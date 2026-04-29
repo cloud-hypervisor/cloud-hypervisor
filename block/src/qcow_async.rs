@@ -597,7 +597,7 @@ mod unit_tests {
             let mut val = 0u64;
             // SAFETY: reading 8 bytes from a valid eventfd.
             unsafe {
-                libc::read(fd, &mut val as *mut u64 as *mut libc::c_void, 8);
+                libc::read(fd, (&raw mut val).cast(), 8);
             }
         }
     }
@@ -605,7 +605,7 @@ mod unit_tests {
     fn async_write(disk: &QcowDisk, offset: u64, data: &[u8]) {
         let mut async_io = disk.create_async_io(1).unwrap();
         let iovec = libc::iovec {
-            iov_base: data.as_ptr() as *mut libc::c_void,
+            iov_base: data.as_ptr().cast::<libc::c_void>().cast_mut(),
             iov_len: data.len(),
         };
         async_io
@@ -624,7 +624,7 @@ mod unit_tests {
         let mut async_io = disk.create_async_io(1).unwrap();
         let mut buf = vec![0xFFu8; len];
         let iovec = libc::iovec {
-            iov_base: buf.as_mut_ptr() as *mut libc::c_void,
+            iov_base: buf.as_mut_ptr().cast(),
             iov_len: buf.len(),
         };
         async_io
@@ -755,11 +755,11 @@ mod unit_tests {
         let offset_b: u64 = 65536;
 
         let iov_a = libc::iovec {
-            iov_base: write_a.as_ptr() as *mut libc::c_void,
+            iov_base: write_a.as_ptr().cast::<libc::c_void>().cast_mut(),
             iov_len: write_a.len(),
         };
         let iov_b = libc::iovec {
-            iov_base: write_b.as_ptr() as *mut libc::c_void,
+            iov_base: write_b.as_ptr().cast::<libc::c_void>().cast_mut(),
             iov_len: write_b.len(),
         };
 
@@ -793,11 +793,11 @@ mod unit_tests {
         let mut read_a = vec![0u8; 4096];
         let mut read_b = vec![0u8; 4096];
         let riov_a = libc::iovec {
-            iov_base: read_a.as_mut_ptr() as *mut libc::c_void,
+            iov_base: read_a.as_mut_ptr().cast(),
             iov_len: read_a.len(),
         };
         let riov_b = libc::iovec {
-            iov_base: read_b.as_mut_ptr() as *mut libc::c_void,
+            iov_base: read_b.as_mut_ptr().cast(),
             iov_len: read_b.len(),
         };
 
@@ -1068,7 +1068,7 @@ mod unit_tests {
                     let mut async_io = disk.create_async_io(1).unwrap();
                     let mut buf = vec![0xFFu8; cluster_size];
                     let iovec = libc::iovec {
-                        iov_base: buf.as_mut_ptr() as *mut libc::c_void,
+                        iov_base: buf.as_mut_ptr().cast(),
                         iov_len: buf.len(),
                     };
                     async_io.read_vectored(0, &[iovec], 1).unwrap();

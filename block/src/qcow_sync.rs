@@ -353,7 +353,7 @@ mod unit_tests {
         let mut async_io = disk.create_async_io(1).unwrap();
         let mut buf = vec![0xFFu8; len];
         let iovec = libc::iovec {
-            iov_base: buf.as_mut_ptr() as *mut libc::c_void,
+            iov_base: buf.as_mut_ptr().cast(),
             iov_len: buf.len(),
         };
         async_io
@@ -368,7 +368,7 @@ mod unit_tests {
     fn async_write(disk: &QcowDisk, offset: u64, data: &[u8]) {
         let mut async_io = disk.create_async_io(1).unwrap();
         let iovec = libc::iovec {
-            iov_base: data.as_ptr() as *mut libc::c_void,
+            iov_base: data.as_ptr().cast::<libc::c_void>().cast_mut(),
             iov_len: data.len(),
         };
         async_io
@@ -1550,15 +1550,15 @@ mod unit_tests {
         let c = vec![0xCCu8; 16 * 1024];
         let iovecs_w = [
             libc::iovec {
-                iov_base: a.as_ptr() as *mut libc::c_void,
+                iov_base: a.as_ptr().cast::<libc::c_void>().cast_mut(),
                 iov_len: a.len(),
             },
             libc::iovec {
-                iov_base: b.as_ptr() as *mut libc::c_void,
+                iov_base: b.as_ptr().cast::<libc::c_void>().cast_mut(),
                 iov_len: b.len(),
             },
             libc::iovec {
-                iov_base: c.as_ptr() as *mut libc::c_void,
+                iov_base: c.as_ptr().cast::<libc::c_void>().cast_mut(),
                 iov_len: c.len(),
             },
         ];
@@ -1578,15 +1578,15 @@ mod unit_tests {
         let mut r3 = vec![0u8; 8 * 1024];
         let iovecs_r = [
             libc::iovec {
-                iov_base: r1.as_mut_ptr() as *mut libc::c_void,
+                iov_base: r1.as_mut_ptr().cast(),
                 iov_len: r1.len(),
             },
             libc::iovec {
-                iov_base: r2.as_mut_ptr() as *mut libc::c_void,
+                iov_base: r2.as_mut_ptr().cast(),
                 iov_len: r2.len(),
             },
             libc::iovec {
-                iov_base: r3.as_mut_ptr() as *mut libc::c_void,
+                iov_base: r3.as_mut_ptr().cast(),
                 iov_len: r3.len(),
             },
         ];

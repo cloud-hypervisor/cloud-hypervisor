@@ -931,8 +931,7 @@ mod unit_tests {
         unsafe { ptr::write_bytes(buf, 0xAB, alignment) };
 
         // SAFETY: buf is aligned and sized for O_DIRECT; fd is valid.
-        let written =
-            unsafe { libc::pwrite(f.as_raw_fd(), buf as *const libc::c_void, alignment, 0) };
+        let written = unsafe { libc::pwrite(f.as_raw_fd(), buf.cast(), alignment, 0) };
         assert_eq!(
             written as usize,
             alignment,
@@ -943,7 +942,7 @@ mod unit_tests {
         // SAFETY: buf is valid for `alignment` bytes.
         unsafe { ptr::write_bytes(buf, 0x00, alignment) };
         // SAFETY: buf is aligned and sized for O_DIRECT; fd is valid.
-        let read = unsafe { libc::pread(f.as_raw_fd(), buf as *mut libc::c_void, alignment, 0) };
+        let read = unsafe { libc::pread(f.as_raw_fd(), buf.cast(), alignment, 0) };
         assert_eq!(
             read as usize,
             alignment,

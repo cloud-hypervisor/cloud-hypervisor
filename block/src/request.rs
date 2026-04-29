@@ -291,7 +291,7 @@ impl Request {
                 .get_slice(data_addr, data_len)
                 .map_err(ExecuteError::GetHostAddress)?;
             assert!(origin_ptr.len() >= data_len);
-            let origin_ptr = origin_ptr.ptr_guard();
+            let origin_ptr = origin_ptr.ptr_guard_mut();
 
             // O_DIRECT requires buffer addresses to be aligned to the
             // backend device's logical block size. In case it's not properly
@@ -299,7 +299,7 @@ impl Request {
             // alignment, and a copy from/to the origin buffer is performed,
             // depending on the type of operation.
             let iov_base = if (origin_ptr.as_ptr() as u64).is_multiple_of(alignment) {
-                origin_ptr.as_ptr() as *mut libc::c_void
+                origin_ptr.as_ptr().cast()
             } else {
                 let layout = Layout::from_size_align(data_len, alignment as usize).unwrap();
                 // SAFETY: layout has non-zero size
@@ -327,7 +327,7 @@ impl Request {
                     layout,
                 });
 
-                aligned_ptr as *mut libc::c_void
+                aligned_ptr.cast()
             };
 
             let iovec = libc::iovec {

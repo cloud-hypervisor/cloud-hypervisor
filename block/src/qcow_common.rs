@@ -30,7 +30,7 @@ pub fn pread_exact(fd: RawFd, buf: &mut [u8], offset: u64) -> io::Result<()> {
         let ret = unsafe {
             libc::pread64(
                 fd,
-                buf[total..].as_mut_ptr() as *mut libc::c_void,
+                buf[total..].as_mut_ptr().cast(),
                 buf.len() - total,
                 (offset + total as u64) as libc::off_t,
             )
@@ -81,7 +81,7 @@ pub fn pwrite_all(fd: RawFd, buf: &[u8], offset: u64) -> io::Result<()> {
         let ret = unsafe {
             libc::pwrite64(
                 fd,
-                buf[total..].as_ptr() as *const libc::c_void,
+                buf[total..].as_ptr().cast(),
                 buf.len() - total,
                 (offset + total as u64) as libc::off_t,
             )
@@ -211,7 +211,7 @@ pub unsafe fn scatter_to_iovecs(iovecs: &[libc::iovec], start: usize, data: &[u8
         let count = min(available, remaining.len());
         // SAFETY: iov_base is valid for iov_len bytes per caller contract.
         unsafe {
-            let dst = (iov.iov_base as *mut u8).add(iov_start);
+            let dst = iov.iov_base.cast::<u8>().add(iov_start);
             ptr::copy_nonoverlapping(remaining.as_ptr(), dst, count);
         }
         remaining = &remaining[count..];
@@ -240,7 +240,7 @@ pub unsafe fn zero_fill_iovecs(iovecs: &[libc::iovec], start: usize, len: usize)
         let count = min(available, remaining);
         // SAFETY: iov_base is valid for iov_len bytes per caller contract.
         unsafe {
-            let dst = (iov.iov_base as *mut u8).add(iov_start);
+            let dst = iov.iov_base.cast::<u8>().add(iov_start);
             ptr::write_bytes(dst, 0, count);
         }
         remaining -= count;
@@ -270,7 +270,7 @@ pub unsafe fn gather_from_iovecs_into(iovecs: &[libc::iovec], start: usize, dst:
         let count = min(available, len - written);
         // SAFETY: iov_base is valid for iov_len bytes per caller contract.
         unsafe {
-            let src = (iov.iov_base as *const u8).add(iov_start);
+            let src = iov.iov_base.cast::<u8>().add(iov_start);
             ptr::copy_nonoverlapping(src, dst.as_mut_ptr().add(written), count);
         }
         written += count;
