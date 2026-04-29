@@ -87,7 +87,7 @@ fn modify_mode<F: FnOnce(&mut termios)>(
     // and we check the return result.
     let mut termios: termios = unsafe { zeroed() };
     // SAFETY: see above
-    let ret = unsafe { tcgetattr(fd, &mut termios as *mut _) };
+    let ret = unsafe { tcgetattr(fd, &raw mut termios) };
     if ret < 0 {
         return vmm_sys_util::errno::errno_result();
     }
@@ -98,7 +98,7 @@ fn modify_mode<F: FnOnce(&mut termios)>(
     f(&mut termios);
     // SAFETY: Safe because the syscall will only read the extent of termios and we check
     // the return result.
-    let ret = unsafe { tcsetattr(fd, TCSANOW, &termios as *const _) };
+    let ret = unsafe { tcsetattr(fd, TCSANOW, &raw const termios) };
     if ret < 0 {
         return vmm_sys_util::errno::errno_result();
     }

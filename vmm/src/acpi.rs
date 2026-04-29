@@ -1278,7 +1278,7 @@ mod tests {
         // safe to read. Casting to `u8` satisfies alignment requirements.
         let bytes = unsafe {
             std::slice::from_raw_parts(
-                &gi as *const GenericInitiatorAffinity as *const u8,
+                (&raw const gi).cast::<u8>(),
                 std::mem::size_of::<GenericInitiatorAffinity>(),
             )
         };

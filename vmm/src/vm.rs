@@ -4069,7 +4069,7 @@ pub fn test_vm() {
                 index as u32,
                 region.start_addr().raw_value(),
                 region.len().try_into().unwrap(),
-                region.as_ptr() as _,
+                region.as_ptr().cast(),
                 false,
                 false,
             )

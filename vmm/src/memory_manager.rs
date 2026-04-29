@@ -1188,7 +1188,7 @@ impl MemoryManager {
             let n = unsafe {
                 libc::read(
                     uffd_raw_fd,
-                    &mut msg as *mut uffd::UffdMsg as *mut libc::c_void,
+                    (&raw mut msg).cast(),
                     std::mem::size_of::<uffd::UffdMsg>(),
                 )
             };
@@ -1824,7 +1824,7 @@ impl MemoryManager {
         let res = unsafe {
             libc::syscall(
                 libc::SYS_mbind,
-                addr as *mut libc::c_void,
+                addr.cast::<libc::c_void>(),
                 len,
                 mode,
                 nodemask.as_ptr(),
@@ -2002,7 +2002,7 @@ impl MemoryManager {
                         // SAFETY: FFI call with correct arguments
                         let ret = unsafe {
                             let addr = r.as_ptr().add(offset);
-                            libc::madvise(addr as _, pages * page_size, libc::MADV_POPULATE_WRITE)
+                            libc::madvise(addr.cast(), pages * page_size, libc::MADV_POPULATE_WRITE)
                         };
                         if ret != 0 {
                             let e = io::Error::last_os_error();
@@ -2021,7 +2021,7 @@ impl MemoryManager {
 
         if thp && !hugepages {
             // SAFETY: FFI call with correct arguments
-            let ret = unsafe { libc::madvise(region.as_ptr() as _, size, libc::MADV_HUGEPAGE) };
+            let ret = unsafe { libc::madvise(region.as_ptr().cast(), size, libc::MADV_HUGEPAGE) };
             if ret != 0 {
                 let e = io::Error::last_os_error();
                 warn!("Failed to mark pages as THP eligible: {e}");
@@ -2319,7 +2319,7 @@ impl MemoryManager {
         // mmap succeeded.
         let ret = unsafe {
             libc::madvise(
-                userspace_addr as *mut libc::c_void,
+                userspace_addr.cast(),
                 memory_size as libc::size_t,
                 libc::MADV_DONTDUMP,
             )
@@ -2335,7 +2335,7 @@ impl MemoryManager {
             // mmap succeeded.
             let ret = unsafe {
                 libc::madvise(
-                    userspace_addr as *mut libc::c_void,
+                    userspace_addr.cast(),
                     memory_size as libc::size_t,
                     libc::MADV_MERGEABLE,
                 )
@@ -2400,7 +2400,7 @@ impl MemoryManager {
             // previously advised.
             let ret = unsafe {
                 libc::madvise(
-                    userspace_addr as *mut libc::c_void,
+                    userspace_addr.cast(),
                     memory_size as libc::size_t,
                     libc::MADV_UNMERGEABLE,
                 )
