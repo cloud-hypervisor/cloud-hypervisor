@@ -443,7 +443,7 @@ impl PvmemcontrolBusDevice {
             )));
         };
         assert!(slice.len() >= range_len);
-        let res = f(slice.ptr_guard_mut().as_ptr() as _, slice.len());
+        let res = f(slice.ptr_guard_mut().as_ptr().cast(), slice.len());
         if res != 0 {
             return Err(Error::LibcFail(io::Error::last_os_error()));
         }

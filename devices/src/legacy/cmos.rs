@@ -122,13 +122,13 @@ impl BusDevice for Cmos {
                 // the tm and timespec struct because it contains only plain data.
                 let update_in_progress = unsafe {
                     let mut timespec: timespec = mem::zeroed();
-                    clock_gettime(CLOCK_REALTIME, &mut timespec as *mut _);
+                    clock_gettime(CLOCK_REALTIME, &raw mut timespec);
 
                     // https://github.com/rust-lang/libc/issues/1848
                     #[cfg_attr(target_env = "musl", allow(deprecated))]
                     let now: time_t = timespec.tv_sec;
                     let mut tm: tm = mem::zeroed();
-                    gmtime_r(&now, &mut tm as *mut _);
+                    gmtime_r(&now, &raw mut tm);
 
                     // The following lines of code are safe but depend on tm being in scope.
                     seconds = tm.tm_sec;
