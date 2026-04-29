@@ -481,7 +481,14 @@ impl Net {
     ) -> Result<Self> {
         assert!(!taps.is_empty());
 
-        let mtu = taps[0].mtu().map_err(Error::TapError)? as u16;
+        // Skip advertising VIRTIO_NET_F_MTU and let the guest fall back to the Ethernet default if querying failed
+        let mtu = match taps[0].mtu() {
+            Ok(m) => Some(m as u16),
+            Err(e) => {
+                warn!("Failed to query tap MTU; not advertising VIRTIO_NET_F_MTU: {e}");
+                None
+            }
+        };
 
         let (avail_features, acked_features, config, queue_sizes, paused) = if let Some(state) =
             state
@@ -495,9 +502,11 @@ impl Net {
                 true,
             )
         } else {
-            let mut avail_features = (1 << VIRTIO_NET_F_MTU)
-                | (1 << VIRTIO_RING_F_EVENT_IDX)
-                | (1 << VIRTIO_F_VERSION_1);
+            let mut avail_features = (1 << VIRTIO_RING_F_EVENT_IDX) | (1 << VIRTIO_F_VERSION_1);
+
+            if mtu.is_some() {
+                avail_features |= 1 << VIRTIO_NET_F_MTU;
+            }
 
             if access_platform_enabled {
                 avail_features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
@@ -528,20 +537,9 @@ impl Net {
 
             let mut config = VirtioNetConfig::default();
             if let Some(mac) = guest_mac {
-                build_net_config_space(
-                    &mut config,
-                    mac,
-                    num_queues,
-                    Some(mtu),
-                    &mut avail_features,
-                );
+                build_net_config_space(&mut config, mac, num_queues, mtu, &mut avail_features);
             } else {
-                build_net_config_space_with_mq(
-                    &mut config,
-                    num_queues,
-                    Some(mtu),
-                    &mut avail_features,
-                );
+                build_net_config_space_with_mq(&mut config, num_queues, mtu, &mut avail_features);
             }
 
             (
