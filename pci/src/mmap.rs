@@ -26,7 +26,7 @@ pub struct MmapRegion {
 impl Drop for MmapRegion {
     fn drop(&mut self) {
         // SAFETY: guaranteed by type validity invariant
-        unsafe { assert_eq!(libc::munmap(self.addr as *mut _, self.len), 0) }
+        unsafe { assert_eq!(libc::munmap(self.addr.cast(), self.len), 0) }
     }
 }
 // SAFETY: the caller is responsible for avoiding data races
@@ -82,7 +82,7 @@ in both isize and libc::size_t";
         if addr == libc::MAP_FAILED {
             Err(Error::last_os_error())
         } else {
-            let addr = addr as _;
+            let addr = addr.cast();
             Ok(Self { addr, len })
         }
     }
