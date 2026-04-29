@@ -2271,20 +2271,16 @@ impl Cpu {
     fn generate_mat(&self) -> Vec<u8> {
         let x2apic_id = arch::x86_64::get_x2apic_id(self.cpu_id, self.topology);
 
-        let lapic = LocalX2Apic {
+        LocalX2Apic {
             r#type: crate::acpi::ACPI_X2APIC_PROCESSOR,
             length: 16,
             processor_id: self.cpu_id,
             apic_id: x2apic_id,
             flags: 1 << MADT_CPU_ENABLE_FLAG,
             _reserved: 0,
-        };
-
-        let mut mat_data: Vec<u8> = vec![0; std::mem::size_of_val(&lapic)];
-        // SAFETY: mat_data is large enough to hold lapic
-        unsafe { *(mat_data.as_mut_ptr() as *mut LocalX2Apic) = lapic };
-
-        mat_data
+        }
+        .as_bytes()
+        .to_vec()
     }
 }
 
