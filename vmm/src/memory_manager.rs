@@ -10,6 +10,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Read as _, Seek, SeekFrom};
 use std::ops::{BitAnd, Not, Sub};
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
+use std::os::unix::fs::FileExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -64,7 +65,6 @@ use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID, uffd};
 /// filesystem does not support `SEEK_HOLE` (e.g. hugetlbfs) or for any
 /// other I/O error. Callers should treat a first-call error as "fall
 /// back to the dense path".
-#[allow(dead_code)]
 fn next_data_extent(fd: BorrowedFd<'_>, cursor: u64, end: u64) -> io::Result<Option<(u64, u64)>> {
     let raw = fd.as_raw_fd();
     // SAFETY: BorrowedFd guarantees the fd is valid for the lifetime of
@@ -3028,6 +3028,74 @@ impl Snapshottable for MemoryManager {
     }
 }
 
+/// Write a single guest RAM region to the snapshot file at `dst_offset`,
+/// streaming populated extents via `SEEK_DATA` / `SEEK_HOLE` on the
+/// backing fd. `set_len(total)` must have been called on `dst` by the
+/// caller. Returns `Ok(true)` if the region was written sparsely, or
+/// `Ok(false)` if `SEEK_HOLE` is unsupported on the source fd (caller
+/// should fall back to dense write).
+fn write_region_sparse(
+    src: &File,
+    src_offset: u64,
+    dst: &File,
+    dst_offset: u64,
+    len: u64,
+) -> io::Result<bool> {
+    let src_fd = src.as_fd();
+    let end = src_offset
+        .checked_add(len)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "range overflow"))?;
+
+    // First call to next_data_extent doubles as a SEEK_HOLE-support probe:
+    // a non-ENXIO error means the filesystem doesn't support sparse-seek;
+    // tell the caller to use the dense path instead.
+    let mut next = match next_data_extent(src_fd, src_offset, end) {
+        Ok(opt) => opt,
+        Err(_) => return Ok(false),
+    };
+
+    const CHUNK: usize = 1 << 20;
+    let mut buf = vec![0u8; CHUNK];
+
+    while let Some((data_off, ext_len)) = next {
+        debug_assert!(data_off >= src_offset);
+        let in_region = data_off
+            .checked_sub(src_offset)
+            .expect("extent precedes src_offset");
+        let mut written = 0u64;
+        while written < ext_len {
+            let this = ((ext_len - written) as usize).min(CHUNK);
+            let slice = &mut buf[..this];
+            let read = src.read_at(slice, data_off + written)?;
+            if read == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "read_at returned 0 inside data extent",
+                ));
+            }
+            let mut wrote_total = 0;
+            while wrote_total < read {
+                let n = dst.write_at(
+                    &slice[wrote_total..read],
+                    dst_offset + in_region + written + wrote_total as u64,
+                )?;
+                if n == 0 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::WriteZero,
+                        "write_at returned 0",
+                    ));
+                }
+                wrote_total += n;
+            }
+            written += read as u64;
+        }
+        // Subsequent next_data_extent failures are real I/O errors, not
+        // unsupported-FS, since the first probe succeeded.
+        next = next_data_extent(src_fd, data_off + ext_len, end)?;
+    }
+    Ok(true)
+}
+
 impl Transportable for MemoryManager {
     fn send(
         &self,
@@ -3041,38 +3109,85 @@ impl Transportable for MemoryManager {
         let mut memory_file_path = url_to_path(destination_url)?;
         memory_file_path.push(String::from(SNAPSHOT_FILENAME));
 
-        // Create the snapshot file for the entire memory
         let mut memory_file = OpenOptions::new()
             .read(true)
             .write(true)
             .create_new(true)
-            .open(memory_file_path)
+            .open(&memory_file_path)
             .map_err(|e| MigratableError::MigrateSend(e.into()))?;
 
+        let total_len: u64 = self
+            .snapshot_memory_ranges
+            .regions()
+            .iter()
+            .map(|r| r.length)
+            .sum();
+
+        // Pre-size the file so per-region write_at lands at the dense-layout
+        // offset. On filesystems that support sparse files unwritten bytes
+        // become real holes; on others the kernel zero-fills the allocation,
+        // which is still byte-correct. If extending the file is not
+        // supported by the destination filesystem (some FUSE backends
+        // reject ftruncate-extend with EOPNOTSUPP), fall back to the dense
+        // write path which never writes past the growing EOF.
+        let sparse_layout = memory_file.set_len(total_len).is_ok();
+
         let guest_memory = self.guest_memory.memory();
+        let mut file_cursor: u64 = 0;
 
         for range in self.snapshot_memory_ranges.regions() {
-            let mut offset: u64 = 0;
-            // Here we are manually handling the retry in case we can't read
-            // the whole region at once because we can't use the implementation
-            // from vm-memory::GuestMemory of write_all_to() as it is not
-            // following the correct behavior. For more info about this issue
-            // see: https://github.com/rust-vmm/vm-memory/issues/174
-            loop {
-                let bytes_written = guest_memory
-                    .write_volatile_to(
-                        GuestAddress(range.gpa + offset),
-                        &mut memory_file,
-                        (range.length - offset) as usize,
-                    )
-                    .map_err(|e| MigratableError::MigrateSend(e.into()))?;
-                offset += bytes_written as u64;
+            let mut wrote_sparse = false;
+            if sparse_layout
+                && let Some(region) = guest_memory.find_region(GuestAddress(range.gpa))
+                && (region.flags() & libc::MAP_SHARED) == libc::MAP_SHARED
+                && let Some(file_offset) = region.file_offset()
+            {
+                let region_base = region.start_addr().raw_value();
+                let in_fd_off = file_offset.start()
+                    + range
+                        .gpa
+                        .checked_sub(region_base)
+                        .expect("range outside its region");
+                wrote_sparse = write_region_sparse(
+                    file_offset.file(),
+                    in_fd_off,
+                    &memory_file,
+                    file_cursor,
+                    range.length,
+                )
+                .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+            }
 
-                if offset == range.length {
-                    break;
+            if !wrote_sparse {
+                // Dense fallback: anonymous mmap or hugetlbfs (no
+                // SEEK_HOLE). Match the dense layout by seeking to
+                // file_cursor and streaming bytes via the existing
+                // volatile copy.
+                memory_file
+                    .seek(SeekFrom::Start(file_cursor))
+                    .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+                let mut offset: u64 = 0;
+                // Manual partial-write loop preserves the workaround for
+                // https://github.com/rust-vmm/vm-memory/issues/174
+                loop {
+                    let bytes_written = guest_memory
+                        .write_volatile_to(
+                            GuestAddress(range.gpa + offset),
+                            &mut memory_file,
+                            (range.length - offset) as usize,
+                        )
+                        .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+                    offset += bytes_written as u64;
+                    if offset == range.length {
+                        break;
+                    }
                 }
             }
+
+            file_cursor += range.length;
         }
+
+        debug_assert_eq!(file_cursor, total_len);
         Ok(())
     }
 }
@@ -3152,7 +3267,7 @@ mod unit_tests {
     use std::io::{Seek, SeekFrom, Write};
     use std::os::fd::{AsFd, BorrowedFd, FromRawFd};
 
-    use super::next_data_extent;
+    use super::{next_data_extent, write_region_sparse};
 
     fn make_memfd(size: u64) -> std::fs::File {
         // SAFETY: memfd_create is a self-contained syscall; we own the
@@ -3178,6 +3293,11 @@ mod unit_tests {
             cursor = off + len;
         }
         Ok(out)
+    }
+
+    fn populated(src: &mut std::fs::File, off: u64, byte: u8, len: u64) {
+        src.seek(SeekFrom::Start(off)).unwrap();
+        src.write_all(&vec![byte; len as usize]).unwrap();
     }
 
     #[test]
@@ -3228,5 +3348,73 @@ mod unit_tests {
         f.write_all(&[0x55; 4096 * 2]).unwrap();
         let extents = collect_extents(f.as_fd(), 0, 4096 * 16).unwrap();
         assert_eq!(extents, vec![(4096 * 4, 4096 * 2)]);
+    }
+
+    #[test]
+    fn single_extent_at_zero_offset() {
+        let mut src = make_memfd(4096 * 16);
+        populated(&mut src, 4096 * 3, 0x42, 4096 * 2);
+
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let dst = tmp.reopen().unwrap();
+        dst.set_len(4096 * 16).unwrap();
+
+        let used = write_region_sparse(&src, 0, &dst, 0, 4096 * 16).unwrap();
+        assert!(used);
+
+        use std::os::unix::fs::MetadataExt;
+        let meta = std::fs::metadata(tmp.path()).unwrap();
+        assert!(
+            meta.blocks() * 512 < meta.len(),
+            "blocks={} len={}",
+            meta.blocks(),
+            meta.len()
+        );
+
+        let buf = std::fs::read(tmp.path()).unwrap();
+        assert!(buf[..4096 * 3].iter().all(|&b| b == 0));
+        assert!(buf[4096 * 3..4096 * 5].iter().all(|&b| b == 0x42));
+        assert!(buf[4096 * 5..].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn two_regions_in_same_destination_file_at_dst_offset() {
+        let mut src_a = make_memfd(4096 * 16);
+        populated(&mut src_a, 4096, 0xAA, 4096 * 2);
+        let mut src_b = make_memfd(4096 * 16);
+        populated(&mut src_b, 4096 * 5, 0xBB, 4096 * 3);
+
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let dst = tmp.reopen().unwrap();
+        dst.set_len(4096 * 32).unwrap();
+
+        let _ = write_region_sparse(&src_a, 0, &dst, 0, 4096 * 16).unwrap();
+        let _ = write_region_sparse(&src_b, 0, &dst, 4096 * 16, 4096 * 16).unwrap();
+
+        let buf = std::fs::read(tmp.path()).unwrap();
+        assert!(buf[..4096].iter().all(|&b| b == 0));
+        assert!(buf[4096..4096 * 3].iter().all(|&b| b == 0xAA));
+        assert!(buf[4096 * 3..4096 * 16].iter().all(|&b| b == 0));
+        assert!(buf[4096 * 16..4096 * 21].iter().all(|&b| b == 0));
+        assert!(buf[4096 * 21..4096 * 24].iter().all(|&b| b == 0xBB));
+        assert!(buf[4096 * 24..].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn extent_at_non_zero_src_offset() {
+        let mut src = make_memfd(4096 * 32);
+        populated(&mut src, 4096 * 20, 0x77, 4096 * 2);
+
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let dst = tmp.reopen().unwrap();
+        dst.set_len(4096 * 16).unwrap();
+
+        let used = write_region_sparse(&src, 4096 * 16, &dst, 0, 4096 * 16).unwrap();
+        assert!(used);
+
+        let buf = std::fs::read(tmp.path()).unwrap();
+        assert!(buf[..4096 * 4].iter().all(|&b| b == 0));
+        assert!(buf[4096 * 4..4096 * 6].iter().all(|&b| b == 0x77));
+        assert!(buf[4096 * 6..].iter().all(|&b| b == 0));
     }
 }
