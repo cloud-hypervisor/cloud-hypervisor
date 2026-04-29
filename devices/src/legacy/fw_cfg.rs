@@ -441,12 +441,17 @@ impl FwCfg {
         initramfs: Option<File>,
         cmdline: Option<std::ffi::CString>,
         fw_cfg_item_list: Option<Vec<FwCfgItem>>,
+        #[cfg(target_arch = "x86_64")] kvm_sev_snp_enabled: bool,
     ) -> Result<()> {
         if let Some(mem_size) = mem_size {
             self.add_e820(mem_size)?;
         }
         if let Some(kernel) = kernel {
-            self.add_kernel_data(&kernel)?;
+            self.add_kernel_data(
+                &kernel,
+                #[cfg(target_arch = "x86_64")]
+                kvm_sev_snp_enabled,
+            )?;
         }
         if let Some(cmdline) = cmdline {
             self.add_kernel_cmdline(cmdline);
@@ -631,24 +636,37 @@ impl FwCfg {
         }
     }
 
-    pub fn add_kernel_data(&mut self, file: &File) -> Result<()> {
+    pub fn add_kernel_data(
+        &mut self,
+        file: &File,
+        #[cfg(target_arch = "x86_64")] kvm_sev_snp_enabled: bool,
+    ) -> Result<()> {
         let mut buffer = vec![0u8; size_of::<boot_params>()];
         file.read_exact_at(&mut buffer, 0)?;
         let bp = boot_params::from_mut_slice(&mut buffer).unwrap();
         #[cfg(target_arch = "x86_64")]
         {
-            // must set to 4 for backwards compatibility
-            // https://docs.kernel.org/arch/x86/boot.html#the-real-mode-kernel-header
-            if bp.hdr.setup_sects == 0 {
-                bp.hdr.setup_sects = 4;
+            // For SEV-SNP guests on KVM, don't modify the kernel header so the
+            // bytes sent via fw_cfg match what the VMM hashes for the launch digest.
+            // The guest firmware handles these fields itself.
+            if !kvm_sev_snp_enabled {
+                if bp.hdr.setup_sects == 0 {
+                    bp.hdr.setup_sects = 4;
+                }
+                bp.hdr.type_of_loader = 0xff;
             }
-            // wildcard boot loader type
-            bp.hdr.type_of_loader = 0xff;
         }
         #[cfg(target_arch = "aarch64")]
         let kernel_start = bp.text_offset;
         #[cfg(target_arch = "x86_64")]
-        let kernel_start = (bp.hdr.setup_sects as usize + 1) * 512;
+        let kernel_start = {
+            let sects = if bp.hdr.setup_sects == 0 {
+                4
+            } else {
+                bp.hdr.setup_sects
+            };
+            (sects as usize + 1) * 512
+        };
 
         #[cfg(target_arch = "x86_64")]
         if kernel_start <= buffer.len() {

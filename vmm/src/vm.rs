@@ -1139,6 +1139,7 @@ impl Vm {
         fw_cfg_config: &FwCfgConfig,
         device_manager: &Arc<Mutex<DeviceManager>>,
         config: &Arc<Mutex<VmConfig>>,
+        #[cfg(target_arch = "x86_64")] kvm_sev_snp_enabled: bool,
     ) -> Result<()> {
         let mut e820_option: Option<usize> = None;
         if fw_cfg_config.e820 {
@@ -1222,6 +1223,8 @@ impl Vm {
                 initramfs_option,
                 cmdline_option,
                 fw_cfg_item_list_option,
+                #[cfg(target_arch = "x86_64")]
+                kvm_sev_snp_enabled,
             )
             .map_err(Error::ErrorPopulatingFwCfg)?;
         Ok(())
@@ -2739,7 +2742,26 @@ impl Vm {
                     .map(|p| p.fw_cfg_config.clone())
                     .unwrap_or_default()
                     .ok_or(Error::VmMissingConfig)?;
-                Self::populate_fw_cfg(&fw_cfg_config, &self.device_manager, &self.config)?;
+                #[cfg(target_arch = "x86_64")]
+                let kvm_sev_snp_enabled = {
+                    #[cfg(feature = "sev_snp")]
+                    {
+                        self.config.lock().unwrap().is_sev_snp_enabled()
+                            && self.hypervisor.hypervisor_type() == hypervisor::HypervisorType::Kvm
+                    }
+                    #[cfg(not(feature = "sev_snp"))]
+                    {
+                        false
+                    }
+                };
+
+                Self::populate_fw_cfg(
+                    &fw_cfg_config,
+                    &self.device_manager,
+                    &self.config,
+                    #[cfg(target_arch = "x86_64")]
+                    kvm_sev_snp_enabled,
+                )?;
 
                 if fw_cfg_config.acpi_tables {
                     let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
