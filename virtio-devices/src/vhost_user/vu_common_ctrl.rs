@@ -687,7 +687,7 @@ impl VhostUserHandle {
             // SAFETY: region is of size len
             let bitmap: &[u64] = unsafe {
                 // Cast the pointer to u64
-                let ptr = region.as_ptr() as *const u64;
+                let ptr = region.as_ptr().cast();
                 std::slice::from_raw_parts(ptr, len)
             };
             Ok(MemoryRangeTable::from_dirty_bitmap(

@@ -185,7 +185,7 @@ impl BalloonEpollHandler {
         let res =
             // SAFETY: FFI call with valid arguments, guaranteed by VolatileSlice
             unsafe {
-                libc::madvise(slice.ptr_guard_mut().as_ptr() as *mut libc::c_void,
+                libc::madvise(slice.ptr_guard_mut().as_ptr().cast(),
                 range_len as libc::size_t, advice) };
         if res != 0 {
             return Err(Error::MadviseFail(io::Error::last_os_error()));

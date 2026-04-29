@@ -396,7 +396,7 @@ impl VsockPacket {
             PacketBuffer::Borrowed { ptr, len } => {
                 // SAFETY: bound checks have already been performed when creating the packet
                 // from the virtq descriptor.
-                Some(unsafe { std::slice::from_raw_parts(*ptr as *const u8, *len) })
+                Some(unsafe { std::slice::from_raw_parts((*ptr).cast(), *len) })
             }
         }
     }

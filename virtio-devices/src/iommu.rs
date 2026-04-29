@@ -1081,7 +1081,7 @@ impl VirtioDevice for Iommu {
     fn write_config(&mut self, offset: u64, data: &[u8]) {
         // The "bypass" field is the only mutable field
         let bypass_offset =
-            (&self.config.bypass as *const _ as u64) - (&self.config as *const _ as u64);
+            (&raw const self.config.bypass as u64) - (&raw const self.config as u64);
         if offset != bypass_offset || data.len() != std::mem::size_of_val(&self.config.bypass) {
             error!(
                 "Attempt to write to read-only field: offset {:x} length {}",
