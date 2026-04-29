@@ -45,7 +45,7 @@ impl KvmAiaImsics {
             &self.device,
             kvm_bindings::KVM_DEV_RISCV_AIA_GRP_CONFIG,
             u64::from(kvm_bindings::KVM_DEV_RISCV_AIA_CONFIG_MODE),
-            &mut aia_mode as *mut u32 as u64,
+            &raw mut aia_mode as u64,
             0,
         )?;
 
@@ -56,7 +56,7 @@ impl KvmAiaImsics {
             &self.device,
             kvm_bindings::KVM_DEV_RISCV_AIA_GRP_CONFIG,
             u64::from(kvm_bindings::KVM_DEV_RISCV_AIA_CONFIG_SRCS),
-            &nr_irqs as *const u32 as u64,
+            &raw const nr_irqs as u64,
             0,
         )?;
 
@@ -66,7 +66,7 @@ impl KvmAiaImsics {
             &self.device,
             kvm_bindings::KVM_DEV_RISCV_AIA_GRP_CONFIG,
             u64::from(kvm_bindings::KVM_DEV_RISCV_AIA_CONFIG_IDS),
-            &mut aia_nr_ids as *mut u32 as u64,
+            &raw mut aia_nr_ids as u64,
             0,
         )?;
 
@@ -79,7 +79,7 @@ impl KvmAiaImsics {
             &self.device,
             kvm_bindings::KVM_DEV_RISCV_AIA_GRP_CONFIG,
             u64::from(kvm_bindings::KVM_DEV_RISCV_AIA_CONFIG_HART_BITS),
-            &hart_bits as *const u32 as u64,
+            &raw const hart_bits as u64,
             0,
         )?;
 
@@ -90,7 +90,7 @@ impl KvmAiaImsics {
             &self.device,
             kvm_bindings::KVM_DEV_RISCV_AIA_GRP_ADDR,
             u64::from(kvm_bindings::KVM_DEV_RISCV_AIA_ADDR_APLIC),
-            &self.aplic_addr as *const u64 as u64,
+            &raw const self.aplic_addr as u64,
             0,
         )?;
 
@@ -107,7 +107,7 @@ impl KvmAiaImsics {
                 &self.device,
                 kvm_bindings::KVM_DEV_RISCV_AIA_GRP_ADDR,
                 riscv_imsic_attr_of(cpu_index),
-                &cpu_imsic_addr as *const u64 as u64,
+                &raw const cpu_imsic_addr as u64,
                 0,
             )?;
         }

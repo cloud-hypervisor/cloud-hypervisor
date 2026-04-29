@@ -1961,7 +1961,7 @@ impl vm::Vm for MshvVm {
                 // Return error
                 return Err(vm::HypervisorVmError::MmapToRoot);
             }
-            Some(Ghcb(addr as *mut svm_ghcb_base))
+            Some(Ghcb(addr.cast()))
         } else {
             None
         };

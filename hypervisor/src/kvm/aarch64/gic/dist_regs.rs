@@ -82,7 +82,7 @@ fn dist_attr_set(gic: &DeviceFd, offset: u32, val: u32) -> Result<()> {
     let gic_dist_attr = kvm_device_attr {
         group: KVM_DEV_ARM_VGIC_GRP_DIST_REGS,
         attr: offset as u64,
-        addr: &val as *const u32 as u64,
+        addr: &raw const val as u64,
         flags: 0,
     };
 
@@ -99,7 +99,7 @@ fn dist_attr_get(gic: &DeviceFd, offset: u32) -> Result<u32> {
     let mut gic_dist_attr = kvm_device_attr {
         group: KVM_DEV_ARM_VGIC_GRP_DIST_REGS,
         attr: offset as u64,
-        addr: &mut val as *mut u32 as u64,
+        addr: &raw mut val as u64,
         flags: 0,
     };
 
@@ -127,7 +127,7 @@ fn get_interrupts_num(gic: &DeviceFd) -> Result<u32> {
     let mut nr_irqs_attr = kvm_device_attr {
         group: KVM_DEV_ARM_VGIC_GRP_NR_IRQS,
         attr: 0,
-        addr: &mut num_irq as *mut u32 as u64,
+        addr: &raw mut num_irq as u64,
         flags: 0,
     };
     // SAFETY: nr_irqs_attr.addr is safe to write to.

@@ -30,7 +30,7 @@ fn gicv3_its_attr_set(its_device: &DeviceFd, group: u32, attr: u32, val: u64) ->
     let gicv3_its_attr = kvm_bindings::kvm_device_attr {
         group,
         attr: attr as u64,
-        addr: &val as *const u64 as u64,
+        addr: &raw const val as u64,
         flags: 0,
     };
 
@@ -45,7 +45,7 @@ fn gicv3_its_attr_get(its_device: &DeviceFd, group: u32, attr: u32) -> Result<u6
     let mut gicv3_its_attr = kvm_bindings::kvm_device_attr {
         group,
         attr: attr as u64,
-        addr: &mut val as *mut u64 as u64,
+        addr: &raw mut val as u64,
         flags: 0,
     };
 
@@ -159,7 +159,7 @@ impl KvmGicV3Its {
             &self.device,
             kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ADDR,
             u64::from(kvm_bindings::KVM_VGIC_V3_ADDR_TYPE_DIST),
-            &self.dist_addr as *const u64 as u64,
+            &raw const self.dist_addr as u64,
             0,
         )?;
 
@@ -168,7 +168,7 @@ impl KvmGicV3Its {
             &self.device,
             kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ADDR,
             u64::from(kvm_bindings::KVM_VGIC_V3_ADDR_TYPE_REDIST),
-            &self.redists_addr as *const u64 as u64,
+            &raw const self.redists_addr as u64,
             0,
         )?;
 
@@ -190,7 +190,7 @@ impl KvmGicV3Its {
             &its_fd,
             kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ADDR,
             u64::from(kvm_bindings::KVM_VGIC_ITS_ADDR_TYPE),
-            &self.msi_addr as *const u64 as u64,
+            &raw const self.msi_addr as u64,
             0,
         )?;
 
@@ -207,7 +207,7 @@ impl KvmGicV3Its {
         /* We need to tell the kernel how many irqs to support with this vgic.
          * See the `layout` module for details.
          */
-        let nr_irqs_ptr = &nr_irqs as *const u32;
+        let nr_irqs_ptr = &raw const nr_irqs;
         Self::set_device_attribute(
             &self.device,
             kvm_bindings::KVM_DEV_ARM_VGIC_GRP_NR_IRQS,
