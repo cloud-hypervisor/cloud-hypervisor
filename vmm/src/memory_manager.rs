@@ -411,6 +411,10 @@ pub enum Error {
     #[error("Error opening snapshot file")]
     SnapshotOpen(#[source] io::Error),
 
+    /// Error reading from snapshot file
+    #[error("Error reading from snapshot file")]
+    SnapshotRead(#[source] io::Error),
+
     // Error copying snapshot into region
     #[error("Error copying snapshot into region")]
     SnapshotCopy(#[source] GuestMemoryError),
@@ -847,27 +851,68 @@ impl MemoryManager {
             .map_err(Error::SnapshotOpen)?;
 
         let guest_memory = self.guest_memory.memory();
-        for range in saved_regions.regions() {
-            let mut offset: u64 = 0;
-            // Here we are manually handling the retry in case we can't write
-            // the whole region at once because we can't use the implementation
-            // from vm-memory::GuestMemory of read_exact_from() as it is not
-            // following the correct behavior. For more info about this issue
-            // see: https://github.com/rust-vmm/vm-memory/issues/174
-            loop {
-                let bytes_read = guest_memory
-                    .read_volatile_from(
-                        GuestAddress(range.gpa + offset),
-                        &mut memory_file,
-                        (range.length - offset) as usize,
-                    )
-                    .map_err(Error::SnapshotCopy)?;
-                offset += bytes_read as u64;
+        let mut file_cursor: u64 = 0;
 
-                if offset == range.length {
-                    break;
+        for range in saved_regions.regions() {
+            let end = file_cursor + range.length;
+
+            // First call doubles as a SEEK_HOLE-support probe. On error,
+            // take the dense path which seeks-and-streams sequentially.
+            match next_data_extent(memory_file.as_fd(), file_cursor, end) {
+                Ok(mut next) => {
+                    while let Some((data_off, ext_len)) = next {
+                        debug_assert!(data_off >= file_cursor);
+                        let in_region = data_off
+                            .checked_sub(file_cursor)
+                            .expect("extent precedes file_cursor");
+                        memory_file
+                            .seek(SeekFrom::Start(data_off))
+                            .map_err(Error::SnapshotRead)?;
+                        let mut done: u64 = 0;
+                        while done < ext_len {
+                            let n = guest_memory
+                                .read_volatile_from(
+                                    GuestAddress(range.gpa + in_region + done),
+                                    &mut memory_file,
+                                    (ext_len - done) as usize,
+                                )
+                                .map_err(Error::SnapshotCopy)?;
+                            if n == 0 {
+                                return Err(Error::SnapshotRead(io::Error::new(
+                                    io::ErrorKind::UnexpectedEof,
+                                    "read_volatile_from returned 0 inside data extent",
+                                )));
+                            }
+                            done += n as u64;
+                        }
+                        next = next_data_extent(memory_file.as_fd(), data_off + ext_len, end)
+                            .map_err(Error::SnapshotRead)?;
+                    }
+                }
+                Err(_) => {
+                    memory_file
+                        .seek(SeekFrom::Start(file_cursor))
+                        .map_err(Error::SnapshotRead)?;
+                    let mut offset: u64 = 0;
+                    // Manual partial-read loop preserves the workaround for
+                    // https://github.com/rust-vmm/vm-memory/issues/174
+                    loop {
+                        let bytes_read = guest_memory
+                            .read_volatile_from(
+                                GuestAddress(range.gpa + offset),
+                                &mut memory_file,
+                                (range.length - offset) as usize,
+                            )
+                            .map_err(Error::SnapshotCopy)?;
+                        offset += bytes_read as u64;
+                        if offset == range.length {
+                            break;
+                        }
+                    }
                 }
             }
+
+            file_cursor = end;
         }
 
         Ok(())
@@ -3266,6 +3311,7 @@ impl Migratable for MemoryManager {
 mod unit_tests {
     use std::io::{Seek, SeekFrom, Write};
     use std::os::fd::{AsFd, BorrowedFd, FromRawFd};
+    use std::os::unix::fs::FileExt;
 
     use super::{next_data_extent, write_region_sparse};
 
@@ -3416,5 +3462,60 @@ mod unit_tests {
         assert!(buf[..4096 * 4].iter().all(|&b| b == 0));
         assert!(buf[4096 * 4..4096 * 6].iter().all(|&b| b == 0x77));
         assert!(buf[4096 * 6..].iter().all(|&b| b == 0));
+    }
+
+    /// Round-trip: write two regions sparsely into a snapshot file, then
+    /// read them back using the same next_data_extent + read_at pattern
+    /// that fill_saved_regions uses. Verifies the restore path recovers
+    /// the original content including holes.
+    #[test]
+    fn round_trip_sparse_write_then_read() {
+        let mut src_a = make_memfd(4096 * 16);
+        populated(&mut src_a, 4096 * 2, 0xAA, 4096 * 3);
+
+        let mut src_b = make_memfd(4096 * 16);
+        populated(&mut src_b, 4096 * 10, 0xBB, 4096 * 4);
+
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let dst = tmp.reopen().unwrap();
+        let total = 4096u64 * 32;
+        dst.set_len(total).unwrap();
+
+        write_region_sparse(&src_a, 0, &dst, 0, 4096 * 16).unwrap();
+        write_region_sparse(&src_b, 0, &dst, 4096 * 16, 4096 * 16).unwrap();
+
+        // Read back using next_data_extent + read_at, mirroring
+        // fill_saved_regions's sparse restore path.
+        let snap = tmp.reopen().unwrap();
+        let regions: Vec<(u64, u64)> = vec![(0, 4096 * 16), (4096 * 16, 4096 * 16)];
+        let mut restored = vec![0u8; total as usize];
+
+        for &(file_cursor, region_len) in &regions {
+            let end = file_cursor + region_len;
+            let mut cursor = file_cursor;
+            while let Some((data_off, ext_len)) =
+                next_data_extent(snap.as_fd(), cursor, end).unwrap()
+            {
+                let in_region = (data_off - file_cursor) as usize;
+                let dst_start = file_cursor as usize + in_region;
+                snap.read_at(
+                    &mut restored[dst_start..dst_start + ext_len as usize],
+                    data_off,
+                )
+                .unwrap();
+                cursor = data_off + ext_len;
+            }
+        }
+
+        // Verify content matches a dense read.
+        let dense = std::fs::read(tmp.path()).unwrap();
+        assert_eq!(restored, dense);
+
+        // Verify the actual data landed in the right places.
+        assert!(restored[..4096 * 2].iter().all(|&b| b == 0));
+        assert!(restored[4096 * 2..4096 * 5].iter().all(|&b| b == 0xAA));
+        assert!(restored[4096 * 5..4096 * 26].iter().all(|&b| b == 0));
+        assert!(restored[4096 * 26..4096 * 30].iter().all(|&b| b == 0xBB));
+        assert!(restored[4096 * 30..].iter().all(|&b| b == 0));
     }
 }
