@@ -84,7 +84,7 @@ pub fn drain_completions(async_io: &mut dyn AsyncIo, count: usize) {
 /// Build an iovec suitable for a read into `buf`.
 pub fn read_iovec(buf: &mut [u8]) -> libc::iovec {
     libc::iovec {
-        iov_base: buf.as_mut_ptr() as *mut libc::c_void,
+        iov_base: buf.as_mut_ptr().cast(),
         iov_len: buf.len(),
     }
 }
@@ -92,7 +92,7 @@ pub fn read_iovec(buf: &mut [u8]) -> libc::iovec {
 /// Build an iovec suitable for a write from `buf`.
 pub fn write_iovec(buf: &[u8]) -> libc::iovec {
     libc::iovec {
-        iov_base: buf.as_ptr() as *mut libc::c_void,
+        iov_base: buf.as_ptr().cast::<libc::c_void>().cast_mut(),
         iov_len: buf.len(),
     }
 }
