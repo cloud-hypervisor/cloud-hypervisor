@@ -18,10 +18,11 @@
 //! other migration streams. All data must pass through rustls; direct I/O on the
 //! underlying socket would bypass TLS processing and break the connection.
 
+use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::os::fd::{AsFd, BorrowedFd};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::result;
 use std::sync::Arc;
 
@@ -43,6 +44,130 @@ const CLIENT_CERT_FILE: &str = "client-cert.pem";
 const CLIENT_KEY_FILE: &str = "client-key.pem";
 const SERVER_CERT_FILE: &str = "server-cert.pem";
 const SERVER_KEY_FILE: &str = "server-key.pem";
+
+/// Identifies which side of live migration uses a TLS certificate directory.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TlsEndpoint {
+    Client,
+    Server,
+}
+
+impl TlsEndpoint {
+    fn required_files(self) -> [&'static str; 3] {
+        match self {
+            Self::Client => [CA_CERT_FILE, CLIENT_CERT_FILE, CLIENT_KEY_FILE],
+            Self::Server => [CA_CERT_FILE, SERVER_CERT_FILE, SERVER_KEY_FILE],
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Client => "migration client",
+            Self::Server => "migration server",
+        }
+    }
+}
+
+/// Validation errors for a migration TLS certificate directory.
+#[derive(Error, Debug)]
+pub enum TlsConfigError {
+    #[error("TLS directory does not exist or is inaccessible: {path}: {source}")]
+    DirectoryMetadata {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("TLS directory must point to a directory: {path}")]
+    NotADirectory { path: PathBuf },
+
+    #[error("Missing required TLS file for {endpoint}: {path}")]
+    MissingFile {
+        endpoint: &'static str,
+        path: PathBuf,
+    },
+
+    #[error("Required TLS path for {endpoint} must be a regular file: {path}")]
+    NotAFile {
+        endpoint: &'static str,
+        path: PathBuf,
+    },
+
+    #[error("Required TLS file for {endpoint} is not readable: {path}: {source}")]
+    FileRead {
+        endpoint: &'static str,
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("Failed to inspect required TLS file for {endpoint}: {path}: {source}")]
+    FileMetadata {
+        endpoint: &'static str,
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+}
+
+/// Validates that a TLS directory contains all files required by the endpoint.
+///
+/// Each required file must exist, be a regular file, and be readable by the
+/// current Cloud Hypervisor process.
+pub fn validate_tls_dir(
+    cert_dir: &Path,
+    endpoint: TlsEndpoint,
+) -> result::Result<(), TlsConfigError> {
+    let metadata = fs::metadata(cert_dir).map_err(|source| TlsConfigError::DirectoryMetadata {
+        path: cert_dir.to_path_buf(),
+        source,
+    })?;
+
+    if !metadata.is_dir() {
+        return Err(TlsConfigError::NotADirectory {
+            path: cert_dir.to_path_buf(),
+        });
+    }
+
+    for file_name in endpoint.required_files() {
+        let path = cert_dir.join(file_name);
+        let endpoint_name = endpoint.as_str();
+
+        let metadata = match fs::metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(source) if source.kind() == io::ErrorKind::NotFound => {
+                return Err(TlsConfigError::MissingFile {
+                    endpoint: endpoint_name,
+                    path,
+                });
+            }
+            Err(source) => {
+                return Err(TlsConfigError::FileMetadata {
+                    endpoint: endpoint_name,
+                    path,
+                    source,
+                });
+            }
+        };
+
+        if !metadata.is_file() {
+            return Err(TlsConfigError::NotAFile {
+                endpoint: endpoint_name,
+                path,
+            });
+        }
+
+        if let Err(source) = File::open(&path) {
+            return Err(TlsConfigError::FileRead {
+                endpoint: endpoint_name,
+                path,
+                source,
+            });
+        }
+    }
+
+    Ok(())
+}
 
 /// Errors that can occur when establishing a TLS-encrypted migration channel.
 #[derive(Error, Debug)]
@@ -352,4 +477,93 @@ fn load_private_key(key_path: &Path) -> result::Result<PrivateKeyDer<'static>, M
     PrivateKeyDer::from_pem_file(key_path)
         .map_err(TlsError::RustlsPemError)
         .map_err(MigratableError::Tls)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{fs, process};
+
+    use super::*;
+
+    struct TestDir {
+        path: PathBuf,
+    }
+
+    impl TestDir {
+        fn new(name: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "cloud-hypervisor-{name}-{}-{unique}",
+                process::id()
+            ));
+            fs::create_dir(&path).unwrap();
+            Self { path }
+        }
+
+        fn add_file(&self, file_name: &str) {
+            fs::write(self.path.join(file_name), b"test").unwrap();
+        }
+
+        fn add_client_files(&self) {
+            self.add_file(CA_CERT_FILE);
+            self.add_file(CLIENT_CERT_FILE);
+            self.add_file(CLIENT_KEY_FILE);
+        }
+
+        fn add_server_files(&self) {
+            self.add_file(CA_CERT_FILE);
+            self.add_file(SERVER_CERT_FILE);
+            self.add_file(SERVER_KEY_FILE);
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn validate_tls_dir_accepts_complete_client_directory() {
+        let dir = TestDir::new("tls-client");
+        dir.add_client_files();
+
+        validate_tls_dir(&dir.path, TlsEndpoint::Client).unwrap();
+    }
+
+    #[test]
+    fn validate_tls_dir_accepts_complete_server_directory() {
+        let dir = TestDir::new("tls-server");
+        dir.add_server_files();
+
+        validate_tls_dir(&dir.path, TlsEndpoint::Server).unwrap();
+    }
+
+    #[test]
+    fn validate_tls_dir_rejects_missing_role_specific_file() {
+        let dir = TestDir::new("tls-missing-client-key");
+        dir.add_file(CA_CERT_FILE);
+        dir.add_file(CLIENT_CERT_FILE);
+
+        let err = validate_tls_dir(&dir.path, TlsEndpoint::Client).unwrap_err();
+        let err = err.to_string();
+        assert!(err.contains(CLIENT_KEY_FILE), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn validate_tls_dir_rejects_non_file_entry() {
+        let dir = TestDir::new("tls-non-file");
+        dir.add_file(CA_CERT_FILE);
+        dir.add_file(CLIENT_KEY_FILE);
+        fs::create_dir(dir.path.join(CLIENT_CERT_FILE)).unwrap();
+
+        let err = validate_tls_dir(&dir.path, TlsEndpoint::Client).unwrap_err();
+        let err = err.to_string();
+        assert!(err.contains(CLIENT_CERT_FILE), "unexpected error: {err}");
+    }
 }
