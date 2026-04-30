@@ -2318,6 +2318,7 @@ impl vm::Vm for MshvVm {
         snp_id_block: IGVM_VHS_SNP_ID_BLOCK,
         host_data: [u8; 32],
         id_block_enabled: u8,
+        auth_key_enabled: u8,
     ) -> vm::Result<()> {
         let mut auth_info = hv_snp_id_auth_info {
             id_key_algorithm: snp_id_block.id_key_algorithm,
@@ -2351,7 +2352,7 @@ impl vm::Vm for MshvVm {
                     id_auth_info: auth_info,
                     host_data,
                     id_block_enabled,
-                    author_key_enabled: 0,
+                    author_key_enabled: auth_key_enabled,
                 },
             },
         };
