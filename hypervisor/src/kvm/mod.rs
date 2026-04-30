@@ -563,6 +563,8 @@ pub struct KvmVm {
     msrs: Vec<MsrEntry>,
     #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
     sev_fd: Option<x86_64::sev::SevFd>,
+    #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+    snp_guest_policy: std::sync::OnceLock<u64>,
     dirty_log_slots: RwLock<HashMap<u32, KvmDirtyLogSlot>>,
     guest_memfds: Option<RwLock<HashMap<u32, OwnedFd>>>,
 }
@@ -689,7 +691,11 @@ impl vm::Vm for KvmVm {
             .as_ref()
             .unwrap()
             .launch_start(&self.fd, guest_policy)
-            .map_err(|e| vm::HypervisorVmError::InitializeSevSnp(e.into()))
+            .map_err(|e| vm::HypervisorVmError::InitializeSevSnp(e.into()))?;
+        self.snp_guest_policy
+            .set(guest_policy.into_bits())
+            .expect("sev_snp_init called more than once");
+        Ok(())
     }
 
     #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
@@ -736,15 +742,22 @@ impl vm::Vm for KvmVm {
         snp_id_block: igvm_defs::IGVM_VHS_SNP_ID_BLOCK,
         host_data: [u8; 32],
         id_block_enabled: u8,
+        auth_key_enabled: u8,
     ) -> vm::Result<()> {
+        let guest_policy = *self
+            .snp_guest_policy
+            .get()
+            .expect("complete_isolated_import called before sev_snp_init");
         self.sev_fd
             .as_ref()
             .unwrap()
             .launch_finish(
                 &self.fd,
+                &snp_id_block,
                 host_data,
                 id_block_enabled,
-                snp_id_block.author_key_enabled,
+                auth_key_enabled,
+                guest_policy,
             )
             .map_err(|e| vm::HypervisorVmError::CompleteIsolatedImport(e.into()))
     }
@@ -1606,6 +1619,8 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 dirty_log_slots: RwLock::new(HashMap::new()),
                 #[cfg(feature = "sev_snp")]
                 sev_fd,
+                #[cfg(feature = "sev_snp")]
+                snp_guest_policy: std::sync::OnceLock::new(),
                 guest_memfds,
             }))
         }

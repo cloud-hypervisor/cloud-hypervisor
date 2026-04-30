@@ -87,6 +87,8 @@ pub enum Error {
     Igvm(#[source] std::io::Error),
     #[error("invalid igvm file")]
     InvalidIgvmFile(#[source] igvm::Error),
+    #[error("multiple SNP ID blocks in IGVM file")]
+    DuplicateSnpIdBlock,
     #[error("invalid guest memory map")]
     InvalidGuestMemmap(#[source] arch::Error),
     #[error("loader error")]
@@ -678,6 +680,9 @@ pub fn load_igvm(
                 author_key_signature,
                 author_public_key,
             } => {
+                if loaded_info.has_snp_id_block {
+                    return Err(Error::DuplicateSnpIdBlock);
+                }
                 loaded_info.snp_id_block.compatibility_mask = *compatibility_mask;
                 loaded_info.snp_id_block.author_key_enabled = *author_key_enabled;
                 loaded_info.snp_id_block.reserved = *reserved;
@@ -692,6 +697,7 @@ pub fn load_igvm(
                 loaded_info.snp_id_block.id_public_key = **id_public_key;
                 loaded_info.snp_id_block.author_key_signature = **author_key_signature;
                 loaded_info.snp_id_block.author_public_key = **author_public_key;
+                loaded_info.has_snp_id_block = true;
             }
             IgvmDirectiveHeader::X64VbsVpContext {
                 vtl: _,
@@ -929,7 +935,12 @@ pub fn load_igvm(
         let id_block_enabled = if hypervisor_type == HypervisorType::Mshv {
             1
         } else {
+            u8::from(loaded_info.has_snp_id_block)
+        };
+        let auth_key_enabled = if hypervisor_type == HypervisorType::Mshv {
             0
+        } else {
+            loaded_info.snp_id_block.author_key_enabled
         };
 
         now = Instant::now();
@@ -942,6 +953,7 @@ pub fn load_igvm(
                 loaded_info.snp_id_block,
                 host_data_contents,
                 id_block_enabled,
+                auth_key_enabled,
             )
             .map_err(Error::CompleteIsolatedImport)?;
 

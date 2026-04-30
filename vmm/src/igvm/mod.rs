@@ -45,6 +45,7 @@ pub struct IgvmLoadedInfo {
     pub gpas: Vec<u64>,
     pub vmsa_gpa: u64,
     pub snp_id_block: IGVM_VHS_SNP_ID_BLOCK,
+    pub has_snp_id_block: bool,
     pub vmsa: SevVmsa,
 }
 
@@ -54,6 +55,7 @@ impl Default for IgvmLoadedInfo {
             gpas: Vec::new(),
             vmsa_gpa: 0,
             snp_id_block: IGVM_VHS_SNP_ID_BLOCK::new_zeroed(),
+            has_snp_id_block: false,
             vmsa: SevVmsa::new_zeroed(),
         }
     }

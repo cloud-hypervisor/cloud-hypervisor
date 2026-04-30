@@ -440,6 +440,7 @@ pub trait Vm: Send + Sync + Any {
         _snp_id_block: IGVM_VHS_SNP_ID_BLOCK,
         _host_data: [u8; 32],
         _id_block_enabled: u8,
+        _auth_key_enabled: u8,
     ) -> Result<()> {
         unimplemented!()
     }
