@@ -316,7 +316,7 @@ pub enum ValidationError {
     )]
     InvalidIommuAddressWidthBits(u8),
     /// Balloon too big
-    #[error("Ballon size ({0}) greater than RAM ({1})")]
+    #[error("Balloon size ({0}) greater than RAM ({1})")]
     BalloonLargerThanRam(u64, u64),
     /// On a IOMMU segment but not behind IOMMU
     #[error("Device is on an IOMMU PCI segment ({0}) but not placed behind IOMMU")]
@@ -3044,14 +3044,7 @@ impl VmConfig {
         }
 
         if let Some(balloon) = &self.balloon {
-            let mut ram_size = self.memory.size;
-
-            if let Some(zones) = &self.memory.zones {
-                for zone in zones {
-                    ram_size += zone.size;
-                }
-            }
-
+            let ram_size = self.memory.total_size();
             if balloon.size >= ram_size {
                 return Err(ValidationError::BalloonLargerThanRam(
                     balloon.size,
