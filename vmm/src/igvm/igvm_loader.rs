@@ -697,6 +697,11 @@ pub fn load_igvm(
                 let area = parameter_areas
                     .get_mut(parameter_area_index)
                     .expect("igvmfile should be valid");
+                #[cfg(feature = "kvm")]
+                let page_count = match area {
+                    ParameterAreaState::Allocated { max_size, .. } => *max_size / HV_PAGE_SIZE,
+                    ParameterAreaState::Inserted => panic!("igvmfile is invalid, multiple insert"),
+                };
                 match area {
                     ParameterAreaState::Allocated { data, max_size } => {
                         #[cfg(all(
@@ -732,11 +737,25 @@ pub fn load_igvm(
                     ParameterAreaState::Inserted => panic!("igvmfile is invalid, multiple insert"),
                 }
                 *area = ParameterAreaState::Inserted;
-                gpas.push(GpaPages {
-                    gpa: *gpa,
-                    page_type: page_types.unmeasured,
-                    page_size: page_types.isolated_page_size_4kb,
-                });
+                match hypervisor_type {
+                    #[cfg(feature = "kvm")]
+                    HypervisorType::Kvm => {
+                        for page_index in 0..page_count {
+                            gpas.push(GpaPages {
+                                gpa: *gpa + page_index * HV_PAGE_SIZE,
+                                page_type: page_types.unmeasured,
+                                page_size: page_types.isolated_page_size_4kb,
+                            });
+                        }
+                    }
+                    _ => {
+                        gpas.push(GpaPages {
+                            gpa: *gpa,
+                            page_type: page_types.unmeasured,
+                            page_size: page_types.isolated_page_size_4kb,
+                        });
+                    }
+                }
             }
             IgvmDirectiveHeader::ErrorRange { .. } => {
                 todo!("Error Range not supported")
@@ -786,14 +805,24 @@ pub fn load_igvm(
 
         let mut now = Instant::now();
 
-        // Sort the gpas to group them by the page type
-        gpas.sort_by_key(|a| a.gpa);
+        // KVM: preserve original IGVM ordering — the SNP launch digest is order-sensitive.
+        // MSHV: sort by GPA to group pages by type for fewer hypercalls.
+        match hypervisor_type {
+            #[cfg(feature = "kvm")]
+            HypervisorType::Kvm => {}
+            _ => gpas.sort_by_key(|a| a.gpa),
+        }
 
         let gpas_grouped = gpas
             .iter()
             .fold(Vec::<Vec<GpaPages>>::new(), |mut acc, gpa| {
                 if let Some(last_vec) = acc.last_mut()
                     && last_vec[0].page_type == gpa.page_type
+                    && match hypervisor_type {
+                        #[cfg(feature = "kvm")]
+                        HypervisorType::Kvm => last_vec[0].page_size == gpa.page_size,
+                        _ => true,
+                    }
                 {
                     last_vec.push(*gpa);
                     return acc;
@@ -802,8 +831,7 @@ pub fn load_igvm(
                 acc
             });
 
-        // Import the pages as a group(by page type) of PFNs to reduce the
-        // hypercall.
+        // Import pages as groups of PFNs to reduce hypercalls.
         for group in gpas_grouped.iter() {
             info!(
                 "Importing {} page{}",
