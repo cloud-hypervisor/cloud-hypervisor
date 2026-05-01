@@ -11,7 +11,7 @@ use std::{io, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -860,16 +860,25 @@ impl IommuEpollHandler {
         let mut used_descs = false;
         while let Some(mut desc_chain) = self.request_queue.pop_descriptor_chain(self.mem.memory())
         {
-            let len = Request::parse(
+            // If the request fails to parse, that's the guest's error. Notify
+            // it with a 0 length response in the used queue.
+            let head_index = desc_chain.head_index();
+            let len = match Request::parse(
                 &mut desc_chain,
                 &self.mapping,
                 &self.ext_mapping.lock().unwrap(),
                 self.msi_iova_space,
                 self.input_range,
-            )?;
+            ) {
+                Ok(len) => len as u32,
+                Err(e) => {
+                    warn!("Failed to parse virtio-iommu request: {e:?}");
+                    0
+                }
+            };
 
             self.request_queue
-                .add_used(desc_chain.memory(), desc_chain.head_index(), len as u32)
+                .add_used(desc_chain.memory(), head_index, len)
                 .map_err(Error::QueueAddUsed)?;
 
             used_descs = true;
