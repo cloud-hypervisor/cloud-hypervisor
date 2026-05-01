@@ -404,6 +404,9 @@ pub enum ValidationError {
     /// The supplied PCI ID is reserved
     #[error("Given PCI device ID ({0}) is reserved")]
     ReservedPciDeviceId(u8),
+    /// Invalid to set both 'mergeable' and 'shared' for memory
+    #[error("Invalid to set both 'mergeable' and 'shared' for memory")]
+    InvalidSharedMemoryWithMergeable,
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -3016,6 +3019,18 @@ impl VmConfig {
             }
         }
 
+        if self.memory.shared && self.memory.mergeable {
+            return Err(ValidationError::InvalidSharedMemoryWithMergeable);
+        }
+
+        if let Some(zones) = &self.memory.zones {
+            for zone in zones {
+                if zone.shared && zone.mergeable {
+                    return Err(ValidationError::InvalidSharedMemoryWithMergeable);
+                }
+            }
+        }
+
         if let Some(user_devices) = &self.user_devices {
             if !user_devices.is_empty() && !self.backed_by_shared_memory() {
                 return Err(ValidationError::UserDevicesRequireSharedMemory);
@@ -5223,6 +5238,29 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             invalid_config.validate(),
             Err(ValidationError::InvalidHugePageSize(3 << 20))
+        );
+
+        // Test mergeable and shared validation for global memory
+        let mut invalid_config = valid_config.clone();
+        invalid_config.memory.shared = true;
+        invalid_config.memory.mergeable = true;
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::InvalidSharedMemoryWithMergeable)
+        );
+
+        // Test mergeable and shared validation for memory zones
+        let mut invalid_config = valid_config.clone();
+        invalid_config.memory.zones = Some(vec![MemoryZoneConfig {
+            id: "mem0".to_string(),
+            size: 1 << 30,
+            shared: true,
+            mergeable: true,
+            ..Default::default()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::InvalidSharedMemoryWithMergeable)
         );
 
         let mut still_valid_config = valid_config.clone();
