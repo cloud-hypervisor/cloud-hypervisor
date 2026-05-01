@@ -52,12 +52,12 @@ resolver = "3"
 
 [workspace.dependencies]
 # rust-vmm crates
-acpi_tables = "0.2.0"
+acpi_tables = "0.2.1"
 iommufd-ioctls = "0.1.0"
 kvm-bindings = "0.14.0"
 kvm-ioctls = "0.24.0"
 linux-loader = "0.13.2"
-mshv-bindings = "0.6.8"
+mshv-bindings = "0.6.9"
 mshv-ioctls = "0.6.8"
 seccompiler = "0.5.0"
 vfio-bindings = { version = "0.6.2", default-features = false }
@@ -68,7 +68,7 @@ vhost-user-backend = { version = "0.22.0", default-features = false }
 virtio-bindings = "0.2.6"
 virtio-queue = "0.17.0"
 vm-fdt = "0.3.0"
-vm-memory = "0.17.1"
+vm-memory = "0.18.0"
 vmm-sys-util = "0.15.0"
 
 # igvm crates
