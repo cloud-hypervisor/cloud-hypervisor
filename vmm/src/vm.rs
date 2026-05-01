@@ -1012,8 +1012,16 @@ impl Vm {
             .create_boot_vcpus(snapshot_from_id(snapshot, CPU_MANAGER_SNAPSHOT_ID))
             .map_err(Error::CpuManager)?;
 
-        // Initialize SEV-SNP - transitions guest into secure state
-        vm.sev_snp_init(Self::get_default_sev_snp_guest_policy())
+        // Extract guest policy from IGVM if available, otherwise use default.
+        #[cfg(feature = "igvm")]
+        let guest_policy = igvm_file
+            .as_ref()
+            .and_then(igvm_loader::extract_guest_policy)
+            .unwrap_or_else(Self::get_default_sev_snp_guest_policy);
+        #[cfg(not(feature = "igvm"))]
+        let guest_policy = Self::get_default_sev_snp_guest_policy();
+
+        vm.sev_snp_init(guest_policy)
             .map_err(Error::InitializeSevSnpVm)?;
 
         // Load payload for SEV-SNP (IGVM parser needs cpu_manager for cpuid)

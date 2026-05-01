@@ -8,6 +8,8 @@ use std::mem::size_of;
 use std::sync::{Arc, Mutex};
 
 use hypervisor::HypervisorType;
+#[cfg(feature = "sev_snp")]
+use igvm::IgvmInitializationHeader;
 use igvm::snp_defs::SevVmsa;
 use igvm::{IgvmDirectiveHeader, IgvmFile, IgvmPlatformHeader};
 #[cfg(feature = "sev_snp")]
@@ -227,6 +229,20 @@ fn import_parameter(
 
     parameter_area[offset..end_of_parameter].copy_from_slice(parameter);
     Ok(())
+}
+
+///
+/// Extract guest policy from the IGVM initialization headers.
+#[cfg(feature = "sev_snp")]
+pub fn extract_guest_policy(igvm_file: &IgvmFile) -> Option<igvm_defs::SnpPolicy> {
+    for header in igvm_file.initializations() {
+        if let IgvmInitializationHeader::GuestPolicy { policy, .. } = header
+            && *policy != 0
+        {
+            return Some(igvm_defs::SnpPolicy::from_bits(*policy));
+        }
+    }
+    None
 }
 
 ///
