@@ -8,7 +8,7 @@ use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::unix::io::{FromRawFd, RawFd};
 
-use block::vhdx::Vhdx;
+use block::formats::vhdx::Vhdx;
 use libfuzzer_sys::{fuzz_target, Corpus};
 
 // Populate the corpus directory with a test file:

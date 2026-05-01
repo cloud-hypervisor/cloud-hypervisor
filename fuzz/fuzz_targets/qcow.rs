@@ -11,7 +11,7 @@ use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
 use std::os::unix::io::{FromRawFd, RawFd};
 
-use block::qcow::{QcowFile, RawFile};
+use block::formats::qcow::internal::{QcowFile, RawFile};
 use libfuzzer_sys::{fuzz_target, Corpus};
 
 // Take the first 64 bits of data as an address and the next 64 bits as data to
