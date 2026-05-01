@@ -348,6 +348,9 @@ pub enum ValidationError {
     /// Invalid rate-limiter group
     #[error("Invalid rate-limiter group")]
     InvalidRateLimiterGroup,
+    /// Rate limiting is not supported with vhost-user
+    #[error("Rate limiting is not supported with vhost-user")]
+    VhostUserRateLimiterNotSupported,
     /// The specified I/O port was invalid. It should be provided in hex, such as `0xe9`.
     #[cfg(target_arch = "x86_64")]
     #[error("The IO port was not properly provided in hex or a `0x` prefix is missing: {0}")]
@@ -1480,6 +1483,14 @@ impl DiskConfig {
             return Err(ValidationError::IommuNotSupported);
         }
 
+        if self.vhost_user && self.rate_limiter_config.is_some() {
+            return Err(ValidationError::VhostUserRateLimiterNotSupported);
+        }
+
+        if self.vhost_user && self.rate_limit_group.is_some() {
+            return Err(ValidationError::VhostUserRateLimiterNotSupported);
+        }
+
         if self.rate_limiter_config.is_some() && self.rate_limit_group.is_some() {
             return Err(ValidationError::InvalidRateLimiterGroup);
         }
@@ -1707,6 +1718,10 @@ impl NetConfig {
 
         if self.vhost_user && self.pci_common.iommu {
             return Err(ValidationError::IommuNotSupported);
+        }
+
+        if self.vhost_user && self.rate_limiter_config.is_some() {
+            return Err(ValidationError::VhostUserRateLimiterNotSupported);
         }
 
         if let Some(mtu) = self.mtu
@@ -2913,6 +2928,11 @@ impl VmConfig {
                 if disk.vhost_user && disk.vhost_socket.is_none() {
                     return Err(ValidationError::VhostUserMissingSocket);
                 }
+                if disk.vhost_user
+                    && (disk.rate_limiter_config.is_some() || disk.rate_limit_group.is_some())
+                {
+                    return Err(ValidationError::VhostUserRateLimiterNotSupported);
+                }
                 if let Some(rate_limit_group) = &disk.rate_limit_group {
                     if let Some(rate_limit_groups) = &self.rate_limit_groups {
                         if !rate_limit_groups
@@ -2937,6 +2957,9 @@ impl VmConfig {
             for net in nets {
                 if net.vhost_user && !self.backed_by_shared_memory() {
                     return Err(ValidationError::VhostUserRequiresSharedMemory);
+                }
+                if net.vhost_user && net.rate_limiter_config.is_some() {
+                    return Err(ValidationError::VhostUserRateLimiterNotSupported);
                 }
                 net.validate(self)?;
                 self.iommu |= net.pci_common.iommu;
@@ -5161,6 +5184,50 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         }]);
         still_valid_config.memory.shared = true;
         still_valid_config.validate().unwrap();
+
+        // Test vhost_user with rate limiting for disk
+        let mut invalid_config = valid_config.clone();
+        invalid_config.memory.shared = true;
+        invalid_config.disks = Some(vec![DiskConfig {
+            path: None,
+            vhost_user: true,
+            vhost_socket: Some("/path/to/sock".to_owned()),
+            rate_limiter_config: Some(RateLimiterConfig::default()),
+            ..disk_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::VhostUserRateLimiterNotSupported)
+        );
+
+        // Test vhost_user with rate_limit_group for disk
+        let mut invalid_config = valid_config.clone();
+        invalid_config.memory.shared = true;
+        invalid_config.disks = Some(vec![DiskConfig {
+            path: None,
+            vhost_user: true,
+            vhost_socket: Some("/path/to/sock".to_owned()),
+            rate_limit_group: Some("group0".to_string()),
+            ..disk_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::VhostUserRateLimiterNotSupported)
+        );
+
+        // Test vhost_user with rate limiting for net
+        let mut invalid_config = valid_config.clone();
+        invalid_config.memory.shared = true;
+        invalid_config.net = Some(vec![NetConfig {
+            vhost_user: true,
+            vhost_socket: Some("/path/to/sock".to_owned()),
+            rate_limiter_config: Some(RateLimiterConfig::default()),
+            ..net_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::VhostUserRateLimiterNotSupported)
+        );
 
         let mut invalid_config = valid_config.clone();
         invalid_config.net = Some(vec![NetConfig {
