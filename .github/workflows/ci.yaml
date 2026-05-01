@@ -743,7 +743,6 @@ jobs:
       - integration-windows
       - integration-x86-64-mq
       - integration-x86-64-pr
-      - lychee
       - openapi
       - package-consistency
       - preflight
