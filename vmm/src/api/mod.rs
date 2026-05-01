@@ -35,6 +35,7 @@ pub mod http;
 
 use std::io;
 use std::num::{NonZeroU32, NonZeroU64};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::mpsc::{RecvError, SendError, Sender, channel};
 use std::time::Duration;
@@ -45,6 +46,7 @@ use option_parser::{OptionParser, OptionParserError, Toggle};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_migration::MigratableError;
+use vm_migration::tls::{TlsEndpoint, validate_tls_dir};
 use vmm_sys_util::eventfd::EventFd;
 
 #[cfg(feature = "dbus_api")]
@@ -53,7 +55,7 @@ pub use self::http::{start_http_fd_thread, start_http_path_thread};
 use crate::Error as VmmError;
 use crate::config::RestoreConfig;
 use crate::device_tree::DeviceTree;
-use crate::migration_transport::MAX_MIGRATION_CONNECTIONS;
+use crate::migration_transport::{MAX_MIGRATION_CONNECTIONS, tcp_address_to_server_name};
 use crate::vm::{Error as VmError, VmState};
 use crate::vm_config::{
     DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
@@ -266,9 +268,103 @@ pub struct VmCoredumpData {
 }
 
 #[derive(Clone, Deserialize, Serialize, Default, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct VmReceiveMigrationData {
     /// URL for the reception of migration state
     pub receiver_url: String,
+    /// Directory containing the TLS server certificate (server-cert.pem), the TLS server key (server-key.pem), and the client TLS root CA certificate (ca-cert.pem).
+    #[serde(default)]
+    pub tls_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Error)]
+pub enum VmReceiveMigrationConfigError {
+    #[error("Error parsing receive migration parameters")]
+    ParseError(#[source] OptionParserError),
+
+    #[error("Error validating receive migration parameters")]
+    ValidationError(String),
+}
+
+impl VmReceiveMigrationData {
+    pub const SYNTAX: &'static str = "VM receive migration parameters \
+        \"<receiver_url>\" or \"receiver_url=<url>[,tls_dir=<path>]\"";
+
+    pub fn parse(migration: &str) -> Result<Self, VmReceiveMigrationConfigError> {
+        let uses_key_value_syntax = migration.split(',').any(
+            |part| matches!(part, p if p.starts_with("receiver_url=") || p.starts_with("tls_dir=")),
+        );
+
+        if !uses_key_value_syntax {
+            let data = Self {
+                receiver_url: migration.to_owned(),
+                tls_dir: None,
+            };
+
+            data.validate()?;
+
+            return Ok(data);
+        }
+
+        let mut parser = OptionParser::new();
+        parser.add("receiver_url").add("tls_dir");
+        parser
+            .parse(migration)
+            .map_err(VmReceiveMigrationConfigError::ParseError)?;
+
+        let receiver_url = parser.get("receiver_url").ok_or_else(|| {
+            VmReceiveMigrationConfigError::ParseError(OptionParserError::InvalidSyntax(
+                "receiver_url is required".to_string(),
+            ))
+        })?;
+        let tls_dir = parser
+            .convert::<String>("tls_dir")
+            .map_err(VmReceiveMigrationConfigError::ParseError)?
+            .map(|path| PathBuf::from(&path));
+
+        let data = Self {
+            receiver_url,
+            tls_dir,
+        };
+
+        data.validate()?;
+
+        Ok(data)
+    }
+
+    pub fn validate(&self) -> Result<(), VmReceiveMigrationConfigError> {
+        if let Some(addr) = self.receiver_url.strip_prefix("tcp:") {
+            tcp_address_to_server_name(addr).map_err(|e| {
+                VmReceiveMigrationConfigError::ValidationError(format!(
+                    "receiver_url must use tcp:<host>:<port> or unix:<path>: {e}."
+                ))
+            })?;
+        } else if self
+            .receiver_url
+            .strip_prefix("unix:")
+            .is_some_and(|path| !path.is_empty())
+        {
+            if self.tls_dir.is_some() {
+                return Err(VmReceiveMigrationConfigError::ValidationError(
+                    "UNIX sockets and TLS encryption cannot be used at the same time.".to_string(),
+                ));
+            }
+        } else {
+            return Err(VmReceiveMigrationConfigError::ValidationError(
+                "receiver_url must use tcp:<host>:<port> or unix:<path>.".to_string(),
+            ));
+        }
+
+        if let Some(tls_dir) = &self.tls_dir {
+            validate_tls_dir(tls_dir, TlsEndpoint::Server).map_err(|e| {
+                VmReceiveMigrationConfigError::ValidationError(format!(
+                    "invalid TLS configuration for receive-migration: {e}"
+                ))
+            })?;
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Copy, Clone, Default, Deserialize, Serialize, Debug, PartialEq, Eq)]
@@ -330,13 +426,17 @@ pub struct VmSendMigrationData {
     /// Must be between 1 and `MAX_MIGRATION_CONNECTIONS` inclusive.
     #[serde(default = "VmSendMigrationData::default_connections")]
     pub connections: NonZeroU32,
+    /// Path to the directory containing the TLS root CA certificate (ca-cert.pem), the TLS client certificate (client-cert.pem), and TLS client key (client-key.pem).
+    #[serde(default)]
+    pub tls_dir: Option<PathBuf>,
 }
 
 impl VmSendMigrationData {
     pub const SYNTAX: &'static str = "VM send migration parameters \
         \"destination_url=<url>[,local=on|off,\
         downtime_ms=<milliseconds>,timeout_s=<seconds>,\
-        timeout_strategy=cancel|ignore,connections=<amount>]\"";
+        timeout_strategy=cancel|ignore,connections=<amount>,\
+        tls_dir=<path>]\"";
 
     // Same as QEMU.
     pub const DEFAULT_DOWNTIME: Duration = Duration::from_millis(300);
@@ -364,7 +464,8 @@ impl VmSendMigrationData {
             .add("downtime_ms")
             .add("timeout_s")
             .add("timeout_strategy")
-            .add("connections");
+            .add("connections")
+            .add("tls_dir");
         parser
             .parse(migration)
             .map_err(VmSendMigrationConfigError::ParseError)?;
@@ -416,6 +517,10 @@ impl VmSendMigrationData {
             })?,
             None => Self::default_connections(),
         };
+        let tls_dir = parser
+            .convert::<String>("tls_dir")
+            .map_err(VmSendMigrationConfigError::ParseError)?
+            .map(|path| PathBuf::from(&path));
 
         let data = Self {
             destination_url,
@@ -424,6 +529,7 @@ impl VmSendMigrationData {
             timeout_s,
             timeout_strategy,
             connections,
+            tls_dir,
         };
 
         data.validate()?;
@@ -440,26 +546,32 @@ impl VmSendMigrationData {
     }
 
     pub fn validate(&self) -> Result<(), VmSendMigrationConfigError> {
-        match self.destination_url.as_str() {
-            url if url
-                .strip_prefix("tcp:")
-                .is_some_and(|addr| !addr.is_empty()) => {}
-            url if url
-                .strip_prefix("unix:")
-                .is_some_and(|path| !path.is_empty()) =>
-            {
-                if self.connections.get() > 1 {
-                    return Err(VmSendMigrationConfigError::ValidationError(
-                        "UNIX sockets and connections option cannot be used at the same time."
-                            .to_string(),
-                    ));
-                }
-            }
-            _ => {
+        if let Some(addr) = self.destination_url.strip_prefix("tcp:") {
+            tcp_address_to_server_name(addr).map_err(|e| {
+                VmSendMigrationConfigError::ValidationError(format!(
+                    "destination_url must use tcp:<host>:<port> or unix:<path>: {e}."
+                ))
+            })?;
+        } else if self
+            .destination_url
+            .strip_prefix("unix:")
+            .is_some_and(|path| !path.is_empty())
+        {
+            if self.connections.get() > 1 {
                 return Err(VmSendMigrationConfigError::ValidationError(
-                    "destination_url must use tcp:<host>:<port> or unix:<path>.".to_string(),
+                    "UNIX sockets and connections option cannot be used at the same time."
+                        .to_string(),
                 ));
             }
+            if self.tls_dir.is_some() {
+                return Err(VmSendMigrationConfigError::ValidationError(
+                    "UNIX sockets and TLS encryption cannot be used at the same time.".to_string(),
+                ));
+            }
+        } else {
+            return Err(VmSendMigrationConfigError::ValidationError(
+                "destination_url must use tcp:<host>:<port> or unix:<path>.".to_string(),
+            ));
         }
 
         if self.connections.get() > MAX_MIGRATION_CONNECTIONS {
@@ -481,6 +593,14 @@ impl VmSendMigrationData {
                         .to_string(),
                 ));
             }
+        }
+
+        if let Some(tls_dir) = &self.tls_dir {
+            validate_tls_dir(tls_dir, TlsEndpoint::Client).map_err(|e| {
+                VmSendMigrationConfigError::ValidationError(format!(
+                    "invalid TLS configuration for send-migration: {e}"
+                ))
+            })?;
         }
 
         Ok(())
@@ -1756,7 +1876,101 @@ impl ApiAction for VmNmi {
 
 #[cfg(test)]
 mod unit_tests {
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{fs, process};
+
     use super::*;
+
+    struct TestDir {
+        path: PathBuf,
+    }
+
+    impl TestDir {
+        fn new(name: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "cloud-hypervisor-api-{name}-{}-{unique}",
+                process::id()
+            ));
+            fs::create_dir(&path).unwrap();
+            Self { path }
+        }
+
+        fn add_file(&self, file_name: &str) {
+            fs::write(self.path.join(file_name), b"test").unwrap();
+        }
+
+        fn add_receive_tls_files(&self) {
+            self.add_file("ca-cert.pem");
+            self.add_file("server-cert.pem");
+            self.add_file("server-key.pem");
+        }
+
+        fn add_send_tls_files(&self) {
+            self.add_file("ca-cert.pem");
+            self.add_file("client-cert.pem");
+            self.add_file("client-key.pem");
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn test_vm_receive_migration_data_parse() {
+        let data = VmReceiveMigrationData::parse("tcp:192.168.1.1:8080").unwrap();
+        assert_eq!(
+            data,
+            VmReceiveMigrationData {
+                receiver_url: "tcp:192.168.1.1:8080".to_string(),
+                tls_dir: None,
+            }
+        );
+
+        let data = VmReceiveMigrationData::parse("tcp:[2001:db8::1]:8080").unwrap();
+        assert_eq!(data.receiver_url, "tcp:[2001:db8::1]:8080");
+
+        let data = VmReceiveMigrationData::parse("tcp:destination.example:8080").unwrap();
+        assert_eq!(data.receiver_url, "tcp:destination.example:8080");
+
+        let data = VmReceiveMigrationData::parse("unix:/tmp/ch=migrate.sock").unwrap();
+        assert_eq!(data.receiver_url, "unix:/tmp/ch=migrate.sock");
+
+        let tls_dir = TestDir::new("receive-tls");
+        tls_dir.add_receive_tls_files();
+        let tls_dir_path = tls_dir.path.clone();
+        let data = VmReceiveMigrationData::parse(&format!(
+            "receiver_url=tcp:192.168.1.1:8080,tls_dir={}",
+            tls_dir_path.display()
+        ))
+        .unwrap();
+        assert_eq!(
+            data,
+            VmReceiveMigrationData {
+                receiver_url: "tcp:192.168.1.1:8080".to_string(),
+                tls_dir: Some(tls_dir_path),
+            }
+        );
+
+        let tls_dir = TestDir::new("receive-empty-tls");
+        VmReceiveMigrationData::parse(&format!(
+            "receiver_url=tcp:192.168.1.1:8080,tls_dir={}",
+            tls_dir.path.display()
+        ))
+        .unwrap_err();
+
+        VmReceiveMigrationData::parse("receiver_url=file:///tmp/migration").unwrap_err();
+        VmReceiveMigrationData::parse("tcp:192.168.1.1").unwrap_err();
+        VmReceiveMigrationData::parse("tcp:[2001:db8::1]").unwrap_err();
+        VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,tls_dir=/tmp").unwrap_err();
+    }
 
     #[test]
     fn test_vm_send_migration_data_parse() {
@@ -1780,6 +1994,14 @@ mod unit_tests {
         assert_eq!(data.timeout_s, VmSendMigrationData::default_timeout_s());
         assert_eq!(data.timeout_strategy, TimeoutStrategy::default());
         assert_eq!(data.connections, VmSendMigrationData::default_connections());
+
+        let data = VmSendMigrationData::parse("destination_url=tcp:[2001:db8::1]:8080")
+            .expect("IPv6 migration string should parse");
+        assert_eq!(data.destination_url, "tcp:[2001:db8::1]:8080");
+
+        let data = VmSendMigrationData::parse("destination_url=tcp:destination.example:8080")
+            .expect("hostname migration string should parse");
+        assert_eq!(data.destination_url, "tcp:destination.example:8080");
 
         // Missing destination_url is an error
         VmSendMigrationData::parse("local=on,downtime_ms=200").unwrap_err();
@@ -1817,6 +2039,8 @@ mod unit_tests {
 
         // Invalid destination URL scheme is rejected
         VmSendMigrationData::parse("destination_url=file:///tmp/migration").unwrap_err();
+        VmSendMigrationData::parse("destination_url=tcp:192.168.1.1").unwrap_err();
+        VmSendMigrationData::parse("destination_url=tcp:[2001:db8::1]").unwrap_err();
 
         // Local migration requires a UNIX socket destination
         VmSendMigrationData::parse("destination_url=tcp:192.168.1.1:8080,local=yes").unwrap_err();
@@ -1838,12 +2062,16 @@ mod unit_tests {
                 timeout_s: VmSendMigrationData::default_timeout_s(),
                 timeout_strategy: Default::default(),
                 connections: VmSendMigrationData::default_connections(),
+                tls_dir: None,
             }
         );
 
         // Happy path, fully specified
+        let tls_dir = TestDir::new("send-tls");
+        tls_dir.add_send_tls_files();
+        let tls_dir_path = tls_dir.path.clone();
         let data =
-            VmSendMigrationData::parse("destination_url=tcp:192.168.1.1:8080,downtime_ms=150,timeout_s=900,timeout_strategy=ignore,connections=4")
+            VmSendMigrationData::parse(&format!("destination_url=tcp:192.168.1.1:8080,downtime_ms=150,timeout_s=900,timeout_strategy=ignore,connections=4,tls_dir={}", tls_dir_path.display()))
                 .unwrap();
         assert_eq!(
             data,
@@ -1854,6 +2082,7 @@ mod unit_tests {
                 timeout_s: NonZeroU64::new(900).unwrap(),
                 timeout_strategy: TimeoutStrategy::Ignore,
                 connections: NonZeroU32::new(4).unwrap(),
+                tls_dir: Some(tls_dir_path),
             }
         );
     }

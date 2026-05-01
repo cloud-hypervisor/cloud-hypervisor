@@ -7,9 +7,9 @@ use std::io::{self, ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::num::NonZeroU32;
 use std::os::fd::{AsFd, BorrowedFd};
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::result::Result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, SyncSender, TrySendError, channel, sync_channel};
@@ -26,6 +26,7 @@ use vm_memory::{
     VolatileSlice, WriteVolatile,
 };
 use vm_migration::protocol::{Command, MemoryRangeTable, Request, Response};
+use vm_migration::tls::{TlsServerConfig, TlsStream};
 use vm_migration::{MigratableError, Snapshot};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -41,6 +42,7 @@ pub(crate) const MAX_MIGRATION_CONNECTIONS: u32 = 128;
 pub(crate) enum ReceiveListener {
     Tcp(TcpListener),
     Unix(UnixListener),
+    Tls(TcpListener, TlsServerConfig),
 }
 
 impl ReceiveListener {
@@ -57,6 +59,18 @@ impl ReceiveListener {
                 .map(|(socket, _)| SocketStream::Unix(socket))
                 .context("Failed to accept Unix migration connection")
                 .map_err(MigratableError::MigrateReceive),
+            ReceiveListener::Tls(listener, config) => {
+                let (socket, _) = listener
+                    .accept()
+                    .context("Failed to accept TCP connection")
+                    .map_err(MigratableError::MigrateReceive)?;
+
+                TlsStream::new_server(socket, config)
+                    .map(Box::new)
+                    .map(SocketStream::Tls)
+                    .context("Failed to accept TLS migration connection")
+                    .map_err(MigratableError::MigrateReceive)
+            }
         }
     }
 
@@ -90,6 +104,11 @@ impl ReceiveListener {
                 .map(ReceiveListener::Unix)
                 .context("Failed to clone Unix listener")
                 .map_err(MigratableError::MigrateReceive),
+            ReceiveListener::Tls(listener, config) => listener
+                .try_clone()
+                .map(|listener| ReceiveListener::Tls(listener, config.clone()))
+                .context("Failed to clone TLS listener")
+                .map_err(MigratableError::MigrateReceive),
         }
     }
 }
@@ -99,6 +118,7 @@ impl AsFd for ReceiveListener {
         match self {
             ReceiveListener::Tcp(listener) => listener.as_fd(),
             ReceiveListener::Unix(listener) => listener.as_fd(),
+            ReceiveListener::Tls(listener, _) => listener.as_fd(),
         }
     }
 }
@@ -107,6 +127,7 @@ impl AsFd for ReceiveListener {
 pub(crate) enum SocketStream {
     Unix(UnixStream),
     Tcp(TcpStream),
+    Tls(Box<TlsStream>),
 }
 
 impl Read for SocketStream {
@@ -114,6 +135,7 @@ impl Read for SocketStream {
         match self {
             SocketStream::Unix(stream) => stream.read(buf),
             SocketStream::Tcp(stream) => stream.read(buf),
+            SocketStream::Tls(stream) => stream.read(buf),
         }
     }
 }
@@ -123,6 +145,7 @@ impl Write for SocketStream {
         match self {
             SocketStream::Unix(stream) => stream.write(buf),
             SocketStream::Tcp(stream) => stream.write(buf),
+            SocketStream::Tls(stream) => stream.write(buf),
         }
     }
 
@@ -130,15 +153,7 @@ impl Write for SocketStream {
         match self {
             SocketStream::Unix(stream) => stream.flush(),
             SocketStream::Tcp(stream) => stream.flush(),
-        }
-    }
-}
-
-impl AsRawFd for SocketStream {
-    fn as_raw_fd(&self) -> RawFd {
-        match self {
-            SocketStream::Unix(s) => s.as_raw_fd(),
-            SocketStream::Tcp(s) => s.as_raw_fd(),
+            SocketStream::Tls(stream) => stream.flush(),
         }
     }
 }
@@ -148,6 +163,7 @@ impl AsFd for SocketStream {
         match self {
             SocketStream::Unix(s) => s.as_fd(),
             SocketStream::Tcp(s) => s.as_fd(),
+            SocketStream::Tls(s) => s.as_fd(),
         }
     }
 }
@@ -160,16 +176,7 @@ impl ReadVolatile for SocketStream {
         match self {
             SocketStream::Unix(s) => s.read_volatile(buf),
             SocketStream::Tcp(s) => s.read_volatile(buf),
-        }
-    }
-
-    fn read_exact_volatile<B: BitmapSlice>(
-        &mut self,
-        buf: &mut VolatileSlice<B>,
-    ) -> Result<(), VolatileMemoryError> {
-        match self {
-            SocketStream::Unix(s) => s.read_exact_volatile(buf),
-            SocketStream::Tcp(s) => s.read_exact_volatile(buf),
+            SocketStream::Tls(s) => s.read_volatile(buf),
         }
     }
 }
@@ -182,16 +189,7 @@ impl WriteVolatile for SocketStream {
         match self {
             SocketStream::Unix(s) => s.write_volatile(buf),
             SocketStream::Tcp(s) => s.write_volatile(buf),
-        }
-    }
-
-    fn write_all_volatile<B: BitmapSlice>(
-        &mut self,
-        buf: &VolatileSlice<B>,
-    ) -> Result<(), VolatileMemoryError> {
-        match self {
-            SocketStream::Unix(s) => s.write_all_volatile(buf),
-            SocketStream::Tcp(s) => s.write_all_volatile(buf),
+            SocketStream::Tls(s) => s.write_volatile(buf),
         }
     }
 }
@@ -512,6 +510,7 @@ impl SendAdditionalConnections {
     pub(crate) fn new(
         destination: &str,
         connections: NonZeroU32,
+        tls_dir: Option<&Path>,
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
     ) -> Result<Self, MigratableError> {
         let mut threads = Vec::new();
@@ -538,7 +537,7 @@ impl SendAdditionalConnections {
         // the memory chunks to the workers, but does not send memory anymore. Thus in
         // this case we create one additional thread for each connection.
         for n in 0..configured_connections {
-            let mut socket = send_migration_socket(destination)?;
+            let mut socket = send_migration_socket(destination, tls_dir)?;
             let guest_memory = guest_memory.clone();
             let message_rx = message_rx.clone();
             let worker_error = worker_error.clone();
@@ -784,9 +783,47 @@ fn socket_url_to_path(url: &str) -> Result<PathBuf, anyhow::Error> {
         .map(|s| s.into())
 }
 
+/// Extract the server name from a TCP address. This function assumes that
+/// `tcp:` has already been stripped.
+///
+/// The expected format is `<host>:<port>` for hostnames and IPv4 addresses, or
+/// `[<ipv6-address>]:<port>` for IPv6 addresses. The host and port must both be
+/// present, and the port must parse as a `u16`.
+pub fn tcp_address_to_server_name(address: &str) -> Result<&str, anyhow::Error> {
+    let (host, port) = if let Some(rest) = address.strip_prefix('[') {
+        let (host, rest) = rest
+            .split_once(']')
+            .ok_or_else(|| anyhow!("missing closing ']' for bracketed IPv6 address".to_string()))?;
+
+        let port = rest
+            .strip_prefix(':')
+            .ok_or_else(|| anyhow!("missing port separator after bracketed host".to_string()))?;
+
+        (host, port)
+    } else {
+        address
+            .rsplit_once(':')
+            .ok_or_else(|| anyhow!("missing TCP port".to_string()))?
+    };
+
+    if host.is_empty() {
+        return Err(anyhow!("host must not be empty".to_string()));
+    }
+
+    if port.is_empty() {
+        return Err(anyhow!("port must not be empty".to_string()));
+    }
+
+    port.parse::<u16>()
+        .map_err(|_| anyhow!(format!("invalid TCP port: {port}")))?;
+
+    Ok(host)
+}
+
 /// Connect to a migration endpoint and return the established stream.
 pub(crate) fn send_migration_socket(
     destination_url: &str,
+    tls_dir: Option<&Path>,
 ) -> Result<SocketStream, MigratableError> {
     if let Some(address) = destination_url.strip_prefix("tcp:") {
         info!("Connecting to TCP socket at {address}");
@@ -795,7 +832,19 @@ pub(crate) fn send_migration_socket(
             MigratableError::MigrateSend(anyhow!("Error connecting to TCP socket: {e}"))
         })?;
 
-        Ok(SocketStream::Tcp(socket))
+        if let Some(tls_dir) = tls_dir {
+            // The address should have been validated by the API using this exact function.
+            // Any error here has to be treated as a programming error.
+            let server_name = tcp_address_to_server_name(address)
+                .expect("TCP address should have been validated by the API");
+            TlsStream::new_client(socket, tls_dir, server_name)
+                .map(Box::new)
+                .map(SocketStream::Tls)
+                .context("Error creating TLS migration stream")
+                .map_err(MigratableError::MigrateSend)
+        } else {
+            Ok(SocketStream::Tcp(socket))
+        }
     } else {
         let path = socket_url_to_path(destination_url).map_err(MigratableError::MigrateSend)?;
         info!("Connecting to UNIX socket at {path:?}");
@@ -811,12 +860,21 @@ pub(crate) fn send_migration_socket(
 /// Bind a migration listener for the receiver side.
 pub(crate) fn receive_migration_listener(
     receiver_url: &str,
+    tls_dir: Option<&Path>,
 ) -> Result<ReceiveListener, MigratableError> {
     if let Some(address) = receiver_url.strip_prefix("tcp:") {
-        TcpListener::bind(address)
-            .map(ReceiveListener::Tcp)
+        let listener = TcpListener::bind(address)
             .context("Error binding to TCP socket")
-            .map_err(MigratableError::MigrateReceive)
+            .map_err(MigratableError::MigrateReceive)?;
+
+        if let Some(tls_dir) = tls_dir {
+            let config = TlsServerConfig::new(tls_dir)
+                .context("Error creating TLS server config")
+                .map_err(MigratableError::MigrateReceive)?;
+            Ok(ReceiveListener::Tls(listener, config))
+        } else {
+            Ok(ReceiveListener::Tcp(listener))
+        }
     } else {
         let path = socket_url_to_path(receiver_url).map_err(MigratableError::MigrateReceive)?;
         UnixListener::bind(&path)
@@ -976,4 +1034,79 @@ pub(crate) fn receive_memory_ranges(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tcp_address_to_server_name;
+
+    #[test]
+    fn test_tcp_address_to_server_name() {
+        assert_eq!(
+            tcp_address_to_server_name("example.com:1234").unwrap(),
+            "example.com"
+        );
+        assert_eq!(
+            tcp_address_to_server_name("192.0.2.1:1234").unwrap(),
+            "192.0.2.1"
+        );
+        assert_eq!(
+            tcp_address_to_server_name("[2001:db8::1]:1234").unwrap(),
+            "2001:db8::1"
+        );
+    }
+
+    #[test]
+    fn test_tcp_address_to_server_name_rejects_invalid_addresses() {
+        assert_eq!(
+            tcp_address_to_server_name("192.168.1.1")
+                .unwrap_err()
+                .to_string(),
+            "missing TCP port"
+        );
+        assert_eq!(
+            tcp_address_to_server_name(":8080").unwrap_err().to_string(),
+            "host must not be empty"
+        );
+        assert_eq!(
+            tcp_address_to_server_name("host:").unwrap_err().to_string(),
+            "port must not be empty"
+        );
+        assert_eq!(
+            tcp_address_to_server_name("host:not-a-port")
+                .unwrap_err()
+                .to_string(),
+            "invalid TCP port: not-a-port"
+        );
+        assert_eq!(
+            tcp_address_to_server_name("[2001:db8::1")
+                .unwrap_err()
+                .to_string(),
+            "missing closing ']' for bracketed IPv6 address"
+        );
+        assert_eq!(
+            tcp_address_to_server_name("[]:8080")
+                .unwrap_err()
+                .to_string(),
+            "host must not be empty"
+        );
+        assert_eq!(
+            tcp_address_to_server_name("[2001:db8::1]")
+                .unwrap_err()
+                .to_string(),
+            "missing port separator after bracketed host"
+        );
+        assert_eq!(
+            tcp_address_to_server_name("[2001:db8::1]:")
+                .unwrap_err()
+                .to_string(),
+            "port must not be empty"
+        );
+        assert_eq!(
+            tcp_address_to_server_name("[2001:db8::1]:99999")
+                .unwrap_err()
+                .to_string(),
+            "invalid TCP port: 99999"
+        );
+    }
 }

@@ -71,6 +71,8 @@ enum Error {
     ReadingFile(#[source] std::io::Error),
     #[error("Invalid disk size")]
     InvalidDiskSize(#[source] ByteSizedParseError),
+    #[error("Error parsing receive migration configuration")]
+    ReceiveMigrationConfig(#[from] vmm::api::VmReceiveMigrationConfigError),
     #[error("Error parsing send migration configuration")]
     SendMigrationConfig(#[from] vmm::api::VmSendMigrationConfigError),
 }
@@ -534,7 +536,7 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
                     .unwrap()
                     .get_one::<String>("receive_migration_config")
                     .unwrap(),
-            );
+            )?;
             simple_api_command(
                 socket,
                 "PUT",
@@ -753,7 +755,7 @@ fn dbus_api_do_command(matches: &ArgMatches, proxy: &DBusApi1ProxyBlocking<'_>) 
                     .unwrap()
                     .get_one::<String>("receive_migration_config")
                     .unwrap(),
-            );
+            )?;
             proxy.api_vm_receive_migration(&receive_migration_data)
         }
         Some("create") => {
@@ -941,12 +943,10 @@ fn coredump_config(destination_url: &str) -> String {
     serde_json::to_string(&coredump_config).unwrap()
 }
 
-fn receive_migration_data(url: &str) -> String {
-    let receive_migration_data = vmm::api::VmReceiveMigrationData {
-        receiver_url: url.to_owned(),
-    };
-
-    serde_json::to_string(&receive_migration_data).unwrap()
+fn receive_migration_data(config: &str) -> Result<String, Error> {
+    let receive_migration_data =
+        vmm::api::VmReceiveMigrationData::parse(config).map_err(Error::ReceiveMigrationConfig)?;
+    Ok(serde_json::to_string(&receive_migration_data).unwrap())
 }
 
 fn send_migration_data(config: &str) -> Result<String, Error> {
@@ -1069,7 +1069,7 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
             .arg(
                 Arg::new("receive_migration_config")
                     .index(1)
-                    .help("<receiver_url>"),
+                    .help(vmm::api::VmReceiveMigrationData::SYNTAX),
             ),
         Command::new("remove-device")
             .about("Remove VFIO and PCI device")

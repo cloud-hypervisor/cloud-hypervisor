@@ -191,6 +191,52 @@ the destination host and continue running there. The source VM instance
 will terminate normally. All ongoing processes and connections within
 the VM should remain intact after the migration.
 
+#### Encryption
+
+TCP migration can be protected with TLS by passing `tls_dir=<path>` to
+both `receive-migration` and `send-migration`.
+
+The destination host needs a directory containing:
+
+- `ca-cert.pem`: the CA certificate used to verify source certificates
+- `server-cert.pem`: the certificate presented by the destination
+- `server-key.pem`: the private key for `server-cert.pem`
+
+The source host needs a directory containing:
+
+- `ca-cert.pem`: the CA certificate used to verify the destination
+  certificate
+- `client-cert.pem`: the certificate presented by the source
+- `client-key.pem`: the private key for `client-cert.pem`
+
+Protect the private key files with file mode `0600` to reduce the risk
+of accidental disclosure:
+
+```console
+$ chmod 600 server-key.pem client-key.pem
+```
+
+Current TCP migration uses mutual TLS (mTLS) authentication. The source
+verifies the destination certificate against `ca-cert.pem` and presents
+`client-cert.pem` and `client-key.pem`. The destination presents
+`server-cert.pem` and `server-key.pem`, and only accepts client
+certificates that chain to `ca-cert.pem`.
+
+Example receiver command:
+
+```console
+dst $ ch-remote --api-socket=/tmp/api receive-migration receiver_url=tcp:0.0.0.0:{port},tls_dir=/path/to/dst-tls
+```
+
+Example sender command:
+
+```console
+src $ ch-remote --api-socket=/tmp/api send-migration destination_url=tcp:{dst}:{port},tls_dir=/path/to/src-tls
+```
+
+TLS encryption is only supported with `tcp:<host>:<port>` migration
+URLs, not with local UNIX-socket migration.
+
 #### Migration Parameters
 
 Cloud Hypervisor supports additional parameters to control the

@@ -1389,8 +1389,10 @@ impl Vmm {
         let mut ctx = OngoingMigrationContext::new();
 
         // Set up the socket connection
-        let mut socket =
-            migration_transport::send_migration_socket(&send_data_migration.destination_url)?;
+        let mut socket = migration_transport::send_migration_socket(
+            &send_data_migration.destination_url,
+            send_data_migration.tls_dir.as_deref(),
+        )?;
 
         // Start the migration
         migration_transport::send_request_expect_ok(
@@ -1434,9 +1436,9 @@ impl Vmm {
                     // Proceed with sending memory file descriptors over UNIX socket
                     vm.send_memory_fds(unix_socket)?;
                 }
-                SocketStream::Tcp(_tcp_socket) => {
+                _ => {
                     return Err(MigratableError::MigrateSend(anyhow!(
-                        "--local option is not supported with TCP sockets",
+                        "--local option is only supported with UNIX sockets",
                     )));
                 }
             }
@@ -1467,6 +1469,7 @@ impl Vmm {
             let mut mem_send = migration_transport::SendAdditionalConnections::new(
                 &send_data_migration.destination_url,
                 send_data_migration.connections,
+                send_data_migration.tls_dir.as_deref(),
                 &vm.guest_memory(),
             )?;
 
@@ -2482,13 +2485,21 @@ impl RequestHandler for Vmm {
         &mut self,
         receive_data_migration: VmReceiveMigrationData,
     ) -> result::Result<(), MigratableError> {
+        receive_data_migration
+            .validate()
+            .context("Invalid receive migration configuration")
+            .map_err(MigratableError::MigrateReceive)?;
+
         info!(
-            "Receiving migration: receiver_url = {}",
-            receive_data_migration.receiver_url
+            "Receiving migration: receiver_url={},tls={}",
+            receive_data_migration.receiver_url,
+            receive_data_migration.tls_dir.is_some()
         );
 
-        let mut listener =
-            migration_transport::receive_migration_listener(&receive_data_migration.receiver_url)?;
+        let mut listener = migration_transport::receive_migration_listener(
+            &receive_data_migration.receiver_url,
+            receive_data_migration.tls_dir.as_deref(),
+        )?;
         // Accept the connection and get the socket
         let mut socket = listener.accept()?;
 
@@ -2544,9 +2555,10 @@ impl RequestHandler for Vmm {
             .map_err(MigratableError::MigrateSend)?;
 
         info!(
-            "Sending migration: destination_url={},local={},downtime={}ms,timeout={}s,timeout_strategy={:?}",
+            "Sending migration: destination_url={},local={},tls={},downtime={}ms,timeout={}s,timeout_strategy={:?}",
             send_data_migration.destination_url,
             send_data_migration.local,
+            send_data_migration.tls_dir.is_some(),
             send_data_migration.downtime().as_millis(),
             send_data_migration.timeout().as_secs(),
             send_data_migration.timeout_strategy
