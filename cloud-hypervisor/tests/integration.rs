@@ -6119,7 +6119,7 @@ mod common_parallel {
     //    live migration;
     // Note: This test does not use vsock as we can't create two identical vsock on the same host.
     #[cfg(not(feature = "mshv"))]
-    fn _test_live_migration(upgrade_test: bool, local: bool) {
+    fn _test_live_migration(upgrade_test: bool, local: bool, paused: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
@@ -6228,7 +6228,13 @@ mod common_parallel {
             );
 
             assert!(
-                start_live_migration(&migration_socket, &src_api_socket, &dest_api_socket, local),
+                start_live_migration(
+                    &migration_socket,
+                    &src_api_socket,
+                    &dest_api_socket,
+                    local,
+                    paused
+                ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
         });
@@ -6403,7 +6409,13 @@ mod common_parallel {
             );
 
             assert!(
-                start_live_migration(&migration_socket, &src_api_socket, &dest_api_socket, local),
+                start_live_migration(
+                    &migration_socket,
+                    &src_api_socket,
+                    &dest_api_socket,
+                    local,
+                    false
+                ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
         });
@@ -6563,7 +6575,13 @@ mod common_parallel {
             );
 
             assert!(
-                start_live_migration(&migration_socket, &src_api_socket, &dest_api_socket, true),
+                start_live_migration(
+                    &migration_socket,
+                    &src_api_socket,
+                    &dest_api_socket,
+                    true,
+                    false
+                ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
         });
@@ -6995,13 +7013,25 @@ mod common_parallel {
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_basic() {
-        _test_live_migration(false, false);
+        _test_live_migration(false, false, false);
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_local() {
-        _test_live_migration(false, true);
+        _test_live_migration(false, true, false);
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_live_migration_basic_paused() {
+        _test_live_migration(false, false, true);
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_live_migration_local_paused() {
+        _test_live_migration(false, true, true);
     }
 
     #[test]
@@ -7040,16 +7070,18 @@ mod common_parallel {
         _test_live_migration_watchdog(false, true);
     }
 
+    // TODO: Add test of live upgrade paused vm after cloud-hypervisor-static
+    // version is updated.
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_basic() {
-        _test_live_migration(true, false);
+        _test_live_migration(true, false, false);
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_local() {
-        _test_live_migration(true, true);
+        _test_live_migration(true, true, false);
     }
 
     #[test]
@@ -7177,7 +7209,13 @@ mod common_parallel {
             let _ = std::fs::remove_file(&virtiofsd_socket_path);
 
             assert!(
-                start_live_migration(&migration_socket, &src_api_socket, &dest_api_socket, local),
+                start_live_migration(
+                    &migration_socket,
+                    &src_api_socket,
+                    &dest_api_socket,
+                    local,
+                    false
+                ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
         });
@@ -7511,7 +7549,13 @@ mod ivshmem {
             );
 
             assert!(
-                start_live_migration(&migration_socket, &src_api_socket, &dest_api_socket, local),
+                start_live_migration(
+                    &migration_socket,
+                    &src_api_socket,
+                    &dest_api_socket,
+                    local,
+                    false
+                ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
         });
@@ -8987,7 +9031,13 @@ mod common_sequential {
             );
 
             assert!(
-                start_live_migration(&migration_socket, &src_api_socket, &dest_api_socket, local),
+                start_live_migration(
+                    &migration_socket,
+                    &src_api_socket,
+                    &dest_api_socket,
+                    local,
+                    false
+                ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
         });
@@ -9208,7 +9258,13 @@ mod common_sequential {
             );
 
             assert!(
-                start_live_migration(&migration_socket, &src_api_socket, &dest_api_socket, local),
+                start_live_migration(
+                    &migration_socket,
+                    &src_api_socket,
+                    &dest_api_socket,
+                    local,
+                    false
+                ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
         });
@@ -9336,7 +9392,13 @@ mod common_sequential {
             );
 
             assert!(
-                start_live_migration(&migration_socket, &src_api_socket, &dest_api_socket, local),
+                start_live_migration(
+                    &migration_socket,
+                    &src_api_socket,
+                    &dest_api_socket,
+                    local,
+                    false
+                ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
         });
