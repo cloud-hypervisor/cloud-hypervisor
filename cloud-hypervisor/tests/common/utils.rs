@@ -1070,6 +1070,7 @@ pub(crate) fn start_live_migration(
     src_api_socket: &str,
     dest_api_socket: &str,
     local: bool,
+    paused: bool,
 ) -> bool {
     // Start to receive migration from the destination VM
     let mut receive_migration = Command::new(clh_command("ch-remote"))
@@ -1084,8 +1085,17 @@ pub(crate) fn start_live_migration(
         .unwrap();
     // Give it '1s' to make sure the 'migration_socket' file is properly created
     thread::sleep(std::time::Duration::new(1, 0));
-    // Start to send migration from the source VM
 
+    if paused {
+        // Test the migration of a paused VM.
+        let cmd_success = remote_command(src_api_socket, "pause", None);
+        if !cmd_success {
+            let _ = receive_migration.kill();
+            eprintln!("Failed to pause the source VM before live migration");
+        }
+    }
+
+    // Start to send migration from the source VM
     let args = [
         format!("--api-socket={}", &src_api_socket),
         "send-migration".to_string(),
@@ -1145,6 +1155,28 @@ pub(crate) fn start_live_migration(
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
+    } else if paused {
+        // for a paused VM, we should make sure the destinations VM state is still 'Paused' after
+        // migration.
+        let dest_state = vm_state(dest_api_socket);
+        if dest_state != "Paused" {
+            eprintln!(
+                "\n\n==== Start 'destination VM state' output ==== \
+                \n\nExpected destination VM state: Paused\nActual destination VM state: {dest_state} \
+                \n\n==== End 'destination VM state' output ====\n\n"
+            );
+            return false;
+        }
+        // Resume the paused VM to make sure it still works after migration
+        let cmd_success = remote_command(dest_api_socket, "resume", None);
+        if !cmd_success {
+            eprintln!(
+                "\n\n==== Start 'destination VM state' output ==== \
+                \n\nFailed to resume the destination VM after live migration \
+                \n\n==== End 'destination VM state' output ====\n\n"
+            );
+            return false;
+        }
     }
 
     send_success && receive_success
