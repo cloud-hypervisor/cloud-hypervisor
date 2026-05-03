@@ -3309,8 +3309,8 @@ impl Migratable for MemoryManager {
 
 #[cfg(test)]
 mod unit_tests {
-    use std::io::{Seek, SeekFrom, Write};
-    use std::os::fd::{AsFd, BorrowedFd, FromRawFd};
+    use std::io::Write;
+    use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd};
     use std::os::unix::fs::FileExt;
 
     use super::{next_data_extent, write_region_sparse};
@@ -3341,9 +3341,54 @@ mod unit_tests {
         Ok(out)
     }
 
-    fn populated(src: &mut std::fs::File, off: u64, byte: u8, len: u64) {
-        src.seek(SeekFrom::Start(off)).unwrap();
-        src.write_all(&vec![byte; len as usize]).unwrap();
+    /// Punch an explicit hole into `f`. Tests use this instead of relying on
+    /// "didn't write here" to mean "is a hole": modern shmem/tmpfs may
+    /// allocate a multi-page folio on the first write and report the whole
+    /// folio as data, so per-page hole tracking after a partial write is
+    /// not portable. `fallocate(PUNCH_HOLE)` is the explicit "deallocate
+    /// these pages" syscall and is honored on every Linux filesystem we
+    /// run tests on (tmpfs, ext4, xfs, btrfs).
+    fn punch_hole(f: &std::fs::File, off: u64, len: u64) {
+        // SAFETY: FFI call; f is a valid open fd for the duration of the
+        // call.
+        let r = unsafe {
+            libc::fallocate(
+                f.as_raw_fd(),
+                libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE,
+                off as libc::off_t,
+                len as libc::off_t,
+            )
+        };
+        assert_eq!(
+            r,
+            0,
+            "fallocate PUNCH_HOLE off={off} len={len}: {}",
+            std::io::Error::last_os_error(),
+        );
+    }
+
+    /// Build a file with a deterministic sparse layout: write each `(off,
+    /// len, byte)` data extent, then punch every gap into a real hole.
+    /// The resulting `SEEK_DATA`/`SEEK_HOLE` extents match `data` exactly,
+    /// regardless of folio/THP allocation policy on the backing FS.
+    fn sparse_layout(f: &std::fs::File, total: u64, data: &[(u64, u64, u8)]) {
+        f.set_len(total).unwrap();
+        for &(off, len, byte) in data {
+            f.write_all_at(&vec![byte; len as usize], off).unwrap();
+        }
+        let mut sorted: Vec<(u64, u64)> = data.iter().map(|&(o, l, _)| (o, l)).collect();
+        sorted.sort_unstable();
+        let mut cursor = 0u64;
+        for (off, len) in sorted {
+            assert!(off >= cursor, "overlapping data extents");
+            if off > cursor {
+                punch_hole(f, cursor, off - cursor);
+            }
+            cursor = off + len;
+        }
+        if cursor < total {
+            punch_hole(f, cursor, total - cursor);
+        }
     }
 
     #[test]
@@ -3355,23 +3400,21 @@ mod unit_tests {
 
     #[test]
     fn written_pages_show_as_data_extents() {
-        let mut f = make_memfd(4096 * 16);
-        f.seek(SeekFrom::Start(4096 * 2)).unwrap();
-        f.write_all(&[0xAB; 4096]).unwrap();
-        f.seek(SeekFrom::Start(4096 * 5)).unwrap();
-        f.write_all(&[0xCD; 4096 * 2]).unwrap();
-
+        let f = make_memfd(0);
+        sparse_layout(
+            &f,
+            4096 * 16,
+            &[(4096 * 2, 4096, 0xAB), (4096 * 5, 4096 * 2, 0xCD)],
+        );
         let extents = collect_extents(f.as_fd(), 0, 4096 * 16).unwrap();
         assert_eq!(extents, vec![(4096 * 2, 4096), (4096 * 5, 4096 * 2)]);
     }
 
     #[test]
     fn enumeration_respects_window() {
-        let mut f = make_memfd(4096 * 16);
-        for page in 0..16u64 {
-            f.seek(SeekFrom::Start(4096 * page)).unwrap();
-            f.write_all(&[page as u8; 4096]).unwrap();
-        }
+        let f = make_memfd(4096 * 16);
+        // Fully populate the file, then leave it as one big data extent.
+        f.write_all_at(&vec![0xEEu8; 4096 * 16], 0).unwrap();
         let extents = collect_extents(f.as_fd(), 4096 * 4, 4096 * 8).unwrap();
         assert_eq!(extents, vec![(4096 * 4, 4096 * 4)]);
     }
@@ -3388,51 +3431,45 @@ mod unit_tests {
     #[test]
     fn sparse_file_yields_extents_at_written_positions() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
-        let mut f = tmp.reopen().unwrap();
-        f.set_len(4096 * 16).unwrap();
-        f.seek(SeekFrom::Start(4096 * 4)).unwrap();
-        f.write_all(&[0x55; 4096 * 2]).unwrap();
+        let f = tmp.reopen().unwrap();
+        sparse_layout(&f, 4096 * 16, &[(4096 * 4, 4096 * 2, 0x55)]);
         let extents = collect_extents(f.as_fd(), 0, 4096 * 16).unwrap();
         assert_eq!(extents, vec![(4096 * 4, 4096 * 2)]);
     }
 
     #[test]
     fn single_extent_at_zero_offset() {
-        let mut src = make_memfd(4096 * 16);
-        populated(&mut src, 4096 * 3, 0x42, 4096 * 2);
+        let src = make_memfd(0);
+        sparse_layout(&src, 4096 * 16, &[(4096 * 3, 4096 * 2, 0x42)]);
 
+        // Pre-fill dst with a sentinel byte so we can verify that
+        // write_region_sparse only wrote where the source had data: any
+        // byte outside the source-data extent must remain the sentinel.
+        // This is FS-independent (does not depend on whether the dst
+        // filesystem reports holes after a partial write).
         let tmp = tempfile::NamedTempFile::new().unwrap();
         let dst = tmp.reopen().unwrap();
-        dst.set_len(4096 * 16).unwrap();
+        dst.write_all_at(&vec![0xFE; 4096 * 16], 0).unwrap();
 
         let used = write_region_sparse(&src, 0, &dst, 0, 4096 * 16).unwrap();
         assert!(used);
 
-        use std::os::unix::fs::MetadataExt;
-        let meta = std::fs::metadata(tmp.path()).unwrap();
-        assert!(
-            meta.blocks() * 512 < meta.len(),
-            "blocks={} len={}",
-            meta.blocks(),
-            meta.len()
-        );
-
         let buf = std::fs::read(tmp.path()).unwrap();
-        assert!(buf[..4096 * 3].iter().all(|&b| b == 0));
+        assert!(buf[..4096 * 3].iter().all(|&b| b == 0xFE));
         assert!(buf[4096 * 3..4096 * 5].iter().all(|&b| b == 0x42));
-        assert!(buf[4096 * 5..].iter().all(|&b| b == 0));
+        assert!(buf[4096 * 5..].iter().all(|&b| b == 0xFE));
     }
 
     #[test]
     fn two_regions_in_same_destination_file_at_dst_offset() {
-        let mut src_a = make_memfd(4096 * 16);
-        populated(&mut src_a, 4096, 0xAA, 4096 * 2);
-        let mut src_b = make_memfd(4096 * 16);
-        populated(&mut src_b, 4096 * 5, 0xBB, 4096 * 3);
+        let src_a = make_memfd(0);
+        sparse_layout(&src_a, 4096 * 16, &[(4096, 4096 * 2, 0xAA)]);
+        let src_b = make_memfd(0);
+        sparse_layout(&src_b, 4096 * 16, &[(4096 * 5, 4096 * 3, 0xBB)]);
 
         let tmp = tempfile::NamedTempFile::new().unwrap();
         let dst = tmp.reopen().unwrap();
-        dst.set_len(4096 * 32).unwrap();
+        sparse_layout(&dst, 4096 * 32, &[]);
 
         let _ = write_region_sparse(&src_a, 0, &dst, 0, 4096 * 16).unwrap();
         let _ = write_region_sparse(&src_b, 0, &dst, 4096 * 16, 4096 * 16).unwrap();
@@ -3448,12 +3485,12 @@ mod unit_tests {
 
     #[test]
     fn extent_at_non_zero_src_offset() {
-        let mut src = make_memfd(4096 * 32);
-        populated(&mut src, 4096 * 20, 0x77, 4096 * 2);
+        let src = make_memfd(0);
+        sparse_layout(&src, 4096 * 32, &[(4096 * 20, 4096 * 2, 0x77)]);
 
         let tmp = tempfile::NamedTempFile::new().unwrap();
         let dst = tmp.reopen().unwrap();
-        dst.set_len(4096 * 16).unwrap();
+        sparse_layout(&dst, 4096 * 16, &[]);
 
         let used = write_region_sparse(&src, 4096 * 16, &dst, 0, 4096 * 16).unwrap();
         assert!(used);
@@ -3470,16 +3507,16 @@ mod unit_tests {
     /// the original content including holes.
     #[test]
     fn round_trip_sparse_write_then_read() {
-        let mut src_a = make_memfd(4096 * 16);
-        populated(&mut src_a, 4096 * 2, 0xAA, 4096 * 3);
+        let src_a = make_memfd(0);
+        sparse_layout(&src_a, 4096 * 16, &[(4096 * 2, 4096 * 3, 0xAA)]);
 
-        let mut src_b = make_memfd(4096 * 16);
-        populated(&mut src_b, 4096 * 10, 0xBB, 4096 * 4);
+        let src_b = make_memfd(0);
+        sparse_layout(&src_b, 4096 * 16, &[(4096 * 10, 4096 * 4, 0xBB)]);
 
         let tmp = tempfile::NamedTempFile::new().unwrap();
         let dst = tmp.reopen().unwrap();
         let total = 4096u64 * 32;
-        dst.set_len(total).unwrap();
+        sparse_layout(&dst, total, &[]);
 
         write_region_sparse(&src_a, 0, &dst, 0, 4096 * 16).unwrap();
         write_region_sparse(&src_b, 0, &dst, 4096 * 16, 4096 * 16).unwrap();
