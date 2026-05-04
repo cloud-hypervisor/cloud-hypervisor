@@ -117,10 +117,6 @@ pub enum Error {
     SetShmRegionsNotSupported,
     #[error("Failed to process net queue")]
     NetQueuePair(#[source] ::net_util::NetQueuePairError),
-    #[error("Failed to ")]
-    QueueAddUsed(#[source] virtio_queue::Error),
-    #[error("Failed to ")]
-    QueueIterator(#[source] virtio_queue::Error),
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
