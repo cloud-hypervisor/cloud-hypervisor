@@ -1323,3 +1323,66 @@ impl Snapshottable for VirtioPciDevice {
 }
 impl Transportable for VirtioPciDevice {}
 impl Migratable for VirtioPciDevice {}
+
+#[cfg(test)]
+mod unit_tests {
+    use vm_device::interrupt::InterruptSourceConfig;
+
+    use super::*;
+
+    struct TestInterruptSourceGroup {
+        event_fd: EventFd,
+    }
+
+    impl InterruptSourceGroup for TestInterruptSourceGroup {
+        fn trigger(&self, _index: InterruptIndex) -> std::result::Result<(), std::io::Error> {
+            self.event_fd.write(1)
+        }
+        fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
+            Some(self.event_fd.try_clone().unwrap())
+        }
+        fn update(
+            &self,
+            _index: InterruptIndex,
+            _config: InterruptSourceConfig,
+            _masked: bool,
+            _set_gsi: bool,
+        ) -> std::result::Result<(), std::io::Error> {
+            Ok(())
+        }
+        fn set_gsi(&self) -> std::result::Result<(), std::io::Error> {
+            Ok(())
+        }
+    }
+
+    fn make_msix_interrupt(num_vectors: u16) -> VirtioInterruptMsix {
+        let isg = Arc::new(TestInterruptSourceGroup {
+            event_fd: EventFd::new(0).unwrap(),
+        });
+        let msix_config = Arc::new(Mutex::new(
+            MsixConfig::new(
+                num_vectors,
+                MaybeMutInterruptSourceGroup::Immutable(isg.clone()),
+                0,
+                None,
+            )
+            .unwrap(),
+        ));
+        let config_vector = Arc::new(AtomicU16::new(VIRTQ_MSI_NO_VECTOR));
+        let queues_vectors = Arc::new(Mutex::new(vec![VIRTQ_MSI_NO_VECTOR; 1]));
+
+        VirtioInterruptMsix::new(
+            msix_config,
+            config_vector,
+            queues_vectors,
+            MaybeMutInterruptSourceGroup::Immutable(isg),
+        )
+    }
+
+    #[test]
+    fn trigger_with_oob_vector_does_not_panic() {
+        let intr = make_msix_interrupt(2);
+        intr.queues_vectors.lock().unwrap()[0] = 0xFFFE;
+        intr.trigger(VirtioInterruptType::Queue(0)).unwrap();
+    }
+}
