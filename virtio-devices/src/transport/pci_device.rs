@@ -1385,4 +1385,10 @@ mod unit_tests {
         intr.queues_vectors.lock().unwrap()[0] = 0xFFFE;
         intr.trigger(VirtioInterruptType::Queue(0)).unwrap();
     }
+
+    #[test]
+    fn trigger_with_no_vector_returns_ok() {
+        let intr = make_msix_interrupt(2);
+        intr.trigger(VirtioInterruptType::Queue(0)).unwrap();
+    }
 }
