@@ -20,6 +20,7 @@ use event_monitor::event;
 use log::{debug, error, info, warn};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -67,6 +68,12 @@ pub const TX_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 pub const EVT_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
 // Notification coming from the backend.
 pub const BACKEND_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
+
+#[derive(Error, Debug)]
+enum Error {
+    #[error("Failed adding used index")]
+    QueueAddUsed(#[source] virtio_queue::Error),
+}
 
 /// The `VsockEpollHandler` implements the runtime logic of our vsock device:
 /// 1. Respond to TX queue events by wrapping virtio buffers into `VsockPacket`s, then sending those
@@ -118,7 +125,7 @@ where
     /// Walk the driver-provided RX queue buffers and attempt to fill them up with any data that we
     /// have pending.
     ///
-    fn process_rx(&mut self) -> result::Result<(), DeviceError> {
+    fn process_rx(&mut self) -> result::Result<bool, Error> {
         debug!("vsock: epoll_handler::process_rx()");
 
         let mut used_descs = false;
@@ -155,21 +162,17 @@ where
 
             self.queues[0]
                 .add_used(desc_chain.memory(), desc_chain.head_index(), used_len)
-                .map_err(DeviceError::QueueAddUsed)?;
+                .map_err(Error::QueueAddUsed)?;
             used_descs = true;
         }
 
-        if used_descs {
-            self.signal_used_queue(0)
-        } else {
-            Ok(())
-        }
+        Ok(used_descs)
     }
 
     /// Walk the driver-provided TX queue buffers, package them up as vsock packets, and send them to
     /// the backend for processing.
     ///
-    fn process_tx(&mut self) -> result::Result<(), DeviceError> {
+    fn process_tx(&mut self) -> result::Result<bool, Error> {
         debug!("vsock: epoll_handler::process_tx()");
 
         let mut used_descs = false;
@@ -184,7 +187,7 @@ where
                     error!("vsock: error reading TX packet: {e:?}");
                     self.queues[1]
                         .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
-                        .map_err(DeviceError::QueueAddUsed)?;
+                        .map_err(Error::QueueAddUsed)?;
                     used_descs = true;
                     continue;
                 }
@@ -197,15 +200,11 @@ where
 
             self.queues[1]
                 .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
-                .map_err(DeviceError::QueueAddUsed)?;
+                .map_err(Error::QueueAddUsed)?;
             used_descs = true;
         }
 
-        if used_descs {
-            self.signal_used_queue(1)
-        } else {
-            Ok(())
-        }
+        Ok(used_descs)
     }
 
     fn run(
@@ -250,9 +249,16 @@ where
                     EpollHelperError::HandleEvent(anyhow!("Failed to get RX queue event: {e:?}"))
                 })?;
                 if self.backend.read().unwrap().has_pending_rx() {
-                    self.process_rx().map_err(|e| {
+                    let needs_notification = self.process_rx().map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!("Failed to process RX queue: {e:?}"))
                     })?;
+                    if needs_notification {
+                        self.signal_used_queue(0).map_err(|e| {
+                            EpollHelperError::HandleEvent(anyhow!(
+                                "Failed to signal used RX queue: {e:?}"
+                            ))
+                        })?;
+                    }
                 }
             }
             TX_QUEUE_EVENT => {
@@ -261,17 +267,31 @@ where
                     EpollHelperError::HandleEvent(anyhow!("Failed to get TX queue event: {e:?}"))
                 })?;
 
-                self.process_tx().map_err(|e| {
+                let needs_notification = self.process_tx().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!("Failed to process TX queue: {e:?}"))
                 })?;
+                if needs_notification {
+                    self.signal_used_queue(1).map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to signal used TX queue: {e:?}"
+                        ))
+                    })?;
+                }
 
                 // The backend may have queued up responses to the packets we sent during TX queue
                 // processing. If that happened, we need to fetch those responses and place them
                 // into RX buffers.
                 if self.backend.read().unwrap().has_pending_rx() {
-                    self.process_rx().map_err(|e| {
+                    let needs_notification = self.process_rx().map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!("Failed to process RX queue: {e:?}"))
                     })?;
+                    if needs_notification {
+                        self.signal_used_queue(0).map_err(|e| {
+                            EpollHelperError::HandleEvent(anyhow!(
+                                "Failed to signal used RX queue: {e:?}"
+                            ))
+                        })?;
+                    }
                 }
             }
             EVT_QUEUE_EVENT => {
@@ -288,13 +308,27 @@ where
                 // In particular, if `self.backend.send_pkt()` halted the TX queue processing (by
                 // returning an error) at some point in the past, now is the time to try walking the
                 // TX queue again.
-                self.process_tx().map_err(|e| {
+                let needs_notification = self.process_tx().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!("Failed to process TX queue: {e:?}"))
                 })?;
+                if needs_notification {
+                    self.signal_used_queue(1).map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to signal used TX queue: {e:?}"
+                        ))
+                    })?;
+                }
                 if self.backend.read().unwrap().has_pending_rx() {
-                    self.process_rx().map_err(|e| {
+                    let needs_notification = self.process_rx().map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!("Failed to process RX queue: {e:?}"))
                     })?;
+                    if needs_notification {
+                        self.signal_used_queue(0).map_err(|e| {
+                            EpollHelperError::HandleEvent(anyhow!(
+                                "Failed to signal used RX queue: {e:?}"
+                            ))
+                        })?;
+                    }
                 }
             }
             _ => {
