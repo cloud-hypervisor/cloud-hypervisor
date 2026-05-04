@@ -380,24 +380,3 @@ LLVM source-based code coverage, executes the test suite via
 `dbus-run-session`, and produces either an LCOV or HTML report. See
 [coverage.md](coverage.md) for details on collecting and viewing
 coverage data.
-
-## CI workflows
-
-The following GitHub Actions workflows exercise the test
-infrastructure on every pull request or merge-group event:
-
-| Workflow                        | Tests run                                           |
-|---------------------------------|-----------------------------------------------------|
-| `build.yaml`                    | Cargo build with multiple feature/toolchain combos. |
-| `quality.yaml`                  | Clippy (stable + beta), bisectability check.        |
-| `integration-x86-64.yaml`       | `--unit` + `--integration` (gnu, musl).             |
-| `integration-arm64.yaml`        | `--unit` + `--integration` + `--integration-windows` (musl). |
-| `integration-vfio.yaml`         | `--integration-vfio`.                               |
-| `integration-windows.yaml`      | `--integration-windows` (gnu, musl).                |
-| `integration-rate-limiter.yaml` | `--integration-rate-limiter`.                        |
-| `mshv-integration.yaml`         | `--hypervisor mshv --integration` on Azure VM.      |
-| `integration-metrics.yaml`      | `--metrics` (runs on push to `main` only).          |
-
-Most integration workflows run tests only on `merge_group` events.
-The `integration-x86-64.yaml` workflow also runs on `pull_request`
-events (limited to the `garm-jammy` + `gnu` combination).
