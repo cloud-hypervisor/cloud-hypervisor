@@ -21,9 +21,13 @@ use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result, thread};
 
+#[cfg(target_arch = "aarch64")]
+use acpi_tables::pptt::{CacheNodeBuilder, CacheType, PPTT, ProcessorNode};
 use acpi_tables::sdt::Sdt;
 use acpi_tables::{Aml, aml};
 use anyhow::anyhow;
+#[cfg(target_arch = "aarch64")]
+use arch::aarch64::cache::{CacheTopologyInfo, read_cache_topology};
 #[cfg(target_arch = "x86_64")]
 use arch::x86_64::get_x2apic_id;
 use arch::{EntryPoint, NumaNodes};
@@ -415,20 +419,6 @@ struct GicIts {
     pub translation_id: u32,
     pub base_address: u64,
     pub reserved1: u32,
-}
-
-#[cfg(target_arch = "aarch64")]
-#[allow(dead_code)]
-#[repr(C, packed)]
-#[derive(IntoBytes, Immutable, FromBytes)]
-struct ProcessorHierarchyNode {
-    pub r#type: u8,
-    pub length: u8,
-    pub reserved: u16,
-    pub flags: u32,
-    pub parent: u32,
-    pub acpi_processor_id: u32,
-    pub num_private_resources: u32,
 }
 
 #[cfg(target_arch = "riscv64")]
@@ -1892,8 +1882,7 @@ impl CpuManager {
     }
 
     #[cfg(target_arch = "aarch64")]
-    pub fn create_pptt(&self) -> Sdt {
-        let pptt_start = 0;
+    pub fn create_pptt(&self) -> PPTT {
         let mut cpus = 0;
         let mut uid = 0;
         // If topology is not specified, the default setting is:
@@ -1904,61 +1893,138 @@ impl CpuManager {
             .unwrap_or((1, u16::try_from(self.max_vcpus()).unwrap(), 1, 1));
         let cores_per_package = cores_per_die * dies_per_package;
 
-        let mut pptt = Sdt::new(*b"PPTT", 36, 2, *b"CLOUDH", *b"CHPPTT  ", 1);
+        // Add cache info.
+        let cache_info = read_cache_topology();
+        if cache_info.is_none() {
+            warn!("cache sysfs system does not exist.");
+        }
+        let CacheTopologyInfo {
+            l1_d_cache_size,
+            l1_d_cache_line_size,
+            l1_d_cache_sets,
+            l1_i_cache_size,
+            l1_i_cache_line_size,
+            l1_i_cache_sets,
+            l2_cache_size,
+            l2_cache_line_size,
+            l2_cache_sets,
+            l3_cache_size,
+            l3_cache_line_size,
+            l3_cache_sets,
+            ..
+        } = cache_info.unwrap_or_default();
+
+        let mut pptt = PPTT::new(*b"CLOUDH", *b"CHPPTT  ", 1);
+
+        let l3_cache_handle = if l3_cache_size != 0 {
+            let l3_cache_node = CacheNodeBuilder::default()
+                .cache_type(CacheType::Unified)
+                .sets(l3_cache_sets)
+                .size(l3_cache_size)
+                .line_size(l3_cache_line_size as u16)
+                .to_node();
+            Some(pptt.add_cache(l3_cache_node))
+        } else {
+            None
+        };
+
+        let l2_cache_handle = if l2_cache_size != 0 {
+            let l2_cache_node = CacheNodeBuilder::default()
+                .cache_type(CacheType::Unified)
+                .sets(l2_cache_sets)
+                .size(l2_cache_size)
+                .line_size(l2_cache_line_size as u16)
+                .to_node();
+            Some(pptt.add_cache(l2_cache_node))
+        } else {
+            None
+        };
+
+        let l1d_cache_handle = if l1_d_cache_size != 0 {
+            let mut l1d_cache_node = CacheNodeBuilder::default()
+                .cache_type(CacheType::Data)
+                .sets(l1_d_cache_sets)
+                .size(l1_d_cache_size)
+                .line_size(l1_d_cache_line_size as u16);
+
+            if let Some(ref l2_cache_handle) = l2_cache_handle {
+                l1d_cache_node = l1d_cache_node.next_level(l2_cache_handle);
+            }
+
+            Some(pptt.add_cache(l1d_cache_node.to_node()))
+        } else {
+            None
+        };
+
+        let l1i_cache_handle = if l1_i_cache_size != 0 {
+            let mut l1i_cache_node = CacheNodeBuilder::default()
+                .cache_type(CacheType::Instruction)
+                .sets(l1_i_cache_sets)
+                .size(l1_i_cache_size)
+                .line_size(l1_i_cache_line_size as u16);
+
+            if let Some(ref l2_cache_handle) = l2_cache_handle {
+                l1i_cache_node = l1i_cache_node.next_level(l2_cache_handle);
+            }
+
+            Some(pptt.add_cache(l1i_cache_node.to_node()))
+        } else {
+            None
+        };
 
         for cluster_idx in 0..packages {
             if cpus < self.config.boot_vcpus as usize {
-                let cluster_offset = pptt.len() - pptt_start;
-                let cluster_hierarchy_node = ProcessorHierarchyNode {
-                    r#type: 0,
-                    length: 20,
-                    reserved: 0,
-                    flags: 0x2,
-                    parent: 0,
-                    acpi_processor_id: cluster_idx as u32,
-                    num_private_resources: 0,
-                };
-                pptt.append(cluster_hierarchy_node);
+                let mut cluster_hierarchy_node =
+                    ProcessorNode::new(None, cluster_idx as u32).valid();
+                if let Some(ref l3_cache_handle) = l3_cache_handle {
+                    cluster_hierarchy_node = cluster_hierarchy_node.add_cache(l3_cache_handle);
+                }
+
+                let cluster_handle = pptt.add_processor(cluster_hierarchy_node);
 
                 for core_idx in 0..cores_per_package {
-                    let core_offset = pptt.len() - pptt_start;
-
                     if threads_per_core > 1 {
-                        let core_hierarchy_node = ProcessorHierarchyNode {
-                            r#type: 0,
-                            length: 20,
-                            reserved: 0,
-                            flags: 0x2,
-                            parent: cluster_offset as u32,
-                            acpi_processor_id: core_idx as u32,
-                            num_private_resources: 0,
-                        };
-                        pptt.append(core_hierarchy_node);
+                        let core_hierarchy_node =
+                            ProcessorNode::new(Some(&cluster_handle), core_idx as u32).valid();
+                        let core_handle = pptt.add_processor(core_hierarchy_node);
 
                         for _thread_idx in 0..threads_per_core {
-                            let thread_hierarchy_node = ProcessorHierarchyNode {
-                                r#type: 0,
-                                length: 20,
-                                reserved: 0,
-                                flags: 0xE,
-                                parent: core_offset as u32,
-                                acpi_processor_id: uid as u32,
-                                num_private_resources: 0,
-                            };
-                            pptt.append(thread_hierarchy_node);
+                            let mut thread_hierarchy_node =
+                                ProcessorNode::new(Some(&core_handle), uid as u32)
+                                    .valid()
+                                    .thread()
+                                    .leaf();
+
+                            if let Some(ref l1d_cache_handle) = l1d_cache_handle {
+                                thread_hierarchy_node =
+                                    thread_hierarchy_node.add_cache(l1d_cache_handle);
+                            }
+
+                            if let Some(ref l1i_cache_handle) = l1i_cache_handle {
+                                thread_hierarchy_node =
+                                    thread_hierarchy_node.add_cache(l1i_cache_handle);
+                            }
+
+                            pptt.add_processor(thread_hierarchy_node);
                             uid += 1;
                         }
                     } else {
-                        let thread_hierarchy_node = ProcessorHierarchyNode {
-                            r#type: 0,
-                            length: 20,
-                            reserved: 0,
-                            flags: 0xA,
-                            parent: cluster_offset as u32,
-                            acpi_processor_id: uid as u32,
-                            num_private_resources: 0,
-                        };
-                        pptt.append(thread_hierarchy_node);
+                        let mut thread_hierarchy_node =
+                            ProcessorNode::new(Some(&cluster_handle), uid as u32)
+                                .valid()
+                                .leaf();
+
+                        if let Some(ref l1d_cache_handle) = l1d_cache_handle {
+                            thread_hierarchy_node =
+                                thread_hierarchy_node.add_cache(l1d_cache_handle);
+                        }
+
+                        if let Some(ref l1i_cache_handle) = l1i_cache_handle {
+                            thread_hierarchy_node =
+                                thread_hierarchy_node.add_cache(l1i_cache_handle);
+                        }
+
+                        pptt.add_processor(thread_hierarchy_node);
                         uid += 1;
                     }
                 }
@@ -1966,7 +2032,6 @@ impl CpuManager {
             }
         }
 
-        pptt.update_checksum();
         pptt
     }
 
