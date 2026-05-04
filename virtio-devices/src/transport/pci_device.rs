@@ -1406,4 +1406,11 @@ mod unit_tests {
         intr.msix_config.lock().unwrap().set_msg_ctl(1u16 << 15);
         intr.trigger(VirtioInterruptType::Queue(0)).unwrap();
     }
+
+    #[test]
+    fn config_vector_oob_does_not_panic() {
+        let intr = make_msix_interrupt(2);
+        intr.config_vector.store(0xFFFE, Ordering::Release);
+        intr.trigger(VirtioInterruptType::Config).unwrap();
+    }
 }
