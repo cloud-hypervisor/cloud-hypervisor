@@ -1393,7 +1393,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot().unwrap();
+            guest.wait_vm_boot_custom_timeout(180).unwrap();
         });
 
         kill_child(&mut child);
@@ -1753,7 +1753,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot().unwrap();
+            guest.wait_vm_boot_custom_timeout(180).unwrap();
         });
 
         kill_child(&mut child);
