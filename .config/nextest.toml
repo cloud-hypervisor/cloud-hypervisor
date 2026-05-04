@@ -1,3 +1,38 @@
 [profile.default]
 # Don't let one individual test run for more than 10 minutes
 slow-timeout = { period = "60s", terminate-after = 10 }
+
+[profile.integration]
+fail-fast = false
+retries = 3
+
+[profile.common_tests]
+inherits = "integration"
+default-filter = 'test(common_parallel::) | test(common_sequential::) | test(aarch64_acpi::)'
+junit.path = "/root/workloads/junit/common.xml"
+
+[[profile.common_tests.overrides]]
+filter = 'test(common_sequential::)'
+# use up all the available test threads for each of the sequential tests
+# i.e. no other test can be running while a sequential test is running.
+threads-required = 'num-test-threads'
+
+[profile.dbus]
+inherits = "integration"
+default-filter = 'test(dbus_api::)'
+junit.path = "/root/workloads/junit/dbus.xml"
+
+[profile.fw_cfg]
+inherits = "integration"
+default-filter = 'test(fw_cfg::)'
+junit.path = "/root/workloads/junit/fw_cfg.xml"
+
+[profile.ivshmem]
+inherits = "integration"
+default-filter = 'test(ivshmem::)'
+junit.path = "/root/workloads/junit/ivshmem.xml"
+
+[profile.common_cvm]
+inherits = "integration"
+default-filter = 'test(common_cvm::)'
+junit.path = "/root/workloads/junit/cvm.xml"

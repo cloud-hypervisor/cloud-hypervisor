@@ -9,7 +9,7 @@ CLI_NAME="Cloud Hypervisor"
 CTR_IMAGE_TAG="ghcr.io/cloud-hypervisor/cloud-hypervisor"
 
 # Needs to match explicit version in docker-image.yaml workflow
-CTR_IMAGE_VERSION="20251114-0"
+CTR_IMAGE_VERSION="20260417-0"
 : "${CTR_IMAGE:=${CTR_IMAGE_TAG}:${CTR_IMAGE_VERSION}}"
 
 DOCKER_RUNTIME="docker"
@@ -20,7 +20,7 @@ CLH_ROOT_DIR=$(cd "${CLH_SCRIPTS_DIR}/.." && pwd)
 CLH_BUILD_DIR="${CLH_ROOT_DIR}/build"
 CLH_CARGO_TARGET="${CLH_BUILD_DIR}/cargo_target"
 CLH_DOCKERFILE="${CLH_SCRIPTS_DIR}/../resources/Dockerfile"
-CLH_CTR_BUILD_DIR="/tmp/cloud-hypervisor/ctr-build"
+CLH_CTR_BUILD_DIR="/tmp/cloud-hypervisor/container/"
 CLH_INTEGRATION_WORKLOADS="${HOME}/workloads"
 
 # Container paths
@@ -628,10 +628,7 @@ cmd_tests() {
 build_container() {
     ensure_build_dir
 
-    BUILD_DIR=/tmp/cloud-hypervisor/container/
-
-    mkdir -p $BUILD_DIR
-    cp "$CLH_DOCKERFILE" $BUILD_DIR
+    cp "$CLH_DOCKERFILE" "$CLH_CTR_BUILD_DIR"
 
     [ "$(uname -m)" = "aarch64" ] && TARGETARCH="arm64"
     [ "$(uname -m)" = "x86_64" ] && TARGETARCH="amd64"
@@ -639,9 +636,9 @@ build_container() {
     $DOCKER_RUNTIME build \
         --target dev \
         -t "$CTR_IMAGE" \
-        -f $BUILD_DIR/Dockerfile \
+        -f "$CLH_CTR_BUILD_DIR/Dockerfile" \
         --build-arg TARGETARCH="$TARGETARCH" \
-        $BUILD_DIR
+        "$CLH_CTR_BUILD_DIR"
 }
 
 cmd_build-container() {
