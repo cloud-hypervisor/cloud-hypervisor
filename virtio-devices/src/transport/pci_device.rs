@@ -15,7 +15,7 @@ use std::sync::{Arc, Barrier, Mutex};
 
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
-use log::{error, info};
+use log::{error, info, warn};
 use pci::{
     BarReprogrammingParams, MaybeMutInterruptSourceGroup, MsixCap, MsixConfig, PciBarConfiguration,
     PciBarRegionType, PciCapability, PciCapabilityId, PciClassCode, PciConfiguration, PciDevice,
@@ -860,6 +860,7 @@ pub struct VirtioInterruptMsix {
     config_vector: Arc<AtomicU16>,
     queues_vectors: Arc<Mutex<Vec<u16>>>,
     interrupt_source_group: MaybeMutInterruptSourceGroup,
+    msix_table_size: usize,
 }
 
 impl VirtioInterruptMsix {
@@ -869,11 +870,13 @@ impl VirtioInterruptMsix {
         queues_vectors: Arc<Mutex<Vec<u16>>>,
         interrupt_source_group: MaybeMutInterruptSourceGroup,
     ) -> Self {
+        let msix_table_size = msix_config.lock().unwrap().table_entries.len();
         VirtioInterruptMsix {
             msix_config,
             config_vector,
             queues_vectors,
             interrupt_source_group,
+            msix_table_size,
         }
     }
 }
@@ -888,6 +891,11 @@ impl VirtioInterrupt for VirtioInterruptMsix {
         };
 
         if vector == VIRTQ_MSI_NO_VECTOR {
+            return Ok(());
+        }
+
+        if vector as usize >= self.msix_table_size {
+            warn!("MSI-X vector {vector} out of range, ignoring interrupt");
             return Ok(());
         }
 
@@ -914,6 +922,15 @@ impl VirtioInterrupt for VirtioInterruptMsix {
                 self.queues_vectors.lock().unwrap()[queue_index as usize]
             }
         };
+
+        if vector == VIRTQ_MSI_NO_VECTOR {
+            return None;
+        }
+
+        if vector as usize >= self.msix_table_size {
+            warn!("MSI-X vector {vector} out of range, notifier unavailable");
+            return None;
+        }
 
         self.interrupt_source_group
             .notifier(vector as InterruptIndex)
