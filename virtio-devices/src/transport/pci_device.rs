@@ -1398,4 +1398,12 @@ mod unit_tests {
         intr.queues_vectors.lock().unwrap()[0] = 0xFFFE;
         assert!(intr.notifier(VirtioInterruptType::Queue(0)).is_none());
     }
+
+    #[test]
+    fn trigger_with_valid_vector_fires() {
+        let intr = make_msix_interrupt(2);
+        intr.queues_vectors.lock().unwrap()[0] = 0;
+        intr.msix_config.lock().unwrap().set_msg_ctl(1u16 << 15);
+        intr.trigger(VirtioInterruptType::Queue(0)).unwrap();
+    }
 }
