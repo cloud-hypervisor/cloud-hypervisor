@@ -757,6 +757,9 @@ pub(crate) fn get_pty_path(api_socket: &str, pty_type: &str) -> PathBuf {
 // We reserve a different IP class for it: 172.18.0.0/24.
 #[cfg(target_arch = "x86_64")]
 pub(crate) fn setup_vfio_network_interfaces() {
+    // Clean up any leftover interfaces from previous runs
+    cleanup_vfio_network_interfaces();
+
     // 'vfio-br0'
     assert!(exec_host_command_status("sudo ip link add name vfio-br0 type bridge").success());
     assert!(exec_host_command_status("sudo ip link set vfio-br0 up").success());
@@ -782,11 +785,11 @@ pub(crate) fn setup_vfio_network_interfaces() {
 // Tear VFIO test network down
 #[cfg(target_arch = "x86_64")]
 pub(crate) fn cleanup_vfio_network_interfaces() {
-    assert!(exec_host_command_status("sudo ip link del vfio-br0").success());
-    assert!(exec_host_command_status("sudo ip link del vfio-tap0").success());
-    assert!(exec_host_command_status("sudo ip link del vfio-tap1").success());
-    assert!(exec_host_command_status("sudo ip link del vfio-tap2").success());
-    assert!(exec_host_command_status("sudo ip link del vfio-tap3").success());
+    let _ = exec_host_command_status("sudo ip link del vfio-br0");
+    let _ = exec_host_command_status("sudo ip link del vfio-tap0");
+    let _ = exec_host_command_status("sudo ip link del vfio-tap1");
+    let _ = exec_host_command_status("sudo ip link del vfio-tap2");
+    let _ = exec_host_command_status("sudo ip link del vfio-tap3");
 }
 
 pub(crate) fn balloon_size(api_socket: &str) -> u64 {
