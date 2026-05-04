@@ -26,6 +26,7 @@ pub mod mem;
 pub mod net;
 mod pmem;
 mod rng;
+mod rtc;
 pub mod seccomp_filters;
 mod thread_helper;
 pub mod transport;
@@ -53,6 +54,7 @@ pub use self::mem::{BlocksState, Mem, VIRTIO_MEM_ALIGN_SIZE, VirtioMemMappingSou
 pub use self::net::{Net, NetCtrlEpollHandler};
 pub use self::pmem::Pmem;
 pub use self::rng::Rng;
+pub use self::rtc::Rtc;
 pub use self::vdpa::{Vdpa, VdpaDmaMapping};
 pub use self::vsock::Vsock;
 pub use self::watchdog::Watchdog;
