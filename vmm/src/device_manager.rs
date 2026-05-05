@@ -5645,13 +5645,19 @@ impl BusDevice for DeviceManager {
                 self.pci_segments[self.selected_segment].pci_devices_down = 0;
             }
             B0EJ_FIELD_OFFSET => {
-                assert!(data.len() == B0EJ_FIELD_SIZE);
+                if data.len() != B0EJ_FIELD_SIZE {
+                    warn!("Unexpected B0EJ read width: {}", data.len());
+                    return;
+                }
                 // Always return an empty bitmap since the eject is always
                 // taken care of right away during a write access.
                 data.fill(0);
             }
             PSEG_FIELD_OFFSET => {
-                assert_eq!(data.len(), PSEG_FIELD_SIZE);
+                if data.len() != PSEG_FIELD_SIZE {
+                    warn!("Unexpected PSEG read width: {}", data.len());
+                    return;
+                }
                 data.copy_from_slice(&(self.selected_segment as u32).to_le_bytes());
             }
             _ => error!("Accessing unknown location at base 0x{base:x}, offset 0x{offset:x}"),
@@ -5663,7 +5669,10 @@ impl BusDevice for DeviceManager {
     fn write(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<std::sync::Barrier>> {
         match offset {
             B0EJ_FIELD_OFFSET => {
-                assert!(data.len() == B0EJ_FIELD_SIZE);
+                if data.len() != B0EJ_FIELD_SIZE {
+                    warn!("Unexpected B0EJ write width: {}", data.len());
+                    return None;
+                }
                 let mut data_array: [u8; 4] = [0, 0, 0, 0];
                 data_array.copy_from_slice(data);
                 let mut slot_bitmap = u32::from_le_bytes(data_array);
@@ -5678,7 +5687,10 @@ impl BusDevice for DeviceManager {
                 }
             }
             PSEG_FIELD_OFFSET => {
-                assert_eq!(data.len(), PSEG_FIELD_SIZE);
+                if data.len() != PSEG_FIELD_SIZE {
+                    warn!("Unexpected PSEG write width: {}", data.len());
+                    return None;
+                }
                 let mut data_array: [u8; 4] = [0, 0, 0, 0];
                 data_array.copy_from_slice(data);
                 let selected_segment = u32::from_le_bytes(data_array) as usize;
