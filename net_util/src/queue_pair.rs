@@ -118,18 +118,22 @@ impl TxVirtio {
                         retry_write = true;
                         break;
                     }
-                    error!("net: tx: failed writing to tap: {e}");
-                    return Err(NetQueuePairError::WriteTap(e));
-                }
 
-                if (result as usize) < vnet_hdr_len() {
+                    if e.raw_os_error() == Some(libc::EINVAL) {
+                        error!("net: tx: dropping malformed packet: {e}");
+                        0
+                    } else {
+                        error!("net: tx: failed writing to tap: {e}");
+                        return Err(NetQueuePairError::WriteTap(e));
+                    }
+                } else if (result as usize) < vnet_hdr_len() {
                     return Err(NetQueuePairError::InvalidVirtioNetHeader);
+                } else {
+                    self.counter_bytes += Wrapping(result as u64 - vnet_hdr_len() as u64);
+                    self.counter_frames += Wrapping(1);
+
+                    result as u64
                 }
-
-                self.counter_bytes += Wrapping(result as u64 - vnet_hdr_len() as u64);
-                self.counter_frames += Wrapping(1);
-
-                result as u64
             };
 
             // For the sake of simplicity (similar to the RX rate limiting), we always
