@@ -234,6 +234,14 @@ copy_igvm_files() {
     fi
 }
 
+# Prepare the IGVM files needed for the confidential VM integration
+# tests. Copies the IGVM files from the source path to the workloads
+# directory.
+prepare_igvm_files() {
+    mkdir -p "$DEST_IGVM_FILES_PATH"
+    copy_igvm_files "$SRC_IGVM_FILES_PATH" "$DEST_IGVM_FILES_PATH"
+}
+
 cmd_help() {
     echo ""
     echo "Cloud Hypervisor $(basename "$0")"
@@ -266,6 +274,7 @@ cmd_help() {
     echo "        --coverage                   Generate code coverage information"
     echo "        --volumes                    Hash separated volumes to be exported. Example --volumes /mnt:/mnt#/myvol:/myvol"
     echo "        --hypervisor                 Underlying hypervisor. Options kvm, mshv"
+    echo "        --vm-type                    Type of VM to run. Options regular, confidential"
     echo "        --all                        Run all tests."
     echo ""
     echo "    build-container [--type]"
@@ -434,6 +443,12 @@ cmd_tests() {
             unit=true
             integration=true
         } ;;
+        "--vm-type")
+            shift
+            [[ "$1" =~ ^(regular|confidential)$ ]] ||
+                die "Invalid VM type: $1. Valid options are \"regular\" and \"confidential\"."
+            vm_type="$1"
+            ;;
         "--") {
             shift
             break
@@ -549,6 +564,7 @@ cmd_tests() {
         --env CH_CUSTOM_BZIMAGE="$CH_CUSTOM_BZIMAGE"
         --env CH_CUSTOM_FIRMWARE="$CH_CUSTOM_FIRMWARE"
         --env CH_CUSTOM_OVMF="$CH_CUSTOM_OVMF"
+        --env VM_TYPE="$vm_type"
     )
 
     if [ "$integration" = true ]; then
@@ -564,8 +580,7 @@ cmd_tests() {
     fi
 
     if [ "$integration_cvm" = true ]; then
-        mkdir -p "$DEST_IGVM_FILES_PATH"
-        copy_igvm_files "$SRC_IGVM_FILES_PATH" "$DEST_IGVM_FILES_PATH"
+        prepare_igvm_files
         say "Running CVM integration tests for $target..."
         run_container "$DOCKER_RUNTIME" run \
             "${common_args[@]}" \
@@ -604,11 +619,17 @@ cmd_tests() {
     fi
 
     if [ "$metrics" = true ]; then
+        local igvm_volume_args=()
+        if [ "$vm_type" = "confidential" ]; then
+            prepare_igvm_files
+            igvm_volume_args=(--volume "$DEST_IGVM_FILES_PATH:$CTR_IGVM_FILES_PATH")
+        fi
         say "Generating performance metrics for $target..."
         run_container "$DOCKER_RUNTIME" run \
             "${common_args[@]}" \
             "${common_env_args[@]}" \
             --env RUST_BACKTRACE="${RUST_BACKTRACE}" \
+            "${igvm_volume_args[@]}" \
             "$CTR_IMAGE" \
             ./scripts/run_metrics.sh "$@" || fix_dir_perms $? || exit $?
     fi
