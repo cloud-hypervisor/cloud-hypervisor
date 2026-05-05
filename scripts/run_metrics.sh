@@ -28,6 +28,13 @@ build_fio() {
 
 process_common_args "$@"
 
+build_features="mshv"
+vm_type_arg=""
+if [ "$VM_TYPE" = "confidential" ]; then
+    build_features="mshv,igvm,sev_snp"
+    vm_type_arg="--vm-type confidential"
+fi
+
 cp scripts/sha1sums-"${TEST_ARCH}"-common "$WORKLOADS_DIR"
 
 if [ "${TEST_ARCH}" == "aarch64" ]; then
@@ -96,7 +103,7 @@ if [[ "${BUILD_TARGET}" == "${TEST_ARCH}-unknown-linux-musl" ]]; then
     CFLAGS="-I /usr/include/${TEST_ARCH}-linux-musl/ -idirafter /usr/include/"
 fi
 
-cargo build --features mshv --all --release --target "$BUILD_TARGET"
+cargo build --features "$build_features" --all --release --target "$BUILD_TARGET"
 
 # setup hugepages
 HUGEPAGESIZE=$(grep Hugepagesize /proc/meminfo | awk '{print $2}')
@@ -122,7 +129,7 @@ else
     echo "RUST_BACKTRACE is set to: $RUST_BACKTRACE_VALUE"
 fi
 # shellcheck disable=SC2048,SC2086
-time target/"$BUILD_TARGET"/release/performance-metrics ${test_binary_args[*]}
+time target/"$BUILD_TARGET"/release/performance-metrics $vm_type_arg ${test_binary_args[*]}
 RES=$?
 
 exit $RES
