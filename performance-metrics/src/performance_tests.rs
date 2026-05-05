@@ -120,9 +120,13 @@ pub fn cleanup_tests() {
 // private network. The default constructor "Guest::new()" does not work
 // well, as we can easily create more than 256 VMs from repeating various
 // performance tests dozens times in a single run.
-fn performance_test_new_guest(disk_config: Box<dyn DiskConfig>, vm_type: GuestVmType) -> Guest {
+fn performance_test_new_guest(
+    disk_config: Box<dyn DiskConfig>,
+    control: &PerformanceTestControl,
+) -> Guest {
     let mut guest = Guest::new_from_ip_range(disk_config, "172.19", 0);
-    if vm_type == GuestVmType::Confidential {
+    guest.num_cpu = control.num_boot_vcpus.unwrap_or(1) as u32;
+    if control.vm_type == GuestVmType::Confidential {
         guest.vm_type = GuestVmType::Confidential;
         guest.boot_timeout = DEFAULT_CVM_TCP_LISTENER_TIMEOUT;
         guest.nested = false;
@@ -135,7 +139,7 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
     let (rx, bandwidth) = control.net_control.unwrap();
 
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-    let guest = performance_test_new_guest(Box::new(focal), control.vm_type);
+    let guest = performance_test_new_guest(Box::new(focal), control);
 
     let num_queues = control.num_queues.unwrap();
     let queue_size = control.queue_size.unwrap();
@@ -175,7 +179,7 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
 
 pub fn performance_net_latency(control: &PerformanceTestControl) -> f64 {
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-    let guest = performance_test_new_guest(Box::new(focal), control.vm_type);
+    let guest = performance_test_new_guest(Box::new(focal), control);
 
     let num_queues = control.num_queues.unwrap();
     let queue_size = control.queue_size.unwrap();
@@ -322,7 +326,7 @@ fn measure_boot_time(cmd: &mut GuestCommand, test_timeout: u32) -> Result<f64, E
 pub fn performance_boot_time(control: &PerformanceTestControl) -> f64 {
     let r = std::panic::catch_unwind(|| {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-        let guest = performance_test_new_guest(Box::new(focal), control.vm_type);
+        let guest = performance_test_new_guest(Box::new(focal), control);
         let mut cmd = GuestCommand::new(&guest);
 
         let c = cmd
@@ -349,7 +353,7 @@ pub fn performance_boot_time(control: &PerformanceTestControl) -> f64 {
 pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> f64 {
     let r = std::panic::catch_unwind(|| {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-        let guest = performance_test_new_guest(Box::new(focal), control.vm_type);
+        let guest = performance_test_new_guest(Box::new(focal), control);
         let mut cmd = GuestCommand::new(&guest);
         let c = cmd
             .args([
@@ -390,7 +394,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
     let test_file = block_control.test_file;
 
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-    let guest = performance_test_new_guest(Box::new(focal), control.vm_type);
+    let guest = performance_test_new_guest(Box::new(focal), control);
     let api_socket = guest
         .tmp_dir
         .as_path()
@@ -531,7 +535,7 @@ fn measure_restore_time(
 pub fn performance_restore_latency(control: &PerformanceTestControl) -> f64 {
     let r = std::panic::catch_unwind(|| {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-        let guest = performance_test_new_guest(Box::new(focal), control.vm_type);
+        let guest = performance_test_new_guest(Box::new(focal), control);
         let api_socket_source = String::from(
             guest
                 .tmp_dir
