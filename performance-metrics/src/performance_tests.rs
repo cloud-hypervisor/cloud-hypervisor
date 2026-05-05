@@ -139,7 +139,7 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
     let (rx, bandwidth) = control.net_control.unwrap();
 
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-    let guest = performance_test_new_guest(Box::new(focal), control);
+    let mut guest = performance_test_new_guest(Box::new(focal), control);
 
     let num_queues = control.num_queues.unwrap();
     let queue_size = control.queue_size.unwrap();
@@ -147,9 +147,9 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
         "tap=,mac={},ip={},mask=255.255.255.128,num_queues={},queue_size={}",
         guest.network.guest_mac0, guest.network.host_ip0, num_queues, queue_size,
     );
-
+    guest.num_cpu = num_queues;
     let mut child = GuestCommand::new(&guest)
-        .args(["--cpus", &format!("boot={num_queues}")])
+        .default_cpus()
         .args(["--memory", "size=4G"])
         .default_kernel_cmdline()
         .default_disks()
@@ -179,7 +179,7 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
 
 pub fn performance_net_latency(control: &PerformanceTestControl) -> f64 {
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-    let guest = performance_test_new_guest(Box::new(focal), control);
+    let mut guest = performance_test_new_guest(Box::new(focal), control);
 
     let num_queues = control.num_queues.unwrap();
     let queue_size = control.queue_size.unwrap();
@@ -187,9 +187,9 @@ pub fn performance_net_latency(control: &PerformanceTestControl) -> f64 {
         "tap=,mac={},ip={},mask=255.255.255.128,num_queues={},queue_size={}",
         guest.network.guest_mac0, guest.network.host_ip0, num_queues, queue_size,
     );
-
+    guest.num_cpu = num_queues;
     let mut child = GuestCommand::new(&guest)
-        .args(["--cpus", &format!("boot={num_queues}")])
+        .default_cpus()
         .args(["--memory", "size=4G"])
         .default_kernel_cmdline()
         .default_disks()
@@ -330,10 +330,7 @@ pub fn performance_boot_time(control: &PerformanceTestControl) -> f64 {
         let mut cmd = GuestCommand::new(&guest);
 
         let c = cmd
-            .args([
-                "--cpus",
-                &format!("boot={}", control.num_boot_vcpus.unwrap_or(1)),
-            ])
+            .default_cpus()
             .args(["--memory", "size=1G"])
             .default_kernel_cmdline()
             .args(["--console", "off"])
@@ -356,10 +353,7 @@ pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> f64 {
         let guest = performance_test_new_guest(Box::new(focal), control);
         let mut cmd = GuestCommand::new(&guest);
         let c = cmd
-            .args([
-                "--cpus",
-                &format!("boot={}", control.num_boot_vcpus.unwrap_or(1)),
-            ])
+            .default_cpus()
             .args(["--memory", "size=1G,hugepages=on"])
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", "root=/dev/pmem0p1 console=ttyS0 quiet rw"])
@@ -394,7 +388,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
     let test_file = block_control.test_file;
 
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-    let guest = performance_test_new_guest(Box::new(focal), control);
+    let mut guest = performance_test_new_guest(Box::new(focal), control);
     let api_socket = guest
         .tmp_dir
         .as_path()
@@ -418,9 +412,9 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
     } else if test_file == BLK_IO_TEST_IMG {
         test_disk_arg.push_str(",image_type=raw");
     }
-
+    guest.num_cpu = num_queues;
     let mut child = GuestCommand::new(&guest)
-        .args(["--cpus", &format!("boot={num_queues}")])
+        .default_cpus()
         .args(["--memory", "size=4G"])
         .default_kernel_cmdline()
         .args([
@@ -547,10 +541,7 @@ pub fn performance_restore_latency(control: &PerformanceTestControl) -> f64 {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--api-socket", &api_socket_source])
-            .args([
-                "--cpus",
-                &format!("boot={}", control.num_boot_vcpus.unwrap_or(1)),
-            ])
+            .default_cpus()
             .args(["--memory", "size=256M"])
             .default_kernel_cmdline()
             .args(["--console", "off"])
