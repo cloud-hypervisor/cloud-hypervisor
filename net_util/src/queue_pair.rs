@@ -293,7 +293,15 @@ impl RxVirtio {
                         return Err(NetQueuePairError::ReadTap(e));
                     }
                 } else if (result as usize) < vnet_hdr_len() {
-                    return Err(NetQueuePairError::InvalidVirtioNetHeader);
+                    error!(
+                        "net: rx: buffer too short for virtio_net_hdr ({result} < {})",
+                        vnet_hdr_len()
+                    );
+                    desc_chain
+                        .memory()
+                        .write_obj(0u16, num_buffers_addr)
+                        .map_err(NetQueuePairError::GuestMemory)?;
+                    0
                 } else {
                     // Write num_buffers to guest memory. Always 1 because the
                     // frame is never spread over more than one descriptor chain.
