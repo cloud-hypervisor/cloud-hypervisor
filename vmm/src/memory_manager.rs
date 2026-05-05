@@ -2563,6 +2563,8 @@ impl MemoryManager {
             userspace_addr_ = userspace_addr as u64
         );
 
+        self.memory_slot_allocator().free_memory_slot(slot);
+
         Ok(())
     }
 
