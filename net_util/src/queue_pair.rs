@@ -127,7 +127,8 @@ impl TxVirtio {
                         return Err(NetQueuePairError::WriteTap(e));
                     }
                 } else if (result as usize) < vnet_hdr_len() {
-                    return Err(NetQueuePairError::InvalidVirtioNetHeader);
+                    error!("net: tx: short tap write ({result} < {})", vnet_hdr_len());
+                    0
                 } else {
                     self.counter_bytes += Wrapping(result as u64 - vnet_hdr_len() as u64);
                     self.counter_frames += Wrapping(1);
