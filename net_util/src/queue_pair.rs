@@ -272,33 +272,41 @@ impl RxVirtio {
                 };
                 if result < 0 {
                     let e = std::io::Error::last_os_error();
-                    exhausted_descs = false;
-                    queue.go_to_previous_position();
 
                     /* EAGAIN */
                     if e.kind() == std::io::ErrorKind::WouldBlock {
+                        exhausted_descs = false;
+                        queue.go_to_previous_position();
                         break;
                     }
 
-                    error!("net: rx: failed reading from tap: {e}");
-                    return Err(NetQueuePairError::ReadTap(e));
-                }
-
-                if (result as usize) < vnet_hdr_len() {
+                    if e.raw_os_error() == Some(libc::EINVAL) {
+                        error!("net: rx: dropping undersized buffer: {e}");
+                        desc_chain
+                            .memory()
+                            .write_obj(0u16, num_buffers_addr)
+                            .map_err(NetQueuePairError::GuestMemory)?;
+                        0
+                    } else {
+                        queue.go_to_previous_position();
+                        error!("net: rx: failed reading from tap: {e}");
+                        return Err(NetQueuePairError::ReadTap(e));
+                    }
+                } else if (result as usize) < vnet_hdr_len() {
                     return Err(NetQueuePairError::InvalidVirtioNetHeader);
+                } else {
+                    // Write num_buffers to guest memory. Always 1 because the
+                    // frame is never spread over more than one descriptor chain.
+                    desc_chain
+                        .memory()
+                        .write_obj(1u16, num_buffers_addr)
+                        .map_err(NetQueuePairError::GuestMemory)?;
+
+                    self.counter_bytes += Wrapping(result as u64 - vnet_hdr_len() as u64);
+                    self.counter_frames += Wrapping(1);
+
+                    result as u32
                 }
-
-                // Write num_buffers to guest memory. We simply write 1 as we
-                // never spread the frame over more than one descriptor chain.
-                desc_chain
-                    .memory()
-                    .write_obj(1u16, num_buffers_addr)
-                    .map_err(NetQueuePairError::GuestMemory)?;
-
-                self.counter_bytes += Wrapping(result as u64 - vnet_hdr_len() as u64);
-                self.counter_frames += Wrapping(1);
-
-                result as u32
             };
 
             // For the sake of simplicity (keeping the handling of RX_QUEUE_EVENT and
