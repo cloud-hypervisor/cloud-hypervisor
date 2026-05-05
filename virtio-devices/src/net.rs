@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::num::Wrapping;
 use std::ops::Deref;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Barrier};
 use std::{result, thread};
@@ -25,6 +25,7 @@ use net_util::{
 };
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
+use serializable_fd::SerializableFd;
 use thiserror::Error;
 use virtio_bindings::virtio_config::*;
 use virtio_bindings::virtio_net::*;
@@ -582,7 +583,7 @@ impl Net {
     #[allow(clippy::too_many_arguments)]
     pub fn from_tap_fds(
         id: String,
-        fds: &[RawFd],
+        fds: &[SerializableFd],
         guest_mac: Option<MacAddr>,
         mtu: Option<u16>,
         access_platform_enabled: bool,
@@ -601,7 +602,7 @@ impl Net {
         for fd in fds.iter() {
             // Duplicate so that it can survive reboots
             // SAFETY: FFI call to dup. Trivially safe.
-            let fd = unsafe { libc::dup(*fd) };
+            let fd = unsafe { libc::dup(fd.as_raw_fd()) };
             if fd < 0 {
                 return Err(Error::DuplicateTapFd(std::io::Error::last_os_error()));
             }

@@ -24,6 +24,7 @@ log = { workspace = true, features = ["std"] }
 option_parser = { path = "../option_parser" }
 seccompiler = { workspace = true }
 serde_json = { workspace = true }
+serializable_fd = { path = "../serializable_fd" }
 signal-hook = { workspace = true }
 thiserror = { workspace = true }
 tpm = { path = "../tpm" }

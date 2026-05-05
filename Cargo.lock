@@ -95,6 +95,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 name = "api_client"
 version = "0.1.0"
 dependencies = [
+ "serializable_fd",
  "thiserror",
  "vmm-sys-util",
 ]
@@ -454,6 +455,7 @@ dependencies = [
  "option_parser",
  "seccompiler",
  "serde_json",
+ "serializable_fd",
  "signal-hook",
  "test_infra",
  "thiserror",
@@ -2505,6 +2507,7 @@ dependencies = [
  "serde",
  "serde_with",
  "serial_buffer",
+ "serializable_fd",
  "thiserror",
  "vhost",
  "virtio-bindings",
@@ -2629,6 +2632,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_buffer",
+ "serializable_fd",
  "sha2",
  "signal-hook",
  "tempfile",

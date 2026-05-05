@@ -30,6 +30,7 @@ serde_with = { workspace = true, default-features = false, features = [
   "macros",
 ] }
 serial_buffer = { path = "../serial_buffer" }
+serializable_fd = { path = "../serializable_fd" }
 thiserror = { workspace = true }
 vhost = { workspace = true, features = [
   "vhost-kern",

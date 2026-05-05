@@ -4700,10 +4700,8 @@ impl DeviceManager {
                     debug!("Closing preserved FDs from virtio-net device: id={id}, fds={fds:?}");
                     for fd in fds {
                         config.preserved_fds.as_mut().unwrap().retain(|x| *x != fd);
-                        // SAFETY: We are closing the only remaining instance of this FD.
-                        unsafe {
-                            libc::close(fd);
-                        }
+                        // We are closing the only remaining instance of this FD.
+                        drop(fd);
                     }
                 }
                 VirtioDeviceType::Block

@@ -10,9 +10,10 @@ use std::{fs, result};
 
 use block::ImageType;
 pub use block::fcntl::LockGranularityChoice;
-use log::{debug, warn};
+use log::warn;
 use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
+use serializable_fd::{FdDevice, FdMap, FdSerialization, SerializableFd};
 use thiserror::Error;
 use virtio_devices::RateLimiterConfig;
 
@@ -373,14 +374,8 @@ pub struct NetConfig {
     pub vhost_socket: Option<String>,
     #[serde(default)]
     pub vhost_mode: VhostMode,
-    // Special deserialize handling:
-    // Therefore, we don't serialize FDs, and whatever value is here after
-    // deserialization is invalid.
-    //
-    // Valid FDs are transmitted via a different channel (SCM_RIGHTS message)
-    // and will be populated into this struct on the destination VMM eventually.
-    #[serde(default, deserialize_with = "deserialize_netconfig_fds")]
-    pub fds: Option<Vec<i32>>,
+    #[serde(default)]
+    pub fds: Option<Vec<SerializableFd>>,
     #[serde(default)]
     pub rate_limiter_config: Option<RateLimiterConfig>,
     #[serde(default = "default_netconfig_true")]
@@ -389,6 +384,44 @@ pub struct NetConfig {
     pub offload_ufo: bool,
     #[serde(default = "default_netconfig_true")]
     pub offload_csum: bool,
+}
+
+impl FdSerialization for NetConfig {
+    fn create_fd_map(&self) -> FdMap {
+        let Some(fds) = self.fds.as_ref() else {
+            return FdMap::new();
+        };
+
+        let Some(id) = self.pci_common.id.as_ref() else {
+            // TODO(fd): proper error handling
+            panic!("NetConfig with fds without id");
+        };
+
+        let fd_device = FdDevice::Net { id: id.clone() };
+
+        FdMap::new_with_entry(fd_device, fds.clone())
+    }
+
+    fn apply_fd_map(&mut self, fd_map: &mut FdMap) {
+        let Some(outdated_fds) = self.fds.as_mut() else {
+            // TODO(fd): proper error handling
+            panic!("no fds")
+        };
+        let Some(id) = self.pci_common.id.as_ref() else {
+            // TODO(fd): proper error handling
+            panic!("NetConfig with fds without id");
+        };
+
+        let fd_device = FdDevice::Net { id: id.clone() };
+        // TODO(fd): proper error handling
+        let updated_fds = fd_map.remove(&fd_device).unwrap();
+        // TODO(fd): proper error handling for when there aren't enough `updated_fds`.
+        assert_eq!(outdated_fds.len(), updated_fds.len());
+        outdated_fds
+            .iter_mut()
+            .zip(updated_fds)
+            .for_each(|(outdated_fd, updated_fd)| outdated_fd.update(updated_fd));
+    }
 }
 
 pub fn default_netconfig_true() -> bool {
@@ -413,21 +446,6 @@ pub const DEFAULT_NET_QUEUE_SIZE: u16 = 256;
 
 pub fn default_netconfig_queue_size() -> u16 {
     DEFAULT_NET_QUEUE_SIZE
-}
-
-fn deserialize_netconfig_fds<'de, D>(d: D) -> Result<Option<Vec<i32>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let invalid_fds: Option<Vec<i32>> = Option::deserialize(d)?;
-    if let Some(invalid_fds) = invalid_fds {
-        debug!(
-            "FDs in 'NetConfig' won't be deserialized as they are most likely invalid now. Deserializing them as -1."
-        );
-        Ok(Some(vec![-1; invalid_fds.len()]))
-    } else {
-        Ok(None)
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -970,7 +988,7 @@ impl ApplyLandlock for LandlockConfig {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct VmConfig {
     #[serde(default)]
     pub cpus: CpusConfig,
@@ -1022,12 +1040,39 @@ pub struct VmConfig {
     // causes the FDs to be closed early. This allows management software to
     // gracefully clean up resources (e.g., libvirt closes tap devices).
     #[serde(skip)]
-    pub preserved_fds: Option<Vec<i32>>,
+    pub preserved_fds: Option<Vec<SerializableFd>>,
     #[serde(default)]
     pub landlock_enable: bool,
     pub landlock_rules: Option<Vec<LandlockConfig>>,
     #[cfg(feature = "ivshmem")]
     pub ivshmem: Option<IvshmemConfig>,
+}
+
+impl FdSerialization for VmConfig {
+    fn create_fd_map(&self) -> FdMap {
+        let Some(net_configs) = self.net.as_ref() else {
+            return FdMap::new();
+        };
+
+        net_configs
+            .iter()
+            .map(|net_config| net_config.create_fd_map())
+            .fold(FdMap::new(), |mut accumulator, next| {
+                accumulator.merge(next);
+                accumulator
+            })
+    }
+
+    fn apply_fd_map(&mut self, updated_fds: &mut FdMap) {
+        let Some(net_configs) = self.net.as_mut() else {
+            // TODO(fd): proper error handling
+            panic!("no fds")
+        };
+
+        net_configs
+            .iter_mut()
+            .for_each(|net_config| net_config.apply_fd_map(updated_fds));
+    }
 }
 
 impl VmConfig {

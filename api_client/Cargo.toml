@@ -7,6 +7,7 @@ rust-version.workspace = true
 version = "0.1.0"
 
 [dependencies]
+serializable_fd = { path = "../serializable_fd" }
 thiserror = { workspace = true }
 vmm-sys-util = { workspace = true }
 

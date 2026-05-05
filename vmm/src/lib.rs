@@ -33,6 +33,7 @@ use pci::PciBdf;
 use seccompiler::{SeccompAction, apply_filter};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::{Deserialize, Serialize};
+use serializable_fd::FdSerialization;
 use signal_hook::iterator::{Handle, Signals};
 use thiserror::Error;
 use tracer::trace_scoped;
@@ -1920,7 +1921,7 @@ impl RequestHandler for Vmm {
         }
     }
 
-    fn vm_restore(&mut self, restore_cfg: RestoreConfig) -> result::Result<(), VmError> {
+    fn vm_restore(&mut self, mut restore_cfg: RestoreConfig) -> result::Result<(), VmError> {
         if self.vm.is_some() || self.vm_config.is_some() {
             return Err(VmError::VmAlreadyCreated);
         }
@@ -1940,19 +1941,8 @@ impl RequestHandler for Vmm {
             .map_err(VmError::ConfigValidation)?;
 
         // Update VM's net configurations with new fds received for restore operation
-        if let (Some(restored_nets), Some(vm_net_configs)) =
-            (restore_cfg.net_fds, &mut vm_config.lock().unwrap().net)
-        {
-            for net in restored_nets.iter() {
-                for net_config in vm_net_configs.iter_mut() {
-                    // update only if the net dev is backed by FDs
-                    if net_config.pci_common.id.as_ref() == Some(&net.id)
-                        && net_config.fds.is_some()
-                    {
-                        net_config.fds.clone_from(&net.fds);
-                    }
-                }
-            }
+        if let Some(fd_map) = restore_cfg.net_fds.as_mut() {
+            vm_config.lock().unwrap().apply_fd_map(fd_map);
         }
 
         self.vm_restore(
