@@ -578,9 +578,12 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioUserDmaMappi
             )));
         }
 
-        // Unwrap is safe as we only do vfio with shared mem with a backing file.
-        let file_offset = region.file_offset().unwrap();
-        let offset = region_offset + file_offset.start();
+        let file_offset = region.file_offset().ok_or_else(|| {
+            std::io::Error::other(format!("region for gpa 0x{gpa:x} has no backing file"))
+        })?;
+        let offset = region_offset
+            .checked_add(file_offset.start())
+            .ok_or_else(|| std::io::Error::other("offset overflow in DMA map"))?;
 
         self.client
             .lock()
