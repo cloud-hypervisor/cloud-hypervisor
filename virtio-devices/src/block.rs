@@ -1167,6 +1167,10 @@ impl VirtioDevice for Block {
         event!("virtio-device", "reset", "id", &self.id);
     }
 
+    fn shutdown(&mut self) {
+        self.common.wait_for_epoll_threads();
+    }
+
     fn counters(&self) -> Option<HashMap<&'static str, Wrapping<u64>>> {
         let mut counters = HashMap::new();
 
