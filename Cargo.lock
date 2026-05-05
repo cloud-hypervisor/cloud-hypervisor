@@ -2057,6 +2057,16 @@ name = "serial_buffer"
 version = "0.1.0"
 
 [[package]]
+name = "serializable_fd"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "serde_with",
+ "thiserror",
+]
+
+[[package]]
 name = "sha2"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

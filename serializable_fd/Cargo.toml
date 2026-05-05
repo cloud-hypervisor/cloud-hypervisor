@@ -1,0 +1,16 @@
+[package]
+edition.workspace = true
+name = "serializable_fd"
+rust-version.workspace = true
+version = "0.1.0"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_with = { workspace = true, features = ["macros"] }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
