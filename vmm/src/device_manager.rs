@@ -4923,6 +4923,19 @@ impl DeviceManager {
 
             self.virtio_devices
                 .retain(|handler| !Arc::ptr_eq(&handler.virtio_device, &virtio_device));
+
+            // Drop any extra arcs that are kept for memory devices.
+            if let Some(balloon) = &self.balloon {
+                let balloon_dyn =
+                    Arc::clone(balloon) as Arc<Mutex<dyn virtio_devices::VirtioDevice>>;
+                if Arc::ptr_eq(&balloon_dyn, &virtio_device) {
+                    self.balloon = None;
+                }
+            }
+            self.virtio_mem_devices.retain(|mem| {
+                let mem_dyn = Arc::clone(mem) as Arc<Mutex<dyn virtio_devices::VirtioDevice>>;
+                !Arc::ptr_eq(&mem_dyn, &virtio_device)
+            });
         }
 
         event!(
