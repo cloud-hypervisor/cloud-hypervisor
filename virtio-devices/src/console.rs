@@ -12,7 +12,7 @@ use std::{cmp, io, result};
 use anyhow::anyhow;
 use event_monitor::event;
 use libc::{EFD_NONBLOCK, TIOCGWINSZ};
-use log::{error, info};
+use log::{error, info, warn};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use serial_buffer::SerialBuffer;
@@ -212,6 +212,10 @@ impl ConsoleEpollHandler {
             while let Some(desc) = desc_chain.next() {
                 if in_buffer.is_empty() {
                     break;
+                }
+                if !desc.is_write_only() {
+                    warn!("Skipping device-readable descriptor on receiveq");
+                    continue;
                 }
                 let len = cmp::min(desc.len(), in_buffer.len() as u32);
                 let source_slice = in_buffer.drain(..len as usize).collect::<Vec<u8>>();
