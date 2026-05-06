@@ -601,11 +601,9 @@ impl MemEpollHandler {
         let config = self.config.lock().unwrap();
         let size: u64 = nb_blocks as u64 * config.block_size;
 
-        let resp_type = if config.is_valid_range(addr, size) {
-            VIRTIO_MEM_RESP_ACK
-        } else {
-            VIRTIO_MEM_RESP_ERROR
-        };
+        if !config.is_valid_range(addr, size) {
+            return (VIRTIO_MEM_RESP_ERROR, 0);
+        }
 
         let offset = addr - config.addr;
         let first_block_index = (offset / config.block_size) as usize;
@@ -627,7 +625,7 @@ impl MemEpollHandler {
                 VIRTIO_MEM_STATE_MIXED
             };
 
-        (resp_type, resp_state)
+        (VIRTIO_MEM_RESP_ACK, resp_state)
     }
 
     fn signal(&self, int_type: VirtioInterruptType) -> result::Result<(), DeviceError> {
