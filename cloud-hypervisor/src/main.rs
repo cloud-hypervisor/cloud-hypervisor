@@ -187,7 +187,7 @@ fn get_cli_options_sorted(
     [
         Arg::new("api-socket")
             .long("api-socket")
-            .help("HTTP API socket (UNIX domain socket): path=</path/to/a/file> or fd=<fd>.")
+            .help("HTTP API socket (UNIX domain socket): path=<path> or fd=<fd>.")
             .num_args(1)
             .group("vmm-config"),
         Arg::new("balloon")
@@ -202,7 +202,7 @@ fn get_cli_options_sorted(
             .group("vm-config"),
         Arg::new("console")
             .long("console")
-            .help("Control (virtio) console: \"off|null|pty|tty|file=</path/to/a/file>,iommu=on|off\"")
+            .help("Control (virtio) console: \"off|null|pty|tty|file=<path>,iommu=on|off\"")
             .default_value("tty")
             .group("vm-config"),
         Arg::new("cpus")
@@ -239,7 +239,7 @@ fn get_cli_options_sorted(
         #[cfg(target_arch = "x86_64")]
         Arg::new("debug-console")
             .long("debug-console")
-            .help("Debug console: off|pty|tty|file=</path/to/a/file>,iobase=<port in hex>")
+            .help("Debug console: off|pty|tty|file=<path>,iobase=<port in hex>")
             .default_value("off,iobase=0xe9")
             .group("vm-config"),
         Arg::new("device")
@@ -256,7 +256,7 @@ fn get_cli_options_sorted(
             .group("vm-config"),
         Arg::new("event-monitor")
             .long("event-monitor")
-            .help("File to report events on: path=</path/to/a/file> or fd=<fd>")
+            .help("Path to report events on: path=<path> or fd=<fd>")
             .num_args(1)
             .group("vmm-config"),
         Arg::new("firmware")
@@ -279,7 +279,7 @@ fn get_cli_options_sorted(
         #[cfg(feature = "guest_debug")]
         Arg::new("gdb")
             .long("gdb")
-            .help("GDB socket (UNIX domain socket): path=</path/to/a/file>")
+            .help("GDB socket (UNIX domain socket): path=<path>")
             .num_args(1)
             .group("vmm-config"),
         Arg::new("generic-vhost-user")
@@ -322,9 +322,7 @@ fn get_cli_options_sorted(
         Arg::new("landlock")
             .long("landlock")
             .num_args(0)
-            .help(
-                "enable/disable Landlock.",
-            )
+            .help("enable/disable Landlock.")
             .action(ArgAction::SetTrue)
             .default_value("false")
             .group("vm-config"),
@@ -393,9 +391,7 @@ fn get_cli_options_sorted(
             .group("vm-config"),
         Arg::new("platform")
             .long("platform")
-            .help(
-                PlatformConfig::syntax()
-            )
+            .help(PlatformConfig::syntax())
             .num_args(1)
             .group("vm-config"),
         Arg::new("pmem")
@@ -430,9 +426,7 @@ fn get_cli_options_sorted(
             .group("vmm-config"),
         Arg::new("rng")
             .long("rng")
-            .help(
-                "Random number generator parameters \"src=<entropy_source_path>,iommu=on|off\"",
-            )
+            .help("Random number generator parameters \"src=<entropy_source_path>,iommu=on|off\"")
             .default_value(default_rng)
             .group("vm-config"),
         Arg::new("seccomp")
@@ -442,7 +436,7 @@ fn get_cli_options_sorted(
             .default_value("true"),
         Arg::new("serial")
             .long("serial")
-            .help("Control serial port: off|null|pty|tty|file=</path/to/a/file>|socket=</path/to/a/file>")
+            .help("Control serial port: off|null|pty|tty|file=<path>|socket=<path>")
             .default_value("null")
             .group("vm-config"),
         Arg::new("tpm")
@@ -484,7 +478,9 @@ fn get_cli_options_sorted(
             .num_args(0)
             .action(ArgAction::SetTrue)
             .group("vm-config"),
-    ].to_vec().into_boxed_slice()
+    ]
+    .to_vec()
+    .into_boxed_slice()
 }
 
 /// Creates the CLI definition of Cloud Hypervisor.
