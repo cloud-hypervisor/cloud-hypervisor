@@ -60,8 +60,6 @@ impl RngEpollHandler {
 
         let mut used_descs = false;
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
-            // virtio-rng has no status byte; on any error along the chain
-            // report a used length of 0 to indicate failure.
             let mut total_len: usize = 0;
             while let Some(desc) = desc_chain.next() {
                 if !desc.is_write_only() {
@@ -78,7 +76,6 @@ impl RngEpollHandler {
                     Ok(a) => a,
                     Err(e) => {
                         warn!("Failed to translate descriptor address: {e}");
-                        total_len = 0;
                         break;
                     }
                 };
@@ -90,7 +87,6 @@ impl RngEpollHandler {
                     Ok(written) => total_len += written,
                     Err(e) => {
                         warn!("Failed to read entropy into descriptor: {e}");
-                        total_len = 0;
                         break;
                     }
                 }
