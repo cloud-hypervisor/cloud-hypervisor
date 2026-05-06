@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 use std::mem::size_of;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Barrier, Mutex, mpsc};
+use std::sync::{Arc, Barrier, Mutex};
 use std::{io, result};
 
 use anyhow::anyhow;
@@ -115,16 +115,8 @@ pub enum Error {
     BufferLengthTooSmall,
     #[error("Guest sent us invalid request")]
     InvalidRequest,
-    #[error("Failed to EventFd write")]
-    EventFdWriteFail(#[source] std::io::Error),
-    #[error("Failed to EventFd try_clone")]
-    EventFdTryCloneFail(#[source] std::io::Error),
-    #[error("Failed to MpscRecv")]
-    MpscRecvFail(#[source] mpsc::RecvError),
     #[error("Resize invalid argument")]
     ResizeError(#[source] anyhow::Error),
-    #[error("Fail to resize trigger")]
-    ResizeTriggerFail(#[source] DeviceError),
     #[error("Invalid configuration")]
     ValidateError(#[source] anyhow::Error),
     #[error("Failed discarding memory range")]
@@ -135,10 +127,6 @@ pub enum Error {
     DmaUnmap(#[source] std::io::Error),
     #[error("Invalid DMA mapping handler")]
     InvalidDmaMappingHandler,
-    #[error("Not activated by the guest")]
-    NotActivatedByGuest,
-    #[error("Unknown request type: {0}")]
-    UnknownRequestType(u16),
     #[error("Failed adding used index")]
     QueueAddUsed(#[source] virtio_queue::Error),
 }
