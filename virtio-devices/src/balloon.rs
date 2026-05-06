@@ -77,18 +77,14 @@ pub enum Error {
     FallocateFail(#[source] std::io::Error),
     #[error("Madvise fail.")]
     MadviseFail(#[source] std::io::Error),
-    #[error("Failed to EventFd write.")]
-    EventFdWriteFail(#[source] std::io::Error),
     #[error("Invalid queue index: {0}")]
     InvalidQueueIndex(usize),
-    #[error("Fail tp signal")]
+    #[error("Failed to signal")]
     FailedSignal(#[source] io::Error),
     #[error("Descriptor chain is too short")]
     DescriptorChainTooShort,
     #[error("Failed adding used index")]
     QueueAddUsed(#[source] virtio_queue::Error),
-    #[error("Failed creating an iterator over the queue")]
-    QueueIterator(#[source] virtio_queue::Error),
 }
 
 // Got from include/uapi/linux/virtio_balloon.h
@@ -451,7 +447,7 @@ pub struct BalloonState {
     pub config: VirtioBalloonConfig,
 }
 
-// Virtio device for exposing entropy to the guest OS through virtio.
+// Virtio device for managing guest memory through a balloon.
 pub struct Balloon {
     common: VirtioCommon,
     id: String,
