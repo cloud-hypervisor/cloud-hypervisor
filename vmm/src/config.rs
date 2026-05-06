@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 #[cfg(feature = "ivshmem")]
 use std::fs;
 use std::path::PathBuf;
@@ -3560,16 +3560,14 @@ impl VmConfig {
     /// # Safety
     /// To use this safely, the caller must guarantee that the input
     /// fds are all valid.
-    pub unsafe fn add_preserved_fds(&mut self, mut fds: Vec<i32>) {
+    pub unsafe fn add_preserved_fds(&mut self, fds: Vec<i32>) {
         if fds.is_empty() {
             return;
         }
 
-        if let Some(preserved_fds) = &self.preserved_fds {
-            fds.append(&mut preserved_fds.clone());
-        }
-
-        self.preserved_fds = Some(fds);
+        self.preserved_fds
+            .get_or_insert_with(HashSet::new)
+            .extend(fds);
     }
 
     #[cfg(feature = "tdx")]
@@ -3627,7 +3625,7 @@ impl Clone for VmConfig {
 impl Drop for VmConfig {
     fn drop(&mut self) {
         if let Some(mut fds) = self.preserved_fds.take() {
-            for fd in fds.drain(..) {
+            for fd in fds.drain() {
                 // SAFETY: FFI call with valid FDs
                 unsafe { libc::close(fd) };
             }
