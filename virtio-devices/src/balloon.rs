@@ -357,11 +357,21 @@ impl BalloonEpollHandler {
             let mut descs_len = 0;
             while let Some(desc) = desc_chain.next() {
                 descs_len += desc.len();
-                let addr = desc
+                let addr = match desc
                     .addr()
                     .translate_gva(self.access_platform.as_deref(), desc.len() as usize)
-                    .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?;
-                Self::release_memory_range(desc_chain.memory(), addr, desc.len() as usize)?;
+                {
+                    Ok(a) => a,
+                    Err(e) => {
+                        warn!("Failed to translate reporting descriptor address: {e}");
+                        continue;
+                    }
+                };
+                if let Err(e) =
+                    Self::release_memory_range(desc_chain.memory(), addr, desc.len() as usize)
+                {
+                    warn!("Failed to release reported memory range: {e}");
+                }
             }
 
             self.queues[queue_index]
