@@ -13,7 +13,7 @@ use rate_limiter::{RateLimiter, TokenType};
 use thiserror::Error;
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
 use vm_memory::bitmap::Bitmap;
-use vm_memory::{Bytes, GuestMemory};
+use vm_memory::{Bytes, GuestAddress, GuestMemory};
 use vm_virtio::{AccessPlatform, Translatable};
 
 use super::{Tap, register_listener, unregister_listener, vnet_hdr_len};
@@ -66,35 +66,50 @@ impl TxVirtio {
             let mut next_desc = desc_chain.next();
 
             let mut iovecs = self.iovecs.borrow();
-            while let Some(desc) = next_desc {
-                let desc_addr = desc
-                    .addr()
-                    .translate_gva(access_platform, desc.len() as usize)
-                    .map_err(|e| {
-                        NetQueuePairError::GuestMemory(vm_memory::GuestMemoryError::IOError(e))
-                    })?;
-                if !desc.is_write_only() && desc.len() > 0 {
-                    let buf = desc_chain
-                        .memory()
-                        .get_slice(desc_addr, desc.len() as usize)
-                        .map_err(NetQueuePairError::GuestMemory)?;
-                    assert!(buf.len() >= desc.len() as usize);
-                    let buf = buf.ptr_guard_mut();
-                    let iovec = libc::iovec {
-                        iov_base: buf.as_ptr().cast(),
-                        iov_len: desc.len() as libc::size_t,
-                    };
-                    iovecs.push(iovec);
-                } else {
-                    error!(
-                        "Invalid descriptor chain: address = 0x{:x} length = {} write_only = {}",
-                        desc_addr.0,
-                        desc.len(),
-                        desc.is_write_only()
-                    );
-                    return Err(NetQueuePairError::DescriptorChainInvalid);
+            // Parse the descriptor chain into an iovec array. On error, the
+            // offending head descriptor is still added to the used ring with
+            // len 0 below, so the guest does not see a descriptor leak.
+            let parse_result: Result<(), NetQueuePairError> = (|| {
+                while let Some(desc) = next_desc {
+                    let desc_addr = desc
+                        .addr()
+                        .translate_gva(access_platform, desc.len() as usize)
+                        .map_err(|e| {
+                            NetQueuePairError::GuestMemory(vm_memory::GuestMemoryError::IOError(e))
+                        })?;
+                    if !desc.is_write_only() && desc.len() > 0 {
+                        let buf = desc_chain
+                            .memory()
+                            .get_slice(desc_addr, desc.len() as usize)
+                            .map_err(NetQueuePairError::GuestMemory)?;
+                        assert!(buf.len() >= desc.len() as usize);
+                        let buf = buf.ptr_guard_mut();
+                        let iovec = libc::iovec {
+                            iov_base: buf.as_ptr().cast(),
+                            iov_len: desc.len() as libc::size_t,
+                        };
+                        iovecs.push(iovec);
+                    } else {
+                        error!(
+                            "Invalid descriptor chain: address = 0x{:x} length = {} write_only = {}",
+                            desc_addr.0,
+                            desc.len(),
+                            desc.is_write_only()
+                        );
+                        return Err(NetQueuePairError::DescriptorChainInvalid);
+                    }
+                    next_desc = desc_chain.next();
                 }
-                next_desc = desc_chain.next();
+                Ok(())
+            })();
+
+            if let Err(e) = parse_result {
+                // Surface the bad descriptor to the guest with len 0 so the
+                // used ring stays consistent before bailing.
+                queue
+                    .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
+                    .map_err(NetQueuePairError::QueueAddUsed)?;
+                return Err(e);
             }
 
             let bytes_sent = if iovecs.is_empty() {
@@ -210,54 +225,72 @@ impl RxVirtio {
                 break;
             }
 
-            let desc = desc_chain
-                .next()
-                .ok_or(NetQueuePairError::DescriptorChainTooShort)?;
+            let mut iovecs = self.iovecs.borrow();
+            // Parse the descriptor chain into an iovec array. On error, the
+            // offending head descriptor is still added to the used ring with
+            // len 0 below, so the guest does not see a descriptor leak.
+            let parse_result: Result<GuestAddress, NetQueuePairError> = (|| {
+                let desc = desc_chain
+                    .next()
+                    .ok_or(NetQueuePairError::DescriptorChainTooShort)?;
 
-            let num_buffers_addr = desc_chain
-                .memory()
-                .checked_offset(
-                    desc.addr()
+                let num_buffers_addr = desc_chain
+                    .memory()
+                    .checked_offset(
+                        desc.addr()
+                            .translate_gva(access_platform, desc.len() as usize)
+                            .map_err(|e| {
+                                NetQueuePairError::GuestMemory(
+                                    vm_memory::GuestMemoryError::IOError(e),
+                                )
+                            })?,
+                        10,
+                    )
+                    .ok_or(NetQueuePairError::DescriptorInvalidHeader)?;
+                let mut next_desc = Some(desc);
+
+                while let Some(desc) = next_desc {
+                    let desc_addr = desc
+                        .addr()
                         .translate_gva(access_platform, desc.len() as usize)
                         .map_err(|e| {
                             NetQueuePairError::GuestMemory(vm_memory::GuestMemoryError::IOError(e))
-                        })?,
-                    10,
-                )
-                .ok_or(NetQueuePairError::DescriptorInvalidHeader)?;
-            let mut next_desc = Some(desc);
-
-            let mut iovecs = self.iovecs.borrow();
-            while let Some(desc) = next_desc {
-                let desc_addr = desc
-                    .addr()
-                    .translate_gva(access_platform, desc.len() as usize)
-                    .map_err(|e| {
-                        NetQueuePairError::GuestMemory(vm_memory::GuestMemoryError::IOError(e))
-                    })?;
-                if desc.is_write_only() && desc.len() > 0 {
-                    let buf = desc_chain
-                        .memory()
-                        .get_slice(desc_addr, desc.len() as usize)
-                        .map_err(NetQueuePairError::GuestMemory)?;
-                    assert!(buf.len() >= desc.len() as usize);
-                    let buf = buf.ptr_guard_mut();
-                    let iovec = libc::iovec {
-                        iov_base: buf.as_ptr().cast(),
-                        iov_len: desc.len() as libc::size_t,
-                    };
-                    iovecs.push(iovec);
-                } else {
-                    error!(
-                        "Invalid descriptor chain: address = 0x{:x} length = {} write_only = {}",
-                        desc_addr.0,
-                        desc.len(),
-                        desc.is_write_only()
-                    );
-                    return Err(NetQueuePairError::DescriptorChainInvalid);
+                        })?;
+                    if desc.is_write_only() && desc.len() > 0 {
+                        let buf = desc_chain
+                            .memory()
+                            .get_slice(desc_addr, desc.len() as usize)
+                            .map_err(NetQueuePairError::GuestMemory)?;
+                        assert!(buf.len() >= desc.len() as usize);
+                        let buf = buf.ptr_guard_mut();
+                        let iovec = libc::iovec {
+                            iov_base: buf.as_ptr().cast(),
+                            iov_len: desc.len() as libc::size_t,
+                        };
+                        iovecs.push(iovec);
+                    } else {
+                        error!(
+                            "Invalid descriptor chain: address = 0x{:x} length = {} write_only = {}",
+                            desc_addr.0,
+                            desc.len(),
+                            desc.is_write_only()
+                        );
+                        return Err(NetQueuePairError::DescriptorChainInvalid);
+                    }
+                    next_desc = desc_chain.next();
                 }
-                next_desc = desc_chain.next();
-            }
+                Ok(num_buffers_addr)
+            })();
+
+            let num_buffers_addr = match parse_result {
+                Ok(addr) => addr,
+                Err(e) => {
+                    queue
+                        .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
+                        .map_err(NetQueuePairError::QueueAddUsed)?;
+                    return Err(e);
+                }
+            };
 
             let len = if iovecs.is_empty() {
                 0
@@ -305,10 +338,14 @@ impl RxVirtio {
                 } else {
                     // Write num_buffers to guest memory. Always 1 because the
                     // frame is never spread over more than one descriptor chain.
-                    desc_chain
-                        .memory()
-                        .write_obj(1u16, num_buffers_addr)
-                        .map_err(NetQueuePairError::GuestMemory)?;
+                    if let Err(e) = desc_chain.memory().write_obj(1u16, num_buffers_addr) {
+                        // Surface the bad descriptor to the guest with len 0 so
+                        // the used ring stays consistent before bailing.
+                        queue
+                            .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
+                            .map_err(NetQueuePairError::QueueAddUsed)?;
+                        return Err(NetQueuePairError::GuestMemory(e));
+                    }
 
                     self.counter_bytes += Wrapping(result as u64 - vnet_hdr_len() as u64);
                     self.counter_frames += Wrapping(1);
@@ -425,8 +462,6 @@ pub enum NetQueuePairError {
     QueueAddUsed(#[source] virtio_queue::Error),
     #[error("Descriptor with invalid virtio-net header")]
     DescriptorInvalidHeader,
-    #[error("Invalid virtio-net header")]
-    InvalidVirtioNetHeader,
 }
 
 pub struct NetQueuePair {
