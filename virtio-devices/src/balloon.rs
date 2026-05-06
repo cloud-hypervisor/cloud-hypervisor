@@ -81,8 +81,6 @@ pub enum Error {
     InvalidQueueIndex(usize),
     #[error("Failed to signal")]
     FailedSignal(#[source] io::Error),
-    #[error("Descriptor chain is too short")]
-    DescriptorChainTooShort,
     #[error("Failed adding used index")]
     QueueAddUsed(#[source] virtio_queue::Error),
 }
@@ -274,50 +272,54 @@ impl BalloonEpollHandler {
         while let Some(mut desc_chain) =
             self.queues[queue_index].pop_descriptor_chain(self.mem.memory())
         {
-            let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
-
             let data_chunk_size = size_of::<u32>();
 
-            // The head contains the request type which MUST be readable.
-            if desc.is_write_only() {
-                error!("The head contains the request type is not right");
-                return Err(Error::UnexpectedWriteOnlyDescriptor);
-            }
-            if !(desc.len() as usize).is_multiple_of(data_chunk_size) {
-                error!("the request size {} is not right", desc.len());
-                return Err(Error::InvalidRequest);
-            }
+            while let Some(desc) = desc_chain.next() {
+                if desc.is_write_only() {
+                    error!("Unexpected device-writable descriptor on inflate/deflate queue");
+                    return Err(Error::UnexpectedWriteOnlyDescriptor);
+                }
+                if !(desc.len() as usize).is_multiple_of(data_chunk_size) {
+                    error!("Descriptor length {} is not a multiple of {data_chunk_size}", desc.len());
+                    return Err(Error::InvalidRequest);
+                }
 
-            let mut offset = 0u64;
-            while offset < desc.len() as u64 {
-                let addr = desc
-                    .addr()
-                    .checked_add(offset)
-                    .unwrap()
-                    .translate_gva(self.access_platform.as_deref(), data_chunk_size)
-                    .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?;
-                let pfn: u32 = desc_chain
-                    .memory()
-                    .read_obj(addr)
-                    .map_err(Error::GuestMemory)?;
-                offset += data_chunk_size as u64;
+                let mut offset = 0u64;
+                while offset < desc.len() as u64 {
+                    let addr = desc
+                        .addr()
+                        .checked_add(offset)
+                        .unwrap()
+                        .translate_gva(self.access_platform.as_deref(), data_chunk_size)
+                        .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?;
+                    let pfn: u32 = desc_chain
+                        .memory()
+                        .read_obj(addr)
+                        .map_err(Error::GuestMemory)?;
+                    offset += data_chunk_size as u64;
 
-                match queue_index {
-                    0 => {
-                        Self::release_memory_range_4k(&mut self.pbp, desc_chain.memory(), pfn)?;
+                    match queue_index {
+                        0 => {
+                            Self::release_memory_range_4k(
+                                &mut self.pbp,
+                                desc_chain.memory(),
+                                pfn,
+                            )?;
+                        }
+                        1 => {
+                            let page_size = get_page_size() as usize;
+                            let rbase =
+                                align_page_size_down((pfn as u64) << VIRTIO_BALLOON_PFN_SHIFT);
+
+                            Self::advise_memory_range(
+                                desc_chain.memory(),
+                                vm_memory::GuestAddress(rbase),
+                                page_size,
+                                libc::MADV_WILLNEED,
+                            )?;
+                        }
+                        _ => return Err(Error::InvalidQueueIndex(queue_index)),
                     }
-                    1 => {
-                        let page_size = get_page_size() as usize;
-                        let rbase = align_page_size_down((pfn as u64) << VIRTIO_BALLOON_PFN_SHIFT);
-
-                        Self::advise_memory_range(
-                            desc_chain.memory(),
-                            vm_memory::GuestAddress(rbase),
-                            page_size,
-                            libc::MADV_WILLNEED,
-                        )?;
-                    }
-                    _ => return Err(Error::InvalidQueueIndex(queue_index)),
                 }
             }
 
