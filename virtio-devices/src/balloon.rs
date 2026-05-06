@@ -69,10 +69,6 @@ const VIRTIO_BALLOON_F_REPORTING: u64 = 5;
 pub enum Error {
     #[error("Guest gave us bad memory addresses.")]
     GuestMemory(#[source] GuestMemoryError),
-    #[error("Guest gave us a write only descriptor that protocol says to read from")]
-    UnexpectedWriteOnlyDescriptor,
-    #[error("Guest sent us invalid request")]
-    InvalidRequest,
     #[error("Fallocate fail.")]
     FallocateFail(#[source] std::io::Error),
     #[error("Madvise fail.")]
@@ -276,47 +272,64 @@ impl BalloonEpollHandler {
 
             while let Some(desc) = desc_chain.next() {
                 if desc.is_write_only() {
-                    error!("Unexpected device-writable descriptor on inflate/deflate queue");
-                    return Err(Error::UnexpectedWriteOnlyDescriptor);
+                    warn!("Skipping device-writable descriptor on inflate/deflate queue");
+                    continue;
                 }
                 if !(desc.len() as usize).is_multiple_of(data_chunk_size) {
-                    error!("Descriptor length {} is not a multiple of {data_chunk_size}", desc.len());
-                    return Err(Error::InvalidRequest);
+                    warn!(
+                        "Skipping descriptor with length {} not a multiple of {data_chunk_size}",
+                        desc.len()
+                    );
+                    continue;
                 }
 
                 let mut offset = 0u64;
                 while offset < desc.len() as u64 {
-                    let addr = desc
-                        .addr()
-                        .checked_add(offset)
-                        .unwrap()
+                    let Some(base) = desc.addr().checked_add(offset) else {
+                        warn!("Address overflow in balloon descriptor");
+                        break;
+                    };
+                    let addr = match base
                         .translate_gva(self.access_platform.as_deref(), data_chunk_size)
-                        .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?;
-                    let pfn: u32 = desc_chain
-                        .memory()
-                        .read_obj(addr)
-                        .map_err(Error::GuestMemory)?;
+                    {
+                        Ok(a) => a,
+                        Err(e) => {
+                            warn!("Failed to translate descriptor address: {e}");
+                            break;
+                        }
+                    };
+                    let pfn: u32 = match desc_chain.memory().read_obj(addr) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            warn!("Failed to read PFN from descriptor: {e}");
+                            break;
+                        }
+                    };
                     offset += data_chunk_size as u64;
 
                     match queue_index {
                         0 => {
-                            Self::release_memory_range_4k(
+                            if let Err(e) = Self::release_memory_range_4k(
                                 &mut self.pbp,
                                 desc_chain.memory(),
                                 pfn,
-                            )?;
+                            ) {
+                                warn!("Failed to release memory for PFN {pfn:#x}: {e}");
+                            }
                         }
                         1 => {
                             let page_size = get_page_size() as usize;
                             let rbase =
                                 align_page_size_down((pfn as u64) << VIRTIO_BALLOON_PFN_SHIFT);
 
-                            Self::advise_memory_range(
+                            if let Err(e) = Self::advise_memory_range(
                                 desc_chain.memory(),
                                 vm_memory::GuestAddress(rbase),
                                 page_size,
                                 libc::MADV_WILLNEED,
-                            )?;
+                            ) {
+                                warn!("Failed to advise memory for PFN {pfn:#x}: {e}");
+                            }
                         }
                         _ => return Err(Error::InvalidQueueIndex(queue_index)),
                     }
