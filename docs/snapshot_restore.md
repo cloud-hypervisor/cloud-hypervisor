@@ -35,6 +35,13 @@ using the following command:
 ./ch-remote --api-socket=/tmp/cloud-hypervisor.sock snapshot file:///home/foo/snapshot
 ```
 
+By default, the snapshot includes guest RAM in the `memory-ranges` file. To
+snapshot only the VM state and configuration, without exporting guest RAM:
+
+```bash
+./ch-remote --api-socket=/tmp/cloud-hypervisor.sock snapshot destination_url=file:///home/foo/snapshot,include_memory=off
+```
+
 Given the directory was present on the system, the snapshot will succeed and
 it should contain the following files:
 
@@ -59,6 +66,11 @@ be needed.
 
 `state.json` contains the virtual machine state. It is used to restore each
 component in the state it was left before the snapshot occurred.
+
+When `include_memory=off` is used, only `config.json` and `state.json` are
+written. Such a snapshot does not contain guest RAM contents and cannot be
+restored through the default memory restore path without an external source for
+guest memory.
 
 ## Restore a Cloud Hypervisor VM
 
