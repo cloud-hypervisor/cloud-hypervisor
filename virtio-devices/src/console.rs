@@ -51,12 +51,6 @@ const VIRTIO_CONSOLE_F_SIZE: u64 = 0;
 
 #[derive(Error, Debug)]
 enum Error {
-    #[error("Failed to read from guest memory")]
-    GuestMemoryRead(#[source] vm_memory::guest_memory::Error),
-    #[error("Failed to write_all output")]
-    OutputWriteAll(#[source] io::Error),
-    #[error("Failed to flush output")]
-    OutputFlush(#[source] io::Error),
     #[error("Failed to add used index")]
     QueueAddUsed(#[source] virtio_queue::Error),
 }
@@ -266,21 +260,28 @@ impl ConsoleEpollHandler {
                     continue;
                 }
                 if let Some(out) = &mut self.out {
+                    let addr = match desc
+                        .addr()
+                        .translate_gva(self.access_platform.as_deref(), desc.len() as usize)
+                    {
+                        Ok(a) => a,
+                        Err(e) => {
+                            warn!("Failed to translate transmitq descriptor address: {e}");
+                            continue;
+                        }
+                    };
                     let mut buf: Vec<u8> = Vec::new();
-                    desc_chain
-                        .memory()
-                        .write_volatile_to(
-                            desc.addr()
-                                .translate_gva(self.access_platform.as_deref(), desc.len() as usize)
-                                .map_err(|e| {
-                                    Error::GuestMemoryRead(vm_memory::GuestMemoryError::IOError(e))
-                                })?,
-                            &mut buf,
-                            desc.len() as usize,
-                        )
-                        .map_err(Error::GuestMemoryRead)?;
-
-                    out.write_all(&buf).map_err(Error::OutputWriteAll)?;
+                    if let Err(e) =
+                        desc_chain
+                            .memory()
+                            .write_volatile_to(addr, &mut buf, desc.len() as usize)
+                    {
+                        warn!("Failed to read from transmitq descriptor: {e}");
+                        continue;
+                    }
+                    if let Err(e) = out.write_all(&buf) {
+                        warn!("Failed to write console output: {e}");
+                    }
                 }
             }
             trans_queue
@@ -289,8 +290,11 @@ impl ConsoleEpollHandler {
             used_descs = true;
         }
 
-        if used_descs && let Some(out) = &mut self.out {
-            out.flush().map_err(Error::OutputFlush)?;
+        if used_descs
+            && let Some(out) = &mut self.out
+            && let Err(e) = out.flush()
+        {
+            warn!("Failed to flush console output: {e}");
         }
 
         Ok(used_descs)
