@@ -159,6 +159,17 @@ nvidia-smi topo -p2p r
  GPU7	OK	OK	OK	OK	OK	OK	OK	X	
 ```
 
+Some VFIO devices expose BARs that should not be mmapped by the VMM even when
+the kernel reports them as mappable. The `x_exclude_mmap_bars` config argument can
+be used to skip mmap for specific BAR indices.
+
+BAR indices must be between 0 and 5 inclusive. The following example disables
+mmap for BAR 2 of the assigned device:
+
+```
+--device path=/sys/bus/pci/devices/0000:01:00.0/,x_exclude_mmap_bars=[2]
+```
+
 Some VFIO devices have a 32-bit mmio BAR. When using many such devices, it is
 possible to exhaust the 32-bit mmio space available on a PCI segment. The
 following example demonstrates an example device with a 16 MiB 32-bit mmio BAR.
