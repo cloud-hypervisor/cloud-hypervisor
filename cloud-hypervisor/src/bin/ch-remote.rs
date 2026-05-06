@@ -20,7 +20,7 @@ use api_client::{
 use clap::ArgAction;
 use clap::{Arg, ArgMatches, Command};
 use log::error;
-use option_parser::{ByteSized, ByteSizedParseError};
+use option_parser::{ByteSized, ByteSizedParseError, OptionParser, OptionParserError, Toggle};
 use thiserror::Error;
 use vmm::config::RestoreConfig;
 use vmm::vm_config::{
@@ -65,6 +65,8 @@ enum Error {
     AddVsockConfig(#[source] vmm::config::Error),
     #[error("Error parsing restore syntax")]
     Restore(#[source] vmm::config::Error),
+    #[error("Error parsing snapshot syntax")]
+    SnapshotConfig(#[source] OptionParserError),
     #[error("Error reading from stdin")]
     ReadingStdin(#[source] std::io::Error),
     #[error("Error reading from file")]
@@ -490,7 +492,7 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
                     .unwrap()
                     .get_one::<String>("snapshot_config")
                     .unwrap(),
-            );
+            )?;
             simple_api_command(socket, "PUT", "snapshot", Some(&snapshot_config))
                 .map_err(Error::HttpApiClient)
         }
@@ -713,7 +715,7 @@ fn dbus_api_do_command(matches: &ArgMatches, proxy: &DBusApi1ProxyBlocking<'_>) 
                     .unwrap()
                     .get_one::<String>("snapshot_config")
                     .unwrap(),
-            );
+            )?;
             proxy.api_vm_snapshot(&snapshot_config)
         }
         Some("restore") => {
@@ -909,12 +911,37 @@ fn add_vsock_config(config: &str) -> Result<String, Error> {
     Ok(vsock_config)
 }
 
-fn snapshot_config(url: &str) -> String {
+fn snapshot_config(config: &str) -> Result<String, Error> {
+    if !config.starts_with("destination_url=") && !config.starts_with("include_memory=") {
+        let snapshot_config = vmm::api::VmSnapshotConfig {
+            destination_url: String::from(config),
+            include_memory: true,
+        };
+
+        return Ok(serde_json::to_string(&snapshot_config).unwrap());
+    }
+
+    let mut parser = OptionParser::new();
+    parser.add("destination_url").add("include_memory");
+    parser.parse(config).map_err(Error::SnapshotConfig)?;
+
+    let destination_url = parser.get("destination_url").ok_or_else(|| {
+        Error::SnapshotConfig(OptionParserError::InvalidSyntax(
+            "destination_url is required".to_string(),
+        ))
+    })?;
+    let include_memory = parser
+        .convert::<Toggle>("include_memory")
+        .map_err(Error::SnapshotConfig)?
+        .unwrap_or(Toggle(true))
+        .0;
+
     let snapshot_config = vmm::api::VmSnapshotConfig {
-        destination_url: String::from(url),
+        destination_url,
+        include_memory,
     };
 
-    serde_json::to_string(&snapshot_config).unwrap()
+    Ok(serde_json::to_string(&snapshot_config).unwrap())
 }
 
 fn restore_config(config: &str) -> Result<(String, Vec<i32>), Error> {
@@ -1144,7 +1171,7 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
             .arg(
                 Arg::new("snapshot_config")
                     .index(1)
-                    .help("<destination_url>"),
+                    .help("<destination_url> or destination_url=<url>,include_memory=on|off"),
             ),
     ]
     .to_vec()
@@ -1318,5 +1345,29 @@ mod unit_tests {
         for command in commands {
             assert_args_sorted(|| command.get_arguments());
         }
+    }
+
+    #[test]
+    fn test_snapshot_config_parse() {
+        let config = snapshot_config("file:///tmp/snapshot").unwrap();
+        let config: vmm::api::VmSnapshotConfig = serde_json::from_str(&config).unwrap();
+        assert_eq!(config.destination_url, "file:///tmp/snapshot");
+        assert!(config.include_memory);
+
+        let config = snapshot_config("https://example.com/snapshot?token=abc").unwrap();
+        let config: vmm::api::VmSnapshotConfig = serde_json::from_str(&config).unwrap();
+        assert_eq!(
+            config.destination_url,
+            "https://example.com/snapshot?token=abc"
+        );
+        assert!(config.include_memory);
+
+        let config =
+            snapshot_config("destination_url=file:///tmp/snapshot,include_memory=off").unwrap();
+        let config: vmm::api::VmSnapshotConfig = serde_json::from_str(&config).unwrap();
+        assert_eq!(config.destination_url, "file:///tmp/snapshot");
+        assert!(!config.include_memory);
+
+        snapshot_config("include_memory=off").unwrap_err();
     }
 }

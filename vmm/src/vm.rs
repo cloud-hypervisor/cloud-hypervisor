@@ -3392,11 +3392,12 @@ impl Snapshottable for Vm {
     }
 }
 
-impl Transportable for Vm {
-    fn send(
+impl Vm {
+    pub(crate) fn send_snapshot(
         &self,
         snapshot: &Snapshot,
         destination_url: &str,
+        include_memory: bool,
     ) -> std::result::Result<(), MigratableError> {
         let mut snapshot_config_path = url_to_path(destination_url)?;
         snapshot_config_path.push(SNAPSHOT_CONFIG_FILE);
@@ -3436,6 +3437,10 @@ impl Transportable for Vm {
             .write(&vm_state)
             .map_err(|e| MigratableError::MigrateSend(e.into()))?;
 
+        if !include_memory {
+            return Ok(());
+        }
+
         // Tell the memory manager to also send/write its own snapshot.
         if let Some(memory_manager_snapshot) = snapshot.snapshots.get(MEMORY_MANAGER_SNAPSHOT_ID) {
             self.memory_manager
@@ -3449,6 +3454,16 @@ impl Transportable for Vm {
         }
 
         Ok(())
+    }
+}
+
+impl Transportable for Vm {
+    fn send(
+        &self,
+        snapshot: &Snapshot,
+        destination_url: &str,
+    ) -> std::result::Result<(), MigratableError> {
+        self.send_snapshot(snapshot, destination_url, true)
     }
 }
 

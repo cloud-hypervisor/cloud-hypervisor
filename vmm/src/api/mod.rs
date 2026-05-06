@@ -253,10 +253,26 @@ pub struct VmRemoveDeviceData {
     pub id: String,
 }
 
-#[derive(Clone, Deserialize, Serialize, Default, Debug)]
+#[derive(Clone, Deserialize, Serialize, Debug)]
 pub struct VmSnapshotConfig {
     /// The snapshot destination URL
     pub destination_url: String,
+    /// Whether to export the guest memory contents
+    #[serde(default = "default_include_memory")]
+    pub include_memory: bool,
+}
+
+fn default_include_memory() -> bool {
+    true
+}
+
+impl Default for VmSnapshotConfig {
+    fn default() -> Self {
+        Self {
+            destination_url: String::default(),
+            include_memory: default_include_memory(),
+        }
+    }
 }
 
 #[derive(Clone, Deserialize, Serialize, Default, Debug)]
@@ -513,7 +529,7 @@ pub trait RequestHandler {
 
     fn vm_resume(&mut self) -> Result<(), VmError>;
 
-    fn vm_snapshot(&mut self, destination_url: &str) -> Result<(), VmError>;
+    fn vm_snapshot(&mut self, destination_url: &str, include_memory: bool) -> Result<(), VmError>;
 
     fn vm_restore(&mut self, restore_cfg: RestoreConfig) -> Result<(), VmError>;
 
@@ -1634,7 +1650,7 @@ impl ApiAction for VmSnapshot {
             info!("API request event: VmSnapshot {config:?}");
 
             let response = vmm
-                .vm_snapshot(&config.destination_url)
+                .vm_snapshot(&config.destination_url, config.include_memory)
                 .map_err(ApiError::VmSnapshot)
                 .map(|_| ApiResponsePayload::Empty);
 
@@ -1757,6 +1773,15 @@ impl ApiAction for VmNmi {
 #[cfg(test)]
 mod unit_tests {
     use super::*;
+
+    #[test]
+    fn test_vm_snapshot_config_deserialize_default_memory() {
+        let config: VmSnapshotConfig =
+            serde_json::from_str(r#"{"destination_url":"file:///tmp/snapshot"}"#).unwrap();
+
+        assert_eq!(config.destination_url, "file:///tmp/snapshot");
+        assert!(config.include_memory);
+    }
 
     #[test]
     fn test_vm_send_migration_data_parse() {

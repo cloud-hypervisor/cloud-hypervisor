@@ -41,7 +41,7 @@ use vm_memory::bitmap::AtomicBitmap;
 use vm_migration::protocol::*;
 use vm_migration::{
     MemoryMigrationContext, Migratable, MigratableError, OngoingMigrationContext, Pausable,
-    Snapshot, Snapshottable, Transportable,
+    Snapshot, Snapshottable,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::unblock_signal;
@@ -1905,14 +1905,18 @@ impl RequestHandler for Vmm {
         }
     }
 
-    fn vm_snapshot(&mut self, destination_url: &str) -> result::Result<(), VmError> {
+    fn vm_snapshot(
+        &mut self,
+        destination_url: &str,
+        include_memory: bool,
+    ) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
             // Drain console_info so that FDs are not reused
             let _ = self.console_info.take();
             vm.snapshot()
                 .map_err(VmError::Snapshot)
                 .and_then(|snapshot| {
-                    vm.send(&snapshot, destination_url)
+                    vm.send_snapshot(&snapshot, destination_url, include_memory)
                         .map_err(VmError::SnapshotSend)
                 })
         } else {
