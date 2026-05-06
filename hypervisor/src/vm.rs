@@ -339,7 +339,7 @@ pub trait Vm: Send + Sync + Any {
     ) -> Result<()>;
     /// Unregister an event from a certain address it has been previously registered to.
     fn unregister_ioevent(&self, fd: &EventFd, addr: &IoEventAddress) -> Result<()>;
-    // Construct a routing entry
+    /// Construct a routing entry
     fn make_routing_entry(&self, gsi: u32, config: &InterruptSourceConfig) -> IrqRoutingEntry;
     /// Sets the GSI routing table entries, overwriting any previously set
     fn set_gsi_routing(&self, entries: &[IrqRoutingEntry]) -> Result<()>;
