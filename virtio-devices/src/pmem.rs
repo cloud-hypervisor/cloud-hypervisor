@@ -15,7 +15,7 @@ use std::{io, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
-use log::{error, info};
+use log::{error, info, warn};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -97,6 +97,7 @@ enum Error {
 #[derive(Debug, PartialEq, Eq)]
 enum RequestType {
     Flush,
+    Unknown(u32),
 }
 
 struct Request {
@@ -130,7 +131,7 @@ impl Request {
 
         let request_type = match request.type_ {
             VIRTIO_PMEM_REQ_TYPE_FLUSH => RequestType::Flush,
-            _ => return Err(Error::InvalidRequest),
+            t => RequestType::Unknown(t),
         };
 
         let status_desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
@@ -170,11 +171,17 @@ impl PmemEpollHandler {
         let mut used_descs = false;
         while let Some(mut desc_chain) = self.queue.pop_descriptor_chain(self.mem.memory()) {
             let len = match Request::parse(&mut desc_chain, self.access_platform.as_deref()) {
-                Ok(ref req) if (req.type_ == RequestType::Flush) => {
-                    let status_code = match self.disk.sync_all() {
-                        Ok(()) => VIRTIO_PMEM_RESP_TYPE_OK,
-                        Err(e) => {
-                            error!("failed flushing disk image: {e}");
+                Ok(ref req) => {
+                    let status_code = match req.type_ {
+                        RequestType::Flush => match self.disk.sync_all() {
+                            Ok(()) => VIRTIO_PMEM_RESP_TYPE_OK,
+                            Err(e) => {
+                                error!("Failed flushing disk image: {e}");
+                                VIRTIO_PMEM_RESP_TYPE_EIO
+                            }
+                        },
+                        RequestType::Unknown(t) => {
+                            warn!("Unknown request type: {t}");
                             VIRTIO_PMEM_RESP_TYPE_EIO
                         }
                     };
@@ -184,21 +191,6 @@ impl PmemEpollHandler {
                         Ok(_) => size_of::<VirtioPmemResp>() as u32,
                         Err(e) => {
                             error!("bad guest memory address: {e}");
-                            0
-                        }
-                    }
-                }
-                Ok(ref req) => {
-                    // Currently, there is only one virtio-pmem request, FLUSH.
-                    error!("Invalid virtio request type {:?}", req.type_);
-                    // The virtio spec requires a status response even on error.
-                    let resp = VirtioPmemResp {
-                        ret: VIRTIO_PMEM_RESP_TYPE_EIO,
-                    };
-                    match desc_chain.memory().write_obj(resp, req.status_addr) {
-                        Ok(()) => size_of::<VirtioPmemResp>() as u32,
-                        Err(e) => {
-                            error!("Bad guest memory address: {e}");
                             0
                         }
                     }
