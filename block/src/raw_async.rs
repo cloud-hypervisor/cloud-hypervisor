@@ -69,7 +69,9 @@ impl AsyncIo for RawFileAsync {
                     .build()
                     .user_data(user_data),
             )
-            .map_err(|_| AsyncIoError::ReadVectored(Error::other("Submission queue is full")))?;
+            .map_err(|e| {
+                AsyncIoError::ReadVectored(Error::other(format!("Submission queue is full: {e:?}")))
+            })?;
         };
 
         // Update the submission queue and submit new operations to the
@@ -97,7 +99,11 @@ impl AsyncIo for RawFileAsync {
                     .build()
                     .user_data(user_data),
             )
-            .map_err(|_| AsyncIoError::WriteVectored(Error::other("Submission queue is full")))?;
+            .map_err(|e| {
+                AsyncIoError::WriteVectored(Error::other(format!(
+                    "Submission queue is full: {e:?}"
+                )))
+            })?;
         };
 
         // Update the submission queue and submit new operations to the
@@ -119,7 +125,9 @@ impl AsyncIo for RawFileAsync {
                         .build()
                         .user_data(user_data),
                 )
-                .map_err(|_| AsyncIoError::Fsync(Error::other("Submission queue is full")))?;
+                .map_err(|e| {
+                    AsyncIoError::Fsync(Error::other(format!("Submission queue is full: {e:?}")))
+                })?;
             };
 
             // Update the submission queue and submit new operations to the
@@ -169,8 +177,10 @@ impl AsyncIo for RawFileAsync {
                             .build()
                             .user_data(req.user_data),
                         )
-                        .map_err(|_| {
-                            AsyncIoError::ReadVectored(Error::other("Submission queue is full"))
+                        .map_err(|e| {
+                            AsyncIoError::ReadVectored(Error::other(format!(
+                                "Submission queue is full: {e:?}"
+                            )))
                         })?;
                     };
                     submitted = true;
@@ -189,8 +199,10 @@ impl AsyncIo for RawFileAsync {
                             .build()
                             .user_data(req.user_data),
                         )
-                        .map_err(|_| {
-                            AsyncIoError::WriteVectored(Error::other("Submission queue is full"))
+                        .map_err(|e| {
+                            AsyncIoError::WriteVectored(Error::other(format!(
+                                "Submission queue is full: {e:?}"
+                            )))
                         })?;
                     };
                     submitted = true;
