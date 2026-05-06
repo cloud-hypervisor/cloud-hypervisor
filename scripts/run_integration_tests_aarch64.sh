@@ -273,13 +273,13 @@ if ! [[ "${PARALLEL_INTEGRATION_TESTS_NUM:-}" =~ ^[1-9][0-9]*$ ]]; then
 fi
 echo "nproc:$(nproc), parallel_integration_tests:${PARALLEL_INTEGRATION_TESTS_NUM}"
 # Run all direct kernel boot (Device Tree) test cases in mod `parallel`
-time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads="${PARALLEL_INTEGRATION_TESTS_NUM}" "common_parallel::$test_filter" -- ${test_binary_args[*]}
+time cargo nextest run -p cloud-hypervisor $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads="${PARALLEL_INTEGRATION_TESTS_NUM}" "common_parallel::$test_filter" -- ${test_binary_args[*]}
 RES=$?
 
 # Run some tests in sequence since the result could be affected by other tests
 # running in parallel.
 if [ $RES -eq 0 ]; then
-    time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=1 "common_sequential::$test_filter" -- ${test_binary_args[*]}
+    time cargo nextest run -p cloud-hypervisor $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=1 "common_sequential::$test_filter" -- ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
@@ -287,7 +287,7 @@ fi
 
 # Run all ACPI test cases
 if [ $RES -eq 0 ]; then
-    time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads="$TEST_THREADS_DEFAULT" "aarch64_acpi::$test_filter" -- ${test_binary_args[*]}
+    time cargo nextest run -p cloud-hypervisor $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads="$TEST_THREADS_DEFAULT" "aarch64_acpi::$test_filter" -- ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
@@ -298,7 +298,7 @@ if [ $RES -eq 0 ]; then
     cargo build --features "mshv,dbus_api" --all --release --target "$BUILD_TARGET"
     export RUST_BACKTRACE=1
     # integration tests now do not reply on build feature "dbus_api"
-    time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads="$TEST_THREADS_DEFAULT" "dbus_api::$test_filter" -- ${test_binary_args[*]}
+    time cargo nextest run -p cloud-hypervisor $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads="$TEST_THREADS_DEFAULT" "dbus_api::$test_filter" -- ${test_binary_args[*]}
     RES=$?
 fi
 
@@ -306,14 +306,14 @@ fi
 if [ $RES -eq 0 ]; then
     cargo build --features "mshv,fw_cfg" --all --release --target "$BUILD_TARGET"
     export RUST_BACKTRACE=1
-    time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads="$TEST_THREADS_DEFAULT" "fw_cfg::$test_filter" -- ${test_binary_args[*]}
+    time cargo nextest run -p cloud-hypervisor $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads="$TEST_THREADS_DEFAULT" "fw_cfg::$test_filter" -- ${test_binary_args[*]}
     RES=$?
 fi
 
 if [ $RES -eq 0 ]; then
     cargo build --features "mshv,ivshmem" --all --release --target "$BUILD_TARGET"
     export RUST_BACKTRACE=1
-    time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads="$TEST_THREADS_DEFAULT" "ivshmem::$test_filter" -- ${test_binary_args[*]}
+    time cargo nextest run -p cloud-hypervisor $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads="$TEST_THREADS_DEFAULT" "ivshmem::$test_filter" -- ${test_binary_args[*]}
 
     RES=$?
 fi
