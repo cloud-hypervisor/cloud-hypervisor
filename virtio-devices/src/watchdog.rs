@@ -331,7 +331,7 @@ impl VirtioDevice for Watchdog {
             mem,
             interrupt_cb,
             mut queues,
-            ..
+            device_status,
         } = context;
         self.common.activate(&queues, interrupt_cb.clone())?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
@@ -351,7 +351,7 @@ impl VirtioDevice for Watchdog {
         let mut handler = WatchdogEpollHandler {
             mem,
             queue,
-            interrupt_cb,
+            interrupt_cb: interrupt_cb.clone(),
             queue_evt,
             kill_evt,
             pause_evt,
@@ -370,6 +370,8 @@ impl VirtioDevice for Watchdog {
             Thread::VirtioWatchdog,
             &mut epoll_threads,
             &self.exit_evt,
+            device_status.clone(),
+            interrupt_cb.clone(),
             move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
 

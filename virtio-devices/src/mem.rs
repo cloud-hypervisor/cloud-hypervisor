@@ -953,7 +953,7 @@ impl VirtioDevice for Mem {
             mem,
             interrupt_cb,
             mut queues,
-            ..
+            device_status,
         } = context;
         self.common.activate(&queues, interrupt_cb.clone())?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
@@ -967,7 +967,7 @@ impl VirtioDevice for Mem {
             blocks_state: Arc::clone(&self.blocks_state),
             config: self.config.clone(),
             queue,
-            interrupt_cb,
+            interrupt_cb: interrupt_cb.clone(),
             queue_evt,
             kill_evt,
             pause_evt,
@@ -1000,6 +1000,8 @@ impl VirtioDevice for Mem {
             Thread::VirtioMem,
             &mut epoll_threads,
             &self.exit_evt,
+            device_status.clone(),
+            interrupt_cb.clone(),
             move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
         self.common.epoll_threads = Some(epoll_threads);

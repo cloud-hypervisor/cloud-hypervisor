@@ -270,7 +270,7 @@ impl VirtioDevice for Net {
             mem,
             interrupt_cb,
             mut queues,
-            ..
+            device_status,
         } = context;
         self.vu_common
             .virtio_common
@@ -321,6 +321,8 @@ impl VirtioDevice for Net {
                 Thread::VirtioVhostNetCtl,
                 &mut epoll_threads,
                 &self.exit_evt,
+                device_status.clone(),
+                interrupt_cb.clone(),
                 move || ctrl_handler.run_ctrl(&paused, paused_sync.as_ref().unwrap()),
             )?;
             self.ctrl_queue_epoll_thread = Some(epoll_threads.remove(0));
@@ -340,7 +342,7 @@ impl VirtioDevice for Net {
         let mut handler = self.vu_common.activate(
             mem,
             &queues,
-            interrupt_cb,
+            interrupt_cb.clone(),
             backend_acked_features,
             backend_req_handler,
             kill_evt,
@@ -357,6 +359,8 @@ impl VirtioDevice for Net {
             Thread::VirtioVhostNet,
             &mut epoll_threads,
             &self.exit_evt,
+            device_status.clone(),
+            interrupt_cb.clone(),
             move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
         self.vu_common.epoll_thread = Some(epoll_threads.remove(0));

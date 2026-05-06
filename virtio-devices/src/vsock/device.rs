@@ -480,7 +480,7 @@ where
             mem,
             interrupt_cb,
             queues,
-            ..
+            device_status,
         } = context;
         self.common.activate(&queues, interrupt_cb.clone())?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
@@ -498,7 +498,7 @@ where
             queue_evts,
             kill_evt,
             pause_evt,
-            interrupt_cb,
+            interrupt_cb: interrupt_cb.clone(),
             backend: self.backend.clone(),
             access_platform: self.common.access_platform(),
         };
@@ -513,6 +513,8 @@ where
             Thread::VirtioVsock,
             &mut epoll_threads,
             &self.exit_evt,
+            device_status.clone(),
+            interrupt_cb.clone(),
             move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
 

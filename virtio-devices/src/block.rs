@@ -1159,6 +1159,8 @@ impl VirtioDevice for Block {
                 Thread::VirtioBlock,
                 &mut epoll_threads,
                 &self.exit_evt,
+                self.device_status.clone(),
+                interrupt_cb.clone(),
                 move || handler.run(&paused, paused_sync.as_ref().unwrap()),
             )?;
         }

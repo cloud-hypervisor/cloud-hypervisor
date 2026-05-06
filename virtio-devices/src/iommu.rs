@@ -1282,7 +1282,7 @@ impl VirtioDevice for Iommu {
             mem,
             interrupt_cb,
             mut queues,
-            ..
+            device_status,
         } = context;
         self.common.activate(&queues, interrupt_cb.clone())?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
@@ -1294,7 +1294,7 @@ impl VirtioDevice for Iommu {
             mem,
             request_queue,
             _event_queue,
-            interrupt_cb,
+            interrupt_cb: interrupt_cb.clone(),
             request_queue_evt,
             _event_queue_evt,
             kill_evt,
@@ -1314,6 +1314,8 @@ impl VirtioDevice for Iommu {
             Thread::VirtioIommu,
             &mut epoll_threads,
             &self.exit_evt,
+            device_status.clone(),
+            interrupt_cb.clone(),
             move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
 

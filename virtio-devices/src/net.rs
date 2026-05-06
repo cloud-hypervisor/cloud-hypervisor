@@ -769,6 +769,8 @@ impl VirtioDevice for Net {
                 Thread::VirtioNetCtl,
                 &mut epoll_threads,
                 &self.exit_evt,
+                self.device_status.clone(),
+                interrupt_cb.clone(),
                 move || ctrl_handler.run_ctrl(&paused, paused_sync.as_ref().unwrap()),
             )?;
             self.ctrl_queue_epoll_thread = Some(epoll_threads.remove(0));
@@ -847,6 +849,8 @@ impl VirtioDevice for Net {
                 Thread::VirtioNet,
                 &mut epoll_threads,
                 &self.exit_evt,
+                self.device_status.clone(),
+                interrupt_cb.clone(),
                 move || handler.run(&paused, paused_sync.as_ref().unwrap()),
             )?;
         }
