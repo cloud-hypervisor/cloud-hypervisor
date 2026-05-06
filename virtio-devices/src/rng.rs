@@ -267,7 +267,7 @@ impl VirtioDevice for Rng {
             mem,
             interrupt_cb,
             mut queues,
-            ..
+            device_status,
         } = context;
         self.common.activate(&queues, interrupt_cb.clone())?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
@@ -284,7 +284,7 @@ impl VirtioDevice for Rng {
                 mem,
                 queue,
                 random_file,
-                interrupt_cb,
+                interrupt_cb: interrupt_cb.clone(),
                 queue_evt,
                 kill_evt,
                 pause_evt,
@@ -300,6 +300,8 @@ impl VirtioDevice for Rng {
                 Thread::VirtioRng,
                 &mut epoll_threads,
                 &self.exit_evt,
+                device_status.clone(),
+                interrupt_cb.clone(),
                 move || handler.run(&paused, paused_sync.as_ref().unwrap()),
             )?;
 

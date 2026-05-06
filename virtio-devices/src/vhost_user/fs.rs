@@ -245,7 +245,7 @@ impl VirtioDevice for Fs {
             mem,
             interrupt_cb,
             queues,
-            ..
+            device_status,
         } = context;
         self.vu_common
             .virtio_common
@@ -260,7 +260,7 @@ impl VirtioDevice for Fs {
         let mut handler = self.vu_common.activate(
             mem,
             &queues,
-            interrupt_cb,
+            interrupt_cb.clone(),
             self.vu_common.virtio_common.acked_features,
             backend_req_handler,
             kill_evt,
@@ -277,6 +277,8 @@ impl VirtioDevice for Fs {
             Thread::VirtioVhostFs,
             &mut epoll_threads,
             &self.exit_evt,
+            device_status.clone(),
+            interrupt_cb.clone(),
             move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
         self.vu_common.epoll_thread = Some(epoll_threads.remove(0));

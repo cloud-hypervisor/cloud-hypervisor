@@ -719,7 +719,7 @@ impl VirtioDevice for Console {
             mem,
             interrupt_cb,
             mut queues,
-            ..
+            device_status,
         } = context;
         self.common.activate(&queues, interrupt_cb.clone())?;
         self.resizer
@@ -741,7 +741,7 @@ impl VirtioDevice for Console {
             mem,
             input_queue,
             output_queue,
-            interrupt_cb,
+            interrupt_cb.clone(),
             self.in_buffer.clone(),
             Arc::clone(&self.resizer),
             self.endpoint.clone(),
@@ -764,6 +764,8 @@ impl VirtioDevice for Console {
             Thread::VirtioConsole,
             &mut epoll_threads,
             &self.exit_evt,
+            device_status.clone(),
+            interrupt_cb.clone(),
             move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
 

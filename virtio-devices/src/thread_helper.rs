@@ -4,22 +4,27 @@
 //
 
 use std::panic::AssertUnwindSafe;
+use std::sync::Arc;
+use std::sync::atomic::AtomicU8;
 use std::thread::{self, JoinHandle};
 
 use log::error;
 use seccompiler::{SeccompAction, apply_filter};
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::ActivateError;
 use crate::epoll_helper::EpollHelperError;
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
+use crate::{ActivateError, VirtioInterrupt, mark_device_needs_reset};
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_virtio_thread<F>(
     name: &str,
     seccomp_action: &SeccompAction,
     thread_type: Thread,
     epoll_threads: &mut Vec<JoinHandle<()>>,
     exit_evt: &EventFd,
+    device_status: Arc<AtomicU8>,
+    interrupt_cb: Arc<dyn VirtioInterrupt>,
     f: F,
 ) -> Result<(), ActivateError>
 where
@@ -49,12 +54,14 @@ where
                     error!("{thread_name} thread panicked");
                     thread_exit_evt.write(1).ok();
                 }
-                Ok(r) => {
-                    if let Err(e) = r {
-                        error!("Error running worker: {e:?}");
-                        thread_exit_evt.write(1).ok();
-                    }
+                Ok(Err(e)) => {
+                    mark_device_needs_reset(
+                        &device_status,
+                        interrupt_cb.as_ref(),
+                        format_args!("{thread_name}: worker exited with error: {e:?}"),
+                    );
                 }
+                Ok(Ok(())) => {}
             }
         })
         .map(|thread| epoll_threads.push(thread))
