@@ -193,6 +193,7 @@ where
     }
 }
 
+#[derive(Clone)]
 pub struct GuestNetworkConfig {
     pub guest_ip0: String,
     pub host_ip0: String,
@@ -207,6 +208,7 @@ pub struct GuestNetworkConfig {
     pub l2_guest_mac2: String,
     pub l2_guest_mac3: String,
     pub tcp_listener_port: u16,
+    pub l2_tcp_listener_port: u16,
     pub notify_ip: String,
 }
 
@@ -230,11 +232,13 @@ pub enum WaitForBootError {
 }
 
 impl GuestNetworkConfig {
-    pub fn wait_vm_boot(&self, custom_timeout: u32) -> Result<(), WaitForBootError> {
+    pub fn wait_vm_boot_from(
+        port: u16,
+        expected_guest_addr: &str,
+        custom_timeout: u32,
+    ) -> Result<(), WaitForBootError> {
         let start = std::time::Instant::now();
-        // The 'port' is unique per 'GUEST' and listening to wild-card ip avoids retrying on 'TcpListener::bind()'
-        let listen_addr = format!("0.0.0.0:{}", self.tcp_listener_port);
-        let expected_guest_addr = self.guest_ip0.as_str();
+        let listen_addr = format!("0.0.0.0:{port}");
         let mut s = String::new();
 
         let mut closure = || -> Result<(), WaitForBootError> {
@@ -313,6 +317,10 @@ impl GuestNetworkConfig {
             }
             Ok(_) => Ok(()),
         }
+    }
+
+    pub fn wait_vm_boot(&self, custom_timeout: u32) -> Result<(), WaitForBootError> {
+        Self::wait_vm_boot_from(self.tcp_listener_port, &self.guest_ip0, custom_timeout)
     }
 }
 
@@ -1203,6 +1211,7 @@ impl Guest {
             l2_guest_mac2: format!("de:ad:be:ef:34:{id:02x}"),
             l2_guest_mac3: format!("de:ad:be:ef:56:{id:02x}"),
             tcp_listener_port: DEFAULT_TCP_LISTENER_PORT + id as u16,
+            l2_tcp_listener_port: DEFAULT_TCP_LISTENER_PORT + 1024 + id as u16,
             notify_ip: format!("{class}.{id}.1"),
         };
 
@@ -1461,6 +1470,16 @@ impl Guest {
         self.network
             .wait_vm_boot(custom_timeout)
             .map_err(Error::WaitForBoot)
+    }
+
+    pub fn prepare_l2_cloudinit(&self) -> (TempDir, String) {
+        let l2_dir = TempDir::new_with_prefix("/tmp/ch-l2").unwrap();
+        let l2_network = GuestNetworkConfig {
+            tcp_listener_port: self.network.l2_tcp_listener_port,
+            ..self.network.clone()
+        };
+        let path = self.disk_config.prepare_cloudinit(&l2_dir, &l2_network);
+        (l2_dir, path)
     }
 
     pub fn check_numa_node_cpus(&self, node_id: usize, cpus: &[usize]) -> Result<(), Error> {
