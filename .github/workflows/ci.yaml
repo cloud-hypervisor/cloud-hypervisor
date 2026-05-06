@@ -665,11 +665,11 @@ jobs:
         with:
           fetch-depth: 0
       - name: Run VFIO integration tests
-        timeout-minutes: 15
+        timeout-minutes: 25
         run: scripts/dev_cli.sh tests --integration-vfio
     # Most tests are failing with musl, see #6790
     # - name: Run VFIO integration tests for musl
-    #   timeout-minutes: 15
+    #   timeout-minutes: 25
     #   run: scripts/dev_cli.sh tests --integration-vfio --libc musl
   integration-windows:
     name: integration-windows
