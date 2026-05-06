@@ -53,8 +53,6 @@ const VIRTIO_CONSOLE_F_SIZE: u64 = 0;
 enum Error {
     #[error("Failed to read from guest memory")]
     GuestMemoryRead(#[source] vm_memory::guest_memory::Error),
-    #[error("Failed to write to guest memory")]
-    GuestMemoryWrite(#[source] vm_memory::guest_memory::Error),
     #[error("Failed to write_all output")]
     OutputWriteAll(#[source] io::Error),
     #[error("Failed to flush output")]
@@ -217,22 +215,24 @@ impl ConsoleEpollHandler {
                     warn!("Skipping device-readable descriptor on receiveq");
                     continue;
                 }
-                let len = cmp::min(desc.len(), in_buffer.len() as u32);
-                let source_slice = in_buffer.drain(..len as usize).collect::<Vec<u8>>();
-
-                desc_chain
-                    .memory()
-                    .write_slice(
-                        &source_slice[..],
-                        desc.addr()
-                            .translate_gva(self.access_platform.as_deref(), desc.len() as usize)
-                            .map_err(|e| {
-                                Error::GuestMemoryWrite(vm_memory::GuestMemoryError::IOError(e))
-                            })?,
-                    )
-                    .map_err(Error::GuestMemoryWrite)?;
-
-                total_len += len;
+                let len = cmp::min(desc.len() as usize, in_buffer.len());
+                let addr = match desc
+                    .addr()
+                    .translate_gva(self.access_platform.as_deref(), desc.len() as usize)
+                {
+                    Ok(a) => a,
+                    Err(e) => {
+                        warn!("Failed to translate receiveq descriptor address: {e}");
+                        break;
+                    }
+                };
+                let source: Vec<u8> = in_buffer.range(..len).copied().collect();
+                if let Err(e) = desc_chain.memory().write_slice(&source, addr) {
+                    warn!("Failed to write to receiveq descriptor: {e}");
+                    break;
+                }
+                in_buffer.drain(..len);
+                total_len += len as u32;
             }
 
             recv_queue
