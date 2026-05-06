@@ -631,7 +631,17 @@ impl MemEpollHandler {
         let mut used_descs = false;
 
         while let Some(mut desc_chain) = self.queue.pop_descriptor_chain(self.mem.memory()) {
-            let r = Request::parse(&mut desc_chain)?;
+            let r = match Request::parse(&mut desc_chain) {
+                Ok(r) => r,
+                Err(e) => {
+                    warn!("Failed to parse virtio-mem request: {e}");
+                    self.queue
+                        .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
+                        .map_err(Error::QueueAddUsed)?;
+                    used_descs = true;
+                    continue;
+                }
+            };
             let (resp_type, resp_state) = match r.req.req_type {
                 VIRTIO_MEM_REQ_PLUG => (
                     self.state_change_request(r.req.addr, r.req.nb_blocks, true),
