@@ -100,7 +100,7 @@ impl RequestHandler for StubApiRequestHandler {
         Ok(())
     }
 
-    fn vm_snapshot(&mut self, _: &str) -> Result<(), VmError> {
+    fn vm_snapshot(&mut self, _: &str, _: bool) -> Result<(), VmError> {
         Ok(())
     }
 
