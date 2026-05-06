@@ -2359,13 +2359,11 @@ mod common_parallel {
         let mut cloud_init_vfio_base_path = vfio_path.clone();
         cloud_init_vfio_base_path.push("cloudinit.img");
 
-        // We copy our cloudinit into the vfio mount point, for the nested
-        // cloud-hypervisor guest to use.
-        rate_limited_copy(
-            guest.disk_config.disk(DiskType::CloudInit).unwrap(),
-            &cloud_init_vfio_base_path,
-        )
-        .expect("copying of cloud-init disk failed");
+        // Prepare a separate cloud-init for the L2 guest with its own
+        // boot notification port.
+        let (_l2_ci_dir, l2_ci_path) = guest.prepare_l2_cloudinit();
+        rate_limited_copy(l2_ci_path, &cloud_init_vfio_base_path)
+            .expect("copying of L2 cloud-init disk failed");
 
         let mut vfio_disk_path = workload_path.clone();
         vfio_disk_path.push("vfio.img");
@@ -2444,24 +2442,17 @@ mod common_parallel {
 
         let r = std::panic::catch_unwind(|| {
             guest.ssh_command_l1("sudo systemctl start vfio").unwrap();
+            GuestNetworkConfig::wait_vm_boot_from(
+                guest.network.l2_tcp_listener_port,
+                &guest.network.l2_guest_ip2,
+                DEFAULT_TCP_LISTENER_TIMEOUT,
+            )
+            .unwrap();
+
             let auth = PasswordAuth {
                 username: String::from("cloud"),
                 password: String::from("cloud123"),
             };
-            wait_for_ssh(
-                "true",
-                &auth,
-                &guest.network.l2_guest_ip1,
-                Duration::from_secs(120),
-            )
-            .unwrap();
-            wait_for_ssh(
-                "true",
-                &auth,
-                &guest.network.l2_guest_ip2,
-                Duration::from_secs(120),
-            )
-            .unwrap();
 
             // We booted our cloud hypervisor L2 guest with a "VFIOTAG" tag
             // added to its kernel command line.
