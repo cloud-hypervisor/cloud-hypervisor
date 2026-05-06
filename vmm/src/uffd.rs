@@ -12,7 +12,9 @@
 //! original memory mapping, so it remains compatible with VFIO device
 //! passthrough and shared-memory-backed guest RAM.
 
-use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
+use std::io::Error;
+use std::mem;
+use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 
 use crate::userfaultfd;
 
@@ -57,17 +59,17 @@ pub(crate) struct UffdMsg {
     _pad: [u8; 8],
 }
 
-const _: () = assert!(std::mem::size_of::<UffdMsg>() == 32);
+const _: () = assert!(mem::size_of::<UffdMsg>() == 32);
 
 /// Create a userfaultfd file descriptor and perform the API handshake.
-pub(crate) fn create(required_features: u64) -> Result<OwnedFd, std::io::Error> {
+pub(crate) fn create(required_features: u64) -> Result<OwnedFd, Error> {
     // SAFETY: `userfaultfd` syscall with O_CLOEXEC | O_NONBLOCK flags.
     let fd = unsafe { libc::syscall(libc::SYS_userfaultfd, libc::O_CLOEXEC | libc::O_NONBLOCK) };
     if fd < 0 {
-        return Err(std::io::Error::last_os_error());
+        return Err(Error::last_os_error());
     }
     // SAFETY: the syscall returned a valid fd above.
-    let fd = unsafe { OwnedFd::from_raw_fd(fd as std::os::unix::io::RawFd) };
+    let fd = unsafe { OwnedFd::from_raw_fd(fd as RawFd) };
 
     let mut api = UffdioApi {
         api: userfaultfd::UFFD_API,
@@ -83,14 +85,14 @@ pub(crate) fn create(required_features: u64) -> Result<OwnedFd, std::io::Error> 
         )
     };
     if ret < 0 {
-        return Err(std::io::Error::last_os_error());
+        return Err(Error::last_os_error());
     }
 
     Ok(fd)
 }
 
 /// Register a memory range for missing-page fault handling.
-pub(crate) fn register(fd: BorrowedFd<'_>, addr: u64, len: u64) -> Result<u64, std::io::Error> {
+pub(crate) fn register(fd: BorrowedFd<'_>, addr: u64, len: u64) -> Result<u64, Error> {
     let mut reg = UffdioRegister {
         range_start: addr,
         range_len: len,
@@ -106,18 +108,13 @@ pub(crate) fn register(fd: BorrowedFd<'_>, addr: u64, len: u64) -> Result<u64, s
         )
     };
     if ret < 0 {
-        return Err(std::io::Error::last_os_error());
+        return Err(Error::last_os_error());
     }
     Ok(reg.ioctls)
 }
 
 /// Resolve a page fault by copying data into the faulted address.
-pub(crate) fn copy(
-    fd: BorrowedFd<'_>,
-    dst: u64,
-    src: *const u8,
-    len: u64,
-) -> Result<(), std::io::Error> {
+pub(crate) fn copy(fd: BorrowedFd<'_>, dst: u64, src: *const u8, len: u64) -> Result<(), Error> {
     let mut cp = UffdioCopy {
         dst,
         src: src as u64,
@@ -134,7 +131,7 @@ pub(crate) fn copy(
         )
     };
     if ret < 0 {
-        return Err(std::io::Error::last_os_error());
+        return Err(Error::last_os_error());
     }
     Ok(())
 }
@@ -150,7 +147,7 @@ struct UffdioRange {
 /// Needed after UFFDIO_COPY returns EEXIST: the page was already resolved
 /// by a concurrent fault, but any additional threads blocked on that page
 /// may not have been woken.
-pub(crate) fn wake(fd: BorrowedFd<'_>, addr: u64, len: u64) -> Result<(), std::io::Error> {
+pub(crate) fn wake(fd: BorrowedFd<'_>, addr: u64, len: u64) -> Result<(), Error> {
     let mut range = UffdioRange { start: addr, len };
     // SAFETY: `range` is a valid, correctly-sized struct for this ioctl.
     let ret = unsafe {
@@ -161,7 +158,7 @@ pub(crate) fn wake(fd: BorrowedFd<'_>, addr: u64, len: u64) -> Result<(), std::i
         )
     };
     if ret < 0 {
-        return Err(std::io::Error::last_os_error());
+        return Err(Error::last_os_error());
     }
     Ok(())
 }
