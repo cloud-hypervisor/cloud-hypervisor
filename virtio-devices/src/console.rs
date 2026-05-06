@@ -261,6 +261,10 @@ impl ConsoleEpollHandler {
 
         while let Some(mut desc_chain) = trans_queue.pop_descriptor_chain(self.mem.memory()) {
             while let Some(desc) = desc_chain.next() {
+                if desc.is_write_only() {
+                    warn!("Skipping device-writable descriptor on transmitq");
+                    continue;
+                }
                 if let Some(out) = &mut self.out {
                     let mut buf: Vec<u8> = Vec::new();
                     desc_chain
