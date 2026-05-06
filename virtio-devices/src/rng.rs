@@ -64,14 +64,12 @@ impl RngEpollHandler {
             // report a used length of 0 to indicate failure.
             let mut total_len: usize = 0;
             while let Some(desc) = desc_chain.next() {
-                if !desc.is_write_only() || desc.len() == 0 {
-                    warn!(
-                        "Skipping descriptor with write_only={} len={}",
-                        desc.is_write_only(),
-                        desc.len()
-                    );
-                    total_len = 0;
-                    break;
+                if !desc.is_write_only() {
+                    warn!("Skipping device-readable descriptor");
+                    continue;
+                }
+                if desc.len() == 0 {
+                    continue;
                 }
                 let addr = match desc
                     .addr()
