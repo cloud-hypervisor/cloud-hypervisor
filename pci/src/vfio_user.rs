@@ -26,7 +26,9 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::mmap::MmapRegion;
-use crate::vfio::{UserMemoryRegion, VFIO_COMMON_ID, Vfio, VfioCommon, VfioError};
+use crate::vfio::{
+    UserMemoryRegion, VFIO_COMMON_ID, Vfio, VfioCommon, VfioCommonConfig, VfioError,
+};
 use crate::{
     BarReprogrammingParams, PciBarConfiguration, PciBdf, PciDevice, PciDeviceError, PciSubclass,
     VfioPciError,
@@ -101,7 +103,7 @@ impl VfioUserPciDevice {
             &PciVfioUserSubclass::VfioUserSubclass,
             bdf,
             vm_migration::snapshot_from_id(snapshot, VFIO_COMMON_ID),
-            None,
+            VfioCommonConfig::default(),
         )
         .map_err(VfioUserPciDeviceError::CreateVfioCommon)?;
 
