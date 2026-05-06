@@ -207,6 +207,7 @@ pub struct GuestNetworkConfig {
     pub l2_guest_mac2: String,
     pub l2_guest_mac3: String,
     pub tcp_listener_port: u16,
+    pub notify_ip: String,
 }
 
 pub const DEFAULT_TCP_LISTENER_MESSAGE: &str = "booted";
@@ -461,7 +462,7 @@ impl DiskConfig for UbuntuDiskConfig {
             "@DEFAULT_TCP_LISTENER_MESSAGE",
             DEFAULT_TCP_LISTENER_MESSAGE,
         );
-        user_data_string = user_data_string.replace("@HOST_IP", &network.host_ip0);
+        user_data_string = user_data_string.replace("@NOTIFY_IP", &network.notify_ip);
         user_data_string =
             user_data_string.replace("@TCP_LISTENER_PORT", &network.tcp_listener_port.to_string());
 
@@ -1202,6 +1203,7 @@ impl Guest {
             l2_guest_mac2: format!("de:ad:be:ef:34:{id:02x}"),
             l2_guest_mac3: format!("de:ad:be:ef:56:{id:02x}"),
             tcp_listener_port: DEFAULT_TCP_LISTENER_PORT + id as u16,
+            notify_ip: format!("{class}.{id}.1"),
         };
 
         disk_config.prepare_files(&tmp_dir, &network);
