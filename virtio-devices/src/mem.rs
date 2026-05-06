@@ -23,7 +23,7 @@ use std::{io, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
-use log::{error, info};
+use log::{error, info, warn};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -654,7 +654,8 @@ impl MemEpollHandler {
                 VIRTIO_MEM_REQ_UNPLUG_ALL => (self.unplug_all(), 0u16),
                 VIRTIO_MEM_REQ_STATE => self.state_request(r.req.addr, r.req.nb_blocks),
                 _ => {
-                    return Err(Error::UnknownRequestType(r.req.req_type));
+                    warn!("Unknown request type: {}", r.req.req_type);
+                    (VIRTIO_MEM_RESP_ERROR, 0u16)
                 }
             };
             let len = r.send_response(desc_chain.memory(), resp_type, resp_state)?;
