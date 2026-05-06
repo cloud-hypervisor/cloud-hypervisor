@@ -9,7 +9,7 @@ use libc::{
     BLKIOMIN, BLKIOOPT, BLKPBSZGET, BLKSSZGET, FIOCLEX, FIONBIO, SIOCGIFFLAGS, SIOCGIFHWADDR,
     SIOCGIFINDEX, SIOCGIFMTU, SIOCSIFADDR, SIOCSIFFLAGS, SIOCSIFHWADDR, SIOCSIFMTU, SIOCSIFNETMASK,
     TCGETS, TCGETS2, TCSETS, TCSETS2, TIOCGPGRP, TIOCGPTPEER, TIOCGWINSZ, TIOCSCTTY, TIOCSPGRP,
-    TIOCSPTLCK, TUNGETFEATURES, TUNGETIFF, TUNSETIFF, TUNSETOFFLOAD, TUNSETVNETHDRSZ,
+    TIOCSPTLCK, TUNGETFEATURES, TUNGETIFF, TUNSETIFF, TUNSETOFFLOAD, TUNSETSNDBUF, TUNSETVNETHDRSZ,
 };
 use seccompiler::SeccompCmpOp::Eq;
 use seccompiler::{
@@ -345,6 +345,7 @@ fn create_vmm_ioctl_seccomp_rule_common(
         and![Cond::new(1, ArgLen::Dword, Eq, TUNGETIFF as _)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TUNSETIFF as _)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TUNSETOFFLOAD as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TUNSETSNDBUF as _)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TUNSETVNETHDRSZ as _)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_GET_API_VERSION)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_CHECK_EXTENSION)?],
