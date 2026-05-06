@@ -8013,7 +8013,6 @@ mod snapshot_restore_common {
                     "remove-device",
                     Some(net_id),
                 ));
-                thread::sleep(std::time::Duration::new(10, 0));
                 let latest_events = [&MetaEvent {
                     event: "device-removed".to_string(),
                     device_id: Some(net_id.to_string()),
