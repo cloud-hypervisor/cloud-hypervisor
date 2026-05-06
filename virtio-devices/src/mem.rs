@@ -347,13 +347,8 @@ impl BlocksState {
         }
     }
 
-    fn is_range_state(&self, first_block_index: usize, nb_blocks: u16, plug: bool) -> bool {
-        for state in self
-            .bitmap
-            .iter()
-            .skip(first_block_index)
-            .take(nb_blocks as usize)
-        {
+    fn is_range_state(&self, first_block_index: usize, nb_blocks: usize, plug: bool) -> bool {
+        for state in self.bitmap.iter().skip(first_block_index).take(nb_blocks) {
             if *state != plug {
                 return false;
             }
@@ -361,12 +356,12 @@ impl BlocksState {
         true
     }
 
-    fn set_range(&mut self, first_block_index: usize, nb_blocks: u16, plug: bool) {
+    fn set_range(&mut self, first_block_index: usize, nb_blocks: usize, plug: bool) {
         for state in self
             .bitmap
             .iter_mut()
             .skip(first_block_index)
-            .take(nb_blocks as usize)
+            .take(nb_blocks)
         {
             *state = plug;
         }
@@ -509,12 +504,11 @@ impl MemEpollHandler {
         let offset = addr - config.addr;
 
         let first_block_index = (offset / config.block_size) as usize;
-        if !self
-            .blocks_state
-            .lock()
-            .unwrap()
-            .is_range_state(first_block_index, nb_blocks, !plug)
-        {
+        if !self.blocks_state.lock().unwrap().is_range_state(
+            first_block_index,
+            nb_blocks as usize,
+            !plug,
+        ) {
             return VIRTIO_MEM_RESP_ERROR;
         }
 
@@ -526,7 +520,7 @@ impl MemEpollHandler {
         self.blocks_state
             .lock()
             .unwrap()
-            .set_range(first_block_index, nb_blocks, plug);
+            .set_range(first_block_index, nb_blocks as usize, plug);
 
         let handlers = self.dma_mapping_handlers.lock().unwrap();
         if plug {
@@ -588,7 +582,7 @@ impl MemEpollHandler {
 
         self.blocks_state.lock().unwrap().set_range(
             0,
-            (config.region_size / config.block_size) as u16,
+            (config.region_size / config.block_size) as usize,
             false,
         );
 
@@ -607,23 +601,21 @@ impl MemEpollHandler {
 
         let offset = addr - config.addr;
         let first_block_index = (offset / config.block_size) as usize;
-        let resp_state =
-            if self
-                .blocks_state
-                .lock()
-                .unwrap()
-                .is_range_state(first_block_index, nb_blocks, true)
-            {
-                VIRTIO_MEM_STATE_PLUGGED
-            } else if self.blocks_state.lock().unwrap().is_range_state(
-                first_block_index,
-                nb_blocks,
-                false,
-            ) {
-                VIRTIO_MEM_STATE_UNPLUGGED
-            } else {
-                VIRTIO_MEM_STATE_MIXED
-            };
+        let resp_state = if self.blocks_state.lock().unwrap().is_range_state(
+            first_block_index,
+            nb_blocks as usize,
+            true,
+        ) {
+            VIRTIO_MEM_STATE_PLUGGED
+        } else if self.blocks_state.lock().unwrap().is_range_state(
+            first_block_index,
+            nb_blocks as usize,
+            false,
+        ) {
+            VIRTIO_MEM_STATE_UNPLUGGED
+        } else {
+            VIRTIO_MEM_STATE_MIXED
+        };
 
         (VIRTIO_MEM_RESP_ACK, resp_state)
     }
