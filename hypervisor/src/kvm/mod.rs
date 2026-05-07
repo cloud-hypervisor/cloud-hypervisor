@@ -560,6 +560,8 @@ struct KvmDirtyLogSlot {
 #[allow(dead_code)]
 struct KvmMemorySlot {
     guest_memfd: OwnedFd,
+    guest_phys_addr: u64,
+    memory_size: u64,
 }
 
 /// Wrapper over KVM VM ioctls.
@@ -850,6 +852,8 @@ impl vm::Vm for KvmVm {
             xsave_size,
             #[cfg(feature = "sev_snp")]
             vm_fd: self.fd.clone(),
+            #[cfg(feature = "sev_snp")]
+            memory_slots: self.memory_slots.clone(),
         };
         Ok(Box::new(vcpu))
     }
@@ -1036,10 +1040,14 @@ impl vm::Vm for KvmVm {
                 )
             };
             let raw_fd = fd.as_raw_fd() as u32;
-            slots
-                .write()
-                .unwrap()
-                .insert(slot, KvmMemorySlot { guest_memfd: fd });
+            slots.write().unwrap().insert(
+                slot,
+                KvmMemorySlot {
+                    guest_memfd: fd,
+                    guest_phys_addr,
+                    memory_size: memory_size as u64,
+                },
+            );
             raw_fd
         } else {
             0
@@ -1726,6 +1734,51 @@ pub struct KvmVcpu {
     xsave_size: i32,
     #[cfg(feature = "sev_snp")]
     vm_fd: Arc<VmFd>,
+    #[cfg(feature = "sev_snp")]
+    memory_slots: Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
+}
+
+#[cfg(feature = "sev_snp")]
+impl KvmVcpu {
+    fn punch_holes_in_guest_memfd(
+        memory_slots: &Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
+        gpa: u64,
+        size: u64,
+    ) {
+        let Some(slots) = memory_slots else {
+            return;
+        };
+        let slots = slots.read().unwrap();
+        let req_end = gpa.saturating_add(size);
+
+        for slot in slots.values() {
+            let slot_end = slot.guest_phys_addr.saturating_add(slot.memory_size);
+            if gpa >= slot_end || req_end <= slot.guest_phys_addr {
+                continue;
+            }
+
+            let overlap_start = gpa.max(slot.guest_phys_addr);
+            let overlap_end = req_end.min(slot_end);
+            let offset = overlap_start - slot.guest_phys_addr;
+            let len = overlap_end - overlap_start;
+
+            // SAFETY: fd is valid, offset and len are within the slot's range.
+            let ret = unsafe {
+                libc::fallocate(
+                    slot.guest_memfd.as_raw_fd(),
+                    libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE,
+                    offset as libc::off_t,
+                    len as libc::off_t,
+                )
+            };
+            if ret != 0 {
+                error!(
+                    "Error punching hole in the guest_memfd: gpa={gpa:#x} offset={offset:#x} len={len:#x}: {}",
+                    std::io::Error::last_os_error()
+                );
+            }
+        }
+    }
 }
 
 /// Implementation of Vcpu trait for KVM
@@ -2430,8 +2483,13 @@ impl cpu::Vcpu for KvmVcpu {
                             };
                             self.vm_fd
                                 .set_memory_attributes(mem_attributes)
-                                .map(|_| cpu::VmExit::Ignore)
-                                .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))
+                                .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
+
+                            if set_private_attr == 0 {
+                                Self::punch_holes_in_guest_memfd(&self.memory_slots, address, size);
+                            }
+
+                            Ok(cpu::VmExit::Ignore)
                         }
                         _ => Ok(cpu::VmExit::Ignore),
                     }
