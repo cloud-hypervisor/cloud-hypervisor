@@ -4,14 +4,16 @@
 
 //! Minimal userfaultfd bindings for demand-paged snapshot restore.
 //!
-//! Uses the `userfaultfd(2)` syscall (available since Linux 4.3) to create a
-//! fault descriptor, then `UFFDIO_API` / `UFFDIO_REGISTER` / `UFFDIO_COPY`
+//! Prefers `/dev/userfaultfd` (Linux 6.1+) over the `userfaultfd(2)` syscall
+//! to create a fault descriptor, falling back to the syscall when the device
+//! is unavailable. Then uses `UFFDIO_API` / `UFFDIO_REGISTER` / `UFFDIO_COPY`
 //! ioctls to handle page faults from a background thread.
 //!
 //! Unlike an mmap(MAP_PRIVATE) overlay approach, UFFD does not replace the
 //! original memory mapping, so it remains compatible with VFIO device
 //! passthrough and shared-memory-backed guest RAM.
 
+use std::fs::OpenOptions;
 use std::io::Error;
 use std::mem;
 use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
@@ -61,15 +63,50 @@ pub(crate) struct UffdMsg {
 
 const _: () = assert!(mem::size_of::<UffdMsg>() == 32);
 
-/// Create a userfaultfd file descriptor and perform the API handshake.
-pub(crate) fn create(required_features: u64) -> Result<OwnedFd, Error> {
-    // SAFETY: `userfaultfd` syscall with O_CLOEXEC | O_NONBLOCK flags.
-    let fd = unsafe { libc::syscall(libc::SYS_userfaultfd, libc::O_CLOEXEC | libc::O_NONBLOCK) };
+/// Try to obtain a userfaultfd via /dev/userfaultfd (Linux 6.1+).
+///
+/// This bypasses the capability and sysctl checks that gate the syscall,
+/// requiring only file permissions on the device node.
+fn try_dev_userfaultfd() -> Result<OwnedFd, Error> {
+    let dev = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/userfaultfd")?;
+    let flags = libc::O_CLOEXEC | libc::O_NONBLOCK;
+    // SAFETY: USERFAULTFD_IOC_NEW on a valid /dev/userfaultfd fd returns a new
+    // userfaultfd file descriptor.
+    let fd = unsafe {
+        libc::ioctl(
+            dev.as_raw_fd(),
+            userfaultfd::USERFAULTFD_IOC_NEW as libc::Ioctl,
+            flags,
+        )
+    };
     if fd < 0 {
         return Err(Error::last_os_error());
     }
-    // SAFETY: the syscall returned a valid fd above.
-    let fd = unsafe { OwnedFd::from_raw_fd(fd as RawFd) };
+    // SAFETY: the ioctl returned a valid fd above.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+/// Create a userfaultfd file descriptor and perform the API handshake.
+///
+/// Prefers `/dev/userfaultfd` (no capability/sysctl requirements, just file
+/// permissions) and falls back to the `userfaultfd(2)` syscall.
+pub(crate) fn create(required_features: u64) -> Result<OwnedFd, Error> {
+    let fd = match try_dev_userfaultfd() {
+        Ok(fd) => fd,
+        Err(_) => {
+            // SAFETY: `userfaultfd` syscall with O_CLOEXEC | O_NONBLOCK flags.
+            let raw =
+                unsafe { libc::syscall(libc::SYS_userfaultfd, libc::O_CLOEXEC | libc::O_NONBLOCK) };
+            if raw < 0 {
+                return Err(Error::last_os_error());
+            }
+            // SAFETY: the syscall returned a valid fd above.
+            unsafe { OwnedFd::from_raw_fd(raw as RawFd) }
+        }
+    };
 
     let mut api = UffdioApi {
         api: userfaultfd::UFFD_API,
