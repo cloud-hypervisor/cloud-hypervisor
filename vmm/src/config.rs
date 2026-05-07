@@ -1750,23 +1750,30 @@ impl NetConfig {
 }
 
 impl RngConfig {
+    pub const SYNTAX: &'static str = "Random number generator parameters \"\
+        src=<entropy_source_path>,iommu=on|off,pci_segment=<segment_id>,\
+        pci_device_id=<pci_slot>\"";
+
     pub fn parse(rng: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
-        parser.add("src").add("iommu");
+        parser
+            .add("src")
+            .add_all(PciDeviceCommonConfig::OPTIONS_IOMMU);
         parser.parse(rng).map_err(Error::ParseRng)?;
 
         let src = PathBuf::from(
             parser
                 .get("src")
-                .unwrap_or_else(|| DEFAULT_RNG_SOURCE.to_owned()),
+                .unwrap_or_else(|| Self::DEFAULT_RNG_SOURCE.to_owned()),
         );
-        let iommu = parser
-            .convert::<Toggle>("iommu")
-            .map_err(Error::ParseRng)?
-            .unwrap_or(Toggle(false))
-            .0;
 
-        Ok(RngConfig { src, iommu })
+        let pci_common = PciDeviceCommonConfig::parse(rng)?;
+
+        Ok(RngConfig { src, pci_common })
+    }
+
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        self.pci_common.validate(vm_config)
     }
 }
 
@@ -2972,6 +2979,8 @@ impl VmConfig {
             }
         }
 
+        self.rng.validate(self)?;
+
         if let Some(nets) = &self.net {
             for net in nets {
                 if net.vhost_user && !self.backed_by_shared_memory() {
@@ -3018,7 +3027,7 @@ impl VmConfig {
             }
         }
 
-        self.iommu |= self.rng.iommu;
+        self.iommu |= self.rng.pci_common.iommu;
         self.iommu |= self.console.iommu;
 
         if let Some(t) = &self.cpus.topology {
@@ -4184,16 +4193,26 @@ mod unit_tests {
             }
         );
         assert_eq!(
-            RngConfig::parse("src=/dev/random,iommu=on")?,
+            RngConfig::parse("src=/dev/random,iommu=on,pci_segment=1,pci_device_id=7")?,
             RngConfig {
                 src: PathBuf::from("/dev/random"),
-                iommu: true,
+                pci_common: PciDeviceCommonConfig {
+                    id: None,
+                    iommu: true,
+                    pci_segment: 1,
+                    pci_device_id: Some(7),
+                },
             }
         );
         assert_eq!(
             RngConfig::parse("iommu=on")?,
             RngConfig {
-                iommu: true,
+                pci_common: PciDeviceCommonConfig {
+                    id: None,
+                    iommu: true,
+                    pci_segment: 0,
+                    pci_device_id: None,
+                },
                 ..Default::default()
             }
         );
@@ -5010,7 +5029,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             net: None,
             rng: RngConfig {
                 src: PathBuf::from("/dev/urandom"),
-                iommu: false,
+                pci_common: PciDeviceCommonConfig::default(),
             },
             balloon: None,
             fs: None,

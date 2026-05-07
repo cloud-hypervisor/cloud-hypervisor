@@ -3006,16 +3006,24 @@ impl DeviceManager {
 
     fn make_virtio_rng_devices(&mut self) -> DeviceManagerResult<()> {
         // Add virtio-rng if required
-        let rng_config = self.config.lock().unwrap().rng.clone();
+        let mut rng_config = self.config.lock().unwrap().rng.clone();
         if let Some(rng_path) = rng_config.src.to_str() {
             info!("Creating virtio-rng device: {rng_config:?}");
-            let id = String::from(RNG_DEVICE_NAME);
+
+            let id = match rng_config.pci_common.id.as_ref() {
+                Some(id) => id.clone(),
+                None => rng_config
+                    .pci_common
+                    .id
+                    .insert(RNG_DEVICE_NAME.to_string())
+                    .clone(),
+            };
 
             let virtio_rng_device = Arc::new(Mutex::new(
                 virtio_devices::Rng::new(
                     id.clone(),
                     rng_path,
-                    self.force_access_platform | rng_config.iommu,
+                    self.force_access_platform | rng_config.pci_common.iommu,
                     self.seccomp_action.clone(),
                     self.exit_evt
                         .try_clone()
@@ -3028,11 +3036,7 @@ impl DeviceManager {
             self.virtio_devices.push(MetaVirtioDevice {
                 virtio_device: Arc::clone(&virtio_rng_device)
                     as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-                pci_common: PciDeviceCommonConfig {
-                    id: Some(id.clone()),
-                    iommu: rng_config.iommu,
-                    ..Default::default()
-                },
+                pci_common: rng_config.pci_common.clone(),
                 dma_handler: None,
             });
 

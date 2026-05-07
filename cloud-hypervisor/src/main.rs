@@ -34,7 +34,7 @@ use vmm::vm_config::IvshmemConfig;
 use vmm::vm_config::{
     BalloonConfig, DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, LandlockConfig,
     NetConfig, NumaConfig, PciSegmentConfig, PlatformConfig, PmemConfig, RateLimiterGroupConfig,
-    TpmConfig, UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
+    RngConfig, TpmConfig, UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::block_signal;
@@ -174,7 +174,7 @@ fn default_memory() -> String {
 }
 
 fn default_rng() -> String {
-    format!("src={}", vm_config::DEFAULT_RNG_SOURCE)
+    format!("src={}", RngConfig::DEFAULT_RNG_SOURCE)
 }
 
 /// Returns all [`Arg`]s in alphabetical order. This is the order used in the
@@ -426,7 +426,7 @@ fn get_cli_options_sorted(
             .group("vmm-config"),
         Arg::new("rng")
             .long("rng")
-            .help("Random number generator parameters \"src=<entropy_source_path>,iommu=on|off\"")
+            .help(RngConfig::SYNTAX)
             .default_value(default_rng)
             .group("vm-config"),
         Arg::new("seccomp")
@@ -953,7 +953,7 @@ mod unit_tests {
     use vmm::vm_config::DebugConsoleConfig;
     use vmm::vm_config::{
         ConsoleConfig, ConsoleOutputMode, CoreScheduling, CpuFeatures, CpusConfig, HotplugMethod,
-        MemoryConfig, PayloadConfig, RngConfig, VmConfig,
+        MemoryConfig, PayloadConfig, PciDeviceCommonConfig, RngConfig, VmConfig,
     };
 
     use crate::test_util::assert_args_sorted;
@@ -1036,7 +1036,7 @@ mod unit_tests {
             net: None,
             rng: RngConfig {
                 src: PathBuf::from("/dev/urandom"),
-                iommu: false,
+                pci_common: PciDeviceCommonConfig::default(),
             },
             balloon: None,
             fs: None,
