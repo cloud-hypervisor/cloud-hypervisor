@@ -165,7 +165,7 @@ impl RequestHandler for StubApiRequestHandler {
                 net: None,
                 rng: RngConfig {
                     src: PathBuf::from("/dev/urandom"),
-                    iommu: false,
+                    pci_common: PciDeviceCommonConfig::default(),
                 },
                 balloon: None,
                 fs: None,

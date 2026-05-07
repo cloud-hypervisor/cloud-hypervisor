@@ -1073,11 +1073,19 @@ components:
         - src
       type: object
       properties:
-        src:
+        id:
           type: string
+        pci_segment:
+          type: integer
+          format: int16
+        pci_device_id:
+          type: integer
+          format: uint8
         iommu:
           type: boolean
           default: false
+        src:
+          type: string
 
     BalloonConfig:
       required:

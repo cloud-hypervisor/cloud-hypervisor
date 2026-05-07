@@ -432,18 +432,20 @@ where
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct RngConfig {
+    #[serde(flatten)]
+    pub pci_common: PciDeviceCommonConfig,
     pub src: PathBuf,
-    #[serde(default)]
-    pub iommu: bool,
 }
 
-pub const DEFAULT_RNG_SOURCE: &str = "/dev/urandom";
+impl RngConfig {
+    pub const DEFAULT_RNG_SOURCE: &str = "/dev/urandom";
+}
 
 impl Default for RngConfig {
     fn default() -> Self {
         RngConfig {
-            src: PathBuf::from(DEFAULT_RNG_SOURCE),
-            iommu: false,
+            src: PathBuf::from(Self::DEFAULT_RNG_SOURCE),
+            pci_common: PciDeviceCommonConfig::default(),
         }
     }
 }

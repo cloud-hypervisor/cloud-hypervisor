@@ -2654,7 +2654,7 @@ mod unit_tests {
     use crate::vm_config::DebugConsoleConfig;
     use crate::vm_config::{
         ConsoleConfig, ConsoleOutputMode, CoreScheduling, CpuFeatures, CpusConfig, HotplugMethod,
-        MemoryConfig, PayloadConfig, RngConfig,
+        MemoryConfig, PayloadConfig, PciDeviceCommonConfig, RngConfig,
     };
 
     fn create_dummy_vmm() -> Vmm {
@@ -2716,7 +2716,7 @@ mod unit_tests {
             net: None,
             rng: RngConfig {
                 src: PathBuf::from("/dev/urandom"),
-                iommu: false,
+                pci_common: PciDeviceCommonConfig::default(),
             },
             balloon: None,
             fs: None,
