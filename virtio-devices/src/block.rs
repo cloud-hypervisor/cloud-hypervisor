@@ -50,7 +50,7 @@ use super::{
 };
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
-use crate::{GuestMemoryMmap, VirtioInterrupt, device_needs_reset, mark_device_needs_reset};
+use crate::{GuestMemoryMmap, VirtioInterrupt, device_needs_reset};
 
 const SECTOR_SHIFT: u8 = 9;
 pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
@@ -207,20 +207,6 @@ impl BlockEpollHandler {
         Ok(())
     }
 
-    fn handle_queue_iterator_error(&mut self, err: &virtio_queue::Error) {
-        // The guest submitted a corrupted VirtQ request, and the error
-        // was logged during queue processing. Ignoring it would let the
-        // guest keep spamming the VMM with bad requests and trigger
-        // excessive error logging, so mark the device as NEEDS_RESET to
-        // stop request processing (see self.needs_reset() usage) until
-        // the guest resets and reactivates the device.
-        mark_device_needs_reset(
-            &self.device_status,
-            self.interrupt_cb.as_ref(),
-            format_args!("virtqueue error: {err:?}"),
-        );
-    }
-
     fn process_queue_submit(&mut self) -> Result<()> {
         if self.needs_reset() {
             return Ok(());
@@ -238,15 +224,13 @@ impl BlockEpollHandler {
                 break;
             }
             processed += 1;
-            let mut desc_chain = match queue.iter(self.mem.memory()) {
-                Ok(mut iter) => match iter.next() {
-                    Some(c) => c,
-                    None => break,
-                },
-                Err(err) => {
-                    self.handle_queue_iterator_error(&err);
-                    return Ok(());
-                }
+            let mut desc_chain = match queue
+                .iter(self.mem.memory())
+                .map_err(Error::QueueIterator)?
+                .next()
+            {
+                Some(c) => c,
+                None => break,
             };
             let mut request = Request::parse(&mut desc_chain, self.access_platform.as_deref())
                 .map_err(Error::RequestParsing)?;
@@ -408,9 +392,20 @@ impl BlockEpollHandler {
     }
 
     fn process_queue_submit_and_signal(&mut self) -> result::Result<(), EpollHelperError> {
-        // Per-request errors are logged but non-device fatal.
-        if let Err(e) = self.process_queue_submit() {
-            warn!("Failed to process queue (submit): {e:?}");
+        match self.process_queue_submit() {
+            Ok(()) => {}
+            Err(e @ Error::QueueIterator(_)) => {
+                // Iterator errors mean the guest virtqueue itself is corrupted.
+                // Surface the failure so the worker exits and spawn_virtio_thread
+                // marks the device as NEEDS_RESET.
+                return Err(EpollHelperError::HandleEvent(anyhow!(
+                    "Failed to process queue (submit): {e:?}"
+                )));
+            }
+            Err(e) => {
+                // Per-request errors are logged but non-device fatal.
+                warn!("Failed to process queue (submit): {e:?}");
+            }
         }
 
         self.try_signal_used_queue()
