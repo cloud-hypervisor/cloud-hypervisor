@@ -26,6 +26,11 @@ const _: () = assert!(UFFDIO_REGISTER <= u32::MAX as u64);
 const _: () = assert!(UFFDIO_COPY <= u32::MAX as u64);
 const _: () = assert!(UFFDIO_WAKE <= u32::MAX as u64);
 
+// /dev/userfaultfd ioctl: _IO(0xAA, 0x00)
+pub const USERFAULTFD_IOC_NEW: u64 = 0x0000_AA00;
+const _: () = assert!(USERFAULTFD_IOC_NEW == ioctl_ioc(0, 0xAA, 0x00, 0));
+const _: () = assert!(USERFAULTFD_IOC_NEW <= u32::MAX as u64);
+
 pub const UFFD_API: u64 = 0xAA;
 pub const UFFDIO_REGISTER_MODE_MISSING: u64 = 1;
 pub const UFFD_EVENT_PAGEFAULT: u8 = 0x12;

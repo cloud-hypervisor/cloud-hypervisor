@@ -25,7 +25,9 @@ use vhost::vhost_kern::vhost_binding::{
     VHOST_VDPA_SET_STATUS, VHOST_VDPA_SET_VRING_ENABLE, VHOST_VDPA_SUSPEND,
 };
 
-use crate::userfaultfd::{UFFDIO_API, UFFDIO_COPY, UFFDIO_REGISTER, UFFDIO_WAKE};
+use crate::userfaultfd::{
+    UFFDIO_API, UFFDIO_COPY, UFFDIO_REGISTER, UFFDIO_WAKE, USERFAULTFD_IOC_NEW,
+};
 
 #[derive(Copy, Clone)]
 pub enum Thread {
@@ -421,6 +423,7 @@ fn create_vmm_ioctl_seccomp_rule_common(
         and![Cond::new(1, ArgLen::Dword, Eq, UFFDIO_COPY)?],
         and![Cond::new(1, ArgLen::Dword, Eq, UFFDIO_REGISTER)?],
         and![Cond::new(1, ArgLen::Dword, Eq, UFFDIO_WAKE)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, USERFAULTFD_IOC_NEW)?],
     ];
 
     let hypervisor_rules = create_vmm_ioctl_seccomp_rule_hypervisor(hypervisor_type)?;
