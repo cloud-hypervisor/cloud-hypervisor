@@ -37,7 +37,7 @@ fails to assign it and the guest sees no GPU.
 
 The fix: tell OVMF to allocate 256 GiB of MMIO64 space via the `fw_cfg`
 device. QEMU has supported this for years with `-fw_cfg name=...,string=...`.
-This PR adds the same `string` item support to Cloud Hypervisor:
+Cloud Hypervisor supports the same `string` item form:
 
 ```
 --fw-cfg-config items=[name=opt/ovmf/X-PciMmio64Mb,string=262144]
@@ -180,7 +180,7 @@ checks firmware measurements against published Reference Integrity Manifests
  │                    │                     │
  │              Attestation SDK             │
  │                    │ SPDM over PCIe DOE  │
- ��────────────────────┼─────────────────────┘
+ └────────────────────┼─────────────────────┘
                       │
       VFIO passthrough (VMM is untrusted)
                       │
