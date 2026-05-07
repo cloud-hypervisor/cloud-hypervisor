@@ -70,15 +70,10 @@ const DEVICE_FEATURES_OK: u32 = 0x08;
 const DEVICE_NEEDS_RESET: u32 = 0x40;
 const DEVICE_FAILED: u32 = 0x80;
 
-/// Returns true if `device_status` has the `DEVICE_NEEDS_RESET` bit set.
-pub(crate) fn device_needs_reset(device_status: &AtomicU8) -> bool {
-    (device_status.load(Ordering::Acquire) & DEVICE_NEEDS_RESET as u8) != 0
-}
-
 /// Marks a virtio device as `NEEDS_RESET` and notifies the guest via a config
 /// change interrupt. Used when a guest induced error (corrupted virtqueue,
-/// malformed descriptor chain or similar) is detected and the device wants
-/// to stop further queue processing without killing the worker thread.
+/// malformed descriptor chain or similar) is detected and the worker thread
+/// has stopped processing the device's queues.
 ///
 /// `context` is included verbatim in the warning log to identify the cause.
 pub(crate) fn mark_device_needs_reset(
