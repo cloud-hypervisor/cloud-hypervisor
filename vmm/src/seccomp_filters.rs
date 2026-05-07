@@ -881,6 +881,15 @@ fn vcpu_thread_rules(
         (libc::SYS_dup, vec![]),
         (libc::SYS_exit, vec![]),
         (libc::SYS_epoll_ctl, vec![]),
+        (
+            libc::SYS_fallocate,
+            or![and![Cond::new(
+                1,
+                ArgLen::Dword,
+                Eq,
+                (libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE) as u64,
+            )?]],
+        ),
         (libc::SYS_fcntl, vec![]),
         (libc::SYS_fstat, vec![]),
         (libc::SYS_futex, vec![]),
