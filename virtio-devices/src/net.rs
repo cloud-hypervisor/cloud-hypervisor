@@ -42,7 +42,7 @@ use super::{
 };
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
-use crate::{GuestMemoryMmap, VirtioInterrupt, device_needs_reset, mark_device_needs_reset};
+use crate::{GuestMemoryMmap, VirtioInterrupt};
 
 /// Control queue
 // Event available on the control queue.
@@ -174,7 +174,6 @@ struct NetEpollHandler {
     queue_index_base: u16,
     queue_pair: (Queue, Queue),
     queue_evt_pair: (EventFd, EventFd),
-    device_status: Arc<AtomicU8>,
 }
 
 impl NetEpollHandler {
@@ -188,9 +187,6 @@ impl NetEpollHandler {
     }
 
     fn handle_rx_event(&mut self) -> result::Result<(), DeviceError> {
-        if self.needs_reset() {
-            return Ok(());
-        }
         let queue_evt = &self.queue_evt_pair.0;
         if let Err(e) = queue_evt.read() {
             error!("Failed to get rx queue event: {e:?}");
@@ -219,34 +215,13 @@ impl NetEpollHandler {
         Ok(())
     }
 
-    fn handle_queue_iterator_error(&mut self, err: &virtio_queue::Error) {
-        // The guest submitted a corrupted VirtQ request, and the error
-        // was logged during queue processing. Ignoring it would let the
-        // guest keep spamming the VMM with bad requests and trigger
-        // excessive error logging, so mark the device as NEEDS_RESET to
-        // stop request processing (see self.needs_reset() usage) until
-        // the guest resets and reactivates the device.
-        mark_device_needs_reset(
-            &self.device_status,
-            self.interrupt_cb.as_ref(),
-            format_args!("virtqueue error: {err:?}"),
-        );
-    }
-
     fn process_tx(&mut self) -> result::Result<(), DeviceError> {
-        if self.needs_reset() {
-            return Ok(());
-        }
         let res = self
             .net
-            .process_tx(&self.mem.memory(), &mut self.queue_pair.1);
+            .process_tx(&self.mem.memory(), &mut self.queue_pair.1)
+            .map_err(DeviceError::NetQueuePair)?;
 
-        if let Err(net_util::NetQueuePairError::QueueIteratorFailed(err)) = res {
-            self.handle_queue_iterator_error(&err);
-            return Ok(());
-        }
-
-        if res.map_err(DeviceError::NetQueuePair)? {
+        if res {
             self.signal_used_queue(self.queue_index_base + 1)?;
             debug!("Signalling TX queue");
         } else {
@@ -270,19 +245,12 @@ impl NetEpollHandler {
     }
 
     fn handle_rx_tap_event(&mut self) -> result::Result<(), DeviceError> {
-        if self.needs_reset() {
-            return Ok(());
-        }
         let res = self
             .net
-            .process_rx(&self.mem.memory(), &mut self.queue_pair.0);
+            .process_rx(&self.mem.memory(), &mut self.queue_pair.0)
+            .map_err(DeviceError::NetQueuePair)?;
 
-        if let Err(net_util::NetQueuePairError::QueueIteratorFailed(err)) = res {
-            self.handle_queue_iterator_error(&err);
-            return Ok(());
-        }
-
-        if res.map_err(DeviceError::NetQueuePair)? {
+        if res {
             self.signal_used_queue(self.queue_index_base)?;
             debug!("Signalling RX queue");
         } else {
@@ -331,10 +299,6 @@ impl NetEpollHandler {
         helper.run(paused, paused_sync, self)?;
 
         Ok(())
-    }
-
-    fn needs_reset(&self) -> bool {
-        device_needs_reset(&self.device_status)
     }
 }
 
@@ -837,7 +801,6 @@ impl VirtioDevice for Net {
                 interrupt_cb: interrupt_cb.clone(),
                 kill_evt,
                 pause_evt,
-                device_status: self.device_status.clone(),
             };
 
             let paused = self.common.paused.clone();
