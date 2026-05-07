@@ -2,27 +2,28 @@
 //
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 
-// Only for this commit
-#![expect(unused)]
+//! Interrupt-number allocation for interrupts.
+//!
+//! See [`GsiAllocator`].
 
 #[cfg(target_arch = "x86_64")]
 use std::collections::btree_map::BTreeMap;
+#[cfg(test)]
+use std::ops::Range;
 use std::result;
 
 use thiserror::Error;
 
-#[derive(Debug)]
-pub enum Error {
-    Overflow,
-}
+pub type Result<T> = result::Result<T, InterruptAllocError>;
 
-pub type Result<T> = result::Result<T, Error>;
-
-/// GsiApic
+/// Describes one APIC interrupt input range in the global system interrupt
+/// namespace.
 #[cfg(target_arch = "x86_64")]
 #[derive(Copy, Clone)]
 pub struct GsiApic {
+    /// The offset from 0.
     base: u32,
+    /// The number of interrupts in the range.
     irqs: u32,
 }
 
@@ -53,6 +54,39 @@ pub enum InterruptAllocError {
         u32, /* upper bound */
     ),
 }
+
+/// Maximum number of IRQ routes supported by KVM.
+///
+/// See <https://elixir.bootlin.com/linux/v7.0.1/source/include/linux/kvm_host.h#L2193>.
+const KVM_MAX_IRQ_ROUTES: u32 = {
+    #[cfg(feature = "kvm")]
+    {
+        4096
+    }
+    #[cfg(not(feature = "kvm"))]
+    {
+        0
+    }
+};
+
+/// Maximum number of IRQ routes supported by MSHV.
+///
+/// See <https://elixir.bootlin.com/linux/v7.0.1/source/drivers/hv/mshv_root.h#L170>.
+const MSHV_MAX_GUEST_IRQS: u32 = 4096;
+
+/// The effective max number of IRQs.
+///
+/// This affects the number of interrupts that can be allocated. This number
+/// alone doesn't mean that the backend necessarily accepts all the IRQs.
+#[allow(clippy::absurd_extreme_comparisons)]
+const MAX_GUEST_IRQS: u32 = {
+    // cmp::max is not const compatible
+    if KVM_MAX_IRQ_ROUTES > MSHV_MAX_GUEST_IRQS {
+        KVM_MAX_IRQ_ROUTES
+    } else {
+        MSHV_MAX_GUEST_IRQS
+    }
+};
 
 /// Simple bitmap-backed interrupt allocator.
 ///
@@ -110,7 +144,7 @@ impl InterruptAllocator {
     /// Allocates a vector by setting its bit in the bitmap.
     ///
     /// Returns an error if the allocator is exhausted.
-    fn alloc(&mut self) -> result::Result<u32, InterruptAllocError> {
+    fn alloc(&mut self) -> Result<u32> {
         // Find the next word with capacity for allocating a vector.
         let Some(idx) = self.words.iter().position(|&w| w != usize::MAX) else {
             return Err(InterruptAllocError::ExhaustedError(self.size));
@@ -134,7 +168,7 @@ impl InterruptAllocator {
     /// This vector is assumed to include the internal `offset`.
     ///
     /// Returns an error if the vector is already free.
-    fn free(&mut self, vector: u32) -> result::Result<(), InterruptAllocError> {
+    fn free(&mut self, vector: u32) -> Result<()> {
         // At first we make sure that the vector is not out of range.
         let begin = self.offset;
         let end = begin + self.size;
@@ -164,82 +198,96 @@ impl InterruptAllocator {
     fn size(&self) -> u32 {
         self.size
     }
+
+    #[cfg(test)]
+    fn range(&self) -> Range<u32> {
+        self.offset..(self.offset + self.size)
+    }
 }
 
-/// GsiAllocator
+/// Coordinates graceful resource allocation of IRQs and GSIs from the interrupt
+/// namespace.
+///
+/// Ensures that interrupt numbers either for IRQs or GSIs are not overlapping.
+///
+/// Check out the [module documentation](super::gsi) for more info.
 pub struct GsiAllocator {
     #[cfg(target_arch = "x86_64")]
-    apics: BTreeMap<u32, u32>,
-    next_irq: u32,
-    next_gsi: u32,
+    apics: BTreeMap<u32 /* base */, u32 /* number of interrupts */>,
+    irqs: InterruptAllocator,
+    gsis: InterruptAllocator,
 }
 
 impl GsiAllocator {
     #[cfg(target_arch = "x86_64")]
-    /// New GSI allocator
+    /// Creates a new GSI allocator with the proper interrupt number ranges
+    /// for IRQs and GSIs.
+    ///
+    /// Respects the provided [`GsiApic`]s
+    // On x86, the interrupt number space starts with IRQs and is followed by
+    // GSI.
     pub fn new(apics: &[GsiApic]) -> Self {
-        let mut allocator = GsiAllocator {
-            apics: BTreeMap::new(),
-            next_irq: 0xffff_ffff,
-            next_gsi: 0,
-        };
+        let next_irq = apics.iter().map(|apic| apic.base).min().unwrap_or(0);
 
-        for apic in apics {
-            if apic.base < allocator.next_irq {
-                allocator.next_irq = apic.base;
-            }
+        let next_gsi = apics
+            .iter()
+            .map(|apic| apic.base + apic.irqs)
+            .max()
+            .unwrap_or(0);
 
-            if apic.base + apic.irqs > allocator.next_gsi {
-                allocator.next_gsi = apic.base + apic.irqs;
-            }
+        let irqs = apics.iter().map(|apic| apic.irqs).sum();
 
-            allocator.apics.insert(apic.base, apic.irqs);
+        let allocator_apics = apics.iter().map(|apic| (apic.base, apic.irqs)).collect();
+
+        let gsis = MAX_GUEST_IRQS - next_gsi;
+
+        Self {
+            apics: allocator_apics,
+            irqs: InterruptAllocator::new(irqs, next_irq),
+            gsis: InterruptAllocator::new(gsis, next_gsi),
         }
-
-        allocator
     }
 
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
-    /// New GSI allocator
+    /// New GSI allocator.
+    // On aarch 64 and riscv x86, the IRQs and GSIs use independent interrupt
+    // number namespaces.
     pub fn new() -> Self {
         GsiAllocator {
-            next_irq: arch::IRQ_BASE,
-            next_gsi: arch::IRQ_BASE,
+            irqs: InterruptAllocator::new(MAX_GUEST_IRQS - arch::IRQ_BASE, arch::IRQ_BASE),
+            gsis: InterruptAllocator::new(MAX_GUEST_IRQS - arch::IRQ_BASE, arch::IRQ_BASE),
         }
     }
 
     /// Allocate a GSI
     pub fn allocate_gsi(&mut self) -> Result<u32> {
-        let gsi = self.next_gsi;
-        self.next_gsi = self.next_gsi.checked_add(1).ok_or(Error::Overflow)?;
-        Ok(gsi)
+        self.gsis.alloc()
+    }
+
+    /// Frees a GSI
+    pub fn free_gsi(&mut self, vector: u32) -> Result<()> {
+        self.gsis.free(vector)
     }
 
     #[cfg(target_arch = "x86_64")]
     /// Allocate an IRQ
     pub fn allocate_irq(&mut self) -> Result<u32> {
-        let mut irq: u32 = 0;
+        let next_irq = self.irqs.alloc()?;
         for (base, irqs) in self.apics.iter() {
             // HACKHACK - This only works with 1 single IOAPIC...
-            if self.next_irq >= *base && self.next_irq < *base + *irqs {
-                irq = self.next_irq;
-                self.next_irq += 1;
+            if next_irq >= *base && next_irq < *base + *irqs {
+                return Ok(next_irq);
             }
         }
 
-        if irq == 0 {
-            return Err(Error::Overflow);
-        }
-
-        Ok(irq)
+        self.irqs.free(next_irq)?;
+        Err(InterruptAllocError::ExhaustedError(self.irqs.size()))
     }
 
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     /// Allocate an IRQ
     pub fn allocate_irq(&mut self) -> Result<u32> {
-        let irq = self.next_irq;
-        self.next_irq = self.next_irq.checked_add(1).ok_or(Error::Overflow)?;
-        Ok(irq)
+        self.irqs.alloc()
     }
 }
 
@@ -353,6 +401,108 @@ mod unit_tests {
                 let vector = i + allocator.offset;
                 allocator.free(vector).expect("should not be exhausted");
             }
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    /// [`GsiAllocator`] tests for x86, where IRQs and GSIs are consecutive
+    /// in a single interrupt number namespace.
+    mod gsi_allocator {
+        use super::*;
+
+        fn single_apic_allocator() -> GsiAllocator {
+            // One IOAPIC: GSI 0..24 are pin-based IRQs, GSIs start after that.
+            GsiAllocator::new(&[GsiApic::new(5, 19)])
+        }
+
+        #[test]
+        fn test_allocator_uses_apic_irq_and_gsi_ranges() {
+            let mut allocator = single_apic_allocator();
+
+            assert_eq!(allocator.irqs.range(), 5..24);
+            assert_eq!(allocator.gsis.range(), 24..MAX_GUEST_IRQS);
+            assert_eq!(allocator.allocate_irq(), Ok(5));
+            assert_eq!(allocator.allocate_irq(), Ok(6));
+            assert_eq!(allocator.allocate_gsi(), Ok(24));
+            assert_eq!(allocator.allocate_gsi(), Ok(25));
+        }
+
+        #[test]
+        fn test_allocator_exhausts_irqs_at_apic_boundary() {
+            let mut allocator = single_apic_allocator();
+
+            for expected_irq in 5..24 {
+                assert_eq!(allocator.allocate_irq(), Ok(expected_irq));
+            }
+
+            assert_eq!(
+                allocator.allocate_irq(),
+                Err(InterruptAllocError::ExhaustedError(19))
+            );
+            assert_eq!(allocator.allocate_gsi(), Ok(24));
+        }
+
+        #[test]
+        fn test_allocator_can_free_and_reuse_gsis() {
+            let mut allocator = single_apic_allocator();
+
+            assert_eq!(
+                allocator.free_gsi(24),
+                Err(InterruptAllocError::AlreadyFree(24))
+            );
+
+            let gsi = allocator.allocate_gsi().unwrap();
+            assert_eq!(gsi, 24);
+
+            allocator.free_gsi(gsi).unwrap();
+            assert_eq!(allocator.allocate_gsi(), Ok(gsi));
+        }
+    }
+
+    /// [`GsiAllocator`] tests for aarch64 and RISC-V, where IRQs and GSIs
+    /// have independent interrupt number namespaces.
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+    mod gsi_allocator {
+        use super::*;
+
+        fn single_apic_allocator() -> GsiAllocator {
+            GsiAllocator::new()
+        }
+
+        #[test]
+        fn test_allocator_uses_arch_irq_base() {
+            let mut allocator = single_apic_allocator();
+
+            assert_eq!(allocator.irqs.range(), ::arch::IRQ_BASE..MAX_GUEST_IRQS);
+            assert_eq!(allocator.gsis.range(), ::arch::IRQ_BASE..MAX_GUEST_IRQS);
+            assert_eq!(allocator.allocate_irq(), Ok(::arch::IRQ_BASE));
+            assert_eq!(allocator.allocate_irq(), Ok(::arch::IRQ_BASE + 1));
+            assert_eq!(allocator.allocate_gsi(), Ok(::arch::IRQ_BASE));
+            assert_eq!(allocator.allocate_gsi(), Ok(::arch::IRQ_BASE + 1));
+        }
+
+        #[test]
+        fn test_allocator_keeps_irq_and_gsi_namespaces_independent() {
+            let mut allocator = single_apic_allocator();
+
+            assert_eq!(allocator.allocate_irq(), Ok(::arch::IRQ_BASE));
+            assert_eq!(allocator.allocate_gsi(), Ok(::arch::IRQ_BASE));
+        }
+
+        #[test]
+        fn test_allocator_can_free_and_reuse_gsis() {
+            let mut allocator = single_apic_allocator();
+
+            assert_eq!(
+                allocator.free_gsi(::arch::IRQ_BASE),
+                Err(InterruptAllocError::AlreadyFree(::arch::IRQ_BASE))
+            );
+
+            let gsi = allocator.allocate_gsi().unwrap();
+            assert_eq!(gsi, ::arch::IRQ_BASE);
+
+            allocator.free_gsi(gsi).unwrap();
+            assert_eq!(allocator.allocate_gsi(), Ok(gsi));
         }
     }
 }
