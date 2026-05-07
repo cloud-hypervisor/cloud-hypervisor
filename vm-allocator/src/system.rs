@@ -10,9 +10,9 @@
 use vm_memory::{GuestAddress, GuestUsize};
 
 use crate::address::AddressAllocator;
-use crate::gsi::GsiAllocator;
 #[cfg(target_arch = "x86_64")]
 use crate::gsi::GsiApic;
+use crate::gsi::{GsiAllocator, InterruptAllocError};
 use crate::page_size::get_page_size;
 
 /// Manages allocating system resources such as address space and interrupt numbers.
@@ -31,17 +31,17 @@ use crate::page_size::get_page_size;
 ///           GuestAddress(0x10000000), 0x10000000,
 ///           #[cfg(target_arch = "x86_64")] &[GsiApic::new(5, 19)]).unwrap();
 ///   #[cfg(target_arch = "x86_64")]
-///   assert_eq!(allocator.allocate_irq(), Some(5));
+///   assert_eq!(allocator.allocate_irq(), Ok(5));
 ///   #[cfg(target_arch = "aarch64")]
-///   assert_eq!(allocator.allocate_irq(), Some(32));
+///   assert_eq!(allocator.allocate_irq(), Ok(32));
 ///   #[cfg(target_arch = "riscv64")]
-///   assert_eq!(allocator.allocate_irq(), Some(0));
+///   assert_eq!(allocator.allocate_irq(), Ok(0));
 ///   #[cfg(target_arch = "x86_64")]
-///   assert_eq!(allocator.allocate_irq(), Some(6));
+///   assert_eq!(allocator.allocate_irq(), Ok(6));
 ///   #[cfg(target_arch = "aarch64")]
-///   assert_eq!(allocator.allocate_irq(), Some(33));
+///   assert_eq!(allocator.allocate_irq(), Ok(33));
 ///   #[cfg(target_arch = "riscv64")]
-///   assert_eq!(allocator.allocate_irq(), Some(1));
+///   assert_eq!(allocator.allocate_irq(), Ok(1));
 ///   assert_eq!(allocator.allocate_platform_mmio_addresses(None, 0x1000, Some(0x1000)), Some(GuestAddress(0x1fff_f000)));
 ///
 /// ```
@@ -82,13 +82,13 @@ impl SystemAllocator {
     }
 
     /// Reserves the next available system irq number.
-    pub fn allocate_irq(&mut self) -> Option<u32> {
-        self.gsi_allocator.allocate_irq().ok()
+    pub fn allocate_irq(&mut self) -> Result<u32, InterruptAllocError> {
+        self.gsi_allocator.allocate_irq()
     }
 
     /// Reserves the next available GSI.
-    pub fn allocate_gsi(&mut self) -> Option<u32> {
-        self.gsi_allocator.allocate_gsi().ok()
+    pub fn allocate_gsi(&mut self) -> Result<u32, InterruptAllocError> {
+        self.gsi_allocator.allocate_gsi()
     }
 
     /// Reserves a section of `size` bytes of IO address space.
