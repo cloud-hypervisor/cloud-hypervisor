@@ -91,6 +91,11 @@ impl SystemAllocator {
         self.gsi_allocator.allocate_gsi()
     }
 
+    /// Frees the given GSI.
+    pub fn free_gsi(&mut self, vector: u32) -> Result<(), InterruptAllocError> {
+        self.gsi_allocator.free_gsi(vector)
+    }
+
     /// Reserves a section of `size` bytes of IO address space.
     pub fn allocate_io_addresses(
         &mut self,

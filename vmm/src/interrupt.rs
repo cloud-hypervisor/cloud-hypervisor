@@ -19,32 +19,47 @@ use vmm_sys_util::eventfd::EventFd;
 /// Reuse std::io::Result to simplify interoperability among crates.
 type Result<T> = std::io::Result<T>;
 
+/// Per-interrupt routing state for an MSI/MSI-X vector.
+///
+/// A route lazily allocates one GSI when the interrupt is first unmasked, then
+/// reuses that same GSI for later routing updates until the route is dropped.
 struct InterruptRoute {
     gsi: Option<u32>,
     irq_fd: Option<EventFd>,
     registered: bool,
+    allocator: Arc<Mutex<SystemAllocator>>,
 }
 
 impl InterruptRoute {
-    fn new() -> Result<Self> {
+    fn new(allocator: Arc<Mutex<SystemAllocator>>) -> Result<Self> {
         // The irq_fd must be created eagerly because external components
         // (say, VFIO) need the fd at device initialization time via notifier().
-        Self::new_with_fd(Some(EventFd::new(libc::EFD_NONBLOCK)?))
+        Self::new_with_fd(Some(EventFd::new(libc::EFD_NONBLOCK)?), allocator)
     }
 
-    fn new_with_fd(irq_fd: Option<EventFd>) -> Result<Self> {
+    fn new_with_fd(
+        irq_fd: Option<EventFd>,
+        allocator: Arc<Mutex<SystemAllocator>>,
+    ) -> Result<Self> {
         Ok(InterruptRoute {
             gsi: None,
             irq_fd,
             registered: false,
+            allocator,
         })
     }
 
-    fn allocate_gsi(&mut self, allocator: &mut SystemAllocator) -> Result<u32> {
+    /// Allocates a GSI, if non was allocated yet.
+    ///
+    /// Repeated calls return a previously allocated GSI.
+    fn allocate_gsi(&mut self) -> Result<u32> {
         match self.gsi {
             Some(existing) => Ok(existing),
             None => {
-                let new_gsi = allocator
+                let new_gsi = self
+                    .allocator
+                    .lock()
+                    .unwrap()
                     .allocate_gsi()
                     .map_err(|e| io::Error::other(format!("Failed allocating new GSI: {e}")))?;
                 self.gsi = Some(new_gsi);
@@ -136,6 +151,20 @@ impl InterruptRoute {
     }
 }
 
+impl Drop for InterruptRoute {
+    fn drop(&mut self) {
+        if let Some(gsi) = self.gsi {
+            let mut allocator = self.allocator.lock().unwrap();
+            // This panics only if we have a programming error (two entities
+            // used the same interrupt and one was freed already). In these
+            // cases, VMM and the VM are likely to fail soon anyway.
+            allocator
+                .free_gsi(gsi)
+                .expect("previously allocated GSI should be in bounds and still allocated");
+        }
+    }
+}
+
 struct RoutingEntry {
     route: IrqRoutingEntry,
     masked: bool,
@@ -145,7 +174,6 @@ struct MsiInterruptGroup {
     vm: Arc<dyn hypervisor::Vm>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry>>>,
     irq_routes: HashMap<InterruptIndex, Mutex<InterruptRoute>>,
-    allocator: Arc<Mutex<SystemAllocator>>,
 }
 
 impl MsiInterruptGroup {
@@ -153,13 +181,11 @@ impl MsiInterruptGroup {
         vm: Arc<dyn hypervisor::Vm>,
         gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry>>>,
         irq_routes: HashMap<InterruptIndex, Mutex<InterruptRoute>>,
-        allocator: Arc<Mutex<SystemAllocator>>,
     ) -> Self {
         MsiInterruptGroup {
             vm,
             gsi_msi_routes,
             irq_routes,
-            allocator,
         }
     }
 
@@ -231,8 +257,7 @@ impl InterruptSourceGroup for MsiInterruptGroup {
                 }
             } else {
                 // Allocate a GSI when the interrupt vector is first unmasked
-                let mut allocator = self.allocator.lock().unwrap();
-                route.allocate_gsi(&mut allocator)?
+                route.allocate_gsi()?
             };
 
             let entry = RoutingEntry {
@@ -382,14 +407,13 @@ impl MsiInterruptManager {
         let mut irq_routes: HashMap<InterruptIndex, Mutex<InterruptRoute>> =
             HashMap::with_capacity(config.count as usize);
         for i in config.base..config.base + config.count {
-            irq_routes.insert(i, Mutex::new(InterruptRoute::new()?));
+            irq_routes.insert(i, Mutex::new(InterruptRoute::new(self.allocator.clone())?));
         }
 
         Ok(MsiInterruptGroup::new(
             self.vm.clone(),
             self.gsi_msi_routes.clone(),
             irq_routes,
-            self.allocator.clone(),
         ))
     }
 }
@@ -401,14 +425,13 @@ impl InterruptManager for MsiInterruptManager {
         let mut irq_routes: HashMap<InterruptIndex, Mutex<InterruptRoute>> =
             HashMap::with_capacity(config.count as usize);
         for i in config.base..config.base + config.count {
-            irq_routes.insert(i, Mutex::new(InterruptRoute::new()?));
+            irq_routes.insert(i, Mutex::new(InterruptRoute::new(self.allocator.clone())?));
         }
 
         Ok(Arc::new(MsiInterruptGroup::new(
             self.vm.clone(),
             self.gsi_msi_routes.clone(),
             irq_routes,
-            self.allocator.clone(),
         )))
     }
 
@@ -422,5 +445,83 @@ impl InterruptManager for MsiInterruptManager {
 
     fn destroy_group(&self, _group: Arc<dyn InterruptSourceGroup>) -> Result<()> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod interrupt_route {
+        #[cfg(target_arch = "x86_64")]
+        use vm_allocator::GsiApic;
+        use vm_memory::GuestAddress;
+
+        use super::*;
+
+        fn make_allocator() -> Arc<Mutex<SystemAllocator>> {
+            Arc::new(Mutex::new(
+                SystemAllocator::new(
+                    GuestAddress(0x1000_0000),
+                    0x1000_0000,
+                    GuestAddress(0x2000_0000),
+                    0x1000_0000,
+                    #[cfg(target_arch = "x86_64")]
+                    &[GsiApic::new(5, 19)],
+                )
+                .unwrap(),
+            ))
+        }
+
+        #[test]
+        fn test_allocate_gsi_on_same_route_is_idempotent() {
+            let allocator = make_allocator();
+            let mut route = InterruptRoute::new(allocator.clone()).unwrap();
+            let gsi1 = route.allocate_gsi().unwrap();
+            let gsi2 = route.allocate_gsi().unwrap();
+            assert_eq!(
+                gsi1, gsi2,
+                "repeated allocate_gsi on the same route must return the same GSI (as it uses the buffered value)"
+            );
+        }
+
+        #[test]
+        fn test_allocated_gsis_are_distinct_for_different_routes() {
+            let allocator = make_allocator();
+            let mut route1 = InterruptRoute::new(allocator.clone()).unwrap();
+            let mut route2 = InterruptRoute::new(allocator.clone()).unwrap();
+            let gsi1 = route1.allocate_gsi().unwrap();
+            let gsi2 = route2.allocate_gsi().unwrap();
+            assert_ne!(gsi1, gsi2, "two routes must receive distinct GSIs");
+        }
+
+        #[test]
+        // Test that a route can allocate a GSI, releases it on drop, and
+        // that a second route can then allocate the very same GSI.
+        fn test_drop_frees_gsi() {
+            let allocator = make_allocator();
+            let gsi = {
+                let mut route = InterruptRoute::new(allocator.clone()).unwrap();
+                route.allocate_gsi().unwrap()
+            }; // Drop reclaims the GSI.
+            let mut route2 = InterruptRoute::new(allocator.clone()).unwrap();
+            let gsi2 = route2.allocate_gsi().unwrap();
+            assert_eq!(gsi, gsi2, "dropped GSI should be reclaimed");
+        }
+
+        #[test]
+        fn test_drop_without_gsi_does_not_panic() {
+            // A route that never had a GSI allocated must drop cleanly.
+            drop(InterruptRoute::new(make_allocator()).unwrap());
+        }
+
+        #[test]
+        fn test_doesnt_run_out_of_gsis() {
+            // Would be exhausted at 4072 if GSIs are not freed
+            for _ in 0..5_000 {
+                let mut route = InterruptRoute::new(make_allocator()).unwrap();
+                route.allocate_gsi().expect("should allocate");
+            }
+        }
     }
 }
