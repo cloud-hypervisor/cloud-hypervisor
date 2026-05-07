@@ -739,7 +739,8 @@ jobs:
       - gitlint
       - hadolint
       - integration-arm64
-      - integration-vfio
+      # VFIO worker is failing #8160
+      # - integration-vfio
       - integration-windows
       - integration-x86-64-mq
       - integration-x86-64-pr
