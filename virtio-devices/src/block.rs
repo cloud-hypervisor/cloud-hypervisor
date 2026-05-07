@@ -391,12 +391,12 @@ impl BlockEpollHandler {
                 // Surface the failure so the worker exits and spawn_virtio_thread
                 // marks the device as NEEDS_RESET.
                 return Err(EpollHelperError::HandleEvent(anyhow!(
-                    "Failed to process queue (submit): {e:?}"
+                    "Failed to process queue (submit): {e}"
                 )));
             }
             Err(e) => {
                 // Per-request errors are logged but non-device fatal.
-                warn!("Failed to process queue (submit): {e:?}");
+                warn!("Failed to process queue (submit): {e}");
             }
         }
 
