@@ -557,6 +557,11 @@ struct KvmDirtyLogSlot {
     guest_memfd: u32,
 }
 
+#[allow(dead_code)]
+struct KvmMemorySlot {
+    guest_memfd: OwnedFd,
+}
+
 /// Wrapper over KVM VM ioctls.
 pub struct KvmVm {
     fd: Arc<VmFd>,
@@ -567,7 +572,7 @@ pub struct KvmVm {
     #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
     snp_guest_policy: std::sync::OnceLock<u64>,
     dirty_log_slots: RwLock<HashMap<u32, KvmDirtyLogSlot>>,
-    guest_memfds: Option<RwLock<HashMap<u32, OwnedFd>>>,
+    memory_slots: Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
 }
 
 impl KvmVm {
@@ -645,7 +650,7 @@ impl KvmVm {
         &self,
         region: kvm_userspace_memory_region2,
     ) -> Result<(), errno::Error> {
-        if self.guest_memfds.is_some() {
+        if self.memory_slots.is_some() {
             // SAFETY: Safe as the caller guarantees that region is safe to map
             // the guest and is non-overlapping.
             unsafe { self.fd.set_user_memory_region2(region) }
@@ -665,7 +670,7 @@ impl KvmVm {
 
     /// Get flag for kvm_userspace_memory_region based on memfd support.
     fn get_kvm_userspace_memory_region_flag(&self, flag: u32) -> u32 {
-        flag | if self.guest_memfds.is_some() {
+        flag | if self.memory_slots.is_some() {
             KVM_MEM_GUEST_MEMFD
         } else {
             0
@@ -1018,7 +1023,7 @@ impl vm::Vm for KvmVm {
         // Create a per-region guest_memfd when supported.
         // Each region gets its own fd sized exactly to memory_size
         #[cfg(feature = "sev_snp")]
-        let guest_memfd = if let Some(memfds) = &self.guest_memfds {
+        let guest_memfd = if let Some(slots) = &self.memory_slots {
             // SAFETY: Safe because guest regions are guaranteed not to overlap.
             let fd = unsafe {
                 OwnedFd::from_raw_fd(
@@ -1031,7 +1036,10 @@ impl vm::Vm for KvmVm {
                 )
             };
             let raw_fd = fd.as_raw_fd() as u32;
-            memfds.write().unwrap().insert(slot, fd);
+            slots
+                .write()
+                .unwrap()
+                .insert(slot, KvmMemorySlot { guest_memfd: fd });
             raw_fd
         } else {
             0
@@ -1084,7 +1092,7 @@ impl vm::Vm for KvmVm {
         }
 
         #[cfg(feature = "sev_snp")]
-        if self.guest_memfds.is_some() {
+        if self.memory_slots.is_some() {
             self.fd
                 .set_memory_attributes(kvm_memory_attributes {
                     address: region.guest_phys_addr,
@@ -1143,8 +1151,8 @@ impl vm::Vm for KvmVm {
         }
 
         // Close the per-region guest_memfd if one was created for this slot
-        if let Some(memfds) = &self.guest_memfds {
-            memfds.write().unwrap().remove(&slot);
+        if let Some(slots) = &self.memory_slots {
+            slots.write().unwrap().remove(&slot);
         }
 
         Ok(())
@@ -1585,10 +1593,10 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             }
 
             #[allow(unused_mut)]
-            let mut guest_memfds = None;
+            let mut memory_slots = None;
             #[cfg(feature = "sev_snp")]
             if _config.sev_snp_enabled && fd.check_extension(Cap::GuestMemfd) {
-                guest_memfds = Some(RwLock::new(HashMap::new()));
+                memory_slots = Some(Arc::new(RwLock::new(HashMap::new())));
             }
 
             #[cfg(feature = "sev_snp")]
@@ -1622,7 +1630,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 sev_fd,
                 #[cfg(feature = "sev_snp")]
                 snp_guest_policy: std::sync::OnceLock::new(),
-                guest_memfds,
+                memory_slots,
             }))
         }
 
@@ -1631,7 +1639,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             Ok(Arc::new(KvmVm {
                 fd: Arc::new(fd),
                 dirty_log_slots: RwLock::new(HashMap::new()),
-                guest_memfds: None,
+                memory_slots: None,
             }))
         }
     }
