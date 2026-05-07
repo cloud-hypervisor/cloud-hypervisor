@@ -337,6 +337,9 @@ pub(crate) fn setup_ovs_dpdk() {
     );
     assert!(exec_host_command_status("service openvswitch-switch restart").success());
 
+    // Clean up any stale bridge from a previous failed run
+    exec_host_command_status("ovs-vsctl --if-exists del-br ovsbr0");
+
     // Create OVS-DPDK bridge and ports
     assert!(
         exec_host_command_status(
