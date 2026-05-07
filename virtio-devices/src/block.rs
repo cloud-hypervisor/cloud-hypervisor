@@ -50,7 +50,7 @@ use super::{
 };
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
-use crate::{GuestMemoryMmap, VirtioInterrupt, device_needs_reset};
+use crate::{GuestMemoryMmap, VirtioInterrupt};
 
 const SECTOR_SHIFT: u8 = 9;
 pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
@@ -165,7 +165,6 @@ struct BlockEpollHandler {
     host_cpus: Option<Vec<usize>>,
     acked_features: u64,
     disable_sector0_writes: bool,
-    device_status: Arc<AtomicU8>,
 }
 
 fn has_feature(features: u64, feature_flag: u64) -> bool {
@@ -173,10 +172,6 @@ fn has_feature(features: u64, feature_flag: u64) -> bool {
 }
 
 impl BlockEpollHandler {
-    fn needs_reset(&self) -> bool {
-        device_needs_reset(&self.device_status)
-    }
-
     fn check_request(
         features: u64,
         request: &Request,
@@ -208,9 +203,6 @@ impl BlockEpollHandler {
     }
 
     fn process_queue_submit(&mut self) -> Result<()> {
-        if self.needs_reset() {
-            return Ok(());
-        }
         let queue = &mut self.queue;
         let queue_size = queue.size();
         let mut batch_requests = Vec::new();
@@ -433,9 +425,6 @@ impl BlockEpollHandler {
     }
 
     fn process_queue_complete(&mut self) -> Result<()> {
-        if self.needs_reset() {
-            return Ok(());
-        }
         let mem = self.mem.memory();
         let mut read_bytes = Wrapping(0);
         let mut write_bytes = Wrapping(0);
@@ -1142,7 +1131,6 @@ impl VirtioDevice for Block {
                 host_cpus: self.queue_affinity.get(&queue_idx).cloned(),
                 acked_features: self.common.acked_features,
                 disable_sector0_writes: self.disable_sector0_writes,
-                device_status: self.device_status.clone(),
             };
 
             let paused = self.common.paused.clone();
