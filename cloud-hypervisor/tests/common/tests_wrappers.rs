@@ -3271,6 +3271,12 @@ pub(crate) fn _test_macvtap(
 
     let phy_net = "eth0";
 
+    // Clean up any stale macvtap interfaces from previous test runs
+    exec_host_command_status(&format!(
+        "sudo ip link del {guest_macvtap_name} 2>/dev/null"
+    ));
+    exec_host_command_status(&format!("sudo ip link del {host_macvtap_name} 2>/dev/null"));
+
     // Create a macvtap interface for the guest VM to use
     assert!(
         exec_host_command_status(&format!(
