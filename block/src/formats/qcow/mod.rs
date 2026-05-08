@@ -97,12 +97,6 @@ impl QcowDisk {
     }
 }
 
-impl Drop for QcowDisk {
-    fn drop(&mut self) {
-        self.metadata.shutdown();
-    }
-}
-
 impl disk_file::DiskSize for QcowDisk {
     fn logical_size(&self) -> BlockResult<u64> {
         Ok(self.metadata.virtual_size())
