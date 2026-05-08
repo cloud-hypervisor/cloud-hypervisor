@@ -28,24 +28,6 @@ build_virtiofsd() {
 update_workloads() {
     cp scripts/sha1sums-aarch64-common "$WORKLOADS_DIR"
 
-    FOCAL_OS_RAW_IMAGE_NAME="focal-server-cloudimg-arm64-custom-20210929-0.raw"
-    FOCAL_OS_RAW_IMAGE_DOWNLOAD_URL="https://ch-images.azureedge.net/$FOCAL_OS_RAW_IMAGE_NAME"
-    FOCAL_OS_RAW_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_NAME"
-    if [ ! -f "$FOCAL_OS_RAW_IMAGE" ]; then
-        pushd "$WORKLOADS_DIR" || exit
-        time wget --quiet $FOCAL_OS_RAW_IMAGE_DOWNLOAD_URL || exit 1
-        popd || exit
-    fi
-
-    FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME="focal-server-cloudimg-arm64-custom-20210929-0.qcow2"
-    FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_DOWNLOAD_URL="https://ch-images.azureedge.net/$FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
-    FOCAL_OS_QCOW2_UNCOMPRESSED_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
-    if [ ! -f "$FOCAL_OS_QCOW2_UNCOMPRESSED_IMAGE" ]; then
-        pushd "$WORKLOADS_DIR" || exit
-        time wget --quiet $FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_DOWNLOAD_URL || exit 1
-        popd || exit
-    fi
-
     JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.raw"
     JAMMY_OS_RAW_IMAGE_DOWNLOAD_URL="https://ch-images.azureedge.net/$JAMMY_OS_RAW_IMAGE_NAME"
     JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
@@ -179,17 +161,6 @@ update_workloads() {
 
     # Prepare linux image (build from source or download pre-built)
     prepare_linux
-
-    # Update the kernel in the cloud image for some tests that requires recent kernel version
-    FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_NAME="focal-server-cloudimg-arm64-custom-20210929-0-update-kernel.raw"
-    cp "$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_NAME" "$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_NAME"
-    FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR="$WORKLOADS_DIR/focal-server-cloudimg-root"
-    NEW_KERNEL="$WORKLOADS_DIR/Image-arm64.gz"
-    DST_KERNEL_PATH="boot/vmlinuz"
-    mkdir -p "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR"
-    IMG="$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_NAME"
-    # Mount image partition, copy kernel, and unmount
-    copy_to_image "$IMG" "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR" "$NEW_KERNEL" "$DST_KERNEL_PATH" || exit 1
 
     # Build virtiofsd
     build_virtiofsd

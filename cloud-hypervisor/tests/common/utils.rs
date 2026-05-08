@@ -1022,7 +1022,6 @@ pub(crate) fn enable_guest_watchdog(guest: &Guest, watchdog_sec: u32) {
             .unwrap_or_default()
     );
 
-    // Enable systemd watchdog
     guest
         .ssh_command(&format!(
             "echo RuntimeWatchdogSec={watchdog_sec}s | sudo tee -a /etc/systemd/system.conf"
