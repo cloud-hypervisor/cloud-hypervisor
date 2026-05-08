@@ -141,7 +141,15 @@ impl QcowMetadata {
             inner: RwLock::new(inner),
         }
     }
+}
 
+impl Drop for QcowMetadata {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+impl QcowMetadata {
     /// Maps a multicluster guest read range to a list of read mappings.
     ///
     /// This walks the range in cluster sized steps under a single lock
