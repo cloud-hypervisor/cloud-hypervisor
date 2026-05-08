@@ -302,7 +302,7 @@ fn get_cli_options_sorted(
             .group("logging"),
         Arg::new("log-format")
             .long("log-format")
-            .help("Log format. Available tokens: {boottime}, {thread}, {level}, {location}, {msg}")
+            .help("Log format. Available tokens: {boottime}, {wallclock}, {pid}, {tid}, {thread}, {level}, {location}, {msg}")
             .num_args(1)
             .default_value(logger::DEFAULT_FORMAT)
             .group("logging"),
