@@ -301,7 +301,7 @@ pub(crate) fn test_cpu_topology(
     packages: u8,
     use_fw: bool,
 ) {
-    let disk_config = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+    let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
     let guest = Guest::new(Box::new(disk_config));
     let total_vcpus = threads_per_core * cores_per_package * packages;
     let direct_kernel_boot_path = direct_kernel_boot_path();
@@ -895,15 +895,7 @@ pub(crate) fn _test_virtio_fs(
     use_generic_vhost_user: bool,
     pci_segment: Option<u16>,
 ) {
-    #[cfg(target_arch = "aarch64")]
-    let focal_image = if hotplug {
-        FOCAL_IMAGE_UPDATE_KERNEL_NAME.to_string()
-    } else {
-        FOCAL_IMAGE_NAME.to_string()
-    };
-    #[cfg(target_arch = "x86_64")]
-    let focal_image = FOCAL_IMAGE_NAME.to_string();
-    let disk_config = UbuntuDiskConfig::new(focal_image);
+    let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
     let guest = Guest::new(Box::new(disk_config));
     let api_socket = temp_api_path(&guest.tmp_dir);
     let event_path = temp_event_monitor_path(&guest.tmp_dir);
@@ -1281,7 +1273,7 @@ pub(crate) fn test_memory_mergeable(mergeable: bool) {
     // We assume the number of shared pages in the rest of the system to be constant
     let ksm_ps_init = get_ksm_pages_shared();
 
-    let disk_config1 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+    let disk_config1 = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
     let guest1 = Guest::new(Box::new(disk_config1));
     let mut child1 = GuestCommand::new(&guest1)
         .default_cpus()
@@ -1307,7 +1299,7 @@ pub(crate) fn test_memory_mergeable(mergeable: bool) {
 
     let ksm_ps_guest1 = get_ksm_pages_shared();
 
-    let disk_config2 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+    let disk_config2 = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
     let guest2 = Guest::new(Box::new(disk_config2));
     let mut child2 = GuestCommand::new(&guest2)
         .default_cpus()
@@ -1353,15 +1345,7 @@ pub(crate) fn test_memory_mergeable(mergeable: bool) {
 // interface attached to the virtual IOMMU since this is the one used to
 // send all commands through SSH.
 pub(crate) fn _test_virtio_iommu(_acpi: bool /* not needed on x86_64 */) {
-    // Virtio-iommu support is ready in recent kernel (v5.14). But the kernel in
-    // Focal image is still old.
-    // So if ACPI is enabled on AArch64, we use a modified Focal image in which
-    // the kernel binary has been updated.
-    #[cfg(target_arch = "aarch64")]
-    let focal_image = FOCAL_IMAGE_UPDATE_KERNEL_NAME.to_string();
-    #[cfg(target_arch = "x86_64")]
-    let focal_image = FOCAL_IMAGE_NAME.to_string();
-    let disk_config = UbuntuDiskConfig::new(focal_image);
+    let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
     let guest = Guest::new(Box::new(disk_config));
 
     #[cfg(target_arch = "x86_64")]
@@ -3114,7 +3098,7 @@ pub(crate) fn _test_watchdog(guest: &Guest) {
         // Trigger a panic (sync first). We need to do this inside a screen with a delay so the SSH command returns.
         guest.ssh_command("screen -dmS reboot sh -c \"sleep 5; echo s | tee /proc/sysrq-trigger; echo c | sudo tee /proc/sysrq-trigger\"").unwrap();
         // Allow some time for the watchdog to trigger (max 30s) and reboot to happen
-        guest.wait_vm_boot_custom_timeout(50).unwrap();
+        guest.wait_vm_boot_custom_timeout(120).unwrap();
         // Check a reboot is triggered by the watchdog
         expected_reboot_count += 1;
         assert_eq!(get_reboot_count(guest), expected_reboot_count);

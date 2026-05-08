@@ -27,8 +27,8 @@ mod common_cvm {
     }
 
     #[test]
-    fn test_focal_simple_launch() {
-        let guest = basic_cvm_guest!(FOCAL_IMAGE_NAME);
+    fn test_jammy_simple_launch() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
 
         _test_simple_launch(&guest);
     }
@@ -116,7 +116,7 @@ mod common_cvm {
     fn test_virtio_block_io_uring() {
         let guest = make_virtio_block_guest(
             &GuestFactory::new_confidential_guest_factory(),
-            FOCAL_IMAGE_NAME,
+            JAMMY_IMAGE_NAME,
         );
         _test_virtio_block(&guest, false, true, false, false, ImageType::Raw);
     }
@@ -125,7 +125,7 @@ mod common_cvm {
     fn test_virtio_block_aio() {
         let guest = make_virtio_block_guest(
             &GuestFactory::new_confidential_guest_factory(),
-            FOCAL_IMAGE_NAME,
+            JAMMY_IMAGE_NAME,
         );
         _test_virtio_block(&guest, true, false, false, false, ImageType::Raw);
     }
@@ -134,7 +134,7 @@ mod common_cvm {
     fn test_virtio_block_sync() {
         let guest = make_virtio_block_guest(
             &GuestFactory::new_confidential_guest_factory(),
-            FOCAL_IMAGE_NAME,
+            JAMMY_IMAGE_NAME,
         );
         _test_virtio_block(&guest, true, true, false, false, ImageType::Raw);
     }
@@ -289,7 +289,7 @@ mod common_cvm {
 
     #[test]
     fn test_watchdog() {
-        let guest = basic_cvm_guest!(FOCAL_IMAGE_NAME);
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
         _test_watchdog(&guest);
     }
 

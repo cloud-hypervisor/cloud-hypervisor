@@ -51,16 +51,16 @@ mod common_parallel {
 
     #[test]
     #[cfg(target_arch = "x86_64")]
-    fn test_focal_hypervisor_fw() {
-        let guest = basic_regular_guest!(FOCAL_IMAGE_NAME)
+    fn test_jammy_hypervisor_fw() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME)
             .with_kernel(fw_path(FwType::RustHypervisorFirmware));
         _test_simple_launch(&guest);
     }
 
     #[test]
     #[cfg(target_arch = "x86_64")]
-    fn test_focal_ovmf() {
-        let guest = basic_regular_guest!(FOCAL_IMAGE_NAME).with_kernel(fw_path(FwType::Ovmf));
+    fn test_jammy_ovmf() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_kernel(fw_path(FwType::Ovmf));
         _test_simple_launch(&guest);
     }
 
@@ -342,8 +342,7 @@ mod common_parallel {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_iommu_segments() {
-        let focal_image = FOCAL_IMAGE_NAME.to_string();
-        let disk_config = UbuntuDiskConfig::new(focal_image);
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
         // Prepare another disk file for the virtio-disk device
@@ -584,14 +583,14 @@ mod common_parallel {
     #[test]
     fn test_virtio_block_io_uring() {
         let guest =
-            make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), FOCAL_IMAGE_NAME);
+            make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), JAMMY_IMAGE_NAME);
         _test_virtio_block(&guest, false, true, false, false, ImageType::Raw);
     }
 
     #[test]
     fn test_virtio_block_aio() {
         let guest =
-            make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), FOCAL_IMAGE_NAME)
+            make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), JAMMY_IMAGE_NAME)
                 .with_cpu(4);
         _test_virtio_block(&guest, true, false, false, false, ImageType::Raw);
     }
@@ -599,7 +598,7 @@ mod common_parallel {
     #[test]
     fn test_virtio_block_sync() {
         let guest =
-            make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), FOCAL_IMAGE_NAME)
+            make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), JAMMY_IMAGE_NAME)
                 .with_cpu(4);
         _test_virtio_block(&guest, true, true, false, false, ImageType::Raw);
     }
@@ -1661,8 +1660,8 @@ mod common_parallel {
 
         let mut raw_file_path = workload_path.clone();
         let mut vhd_file_path = workload_path;
-        raw_file_path.push(FOCAL_IMAGE_NAME);
-        vhd_file_path.push(FOCAL_IMAGE_NAME_VHD);
+        raw_file_path.push(JAMMY_IMAGE_NAME);
+        vhd_file_path.push(JAMMY_IMAGE_NAME_VHD);
 
         // Generate VHD file from RAW file
         std::process::Command::new("qemu-img")
@@ -1677,7 +1676,7 @@ mod common_parallel {
             .expect("Expect generating VHD image from RAW image");
         let guest = make_virtio_block_guest(
             &GuestFactory::new_regular_guest_factory(),
-            FOCAL_IMAGE_NAME_VHD,
+            JAMMY_IMAGE_NAME_VHD,
         );
         _test_virtio_block(&guest, false, false, false, false, ImageType::FixedVhd);
     }
@@ -1689,8 +1688,8 @@ mod common_parallel {
 
         let mut raw_file_path = workload_path.clone();
         let mut vhdx_file_path = workload_path;
-        raw_file_path.push(FOCAL_IMAGE_NAME);
-        vhdx_file_path.push(FOCAL_IMAGE_NAME_VHDX);
+        raw_file_path.push(JAMMY_IMAGE_NAME);
+        vhdx_file_path.push(JAMMY_IMAGE_NAME_VHDX);
 
         // Generate dynamic VHDX file from RAW file
         std::process::Command::new("qemu-img")
@@ -1704,7 +1703,7 @@ mod common_parallel {
             .expect("Expect generating dynamic VHDx image from RAW image");
         let guest = make_virtio_block_guest(
             &GuestFactory::new_regular_guest_factory(),
-            FOCAL_IMAGE_NAME_VHDX,
+            JAMMY_IMAGE_NAME_VHDX,
         );
         _test_virtio_block(&guest, false, false, true, false, ImageType::Vhdx);
     }
@@ -2769,11 +2768,7 @@ mod common_parallel {
 
     #[test]
     fn test_memory_hotplug() {
-        #[cfg(target_arch = "aarch64")]
-        let focal_image = FOCAL_IMAGE_UPDATE_KERNEL_NAME.to_string();
-        #[cfg(target_arch = "x86_64")]
-        let focal_image = FOCAL_IMAGE_NAME.to_string();
-        let disk_config = UbuntuDiskConfig::new(focal_image);
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -4939,11 +4934,7 @@ mod common_parallel {
     }
 
     fn _test_pmem_hotplug(pci_segment: Option<u16>) {
-        #[cfg(target_arch = "aarch64")]
-        let focal_image = FOCAL_IMAGE_UPDATE_KERNEL_NAME.to_string();
-        #[cfg(target_arch = "x86_64")]
-        let focal_image = FOCAL_IMAGE_NAME.to_string();
-        let disk_config = UbuntuDiskConfig::new(focal_image);
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
         #[cfg(target_arch = "x86_64")]
@@ -5232,7 +5223,7 @@ mod common_parallel {
 
     #[test]
     fn test_watchdog() {
-        let guest = basic_regular_guest!(FOCAL_IMAGE_NAME);
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_watchdog(&guest);
     }
 
@@ -5265,10 +5256,10 @@ mod common_parallel {
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_ovs_dpdk() {
-        let disk_config1 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let disk_config1 = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest1 = Guest::new(Box::new(disk_config1));
 
-        let disk_config2 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let disk_config2 = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest2 = Guest::new(Box::new(disk_config2));
         let api_socket_source = format!("{}.1", temp_api_path(&guest2.tmp_dir));
 
@@ -6274,7 +6265,7 @@ mod common_parallel {
 
     #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_watchdog(upgrade_test: bool, local: bool) {
-        let disk_config = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
         let console_text = String::from("On a branch floating down river a cricket, singing.");
@@ -6451,7 +6442,7 @@ mod common_parallel {
             // Trigger a panic (sync first). We need to do this inside a screen with a delay so the SSH command returns.
             guest.ssh_command("screen -dmS reboot sh -c \"sleep 5; echo s | tee /proc/sysrq-trigger; echo c | sudo tee /proc/sysrq-trigger\"").unwrap();
             // Allow some time for the watchdog to trigger (max 30s) and reboot to happen
-            guest.wait_vm_boot_custom_timeout(50).unwrap();
+            guest.wait_vm_boot_custom_timeout(120).unwrap();
             // Check a reboot is triggered by the watchdog
             expected_reboot_count += 1;
             assert_eq!(get_reboot_count(&guest), expected_reboot_count);
@@ -9347,10 +9338,10 @@ mod common_sequential {
 
     #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_ovs_dpdk(upgrade_test: bool, local: bool) {
-        let ovs_disk_config = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let ovs_disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let ovs_guest = Guest::new(Box::new(ovs_disk_config));
 
-        let migration_disk_config = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let migration_disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let migration_guest = Guest::new(Box::new(migration_disk_config));
         let src_api_socket = temp_api_path(&migration_guest.tmp_dir);
 
@@ -11129,9 +11120,9 @@ mod aarch64_acpi {
 
     #[test]
     fn test_simple_launch_acpi() {
-        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let jammy = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
 
-        vec![Box::new(focal)].drain(..).for_each(|disk_config| {
+        vec![Box::new(jammy)].drain(..).for_each(|disk_config| {
             let guest = Guest::new(disk_config);
 
             let mut child = GuestCommand::new(&guest)

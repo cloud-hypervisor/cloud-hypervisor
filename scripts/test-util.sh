@@ -168,7 +168,7 @@ download_hypervisor_fw() {
 }
 
 download_linux() {
-    KERNEL_TAG="ch-release-v6.16.9-20251112"
+    KERNEL_TAG="ch-release-v6.16.9-20260508"
     if [ -n "$AUTH_DOWNLOAD_TOKEN" ]; then
         echo "Using authenticated download from GitHub"
         KERNEL_URLS=$(curl --silent https://api.github.com/repos/cloud-hypervisor/linux/releases/tags/${KERNEL_TAG} \
@@ -346,25 +346,8 @@ copy_to_image() {
     return $?
 }
 
-# Download x86 guest images (Focal and Jammy)
+# Download x86 guest images
 download_x86_guest_images() {
-    FOCAL_OS_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0.qcow2"
-    FOCAL_OS_IMAGE_URL="https://ch-images.azureedge.net/$FOCAL_OS_IMAGE_NAME"
-    FOCAL_OS_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_IMAGE_NAME"
-    if [ ! -f "$FOCAL_OS_IMAGE" ]; then
-        pushd "$WORKLOADS_DIR" || exit
-        time wget --quiet $FOCAL_OS_IMAGE_URL || exit 1
-        popd || exit
-    fi
-
-    FOCAL_OS_RAW_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0.raw"
-    FOCAL_OS_RAW_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_NAME"
-    if [ ! -f "$FOCAL_OS_RAW_IMAGE" ]; then
-        pushd "$WORKLOADS_DIR" || exit
-        time qemu-img convert -p -f qcow2 -O raw $FOCAL_OS_IMAGE_NAME $FOCAL_OS_RAW_IMAGE_NAME || exit 1
-        popd || exit
-    fi
-
     JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.qcow2"
     JAMMY_OS_IMAGE_URL="https://ch-images.azureedge.net/$JAMMY_OS_IMAGE_NAME"
     JAMMY_OS_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_IMAGE_NAME"
