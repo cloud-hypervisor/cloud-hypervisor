@@ -3892,7 +3892,7 @@ impl DeviceManager {
             .try_clone()
             .map_err(DeviceManagerError::VfioCreate)?;
 
-        let iommufd = self
+        let iommufd_on = self
             .config
             .lock()
             .unwrap()
@@ -3900,11 +3900,40 @@ impl DeviceManager {
             .as_ref()
             .is_some_and(|p| p.iommufd);
 
-        if iommufd {
+        if iommufd_on {
             #[cfg(feature = "kvm")]
             {
-                info!("Using vfio cdev mode with iommufd.");
-                let iommufd = IommuFd::new().map_err(DeviceManagerError::IommufdCreate)?;
+                let iommufd_fd = self
+                    .config
+                    .lock()
+                    .unwrap()
+                    .platform
+                    .as_ref()
+                    .and_then(|p| p.iommufd_fd);
+                let iommufd = match iommufd_fd {
+                    Some(fd) => {
+                        info!("Using vfio cdev mode with externally-supplied iommufd fd: {fd}.");
+                        // Dup so the IommuFd owns its own File; the
+                        // caller-supplied fd is kept alive across reboot
+                        // via VmConfig::preserved_fds.
+                        // SAFETY: FFI call to dup. Trivially safe.
+                        let dup_fd = unsafe { libc::dup(fd) };
+                        if dup_fd < 0 {
+                            return Err(DeviceManagerError::VfioDupFd(io::Error::last_os_error()));
+                        }
+                        // SAFETY: dup_fd is valid and can be owned by this File
+                        let file = unsafe { File::from_raw_fd(dup_fd) };
+                        // SAFETY: fd is a valid open iommufd
+                        unsafe {
+                            self.config.lock().unwrap().add_preserved_fds(vec![fd]);
+                        }
+                        IommuFd::new_from_fd(file)
+                    }
+                    None => {
+                        info!("Using vfio cdev mode with iommufd.");
+                        IommuFd::new().map_err(DeviceManagerError::IommufdCreate)?
+                    }
+                };
                 let vfio_iommufd = VfioIommufd::new(Arc::new(iommufd), None, Some(Arc::new(dup)))
                     .map_err(DeviceManagerError::VfioCreate)?;
                 Ok(Arc::new(vfio_iommufd))
@@ -3933,15 +3962,26 @@ impl DeviceManager {
         fd: i32,
         vfio_ops: Arc<dyn VfioOps>,
     ) -> DeviceManagerResult<(VfioDevice, PathBuf)> {
-        assert!(
-            self.config
-                .lock()
-                .unwrap()
-                .platform
+        let already_bound = {
+            let config = self.config.lock().unwrap();
+            assert!(
+                config.platform.as_ref().is_some_and(|p| p.iommufd),
+                "DeviceConfig::validate enforces iommufd when fd is set",
+            );
+            assert!(
+                config
+                    .platform
+                    .as_ref()
+                    .is_some_and(|p| p.iommufd_fd.is_some()),
+                "DeviceConfig::validate enforces iommufd_fd when device fd is set",
+            );
+            // If a cdev fd was preserved on a prior boot, it is already bound
+            // to an iommufd instance
+            config
+                .preserved_fds
                 .as_ref()
-                .is_some_and(|p| p.iommufd),
-            "DeviceConfig::validate enforces iommufd when fd is set",
-        );
+                .is_some_and(|s| s.contains(&fd))
+        };
 
         // SAFETY: FFI call to dup. Trivially safe.
         let dup_fd = unsafe { libc::dup(fd) };
@@ -3950,8 +3990,11 @@ impl DeviceManager {
         }
         // SAFETY: dup_fd is a freshly-opened fd owned by this File.
         let file = unsafe { File::from_raw_fd(dup_fd) };
-        let vfio_device =
-            VfioDevice::new_from_fd(file, vfio_ops).map_err(DeviceManagerError::VfioCreate)?;
+        let vfio_device = if already_bound {
+            VfioDevice::new_from_bound_fd(file, vfio_ops).map_err(DeviceManagerError::VfioCreate)?
+        } else {
+            VfioDevice::new_from_fd(file, vfio_ops).map_err(DeviceManagerError::VfioCreate)?
+        };
 
         // SAFETY: fd is a valid open vfio cdev FD; the VfioDevice only
         // holds a dup, so VmConfig can safely take ownership of the
