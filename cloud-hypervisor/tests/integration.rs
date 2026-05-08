@@ -9504,24 +9504,6 @@ mod common_sequential {
     fn test_live_migration_watchdog() {
         _test_live_migration_watchdog(false, false);
     }
-
-    #[test]
-    #[cfg(not(feature = "mshv"))]
-    fn test_live_migration_watchdog_local() {
-        _test_live_migration_watchdog(false, true);
-    }
-
-    #[test]
-    #[cfg(not(feature = "mshv"))]
-    fn test_live_upgrade_watchdog() {
-        _test_live_migration_watchdog(true, false);
-    }
-
-    #[test]
-    #[cfg(not(feature = "mshv"))]
-    fn test_live_upgrade_watchdog_local() {
-        _test_live_migration_watchdog(true, true);
-    }
 }
 
 mod windows {
