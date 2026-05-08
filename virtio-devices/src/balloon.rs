@@ -59,6 +59,12 @@ const REPORTING_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
 // Size of a PFN in the balloon interface.
 const VIRTIO_BALLOON_PFN_SHIFT: u64 = 12;
 
+// Upper bound on a single inflate or deflate descriptor length, in
+// bytes. Matches the Linux driver, which submits at most
+// VIRTIO_BALLOON_ARRAY_PFNS_MAX of 256 PFN entries of 4 bytes each per
+// descriptor.
+const VIRTIO_BALLOON_MAX_PFN_BYTES: u32 = 256 * 4;
+
 // Deflate balloon on OOM
 const VIRTIO_BALLOON_F_DEFLATE_ON_OOM: u64 = 2;
 // Enable an additional virtqueue to let the guest notify the host about free
@@ -278,6 +284,13 @@ impl BalloonEpollHandler {
                 if !(desc.len() as usize).is_multiple_of(data_chunk_size) {
                     warn!(
                         "Skipping descriptor with length {} not a multiple of {data_chunk_size}",
+                        desc.len()
+                    );
+                    continue;
+                }
+                if desc.len() > VIRTIO_BALLOON_MAX_PFN_BYTES {
+                    warn!(
+                        "Skipping descriptor with length {} exceeding cap {VIRTIO_BALLOON_MAX_PFN_BYTES}",
                         desc.len()
                     );
                     continue;
