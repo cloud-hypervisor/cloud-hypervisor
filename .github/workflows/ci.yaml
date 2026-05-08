@@ -597,7 +597,7 @@ jobs:
     name: integration-arm64
     needs: [preflight, dco, quality, build]
     if: >-
-      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
+      needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
     timeout-minutes: 120
     env:
       # Our runner has 80 cores (nproc).
@@ -620,7 +620,9 @@ jobs:
       - name: Run integration tests (musl)
         timeout-minutes: 60
         run: scripts/dev_cli.sh tests --integration --libc musl
+      # MQ-only: pull_request runs do not have access to private image secrets.
       - name: Install Azure CLI
+        if: github.event_name == 'merge_group'
         run: |
           set -eufo pipefail
           sudo apt install -y ca-certificates curl apt-transport-https lsb-release gnupg
@@ -629,6 +631,7 @@ jobs:
           sudo apt update
           sudo apt install -y azure-cli
       - name: Download Windows image
+        if: github.event_name == 'merge_group'
         shell: bash
         run: |
           set -eufo pipefail
@@ -646,6 +649,7 @@ jobs:
           az storage blob download --container-name private-images --file "$IMG_GZ_PATH" --name "$IMG_GZ_BLOB_NAME" --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
           gzip -d "$IMG_GZ_PATH"
       - name: Run Windows guest integration tests
+        if: github.event_name == 'merge_group'
         timeout-minutes: 30
         run: scripts/dev_cli.sh tests --integration-windows --libc musl
   integration-vfio:
