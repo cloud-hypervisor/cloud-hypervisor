@@ -461,7 +461,9 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
 
             let mut request = self.find_inflight_request(desc_index)?;
 
-            request.complete_async().map_err(Error::RequestCompleting)?;
+            request
+                .complete_async(&mem)
+                .map_err(Error::RequestCompleting)?;
 
             let latency = request.start.elapsed().as_micros() as u64;
             let read_ops_last = self.counters.read_ops.load(Ordering::Relaxed);
