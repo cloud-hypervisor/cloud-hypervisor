@@ -480,6 +480,14 @@ impl VhostUserCommon {
         kill_evt: EventFd,
         pause_evt: EventFd,
     ) -> std::result::Result<VhostUserEpollHandler<T>, ActivateError> {
+        if self.disconnected.load(Ordering::Relaxed) {
+            warn!(
+                "Not activating disconnected vhost-user device for socket {}",
+                self.socket_path
+            );
+            return Err(ActivateError::BadActivate);
+        }
+
         let mut inflight: Option<Inflight> =
             if self.acked_protocol_features & VhostUserProtocolFeatures::INFLIGHT_SHMFD.bits() != 0
             {
