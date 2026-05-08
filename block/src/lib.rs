@@ -8,6 +8,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+mod aligned_operation;
 pub mod async_io;
 pub mod fcntl;
 pub mod fixed_vhd;
@@ -28,7 +29,7 @@ pub mod vhd;
 pub mod vhdx;
 pub mod vhdx_sync;
 
-use std::alloc::{Layout, alloc_zeroed, dealloc};
+use std::alloc::{Layout, alloc_zeroed};
 use std::collections::VecDeque;
 use std::fmt::{self, Debug};
 use std::fs::File;
@@ -56,6 +57,8 @@ use vm_memory::{
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::{aio, ioctl_io_nr};
+
+pub use aligned_operation::AlignedOperation;
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 use crate::vhdx::VhdxError;
@@ -231,14 +234,6 @@ fn sector<B: Bitmap + 'static>(
 }
 
 const DEFAULT_DESCRIPTOR_VEC_SIZE: usize = 32;
-
-#[derive(Debug)]
-pub struct AlignedOperation {
-    origin_ptr: u64,
-    aligned_ptr: u64,
-    size: usize,
-    layout: Layout,
-}
 
 pub struct BatchRequest {
     pub offset: libc::off_t,
@@ -473,31 +468,19 @@ impl Request {
             let iov_base = if (origin_ptr.as_ptr() as u64).is_multiple_of(SECTOR_SIZE) {
                 origin_ptr.as_ptr() as *mut libc::c_void
             } else {
-                let layout = Layout::from_size_align(data_len, SECTOR_SIZE as usize).unwrap();
-                // SAFETY: layout has non-zero size
-                let aligned_ptr = unsafe { alloc_zeroed(layout) };
-                if aligned_ptr.is_null() {
-                    return Err(ExecuteError::TemporaryBufferAllocation(
-                        io::Error::last_os_error(),
-                    ));
-                }
+                let mut aligned_op =
+                    AlignedOperation::new(data_addr, data_len, SECTOR_SIZE as usize)
+                        .map_err(ExecuteError::TemporaryBufferAllocation)?;
 
                 // We need to perform the copy beforehand in case we're writing
                 // data out.
                 if request_type == RequestType::Out {
-                    // SAFETY: destination buffer has been allocated with
-                    // the proper size.
-                    unsafe { std::ptr::copy(origin_ptr.as_ptr(), aligned_ptr, data_len) };
+                    mem.read_slice(aligned_op.as_bytes_mut(), data_addr)
+                        .map_err(ExecuteError::Read)?;
                 }
 
-                // Store both origin and aligned pointers for complete_async()
-                // to process them.
-                self.aligned_operations.push(AlignedOperation {
-                    origin_ptr: origin_ptr.as_ptr() as u64,
-                    aligned_ptr: aligned_ptr as u64,
-                    size: data_len,
-                    layout,
-                });
+                let aligned_ptr = aligned_op.as_mut_ptr();
+                self.aligned_operations.push(aligned_op);
 
                 aligned_ptr as *mut libc::c_void
             };
@@ -639,31 +622,17 @@ impl Request {
         Ok(ret)
     }
 
-    pub fn complete_async(&mut self) -> result::Result<(), Error> {
-        for aligned_operation in self.aligned_operations.drain(..) {
+    pub fn complete_async<B: Bitmap + 'static>(
+        &mut self,
+        mem: &vm_memory::GuestMemoryMmap<B>,
+    ) -> result::Result<(), Error> {
+        for aligned_op in self.aligned_operations.drain(..) {
             // We need to perform the copy after the data has been read inside
             // the aligned buffer in case we're reading data in.
             if self.request_type == RequestType::In {
-                // SAFETY: origin buffer has been allocated with the
-                // proper size.
-                unsafe {
-                    std::ptr::copy(
-                        aligned_operation.aligned_ptr as *const u8,
-                        aligned_operation.origin_ptr as *mut u8,
-                        aligned_operation.size,
-                    );
-                };
+                mem.write_slice(aligned_op.as_bytes(), aligned_op.data_addr())
+                    .map_err(Error::GuestMemory)?;
             }
-
-            // Free the temporary aligned buffer.
-            // SAFETY: aligned_ptr was allocated by alloc_zeroed with the same
-            // layout
-            unsafe {
-                dealloc(
-                    aligned_operation.aligned_ptr as *mut u8,
-                    aligned_operation.layout,
-                );
-            };
         }
 
         Ok(())
