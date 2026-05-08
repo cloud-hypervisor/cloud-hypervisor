@@ -90,7 +90,7 @@ fn parse_format(fmt: &str) -> Result<Vec<Token>, Error> {
     Ok(tokens)
 }
 
-const DEFAULT_FORMAT: &str =
+pub const DEFAULT_FORMAT: &str =
     "cloud-hypervisor: {boottime}s: <{thread}> {level}:{location} -- {msg}";
 
 pub struct Logger {
@@ -100,11 +100,11 @@ pub struct Logger {
 }
 
 impl Logger {
-    pub fn new(output: Box<dyn Write + Send>) -> Result<Self, Error> {
+    pub fn new(output: Box<dyn Write + Send>, format: &str) -> Result<Self, Error> {
         Ok(Self {
             output: Mutex::new(output),
             start: Instant::now(),
-            tokens: parse_format(DEFAULT_FORMAT)?,
+            tokens: parse_format(format)?,
         })
     }
 }
@@ -262,7 +262,7 @@ mod tests {
     #[test]
     fn logger_new_uses_default_format() {
         let buf = SharedBuffer::default();
-        let logger = Logger::new(Box::new(buf.clone())).unwrap();
+        let logger = Logger::new(Box::new(buf.clone()), DEFAULT_FORMAT).unwrap();
         // The default format has all 5 dynamic tokens.
         assert_eq!(
             logger
@@ -277,7 +277,7 @@ mod tests {
     #[test]
     fn logger_enabled_always_true() {
         let buf = SharedBuffer::default();
-        let logger = Logger::new(Box::new(buf)).unwrap();
+        let logger = Logger::new(Box::new(buf), DEFAULT_FORMAT).unwrap();
         let metadata = log::Metadata::builder()
             .level(log::Level::Trace)
             .target("anything")
@@ -288,7 +288,7 @@ mod tests {
     #[test]
     fn logger_writes_expected_fields() {
         let buf = SharedBuffer::default();
-        let logger = Logger::new(Box::new(buf.clone())).unwrap();
+        let logger = Logger::new(Box::new(buf.clone()), DEFAULT_FORMAT).unwrap();
 
         logger.log(
             &log::Record::builder()
@@ -311,7 +311,7 @@ mod tests {
     #[test]
     fn logger_uses_target_when_no_file() {
         let buf = SharedBuffer::default();
-        let logger = Logger::new(Box::new(buf.clone())).unwrap();
+        let logger = Logger::new(Box::new(buf.clone()), DEFAULT_FORMAT).unwrap();
 
         logger.log(
             &log::Record::builder()
@@ -331,7 +331,7 @@ mod tests {
     #[test]
     fn logger_appends_each_record() {
         let buf = SharedBuffer::default();
-        let logger = Logger::new(Box::new(buf.clone())).unwrap();
+        let logger = Logger::new(Box::new(buf.clone()), DEFAULT_FORMAT).unwrap();
 
         for i in 0..3 {
             logger.log(

@@ -300,6 +300,12 @@ fn get_cli_options_sorted(
             .help("Log file. Standard error is used if not specified")
             .num_args(1)
             .group("logging"),
+        Arg::new("log-format")
+            .long("log-format")
+            .help("Log format. Available tokens: {boottime}, {thread}, {level}, {location}, {msg}")
+            .num_args(1)
+            .default_value(logger::DEFAULT_FORMAT)
+            .group("logging"),
         Arg::new("memory")
             .long("memory")
             .help(
@@ -515,7 +521,8 @@ fn start_vmm(
         Box::new(std::io::stderr())
     };
 
-    let logger = Logger::new(log_file).map_err(Error::LoggerFormat)?;
+    let format = cmd_arguments.get_one::<String>("log-format").unwrap();
+    let logger = Logger::new(log_file, format).map_err(Error::LoggerFormat)?;
     log::set_boxed_logger(Box::new(logger))
         .map(|()| log::set_max_level(log_level))
         .map_err(Error::LoggerSetup)?;
