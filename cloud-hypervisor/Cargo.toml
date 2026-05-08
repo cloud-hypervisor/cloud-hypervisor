@@ -19,6 +19,7 @@ env_logger = { workspace = true }
 epoll = { workspace = true }
 event_monitor = { path = "../event_monitor" }
 hypervisor = { path = "../hypervisor" }
+jiff = { workspace = true }
 libc = { workspace = true }
 log = { workspace = true, features = ["std"] }
 option_parser = { path = "../option_parser" }

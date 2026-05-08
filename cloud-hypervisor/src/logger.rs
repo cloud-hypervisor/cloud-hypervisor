@@ -23,6 +23,9 @@ pub enum Error {
 enum Token {
     Literal(String),
     BootTime,
+    WallClock,
+    Pid,
+    Tid,
     Thread,
     Level,
     Location,
@@ -35,6 +38,9 @@ impl FromStr for Token {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "boottime" => Ok(Self::BootTime),
+            "wallclock" => Ok(Self::WallClock),
+            "pid" => Ok(Self::Pid),
+            "tid" => Ok(Self::Tid),
             "thread" => Ok(Self::Thread),
             "level" => Ok(Self::Level),
             "location" => Ok(Self::Location),
@@ -96,6 +102,7 @@ pub const DEFAULT_FORMAT: &str =
 pub struct Logger {
     output: Mutex<Box<dyn Write + Send>>,
     start: Instant,
+    pid: u32,
     tokens: Vec<Token>,
 }
 
@@ -104,6 +111,7 @@ impl Logger {
         Ok(Self {
             output: Mutex::new(output),
             start: Instant::now(),
+            pid: std::process::id(),
             tokens: parse_format(format)?,
         })
     }
@@ -126,6 +134,14 @@ impl log::Log for Logger {
                 Token::Literal(s) => out.write_all(s.as_bytes()),
                 // 10: 6 decimal places + sep => whole seconds in range `0..=999` properly aligned
                 Token::BootTime => write!(&mut *out, "{duration_s:>10.6?}"),
+                Token::WallClock => write!(
+                    out,
+                    "{}",
+                    jiff::Zoned::now().strftime("%Y-%m-%dT%H:%M:%S%.6fZ")
+                ),
+                Token::Pid => write!(&mut *out, "{}", self.pid),
+                // SAFETY: gettid(2) always succeeds
+                Token::Tid => write!(&mut *out, "{}", unsafe { libc::gettid() }),
                 Token::Thread => write!(
                     &mut *out,
                     "{}",
@@ -182,6 +198,9 @@ mod tests {
             .map(|t| match t {
                 Token::Literal(s) => format!("L({s})"),
                 Token::BootTime => "B".to_string(),
+                Token::WallClock => "W".to_string(),
+                Token::Pid => "P".to_string(),
+                Token::Tid => "I".to_string(),
                 Token::Thread => "T".to_string(),
                 Token::Level => "V".to_string(),
                 Token::Location => "O".to_string(),
@@ -205,8 +224,14 @@ mod tests {
 
     #[test]
     fn parse_all_known_tokens() {
-        let tokens = parse_format("[{boottime}] <{thread}> {level} {location} -- {msg}").unwrap();
-        assert_eq!(render(&tokens), "L([)|B|L(] <)|T|L(> )|V|L( )|O|L( -- )|M");
+        let tokens = parse_format(
+            "[{boottime}] {wallclock} {pid}/{tid} <{thread}> {level} {location} -- {msg}",
+        )
+        .unwrap();
+        assert_eq!(
+            render(&tokens),
+            "L([)|B|L(] )|W|L( )|P|L(/)|I|L( <)|T|L(> )|V|L( )|O|L( -- )|M"
+        );
     }
 
     #[test]
@@ -326,6 +351,68 @@ mod tests {
         let out = buf.contents();
         assert!(out.contains("my_target"), "got: {out}");
         assert!(!out.contains("foo.rs"), "got: {out}");
+    }
+
+    #[test]
+    fn logger_wallclock_is_rfc3339() {
+        let buf = SharedBuffer::default();
+        let logger = Logger::new(Box::new(buf.clone()), "{wallclock}").unwrap();
+
+        logger.log(
+            &log::Record::builder()
+                .args(format_args!(""))
+                .level(log::Level::Info)
+                .target("t")
+                .build(),
+        );
+
+        let out = buf.contents();
+        let out = out.trim();
+        assert_eq!(out.len(), 27, "got: {out}");
+        assert!(out.ends_with('Z'), "got: {out}");
+        assert_eq!(&out[4..5], "-", "got: {out}");
+        assert_eq!(&out[7..8], "-", "got: {out}");
+        assert_eq!(&out[10..11], "T", "got: {out}");
+        assert_eq!(&out[13..14], ":", "got: {out}");
+        assert_eq!(&out[16..17], ":", "got: {out}");
+        assert_eq!(&out[19..20], ".", "got: {out}");
+    }
+
+    #[test]
+    fn logger_pid_token() {
+        let buf = SharedBuffer::default();
+        let logger = Logger::new(Box::new(buf.clone()), "{pid}").unwrap();
+
+        logger.log(
+            &log::Record::builder()
+                .args(format_args!(""))
+                .level(log::Level::Info)
+                .target("t")
+                .build(),
+        );
+
+        let out = buf.contents();
+        let out = out.trim();
+        assert_eq!(out, std::process::id().to_string(), "got: {out}");
+    }
+
+    #[test]
+    fn logger_tid_token() {
+        let buf = SharedBuffer::default();
+        let logger = Logger::new(Box::new(buf.clone()), "{tid}").unwrap();
+
+        logger.log(
+            &log::Record::builder()
+                .args(format_args!(""))
+                .level(log::Level::Info)
+                .target("t")
+                .build(),
+        );
+
+        let out = buf.contents();
+        let out = out.trim();
+        let tid: i64 = out.parse().expect("tid should be numeric");
+        assert!(tid > 0, "got: {tid}");
     }
 
     #[test]
