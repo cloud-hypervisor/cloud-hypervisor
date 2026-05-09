@@ -588,4 +588,48 @@ mod unit_tests {
                 .all(|v| *v == VIRTQ_MSI_NO_VECTOR)
         );
     }
+
+    fn make_regs(config_generation: u8) -> VirtioPciCommonConfig {
+        let dev: Arc<Mutex<dyn VirtioDevice>> = Arc::new(Mutex::new(DummyDevice(0)));
+        VirtioPciCommonConfig {
+            device: dev,
+            driver_status: Arc::new(AtomicU8::new(0)),
+            config_generation: Arc::new(AtomicU8::new(config_generation)),
+            config_changed: Arc::new(AtomicBool::new(false)),
+            device_feature_select: 0,
+            driver_feature_select: 0,
+            queue_select: 0,
+            msix_config: Arc::new(AtomicU16::new(0)),
+            msix_queues: Arc::new(Mutex::new(vec![0; 1])),
+        }
+    }
+
+    #[test]
+    fn consume_config_change_bumps_when_flag_set() {
+        let regs = make_regs(0x10);
+        regs.config_changed.store(true, Ordering::Release);
+        regs.consume_config_change();
+        assert_eq!(regs.config_generation.load(Ordering::Acquire), 0x11);
+        assert!(!regs.config_changed.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn consume_config_change_is_noop_when_flag_clear() {
+        let regs = make_regs(0x10);
+        regs.consume_config_change();
+        assert_eq!(regs.config_generation.load(Ordering::Acquire), 0x10);
+        assert!(!regs.config_changed.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn consume_config_change_coalesces_multiple_sets() {
+        let regs = make_regs(0x10);
+        regs.config_changed.store(true, Ordering::Release);
+        regs.config_changed.store(true, Ordering::Release);
+        regs.config_changed.store(true, Ordering::Release);
+        regs.consume_config_change();
+        assert_eq!(regs.config_generation.load(Ordering::Acquire), 0x11);
+        regs.consume_config_change();
+        assert_eq!(regs.config_generation.load(Ordering::Acquire), 0x11);
+    }
 }
