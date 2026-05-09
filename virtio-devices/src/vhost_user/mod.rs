@@ -72,7 +72,7 @@ pub enum Error {
     #[error("Failed to open vhost device")]
     VhostUserOpen(#[source] VhostError),
     #[error("Connection to socket failed")]
-    VhostUserConnect,
+    VhostUserConnect(#[source] VhostError),
     #[error("Get features failed")]
     VhostUserGetFeatures(#[source] VhostError),
     #[error("Get queue max number failed")]
@@ -159,6 +159,18 @@ pub enum Error {
     VringBasesCountMismatch(usize, usize),
     #[error("Backend state and vring bases must both be present or both be absent")]
     InconsistentBackendState,
+    #[error("Failed to create timerfd")]
+    TimerFdCreate(#[source] io::Error),
+    #[error("Failed to arm timerfd")]
+    TimerFdArm(#[source] io::Error),
+    #[error("Failed waiting on timerfd")]
+    TimerFdWait(#[source] io::Error),
+    #[error("Failed to create epoll instance")]
+    EpollCreate(#[source] io::Error),
+    #[error("Failed to add fd to epoll")]
+    EpollCtl(#[source] io::Error),
+    #[error("Failed waiting on epoll")]
+    EpollWait(#[source] io::Error),
 }
 type Result<T> = std::result::Result<T, Error>;
 
