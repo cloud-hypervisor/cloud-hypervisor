@@ -569,6 +569,15 @@ impl VhostUserCommon {
         self.virtio_common.interrupt_cb = None;
     }
 
+    fn memory_update_error(&self, source: Error) -> crate::Error {
+        if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits() != 0
+        {
+            crate::Error::VhostUserAddMemoryRegion(source)
+        } else {
+            crate::Error::VhostUserUpdateMemory(source)
+        }
+    }
+
     pub fn shutdown(&mut self) {
         // Signal the epoll thread to exit, unpause it (it may be parked
         // if the VM was paused for migration), then wait for it to finish.
@@ -595,27 +604,54 @@ impl VhostUserCommon {
         self.vu = None;
     }
 
+    fn add_memory_region_internal(
+        &self,
+        guest_memory: &Option<GuestMemoryAtomic<GuestMemoryMmap>>,
+        region: &Arc<GuestRegionMmap>,
+    ) -> Result<()> {
+        if let Some(vu) = &self.vu {
+            if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits()
+                != 0
+            {
+                return vu.lock().unwrap().add_memory_region(region);
+            } else if let Some(guest_memory) = guest_memory {
+                return vu
+                    .lock()
+                    .unwrap()
+                    .update_mem_table(guest_memory.memory().deref());
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn add_memory_region(
         &mut self,
         guest_memory: &Option<GuestMemoryAtomic<GuestMemoryMmap>>,
         region: &Arc<GuestRegionMmap>,
     ) -> std::result::Result<(), crate::Error> {
-        if let Some(vu) = &self.vu {
-            if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits()
-                != 0
-            {
-                return vu
-                    .lock()
-                    .unwrap()
-                    .add_memory_region(region)
-                    .map_err(crate::Error::VhostUserAddMemoryRegion);
-            } else if let Some(guest_memory) = guest_memory {
-                return vu
-                    .lock()
-                    .unwrap()
-                    .update_mem_table(guest_memory.memory().deref())
-                    .map_err(crate::Error::VhostUserUpdateMemory);
+        if self.disconnected.load(Ordering::Relaxed) {
+            warn!(
+                "Skipping add memory region on disconnected dev with socket: {}",
+                self.socket_path
+            );
+        }
+
+        if let Err(e) = self.add_memory_region_internal(guest_memory, region) {
+            if e.is_transport_lost() {
+                warn!(
+                    "Failed updating memory on vhost-user backend for socket {}: {e:?}; \
+                     marking device as disconnected",
+                    self.socket_path
+                );
+                self.disconnected.store(true, Ordering::Relaxed);
+            } else {
+                warn!(
+                    "Failed updating memory on vhost-user backend for socket {}: {e:?}",
+                    self.socket_path
+                );
             }
+            return Err(self.memory_update_error(e));
         }
         Ok(())
     }
