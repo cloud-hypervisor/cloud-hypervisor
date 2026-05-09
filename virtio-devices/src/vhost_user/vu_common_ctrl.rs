@@ -381,6 +381,7 @@ impl VhostUserHandle {
         socket_path: &str,
         num_queues: u64,
         unlink_socket: bool,
+        kill_evt: Option<&EventFd>,
     ) -> Result<Self> {
         if server {
             if unlink_socket {
@@ -405,7 +406,12 @@ impl VhostUserHandle {
         } else {
             const RETRY_INTERVAL: Duration = Duration::from_millis(100);
             const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
-            const TIMER_EVENT: u64 = 0;
+
+            #[repr(u64)]
+            enum ConnectEvent {
+                Timer = 0,
+                Kill = 1,
+            }
 
             let mut retry_timer = TimerFd::new().map_err(|e| Error::TimerFdCreate(e.into()))?;
             retry_timer
@@ -417,9 +423,19 @@ impl VhostUserHandle {
                 .ctl(
                     ControlOperation::Add,
                     retry_timer.as_raw_fd(),
-                    EpollEvent::new(EventSet::IN, TIMER_EVENT),
+                    EpollEvent::new(EventSet::IN, ConnectEvent::Timer as u64),
                 )
                 .map_err(Error::EpollCtl)?;
+
+            if let Some(kill_evt) = kill_evt {
+                epoll
+                    .ctl(
+                        ControlOperation::Add,
+                        kill_evt.as_raw_fd(),
+                        EpollEvent::new(EventSet::IN, ConnectEvent::Kill as u64),
+                    )
+                    .map_err(Error::EpollCtl)?;
+            }
 
             let start = Instant::now();
             let mut events = [EpollEvent::default(); 1];
@@ -456,10 +472,21 @@ impl VhostUserHandle {
                     }
                 }
 
-                // Drain the timerfd so it stops signaling.
-                retry_timer
-                    .wait()
-                    .map_err(|e| Error::TimerFdWait(e.into()))?;
+                match events[0].data() {
+                    x if x == ConnectEvent::Kill as u64 => {
+                        info!(
+                            "Aborting vhost-user connect for socket {socket_path}: kill event received"
+                        );
+                        return Err(Error::ConnectKilled);
+                    }
+                    x if x == ConnectEvent::Timer as u64 => {
+                        // Drain the timerfd to clear the event.
+                        retry_timer
+                            .wait()
+                            .map_err(|e| Error::TimerFdWait(e.into()))?;
+                    }
+                    _ => unreachable!(),
+                }
             }
         }
     }

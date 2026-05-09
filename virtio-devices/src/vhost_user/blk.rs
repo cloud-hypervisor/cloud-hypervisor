@@ -59,8 +59,13 @@ impl Blk {
     ) -> Result<Blk> {
         let num_queues = vu_cfg.num_queues;
 
-        let mut vu =
-            VhostUserHandle::connect_vhost_user(false, &vu_cfg.socket, num_queues as u64, false)?;
+        let mut vu = VhostUserHandle::connect_vhost_user(
+            false,
+            &vu_cfg.socket,
+            num_queues as u64,
+            false,
+            None,
+        )?;
 
         let (
             avail_features,
