@@ -8,7 +8,6 @@ use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use log::{error, info};
@@ -26,7 +25,9 @@ use virtio_queue::{Queue, QueueT};
 use vm_memory::guest_memory::Error as MmapError;
 use vm_memory::{Address, FileOffset, GuestAddress, GuestMemory, GuestMemoryRegion};
 use vm_migration::protocol::MemoryRangeTable;
+use vmm_sys_util::epoll::{ControlOperation, Epoll, EpollEvent, EventSet};
 use vmm_sys_util::eventfd::EventFd;
+use vmm_sys_util::timerfd::TimerFd;
 
 use super::{Error, Result, VhostUserState};
 use crate::vhost_user::Inflight;
@@ -402,10 +403,28 @@ impl VhostUserHandle {
                 queue_indexes: Vec::new(),
             })
         } else {
-            let now = Instant::now();
+            const RETRY_INTERVAL: Duration = Duration::from_millis(100);
+            const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
+            const TIMER_EVENT: u64 = 0;
 
-            // Retry connecting for a full minute
-            let err = loop {
+            let mut retry_timer = TimerFd::new().map_err(|e| Error::TimerFdCreate(e.into()))?;
+            retry_timer
+                .reset(RETRY_INTERVAL, Some(RETRY_INTERVAL))
+                .map_err(|e| Error::TimerFdArm(e.into()))?;
+
+            let epoll = Epoll::new().map_err(Error::EpollCreate)?;
+            epoll
+                .ctl(
+                    ControlOperation::Add,
+                    retry_timer.as_raw_fd(),
+                    EpollEvent::new(EventSet::IN, TIMER_EVENT),
+                )
+                .map_err(Error::EpollCtl)?;
+
+            let start = Instant::now();
+            let mut events = [EpollEvent::default(); 1];
+
+            loop {
                 let err = match Frontend::connect(socket_path, num_queues) {
                     Ok(m) => {
                         return Ok(VhostUserHandle {
@@ -421,17 +440,27 @@ impl VhostUserHandle {
                     }
                     Err(e) => e,
                 };
-                sleep(Duration::from_millis(100));
 
-                if now.elapsed().as_secs() >= 60 {
-                    break err;
+                if start.elapsed() >= CONNECT_TIMEOUT {
+                    error!(
+                        "Failed connecting the backend after trying for 1 minute for socket {socket_path}: {err:?}"
+                    );
+                    return Err(Error::VhostUserConnect(err));
                 }
-            };
 
-            error!(
-                "Failed connecting the backend after trying for 1 minute for socket {socket_path}: {err:?}"
-            );
-            Err(Error::VhostUserConnect)
+                loop {
+                    match epoll.wait(-1, &mut events) {
+                        Ok(_) => break,
+                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                        Err(e) => return Err(Error::EpollWait(e)),
+                    }
+                }
+
+                // Drain the timerfd so it stops signaling.
+                retry_timer
+                    .wait()
+                    .map_err(|e| Error::TimerFdWait(e.into()))?;
+            }
         }
     }
 

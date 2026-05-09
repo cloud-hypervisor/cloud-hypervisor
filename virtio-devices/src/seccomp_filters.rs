@@ -198,6 +198,8 @@ fn virtio_vhost_fs_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_sendmsg, vec![]),
         (libc::SYS_sendto, vec![]),
         (libc::SYS_socket, vec![]),
+        (libc::SYS_timerfd_create, vec![]),
+        (libc::SYS_timerfd_settime, vec![]),
     ]
 }
 
@@ -212,6 +214,8 @@ fn virtio_generic_vhost_user_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_sendmsg, vec![]),
         (libc::SYS_sendto, vec![]),
         (libc::SYS_socket, vec![]),
+        (libc::SYS_timerfd_create, vec![]),
+        (libc::SYS_timerfd_settime, vec![]),
     ]
 }
 
@@ -232,6 +236,8 @@ fn virtio_vhost_net_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_sendmsg, vec![]),
         (libc::SYS_sendto, vec![]),
         (libc::SYS_socket, vec![]),
+        (libc::SYS_timerfd_create, vec![]),
+        (libc::SYS_timerfd_settime, vec![]),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_unlink, vec![]),
         #[cfg(target_arch = "aarch64")]
@@ -247,6 +253,8 @@ fn virtio_vhost_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_recvmsg, vec![]),
         (libc::SYS_sendmsg, vec![]),
         (libc::SYS_socket, vec![]),
+        (libc::SYS_timerfd_create, vec![]),
+        (libc::SYS_timerfd_settime, vec![]),
     ]
 }
 
