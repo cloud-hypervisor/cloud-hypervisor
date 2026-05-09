@@ -10,7 +10,7 @@ use std::{io, thread};
 
 use anyhow::anyhow;
 use event_monitor::event;
-use log::{error, info};
+use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vhost::Error as VhostError;
@@ -538,13 +538,24 @@ impl VhostUserCommon {
             error!("Failed to resume paused device during reset: {e:?}");
         }
 
-        if let Some(vu) = &self.vu
+        // Skip reset_vhost_user if the backend is not connected.
+        if !self.disconnected.load(Ordering::Relaxed)
+            && let Some(vu) = &self.vu
             && let Err(e) = vu.lock().unwrap().reset_vhost_user()
         {
-            error!(
-                "Failed to reset vhost-user daemon for socket {}: {e:?}",
-                self.socket_path
-            );
+            if e.is_transport_lost() {
+                warn!(
+                    "Failed to reset vhost-user daemon for socket {}: {e:?}; \
+                     marking device as disconnected",
+                    self.socket_path
+                );
+                self.disconnected.store(true, Ordering::Relaxed);
+            } else {
+                warn!(
+                    "Failed to reset vhost-user daemon for socket {}: {e:?}",
+                    self.socket_path
+                );
+            }
         }
 
         if let Some(kill_evt) = self.virtio_common.kill_evt.take() {
