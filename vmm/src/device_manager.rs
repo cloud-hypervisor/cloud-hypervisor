@@ -5501,7 +5501,13 @@ impl Pausable for DeviceManager {
     fn pause(&mut self) -> result::Result<(), MigratableError> {
         for (_, device_node) in self.device_tree.lock().unwrap().iter() {
             if let Some(migratable) = &device_node.migratable {
-                migratable.lock().unwrap().pause()?;
+                match migratable.lock().unwrap().pause() {
+                    Ok(()) => {}
+                    Err(MigratableError::DeviceDisconnected(id)) => {
+                        warn!("Skipping pause for disconnected device {id}");
+                    }
+                    Err(e) => return Err(e),
+                }
             }
         }
         // On AArch64, the pause of device manager needs to trigger
