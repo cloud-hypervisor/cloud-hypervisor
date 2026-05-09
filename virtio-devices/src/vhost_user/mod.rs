@@ -171,6 +171,8 @@ pub enum Error {
     EpollCtl(#[source] io::Error),
     #[error("Failed waiting on epoll")]
     EpollWait(#[source] io::Error),
+    #[error("Aborted vhost-user connect: kill event received")]
+    ConnectKilled,
 }
 type Result<T> = std::result::Result<T, Error>;
 
@@ -236,18 +238,25 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
             epoll::Events::EPOLLHUP,
         )?;
 
-        let mut vhost_user = VhostUserHandle::connect_vhost_user(
+        let mut vhost_user = match VhostUserHandle::connect_vhost_user(
             self.server,
             &self.socket_path,
             self.queues.len() as u64,
             true,
-        )
-        .map_err(|e| {
-            EpollHelperError::IoError(std::io::Error::other(format!(
-                "failed connecting vhost-user backend for socket {}: {e:?}",
-                self.socket_path
-            )))
-        })?;
+            Some(&self.kill_evt),
+        ) {
+            Ok(vu) => vu,
+            // Kill event fired during the connect retry loop; abandon the
+            // reconnect attempt. The EpollHelper observes the same kill
+            // event and will tear down on its next iteration.
+            Err(Error::ConnectKilled) => return Ok(()),
+            Err(e) => {
+                return Err(EpollHelperError::IoError(std::io::Error::other(format!(
+                    "failed connecting vhost-user backend for socket {}: {e:?}",
+                    self.socket_path
+                ))));
+            }
+        };
 
         let queues = self
             .queues
@@ -428,6 +437,7 @@ impl VhostUserCommon {
             &self.socket_path,
             self.vu_num_queues as u64,
             false,
+            None,
         )?;
 
         vu.set_protocol_features_vhost_user(acked_features, self.acked_protocol_features)?;
