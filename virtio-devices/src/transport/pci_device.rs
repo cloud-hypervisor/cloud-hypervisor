@@ -1417,4 +1417,19 @@ mod unit_tests {
         intr.config_vector.store(0xFFFE, Ordering::Release);
         intr.trigger(VirtioInterruptType::Config).unwrap();
     }
+
+    #[test]
+    fn trigger_config_sets_config_changed_flag() {
+        let intr = make_msix_interrupt(2);
+        assert!(!intr.config_changed.load(Ordering::Acquire));
+        intr.trigger(VirtioInterruptType::Config).unwrap();
+        assert!(intr.config_changed.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn trigger_queue_does_not_set_config_changed_flag() {
+        let intr = make_msix_interrupt(2);
+        intr.trigger(VirtioInterruptType::Queue(0)).unwrap();
+        assert!(!intr.config_changed.load(Ordering::Acquire));
+    }
 }
