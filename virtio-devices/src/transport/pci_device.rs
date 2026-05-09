@@ -591,6 +591,7 @@ impl VirtioPciDevice {
         let virtio_interrupt = Arc::new(VirtioInterruptMsix::new(
             msix_config.clone(),
             common_config.msix_config.clone(),
+            common_config.config_changed.clone(),
             common_config.msix_queues.clone(),
             interrupt_source_group.clone(),
         ));
@@ -851,6 +852,7 @@ impl VirtioTransport for VirtioPciDevice {
 pub struct VirtioInterruptMsix {
     msix_config: Arc<Mutex<MsixConfig>>,
     config_vector: Arc<AtomicU16>,
+    config_changed: Arc<AtomicBool>,
     queues_vectors: Arc<Mutex<Vec<u16>>>,
     interrupt_source_group: MaybeMutInterruptSourceGroup,
     msix_table_size: usize,
@@ -860,6 +862,7 @@ impl VirtioInterruptMsix {
     pub fn new(
         msix_config: Arc<Mutex<MsixConfig>>,
         config_vector: Arc<AtomicU16>,
+        config_changed: Arc<AtomicBool>,
         queues_vectors: Arc<Mutex<Vec<u16>>>,
         interrupt_source_group: MaybeMutInterruptSourceGroup,
     ) -> Self {
@@ -867,6 +870,7 @@ impl VirtioInterruptMsix {
         VirtioInterruptMsix {
             msix_config,
             config_vector,
+            config_changed,
             queues_vectors,
             interrupt_source_group,
             msix_table_size,
@@ -876,6 +880,10 @@ impl VirtioInterruptMsix {
 
 impl VirtioInterrupt for VirtioInterruptMsix {
     fn trigger(&self, int_type: VirtioInterruptType) -> std::result::Result<(), std::io::Error> {
+        if matches!(int_type, VirtioInterruptType::Config) {
+            self.config_changed.store(true, Ordering::Release);
+        }
+
         let vector = match int_type {
             VirtioInterruptType::Config => self.config_vector.load(Ordering::Acquire),
             VirtioInterruptType::Queue(queue_index) => {
@@ -1159,6 +1167,7 @@ impl PciDevice for VirtioPciDevice {
             o if (DEVICE_CONFIG_BAR_OFFSET..DEVICE_CONFIG_BAR_OFFSET + DEVICE_CONFIG_SIZE)
                 .contains(&o) =>
             {
+                self.common_config.consume_config_change();
                 let device = self.device.lock().unwrap();
                 device.read_config(o - DEVICE_CONFIG_BAR_OFFSET, data);
             }
@@ -1362,11 +1371,13 @@ mod unit_tests {
             .unwrap(),
         ));
         let config_vector = Arc::new(AtomicU16::new(VIRTQ_MSI_NO_VECTOR));
+        let config_changed = Arc::new(AtomicBool::new(false));
         let queues_vectors = Arc::new(Mutex::new(vec![VIRTQ_MSI_NO_VECTOR; 1]));
 
         VirtioInterruptMsix::new(
             msix_config,
             config_vector,
+            config_changed,
             queues_vectors,
             MaybeMutInterruptSourceGroup::Immutable(isg),
         )

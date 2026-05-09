@@ -6,7 +6,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::sync::atomic::{AtomicU8, AtomicU16, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 
 use byteorder::{ByteOrder, LittleEndian};
@@ -127,6 +127,10 @@ pub struct VirtioPciCommonConfig {
     pub device: Arc<Mutex<dyn VirtioDevice>>,
     pub driver_status: Arc<AtomicU8>,
     pub config_generation: Arc<AtomicU8>,
+    /// Set when a Config interrupt fires. Cleared on the next read of
+    /// the device specific configuration region, which also bumps
+    /// config_generation.
+    pub config_changed: Arc<AtomicBool>,
     pub device_feature_select: u32,
     pub driver_feature_select: u32,
     pub queue_select: u16,
@@ -140,11 +144,22 @@ impl VirtioPciCommonConfig {
             device,
             driver_status: Arc::new(AtomicU8::new(state.driver_status)),
             config_generation: Arc::new(AtomicU8::new(state.config_generation)),
+            config_changed: Arc::new(AtomicBool::new(false)),
             device_feature_select: state.device_feature_select,
             driver_feature_select: state.driver_feature_select,
             queue_select: state.queue_select,
             msix_config: Arc::new(AtomicU16::new(state.msix_config)),
             msix_queues: Arc::new(Mutex::new(state.msix_queues)),
+        }
+    }
+
+    /// If a Config interrupt has fired since the last device specific
+    /// configuration read, increment config_generation and clear the
+    /// pending flag.
+    pub fn consume_config_change(&self) {
+        if self.config_changed.swap(false, Ordering::AcqRel) {
+            // Wrap at u8 max is intentional per the virtio spec.
+            self.config_generation.fetch_add(1, Ordering::Release);
         }
     }
 
@@ -165,6 +180,7 @@ impl VirtioPciCommonConfig {
     /// observe.
     pub fn reset(&mut self) {
         self.driver_status.store(0, Ordering::Release);
+        self.config_changed.store(false, Ordering::Release);
         self.device_feature_select = 0;
         self.driver_feature_select = 0;
         self.queue_select = 0;
@@ -462,6 +478,7 @@ mod unit_tests {
             device: dev.clone(),
             driver_status: Arc::new(AtomicU8::new(0xaa)),
             config_generation: Arc::new(AtomicU8::new(0x55)),
+            config_changed: Arc::new(AtomicBool::new(false)),
             device_feature_select: 0x0,
             driver_feature_select: 0x0,
             queue_select: 0xff,
@@ -514,6 +531,7 @@ mod unit_tests {
             device: dev.clone(),
             driver_status: Arc::new(AtomicU8::new(0)),
             config_generation: Arc::new(AtomicU8::new(0)),
+            config_changed: Arc::new(AtomicBool::new(false)),
             device_feature_select: 0,
             driver_feature_select: 0,
             queue_select: 0,
@@ -542,6 +560,7 @@ mod unit_tests {
             device: dev,
             driver_status: Arc::new(AtomicU8::new(0x55)),
             config_generation: Arc::new(AtomicU8::new(0xab)),
+            config_changed: Arc::new(AtomicBool::new(true)),
             device_feature_select: 1,
             driver_feature_select: 1,
             queue_select: 7,
@@ -553,6 +572,7 @@ mod unit_tests {
 
         assert_eq!(regs.driver_status.load(Ordering::Acquire), 0);
         assert_eq!(regs.config_generation.load(Ordering::Acquire), 0xab); // unchanged across reset
+        assert!(!regs.config_changed.load(Ordering::Acquire));
         assert_eq!(regs.device_feature_select, 0);
         assert_eq!(regs.driver_feature_select, 0);
         assert_eq!(regs.queue_select, 0);
