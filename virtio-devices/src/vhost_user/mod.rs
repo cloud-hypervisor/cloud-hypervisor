@@ -528,22 +528,6 @@ impl VhostUserCommon {
         })
     }
 
-    pub fn restore_backend_connection(&mut self, acked_features: u64) -> Result<()> {
-        let mut vu = VhostUserHandle::connect_vhost_user(
-            self.server,
-            &self.socket_path,
-            self.vu_num_queues as u64,
-            false,
-            None,
-        )?;
-
-        vu.set_protocol_features_vhost_user(acked_features, self.acked_protocol_features)?;
-
-        self.vu = Some(Arc::new(Mutex::new(vu)));
-
-        Ok(())
-    }
-
     pub fn reset(&mut self, id: &str) {
         // Resume the virtio thread if it was paused. Reset must always
         // converge to fresh state, so backend resume / reset failures are
