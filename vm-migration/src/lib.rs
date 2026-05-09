@@ -92,6 +92,9 @@ pub enum MigratableError {
 
     #[error("Failed to release a disk lock")]
     UnlockError(#[source] anyhow::Error),
+
+    #[error("Lifecycle operation skipped for disconnected component {0}")]
+    DeviceDisconnected(String),
 }
 
 /// A Pausable component can be paused and resumed.
