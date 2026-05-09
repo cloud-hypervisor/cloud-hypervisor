@@ -632,4 +632,12 @@ mod unit_tests {
         regs.consume_config_change();
         assert_eq!(regs.config_generation.load(Ordering::Acquire), 0x11);
     }
+
+    #[test]
+    fn consume_config_change_wraps_at_u8_max() {
+        let regs = make_regs(0xff);
+        regs.config_changed.store(true, Ordering::Release);
+        regs.consume_config_change();
+        assert_eq!(regs.config_generation.load(Ordering::Acquire), 0x00);
+    }
 }
