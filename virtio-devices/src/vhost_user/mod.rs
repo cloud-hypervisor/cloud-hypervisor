@@ -9,7 +9,7 @@ use std::{io, thread};
 
 use anyhow::anyhow;
 use event_monitor::event;
-use log::error;
+use log::{error, info};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vhost::Error as VhostError;
@@ -303,6 +303,10 @@ impl<S: VhostUserFrontendReqHandler> EpollHelperHandler for VhostUserEpollHandle
         let ev_type = event.data as u16;
         match ev_type {
             HUP_CONNECTION_EVENT => {
+                info!(
+                    "vhost-user backend for socket {} disconnected, attempting reconnection",
+                    self.socket_path
+                );
                 self.reconnect(helper).map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
                         "failed to reconnect vhost-user backend for socket {}: {e:?}",
