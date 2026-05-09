@@ -5528,7 +5528,13 @@ impl Pausable for DeviceManager {
     fn resume(&mut self) -> result::Result<(), MigratableError> {
         for (_, device_node) in self.device_tree.lock().unwrap().iter() {
             if let Some(migratable) = &device_node.migratable {
-                migratable.lock().unwrap().resume()?;
+                match migratable.lock().unwrap().resume() {
+                    Ok(()) => {}
+                    Err(MigratableError::DeviceDisconnected(id)) => {
+                        warn!("Skipping resume for disconnected device {id}");
+                    }
+                    Err(e) => return Err(e),
+                }
             }
         }
         Ok(())

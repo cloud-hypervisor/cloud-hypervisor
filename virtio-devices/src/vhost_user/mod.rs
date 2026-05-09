@@ -681,18 +681,45 @@ impl VhostUserCommon {
         Ok(())
     }
 
-    pub fn resume(&mut self) -> std::result::Result<(), MigratableError> {
-        if let Some(vu) = &self.vu {
-            vu.lock().unwrap().resume_vhost_user().map_err(|e| {
-                MigratableError::Resume(anyhow!("Error resuming vhost-user backend: {e:?}"))
-            })?;
+    fn resume_internal(&mut self) -> std::result::Result<(), MigratableError> {
+        // Skip the resume_vhost_user call if the backend is disconnected. Process the queue
+        // interrupts to kick any paused workers.
+        if self.disconnected.load(Ordering::Relaxed) {
+            return Err(MigratableError::DeviceDisconnected(
+                self.socket_path.clone(),
+            ));
         }
+
+        if let Some(vu) = &self.vu
+            && let Err(e) = vu.lock().unwrap().resume_vhost_user()
+        {
+            if e.is_transport_lost() {
+                self.disconnected.store(true, Ordering::Relaxed);
+                return Err(MigratableError::DeviceDisconnected(
+                    self.socket_path.clone(),
+                ));
+            }
+
+            return Err(MigratableError::Resume(anyhow!(
+                "Error resuming vhost-user backend for socket {}: {e:?}",
+                self.socket_path
+            )));
+        }
+
+        Ok(())
+    }
+
+    pub fn resume(&mut self) -> std::result::Result<(), MigratableError> {
+        let ret = self.resume_internal();
+
+        // Always run the interrupt loop so workers don't get stuck.
         for i in 0..self.vu_num_queues {
             self.virtio_common
                 .trigger_interrupt(crate::VirtioInterruptType::Queue(i as u16))
                 .ok();
         }
-        Ok(())
+
+        ret
     }
 
     pub fn state<C: Default>(
