@@ -325,6 +325,7 @@ version = "0.1.0"
 dependencies = [
  "bitflags 2.11.1",
  "byteorder",
+ "cfg-if",
  "crc-any",
  "flate2",
  "io-uring",
