@@ -15,7 +15,7 @@ use std::sync::mpsc::Sender;
 use std::thread;
 
 use hypervisor::HypervisorType;
-use log::error;
+use log::{error, info};
 use micro_http::{
     Body, HttpServer, MediaType, Method, Request, Response, ServerError, StatusCode, Version,
 };
@@ -89,6 +89,8 @@ pub fn error_response(error: HttpError, status: StatusCode) -> Response {
     })
     .map(|error| format!("{error}"))
     .collect::<Vec<_>>();
+
+    info!("HTTP API error response: {}", error_messages.join(": "));
 
     // TODO: Move `api` module from `vmm` to dedicated crate and use a common type definition
     let json = serde_json::to_string(&error_messages).unwrap();
