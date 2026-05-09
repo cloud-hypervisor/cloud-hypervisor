@@ -657,13 +657,28 @@ impl VhostUserCommon {
     }
 
     pub fn pause(&mut self) -> std::result::Result<(), MigratableError> {
-        if let Some(vu) = &self.vu {
-            vu.lock().unwrap().pause_vhost_user().map_err(|e| {
-                MigratableError::Pause(anyhow!("Error pausing vhost-user backend: {e:?}"))
-            })
-        } else {
-            Ok(())
+        if self.disconnected.load(Ordering::Relaxed) {
+            return Err(MigratableError::DeviceDisconnected(
+                self.socket_path.clone(),
+            ));
         }
+
+        if let Some(vu) = &self.vu
+            && let Err(e) = vu.lock().unwrap().pause_vhost_user()
+        {
+            if e.is_transport_lost() {
+                self.disconnected.store(true, Ordering::Relaxed);
+                return Err(MigratableError::DeviceDisconnected(
+                    self.socket_path.clone(),
+                ));
+            }
+
+            return Err(MigratableError::Pause(anyhow!(
+                "Error pausing vhost-user backend for socket {}: {e:?}",
+                self.socket_path
+            )));
+        }
+        Ok(())
     }
 
     pub fn resume(&mut self) -> std::result::Result<(), MigratableError> {
