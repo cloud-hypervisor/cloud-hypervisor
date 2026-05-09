@@ -170,10 +170,15 @@ mod unit_tests {
 
     fn assert_async_io_from_dyn(disk: &dyn AsyncDiskFile, expect_backend: RawBackend) {
         let io: Box<dyn AsyncIo> = disk.create_async_io(128).unwrap();
-        assert_eq!(
-            io.batch_requests_enabled(),
-            expect_backend == RawBackend::IoUring
-        );
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "io_uring")] {
+                let expected_batch_requests = expect_backend == RawBackend::IoUring;
+            } else {
+                let _ = expect_backend;
+                let expected_batch_requests = false;
+            }
+        }
+        assert_eq!(io.batch_requests_enabled(), expected_batch_requests);
     }
 
     fn assert_sync_backend(disk: &RawDisk) {

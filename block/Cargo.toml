@@ -33,5 +33,8 @@ vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { workspace = true }
 zstd = "0.13"
 
+[dev-dependencies]
+cfg-if = { workspace = true }
+
 [lints]
 workspace = true
