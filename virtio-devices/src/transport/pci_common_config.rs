@@ -126,7 +126,7 @@ pub fn get_vring_size(t: VringType, queue_size: u16) -> u64 {
 pub struct VirtioPciCommonConfig {
     pub device: Arc<Mutex<dyn VirtioDevice>>,
     pub driver_status: Arc<AtomicU8>,
-    pub config_generation: u8,
+    pub config_generation: Arc<AtomicU8>,
     pub device_feature_select: u32,
     pub driver_feature_select: u32,
     pub queue_select: u16,
@@ -139,7 +139,7 @@ impl VirtioPciCommonConfig {
         VirtioPciCommonConfig {
             device,
             driver_status: Arc::new(AtomicU8::new(state.driver_status)),
-            config_generation: state.config_generation,
+            config_generation: Arc::new(AtomicU8::new(state.config_generation)),
             device_feature_select: state.device_feature_select,
             driver_feature_select: state.driver_feature_select,
             queue_select: state.queue_select,
@@ -151,7 +151,7 @@ impl VirtioPciCommonConfig {
     fn state(&self) -> VirtioPciCommonConfigState {
         VirtioPciCommonConfigState {
             driver_status: self.driver_status.load(Ordering::Acquire),
-            config_generation: self.config_generation,
+            config_generation: self.config_generation.load(Ordering::Acquire),
             device_feature_select: self.device_feature_select,
             driver_feature_select: self.driver_feature_select,
             queue_select: self.queue_select,
@@ -216,7 +216,7 @@ impl VirtioPciCommonConfig {
         // The driver is only allowed to do aligned, properly sized access.
         match offset {
             0x14 => self.driver_status.load(Ordering::Acquire),
-            0x15 => self.config_generation,
+            0x15 => self.config_generation.load(Ordering::Acquire),
             _ => {
                 warn!("invalid virtio config byte read: 0x{offset:x}");
                 0
@@ -461,7 +461,7 @@ mod unit_tests {
         let mut regs = VirtioPciCommonConfig {
             device: dev.clone(),
             driver_status: Arc::new(AtomicU8::new(0xaa)),
-            config_generation: 0x55,
+            config_generation: Arc::new(AtomicU8::new(0x55)),
             device_feature_select: 0x0,
             driver_feature_select: 0x0,
             queue_select: 0xff,
@@ -513,7 +513,7 @@ mod unit_tests {
         let mut regs = VirtioPciCommonConfig {
             device: dev.clone(),
             driver_status: Arc::new(AtomicU8::new(0)),
-            config_generation: 0,
+            config_generation: Arc::new(AtomicU8::new(0)),
             device_feature_select: 0,
             driver_feature_select: 0,
             queue_select: 0,
@@ -541,7 +541,7 @@ mod unit_tests {
         let mut regs = VirtioPciCommonConfig {
             device: dev,
             driver_status: Arc::new(AtomicU8::new(0x55)),
-            config_generation: 0xab,
+            config_generation: Arc::new(AtomicU8::new(0xab)),
             device_feature_select: 1,
             driver_feature_select: 1,
             queue_select: 7,
@@ -552,7 +552,7 @@ mod unit_tests {
         regs.reset();
 
         assert_eq!(regs.driver_status.load(Ordering::Acquire), 0);
-        assert_eq!(regs.config_generation, 0xab); // unchanged across reset
+        assert_eq!(regs.config_generation.load(Ordering::Acquire), 0xab); // unchanged across reset
         assert_eq!(regs.device_feature_select, 0);
         assert_eq!(regs.driver_feature_select, 0);
         assert_eq!(regs.queue_select, 0);
