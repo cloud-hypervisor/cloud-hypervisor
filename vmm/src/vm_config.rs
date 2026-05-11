@@ -574,10 +574,6 @@ impl ApplyLandlock for CommonConsoleConfig {
 }
 
 /// Configuration for a legacy serial console device.
-///
-/// - On x86_64, this is a port I/O-mapped UART16550-compatible device
-/// - On aarch64, this is a MMIO-mapped PL011 device
-/// - On RISCV, this is a MMIO-mapped UART16550-compatible device
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct SerialConfig {
     #[serde(flatten)]
@@ -611,13 +607,12 @@ impl ApplyLandlock for SerialConfig {
 pub struct ConsoleConfig {
     #[serde(flatten)]
     pub common: CommonConsoleConfig,
-    #[serde(default, skip_serializing_if = "<&bool as std::ops::Not>::not")]
-    pub iommu: bool,
+    #[serde(default, flatten)]
+    pub pci_common: PciDeviceCommonConfig,
 }
 
 impl ConsoleConfig {
-    pub const SYNTAX: &str =
-        "Control (virtio) console: \"off|null|pty|tty|file=<path>,iommu=on|off\"";
+    pub const SYNTAX: &str = "Control (virtio) console: \"off|null|pty|tty|file=<path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 }
 
 impl Default for ConsoleConfig {
@@ -628,7 +623,7 @@ impl Default for ConsoleConfig {
                 mode: ConsoleOutputMode::Tty,
                 socket: None,
             },
-            iommu: false,
+            pci_common: PciDeviceCommonConfig::default(),
         }
     }
 }

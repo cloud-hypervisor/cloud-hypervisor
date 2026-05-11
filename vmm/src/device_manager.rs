@@ -2368,7 +2368,7 @@ impl DeviceManager {
         transport: ConsoleTransport,
         resize_pipe: Option<Arc<File>>,
     ) -> DeviceManagerResult<Option<Arc<virtio_devices::ConsoleResizer>>> {
-        let console_config = self.config.lock().unwrap().console.clone();
+        let mut console_config = self.config.lock().unwrap().console.clone();
         let endpoint = match transport {
             ConsoleTransport::File(file) => Endpoint::File(file),
             ConsoleTransport::Pty(file) => {
@@ -2402,7 +2402,15 @@ impl DeviceManager {
             ConsoleTransport::Null => Endpoint::Null,
             ConsoleTransport::Off => return Ok(None),
         };
-        let id = String::from(CONSOLE_DEVICE_NAME);
+
+        let id = match console_config.pci_common.id.as_ref() {
+            Some(id) => id.clone(),
+            None => console_config
+                .pci_common
+                .id
+                .insert(CONSOLE_DEVICE_NAME.to_string())
+                .clone(),
+        };
 
         let (virtio_console_device, console_resizer) = virtio_devices::Console::new(
             id.clone(),
@@ -2410,7 +2418,7 @@ impl DeviceManager {
             self.console_resize_pipe
                 .as_ref()
                 .map(|p| p.try_clone().unwrap()),
-            self.force_access_platform | console_config.iommu,
+            self.force_access_platform | console_config.pci_common.iommu,
             self.seccomp_action.clone(),
             self.exit_evt
                 .try_clone()
@@ -2423,11 +2431,7 @@ impl DeviceManager {
         self.virtio_devices.push(MetaVirtioDevice {
             virtio_device: Arc::clone(&virtio_console_device)
                 as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-            pci_common: PciDeviceCommonConfig {
-                id: Some(id.clone()),
-                iommu: console_config.iommu,
-                ..Default::default()
-            },
+            pci_common: console_config.pci_common.clone(),
             dma_handler: None,
         });
 
