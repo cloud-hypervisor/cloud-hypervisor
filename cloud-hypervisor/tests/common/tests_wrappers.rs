@@ -343,9 +343,16 @@ pub(crate) fn test_cpu_topology(
             threads_per_core
         );
 
+        #[cfg(target_arch = "x86_64")]
+        let cores_per_package_grep = "per socket";
+        #[cfg(target_arch = "aarch64")]
+        let cores_per_package_grep = if use_fw { "per socket" } else { "per cluster" };
+
         assert_eq!(
             guest
-                .ssh_command("lscpu | grep \"per socket\" | cut -f 2 -d \":\" | sed \"s# *##\"")
+                .ssh_command(&format!(
+                    "lscpu | grep \"{cores_per_package_grep}\" | cut -f 2 -d \":\" | sed \"s# *##\""
+                ))
                 .unwrap()
                 .trim()
                 .parse::<u8>()
@@ -353,9 +360,16 @@ pub(crate) fn test_cpu_topology(
             cores_per_package
         );
 
+        #[cfg(target_arch = "x86_64")]
+        let packages_grep = "Socket";
+        #[cfg(target_arch = "aarch64")]
+        let packages_grep = if use_fw { "Socket" } else { "Cluster" };
+
         assert_eq!(
             guest
-                .ssh_command("lscpu | grep \"Socket\" | cut -f 2 -d \":\" | sed \"s# *##\"")
+                .ssh_command(&format!(
+                    "lscpu | grep \"{packages_grep}\" | cut -f 2 -d \":\" | sed \"s# *##\""
+                ))
                 .unwrap()
                 .trim()
                 .parse::<u8>()
