@@ -137,7 +137,7 @@ impl log::Log for Logger {
                 Token::WallClock => write!(
                     out,
                     "{}",
-                    jiff::Zoned::now().strftime("%Y-%m-%dT%H:%M:%S%.6fZ")
+                    jiff::Zoned::now().strftime("%Y-%m-%dT%H:%M:%S%.6f")
                 ),
                 Token::Pid => write!(&mut *out, "{}", self.pid),
                 // SAFETY: gettid(2) always succeeds
@@ -368,8 +368,7 @@ mod tests {
 
         let out = buf.contents();
         let out = out.trim();
-        assert_eq!(out.len(), 27, "got: {out}");
-        assert!(out.ends_with('Z'), "got: {out}");
+        assert_eq!(out.len(), 26, "got: {out}");
         assert_eq!(&out[4..5], "-", "got: {out}");
         assert_eq!(&out[7..8], "-", "got: {out}");
         assert_eq!(&out[10..11], "T", "got: {out}");
