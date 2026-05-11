@@ -3004,8 +3004,6 @@ impl VmConfig {
             }
         }
 
-        self.rng.validate(self)?;
-
         if let Some(nets) = &self.net {
             for net in nets {
                 if net.vhost_user && !self.backed_by_shared_memory() {
@@ -3052,6 +3050,8 @@ impl VmConfig {
             }
         }
 
+        self.rng.validate(self)?;
+        Self::validate_identifier(&mut id_list, &self.rng.pci_common.id)?;
         self.iommu |= self.rng.pci_common.iommu;
 
         self.console.validate(self)?;
