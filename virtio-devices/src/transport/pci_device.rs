@@ -829,7 +829,9 @@ impl VirtioPciDevice {
     }
 
     fn needs_activation(&self) -> bool {
-        !self.device_activated.load(Ordering::SeqCst) && self.is_driver_ready()
+        !self.device_activated.load(Ordering::SeqCst)
+            && self.is_driver_ready()
+            && self.queues.iter().any(|q| q.ready())
     }
 
     pub fn dma_handler(&self) -> Option<&dyn ExternalDmaMapping> {
