@@ -2141,10 +2141,7 @@ impl ConsoleConfig {
     pub fn parse(console: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
-            .add_valueless("off")
-            .add_valueless("pty")
-            .add_valueless("tty")
-            .add_valueless("null")
+            .add_all_valueless(&["off", "pty", "tty", "null"])
             .add("file")
             .add("iommu")
             .add("socket");

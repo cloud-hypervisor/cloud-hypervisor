@@ -226,6 +226,17 @@ impl OptionParser {
         self
     }
 
+    /// Registers multiple flag-style options that do not take a value.
+    ///
+    /// Equivalent to calling [`add_valueless`](Self::add_valueless) for each
+    /// element in the slice.
+    pub fn add_all_valueless(&mut self, options: &[&str]) -> &mut Self {
+        for option in options {
+            self.add_valueless(option);
+        }
+        self
+    }
+
     /// Returns the raw string value of an option, or `None` if the option was
     /// not set or if its value is an empty string (e.g. `key=`).
     ///
