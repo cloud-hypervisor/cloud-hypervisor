@@ -5793,6 +5793,8 @@ mod common_parallel {
         handle_child_output(r, &output);
     }
 
+    // Checks that explicit PCI device IDs are honored for boot-time and hotplugged devices.
+    // It also verifies dynamic hotplug allocation reuses freed PCI device ID holes.
     #[test]
     fn test_pci_device_id() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -5813,6 +5815,7 @@ mod common_parallel {
             .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--console", "tty,pci_device_id=7"])
             .default_net()
             .default_disks()
             .capture_output();
@@ -5823,6 +5826,17 @@ mod common_parallel {
 
         // Add a network device with non-static device id request
         let r = std::panic::catch_unwind(|| {
+            // Make sure an explicit BDF for virtio-console is set.
+            assert!(wait_until(Duration::from_secs(10), || {
+                ssh_command_ip_with_auth(
+                    "lspci | grep \"00:07.0\" | grep Virtio | grep console",
+                    &default_guest_auth(),
+                    &guest.network.guest_ip0,
+                    Some(Duration::from_secs(1)),
+                )
+                .is_ok()
+            }));
+
             let (cmd_success, cmd_stdout, _) = remote_command_w_output(
                 &api_socket,
                 "add-net",
