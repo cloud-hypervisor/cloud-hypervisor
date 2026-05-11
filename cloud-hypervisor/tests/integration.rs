@@ -2767,6 +2767,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg_attr(target_arch = "aarch64", ignore = "See #8187")]
     fn test_memory_hotplug() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -4924,11 +4925,13 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg_attr(target_arch = "aarch64", ignore = "See #8187")]
     fn test_pmem_hotplug() {
         _test_pmem_hotplug(None);
     }
 
     #[test]
+    #[cfg_attr(target_arch = "aarch64", ignore = "See #8187")]
     fn test_pmem_multi_segment_hotplug() {
         _test_pmem_hotplug(Some(15));
     }
@@ -11162,6 +11165,7 @@ mod aarch64_acpi {
     }
 
     #[test]
+    #[cfg_attr(target_arch = "aarch64", ignore = "See #8187")]
     fn test_virtio_iommu() {
         _test_virtio_iommu(true);
     }
