@@ -2187,18 +2187,17 @@ impl ConsoleConfig {
         parser
             .add_all_valueless(CommonConsoleConfig::VALUELESS_OPTIONS)
             .add_all(CommonConsoleConfig::VALUE_OPTIONS)
-            .add("iommu");
+            .add_all(PciDeviceCommonConfig::OPTIONS_IOMMU);
         parser.parse(console).map_err(Error::ParseConsole)?;
 
-        let iommu = parser
-            .convert::<Toggle>("iommu")
-            .map_err(Error::ParsePciDeviceCommonConfig)?
-            .unwrap_or(Toggle(false))
-            .0;
-
         let common = CommonConsoleConfig::parse(console, Error::ParseConsole)?;
+        let pci_common = PciDeviceCommonConfig::parse(console)?;
 
-        Ok(Self { common, iommu })
+        Ok(Self { common, pci_common })
+    }
+
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        self.pci_common.validate(vm_config)
     }
 }
 
@@ -3054,7 +3053,10 @@ impl VmConfig {
         }
 
         self.iommu |= self.rng.pci_common.iommu;
-        self.iommu |= self.console.iommu;
+
+        self.console.validate(self)?;
+        Self::validate_identifier(&mut id_list, &self.console.pci_common.id)?;
+        self.iommu |= self.console.pci_common.iommu;
 
         if let Some(t) = &self.cpus.topology {
             if t.threads_per_core == 0
@@ -4411,7 +4413,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
     fn test_console_parsing() -> Result<()> {
         let console_config = |mode, file, socket, iommu| ConsoleConfig {
             common: CommonConsoleConfig { file, mode, socket },
-            iommu,
+            pci_common: PciDeviceCommonConfig {
+                iommu,
+                ..Default::default()
+            },
         };
 
         ConsoleConfig::parse("").unwrap_err();
@@ -5054,7 +5059,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                     mode: ConsoleOutputMode::Tty,
                     socket: None,
                 },
-                iommu: false,
+                pci_common: PciDeviceCommonConfig::default(),
             },
             #[cfg(target_arch = "x86_64")]
             debug_console: DebugConsoleConfig::default(),
@@ -5980,6 +5985,37 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             invalid_config.validate(),
             Err(ValidationError::InvalidPciDeviceId(pci::NUM_DEVICE_IDS + 1))
+        );
+
+        // Invalid console BDF - Same ID as Root device
+        let mut invalid_config = valid_config.clone();
+        invalid_config.console.pci_common.pci_device_id = Some(pci::PCI_ROOT_DEVICE_ID);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::ReservedPciDeviceId(
+                pci::PCI_ROOT_DEVICE_ID
+            ))
+        );
+        // Invalid console BDF - Out of range
+        let mut invalid_config = valid_config.clone();
+        invalid_config.console.pci_common.pci_device_id = Some(pci::NUM_DEVICE_IDS + 1);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::InvalidPciDeviceId(pci::NUM_DEVICE_IDS + 1))
+        );
+        // Invalid console ID - Duplicate identifier
+        let mut invalid_config = valid_config.clone();
+        invalid_config.console.pci_common.id = Some("test0".to_string());
+        invalid_config.disks = Some(vec![DiskConfig {
+            pci_common: PciDeviceCommonConfig {
+                id: Some("test0".to_string()),
+                ..Default::default()
+            },
+            ..disk_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::IdentifierNotUnique("test0".to_string()))
         );
     }
     #[test]

@@ -184,7 +184,7 @@ impl RequestHandler for StubApiRequestHandler {
                         mode: ConsoleOutputMode::Tty,
                         socket: None,
                     },
-                    iommu: false,
+                    pci_common: PciDeviceCommonConfig::default(),
                 },
                 #[cfg(target_arch = "x86_64")]
                 debug_console: DebugConsoleConfig::default(),

@@ -2737,7 +2737,7 @@ mod unit_tests {
                     mode: ConsoleOutputMode::Off,
                     socket: None,
                 },
-                iommu: false,
+                pci_common: PciDeviceCommonConfig::default(),
             },
             #[cfg(target_arch = "x86_64")]
             debug_console: DebugConsoleConfig::default(),

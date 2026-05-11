@@ -1025,7 +1025,7 @@ mod unit_tests {
                     mode: ConsoleOutputMode::Tty,
                     socket: None,
                 },
-                iommu: false,
+                pci_common: PciDeviceCommonConfig::default(),
             },
             #[cfg(target_arch = "x86_64")]
             debug_console: DebugConsoleConfig::default(),
@@ -1693,10 +1693,12 @@ mod unit_tests {
                     "--serial",
                     "null",
                     "--console",
-                    "tty",
+                    "tty,pci_segment=1,pci_device_id=7",
                 ],
                 r#"{
-                    "payload": {"kernel": "/path/to/kernel"}
+                    "payload": {"kernel": "/path/to/kernel"},
+                    "serial": {"mode": "Null"},
+                    "console": {"mode": "Tty", "iommu": false, "pci_segment": 1, "pci_device_id": 7}
                 }"#,
                 true,
             ),
