@@ -177,7 +177,6 @@ impl RequestHandler for StubApiRequestHandler {
                         mode: ConsoleOutputMode::Tty,
                         socket: None,
                     },
-                    iommu: false,
                 },
                 console: ConsoleConfig {
                     common: CommonConsoleConfig {
