@@ -128,9 +128,12 @@ pub enum Error {
     /// Error parsing generic vhost-user parameters
     #[error("Error parsing --generic-vhost-user")]
     ParseGenericVhostUser(#[source] OptionParserError),
-    /// Failed parsing console
+    /// Failed parsing console parameters
     #[error("Error parsing --console")]
     ParseConsole(#[source] OptionParserError),
+    /// Failed parsing serial parameters
+    #[error("Error parsing --serial")]
+    ParseSerial(#[source] OptionParserError),
     #[cfg(target_arch = "x86_64")]
     /// Failed parsing debug-console
     #[error("Error parsing --debug-console")]
@@ -2137,17 +2140,18 @@ impl PmemConfig {
     }
 }
 
-impl ConsoleConfig {
-    pub fn parse(console: &str) -> Result<Self> {
+impl CommonConsoleConfig {
+    const VALUELESS_OPTIONS: &[&str] = &["off", "pty", "tty", "null"];
+    const VALUE_OPTIONS: &[&str] = &["file", "socket"];
+
+    fn parse(console: &str, map_err: impl Fn(OptionParserError) -> Error) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
-            .add_all_valueless(&["off", "pty", "tty", "null"])
-            .add("file")
-            .add("iommu")
-            .add("socket");
-        parser.parse(console).map_err(Error::ParseConsole)?;
+            .add_all_valueless(Self::VALUELESS_OPTIONS)
+            .add_all(Self::VALUE_OPTIONS);
+        parser.parse_subset(console).map_err(map_err)?;
 
-        let mut file: Option<PathBuf> = default_consoleconfig_file();
+        let mut file: Option<PathBuf> = None;
         let mut socket: Option<PathBuf> = None;
         let mut mode: ConsoleOutputMode = ConsoleOutputMode::Off;
 
@@ -2172,18 +2176,49 @@ impl ConsoleConfig {
         } else {
             return Err(Error::ParseConsoleInvalidModeGiven);
         }
+
+        Ok(Self { mode, file, socket })
+    }
+}
+
+impl ConsoleConfig {
+    pub fn parse(console: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser
+            .add_all_valueless(CommonConsoleConfig::VALUELESS_OPTIONS)
+            .add_all(CommonConsoleConfig::VALUE_OPTIONS)
+            .add("iommu");
+        parser.parse(console).map_err(Error::ParseConsole)?;
+
         let iommu = parser
             .convert::<Toggle>("iommu")
-            .map_err(Error::ParseConsole)?
+            .map_err(Error::ParsePciDeviceCommonConfig)?
             .unwrap_or(Toggle(false))
             .0;
 
-        Ok(Self {
-            file,
-            mode,
-            iommu,
-            socket,
-        })
+        let common = CommonConsoleConfig::parse(console, Error::ParseConsole)?;
+
+        Ok(Self { common, iommu })
+    }
+}
+
+impl SerialConfig {
+    pub fn parse(serial: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser
+            .add_all_valueless(CommonConsoleConfig::VALUELESS_OPTIONS)
+            .add_all(CommonConsoleConfig::VALUE_OPTIONS)
+            .add("iommu");
+        parser.parse(serial).map_err(Error::ParseSerial)?;
+
+        let iommu = parser
+            .convert::<Toggle>("iommu")
+            .map_err(Error::ParsePciDeviceCommonConfig)?
+            .unwrap_or(Toggle(false))
+            .0;
+
+        let common = CommonConsoleConfig::parse(serial, Error::ParseSerial)?;
+        Ok(Self { common, iommu })
     }
 }
 
@@ -2202,7 +2237,7 @@ impl DebugConsoleConfig {
             .parse(debug_console_ops)
             .map_err(Error::ParseConsole)?;
 
-        let mut file: Option<PathBuf> = default_consoleconfig_file();
+        let mut file: Option<PathBuf> = None;
         let mut iobase: Option<u16> = None;
         let mut mode: ConsoleOutputMode = ConsoleOutputMode::Off;
 
@@ -2894,10 +2929,10 @@ impl VmConfig {
         // "console=hvc0 earlyprintk=ttyS0"
 
         let mut tty_consoles = Vec::new();
-        if self.console.mode == ConsoleOutputMode::Tty {
+        if self.console.common.mode == ConsoleOutputMode::Tty {
             tty_consoles.push("virtio-console");
         }
-        if self.serial.mode == ConsoleOutputMode::Tty {
+        if self.serial.common.mode == ConsoleOutputMode::Tty {
             tty_consoles.push("serial-console");
         }
         #[cfg(target_arch = "x86_64")]
@@ -2908,11 +2943,12 @@ impl VmConfig {
             warn!("Using TTY output for multiple consoles: {tty_consoles:?}");
         }
 
-        if self.console.mode == ConsoleOutputMode::File && self.console.file.is_none() {
+        if self.console.common.mode == ConsoleOutputMode::File && self.console.common.file.is_none()
+        {
             return Err(ValidationError::ConsoleFileMissing);
         }
 
-        if self.serial.mode == ConsoleOutputMode::File && self.serial.file.is_none() {
+        if self.serial.common.mode == ConsoleOutputMode::File && self.serial.common.file.is_none() {
             return Err(ValidationError::ConsoleFileMissing);
         }
 
@@ -3298,7 +3334,7 @@ impl VmConfig {
         }
 
         let console = ConsoleConfig::parse(vm_params.console)?;
-        let serial = ConsoleConfig::parse(vm_params.serial)?;
+        let serial = SerialConfig::parse(vm_params.serial)?;
         #[cfg(target_arch = "x86_64")]
         let debug_console = DebugConsoleConfig::parse(vm_params.debug_console)?;
 
@@ -4380,79 +4416,59 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
     #[test]
     fn test_console_parsing() -> Result<()> {
+        let console_config = |mode, file, socket, iommu| ConsoleConfig {
+            common: CommonConsoleConfig { file, mode, socket },
+            iommu,
+        };
+
         ConsoleConfig::parse("").unwrap_err();
         ConsoleConfig::parse("badmode").unwrap_err();
         assert_eq!(
             ConsoleConfig::parse("off")?,
-            ConsoleConfig {
-                mode: ConsoleOutputMode::Off,
-                iommu: false,
-                file: None,
-                socket: None,
-            }
+            console_config(ConsoleOutputMode::Off, None, None, false)
         );
         assert_eq!(
             ConsoleConfig::parse("pty")?,
-            ConsoleConfig {
-                mode: ConsoleOutputMode::Pty,
-                iommu: false,
-                file: None,
-                socket: None,
-            }
+            console_config(ConsoleOutputMode::Pty, None, None, false)
         );
         assert_eq!(
             ConsoleConfig::parse("tty")?,
-            ConsoleConfig {
-                mode: ConsoleOutputMode::Tty,
-                iommu: false,
-                file: None,
-                socket: None,
-            }
+            console_config(ConsoleOutputMode::Tty, None, None, false)
         );
         assert_eq!(
             ConsoleConfig::parse("null")?,
-            ConsoleConfig {
-                mode: ConsoleOutputMode::Null,
-                iommu: false,
-                file: None,
-                socket: None,
-            }
+            console_config(ConsoleOutputMode::Null, None, None, false)
         );
         assert_eq!(
             ConsoleConfig::parse("file=/tmp/console")?,
-            ConsoleConfig {
-                mode: ConsoleOutputMode::File,
-                iommu: false,
-                file: Some(PathBuf::from("/tmp/console")),
-                socket: None,
-            }
+            console_config(
+                ConsoleOutputMode::File,
+                Some(PathBuf::from("/tmp/console")),
+                None,
+                false
+            )
         );
         assert_eq!(
             ConsoleConfig::parse("null,iommu=on")?,
-            ConsoleConfig {
-                mode: ConsoleOutputMode::Null,
-                iommu: true,
-                file: None,
-                socket: None,
-            }
+            console_config(ConsoleOutputMode::Null, None, None, true)
         );
         assert_eq!(
             ConsoleConfig::parse("file=/tmp/console,iommu=on")?,
-            ConsoleConfig {
-                mode: ConsoleOutputMode::File,
-                iommu: true,
-                file: Some(PathBuf::from("/tmp/console")),
-                socket: None,
-            }
+            console_config(
+                ConsoleOutputMode::File,
+                Some(PathBuf::from("/tmp/console")),
+                None,
+                true
+            )
         );
         assert_eq!(
             ConsoleConfig::parse("socket=/tmp/serial.sock,iommu=on")?,
-            ConsoleConfig {
-                mode: ConsoleOutputMode::Socket,
-                iommu: true,
-                file: None,
-                socket: Some(PathBuf::from("/tmp/serial.sock")),
-            }
+            console_config(
+                ConsoleOutputMode::Socket,
+                None,
+                Some(PathBuf::from("/tmp/serial.sock")),
+                true
+            )
         );
         Ok(())
     }
@@ -4798,8 +4814,8 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             balloon: None,
             fs: None,
             pmem: None,
-            serial: default_serial(),
-            console: default_console(),
+            serial: SerialConfig::default(),
+            console: ConsoleConfig::default(),
             #[cfg(target_arch = "x86_64")]
             debug_console: DebugConsoleConfig::default(),
             devices: None,
@@ -5032,17 +5048,21 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             fs: None,
             generic_vhost_user: None,
             pmem: None,
-            serial: ConsoleConfig {
-                file: None,
-                mode: ConsoleOutputMode::Null,
+            serial: SerialConfig {
+                common: CommonConsoleConfig {
+                    file: None,
+                    mode: ConsoleOutputMode::Null,
+                    socket: None,
+                },
                 iommu: false,
-                socket: None,
             },
             console: ConsoleConfig {
-                file: None,
-                mode: ConsoleOutputMode::Tty,
+                common: CommonConsoleConfig {
+                    file: None,
+                    mode: ConsoleOutputMode::Tty,
+                    socket: None,
+                },
                 iommu: false,
-                socket: None,
             },
             #[cfg(target_arch = "x86_64")]
             debug_console: DebugConsoleConfig::default(),
@@ -5071,8 +5091,8 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         valid_config.validate().unwrap();
 
         let mut invalid_config = valid_config.clone();
-        invalid_config.serial.mode = ConsoleOutputMode::Tty;
-        invalid_config.console.mode = ConsoleOutputMode::Tty;
+        invalid_config.serial.common.mode = ConsoleOutputMode::Tty;
+        invalid_config.console.common.mode = ConsoleOutputMode::Tty;
         valid_config.validate().unwrap();
 
         let mut invalid_config = valid_config.clone();
@@ -5112,8 +5132,8 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         }
 
         let mut invalid_config = valid_config.clone();
-        invalid_config.serial.mode = ConsoleOutputMode::File;
-        invalid_config.serial.file = None;
+        invalid_config.serial.common.mode = ConsoleOutputMode::File;
+        invalid_config.serial.common.file = None;
         assert_eq!(
             invalid_config.validate(),
             Err(ValidationError::ConsoleFileMissing)

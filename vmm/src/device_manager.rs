@@ -2440,11 +2440,13 @@ impl DeviceManager {
             .insert(id.clone(), device_node!(id, virtio_console_device));
 
         // Only provide a resizer (for SIGWINCH handling) if the console is attached to the TTY
-        Ok(if matches!(console_config.mode, ConsoleOutputMode::Tty) {
-            Some(console_resizer)
-        } else {
-            None
-        })
+        Ok(
+            if matches!(console_config.common.mode, ConsoleOutputMode::Tty) {
+                Some(console_resizer)
+            } else {
+                None
+            },
+        )
     }
 
     /// Adds all devices that behave like a console with respect to the VM
@@ -2482,9 +2484,12 @@ impl DeviceManager {
                 ConsoleTransport::Pty(_)
                 | ConsoleTransport::Tty(_)
                 | ConsoleTransport::Socket(_) => {
-                    let serial_manager =
-                        SerialManager::new(serial, console_info.serial, serial_config.socket)
-                            .map_err(DeviceManagerError::CreateSerialManager)?;
+                    let serial_manager = SerialManager::new(
+                        serial,
+                        console_info.serial,
+                        serial_config.common.socket,
+                    )
+                    .map_err(DeviceManagerError::CreateSerialManager)?;
                     if let Some(mut serial_manager) = serial_manager {
                         serial_manager
                             .start_thread(
@@ -5426,18 +5431,18 @@ impl Aml for DeviceManager {
         #[cfg(target_arch = "x86_64")]
         let serial_irq = 4;
         #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
-        let serial_irq =
-            if self.config.lock().unwrap().serial.clone().mode == ConsoleOutputMode::Off {
-                // If serial is turned off, add a fake device with invalid irq.
-                31
-            } else {
-                self.get_device_info()
-                    .clone()
-                    .get(&(DeviceType::Serial, DeviceType::Serial.to_string()))
-                    .unwrap()
-                    .irq()
-            };
-        if self.config.lock().unwrap().serial.mode != ConsoleOutputMode::Off {
+        let serial_irq = if self.config.lock().unwrap().serial.common.mode == ConsoleOutputMode::Off
+        {
+            // If serial is turned off, add a fake device with invalid irq.
+            31
+        } else {
+            self.get_device_info()
+                .clone()
+                .get(&(DeviceType::Serial, DeviceType::Serial.to_string()))
+                .unwrap()
+                .irq()
+        };
+        if self.config.lock().unwrap().serial.common.mode != ConsoleOutputMode::Off {
             aml::Device::new(
                 "_SB_.COM1".into(),
                 vec![
