@@ -582,13 +582,10 @@ impl ApplyLandlock for CommonConsoleConfig {
 pub struct SerialConfig {
     #[serde(flatten)]
     pub common: CommonConsoleConfig,
-    #[serde(default, skip_serializing_if = "<&bool as std::ops::Not>::not")]
-    pub iommu: bool,
 }
 
 impl SerialConfig {
-    pub const SYNTAX: &str =
-        "Control serial port: \"off|null|pty|tty|file=<path>|socket=<path>,iommu=on|off\"";
+    pub const SYNTAX: &str = "Control serial port: \"off|null|pty|tty|file=<path>|socket=<path>\"";
 }
 
 impl Default for SerialConfig {
@@ -599,7 +596,6 @@ impl Default for SerialConfig {
                 mode: ConsoleOutputMode::Null,
                 socket: None,
             },
-            iommu: false,
         }
     }
 }

@@ -2207,18 +2207,11 @@ impl SerialConfig {
         let mut parser = OptionParser::new();
         parser
             .add_all_valueless(CommonConsoleConfig::VALUELESS_OPTIONS)
-            .add_all(CommonConsoleConfig::VALUE_OPTIONS)
-            .add("iommu");
+            .add_all(CommonConsoleConfig::VALUE_OPTIONS);
         parser.parse(serial).map_err(Error::ParseSerial)?;
 
-        let iommu = parser
-            .convert::<Toggle>("iommu")
-            .map_err(Error::ParsePciDeviceCommonConfig)?
-            .unwrap_or(Toggle(false))
-            .0;
-
         let common = CommonConsoleConfig::parse(serial, Error::ParseSerial)?;
-        Ok(Self { common, iommu })
+        Ok(Self { common })
     }
 }
 
@@ -5054,7 +5047,6 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                     mode: ConsoleOutputMode::Null,
                     socket: None,
                 },
-                iommu: false,
             },
             console: ConsoleConfig {
                 common: CommonConsoleConfig {

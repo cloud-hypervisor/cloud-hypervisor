@@ -1018,7 +1018,6 @@ mod unit_tests {
                     mode: ConsoleOutputMode::Null,
                     socket: None,
                 },
-                iommu: false,
             },
             console: ConsoleConfig {
                 common: CommonConsoleConfig {
