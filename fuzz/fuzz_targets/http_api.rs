@@ -171,17 +171,21 @@ impl RequestHandler for StubApiRequestHandler {
                 fs: None,
                 generic_vhost_user: None,
                 pmem: None,
-                serial: ConsoleConfig {
-                    file: None,
-                    mode: ConsoleOutputMode::Null,
+                serial: SerialConfig {
+                    common: CommonConsoleConfig {
+                        file: None,
+                        mode: ConsoleOutputMode::Tty,
+                        socket: None,
+                    },
                     iommu: false,
-                    socket: None,
                 },
                 console: ConsoleConfig {
-                    file: None,
-                    mode: ConsoleOutputMode::Tty,
+                    common: CommonConsoleConfig {
+                        file: None,
+                        mode: ConsoleOutputMode::Tty,
+                        socket: None,
+                    },
                     iommu: false,
-                    socket: None,
                 },
                 #[cfg(target_arch = "x86_64")]
                 debug_console: DebugConsoleConfig::default(),

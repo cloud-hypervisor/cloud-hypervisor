@@ -32,9 +32,10 @@ use vmm::vm_config::FwCfgConfig;
 #[cfg(feature = "ivshmem")]
 use vmm::vm_config::IvshmemConfig;
 use vmm::vm_config::{
-    BalloonConfig, DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, LandlockConfig,
-    NetConfig, NumaConfig, PciSegmentConfig, PlatformConfig, PmemConfig, RateLimiterGroupConfig,
-    RngConfig, TpmConfig, UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
+    BalloonConfig, ConsoleConfig, DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig,
+    LandlockConfig, NetConfig, NumaConfig, PciSegmentConfig, PlatformConfig, PmemConfig,
+    RateLimiterGroupConfig, RngConfig, SerialConfig, TpmConfig, UserDeviceConfig, VdpaConfig,
+    VmConfig, VsockConfig,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::block_signal;
@@ -165,7 +166,7 @@ fn get_cli_options_sorted(
             .group("vm-config"),
         Arg::new("console")
             .long("console")
-            .help("Control (virtio) console: \"off|null|pty|tty|file=<path>,iommu=on|off\"")
+            .help(ConsoleConfig::SYNTAX)
             .default_value("tty")
             .group("vm-config"),
         Arg::new("cpus")
@@ -405,7 +406,7 @@ fn get_cli_options_sorted(
             .default_value("true"),
         Arg::new("serial")
             .long("serial")
-            .help("Control serial port: off|null|pty|tty|file=<path>|socket=<path>")
+            .help(SerialConfig::SYNTAX)
             .default_value("null")
             .group("vm-config"),
         Arg::new("tpm")
@@ -920,8 +921,9 @@ mod unit_tests {
     #[cfg(target_arch = "x86_64")]
     use vmm::vm_config::DebugConsoleConfig;
     use vmm::vm_config::{
-        ConsoleConfig, ConsoleOutputMode, CoreScheduling, CpuFeatures, CpusConfig, HotplugMethod,
-        MemoryConfig, PayloadConfig, PciDeviceCommonConfig, RngConfig, VmConfig,
+        CommonConsoleConfig, ConsoleConfig, ConsoleOutputMode, CoreScheduling, CpuFeatures,
+        CpusConfig, HotplugMethod, MemoryConfig, PayloadConfig, PciDeviceCommonConfig, RngConfig,
+        SerialConfig, VmConfig,
     };
 
     use crate::test_util::assert_args_sorted;
@@ -1010,17 +1012,21 @@ mod unit_tests {
             fs: None,
             generic_vhost_user: None,
             pmem: None,
-            serial: ConsoleConfig {
-                file: None,
-                mode: ConsoleOutputMode::Null,
+            serial: SerialConfig {
+                common: CommonConsoleConfig {
+                    file: None,
+                    mode: ConsoleOutputMode::Null,
+                    socket: None,
+                },
                 iommu: false,
-                socket: None,
             },
             console: ConsoleConfig {
-                file: None,
-                mode: ConsoleOutputMode::Tty,
+                common: CommonConsoleConfig {
+                    file: None,
+                    mode: ConsoleOutputMode::Tty,
+                    socket: None,
+                },
                 iommu: false,
-                socket: None,
             },
             #[cfg(target_arch = "x86_64")]
             debug_console: DebugConsoleConfig::default(),

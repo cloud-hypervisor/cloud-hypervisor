@@ -2653,8 +2653,9 @@ mod unit_tests {
     #[cfg(target_arch = "x86_64")]
     use crate::vm_config::DebugConsoleConfig;
     use crate::vm_config::{
-        ConsoleConfig, ConsoleOutputMode, CoreScheduling, CpuFeatures, CpusConfig, HotplugMethod,
-        MemoryConfig, PayloadConfig, PciDeviceCommonConfig, RngConfig,
+        CommonConsoleConfig, ConsoleConfig, ConsoleOutputMode, CoreScheduling, CpuFeatures,
+        CpusConfig, HotplugMethod, MemoryConfig, PayloadConfig, PciDeviceCommonConfig, RngConfig,
+        SerialConfig,
     };
 
     fn create_dummy_vmm() -> Vmm {
@@ -2722,18 +2723,22 @@ mod unit_tests {
             fs: None,
             generic_vhost_user: None,
             pmem: None,
-            serial: ConsoleConfig {
-                file: None,
-                mode: ConsoleOutputMode::Null,
+            serial: SerialConfig {
+                common: CommonConsoleConfig {
+                    file: None,
+                    mode: ConsoleOutputMode::Null,
+                    socket: None,
+                },
                 iommu: false,
-                socket: None,
             },
             console: ConsoleConfig {
-                file: None,
-                // Caution: Don't use `Tty` to not mess with users terminal
-                mode: ConsoleOutputMode::Off,
+                common: CommonConsoleConfig {
+                    file: None,
+                    // Caution: Don't use `Tty` to not mess with users terminal
+                    mode: ConsoleOutputMode::Off,
+                    socket: None,
+                },
                 iommu: false,
-                socket: None,
             },
             #[cfg(target_arch = "x86_64")]
             debug_console: DebugConsoleConfig::default(),

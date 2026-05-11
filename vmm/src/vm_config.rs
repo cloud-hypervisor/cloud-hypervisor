@@ -545,21 +545,19 @@ pub enum ConsoleOutputMode {
     Null,
 }
 
+/// Common configuration for plain console configs.
+///
+/// Independent of PCI or legacy devices.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct ConsoleConfig {
-    #[serde(default = "default_consoleconfig_file")]
+pub struct CommonConsoleConfig {
+    #[serde(default)]
     pub file: Option<PathBuf>,
     pub mode: ConsoleOutputMode,
     #[serde(default)]
-    pub iommu: bool,
     pub socket: Option<PathBuf>,
 }
 
-pub fn default_consoleconfig_file() -> Option<PathBuf> {
-    None
-}
-
-impl ApplyLandlock for ConsoleConfig {
+impl ApplyLandlock for CommonConsoleConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         if self.mode == ConsoleOutputMode::Pty {
             landlock.add_rule_with_access(Path::new("/dev/pts"), "rw")?;
@@ -572,6 +570,76 @@ impl ApplyLandlock for ConsoleConfig {
             landlock.add_rule_with_access(socket, "rw")?;
         }
         Ok(())
+    }
+}
+
+/// Configuration for a legacy serial console device.
+///
+/// - On x86_64, this is a port I/O-mapped UART16550-compatible device
+/// - On aarch64, this is a MMIO-mapped PL011 device
+/// - On RISCV, this is a MMIO-mapped UART16550-compatible device
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct SerialConfig {
+    #[serde(flatten)]
+    pub common: CommonConsoleConfig,
+    #[serde(default, skip_serializing_if = "<&bool as std::ops::Not>::not")]
+    pub iommu: bool,
+}
+
+impl SerialConfig {
+    pub const SYNTAX: &str =
+        "Control serial port: \"off|null|pty|tty|file=<path>|socket=<path>,iommu=on|off\"";
+}
+
+impl Default for SerialConfig {
+    fn default() -> Self {
+        Self {
+            common: CommonConsoleConfig {
+                file: None,
+                mode: ConsoleOutputMode::Null,
+                socket: None,
+            },
+            iommu: false,
+        }
+    }
+}
+
+impl ApplyLandlock for SerialConfig {
+    fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
+        self.common.apply_landlock(landlock)
+    }
+}
+
+/// Configuration for a virtio-console device.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ConsoleConfig {
+    #[serde(flatten)]
+    pub common: CommonConsoleConfig,
+    #[serde(default, skip_serializing_if = "<&bool as std::ops::Not>::not")]
+    pub iommu: bool,
+}
+
+impl ConsoleConfig {
+    pub const SYNTAX: &str =
+        "Control (virtio) console: \"off|null|pty|tty|file=<path>,iommu=on|off\"";
+}
+
+impl Default for ConsoleConfig {
+    fn default() -> Self {
+        Self {
+            common: CommonConsoleConfig {
+                file: None,
+                mode: ConsoleOutputMode::Tty,
+                socket: None,
+            },
+            iommu: false,
+        }
+    }
+}
+
+impl ApplyLandlock for ConsoleConfig {
+    fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
+        self.common.apply_landlock(landlock)
     }
 }
 
@@ -929,24 +997,6 @@ impl ApplyLandlock for PayloadConfig {
     }
 }
 
-pub fn default_serial() -> ConsoleConfig {
-    ConsoleConfig {
-        file: None,
-        mode: ConsoleOutputMode::Null,
-        iommu: false,
-        socket: None,
-    }
-}
-
-pub fn default_console() -> ConsoleConfig {
-    ConsoleConfig {
-        file: None,
-        mode: ConsoleOutputMode::Tty,
-        iommu: false,
-        socket: None,
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct TpmConfig {
     pub socket: PathBuf,
@@ -988,9 +1038,9 @@ pub struct VmConfig {
     pub generic_vhost_user: Option<Vec<GenericVhostUserConfig>>,
     pub fs: Option<Vec<FsConfig>>,
     pub pmem: Option<Vec<PmemConfig>>,
-    #[serde(default = "default_serial")]
-    pub serial: ConsoleConfig,
-    #[serde(default = "default_console")]
+    #[serde(default)]
+    pub serial: SerialConfig,
+    #[serde(default)]
     pub console: ConsoleConfig,
     #[cfg(target_arch = "x86_64")]
     #[serde(default)]
