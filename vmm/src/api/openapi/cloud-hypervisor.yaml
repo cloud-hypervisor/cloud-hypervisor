@@ -638,7 +638,7 @@ components:
           items:
             $ref: "#/components/schemas/PmemConfig"
         serial:
-          $ref: "#/components/schemas/ConsoleConfig"
+          $ref: "#/components/schemas/SerialConfig"
         console:
           $ref: "#/components/schemas/ConsoleConfig"
         debug_console:
@@ -1197,6 +1197,26 @@ components:
         iommu:
           type: boolean
           default: false
+        id:
+          type: string
+        pci_segment:
+          type: integer
+          format: int16
+        pci_device_id:
+          type: integer
+          format: uint8
+
+    SerialConfig:
+      required:
+        - mode
+      type: object
+      properties:
+        file:
+          type: string
+        socket:
+          type: string
+        mode:
+          $ref: "#/components/schemas/ConsoleMode"
 
     DebugConsoleConfig:
       required:
