@@ -358,7 +358,7 @@ mod unit_tests {
 
     use libc::EFD_NONBLOCK;
     use virtio_bindings::virtio_ring::VRING_DESC_F_WRITE;
-    use vm_memory::{GuestAddress, GuestMemoryAtomic};
+    use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
     use vm_virtio::queue::testing::VirtQueue as GuestQ;
     use vmm_sys_util::eventfd::EventFd;
 
@@ -418,5 +418,16 @@ mod unit_tests {
         };
 
         (handler, mem)
+    }
+
+    const SENTINEL: u8 = 0xa5;
+
+    #[test]
+    fn process_queue_in_bounds_overwrites_buffer() {
+        let (mut handler, mem) = build_handler(128 * 1024, 0x4000, 4096);
+        mem.write_obj(SENTINEL, GuestAddress(0x4000)).unwrap();
+        assert!(handler.process_queue().unwrap());
+        let first: u8 = mem.read_obj(GuestAddress(0x4000)).unwrap();
+        assert_eq!(first, 0);
     }
 }
