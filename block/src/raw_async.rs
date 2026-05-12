@@ -11,13 +11,15 @@ use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
-use crate::{BatchRequest, RequestType, SECTOR_SIZE};
+use crate::sparse::{blkdiscard, blkzeroout};
+use crate::{BatchRequest, RequestType, SECTOR_SIZE, is_block_device};
 
 pub struct RawFileAsync {
     fd: RawFd,
     io_uring: IoUring,
     eventfd: EventFd,
     alignment: u64,
+    is_block_device: bool,
 }
 
 impl RawFileAsync {
@@ -34,12 +36,31 @@ impl RawFileAsync {
             .register_eventfd(eventfd.as_raw_fd())
             .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
 
+        let is_block_device = is_block_device(fd);
+
         Ok(RawFileAsync {
             fd,
             io_uring,
             eventfd,
             alignment: SECTOR_SIZE,
+            is_block_device,
         })
+    }
+
+    /// Queue an `IORING_OP_NOP` carrying `user_data` so a synchronously
+    /// completed operation (e.g. a BLK* ioctl) is reaped through the normal
+    /// io_uring completion path.
+    fn submit_nop(&mut self, user_data: u64) -> Result<(), Error> {
+        let (submitter, mut sq, _) = self.io_uring.split();
+        // SAFETY: Nop carries no buffer; only `user_data` is consumed by the
+        // kernel.
+        unsafe {
+            sq.push(&opcode::Nop::new().build().user_data(user_data))
+                .map_err(|e| Error::other(format!("Submission queue is full: {e:?}")))?;
+        };
+        sq.sync();
+        submitter.submit()?;
+        Ok(())
     }
 }
 
@@ -227,6 +248,18 @@ impl AsyncIo for RawFileAsync {
     }
 
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
+        // Some block devices don't support fallocate(). Use ioctl instead. The assumption is that
+        // this happens rarely and we don't need to introduce unnecessary complexity by submitting
+        // a fallocate request, reaping ENOTSUPP in the completion routine, and reissuing the
+        // request with an ioctl.
+        if self.is_block_device {
+            blkdiscard(self.fd, offset, length).map_err(AsyncIoError::PunchHole)?;
+            // Deliver the completion through the normal io_uring path by
+            // queuing a NOP carrying `user_data`. The registered eventfd will
+            // fire when it completes, just like any other request.
+            return self.submit_nop(user_data).map_err(AsyncIoError::PunchHole);
+        }
+
         let (submitter, mut sq, _) = self.io_uring.split();
 
         let mode = FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE;
@@ -252,6 +285,14 @@ impl AsyncIo for RawFileAsync {
     }
 
     fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
+        // Same rationale as punch_hole().
+        if self.is_block_device {
+            blkzeroout(self.fd, offset, length).map_err(AsyncIoError::WriteZeroes)?;
+            return self
+                .submit_nop(user_data)
+                .map_err(AsyncIoError::WriteZeroes);
+        }
+
         let (submitter, mut sq, _) = self.io_uring.split();
 
         let mode = FALLOC_FL_ZERO_RANGE | FALLOC_FL_KEEP_SIZE;

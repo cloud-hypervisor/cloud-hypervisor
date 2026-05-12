@@ -5,26 +5,29 @@
 use std::collections::VecDeque;
 use std::os::unix::io::RawFd;
 
-use libc::{FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE};
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::SECTOR_SIZE;
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
+use crate::sparse::{punch_hole, write_zeroes};
+use crate::{SECTOR_SIZE, is_block_device};
 
 pub struct RawFileSync {
     fd: RawFd,
     eventfd: EventFd,
     completion_list: VecDeque<(u64, i32)>,
     alignment: u64,
+    is_block_device: bool,
 }
 
 impl RawFileSync {
     pub fn new(fd: RawFd) -> Self {
+        let is_block_device = is_block_device(fd);
         RawFileSync {
             fd,
             eventfd: EventFd::new(libc::EFD_NONBLOCK).expect("Failed creating EventFd for RawFile"),
             completion_list: VecDeque::new(),
             alignment: SECTOR_SIZE,
+            is_block_device,
         }
     }
 }
@@ -108,46 +111,18 @@ impl AsyncIo for RawFileSync {
     }
 
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
-        let mode = FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE;
-
-        // SAFETY: FFI call with valid arguments
-        let result = unsafe {
-            libc::fallocate(
-                self.fd as libc::c_int,
-                mode,
-                offset as libc::off_t,
-                length as libc::off_t,
-            )
-        };
-        if result < 0 {
-            return Err(AsyncIoError::PunchHole(std::io::Error::last_os_error()));
-        }
-
-        self.completion_list.push_back((user_data, result));
+        punch_hole(self.fd, self.is_block_device, offset, length)
+            .map_err(AsyncIoError::PunchHole)?;
+        self.completion_list.push_back((user_data, 0));
         self.eventfd.write(1).unwrap();
-
         Ok(())
     }
 
     fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
-        let mode = FALLOC_FL_ZERO_RANGE | FALLOC_FL_KEEP_SIZE;
-
-        // SAFETY: FFI call with valid arguments
-        let result = unsafe {
-            libc::fallocate(
-                self.fd as libc::c_int,
-                mode,
-                offset as libc::off_t,
-                length as libc::off_t,
-            )
-        };
-        if result < 0 {
-            return Err(AsyncIoError::WriteZeroes(std::io::Error::last_os_error()));
-        }
-
-        self.completion_list.push_back((user_data, result));
+        write_zeroes(self.fd, self.is_block_device, offset, length)
+            .map_err(AsyncIoError::WriteZeroes)?;
+        self.completion_list.push_back((user_data, 0));
         self.eventfd.write(1).unwrap();
-
         Ok(())
     }
 }

@@ -8,13 +8,13 @@
 use std::collections::VecDeque;
 use std::os::unix::io::{AsRawFd, RawFd};
 
-use libc::{FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE};
 use vmm_sys_util::aio;
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::SECTOR_SIZE;
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
+use crate::sparse::{punch_hole, write_zeroes};
+use crate::{SECTOR_SIZE, is_block_device};
 
 pub struct RawFileAsyncAio {
     fd: RawFd,
@@ -22,6 +22,7 @@ pub struct RawFileAsyncAio {
     eventfd: EventFd,
     alignment: u64,
     completion_list: VecDeque<(u64, i32)>,
+    is_block_device: bool,
 }
 
 impl RawFileAsyncAio {
@@ -30,6 +31,7 @@ impl RawFileAsyncAio {
             EventFd::new(libc::EFD_NONBLOCK).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
         let ctx =
             aio::IoContext::new(queue_depth).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
+        let is_block_device = is_block_device(fd);
 
         Ok(RawFileAsyncAio {
             fd,
@@ -37,6 +39,7 @@ impl RawFileAsyncAio {
             eventfd,
             alignment: SECTOR_SIZE,
             completion_list: VecDeque::new(),
+            is_block_device,
         })
     }
 }
@@ -133,50 +136,22 @@ impl AsyncIo for RawFileAsyncAio {
     }
 
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
-        // Linux AIO has no IOCB command for fallocate, so perform the operation
-        // synchronously and signal completion via the completion list, matching
-        // the pattern used by the sync backend (RawFileSync).
-        let mode = FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE;
-
-        // SAFETY: FFI call with valid arguments
-        let result = unsafe {
-            libc::fallocate(
-                self.fd as libc::c_int,
-                mode,
-                offset as libc::off_t,
-                length as libc::off_t,
-            )
-        };
-        if result < 0 {
-            return Err(AsyncIoError::PunchHole(std::io::Error::last_os_error()));
-        }
-
-        self.completion_list.push_back((user_data, result));
+        // Linux AIO has no IOCB command for fallocate, so perform the
+        // operation synchronously and signal completion via the completion
+        // list, matching the pattern used by the sync backend (RawFileSync).
+        punch_hole(self.fd, self.is_block_device, offset, length)
+            .map_err(AsyncIoError::PunchHole)?;
+        self.completion_list.push_back((user_data, 0));
         self.eventfd.write(1).unwrap();
 
         Ok(())
     }
 
     fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
-        // Linux AIO has no IOCB command for fallocate, so perform the operation
-        // synchronously and signal completion via the completion list, matching
-        // the pattern used by the sync backend (RawFileSync).
-        let mode = FALLOC_FL_ZERO_RANGE | FALLOC_FL_KEEP_SIZE;
-
-        // SAFETY: FFI call with valid arguments
-        let result = unsafe {
-            libc::fallocate(
-                self.fd as libc::c_int,
-                mode,
-                offset as libc::off_t,
-                length as libc::off_t,
-            )
-        };
-        if result < 0 {
-            return Err(AsyncIoError::WriteZeroes(std::io::Error::last_os_error()));
-        }
-
-        self.completion_list.push_back((user_data, result));
+        // Same as punch_hole().
+        write_zeroes(self.fd, self.is_block_device, offset, length)
+            .map_err(AsyncIoError::WriteZeroes)?;
+        self.completion_list.push_back((user_data, 0));
         self.eventfd.write(1).unwrap();
 
         Ok(())
