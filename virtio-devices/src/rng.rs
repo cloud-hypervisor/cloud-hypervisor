@@ -430,4 +430,26 @@ mod unit_tests {
         let first: u8 = mem.read_obj(GuestAddress(0x4000)).unwrap();
         assert_eq!(first, 0);
     }
+
+    #[test]
+    fn process_queue_overflow_preserves_buffer() {
+        // 128 KiB of guest RAM, descriptor at 0x4000 claiming 1 GiB.
+        // The descriptor overshoots guest memory, so process_queue must
+        // skip it and leave the sentinel byte at 0x4000 untouched.
+        let (mut handler, mem) = build_handler(128 * 1024, 0x4000, 1 << 30);
+        mem.write_obj(SENTINEL, GuestAddress(0x4000))
+            .expect("write sentinel into guest memory");
+        assert!(
+            handler
+                .process_queue()
+                .expect("process_queue must not fail"),
+        );
+        let first: u8 = mem
+            .read_obj(GuestAddress(0x4000))
+            .expect("read back sentinel from guest memory");
+        assert_eq!(
+            first, SENTINEL,
+            "oversize descriptor must not overwrite buffer"
+        );
+    }
 }
