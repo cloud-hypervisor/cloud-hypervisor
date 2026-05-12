@@ -158,7 +158,7 @@ impl MigrationWorker {
     ///
     /// Cleanup should be done by the VMM.
     ///
-    /// See [module documentation](super::migration_worker).
+    /// See [module documentation](super::worker).
     #[expect(clippy::result_large_err)]
     // TODO seccomp?
     pub fn spawn(
