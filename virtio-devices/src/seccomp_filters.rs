@@ -4,6 +4,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use block::{BLKDISCARD, BLKZEROOUT};
 use libc::{FIONBIO, TIOCGWINSZ, TUNSETOFFLOAD};
 use seccompiler::SeccompCmpOp::Eq;
 use seccompiler::{
@@ -113,8 +114,7 @@ fn virtio_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_fsync, vec![]),
         (libc::SYS_ftruncate, vec![]),
         (libc::SYS_getrandom, vec![]),
-        #[cfg(feature = "sev_snp")]
-        (libc::SYS_ioctl, create_mshv_sev_snp_ioctl_seccomp_rule()),
+        (libc::SYS_ioctl, create_virtio_block_ioctl_seccomp_rule()),
         (libc::SYS_io_destroy, vec![]),
         (libc::SYS_io_getevents, vec![]),
         (libc::SYS_io_submit, vec![]),
@@ -128,6 +128,15 @@ fn virtio_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_sched_setaffinity, vec![]),
         (libc::SYS_set_robust_list, vec![]),
         (libc::SYS_timerfd_settime, vec![]),
+    ]
+}
+
+fn create_virtio_block_ioctl_seccomp_rule() -> Vec<SeccompRule> {
+    or![
+        and![Cond::new(1, ArgLen::Dword, Eq, BLKDISCARD as _).unwrap()],
+        and![Cond::new(1, ArgLen::Dword, Eq, BLKZEROOUT as _).unwrap()],
+        #[cfg(feature = "sev_snp")]
+        mshv_sev_snp_ioctl_seccomp_rule(),
     ]
 }
 

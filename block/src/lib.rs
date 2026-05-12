@@ -34,6 +34,8 @@ mod raw_async_io_tests;
 pub mod raw_disk;
 pub(crate) mod raw_sync;
 mod request;
+mod sparse;
+pub use sparse::{BLKDISCARD, BLKZEROOUT};
 pub mod vhd;
 pub mod vhdx;
 pub mod vhdx_sync;
