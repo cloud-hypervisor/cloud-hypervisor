@@ -53,7 +53,7 @@ pub use self::http::{start_http_fd_thread, start_http_path_thread};
 use crate::Error as VmmError;
 use crate::config::RestoreConfig;
 use crate::device_tree::DeviceTree;
-use crate::migration_transport::MAX_MIGRATION_CONNECTIONS;
+use crate::migration::transport::MAX_MIGRATION_CONNECTIONS;
 use crate::vm::{Error as VmError, VmState};
 use crate::vm_config::{
     DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,

@@ -56,11 +56,11 @@ use crate::landlock::Landlock;
 use crate::memory_manager::MemoryManager;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::migration::get_vm_snapshot;
-use crate::migration::{recv_vm_config, recv_vm_state};
-use crate::migration_transport::{
-    ReceiveAdditionalConnections, ReceiveListener, SendAdditionalConnections, SocketStream,
+use crate::migration::transport::{
+    self, ReceiveAdditionalConnections, ReceiveListener, SendAdditionalConnections, SocketStream,
 };
-use crate::migration_worker::{MigrationThreadOut, MigrationWorker, MigrationWorkerHandle};
+use crate::migration::worker::{MigrationThreadOut, MigrationWorker, MigrationWorkerHandle};
+use crate::migration::{recv_vm_config, recv_vm_state};
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::vm::{Error as VmError, Vm, VmState};
 use crate::vm_config::{
@@ -86,8 +86,6 @@ pub mod interrupt;
 pub mod landlock;
 pub mod memory_manager;
 pub mod migration;
-pub mod migration_transport;
-mod migration_worker;
 mod pci_segment;
 pub mod seccomp_filters;
 mod serial_manager;
@@ -1007,11 +1005,7 @@ impl Vmm {
                 // When multiple TCP connections are configured, the worker connections carry
                 // all memory commands and the main connection is used only for control traffic.
                 Command::Memory => {
-                    migration_transport::receive_memory_ranges(
-                        &config_data.guest_memory,
-                        req,
-                        socket,
-                    )
+                    transport::receive_memory_ranges(&config_data.guest_memory, req, socket)
                     .inspect_err(|_| {
                         // connections.cleanup() already logs all errors that occurred in one of the
                         // threads. Furthermore, this path is only taken in the single-connection case,
@@ -1465,11 +1459,10 @@ impl Vmm {
         let mut ctx = OngoingMigrationContext::new();
 
         // Set up the socket connection
-        let mut socket =
-            migration_transport::send_migration_socket(&send_data_migration.destination_url)?;
+        let mut socket = transport::send_migration_socket(&send_data_migration.destination_url)?;
 
         // Start the migration
-        migration_transport::send_request_expect_ok(
+        transport::send_request_expect_ok(
             &mut socket,
             Request::start(),
             MigratableError::MigrateSend(anyhow!("Error starting migration")),
@@ -1534,7 +1527,7 @@ impl Vmm {
             common_cpuid,
             memory_manager_data: vm.memory_manager_data(),
         };
-        migration_transport::send_config(&mut socket, &vm_migration_config)?;
+        transport::send_config(&mut socket, &vm_migration_config)?;
 
         // Let every Migratable object know about the migration being started.
         vm.start_migration()?;
@@ -1552,7 +1545,7 @@ impl Vmm {
             )
             .expect("migration context should transition to VmPaused for local migration");
         } else {
-            let mut mem_send = migration_transport::SendAdditionalConnections::new(
+            let mut mem_send = transport::SendAdditionalConnections::new(
                 &send_data_migration.destination_url,
                 send_data_migration.connections,
                 &vm.guest_memory(),
@@ -1588,17 +1581,13 @@ impl Vmm {
             // One final memory iteration to handle side effects from snapshot.
             if !send_data_migration.local {
                 let memory_ranges = vm.dirty_log()?;
-                migration_transport::send_memory_ranges(
-                    &vm.guest_memory(),
-                    &memory_ranges,
-                    &mut socket,
-                )?;
+                transport::send_memory_ranges(&vm.guest_memory(), &memory_ranges, &mut socket)?;
             }
             Ok(snapshot)
         })?;
 
         let (_, send_snapshot_duration) =
-            measure_ok(|| migration_transport::send_state(&mut socket, &vm_snapshot))?;
+            measure_ok(|| transport::send_state(&mut socket, &vm_snapshot))?;
 
         // Complete the migration.
         // When this returns, we know the VM was resumed (if it was running
@@ -1610,7 +1599,7 @@ impl Vmm {
             Request::complete_paused()
         };
         let (_, complete_duration) = measure_ok(|| {
-            migration_transport::send_request_expect_ok(
+            transport::send_request_expect_ok(
                 &mut socket,
                 complete_req,
                 MigratableError::MigrateSend(anyhow!("Error completing migration")),
@@ -2673,10 +2662,9 @@ impl RequestHandler for Vmm {
         }
 
         let mut listener =
-            migration_transport::receive_migration_listener(&receive_data_migration.receiver_url)?;
+            transport::receive_migration_listener(&receive_data_migration.receiver_url)?;
 
         event!("vm", "migration-receive-ready");
-
         // Accept the connection and get the socket
         let mut socket = listener.accept()?;
 
