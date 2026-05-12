@@ -20,6 +20,7 @@ use std::fs::{OpenOptions, read_link};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
 use std::os::fd::{AsRawFd, RawFd};
+use std::path::Path;
 use std::str;
 
 #[cfg(test)]
@@ -425,9 +426,23 @@ pub(crate) fn parse_qcow(
     }
 
     let direct_io = file.is_direct();
+    // QCOW2 relative backing paths are resolved from the image that stores
+    // them. Resolve only the config passed to BackingFile::new(), leaving the
+    // header copy unchanged so the original backing filename is preserved.
+    let backing_file_config = header.backing_file.as_ref().map(|config| {
+        let mut config = config.clone();
+        if !Path::new(&config.path).is_absolute()
+            && let Ok(img) = read_link(format!("/proc/self/fd/{}", file.as_raw_fd()))
+            && img.exists()
+            && let Some(parent) = img.parent()
+        {
+            config.path = parent.join(&config.path).to_string_lossy().into_owned();
+        }
+        config
+    });
 
     let backing_file = BackingFile::new(
-        header.backing_file.as_ref(),
+        backing_file_config.as_ref(),
         direct_io,
         max_nesting_depth,
         sparse,

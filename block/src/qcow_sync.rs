@@ -311,15 +311,21 @@ impl AsyncIo for QcowSync {
 
 #[cfg(test)]
 mod unit_tests {
+    use std::fs::{File, OpenOptions};
     use std::io::{Seek, SeekFrom, Write};
     use std::os::fd::RawFd;
-    use std::thread;
+    use std::path::Path;
+    use std::{env, thread};
 
+    use vmm_sys_util::tempdir::TempDir;
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
     use crate::disk_file::{AsyncDiskFile, DiskSize, Resizable};
-    use crate::qcow::{BackingFileConfig, ImageType, QcowFile, RawFile};
+    use crate::error::BlockErrorKind;
+    use crate::qcow::{
+        BackingFileConfig, Error as QcowError, ImageType, QcowFile, QcowHeader, RawFile,
+    };
     use crate::qcow_common::unit_tests::compress_allocated_clusters;
     use crate::qcow_disk::QcowDisk;
 
@@ -656,6 +662,171 @@ mod unit_tests {
     #[test]
     fn test_backing_file_read_direct_io() {
         test_backing_file_read_impl(true);
+    }
+
+    fn create_raw_backing(path: &Path, pattern: &[u8]) {
+        let mut backing_file = File::create(path).unwrap();
+        backing_file.write_all(pattern).unwrap();
+        backing_file.sync_all().unwrap();
+    }
+
+    fn create_qcow2_overlay(overlay_path: &Path, backing_path: &str, file_size: u64) {
+        let raw = RawFile::new(
+            OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(overlay_path)
+                .unwrap(),
+            false,
+        );
+        let backing_config = BackingFileConfig {
+            path: backing_path.to_string(),
+            format: Some(ImageType::Raw),
+        };
+        let _overlay =
+            QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
+    }
+
+    fn create_qcow2_overlay_header(overlay_path: &Path, backing_path: &str, file_size: u64) {
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(overlay_path)
+            .unwrap();
+        let header =
+            QcowHeader::create_for_size_and_path(3, file_size, Some(backing_path)).unwrap();
+        header.write_to(&mut file).unwrap();
+        file.sync_all().unwrap();
+    }
+
+    #[test]
+    fn test_relative_backing_file_read() {
+        let test_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
+        let cwd = env::current_dir().unwrap();
+        assert_ne!(cwd.as_path(), test_dir.as_path());
+
+        let backing_path = test_dir.as_path().join("backing.raw");
+        let overlay_path = test_dir.as_path().join("overlay.qcow2");
+        let cluster_size = 1u64 << 16;
+        let file_size = cluster_size * 2;
+        let pattern: Vec<u8> = (0..file_size as usize).map(|i| (i % 251) as u8).collect();
+
+        create_raw_backing(&backing_path, &pattern);
+        create_qcow2_overlay(&overlay_path, "backing.raw", file_size);
+
+        let disk =
+            QcowDisk::new(File::open(&overlay_path).unwrap(), false, true, true, false).unwrap();
+
+        let buf = async_read(&disk, 0, cluster_size as usize);
+        assert_eq!(
+            &buf[..],
+            &pattern[..cluster_size as usize],
+            "Relative backing file should resolve from the overlay image directory"
+        );
+    }
+
+    #[test]
+    fn test_missing_relative_backing_file_error_uses_resolved_path() {
+        let test_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
+        let overlay_path = test_dir.as_path().join("overlay.qcow2");
+        let cluster_size = 1u64 << 16;
+        let file_size = cluster_size * 2;
+
+        create_qcow2_overlay_header(&overlay_path, "missing.raw", file_size);
+
+        let err = QcowDisk::new(File::open(&overlay_path).unwrap(), false, true, true, false)
+            .unwrap_err();
+        assert!(matches!(err.kind(), BlockErrorKind::Io));
+
+        let expected_path = test_dir
+            .as_path()
+            .join("missing.raw")
+            .to_string_lossy()
+            .into_owned();
+        match err.downcast_ref::<QcowError>() {
+            Some(QcowError::BackingFileIo(path, _)) => assert_eq!(path, &expected_path),
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_relative_backing_file_with_parent_components() {
+        let test_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
+        let overlay_dir = test_dir.as_path().join("overlay");
+        let sibling_dir = test_dir.as_path().join("sibling");
+        std::fs::create_dir(&overlay_dir).unwrap();
+        std::fs::create_dir(&sibling_dir).unwrap();
+
+        let backing_path = sibling_dir.join("backing.raw");
+        let overlay_path = overlay_dir.join("overlay.qcow2");
+        let cluster_size = 1u64 << 16;
+        let file_size = cluster_size * 2;
+        let pattern: Vec<u8> = (0..file_size as usize).map(|i| (i % 251) as u8).collect();
+
+        create_raw_backing(&backing_path, &pattern);
+        create_qcow2_overlay(&overlay_path, "../sibling/backing.raw", file_size);
+
+        let disk =
+            QcowDisk::new(File::open(&overlay_path).unwrap(), false, true, true, false).unwrap();
+
+        let buf = async_read(&disk, 0, cluster_size as usize);
+        assert_eq!(
+            &buf[..],
+            &pattern[..cluster_size as usize],
+            "Relative backing file with parent components should resolve from the overlay image directory"
+        );
+    }
+
+    #[test]
+    fn test_absolute_backing_file_path_read() {
+        let test_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
+        let backing_path = test_dir.as_path().join("backing.raw");
+        let overlay_path = test_dir.as_path().join("overlay.qcow2");
+        let cluster_size = 1u64 << 16;
+        let file_size = cluster_size * 2;
+        let pattern: Vec<u8> = (0..file_size as usize).map(|i| (i % 251) as u8).collect();
+
+        create_raw_backing(&backing_path, &pattern);
+        create_qcow2_overlay(&overlay_path, backing_path.to_str().unwrap(), file_size);
+
+        let disk =
+            QcowDisk::new(File::open(&overlay_path).unwrap(), false, true, true, false).unwrap();
+
+        let buf = async_read(&disk, 0, cluster_size as usize);
+        assert_eq!(
+            &buf[..],
+            &pattern[..cluster_size as usize],
+            "Absolute backing file path should be used as is"
+        );
+    }
+
+    #[test]
+    fn test_relative_backing_file_falls_back_for_fd_without_filesystem_path() {
+        let overlay_temp = TempFile::new().unwrap();
+        let cluster_size = 1u64 << 16;
+        let file_size = cluster_size * 2;
+
+        {
+            let mut file = overlay_temp.as_file().try_clone().unwrap();
+            let header =
+                QcowHeader::create_for_size_and_path(3, file_size, Some("missing.raw")).unwrap();
+            header.write_to(&mut file).unwrap();
+            file.sync_all().unwrap();
+        }
+
+        let mut overlay_file = overlay_temp.into_file();
+        overlay_file.rewind().unwrap();
+        let err = QcowDisk::new(overlay_file, false, true, true, false).unwrap_err();
+        assert!(matches!(err.kind(), BlockErrorKind::Io));
+
+        match err.downcast_ref::<QcowError>() {
+            Some(QcowError::BackingFileIo(path, _)) => assert_eq!(path, "missing.raw"),
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     fn test_backing_file_read_qcow2_backing_impl(direct_io: bool) {
