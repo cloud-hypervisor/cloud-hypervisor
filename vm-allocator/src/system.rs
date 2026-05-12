@@ -42,7 +42,7 @@ use crate::page_size::get_page_size;
 ///   assert_eq!(allocator.allocate_irq(), Ok(33));
 ///   #[cfg(target_arch = "riscv64")]
 ///   assert_eq!(allocator.allocate_irq(), Ok(1));
-///   assert_eq!(allocator.allocate_platform_mmio_addresses(None, 0x1000, Some(0x1000)), Some(GuestAddress(0x1fff_f000)));
+///   assert_eq!(allocator.allocate_platform_mmio_addresses(None, 0x1000, Some(0x1000)), Some(GuestAddress(0x1000_0000)));
 ///
 /// ```
 pub struct SystemAllocator {

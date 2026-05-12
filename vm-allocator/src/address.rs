@@ -30,8 +30,8 @@ pub type Result<T> = result::Result<T, Error>;
 /// # use vm_allocator::AddressAllocator;
 /// # use vm_memory::{Address, GuestAddress, GuestUsize};
 ///   AddressAllocator::new(GuestAddress(0x1000), 0x10000).map(|mut pool| {
-///       assert_eq!(pool.allocate(None, 0x110, Some(0x100)), Some(GuestAddress(0x10e00)));
-///       assert_eq!(pool.allocate(None, 0x100, Some(0x100)), Some(GuestAddress(0x10d00)));
+///       assert_eq!(pool.allocate(None, 0x110, Some(0x100)), Some(GuestAddress(0x1000)));
+///       assert_eq!(pool.allocate(None, 0x100, Some(0x100)), Some(GuestAddress(0x1200)));
 ///   });
 /// ```
 #[derive(Debug, Eq, PartialEq)]
@@ -128,33 +128,18 @@ impl AddressAllocator {
         req_size: GuestUsize,
         alignment: GuestUsize,
     ) -> Option<GuestAddress> {
-        let reversed_ranges: Vec<(&GuestAddress, &GuestUsize)> = self.ranges.iter().rev().collect();
+        let mut prev_end_address = self.base;
 
-        for (idx, (address, _size)) in reversed_ranges.iter().enumerate() {
-            let next_range_idx = idx + 1;
-            let prev_end_address = if next_range_idx >= reversed_ranges.len() {
-                self.base
-            } else {
-                reversed_ranges[next_range_idx]
-                    .0
-                    .unchecked_add(*(reversed_ranges[next_range_idx].1))
-            };
+        for (address, size) in self.ranges.iter() {
+            let aligned_address = self.align_address(prev_end_address, alignment);
 
-            // If we have enough space between this range and the previous one,
-            // we return the start of this range minus the requested size.
-            // As each new range is allocated at the end of the available address space,
-            // we will tend to always allocate new ranges there as well. In other words,
-            // ranges accumulate at the end of the address space.
-            if let Some(size_delta) =
-                address.checked_sub(self.align_address(prev_end_address, alignment).raw_value())
-            {
-                let adjust = alignment.saturating_sub(1);
-                if size_delta.raw_value() >= req_size {
-                    return Some(
-                        self.align_address(address.unchecked_sub(req_size + adjust), alignment),
-                    );
+            if let Some(space) = address.checked_sub(aligned_address.raw_value()) {
+                if space.raw_value() >= req_size {
+                    return Some(aligned_address);
                 }
             }
+
+            prev_end_address = address.unchecked_add(*size);
         }
 
         None
@@ -251,12 +236,12 @@ mod unit_tests {
         let mut pool = AddressAllocator::new(GuestAddress(0x1000), 0x1000).unwrap();
         assert_eq!(
             pool.allocate(None, 0x800, Some(0x100)),
-            Some(GuestAddress(0x1800))
+            Some(GuestAddress(0x1000))
         );
         assert_eq!(pool.allocate(None, 0x900, Some(0x100)), None);
         assert_eq!(
             pool.allocate(None, 0x400, Some(0x100)),
-            Some(GuestAddress(0x1400))
+            Some(GuestAddress(0x1800))
         );
     }
 
@@ -265,15 +250,15 @@ mod unit_tests {
         let mut pool = AddressAllocator::new(GuestAddress(0x1000), 0x10000).unwrap();
         assert_eq!(
             pool.allocate(None, 0x110, Some(0x100)),
-            Some(GuestAddress(0x10e00))
+            Some(GuestAddress(0x1000))
         );
         assert_eq!(
             pool.allocate(None, 0x100, Some(0x100)),
-            Some(GuestAddress(0x10d00))
+            Some(GuestAddress(0x1200))
         );
         assert_eq!(
             pool.allocate(None, 0x10, Some(0x100)),
-            Some(GuestAddress(0x10c00))
+            Some(GuestAddress(0x1300))
         );
     }
 
