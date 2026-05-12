@@ -23,6 +23,7 @@ pub enum Error {
 enum Token {
     Literal(String),
     BootTime,
+    /// Wallclock using RFC 3339 formatting.
     WallClock,
     Pid,
     Tid,
@@ -134,11 +135,9 @@ impl log::Log for Logger {
                 Token::Literal(s) => out.write_all(s.as_bytes()),
                 // 10: 6 decimal places + sep => whole seconds in range `0..=999` properly aligned
                 Token::BootTime => write!(&mut *out, "{duration_s:>10.6?}"),
-                Token::WallClock => write!(
-                    out,
-                    "{}",
-                    jiff::Zoned::now().strftime("%Y-%m-%dT%H:%M:%S%.6f")
-                ),
+                Token::WallClock => {
+                    write!(out, "{:.6}", jiff::Timestamp::now())
+                }
                 Token::Pid => write!(&mut *out, "{}", self.pid),
                 // SAFETY: gettid(2) always succeeds
                 Token::Tid => write!(&mut *out, "{}", unsafe { libc::gettid() }),
@@ -368,13 +367,14 @@ mod tests {
 
         let out = buf.contents();
         let out = out.trim();
-        assert_eq!(out.len(), 26, "got: {out}");
+        assert_eq!(out.len(), 27, "got: {out}");
         assert_eq!(&out[4..5], "-", "got: {out}");
         assert_eq!(&out[7..8], "-", "got: {out}");
         assert_eq!(&out[10..11], "T", "got: {out}");
         assert_eq!(&out[13..14], ":", "got: {out}");
         assert_eq!(&out[16..17], ":", "got: {out}");
         assert_eq!(&out[19..20], ".", "got: {out}");
+        assert!(out.ends_with('Z'), "got: {out}");
     }
 
     #[test]
