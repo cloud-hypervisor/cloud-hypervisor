@@ -59,7 +59,7 @@ pub use request::{
     AlignedOperation, BatchRequest, ExecuteAsync, MAX_DISCARD_WRITE_ZEROES_SEG, Request,
     RequestType,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de};
 use smallvec::SmallVec;
 use thiserror::Error;
 use virtio_bindings::virtio_blk::*;
@@ -557,7 +557,7 @@ pub trait AsyncAdaptor {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ImageType {
     FixedVhd,
     Qcow2,
@@ -583,6 +583,21 @@ pub enum ImageTypeParseError {
     InvalidValue(String),
 }
 
+impl ImageType {
+    const VARIANTS: &'static [&'static str] = &["FixedVhd", "Qcow2", "Raw", "Vhdx", "Unknown"];
+
+    fn from_config_value(s: &str) -> Result<Self, ImageTypeParseError> {
+        match s {
+            "FixedVhd" => Ok(ImageType::FixedVhd),
+            "Qcow2" => Ok(ImageType::Qcow2),
+            "Raw" => Ok(ImageType::Raw),
+            "Vhdx" => Ok(ImageType::Vhdx),
+            "Unknown" => Ok(ImageType::Unknown),
+            _ => s.parse(),
+        }
+    }
+}
+
 impl FromStr for ImageType {
     type Err = ImageTypeParseError;
 
@@ -594,6 +609,17 @@ impl FromStr for ImageType {
             "vhdx" => Ok(ImageType::Vhdx),
             _ => Err(ImageTypeParseError::InvalidValue(s.to_string())),
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for ImageType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        ImageType::from_config_value(&s)
+            .map_err(|_| de::Error::unknown_variant(&s, ImageType::VARIANTS))
     }
 }
 
@@ -845,9 +871,33 @@ mod unit_tests {
     use std::os::unix::fs::OpenOptionsExt;
     use std::{ptr, slice};
 
+    use serde::Deserialize as _;
+    use serde::de::IntoDeserializer;
+    use serde::de::value::Error as DeError;
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
+
+    fn deserialize_image_type(value: &str) -> ImageType {
+        let deserializer: serde::de::value::StrDeserializer<'_, DeError> =
+            value.into_deserializer();
+        ImageType::deserialize(deserializer).unwrap()
+    }
+
+    #[test]
+    fn test_image_type_deserialize_accepts_cli_values() {
+        assert_eq!(deserialize_image_type("qcow2"), ImageType::Qcow2);
+        assert_eq!(deserialize_image_type("raw"), ImageType::Raw);
+        assert_eq!(deserialize_image_type("vhd"), ImageType::FixedVhd);
+        assert_eq!(deserialize_image_type("vhdx"), ImageType::Vhdx);
+    }
+
+    #[test]
+    fn test_image_type_deserialize_keeps_enum_values() {
+        assert_eq!(deserialize_image_type("Qcow2"), ImageType::Qcow2);
+        assert_eq!(deserialize_image_type("FixedVhd"), ImageType::FixedVhd);
+        assert_eq!(deserialize_image_type("Unknown"), ImageType::Unknown);
+    }
 
     #[test]
     fn test_probe_regular_file_returns_valid_alignment() {
