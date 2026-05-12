@@ -603,6 +603,191 @@ mod common_parallel {
         _test_virtio_block(&guest, true, true, false, false, ImageType::Raw);
     }
 
+    // RAII wrapper around a `losetup`'d loop device. The backing file lives
+    // in the guest's tmp_dir so it is cleaned up automatically when the
+    // guest is dropped.
+    struct LoopDev {
+        path: String,
+    }
+
+    impl LoopDev {
+        fn new(tmp: &std::path::Path, size_mb: u64) -> Self {
+            let backing = tmp.join("blkdev.img");
+            let backing_str = backing.to_str().unwrap();
+            assert!(
+                exec_host_command_status(&format!("truncate -s {size_mb}M {backing_str}"))
+                    .success(),
+                "truncate failed"
+            );
+            let out = exec_host_command_output(&format!("losetup -f --show -- {backing_str}"));
+            assert!(out.status.success(), "losetup failed: {out:?}");
+            let path = String::from_utf8(out.stdout).unwrap().trim().to_string();
+            Self { path }
+        }
+    }
+
+    impl Drop for LoopDev {
+        fn drop(&mut self) {
+            let _ = exec_host_command_status(&format!("losetup -d {}", self.path));
+        }
+    }
+
+    // Exercise the new BLKDISCARD / BLKZEROOUT ioctl paths in `block/` by
+    // attaching a real block device (a loop device) as a writable virtio-blk
+    // disk and issuing `blkdiscard` / `fstrim` from inside the guest.
+    //
+    // `is_block_device()` returns true for `/dev/loopN`, so cloud-hypervisor now
+    // routes punch_hole / write_zeroes through the BLK* ioctls regardless of
+    // whether `fallocate()` would have worked. This test therefore covers:
+    //   - is_block_device() detection at backend construction,
+    //   - blkdiscard() / blkzeroout() helpers in block::sparse,
+    //   - the io_uring `submit_nop()` completion plumbing (io_uring case),
+    //   - the BLKDISCARD / BLKZEROOUT additions to the VirtioBlock seccomp
+    //     whitelist (any of these would otherwise SIGSYS the device thread).
+    fn _test_virtio_block_blkdev(disable_io_uring: bool, disable_aio: bool) {
+        let focal = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let loopdev = LoopDev::new(guest.tmp_dir.as_path(), 64);
+        let kernel_path = direct_kernel_boot_path();
+
+        let mut cloud_child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=2"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
+                "--disk",
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={},image_type=raw,num_queues=2,\
+                     _disable_io_uring={},_disable_aio={}",
+                    loopdev.path, disable_io_uring, disable_aio,
+                )
+                .as_str(),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            // The loop device shows up as vdc.
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep -c vdc")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            // 1) BLKDISCARD path: fill the first 16 MiB with random data,
+            //    then discard the first 8 MiB. We only assert that the
+            //    ioctl path succeeds end-to-end; whether the discarded
+            //    range reads back as zeros is not guaranteed by the
+            //    BLKDISCARD contract (see BLKZEROOUT below for the
+            //    read-as-zero assertion).
+            guest
+                .ssh_command("sudo dd if=/dev/urandom of=/dev/vdc bs=1M count=16 conv=fsync")
+                .expect("initial write failed");
+            guest
+                .ssh_command("sudo blkdiscard -o 0 -l 8388608 /dev/vdc")
+                .expect("blkdiscard (BLKDISCARD ioctl path) failed");
+
+            // 2) BLKZEROOUT path: same idea, but via `blkdiscard -z` which
+            //    issues BLKZEROOUT instead of BLKDISCARD.
+            guest
+                .ssh_command("sudo dd if=/dev/urandom of=/dev/vdc bs=1M count=16 conv=fsync")
+                .expect("second write failed");
+            guest
+                .ssh_command("sudo blkdiscard -z -o 0 -l 8388608 /dev/vdc")
+                .expect("blkdiscard -z (BLKZEROOUT ioctl path) failed");
+            let nonzero = guest
+                .ssh_command(
+                    "sudo dd if=/dev/vdc bs=1M count=8 status=none | \
+                     tr -d '\\000' | wc -c",
+                )
+                .unwrap();
+            assert_eq!(
+                nonzero.trim(),
+                "0",
+                "BLKZEROOUT did not zero the requested range"
+            );
+
+            // 3) End-to-end fstrim through a real filesystem on the block
+            //    device. This is the closest CI-friendly approximation of
+            //    the original ZFS-zvol scenario in #8127.
+            guest
+                .ssh_command("sudo mkfs.ext4 -F /dev/vdc")
+                .expect("mkfs.ext4 failed");
+            guest
+                .ssh_command(
+                    "sudo mkdir -p /mnt/blkdev && \
+                     sudo mount -o discard /dev/vdc /mnt/blkdev",
+                )
+                .expect("mount -o discard failed");
+            guest
+                .ssh_command(
+                    "sudo dd if=/dev/urandom of=/mnt/blkdev/f bs=1M count=16 \
+                     conv=fsync && sudo rm /mnt/blkdev/f && sync",
+                )
+                .expect("populate-then-delete failed");
+            // `fstrim -v` prints e.g. "/mnt/blkdev: 12 MiB (12582912 bytes)
+            // trimmed on /dev/vdc". Extract the byte count and assert that
+            // it is non-zero: `fstrim` exits 0 even when nothing is trimmed
+            // (e.g. if virtio-blk DISCARD was not negotiated), which would
+            // silently mask exactly the regression this test exists to
+            // catch.
+            let fstrim_out = guest
+                .ssh_command("sudo fstrim -v /mnt/blkdev")
+                .expect("fstrim invocation failed");
+            let trimmed_bytes: u64 = fstrim_out
+                .split_once('(')
+                .and_then(|(_, rest)| rest.split_once(" bytes"))
+                .and_then(|(n, _)| n.trim().parse().ok())
+                .unwrap_or_else(|| panic!("could not parse fstrim output: {fstrim_out:?}"));
+            assert!(
+                trimmed_bytes > 0,
+                "fstrim trimmed 0 bytes -- virtio-blk DISCARD likely \
+                 not advertised or BLK* path not wired up: {fstrim_out:?}"
+            );
+            guest
+                .ssh_command("sudo umount /mnt/blkdev")
+                .expect("umount failed");
+        });
+
+        let _ = cloud_child.kill();
+        let output = cloud_child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_virtio_block_blkdev_io_uring() {
+        _test_virtio_block_blkdev(false, false);
+    }
+
+    #[test]
+    fn test_virtio_block_blkdev_aio() {
+        _test_virtio_block_blkdev(true, false);
+    }
+
+    #[test]
+    fn test_virtio_block_blkdev_sync() {
+        _test_virtio_block_blkdev(true, true);
+    }
+
     #[test]
     fn test_compute_file_checksum_empty() {
         let mut reader = io::Cursor::new(vec![]);
