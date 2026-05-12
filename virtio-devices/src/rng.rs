@@ -351,3 +351,72 @@ impl Snapshottable for Rng {
 
 impl Transportable for Rng {}
 impl Migratable for Rng {}
+
+#[cfg(test)]
+mod unit_tests {
+    use std::sync::Arc;
+
+    use libc::EFD_NONBLOCK;
+    use virtio_bindings::virtio_ring::VRING_DESC_F_WRITE;
+    use vm_memory::{GuestAddress, GuestMemoryAtomic};
+    use vm_virtio::queue::testing::VirtQueue as GuestQ;
+    use vmm_sys_util::eventfd::EventFd;
+
+    use super::*;
+    use crate::GuestMemoryMmap;
+    use crate::device::{VirtioInterrupt, VirtioInterruptType};
+
+    struct NoopVirtioInterrupt;
+
+    impl VirtioInterrupt for NoopVirtioInterrupt {
+        fn trigger(
+            &self,
+            _int_type: VirtioInterruptType,
+        ) -> std::result::Result<(), std::io::Error> {
+            Ok(())
+        }
+
+        fn set_notifier(
+            &self,
+            _interrupt: u32,
+            _eventfd: Option<EventFd>,
+            _vm: &dyn hypervisor::Vm,
+        ) -> std::io::Result<()> {
+            unimplemented!()
+        }
+    }
+
+    fn build_handler(
+        mem_size: usize,
+        desc_addr: u64,
+        desc_len: u32,
+    ) -> (RngEpollHandler, GuestMemoryMmap) {
+        const QSIZE: u16 = 2;
+
+        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), mem_size)]).unwrap();
+        let guest_vq = GuestQ::new(GuestAddress(0x1_0000), &mem, QSIZE);
+        let queue = guest_vq.create_queue();
+
+        guest_vq.dtable[0].set(
+            desc_addr,
+            desc_len,
+            VRING_DESC_F_WRITE.try_into().unwrap(),
+            0,
+        );
+        guest_vq.avail.ring[0].set(0);
+        guest_vq.avail.idx.set(1);
+
+        let handler = RngEpollHandler {
+            mem: GuestMemoryAtomic::new(mem.clone()),
+            queue,
+            random_file: File::open("/dev/zero").unwrap(),
+            interrupt_cb: Arc::new(NoopVirtioInterrupt),
+            queue_evt: EventFd::new(EFD_NONBLOCK).unwrap(),
+            kill_evt: EventFd::new(EFD_NONBLOCK).unwrap(),
+            pause_evt: EventFd::new(EFD_NONBLOCK).unwrap(),
+            access_platform: None,
+        };
+
+        (handler, mem)
+    }
+}
