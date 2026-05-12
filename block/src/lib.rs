@@ -44,7 +44,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::fs::FileTypeExt;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::Path;
 use std::str::FromStr;
 use std::{cmp, mem, result};
@@ -333,26 +333,25 @@ pub fn block_io_uring_is_supported() -> bool {
     }
 }
 
+/// Returns `true` iff `fd` refers to a block device.
+///
+/// Returns `false` if the `fstat()` probe itself fails. Callers that need to
+/// distinguish "not a block device" from "couldn't tell" should fall back to
+/// regular-file behaviour, which is what every current caller already does.
+pub(crate) fn is_block_device(fd: RawFd) -> bool {
+    // SAFETY: `libc::stat` is POD; zero-initialization is a valid bit pattern
+    // and `fstat` overwrites every field it cares about on success.
+    let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+    // SAFETY: FFI call with a valid fd and a valid out-pointer.
+    let ret = unsafe { libc::fstat(fd, &mut stat) };
+    ret == 0 && stat.st_mode & S_IFMT == S_IFBLK
+}
+
 /// Probe whether the file/device supports punch hole and zero range
 pub fn probe_sparse_support(file: &File) -> bool {
     let fd = file.as_raw_fd();
 
-    let is_block_device = {
-        let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
-        // SAFETY: FFI call with valid fd and buffer
-        let ret = unsafe { libc::fstat(fd, stat.as_mut_ptr()) };
-        if ret != 0 {
-            warn!(
-                "Failed to stat file descriptor for sparse probe: {}",
-                io::Error::last_os_error()
-            );
-            return false;
-        }
-        // SAFETY: stat result is valid at this point
-        unsafe { (*stat.as_ptr()).st_mode & S_IFMT == S_IFBLK }
-    };
-
-    if is_block_device {
+    if is_block_device(fd) {
         probe_block_device_sparse_support(fd)
     } else {
         probe_file_sparse_support(fd)
@@ -722,19 +721,6 @@ enum BlockSize {
 }
 
 impl DiskTopology {
-    fn is_block_device(f: &File) -> std::io::Result<bool> {
-        let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
-        // SAFETY: FFI call with a valid fd and buffer
-        let ret = unsafe { libc::fstat(f.as_raw_fd(), stat.as_mut_ptr()) };
-        if ret != 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-
-        // SAFETY: stat is valid at this point
-        let is_block = unsafe { (*stat.as_ptr()).st_mode & S_IFMT == S_IFBLK };
-        Ok(is_block)
-    }
-
     // libc::ioctl() takes different types on different architectures
     fn query_block_size(f: &File, block_size_type: BlockSize) -> std::io::Result<u64> {
         let mut block_size = 0;
@@ -810,7 +796,7 @@ impl DiskTopology {
     }
 
     pub fn probe(f: &File) -> std::io::Result<Self> {
-        if !Self::is_block_device(f)? {
+        if !is_block_device(f.as_raw_fd()) {
             // For regular files opened with O_DIRECT, the logical block size
             // must reflect the filesystem DIO alignment so the guest issues
             // correctly sized I/O.
