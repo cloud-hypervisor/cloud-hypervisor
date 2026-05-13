@@ -2692,6 +2692,7 @@ dependencies = [
 name = "vm-virtio"
 version = "0.1.0"
 dependencies = [
+ "log",
  "virtio-queue",
  "vm-memory",
 ]
