@@ -30,7 +30,7 @@ use thiserror::Error;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
+    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryLoadGuard, GuestMemoryRegion,
 };
 use vm_migration::protocol::MemoryRangeTable;
@@ -284,6 +284,14 @@ impl Request {
         if (desc.len() as usize) < size_of::<VirtioMemReq>() {
             return Err(Error::InvalidRequest);
         }
+        if !desc_chain
+            .memory()
+            .check_range(desc.addr(), desc.len() as usize)
+        {
+            return Err(Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(
+                desc.addr(),
+            )));
+        }
         let req: VirtioMemReq = desc_chain
             .memory()
             .read_obj(desc.addr())
@@ -298,6 +306,15 @@ impl Request {
 
         if (status_desc.len() as usize) < size_of::<VirtioMemResp>() {
             return Err(Error::BufferLengthTooSmall);
+        }
+
+        if !desc_chain
+            .memory()
+            .check_range(status_desc.addr(), status_desc.len() as usize)
+        {
+            return Err(Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(
+                status_desc.addr(),
+            )));
         }
 
         Ok(Request {
