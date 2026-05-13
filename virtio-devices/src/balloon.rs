@@ -16,6 +16,7 @@
 
 use std::io::{self, Write};
 use std::mem::size_of;
+use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::AtomicBool;
@@ -34,7 +35,8 @@ use vm_memory::{
     GuestMemoryError, GuestMemoryRegion,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
-use vm_virtio::{AccessPlatform, Translatable};
+use vm_virtio::AccessPlatform;
+use vm_virtio::checked_descriptor::DescriptorChainExt;
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::seccomp_filters::Thread;
@@ -276,7 +278,8 @@ impl BalloonEpollHandler {
         {
             let data_chunk_size = size_of::<u32>();
 
-            while let Some(desc) = desc_chain.next() {
+            let descs = desc_chain.checked_iter(self.access_platform.as_deref());
+            for desc in descs {
                 if desc.is_write_only() {
                     warn!("Skipping device-writable descriptor on inflate/deflate queue");
                     continue;
@@ -298,20 +301,11 @@ impl BalloonEpollHandler {
 
                 let mut offset = 0u64;
                 while offset < desc.len() as u64 {
-                    let Some(base) = desc.addr().checked_add(offset) else {
+                    let Some(addr) = desc.addr().checked_add(offset) else {
                         warn!("Address overflow in balloon descriptor");
                         break;
                     };
-                    let addr = match base
-                        .translate_gva(self.access_platform.as_deref(), data_chunk_size)
-                    {
-                        Ok(a) => a,
-                        Err(e) => {
-                            warn!("Failed to translate descriptor address: {e}");
-                            break;
-                        }
-                    };
-                    let pfn: u32 = match desc_chain.memory().read_obj(addr) {
+                    let pfn: u32 = match self.mem.memory().read_obj(addr) {
                         Ok(v) => v,
                         Err(e) => {
                             warn!("Failed to read PFN from descriptor: {e}");
@@ -324,7 +318,7 @@ impl BalloonEpollHandler {
                         0 => {
                             if let Err(e) = Self::release_memory_range_4k(
                                 &mut self.pbp,
-                                desc_chain.memory(),
+                                self.mem.memory().deref(),
                                 pfn,
                             ) {
                                 warn!("Failed to release memory for PFN {pfn:#x}: {e}");
@@ -336,7 +330,7 @@ impl BalloonEpollHandler {
                                 align_page_size_down((pfn as u64) << VIRTIO_BALLOON_PFN_SHIFT);
 
                             if let Err(e) = Self::advise_memory_range(
-                                desc_chain.memory(),
+                                self.mem.memory().deref(),
                                 vm_memory::GuestAddress(rbase),
                                 page_size,
                                 libc::MADV_WILLNEED,
@@ -368,21 +362,14 @@ impl BalloonEpollHandler {
             self.queues[queue_index].pop_descriptor_chain(self.mem.memory())
         {
             let mut descs_len = 0;
-            while let Some(desc) = desc_chain.next() {
+            let descs = desc_chain.checked_iter(self.access_platform.as_deref());
+            for desc in descs {
                 descs_len += desc.len();
-                let addr = match desc
-                    .addr()
-                    .translate_gva(self.access_platform.as_deref(), desc.len() as usize)
-                {
-                    Ok(a) => a,
-                    Err(e) => {
-                        warn!("Failed to translate reporting descriptor address: {e}");
-                        continue;
-                    }
-                };
-                if let Err(e) =
-                    Self::release_memory_range(desc_chain.memory(), addr, desc.len() as usize)
-                {
+                if let Err(e) = Self::release_memory_range(
+                    self.mem.memory().deref(),
+                    desc.addr(),
+                    desc.len() as usize,
+                ) {
                     warn!("Failed to release reported memory range: {e}");
                 }
             }
