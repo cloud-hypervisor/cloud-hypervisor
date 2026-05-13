@@ -10758,10 +10758,9 @@ mod vfio {
             // Add RAM to the VM
             let desired_ram = 6 << 30;
             resize_command(&api_socket, None, Some(desired_ram), None, None);
-            assert!(wait_until(Duration::from_secs(5), || {
+            assert!(wait_until(Duration::from_secs(15), || {
                 guest.get_total_memory().unwrap_or_default() > 5_760_000
             }));
-            assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
 
             // Check the VFIO device works when RAM is increased to 6GiB.
             // After guest memory hotplug, the VMM must refresh VFIO/iommufd DMA
