@@ -709,7 +709,7 @@ pub struct CpuManager {
     #[cfg(feature = "guest_debug")]
     vm_debug_evt: EventFd,
     // Shared with AcpiCpuHotplugController
-    vcpu_states: Arc<Mutex<Vec<VcpuState>>>,
+    vcpu_states: Arc<Mutex<Box<[VcpuState]>>>,
     vcpus: Vec<Arc<Mutex<Vcpu>>>,
     seccomp_action: SeccompAction,
     vm_ops: Arc<dyn VmOps>,
@@ -889,7 +889,7 @@ impl CpuManager {
         let max_vcpus = usize::try_from(config.max_vcpus).unwrap();
         let mut vcpu_states = Vec::with_capacity(max_vcpus);
         vcpu_states.resize_with(max_vcpus, VcpuState::default);
-        let vcpu_states = Arc::new(Mutex::new(vcpu_states));
+        let vcpu_states = Arc::new(Mutex::new(vcpu_states.into_boxed_slice()));
         let hypervisor_type = hypervisor.hypervisor_type();
         #[cfg(target_arch = "x86_64")]
         let cpu_vendor = hypervisor.get_cpu_vendor();
@@ -1640,10 +1640,12 @@ impl CpuManager {
 
         self.signal_vcpus()?;
 
+        let mut vcpu_states = self.vcpu_states.lock().unwrap();
         // Wait for all the threads to finish. This removes the state from the vector.
-        for mut state in self.vcpu_states.lock().unwrap().drain(..) {
+        for state in vcpu_states.iter_mut() {
             state.join_thread()?;
         }
+        *vcpu_states = Box::new([]);
 
         Ok(())
     }
@@ -3180,7 +3182,7 @@ pub struct AcpiCpuHotplugController {
     /// The currently selected CPU by the guest.
     selected_cpu: u32,
     /// Shared vCPU state with [`CpuManager`].
-    vcpu_states: Arc<Mutex<Vec<VcpuState>>>,
+    vcpu_states: Arc<Mutex<Box<[VcpuState]>>>,
     /// Maximum number of vCPUS of the VM.
     max_vcpus: u32,
 }
