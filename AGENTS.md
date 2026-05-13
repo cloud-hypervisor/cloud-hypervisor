@@ -36,11 +36,6 @@ reviewable, and compatible with the project's normal engineering constraints.
   comment with the invariants, and make sure the surrounding code upholds them.
 - Assume concurrency matters. Avoid races, unsynchronized shared state, and
   implicit ordering assumptions; prefer clear ownership and synchronization.
-- Keep docs and comments short and useful. Document non-trivial invariants at
-  struct definitions and critical state transitions.
-- Logging should be minimal and high signal. Use `info!` for important normal
-  state changes that matter in production; use `warn!` or `error!` only for
-  abnormal conditions. Keep `debug!` for focused diagnostics.
 
 ### Build and Test Notes
 
