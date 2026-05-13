@@ -11,6 +11,11 @@ license of those projects.
 New code should be under the [Apache v2
 License](https://opensource.org/licenses/Apache-2.0).
 
+Cloud Hypervisor's main supported architectures are `x86_64` and `aarch64`,
+and the main hypervisor backends are KVM and MSHV. `x86_64` with KVM gets the
+most regular exercise, but changes should not make the other supported
+architecture and backend combinations worse.
+
 ## Coding Style & Code Comments
 
 We use the [Rust Style] guide and enforce formatting and linting in CI,
