@@ -20,7 +20,8 @@ use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
-use vm_virtio::{AccessPlatform, Translatable};
+use vm_virtio::AccessPlatform;
+use vm_virtio::checked_descriptor::DescriptorChainExt;
 use vmm_sys_util::eventfd::EventFd;
 
 use super::{
@@ -201,7 +202,15 @@ impl ConsoleEpollHandler {
 
         while let Some(mut desc_chain) = recv_queue.pop_descriptor_chain(self.mem.memory()) {
             let mut total_len = 0;
-            while let Some(desc) = desc_chain.next() {
+
+            // Validate all descriptors upfront so we never partially fill
+            // buffers for a chain that turns out to be invalid.
+            let descs: Vec<_> = desc_chain
+                .checked_iter(self.access_platform.as_deref())
+                .collect::<Result<_, _>>()
+                .unwrap_or_default();
+
+            for desc in &descs {
                 if in_buffer.is_empty() {
                     break;
                 }
@@ -210,18 +219,8 @@ impl ConsoleEpollHandler {
                     continue;
                 }
                 let len = cmp::min(desc.len() as usize, in_buffer.len());
-                let addr = match desc
-                    .addr()
-                    .translate_gva(self.access_platform.as_deref(), desc.len() as usize)
-                {
-                    Ok(a) => a,
-                    Err(e) => {
-                        warn!("Failed to translate receiveq descriptor address: {e}");
-                        break;
-                    }
-                };
                 let source: Vec<u8> = in_buffer.range(..len).copied().collect();
-                if let Err(e) = desc_chain.memory().write_slice(&source, addr) {
+                if let Err(e) = desc_chain.memory().write_slice(&source, desc.addr()) {
                     warn!("Failed to write to receiveq descriptor: {e}");
                     break;
                 }
@@ -254,28 +253,25 @@ impl ConsoleEpollHandler {
         let mut used_descs = false;
 
         while let Some(mut desc_chain) = trans_queue.pop_descriptor_chain(self.mem.memory()) {
-            while let Some(desc) = desc_chain.next() {
+            let results: Vec<_> = desc_chain
+                .checked_iter(self.access_platform.as_deref())
+                .collect();
+            for result in results {
+                let desc = match result {
+                    Ok(d) => d,
+                    Err(_) => break,
+                };
                 if desc.is_write_only() {
                     warn!("Skipping device-writable descriptor on transmitq");
                     continue;
                 }
                 if let Some(out) = &mut self.out {
-                    let addr = match desc
-                        .addr()
-                        .translate_gva(self.access_platform.as_deref(), desc.len() as usize)
-                    {
-                        Ok(a) => a,
-                        Err(e) => {
-                            warn!("Failed to translate transmitq descriptor address: {e}");
-                            continue;
-                        }
-                    };
                     let mut buf: Vec<u8> = Vec::new();
-                    if let Err(e) =
-                        desc_chain
-                            .memory()
-                            .write_volatile_to(addr, &mut buf, desc.len() as usize)
-                    {
+                    if let Err(e) = desc_chain.memory().write_volatile_to(
+                        desc.addr(),
+                        &mut buf,
+                        desc.len() as usize,
+                    ) {
                         warn!("Failed to read from transmitq descriptor: {e}");
                         continue;
                     }
