@@ -1,0 +1,25 @@
+# https://editorconfig.org/
+#
+# Hints for editors to assist with correct formatting as you type.
+root = true
+
+# Unix-style newlines with a newline ending every file
+[*]
+charset = utf-8
+indent_size = 4
+end_of_line = lf
+indent_style = space
+insert_final_newline = true
+trim_trailing_whitespace = true
+# Recommendation, not enforced.
+max_line_length = 80
+
+[Makefile]
+indent_style = tab
+
+# Inherited as default
+# [*.sh]
+# indent_size = 4
+
+[{Cargo.lock,*.md,*.toml,*.yml,*.yaml}]
+indent_size = 2
