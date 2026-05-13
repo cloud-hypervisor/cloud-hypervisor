@@ -5770,9 +5770,11 @@ mod common_parallel {
                 event: "panic".to_string(),
                 device_id: None,
             }];
-            assert!(wait_until(Duration::from_secs(3), || {
-                check_latest_events_exact(&expected_sequential_events, &event_path)
-            }));
+            assert!(wait_for_latest_events_exact(
+                Duration::from_secs(3),
+                &expected_sequential_events,
+                &event_path
+            ));
         });
 
         kill_child(&mut child);
@@ -7524,9 +7526,11 @@ mod ivshmem {
             device_id: None,
         }];
         // Wait for the restored event to show up in the monitor file.
-        assert!(wait_until(Duration::from_secs(30), || {
-            check_latest_events_exact(&latest_events, &event_path_restored)
-        }));
+        assert!(wait_for_latest_events_exact(
+            Duration::from_secs(30),
+            &latest_events,
+            &event_path_restored
+        ));
 
         // Remove the snapshot dir
         let _ = remove_dir_all(snapshot_dir.as_str());
@@ -7549,9 +7553,11 @@ mod ivshmem {
                     device_id: None,
                 },
             ];
-            assert!(wait_until(Duration::from_secs(30), || {
-                check_latest_events_exact(&latest_events, &event_path_restored)
-            }));
+            assert!(wait_for_latest_events_exact(
+                Duration::from_secs(30),
+                &latest_events,
+                &event_path_restored
+            ));
 
             // Check the number of vCPUs
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
@@ -7650,9 +7656,11 @@ mod snapshot_restore_common {
             },
         ];
 
-        assert!(wait_until(Duration::from_secs(30), || {
-            check_latest_events_exact(&latest_events, event_path)
-        }));
+        assert!(wait_for_latest_events_exact(
+            Duration::from_secs(30),
+            &latest_events,
+            event_path
+        ));
 
         // Take a snapshot from the VM
         assert!(remote_command(
@@ -7672,9 +7680,11 @@ mod snapshot_restore_common {
             },
         ];
 
-        assert!(wait_until(Duration::from_secs(30), || {
-            check_latest_events_exact(&latest_events, event_path)
-        }));
+        assert!(wait_for_latest_events_exact(
+            Duration::from_secs(30),
+            &latest_events,
+            event_path
+        ));
     }
 
     pub(crate) fn _test_snapshot_restore(use_hotplug: bool, use_resume_option: bool) {
@@ -7787,9 +7797,11 @@ mod snapshot_restore_common {
                     event: "device-removed".to_string(),
                     device_id: Some(net_id.to_string()),
                 }];
-                assert!(wait_until(Duration::from_secs(30), || {
-                    check_latest_events_exact(&latest_events, &event_path)
-                }));
+                assert!(wait_for_latest_events_exact(
+                    Duration::from_secs(30),
+                    &latest_events,
+                    &event_path
+                ));
 
                 // Plug the virtio-net device again
                 assert!(remote_command(
@@ -7861,9 +7873,11 @@ mod snapshot_restore_common {
                 device_id: None,
             },
         ];
-        assert!(wait_until(Duration::from_secs(30), || {
-            check_sequential_events(&expected_events, &event_path_restored)
-        }));
+        assert!(wait_for_sequential_events(
+            Duration::from_secs(30),
+            &expected_events,
+            &event_path_restored
+        ));
         if use_resume_option {
             let latest_events = [
                 &MetaEvent {
@@ -7879,17 +7893,21 @@ mod snapshot_restore_common {
                     device_id: None,
                 },
             ];
-            assert!(wait_until(Duration::from_secs(30), || {
-                check_latest_events_exact(&latest_events, &event_path_restored)
-            }));
+            assert!(wait_for_latest_events_exact(
+                Duration::from_secs(30),
+                &latest_events,
+                &event_path_restored
+            ));
         } else {
             let latest_events = [&MetaEvent {
                 event: "restored".to_string(),
                 device_id: None,
             }];
-            assert!(wait_until(Duration::from_secs(30), || {
-                check_latest_events_exact(&latest_events, &event_path_restored)
-            }));
+            assert!(wait_for_latest_events_exact(
+                Duration::from_secs(30),
+                &latest_events,
+                &event_path_restored
+            ));
         }
 
         // Wait until the restored VM API is ready before issuing follow-up requests.
@@ -7925,9 +7943,11 @@ mod snapshot_restore_common {
                         device_id: None,
                     },
                 ];
-                assert!(wait_until(Duration::from_secs(30), || {
-                    check_latest_events_exact(&latest_events, &event_path_restored)
-                }));
+                assert!(wait_for_latest_events_exact(
+                    Duration::from_secs(30),
+                    &latest_events,
+                    &event_path_restored
+                ));
             }
 
             // Perform same checks to validate VM has been properly restored
@@ -8049,9 +8069,11 @@ mod snapshot_restore_common {
             device_id: None,
         }];
 
-        assert!(wait_until(Duration::from_secs(30), || {
-            check_latest_events_exact(&latest_events, &event_path_restored)
-        }));
+        assert!(wait_for_latest_events_exact(
+            Duration::from_secs(30),
+            &latest_events,
+            &event_path_restored
+        ));
 
         let r = std::panic::catch_unwind(|| {
             assert!(wait_until(Duration::from_secs(30), || remote_command(
@@ -8071,9 +8093,11 @@ mod snapshot_restore_common {
                     device_id: None,
                 },
             ];
-            assert!(wait_until(Duration::from_secs(30), || {
-                check_latest_events_exact(&latest_events, &event_path_restored)
-            }));
+            assert!(wait_for_latest_events_exact(
+                Duration::from_secs(30),
+                &latest_events,
+                &event_path_restored
+            ));
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
             assert!(guest.get_total_memory().unwrap_or_default() > min_total_memory_kib);
@@ -8178,9 +8202,11 @@ mod snapshot_restore_common {
             event: "restored".to_string(),
             device_id: None,
         }];
-        assert!(wait_until(Duration::from_secs(30), || {
-            check_latest_events_exact(&latest_events, &event_path_restored)
-        }));
+        assert!(wait_for_latest_events_exact(
+            Duration::from_secs(30),
+            &latest_events,
+            &event_path_restored
+        ));
 
         let _ = remove_dir_all(snapshot_dir.as_str());
 
@@ -8201,9 +8227,11 @@ mod snapshot_restore_common {
                     device_id: None,
                 },
             ];
-            assert!(wait_until(Duration::from_secs(30), || {
-                check_latest_events_exact(&latest_events, &event_path_restored)
-            }));
+            assert!(wait_for_latest_events_exact(
+                Duration::from_secs(30),
+                &latest_events,
+                &event_path_restored
+            ));
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
             guest.check_devices_common(Some(&socket), Some(&console_text), None);
@@ -8438,16 +8466,20 @@ mod common_sequential {
             },
         ];
         // Wait for the restore event sequence to be recorded.
-        assert!(wait_until(Duration::from_secs(30), || {
-            check_sequential_events(&expected_events, &event_path_restored)
-        }));
+        assert!(wait_for_sequential_events(
+            Duration::from_secs(30),
+            &expected_events,
+            &event_path_restored
+        ));
         let latest_events = [&MetaEvent {
             event: "restored".to_string(),
             device_id: None,
         }];
-        assert!(wait_until(Duration::from_secs(30), || {
-            check_latest_events_exact(&latest_events, &event_path_restored)
-        }));
+        assert!(wait_for_latest_events_exact(
+            Duration::from_secs(30),
+            &latest_events,
+            &event_path_restored
+        ));
 
         // Remove the snapshot dir
         let _ = remove_dir_all(snapshot_dir.as_str());
@@ -8471,9 +8503,11 @@ mod common_sequential {
                     device_id: None,
                 },
             ];
-            assert!(wait_until(Duration::from_secs(30), || {
-                check_latest_events_exact(&latest_events, &event_path_restored)
-            }));
+            assert!(wait_for_latest_events_exact(
+                Duration::from_secs(30),
+                &latest_events,
+                &event_path_restored
+            ));
 
             // Perform same checks to validate VM has been properly restored
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), n_cpu);
