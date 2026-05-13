@@ -85,6 +85,8 @@ pub enum Error {
     QueueAddUsed(#[source] virtio_queue::Error),
     #[error("Failed creating an iterator over the queue")]
     QueueIterator(#[source] virtio_queue::Error),
+    #[error("Duplicated head index in the queue")]
+    QueueDuplicatedHeadIndex,
     #[error("Failed to update request status")]
     RequestStatus(#[source] GuestMemoryError),
     #[error("Failed to enable notification")]
@@ -200,6 +202,17 @@ impl BlockEpollHandler {
         Ok(())
     }
 
+    // A spec-compliant driver never reuses a virtqueue head_index while the
+    // corresponding chain is still available (virtio 1.x §2.7.13.4).
+    // Double check the guest driver is behaving.
+    fn is_head_in_flight(
+        inflight: &VecDeque<(u16, Request)>,
+        batch: &[(u16, Request)],
+        head: u16,
+    ) -> bool {
+        batch.iter().any(|(h, _)| *h == head) || inflight.iter().any(|(h, _)| *h == head)
+    }
+
     fn process_queue_submit(&mut self) -> Result<()> {
         let queue = &mut self.queue;
         let queue_size = queue.size();
@@ -222,6 +235,13 @@ impl BlockEpollHandler {
                 Some(c) => c,
                 None => break,
             };
+
+            let head = desc_chain.head_index();
+            if Self::is_head_in_flight(&self.inflight_requests, &batch_inflight_requests, head) {
+                warn!("Guest reused virtio-blk head_index {head} while the chain was used");
+                return Err(Error::QueueDuplicatedHeadIndex);
+            }
+
             let mut request = Request::parse(&mut desc_chain, self.access_platform.as_deref())
                 .map_err(Error::RequestParsing)?;
 
@@ -384,10 +404,9 @@ impl BlockEpollHandler {
     fn process_queue_submit_and_signal(&mut self) -> result::Result<(), EpollHelperError> {
         match self.process_queue_submit() {
             Ok(()) => {}
-            Err(e @ Error::QueueIterator(_)) => {
-                // Iterator errors mean the guest virtqueue itself is corrupted.
-                // Surface the failure so the worker exits and spawn_virtio_thread
-                // marks the device as NEEDS_RESET.
+            Err(e @ (Error::QueueIterator(_) | Error::QueueDuplicatedHeadIndex)) => {
+                // Virtqueue is corrupted or guest driver is misbehaving; exit
+                // the worker so spawn_virtio_thread marks the device NEEDS_RESET.
                 return Err(EpollHelperError::HandleEvent(anyhow!(
                     "Failed to process queue (submit): {e}"
                 )));
