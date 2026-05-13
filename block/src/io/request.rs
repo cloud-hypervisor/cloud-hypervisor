@@ -27,7 +27,8 @@ use vm_memory::{
     Address as _, Bytes as _, GuestAddress, GuestMemory as _, GuestMemoryError,
     GuestMemoryLoadGuard,
 };
-use vm_virtio::{AccessPlatform, Translatable as _};
+use vm_virtio::AccessPlatform;
+use vm_virtio::checked_descriptor::DescriptorChainExt;
 
 use crate::async_io::{
     AsyncIo, AsyncIoCompletion, AsyncIoOperation, GuestMemoryTarget, OwnedIoBuffer,
@@ -84,10 +85,11 @@ impl Request {
         access_platform: Option<&dyn AccessPlatform>,
     ) -> Result<Request, Error> {
         let hdr_desc = desc_chain
-            .next()
-            .ok_or(Error::DescriptorChainTooShort)
-            .inspect_err(|_| {
+            .next_checked(access_platform)
+            .map_err(|addr| Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(addr)))?
+            .ok_or_else(|| {
                 error!("Missing head descriptor");
+                Error::DescriptorChainTooShort
             })?;
 
         // The head contains the request type which MUST be readable.
@@ -95,10 +97,7 @@ impl Request {
             return Err(Error::UnexpectedWriteOnlyDescriptor);
         }
 
-        let hdr_desc_addr = hdr_desc
-            .addr()
-            .translate_gva(access_platform, hdr_desc.len() as usize)
-            .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?;
+        let hdr_desc_addr = hdr_desc.addr();
 
         let mut req = Request {
             request_type: request_type(desc_chain.memory(), hdr_desc_addr)?,
@@ -111,10 +110,11 @@ impl Request {
 
         let status_desc;
         let mut desc = desc_chain
-            .next()
-            .ok_or(Error::DescriptorChainTooShort)
-            .inspect_err(|_| {
+            .next_checked(access_platform)
+            .map_err(|addr| Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(addr)))?
+            .ok_or_else(|| {
                 error!("Only head descriptor present: request = {req:?}");
+                Error::DescriptorChainTooShort
             })?;
 
         if desc.has_next() {
@@ -136,17 +136,15 @@ impl Request {
                     return Err(Error::UnexpectedReadOnlyDescriptor);
                 }
 
-                req.data_descriptors.push((
-                    desc.addr()
-                        .translate_gva(access_platform, desc.len() as usize)
-                        .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?,
-                    desc.len(),
-                ));
+                req.data_descriptors.push((desc.addr(), desc.len()));
                 desc = desc_chain
-                    .next()
-                    .ok_or(Error::DescriptorChainTooShort)
-                    .inspect_err(|_| {
+                    .next_checked(access_platform)
+                    .map_err(|addr| {
+                        Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(addr))
+                    })?
+                    .ok_or_else(|| {
                         error!("DescriptorChain corrupted: request = {req:?}");
+                        Error::DescriptorChainTooShort
                     })?;
             }
             status_desc = desc;
@@ -164,14 +162,11 @@ impl Request {
             return Err(Error::UnexpectedReadOnlyDescriptor);
         }
 
-        if status_desc.len() < 1 {
+        if status_desc.is_empty() {
             return Err(Error::DescriptorLengthTooSmall);
         }
 
-        req.status_addr = status_desc
-            .addr()
-            .translate_gva(access_platform, status_desc.len() as usize)
-            .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?;
+        req.status_addr = status_desc.addr();
 
         Ok(req)
     }
