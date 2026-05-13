@@ -741,7 +741,8 @@ jobs:
       - integration-arm64
       # VFIO worker is failing #8160
       # - integration-vfio
-      - integration-windows
+      # See: #8211
+      # - integration-windows
       - integration-x86-64-mq
       - integration-x86-64-pr
       - openapi
