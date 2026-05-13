@@ -297,12 +297,21 @@ impl VirtioDevice for GenericVhostUser {
 
         let backend_req_handler = has_backend_req
             .then(|| {
-                FrontendReqHandler::new(Arc::new(BackendReqHandler {
+                let mut handler = FrontendReqHandler::new(Arc::new(BackendReqHandler {
                     interrupt_cb: interrupt_cb.clone(),
                 }))
                 .map_err(|e| {
                     crate::ActivateError::VhostUserSetup(Error::FrontendReqHandlerCreation(e))
-                })
+                })?;
+
+                if self.vu_common.acked_protocol_features
+                    & VhostUserProtocolFeatures::REPLY_ACK.bits()
+                    != 0
+                {
+                    handler.set_reply_ack_flag(true);
+                }
+
+                Ok(handler)
             })
             // Return inner Err early, keep Option of `Ok` value
             .transpose()?;
