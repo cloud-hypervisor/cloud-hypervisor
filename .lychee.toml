@@ -3,33 +3,28 @@ verbose = "info"
 exclude_path = [".lychee.toml"]
 
 exclude = [
-    # Availability of links below should be manually verified.
-    # Page for intel TDX support, returns 403 while querying.
-    '^https://www.intel.com/content/www/us/en/developer/tools/trust-domain-extensions/overview.html',
-    # Page for TPM, returns 403 while querying.
-    '^https://trustedcomputinggroup.org/wp-content/uploads/PC-Client-Specific-Platform-TPM-Profile-for-TPM-2p0-v1p05p_r14_pub.pdf',
-
-    # GitHub user smibarber referenced in `CREDITS.md` no longer exist
-    '^https://github.com/smibarber',
-
-    # OSDev has added bot protection and accesses my result in 403 Forbidden.
-    '^https://wiki.osdev.org',
-    # Exclude all pages with $ in the URL since $XXX is a variable
-    "\\$.*",
-    # Exclude local files
-    "file://.*",
-
-    # ARM documentation returns 403 Forbidden for automated CI checks.
-    '^http://infocenter\.arm\.com',
-    '^https://developer\.arm\.com',
-
-    # Ignore internal/unsupported protocols seen in logs
-    '^tcp://192\.168\.1\.10',
+  # Availability of links below should be manually verified.
+  # Page for intel TDX support, returns 403 while querying.
+  '^https://www.intel.com/content/www/us/en/developer/tools/trust-domain-extensions/overview.html',
+  # Page for TPM, returns 403 while querying.
+  '^https://trustedcomputinggroup.org/wp-content/uploads/PC-Client-Specific-Platform-TPM-Profile-for-TPM-2p0-v1p05p_r14_pub.pdf',
+  # GitHub user smibarber referenced in `CREDITS.md` no longer exist
+  '^https://github.com/smibarber',
+  # OSDev has added bot protection and accesses my result in 403 Forbidden.
+  '^https://wiki.osdev.org',
+  # Exclude all pages with $ in the URL since $XXX is a variable
+  "\\$.*",
+  # Exclude local files
+  "file://.*",
+  # ARM documentation returns 403 Forbidden for automated CI checks.
+  '^http://infocenter\.arm\.com',
+  '^https://developer\.arm\.com',
+  # Ignore internal/unsupported protocols seen in logs
+  '^tcp://192\.168\.1\.10',
 ]
 
 # Exclude loopback addresses
 exclude_loopback = true
-
 
 max_retries = 3
 
