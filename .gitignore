@@ -1,3 +1,6 @@
+/.agents
+/.claude
+/.codex
 /build
 /.cargo
 /target
