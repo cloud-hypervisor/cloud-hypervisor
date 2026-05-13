@@ -111,19 +111,25 @@ do not wish to use the pre-built binaries.
 
 ## Booting Linux
 
-Cloud Hypervisor supports direct kernel boot (the x86-64 kernel requires the kernel
-built with PVH support or a bzImage) or booting via a firmware (either [Rust Hypervisor
-Firmware](https://github.com/cloud-hypervisor/rust-hypervisor-firmware) or an
-edk2 UEFI firmware called `CLOUDHV` / `CLOUDHV_EFI`.)
+Cloud Hypervisor boots guests in one of two ways. The first is direct
+kernel boot, where a kernel image is passed to `--kernel`. The x86-64
+kernel must be built with PVH support or be a bzImage. The second is
+firmware boot, where a firmware image is passed to `--firmware` and
+brings up the guest's normal boot loader.
 
-Binary builds of the firmware files are available for the latest release of
-[Rust Hypervisor
+Two firmware options are supported, and which one works best depends
+on the guest OS. [Rust Hypervisor
+Firmware](https://github.com/cloud-hypervisor/rust-hypervisor-firmware)
+is a lightweight Rust-based PVH firmware. The edk2 UEFI firmware is
+called `CLOUDHV.fd` for x86-64 and `CLOUDHV_EFI.fd` for AArch64.
+Prebuilt binaries for both are available at their respective releases
+pages, [Rust Hypervisor
 Firmware](https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/latest)
 and [our edk2
-repository](https://github.com/cloud-hypervisor/edk2/releases/latest)
-
-The choice of firmware depends on your guest OS choice; some experimentation
-may be required.
+fork](https://github.com/cloud-hypervisor/edk2/releases/latest).
+The edk2 fork carries customizations required to boot AArch64 guests
+on cloud-hypervisor. See [docs/uefi.md](docs/uefi.md) for differences
+with upstream tianocore/edk2.
 
 ### Firmware Booting
 
