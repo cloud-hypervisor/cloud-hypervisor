@@ -2,8 +2,8 @@
 
 [files]
 extend-exclude = [
-    "hypervisor/src/kvm/x86_64/mod.rs",
-    "resources/linux-config-*",
+  "hypervisor/src/kvm/x86_64/mod.rs",
+  "resources/linux-config-*",
 ]
 
 [default.extend-words]
