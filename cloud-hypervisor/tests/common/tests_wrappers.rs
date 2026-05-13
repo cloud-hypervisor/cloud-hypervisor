@@ -1059,9 +1059,11 @@ pub(crate) fn _test_virtio_fs(
                 event: "device-removed".to_string(),
                 device_id: Some("myfs0".to_string()),
             };
-            assert!(wait_until(Duration::from_secs(10), || {
-                check_sequential_events(&[&removed_event], &event_path)
-            }));
+            assert!(wait_for_sequential_events(
+                Duration::from_secs(10),
+                &[&removed_event],
+                &event_path
+            ));
         }
     });
 
@@ -1635,9 +1637,11 @@ pub(crate) fn _test_simple_launch(guest: &Guest) {
                 device_id: None,
             },
         ];
-        assert!(wait_until(Duration::from_secs(20), || {
-            check_latest_events_exact(&latest_events, &event_path)
-        }));
+        assert!(wait_for_latest_events_exact(
+            Duration::from_secs(20),
+            &latest_events,
+            &event_path
+        ));
     });
 
     kill_child(&mut child);
@@ -3173,9 +3177,11 @@ pub(crate) fn _test_pvpanic(guest: &Guest) {
             event: "panic".to_string(),
             device_id: None,
         }];
-        assert!(wait_until(Duration::from_secs(10), || {
-            check_latest_events_exact(&expected_sequential_events, &event_path)
-        }));
+        assert!(wait_for_latest_events_exact(
+            Duration::from_secs(10),
+            &expected_sequential_events,
+            &event_path
+        ));
     });
 
     kill_child(&mut child);

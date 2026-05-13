@@ -486,8 +486,8 @@ pub(crate) fn fw_path(_fw_type: FwType) -> String {
     fw_path.to_str().unwrap().to_string()
 }
 
-// Parse the event_monitor file based on the format that each event
-// is followed by a double newline
+/// Parse the event_monitor file based on the format that each event
+/// is followed by a double newline
 fn parse_event_file(event_file: &str) -> Vec<serde_json::Value> {
     let content = fs::read(event_file).unwrap();
     let mut ret = Vec::new();
@@ -502,9 +502,34 @@ fn parse_event_file(event_file: &str) -> Vec<serde_json::Value> {
     ret
 }
 
-// Return true if all events from the input 'expected_events' are matched sequentially
-// with events from the 'event_file'
+/// Return true if all events from the input 'expected_events' are matched sequentially
+/// with events from the 'event_file'
 pub(crate) fn check_sequential_events(expected_events: &[&MetaEvent], event_file: &str) -> bool {
+    check_sequential_events_with_options(expected_events, event_file, true)
+}
+
+/// Wait for a sequential event match and print diagnostics only after timeout.
+pub(crate) fn wait_for_sequential_events(
+    timeout: Duration,
+    expected_events: &[&MetaEvent],
+    event_file: &str,
+) -> bool {
+    if wait_until(timeout, || {
+        check_sequential_events_with_options(expected_events, event_file, false)
+    }) {
+        return true;
+    }
+
+    check_sequential_events(expected_events, event_file);
+    false
+}
+
+/// Check sequential events with optional mismatch diagnostics.
+fn check_sequential_events_with_options(
+    expected_events: &[&MetaEvent],
+    event_file: &str,
+    print_diagnostics: bool,
+) -> bool {
     if !Path::new(event_file).exists() {
         return false;
     }
@@ -522,7 +547,7 @@ pub(crate) fn check_sequential_events(expected_events: &[&MetaEvent], event_file
 
     let ret = idx == len;
 
-    if !ret {
+    if !ret && print_diagnostics {
         eprintln!(
             "\n\n==== Start 'check_sequential_events' failed ==== \
              \n\nexpected_events={expected_events:?}\nactual_events={json_events:?} \
@@ -563,9 +588,34 @@ pub(crate) fn check_sequential_events_exact(
     true
 }
 
-// Return true if events from the input 'latest_events' are matched exactly
-// with the most recent events from the 'event_file'
+/// Return true if events from the input 'latest_events' are matched exactly
+/// with the most recent events from the 'event_file'
 pub(crate) fn check_latest_events_exact(latest_events: &[&MetaEvent], event_file: &str) -> bool {
+    check_latest_events_exact_with_options(latest_events, event_file, true)
+}
+
+/// Wait for an exact latest-event match and print diagnostics only after timeout.
+pub(crate) fn wait_for_latest_events_exact(
+    timeout: Duration,
+    latest_events: &[&MetaEvent],
+    event_file: &str,
+) -> bool {
+    if wait_until(timeout, || {
+        check_latest_events_exact_with_options(latest_events, event_file, false)
+    }) {
+        return true;
+    }
+
+    check_latest_events_exact(latest_events, event_file);
+    false
+}
+
+/// Check latest events with optional mismatch diagnostics.
+fn check_latest_events_exact_with_options(
+    latest_events: &[&MetaEvent],
+    event_file: &str,
+    print_diagnostics: bool,
+) -> bool {
     if !Path::new(event_file).exists() {
         return false;
     }
@@ -577,11 +627,13 @@ pub(crate) fn check_latest_events_exact(latest_events: &[&MetaEvent], event_file
 
     for (idx, e) in json_events.iter().enumerate() {
         if !latest_events[idx].match_with_json_event(e) {
-            eprintln!(
-                "\n\n==== Start 'check_latest_events_exact' failed ==== \
-                 \n\nexpected_events={latest_events:?}\nactual_events={json_events:?} \
-                 \n\n==== End 'check_latest_events_exact' failed ====",
-            );
+            if print_diagnostics {
+                eprintln!(
+                    "\n\n==== Start 'check_latest_events_exact' failed ==== \
+                     \n\nexpected_events={latest_events:?}\nactual_events={json_events:?} \
+                     \n\n==== End 'check_latest_events_exact' failed ====",
+                );
+            }
 
             return false;
         }
