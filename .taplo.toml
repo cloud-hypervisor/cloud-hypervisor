@@ -1,5 +1,6 @@
 include = ["**/Cargo.toml"]
 
 [formatting]
+indent_string = "  " # 2 spaces: keep in sync with .editorconfig
 reorder_arrays = true
 reorder_keys = true
