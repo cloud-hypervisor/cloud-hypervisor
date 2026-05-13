@@ -59,12 +59,7 @@ use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
 use libc::{c_void, siginfo_t};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use linux_loader::elf::Elf64_Nhdr;
-#[cfg(any(
-    target_arch = "aarch64",
-    all(target_arch = "x86_64", feature = "guest_debug")
-))]
-use log::debug;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use seccompiler::{SeccompAction, apply_filter};
 use thiserror::Error;
 use tracer::trace_scoped;
@@ -837,26 +832,51 @@ impl VcpuState {
     /// the signal every 10ms. Times out after 1000ms.
     ///
     /// This is the counterpart of [`Self::signal_thread`].
-    fn wait_until_signal_acknowledged(&self) -> Result<()> {
-        if let Some(_handle) = self.handle.as_ref() {
-            let mut count = 0;
-            loop {
-                if self.vcpu_run_interrupted.load(Ordering::SeqCst) {
+    ///
+    /// This code may race with [`AcpiCpuHotplugController::remove_vcpu`] when
+    /// a vCPU thread is doing MMIO and needs mutable access to the vCPU state.
+    /// The careful locking architecture makes sure that these situations are
+    /// handled gracefully.
+    ///
+    /// # Arguments
+    ///
+    /// - `get_vcpu_state`: Function that returns the vCPU state. This may be
+    ///   a freshly locked accessory or a direct reference.
+    fn wait_until_signal_acknowledged<F, T>(get_vcpu_state: F) -> Result<()>
+    where
+        F: Fn() -> T,
+        T: Deref<Target = VcpuState>,
+    {
+        let mut count = 0;
+        loop {
+            // `get_vcpu_state()` may acquire a lock, depending on the caller.
+            // Scope the lock to this block so it is dropped before this loop
+            // sleeps. Otherwise, AcpiCpuHotplugController::remove_vcpu() could
+            // be blocked from taking the vCPU write lock if the vCPU performs
+            // MMIO before acknowledging the signal.
+            {
+                let vcpu_state = get_vcpu_state();
+                if vcpu_state.vcpu_run_interrupted.load(Ordering::SeqCst) {
                     return Ok(());
                 }
-                // This is more effective than thread::yield_now() at
-                // avoiding a priority inversion with the vCPU thread
-                thread::sleep(std::time::Duration::from_millis(1));
-                count += 1;
-                if count >= 1000 {
-                    return Err(Error::SignalAcknowledgeTimeout);
-                } else if count % 10 == 0 {
-                    warn!("vCPU thread did not respond in {count}ms to signal - retrying");
-                    self.signal_thread();
+                if !vcpu_state.active() {
+                    debug!("vCPU was removed while we waited for it to acknowledge its signal");
+                    return Ok(());
                 }
             }
+
+            // This is more effective than thread::yield_now() at
+            // avoiding a priority inversion with the vCPU thread
+            thread::sleep(std::time::Duration::from_millis(1));
+            count += 1;
+            if count >= 1000 {
+                return Err(Error::SignalAcknowledgeTimeout);
+            } else if count % 10 == 0 {
+                warn!("vCPU thread did not respond in {count}ms to signal - retrying");
+                let lock = get_vcpu_state();
+                lock.signal_thread();
+            }
         }
-        Ok(())
     }
 
     fn join_thread(&mut self) -> Result<()> {
@@ -1640,8 +1660,8 @@ impl CpuManager {
         // AcpiCpuHotplugController, which needs writable access to the
         // vCPU state. We therefore need to not hold the lock here while we
         // wait but grab it for every check (TODO next commit).
-        for state in self.vcpu_states.iter().map(|state| state.read().unwrap()) {
-            state.wait_until_signal_acknowledged()?;
+        for state in self.vcpu_states.iter() {
+            VcpuState::wait_until_signal_acknowledged(|| state.read().unwrap())?;
         }
 
         Ok(())
@@ -3235,7 +3255,7 @@ impl AcpiCpuHotplugController {
         info!("Removing vCPU: cpu_id = {cpu_id}");
         state.kill.store(true, Ordering::SeqCst);
         state.signal_thread();
-        state.wait_until_signal_acknowledged()?;
+        VcpuState::wait_until_signal_acknowledged(|| &*state)?;
         state.join_thread()?;
         state.handle = None;
 
