@@ -773,10 +773,10 @@ impl TryFrom<i32> for CoreSchedulingLeader {
 struct VcpuHotplugState {
     /// Guest-visible ACPI status that is true until the guest acknowledged the
     /// hotplugging of a vCPU.
-    inserting: bool,
+    inserting: AtomicBool,
     /// Guest-visible ACPI status that is true until the guest acknowledged the
     /// removal of a vCPU.
-    removing: bool,
+    removing: AtomicBool,
 }
 
 /// Management structure for a vCPU (thread).
@@ -1186,15 +1186,12 @@ impl CpuManager {
         let vcpus_kick_signalled = self.vcpus_kick_signalled.clone();
 
         let mut vcpu_states = self.vcpu_states.lock().unwrap();
-
-        let vcpu_kill = vcpu_states[usize::try_from(vcpu_id).unwrap()].kill.clone();
-        let vcpu_run_interrupted = vcpu_states[usize::try_from(vcpu_id).unwrap()]
-            .vcpu_run_interrupted
-            .clone();
+        let vcpu_id_usize = usize::try_from(vcpu_id).unwrap();
+        let vcpu_state = &mut vcpu_states[vcpu_id_usize];
+        let vcpu_kill = vcpu_state.kill.clone();
+        let vcpu_run_interrupted = vcpu_state.vcpu_run_interrupted.clone();
         let panic_vcpu_run_interrupted = vcpu_run_interrupted.clone();
-        let vcpu_paused = vcpu_states[usize::try_from(vcpu_id).unwrap()]
-            .paused
-            .clone();
+        let vcpu_paused = vcpu_state.paused.clone();
 
         // Prepare the CPU set the current vCPU is expected to run onto.
         let cpuset = self.affinity.get(&vcpu_id).map(|host_cpus| {
@@ -1480,10 +1477,11 @@ impl CpuManager {
 
         // On hot plug calls into this function entry_point is None. It is for
         // those hotplug CPU additions that we need to set the inserting flag.
-        vcpu_states[usize::try_from(vcpu_id).unwrap()].handle = handle;
-        vcpu_states[usize::try_from(vcpu_id).unwrap()]
+        vcpu_state.handle = handle;
+        vcpu_state
             .hotplug_state
-            .inserting = inserting;
+            .inserting
+            .store(inserting, Ordering::Release);
 
         Ok(())
     }
@@ -1527,17 +1525,18 @@ impl CpuManager {
     }
 
     fn mark_vcpus_for_removal(&mut self, desired_vcpus: u32) {
-        let mut vcpu_states = self.vcpu_states.lock().unwrap();
+        let vcpu_states = self.vcpu_states.lock().unwrap();
         let present_vcpus = Self::active_vcpus(&vcpu_states);
 
         // Mark vCPUs for removal, actual removal happens on ejection
         for cpu_id in desired_vcpus..present_vcpus {
             vcpu_states[usize::try_from(cpu_id).unwrap()]
                 .hotplug_state
-                .removing = true;
+                .removing
+                .store(true, Ordering::Release);
             vcpu_states[usize::try_from(cpu_id).unwrap()]
                 .pending_removal
-                .store(true, Ordering::SeqCst);
+                .store(true, Ordering::Release);
         }
     }
 
@@ -3263,10 +3262,10 @@ impl BusDevice for AcpiCpuHotplugController {
                     if state.active() {
                         data[0] |= 1 << Self::CPU_ENABLE_FLAG;
                     }
-                    if state.hotplug_state.inserting {
+                    if state.hotplug_state.inserting.load(Ordering::Acquire) {
                         data[0] |= 1 << Self::CPU_INSERTING_FLAG;
                     }
-                    if state.hotplug_state.removing {
+                    if state.hotplug_state.removing.load(Ordering::Acquire) {
                         data[0] |= 1 << Self::CPU_REMOVING_FLAG;
                     }
                 } else {
@@ -3294,15 +3293,18 @@ impl BusDevice for AcpiCpuHotplugController {
                     let state = &mut vcpu_states[usize::try_from(self.selected_cpu).unwrap()];
                     // The ACPI code writes back a 1 to acknowledge the insertion
                     if (data[0] & (1 << Self::CPU_INSERTING_FLAG) == 1 << Self::CPU_INSERTING_FLAG)
-                        && state.hotplug_state.inserting
+                        && state.hotplug_state.inserting.load(Ordering::Acquire)
                     {
-                        state.hotplug_state.inserting = false;
+                        state
+                            .hotplug_state
+                            .inserting
+                            .store(false, Ordering::Release);
                     }
                     // Ditto for removal
                     if (data[0] & (1 << Self::CPU_REMOVING_FLAG) == 1 << Self::CPU_REMOVING_FLAG)
-                        && state.hotplug_state.removing
+                        && state.hotplug_state.removing.load(Ordering::Acquire)
                     {
-                        state.hotplug_state.removing = false;
+                        state.hotplug_state.removing.store(false, Ordering::Release);
                     }
                     // Trigger removal of vCPU:
                     if data[0] & (1 << Self::CPU_EJECT_FLAG) == 1 << Self::CPU_EJECT_FLAG
