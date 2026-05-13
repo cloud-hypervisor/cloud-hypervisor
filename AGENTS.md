@@ -11,9 +11,6 @@ reviewable, and compatible with the project's normal engineering constraints.
 - Start with `README.md` for the project shape and `CONTRIBUTING.md` for the
   contribution rules, coding style, commit message guidance, and LLM assistance
   disclosure policy. Following `CONTRIBUTING.md` is crucial!
-- The main supported architectures are `x86_64` and `aarch64`; the main
-  hypervisor backends are KVM and MSHV. `x86_64` with KVM gets the most regular
-  exercise, but changes must not make the other first-class targets worse.
 
 ### Change Guidelines
 
@@ -78,4 +75,3 @@ reviewable, and compatible with the project's normal engineering constraints.
 - Temporary allowances such as `#[allow(unused)]` or ignored tests are only
   acceptable if resolved within the same commit series or paired with a clear
   TODO referencing a ticket. Ask the developer if in doubt.
-
