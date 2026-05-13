@@ -26,7 +26,8 @@ use vm_memory::{
     GuestMemoryError, GuestMemoryLoadGuard,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
-use vm_virtio::{AccessPlatform, Translatable};
+use vm_virtio::AccessPlatform;
+use vm_virtio::checked_descriptor::DescriptorChainExt;
 use vmm_sys_util::eventfd::EventFd;
 
 use super::{
@@ -110,7 +111,10 @@ impl Request {
         desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>,
         access_platform: Option<&dyn AccessPlatform>,
     ) -> result::Result<Request, Error> {
-        let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
+        let desc = desc_chain
+            .next_checked(access_platform)
+            .map_err(|addr| Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(addr)))?
+            .ok_or(Error::DescriptorChainTooShort)?;
         // The descriptor contains the request type which MUST be readable.
         if desc.is_write_only() {
             return Err(Error::UnexpectedWriteOnlyDescriptor);
@@ -122,11 +126,7 @@ impl Request {
 
         let request: VirtioPmemReq = desc_chain
             .memory()
-            .read_obj(
-                desc.addr()
-                    .translate_gva(access_platform, desc.len() as usize)
-                    .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?,
-            )
+            .read_obj(desc.addr())
             .map_err(Error::GuestMemory)?;
 
         let request_type = match request.type_ {
@@ -134,7 +134,10 @@ impl Request {
             t => RequestType::Unknown(t),
         };
 
-        let status_desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
+        let status_desc = desc_chain
+            .next_checked(access_platform)
+            .map_err(|addr| Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(addr)))?
+            .ok_or(Error::DescriptorChainTooShort)?;
 
         // The status MUST always be writable
         if !status_desc.is_write_only() {
@@ -147,10 +150,7 @@ impl Request {
 
         Ok(Request {
             type_: request_type,
-            status_addr: status_desc
-                .addr()
-                .translate_gva(access_platform, status_desc.len() as usize)
-                .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?,
+            status_addr: status_desc.addr(),
         })
     }
 }
