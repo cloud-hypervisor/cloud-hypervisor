@@ -11,6 +11,8 @@ reviewable, and compatible with the project's normal engineering constraints.
 - Start with `README.md` for the project shape and `CONTRIBUTING.md` for the
   contribution rules, coding style, commit message guidance, and LLM assistance
   disclosure policy. Following `CONTRIBUTING.md` is crucial!
+- Respect `.editorconfig` when editing files, in addition to any
+  language-specific formatter required by `CONTRIBUTING.md`.
 
 ### Change Guidelines
 
