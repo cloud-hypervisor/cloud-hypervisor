@@ -21,6 +21,8 @@ exclude = [
   '^https://developer\.arm\.com',
   # Ignore internal/unsupported protocols seen in logs
   '^tcp://192\.168\.1\.10',
+  # Slack invite endpoints reject automated GETs and return 403.
+  '^https://join\.slack\.com/t/',
 ]
 
 # Exclude loopback addresses
