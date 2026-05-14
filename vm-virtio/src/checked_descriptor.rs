@@ -365,4 +365,19 @@ mod unit_tests {
         assert_eq!(desc.len(), LEN);
         assert!(!it.failed());
     }
+
+    #[test]
+    fn rejects_descriptor_one_past_memory_end() {
+        // A descriptor whose buffer extends one byte past the end of guest
+        // RAM must be rejected.
+        const MEM_SIZE: usize = 128 * 1024;
+        const LEN: u32 = 256;
+        let addr = (MEM_SIZE as u64) - LEN as u64 + 1;
+        let (_mem, mem_atomic, mut queue) = setup_vq(MEM_SIZE, addr, LEN, 0);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let mut it = chain.checked_iter(None);
+        assert!(it.next().is_none());
+        assert_eq!(it.failed_addr(), Some(GuestAddress(addr)));
+    }
 }
