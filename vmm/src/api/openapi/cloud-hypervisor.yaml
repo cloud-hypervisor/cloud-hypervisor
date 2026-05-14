@@ -878,6 +878,14 @@ components:
         thp:
           type: boolean
           default: true
+        device_memory_size:
+          type: integer
+          format: int64
+          description: |
+            Total size of the dedicated guest-physical "device memory" region
+            hosting memory-device GPAs (virtio-pmem, virtio-mem zones, future
+            pc-dimm-equivalents). When unset, the size is derived from the
+            declared hotplug_size plus headroom for pmem devices.
         zones:
           type: array
           items:

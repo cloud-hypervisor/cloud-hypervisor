@@ -230,6 +230,14 @@ pub struct MemoryConfig {
     pub zones: Option<Vec<MemoryZoneConfig>>,
     #[serde(default = "default_memoryconfig_thp")]
     pub thp: bool,
+    /// Total size of the dedicated guest-physical "device memory" region
+    /// that hosts memory-device GPAs (virtio-pmem, virtio-mem zones,
+    /// future pc-dimm-equivalents). Mirrors QEMU's `maxmem - mem` minus
+    /// the per-slot reservation: when `None`, the size is derived from
+    /// the declared `hotplug_size` plus headroom for pmem devices, which
+    /// preserves the historical behaviour for unmodified configurations.
+    #[serde(default)]
+    pub device_memory_size: Option<u64>,
 }
 
 pub const DEFAULT_MEMORY_MB: u64 = 512;
@@ -248,6 +256,7 @@ impl Default for MemoryConfig {
             prefault: false,
             zones: None,
             thp: true,
+            device_memory_size: None,
         }
     }
 }

@@ -151,6 +151,7 @@ impl RequestHandler for StubApiRequestHandler {
                     prefault: false,
                     zones: None,
                     thp: true,
+                    device_memory_size: None,
                 },
                 payload: Some(PayloadConfig {
                     kernel: Some(PathBuf::from("/path/to/kernel")),

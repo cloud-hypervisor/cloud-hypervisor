@@ -968,7 +968,8 @@ impl MemoryConfig {
             .add("hugepages")
             .add("hugepage_size")
             .add("prefault")
-            .add("thp");
+            .add("thp")
+            .add("device_memory_size");
         parser.parse(memory).map_err(Error::ParseMemory)?;
 
         let size = parser
@@ -1017,6 +1018,10 @@ impl MemoryConfig {
             .map_err(Error::ParseMemory)?
             .unwrap_or(Toggle(true))
             .0;
+        let device_memory_size = parser
+            .convert::<ByteSized>("device_memory_size")
+            .map_err(Error::ParseMemory)?
+            .map(|v| v.0);
 
         let zones: Option<Vec<MemoryZoneConfig>> = if let Some(memory_zones) = &memory_zones {
             let mut zones = Vec::new();
@@ -1111,6 +1116,7 @@ impl MemoryConfig {
             prefault,
             zones,
             thp,
+            device_memory_size,
         })
     }
 
@@ -5021,6 +5027,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 prefault: false,
                 zones: None,
                 thp: true,
+                device_memory_size: None,
             },
             payload: Some(PayloadConfig {
                 kernel: Some(PathBuf::from("/path/to/kernel")),
