@@ -1,3 +1,4 @@
+- [v51.2](#v512)
 - [v51.1](#v511)
 - [v51.0](#v510)
     - [Security Fixes](#security-fixes)
@@ -418,6 +419,12 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+# v51.2
+
+This is a point release containing security fixes to a use-after-free
+vulnerability in the `virtio-block` async I/O completion path
+(#8220). Details can be found in GHSA-f47p-p25q-83rh (CVE-2026-45782).
 
 # v51.1
 
