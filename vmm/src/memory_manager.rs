@@ -328,6 +328,12 @@ pub struct MemoryManager {
     ram_allocator: AddressAllocator,
     dynamic: bool,
 
+    /// Dedicated guest-physical region for memory devices (virtio-pmem,
+    /// virtio-mem, future pc-dimm-equivalents), mirroring QEMU's
+    /// machine `device_memory` region. `None` until the constructor in a
+    /// subsequent commit starts populating it.
+    device_memory: Option<DeviceMemoryRegion>,
+
     // Keep track of calls to create_userspace_mapping() for guest RAM.
     // This is useful for getting the dirty pages as we need to know the
     // slots that the mapping is created in.
@@ -1813,6 +1819,7 @@ impl MemoryManager {
             arch_mem_regions,
             ram_allocator,
             dynamic,
+            device_memory: None,
             #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
             uefi_flash: None,
             thp: config.thp,
@@ -2336,6 +2343,16 @@ impl MemoryManager {
 
     pub fn end_of_device_area(&self) -> GuestAddress {
         self.end_of_device_area
+    }
+
+    /// Dedicated GPA region for memory devices (virtio-pmem, virtio-mem,
+    /// future pc-dimm-equivalents). Currently `None`; the constructor in a
+    /// subsequent commit in this series will populate it when either
+    /// `MemoryConfig::device_memory_size` is set or memory-device hotplug
+    /// requirements imply a non-empty default size.
+    #[allow(dead_code)] // TODO: callers added by subsequent commits in this series.
+    pub(crate) fn device_memory(&self) -> Option<&DeviceMemoryRegion> {
+        self.device_memory.as_ref()
     }
 
     pub fn memory_slot_allocator(&mut self) -> MemorySlotAllocator {
