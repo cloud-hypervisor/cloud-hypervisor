@@ -433,7 +433,7 @@ pub fn load_igvm(
         let mut now = Instant::now();
 
         // Sort the gpas to group them by the page type
-        gpas.sort_by(|a, b| a.gpa.cmp(&b.gpa));
+        gpas.sort_by_key(|a| a.gpa);
 
         let gpas_grouped = gpas
             .iter()

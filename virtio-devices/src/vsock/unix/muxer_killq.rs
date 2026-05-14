@@ -110,6 +110,10 @@ impl MuxerKillQ {
     /// This will succeed and return a connection key, only if the connection at the front of
     /// the queue has expired. Otherwise, `None` is returned.
     ///
+    // `VecDeque::pop_front_if` is unstable on the project MSRV; allow the
+    // beta clippy lint that asks for it. `unknown_lints` is needed because
+    // the lint does not exist on stable clippy.
+    #[allow(unknown_lints, clippy::manual_pop_if)]
     pub fn pop(&mut self) -> Option<ConnMapKey> {
         if let Some(item) = self.q.front()
             && Instant::now() > item.kill_time

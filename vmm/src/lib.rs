@@ -735,22 +735,20 @@ impl Vmm {
 
         for signal in signals.forever() {
             match signal {
-                SIGTERM | SIGINT => {
-                    if exit_evt.write(1).is_err() {
-                        // Resetting the terminal is usually done as the VMM exits
-                        if let Ok(lock) = original_termios_opt.lock() {
-                            if let Some(termios) = *lock {
-                                // SAFETY: FFI call
-                                let _ = unsafe {
-                                    tcsetattr(stdout().lock().as_raw_fd(), TCSANOW, &termios)
-                                };
-                            }
-                        } else {
-                            warn!("Failed to lock original termios");
+                SIGTERM | SIGINT if exit_evt.write(1).is_err() => {
+                    // Resetting the terminal is usually done as the VMM exits
+                    if let Ok(lock) = original_termios_opt.lock() {
+                        if let Some(termios) = *lock {
+                            // SAFETY: FFI call
+                            let _ = unsafe {
+                                tcsetattr(stdout().lock().as_raw_fd(), TCSANOW, &termios)
+                            };
                         }
-
-                        std::process::exit(1);
+                    } else {
+                        warn!("Failed to lock original termios");
                     }
+
+                    std::process::exit(1);
                 }
                 _ => (),
             }
