@@ -193,12 +193,8 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                 set_raw_mode(&sub_fd.as_raw_fd(), &mut original_termios_opt)?;
                 vmconfig.console.common.file = Some(path.clone());
                 vmm.console_resize_pipe = Some(Arc::new(
-                    listen_for_sigwinch_on_tty(
-                        sub_fd,
-                        &vmm.seccomp_action,
-                        vmm.hypervisor.hypervisor_type(),
-                    )
-                    .map_err(ConsoleDeviceError::StartSigwinchListener)?,
+                    listen_for_sigwinch_on_tty(sub_fd, &vmm.seccomp_action)
+                        .map_err(ConsoleDeviceError::StartSigwinchListener)?,
                 ));
                 ConsoleTransport::Pty(Arc::new(main_fd))
             }
@@ -214,7 +210,6 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                         listen_for_sigwinch_on_tty(
                             stdout.try_clone().unwrap(),
                             &vmm.seccomp_action,
-                            vmm.hypervisor.hypervisor_type(),
                         )
                         .map_err(ConsoleDeviceError::StartSigwinchListener)?,
                     ));

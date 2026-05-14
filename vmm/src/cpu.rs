@@ -1172,7 +1172,7 @@ impl CpuManager {
         let vcpu_seccomp_filter = get_seccomp_filter(
             &self.seccomp_action,
             Thread::Vcpu,
-            self.hypervisor.hypervisor_type(),
+            Some(self.hypervisor.hypervisor_type()),
         )
         .map_err(Error::CreateSeccompFilter)?;
 

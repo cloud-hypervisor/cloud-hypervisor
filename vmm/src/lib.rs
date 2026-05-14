@@ -391,11 +391,10 @@ pub fn start_event_monitor_thread(
     mut monitor: event_monitor::Monitor,
     seccomp_action: &SeccompAction,
     landlock_enable: bool,
-    hypervisor_type: hypervisor::HypervisorType,
     exit_event: EventFd,
 ) -> Result<thread::JoinHandle<Result<()>>> {
     // Retrieve seccomp filter
-    let seccomp_filter = get_seccomp_filter(seccomp_action, Thread::EventMonitor, hypervisor_type)
+    let seccomp_filter = get_seccomp_filter(seccomp_action, Thread::EventMonitor, None)
         .map_err(Error::CreateSeccompFilter)?;
 
     thread::Builder::new()
@@ -478,7 +477,7 @@ pub fn start_vmm_thread(
     let hypervisor_type = hypervisor.hypervisor_type();
 
     // Retrieve seccomp filter
-    let vmm_seccomp_filter = get_seccomp_filter(seccomp_action, Thread::Vmm, hypervisor_type)
+    let vmm_seccomp_filter = get_seccomp_filter(seccomp_action, Thread::Vmm, Some(hypervisor_type))
         .map_err(Error::CreateSeccompFilter)?;
 
     let vmm_seccomp_action = seccomp_action.clone();
@@ -527,7 +526,6 @@ pub fn start_vmm_thread(
                 api_sender.clone(),
                 seccomp_action,
                 exit_event.try_clone().map_err(Error::EventFdClone)?,
-                hypervisor_type,
             )?;
             Some(chs)
         }
@@ -541,7 +539,6 @@ pub fn start_vmm_thread(
             api_sender,
             seccomp_action,
             exit_event,
-            hypervisor_type,
             landlock_enable,
         )?)
     } else if let Some(http_fd) = http_fd {
@@ -551,7 +548,6 @@ pub fn start_vmm_thread(
             api_sender,
             seccomp_action,
             exit_event,
-            hypervisor_type,
             landlock_enable,
         )?)
     } else {
@@ -750,12 +746,9 @@ impl Vmm {
                 let exit_evt = self.exit_evt.try_clone().map_err(Error::EventFdClone)?;
                 let original_termios_opt = Arc::clone(&self.original_termios_opt);
 
-                let signal_handler_seccomp_filter = get_seccomp_filter(
-                    &self.seccomp_action,
-                    Thread::SignalHandler,
-                    self.hypervisor.hypervisor_type(),
-                )
-                .map_err(Error::CreateSeccompFilter)?;
+                let signal_handler_seccomp_filter =
+                    get_seccomp_filter(&self.seccomp_action, Thread::SignalHandler, None)
+                        .map_err(Error::CreateSeccompFilter)?;
                 self.threads.push(
                     thread::Builder::new()
                         .name("vmm_signal_handler".to_string())
