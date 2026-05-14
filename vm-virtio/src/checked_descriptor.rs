@@ -228,4 +228,14 @@ mod unit_tests {
         assert!(desc.is_write_only());
         assert!(it.next().is_none());
     }
+
+    #[test]
+    fn rejects_out_of_range_descriptor() {
+        let (_mem, mem_atomic, mut queue) = setup_vq(128 * 1024, 0x4000, 1 << 30, 0);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let mut it = chain.checked_iter(None);
+        let result = it.next().expect("iterator must yield an item");
+        result.unwrap_err();
+    }
 }
