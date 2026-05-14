@@ -123,6 +123,9 @@ impl AddressAllocator {
         Err(Error::Overflow)
     }
 
+    /// Top-down (highest-fit) search for a free range of `req_size` bytes
+    /// aligned to `alignment`. Used by `allocate(None, …)` so that ranges
+    /// accumulate at the high end of the address space.
     fn first_available_range(
         &self,
         req_size: GuestUsize,
@@ -160,6 +163,32 @@ impl AddressAllocator {
         None
     }
 
+    /// Bottom-up (first-fit) search for a free range of `req_size` bytes
+    /// aligned to `alignment`. Unlike `first_available_range`, which scans
+    /// from the end and packs ranges at the top of the address space, this
+    /// scans from the start and packs ranges just above `self.base`. Used
+    /// by `allocate_first_fit` for callers that prefer low GPAs (e.g.
+    /// virtio-pmem placement just above guest RAM).
+    fn first_available_range_low(
+        &self,
+        req_size: GuestUsize,
+        alignment: GuestUsize,
+    ) -> Option<GuestAddress> {
+        let mut prev_end_address = self.base;
+
+        for (address, size) in self.ranges.iter() {
+            let aligned = self.align_address(prev_end_address, alignment);
+            if let Some(size_delta) = address.checked_sub(aligned.raw_value())
+                && size_delta.raw_value() >= req_size
+            {
+                return Some(aligned);
+            }
+            prev_end_address = address.unchecked_add(*size);
+        }
+
+        None
+    }
+
     /// Allocates a range of addresses from the managed region. Returns `Some(allocated_address)`
     /// when successful, or `None` if an area of `size` can't be allocated or if alignment isn't
     /// a power of two.
@@ -186,6 +215,47 @@ impl AddressAllocator {
                 }
             },
             None => self.first_available_range(size, alignment)?,
+        };
+
+        self.ranges.insert(new_addr, size);
+
+        Some(new_addr)
+    }
+
+    /// Allocates a range of addresses from the managed region using a
+    /// bottom-up (first-fit) search. When `address` is `Some(_)`, this
+    /// behaves identically to `allocate` (the explicit base is honored
+    /// verbatim). When `address` is `None`, the lowest free hole that
+    /// fits is returned, instead of the highest hole returned by
+    /// `allocate`.
+    ///
+    /// This is intended for callers that want ranges packed at the start
+    /// of the address space (e.g. virtio-pmem placement just above guest
+    /// RAM), while still sharing the same allocator with other top-down
+    /// consumers.
+    pub fn allocate_first_fit(
+        &mut self,
+        address: Option<GuestAddress>,
+        size: GuestUsize,
+        align_size: Option<GuestUsize>,
+    ) -> Option<GuestAddress> {
+        if size == 0 {
+            return None;
+        }
+
+        let alignment = align_size.unwrap_or(4);
+        if !alignment.is_power_of_two() || alignment == 0 {
+            return None;
+        }
+
+        let new_addr = match address {
+            Some(req_address) => match self.available_range(req_address, size, alignment) {
+                Ok(addr) => addr,
+                Err(_) => {
+                    return None;
+                }
+            },
+            None => self.first_available_range_low(size, alignment)?,
         };
 
         self.ranges.insert(new_addr, size);
