@@ -473,4 +473,35 @@ mod unit_tests {
         assert!(!it.failed());
         assert_eq!(it.failed_addr(), None);
     }
+
+    #[test]
+    fn accessors_reflect_underlying_descriptor() {
+        // Two descriptor chain: a non-empty writable head followed by a
+        // zero length tail. Verify the CheckedDescriptor accessors agree
+        // with the descriptor flags and length on each entry.
+        let (_mem, mem_atomic, mut queue) = setup_vq_chain(
+            128 * 1024,
+            &[(0x4000, 256, VRING_DESC_F_WRITE as u16), (0x5000, 0, 0)],
+        );
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let mut it = chain.checked_iter(None);
+
+        let head = it.next().expect("head must be yielded");
+        assert_eq!(head.addr().0, 0x4000);
+        assert_eq!(head.len(), 256);
+        assert!(!head.is_empty());
+        assert!(head.is_write_only());
+        assert!(head.has_next());
+
+        let tail = it.next().expect("tail must be yielded");
+        assert_eq!(tail.addr().0, 0x5000);
+        assert_eq!(tail.len(), 0);
+        assert!(tail.is_empty());
+        assert!(!tail.is_write_only());
+        assert!(!tail.has_next());
+
+        assert!(it.next().is_none());
+        assert!(!it.failed());
+    }
 }
