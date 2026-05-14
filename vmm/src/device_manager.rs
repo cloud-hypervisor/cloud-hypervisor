@@ -2534,6 +2534,7 @@ impl DeviceManager {
                                 self.exit_evt
                                     .try_clone()
                                     .map_err(DeviceManagerError::EventFd)?,
+                                &self.seccomp_action,
                             )
                             .map_err(DeviceManagerError::SpawnSerialManager)?;
                         Some(Arc::new(serial_manager))
