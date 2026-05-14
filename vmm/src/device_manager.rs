@@ -2696,6 +2696,11 @@ impl DeviceManager {
 
             if disk_cfg.image_type == ImageType::Unknown {
                 warn!(
+                    "DEPRECATION: auto-detection of disk image type is deprecated and will be \
+                    removed in a future release. Please specify image type explicitly."
+                );
+
+                warn!(
                     "No image_type specified - detected as {detected_image_type}. \
                     Configuration updated to persist type across reboots and migrations."
                 );
