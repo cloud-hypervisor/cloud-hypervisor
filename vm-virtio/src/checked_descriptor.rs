@@ -392,4 +392,42 @@ mod unit_tests {
         let result = it.next().expect("must yield an item");
         assert_eq!(result.unwrap_err(), GuestAddress(addr));
     }
+
+    /// AccessPlatform stub that applies a fixed offset between GVA and GPA.
+    #[derive(Debug)]
+    struct OffsetTranslator {
+        gva_base: u64,
+        gpa_base: u64,
+    }
+
+    impl AccessPlatform for OffsetTranslator {
+        fn translate_gva(&self, base: u64, _size: u64) -> std::io::Result<u64> {
+            Ok(base - self.gva_base + self.gpa_base)
+        }
+        fn translate_gpa(&self, base: u64, _size: u64) -> std::io::Result<u64> {
+            Ok(base - self.gpa_base + self.gva_base)
+        }
+    }
+
+    #[test]
+    fn translates_descriptor_via_access_platform() {
+        const MEM_SIZE: usize = 128 * 1024;
+        const LEN: u32 = 256;
+        let gva = 0x1_0000_0000u64;
+        let gpa = 0x4000u64;
+        let (_mem, mem_atomic, mut queue) = setup_vq(MEM_SIZE, gva, LEN, 0);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let ap = OffsetTranslator {
+            gva_base: gva,
+            gpa_base: gpa,
+        };
+        let mut it = chain.checked_iter(Some(&ap));
+        let desc = it
+            .next()
+            .unwrap()
+            .expect("translated descriptor must be Ok");
+        assert_eq!(desc.addr().0, gpa);
+        assert_eq!(desc.len(), LEN);
+    }
 }
