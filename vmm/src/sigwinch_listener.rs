@@ -12,7 +12,6 @@ use std::process::exit;
 use std::ptr::null_mut;
 
 use arch::_NSIG;
-use hypervisor::HypervisorType;
 use libc::{
     EINVAL, ENOSYS, ENOTTY, O_CLOEXEC, POLLERR, SIG_DFL, SIG_SETMASK, SIGCHLD, SIGWINCH,
     STDERR_FILENO, SYS_close_range, TIOCSCTTY, c_int, c_void, close, fork, getpgrp, ioctl, pipe2,
@@ -270,10 +269,8 @@ pub fn start_sigwinch_listener(seccomp_filter: BpfProgramRef, tty_sub: File) -> 
 pub fn listen_for_sigwinch_on_tty(
     pty_sub: File,
     seccomp_action: &SeccompAction,
-    hypervisor_type: HypervisorType,
 ) -> std::io::Result<File> {
-    let seccomp_filter =
-        get_seccomp_filter(seccomp_action, Thread::PtyForeground, hypervisor_type).unwrap();
+    let seccomp_filter = get_seccomp_filter(seccomp_action, Thread::PtyForeground, None).unwrap();
 
     let console_resize_pipe = start_sigwinch_listener(&seccomp_filter, pty_sub)?;
 

@@ -14,7 +14,6 @@ use std::sync::LazyLock;
 use std::sync::mpsc::Sender;
 use std::thread;
 
-use hypervisor::HypervisorType;
 use log::{error, info};
 use micro_http::{
     Body, HttpServer, MediaType, Method, Request, Response, ServerError, StatusCode, Version,
@@ -328,11 +327,10 @@ fn start_http_thread(
     api_sender: Sender<ApiRequest>,
     seccomp_action: &SeccompAction,
     exit_evt: EventFd,
-    hypervisor_type: HypervisorType,
     landlock_enable: bool,
 ) -> Result<HttpApiHandle> {
     // Retrieve seccomp filter for API thread
-    let api_seccomp_filter = get_seccomp_filter(seccomp_action, Thread::HttpApi, hypervisor_type)
+    let api_seccomp_filter = get_seccomp_filter(seccomp_action, Thread::HttpApi, None)
         .map_err(VmmError::CreateSeccompFilter)?;
 
     let api_shutdown_fd = EventFd::new(libc::EFD_NONBLOCK).map_err(VmmError::EventFdCreate)?;
@@ -410,7 +408,6 @@ pub fn start_http_path_thread(
     api_sender: Sender<ApiRequest>,
     seccomp_action: &SeccompAction,
     exit_evt: EventFd,
-    hypervisor_type: HypervisorType,
     landlock_enable: bool,
 ) -> Result<HttpApiHandle> {
     let socket_path = PathBuf::from(path);
@@ -425,7 +422,6 @@ pub fn start_http_path_thread(
         api_sender,
         seccomp_action,
         exit_evt,
-        hypervisor_type,
         landlock_enable,
     )
 }
@@ -436,7 +432,6 @@ pub fn start_http_fd_thread(
     api_sender: Sender<ApiRequest>,
     seccomp_action: &SeccompAction,
     exit_evt: EventFd,
-    hypervisor_type: HypervisorType,
     landlock_enable: bool,
 ) -> Result<HttpApiHandle> {
     // SAFETY: Valid FD
@@ -447,7 +442,6 @@ pub fn start_http_fd_thread(
         api_sender,
         seccomp_action,
         exit_evt,
-        hypervisor_type,
         landlock_enable,
     )
 }

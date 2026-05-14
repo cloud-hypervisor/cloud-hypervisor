@@ -9,7 +9,6 @@ use std::thread;
 
 use futures::channel::oneshot;
 use futures::{FutureExt, executor};
-use hypervisor::HypervisorType;
 use log::{error, warn};
 use seccompiler::{SeccompAction, apply_filter};
 use vmm_sys_util::eventfd::EventFd;
@@ -326,7 +325,6 @@ pub fn start_dbus_thread(
     api_sender: Sender<ApiRequest>,
     seccomp_action: &SeccompAction,
     exit_evt: EventFd,
-    hypervisor_type: HypervisorType,
 ) -> VmmResult<(thread::JoinHandle<VmmResult<()>>, DBusApiShutdownChannels)> {
     let dbus_iface = DBusApi::new(api_notifier, api_sender);
     let (connection, iface_ref) = executor::block_on(async move {
@@ -356,7 +354,7 @@ pub fn start_dbus_thread(
     let (send_done, recv_done) = oneshot::channel::<()>();
 
     // Retrieve seccomp filter for API thread
-    let api_seccomp_filter = get_seccomp_filter(seccomp_action, Thread::DBusApi, hypervisor_type)
+    let api_seccomp_filter = get_seccomp_filter(seccomp_action, Thread::DBusApi, None)
         .map_err(VmmError::CreateSeccompFilter)?;
 
     let thread_join_handle = thread::Builder::new()
