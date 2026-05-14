@@ -3315,27 +3315,71 @@ impl DeviceManager {
         let (region_base, region_size) = if let Some((base, size)) = region_range {
             // The memory needs to be 2MiB aligned in order to support
             // hugepages.
-            self.pci_segments[pmem_cfg.pci_common.pci_segment as usize]
-                .mem64_allocator
-                .lock()
-                .unwrap()
-                .allocate(
+            //
+            // Restore path: honour the GPA recorded in the snapshot.
+            // Try the device-memory region first when present (newer
+            // snapshots that already lived inside it); fall back to
+            // the per-segment 64-bit MMIO window for snapshots taken
+            // before the device-memory region was introduced.
+            let mm = self.memory_manager.lock().unwrap();
+            let allocated = if let Some(device_memory) = mm.device_memory()
+                && (device_memory.base().raw_value()..device_memory.top().raw_value())
+                    .contains(&base)
+            {
+                device_memory.allocator().lock().unwrap().allocate(
                     Some(GuestAddress(base)),
                     size as GuestUsize,
                     Some(0x0020_0000),
                 )
-                .ok_or(DeviceManagerError::PmemRangeAllocation)?;
+            } else {
+                self.pci_segments[pmem_cfg.pci_common.pci_segment as usize]
+                    .mem64_allocator
+                    .lock()
+                    .unwrap()
+                    .allocate(
+                        Some(GuestAddress(base)),
+                        size as GuestUsize,
+                        Some(0x0020_0000),
+                    )
+            };
+            drop(mm);
+            allocated.ok_or(DeviceManagerError::PmemRangeAllocation)?;
 
             (base, size)
         } else {
             // The memory needs to be 2MiB aligned in order to support
             // hugepages.
-            let base = self.pci_segments[pmem_cfg.pci_common.pci_segment as usize]
-                .mem64_allocator
-                .lock()
-                .unwrap()
-                .allocate(None, size as GuestUsize, Some(0x0020_0000))
-                .ok_or(DeviceManagerError::PmemRangeAllocation)?;
+            //
+            // QEMU places nvdimm / virtio-pmem inside a single
+            // device-memory region anchored just above guest RAM
+            // (`hw/i386/pc.c::pc_get_device_memory_range` +
+            // `hw/mem/memory-device.c::memory_device_get_free_addr`).
+            // Mirror that here: prefer the dedicated `device_memory`
+            // window when the memory manager set one up. The window
+            // is segment-agnostic, matching QEMU and avoiding the
+            // top-of-mem64 placement that pushes pmem above guest
+            // kernel MAXMEM ceilings on hosts with large
+            // `phys_bits`.
+            //
+            // When no device-memory region exists (e.g. plain VMs
+            // without declared `hotplug_size` / `device_memory_size`),
+            // fall back to the legacy per-segment 64-bit MMIO window.
+            let mm = self.memory_manager.lock().unwrap();
+            let base = if let Some(device_memory) = mm.device_memory() {
+                device_memory
+                    .allocator()
+                    .lock()
+                    .unwrap()
+                    .allocate_first_fit(None, size as GuestUsize, Some(0x0020_0000))
+            } else {
+                self.pci_segments[pmem_cfg.pci_common.pci_segment as usize]
+                    .mem64_allocator
+                    .lock()
+                    .unwrap()
+                    .allocate(None, size as GuestUsize, Some(0x0020_0000))
+            }
+            .ok_or(DeviceManagerError::PmemRangeAllocation)?;
+            drop(mm);
 
             (base.raw_value(), size)
         };
