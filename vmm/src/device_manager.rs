@@ -1046,7 +1046,7 @@ pub struct DeviceManager {
     // Counter to keep track of the consumed device IDs.
     device_id_cnt: Wrapping<usize>,
 
-    pci_segments: Vec<PciSegment>,
+    pci_segments: Box<[PciSegment]>,
 
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     // MSI Interrupt Manager
@@ -1402,7 +1402,7 @@ impl DeviceManager {
             iommu_device: None,
             iommu_mapping: None,
             iommu_attached_devices: None,
-            pci_segments,
+            pci_segments: pci_segments.into_boxed_slice(),
             device_tree,
             exit_evt,
             reset_evt,
@@ -4526,7 +4526,7 @@ impl DeviceManager {
             .map(|ic| ic.clone() as Arc<Mutex<dyn InterruptController>>)
     }
 
-    pub(crate) fn pci_segments(&self) -> &Vec<PciSegment> {
+    pub(crate) fn pci_segments(&self) -> &[PciSegment] {
         &self.pci_segments
     }
 
