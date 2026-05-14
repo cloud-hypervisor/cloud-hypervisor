@@ -2700,8 +2700,12 @@ impl DeviceManager {
                     Configuration updated to persist type across reboots and migrations."
                 );
 
-                if detected_image_type == ImageType::Raw {
-                    warn!("Autodetected raw image type. Disabling sector 0 writes.");
+                if detected_image_type == ImageType::Raw
+                    || detected_image_type == ImageType::FixedVhd
+                {
+                    warn!(
+                        "Autodetected {detected_image_type} image type. Disabling sector 0 writes."
+                    );
                     disable_sector0_writes = true;
                 } else {
                     warn!(
