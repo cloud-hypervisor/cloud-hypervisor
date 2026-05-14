@@ -184,7 +184,7 @@ where
 
 #[cfg(test)]
 mod unit_tests {
-    use virtio_bindings::virtio_ring::VRING_DESC_F_WRITE;
+    use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::{Queue, QueueT};
     use vm_memory::bitmap::AtomicBitmap;
     use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
@@ -210,6 +210,40 @@ mod unit_tests {
         let queue = guest_vq.create_queue();
 
         guest_vq.dtable[0].set(desc_addr, desc_len, desc_flags, 0);
+        guest_vq.avail.ring[0].set(0);
+        guest_vq.avail.idx.set(1);
+
+        let mem_atomic = GuestMemoryAtomic::new(mem.clone());
+        (mem, mem_atomic, queue)
+    }
+
+    /// Set up a chain of descriptors linked via VRING_DESC_F_NEXT in a
+    /// virtqueue backed by `mem_size` bytes of guest RAM. Each entry is
+    /// `(addr, len, flags)`; the helper adds the NEXT flag on every
+    /// descriptor except the last.
+    fn setup_vq_chain(
+        mem_size: usize,
+        descs: &[(u64, u32, u16)],
+    ) -> (TestMmap, GuestMemoryAtomic<TestMmap>, Queue) {
+        let qsize = descs.len() as u16;
+        assert!(qsize >= 1);
+
+        let mem = TestMmap::from_ranges(&[(GuestAddress(0), mem_size)]).unwrap();
+        let guest_vq = GuestQ::new(GuestAddress(0x1_0000), &mem, qsize);
+        let queue = guest_vq.create_queue();
+
+        let last = descs.len() - 1;
+        for (i, &(addr, len, flags)) in descs.iter().enumerate() {
+            let (flags, next) = if i < last {
+                (
+                    flags | u16::try_from(VRING_DESC_F_NEXT).unwrap(),
+                    (i + 1) as u16,
+                )
+            } else {
+                (flags, 0)
+            };
+            guest_vq.dtable[i].set(addr, len, flags, next);
+        }
         guest_vq.avail.ring[0].set(0);
         guest_vq.avail.idx.set(1);
 
@@ -251,5 +285,20 @@ mod unit_tests {
         let desc = it.next().expect("zero length descriptor must pass through");
         assert_eq!(desc.len(), 0);
         assert!(!it.failed());
+    }
+
+    #[test]
+    fn yields_valid_prefix_then_stops_on_invalid() {
+        let (_mem, mem_atomic, mut queue) =
+            setup_vq_chain(128 * 1024, &[(0x4000, 256, 0), (0x8000, 1 << 30, 0)]);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let mut it = chain.checked_iter(None);
+        let first = it.next().expect("first descriptor must be yielded");
+        assert_eq!(first.addr().0, 0x4000);
+        assert_eq!(first.len(), 256);
+        assert!(!it.failed());
+        assert!(it.next().is_none());
+        assert!(it.failed());
     }
 }
