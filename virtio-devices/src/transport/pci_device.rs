@@ -272,6 +272,7 @@ const MSIX_PBA_BAR_OFFSET: u64 = next_bar_addr(MSIX_TABLE_BAR_OFFSET, MSIX_TABLE
 const MSIX_PBA_SIZE: u64 = 0x800;
 // The BAR size must be a power of 2.
 const CAPABILITY_BAR_SIZE: u64 = (MSIX_PBA_BAR_OFFSET + MSIX_PBA_SIZE).next_power_of_two();
+// Align larger than natural alignment to work around Windows driver issues
 const VIRTIO_PCI_BAR_ALIGN: u64 = 0x80_0000;
 const VIRTIO_COMMON_BAR_INDEX: u8 = 0;
 const VIRTIO_SHM_BAR_INDEX: usize = 2;
