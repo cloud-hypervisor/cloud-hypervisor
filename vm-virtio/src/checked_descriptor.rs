@@ -313,4 +313,16 @@ mod unit_tests {
         assert_eq!(desc.addr().0, 0x4000);
         assert_eq!(desc.len(), 256);
     }
+
+    #[test]
+    fn next_checked_returns_none_when_exhausted() {
+        let (_mem, mem_atomic, mut queue) = setup_vq(128 * 1024, 0x4000, 256, 0);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        // Consume the single descriptor.
+        let _ = chain.next_checked(None).unwrap().unwrap();
+        // The chain is now exhausted; expect Ok(None).
+        let res = chain.next_checked(None);
+        assert!(matches!(res, Ok(None)));
+    }
 }
