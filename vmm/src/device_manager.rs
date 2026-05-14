@@ -727,7 +727,9 @@ impl DeviceRelocation for AddressManager {
         match region_type {
             PciBarRegionType::IoRegion => {
                 let mut sys_allocator = self.allocator.lock().unwrap();
-                // Update system allocator
+                // Free old_base first so allocate(new_base) sees it as
+                // available; restore old_base on failure to keep the
+                // allocator in sync with the PIO bus.
                 sys_allocator.free_io_addresses(GuestAddress(old_base), len as GuestUsize);
                 if sys_allocator
                     .allocate_io_addresses(Some(GuestAddress(new_base)), len as GuestUsize, None)
@@ -767,6 +769,9 @@ impl DeviceRelocation for AddressManager {
                     if old_base >= pci_mmio_allocator.base().0
                         && old_base <= pci_mmio_allocator.end().0
                     {
+                        // Free old_base first so allocate(new_base) sees it
+                        // as available; restore old_base on failure to keep
+                        // the allocator in sync with the MMIO bus.
                         pci_mmio_allocator.free(GuestAddress(old_base), len as GuestUsize);
                         if pci_mmio_allocator
                             .allocate(Some(GuestAddress(new_base)), len as GuestUsize, Some(len))
