@@ -300,4 +300,17 @@ mod unit_tests {
         second.unwrap_err();
         assert!(it.next().is_none());
     }
+
+    #[test]
+    fn next_checked_returns_valid_descriptor() {
+        let (_mem, mem_atomic, mut queue) = setup_vq(128 * 1024, 0x4000, 256, 0);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let desc = chain
+            .next_checked(None)
+            .expect("validation must succeed")
+            .expect("descriptor must be present");
+        assert_eq!(desc.addr().0, 0x4000);
+        assert_eq!(desc.len(), 256);
+    }
 }
