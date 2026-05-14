@@ -22,11 +22,12 @@ struct MemoryConfig {
     prefault: bool,
     thp: bool,
     zones: Option<Vec<MemoryZoneConfig>>,
+    device_memory_size: Option<u64>,
 }
 ```
 
 ```
---memory <memory>	Memory parameters "size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,hotplug_method=acpi|virtio-mem,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off,thp=on|off" [default: size=512M,thp=on]
+--memory <memory>	Memory parameters "size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,hotplug_method=acpi|virtio-mem,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off,thp=on|off,device_memory_size=<device_memory_size>" [default: size=512M,thp=on]
 ```
 
 ### `size`
@@ -194,6 +195,31 @@ _Example_
 
 ```
 --memory size=1G,thp=on
+```
+
+### `device_memory_size`
+
+Total size of the dedicated guest-physical "device memory" region that hosts
+memory-device GPAs: virtio-pmem, virtio-mem zones, and ACPI RAM hot-plug
+slots. The region is anchored at a 1 GiB-aligned GPA immediately above guest
+RAM, mirroring QEMU's machine `device_memory` region
+(`hw/i386/pc.c::pc_get_device_memory_range`).
+
+When unset (the default), the size is derived from the sum of declared
+`hotplug_size` values across the default zone or all `--memory-zone`s,
+preserving today's layout for unmodified configurations.
+
+When set to `0`, the region is omitted entirely and Cloud Hypervisor falls
+back to the legacy bump-pointer layout above RAM.
+
+Increasing this value above the implicit default reserves headroom for
+future virtio-pmem hot-adds without consuming address space from the
+per-segment PCI64 BAR window.
+
+_Example_
+
+```
+--memory size=4G,hotplug_size=8G,device_memory_size=16G
 ```
 
 ## Advanced Parameters
