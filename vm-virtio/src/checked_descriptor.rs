@@ -326,4 +326,16 @@ mod unit_tests {
         let res = chain.next_checked(None);
         assert!(matches!(res, Ok(None)));
     }
+
+    #[test]
+    fn next_checked_returns_err_on_invalid_descriptor() {
+        let (_mem, mem_atomic, mut queue) = setup_vq(128 * 1024, 0x4000, 1 << 30, 0);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let err = chain
+            .next_checked(None)
+            .err()
+            .expect("validation must reject the descriptor");
+        assert_eq!(err.0, 0x4000);
+    }
 }
