@@ -1622,6 +1622,36 @@ impl MemoryManager {
             let guest_memory =
                 GuestMemoryMmap::from_arc_regions(regions).map_err(Error::GuestRegionCollection)?;
             let boot_guest_memory = guest_memory.clone();
+            // Rebuild the dedicated device-memory region from the
+            // saved (base, size) when present. Re-reserve every
+            // virtio-mem zone at its saved GPA so subsequent
+            // memory-device allocations (e.g. virtio-pmem hot-add)
+            // don't hand out overlapping addresses. Snapshots
+            // produced before this field was added carry `None` and
+            // fall back to the legacy bump-pointer layout via the
+            // saved `start_of_device_area`.
+            let device_memory = if let Some((base, size)) = data.device_memory {
+                let region = DeviceMemoryRegion::new(GuestAddress(base), size)?;
+                for zone in memory_zones.values() {
+                    if let Some(virtio_mem_zone) = zone.virtio_mem_zone() {
+                        let mem_region = virtio_mem_zone.region();
+                        region
+                            .allocator()
+                            .lock()
+                            .unwrap()
+                            .allocate(
+                                Some(mem_region.start_addr()),
+                                mem_region.len(),
+                                Some(virtio_devices::VIRTIO_MEM_ALIGN_SIZE),
+                            )
+                            .ok_or(Error::MemoryRangeAllocation)?;
+                    }
+                }
+                Some(region)
+            } else {
+                None
+            };
+
             (
                 GuestAddress(data.start_of_device_area),
                 data.boot_ram,
@@ -1634,12 +1664,7 @@ impl MemoryManager {
                 data.next_memory_slot,
                 data.selected_slot,
                 data.next_hotplug_slot,
-                // Snapshots produced by this commit do not yet record the
-                // device-memory region; restore replays the original
-                // top-down layout via the saved `start_of_device_area`.
-                // A later commit in this series adds an optional snapshot
-                // field and reconstructs the region on restore.
-                None,
+                device_memory,
             )
         } else {
             // Init guest memory
@@ -2769,6 +2794,10 @@ impl MemoryManager {
             next_memory_slot: self.next_memory_slot.load(Ordering::SeqCst),
             selected_slot: self.selected_slot,
             next_hotplug_slot: self.next_hotplug_slot,
+            device_memory: self
+                .device_memory
+                .as_ref()
+                .map(|r| (r.base().raw_value(), r.size())),
         }
     }
 
@@ -3227,6 +3256,13 @@ pub struct MemoryManagerSnapshotData {
     next_memory_slot: u32,
     selected_slot: usize,
     next_hotplug_slot: usize,
+    /// (base, size) of the dedicated device-memory region, when one was
+    /// in use at snapshot time. `None` for snapshots produced before the
+    /// region was introduced; the restore path falls back to the legacy
+    /// `start_of_device_area` layout in that case so older snapshots
+    /// continue to map at their original GPAs.
+    #[serde(default)]
+    device_memory: Option<(u64, u64)>,
 }
 
 impl Snapshottable for MemoryManager {
