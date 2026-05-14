@@ -459,4 +459,18 @@ mod unit_tests {
         // translated one.
         assert_eq!(it.failed_addr(), Some(GuestAddress(gva)));
     }
+
+    #[test]
+    fn exhausted_chain_does_not_set_failed() {
+        // After the iterator yields the only descriptor in the chain, the
+        // subsequent None must reflect exhaustion, not a validation failure.
+        let (_mem, mem_atomic, mut queue) = setup_vq(128 * 1024, 0x4000, 256, 0);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let mut it = chain.checked_iter(None);
+        assert!(it.next().is_some());
+        assert!(it.next().is_none());
+        assert!(!it.failed());
+        assert_eq!(it.failed_addr(), None);
+    }
 }
