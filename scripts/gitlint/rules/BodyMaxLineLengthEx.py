@@ -9,6 +9,7 @@ IGNORE_PREFIXES = [
     # Please sort alphabetically
     " ",
     "Acked-by: ",
+    "Closes: ",
     "Co-authored-by: ",
     "Co-developed-by: ",
     "Debugged-by: ",
@@ -18,6 +19,7 @@ IGNORE_PREFIXES = [
     "Fixes: ",
     "Helped-by: ",
     "Inspired-by: ",
+    "Link: ",
     "On-behalf-of: ",
     "Originally-by: ",
     "Reported-by: ",
