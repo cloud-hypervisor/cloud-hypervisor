@@ -719,7 +719,7 @@ impl CpusConfig {
                 v.0.iter()
                     .map(|(e1, e2)| CpuAffinity {
                         vcpu: *e1,
-                        host_cpus: e2.clone(),
+                        host_cpus: e2.clone().into_boxed_slice(),
                     })
                     .collect()
             });
@@ -3694,16 +3694,16 @@ mod unit_tests {
             CpusConfig {
                 boot_vcpus: 2,
                 max_vcpus: 2,
-                affinity: Some(vec![
+                affinity: Some(Box::new([
                     CpuAffinity {
                         vcpu: 0,
-                        host_cpus: vec![0, 2],
+                        host_cpus: Box::new([0, 2]),
                     },
                     CpuAffinity {
                         vcpu: 1,
-                        host_cpus: vec![1, 3],
+                        host_cpus: Box::new([1, 3]),
                     }
-                ]),
+                ])),
                 ..Default::default()
             },
         );
