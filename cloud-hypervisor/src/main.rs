@@ -679,7 +679,6 @@ fn start_vmm(
             monitor,
             &seccomp_action,
             landlock_enable,
-            hypervisor.hypervisor_type(),
             exit_evt.try_clone().unwrap(),
         )
         .map_err(Error::EventMonitorThread)?;
