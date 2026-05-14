@@ -716,7 +716,7 @@ pub struct CpuManager {
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     acpi_address: Option<GuestAddress>,
     proximity_domain_per_cpu: BTreeMap<u32, u32>,
-    affinity: BTreeMap<u32, Vec<usize>>,
+    affinity: BTreeMap<u32, Box<[usize]>>,
     dynamic: bool,
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     #[cfg(feature = "sev_snp")]

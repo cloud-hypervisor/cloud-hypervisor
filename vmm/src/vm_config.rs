@@ -30,7 +30,7 @@ pub(crate) trait ApplyLandlock {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CpuAffinity {
     pub vcpu: u32,
-    pub host_cpus: Vec<usize>,
+    pub host_cpus: Box<[usize]>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -76,7 +76,7 @@ pub struct CpusConfig {
     #[serde(default = "default_cpuconfig_max_phys_bits")]
     pub max_phys_bits: u8,
     #[serde(default)]
-    pub affinity: Option<Vec<CpuAffinity>>,
+    pub affinity: Option<Box<[CpuAffinity]>>,
     #[serde(default)]
     pub features: CpuFeatures,
     #[serde(default = "default_cpusconfig_nested")]
