@@ -123,3 +123,9 @@ pub const APIC_START: GuestAddress = GuestAddress(0xfee0_0000);
 
 // ** 64-bit RAM start (start: 4GiB, length: varies) **
 pub const RAM_64BIT_START: GuestAddress = GuestAddress(0x1_0000_0000);
+
+/// Alignment used for the base of the guest-physical "device memory"
+/// region that hosts memory-device GPAs (virtio-pmem, virtio-mem, future
+/// pc-dimm-equivalents). Mirrors QEMU's `pc_get_device_memory_range()`
+/// which aligns the region base to 1 GiB above the top of RAM.
+pub const DEVICE_MEMORY_ALIGN: u64 = 1 << 30;

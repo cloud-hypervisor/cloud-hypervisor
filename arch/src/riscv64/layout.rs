@@ -115,3 +115,9 @@ pub const IRQ_BASE: u32 = 0;
 // As per https://elixir.bootlin.com/linux/v6.10/source/arch/riscv/include/asm/kvm_host.h#L31
 /// Number of supported interrupts
 pub const IRQ_NUM: u32 = 1023;
+
+/// Alignment used for the base of the guest-physical "device memory"
+/// region that hosts memory-device GPAs (virtio-pmem, virtio-mem, future
+/// pc-dimm-equivalents). Mirrors QEMU's machine memory-device region,
+/// which aligns the region base to 1 GiB above the top of RAM.
+pub const DEVICE_MEMORY_ALIGN: u64 = 1 << 30;

@@ -147,3 +147,9 @@ pub const GICV2M_SPI_NUM: u32 = 64;
 
 /// GICv2M compatible string
 pub const GIC_V2M_COMPATIBLE: &str = "arm,gic-v2m-frame";
+
+/// Alignment used for the base of the guest-physical "device memory"
+/// region that hosts memory-device GPAs (virtio-pmem, virtio-mem, future
+/// pc-dimm-equivalents). Mirrors QEMU's machine memory-device region,
+/// which aligns the region base to 1 GiB above the top of RAM.
+pub const DEVICE_MEMORY_ALIGN: u64 = 1 << 30;
