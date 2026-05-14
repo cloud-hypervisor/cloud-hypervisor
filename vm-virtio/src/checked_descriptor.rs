@@ -377,4 +377,19 @@ mod unit_tests {
         let result = it.next().expect("must yield an item");
         assert_eq!(result.unwrap_err(), GuestAddress(addr));
     }
+
+    #[test]
+    fn rejects_descriptor_with_address_overflow() {
+        // A descriptor whose addr plus len would wrap around the u64 address
+        // space must be rejected without panicking.
+        const MEM_SIZE: usize = 128 * 1024;
+        let addr = u64::MAX - 100;
+        let len: u32 = 1024;
+        let (_mem, mem_atomic, mut queue) = setup_vq(MEM_SIZE, addr, len, 0);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let mut it = chain.checked_iter(None);
+        let result = it.next().expect("must yield an item");
+        assert_eq!(result.unwrap_err(), GuestAddress(addr));
+    }
 }
