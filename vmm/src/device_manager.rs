@@ -729,9 +729,24 @@ impl DeviceRelocation for AddressManager {
                 let mut sys_allocator = self.allocator.lock().unwrap();
                 // Update system allocator
                 sys_allocator.free_io_addresses(GuestAddress(old_base), len as GuestUsize);
-                sys_allocator
+                if sys_allocator
                     .allocate_io_addresses(Some(GuestAddress(new_base)), len as GuestUsize, None)
-                    .ok_or_else(|| io::Error::other("failed allocating new IO range"))?;
+                    .is_none()
+                {
+                    if sys_allocator
+                        .allocate_io_addresses(
+                            Some(GuestAddress(old_base)),
+                            len as GuestUsize,
+                            None,
+                        )
+                        .is_none()
+                    {
+                        error!(
+                            "Failed to restore old IO range 0x{old_base:x} after rejected move_bar"
+                        );
+                    }
+                    return Err(io::Error::other("failed allocating new IO range"));
+                }
 
                 // Update PIO bus
                 self.io_bus
@@ -753,10 +768,24 @@ impl DeviceRelocation for AddressManager {
                         && old_base <= pci_mmio_allocator.end().0
                     {
                         pci_mmio_allocator.free(GuestAddress(old_base), len as GuestUsize);
-
-                        pci_mmio_allocator
+                        if pci_mmio_allocator
                             .allocate(Some(GuestAddress(new_base)), len as GuestUsize, Some(len))
-                            .ok_or_else(|| io::Error::other("failed allocating new MMIO range"))?;
+                            .is_none()
+                        {
+                            if pci_mmio_allocator
+                                .allocate(
+                                    Some(GuestAddress(old_base)),
+                                    len as GuestUsize,
+                                    Some(len),
+                                )
+                                .is_none()
+                            {
+                                error!(
+                                    "Failed to restore old MMIO range 0x{old_base:x} after rejected move_bar"
+                                );
+                            }
+                            return Err(io::Error::other("failed allocating new MMIO range"));
+                        }
 
                         break;
                     }
