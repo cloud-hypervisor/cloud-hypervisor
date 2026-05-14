@@ -430,4 +430,32 @@ mod unit_tests {
         assert_eq!(desc.addr().0, gpa);
         assert_eq!(desc.len(), LEN);
     }
+
+    /// AccessPlatform stub that always fails translation.
+    #[derive(Debug)]
+    struct FailingTranslator;
+
+    impl AccessPlatform for FailingTranslator {
+        fn translate_gva(&self, _base: u64, _size: u64) -> std::io::Result<u64> {
+            Err(std::io::Error::other("translation failed"))
+        }
+        fn translate_gpa(&self, _base: u64, _size: u64) -> std::io::Result<u64> {
+            Err(std::io::Error::other("translation failed"))
+        }
+    }
+
+    #[test]
+    fn rejects_descriptor_when_translation_fails() {
+        const MEM_SIZE: usize = 128 * 1024;
+        let gva = 0x4000u64;
+        let (_mem, mem_atomic, mut queue) = setup_vq(MEM_SIZE, gva, 256, 0);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let ap = FailingTranslator;
+        let mut it = chain.checked_iter(Some(&ap));
+        let result = it.next().expect("must yield an item");
+        // The error reports the original descriptor address, not a
+        // translated one.
+        assert_eq!(result.unwrap_err(), GuestAddress(gva));
+    }
 }
