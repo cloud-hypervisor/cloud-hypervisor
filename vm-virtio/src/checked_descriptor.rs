@@ -346,4 +346,20 @@ mod unit_tests {
         let result = it.next().expect("must yield an item");
         assert_eq!(result.unwrap_err(), GuestAddress(0x4000));
     }
+
+    #[test]
+    fn accepts_descriptor_at_memory_end() {
+        // 128 KiB of guest RAM ends at 0x20000. A descriptor whose buffer
+        // ends exactly at that boundary must be accepted.
+        const MEM_SIZE: usize = 128 * 1024;
+        const LEN: u32 = 256;
+        let addr = (MEM_SIZE as u64) - LEN as u64;
+        let (_mem, mem_atomic, mut queue) = setup_vq(MEM_SIZE, addr, LEN, 0);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let mut it = chain.checked_iter(None);
+        let desc = it.next().unwrap().expect("boundary descriptor must be Ok");
+        assert_eq!(desc.addr().0, addr);
+        assert_eq!(desc.len(), LEN);
+    }
 }
