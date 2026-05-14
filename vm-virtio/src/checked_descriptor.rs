@@ -176,3 +176,56 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod unit_tests {
+    use virtio_bindings::virtio_ring::VRING_DESC_F_WRITE;
+    use virtio_queue::{Queue, QueueT};
+    use vm_memory::bitmap::AtomicBitmap;
+    use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
+
+    use super::*;
+    use crate::queue::testing::VirtQueue as GuestQ;
+
+    type TestMmap = GuestMemoryMmap<AtomicBitmap>;
+
+    /// Set up a single descriptor in a virtqueue backed by `mem_size` bytes
+    /// of guest RAM. Returns the guest memory, an atomic wrapper around it,
+    /// and the ready queue.
+    fn setup_vq(
+        mem_size: usize,
+        desc_addr: u64,
+        desc_len: u32,
+        desc_flags: u16,
+    ) -> (TestMmap, GuestMemoryAtomic<TestMmap>, Queue) {
+        const QSIZE: u16 = 2;
+
+        let mem = TestMmap::from_ranges(&[(GuestAddress(0), mem_size)]).unwrap();
+        let guest_vq = GuestQ::new(GuestAddress(0x1_0000), &mem, QSIZE);
+        let queue = guest_vq.create_queue();
+
+        guest_vq.dtable[0].set(desc_addr, desc_len, desc_flags, 0);
+        guest_vq.avail.ring[0].set(0);
+        guest_vq.avail.idx.set(1);
+
+        let mem_atomic = GuestMemoryAtomic::new(mem.clone());
+        (mem, mem_atomic, queue)
+    }
+
+    #[test]
+    fn yields_valid_single_descriptor() {
+        let (_mem, mem_atomic, mut queue) =
+            setup_vq(128 * 1024, 0x4000, 256, VRING_DESC_F_WRITE as u16);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let mut it = chain.checked_iter(None);
+        let desc = it
+            .next()
+            .unwrap()
+            .expect("valid descriptor must be yielded");
+        assert_eq!(desc.addr().0, 0x4000);
+        assert_eq!(desc.len(), 256);
+        assert!(desc.is_write_only());
+        assert!(it.next().is_none());
+    }
+}
