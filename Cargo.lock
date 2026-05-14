@@ -2579,6 +2579,7 @@ name = "vm-virtio"
 version = "0.1.0"
 dependencies = [
  "log",
+ "virtio-bindings",
  "virtio-queue",
  "vm-memory",
 ]
