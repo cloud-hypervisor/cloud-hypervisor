@@ -41,6 +41,7 @@ use std::str::FromStr;
 use std::time::Instant;
 use std::{cmp, result};
 
+pub use aligned_operation::AlignedOperation;
 #[cfg(feature = "io_uring")]
 use io_uring::{IoUring, Probe, opcode};
 use libc::{S_IFBLK, S_IFMT, ioctl};
@@ -57,8 +58,6 @@ use vm_memory::{
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::{aio, ioctl_io_nr};
-
-pub use aligned_operation::AlignedOperation;
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 use crate::vhdx::VhdxError;
