@@ -19,3 +19,6 @@ vm-memory = { workspace = true, features = [
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+virtio-bindings = { workspace = true }
