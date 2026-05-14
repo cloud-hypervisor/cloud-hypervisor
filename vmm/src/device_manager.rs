@@ -711,8 +711,8 @@ pub(crate) struct AddressManager {
     pub(crate) mmio_bus: Arc<Bus>,
     pub(crate) vm: Arc<dyn hypervisor::Vm>,
     device_tree: Arc<Mutex<DeviceTree>>,
-    pci_mmio32_allocators: Vec<Arc<Mutex<AddressAllocator>>>,
-    pci_mmio64_allocators: Vec<Arc<Mutex<AddressAllocator>>>,
+    pci_mmio32_allocators: Box<[Arc<Mutex<AddressAllocator>>]>,
+    pci_mmio64_allocators: Box<[Arc<Mutex<AddressAllocator>>]>,
 }
 
 impl DeviceRelocation for AddressManager {
@@ -1160,7 +1160,7 @@ fn create_mmio_allocators(
     num_pci_segments: u16,
     weights: &[u32],
     alignment: u64,
-) -> Vec<Arc<Mutex<AddressAllocator>>> {
+) -> Box<[Arc<Mutex<AddressAllocator>>]> {
     let total_weight: u32 = weights.iter().sum();
 
     // Start each PCI segment mmio range on an aligned boundary
@@ -1187,7 +1187,7 @@ fn create_mmio_allocators(
         i += weight;
     }
 
-    mmio_allocators
+    mmio_allocators.into_boxed_slice()
 }
 
 fn use_64bit_bar_for_virtio_device(
