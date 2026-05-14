@@ -484,7 +484,7 @@ impl run_blocking::BlockingEventLoop for GdbEventLoop {
                 }
             }
 
-            if conn.peek().map(|b| b.is_some()).unwrap_or(true) {
+            if conn.peek().map_or(true, |b| b.is_some()) {
                 let byte = conn
                     .read()
                     .map_err(run_blocking::WaitForStopReasonError::Connection)?;

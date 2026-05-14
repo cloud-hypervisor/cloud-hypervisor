@@ -407,9 +407,11 @@ impl VsockMuxer {
             Some(EpollListener::HostSock) => {
                 if self.conn_map.len() == defs::MAX_CONNECTIONS {
                     // If we're already maxed-out on connections, we'll just accept and
-                    // immediately discard this potentially new one.
+                    // immediately discard this potentially new one. Dropping the returned
+                    // `UnixStream` closes the new connection; we don't care if `accept()`
+                    // itself failed.
                     warn!("vsock: connection limit reached; refusing new host connection");
-                    self.host_sock.accept().map(|_| 0).unwrap_or(0);
+                    let _ = self.host_sock.accept();
                     return;
                 }
                 self.host_sock
