@@ -1,12 +1,29 @@
-- [v51.0](#v510)
+- [v52.0](#v520)
     - [Security Fixes](#security-fixes)
+    - [Confidential VM Support: KVM SEV-SNP](#confidential-vm-support-kvm-sev-snp)
+    - [VFIO Device Passthrough via `iommufd` and `vfio-cdev`](#vfio-device-passthrough-via-iommufd-and-vfio-cdev)
+    - [Multi-Connection TCP Live Migration](#multi-connection-tcp-live-migration)
+    - [Userfaultfd Demand-Paged Snapshot Restore](#userfaultfd-demand-paged-snapshot-restore)
+    - [Configurable PCI BDFs for Devices](#configurable-pci-bdfs-for-devices)
+    - [AIO Block Backend `write_zeroes` and `punch_hole` Support](#aio-block-backend-write_zeroes-and-punch_hole-support)
+    - [Asynchronous QCOW2 Backend with `io_uring`](#asynchronous-qcow2-backend-with-io_uring)
+    - [Generic `vhost-user` Device Support](#generic-vhost-user-device-support)
+    - [Core Scheduling for vCPU Threads](#core-scheduling-for-vcpu-threads)
+    - [Snapshot/Restore and Live Migration Improvements](#snapshotrestore-and-live-migration-improvements)
+    - [New Command-Line and API Options](#new-command-line-and-api-options)
+    - [MSHV Support Improvements](#mshv-support-improvements)
+    - [Deprecations](#deprecations)
+    - [Notable Bug Fixes](#notable-bug-fixes)
+    - [Contributors](#contributors)
+- [v51.0](#v510)
+    - [Security Fixes](#security-fixes-1)
     - [Significant QCOW2 v3 Improvements](#significant-qcow2-v3-improvements)
     - [ACPI Generic Initiator Support](#acpi-generic-initiator-support)
     - [Block Device DISCARD and WRITE_ZEROES Support](#block-device-discard-and-write_zeroes-support)
     - [Notable Performance Improvements](#notable-performance-improvements)
-    - [MSHV Support Improvements](#mshv-support-improvements)
-    - [Notable Bug Fixes](#notable-bug-fixes)
-    - [Contributors](#contributors)
+    - [MSHV Support Improvements](#mshv-support-improvements-1)
+    - [Notable Bug Fixes](#notable-bug-fixes-1)
+    - [Contributors](#contributors-1)
 - [v50.0](#v500)
     - [Configurable Nested Virtualization Option on x86_64](#configurable-nested-virtualization-option-on-x86_64)
     - [Compression Support for QCOW2](#compression-support-for-qcow2)
@@ -15,14 +32,14 @@
     - [Developer Experience Improvements](#developer-experience-improvements)
     - [Improved File-level Locking Support](#improved-file-level-locking-support)
     - [Logging Improvements](#logging-improvements)
-    - [Notable Bug Fixes](#notable-bug-fixes-1)
-    - [Contributors](#contributors-1)
-- [v49.0](#v490)
-    - [MSHV Support Improvements](#mshv-support-improvements-1)
-    - [Logging Improvements](#logging-improvements-1)
-    - [Removed Default IP and Mask for `virtio-net` Devices](#removed-default-ip-and-mask-for-virtio-net-devices)
     - [Notable Bug Fixes](#notable-bug-fixes-2)
     - [Contributors](#contributors-2)
+- [v49.0](#v490)
+    - [MSHV Support Improvements](#mshv-support-improvements-2)
+    - [Logging Improvements](#logging-improvements-1)
+    - [Removed Default IP and Mask for `virtio-net` Devices](#removed-default-ip-and-mask-for-virtio-net-devices)
+    - [Notable Bug Fixes](#notable-bug-fixes-3)
+    - [Contributors](#contributors-3)
 - [v48.0](#v480)
     - [Experimental `fw_cfg` Device Support](#experimental-fw_cfg-device-support)
     - [Experimental `ivshmem` Device Support](#experimental-ivshmem-device-support)
@@ -33,62 +50,62 @@
     - [Updated Documentation on Windows Guest Support](#updated-documentation-on-windows-guest-support)
     - [Policy on AI Generated Code](#policy-on-ai-generated-code)
     - [Removed SGX Support](#removed-sgx-support)
-    - [Notable Bug Fixes](#notable-bug-fixes-3)
-    - [Contributors](#contributors-3)
+    - [Notable Bug Fixes](#notable-bug-fixes-4)
+    - [Contributors](#contributors-4)
 - [v47.0](#v470)
     - [Block Device Error Reporting to the Guest](#block-device-error-reporting-to-the-guest)
     - [Nice Error Messages on Exit](#nice-error-messages-on-exit)
     - [Alphabetically Sorted CLI Options for ch-remote](#alphabetically-sorted-cli-options-for-ch-remote)
-    - [Notable Bug Fixes](#notable-bug-fixes-4)
-    - [Deprecations](#deprecations)
-    - [Contributors](#contributors-4)
+    - [Notable Bug Fixes](#notable-bug-fixes-5)
+    - [Deprecations](#deprecations-1)
+    - [Contributors](#contributors-5)
 - [v46.0](#v460)
     - [File-level Locking Support with `--disk`](#file-level-locking-support-with---disk)
     - [Improved Error Reporting with VM Resizing](#improved-error-reporting-with-vm-resizing)
     - [IPv6 Address Support with `--net`](#ipv6-address-support-with---net)
     - [Experimental AArch64 Support with the MSHV Hypervisor](#experimental-aarch64-support-with-the-mshv-hypervisor)
     - [Deprecated SGX Support](#deprecated-sgx-support)
-    - [Notable Bug Fixes](#notable-bug-fixes-5)
-    - [Contributors](#contributors-5)
+    - [Notable Bug Fixes](#notable-bug-fixes-6)
+    - [Contributors](#contributors-6)
 - [v45.0](#v450)
     - [Experimental `riscv64` Architecture Support](#experimental-riscv64-architecture-support)
     - [Alphabetically Sorted CLI Options](#alphabetically-sorted-cli-options)
     - [Improved Downtime of VM Live Migration](#improved-downtime-of-vm-live-migration)
-    - [Notable Bug Fixes](#notable-bug-fixes-6)
-    - [Contributors](#contributors-6)
+    - [Notable Bug Fixes](#notable-bug-fixes-7)
+    - [Contributors](#contributors-7)
 - [v44.0](#v440)
     - [Configurable `virtio-iommu` Address Width](#configurable-virtio-iommu-address-width)
     - [Notable Performance Improvements](#notable-performance-improvements-2)
     - [New Fuzzers](#new-fuzzers)
-    - [Notable Bug Fixes](#notable-bug-fixes-7)
-    - [Contributors](#contributors-7)
+    - [Notable Bug Fixes](#notable-bug-fixes-8)
+    - [Contributors](#contributors-8)
 - [v43.0](#v430)
     - [Live Migration over TCP Connections](#live-migration-over-tcp-connections)
     - [Notable Performance Improvements](#notable-performance-improvements-3)
-    - [Notable Bug Fixes](#notable-bug-fixes-8)
-    - [Contributors](#contributors-8)
+    - [Notable Bug Fixes](#notable-bug-fixes-9)
+    - [Contributors](#contributors-9)
 - [v42.0](#v420)
     - [SVE/SVE2 Support on AArch64](#svesve2-support-on-aarch64)
-    - [Notable Bug Fixes](#notable-bug-fixes-9)
+    - [Notable Bug Fixes](#notable-bug-fixes-10)
     - [Sponsorships](#sponsorships)
-    - [Contributors](#contributors-9)
+    - [Contributors](#contributors-10)
 - [v41.0](#v410)
     - [Experimental "Pvmemcontrol" Support](#experimental-pvmemcontrol-support)
     - [Sandboxing With Landlock Support](#sandboxing-with-landlock-support)
     - [Notable Performance Improvements](#notable-performance-improvements-4)
-    - [Notable Bug Fixes](#notable-bug-fixes-10)
-    - [Contributors](#contributors-10)
-- [v40.0](#v400)
-    - [Support for Restoring File Descriptor Backed Network Devices](#support-for-restoring-file-descriptor-backed-network-devices)
     - [Notable Bug Fixes](#notable-bug-fixes-11)
     - [Contributors](#contributors-11)
+- [v40.0](#v400)
+    - [Support for Restoring File Descriptor Backed Network Devices](#support-for-restoring-file-descriptor-backed-network-devices)
+    - [Notable Bug Fixes](#notable-bug-fixes-12)
+    - [Contributors](#contributors-12)
 - [v39.0](#v390)
     - [Variable Sizing of PCI Apertures for Segments](#variable-sizing-of-pci-apertures-for-segments)
     - [Direct Booting with bzImages](#direct-booting-with-bzimages)
     - [Support for NVIDIA GPUDirect P2P Support](#support-for-nvidia-gpudirect-p2p-support)
     - [Guest NMI Injection Support](#guest-nmi-injection-support)
-    - [Notable Bug Fixes](#notable-bug-fixes-12)
-    - [Contributors](#contributors-12)
+    - [Notable Bug Fixes](#notable-bug-fixes-13)
+    - [Contributors](#contributors-13)
 - [v38.0](#v380)
     - [Group Rate Limiter on Block Devices](#group-rate-limiter-on-block-devices)
     - [CPU Pinning Support for Block Device Worker Thread](#cpu-pinning-support-for-block-device-worker-thread)
@@ -96,16 +113,16 @@
     - [New 'debug-console' Device](#new-debug-console-device)
     - [Improved VFIO Device Support](#improved-vfio-device-support)
     - [Extended CPU Affinity Support](#extended-cpu-affinity-support)
-    - [Notable Bug Fixes](#notable-bug-fixes-13)
-    - [Contributors](#contributors-13)
+    - [Notable Bug Fixes](#notable-bug-fixes-14)
+    - [Contributors](#contributors-14)
 - [v37.0](#v370)
     - [Long Term Support (LTS) Release](#long-term-support-lts-release)
     - [Multiple PCI segments Support for 32-bit VFIO devices](#multiple-pci-segments-support-for-32-bit-vfio-devices)
     - [Configurable Named TAP Devices](#configurable-named-tap-devices)
     - [TTY Output from Both Serial Device and Virtio Console](#tty-output-from-both-serial-device-and-virtio-console)
     - [Faster VM Restoration from Snapshots](#faster-vm-restoration-from-snapshots)
-    - [Notable Bug Fixes](#notable-bug-fixes-14)
-    - [Contributors](#contributors-14)
+    - [Notable Bug Fixes](#notable-bug-fixes-15)
+    - [Contributors](#contributors-15)
 - [v36.0](#v360)
     - [Command Line Changes](#command-line-changes)
     - [Enabled Features Reported via API Endpoint and CLI](#enabled-features-reported-via-api-endpoint-and-cli)
@@ -114,31 +131,31 @@
     - [Unix Socket Backend for Serial Port](#unix-socket-backend-for-serial-port)
     - [AIO Backend for Block Devices](#aio-backend-for-block-devices)
     - [Documentation Improvements](#documentation-improvements)
-    - [Notable Bug Fixes](#notable-bug-fixes-15)
-    - [Contributors](#contributors-15)
+    - [Notable Bug Fixes](#notable-bug-fixes-16)
+    - [Contributors](#contributors-16)
 - [v35.0](#v350)
     - [`virtio-vsock` Support for Linux Guest Kernel v6.3+](#virtio-vsock-support-for-linux-guest-kernel-v63)
     - [User Specified Serial Number for `virtio-block`](#user-specified-serial-number-for-virtio-block)
     - [vCPU TSC Frequency Included in Migration State](#vcpu-tsc-frequency-included-in-migration-state)
-    - [Notable Bug Fixes](#notable-bug-fixes-16)
-    - [Contributors](#contributors-16)
+    - [Notable Bug Fixes](#notable-bug-fixes-17)
+    - [Contributors](#contributors-17)
 - [v34.0](#v340)
     - [Paravirtualised Panic Device Support](#paravirtualised-panic-device-support)
     - [Improvements to VM Core Dump](#improvements-to-vm-core-dump)
     - [QCOW2 Support for Backing Files](#qcow2-support-for-backing-files)
     - [Minimum Host Kernel Bump](#minimum-host-kernel-bump)
-    - [Notable Bug Fixes](#notable-bug-fixes-17)
-    - [Contributors](#contributors-17)
+    - [Notable Bug Fixes](#notable-bug-fixes-18)
+    - [Contributors](#contributors-18)
 - [v33.0](#v330)
     - [D-Bus based API](#d-bus-based-api)
     - [Expose Host CPU Cache Details for AArch64](#expose-host-cpu-cache-details-for-aarch64)
-    - [Notable Bug Fixes](#notable-bug-fixes-18)
-    - [Contributors](#contributors-18)
+    - [Notable Bug Fixes](#notable-bug-fixes-19)
+    - [Contributors](#contributors-19)
 - [v32.0](#v320)
     - [Increased PCI Segment Limit](#increased-pci-segment-limit)
     - [API Changes](#api-changes)
-    - [Notable Bug Fixes](#notable-bug-fixes-19)
-    - [Contributors](#contributors-19)
+    - [Notable Bug Fixes](#notable-bug-fixes-20)
+    - [Contributors](#contributors-20)
 - [v31.1](#v311)
 - [v31.0](#v310)
     - [Update to Latest `acpi_tables`](#update-to-latest-acpi_tables)
@@ -146,28 +163,28 @@
     - [Improvements on Console `SIGWINCH` Handler](#improvements-on-console-sigwinch-handler)
     - [Remove Directory Support from `MemoryZoneConfig::file`](#remove-directory-support-from-memoryzoneconfigfile)
     - [Documentation Improvements](#documentation-improvements-1)
-    - [Notable Bug Fixes](#notable-bug-fixes-20)
-    - [Contributors](#contributors-20)
+    - [Notable Bug Fixes](#notable-bug-fixes-21)
+    - [Contributors](#contributors-21)
 - [v30.0](#v300)
     - [Command Line Changes for Reduced Binary Size](#command-line-changes-for-reduced-binary-size)
     - [Basic vfio-user Server Support](#basic-vfio-user-server-support)
     - [Heap Profiling Support](#heap-profiling-support)
     - [Documentation Improvements](#documentation-improvements-2)
-    - [Notable Bug Fixes](#notable-bug-fixes-21)
-    - [Contributors](#contributors-21)
+    - [Notable Bug Fixes](#notable-bug-fixes-22)
+    - [Contributors](#contributors-22)
 - [v28.2](#v282)
 - [v29.0](#v290)
     - [Release Binary Supports Both MSHV and KVM](#release-binary-supports-both-mshv-and-kvm)
-    - [Snapshot/Restore and Live Migration Improvements](#snapshotrestore-and-live-migration-improvements)
+    - [Snapshot/Restore and Live Migration Improvements](#snapshotrestore-and-live-migration-improvements-1)
     - [Heap Allocation Improvements](#heap-allocation-improvements)
     - [`ch-remote` Improvements](#ch-remote-improvements)
     - [`AArch64` Documentation Integration](#aarch64-documentation-integration)
     - [`virtio-block` Counters Enhancement](#virtio-block-counters-enhancement)
     - [TCP Offload Control](#tcp-offload-control)
-    - [Notable Bug Fixes](#notable-bug-fixes-22)
+    - [Notable Bug Fixes](#notable-bug-fixes-23)
     - [Removals](#removals)
-    - [Deprecations](#deprecations-1)
-    - [Contributors](#contributors-22)
+    - [Deprecations](#deprecations-2)
+    - [Contributors](#contributors-23)
 - [v28.1](#v281)
 - [v28.0](#v280)
     - [Community Engagement (Reminder)](#community-engagement-reminder)
@@ -175,9 +192,9 @@
     - [Virtualised TPM Support](#virtualised-tpm-support)
     - [Transparent Huge Page Support](#transparent-huge-page-support)
     - [README Quick Start Improved](#readme-quick-start-improved)
-    - [Notable Bug Fixes](#notable-bug-fixes-23)
+    - [Notable Bug Fixes](#notable-bug-fixes-24)
     - [Removals](#removals-1)
-    - [Contributors](#contributors-23)
+    - [Contributors](#contributors-24)
 - [v27.0](#v270)
     - [Community Engagement](#community-engagement)
     - [Prebuilt Packages](#prebuilt-packages)
@@ -186,41 +203,41 @@
     - [Simplified Build Feature Flags](#simplified-build-feature-flags)
     - [Asynchronous Kernel Loading](#asynchronous-kernel-loading)
     - [GDB Support for AArch64](#gdb-support-for-aarch64)
-    - [Notable Bug Fixes](#notable-bug-fixes-24)
-    - [Deprecations](#deprecations-2)
-    - [Contributors](#contributors-24)
+    - [Notable Bug Fixes](#notable-bug-fixes-25)
+    - [Deprecations](#deprecations-3)
+    - [Contributors](#contributors-25)
 - [v26.0](#v260)
     - [SMBIOS Improvements via `--platform`](#smbios-improvements-via---platform)
     - [Unified Binary MSHV and KVM Support](#unified-binary-mshv-and-kvm-support)
-    - [Notable Bug Fixes](#notable-bug-fixes-25)
-    - [Deprecations](#deprecations-3)
+    - [Notable Bug Fixes](#notable-bug-fixes-26)
+    - [Deprecations](#deprecations-4)
     - [Removals](#removals-2)
-    - [Contributors](#contributors-25)
+    - [Contributors](#contributors-26)
 - [v25.0](#v250)
     - [`ch-remote` Improvements](#ch-remote-improvements-1)
     - [VM "Coredump" Support](#vm-coredump-support)
-    - [Notable Bug Fixes](#notable-bug-fixes-26)
+    - [Notable Bug Fixes](#notable-bug-fixes-27)
     - [Removals](#removals-3)
-    - [Contributors](#contributors-26)
+    - [Contributors](#contributors-27)
 - [v24.0](#v240)
     - [Bypass Mode for `virtio-iommu`](#bypass-mode-for-virtio-iommu)
     - [Ensure Identifiers Uniqueness](#ensure-identifiers-uniqueness)
     - [Sparse Mmap support](#sparse-mmap-support)
     - [Expose Platform Serial Number](#expose-platform-serial-number)
-    - [Notable Bug Fixes](#notable-bug-fixes-27)
+    - [Notable Bug Fixes](#notable-bug-fixes-28)
     - [Notable Improvements](#notable-improvements)
-    - [Deprecations](#deprecations-4)
+    - [Deprecations](#deprecations-5)
     - [New on the Website](#new-on-the-website)
-    - [Contributors](#contributors-27)
+    - [Contributors](#contributors-28)
 - [v23.1](#v231)
 - [v23.0](#v230)
     - [vDPA Support](#vdpa-support)
     - [Updated OS Support list](#updated-os-support-list)
     - [`AArch64` Memory Map Improvements](#aarch64-memory-map-improvements)
     - [`AMX` Support](#amx-support)
-    - [Notable Bug Fixes](#notable-bug-fixes-28)
-    - [Deprecations](#deprecations-5)
-    - [Contributors](#contributors-28)
+    - [Notable Bug Fixes](#notable-bug-fixes-29)
+    - [Deprecations](#deprecations-6)
+    - [Contributors](#contributors-29)
 - [v22.1](#v221)
 - [v22.0](#v220)
     - [GDB Debug Stub Support](#gdb-debug-stub-support)
@@ -231,13 +248,13 @@
     - [PMU Support for AArch64](#pmu-support-for-aarch64)
     - [Documentation Under CC-BY-4.0 License](#documentation-under-cc-by-40-license)
     - [Deprecation of "Classic" `virtiofsd`](#deprecation-of-classic-virtiofsd)
-    - [Notable Bug Fixes](#notable-bug-fixes-29)
-    - [Contributors](#contributors-29)
+    - [Notable Bug Fixes](#notable-bug-fixes-30)
+    - [Contributors](#contributors-30)
 - [v21.0](#v210)
     - [Efficient Local Live Migration (for Live Upgrade)](#efficient-local-live-migration-for-live-upgrade)
     - [Recommended Kernel is Now 5.15](#recommended-kernel-is-now-515)
-    - [Notable Bug fixes](#notable-bug-fixes-30)
-    - [Contributors](#contributors-30)
+    - [Notable Bug fixes](#notable-bug-fixes-31)
+    - [Contributors](#contributors-31)
 - [v20.2](#v202)
 - [v20.1](#v201)
 - [v20.0](#v200)
@@ -246,8 +263,8 @@
     - [Improved VFIO support](#improved-vfio-support)
     - [Safer code](#safer-code)
     - [Extended documentation](#extended-documentation)
-    - [Notable bug fixes](#notable-bug-fixes-31)
-    - [Contributors](#contributors-31)
+    - [Notable bug fixes](#notable-bug-fixes-32)
+    - [Contributors](#contributors-32)
 - [v19.0](#v190)
     - [Improved PTY handling for serial and `virtio-console`](#improved-pty-handling-for-serial-and-virtio-console)
     - [PCI boot time optimisations](#pci-boot-time-optimisations)
@@ -255,8 +272,8 @@
     - [Live migration enhancements](#live-migration-enhancements)
     - [`virtio-mem` support with `vfio-user`](#virtio-mem-support-with-vfio-user)
     - [AArch64 for `virtio-iommu`](#aarch64-for-virtio-iommu)
-    - [Notable bug fixes](#notable-bug-fixes-32)
-    - [Contributors](#contributors-32)
+    - [Notable bug fixes](#notable-bug-fixes-33)
+    - [Contributors](#contributors-33)
 - [v18.0](#v180)
     - [Experimental User Device (`vfio-user`) support](#experimental-user-device-vfio-user-support)
     - [Migration support for `vhost-user` devices](#migration-support-for-vhost-user-devices)
@@ -266,31 +283,31 @@
     - [Live migration on MSHV hypervisor](#live-migration-on-mshv-hypervisor)
     - [AArch64 CPU topology support](#aarch64-cpu-topology-support)
     - [Power button support on AArch64](#power-button-support-on-aarch64)
-    - [Notable bug fixes](#notable-bug-fixes-33)
-    - [Contributors](#contributors-33)
+    - [Notable bug fixes](#notable-bug-fixes-34)
+    - [Contributors](#contributors-34)
 - [v17.0](#v170)
     - [ARM64 NUMA support using ACPI](#arm64-numa-support-using-acpi)
     - [`Seccomp` support for MSHV backend](#seccomp-support-for-mshv-backend)
     - [Hotplug of `macvtap` devices](#hotplug-of-macvtap-devices)
     - [Improved SGX support](#improved-sgx-support)
     - [Inflight tracking for `vhost-user` devices](#inflight-tracking-for-vhost-user-devices)
-    - [Notable bug fixes](#notable-bug-fixes-34)
-    - [Contributors](#contributors-34)
+    - [Notable bug fixes](#notable-bug-fixes-35)
+    - [Contributors](#contributors-35)
 - [v16.0](#v160)
     - [Improved live migration support](#improved-live-migration-support)
     - [Improved `vhost-user` support](#improved-vhost-user-support)
     - [ARM64 ACPI and UEFI support](#arm64-acpi-and-uefi-support)
-    - [Notable bug fixes](#notable-bug-fixes-35)
+    - [Notable bug fixes](#notable-bug-fixes-36)
     - [Removed functionality](#removed-functionality)
-    - [Contributors](#contributors-35)
+    - [Contributors](#contributors-36)
 - [v15.0](#v150)
     - [Version numbering and stability guarantees](#version-numbering-and-stability-guarantees)
     - [Network device rate limiting](#network-device-rate-limiting)
     - [Support for runtime control of `virtio-net` guest offload](#support-for-runtime-control-of-virtio-net-guest-offload)
     - [`--api-socket` supports file descriptor parameter](#--api-socket-supports-file-descriptor-parameter)
     - [Bug fixes](#bug-fixes)
-    - [Deprecations](#deprecations-6)
-    - [Contributors](#contributors-36)
+    - [Deprecations](#deprecations-7)
+    - [Contributors](#contributors-37)
 - [v0.14.1](#v0141)
 - [v0.14.0](#v0140)
     - [Structured event monitoring](#structured-event-monitoring)
@@ -299,8 +316,8 @@
     - [Updated hotplug documentation](#updated-hotplug-documentation)
     - [PTY control for serial and `virtio-console`](#pty-control-for-serial-and-virtio-console)
     - [Block device rate limiting](#block-device-rate-limiting)
-    - [Deprecations](#deprecations-7)
-    - [Contributors](#contributors-37)
+    - [Deprecations](#deprecations-8)
+    - [Contributors](#contributors-38)
 - [v0.13.0](#v0130)
     - [Wider VFIO device support](#wider-vfio-device-support)
     - [Improved huge page support](#improved-huge-page-support)
@@ -308,13 +325,13 @@
     - [VHD disk image support](#vhd-disk-image-support)
     - [Improved Virtio device threading](#improved-virtio-device-threading)
     - [Clean shutdown support via synthetic power button](#clean-shutdown-support-via-synthetic-power-button)
-    - [Contributors](#contributors-38)
+    - [Contributors](#contributors-39)
 - [v0.12.0](#v0120)
     - [ARM64 enhancements](#arm64-enhancements)
     - [Removal of `vhost-user-net` and `vhost-user-block` self spawning](#removal-of-vhost-user-net-and-vhost-user-block-self-spawning)
     - [Migration of `vhost-user-fs` backend](#migration-of-vhost-user-fs-backend)
     - [Enhanced "info" API](#enhanced-info-api)
-    - [Contributors](#contributors-39)
+    - [Contributors](#contributors-40)
 - [v0.11.0](#v0110)
     - [`io_uring` support by default for `virtio-block`](#io_uring-support-by-default-for-virtio-block)
     - [Windows Guest Support](#windows-guest-support)
@@ -326,15 +343,15 @@
     - [Default Log Level Changed](#default-log-level-changed)
     - [New `--balloon` Parameter Added](#new---balloon-parameter-added)
     - [Experimental `virtio-watchdog` Support](#experimental-virtio-watchdog-support)
-    - [Notable Bug Fixes](#notable-bug-fixes-36)
-    - [Contributors](#contributors-40)
+    - [Notable Bug Fixes](#notable-bug-fixes-37)
+    - [Contributors](#contributors-41)
 - [v0.10.0](#v0100)
     - [`virtio-block` Support for Multiple Descriptors](#virtio-block-support-for-multiple-descriptors)
     - [Memory Zones](#memory-zones)
     - [`Seccomp` Sandbox Improvements](#seccomp-sandbox-improvements)
     - [Preliminary KVM HyperV Emulation Control](#preliminary-kvm-hyperv-emulation-control)
-    - [Notable Bug Fixes](#notable-bug-fixes-37)
-    - [Contributors](#contributors-41)
+    - [Notable Bug Fixes](#notable-bug-fixes-38)
+    - [Contributors](#contributors-42)
 - [v0.9.0](#v090)
     - [`io_uring` Based Block Device Support](#io_uring-based-block-device-support)
     - [Block and Network Device Statistics](#block-and-network-device-statistics)
@@ -347,17 +364,17 @@
     - [Enhancements to ARM64 Support](#enhancements-to-arm64-support)
     - [Intel SGX Support](#intel-sgx-support)
     - [`Seccomp` Sandbox Improvements](#seccomp-sandbox-improvements-1)
-    - [Notable Bug Fixes](#notable-bug-fixes-38)
-    - [Contributors](#contributors-42)
+    - [Notable Bug Fixes](#notable-bug-fixes-39)
+    - [Contributors](#contributors-43)
 - [v0.8.0](#v080)
     - [Experimental Snapshot and Restore Support](#experimental-snapshot-and-restore-support)
     - [Experimental ARM64 Support](#experimental-arm64-support)
     - [Support for Using 5-level Paging in Guests](#support-for-using-5-level-paging-in-guests)
     - [Virtio Device Interrupt Suppression for Network Devices](#virtio-device-interrupt-suppression-for-network-devices)
     - [`vhost_user_fs` Improvements](#vhost_user_fs-improvements)
-    - [Notable Bug Fixes](#notable-bug-fixes-39)
+    - [Notable Bug Fixes](#notable-bug-fixes-40)
     - [Command Line and API Changes](#command-line-and-api-changes)
-    - [Contributors](#contributors-43)
+    - [Contributors](#contributors-44)
 - [v0.7.0](#v070)
     - [Block, Network, Persistent Memory (PMEM), VirtioFS and Vsock hotplug](#block-network-persistent-memory-pmem-virtiofs-and-vsock-hotplug)
     - [Alternative `libc` Support](#alternative-libc-support)
@@ -367,14 +384,14 @@
     - [`Seccomp` Sandboxing](#seccomp-sandboxing)
     - [Updated Distribution Support](#updated-distribution-support)
     - [Command Line and API Changes](#command-line-and-api-changes-1)
-    - [Contributors](#contributors-44)
+    - [Contributors](#contributors-45)
 - [v0.6.0](#v060)
     - [Directly Assigned Devices Hotplug](#directly-assigned-devices-hotplug)
     - [Shared Filesystem Improvements](#shared-filesystem-improvements)
     - [Block and Networking IO Self Offloading](#block-and-networking-io-self-offloading)
     - [Command Line Interface](#command-line-interface)
     - [PVH Boot](#pvh-boot)
-    - [Contributors](#contributors-45)
+    - [Contributors](#contributors-46)
 - [v0.5.1](#v051)
 - [v0.5.0](#v050)
     - [Virtual Machine Dynamic Resizing](#virtual-machine-dynamic-resizing)
@@ -382,7 +399,7 @@
     - [New Interrupt Management Framework](#new-interrupt-management-framework)
     - [Development Tools](#development-tools)
     - [Kata Containers Integration](#kata-containers-integration)
-    - [Contributors](#contributors-46)
+    - [Contributors](#contributors-47)
 - [v0.4.0](#v040)
     - [Dynamic virtual CPUs addition](#dynamic-virtual-cpus-addition)
     - [Programmatic firmware tables generation](#programmatic-firmware-tables-generation)
@@ -391,7 +408,7 @@
     - [Userspace IOAPIC by default](#userspace-ioapic-by-default)
     - [PCI BAR reprogramming](#pci-bar-reprogramming)
     - [New `cloud-hypervisor` organization](#new-cloud-hypervisor-organization)
-    - [Contributors](#contributors-47)
+    - [Contributors](#contributors-48)
 - [v0.3.0](#v030)
     - [Block device offloading](#block-device-offloading)
     - [Network device backend](#network-device-backend)
@@ -417,6 +434,290 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+# v52.0
+
+This release has been tracked in [v52.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/6?filterQuery=release%3A%22Release+52%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
+
+### Security Fixes
+
+This release fixes a use-after-free vulnerability in the
+`virtio-block` async I/O completion path (#8220). Details can be found
+in GHSA-f47p-p25q-83rh (CVE-2026-45782).
+
+### Confidential VM Support: KVM SEV-SNP
+
+AMD SEV-SNP confidential VMs can now be launched on KVM in addition to
+MSHV. Cloud Hypervisor uses `guest_memfd` to back private memory and
+loads an IGVM-packaged firmware (e.g. Oak stage0) to bring up an
+SEV-SNP guest on real hardware (#7942).
+
+Measured-boot support has been completed for KVM SEV-SNP guests,
+bringing parity with the QEMU launch flow: the kernel, command line,
+and initrd are reflected in the launch measurement, and a signed SNP
+ID block can be passed so the guest (or a remote attestor) can verify
+the launch (#8123).
+
+### VFIO Device Passthrough via `iommufd` and `vfio-cdev`
+
+Cloud Hypervisor now supports the modern Linux VFIO device-access
+model based on the `iommufd` subsystem and per-device `vfio-cdev`
+character devices (available since Linux v6.6). This unlocks the
+advanced IOMMU features exposed by modern hardware and enables fully
+accelerated IOMMU support inside the guest. The legacy
+`container/group`-based path continues to be supported (#7981).
+
+In addition, several VFIO/PCI improvements have landed:
+
+* A new `host_mmap_bars` option allows selective mapping of VFIO BARs
+  into the guest, so devices that expose registers that should not be
+  fast-pathed can be selectively trapped (#7991).
+* Sub-page VFIO BARs are now expanded to a full page for `mmap()`,
+  avoiding spurious failures on devices with small BARs (#7939).
+* `VfioMsix::cap` and `VfioMsix::bar` are now kept synchronized to
+  avoid stale MSI-X state (#7993).
+* VFIO MMIO regions are now reliably cleared in `DeviceManager::drop`
+  (#8063).
+* Deferred PCI BAR reprogramming state is now part of the saved
+  device state (#7945).
+* GSIs for MSI/MSI-X interrupt vectors are now allocated lazily,
+  reducing GSI consumption for VMs with many devices (#7940).
+
+### Multi-Connection TCP Live Migration
+
+The `send-migration` HTTP command now accepts a `connections`
+parameter (defaults to `1`) that controls how many parallel TCP
+connections are used for the live migration data transfer. On
+servers with high-bandwidth (e.g. 100G) network links, multiple
+connections significantly increase migration throughput (#7669).
+
+### Userfaultfd Demand-Paged Snapshot Restore
+
+A new `memory_restore_mode` option on the restore path allows guest
+memory to be populated lazily via `userfaultfd` instead of reading
+the entire memory snapshot before the VM resumes. This dramatically
+reduces restore-to-resume latency for large guests, at the cost of
+faulting pages in on demand after resume (#7800).
+
+### Configurable PCI BDFs for Devices
+
+Users now can configure the PCI slot/device number, the middle
+part of the PCI BDF, through the CLI and API; bus and function
+remain fixed at `0`. This covers virtio devices (except balloon),
+VFIO devices, vfio-user device, and generic vhost-user devices
+(#8175, #7965, #8174, #8163).
+
+### AIO Block Backend `write_zeroes` and `punch_hole` Support
+
+The AIO block backend now implements `write_zeroes` and `punch_hole`,
+fixing a v51.0 regression that affected guests on hosts with
+`io_uring` disabled (e.g. RHEL 9 / CentOS Stream 9, where
+`kernel.io_uring_disabled=2` is a common hardening default)
+(#7817).
+
+### Asynchronous QCOW2 Backend with `io_uring`
+
+A new `QcowDiskAsync` backend uses `io_uring` for data I/O on QCOW2
+images and is automatically selected when `io_uring` is available
+(falling back to the synchronous backend otherwise). Each virtio
+queue gets its own ring and its own duplicated file descriptor,
+enabling parallel data I/O across queues; QCOW2 metadata is shared
+behind an `Arc<RwLock<_>>` (#7882).
+
+### Generic `vhost-user` Device Support
+
+A new generic `vhost-user-generic` device type has been added.
+All information about the device (number of queues, queue size,
+feature bits, etc.) is provided to Cloud Hypervisor via the
+command line or API, allowing arbitrary vhost-user backends to be
+attached without device-type-specific support in the VMM (#7221).
+
+### Core Scheduling for vCPU Threads
+
+A new `core_scheduling` option on `--cpus` controls how vCPU threads
+are placed on SMT siblings via the kernel's core-scheduling feature,
+which is useful for mitigating cross-thread side-channel attacks
+without disabling SMT outright. Three modes are supported: `vm`
+(default — all vCPU threads share one cookie), one-cookie-per-vCPU,
+and a configurable grouping mode (#7747).
+
+### Snapshot/Restore and Live Migration Improvements
+
+* Snapshot and restore now treat the memory backing file as a sparse
+  file: on snapshot the backing FD is sought with
+  `SEEK_DATA`/`SEEK_HOLE` to skip unallocated regions, and on restore
+  the on-disk file is read as sparse. Pages the guest never touched
+  remain as holes in the backing file, substantially reducing both
+  snapshot size and restore time (#8113).
+* Paused VMs can now be migrated (#8099).
+* User-configurable downtime and timeout parameters for live
+  migration (#7835), and improved downtime observability (#7979).
+* A new option to automatically resume the VM on restore, useful
+  when restoring from the VMM command line without an API socket
+  (#7857).
+* Snapshot/restore support for `vhost-user` devices has been filled
+  out (#7908), including migration support for `virtio-fs` (#7937).
+* Vsock connections are now reset on snapshot restore to avoid stale
+  half-open connections on the guest side (#7958).
+* The KVM clock is now restored before vCPUs are resumed (#7932),
+  and `notify_guest_clock_paused` is called for Hyper-V guests
+  (#7933), eliminating clock jumps observed after restore.
+* `vhost-user` devices receive a guest interrupt on resume so that
+  in-flight I/O is not stalled across pause/resume (#7851), and
+  activated queue eventfds are signaled on resume for all virtio
+  devices (#8004).
+* `UFFDIO_WAKE` and `UFFD_FEATURE_MISSING_HUGETLBFS` are now handled
+  correctly (#8016).
+
+### New Command-Line and API Options
+
+* `--no-shutdown` keeps the VMM process running when the guest
+  triggers a shutdown. This is useful for higher-level management
+  layers that need full control over the VMM process (#8025).
+* fw_cfg now supports inline string items via
+  `--fw-cfg name=...,string=...`, matching QEMU's syntax (#7825).
+* A new per-zone `mergeable` option on `--memory-zone` lets KSM
+  merging be controlled per memory zone instead of only globally
+  (#7983).
+* Disk lock granularity is now configurable via `--disk` (#7763).
+* `--cpus threads_per_core` is now enforced to be at most two
+  (#8078), matching the hardware constraint.
+* `--log-format` controls the log output format, complementing
+  existing log-level controls (#8172). Wallclock log timestamps
+  now use UTC (#8193).
+* The HTTP API now logs error responses (#8181), and the
+  `user_devices` configuration is included in the OpenAPI spec
+  (#8072).
+
+### MSHV Support Improvements
+
+* `SVM_EXIT_CPUID`, `SVM_EXIT_MSR`, and `GHCB_MSR_TERM_REQ` handlers
+  have been added to the SEV-SNP exit path (#7934).
+* Guest MTRR MSRs are now preserved on KVM (#7944).
+* Nested-virtualization control fixes on AMD (#7783).
+
+### Deprecations
+
+Auto-detection of disk image types is now deprecated and will be
+removed in a future release. Specify the image type explicitly via
+the `--disk image_type=...` CLI option or the `image_type` field
+on `DiskConfig` in the HTTP/D-Bus API to avoid the deprecation
+warning (#8219).
+
+### Notable Bug Fixes
+
+* Fix a guest-triggerable VMM panic via an out-of-bounds
+  `queue_select` in the MSI-X vector access path on the virtio PCI
+  common config (#7918).
+* Saturate instead of underflowing on a malformed balloon `actual`
+  value reported by the guest (#7903).
+* IOMMU address translation now returns errors instead of panicking
+  on malformed guest input (#8023).
+* Several virtio device error paths now reset queues instead of
+  panicking or exiting the worker (#8128); additional device
+  manager paths avoid guest-induced panics (#8186).
+* Virtio barriers are now sized from the number of queues actually
+  activated by the guest, fixing pause hangs (#7881).
+* Spec compliance fixes for virtio device config layouts (#7805).
+  and other small spec deviations (#8066). Console descriptor-chain
+  processing has been fixed (#7802). dword writes to the MSI-X
+  control register are now handled (#7956).
+* PCI segment ACPI `_UID` values now match the segment ID (#7992).
+* Fix VHDX multiqueue data corruption (#7746).
+* Fix block-device resize-disk (#7948) and the writeback-mode
+  update flow (#7949).
+* Fix vdpa RX failure after device reset by always using base 0
+  (#7964).
+* Fix rebooting with landlock and a pty console (#7911).
+* Reject rate limiting with `vhost-user` (#8135).
+* Fix a deadlock between `CpuManager::pause()` and MMIO writes to
+  the ACPI CPU hotplug controller (#7990, #8092).
+* Cancel `vhost-user` reconnection if the device has been unplugged
+  (#8182).
+* Remove the API socket path when `start_vmm` fails (#8018).
+* Add missing ID validation for the virtio-rng device (#9a46affc3).
+* Fix UB in `MemoryRangeTable::read_from` (#7828) and `load_igvm()`
+  (#8129).
+* `memory_actual_size` reflects hot-plug state, removing a slow
+  recomputation path (#7969).
+* DIO alignment is now queried directly from the underlying file
+  rather than assumed (#7767).
+* QCOW2 metadata access is now thread-safe with `num_queues > 1`
+  (#7744).
+* Block devices unconditionally assume sparse support, matching
+  QEMU and avoiding a non-existent probe ioctl (#7757).
+* Multi-value CLI options now use `.action(ArgAction::Append)` so
+  that repeating an option appends rather than replacing (#7778).
+* AIO completions are batched in `next_completed_request` for the
+  block backend, reducing per-completion overhead (#7864).
+* Roll back the PCI BAR address on a failed `move_bar` so that an
+  out-of-range MMIO address programmed by the guest leaves the
+  device functional rather than crashing the VMM (#7950).
+* Fix O_DIRECT writes failing with `EINVAL` on the synchronous
+  QCOW2 backend (#8012).
+* Fix O_DIRECT reads failing with `EINVAL` on the async `io_uring`
+  QCOW2 read path (#8051).
+* Move QCOW2 compressed-cluster decompression out of the metadata
+  lock, removing a bottleneck for compressed images (#8061).
+* Clamp the balloon's reported range to its region before
+  processing unused pages (#8098).
+* Validate the requested balloon size against total guest RAM
+  (#8116).
+* Reject `--memory-zone` configurations that set both `mergeable`
+  and `shared` (#8126).
+* Disable sector 0 writes for autodetected VHD images (#8218).
+
+### Contributors
+
+Many thanks to everyone who has contributed to our release:
+
+* Alyssa Ross <hi@alyssa.is>
+* Anatol Belski <anbelski@linux.microsoft.com>
+* Andrei Vagin <avagin@google.com>
+* Anirudh Rayabharam <anrayabh@microsoft.com>
+* Bo Chen <bchen@crusoe.ai>
+* CMGS <ilskdw@gmail.com>
+* Changyuan Lyu <changyuanl@google.com>
+* Chinmoy <daschinmoyy21@gmail.com>
+* Damian Barabonkov <dbctl@pm.me>
+* Demi Marie Obenour <demiobenour@gmail.com>
+* Dylan Reid <dgreid@dylanreid.com>
+* Dylan Reid <dgreid@fb.com>
+* Emir Beganovic <beganovic.emir@gmail.com>
+* JP Kobryn <inwardvessel@gmail.com>
+* Jared White <git@jaredwhite.dev>
+* Julian Schindel <julian.schindel@cyberus-technology.de>
+* Julian Schindel <mail@arctic-alpaca.de>
+* Keith Adler <kadler@cloudflare.com>
+* Kevin Hui <kevinhui@meta.com>
+* Leander Kohler <leander.kohler@cyberus-technology.de>
+* Max Makarov <maxpain@linux.com>
+* Muminul Islam <muislam@microsoft.com>
+* Nguyen Dinh Phi <phind.uet@gmail.com>
+* Pascal Scholz <pascal.scholz@cyberus-technology.de>
+* Peter Oskolkov <posk@google.com>
+* Philipp Schuster <philipp.schuster@cyberus-technology.de>
+* Rob Bradford <rbradford@meta.com>
+* Roberto Campesato <render@metalabs.org>
+* Ruben Hakobyan <hruben@meta.com>
+* Saravanan D <saravanand@crusoe.ai>
+* Sebastian Eydam <sebastian.eydam@cyberus-technology.de>
+* Sebastian Walz <sebastian.walz@secunet.com>
+* Shayon Mukherjee <shayonj@gmail.com>
+* Souradeep <schakrabarti@microsoft.com>
+* Souradeep Chakrabarti <schakrabarti@microsoft.com>
+* Stepan Rabotkin <epicstyt@gmail.com>
+* Thomas Prescher <thomas.prescher@cyberus-technology.de>
+* Tobias Kässer <t.kaesser@gmail.com>
+* Victor Vieux <vieux@repl.it>
+* Vincent Thomas <vincent@v-thomas.com>
+* Wei Liu <liuwe@microsoft.com>
+* Zhiheng Tao <junchuan.tzh@antgroup.com>
+* dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
+* sohakpt <sohakpt@outlook.com>
+* wuxinyue <wuxinyue.wxy@antgroup.com>
 
 # v51.0
 
