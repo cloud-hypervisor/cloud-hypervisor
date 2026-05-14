@@ -235,6 +235,69 @@ struct ArchMemRegion {
     r_type: RegionType,
 }
 
+/// Dedicated guest-physical address region that hosts memory-device GPAs
+/// (virtio-pmem, virtio-mem zones, future pc-dimm-equivalents).
+///
+/// The region is anchored at a 1 GiB-aligned GPA immediately above guest
+/// RAM and sized either explicitly via `MemoryConfig::device_memory_size`
+/// or implicitly from the sum of declared `hotplug_size`/`pmem` headroom.
+/// This mirrors QEMU's `MachineState::device_memory` (see
+/// `hw/i386/pc.c::pc_get_device_memory_range`) and replaces the prior
+/// behaviour where pmem regions were placed at the top of the per-PCI-
+/// segment 64-bit MMIO window — that placement collided with guest
+/// kernel MAXMEM ceilings on hosts that advertise large `phys_bits`
+/// (e.g. 48 on bare-metal MSHV).
+///
+/// PCI64 BAR allocation continues to use the per-segment `mem64_allocator`
+/// and is unaffected by this region; the two windows are disjoint.
+#[allow(dead_code)] // TODO: wired up by subsequent commits in this series.
+pub(crate) struct DeviceMemoryRegion {
+    /// Inclusive base GPA of the region.
+    base: GuestAddress,
+    /// Size of the region in bytes.
+    size: u64,
+    /// Bottom-up first-fit allocator scoped to `[base, base+size)`.
+    allocator: Arc<Mutex<AddressAllocator>>,
+}
+
+#[allow(dead_code)] // TODO: wired up by subsequent commits in this series.
+impl DeviceMemoryRegion {
+    /// Construct a new region. `base` is expected to already be aligned to
+    /// `DEVICE_MEMORY_ALIGN`; callers should round up before invoking.
+    pub(crate) fn new(base: GuestAddress, size: u64) -> Result<Self, Error> {
+        let allocator =
+            AddressAllocator::new(base, size).ok_or(Error::CreateDeviceMemoryAllocator)?;
+        Ok(Self {
+            base,
+            size,
+            allocator: Arc::new(Mutex::new(allocator)),
+        })
+    }
+
+    pub(crate) fn base(&self) -> GuestAddress {
+        self.base
+    }
+
+    pub(crate) fn size(&self) -> u64 {
+        self.size
+    }
+
+    /// Inclusive last GPA of the region.
+    pub(crate) fn end(&self) -> GuestAddress {
+        self.base.unchecked_add(self.size.saturating_sub(1))
+    }
+
+    /// First GPA *above* the region (exclusive). Suitable as the base for
+    /// the next downstream window (e.g. PCI64 mem64 allocator).
+    pub(crate) fn top(&self) -> GuestAddress {
+        self.base.unchecked_add(self.size)
+    }
+
+    pub(crate) fn allocator(&self) -> Arc<Mutex<AddressAllocator>> {
+        Arc::clone(&self.allocator)
+    }
+}
+
 pub struct MemoryManager {
     boot_guest_memory: GuestMemoryMmap,
     guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
@@ -345,6 +408,10 @@ pub enum Error {
     /// Cannot create the system allocator
     #[error("Cannot create the system allocator")]
     CreateSystemAllocator,
+
+    /// Cannot create the device-memory region allocator
+    #[error("Cannot create the device-memory region allocator")]
+    CreateDeviceMemoryAllocator,
 
     /// Failed creating a new MmapRegion instance.
     #[cfg(target_arch = "x86_64")]
