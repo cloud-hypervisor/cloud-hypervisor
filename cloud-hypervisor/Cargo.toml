@@ -8,7 +8,7 @@ homepage = "https://github.com/cloud-hypervisor/cloud-hypervisor"
 license = "Apache-2.0 AND BSD-3-Clause"
 name = "cloud-hypervisor"
 rust-version.workspace = true
-version = "51.0.0"
+version = "52.0.0"
 
 [dependencies]
 anyhow = { workspace = true }
