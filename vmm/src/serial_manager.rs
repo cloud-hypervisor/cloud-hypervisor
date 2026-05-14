@@ -21,11 +21,13 @@ use devices::legacy::Pl011;
 use devices::legacy::Serial;
 use libc::EFD_NONBLOCK;
 use log::{error, info, warn};
+use seccompiler::{SeccompAction, apply_filter};
 use serial_buffer::SerialBuffer;
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::console_devices::ConsoleTransport;
+use crate::seccomp_filters::{Thread, get_seccomp_filter};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -84,6 +86,14 @@ pub enum Error {
     /// Cannot duplicate file descriptor
     #[error("Error duplicating file descriptor")]
     DupFd(#[source] io::Error),
+
+    /// Cannot create seccomp filter.
+    #[error("Error creating seccomp filter")]
+    CreateSeccompFilter(seccompiler::Error),
+
+    /// Cannot apply seccomp filter.
+    #[error("Error applying seccomp filter")]
+    ApplySeccompFilter(seccompiler::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -250,12 +260,19 @@ impl SerialManager {
         Ok(())
     }
 
-    pub fn start_thread(&mut self, exit_evt: EventFd) -> Result<()> {
+    pub fn start_thread(
+        &mut self,
+        exit_evt: EventFd,
+        seccomp_action: &SeccompAction,
+    ) -> Result<()> {
         // Don't allow this to be run if the handle exists
         if self.handle.is_some() {
             warn!("Tried to start multiple SerialManager threads, ignoring");
             return Ok(());
         }
+
+        let seccomp_filter = get_seccomp_filter(seccomp_action, Thread::SerialManager, None)
+            .map_err(Error::CreateSeccompFilter)?;
 
         let epoll_fd = self.epoll_fd.try_clone().map_err(Error::Epoll)?;
         let transport = self.transport.clone();
@@ -275,6 +292,11 @@ impl SerialManager {
             .name("serial-manager".to_string())
             .spawn(move || {
                 std::panic::catch_unwind(AssertUnwindSafe(move || {
+                    // Apply seccomp filter for serial manager thread.
+                    if !seccomp_filter.is_empty() {
+                        apply_filter(&seccomp_filter).map_err(Error::ApplySeccompFilter)?;
+                    }
+
                     let mut events =
                         [epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
 
