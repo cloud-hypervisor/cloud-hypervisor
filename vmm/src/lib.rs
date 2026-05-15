@@ -685,6 +685,18 @@ enum ReceiveMigrationState {
 }
 
 impl ReceiveMigrationState {
+    fn variant_name(&self) -> &'static str {
+        match self {
+            ReceiveMigrationState::Established => "Established",
+            ReceiveMigrationState::Started => "Started",
+            ReceiveMigrationState::MemoryFdsReceived(_) => "MemoryFdsReceived",
+            ReceiveMigrationState::Configured(_) => "Configured",
+            ReceiveMigrationState::StateReceived { .. } => "StateReceived",
+            ReceiveMigrationState::Completed => "Completed",
+            ReceiveMigrationState::Aborted => "Aborted",
+        }
+    }
+
     fn finished(&self) -> bool {
         matches!(
             self,
@@ -887,9 +899,9 @@ impl Vmm {
     ) -> std::result::Result<ReceiveMigrationState, MigratableError> {
         use ReceiveMigrationState::*;
 
-        let invalid_command = || {
+        let invalid_command = |state: &str, cmd: Command| {
             Err(MigratableError::MigrateReceive(anyhow!(
-                "Can't handle command in current state"
+                "Can't handle command {cmd:?} in current receive state {state}"
             )))
         };
 
@@ -927,22 +939,23 @@ impl Vmm {
             return Ok(Aborted);
         }
 
+        let state_name = state.variant_name();
         match state {
             Established => match req.command() {
                 Command::Start => Ok(Started),
-                _ => invalid_command(),
+                c => invalid_command(state_name, c),
             },
             Started => match req.command() {
                 Command::MemoryFd => recv_memory_fd(socket, Vec::new()).map(MemoryFdsReceived),
                 Command::Config => configure_vm(socket, Default::default()).map(Configured),
-                _ => invalid_command(),
+                c => invalid_command(state_name, c),
             },
             MemoryFdsReceived(memory_files) => match req.command() {
                 Command::MemoryFd => recv_memory_fd(socket, memory_files).map(MemoryFdsReceived),
                 Command::Config => {
                     configure_vm(socket, HashMap::from_iter(memory_files)).map(Configured)
                 }
-                _ => invalid_command(),
+                c => invalid_command(state_name, c),
             },
             Configured(mut config_data) => match req.command() {
                 // Memory commands use the main connection only in the single-connection case.
@@ -981,7 +994,7 @@ impl Vmm {
                         state_receive_begin,
                     })
                 }
-                _ => invalid_command(),
+                c => invalid_command(state_name, c),
             },
             StateReceived {
                 state_receive_begin,
@@ -1011,7 +1024,7 @@ impl Vmm {
                     );
                     Ok(Completed)
                 }
-                _ => invalid_command(),
+                c => invalid_command(state_name, c),
             },
             Completed | Aborted => {
                 unreachable!("Performed a step on the finished state machine")
