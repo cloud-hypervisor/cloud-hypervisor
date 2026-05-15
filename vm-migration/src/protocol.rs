@@ -111,19 +111,19 @@ use crate::bitpos_iterator::BitposIteratorExt;
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
 pub enum Command {
     #[default]
-    Invalid,
-    Start,
-    Config,
-    State,
-    Memory,
+    Invalid = 0,
+    Start = 1,
+    Config = 2,
+    State = 3,
+    Memory = 4,
     /// Finalizes the migration and resumes the VM on the destination.
     /// Sent when the source VM was running at migration time.
-    Complete,
-    Abandon,
-    MemoryFd,
+    Complete = 5,
+    Abandon = 6,
+    MemoryFd = 7,
     /// Finalizes the migration without resuming the VM on the destination.
     /// Sent when the source VM was paused at migration time.
-    CompletePaused,
+    CompletePaused = 8,
 }
 
 #[repr(C)]
