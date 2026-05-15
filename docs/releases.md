@@ -63,8 +63,8 @@ and then be considered EOL.
 + - Active release support
 E - EOL
 
-        2021                2022                2023 
-         |    |    |    |    |    |    |    |    | 
+        2021                2022                2023
+         |    |    |    |    |    |    |    |    |
 18.0     |    |    |  ++++++++E
 19.0     |    |    |    |++++++++E
 20.0     |    |    |    |   ++++++++E
@@ -79,25 +79,3 @@ E - EOL
 Snapshot/restore support is not compatible across `MAJOR` versions.
 Live migration support is not compatible across `MAJOR` versions.
 
-### LTS Release Cadence
-
-A regular release is promoted to LTS every 12 months. An LTS release is supported for 18 months. This gives a 6 months window for users to move to the new LTS.
-
-```
-+ - Active release support
-E - EOL
-
-        2022                2023               2024                 2025                2026
-         |    |    |    |    |    |    |    |    |    |    |    |    |    |    |    |    |
-23.0     |    |+++++++++++++++++++++++++++++E
-43.0     |    |    |    |    |    |+++++++++++++++++++++++++++++E
-63.0     |    |    |    |    |    |    |    |    |    |+++++++++++++++++++++++++++++E
-
-```
-
-### LTS Stability Considerations
-
-An LTS release is just a `MAJOR` release for which point releases are made for
-longer following the same rules for what can be backported to a `POINT` release.
-The focus lays on critical and security bug fixes which are pulled at the
-maintainer's discretion.
