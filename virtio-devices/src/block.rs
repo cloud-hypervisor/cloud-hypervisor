@@ -155,7 +155,7 @@ struct BlockEpollHandler {
     disk_image: Box<dyn AsyncIo>,
     disk_nsectors: Arc<AtomicU64>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
-    serial: Vec<u8>,
+    serial: Box<[u8]>,
     kill_evt: EventFd,
     pause_evt: EventFd,
     writeback: Arc<AtomicBool>,
@@ -164,7 +164,7 @@ struct BlockEpollHandler {
     inflight_requests: VecDeque<(u16, Request)>,
     rate_limiter: Option<RateLimiterGroupHandle>,
     access_platform: Option<Arc<dyn AccessPlatform>>,
-    host_cpus: Option<Vec<usize>>,
+    host_cpus: Option<Box<[usize]>>,
     acked_features: u64,
     disable_sector0_writes: bool,
 }
@@ -723,8 +723,8 @@ pub struct Block {
     seccomp_action: SeccompAction,
     rate_limiter: Option<Arc<RateLimiterGroup>>,
     exit_evt: EventFd,
-    serial: Vec<u8>,
-    queue_affinity: BTreeMap<u16, Vec<usize>>,
+    serial: Box<[u8]>,
+    queue_affinity: BTreeMap<u16, Box<[usize]>>,
     disable_sector0_writes: bool,
     lock_granularity_choice: LockGranularityChoice,
     device_status: Arc<AtomicU8>,
@@ -755,7 +755,7 @@ impl Block {
         rate_limiter: Option<Arc<RateLimiterGroup>>,
         exit_evt: EventFd,
         state: Option<BlockState>,
-        queue_affinity: BTreeMap<u16, Vec<usize>>,
+        queue_affinity: BTreeMap<u16, Box<[usize]>>,
         sparse: bool,
         disable_sector0_writes: bool,
         lock_granularity: LockGranularityChoice,
@@ -862,7 +862,9 @@ impl Block {
                 (disk_nsectors, avail_features, 0, config, false)
             };
 
-        let serial = serial.map_or_else(|| build_serial(&disk_path), Vec::from);
+        let serial = serial
+            .map_or_else(|| build_serial(&disk_path), Vec::from)
+            .into_boxed_slice();
 
         Ok(Block {
             common: VirtioCommon {

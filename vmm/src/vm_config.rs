@@ -122,7 +122,7 @@ pub struct PlatformConfig {
     #[serde(default = "default_platformconfig_num_pci_segments")]
     pub num_pci_segments: u16,
     #[serde(default)]
-    pub iommu_segments: Option<Vec<u16>>,
+    pub iommu_segments: Option<Box<[u16]>>,
     #[serde(default = "default_platformconfig_iommu_address_width_bits")]
     pub iommu_address_width_bits: u8,
     #[serde(default)]
@@ -130,7 +130,7 @@ pub struct PlatformConfig {
     #[serde(default)]
     pub uuid: Option<String>,
     #[serde(default)]
-    pub oem_strings: Option<Vec<String>>,
+    pub oem_strings: Option<Box<[String]>>,
     #[cfg(feature = "tdx")]
     #[serde(default)]
     pub tdx: bool,
@@ -270,7 +270,7 @@ pub struct RateLimiterGroupConfig {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct VirtQueueAffinity {
     pub queue_index: u16,
-    pub host_cpus: Vec<usize>,
+    pub host_cpus: Box<[usize]>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
@@ -314,7 +314,7 @@ pub struct DiskConfig {
     #[serde(default)]
     pub serial: Option<String>,
     #[serde(default)]
-    pub queue_affinity: Option<Vec<VirtQueueAffinity>>,
+    pub queue_affinity: Option<Box<[VirtQueueAffinity]>>,
     #[serde(default)]
     pub backing_files: bool,
     #[serde(default = "default_diskconfig_sparse")]
@@ -782,13 +782,13 @@ pub struct NumaDistance {
 pub struct NumaConfig {
     pub guest_numa_id: u32,
     #[serde(default)]
-    pub cpus: Option<Vec<u32>>,
+    pub cpus: Option<Box<[u32]>>,
     #[serde(default)]
-    pub distances: Option<Vec<NumaDistance>>,
+    pub distances: Option<Box<[NumaDistance]>>,
     #[serde(default)]
-    pub memory_zones: Option<Vec<String>>,
+    pub memory_zones: Option<Box<[String]>>,
     #[serde(default)]
-    pub pci_segments: Option<Vec<u16>>,
+    pub pci_segments: Option<Box<[u16]>>,
     #[serde(default)]
     pub device_id: Option<String>,
 }
@@ -1020,7 +1020,7 @@ pub struct VmConfig {
     #[serde(default)]
     pub memory: MemoryConfig,
     pub payload: Option<PayloadConfig>,
-    pub rate_limit_groups: Option<Vec<RateLimiterGroupConfig>>,
+    pub rate_limit_groups: Option<Box<[RateLimiterGroupConfig]>>,
     pub disks: Option<Vec<DiskConfig>>,
     pub net: Option<Vec<NetConfig>>,
     #[serde(default)]
@@ -1047,13 +1047,13 @@ pub struct VmConfig {
     pub pvpanic: bool,
     #[serde(default)]
     pub iommu: bool,
-    pub numa: Option<Vec<NumaConfig>>,
+    pub numa: Option<Box<[NumaConfig]>>,
     #[serde(default)]
     pub watchdog: bool,
     #[cfg(feature = "guest_debug")]
     #[serde(default)]
     pub gdb: bool,
-    pub pci_segments: Option<Vec<PciSegmentConfig>>,
+    pub pci_segments: Option<Box<[PciSegmentConfig]>>,
     pub platform: Option<PlatformConfig>,
     pub tpm: Option<TpmConfig>,
     // Preserved FDs are the ones that share the same life-time as its holding
@@ -1068,7 +1068,7 @@ pub struct VmConfig {
     pub preserved_fds: Option<Vec<i32>>,
     #[serde(default)]
     pub landlock_enable: bool,
-    pub landlock_rules: Option<Vec<LandlockConfig>>,
+    pub landlock_rules: Option<Box<[LandlockConfig]>>,
     #[cfg(feature = "ivshmem")]
     pub ivshmem: Option<IvshmemConfig>,
 }
