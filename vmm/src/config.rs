@@ -1278,7 +1278,8 @@ impl MemoryConfig {
                     .add("hotplugged_size")
                     .add("prefault")
                     .add("reserve")
-                    .add("mergeable");
+                    .add("mergeable")
+                    .add("skip_snapshot");
                 parser.parse(memory_zone).map_err(Error::ParseMemoryZone)?;
 
                 let id = parser.get("id").ok_or(Error::ParseMemoryZoneIdMissing)?;
@@ -1328,6 +1329,11 @@ impl MemoryConfig {
                     .map_err(Error::ParseMemoryZone)?
                     .unwrap_or(Toggle(mergeable))
                     .0;
+                let skip_snapshot = parser
+                    .convert::<Toggle>("skip_snapshot")
+                    .map_err(Error::ParseMemoryZone)?
+                    .unwrap_or(Toggle(false))
+                    .0;
 
                 zones.push(MemoryZoneConfig {
                     id,
@@ -1342,6 +1348,7 @@ impl MemoryConfig {
                     prefault,
                     reserve,
                     mergeable,
+                    skip_snapshot,
                 });
             }
             Some(zones)
@@ -4779,6 +4786,20 @@ mod tests {
                     id: "mem0".to_string(),
                     size: 1 << 30,
                     mergeable: true,
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            }
+        );
+        // skip_snapshot=on
+        assert_eq!(
+            MemoryConfig::parse("size=0", Some(vec!["id=mem0,size=1G,skip_snapshot=on"]))?,
+            MemoryConfig {
+                size: 0,
+                zones: Some(vec![MemoryZoneConfig {
+                    id: "mem0".to_string(),
+                    size: 1 << 30,
+                    skip_snapshot: true,
                     ..Default::default()
                 }]),
                 ..Default::default()

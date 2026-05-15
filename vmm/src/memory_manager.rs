@@ -255,10 +255,17 @@ pub struct MemoryZone {
     hugepages: bool,
     backing_page_size: u64,
     mergeable: bool,
+    skip_snapshot: bool,
 }
 
 impl MemoryZone {
-    fn new(shared: bool, hugepages: bool, backing_page_size: u64, mergeable: bool) -> Self {
+    fn new(
+        shared: bool,
+        hugepages: bool,
+        backing_page_size: u64,
+        mergeable: bool,
+        skip_snapshot: bool,
+    ) -> Self {
         Self {
             regions: Vec::new(),
             virtio_mem_zone: None,
@@ -266,6 +273,7 @@ impl MemoryZone {
             hugepages,
             backing_page_size,
             mergeable,
+            skip_snapshot,
         }
     }
 
@@ -804,7 +812,13 @@ impl MemoryManager {
         // Add zone id to the list of memory zones.
         memory_zones.insert(
             zone.id.clone(),
-            MemoryZone::new(zone.shared, zone.hugepages, zone_align_size, zone.mergeable),
+            MemoryZone::new(
+                zone.shared,
+                zone.hugepages,
+                zone_align_size,
+                zone.mergeable,
+                zone.skip_snapshot,
+            ),
         );
 
         for ram_region in ram_regions.iter() {
@@ -908,6 +922,7 @@ impl MemoryManager {
                             zone.hugepages,
                             zone_align_size,
                             zone.mergeable,
+                            zone.skip_snapshot,
                         ),
                     );
                 }
@@ -988,6 +1003,7 @@ impl MemoryManager {
                     zone_config.hugepages,
                     zone_page_size,
                     zone_config.mergeable,
+                    zone_config.skip_snapshot,
                 ),
             );
         }
@@ -2109,6 +2125,7 @@ impl MemoryManager {
                 prefault: config.prefault,
                 reserve: config.reserve,
                 mergeable: config.mergeable,
+                skip_snapshot: false,
             }];
 
             Ok((config.size, zones, allow_mem_hotplug))
@@ -3157,6 +3174,11 @@ impl MemoryManager {
         let mut table = MemoryRangeTable::default();
 
         for memory_zone in self.memory_zones.values() {
+            if memory_zone.skip_snapshot {
+                // Skip generating tables for memory zones marked with skip_snapshot.
+                continue;
+            }
+
             if let Some(virtio_mem_zone) = memory_zone.virtio_mem_zone() {
                 table.extend(virtio_mem_zone.plugged_ranges());
             }

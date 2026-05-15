@@ -379,6 +379,19 @@ _Example_
 --memory size=0
 --memory-zone id=mem0,size=1G,mergeable=on
 ```
+### `skip_snapshot`
+
+Specifies if the memory zone should be skipped during snapshot operations.
+This can be useful for memory zones that are backed by memfds.
+
+By default this option is turned off.
+
+_Example_
+
+```
+--memory size=0
+--memory-zone id=mem0,size=1G,skip_snapshot=on
+```
 
 ## NUMA settings
 

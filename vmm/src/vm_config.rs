@@ -270,6 +270,8 @@ pub struct MemoryZoneConfig {
     pub reserve: Option<bool>,
     #[serde(default)]
     pub mergeable: bool,
+    #[serde(default)]
+    pub skip_snapshot: bool,
 }
 
 impl ApplyLandlock for MemoryZoneConfig {
