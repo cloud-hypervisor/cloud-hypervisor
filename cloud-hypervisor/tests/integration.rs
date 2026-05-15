@@ -6257,9 +6257,10 @@ mod common_parallel {
             );
         }
 
-        // Check the source vm has been terminated successful (give it '3s' to settle)
-        thread::sleep(std::time::Duration::new(3, 0));
-        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
+        let src_exited_ok = wait_until(Duration::from_secs(30), || {
+            matches!(src_child.try_wait(), Ok(Some(_)))
+        }) && src_child.try_wait().unwrap().is_some_and(|s| s.success());
+        if !src_exited_ok {
             print_and_panic(
                 src_child,
                 dest_child,
@@ -6396,9 +6397,10 @@ mod common_parallel {
             );
         }
 
-        // Check the source vm has been terminated successful (give it '3s' to settle)
-        thread::sleep(std::time::Duration::new(3, 0));
-        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
+        let src_exited_ok = wait_until(Duration::from_secs(30), || {
+            matches!(src_child.try_wait(), Ok(Some(_)))
+        }) && src_child.try_wait().unwrap().is_some_and(|s| s.success());
+        if !src_exited_ok {
             print_and_panic(
                 src_child,
                 dest_child,
@@ -6622,9 +6624,10 @@ mod common_parallel {
             );
         }
 
-        // Check the source vm has been terminated successful (give it '3s' to settle)
-        thread::sleep(std::time::Duration::new(3, 0));
-        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
+        let src_exited_ok = wait_until(Duration::from_secs(30), || {
+            matches!(src_child.try_wait(), Ok(Some(_)))
+        }) && src_child.try_wait().unwrap().is_some_and(|s| s.success());
+        if !src_exited_ok {
             print_and_panic(
                 src_child,
                 dest_child,
@@ -7006,9 +7009,10 @@ mod common_parallel {
             );
         }
 
-        // Check the source vm has been terminated successfully (give it '3s' to settle)
-        thread::sleep(Duration::from_secs(3));
-        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
+        let src_exited_ok = wait_until(Duration::from_secs(30), || {
+            matches!(src_child.try_wait(), Ok(Some(_)))
+        }) && src_child.try_wait().unwrap().is_some_and(|s| s.success());
+        if !src_exited_ok {
             print_and_panic(
                 src_child,
                 dest_child,
@@ -7346,9 +7350,10 @@ mod ivshmem {
             );
         }
 
-        // Check the source vm has been terminated successful (give it '3s' to settle)
-        thread::sleep(std::time::Duration::new(3, 0));
-        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
+        let src_exited_ok = wait_until(Duration::from_secs(30), || {
+            matches!(src_child.try_wait(), Ok(Some(_)))
+        }) && src_child.try_wait().unwrap().is_some_and(|s| s.success());
+        if !src_exited_ok {
             print_and_panic(
                 src_child,
                 dest_child,
@@ -8858,9 +8863,10 @@ mod common_sequential {
             );
         }
 
-        // Check the source vm has been terminated successful (give it '3s' to settle)
-        thread::sleep(std::time::Duration::new(3, 0));
-        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
+        let src_exited_ok = wait_until(Duration::from_secs(30), || {
+            matches!(src_child.try_wait(), Ok(Some(_)))
+        }) && src_child.try_wait().unwrap().is_some_and(|s| s.success());
+        if !src_exited_ok {
             print_and_panic(
                 src_child,
                 dest_child,
@@ -9085,9 +9091,10 @@ mod common_sequential {
             );
         }
 
-        // Check the source vm has been terminated successful (give it '3s' to settle)
-        thread::sleep(std::time::Duration::new(3, 0));
-        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
+        let src_exited_ok = wait_until(Duration::from_secs(30), || {
+            matches!(src_child.try_wait(), Ok(Some(_)))
+        }) && src_child.try_wait().unwrap().is_some_and(|s| s.success());
+        if !src_exited_ok {
             print_and_panic(
                 src_child,
                 dest_child,
@@ -9219,9 +9226,10 @@ mod common_sequential {
             );
         }
 
-        // Check the source vm has been terminated successful (give it '3s' to settle)
-        thread::sleep(std::time::Duration::new(3, 0));
-        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
+        let src_exited_ok = wait_until(Duration::from_secs(30), || {
+            matches!(src_child.try_wait(), Ok(Some(_)))
+        }) && src_child.try_wait().unwrap().is_some_and(|s| s.success());
+        if !src_exited_ok {
             print_and_panic(
                 src_child,
                 dest_child,
@@ -9498,9 +9506,10 @@ mod common_sequential {
             );
         }
 
-        // Check the source vm has been terminated successful (give it '3s' to settle)
-        thread::sleep(std::time::Duration::new(3, 0));
-        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
+        let src_exited_ok = wait_until(Duration::from_secs(30), || {
+            matches!(src_child.try_wait(), Ok(Some(_)))
+        }) && src_child.try_wait().unwrap().is_some_and(|s| s.success());
+        if !src_exited_ok {
             print_and_panic(
                 src_child,
                 dest_child,
