@@ -41,7 +41,8 @@ Comments should be concise and add additional context or information to the code
 
 Logging should be minimal and high signal. Use `info!` for important normal
 state changes that matter in production; use `warn!` or `error!` only for
-abnormal conditions. Keep `debug!` for focused diagnostics.
+abnormal conditions. Keep `debug!` for focused diagnostics. Please find more
+information in [`docs/logging.md`](docs/logging.md).
 
 [Rust Style]: https://github.com/rust-lang/rust/tree/HEAD/src/doc/style-guide/src
 
