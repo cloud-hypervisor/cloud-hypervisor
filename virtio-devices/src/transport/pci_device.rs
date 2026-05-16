@@ -1443,4 +1443,12 @@ mod unit_tests {
         intr.trigger(VirtioInterruptType::Queue(0)).unwrap();
         assert!(!intr.config_changed.load(Ordering::Acquire));
     }
+
+    #[test]
+    fn pci_cfg_cap_len_includes_data_window() {
+        let cap = VirtioPciCfgCap::new();
+        let expected = (size_of::<VirtioPciCfgCap>() as u8) + VIRTIO_PCI_CAP_LEN_OFFSET;
+        assert_eq!(cap.cap.cap_len, expected);
+        assert_eq!(cap.cap.cap_len, 20);
+    }
 }
