@@ -1451,4 +1451,11 @@ mod unit_tests {
         assert_eq!(cap.cap.cap_len, expected);
         assert_eq!(cap.cap.cap_len, 20);
     }
+
+    #[test]
+    fn pci_cfg_cap_cfg_type_is_pci() {
+        let cap = VirtioPciCfgCap::new();
+        assert_eq!(cap.cap.cfg_type, PciCapabilityType::Pci as u8);
+        assert_eq!(cap.cap.cfg_type, 5);
+    }
 }
