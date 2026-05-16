@@ -491,7 +491,8 @@ impl VmOps for VmOpsHandler {
     #[cfg(target_arch = "x86_64")]
     fn pio_read(&self, port: u64, data: &mut [u8]) -> result::Result<(), HypervisorVmError> {
         if let Err(vm_device::BusError::MissingAddressRange) = self.io_bus.read(port, data) {
-            info!("Guest PIO read to unregistered address 0x{port:x}");
+            info!("Guest PIO read from unregistered address 0x{port:x}");
+            data.fill(0xff); // 0xff is sentinel value for invalid reads
         }
         Ok(())
     }
