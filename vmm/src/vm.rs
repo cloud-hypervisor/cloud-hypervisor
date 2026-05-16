@@ -467,7 +467,8 @@ impl VmOps for VmOpsHandler {
 
     fn mmio_read(&self, gpa: u64, data: &mut [u8]) -> result::Result<(), HypervisorVmError> {
         if let Err(vm_device::BusError::MissingAddressRange) = self.mmio_bus.read(gpa, data) {
-            info!("Guest MMIO read to unregistered address 0x{gpa:x}");
+            info!("Guest MMIO read from unregistered address 0x{gpa:x}");
+            data.fill(0xff); // 0xff is sentinel value for invalid reads
         }
         Ok(())
     }
