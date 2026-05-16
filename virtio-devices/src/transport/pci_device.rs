@@ -1458,4 +1458,19 @@ mod unit_tests {
         assert_eq!(cap.cap.cfg_type, PciCapabilityType::Pci as u8);
         assert_eq!(cap.cap.cfg_type, 5);
     }
+
+    #[test]
+    fn compound_caps_size_cap_len_from_own_type() {
+        let notify = VirtioPciNotifyCap::new(PciCapabilityType::Notify, 0, 0, 0, Le32::from(0));
+        assert_eq!(
+            notify.cap.cap_len,
+            (size_of::<VirtioPciNotifyCap>() as u8) + VIRTIO_PCI_CAP_LEN_OFFSET
+        );
+
+        let cap64 = VirtioPciCap64::new(PciCapabilityType::SharedMemory, 0, 0, 0, 0);
+        assert_eq!(
+            cap64.cap.cap_len,
+            (size_of::<VirtioPciCap64>() as u8) + VIRTIO_PCI_CAP_LEN_OFFSET
+        );
+    }
 }
