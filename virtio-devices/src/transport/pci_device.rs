@@ -9,6 +9,7 @@
 use std::any::Any;
 use std::cmp;
 use std::io::Write;
+use std::mem::size_of;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
@@ -208,7 +209,15 @@ impl PciCapability for VirtioPciCfgCap {
 impl VirtioPciCfgCap {
     fn new() -> Self {
         VirtioPciCfgCap {
-            cap: VirtioPciCap::new(PciCapabilityType::Pci, 0, 0, 0),
+            cap: VirtioPciCap {
+                cap_len: (size_of::<VirtioPciCfgCap>() as u8) + VIRTIO_PCI_CAP_LEN_OFFSET,
+                cfg_type: PciCapabilityType::Pci as u8,
+                pci_bar: 0,
+                id: 0,
+                padding: [0; 2],
+                offset: Le32::from(0),
+                length: Le32::from(0),
+            },
             ..Default::default()
         }
     }
