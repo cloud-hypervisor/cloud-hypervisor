@@ -2104,7 +2104,8 @@ impl PmemConfig {
     pub const SYNTAX: &'static str = "Persistent memory parameters \
     \"file=<backing_file_path>,size=<persistent_memory_size>,iommu=on|off,\
     discard_writes=on|off,id=<device_id>,\
-    pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
+    pci_segment=<segment_id>,pci_device_id=<pci_slot>,\
+    backend_type=file|uffd\"";
 
     pub fn parse(pmem: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2112,7 +2113,8 @@ impl PmemConfig {
             .add("size")
             .add("file")
             .add("discard_writes")
-            .add_all(PciDeviceCommonConfig::OPTIONS_IOMMU);
+            .add_all(PciDeviceCommonConfig::OPTIONS_IOMMU)
+            .add("backend_type");
         parser.parse(pmem).map_err(Error::ParsePersistentMemory)?;
 
         let pci_common = PciDeviceCommonConfig::parse(pmem)?;
@@ -2126,12 +2128,17 @@ impl PmemConfig {
             .map_err(Error::ParsePersistentMemory)?
             .unwrap_or(Toggle(false))
             .0;
+        let backend_type = parser
+            .convert::<MemBackendType>("backend_type")
+            .map_err(Error::ParsePersistentMemory)?
+            .unwrap_or_default();
 
         Ok(PmemConfig {
             pci_common,
             file,
             size,
             discard_writes,
+            backend_type,
         })
     }
 
@@ -4373,6 +4380,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             file: PathBuf::from("/tmp/pmem"),
             size: Some(128 << 20),
             discard_writes: false,
+            backend_type: MemBackendType::File,
         }
     }
 
@@ -4406,6 +4414,17 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 ..pmem_fixture()
             }
         );
+        // UFFD backend type
+        assert_eq!(
+            PmemConfig::parse("file=/tmp/handler.sock,size=128M,backend_type=uffd")?,
+            PmemConfig {
+                file: PathBuf::from("/tmp/handler.sock"),
+                backend_type: MemBackendType::Uffd,
+                ..pmem_fixture()
+            }
+        );
+        // Invalid backend type
+        PmemConfig::parse("file=/tmp/pmem,size=128M,backend_type=invalid").unwrap_err();
 
         Ok(())
     }

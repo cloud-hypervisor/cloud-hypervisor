@@ -142,6 +142,25 @@ allows bypassing the guest page cache and improve the guest memory footprint.
 This device is always built-in, and it is enabled based on the presence of the
 flag `--pmem`.
 
+#### UFFD Backend
+
+By default, the `file` parameter points to a regular file that backs the PMEM
+device. With `backend_type=uffd`, the `file` parameter instead specifies the
+path to a Unix socket connected to an external UFFD handler (such as nydusd):
+
+```bash
+cloud-hypervisor \
+    --pmem file=/tmp/handler.sock,size=8G,backend_type=uffd,discard_writes=on
+```
+
+In this mode, Cloud Hypervisor creates an anonymous memory region, registers it
+with `userfaultfd`, and connects to the external handler. Page faults are
+resolved zero-copy: the handler sends blob file descriptors back to Cloud
+Hypervisor, which `mmap(MAP_FIXED)`s them directly into the guest memory.
+
+The handler must implement the UFFD handshake protocol and respond to page
+faults with blob descriptors for the requested ranges.
+
 ### virtio-rng
 
 A VM does not generate entropy like a real machine would, which is an issue
