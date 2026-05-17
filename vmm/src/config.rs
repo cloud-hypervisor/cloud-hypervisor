@@ -2623,18 +2623,23 @@ pub struct RestoreConfig {
     pub net_fds: Option<Vec<RestoredNetConfig>>,
     #[serde(default)]
     pub resume: bool,
+    #[serde(default)]
+    pub external_sock: Option<PathBuf>,
 }
 
 impl RestoreConfig {
     pub const SYNTAX: &'static str = "Restore from a VM snapshot. \
         \nRestore parameters \"source_url=<source_url>,prefault=on|off,memory_restore_mode=copy|ondemand,\
-        net_fds=<list_of_net_ids_with_their_associated_fds>,resume=true|false\" \
+        external_sock=<path>,net_fds=<list_of_net_ids_with_their_associated_fds>,resume=true|false\" \
         \n`source_url` should be a valid URL (e.g file:///foo/bar or tcp://192.168.1.10/foo) \
         \n`prefault` controls eager prefaulting for the copy-based restore path (disabled by default) \
         \n`memory_restore_mode=copy` preserves the existing eager read-copy restore behavior, while `memory_restore_mode=ondemand` enables lazy demand paging and fails restore if userfaultfd support is unavailable \
         \n`net_fds` is a list of net ids with new file descriptors. \
         Only net devices backed by FDs directly are needed as input.\
-        \n `resume` controls whether the VM will be directly resumed after restore ";
+        \n`resume` controls whether the VM will be directly resumed after restore \
+        \n`external_sock` is the path to a Unix socket for an external UFFD handler \
+        that can provide zero-copy page fault resolution. \
+        Only used when memory_restore_mode=ondemand";
 
     pub fn parse(restore: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2643,7 +2648,8 @@ impl RestoreConfig {
             .add("prefault")
             .add("memory_restore_mode")
             .add("net_fds")
-            .add("resume");
+            .add("resume")
+            .add("external_sock");
         parser.parse(restore).map_err(Error::ParseRestore)?;
 
         let source_url = parser
@@ -2676,6 +2682,7 @@ impl RestoreConfig {
             .map_err(Error::ParseRestore)?
             .unwrap_or(Toggle(false))
             .0;
+        let external_sock = parser.get("external_sock").map(PathBuf::from);
 
         Ok(RestoreConfig {
             source_url,
@@ -2683,6 +2690,7 @@ impl RestoreConfig {
             memory_restore_mode,
             net_fds,
             resume,
+            external_sock,
         })
     }
 
@@ -4749,6 +4757,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 memory_restore_mode: MemoryRestoreMode::Copy,
                 net_fds: None,
                 resume: false,
+                ..Default::default()
             }
         );
         assert_eq!(
@@ -4772,6 +4781,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                     }
                 ]),
                 resume: false,
+                ..Default::default()
             }
         );
         assert_eq!(
@@ -4782,6 +4792,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 memory_restore_mode: MemoryRestoreMode::OnDemand,
                 net_fds: None,
                 resume: false,
+                ..Default::default()
             }
         );
         assert_eq!(
@@ -4792,11 +4803,27 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 memory_restore_mode: MemoryRestoreMode::Copy,
                 net_fds: None,
                 resume: true,
+                ..Default::default()
             }
         );
         // Parsing should fail as source_url is a required field
         RestoreConfig::parse("prefault=off").unwrap_err();
         RestoreConfig::parse("source_url=/path/to/snapshot,memory_restore_mode=bogus").unwrap_err();
+        // external_sock with ondemand
+        assert_eq!(
+            RestoreConfig::parse(
+                "source_url=/path/to/snapshot,memory_restore_mode=ondemand,external_sock=/tmp/handler.sock"
+            )?,
+            RestoreConfig {
+                source_url: PathBuf::from("/path/to/snapshot"),
+                prefault: false,
+                memory_restore_mode: MemoryRestoreMode::OnDemand,
+                net_fds: None,
+                resume: false,
+                external_sock: Some(PathBuf::from("/tmp/handler.sock")),
+            }
+        );
+
         Ok(())
     }
 
@@ -4815,6 +4842,21 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             .unwrap()
             .memory_restore_mode,
             MemoryRestoreMode::OnDemand
+        );
+        // external_sock defaults to None
+        assert_eq!(
+            serde_json::from_str::<RestoreConfig>(r#"{"source_url":"/path/to/snapshot"}"#)
+                .unwrap()
+                .external_sock,
+            None
+        );
+        assert_eq!(
+            serde_json::from_str::<RestoreConfig>(
+                r#"{"source_url":"/path/to/snapshot","external_sock":"/tmp/handler.sock"}"#
+            )
+            .unwrap()
+            .external_sock,
+            Some(PathBuf::from("/tmp/handler.sock"))
         );
     }
 
@@ -4903,6 +4945,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 },
             ]),
             resume: false,
+            ..Default::default()
         };
         valid_config.validate(&snapshot_vm_config).unwrap();
 
@@ -4968,6 +5011,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             memory_restore_mode: MemoryRestoreMode::Copy,
             net_fds: None,
             resume: false,
+            ..Default::default()
         };
         snapshot_vm_config.net = Some(vec![NetConfig {
             pci_common: PciDeviceCommonConfig {
@@ -4985,6 +5029,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             memory_restore_mode: MemoryRestoreMode::OnDemand,
             net_fds: None,
             resume: false,
+            ..Default::default()
         };
         assert_eq!(
             invalid_restore_mode.validate(&snapshot_vm_config),

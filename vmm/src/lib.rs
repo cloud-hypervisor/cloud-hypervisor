@@ -1613,6 +1613,7 @@ impl Vmm {
         vm_config: Arc<Mutex<VmConfig>>,
         prefault: bool,
         memory_restore_mode: MemoryRestoreMode,
+        external_sock: Option<&std::path::Path>,
     ) -> std::result::Result<(), VmError> {
         let snapshot = recv_vm_state(source_url).map_err(VmError::Restore)?;
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -1661,6 +1662,7 @@ impl Vmm {
             Some(source_url),
             Some(prefault),
             Some(memory_restore_mode),
+            external_sock,
         )?;
         self.vm = Some(vm);
 
@@ -1883,6 +1885,7 @@ impl RequestHandler for Vmm {
                         None,
                         None,
                         None,
+                        None,
                     )?;
 
                     self.vm = Some(vm);
@@ -1974,6 +1977,7 @@ impl RequestHandler for Vmm {
             vm_config,
             restore_cfg.prefault,
             restore_cfg.memory_restore_mode,
+            restore_cfg.external_sock.as_deref(),
         )
         .and_then(|()| {
             if restore_cfg.resume {
@@ -2074,6 +2078,7 @@ impl RequestHandler for Vmm {
             self.console_info.clone(),
             self.console_resize_pipe.clone(),
             Arc::clone(&self.original_termios_opt),
+            None,
             None,
             None,
             None,
