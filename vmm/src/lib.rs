@@ -101,6 +101,7 @@ pub(crate) mod sev;
 mod sigwinch_listener;
 mod sync_utils;
 mod uffd;
+pub mod uffd_block;
 mod userfaultfd;
 pub mod vm;
 pub mod vm_config;
