@@ -10,7 +10,6 @@ use std::io;
 use super::AsyncIoOperation;
 
 /// Converts an I/O error into the negative errno form used in completions.
-#[allow(dead_code)]
 pub(super) fn errno_result(error: &io::Error) -> i32 {
     -error.raw_os_error().unwrap_or(libc::EIO)
 }
