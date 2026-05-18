@@ -553,7 +553,7 @@ impl Vcpu {
     ) -> Result<()> {
         #[cfg(target_arch = "aarch64")]
         {
-            self.init(vm)?;
+            self.init(vm, None)?;
             self.mpidr = arch::configure_vcpu(self.vcpu.as_ref(), self.id, boot_setup)
                 .map_err(Error::VcpuConfiguration)?;
         }
@@ -605,8 +605,12 @@ impl Vcpu {
     }
 
     /// Initializes an aarch64 specific vcpu for booting Linux.
+    ///
+    /// When `restore_state` is `Some(_)`, this performs the SVE-aware restore
+    /// sequence, writing any pre-finalize registers between
+    /// `KVM_ARM_VCPU_INIT` and `KVM_ARM_VCPU_FINALIZE(SVE)`.
     #[cfg(target_arch = "aarch64")]
-    pub fn init(&self, vm: &dyn hypervisor::Vm) -> Result<()> {
+    pub fn init(&self, vm: &dyn hypervisor::Vm, restore_state: Option<&CpuState>) -> Result<()> {
         use std::arch::is_aarch64_feature_detected;
         #[allow(clippy::nonminimal_bool)]
         let sve_supported =
@@ -622,6 +626,12 @@ impl Vcpu {
             .map_err(Error::VcpuSetProcessorFeatures)?;
 
         self.vcpu.vcpu_init(&kvi).map_err(Error::VcpuArmInit)?;
+
+        if let Some(state) = restore_state {
+            self.vcpu
+                .restore_pre_finalize(state)
+                .map_err(Error::VcpuArmInit)?;
+        }
 
         if sve_supported {
             let finalized_features = self.vcpu.vcpu_get_finalized_features();
@@ -984,13 +994,15 @@ impl CpuManager {
         )?;
 
         if let Some(snapshot) = snapshot {
-            // AArch64 vCPUs should be initialized after created.
-            #[cfg(target_arch = "aarch64")]
-            vcpu.init(self.vm.as_ref())?;
-
             let state: CpuState = snapshot.to_state().map_err(|e| {
                 Error::VcpuCreate(anyhow!("Could not get vCPU state from snapshot {e:?}"))
             })?;
+
+            // AArch64 restore has to interleave pre-finalize register writes
+            // between KVM_ARM_VCPU_INIT and KVM_ARM_VCPU_FINALIZE.
+            #[cfg(target_arch = "aarch64")]
+            vcpu.init(self.vm.as_ref(), Some(&state))?;
+
             vcpu.vcpu
                 .set_state(&state)
                 .map_err(|e| Error::VcpuCreate(anyhow!("Could not set the vCPU state {e:?}")))?;
