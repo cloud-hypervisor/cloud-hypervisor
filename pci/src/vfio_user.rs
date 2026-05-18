@@ -182,8 +182,9 @@ impl VfioUserPciDevice {
                         }
                     };
 
+                    let slot = self.memory_slot_allocator.next_memory_slot();
                     let user_memory_region = UserMemoryRegion {
-                        slot: self.memory_slot_allocator.next_memory_slot(),
+                        slot: Some(slot),
                         start: mmio_region.start.0 + s.offset,
                         mapping,
                     };
@@ -191,7 +192,7 @@ impl VfioUserPciDevice {
                     // SAFETY: validity of len and host_addr guaranteed by hypervisor::mmap::MmapRegion
                     unsafe {
                         self.vm.create_user_memory_region(
-                            user_memory_region.slot,
+                            slot,
                             user_memory_region.start,
                             user_memory_region.mapping.len(),
                             user_memory_region.mapping.addr(),
@@ -212,23 +213,24 @@ impl VfioUserPciDevice {
     fn unmap_mmio_regions(&mut self) {
         for mmio_region in self.common.mmio_regions.iter_mut() {
             for user_memory_region in mmio_region.user_memory_regions.drain(..) {
-                // Remove region
-                // SAFETY: guaranteed by hypervisor::mmap::MmapRegion invariants
-                if let Err(e) = unsafe {
-                    self.vm.remove_user_memory_region(
-                        user_memory_region.slot,
-                        user_memory_region.start,
-                        user_memory_region.mapping.len(),
-                        user_memory_region.mapping.addr(),
-                        false,
-                        false,
-                    )
-                } {
-                    error!("Could not remove the userspace memory region: {e}");
-                }
+                if let Some(slot) = user_memory_region.slot {
+                    // Remove region
+                    // SAFETY: guaranteed by hypervisor::mmap::MmapRegion invariants
+                    if let Err(e) = unsafe {
+                        self.vm.remove_user_memory_region(
+                            slot,
+                            user_memory_region.start,
+                            user_memory_region.mapping.len(),
+                            user_memory_region.mapping.addr(),
+                            false,
+                            false,
+                        )
+                    } {
+                        error!("Could not remove the userspace memory region: {e}");
+                    }
 
-                self.memory_slot_allocator
-                    .free_memory_slot(user_memory_region.slot);
+                    self.memory_slot_allocator.free_memory_slot(slot);
+                }
                 // memory will be unmapped on drop
             }
         }
@@ -452,19 +454,21 @@ impl PciDevice for VfioUserPciDevice {
                 mmio_region.start = GuestAddress(new_base);
 
                 for user_memory_region in mmio_region.user_memory_regions.iter_mut() {
-                    // Remove old region
-                    // SAFETY: only valid regions are in user_memory_regions
-                    unsafe {
-                        self.vm.remove_user_memory_region(
-                            user_memory_region.slot,
-                            user_memory_region.start,
-                            user_memory_region.mapping.len(),
-                            user_memory_region.mapping.addr(),
-                            false,
-                            false,
-                        )
+                    if let Some(slot) = user_memory_region.slot {
+                        // Remove old region
+                        // SAFETY: only valid regions are in user_memory_regions
+                        unsafe {
+                            self.vm.remove_user_memory_region(
+                                slot,
+                                user_memory_region.start,
+                                user_memory_region.mapping.len(),
+                                user_memory_region.mapping.addr(),
+                                false,
+                                false,
+                            )
+                        }
+                        .map_err(std::io::Error::other)?;
                     }
-                    .map_err(std::io::Error::other)?;
 
                     // Update the user memory region with the correct start address.
                     if new_base > old_base {
@@ -473,19 +477,21 @@ impl PciDevice for VfioUserPciDevice {
                         user_memory_region.start -= old_base - new_base;
                     }
 
-                    // Insert new region
-                    // SAFETY: only valid regions are in user_memory_regions
-                    unsafe {
-                        self.vm.create_user_memory_region(
-                            user_memory_region.slot,
-                            user_memory_region.start,
-                            user_memory_region.mapping.len(),
-                            user_memory_region.mapping.addr(),
-                            false,
-                            false,
-                        )
+                    if let Some(slot) = user_memory_region.slot {
+                        // Insert new region
+                        // SAFETY: only valid regions are in user_memory_regions
+                        unsafe {
+                            self.vm.create_user_memory_region(
+                                slot,
+                                user_memory_region.start,
+                                user_memory_region.mapping.len(),
+                                user_memory_region.mapping.addr(),
+                                false,
+                                false,
+                            )
+                        }
+                        .map_err(std::io::Error::other)?;
                     }
-                    .map_err(std::io::Error::other)?;
                 }
                 info!("Moved bar 0x{old_base:x} -> 0x{new_base:x}");
             }
