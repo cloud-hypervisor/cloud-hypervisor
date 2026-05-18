@@ -1932,8 +1932,8 @@ impl MemoryManager {
             mmap_flags |= libc::MAP_SHARED;
             Some(Self::create_anonymous_file(size, hugepages, hugepage_size)?)
         } else {
-            mmap_flags |= libc::MAP_PRIVATE;
-            Some(Self::create_anonymous_file(size, hugepages, hugepage_size)?)
+            mmap_flags |= libc::MAP_PRIVATE | libc::MAP_ANONYMOUS;
+            None
         };
 
         let region = MmapRegion::build(fo, size, libc::PROT_READ | libc::PROT_WRITE, mmap_flags)
