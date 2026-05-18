@@ -4,6 +4,7 @@
 
 use std::marker::PhantomData;
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
+mod aio_data_io;
 mod common;
 mod completion;
 mod guest_memory_target;
@@ -12,6 +13,7 @@ mod owned_io_buffer;
 #[cfg(feature = "io_uring")]
 mod uring_data_io;
 
+pub use aio_data_io::AioDataIo;
 pub use completion::AsyncIoCompletion;
 pub use guest_memory_target::GuestMemoryTarget;
 pub use operation::AsyncIoOperation;
