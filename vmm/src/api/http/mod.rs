@@ -36,6 +36,7 @@ use crate::api::{
 use crate::landlock::Landlock;
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::{Error as VmmError, Result};
+use event_monitor::event;
 
 pub mod http_endpoint;
 
@@ -370,6 +371,7 @@ fn start_http_thread(
 
             std::panic::catch_unwind(AssertUnwindSafe(move || {
                 server.start_server().unwrap();
+                event!("vmm", "api-ready");
                 loop {
                     match server.requests() {
                         Ok(request_vec) => {
