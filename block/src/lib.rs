@@ -54,7 +54,7 @@ use std::{cmp, mem, result};
 
 pub use aligned_operation::AlignedOperation;
 #[cfg(feature = "io_uring")]
-use io_uring::{IoUring, Probe, opcode};
+use io_uring::{IoUring, Probe, SubmissionQueue, Submitter, opcode};
 use libc::{
     FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE, S_IFBLK, S_IFMT, ioctl,
 };
@@ -220,6 +220,74 @@ pub fn request_type<B: Bitmap + 'static>(
         VIRTIO_BLK_T_WRITE_ZEROES => Ok(RequestType::WriteZeroes),
         t => Ok(RequestType::Unsupported(t)),
     }
+}
+
+#[cfg(feature = "io_uring")]
+struct DestructorClear<'a>(&'a mut Option<IoUring>);
+#[cfg(feature = "io_uring")]
+/// A struct that drops the contained [`IoUring`] instance
+/// on [`Drop`].  It crashes the program if the destructor
+/// for the [`IoUring`] panics.  It can be disarmed by
+/// setting the contained `&mut Option<IoUring>` to a
+/// reference to a `None`.
+impl<'a> Drop for DestructorClear<'a> {
+    fn drop(&mut self) {
+        struct ConvertPanicToAbort;
+        impl Drop for ConvertPanicToAbort {
+            fn drop(&mut self) {
+                if std::thread::panicking() {
+                    // double panic always aborts
+                    panic!(
+                        "Cannot handle panic while there are \
+unsubmitted iovecs in the submission queue"
+                    )
+                }
+            }
+        }
+        if self.0.is_some() {
+            // Ensure that any panic in this destructor becomes a double panic.
+            let _convert_panic_into_abort = ConvertPanicToAbort;
+            // Cancel all outstanding requests to prevent
+            // use-after-scope of iovecs.
+            // TODO: this isn't safe in the presence
+            // of concurrent forks, but Cloud Hypervisor doesn't fork
+            // while this code is running.
+            *self.0 = None;
+        }
+    }
+}
+#[cfg(feature = "io_uring")]
+impl<'a> DestructorClear<'a> {
+    fn split_ring(&mut self) -> std::io::Result<(Submitter<'_>, SubmissionQueue<'_>)> {
+        let Some(io_uring) = self.0.as_mut() else {
+            return Err(std::io::Error::other("io_uring instance already deleted"));
+        };
+        let (submitter, sq, _) = io_uring.split();
+        Ok((submitter, sq))
+    }
+}
+
+#[cfg(feature = "io_uring")]
+fn submit_all(submitter: &Submitter<'_>, sq: &mut SubmissionQueue<'_>) -> std::io::Result<()> {
+    const MAX_ZERO_SUBMITS: u32 = 100;
+    let mut len = sq.len();
+    while len > 0 {
+        sq.sync();
+        let mut submissions_that_submitted_no_sqes = 0u32;
+        len -= loop {
+            let submitted = submitter.submit()?;
+            if submitted != 0 {
+                break submitted;
+            }
+            submissions_that_submitted_no_sqes += 1;
+            if submissions_that_submitted_no_sqes >= MAX_ZERO_SUBMITS {
+                return Err(std::io::Error::other(
+                    "100 consecutive calls to io_uring_enter didn't submit any SQEs",
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn sector<B: Bitmap + 'static>(
