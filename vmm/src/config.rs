@@ -116,6 +116,9 @@ pub enum Error {
     /// Error parsing RNG options
     #[error("Error parsing --rng")]
     ParseRng(#[source] OptionParserError),
+    /// Error parsing RTC options
+    #[error("Error parsing --rtc")]
+    ParseRtc(#[source] OptionParserError),
     /// Error parsing balloon options
     #[error("Error parsing --balloon")]
     ParseBalloon(#[source] OptionParserError),
@@ -474,6 +477,7 @@ pub struct VmParams<'a> {
     pub pvpanic: bool,
     pub numa: Option<Vec<&'a str>>,
     pub watchdog: bool,
+    pub rtc: Option<&'a str>,
     #[cfg(feature = "guest_debug")]
     pub gdb: bool,
     pub pci_segments: Option<Vec<&'a str>>,
@@ -544,6 +548,7 @@ impl<'a> VmParams<'a> {
             .get_many::<String>("numa")
             .map(|x| x.map(|y| y as &str).collect());
         let watchdog = args.get_flag("watchdog");
+        let rtc: Option<&str> = args.get_one::<String>("rtc").map(|x| x as &str);
         let pci_segments: Option<Vec<&str>> = args
             .get_many::<String>("pci-segment")
             .map(|x| x.map(|y| y as &str).collect());
@@ -593,6 +598,7 @@ impl<'a> VmParams<'a> {
             pvpanic,
             numa,
             watchdog,
+            rtc,
             #[cfg(feature = "guest_debug")]
             gdb,
             pci_segments,
@@ -1773,6 +1779,28 @@ impl RngConfig {
         let pci_common = PciDeviceCommonConfig::parse(rng)?;
 
         Ok(RngConfig { src, pci_common })
+    }
+
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        self.pci_common.validate(vm_config)
+    }
+}
+
+impl RtcConfig {
+    pub const SYNTAX: &'static str = "Virtio RTC parameters \"\
+        iommu=on|off,id=<device_id>,\
+        pci_segment=<segment_id>,pci_device_id=<pci_slot>\". \
+        Passing --rtc with no arguments enables the device with default \
+        settings.";
+
+    pub fn parse(rtc: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser.add_all(PciDeviceCommonConfig::OPTIONS_IOMMU);
+        parser.parse(rtc).map_err(Error::ParseRtc)?;
+
+        let pci_common = PciDeviceCommonConfig::parse(rtc)?;
+
+        Ok(RtcConfig { pci_common })
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
@@ -3054,6 +3082,12 @@ impl VmConfig {
         Self::validate_identifier(&mut id_list, &self.rng.pci_common.id)?;
         self.iommu |= self.rng.pci_common.iommu;
 
+        if let Some(rtc) = &self.rtc {
+            rtc.validate(self)?;
+            Self::validate_identifier(&mut id_list, &rtc.pci_common.id)?;
+            self.iommu |= rtc.pci_common.iommu;
+        }
+
         self.console.validate(self)?;
         Self::validate_identifier(&mut id_list, &self.console.pci_common.id)?;
         self.iommu |= self.console.pci_common.iommu;
@@ -3290,6 +3324,11 @@ impl VmConfig {
 
         let rng = RngConfig::parse(vm_params.rng)?;
 
+        let mut rtc: Option<RtcConfig> = None;
+        if let Some(rtc_params) = &vm_params.rtc {
+            rtc = Some(RtcConfig::parse(rtc_params)?);
+        }
+
         let mut balloon: Option<BalloonConfig> = None;
         if let Some(balloon_params) = &vm_params.balloon {
             balloon = Some(BalloonConfig::parse(balloon_params)?);
@@ -3471,6 +3510,7 @@ impl VmConfig {
             iommu: false, // updated in VmConfig::validate()
             numa,
             watchdog: vm_params.watchdog,
+            rtc,
             #[cfg(feature = "guest_debug")]
             gdb,
             pci_segments,
@@ -3593,6 +3633,7 @@ impl Clone for VmConfig {
             disks: self.disks.clone(),
             net: self.net.clone(),
             rng: self.rng.clone(),
+            rtc: self.rtc.clone(),
             balloon: self.balloon.clone(),
             #[cfg(feature = "pvmemcontrol")]
             pvmemcontrol: self.pvmemcontrol.clone(),
@@ -4827,6 +4868,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             iommu: false,
             numa: None,
             watchdog: false,
+            rtc: None,
             #[cfg(feature = "guest_debug")]
             gdb: false,
             pci_segments: None,
@@ -5074,6 +5116,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             iommu: false,
             numa: None,
             watchdog: false,
+            rtc: None,
             #[cfg(feature = "guest_debug")]
             gdb: false,
             pci_segments: None,
