@@ -2,6 +2,8 @@
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+/// Module for cache info.
+pub mod cache;
 /// Module for the flattened device tree.
 pub mod fdt;
 /// Layout for this aarch64 system.
