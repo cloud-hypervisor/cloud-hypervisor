@@ -39,6 +39,7 @@ pub enum Thread {
     Vcpu,
     Vmm,
     PtyForeground,
+    SerialManager,
 }
 
 /// Shorthand for chaining `SeccompCondition`s with the `and` operator  in a `SeccompRule`.
@@ -1031,18 +1032,48 @@ fn event_monitor_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendE
     ])
 }
 
+fn serial_manager_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
+    Ok(vec![
+        (libc::SYS_accept4, vec![]),
+        (libc::SYS_clock_nanosleep, vec![]),
+        (libc::SYS_close, vec![]),
+        (libc::SYS_epoll_ctl, vec![]),
+        #[cfg(target_arch = "aarch64")]
+        (libc::SYS_epoll_pwait, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_epoll_wait, vec![]),
+        (libc::SYS_exit, vec![]),
+        (libc::SYS_fcntl, vec![]),
+        (libc::SYS_futex, vec![]),
+        (libc::SYS_madvise, vec![]),
+        (libc::SYS_munmap, vec![]),
+        (libc::SYS_read, vec![]),
+        (libc::SYS_recvfrom, vec![]),
+        (libc::SYS_rt_sigprocmask, vec![]),
+        (libc::SYS_rt_sigreturn, vec![]),
+        (libc::SYS_shutdown, vec![]),
+        (libc::SYS_sigaltstack, vec![]),
+        (libc::SYS_write, vec![]),
+    ])
+}
+
 fn get_seccomp_rules(
     thread_type: Thread,
-    hypervisor_type: HypervisorType,
+    hypervisor_type: Option<HypervisorType>,
 ) -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
     match thread_type {
         Thread::HttpApi => Ok(http_api_thread_rules()?),
         #[cfg(feature = "dbus_api")]
         Thread::DBusApi => Ok(dbus_api_thread_rules()?),
         Thread::EventMonitor => Ok(event_monitor_thread_rules()?),
+        Thread::SerialManager => Ok(serial_manager_thread_rules()?),
         Thread::SignalHandler => Ok(signal_handler_thread_rules()?),
-        Thread::Vcpu => Ok(vcpu_thread_rules(hypervisor_type)?),
-        Thread::Vmm => Ok(vmm_thread_rules(hypervisor_type)?),
+        Thread::Vcpu => Ok(vcpu_thread_rules(
+            hypervisor_type.expect("hypervisor_type is required for Vcpu threads"),
+        )?),
+        Thread::Vmm => Ok(vmm_thread_rules(
+            hypervisor_type.expect("hypervisor_type is required for Vmm threads"),
+        )?),
         Thread::PtyForeground => Ok(pty_foreground_thread_rules()?),
     }
 }
@@ -1051,7 +1082,7 @@ fn get_seccomp_rules(
 pub fn get_seccomp_filter(
     seccomp_action: &SeccompAction,
     thread_type: Thread,
-    hypervisor_type: HypervisorType,
+    hypervisor_type: Option<HypervisorType>,
 ) -> Result<BpfProgram, Error> {
     match seccomp_action {
         SeccompAction::Allow => Ok(vec![]),
