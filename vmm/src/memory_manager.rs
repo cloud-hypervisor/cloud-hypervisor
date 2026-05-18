@@ -55,6 +55,7 @@ use crate::coredump::{
     CoredumpMemoryRegion, CoredumpMemoryRegions, DumpState, GuestDebuggableError,
 };
 use crate::migration::url_to_path;
+use crate::uffd_block::{FaultPolicy, UffdBlock, VmaRegion};
 use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
 use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID, uffd};
 
@@ -270,6 +271,7 @@ pub struct MemoryManager {
     // slots that the mapping is created in.
     guest_ram_mappings: Vec<GuestRamMapping>,
     uffd_handler: Option<UffdHandler>,
+    uffd_block: Option<UffdBlock>,
 
     pub acpi_address: Option<GuestAddress>,
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
@@ -940,6 +942,7 @@ impl MemoryManager {
         file_path: &Path,
         saved_regions: &MemoryRangeTable,
         exit_evt: &EventFd,
+        external_sock: Option<&Path>,
     ) -> Result<(), Error> {
         if saved_regions.is_empty() {
             return Ok(());
@@ -963,8 +966,6 @@ impl MemoryManager {
         {
             return Err(UffdError::UnalignedRanges.into());
         }
-
-        let snapshot_file = File::open(file_path).map_err(Error::SnapshotOpen)?;
 
         let uffd_fd = uffd::create(required_uffd_features).map_err(UffdError::Create)?;
 
@@ -1016,6 +1017,46 @@ impl MemoryManager {
             handler_ranges.len(),
             file_offset
         );
+
+        if let Some(sock_path) = external_sock {
+            // External handler path: handshake with Copy policy, server handles
+            // UFFDIO_COPY directly via the uffd fd. No handler thread needed.
+            let vma_regions: Vec<VmaRegion> = handler_ranges
+                .iter()
+                .map(|r| VmaRegion {
+                    base_host_virt_addr: r.host_addr,
+                    size: r.length as usize,
+                    offset: r.file_offset,
+                    page_size: r.page_size as usize,
+                    page_size_kib: 0,
+                    prot: libc::PROT_READ | libc::PROT_WRITE,
+                    flags: libc::MAP_SHARED,
+                })
+                .collect();
+
+            let sock_path_str = sock_path.to_string_lossy().to_string();
+
+            // Copy policy: external server performs UFFDIO_COPY directly —
+            // no local handler thread needed.
+            let mut uffd_block =
+                UffdBlock::new(&sock_path_str, FaultPolicy::Copy).map_err(|e| {
+                    Error::Restore(vm_migration::MigratableError::Restore(anyhow!(
+                        "UffdBlock connect failed: {e}"
+                    )))
+                })?;
+
+            uffd_block.handshake(uffd_fd, vma_regions).map_err(|e| {
+                Error::Restore(vm_migration::MigratableError::Restore(anyhow!(
+                    "UffdBlock handshake failed: {e}"
+                )))
+            })?;
+
+            info!("UFFD restore: external handler handshake with {sock_path_str} succeeded");
+            self.uffd_block = Some(uffd_block);
+            return Ok(());
+        }
+
+        let snapshot_file = File::open(file_path).map_err(Error::SnapshotOpen)?;
 
         let stop_event = EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?;
         let thread_stop_event = stop_event.try_clone().map_err(Error::EventFdFail)?;
@@ -1741,6 +1782,7 @@ impl MemoryManager {
             memory_zones,
             guest_ram_mappings: Vec::new(),
             uffd_handler: None,
+            uffd_block: None,
             acpi_address,
             log_dirty: dynamic, // Cannot log dirty pages on a TD
             arch_mem_regions,
@@ -1764,6 +1806,7 @@ impl MemoryManager {
         memory_restore_mode: MemoryRestoreMode,
         phys_bits: u8,
         exit_evt: &EventFd,
+        external_sock: Option<&Path>,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         if let Some(source_url) = source_url {
             let mut memory_file_path = url_to_path(source_url).map_err(Error::Restore)?;
@@ -1788,6 +1831,7 @@ impl MemoryManager {
                     &memory_file_path,
                     &mem_snapshot.memory_ranges,
                     exit_evt,
+                    external_sock,
                 )?;
             } else {
                 mm.lock()

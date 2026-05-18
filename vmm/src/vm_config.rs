@@ -516,6 +516,24 @@ impl ApplyLandlock for GenericVhostUserConfig {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub enum MemBackendType {
+    #[default]
+    File,
+    Uffd,
+}
+
+impl std::str::FromStr for MemBackendType {
+    type Err = String;
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "file" => Ok(Self::File),
+            "uffd" => Ok(Self::Uffd),
+            _ => Err(format!("invalid backend type: {s}")),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PmemConfig {
     #[serde(flatten)]
@@ -525,12 +543,22 @@ pub struct PmemConfig {
     pub size: Option<u64>,
     #[serde(default)]
     pub discard_writes: bool,
+    #[serde(default)]
+    pub backend_type: MemBackendType,
 }
 
 impl ApplyLandlock for PmemConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        let access = if self.discard_writes { "r" } else { "rw" };
-        landlock.add_rule_with_access(&self.file, access)?;
+        match self.backend_type {
+            MemBackendType::File => {
+                let access = if self.discard_writes { "r" } else { "rw" };
+                landlock.add_rule_with_access(&self.file, access)?;
+            }
+            MemBackendType::Uffd => {
+                // For UFFD backend, file is a socket path
+                landlock.add_rule_with_access(&self.file, "rw")?;
+            }
+        }
         Ok(())
     }
 }
@@ -1182,5 +1210,32 @@ impl VmConfig {
         } else {
             self.cpus.max_vcpus
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mem_backend_type_default() {
+        assert_eq!(MemBackendType::default(), MemBackendType::File);
+    }
+
+    #[test]
+    fn test_mem_backend_type_from_str() {
+        assert_eq!(
+            "file".parse::<MemBackendType>().unwrap(),
+            MemBackendType::File
+        );
+        assert_eq!(
+            "uffd".parse::<MemBackendType>().unwrap(),
+            MemBackendType::Uffd
+        );
+        assert_eq!(
+            "UFFD".parse::<MemBackendType>().unwrap(),
+            MemBackendType::Uffd
+        );
+        "invalid".parse::<MemBackendType>().unwrap_err();
     }
 }

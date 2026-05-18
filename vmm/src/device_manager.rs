@@ -13,6 +13,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::{File, OpenOptions};
 use std::io::{self, IsTerminal, Seek, SeekFrom, stdout};
 use std::num::Wrapping;
+use std::os::fd::AsFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 #[cfg(not(target_arch = "riscv64"))]
@@ -69,8 +70,8 @@ use hypervisor::arch::aarch64::regs::AARCH64_PMU_IRQ;
 #[cfg(feature = "kvm")]
 use iommufd_ioctls::IommuFd;
 use libc::{
-    MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED, O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW, tcsetattr,
-    termios,
+    EFD_NONBLOCK, MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED, O_TMPFILE, PROT_READ, PROT_WRITE,
+    TCSANOW, tcsetattr, termios,
 };
 use log::{debug, error, info, warn};
 use pci::{
@@ -118,14 +119,16 @@ use crate::interrupt::{LegacyUserspaceInterruptManager, MsiInterruptManager};
 use crate::memory_manager::{Error as MemoryManagerError, MEMORY_MANAGER_ACPI_SIZE, MemoryManager};
 use crate::pci_segment::PciSegment;
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
+use crate::uffd_block::{FaultPolicy, UffdBlock, VmaRegion};
 #[cfg(feature = "ivshmem")]
 use crate::vm_config::IvshmemConfig;
 use crate::vm_config::{
     ConsoleOutputMode, DEFAULT_IOMMU_ADDRESS_WIDTH_BITS, DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT,
-    DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PciDeviceCommonConfig,
-    PmemConfig, UserDeviceConfig, VdpaConfig, VhostMode, VmConfig, VsockConfig,
+    DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, MemBackendType, NetConfig,
+    PciDeviceCommonConfig, PmemConfig, UserDeviceConfig, VdpaConfig, VhostMode, VmConfig,
+    VsockConfig,
 };
-use crate::{DEVICE_MANAGER_SNAPSHOT_ID, GuestRegionMmap, PciDeviceInfo, device_node};
+use crate::{DEVICE_MANAGER_SNAPSHOT_ID, GuestRegionMmap, PciDeviceInfo, device_node, uffd};
 
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 const MMIO_LEN: u64 = 0x1000;
@@ -515,6 +518,14 @@ pub enum DeviceManagerError {
     /// Trying to use a size that is not multiple of 2MiB
     #[error("Trying to use a size that is not multiple of 2MiB")]
     PmemSizeNotAligned,
+
+    /// UFFD backend requires size to be specified
+    #[error("UFFD pmem backend requires size to be specified")]
+    PmemUffdSizeMissing,
+
+    /// Failed to set up UFFD pmem backend
+    #[error("Failed to set up UFFD pmem backend: {0}")]
+    PmemUffdSetup(#[source] io::Error),
 
     /// Could not find the node in the device tree.
     #[error("Could not find the node in the device tree")]
@@ -987,6 +998,13 @@ impl AccessPlatform for SevSnpPageAccessProxy {
     }
 }
 
+/// Tracks the UFFD handler thread for a PMEM device with zerocopy backend.
+struct PmemUffdHandler {
+    stop_event: EventFd,
+    result_rx: std::sync::mpsc::Receiver<io::Result<()>>,
+    handle: std::thread::JoinHandle<()>,
+}
+
 pub struct DeviceManager {
     // Manage address space related to devices
     address_manager: Arc<AddressManager>,
@@ -1150,6 +1168,9 @@ pub struct DeviceManager {
     #[cfg(feature = "ivshmem")]
     // ivshmem device
     ivshmem_device: Option<Arc<Mutex<devices::IvshmemDevice>>>,
+
+    // UFFD handler threads for PMEM devices with zerocopy backend.
+    pmem_uffd_handlers: Vec<PmemUffdHandler>,
 }
 
 /// Create per-PCI-segment MMIO allocators over the range `[start, end]`.
@@ -1440,6 +1461,7 @@ impl DeviceManager {
             fw_cfg: None,
             #[cfg(feature = "ivshmem")]
             ivshmem_device: None,
+            pmem_uffd_handlers: Vec::new(),
             _acpi_cpu_hotplug_controller: acpi_cpu_hotplug_controller,
         };
 
@@ -3281,31 +3303,58 @@ impl DeviceManager {
             None
         };
 
-        let (custom_flags, set_len) = if pmem_cfg.file.is_dir() {
-            if pmem_cfg.size.is_none() {
-                return Err(DeviceManagerError::PmemWithDirectorySizeMissing);
+        let (file, size, backend_sock_path) = match pmem_cfg.backend_type {
+            MemBackendType::File => {
+                let (custom_flags, set_len) = if pmem_cfg.file.is_dir() {
+                    if pmem_cfg.size.is_none() {
+                        return Err(DeviceManagerError::PmemWithDirectorySizeMissing);
+                    }
+                    (O_TMPFILE, true)
+                } else {
+                    (0, false)
+                };
+
+                let mut file = OpenOptions::new()
+                    .read(true)
+                    .write(!pmem_cfg.discard_writes)
+                    .custom_flags(custom_flags)
+                    .open(&pmem_cfg.file)
+                    .map_err(DeviceManagerError::PmemFileOpen)?;
+
+                let size = if let Some(size) = pmem_cfg.size {
+                    if set_len {
+                        file.set_len(size)
+                            .map_err(DeviceManagerError::PmemFileSetLen)?;
+                    }
+                    size
+                } else {
+                    file.seek(SeekFrom::End(0))
+                        .map_err(DeviceManagerError::PmemFileSetLen)?
+                };
+
+                (file, size, None)
             }
-            (O_TMPFILE, true)
-        } else {
-            (0, false)
-        };
-
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(!pmem_cfg.discard_writes)
-            .custom_flags(custom_flags)
-            .open(&pmem_cfg.file)
-            .map_err(DeviceManagerError::PmemFileOpen)?;
-
-        let size = if let Some(size) = pmem_cfg.size {
-            if set_len {
+            MemBackendType::Uffd => {
+                let size = pmem_cfg
+                    .size
+                    .ok_or(DeviceManagerError::PmemUffdSizeMissing)?;
+                // Create an anonymous memfd as a placeholder backing for the
+                // guest mapping.  The actual data will be paged in via the
+                // external UFFD handler.
+                let memfd_name = std::ffi::CString::new("ch-pmem-uffd")
+                    .map_err(|e| DeviceManagerError::PmemUffdSetup(io::Error::other(e)))?;
+                // SAFETY: memfd_create with valid CString name.
+                let raw_fd = unsafe { libc::memfd_create(memfd_name.as_ptr(), libc::MFD_CLOEXEC) };
+                if raw_fd < 0 {
+                    return Err(DeviceManagerError::PmemUffdSetup(io::Error::last_os_error()));
+                }
+                // SAFETY: raw_fd is a valid fd returned by memfd_create.
+                let file = unsafe { File::from_raw_fd(raw_fd) };
                 file.set_len(size)
                     .map_err(DeviceManagerError::PmemFileSetLen)?;
+
+                (file, size, Some(pmem_cfg.file.clone()))
             }
-            size
-        } else {
-            file.seek(SeekFrom::End(0))
-                .map_err(DeviceManagerError::PmemFileSetLen)?
         };
 
         if size % 0x20_0000 != 0 {
@@ -3341,16 +3390,18 @@ impl DeviceManager {
         };
 
         let cloned_file = file.try_clone().map_err(DeviceManagerError::CloneFile)?;
+        let mmap_prot = PROT_READ | PROT_WRITE;
+        let mmap_flags = MAP_NORESERVE
+            | if pmem_cfg.discard_writes {
+                MAP_PRIVATE
+            } else {
+                MAP_SHARED
+            };
         let mmap_region = MmapRegion::build(
             Some(FileOffset::new(cloned_file, 0)),
             region_size as usize,
-            PROT_READ | PROT_WRITE,
-            MAP_NORESERVE
-                | if pmem_cfg.discard_writes {
-                    MAP_PRIVATE
-                } else {
-                    MAP_SHARED
-                },
+            mmap_prot,
+            mmap_flags,
         )
         .map_err(DeviceManagerError::NewMmapRegion)?;
         let host_addr = mmap_region.as_ptr();
@@ -3364,6 +3415,82 @@ impl DeviceManager {
                 .create_userspace_mapping(region_base, region_size, host_addr, false, false, false)
                 .map_err(DeviceManagerError::MemoryManager)
         }?;
+
+        // For UFFD backend, register the mapping with userfaultfd and start
+        // the handler thread that communicates with the external server.
+        if let Some(sock_path) = backend_sock_path {
+            let uffd_fd = uffd::create(0).map_err(DeviceManagerError::PmemUffdSetup)?;
+            uffd::register(uffd_fd.as_fd(), host_addr as u64, region_size)
+                .map_err(DeviceManagerError::PmemUffdSetup)?;
+
+            let vma_region = VmaRegion {
+                base_host_virt_addr: host_addr as u64,
+                size: region_size as usize,
+                offset: 0,
+                page_size: 512 * 4096,
+                page_size_kib: 0,
+                prot: mmap_prot,
+                flags: mmap_flags,
+            };
+
+            let sock_path_str = sock_path.to_string_lossy().to_string();
+            // Zerocopy policy: external server returns blob fds, CH mmaps
+            // them into the guest — requires a local handler thread.
+            let mut uffd_block = UffdBlock::new(&sock_path_str, FaultPolicy::Zerocopy)
+                .map_err(DeviceManagerError::PmemUffdSetup)?;
+            uffd_block
+                .handshake(uffd_fd, vec![vma_region])
+                .map_err(DeviceManagerError::PmemUffdSetup)?;
+
+            let stop_event = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
+            let thread_stop = stop_event
+                .try_clone()
+                .map_err(DeviceManagerError::EventFd)?;
+            let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
+            let (result_tx, result_rx) = std::sync::mpsc::sync_channel(1);
+            let thread_id = id.clone();
+
+            let handle = std::thread::Builder::new()
+                .name(format!("uffd-pmem-{id}"))
+                .spawn(move || {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                        let result = crate::uffd_block::uffd_handler_loop(
+                            &uffd_block,
+                            &thread_stop,
+                            &ready_tx,
+                        );
+                        if let Err(e) = &result {
+                            error!("UFFD pmem handler exited with error: {e}");
+                        }
+                        result_tx.send(result).ok();
+                    }))
+                    .map_err(|_| {
+                        error!("uffd-pmem-{thread_id} thread panicked");
+                    })
+                    .ok();
+                })
+                .map_err(DeviceManagerError::PmemUffdSetup)?;
+
+            // Wait for the handler to signal readiness (epoll setup done).
+            if ready_rx.recv().is_err() {
+                handle.join().ok();
+                return Err(DeviceManagerError::PmemUffdSetup(io::Error::other(
+                    "UFFD pmem handler failed to start",
+                )));
+            }
+
+            // Check for immediate runtime failure.
+            if let Ok(Err(e)) = result_rx.try_recv() {
+                handle.join().ok();
+                return Err(DeviceManagerError::PmemUffdSetup(e));
+            }
+
+            self.pmem_uffd_handlers.push(PmemUffdHandler {
+                stop_event,
+                result_rx,
+                handle,
+            });
+        }
 
         let mapping = UserspaceMapping {
             mem_slot,
@@ -5782,6 +5909,20 @@ impl BusDevice for DeviceManager {
 
 impl Drop for DeviceManager {
     fn drop(&mut self) {
+        // Stop PMEM UFFD handler threads before tearing down devices.
+        for handler in self.pmem_uffd_handlers.drain(..) {
+            handler.stop_event.write(1).ok();
+            handler.handle.join().ok();
+
+            match handler.result_rx.try_recv() {
+                Ok(Err(e)) => error!("UFFD pmem handler terminated with error: {e}"),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    warn!("UFFD pmem handler terminated unexpectedly (possible panic)");
+                }
+                _ => {}
+            }
+        }
+
         // Explicitly clear the regions owned by this device to ensure
         // that they are dropped and unmapped before the container is cleared.
         // See eject_device() for the device hot-unplug equivalent.

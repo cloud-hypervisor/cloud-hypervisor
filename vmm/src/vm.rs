@@ -1338,6 +1338,7 @@ impl Vm {
         source_url: Option<&str>,
         prefault: Option<bool>,
         memory_restore_mode: Option<MemoryRestoreMode>,
+        external_sock: Option<&std::path::Path>,
     ) -> Result<Self> {
         trace_scoped!("Vm::new");
 
@@ -1395,6 +1396,7 @@ impl Vm {
                     memory_restore_mode.unwrap_or_default(),
                     phys_bits,
                     &exit_evt,
+                    external_sock,
                 )
                 .map_err(Error::MemoryManager)?
             } else {

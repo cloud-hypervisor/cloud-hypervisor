@@ -124,6 +124,30 @@ Current constraints for `memory_restore_mode=ondemand`:
 - `prefault=on` is not supported
 - the snapshot memory ranges must be page-aligned
 
+### External UFFD Handler for Snapshot Restore
+
+When using `memory_restore_mode=ondemand`, an external UFFD handler can be
+specified to serve page faults on behalf of Cloud Hypervisor:
+
+```bash
+cloud-hypervisor \
+    --api-socket /tmp/cloud-hypervisor.sock \
+    --restore source_url=file:///home/foo/snapshot,memory_restore_mode=ondemand,external_sock=/tmp/handler.sock
+```
+
+With `external_sock`, Cloud Hypervisor performs a handshake with the external
+handler over the Unix socket and delegates page fault resolution (`UFFDIO_COPY`)
+to it. This allows the handler to serve snapshot memory pages from a remote
+source, avoiding the need for the `memory-ranges` file to be present locally.
+
+The handler must implement the UFFD protocol: accept a connection, receive the
+uffd file descriptor and VMA region list via the handshake, then respond to
+page faults by copying data into the faulting pages.
+
+When `external_sock` is not specified, Cloud Hypervisor reads pages from the
+local `memory-ranges` file and performs `UFFDIO_COPY` itself — no external
+handler thread is needed.
+
 ## Restore a VM with new Net FDs
 For a VM created with FDs explicitly passed to NetConfig, a set of valid FDs
 need to be provided along with the VM restore command in the following syntax:
