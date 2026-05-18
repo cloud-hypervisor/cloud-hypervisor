@@ -4,7 +4,9 @@
 
 use std::marker::PhantomData;
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
+mod guest_memory_target;
 
+pub use guest_memory_target::GuestMemoryTarget;
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
