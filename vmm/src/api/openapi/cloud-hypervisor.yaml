@@ -781,7 +781,7 @@ components:
           items:
             type: integer
             format: int16
-        iommu_address_width:
+        iommu_address_width_bits:
           type: integer
           format: uint8
         serial_number:
