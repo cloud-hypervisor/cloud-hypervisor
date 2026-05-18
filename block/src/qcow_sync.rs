@@ -57,6 +57,26 @@ impl QcowSync {
             completion_list: VecDeque::new(),
         }
     }
+
+    fn apply_dealloc_action(&mut self, action: &DeallocAction) {
+        match action {
+            DeallocAction::PunchHole {
+                host_offset,
+                length,
+            } => {
+                let _ = self.data_file.file_mut().punch_hole(*host_offset, *length);
+            }
+            DeallocAction::WriteZeroes {
+                host_offset,
+                length,
+            } => {
+                let _ = self
+                    .data_file
+                    .file_mut()
+                    .write_zeroes_at(*host_offset, *length);
+            }
+        }
+    }
 }
 
 impl AsyncIo for QcowSync {
@@ -249,41 +269,21 @@ impl AsyncIo for QcowSync {
     }
 
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
-        let virtual_size = self.metadata.virtual_size();
-        let cluster_size = self.cluster_size;
-
         let result = self
             .metadata
             .deallocate_bytes(
                 offset,
                 length as usize,
                 self.sparse,
-                virtual_size,
-                cluster_size,
+                false,
                 self.backing_file.as_deref(),
             )
             .map_err(AsyncIoError::PunchHole);
 
         match result {
             Ok(actions) => {
-                for action in actions {
-                    match action {
-                        DeallocAction::PunchHole {
-                            host_offset,
-                            length,
-                        } => {
-                            let _ = self.data_file.file_mut().punch_hole(host_offset, length);
-                        }
-                        DeallocAction::WriteZeroes {
-                            host_offset,
-                            length,
-                        } => {
-                            let _ = self
-                                .data_file
-                                .file_mut()
-                                .write_zeroes_at(host_offset, length);
-                        }
-                    }
+                for action in &actions {
+                    self.apply_dealloc_action(action);
                 }
                 self.completion_list.push_back((user_data, 0));
                 self.eventfd.write(1).unwrap();
@@ -303,9 +303,37 @@ impl AsyncIo for QcowSync {
     }
 
     fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
-        // For QCOW2 write_zeroes uses cluster deallocation, same as punch_hole.
-        // Unallocated clusters inherently read as zero in the QCOW2 format.
-        self.punch_hole(offset, length, user_data)
+        let result = self
+            .metadata
+            .deallocate_bytes(
+                offset,
+                length as usize,
+                self.sparse,
+                true,
+                self.backing_file.as_deref(),
+            )
+            .map_err(AsyncIoError::WriteZeroes);
+
+        match result {
+            Ok(actions) => {
+                for action in &actions {
+                    self.apply_dealloc_action(action);
+                }
+                self.completion_list.push_back((user_data, 0));
+                self.eventfd.write(1).unwrap();
+                Ok(())
+            }
+            Err(e) => {
+                let errno = if let AsyncIoError::WriteZeroes(ref io_err) = e {
+                    -io_err.raw_os_error().unwrap_or(libc::EIO)
+                } else {
+                    -libc::EIO
+                };
+                self.completion_list.push_back((user_data, errno));
+                self.eventfd.write(1).unwrap();
+                Ok(())
+            }
+        }
     }
 }
 
@@ -353,6 +381,39 @@ mod unit_tests {
         )
         .unwrap();
         (temp_file, disk)
+    }
+
+    fn create_overlay_disk_with_raw_backing_pattern(
+        file_size: u64,
+        value: u8,
+        direct_io: bool,
+    ) -> (TempFile, TempFile, QcowDisk) {
+        let backing_temp = TempFile::new().unwrap();
+        let backing_data = vec![value; file_size as usize];
+        backing_temp.as_file().write_all(&backing_data).unwrap();
+        backing_temp.as_file().sync_all().unwrap();
+        let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
+
+        let overlay_temp = TempFile::new().unwrap();
+        {
+            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
+            let backing_config = BackingFileConfig {
+                path: backing_path,
+                format: Some(ImageType::Raw),
+            };
+            QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
+        }
+
+        let disk = QcowDisk::new(
+            overlay_temp.as_file().try_clone().unwrap(),
+            direct_io,
+            true,
+            true,
+            false,
+        )
+        .unwrap();
+
+        (backing_temp, overlay_temp, disk)
     }
 
     fn async_read(disk: &QcowDisk, offset: u64, len: usize) -> Vec<u8> {
@@ -827,6 +888,77 @@ mod unit_tests {
             Some(QcowError::BackingFileIo(path, _)) => assert_eq!(path, "missing.raw"),
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    fn test_write_zeroes_unallocated_overlay_with_backing_must_read_zero_impl(direct_io: bool) {
+        let cluster_size = 1u64 << 16;
+        let file_size = cluster_size * 4;
+        let offset = cluster_size;
+        let (_backing_temp, _overlay_temp, disk) =
+            create_overlay_disk_with_raw_backing_pattern(file_size, 0xAB, direct_io);
+
+        let mut async_io = disk.create_async_io(1).unwrap();
+        async_io.write_zeroes(offset, cluster_size, 42).unwrap();
+        let (user_data, result) = async_io.next_completed_request().unwrap();
+        assert_eq!(user_data, 42);
+        assert_eq!(result, 0);
+        drop(async_io);
+
+        let buf = async_read(&disk, offset, cluster_size as usize);
+        assert!(
+            buf.iter().all(|&b| b == 0),
+            "zeroed unallocated overlay cluster exposed backing data"
+        );
+    }
+
+    #[test]
+    fn test_write_zeroes_unallocated_overlay_with_backing_must_read_zero() {
+        test_write_zeroes_unallocated_overlay_with_backing_must_read_zero_impl(false);
+    }
+
+    #[test]
+    fn test_write_zeroes_unallocated_overlay_with_backing_must_read_zero_direct_io() {
+        test_write_zeroes_unallocated_overlay_with_backing_must_read_zero_impl(true);
+    }
+
+    fn test_partial_write_after_write_zeroes_must_not_reintroduce_backing_data_impl(
+        direct_io: bool,
+    ) {
+        let cluster_size = 1u64 << 16;
+        let file_size = cluster_size * 4;
+        let offset = cluster_size;
+        let patch_offset = 0x4000usize;
+        let patch_len = 0x1000usize;
+        let (_backing_temp, _overlay_temp, disk) =
+            create_overlay_disk_with_raw_backing_pattern(file_size, 0xAB, direct_io);
+
+        let mut async_io = disk.create_async_io(1).unwrap();
+        async_io.write_zeroes(offset, cluster_size, 42).unwrap();
+        let (_user_data, result) = async_io.next_completed_request().unwrap();
+        assert_eq!(result, 0);
+        drop(async_io);
+
+        let patch = [0x99u8; 0x1000];
+        async_write(&disk, offset + patch_offset as u64, &patch[..patch_len]);
+
+        let buf = async_read(&disk, offset, cluster_size as usize);
+        assert!(buf[..patch_offset].iter().all(|&b| b == 0));
+        assert!(
+            buf[patch_offset..patch_offset + patch_len]
+                .iter()
+                .all(|&b| b == 0x99)
+        );
+        assert!(buf[patch_offset + patch_len..].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn test_partial_write_after_write_zeroes_must_not_reintroduce_backing_data() {
+        test_partial_write_after_write_zeroes_must_not_reintroduce_backing_data_impl(false);
+    }
+
+    #[test]
+    fn test_partial_write_after_write_zeroes_must_not_reintroduce_backing_data_direct_io() {
+        test_partial_write_after_write_zeroes_must_not_reintroduce_backing_data_impl(true);
     }
 
     fn test_backing_file_read_qcow2_backing_impl(direct_io: bool) {
