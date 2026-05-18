@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::btree_map::BTreeMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::fd::{AsRawFd, RawFd};
@@ -48,9 +47,7 @@ pub type Result<T> = std::result::Result<T, VhdxError>;
 pub struct Vhdx {
     file: File,
     vhdx_header: VhdxHeader,
-    region_entries: BTreeMap<u64, u64>,
     bat_entry: RegionTableEntry,
-    mdr_entry: RegionTableEntry,
     disk_spec: DiskSpec,
     bat_entries: Vec<BatEntry>,
     current_offset: u64,
@@ -81,9 +78,7 @@ impl Vhdx {
         Ok(Vhdx {
             file,
             vhdx_header,
-            region_entries: collected_entries.region_entries,
             bat_entry,
-            mdr_entry,
             disk_spec,
             bat_entries,
             current_offset: 0,
@@ -125,7 +120,7 @@ impl Read for Vhdx {
 
 impl Write for Vhdx {
     fn flush(&mut self) -> std::result::Result<(), std::io::Error> {
-        self.file.flush()
+        self.file.sync_all()
     }
 
     /// Wrapper function to satisfy Write trait implementation for VHDx disk.
@@ -211,22 +206,6 @@ impl BlockBackend for Vhdx {
             .metadata()
             .map(|m| m.len())
             .map_err(crate::Error::GetFileMetadata)
-    }
-}
-
-impl Clone for Vhdx {
-    fn clone(&self) -> Self {
-        Vhdx {
-            file: self.file.try_clone().unwrap(),
-            vhdx_header: self.vhdx_header.clone(),
-            region_entries: self.region_entries.clone(),
-            bat_entry: self.bat_entry,
-            mdr_entry: self.mdr_entry,
-            disk_spec: self.disk_spec.clone(),
-            bat_entries: self.bat_entries.clone(),
-            current_offset: self.current_offset,
-            first_write: self.first_write,
-        }
     }
 }
 

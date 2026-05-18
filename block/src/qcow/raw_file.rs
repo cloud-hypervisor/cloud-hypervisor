@@ -35,7 +35,9 @@ fn is_valid_alignment(fd: RawFd, alignment: usize) -> bool {
     let layout = Layout::from_size_align(alignment, alignment).unwrap();
     // SAFETY: layout has non-zero size
     let ptr = unsafe { alloc_zeroed(layout) };
-    assert!(!ptr.is_null());
+    if ptr.is_null() {
+        return false;
+    }
 
     // SAFETY: FFI call
     let ret = unsafe { ::libc::pread(fd, ptr.cast(), alignment, alignment.try_into().unwrap()) };
@@ -98,7 +100,7 @@ impl RawFile {
 
     pub fn try_clone(&self) -> std::io::Result<RawFile> {
         Ok(RawFile {
-            file: self.file.try_clone().expect("RawFile cloning failed"),
+            file: self.file.try_clone()?,
             alignment: self.alignment,
             position: self.position,
             direct_io: self.direct_io,
@@ -202,7 +204,7 @@ impl Read for RawFile {
                 to_copy = buf_len;
             }
 
-            buf.copy_from_slice(&tmp_buf[file_offset..(file_offset + buf_len)]);
+            buf[..to_copy].copy_from_slice(&tmp_buf[file_offset..(file_offset + to_copy)]);
             // SAFETY: tmp_ptr was allocated by alloc_zeroed with layout
             unsafe { dealloc(tmp_ptr, layout) };
 

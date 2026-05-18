@@ -11,8 +11,6 @@ use thiserror::Error;
 use crate::vhdx::vhdx_bat::{self, BatEntry, VhdxBatError};
 use crate::vhdx::vhdx_metadata::{self, DiskSpec};
 
-const SECTOR_SIZE: u64 = 512;
-
 #[sorted]
 #[derive(Error, Debug)]
 pub enum VhdxIoError {
@@ -76,7 +74,10 @@ impl Sector {
         };
         sector.file_offset = bat_entry & vhdx_bat::BAT_FILE_OFF_MASK;
         if sector.file_offset != 0 {
-            sector.file_offset += sector.block_offset;
+            sector.file_offset = sector
+                .file_offset
+                .checked_add(sector.block_offset)
+                .ok_or(VhdxIoError::InvalidBatEntryState)?;
         }
 
         Ok(sector)
@@ -116,11 +117,8 @@ pub fn read(
             vhdx_bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
                 f.seek(SeekFrom::Start(sector.file_offset))
                     .map_err(VhdxIoError::ReadSectorBlock)?;
-                f.read_exact(
-                    &mut buf
-                        [read_count..(read_count + (sector.free_sectors * SECTOR_SIZE) as usize)],
-                )
-                .map_err(VhdxIoError::ReadSectorBlock)?;
+                f.read_exact(&mut buf[read_count..(read_count + sector.free_bytes as usize)])
+                    .map_err(VhdxIoError::ReadSectorBlock)?;
             }
             vhdx_bat::PAYLOAD_BLOCK_PARTIALLY_PRESENT => {
                 return Err(VhdxIoError::UnsupportedMode);
@@ -179,18 +177,17 @@ pub fn write(
                 let new_bat_entry = file_offset
                     | (vhdx_bat::PAYLOAD_BLOCK_FULLY_PRESENT & vhdx_bat::BAT_STATE_BIT_MASK);
                 bat[sector.bat_index as usize] = BatEntry(new_bat_entry);
-                BatEntry::write_bat_entries(f, bat_offset, bat).map_err(VhdxIoError::WriteBat)?;
+                BatEntry::write_bat_entry(f, bat_offset, sector.bat_index, new_bat_entry)
+                    .map_err(VhdxIoError::WriteBat)?;
 
                 if file_offset < vhdx_metadata::BLOCK_SIZE_MIN as u64 {
                     break;
                 }
 
-                f.seek(SeekFrom::Start(file_offset))
+                f.seek(SeekFrom::Start(file_offset + sector.block_offset))
                     .map_err(VhdxIoError::ReadSectorBlock)?;
-                f.write_all(
-                    &buf[write_count..(write_count + (sector.free_sectors * SECTOR_SIZE) as usize)],
-                )
-                .map_err(VhdxIoError::ReadSectorBlock)?;
+                f.write_all(&buf[write_count..(write_count + sector.free_bytes as usize)])
+                    .map_err(VhdxIoError::ReadSectorBlock)?;
             }
             vhdx_bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
                 if sector.file_offset < vhdx_metadata::BLOCK_SIZE_MIN as u64 {
@@ -199,10 +196,8 @@ pub fn write(
 
                 f.seek(SeekFrom::Start(sector.file_offset))
                     .map_err(VhdxIoError::ReadSectorBlock)?;
-                f.write_all(
-                    &buf[write_count..(write_count + (sector.free_sectors * SECTOR_SIZE) as usize)],
-                )
-                .map_err(VhdxIoError::ReadSectorBlock)?;
+                f.write_all(&buf[write_count..(write_count + sector.free_bytes as usize)])
+                    .map_err(VhdxIoError::ReadSectorBlock)?;
             }
             vhdx_bat::PAYLOAD_BLOCK_PARTIALLY_PRESENT => {
                 return Err(VhdxIoError::UnsupportedMode);

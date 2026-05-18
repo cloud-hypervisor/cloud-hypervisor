@@ -26,13 +26,17 @@ use crate::qcow::decoder::Decoder;
 pub fn pread_exact(fd: RawFd, buf: &mut [u8], offset: u64) -> io::Result<()> {
     let mut total = 0usize;
     while total < buf.len() {
+        let cur_offset = offset
+            .checked_add(total as u64)
+            .and_then(|o| i64::try_from(o).ok())
+            .ok_or_else(|| io::Error::other("pread_exact offset overflow"))?;
         // SAFETY: buf and fd are valid for the lifetime of the call.
         let ret = unsafe {
             libc::pread64(
                 fd,
                 buf[total..].as_mut_ptr().cast(),
                 buf.len() - total,
-                (offset + total as u64) as libc::off_t,
+                cur_offset,
             )
         };
         if ret < 0 {
@@ -77,13 +81,17 @@ pub fn decompress_cluster(
 pub fn pwrite_all(fd: RawFd, buf: &[u8], offset: u64) -> io::Result<()> {
     let mut total = 0usize;
     while total < buf.len() {
+        let cur_offset = offset
+            .checked_add(total as u64)
+            .and_then(|o| i64::try_from(o).ok())
+            .ok_or_else(|| io::Error::other("pwrite_all offset overflow"))?;
         // SAFETY: buf and fd are valid for the lifetime of the call.
         let ret = unsafe {
             libc::pwrite64(
                 fd,
                 buf[total..].as_ptr().cast(),
                 buf.len() - total,
-                (offset + total as u64) as libc::off_t,
+                cur_offset,
             )
         };
         if ret < 0 {

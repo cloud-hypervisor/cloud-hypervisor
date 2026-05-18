@@ -67,6 +67,8 @@ pub enum VhdxHeaderError {
     ReadRegionTableHeader(#[source] io::Error),
     #[error("Failed to read region entries")]
     RegionEntryCollectionFailed,
+    #[error("Region table entry length overflows file offset")]
+    RegionLengthOverflow,
     #[error("Overlapping regions found")]
     RegionOverlap,
     #[error("Reserved region has non-zero value")]
@@ -79,6 +81,8 @@ pub enum VhdxHeaderError {
     SeekRegionTableEntries(#[source] io::Error),
     #[error("Failed to seek in region table header {0}")]
     SeekRegionTableHeader(#[source] io::Error),
+    #[error("Header sequence number overflowed")]
+    SequenceOverflow,
     #[error("We do not recognize this entry")]
     UnrecognizedRegionEntry,
     #[error("Failed to write header {0}")]
@@ -178,7 +182,10 @@ impl Header {
         let mut new_header = Header {
             signature: current_header.signature,
             checksum: 0,
-            sequence_number: current_header.sequence_number + 1,
+            sequence_number: current_header
+                .sequence_number
+                .checked_add(1)
+                .ok_or(VhdxHeaderError::SequenceOverflow)?,
             file_write_guid,
             data_write_guid,
             log_guid: current_header.log_guid,
@@ -194,7 +201,7 @@ impl Header {
 
         f.seek(SeekFrom::Start(start))
             .map_err(VhdxHeaderError::SeekHeader)?;
-        f.write(&buffer).map_err(VhdxHeaderError::WriteHeader)?;
+        f.write_all(&buffer).map_err(VhdxHeaderError::WriteHeader)?;
 
         Ok(new_header)
     }
@@ -246,7 +253,6 @@ impl RegionTableHeader {
 pub struct RegionInfo {
     pub bat_entry: RegionTableEntry,
     pub mdr_entry: RegionTableEntry,
-    pub region_entries: BTreeMap<u64, u64>,
 }
 
 impl RegionInfo {
@@ -274,15 +280,19 @@ impl RegionInfo {
 
             offset += size_of::<RegionTableEntry>();
             let start = entry.file_offset;
-            let end = start + entry.length as u64;
+            let end = start
+                .checked_add(entry.length as u64)
+                .ok_or(VhdxHeaderError::RegionLengthOverflow)?;
 
-            for (region_ent_start, region_ent_end) in region_entries.iter() {
-                if !((start >= *region_ent_start) || (end <= *region_ent_end)) {
+            for (&region_ent_start, &region_ent_end) in region_entries.iter() {
+                if start < region_ent_end && region_ent_start < end {
                     return Err(VhdxHeaderError::RegionOverlap);
                 }
             }
 
-            region_entries.insert(entry.file_offset, entry.file_offset + entry.length as u64);
+            if region_entries.insert(start, end).is_some() {
+                return Err(VhdxHeaderError::RegionOverlap);
+            }
 
             if entry.guid == Uuid::parse_str(BAT_GUID).map_err(VhdxHeaderError::InvalidUuid)? {
                 if bat_entry.is_none() {
@@ -308,7 +318,6 @@ impl RegionInfo {
         }
 
         if bat_entry.is_none() || mdr_entry.is_none() {
-            region_entries.clear();
             return Err(VhdxHeaderError::RegionEntryCollectionFailed);
         }
 
@@ -320,7 +329,6 @@ impl RegionInfo {
         Ok(RegionInfo {
             bat_entry,
             mdr_entry,
-            region_entries,
         })
     }
 }

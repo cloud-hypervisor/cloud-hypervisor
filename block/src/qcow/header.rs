@@ -226,6 +226,11 @@ impl QcowHeader {
 
             let ext_length = u32::read_be(f).map_err(Error::ReadingHeader)?;
 
+            const MAX_EXT_LENGTH: u32 = 1 << 20;
+            if ext_length > MAX_EXT_LENGTH {
+                return Err(Error::HeaderExtensionTooLarge(ext_length));
+            }
+
             match ext_type {
                 HEADER_EXT_BACKING_FORMAT => {
                     let mut format_bytes = vec![0u8; ext_length as usize];
@@ -425,7 +430,7 @@ impl QcowHeader {
                 let max_refcount_clusters = max_refcount_clusters(
                     DEFAULT_REFCOUNT_ORDER,
                     cluster_size,
-                    num_clusters + l1_clusters + num_l2_clusters + header_clusters,
+                    u64::from(num_clusters + l1_clusters + num_l2_clusters + header_clusters),
                 ) as u32;
                 // The refcount table needs to store the offset of each refcount cluster.
                 div_round_up_u32(
@@ -586,12 +591,12 @@ impl QcowHeader {
 pub(super) fn max_refcount_clusters(
     refcount_order: u32,
     cluster_size: u32,
-    num_clusters: u32,
+    num_clusters: u64,
 ) -> u64 {
     // Use u64 as the product of the u32 inputs can overflow.
     let refcount_bits = 0x01u64 << u64::from(refcount_order);
     let cluster_bits = u64::from(cluster_size) * 8;
-    let for_data = div_round_up_u64(u64::from(num_clusters) * refcount_bits, cluster_bits);
+    let for_data = div_round_up_u64(num_clusters * refcount_bits, cluster_bits);
     let for_refcounts = div_round_up_u64(for_data * refcount_bits, cluster_bits);
     for_data + for_refcounts
 }
