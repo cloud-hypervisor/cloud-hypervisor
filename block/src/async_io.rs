@@ -5,8 +5,10 @@
 use std::marker::PhantomData;
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 mod guest_memory_target;
+mod owned_io_buffer;
 
 pub use guest_memory_target::GuestMemoryTarget;
+pub use owned_io_buffer::OwnedIoBuffer;
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
