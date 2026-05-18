@@ -22,6 +22,7 @@ use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
+use vm_virtio::checked_descriptor::DescriptorChainExt;
 use vmm_sys_util::eventfd::EventFd;
 
 use super::{
@@ -81,13 +82,14 @@ impl WatchdogEpollHandler {
         let queue = &mut self.queue;
         let mut used_descs = false;
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
-            let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
+            let mut descs = desc_chain.checked_iter(None);
+            let desc = descs.next().ok_or(Error::DescriptorChainTooShort)?;
 
-            if !(desc.is_write_only() && desc.len() > 0) {
+            if !desc.is_write_only() || desc.is_empty() {
                 return Err(Error::InvalidDescriptor);
             }
 
-            desc_chain
+            self.mem
                 .memory()
                 .write_obj(1u8, desc.addr())
                 .map_err(Error::GuestMemoryWrite)?;

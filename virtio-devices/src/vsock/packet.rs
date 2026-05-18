@@ -20,7 +20,8 @@ use std::ops::Deref;
 use byteorder::{ByteOrder, LittleEndian};
 use virtio_queue::DescriptorChain;
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemory};
-use vm_virtio::{AccessPlatform, Translatable};
+use vm_virtio::AccessPlatform;
+use vm_virtio::checked_descriptor::DescriptorChainExt;
 
 use super::{Result, VsockError, defs};
 use crate::get_host_address_range;
@@ -127,7 +128,10 @@ impl VsockPacket {
         M: Clone + Deref,
         M::Target: GuestMemory,
     {
-        let head = desc_chain.next().ok_or(VsockError::HdrDescMissing)?;
+        let head = desc_chain
+            .next_checked(access_platform)
+            .map_err(|_| VsockError::GuestMemory)?
+            .ok_or(VsockError::HdrDescMissing)?;
 
         // All buffers in the TX queue must be readable.
         //
@@ -140,10 +144,7 @@ impl VsockPacket {
             return Err(VsockError::HdrDescTooSmall(head.len()));
         }
 
-        let guest_hdr_addr = head
-            .addr()
-            .translate_gva(access_platform, VSOCK_PKT_HDR_SIZE)
-            .map_err(|_| VsockError::GuestMemory)?;
+        let guest_hdr_addr = head.addr();
 
         // To avoid TOCTOU issues when reading/writing the VSock packet header in guest memory,
         // we need to copy the content of the header in the VMM's memory.
@@ -182,9 +183,7 @@ impl VsockPacket {
                 desc_chain.memory(),
                 head.addr()
                     .checked_add(VSOCK_PKT_HDR_SIZE as u64)
-                    .ok_or(VsockError::GuestMemory)?
-                    .translate_gva(access_platform, buf_size)
-                    .map_err(|_| VsockError::GuestMemory)?,
+                    .ok_or(VsockError::GuestMemory)?,
                 buf_size,
             )
             .ok_or(VsockError::GuestMemory)?;
@@ -197,7 +196,10 @@ impl VsockPacket {
         }
 
         // We have separate header and data descriptors.
-        let buf_desc = desc_chain.next().ok_or(VsockError::BufDescMissing)?;
+        let buf_desc = desc_chain
+            .next_checked(access_platform)
+            .map_err(|_| VsockError::GuestMemory)?
+            .ok_or(VsockError::BufDescMissing)?;
 
         // TX data should be read-only.
         if buf_desc.is_write_only() {
@@ -219,19 +221,20 @@ impl VsockPacket {
                 let desc_len = desc.len() as usize;
                 if desc_len > 0 && offset < total_len {
                     let to_copy = std::cmp::min(desc_len, total_len - offset);
-                    let desc_addr = desc
-                        .addr()
-                        .translate_gva(access_platform, desc_len)
-                        .map_err(|_| VsockError::GuestMemory)?;
                     desc_chain
                         .memory()
-                        .read_slice(&mut owned[offset..offset + to_copy], desc_addr)
+                        .read_slice(&mut owned[offset..offset + to_copy], desc.addr())
                         .map_err(|_| VsockError::GuestMemory)?;
                     offset += to_copy;
                 }
 
                 cur_desc = if desc.has_next() {
-                    Some(desc_chain.next().ok_or(VsockError::BufDescMissing)?)
+                    Some(
+                        desc_chain
+                            .next_checked(access_platform)
+                            .map_err(|_| VsockError::GuestMemory)?
+                            .ok_or(VsockError::BufDescMissing)?,
+                    )
                 } else {
                     None
                 };
@@ -248,15 +251,8 @@ impl VsockPacket {
                 return Err(VsockError::BufDescTooSmall);
             }
             let buf_size = buf_desc.len() as usize;
-            let buf_ptr = get_host_address_range(
-                desc_chain.memory(),
-                buf_desc
-                    .addr()
-                    .translate_gva(access_platform, buf_size)
-                    .map_err(|_| VsockError::GuestMemory)?,
-                buf_size,
-            )
-            .ok_or(VsockError::GuestMemory)?;
+            let buf_ptr = get_host_address_range(desc_chain.memory(), buf_desc.addr(), buf_size)
+                .ok_or(VsockError::GuestMemory)?;
             pkt.buf = Some(PacketBuffer::Borrowed {
                 ptr: buf_ptr,
                 len: buf_size,
@@ -279,7 +275,10 @@ impl VsockPacket {
         M: Clone + Deref,
         M::Target: GuestMemory,
     {
-        let head = desc_chain.next().ok_or(VsockError::HdrDescMissing)?;
+        let head = desc_chain
+            .next_checked(access_platform)
+            .map_err(|_| VsockError::GuestMemory)?
+            .ok_or(VsockError::HdrDescMissing)?;
 
         // All RX buffers must be writable.
         //
@@ -292,10 +291,7 @@ impl VsockPacket {
             return Err(VsockError::HdrDescTooSmall(head.len()));
         }
 
-        let guest_hdr_addr = head
-            .addr()
-            .translate_gva(access_platform, VSOCK_PKT_HDR_SIZE)
-            .map_err(|_| VsockError::GuestMemory)?;
+        let guest_hdr_addr = head.addr();
 
         // To avoid TOCTOU issues when reading/writing the VSock packet header in guest memory,
         // we need to copy the content of the header in the VMM's memory.
@@ -309,7 +305,10 @@ impl VsockPacket {
 
         // Prior to Linux v6.3 there are two descriptors
         if head.has_next() {
-            let buf_desc = desc_chain.next().ok_or(VsockError::BufDescMissing)?;
+            let buf_desc = desc_chain
+                .next_checked(access_platform)
+                .map_err(|_| VsockError::GuestMemory)?
+                .ok_or(VsockError::BufDescMissing)?;
             let buf_size = buf_desc.len() as usize;
 
             // TODO: We still assume that there are at most two descriptors. We should probably
@@ -323,15 +322,8 @@ impl VsockPacket {
                 guest_hdr_addr,
                 hdr,
                 buf: Some(PacketBuffer::Borrowed {
-                    ptr: get_host_address_range(
-                        desc_chain.memory(),
-                        buf_desc
-                            .addr()
-                            .translate_gva(access_platform, buf_size)
-                            .map_err(|_| VsockError::GuestMemory)?,
-                        buf_size,
-                    )
-                    .ok_or(VsockError::GuestMemory)?,
+                    ptr: get_host_address_range(desc_chain.memory(), buf_desc.addr(), buf_size)
+                        .ok_or(VsockError::GuestMemory)?,
                     len: buf_size,
                 }),
             })
@@ -345,9 +337,7 @@ impl VsockPacket {
                         desc_chain.memory(),
                         head.addr()
                             .checked_add(VSOCK_PKT_HDR_SIZE as u64)
-                            .ok_or(VsockError::GuestMemory)?
-                            .translate_gva(access_platform, buf_size)
-                            .map_err(|_| VsockError::GuestMemory)?,
+                            .ok_or(VsockError::GuestMemory)?,
                         buf_size,
                     )
                     .ok_or(VsockError::GuestMemory)?,

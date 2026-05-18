@@ -19,7 +19,8 @@ use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
-use vm_virtio::{AccessPlatform, Translatable};
+use vm_virtio::AccessPlatform;
+use vm_virtio::checked_descriptor::DescriptorChainExt;
 use vmm_sys_util::eventfd::EventFd;
 
 use super::{
@@ -61,26 +62,17 @@ impl RngEpollHandler {
         let mut used_descs = false;
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
             let mut total_len: usize = 0;
-            while let Some(desc) = desc_chain.next() {
+            let mut descs = desc_chain.checked_iter(self.access_platform.as_deref());
+            for desc in descs.by_ref() {
                 if !desc.is_write_only() {
                     warn!("Skipping device-readable descriptor");
                     continue;
                 }
-                if desc.len() == 0 {
+                if desc.is_empty() {
                     continue;
                 }
-                let addr = match desc
-                    .addr()
-                    .translate_gva(self.access_platform.as_deref(), desc.len() as usize)
-                {
-                    Ok(a) => a,
-                    Err(e) => {
-                        warn!("Failed to translate descriptor address: {e}");
-                        break;
-                    }
-                };
-                match desc_chain.memory().read_volatile_from(
-                    addr,
+                match self.mem.memory().read_volatile_from(
+                    desc.addr(),
                     &mut self.random_file,
                     desc.len() as usize,
                 ) {
@@ -90,6 +82,9 @@ impl RngEpollHandler {
                         break;
                     }
                 }
+            }
+            if descs.failed() {
+                total_len = 0;
             }
 
             queue

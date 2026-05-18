@@ -1,0 +1,507 @@
+// Copyright © 2025 Cloud Hypervisor Authors
+//
+// SPDX-License-Identifier: Apache-2.0
+
+//! Centralized descriptor buffer validation for virtio devices.
+//!
+//! This module provides [`CheckedDescriptorIter`], an iterator adapter over
+//! [`DescriptorChain`] that validates each descriptor's buffer range against
+//! guest memory before yielding it. Any descriptor whose translated
+//! `(addr, len)` range is not fully backed by guest RAM is rejected, so the
+//! device never performs I/O against memory the guest does not actually own.
+
+use std::ops::Deref;
+
+use log::warn;
+use virtio_queue::DescriptorChain;
+use virtio_queue::desc::split::Descriptor;
+use vm_memory::{GuestAddress, GuestMemory};
+
+use crate::{AccessPlatform, Translatable};
+
+/// A descriptor whose buffer range has been validated against guest memory.
+pub struct CheckedDescriptor {
+    inner: Descriptor,
+    /// The translated guest physical address.
+    addr: GuestAddress,
+}
+
+impl CheckedDescriptor {
+    pub fn addr(&self) -> GuestAddress {
+        self.addr
+    }
+
+    pub fn len(&self) -> u32 {
+        self.inner.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.len() == 0
+    }
+
+    pub fn is_write_only(&self) -> bool {
+        self.inner.is_write_only()
+    }
+
+    pub fn has_next(&self) -> bool {
+        self.inner.has_next()
+    }
+}
+
+/// Iterator adapter that validates each descriptor's buffer against guest
+/// memory before yielding it.
+///
+/// If any descriptor's `(addr, len)` range is not fully backed by guest RAM,
+/// iteration terminates and [`Self::failed()`] returns `true`.
+pub struct CheckedDescriptorIter<'a, M> {
+    chain: &'a mut DescriptorChain<M>,
+    access_platform: Option<&'a dyn AccessPlatform>,
+    failed_addr: Option<GuestAddress>,
+}
+
+impl<'a, M> CheckedDescriptorIter<'a, M>
+where
+    M: Deref,
+    M::Target: GuestMemory,
+{
+    pub fn new(
+        chain: &'a mut DescriptorChain<M>,
+        access_platform: Option<&'a dyn AccessPlatform>,
+    ) -> Self {
+        Self {
+            chain,
+            access_platform,
+            failed_addr: None,
+        }
+    }
+
+    /// Returns `true` if iteration was terminated due to an invalid descriptor.
+    pub fn failed(&self) -> bool {
+        self.failed_addr.is_some()
+    }
+
+    /// Returns the guest address of the descriptor that caused iteration to
+    /// terminate, if any.
+    pub fn failed_addr(&self) -> Option<GuestAddress> {
+        self.failed_addr
+    }
+}
+
+impl<M> Iterator for CheckedDescriptorIter<'_, M>
+where
+    M: Deref,
+    M::Target: GuestMemory,
+{
+    type Item = CheckedDescriptor;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.failed_addr.is_some() {
+            return None;
+        }
+
+        let desc = self.chain.next()?;
+
+        if desc.len() == 0 {
+            return Some(CheckedDescriptor {
+                addr: desc.addr(),
+                inner: desc,
+            });
+        }
+
+        let addr = match desc
+            .addr()
+            .translate_gva(self.access_platform, desc.len() as usize)
+        {
+            Ok(a) => a,
+            Err(_) => {
+                warn!(
+                    "Descriptor address translation failed: addr=0x{:x} len={}",
+                    desc.addr().0,
+                    desc.len()
+                );
+                self.failed_addr = Some(desc.addr());
+                return None;
+            }
+        };
+
+        if !self.chain.memory().check_range(addr, desc.len() as usize) {
+            warn!(
+                "Descriptor buffer extends past guest memory: addr=0x{:x} len={}",
+                addr.0,
+                desc.len()
+            );
+            self.failed_addr = Some(addr);
+            return None;
+        }
+
+        Some(CheckedDescriptor { inner: desc, addr })
+    }
+}
+
+/// Extension trait on [`DescriptorChain`] providing validated iteration.
+pub trait DescriptorChainExt<M> {
+    fn checked_iter<'a>(
+        &'a mut self,
+        access_platform: Option<&'a dyn AccessPlatform>,
+    ) -> CheckedDescriptorIter<'a, M>;
+
+    /// Fetch the next descriptor from the chain, validating its buffer range
+    /// against guest memory.
+    ///
+    /// Returns `Ok(None)` when the chain is exhausted, and
+    /// `Err(failing_addr)` when validation rejected a descriptor. Callers can
+    /// map the failing address into a domain specific error.
+    fn next_checked(
+        &mut self,
+        access_platform: Option<&dyn AccessPlatform>,
+    ) -> Result<Option<CheckedDescriptor>, GuestAddress>;
+}
+
+impl<M> DescriptorChainExt<M> for DescriptorChain<M>
+where
+    M: Deref,
+    M::Target: GuestMemory,
+{
+    fn checked_iter<'a>(
+        &'a mut self,
+        access_platform: Option<&'a dyn AccessPlatform>,
+    ) -> CheckedDescriptorIter<'a, M> {
+        CheckedDescriptorIter::new(self, access_platform)
+    }
+
+    fn next_checked(
+        &mut self,
+        access_platform: Option<&dyn AccessPlatform>,
+    ) -> Result<Option<CheckedDescriptor>, GuestAddress> {
+        let mut iter = self.checked_iter(access_platform);
+        let desc = iter.next();
+        if let Some(addr) = iter.failed_addr() {
+            return Err(addr);
+        }
+        Ok(desc)
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
+    use virtio_queue::{Queue, QueueT};
+    use vm_memory::bitmap::AtomicBitmap;
+    use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
+
+    use super::*;
+    use crate::queue::testing::VirtQueue as GuestQ;
+
+    type TestMmap = GuestMemoryMmap<AtomicBitmap>;
+
+    /// Set up a single descriptor in a virtqueue backed by `mem_size` bytes
+    /// of guest RAM. Returns the guest memory, an atomic wrapper around it,
+    /// and the ready queue.
+    fn setup_vq(
+        mem_size: usize,
+        desc_addr: u64,
+        desc_len: u32,
+        desc_flags: u16,
+    ) -> (TestMmap, GuestMemoryAtomic<TestMmap>, Queue) {
+        const QSIZE: u16 = 2;
+
+        let mem = TestMmap::from_ranges(&[(GuestAddress(0), mem_size)]).unwrap();
+        let guest_vq = GuestQ::new(GuestAddress(0x1_0000), &mem, QSIZE);
+        let queue = guest_vq.create_queue();
+
+        guest_vq.dtable[0].set(desc_addr, desc_len, desc_flags, 0);
+        guest_vq.avail.ring[0].set(0);
+        guest_vq.avail.idx.set(1);
+
+        let mem_atomic = GuestMemoryAtomic::new(mem.clone());
+        (mem, mem_atomic, queue)
+    }
+
+    /// Set up a chain of descriptors linked via VRING_DESC_F_NEXT in a
+    /// virtqueue backed by `mem_size` bytes of guest RAM. Each entry is
+    /// `(addr, len, flags)`; the helper adds the NEXT flag on every
+    /// descriptor except the last.
+    fn setup_vq_chain(
+        mem_size: usize,
+        descs: &[(u64, u32, u16)],
+    ) -> (TestMmap, GuestMemoryAtomic<TestMmap>, Queue) {
+        let qsize = descs.len() as u16;
+        assert!(qsize >= 1);
+
+        let mem = TestMmap::from_ranges(&[(GuestAddress(0), mem_size)]).unwrap();
+        let guest_vq = GuestQ::new(GuestAddress(0x1_0000), &mem, qsize);
+        let queue = guest_vq.create_queue();
+
+        let last = descs.len() - 1;
+        for (i, &(addr, len, flags)) in descs.iter().enumerate() {
+            let (flags, next) = if i < last {
+                (
+                    flags | u16::try_from(VRING_DESC_F_NEXT).unwrap(),
+                    (i + 1) as u16,
+                )
+            } else {
+                (flags, 0)
+            };
+            guest_vq.dtable[i].set(addr, len, flags, next);
+        }
+        guest_vq.avail.ring[0].set(0);
+        guest_vq.avail.idx.set(1);
+
+        let mem_atomic = GuestMemoryAtomic::new(mem.clone());
+        (mem, mem_atomic, queue)
+    }
+
+    #[test]
+    fn yields_valid_single_descriptor() {
+        let (_mem, mem_atomic, mut queue) =
+            setup_vq(128 * 1024, 0x4000, 256, VRING_DESC_F_WRITE as u16);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let mut it = chain.checked_iter(None);
+        let desc = it.next().expect("valid descriptor must be yielded");
+        assert_eq!(desc.addr().0, 0x4000);
+        assert_eq!(desc.len(), 256);
+        assert!(desc.is_write_only());
+        assert!(it.next().is_none());
+        assert!(!it.failed());
+    }
+
+    #[test]
+    fn rejects_out_of_range_descriptor() {
+        let (_mem, mem_atomic, mut queue) = setup_vq(128 * 1024, 0x4000, 1 << 30, 0);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let mut it = chain.checked_iter(None);
+        assert!(it.next().is_none());
+        assert!(it.failed());
+    }
+
+    #[test]
+    fn passes_through_zero_length_descriptor() {
+        let (_mem, mem_atomic, mut queue) = setup_vq(128 * 1024, 0x4000, 0, 0);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let mut it = chain.checked_iter(None);
+        let desc = it.next().expect("zero length descriptor must pass through");
+        assert_eq!(desc.len(), 0);
+        assert!(!it.failed());
+    }
+
+    #[test]
+    fn yields_valid_prefix_then_stops_on_invalid() {
+        let (_mem, mem_atomic, mut queue) =
+            setup_vq_chain(128 * 1024, &[(0x4000, 256, 0), (0x8000, 1 << 30, 0)]);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let mut it = chain.checked_iter(None);
+        let first = it.next().expect("first descriptor must be yielded");
+        assert_eq!(first.addr().0, 0x4000);
+        assert_eq!(first.len(), 256);
+        assert!(!it.failed());
+        assert!(it.next().is_none());
+        assert!(it.failed());
+    }
+
+    #[test]
+    fn next_checked_returns_valid_descriptor() {
+        let (_mem, mem_atomic, mut queue) = setup_vq(128 * 1024, 0x4000, 256, 0);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let desc = chain
+            .next_checked(None)
+            .expect("validation must succeed")
+            .expect("descriptor must be present");
+        assert_eq!(desc.addr().0, 0x4000);
+        assert_eq!(desc.len(), 256);
+    }
+
+    #[test]
+    fn next_checked_returns_none_when_exhausted() {
+        let (_mem, mem_atomic, mut queue) = setup_vq(128 * 1024, 0x4000, 256, 0);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        // Consume the single descriptor.
+        let _ = chain.next_checked(None).unwrap().unwrap();
+        // The chain is now exhausted; expect Ok(None).
+        let res = chain.next_checked(None);
+        assert!(matches!(res, Ok(None)));
+    }
+
+    #[test]
+    fn next_checked_returns_err_on_invalid_descriptor() {
+        let (_mem, mem_atomic, mut queue) = setup_vq(128 * 1024, 0x4000, 1 << 30, 0);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let err = chain
+            .next_checked(None)
+            .err()
+            .expect("validation must reject the descriptor");
+        assert_eq!(err.0, 0x4000);
+    }
+
+    #[test]
+    fn failed_addr_reports_rejected_address() {
+        let (_mem, mem_atomic, mut queue) = setup_vq(128 * 1024, 0x4000, 1 << 30, 0);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let mut it = chain.checked_iter(None);
+        assert!(it.next().is_none());
+        assert_eq!(it.failed_addr(), Some(GuestAddress(0x4000)));
+    }
+
+    #[test]
+    fn accepts_descriptor_at_memory_end() {
+        // 128 KiB of guest RAM ends at 0x20000. A descriptor whose buffer
+        // ends exactly at that boundary must be accepted.
+        const MEM_SIZE: usize = 128 * 1024;
+        const LEN: u32 = 256;
+        let addr = (MEM_SIZE as u64) - LEN as u64;
+        let (_mem, mem_atomic, mut queue) = setup_vq(MEM_SIZE, addr, LEN, 0);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let mut it = chain.checked_iter(None);
+        let desc = it.next().expect("boundary descriptor must be yielded");
+        assert_eq!(desc.addr().0, addr);
+        assert_eq!(desc.len(), LEN);
+        assert!(!it.failed());
+    }
+
+    #[test]
+    fn rejects_descriptor_one_past_memory_end() {
+        // A descriptor whose buffer extends one byte past the end of guest
+        // RAM must be rejected.
+        const MEM_SIZE: usize = 128 * 1024;
+        const LEN: u32 = 256;
+        let addr = (MEM_SIZE as u64) - LEN as u64 + 1;
+        let (_mem, mem_atomic, mut queue) = setup_vq(MEM_SIZE, addr, LEN, 0);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let mut it = chain.checked_iter(None);
+        assert!(it.next().is_none());
+        assert_eq!(it.failed_addr(), Some(GuestAddress(addr)));
+    }
+
+    #[test]
+    fn rejects_descriptor_with_address_overflow() {
+        // A descriptor whose addr plus len would wrap around the u64 address
+        // space must be rejected without panicking.
+        const MEM_SIZE: usize = 128 * 1024;
+        let addr = u64::MAX - 100;
+        let len: u32 = 1024;
+        let (_mem, mem_atomic, mut queue) = setup_vq(MEM_SIZE, addr, len, 0);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let mut it = chain.checked_iter(None);
+        assert!(it.next().is_none());
+        assert_eq!(it.failed_addr(), Some(GuestAddress(addr)));
+    }
+
+    /// AccessPlatform stub that applies a fixed offset between GVA and GPA.
+    #[derive(Debug)]
+    struct OffsetTranslator {
+        gva_base: u64,
+        gpa_base: u64,
+    }
+
+    impl AccessPlatform for OffsetTranslator {
+        fn translate_gva(&self, base: u64, _size: u64) -> std::io::Result<u64> {
+            Ok(base - self.gva_base + self.gpa_base)
+        }
+        fn translate_gpa(&self, base: u64, _size: u64) -> std::io::Result<u64> {
+            Ok(base - self.gpa_base + self.gva_base)
+        }
+    }
+
+    #[test]
+    fn translates_descriptor_via_access_platform() {
+        const MEM_SIZE: usize = 128 * 1024;
+        const LEN: u32 = 256;
+        let gva = 0x1_0000_0000u64;
+        let gpa = 0x4000u64;
+        let (_mem, mem_atomic, mut queue) = setup_vq(MEM_SIZE, gva, LEN, 0);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let ap = OffsetTranslator {
+            gva_base: gva,
+            gpa_base: gpa,
+        };
+        let mut it = chain.checked_iter(Some(&ap));
+        let desc = it.next().expect("translated descriptor must be yielded");
+        assert_eq!(desc.addr().0, gpa);
+        assert_eq!(desc.len(), LEN);
+        assert!(!it.failed());
+    }
+
+    /// AccessPlatform stub that always fails translation.
+    #[derive(Debug)]
+    struct FailingTranslator;
+
+    impl AccessPlatform for FailingTranslator {
+        fn translate_gva(&self, _base: u64, _size: u64) -> std::io::Result<u64> {
+            Err(std::io::Error::other("translation failed"))
+        }
+        fn translate_gpa(&self, _base: u64, _size: u64) -> std::io::Result<u64> {
+            Err(std::io::Error::other("translation failed"))
+        }
+    }
+
+    #[test]
+    fn rejects_descriptor_when_translation_fails() {
+        const MEM_SIZE: usize = 128 * 1024;
+        let gva = 0x4000u64;
+        let (_mem, mem_atomic, mut queue) = setup_vq(MEM_SIZE, gva, 256, 0);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let ap = FailingTranslator;
+        let mut it = chain.checked_iter(Some(&ap));
+        assert!(it.next().is_none());
+        // failed_addr reports the original descriptor address, not a
+        // translated one.
+        assert_eq!(it.failed_addr(), Some(GuestAddress(gva)));
+    }
+
+    #[test]
+    fn exhausted_chain_does_not_set_failed() {
+        // After the iterator yields the only descriptor in the chain, the
+        // subsequent None must reflect exhaustion, not a validation failure.
+        let (_mem, mem_atomic, mut queue) = setup_vq(128 * 1024, 0x4000, 256, 0);
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let mut it = chain.checked_iter(None);
+        assert!(it.next().is_some());
+        assert!(it.next().is_none());
+        assert!(!it.failed());
+        assert_eq!(it.failed_addr(), None);
+    }
+
+    #[test]
+    fn accessors_reflect_underlying_descriptor() {
+        // Two descriptor chain: a non-empty writable head followed by a
+        // zero length tail. Verify the CheckedDescriptor accessors agree
+        // with the descriptor flags and length on each entry.
+        let (_mem, mem_atomic, mut queue) = setup_vq_chain(
+            128 * 1024,
+            &[(0x4000, 256, VRING_DESC_F_WRITE as u16), (0x5000, 0, 0)],
+        );
+        let mem_guard = mem_atomic.memory();
+        let mut chain = queue.pop_descriptor_chain(mem_guard).unwrap();
+        let mut it = chain.checked_iter(None);
+
+        let head = it.next().expect("head must be yielded");
+        assert_eq!(head.addr().0, 0x4000);
+        assert_eq!(head.len(), 256);
+        assert!(!head.is_empty());
+        assert!(head.is_write_only());
+        assert!(head.has_next());
+
+        let tail = it.next().expect("tail must be yielded");
+        assert_eq!(tail.addr().0, 0x5000);
+        assert_eq!(tail.len(), 0);
+        assert!(tail.is_empty());
+        assert!(!tail.is_write_only());
+        assert!(!tail.has_next());
+
+        assert!(it.next().is_none());
+        assert!(!it.failed());
+    }
+}
