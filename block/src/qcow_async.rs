@@ -200,17 +200,13 @@ impl AsyncIo for QcowAsync {
     }
 
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
-        let virtual_size = self.metadata.virtual_size();
-        let cluster_size = self.cluster_size;
-
         let result = self
             .metadata
             .deallocate_bytes(
                 offset,
                 length as usize,
                 self.sparse,
-                virtual_size,
-                cluster_size,
+                false,
                 self.backing_file.as_deref(),
             )
             .map_err(AsyncIoError::PunchHole);
@@ -238,9 +234,37 @@ impl AsyncIo for QcowAsync {
     }
 
     fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
-        // For QCOW2, zeroing and hole punching are the same operation.
-        // Both discard guest data so the range reads back as zero.
-        self.punch_hole(offset, length, user_data)
+        let result = self
+            .metadata
+            .deallocate_bytes(
+                offset,
+                length as usize,
+                self.sparse,
+                true,
+                self.backing_file.as_deref(),
+            )
+            .map_err(AsyncIoError::WriteZeroes);
+
+        match result {
+            Ok(actions) => {
+                for action in &actions {
+                    self.apply_dealloc_action(action);
+                }
+                self.completion_list.push_back((user_data, 0));
+                self.eventfd.write(1).unwrap();
+                Ok(())
+            }
+            Err(e) => {
+                let errno = if let AsyncIoError::WriteZeroes(ref io_err) = e {
+                    -io_err.raw_os_error().unwrap_or(libc::EIO)
+                } else {
+                    -libc::EIO
+                };
+                self.completion_list.push_back((user_data, errno));
+                self.eventfd.write(1).unwrap();
+                Ok(())
+            }
+        }
     }
 
     fn batch_requests_enabled(&self) -> bool {
@@ -557,7 +581,7 @@ mod unit_tests {
 
     use super::*;
     use crate::disk_file::AsyncDiskFile;
-    use crate::qcow::{QcowFile, RawFile};
+    use crate::qcow::{BackingFileConfig, ImageType, QcowFile, RawFile};
     use crate::qcow_common::unit_tests::compress_allocated_clusters;
     use crate::qcow_disk::QcowDisk;
     use crate::{BatchRequest, RequestType, SECTOR_SIZE};
@@ -585,6 +609,38 @@ mod unit_tests {
         )
         .unwrap();
         (temp_file, disk)
+    }
+
+    fn create_overlay_disk_with_raw_backing_pattern(
+        file_size: u64,
+        value: u8,
+    ) -> (TempFile, TempFile, QcowDisk) {
+        let backing_temp = TempFile::new().unwrap();
+        let backing_data = vec![value; file_size as usize];
+        backing_temp.as_file().write_all(&backing_data).unwrap();
+        backing_temp.as_file().sync_all().unwrap();
+        let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
+
+        let overlay_temp = TempFile::new().unwrap();
+        {
+            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
+            let backing_config = BackingFileConfig {
+                path: backing_path,
+                format: Some(ImageType::Raw),
+            };
+            QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
+        }
+
+        let disk = QcowDisk::new(
+            overlay_temp.as_file().try_clone().unwrap(),
+            false,
+            true,
+            true,
+            true,
+        )
+        .unwrap();
+
+        (backing_temp, overlay_temp, disk)
     }
 
     fn wait_for_completion(async_io: &mut dyn AsyncIo) -> (u64, i32) {
@@ -675,6 +731,28 @@ mod unit_tests {
         assert!(
             read_buf.iter().all(|&b| b == 0),
             "Write zeroes region should read as zeros"
+        );
+    }
+
+    #[test]
+    fn test_qcow_async_write_zeroes_unallocated_overlay_with_backing_must_read_zero() {
+        let cluster_size = 1u64 << 16;
+        let file_size = cluster_size * 4;
+        let offset = cluster_size;
+        let (_backing_temp, _overlay_temp, disk) =
+            create_overlay_disk_with_raw_backing_pattern(file_size, 0xAB);
+
+        let mut async_io = disk.create_async_io(1).unwrap();
+        async_io.write_zeroes(offset, cluster_size, 201).unwrap();
+        let (user_data, result) = wait_for_completion(async_io.as_mut());
+        assert_eq!(user_data, 201);
+        assert_eq!(result, 0, "write_zeroes should succeed");
+        drop(async_io);
+
+        let read_buf = async_read(&disk, offset, cluster_size as usize);
+        assert!(
+            read_buf.iter().all(|&b| b == 0),
+            "zeroed unallocated overlay cluster exposed backing data"
         );
     }
 

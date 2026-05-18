@@ -22,6 +22,7 @@ use std::mem;
 use std::sync::{Arc, RwLock};
 
 use libc::{EINVAL, EIO};
+use vmm_sys_util::write_zeroes::WriteZeroesAt;
 
 use super::decoder::Decoder;
 use super::qcow_raw_file::QcowRawFile;
@@ -29,7 +30,7 @@ use super::refcount::RefCount;
 use super::util::{
     div_round_up_u64, l1_entry_make, l2_entry_compressed_cluster_layout, l2_entry_is_compressed,
     l2_entry_is_empty, l2_entry_is_zero, l2_entry_make_std, l2_entry_make_zero,
-    l2_entry_std_cluster_addr,
+    l2_entry_make_zero_plain, l2_entry_std_cluster_addr,
 };
 use super::vec_cache::{CacheMap, Cacheable, VecCache};
 use super::{QcowHeader, refcount};
@@ -270,15 +271,16 @@ impl QcowMetadata {
     }
 
     /// Deallocates a range of bytes. Full clusters are deallocated via metadata.
-    /// Partial clusters need the caller to write zeros. This method returns a
-    /// list of actions the caller should take.
+    /// If `zero_marker` is true, full-cluster deallocation records a logical
+    /// zero instead of an empty entry where backing data could otherwise be
+    /// exposed. Partial clusters need the caller to write zeros. This method
+    /// returns a list of actions the caller should take.
     pub(crate) fn deallocate_bytes(
         &self,
         address: u64,
         length: usize,
         sparse: bool,
-        virtual_size: u64,
-        cluster_size: u64,
+        zero_marker: bool,
         backing_file: Option<&dyn BackingRead>,
     ) -> io::Result<Vec<DeallocAction>> {
         if address.checked_add(length as u64).is_none() {
@@ -287,7 +289,8 @@ impl QcowMetadata {
         let mut inner = self.inner.write().unwrap();
         let mut actions = Vec::new();
 
-        let file_end = virtual_size;
+        let file_end = inner.header.size;
+        let cluster_size = inner.raw_file.cluster_size();
         let remaining_in_file = file_end.saturating_sub(address);
         let write_count = min(length as u64, remaining_in_file) as usize;
 
@@ -301,7 +304,11 @@ impl QcowMetadata {
             );
 
             if count == cluster_size as usize {
-                let punch_offset = inner.deallocate_cluster(curr_addr, sparse)?;
+                let punch_offset = inner.deallocate_cluster(
+                    curr_addr,
+                    sparse,
+                    zero_marker && backing_file.is_some(),
+                )?;
                 if let Some(host_offset) = punch_offset {
                     actions.push(DeallocAction::PunchHole {
                         host_offset,
@@ -406,14 +413,9 @@ impl QcowState {
                 has_backing_file,
             )))
         } else if l2_entry_is_zero(l2_entry) {
-            // Match original QcowFile::file_read semantics where zero flagged
-            // entries fall through to backing file when one exists or return
-            // zeros otherwise.
-            Ok(Some(self.unallocated_read_mapping(
-                address,
-                count,
-                has_backing_file,
-            )))
+            Ok(Some(ClusterReadMapping::Zero {
+                length: count as u64,
+            }))
         } else {
             let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
             let cluster_size = self.raw_file.cluster_size();
@@ -469,10 +471,9 @@ impl QcowState {
                 length: count,
             })
         } else if l2_entry_is_zero(l2_entry) {
-            // Match original QcowFile::file_read semantics where zero flagged
-            // entries fall through to backing file when one exists or return
-            // zeros otherwise.
-            Ok(self.unallocated_read_mapping(address, count, has_backing_file))
+            Ok(ClusterReadMapping::Zero {
+                length: count as u64,
+            })
         } else {
             let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
             let cluster_size = self.raw_file.cluster_size();
@@ -558,7 +559,11 @@ impl QcowState {
             self.deallocate_compressed_cluster(l2_entry)?;
             cluster_addr
         } else if l2_entry_is_empty(l2_entry) || l2_entry_is_zero(l2_entry) {
-            let cluster_addr = self.append_data_cluster(backing_data)?;
+            let cluster_addr = if l2_entry_is_zero(l2_entry) {
+                self.append_zeroed_data_cluster()?
+            } else {
+                self.append_data_cluster(backing_data)?
+            };
             self.update_cluster_addr(l1_index, l2_index, cluster_addr, &mut set_refcounts)?;
             cluster_addr
         } else {
@@ -679,6 +684,17 @@ impl QcowState {
     /// Allocates a data cluster and sets its refcount to 1.
     fn append_data_cluster(&mut self, initial_data: Option<Vec<u8>>) -> io::Result<u64> {
         let new_addr = self.get_new_cluster(initial_data)?;
+        self.set_cluster_refcount_track_freed(new_addr, 1)?;
+        Ok(new_addr)
+    }
+
+    /// Allocates a data cluster and zeroes it without building a cluster-sized buffer.
+    fn append_zeroed_data_cluster(&mut self) -> io::Result<u64> {
+        let new_addr = self.get_new_cluster(None)?;
+        let cluster_size = self.raw_file.cluster_size() as usize;
+        self.raw_file
+            .file_mut()
+            .write_zeroes_at(new_addr, cluster_size)?;
         self.set_cluster_refcount_track_freed(new_addr, 1)?;
         Ok(new_addr)
     }
@@ -821,13 +837,15 @@ impl QcowState {
     /// If sparse is true, fully deallocates and returns the host offset if
     /// the underlying storage should be punched after the refcount dropped
     /// to zero. If sparse is false, uses the zero flag optimization when
-    /// possible.
+    /// possible. If `zero_marker` is true, empty entries are replaced with
+    /// logical-zero entries so reads do not fall through to backing data.
     ///
     /// Returns None if no host punch_hole is needed.
     pub(super) fn deallocate_cluster(
         &mut self,
         address: u64,
         sparse: bool,
+        zero_marker: bool,
     ) -> io::Result<Option<u64>> {
         if address >= self.header.size {
             return Err(io::Error::from_raw_os_error(EINVAL));
@@ -839,21 +857,38 @@ impl QcowState {
             None => return Err(io::Error::from_raw_os_error(EINVAL)),
         };
         let l2_index = self.l2_table_index(address) as usize;
+        let dealloc_entry = if zero_marker {
+            l2_entry_make_zero_plain()
+        } else {
+            0
+        };
 
         if l2_addr_disk == 0 {
+            if zero_marker {
+                if let Some(new_addr) = self.cache_l2_cluster_alloc(l1_index, l2_addr_disk)? {
+                    self.set_cluster_refcount_track_freed(new_addr, 1)?;
+                }
+                self.l2_cache.get_mut(l1_index).unwrap()[l2_index] = dealloc_entry;
+            }
             return Ok(None);
         }
 
         self.cache_l2_cluster(l1_index, l2_addr_disk)?;
 
         let l2_entry = self.l2_cache.get(l1_index).unwrap()[l2_index];
-        if l2_entry_is_empty(l2_entry) || l2_entry_is_zero(l2_entry) {
+        if l2_entry_is_empty(l2_entry) {
+            if zero_marker {
+                self.l2_cache.get_mut(l1_index).unwrap()[l2_index] = dealloc_entry;
+            }
+            return Ok(None);
+        }
+        if l2_entry_is_zero(l2_entry) {
             return Ok(None);
         }
 
         if l2_entry_is_compressed(l2_entry) {
             self.deallocate_compressed_cluster(l2_entry)?;
-            self.l2_cache.get_mut(l1_index).unwrap()[l2_index] = 0;
+            self.l2_cache.get_mut(l1_index).unwrap()[l2_index] = dealloc_entry;
             return Ok(None);
         }
 
@@ -877,7 +912,7 @@ impl QcowState {
         if sparse {
             let new_refcount = refcount - 1;
             self.set_cluster_refcount_track_freed(cluster_addr, new_refcount)?;
-            self.l2_cache.get_mut(l1_index).unwrap()[l2_index] = 0;
+            self.l2_cache.get_mut(l1_index).unwrap()[l2_index] = dealloc_entry;
             if new_refcount == 0 {
                 self.unref_clusters.push(cluster_addr);
                 return Ok(Some(cluster_addr));
@@ -886,7 +921,7 @@ impl QcowState {
             self.l2_cache.get_mut(l1_index).unwrap()[l2_index] = l2_entry_make_zero(cluster_addr);
         } else {
             self.set_cluster_refcount_track_freed(cluster_addr, refcount - 1)?;
-            self.l2_cache.get_mut(l1_index).unwrap()[l2_index] = 0;
+            self.l2_cache.get_mut(l1_index).unwrap()[l2_index] = dealloc_entry;
         }
         Ok(None)
     }
