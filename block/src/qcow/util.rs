@@ -63,6 +63,11 @@ pub(super) fn l2_entry_make_zero(cluster_addr: u64) -> u64 {
     (cluster_addr & L2_TABLE_OFFSET_MASK) | CLUSTER_USED_FLAG | ZERO_FLAG
 }
 
+/// Make L2 entry for an unallocated cluster that reads as logical zeros.
+pub(super) fn l2_entry_make_zero_plain() -> u64 {
+    ZERO_FLAG
+}
+
 /// Make L1 entry with optional flags.
 pub(super) fn l1_entry_make(cluster_addr: u64, refcount_is_one: bool) -> u64 {
     (cluster_addr & L1_TABLE_OFFSET_MASK) | (refcount_is_one as u64 * CLUSTER_USED_FLAG)
