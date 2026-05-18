@@ -4,10 +4,14 @@
 
 use std::marker::PhantomData;
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
+mod completion;
 mod guest_memory_target;
+mod operation;
 mod owned_io_buffer;
 
+pub use completion::AsyncIoCompletion;
 pub use guest_memory_target::GuestMemoryTarget;
+pub use operation::AsyncIoOperation;
 pub use owned_io_buffer::OwnedIoBuffer;
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
