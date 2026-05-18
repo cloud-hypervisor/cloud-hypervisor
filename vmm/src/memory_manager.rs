@@ -689,33 +689,35 @@ impl MemoryManager {
                     ram_region_available_size
                 };
 
-                info!(
-                    "create ram region for zone {}, region_start: {:#x}, region_size: {:#x}",
-                    zone.id,
-                    region_start.raw_value(),
-                    region_size
-                );
-                let region = MemoryManager::create_ram_region(
-                    &zone.file,
-                    file_offset,
-                    region_start,
-                    region_size as usize,
-                    prefault.unwrap_or(zone.prefault),
-                    zone.shared,
-                    zone.hugepages,
-                    zone.hugepage_size,
-                    zone.host_numa_node,
-                    None,
-                    thp,
-                )?;
+                if region_size > 0 {
+                    info!(
+                        "create ram region for zone {}, region_start: {:#x}, region_size: {:#x}",
+                        zone.id,
+                        region_start.raw_value(),
+                        region_size
+                    );
+                    let region = MemoryManager::create_ram_region(
+                        &zone.file,
+                        file_offset,
+                        region_start,
+                        region_size as usize,
+                        prefault.unwrap_or(zone.prefault),
+                        zone.shared,
+                        zone.hugepages,
+                        zone.hugepage_size,
+                        zone.host_numa_node,
+                        None,
+                        thp,
+                    )?;
 
-                // Add region to the list of regions associated with the
-                // current memory zone.
-                if let Some(memory_zone) = memory_zones.get_mut(&zone.id) {
-                    memory_zone.regions.push(region.clone());
+                    // Add region to the list of regions associated with the
+                    // current memory zone.
+                    if let Some(memory_zone) = memory_zones.get_mut(&zone.id) {
+                        memory_zone.regions.push(region.clone());
+                    }
+
+                    mem_regions.push(region);
                 }
-
-                mem_regions.push(region);
 
                 if pull_next_zone {
                     // Get the next zone and reset the offset.
