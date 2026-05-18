@@ -35,10 +35,32 @@
 //! [special HTTP library]: https://github.com/firecracker-microvm/micro-http
 
 use std::fs::File;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Receiver, Sender, SyncSender};
+use std::sync::{LazyLock, Mutex};
 
+use log::debug;
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use vmm_sys_util::eventfd::EventFd;
+
+/// Temporary rendezvous for preserving blocking HTTP send-migration semantics.
+///
+/// The VMM API request now only dispatches migration work. The HTTP handler
+/// waits here until the VMM reports the final migration result, so existing
+/// callers still observe `vm.send-migration` returning after migration
+/// completed.
+///
+/// This is safe for the current API model because API requests are serialized:
+/// there can be only one active HTTP `vm.send-migration` waiter and one
+/// matching VMM completion notification. A dedicated progress endpoint should
+/// replace this once send-migration is intentionally non-blocking.
+#[expect(clippy::type_complexity)]
+pub static ONGOING_LIVEMIGRATION: LazyLock<(
+    SyncSender<Result<(), vm_migration::MigratableError>>,
+    Mutex<Receiver<Result<(), vm_migration::MigratableError>>>,
+)> = LazyLock::new(|| {
+    let (sender, receiver) = std::sync::mpsc::sync_channel(0);
+    (sender, Mutex::new(receiver))
+});
 
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::api::VmCoredump;
@@ -430,7 +452,6 @@ vm_action_put_handler_body!(VmResizeDisk);
 vm_action_put_handler_body!(VmResizeZone);
 vm_action_put_handler_body!(VmSnapshot);
 vm_action_put_handler_body!(VmReceiveMigration);
-vm_action_put_handler_body!(VmSendMigration);
 
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 vm_action_put_handler_body!(VmCoredump);
@@ -458,6 +479,40 @@ impl PutHandler for VmAddNet {
 }
 
 impl GetHandler for VmAddNet {}
+
+impl PutHandler for VmSendMigration {
+    fn handle_request(
+        &'static self,
+        api_notifier: EventFd,
+        api_sender: Sender<ApiRequest>,
+        body: &Option<Body>,
+        _files: Vec<File>,
+    ) -> std::result::Result<Option<Body>, HttpError> {
+        if let Some(body) = body {
+            let res = self
+                .send(
+                    api_notifier,
+                    api_sender,
+                    serde_json::from_slice(body.raw())?,
+                )
+                .map_err(HttpError::ApiError)?;
+
+            debug!("Waiting for migration to finish ...");
+            let (_, receiver) = &*ONGOING_LIVEMIGRATION;
+            let mig_res = receiver.lock().unwrap().recv().unwrap();
+            debug!("Migration finished, received result");
+
+            // We forward the migration error here to the guest.
+            mig_res
+                .map(|_| res)
+                .map_err(|e| HttpError::ApiError(ApiError::VmSendMigration(e)))
+        } else {
+            Err(HttpError::BadRequest)
+        }
+    }
+}
+
+impl GetHandler for VmSendMigration {}
 
 impl PutHandler for VmResize {
     fn handle_request(

@@ -14,6 +14,9 @@ use crate::coredump::GuestDebuggableError;
 use crate::vm::VmSnapshot;
 use crate::vm_config::VmConfig;
 
+pub(crate) mod transport;
+pub(crate) mod worker;
+
 pub const SNAPSHOT_STATE_FILE: &str = "state.json";
 pub const SNAPSHOT_CONFIG_FILE: &str = "config.json";
 
