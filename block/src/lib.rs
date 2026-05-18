@@ -9,37 +9,14 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 mod aligned_operation;
-pub mod async_io;
 pub mod disk_file;
 pub mod error;
 pub mod factory;
-pub mod fcntl;
-pub mod fixed_vhd;
-#[cfg(feature = "io_uring")]
-/// Enabled with the `"io_uring"` feature
-pub mod fixed_vhd_async;
-pub mod fixed_vhd_disk;
-pub mod fixed_vhd_sync;
-pub mod qcow;
-#[cfg(feature = "io_uring")]
-pub(crate) mod qcow_async;
-pub(crate) mod qcow_common;
-pub mod qcow_disk;
-pub(crate) mod qcow_sync;
-#[cfg(feature = "io_uring")]
-pub(crate) mod raw_async;
-pub(crate) mod raw_async_aio;
-#[cfg(test)]
-mod raw_async_io_tests;
-pub mod raw_disk;
-pub(crate) mod raw_sync;
-mod request;
+#[path = "io/mod.rs"]
+mod io_impl;
+pub use io_impl::{async_io, fcntl, request};
+pub mod formats;
 mod sparse;
-pub use sparse::{BLKDISCARD, BLKZEROOUT};
-pub mod vhd;
-pub mod vhdx;
-pub mod vhdx_sync;
-
 use std::alloc::{Layout, alloc_zeroed};
 use std::collections::VecDeque;
 use std::fmt::{self, Debug};
@@ -53,6 +30,7 @@ use std::str::FromStr;
 use std::{cmp, mem, result};
 
 pub use aligned_operation::AlignedOperation;
+use formats::qcow::internal as qcow;
 #[cfg(feature = "io_uring")]
 use io_uring::{IoUring, Probe, opcode};
 use libc::{
@@ -62,6 +40,7 @@ use log::{debug, info, warn};
 pub use request::{BatchRequest, ExecuteAsync, MAX_DISCARD_WRITE_ZEROES_SEG, Request, RequestType};
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
+pub use sparse::{BLKDISCARD, BLKZEROOUT};
 use thiserror::Error;
 use virtio_bindings::virtio_blk::*;
 use vm_memory::bitmap::Bitmap;
@@ -71,8 +50,8 @@ use vmm_sys_util::{aio, ioctl_io_nr, ioctl_ior_nr};
 
 use crate::async_io::{AsyncIoError, AsyncIoResult};
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
+use crate::formats::vhdx::VhdxError;
 use crate::request::{DEFAULT_DESCRIPTOR_VEC_SIZE, SECTOR_SIZE};
-use crate::vhdx::VhdxError;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -635,7 +614,7 @@ pub fn detect_image_type(f: &mut File) -> BlockResult<ImageType> {
     // Check 4 first bytes to get the header value and determine the image type
     let image_type = if u32::from_be_bytes(block[0..4].try_into().unwrap()) == QCOW_MAGIC {
         ImageType::Qcow2
-    } else if vhd::is_fixed_vhd(f)
+    } else if formats::vhd::is_fixed_vhd(f)
         .map_err(|e| BlockError::new(BlockErrorKind::Io, e).with_op(ErrorOp::DetectImageType))?
     {
         ImageType::FixedVhd
