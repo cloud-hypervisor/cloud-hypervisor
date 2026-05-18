@@ -12,7 +12,7 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::sparse::{blkdiscard, blkzeroout};
-use crate::{BatchRequest, RequestType, SECTOR_SIZE, is_block_device};
+use crate::{SECTOR_SIZE, is_block_device};
 
 pub struct RawFileAsync {
     fd: RawFd,
@@ -168,91 +168,6 @@ impl AsyncIo for RawFileAsync {
             .completion()
             .next()
             .map(|entry| (entry.user_data(), entry.result()))
-    }
-
-    fn batch_requests_enabled(&self) -> bool {
-        true
-    }
-
-    fn submit_batch_requests(&mut self, batch_request: &[BatchRequest]) -> AsyncIoResult<()> {
-        if !self.batch_requests_enabled() {
-            return Ok(());
-        }
-
-        let (submitter, mut sq, _) = self.io_uring.split();
-        let mut submitted = false;
-
-        // Refuse the whole batch if it can't fit in the SQ to avoid having to unroll a partially
-        // successful push.
-        if batch_request.len() > sq.capacity() - sq.len() {
-            return Err(AsyncIoError::SubmitBatchRequests(Error::other(
-                "io_uring submission queue is full",
-            )));
-        }
-
-        for req in batch_request {
-            match req.request_type {
-                RequestType::In => {
-                    // SAFETY: we know the file descriptor is valid and we
-                    // relied on vm-memory to provide the buffer address.
-                    unsafe {
-                        sq.push(
-                            &opcode::Readv::new(
-                                types::Fd(self.fd),
-                                req.iovecs.as_ptr(),
-                                req.iovecs.len() as u32,
-                            )
-                            .offset(req.offset as u64)
-                            .build()
-                            .user_data(req.user_data),
-                        )
-                        .map_err(|e| {
-                            AsyncIoError::ReadVectored(Error::other(format!(
-                                "Submission queue is full: {e:?}"
-                            )))
-                        })?;
-                    };
-                    submitted = true;
-                }
-                RequestType::Out => {
-                    // SAFETY: we know the file descriptor is valid and we
-                    // relied on vm-memory to provide the buffer address.
-                    unsafe {
-                        sq.push(
-                            &opcode::Writev::new(
-                                types::Fd(self.fd),
-                                req.iovecs.as_ptr(),
-                                req.iovecs.len() as u32,
-                            )
-                            .offset(req.offset as u64)
-                            .build()
-                            .user_data(req.user_data),
-                        )
-                        .map_err(|e| {
-                            AsyncIoError::WriteVectored(Error::other(format!(
-                                "Submission queue is full: {e:?}"
-                            )))
-                        })?;
-                    };
-                    submitted = true;
-                }
-                _ => {
-                    unreachable!("Unexpected batch request type: {:?}", req.request_type)
-                }
-            }
-        }
-
-        // Only submit if we actually queued something
-        if submitted {
-            // Update the submission queue and submit new operations to the
-            // io_uring instance.
-            sq.sync();
-            submitter
-                .submit()
-                .map_err(AsyncIoError::SubmitBatchRequests)?;
-        }
-
-        Ok(())
     }
 
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {

@@ -150,7 +150,6 @@ mod unit_tests {
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
-    use crate::async_io::AsyncIo;
     use crate::disk_file::{AsyncDiskFile, DiskSize, PhysicalSize, Resizable};
 
     const TEST_SIZE: u64 = 0x1122_3344;
@@ -168,33 +167,24 @@ mod unit_tests {
         assert_eq!(disk.logical_size().unwrap(), TEST_SIZE);
     }
 
-    fn assert_async_io_from_dyn(disk: &dyn AsyncDiskFile, expect_backend: RawBackend) {
-        let io: Box<dyn AsyncIo> = disk.create_async_io(128).unwrap();
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "io_uring")] {
-                let expected_batch_requests = expect_backend == RawBackend::IoUring;
-            } else {
-                let _ = expect_backend;
-                let expected_batch_requests = false;
-            }
-        }
-        assert_eq!(io.batch_requests_enabled(), expected_batch_requests);
+    fn assert_async_io_from_dyn(disk: &dyn AsyncDiskFile) {
+        let _ = disk.create_async_io(128).unwrap();
     }
 
     fn assert_sync_backend(disk: &RawDisk) {
         assert_eq!(disk.backend, RawBackend::Sync);
-        assert_async_io_from_dyn(disk, RawBackend::Sync);
+        assert_async_io_from_dyn(disk);
     }
 
     fn assert_aio_backend(disk: &RawDisk) {
         assert_eq!(disk.backend, RawBackend::Aio);
-        assert_async_io_from_dyn(disk, RawBackend::Aio);
+        assert_async_io_from_dyn(disk);
     }
 
     #[cfg(feature = "io_uring")]
     fn assert_io_uring_backend(disk: &RawDisk) {
         assert_eq!(disk.backend, RawBackend::IoUring);
-        assert_async_io_from_dyn(disk, RawBackend::IoUring);
+        assert_async_io_from_dyn(disk);
     }
 
     #[test]
@@ -219,23 +209,23 @@ mod unit_tests {
         assert_io_uring_backend(&disk);
     }
 
-    fn assert_try_clone(disk: &RawDisk, expect_backend: RawBackend) {
+    fn assert_try_clone(disk: &RawDisk) {
         let cloned = disk.try_clone().unwrap();
-        assert_async_io_from_dyn(cloned.as_ref(), expect_backend);
+        assert_async_io_from_dyn(cloned.as_ref());
     }
 
     #[test]
     fn try_clone_preserves_sync_backend() {
         let file = make_raw_file();
         let disk = RawDisk::new(file, RawBackend::Sync);
-        assert_try_clone(&disk, RawBackend::Sync);
+        assert_try_clone(&disk);
     }
 
     #[test]
     fn try_clone_preserves_aio_backend() {
         let file = make_raw_file();
         let disk = RawDisk::new(file, RawBackend::Aio);
-        assert_try_clone(&disk, RawBackend::Aio);
+        assert_try_clone(&disk);
     }
 
     #[cfg(feature = "io_uring")]
@@ -243,7 +233,7 @@ mod unit_tests {
     fn try_clone_preserves_io_uring_backend() {
         let file = make_raw_file();
         let disk = RawDisk::new(file, RawBackend::IoUring);
-        assert_try_clone(&disk, RawBackend::IoUring);
+        assert_try_clone(&disk);
     }
 
     #[test]

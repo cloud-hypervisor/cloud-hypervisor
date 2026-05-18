@@ -124,7 +124,6 @@ mod unit_tests {
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
-    use crate::async_io::AsyncIo;
     use crate::disk_file::{AsyncDiskFile, DiskSize, PhysicalSize, Resizable};
 
     /// Minimal fixed VHD footer (disk type = 2, current_size = 0x11223344).
@@ -164,20 +163,19 @@ mod unit_tests {
         assert_eq!(disk.logical_size().unwrap(), 0x1122_3344);
     }
 
-    fn assert_async_io_from_dyn(disk: &dyn AsyncDiskFile, expect_batch: bool) {
-        let io: Box<dyn AsyncIo> = disk.create_async_io(128).unwrap();
-        assert_eq!(io.batch_requests_enabled(), expect_batch);
+    fn assert_async_io_from_dyn(disk: &dyn AsyncDiskFile) {
+        let _ = disk.create_async_io(128).unwrap();
     }
 
-    fn assert_async_io(disk: &FixedVhdDisk, expect_batch: bool) {
-        assert_async_io_from_dyn(disk, expect_batch);
+    fn assert_async_io(disk: &FixedVhdDisk) {
+        assert_async_io_from_dyn(disk);
     }
 
     #[test]
     fn sync_backend_disables_batch_requests() {
         let file = make_vhd_file();
         let disk = FixedVhdDisk::new(file, false).unwrap();
-        assert_async_io(&disk, false);
+        assert_async_io(&disk);
     }
 
     #[cfg(feature = "io_uring")]
@@ -185,7 +183,7 @@ mod unit_tests {
     fn io_uring_backend_enables_batch_requests() {
         let file = make_vhd_file();
         let disk = FixedVhdDisk::new(file, true).unwrap();
-        assert_async_io(&disk, true);
+        assert_async_io(&disk);
     }
 
     #[test]
@@ -193,7 +191,7 @@ mod unit_tests {
         let file = make_vhd_file();
         let disk = FixedVhdDisk::new(file, false).unwrap();
         let cloned = disk.try_clone().unwrap();
-        assert_async_io_from_dyn(cloned.as_ref(), false);
+        assert_async_io_from_dyn(cloned.as_ref());
     }
 
     #[cfg(feature = "io_uring")]
@@ -202,7 +200,7 @@ mod unit_tests {
         let file = make_vhd_file();
         let disk = FixedVhdDisk::new(file, true).unwrap();
         let cloned = disk.try_clone().unwrap();
-        assert_async_io_from_dyn(cloned.as_ref(), true);
+        assert_async_io_from_dyn(cloned.as_ref());
     }
 
     #[test]

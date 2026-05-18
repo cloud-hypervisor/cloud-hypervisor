@@ -6,7 +6,6 @@ use std::os::unix::io::RawFd;
 
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::BatchRequest;
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 use crate::error::BlockResult;
 use crate::raw_async::RawFileAsync;
@@ -89,13 +88,5 @@ impl AsyncIo for FixedVhdAsync {
         Err(AsyncIoError::WriteZeroes(std::io::Error::other(
             "write_zeroes not supported for fixed VHD",
         )))
-    }
-
-    fn batch_requests_enabled(&self) -> bool {
-        true
-    }
-
-    fn submit_batch_requests(&mut self, batch_request: &[BatchRequest]) -> AsyncIoResult<()> {
-        self.raw_file_async.submit_batch_requests(batch_request)
     }
 }

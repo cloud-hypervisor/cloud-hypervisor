@@ -59,7 +59,7 @@ use libc::{
     FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE, S_IFBLK, S_IFMT, ioctl,
 };
 use log::{debug, info, warn};
-pub use request::{BatchRequest, ExecuteAsync, MAX_DISCARD_WRITE_ZEROES_SEG, Request, RequestType};
+pub use request::{ExecuteAsync, MAX_DISCARD_WRITE_ZEROES_SEG, Request, RequestType};
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use thiserror::Error;

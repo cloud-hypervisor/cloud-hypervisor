@@ -205,19 +205,13 @@ impl BlockEpollHandler {
     // A spec-compliant driver never reuses a virtqueue head_index while the
     // corresponding chain is still available (virtio 1.x §2.7.13.4).
     // Double check the guest driver is behaving.
-    fn is_head_in_flight(
-        inflight: &VecDeque<(u16, Request)>,
-        batch: &[(u16, Request)],
-        head: u16,
-    ) -> bool {
-        batch.iter().any(|(h, _)| *h == head) || inflight.iter().any(|(h, _)| *h == head)
+    fn is_head_in_flight(inflight: &VecDeque<(u16, Request)>, head: u16) -> bool {
+        inflight.iter().any(|(h, _)| *h == head)
     }
 
     fn process_queue_submit(&mut self) -> Result<()> {
         let queue = &mut self.queue;
         let queue_size = queue.size();
-        let mut batch_requests = Vec::new();
-        let mut batch_inflight_requests = Vec::new();
         let mut processed = 0;
 
         loop {
@@ -237,7 +231,7 @@ impl BlockEpollHandler {
             };
 
             let head = desc_chain.head_index();
-            if Self::is_head_in_flight(&self.inflight_requests, &batch_inflight_requests, head) {
+            if Self::is_head_in_flight(&self.inflight_requests, head) {
                 warn!("Guest reused virtio-blk head_index {head} while the chain was used");
                 return Err(Error::QueueDuplicatedHeadIndex);
             }
@@ -313,24 +307,10 @@ impl BlockEpollHandler {
 
             if let Ok(ExecuteAsync {
                 async_complete: true,
-                batch_request,
             }) = result
             {
-                if let Some(batch_request) = batch_request {
-                    match batch_request.request_type {
-                        RequestType::In | RequestType::Out => batch_requests.push(batch_request),
-                        _ => {
-                            unreachable!(
-                                "Unexpected batch request type: {:?}",
-                                request.request_type()
-                            )
-                        }
-                    }
-                    batch_inflight_requests.push((desc_chain.head_index(), request));
-                } else {
-                    self.inflight_requests
-                        .push_back((desc_chain.head_index(), request));
-                }
+                self.inflight_requests
+                    .push_back((desc_chain.head_index(), request));
             } else {
                 let status = match result {
                     Ok(_) => VIRTIO_BLK_S_OK,
@@ -360,28 +340,6 @@ impl BlockEpollHandler {
                 queue
                     .enable_notification(self.mem.memory().deref())
                     .map_err(Error::QueueEnableNotification)?;
-            }
-        }
-
-        match self.disk_image.submit_batch_requests(&batch_requests) {
-            Ok(()) => {
-                self.inflight_requests.extend(batch_inflight_requests);
-            }
-            Err(e) => {
-                // If batch submission fails, report VIRTIO_BLK_S_IOERR for all requests.
-                for (user_data, request) in batch_inflight_requests {
-                    warn!("Request failed with batch submission: {request:x?} {e:?}");
-                    let desc_index = user_data;
-                    let mem = self.mem.memory();
-                    mem.write_obj(VIRTIO_BLK_S_IOERR as u8, request.status_addr())
-                        .map_err(Error::RequestStatus)?;
-                    queue
-                        .add_used(mem.deref(), desc_index, 1)
-                        .map_err(Error::QueueAddUsed)?;
-                    queue
-                        .enable_notification(mem.deref())
-                        .map_err(Error::QueueEnableNotification)?;
-                }
             }
         }
 

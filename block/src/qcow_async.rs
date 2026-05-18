@@ -16,6 +16,7 @@ use io_uring::{IoUring, opcode, types};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
+use crate::SECTOR_SIZE;
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 use crate::qcow::decoder::Decoder;
 use crate::qcow::metadata::{
@@ -26,7 +27,6 @@ use crate::qcow_common::{
     AlignedBuf, aligned_pread, aligned_pwrite, decompress_cluster, gather_from_iovecs_into,
     pread_alloc, pread_exact, pwrite_all, scatter_to_iovecs, zero_fill_iovecs,
 };
-use crate::{BatchRequest, RequestType, SECTOR_SIZE};
 
 /// Per queue QCOW2 I/O worker using io_uring.
 ///
@@ -243,93 +243,8 @@ impl AsyncIo for QcowAsync {
         self.punch_hole(offset, length, user_data)
     }
 
-    fn batch_requests_enabled(&self) -> bool {
-        true
-    }
-
     fn alignment(&self) -> u64 {
         self.io_alignment
-    }
-
-    fn submit_batch_requests(&mut self, batch_request: &[BatchRequest]) -> AsyncIoResult<()> {
-        let (submitter, mut sq, _) = self.io_uring.split();
-        let mut needs_submit = false;
-        let mut sync_completions: Vec<(u64, i32)> = Vec::new();
-
-        for req in batch_request {
-            match req.request_type {
-                RequestType::In => {
-                    let total_len: usize = req.iovecs.iter().map(|v| v.iov_len).sum();
-
-                    if let Some(host_offset) = Self::resolve_read(
-                        &self.metadata,
-                        &self.data_file,
-                        &self.backing_file,
-                        req.offset as u64,
-                        &req.iovecs,
-                        total_len,
-                        self.alignment,
-                        self.cluster_size,
-                        &*self.decoder,
-                    )? {
-                        let fd = self.data_file.as_raw_fd();
-                        // SAFETY: fd is valid and iovecs point to valid guest memory.
-                        unsafe {
-                            sq.push(
-                                &opcode::Readv::new(
-                                    types::Fd(fd),
-                                    req.iovecs.as_ptr(),
-                                    req.iovecs.len() as u32,
-                                )
-                                .offset(host_offset)
-                                .build()
-                                .user_data(req.user_data),
-                            )
-                            .map_err(|_| {
-                                AsyncIoError::ReadVectored(io::Error::other(
-                                    "Submission queue is full",
-                                ))
-                            })?;
-                        }
-                        needs_submit = true;
-                    } else {
-                        sync_completions.push((req.user_data, total_len as i32));
-                    }
-                }
-                RequestType::Out => {
-                    let total_len: usize = req.iovecs.iter().map(|v| v.iov_len).sum();
-                    Self::cow_write_sync(
-                        req.offset as u64,
-                        &req.iovecs,
-                        &self.metadata,
-                        &self.data_file,
-                        &self.backing_file,
-                        self.alignment,
-                        self.cluster_size,
-                    )?;
-                    sync_completions.push((req.user_data, total_len as i32));
-                }
-                _ => {
-                    unreachable!("Unexpected batch request type: {:?}", req.request_type)
-                }
-            }
-        }
-
-        if needs_submit {
-            sq.sync();
-            submitter
-                .submit()
-                .map_err(AsyncIoError::SubmitBatchRequests)?;
-        }
-
-        if !sync_completions.is_empty() {
-            for c in sync_completions {
-                self.completion_list.push_back(c);
-            }
-            self.eventfd.write(1).unwrap();
-        }
-
-        Ok(())
     }
 }
 
@@ -556,11 +471,11 @@ mod unit_tests {
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
+    use crate::SECTOR_SIZE;
     use crate::disk_file::AsyncDiskFile;
     use crate::qcow::{QcowFile, RawFile};
     use crate::qcow_common::unit_tests::compress_allocated_clusters;
     use crate::qcow_disk::QcowDisk;
-    use crate::{BatchRequest, RequestType, SECTOR_SIZE};
 
     fn create_disk_with_data(
         file_size: u64,
@@ -727,108 +642,6 @@ mod unit_tests {
             buf[4096..].iter().all(|&b| b == 0xBB),
             "second half should come from cluster 1"
         );
-    }
-
-    #[test]
-    fn test_qcow_async_batch_mixed_requests() {
-        let file_size = 100 * 1024 * 1024;
-        let temp_file = TempFile::new().unwrap();
-        {
-            let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
-            QcowFile::new(raw_file, 3, file_size, true).unwrap();
-        }
-        let disk = QcowDisk::new(
-            temp_file.as_file().try_clone().unwrap(),
-            false,
-            false,
-            true,
-            true,
-        )
-        .unwrap();
-
-        let mut async_io = disk.create_async_io(8).unwrap();
-
-        // Prepare write data for two regions.
-        let write_a = vec![0xAA; 4096];
-        let write_b = vec![0xBB; 4096];
-        let offset_a: u64 = 0;
-        let offset_b: u64 = 65536;
-
-        let iov_a = libc::iovec {
-            iov_base: write_a.as_ptr().cast::<libc::c_void>().cast_mut(),
-            iov_len: write_a.len(),
-        };
-        let iov_b = libc::iovec {
-            iov_base: write_b.as_ptr().cast::<libc::c_void>().cast_mut(),
-            iov_len: write_b.len(),
-        };
-
-        let batch = vec![
-            BatchRequest {
-                offset: offset_a as libc::off_t,
-                iovecs: smallvec::smallvec![iov_a],
-                user_data: 10,
-                request_type: RequestType::Out,
-            },
-            BatchRequest {
-                offset: offset_b as libc::off_t,
-                iovecs: smallvec::smallvec![iov_b],
-                user_data: 20,
-                request_type: RequestType::Out,
-            },
-        ];
-
-        async_io.submit_batch_requests(&batch).unwrap();
-
-        let mut completions = [
-            wait_for_completion(async_io.as_mut()),
-            wait_for_completion(async_io.as_mut()),
-        ];
-        completions.sort_by_key(|c| c.0);
-        assert_eq!(completions[0], (10, 4096));
-        assert_eq!(completions[1], (20, 4096));
-        drop(async_io);
-
-        // Batch read both regions back.
-        let mut read_a = vec![0u8; 4096];
-        let mut read_b = vec![0u8; 4096];
-        let riov_a = libc::iovec {
-            iov_base: read_a.as_mut_ptr().cast(),
-            iov_len: read_a.len(),
-        };
-        let riov_b = libc::iovec {
-            iov_base: read_b.as_mut_ptr().cast(),
-            iov_len: read_b.len(),
-        };
-
-        let mut async_io = disk.create_async_io(8).unwrap();
-        let read_batch = vec![
-            BatchRequest {
-                offset: offset_a as libc::off_t,
-                iovecs: smallvec::smallvec![riov_a],
-                user_data: 30,
-                request_type: RequestType::In,
-            },
-            BatchRequest {
-                offset: offset_b as libc::off_t,
-                iovecs: smallvec::smallvec![riov_b],
-                user_data: 40,
-                request_type: RequestType::In,
-            },
-        ];
-
-        async_io.submit_batch_requests(&read_batch).unwrap();
-
-        let mut completions = [
-            wait_for_completion(async_io.as_mut()),
-            wait_for_completion(async_io.as_mut()),
-        ];
-        completions.sort_by_key(|c| c.0);
-        assert_eq!(completions[0], (30, 4096));
-        assert_eq!(completions[1], (40, 4096));
-
-        assert_eq!(read_a, write_a, "batch read A should match written data");
-        assert_eq!(read_b, write_b, "batch read B should match written data");
     }
 
     #[test]
