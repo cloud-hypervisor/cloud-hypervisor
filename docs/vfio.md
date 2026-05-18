@@ -159,12 +159,14 @@ nvidia-smi topo -p2p r
  GPU7	OK	OK	OK	OK	OK	OK	OK	X	
 ```
 
-Some VFIO devices expose BARs that should not be mmapped by the VMM even when
-the kernel reports them as mappable. The `x_exclude_mmap_bars` config argument can
-be used to skip mmap for specific BAR indices.
+Some VFIO devices expose BARs that should not be registered as guest userspace
+memory regions even when the kernel reports them as mappable. The
+`x_exclude_mmap_bars` config argument can be used to skip userspace memory
+region creation for specific BAR indices while preserving the host mmap needed
+for peer-to-peer DMA mappings.
 
 BAR indices must be between 0 and 5 inclusive. The following example disables
-mmap for BAR 2 of the assigned device:
+userspace memory region creation for BAR 2 of the assigned device:
 
 ```
 --device path=/sys/bus/pci/devices/0000:01:00.0/,x_exclude_mmap_bars=[2]
