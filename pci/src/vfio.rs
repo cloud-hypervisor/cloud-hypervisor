@@ -268,7 +268,7 @@ impl Interrupt {
 
 #[derive(Clone)]
 pub struct UserMemoryRegion {
-    pub slot: u32,
+    pub slot: Option<u32>,
     pub start: u64,
     pub mapping: Arc<crate::mmap::MmapRegion>,
 }
@@ -286,10 +286,16 @@ impl MmioRegion {
     /// Returns true if this region has the exact same memory slots as the other region.
     pub fn has_matching_slots(&self, other: &MmioRegion) -> bool {
         self.user_memory_regions.len() == other.user_memory_regions.len()
-            && self
-                .user_memory_regions
-                .iter()
-                .all(|u| other.user_memory_regions.iter().any(|o| o.slot == u.slot))
+            && self.user_memory_regions.iter().all(|u| {
+                other
+                    .user_memory_regions
+                    .iter()
+                    .any(|o| match (u.slot, o.slot) {
+                        (Some(u_slot), Some(o_slot)) => u_slot == o_slot,
+                        (None, None) => Arc::ptr_eq(&u.mapping, &o.mapping),
+                        _ => false,
+                    })
+            })
     }
 }
 
@@ -1661,19 +1667,18 @@ impl VfioPciDevice {
         // SAFETY: fd is guaranteed valid
         let fd = unsafe { BorrowedFd::borrow_raw(fd) };
         for region in self.common.mmio_regions.iter_mut() {
-            if self
+            let exclude_mmap_bar = self
                 .common
                 .x_exclude_mmap_bars
-                .contains(&(region.index as u8))
-            {
+                .contains(&(region.index as u8));
+            if exclude_mmap_bar {
                 info!(
-                    "Skipping VFIO BAR mmap and P2P DMA mapping for device {} at {} BAR {} (size = 0x{:x})",
+                    "Skipping VFIO BAR userspace memory region for device {} at {} BAR {} (size = 0x{:x})",
                     self.bdf,
                     self.device_path.display(),
                     region.index,
                     region.length
                 );
-                continue;
             }
 
             let region_flags = self.device.get_region_flags(region.index);
@@ -1765,26 +1770,33 @@ impl VfioPciDevice {
                         }
                     };
 
+                    let slot = if exclude_mmap_bar {
+                        None
+                    } else {
+                        Some(self.memory_slot_allocator.next_memory_slot())
+                    };
                     let user_memory_region = UserMemoryRegion {
-                        slot: self.memory_slot_allocator.next_memory_slot(),
+                        slot,
                         start: region.start.0 + area.offset,
                         mapping: Arc::new(mapping),
                     };
-                    // SAFETY: MmapRegion invariants guarantee that
-                    // user_memory_region.mapping.addr() points to
-                    // user_memory_region.mapping.len() bytes of
-                    // valid memory that will only be unmapped with munmap().
-                    unsafe {
-                        self.vm.create_user_memory_region(
-                            user_memory_region.slot,
-                            user_memory_region.start,
-                            user_memory_region.mapping.len(),
-                            user_memory_region.mapping.addr(),
-                            false,
-                            false,
-                        )
+                    if let Some(slot) = user_memory_region.slot {
+                        // SAFETY: MmapRegion invariants guarantee that
+                        // user_memory_region.mapping.addr() points to
+                        // user_memory_region.mapping.len() bytes of
+                        // valid memory that will only be unmapped with munmap().
+                        unsafe {
+                            self.vm.create_user_memory_region(
+                                slot,
+                                user_memory_region.start,
+                                user_memory_region.mapping.len(),
+                                user_memory_region.mapping.addr(),
+                                false,
+                                false,
+                            )
+                        }
+                        .map_err(VfioPciError::CreateUserMemoryRegion)?;
                     }
-                    .map_err(VfioPciError::CreateUserMemoryRegion)?;
 
                     // Map the MMIO BAR into the host IOMMU address space via VfioOps
                     // Only needed if p2p_dma is enabled.
@@ -1833,25 +1845,26 @@ impl VfioPciDevice {
                     );
                 }
 
-                // Remove region
-                // SAFETY: only valid entries are added to the user_memory_regions field
-                // of the entries of self.common.mmio_regions.
-                // Also, host_addr..host_addr + len is valid by the MmapRegion invariants.
-                if let Err(e) = unsafe {
-                    self.vm.remove_user_memory_region(
-                        user_memory_region.slot,
-                        user_memory_region.start,
-                        len,
-                        host_addr,
-                        false,
-                        false,
-                    )
-                } {
-                    error!("Could not remove the userspace memory region: {e}");
-                }
+                if let Some(slot) = user_memory_region.slot {
+                    // Remove region
+                    // SAFETY: only valid entries are added to the user_memory_regions field
+                    // of the entries of self.common.mmio_regions.
+                    // Also, host_addr..host_addr + len is valid by the MmapRegion invariants.
+                    if let Err(e) = unsafe {
+                        self.vm.remove_user_memory_region(
+                            slot,
+                            user_memory_region.start,
+                            len,
+                            host_addr,
+                            false,
+                            false,
+                        )
+                    } {
+                        error!("Could not remove the userspace memory region: {e}");
+                    }
 
-                self.memory_slot_allocator
-                    .free_memory_slot(user_memory_region.slot);
+                    self.memory_slot_allocator.free_memory_slot(slot);
+                }
             }
         }
     }
@@ -1994,21 +2007,23 @@ iova 0x{:x}, size 0x{:x}: {}, ",
                             user_memory_region.start, len, e
                         );
                     }
-                    // Remove old region
-                    // SAFETY: MmapRegion invariants guarantee that
-                    // host_addr points to len bytes of
-                    // valid memory that will only be unmapped with munmap().
-                    unsafe {
-                        self.vm.remove_user_memory_region(
-                            user_memory_region.slot,
-                            user_memory_region.start,
-                            len,
-                            host_addr,
-                            false,
-                            false,
-                        )
+                    if let Some(slot) = user_memory_region.slot {
+                        // Remove old region
+                        // SAFETY: MmapRegion invariants guarantee that
+                        // host_addr points to len bytes of
+                        // valid memory that will only be unmapped with munmap().
+                        unsafe {
+                            self.vm.remove_user_memory_region(
+                                slot,
+                                user_memory_region.start,
+                                len,
+                                host_addr,
+                                false,
+                                false,
+                            )
+                        }
+                        .map_err(io::Error::other)?;
                     }
-                    .map_err(io::Error::other)?;
 
                     // Update the user memory region with the correct start address.
                     if new_base > old_base {
@@ -2017,21 +2032,23 @@ iova 0x{:x}, size 0x{:x}: {}, ",
                         user_memory_region.start -= old_base - new_base;
                     }
 
-                    // Insert new region
-                    // SAFETY: MmapRegion invariants guarantee that
-                    // host_addr points to len bytes of
-                    // valid memory that will only be unmapped with munmap().
-                    unsafe {
-                        self.vm.create_user_memory_region(
-                            user_memory_region.slot,
-                            user_memory_region.start,
-                            len,
-                            host_addr,
-                            false,
-                            false,
-                        )
+                    if let Some(slot) = user_memory_region.slot {
+                        // Insert new region
+                        // SAFETY: MmapRegion invariants guarantee that
+                        // host_addr points to len bytes of
+                        // valid memory that will only be unmapped with munmap().
+                        unsafe {
+                            self.vm.create_user_memory_region(
+                                slot,
+                                user_memory_region.start,
+                                len,
+                                host_addr,
+                                false,
+                                false,
+                            )
+                        }
+                        .map_err(io::Error::other)?;
                     }
-                    .map_err(io::Error::other)?;
 
                     // Map the moved MMIO region into the host IOMMU address space via VfioOps
                     // Only needed if p2p_dma is enabled.

@@ -11226,7 +11226,7 @@ mod vfio {
         let stderr = String::from_utf8_lossy(&output.stderr);
 
         assert!(
-            stderr.contains("Skipping VFIO BAR mmap"),
+            stderr.contains("Skipping VFIO BAR userspace memory region"),
             "Expected x_exclude_mmap_bars log in stderr: {stderr}"
         );
         assert!(
