@@ -4,16 +4,21 @@
 
 use std::marker::PhantomData;
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
+mod common;
 mod completion;
 mod guest_memory_target;
 mod operation;
 mod owned_io_buffer;
+#[cfg(feature = "io_uring")]
+mod uring_data_io;
 
 pub use completion::AsyncIoCompletion;
 pub use guest_memory_target::GuestMemoryTarget;
 pub use operation::AsyncIoOperation;
 pub use owned_io_buffer::OwnedIoBuffer;
 use thiserror::Error;
+#[cfg(feature = "io_uring")]
+pub use uring_data_io::UringDataIo;
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::{BatchRequest, SECTOR_SIZE};
