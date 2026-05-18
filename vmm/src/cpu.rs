@@ -19,7 +19,7 @@ use std::mem::size_of;
 use std::ops::Deref;
 use std::os::unix::thread::JoinHandleExt;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use std::sync::{Arc, Barrier, Mutex, RwLock};
+use std::sync::{Arc, Barrier, Mutex, RwLock, Weak};
 use std::{cmp, io, result, thread};
 
 use acpi_tables::sdt::Sdt;
@@ -1667,6 +1667,7 @@ impl CpuManager {
         }
 
         // Clear any stale data. Will be initialized on the next VM boot.
+        // AcpiCpuHotplugController only has a Weak reference.
         self.vcpu_states = Arc::new(Box::new([]));
 
         Ok(())
@@ -3204,7 +3205,7 @@ pub struct AcpiCpuHotplugController {
     /// The currently selected CPU by the guest.
     selected_cpu: u32,
     /// Shared vCPU state with [`CpuManager`].
-    vcpu_states: Arc<Box<[RwLock<VcpuState>]>>,
+    vcpu_states: Weak<Box<[RwLock<VcpuState>]>>,
     /// Maximum number of vCPUS of the VM.
     max_vcpus: u32,
 }
@@ -3223,7 +3224,7 @@ impl AcpiCpuHotplugController {
         Self {
             max_vcpus: cpu_manager.config.max_vcpus,
             selected_cpu: 0,
-            vcpu_states: cpu_manager.vcpu_states.clone(),
+            vcpu_states: Arc::downgrade(&cpu_manager.vcpu_states),
         }
     }
 
@@ -3248,6 +3249,11 @@ impl AcpiCpuHotplugController {
 
 impl BusDevice for AcpiCpuHotplugController {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
+        let vcpu_states = self
+            .vcpu_states
+            .upgrade()
+            .expect("corresponding CpuManager should still be alive");
+
         // The Linux kernel, quite reasonably, doesn't zero the memory it gives us.
         data.fill(0);
 
@@ -3260,7 +3266,7 @@ impl BusDevice for AcpiCpuHotplugController {
             Self::CPU_STATUS_OFFSET => {
                 if self.selected_cpu < self.max_vcpus {
                     let vcpu_id = usize::try_from(self.selected_cpu).unwrap();
-                    let state = self.vcpu_states[vcpu_id].read().unwrap();
+                    let state = vcpu_states[vcpu_id].read().unwrap();
                     if state.active() {
                         data[0] |= 1 << Self::CPU_ENABLE_FLAG;
                     }
@@ -3281,6 +3287,11 @@ impl BusDevice for AcpiCpuHotplugController {
     }
 
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
+        let vcpu_states = self
+            .vcpu_states
+            .upgrade()
+            .expect("corresponding CpuManager should still be alive");
+
         match offset {
             Self::CPU_SELECTION_OFFSET => {
                 assert!(data.len() >= core::mem::size_of::<u32>());
@@ -3290,7 +3301,7 @@ impl BusDevice for AcpiCpuHotplugController {
             Self::CPU_STATUS_OFFSET => {
                 if self.selected_cpu < self.max_vcpus {
                     let vcpu_id = usize::try_from(self.selected_cpu).unwrap();
-                    let mut state = self.vcpu_states[vcpu_id].write().unwrap();
+                    let mut state = vcpu_states[vcpu_id].write().unwrap();
                     // The ACPI code writes back a 1 to acknowledge the insertion
                     if (data[0] & (1 << Self::CPU_INSERTING_FLAG) == 1 << Self::CPU_INSERTING_FLAG)
                         && state.hotplug_state.inserting.load(Ordering::Acquire)
