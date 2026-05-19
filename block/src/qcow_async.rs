@@ -26,8 +26,8 @@ use crate::qcow::metadata::{
 };
 use crate::qcow::qcow_raw_file::QcowRawFile;
 use crate::qcow_common::{
-    AlignedBuf, aligned_pread, aligned_pwrite, decompress_cluster, gather_from_iovecs_into,
-    pread_alloc, pread_exact, pwrite_all, scatter_to_iovecs, zero_fill_iovecs,
+    AlignedBuf, aligned_pread, aligned_pwrite, decompress_cluster, pread_alloc, pread_exact,
+    pwrite_all,
 };
 
 /// Per queue QCOW2 I/O worker using io_uring.
@@ -124,7 +124,7 @@ impl QcowAsync {
             &self.data_file,
             &self.backing_file,
             op.offset() as u64,
-            op.iovecs(),
+            &mut op,
             total_len,
             self.alignment,
             self.cluster_size,
@@ -155,7 +155,7 @@ impl QcowAsync {
         let total_len = op.total_len();
         if let Err(e) = Self::cow_write_sync(
             op.offset() as u64,
-            op.iovecs(),
+            &op,
             &self.metadata,
             &self.data_file,
             &self.backing_file,
@@ -328,7 +328,7 @@ impl QcowAsync {
         data_file: &QcowRawFile,
         backing_file: &Option<Arc<dyn BackingRead>>,
         address: u64,
-        iovecs: &[libc::iovec],
+        op: &mut AsyncIoOperation,
         total_len: usize,
         alignment: usize,
         cluster_size: u64,
@@ -359,7 +359,7 @@ impl QcowAsync {
 
         Self::scatter_read_sync(
             mappings,
-            iovecs,
+            op,
             data_file,
             backing_file,
             alignment,
@@ -369,10 +369,10 @@ impl QcowAsync {
         Ok(None)
     }
 
-    /// Scatter-read cluster mappings synchronously into iovec buffers.
+    /// Scatter-read cluster mappings synchronously into an owned operation.
     fn scatter_read_sync(
         mappings: Vec<ClusterReadMapping>,
-        iovecs: &[libc::iovec],
+        op: &mut AsyncIoOperation,
         data_file: &QcowRawFile,
         backing_file: &Option<Arc<dyn BackingRead>>,
         alignment: usize,
@@ -383,10 +383,8 @@ impl QcowAsync {
         for mapping in mappings {
             match mapping {
                 ClusterReadMapping::Zero { length } => {
-                    // SAFETY: iovecs point to valid guest memory buffers.
-                    unsafe {
-                        zero_fill_iovecs(iovecs, buf_offset, length as usize);
-                    }
+                    op.fill_zeroes_at(buf_offset, length as usize)
+                        .map_err(AsyncIoError::ReadVectored)?;
                     buf_offset += length as usize;
                 }
                 ClusterReadMapping::Allocated {
@@ -404,14 +402,14 @@ impl QcowAsync {
                             alignment,
                         )
                         .map_err(AsyncIoError::ReadVectored)?;
-                        // SAFETY: iovecs point to valid guest memory buffers.
-                        unsafe { scatter_to_iovecs(iovecs, buf_offset, abuf.as_slice(len)) };
+                        op.write_bytes_at(buf_offset, abuf.as_slice(len))
+                            .map_err(AsyncIoError::ReadVectored)?;
                     } else {
                         let mut buf = vec![0u8; len];
                         pread_exact(data_file.as_raw_fd(), &mut buf, host_offset)
                             .map_err(AsyncIoError::ReadVectored)?;
-                        // SAFETY: iovecs point to valid guest memory buffers.
-                        unsafe { scatter_to_iovecs(iovecs, buf_offset, &buf) };
+                        op.write_bytes_at(buf_offset, &buf)
+                            .map_err(AsyncIoError::ReadVectored)?;
                     }
                     buf_offset += len;
                 }
@@ -427,14 +425,11 @@ impl QcowAsync {
                     let decompressed =
                         decompress_cluster(&compressed, cluster_size as usize, decoder)
                             .map_err(AsyncIoError::ReadVectored)?;
-                    // SAFETY: iovecs point to valid guest memory buffers.
-                    unsafe {
-                        scatter_to_iovecs(
-                            iovecs,
-                            buf_offset,
-                            &decompressed[cluster_offset..cluster_offset + length],
-                        );
-                    }
+                    op.write_bytes_at(
+                        buf_offset,
+                        &decompressed[cluster_offset..cluster_offset + length],
+                    )
+                    .map_err(AsyncIoError::ReadVectored)?;
                     buf_offset += length;
                 }
                 ClusterReadMapping::Backing {
@@ -447,8 +442,8 @@ impl QcowAsync {
                         .unwrap()
                         .read_at(backing_offset, &mut buf)
                         .map_err(AsyncIoError::ReadVectored)?;
-                    // SAFETY: iovecs point to valid guest memory buffers.
-                    unsafe { scatter_to_iovecs(iovecs, buf_offset, &buf) };
+                    op.write_bytes_at(buf_offset, &buf)
+                        .map_err(AsyncIoError::ReadVectored)?;
                     buf_offset += length as usize;
                 }
             }
@@ -456,17 +451,17 @@ impl QcowAsync {
         Ok(())
     }
 
-    /// Write iovec data cluster-by-cluster with COW from backing file.
+    /// Write owned operation data cluster-by-cluster with COW from backing file.
     fn cow_write_sync(
         address: u64,
-        iovecs: &[libc::iovec],
+        op: &AsyncIoOperation,
         metadata: &QcowMetadata,
         data_file: &QcowRawFile,
         backing_file: &Option<Arc<dyn BackingRead>>,
         alignment: usize,
         cluster_size: u64,
     ) -> AsyncIoResult<()> {
-        let total_len: usize = iovecs.iter().map(|v| v.iov_len).sum();
+        let total_len = op.total_len();
         let mut buf_offset = 0usize;
 
         while buf_offset < total_len {
@@ -501,10 +496,8 @@ impl QcowAsync {
                         // O_DIRECT, gather directly into aligned buffer.
                         let mut abuf = AlignedBuf::new(count, alignment)
                             .map_err(AsyncIoError::WriteVectored)?;
-                        // SAFETY: iovecs point to valid guest memory buffers
-                        unsafe {
-                            gather_from_iovecs_into(iovecs, buf_offset, abuf.as_mut_slice(count));
-                        }
+                        op.read_bytes_at(buf_offset, abuf.as_mut_slice(count))
+                            .map_err(AsyncIoError::WriteVectored)?;
                         aligned_pwrite(
                             data_file.as_raw_fd(),
                             abuf.as_slice(count),
@@ -515,10 +508,8 @@ impl QcowAsync {
                     } else {
                         // No O_DIRECT, plain buffer is fine.
                         let mut buf = vec![0u8; count];
-                        // SAFETY: iovecs point to valid guest memory buffers.
-                        unsafe {
-                            gather_from_iovecs_into(iovecs, buf_offset, &mut buf);
-                        }
+                        op.read_bytes_at(buf_offset, &mut buf)
+                            .map_err(AsyncIoError::WriteVectored)?;
                         pwrite_all(data_file.as_raw_fd(), &buf, host_offset)
                             .map_err(AsyncIoError::WriteVectored)?;
                     }
@@ -536,11 +527,12 @@ mod unit_tests {
     use std::sync::Arc;
     use std::thread;
 
+    use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
     use crate::SECTOR_SIZE;
-    use crate::async_io::{AsyncIoCompletion, AsyncIoOperation, OwnedIoBuffer};
+    use crate::async_io::{AsyncIoCompletion, AsyncIoOperation, GuestMemoryTarget, OwnedIoBuffer};
     use crate::disk_file::AsyncDiskFile;
     use crate::qcow::{BackingFileConfig, ImageType, QcowFile, RawFile};
     use crate::qcow_common::unit_tests::compress_allocated_clusters;
@@ -776,6 +768,76 @@ mod unit_tests {
             buf[4096..].iter().all(|&b| b == 0xBB),
             "second half should come from cluster 1"
         );
+    }
+
+    #[test]
+    fn test_qcow_async_sync_read_to_guest_memory() {
+        let cluster_size = 65536usize;
+        let file_size = 100 * 1024 * 1024;
+        let data: Vec<u8> = (0..cluster_size * 2).map(|i| (i % 251) as u8).collect();
+        let (_temp, disk) = create_disk_with_data(file_size, &data, 0, true);
+        let mem = Arc::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0x1000), 0x4000)]).unwrap(),
+        );
+        let ranges = [(GuestAddress(0x1000), 2048), (GuestAddress(0x2000), 2048)];
+        let target = GuestMemoryTarget::new(Arc::clone(&mem), &ranges).unwrap();
+        let read_offset = cluster_size as u64 - 2048;
+
+        let mut async_io = disk.create_async_io(1).unwrap();
+        async_io
+            .read_to_memory(read_offset as libc::off_t, target, 55)
+            .unwrap();
+
+        let completion = wait_for_completion(async_io.as_mut());
+        assert_eq!(completion_tuple(&completion), (55, 4096));
+        assert!(completion.buffer.is_none());
+
+        let mut first = vec![0u8; 2048];
+        let mut second = vec![0u8; 2048];
+        mem.read_slice(&mut first, GuestAddress(0x1000)).unwrap();
+        mem.read_slice(&mut second, GuestAddress(0x2000)).unwrap();
+
+        let expected = &data[read_offset as usize..read_offset as usize + 4096];
+        assert_eq!(&first[..], &expected[..2048]);
+        assert_eq!(&second[..], &expected[2048..]);
+    }
+
+    #[test]
+    fn test_qcow_async_sync_write_from_guest_memory() {
+        let file_size = 100 * 1024 * 1024;
+        let temp_file = TempFile::new().unwrap();
+        {
+            let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
+            QcowFile::new(raw_file, 3, file_size, true).unwrap();
+        }
+        let disk = QcowDisk::new(
+            temp_file.as_file().try_clone().unwrap(),
+            false,
+            false,
+            true,
+            true,
+        )
+        .unwrap();
+        let mem = Arc::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0x1000), 0x4000)]).unwrap(),
+        );
+        let first = vec![0x5a; 2048];
+        let second = vec![0xc3; 2048];
+        mem.write_slice(&first, GuestAddress(0x1000)).unwrap();
+        mem.write_slice(&second, GuestAddress(0x2000)).unwrap();
+        let ranges = [(GuestAddress(0x1000), 2048), (GuestAddress(0x2000), 2048)];
+        let target = GuestMemoryTarget::new(Arc::clone(&mem), &ranges).unwrap();
+
+        let mut async_io = disk.create_async_io(1).unwrap();
+        async_io.write_from_memory(4096, target, 56).unwrap();
+        let completion = wait_for_completion(async_io.as_mut());
+        assert_eq!(completion_tuple(&completion), (56, 4096));
+        drop(async_io);
+
+        let mut expected = first;
+        expected.extend_from_slice(&second);
+        let read_buf = async_read(&disk, 4096, expected.len());
+        assert_eq!(read_buf, expected);
     }
 
     #[test]

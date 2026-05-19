@@ -152,7 +152,6 @@ impl AsyncIoOperation {
         }
     }
 
-    #[allow(dead_code)]
     fn checked_range(total_len: usize, start: usize, len: usize) -> io::Result<Range<usize>> {
         if start <= total_len
             && let Some(end) = start.checked_add(len)
@@ -168,7 +167,6 @@ impl AsyncIoOperation {
     }
 
     /// Copies bytes into a read operation at `start`.
-    #[allow(dead_code)]
     pub(crate) fn write_bytes_at(&mut self, start: usize, data: &[u8]) -> io::Result<()> {
         match self {
             Self::ReadToMemory { target, .. } => {
@@ -187,7 +185,6 @@ impl AsyncIoOperation {
     }
 
     /// Fills a read operation with zeroes at `start`.
-    #[allow(dead_code)]
     pub(crate) fn fill_zeroes_at(&mut self, start: usize, len: usize) -> io::Result<()> {
         match self {
             Self::ReadToMemory { target, .. } => {
@@ -206,7 +203,6 @@ impl AsyncIoOperation {
     }
 
     /// Copies bytes out of a write operation at `start`.
-    #[allow(dead_code)]
     pub(crate) fn read_bytes_at(&self, start: usize, data: &mut [u8]) -> io::Result<()> {
         match self {
             Self::WriteFromMemory { target, .. } => {
