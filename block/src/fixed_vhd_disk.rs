@@ -203,7 +203,7 @@ mod unit_tests {
         let op = AsyncIoOperation::read_to_vec(0x800, OwnedIoBuffer::from_vec(vec![0; 0x900]), 1);
 
         assert!(matches!(
-            async_io.submit_batch_operations(vec![op]),
+            async_io.submit_batch_requests(vec![op]),
             Err(crate::async_io::AsyncIoError::ReadVectored(_))
         ));
     }

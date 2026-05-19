@@ -43,58 +43,6 @@ impl AsyncIo for RawFileSync {
         self.alignment
     }
 
-    fn read_vectored(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-    ) -> AsyncIoResult<()> {
-        // SAFETY: FFI call with valid arguments
-        let result = unsafe {
-            libc::preadv(
-                self.fd as libc::c_int,
-                iovecs.as_ptr(),
-                iovecs.len() as libc::c_int,
-                offset,
-            )
-        };
-        if result < 0 {
-            return Err(AsyncIoError::ReadVectored(std::io::Error::last_os_error()));
-        }
-
-        self.completion_list
-            .push_back(AsyncIoCompletion::new(user_data, result as i32, None));
-        self.eventfd.write(1).unwrap();
-
-        Ok(())
-    }
-
-    fn write_vectored(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-    ) -> AsyncIoResult<()> {
-        // SAFETY: FFI call with valid arguments
-        let result = unsafe {
-            libc::pwritev(
-                self.fd as libc::c_int,
-                iovecs.as_ptr(),
-                iovecs.len() as libc::c_int,
-                offset,
-            )
-        };
-        if result < 0 {
-            return Err(AsyncIoError::WriteVectored(std::io::Error::last_os_error()));
-        }
-
-        self.completion_list
-            .push_back(AsyncIoCompletion::new(user_data, result as i32, None));
-        self.eventfd.write(1).unwrap();
-
-        Ok(())
-    }
-
     fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
         let offset = op.offset();
         let is_read = op.is_read();
@@ -157,7 +105,7 @@ impl AsyncIo for RawFileSync {
         Ok(())
     }
 
-    fn next_completion(&mut self) -> Option<AsyncIoCompletion> {
+    fn next_completed_request(&mut self) -> Option<AsyncIoCompletion> {
         self.completion_list.pop_front()
     }
 

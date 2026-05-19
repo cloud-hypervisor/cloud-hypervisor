@@ -8,7 +8,6 @@ use std::os::unix::io::RawFd;
 
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::BatchRequest;
 use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
 use crate::error::BlockResult;
 use crate::raw_async::RawFileAsync;
@@ -65,45 +64,6 @@ impl AsyncIo for FixedVhdAsync {
         self.raw_file_async.notifier()
     }
 
-    fn read_vectored(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-    ) -> AsyncIoResult<()> {
-        if offset as u64 >= self.size {
-            return Err(AsyncIoError::ReadVectored(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "Invalid offset {}, can't be larger than file size {}",
-                    offset, self.size
-                ),
-            )));
-        }
-
-        self.raw_file_async.read_vectored(offset, iovecs, user_data)
-    }
-
-    fn write_vectored(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-    ) -> AsyncIoResult<()> {
-        if offset as u64 >= self.size {
-            return Err(AsyncIoError::WriteVectored(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "Invalid offset {}, can't be larger than file size {}",
-                    offset, self.size
-                ),
-            )));
-        }
-
-        self.raw_file_async
-            .write_vectored(offset, iovecs, user_data)
-    }
-
     fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
         self.validate_operation_bounds(&op)?;
         self.raw_file_async.submit_data_operation(op)
@@ -113,8 +73,8 @@ impl AsyncIo for FixedVhdAsync {
         self.raw_file_async.fsync(user_data)
     }
 
-    fn next_completion(&mut self) -> Option<AsyncIoCompletion> {
-        self.raw_file_async.next_completion()
+    fn next_completed_request(&mut self) -> Option<AsyncIoCompletion> {
+        self.raw_file_async.next_completed_request()
     }
 
     fn punch_hole(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
@@ -133,18 +93,11 @@ impl AsyncIo for FixedVhdAsync {
         true
     }
 
-    fn submit_batch_requests(&mut self, batch_request: &[BatchRequest]) -> AsyncIoResult<()> {
-        self.raw_file_async.submit_batch_requests(batch_request)
-    }
-
-    fn submit_batch_operations(
-        &mut self,
-        batch_request: Vec<AsyncIoOperation>,
-    ) -> AsyncIoResult<()> {
+    fn submit_batch_requests(&mut self, batch_request: Vec<AsyncIoOperation>) -> AsyncIoResult<()> {
         for op in &batch_request {
             self.validate_operation_bounds(op)?;
         }
 
-        self.raw_file_async.submit_batch_operations(batch_request)
+        self.raw_file_async.submit_batch_requests(batch_request)
     }
 }

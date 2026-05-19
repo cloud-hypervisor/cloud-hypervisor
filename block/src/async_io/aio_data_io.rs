@@ -27,8 +27,7 @@ pub struct AioDataIo {
     eventfd: EventFd,
     // `in_flight` tracks every user_data value accepted by the kernel. Owned
     // data operations store `Some(op)` so their iovecs and backing buffers
-    // remain valid until completion; metadata and legacy borrowed operations
-    // store `None`.
+    // remain valid until completion; metadata operations store `None`.
     in_flight: HashMap<u64, Option<AsyncIoOperation>>,
     // `completions` holds locally produced completions and kernel events that
     // have been fetched but not yet returned to the caller.
@@ -103,54 +102,6 @@ impl AioDataIo {
             .and_then(AsyncIoOperation::into_completion_buffer);
         self.inject_completion(AsyncIoCompletion::new(user_data, result, buffer));
         Ok(())
-    }
-
-    /// Submits one borrowed read or write operation to the queue.
-    ///
-    /// This is only for the legacy `AsyncIo` interface. The caller must keep
-    /// the iovec array and the buffers it references alive until the matching
-    /// completion is consumed.
-    pub fn submit_borrowed_operation(
-        &mut self,
-        fd: RawFd,
-        offset: libc::off_t,
-        is_read: bool,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-    ) -> io::Result<()> {
-        if self.in_flight.contains_key(&user_data) {
-            return Err(duplicate_user_data_error(user_data));
-        }
-        self.in_flight.insert(user_data, None);
-
-        let opcode = if is_read {
-            aio::IOCB_CMD_PREADV
-        } else {
-            aio::IOCB_CMD_PWRITEV
-        };
-        let mut iocb = aio::IoControlBlock {
-            aio_fildes: fd.as_raw_fd() as u32,
-            aio_lio_opcode: opcode as u16,
-            aio_buf: iovecs.as_ptr() as u64,
-            aio_nbytes: iovecs.len() as u64,
-            aio_offset: offset,
-            aio_data: user_data,
-            aio_flags: aio::IOCB_FLAG_RESFD,
-            aio_resfd: self.eventfd.as_raw_fd() as u32,
-            ..Default::default()
-        };
-
-        match Self::submit_iocbs(&self.ctx, &[&mut iocb]) {
-            Ok(1) => Ok(()),
-            Ok(_) => {
-                self.in_flight.remove(&user_data);
-                Err(io::Error::from_raw_os_error(libc::EAGAIN))
-            }
-            Err(e) => {
-                self.in_flight.remove(&user_data);
-                Err(e)
-            }
-        }
     }
 
     /// Submits an fsync operation carrying `user_data`.

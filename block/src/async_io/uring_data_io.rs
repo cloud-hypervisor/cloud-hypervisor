@@ -4,7 +4,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::os::fd::{AsRawFd, RawFd};
 
@@ -27,8 +27,7 @@ pub struct UringDataIo {
     eventfd: EventFd,
     // `in_flight` tracks every user_data value accepted by the kernel. Owned
     // data operations store `Some(op)` so their iovecs and backing buffers
-    // remain valid until completion; metadata and legacy borrowed operations
-    // store `None`.
+    // remain valid until completion; metadata operations store `None`.
     in_flight: HashMap<u64, Option<AsyncIoOperation>>,
     // `injected` holds locally produced completions so synchronous failures
     // and short-circuited requests use the same drain path as kernel CQEs.
@@ -64,85 +63,12 @@ impl UringDataIo {
         self.submit_batch(fd, vec![op])
     }
 
-    /// Submits one borrowed read or write operation to the queue.
-    ///
-    /// This is only for the legacy `AsyncIo` interface. The caller must keep
-    /// the iovec array and the buffers it references alive until the matching
-    /// completion is consumed.
-    ///
-    /// # Safety
-    ///
-    /// The caller must guarantee that `iovecs` and all buffers described by
-    /// them remain valid for kernel access until the completion carrying
-    /// `user_data` is consumed.
-    pub unsafe fn submit_borrowed_operation(
-        &mut self,
-        fd: RawFd,
-        offset: libc::off_t,
-        is_read: bool,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-    ) -> io::Result<()> {
-        let entry = Self::build_borrowed_entry(fd, offset, is_read, iovecs, user_data);
-        self.submit_kernel_entry(user_data, &entry)
-    }
-
     fn reserve_user_data(&mut self, user_data: u64) -> io::Result<()> {
         if self.in_flight.contains_key(&user_data) {
             return Err(duplicate_user_data_error(user_data));
         }
         self.in_flight.insert(user_data, None);
 
-        Ok(())
-    }
-
-    /// Submits a batch of borrowed read and write operations to the queue.
-    ///
-    /// This is only for the legacy `AsyncIo` interface. The caller must keep
-    /// every iovec array and referenced buffer alive until its matching
-    /// completion is consumed.
-    ///
-    /// # Safety
-    ///
-    /// The caller must guarantee that every borrowed iovec array and every
-    /// buffer described by those arrays remains valid for kernel access until
-    /// the matching completion is consumed.
-    pub unsafe fn submit_borrowed_batch(
-        &mut self,
-        fd: RawFd,
-        batch: &[(libc::off_t, bool, &[libc::iovec], u64)],
-    ) -> io::Result<()> {
-        if batch.is_empty() {
-            return Ok(());
-        }
-
-        let mut seen = HashSet::with_capacity(batch.len());
-        for &(_, _, _, user_data) in batch {
-            if self.in_flight.contains_key(&user_data) || !seen.insert(user_data) {
-                return Err(duplicate_user_data_error(user_data));
-            }
-        }
-
-        let (submitter, mut sq, _) = self.io_uring.split();
-        let available = sq.capacity() - sq.len();
-        if batch.len() > available {
-            return Err(io::Error::other("io_uring submission queue is full"));
-        }
-
-        for &(offset, is_read, iovecs, user_data) in batch {
-            let entry = Self::build_borrowed_entry(fd, offset, is_read, iovecs, user_data);
-            self.in_flight.insert(user_data, None);
-
-            // SAFETY: capacity was checked above, and the legacy caller keeps
-            // the borrowed iovec storage alive until completion.
-            if let Err(e) = unsafe { sq.push(&entry) } {
-                self.in_flight.remove(&user_data);
-                return Err(io::Error::other(format!("Submission queue is full: {e:?}")));
-            }
-        }
-
-        sq.sync();
-        submitter.submit()?;
         Ok(())
     }
 
@@ -259,27 +185,17 @@ impl UringDataIo {
 
     fn build_entry(fd: RawFd, op: &AsyncIoOperation) -> squeue::Entry {
         let iovecs = op.iovecs();
-        Self::build_borrowed_entry(fd, op.offset(), op.is_read(), iovecs, op.user_data())
-    }
-
-    fn build_borrowed_entry(
-        fd: RawFd,
-        offset: libc::off_t,
-        is_read: bool,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-    ) -> squeue::Entry {
         let fd = types::Fd(fd);
-        if is_read {
+        if op.is_read() {
             opcode::Readv::new(fd, iovecs.as_ptr(), iovecs.len() as u32)
-                .offset(offset as u64)
+                .offset(op.offset() as u64)
                 .build()
-                .user_data(user_data)
+                .user_data(op.user_data())
         } else {
             opcode::Writev::new(fd, iovecs.as_ptr(), iovecs.len() as u32)
-                .offset(offset as u64)
+                .offset(op.offset() as u64)
                 .build()
-                .user_data(user_data)
+                .user_data(op.user_data())
         }
     }
 

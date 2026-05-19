@@ -22,7 +22,7 @@ use crate::util::{
 };
 
 /// Submit num_ops AIO writes, wait for them all to land, then time
-/// how long it takes to drain every completion via next_completion().
+/// how long it takes to drain every completion via next_completed_request().
 ///
 /// Returns the drain wall clock time in seconds.
 pub fn micro_bench_aio_drain(control: &PerformanceTestControl) -> f64 {
@@ -50,7 +50,7 @@ pub fn micro_bench_aio_drain(control: &PerformanceTestControl) -> f64 {
     let start = Instant::now();
     let mut drained = 0usize;
     while drained < num_ops {
-        if aio.next_completion().is_some() {
+        if aio.next_completed_request().is_some() {
             drained += 1;
         }
     }
@@ -421,7 +421,7 @@ pub fn micro_bench_qcow_batch_read(control: &PerformanceTestControl) -> f64 {
 
     let start = Instant::now();
     async_io
-        .submit_batch_operations(batch)
+        .submit_batch_requests(batch)
         .expect("submit_batch_requests failed");
 
     // Drain all io_uring completions before stopping the clock.
@@ -631,7 +631,7 @@ pub fn micro_bench_qcow_batch_write(control: &PerformanceTestControl) -> f64 {
 
     let start = Instant::now();
     async_io
-        .submit_batch_operations(batch)
+        .submit_batch_requests(batch)
         .expect("submit_batch_requests failed");
 
     drain_async_completions(async_io.as_mut(), num_ops);

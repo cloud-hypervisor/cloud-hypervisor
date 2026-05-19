@@ -8,7 +8,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-mod aligned_operation;
 pub mod async_io;
 pub mod disk_file;
 pub mod error;
@@ -41,10 +40,9 @@ pub mod vhdx;
 pub mod vhdx_sync;
 
 use std::alloc::{Layout, alloc_zeroed};
-use std::collections::VecDeque;
 use std::fmt::{self, Debug};
 use std::fs::{File, OpenOptions};
-use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
+use std::io::{self, Read, Seek, Write};
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::fs::FileTypeExt;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -52,26 +50,23 @@ use std::path::Path;
 use std::str::FromStr;
 use std::{cmp, mem, result};
 
-pub use aligned_operation::AlignedOperation;
 #[cfg(feature = "io_uring")]
 use io_uring::{IoUring, Probe, opcode};
 use libc::{
     FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE, S_IFBLK, S_IFMT, ioctl,
 };
 use log::{debug, info, warn};
-pub use request::{BatchRequest, ExecuteAsync, MAX_DISCARD_WRITE_ZEROES_SEG, Request, RequestType};
+pub use request::{ExecuteAsync, MAX_DISCARD_WRITE_ZEROES_SEG, Request, RequestType};
 use serde::{Deserialize, Serialize};
-use smallvec::SmallVec;
 use thiserror::Error;
 use virtio_bindings::virtio_blk::*;
 use vm_memory::bitmap::Bitmap;
 use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError};
-use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::{aio, ioctl_io_nr, ioctl_ior_nr};
 
-use crate::async_io::{AsyncIoError, AsyncIoResult};
+use crate::async_io::AsyncIoError;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
-use crate::request::{DEFAULT_DESCRIPTOR_VEC_SIZE, SECTOR_SIZE};
+use crate::request::SECTOR_SIZE;
 use crate::vhdx::VhdxError;
 
 #[derive(Error, Debug)]
@@ -450,110 +445,6 @@ pub fn preallocate_disk<P: AsRef<Path>>(file: &File, path: P) {
             "Preallocated {size} bytes for disk image {:?}",
             path.as_ref()
         );
-    }
-}
-
-pub trait AsyncAdaptor {
-    fn read_vectored_sync(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-        eventfd: &EventFd,
-        completion_list: &mut VecDeque<(u64, i32)>,
-    ) -> AsyncIoResult<()>
-    where
-        Self: Read + Seek,
-    {
-        // Convert libc::iovec into IoSliceMut
-        let mut slices: SmallVec<[IoSliceMut; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
-            SmallVec::with_capacity(iovecs.len());
-        for iovec in iovecs.iter() {
-            // SAFETY: on Linux IoSliceMut wraps around libc::iovec
-            slices.push(IoSliceMut::new(unsafe {
-                std::mem::transmute::<libc::iovec, &mut [u8]>(*iovec)
-            }));
-        }
-
-        let result = {
-            // Move the cursor to the right offset
-            self.seek(SeekFrom::Start(offset as u64))
-                .map_err(AsyncIoError::ReadVectored)?;
-
-            let mut r = 0;
-            for b in slices.iter_mut() {
-                r += self.read(b).map_err(AsyncIoError::ReadVectored)?;
-            }
-            r
-        };
-
-        completion_list.push_back((user_data, result as i32));
-        eventfd.write(1).unwrap();
-
-        Ok(())
-    }
-
-    fn write_vectored_sync(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-        eventfd: &EventFd,
-        completion_list: &mut VecDeque<(u64, i32)>,
-    ) -> AsyncIoResult<()>
-    where
-        Self: Write + Seek,
-    {
-        // Convert libc::iovec into IoSlice
-        let mut slices: SmallVec<[IoSlice; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
-            SmallVec::with_capacity(iovecs.len());
-        for iovec in iovecs.iter() {
-            // SAFETY: on Linux IoSlice wraps around libc::iovec
-            slices.push(IoSlice::new(unsafe {
-                std::mem::transmute::<libc::iovec, &mut [u8]>(*iovec)
-            }));
-        }
-
-        let result = {
-            // Move the cursor to the right offset
-            self.seek(SeekFrom::Start(offset as u64))
-                .map_err(AsyncIoError::WriteVectored)?;
-
-            let mut r = 0;
-            for b in slices.iter() {
-                r += self.write(b).map_err(AsyncIoError::WriteVectored)?;
-            }
-            r
-        };
-
-        completion_list.push_back((user_data, result as i32));
-        eventfd.write(1).unwrap();
-
-        Ok(())
-    }
-
-    fn fsync_sync(
-        &mut self,
-        user_data: Option<u64>,
-        eventfd: &EventFd,
-        completion_list: &mut VecDeque<(u64, i32)>,
-    ) -> AsyncIoResult<()>
-    where
-        Self: Write,
-    {
-        let result: i32 = {
-            // Flush
-            self.flush().map_err(AsyncIoError::Fsync)?;
-
-            0
-        };
-
-        if let Some(user_data) = user_data {
-            completion_list.push_back((user_data, result));
-            eventfd.write(1).unwrap();
-        }
-
-        Ok(())
     }
 }
 

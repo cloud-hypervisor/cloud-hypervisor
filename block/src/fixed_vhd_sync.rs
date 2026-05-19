@@ -30,44 +30,6 @@ impl AsyncIo for FixedVhdSync {
         self.raw_file_sync.notifier()
     }
 
-    fn read_vectored(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-    ) -> AsyncIoResult<()> {
-        if offset as u64 >= self.size {
-            return Err(AsyncIoError::ReadVectored(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "Invalid offset {}, can't be larger than file size {}",
-                    offset, self.size
-                ),
-            )));
-        }
-
-        self.raw_file_sync.read_vectored(offset, iovecs, user_data)
-    }
-
-    fn write_vectored(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-    ) -> AsyncIoResult<()> {
-        if offset as u64 >= self.size {
-            return Err(AsyncIoError::WriteVectored(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "Invalid offset {}, can't be larger than file size {}",
-                    offset, self.size
-                ),
-            )));
-        }
-
-        self.raw_file_sync.write_vectored(offset, iovecs, user_data)
-    }
-
     fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
         let offset = op.offset();
         if offset as u64 >= self.size {
@@ -92,8 +54,8 @@ impl AsyncIo for FixedVhdSync {
         self.raw_file_sync.fsync(user_data)
     }
 
-    fn next_completion(&mut self) -> Option<AsyncIoCompletion> {
-        self.raw_file_sync.next_completion()
+    fn next_completed_request(&mut self) -> Option<AsyncIoCompletion> {
+        self.raw_file_sync.next_completed_request()
     }
 
     fn punch_hole(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {

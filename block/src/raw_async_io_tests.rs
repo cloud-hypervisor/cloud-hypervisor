@@ -16,7 +16,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use crate::async_io::{AsyncIo, AsyncIoError};
 
 fn next_completion(async_io: &mut dyn AsyncIo) -> (u64, i32) {
-    let completion = async_io.next_completion().expect("No completion");
+    let completion = async_io.next_completed_request().expect("No completion");
     (completion.user_data, completion.result)
 }
 

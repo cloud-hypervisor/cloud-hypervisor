@@ -81,7 +81,7 @@ pub fn qcow_async_tempfile(num_clusters: usize) -> (TempFile, QcowDisk) {
 /// Drain `count` completions from a synchronous async_io backend.
 pub fn drain_completions(async_io: &mut dyn AsyncIo, count: usize) {
     for _ in 0..count {
-        async_io.next_completion();
+        async_io.next_completed_request();
     }
 }
 
@@ -187,7 +187,7 @@ pub fn drain_async_completions(async_io: &mut dyn AsyncIo, count: usize) {
     let mut drained = 0usize;
     while drained < count {
         wait_for_eventfd(async_io.notifier());
-        while async_io.next_completion().is_some() {
+        while async_io.next_completed_request().is_some() {
             drained += 1;
         }
     }

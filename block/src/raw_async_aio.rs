@@ -49,28 +49,6 @@ impl AsyncIo for RawFileAsyncAio {
         self.alignment
     }
 
-    fn read_vectored(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-    ) -> AsyncIoResult<()> {
-        self.data_io
-            .submit_borrowed_operation(self.fd, offset, true, iovecs, user_data)
-            .map_err(AsyncIoError::ReadVectored)
-    }
-
-    fn write_vectored(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-    ) -> AsyncIoResult<()> {
-        self.data_io
-            .submit_borrowed_operation(self.fd, offset, false, iovecs, user_data)
-            .map_err(AsyncIoError::WriteVectored)
-    }
-
     fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
         let is_read = op.is_read();
         self.data_io.submit_operation(self.fd, op).map_err(|e| {
@@ -95,7 +73,7 @@ impl AsyncIo for RawFileAsyncAio {
         Ok(())
     }
 
-    fn next_completion(&mut self) -> Option<AsyncIoCompletion> {
+    fn next_completed_request(&mut self) -> Option<AsyncIoCompletion> {
         self.data_io.next_completion()
     }
 

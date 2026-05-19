@@ -14,7 +14,7 @@ use crate::async_io::{
 };
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::sparse::{blkdiscard, blkzeroout};
-use crate::{BatchRequest, RequestType, SECTOR_SIZE, is_block_device};
+use crate::{SECTOR_SIZE, is_block_device};
 
 pub struct RawFileAsync {
     fd: RawFd,
@@ -47,36 +47,6 @@ impl AsyncIo for RawFileAsync {
         self.alignment
     }
 
-    fn read_vectored(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-    ) -> AsyncIoResult<()> {
-        // SAFETY: this legacy trait method's caller must keep the borrowed
-        // iovecs and writable buffers valid until completion.
-        unsafe {
-            self.data_io
-                .submit_borrowed_operation(self.fd, offset, true, iovecs, user_data)
-        }
-        .map_err(AsyncIoError::ReadVectored)
-    }
-
-    fn write_vectored(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-    ) -> AsyncIoResult<()> {
-        // SAFETY: this legacy trait method's caller must keep the borrowed
-        // iovecs and readable buffers valid until completion.
-        unsafe {
-            self.data_io
-                .submit_borrowed_operation(self.fd, offset, false, iovecs, user_data)
-        }
-        .map_err(AsyncIoError::WriteVectored)
-    }
-
     fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
         let is_read = op.is_read();
         self.data_io.submit_operation(self.fd, op).map_err(|e| {
@@ -101,7 +71,7 @@ impl AsyncIo for RawFileAsync {
         Ok(())
     }
 
-    fn next_completion(&mut self) -> Option<AsyncIoCompletion> {
+    fn next_completed_request(&mut self) -> Option<AsyncIoCompletion> {
         self.data_io.next_completion()
     }
 
@@ -109,27 +79,7 @@ impl AsyncIo for RawFileAsync {
         true
     }
 
-    fn submit_batch_requests(&mut self, batch_request: &[BatchRequest]) -> AsyncIoResult<()> {
-        let mut batch = Vec::with_capacity(batch_request.len());
-        for req in batch_request {
-            let is_read = match req.request_type {
-                RequestType::In => true,
-                RequestType::Out => false,
-                _ => unreachable!("Unexpected batch request type: {:?}", req.request_type),
-            };
-            batch.push((req.offset, is_read, req.iovecs.as_slice(), req.user_data));
-        }
-
-        // SAFETY: this legacy trait method's caller must keep every borrowed
-        // iovec array and buffer valid until its completion.
-        unsafe { self.data_io.submit_borrowed_batch(self.fd, &batch) }
-            .map_err(AsyncIoError::SubmitBatchRequests)
-    }
-
-    fn submit_batch_operations(
-        &mut self,
-        batch_request: Vec<AsyncIoOperation>,
-    ) -> AsyncIoResult<()> {
+    fn submit_batch_requests(&mut self, batch_request: Vec<AsyncIoOperation>) -> AsyncIoResult<()> {
         self.data_io
             .submit_batch(self.fd, batch_request)
             .map_err(AsyncIoError::SubmitBatchRequests)
