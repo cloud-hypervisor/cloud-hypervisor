@@ -12,7 +12,7 @@ use std::net::{IpAddr, Ipv6Addr};
 use std::os::raw::*;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 
-use libc::{__c_anonymous_ifr_ifru, ifreq};
+use libc::{__c_anonymous_ifr_ifru, IFNAMSIZ, ifreq};
 use thiserror::Error;
 use vmm_sys_util::ioctl::{ioctl_with_mut_ref, ioctl_with_ref, ioctl_with_val};
 
@@ -21,13 +21,6 @@ use super::{
     vnet_hdr_len,
 };
 use crate::mac::MAC_ADDR_LEN;
-
-/// Maximum length of a network interface name in Linux, excluding any NUL byte.
-///
-/// This corresponds to `IFNAMSIZ` in Linux [[0]].
-///
-/// [0]: https://elixir.bootlin.com/linux/v6.12/source/include/uapi/linux/if.h#L33
-const MAX_INTERFACE_NAME_LEN: usize = 15;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -43,7 +36,7 @@ pub enum Error {
     IoctlError(c_ulong, #[source] IoError),
     #[error("Failed to create a socket")]
     NetUtil(#[source] NetUtilError),
-    #[error("Interface name too long (max length is {MAX_INTERFACE_NAME_LEN}): {0}")]
+    #[error("Interface name too long (max length is {max_len}): {0}", max_len = IFNAMSIZ - 1)]
     IfnameTooLong(String),
     #[error("Interface name contains interior NUL byte: {0:?}")]
     IfnameContainsNUL(String),
@@ -66,7 +59,7 @@ pub type Result<T> = ::std::result::Result<T, Error>;
 #[derive(Debug)]
 pub struct Tap {
     tap_file: File,
-    /// The name does not exceed [`MAX_INTERFACE_NAME_LEN`] bytes excluding the NUL byte.
+    /// The name does not exceed [`IFNAMSIZ`] bytes including the NUL byte.
     if_name: CString,
 }
 
@@ -157,7 +150,7 @@ impl Tap {
     }
 
     pub fn open_named(if_name: &str, num_queue_pairs: usize, flags: Option<i32>) -> Result<Tap> {
-        if if_name.len() > MAX_INTERFACE_NAME_LEN {
+        if if_name.len() > IFNAMSIZ - 1 {
             return Err(Error::IfnameTooLong(if_name.to_string()));
         }
 
@@ -202,7 +195,7 @@ impl Tap {
         }
 
         let mut ifreq = libc::ifreq {
-            ifr_name: [0; libc::IFNAMSIZ],
+            ifr_name: [0; IFNAMSIZ],
             ifr_ifru: __c_anonymous_ifr_ifru { ifru_flags },
         };
 
@@ -254,7 +247,7 @@ impl Tap {
         // SAFETY: fd is a tap fd
         let tap_file = unsafe { File::from_raw_fd(fd) };
         let mut ifreq: libc::ifreq = ifreq {
-            ifr_name: [0; libc::IFNAMSIZ],
+            ifr_name: [0; IFNAMSIZ],
             ifr_ifru: __c_anonymous_ifr_ifru { ifru_flags: 0 },
         };
 
@@ -491,7 +484,7 @@ impl Tap {
 
     fn get_ifreq(&self) -> libc::ifreq {
         let mut ifreq: libc::ifreq = libc::ifreq {
-            ifr_name: [0; libc::IFNAMSIZ],
+            ifr_name: [0; IFNAMSIZ],
             ifr_ifru: __c_anonymous_ifr_ifru { ifru_flags: 0 },
         };
 
@@ -525,8 +518,8 @@ impl Tap {
 
     #[cfg(fuzzing)]
     pub fn new_for_fuzzing(tap_file: File, if_name: &str) -> Self {
-        if if_name.len() > MAX_INTERFACE_NAME_LEN {
-            panic!("provided name longer than `MAX_INTERFACE_NAME_LEN`")
+        if if_name.len() > IFNAMSIZ - 1 {
+            panic!("provided name longer than `IFNAMSIZ` without NULL terminator")
         }
 
         let if_name = CString::new(if_name)
