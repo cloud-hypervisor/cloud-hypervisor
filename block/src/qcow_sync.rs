@@ -253,38 +253,6 @@ impl AsyncIo for QcowSync {
         &self.eventfd
     }
 
-    fn read_vectored(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-    ) -> AsyncIoResult<()> {
-        // SAFETY: the legacy caller is responsible for keeping the borrowed
-        // iovecs valid for this synchronous call and for ensuring that turning
-        // their pointers into Rust slices does not violate aliasing rules.
-        let total_len = unsafe { self.read_iovecs(offset, iovecs)? };
-        self.completion_list
-            .push_back(AsyncIoCompletion::new(user_data, total_len as i32, None));
-        self.eventfd.write(1).unwrap();
-        Ok(())
-    }
-
-    fn write_vectored(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-    ) -> AsyncIoResult<()> {
-        // SAFETY: the legacy caller is responsible for keeping the borrowed
-        // iovecs valid for this synchronous call and for ensuring that turning
-        // their pointers into Rust slices does not violate aliasing rules.
-        let total_len = unsafe { self.write_iovecs(offset, iovecs)? };
-        self.completion_list
-            .push_back(AsyncIoCompletion::new(user_data, total_len as i32, None));
-        self.eventfd.write(1).unwrap();
-        Ok(())
-    }
-
     fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
         let offset = op.offset();
         let is_read = op.is_read();
@@ -318,7 +286,7 @@ impl AsyncIo for QcowSync {
         Ok(())
     }
 
-    fn next_completion(&mut self) -> Option<AsyncIoCompletion> {
+    fn next_completed_request(&mut self) -> Option<AsyncIoCompletion> {
         self.completion_list.pop_front()
     }
 
@@ -518,7 +486,7 @@ mod unit_tests {
     }
 
     fn next_completion(async_io: &mut dyn AsyncIo) -> (u64, i32) {
-        completion_tuple(&async_io.next_completion().unwrap())
+        completion_tuple(&async_io.next_completed_request().unwrap())
     }
 
     fn async_read(disk: &QcowDisk, offset: u64, len: usize) -> Vec<u8> {
@@ -530,7 +498,7 @@ mod unit_tests {
                 1,
             )
             .unwrap();
-        let mut completion = async_io.next_completion().unwrap();
+        let mut completion = async_io.next_completed_request().unwrap();
         let (user_data, result) = completion_tuple(&completion);
         assert_eq!(user_data, 1);
         assert_eq!(result as usize, len, "read should return requested length");
@@ -616,12 +584,12 @@ mod unit_tests {
         .unwrap();
         let mut async_io = disk.create_async_io(1).unwrap();
         async_io.write_zeroes(0, cluster_size, 200).unwrap();
-        let (user_data, result) = async_io.next_completed_request().unwrap();
+        let (user_data, result) = next_completion(async_io.as_mut());
         assert_eq!(user_data, 200);
         assert_eq!(result, 0);
 
         async_io.fsync(Some(201)).unwrap();
-        let (user_data, result) = async_io.next_completed_request().unwrap();
+        let (user_data, result) = next_completion(async_io.as_mut());
         assert_eq!(user_data, 201);
         assert_eq!(result, 0);
         drop(async_io);
@@ -1042,7 +1010,7 @@ mod unit_tests {
 
         let mut async_io = disk.create_async_io(1).unwrap();
         async_io.write_zeroes(offset, cluster_size, 42).unwrap();
-        let (user_data, result) = async_io.next_completed_request().unwrap();
+        let (user_data, result) = next_completion(async_io.as_mut());
         assert_eq!(user_data, 42);
         assert_eq!(result, 0);
         drop(async_io);
@@ -1077,7 +1045,7 @@ mod unit_tests {
 
         let mut async_io = disk.create_async_io(1).unwrap();
         async_io.write_zeroes(offset, cluster_size, 42).unwrap();
-        let (_user_data, result) = async_io.next_completed_request().unwrap();
+        let (_user_data, result) = next_completion(async_io.as_mut());
         assert_eq!(result, 0);
         drop(async_io);
 
@@ -2012,7 +1980,7 @@ mod unit_tests {
         let mut aio = disk.create_async_io(1).unwrap();
         aio.read_to_vec(0, OwnedIoBuffer::from_vec(vec![0; total]), 10)
             .unwrap();
-        let mut completion = aio.next_completion().unwrap();
+        let mut completion = aio.next_completed_request().unwrap();
         let (ud, res) = completion_tuple(&completion);
         assert_eq!(ud, 10);
         assert_eq!(res as usize, total);

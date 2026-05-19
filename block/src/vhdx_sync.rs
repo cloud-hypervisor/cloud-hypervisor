@@ -191,36 +191,6 @@ impl AsyncIo for VhdxSync {
         &self.eventfd
     }
 
-    fn read_vectored(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-    ) -> AsyncIoResult<()> {
-        // SAFETY: the legacy caller is responsible for keeping the borrowed
-        // iovecs and writable buffers valid until completion. This is unsound, but only temporary.
-        let result = unsafe { self.read_iovecs(offset, iovecs)? };
-        self.completion_list
-            .push_back(AsyncIoCompletion::new(user_data, result as i32, None));
-        self.eventfd.write(1).unwrap();
-        Ok(())
-    }
-
-    fn write_vectored(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-    ) -> AsyncIoResult<()> {
-        // SAFETY: the legacy caller is responsible for keeping the borrowed
-        // iovecs and readable buffers valid until completion. This is unsound, but only temporary.
-        let result = unsafe { self.write_iovecs(offset, iovecs)? };
-        self.completion_list
-            .push_back(AsyncIoCompletion::new(user_data, result as i32, None));
-        self.eventfd.write(1).unwrap();
-        Ok(())
-    }
-
     fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
         let offset = op.offset();
         let is_read = op.is_read();
@@ -259,7 +229,7 @@ impl AsyncIo for VhdxSync {
         Ok(())
     }
 
-    fn next_completion(&mut self) -> Option<AsyncIoCompletion> {
+    fn next_completed_request(&mut self) -> Option<AsyncIoCompletion> {
         self.completion_list.pop_front()
     }
 

@@ -358,7 +358,7 @@ impl BlockEpollHandler {
         }
 
         if !batch_requests.is_empty() {
-            match self.disk_image.submit_batch_operations(batch_requests) {
+            match self.disk_image.submit_batch_requests(batch_requests) {
                 Ok(()) => {
                     self.inflight_requests.extend(batch_inflight_requests);
                 }
@@ -447,7 +447,7 @@ impl BlockEpollHandler {
         let mut read_ops = Wrapping(0);
         let mut write_ops = Wrapping(0);
 
-        while let Some(mut completion) = self.disk_image.next_completion() {
+        while let Some(mut completion) = self.disk_image.next_completed_request() {
             let result = completion.result;
             let desc_index = completion.user_data as u16;
 

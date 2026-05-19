@@ -25,7 +25,7 @@ use thiserror::Error;
 pub use uring_data_io::UringDataIo;
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::{BatchRequest, SECTOR_SIZE};
+use crate::SECTOR_SIZE;
 
 #[derive(Error, Debug)]
 pub enum DiskFileError {
@@ -101,33 +101,13 @@ pub type AsyncIoResult<T> = std::result::Result<T, AsyncIoError>;
 
 pub trait AsyncIo: Send {
     fn notifier(&self) -> &EventFd;
-    fn read_vectored(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-    ) -> AsyncIoResult<()>;
-    fn write_vectored(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-    ) -> AsyncIoResult<()>;
 
     /// Submits one owned data operation.
     ///
     /// Takes ownership of `op`.
     /// Implementations that complete asynchronously must retain it until its
     /// completion is returned.
-    fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
-        let error =
-            io::Error::other("owned async I/O operations are not supported by this backend");
-        if op.is_read() {
-            Err(AsyncIoError::ReadVectored(error))
-        } else {
-            Err(AsyncIoError::WriteVectored(error))
-        }
-    }
+    fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()>;
 
     /// Submits a read from `offset` into guest memory.
     fn read_to_memory(
@@ -178,32 +158,17 @@ pub trait AsyncIo: Send {
     /// Returns the next owned completion, if one is available.
     ///
     /// Read completions from owned host-memory buffers return that buffer here.
-    fn next_completion(&mut self) -> Option<AsyncIoCompletion> {
-        self.next_completed_request()
-            .map(|(user_data, result)| AsyncIoCompletion::new(user_data, result, None))
-    }
-
-    fn next_completed_request(&mut self) -> Option<(u64, i32)> {
-        self.next_completion()
-            .map(|completion| (completion.user_data, completion.result))
-    }
+    fn next_completed_request(&mut self) -> Option<AsyncIoCompletion>;
 
     fn batch_requests_enabled(&self) -> bool {
         false
-    }
-
-    fn submit_batch_requests(&mut self, _batch_request: &[BatchRequest]) -> AsyncIoResult<()> {
-        Ok(())
     }
 
     /// Submits a batch of owned data operations.
     ///
     /// Backends either accept the whole batch for eventual completion or return
     /// an error before taking ownership of any operation.
-    fn submit_batch_operations(
-        &mut self,
-        batch_request: Vec<AsyncIoOperation>,
-    ) -> AsyncIoResult<()> {
+    fn submit_batch_requests(&mut self, batch_request: Vec<AsyncIoOperation>) -> AsyncIoResult<()> {
         if batch_request.is_empty() {
             Ok(())
         } else {

@@ -16,6 +16,7 @@ use std::sync::Arc;
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
+use crate::SECTOR_SIZE;
 use crate::async_io::{
     AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, UringDataIo,
 };
@@ -28,7 +29,6 @@ use crate::qcow_common::{
     AlignedBuf, aligned_pread, aligned_pwrite, decompress_cluster, gather_from_iovecs_into,
     pread_alloc, pread_exact, pwrite_all, scatter_to_iovecs, zero_fill_iovecs,
 };
-use crate::{BatchRequest, RequestType, SECTOR_SIZE};
 
 /// Per queue QCOW2 I/O worker using io_uring.
 ///
@@ -175,69 +175,6 @@ impl AsyncIo for QcowAsync {
         self.data_io.notifier()
     }
 
-    fn read_vectored(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-    ) -> AsyncIoResult<()> {
-        let total_len: usize = iovecs.iter().map(|v| v.iov_len).sum();
-
-        if let Some(host_offset) = Self::resolve_read(
-            &self.metadata,
-            &self.data_file,
-            &self.backing_file,
-            offset as u64,
-            iovecs,
-            total_len,
-            self.alignment,
-            self.cluster_size,
-            &*self.decoder,
-        )? {
-            // SAFETY: this legacy trait method's caller must keep the
-            // borrowed iovecs and writable buffers valid until completion.
-            unsafe {
-                self.data_io.submit_borrowed_operation(
-                    self.data_file.as_raw_fd(),
-                    host_offset as libc::off_t,
-                    true,
-                    iovecs,
-                    user_data,
-                )
-            }
-            .map_err(AsyncIoError::ReadVectored)?;
-        } else {
-            self.data_io.inject_completion(AsyncIoCompletion::new(
-                user_data,
-                total_len as i32,
-                None,
-            ));
-        }
-        Ok(())
-    }
-
-    fn write_vectored(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-    ) -> AsyncIoResult<()> {
-        Self::cow_write_sync(
-            offset as u64,
-            iovecs,
-            &self.metadata,
-            &self.data_file,
-            &self.backing_file,
-            self.alignment,
-            self.cluster_size,
-        )?;
-
-        let total_len: usize = iovecs.iter().map(|v| v.iov_len).sum();
-        self.data_io
-            .inject_completion(AsyncIoCompletion::new(user_data, total_len as i32, None));
-        Ok(())
-    }
-
     fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
         if op.is_read() {
             match self.prepare_read_operation(op) {
@@ -264,7 +201,7 @@ impl AsyncIo for QcowAsync {
         Ok(())
     }
 
-    fn next_completion(&mut self) -> Option<AsyncIoCompletion> {
+    fn next_completed_request(&mut self) -> Option<AsyncIoCompletion> {
         self.data_io.next_completion()
     }
 
@@ -344,77 +281,7 @@ impl AsyncIo for QcowAsync {
         self.io_alignment
     }
 
-    fn submit_batch_requests(&mut self, batch_request: &[BatchRequest]) -> AsyncIoResult<()> {
-        let mut async_reads = Vec::new();
-
-        for req in batch_request {
-            match req.request_type {
-                RequestType::In => {
-                    let total_len: usize = req.iovecs.iter().map(|v| v.iov_len).sum();
-
-                    if let Some(host_offset) = Self::resolve_read(
-                        &self.metadata,
-                        &self.data_file,
-                        &self.backing_file,
-                        req.offset as u64,
-                        &req.iovecs,
-                        total_len,
-                        self.alignment,
-                        self.cluster_size,
-                        &*self.decoder,
-                    )? {
-                        async_reads.push((
-                            host_offset as libc::off_t,
-                            true,
-                            req.iovecs.as_slice(),
-                            req.user_data,
-                        ));
-                    } else {
-                        self.data_io.inject_completion(AsyncIoCompletion::new(
-                            req.user_data,
-                            total_len as i32,
-                            None,
-                        ));
-                    }
-                }
-                RequestType::Out => {
-                    let total_len: usize = req.iovecs.iter().map(|v| v.iov_len).sum();
-                    Self::cow_write_sync(
-                        req.offset as u64,
-                        &req.iovecs,
-                        &self.metadata,
-                        &self.data_file,
-                        &self.backing_file,
-                        self.alignment,
-                        self.cluster_size,
-                    )?;
-                    self.data_io.inject_completion(AsyncIoCompletion::new(
-                        req.user_data,
-                        total_len as i32,
-                        None,
-                    ));
-                }
-                _ => unreachable!("Unexpected batch request type: {:?}", req.request_type),
-            }
-        }
-
-        if !async_reads.is_empty() {
-            // SAFETY: this legacy trait method's caller must keep every
-            // borrowed iovec array and buffer valid until its completion.
-            unsafe {
-                self.data_io
-                    .submit_borrowed_batch(self.data_file.as_raw_fd(), &async_reads)
-            }
-            .map_err(AsyncIoError::SubmitBatchRequests)?;
-        }
-
-        Ok(())
-    }
-
-    fn submit_batch_operations(
-        &mut self,
-        batch_request: Vec<AsyncIoOperation>,
-    ) -> AsyncIoResult<()> {
+    fn submit_batch_requests(&mut self, batch_request: Vec<AsyncIoOperation>) -> AsyncIoResult<()> {
         let mut async_reads = Vec::new();
 
         for op in batch_request {
@@ -738,7 +605,7 @@ mod unit_tests {
 
     fn wait_for_completion(async_io: &mut dyn AsyncIo) -> AsyncIoCompletion {
         loop {
-            if let Some(c) = async_io.next_completion() {
+            if let Some(c) = async_io.next_completed_request() {
                 return c;
             }
             // Block until the eventfd is signaled (io_uring or synthetic).
@@ -801,7 +668,7 @@ mod unit_tests {
 
         let mut async_io = disk.create_async_io(1).unwrap();
         async_io.punch_hole(offset, data.len() as u64, 100).unwrap();
-        let completion = async_io.next_completion().unwrap();
+        let completion = async_io.next_completed_request().unwrap();
         let (user_data, result) = completion_tuple(&completion);
         assert_eq!(user_data, 100);
         assert_eq!(result, 0, "punch_hole should succeed");
@@ -824,7 +691,7 @@ mod unit_tests {
         async_io
             .write_zeroes(offset, data.len() as u64, 200)
             .unwrap();
-        let completion = async_io.next_completion().unwrap();
+        let completion = async_io.next_completed_request().unwrap();
         let (user_data, result) = completion_tuple(&completion);
         assert_eq!(user_data, 200);
         assert_eq!(result, 0, "write_zeroes should succeed");
@@ -949,7 +816,7 @@ mod unit_tests {
             ),
         ];
 
-        async_io.submit_batch_operations(batch).unwrap();
+        async_io.submit_batch_requests(batch).unwrap();
 
         let mut completions = [
             completion_tuple(&wait_for_completion(async_io.as_mut())),
@@ -975,7 +842,7 @@ mod unit_tests {
             ),
         ];
 
-        async_io.submit_batch_operations(read_batch).unwrap();
+        async_io.submit_batch_requests(read_batch).unwrap();
 
         let mut completion_a = wait_for_completion(async_io.as_mut());
         let mut completion_b = wait_for_completion(async_io.as_mut());

@@ -60,12 +60,6 @@ pub enum RequestType {
 }
 
 pub const DEFAULT_DESCRIPTOR_VEC_SIZE: usize = 32;
-pub struct BatchRequest {
-    pub offset: libc::off_t,
-    pub iovecs: SmallVec<[libc::iovec; DEFAULT_DESCRIPTOR_VEC_SIZE]>,
-    pub user_data: u64,
-    pub request_type: RequestType,
-}
 
 pub struct ExecuteAsync {
     // `true` if the execution will complete asynchronously
