@@ -1028,12 +1028,16 @@ impl MemoryManager {
                     source: e,
                 })? as u64;
 
-            let ioctls = uffd::register(uffd_fd.as_fd(), host_addr, range.length).map_err(|e| {
-                UffdError::Register {
-                    addr: host_addr,
-                    len: range.length,
-                    source: e,
-                }
+            let ioctls = uffd::register(
+                uffd_fd.as_fd(),
+                host_addr,
+                range.length,
+                userfaultfd::UFFDIO_REGISTER_MODE_MISSING,
+            )
+            .map_err(|e| UffdError::Register {
+                addr: host_addr,
+                len: range.length,
+                source: e,
             })?;
 
             if ioctls & userfaultfd::UFFD_API_RANGE_IOCTLS_BASIC
