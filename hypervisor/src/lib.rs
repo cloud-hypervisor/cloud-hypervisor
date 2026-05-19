@@ -184,12 +184,28 @@ pub enum ClockData {
 
 #[cfg(target_arch = "x86_64")]
 impl ClockData {
-    pub fn reset_flags(&mut self) {
+    pub fn has_realtime(&self) -> bool {
         match self {
             #[cfg(feature = "kvm")]
-            ClockData::Kvm(s) => s.flags = 0,
+            ClockData::Kvm(s) => s.flags & kvm_bindings::KVM_CLOCK_REALTIME != 0,
             #[allow(unreachable_patterns)]
-            _ => {}
+            _ => false,
+        }
+    }
+
+    pub fn set_realtime(&mut self, realtime: std::time::SystemTime) {
+        match self {
+            #[cfg(feature = "kvm")]
+            ClockData::Kvm(s) => {
+                if let Ok(time_since_epoch) = realtime.duration_since(std::time::UNIX_EPOCH) {
+                    s.realtime = time_since_epoch.as_nanos() as u64;
+                    s.flags |= kvm_bindings::KVM_CLOCK_REALTIME;
+                }
+            }
+            #[allow(unreachable_patterns)]
+            _ => {
+                let _ = realtime;
+            }
         }
     }
 }
