@@ -535,6 +535,8 @@ impl ApplyLandlock for RngConfig {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct BalloonConfig {
+    #[serde(flatten)]
+    pub pci_common: PciDeviceCommonConfig,
     pub size: u64,
     /// Option to deflate the balloon in case the guest is out of memory.
     #[serde(default)]

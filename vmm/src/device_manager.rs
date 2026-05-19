@@ -3664,8 +3664,16 @@ impl DeviceManager {
         &mut self,
         snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<()> {
-        if let Some(balloon_config) = &self.config.lock().unwrap().balloon {
-            let id = String::from(BALLOON_DEVICE_NAME);
+        let mut balloon_config = self.config.lock().unwrap().balloon.clone();
+        if let Some(balloon_config) = &mut balloon_config {
+            let id = match balloon_config.pci_common.id.as_ref() {
+                Some(id) => id.clone(),
+                None => balloon_config
+                    .pci_common
+                    .id
+                    .insert(BALLOON_DEVICE_NAME.to_string())
+                    .clone(),
+            };
             info!("Creating virtio-balloon device: id = {id}");
 
             let virtio_balloon_device = Arc::new(Mutex::new(
@@ -3674,7 +3682,7 @@ impl DeviceManager {
                     balloon_config.size,
                     balloon_config.deflate_on_oom,
                     balloon_config.free_page_reporting,
-                    self.force_access_platform,
+                    self.force_access_platform | balloon_config.pci_common.iommu,
                     self.seccomp_action.clone(),
                     self.exit_evt
                         .try_clone()
@@ -3690,10 +3698,7 @@ impl DeviceManager {
             self.virtio_devices.push(MetaVirtioDevice {
                 virtio_device: Arc::clone(&virtio_balloon_device)
                     as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-                pci_common: PciDeviceCommonConfig {
-                    id: Some(id.clone()),
-                    ..Default::default()
-                },
+                pci_common: balloon_config.pci_common.clone(),
                 dma_handler: None,
             });
 

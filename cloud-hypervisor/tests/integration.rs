@@ -6092,6 +6092,7 @@ mod common_parallel {
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args(["--console", "tty,pci_device_id=7"])
+            .args(["--balloon", "size=0,pci_device_id=8"])
             .default_net()
             .default_disks()
             .capture_output();
@@ -6106,6 +6107,17 @@ mod common_parallel {
             assert!(wait_until(Duration::from_secs(10), || {
                 ssh_command_ip_with_auth(
                     "lspci | grep \"00:07.0\" | grep Virtio | grep console",
+                    &default_guest_auth(),
+                    &guest.network.guest_ip0,
+                    Some(Duration::from_secs(1)),
+                )
+                .is_ok()
+            }));
+
+            // Make sure an explicit BDF for virtio-balloon is set.
+            assert!(wait_until(Duration::from_secs(10), || {
+                ssh_command_ip_with_auth(
+                    "lspci -n | grep \"00:08.0\"",
                     &default_guest_auth(),
                     &guest.network.guest_ip0,
                     Some(Duration::from_secs(1)),
