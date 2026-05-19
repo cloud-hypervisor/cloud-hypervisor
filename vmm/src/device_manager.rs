@@ -1567,6 +1567,11 @@ impl DeviceManager {
         Ok(())
     }
 
+    /// Drop restore-only state once all devices have consumed it.
+    pub(crate) fn clear_restore_snapshot(&mut self) {
+        self.snapshot = None;
+    }
+
     #[cfg(feature = "fw_cfg")]
     pub fn create_fw_cfg_device(&mut self) -> Result<(), DeviceManagerError> {
         let fw_cfg = Arc::new(Mutex::new(devices::legacy::FwCfg::new(

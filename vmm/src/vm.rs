@@ -665,6 +665,9 @@ impl Vm {
             igvm_file,
         )?;
 
+        // Remove any snapshot artifacts after the hypervisor-specific init.
+        device_manager.lock().unwrap().clear_restore_snapshot();
+
         // Load kernel and initramfs files
         #[cfg(feature = "tdx")]
         let kernel = config
