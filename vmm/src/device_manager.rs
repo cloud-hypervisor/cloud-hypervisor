@@ -1565,8 +1565,11 @@ impl DeviceManager {
         }
 
         #[cfg(feature = "ivshmem")]
-        if let Some(ivshmem) = self.config.clone().lock().unwrap().ivshmem.as_ref() {
-            self.ivshmem_device = self.add_ivshmem_device(ivshmem, snapshot)?;
+        {
+            let mut ivshmem = self.config.lock().unwrap().ivshmem.clone();
+            if let Some(ivshmem) = &mut ivshmem {
+                self.ivshmem_device = self.add_ivshmem_device(ivshmem, snapshot)?;
+            }
         }
 
         Ok(())
@@ -4486,15 +4489,24 @@ impl DeviceManager {
     #[cfg(feature = "ivshmem")]
     fn add_ivshmem_device(
         &mut self,
-        ivshmem_cfg: &IvshmemConfig,
+        ivshmem_cfg: &mut IvshmemConfig,
         snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<Option<Arc<Mutex<devices::IvshmemDevice>>>> {
-        let id = String::from(IVSHMEM_DEVICE_NAME);
-        let pci_segment_id = 0x0_u16;
+        let id = match ivshmem_cfg.pci_common.id.as_ref() {
+            Some(id) => id.clone(),
+            None => ivshmem_cfg
+                .pci_common
+                .id
+                .insert(IVSHMEM_DEVICE_NAME.to_string())
+                .clone(),
+        };
         info!("Creating ivshmem device {id}");
 
-        let (pci_segment_id, pci_device_bdf, resources) =
-            self.pci_resources(&id, pci_segment_id, None)?;
+        let (pci_segment_id, pci_device_bdf, resources) = self.pci_resources(
+            &id,
+            ivshmem_cfg.pci_common.pci_segment,
+            ivshmem_cfg.pci_common.pci_device_id,
+        )?;
         let snapshot = snapshot_from_id(snapshot, id.as_str());
 
         let ivshmem_ops = Arc::new(Mutex::new(IvshmemHandler {
@@ -4561,6 +4573,14 @@ impl DeviceManager {
                         .reserve_device_id(device_id)?;
                 }
             }
+        }
+
+        #[cfg(feature = "ivshmem")]
+        if let Some(ivshmem_cfg) = &config.ivshmem
+            && let Some(device_id) = ivshmem_cfg.pci_common.pci_device_id
+        {
+            self.pci_segments[ivshmem_cfg.pci_common.pci_segment as usize]
+                .reserve_device_id(device_id)?;
         }
 
         Ok(())
