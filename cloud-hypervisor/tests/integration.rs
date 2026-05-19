@@ -6730,6 +6730,29 @@ mod common_parallel {
             .output()
             .expect("Expect creating disk image to succeed");
         let pmem_path = String::from("/dev/pmem0");
+        let mut hotplug_blk_file_path = dirs::home_dir().unwrap();
+        hotplug_blk_file_path.push("workloads");
+        hotplug_blk_file_path.push("blk.img");
+        let hotplug_disk_id = "test0";
+        let hotplug_disk_params = format!(
+            "path={},id={hotplug_disk_id},readonly=true",
+            hotplug_blk_file_path.to_str().unwrap()
+        );
+        let hotplug_disk_exists = || {
+            guest
+                .ssh_command("lsblk | grep vdc | grep -c 16M")
+                .is_ok_and(|s| s.trim().parse::<u32>().unwrap_or_default() == 1)
+        };
+        let hotplug_disk_absent = || {
+            guest
+                .ssh_command("lsblk | grep -c vdc.*16M || true")
+                .is_ok_and(|s| s.trim().parse::<u32>().unwrap_or(1) == 0)
+        };
+        let check_hotplug_disk_readable = || {
+            guest
+                .ssh_command("sudo dd if=/dev/vdc of=/dev/null bs=1M iflag=direct count=16")
+                .unwrap();
+        };
 
         // Start the source VM
         let src_vm_path = clh_command("cloud-hypervisor");
@@ -6791,6 +6814,14 @@ mod common_parallel {
                     Some(net_params.as_str()),
                 ));
                 guest.wait_for_ssh(Duration::from_secs(10)).unwrap();
+
+                assert!(remote_command(
+                    &src_api_socket,
+                    "add-disk",
+                    Some(hotplug_disk_params.as_str()),
+                ));
+                assert!(wait_until(Duration::from_secs(10), hotplug_disk_exists));
+                check_hotplug_disk_readable();
             }
             // Start TCP live migration
             assert!(
@@ -6827,6 +6858,27 @@ mod common_parallel {
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
             assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
             guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+
+            // Test hot(re)plugging works after a migration
+            {
+                assert!(hotplug_disk_exists());
+                check_hotplug_disk_readable();
+
+                assert!(remote_command(
+                    &dest_api_socket,
+                    "remove-device",
+                    Some(hotplug_disk_id),
+                ));
+                assert!(wait_until(Duration::from_secs(10), hotplug_disk_absent));
+
+                assert!(remote_command(
+                    &dest_api_socket,
+                    "add-disk",
+                    Some(hotplug_disk_params.as_str()),
+                ));
+                assert!(wait_until(Duration::from_secs(10), hotplug_disk_exists));
+                check_hotplug_disk_readable();
+            }
         });
 
         // Clean up the destination VM and ensure it terminates properly
