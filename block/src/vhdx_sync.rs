@@ -1,18 +1,26 @@
 // Copyright © 2021 Intel Corporation
 //
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+//
 // SPDX-License-Identifier: Apache-2.0
 
 use std::collections::VecDeque;
 use std::fs::File;
+use std::io::{IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use std::os::fd::AsRawFd;
 use std::sync::{Arc, Mutex};
 
+use smallvec::SmallVec;
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
+use crate::async_io::{
+    AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, BorrowedDiskFd,
+    DiskFileError,
+};
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
+use crate::request::DEFAULT_DESCRIPTOR_VEC_SIZE;
 use crate::vhdx::{Vhdx, VhdxError};
-use crate::{AsyncAdaptor, BlockBackend, Error, disk_file};
+use crate::{BlockBackend, Error, disk_file};
 
 #[derive(Debug)]
 pub struct VhdxDiskSync {
@@ -103,7 +111,7 @@ impl disk_file::AsyncDiskFile for VhdxDiskSync {
 pub struct VhdxSync {
     vhdx_file: Arc<Mutex<Vhdx>>,
     eventfd: EventFd,
-    completion_list: VecDeque<(u64, i32)>,
+    completion_list: VecDeque<AsyncIoCompletion>,
 }
 
 impl VhdxSync {
@@ -115,9 +123,68 @@ impl VhdxSync {
             completion_list: VecDeque::new(),
         }
     }
-}
 
-impl AsyncAdaptor for Vhdx {}
+    // SAFETY: each iovec must describe writable memory that remains valid for
+    // this synchronous call. The caller must also ensure that creating a
+    // mutable slice from each iovec does not violate Rust aliasing rules.
+    unsafe fn read_iovecs(
+        &mut self,
+        offset: libc::off_t,
+        iovecs: &[libc::iovec],
+    ) -> AsyncIoResult<usize> {
+        let mut slices: SmallVec<[IoSliceMut; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
+            SmallVec::with_capacity(iovecs.len());
+        for iovec in iovecs.iter() {
+            if iovec.iov_len == 0 {
+                continue;
+            }
+            // SAFETY: Guaranteed by read_iovecs' caller.
+            let slice = unsafe {
+                std::slice::from_raw_parts_mut(iovec.iov_base.cast::<u8>(), iovec.iov_len)
+            };
+            slices.push(IoSliceMut::new(slice));
+        }
+
+        let mut vhdx = self.vhdx_file.lock().unwrap();
+        vhdx.seek(SeekFrom::Start(offset as u64))
+            .map_err(AsyncIoError::ReadVectored)?;
+        let mut result = 0usize;
+        for slice in slices.iter_mut() {
+            result += vhdx.read(slice).map_err(AsyncIoError::ReadVectored)?;
+        }
+        Ok(result)
+    }
+
+    // SAFETY: each iovec must describe readable memory that remains valid for
+    // this synchronous call. The caller must also ensure that creating a shared
+    // slice from each iovec does not violate Rust aliasing rules.
+    unsafe fn write_iovecs(
+        &mut self,
+        offset: libc::off_t,
+        iovecs: &[libc::iovec],
+    ) -> AsyncIoResult<usize> {
+        let mut slices: SmallVec<[IoSlice; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
+            SmallVec::with_capacity(iovecs.len());
+        for iovec in iovecs.iter() {
+            if iovec.iov_len == 0 {
+                continue;
+            }
+            // SAFETY: Guaranteed by write_iovecs' caller.
+            let slice =
+                unsafe { std::slice::from_raw_parts(iovec.iov_base.cast::<u8>(), iovec.iov_len) };
+            slices.push(IoSlice::new(slice));
+        }
+
+        let mut vhdx = self.vhdx_file.lock().unwrap();
+        vhdx.seek(SeekFrom::Start(offset as u64))
+            .map_err(AsyncIoError::WriteVectored)?;
+        let mut result = 0usize;
+        for slice in slices.iter() {
+            result += vhdx.write(slice).map_err(AsyncIoError::WriteVectored)?;
+        }
+        Ok(result)
+    }
+}
 
 impl AsyncIo for VhdxSync {
     fn notifier(&self) -> &EventFd {
@@ -130,13 +197,13 @@ impl AsyncIo for VhdxSync {
         iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        self.vhdx_file.lock().unwrap().read_vectored_sync(
-            offset,
-            iovecs,
-            user_data,
-            &self.eventfd,
-            &mut self.completion_list,
-        )
+        // SAFETY: the legacy caller is responsible for keeping the borrowed
+        // iovecs and writable buffers valid until completion. This is unsound, but only temporary.
+        let result = unsafe { self.read_iovecs(offset, iovecs)? };
+        self.completion_list
+            .push_back(AsyncIoCompletion::new(user_data, result as i32, None));
+        self.eventfd.write(1).unwrap();
+        Ok(())
     }
 
     fn write_vectored(
@@ -145,24 +212,54 @@ impl AsyncIo for VhdxSync {
         iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        self.vhdx_file.lock().unwrap().write_vectored_sync(
-            offset,
-            iovecs,
-            user_data,
-            &self.eventfd,
-            &mut self.completion_list,
-        )
+        // SAFETY: the legacy caller is responsible for keeping the borrowed
+        // iovecs and readable buffers valid until completion. This is unsound, but only temporary.
+        let result = unsafe { self.write_iovecs(offset, iovecs)? };
+        self.completion_list
+            .push_back(AsyncIoCompletion::new(user_data, result as i32, None));
+        self.eventfd.write(1).unwrap();
+        Ok(())
+    }
+
+    fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
+        let offset = op.offset();
+        let is_read = op.is_read();
+        let iovecs = op.iovecs();
+        let result = if is_read {
+            // SAFETY: AsyncIoOperation keeps the iovec target alive for this
+            // synchronous call. Host-memory operations also satisfy the
+            // aliasing requirement above; guest-memory-backed iovecs remain a
+            // temporary unsound VHDX case deferred to a later fix.
+            unsafe { self.read_iovecs(offset, iovecs)? }
+        } else {
+            // SAFETY: AsyncIoOperation keeps the iovec target alive for this
+            // synchronous call. Host-memory operations also satisfy the
+            // aliasing requirement above; guest-memory-backed iovecs remain a
+            // temporary unsound VHDX case deferred to a later fix.
+            unsafe { self.write_iovecs(offset, iovecs)? }
+        };
+
+        self.completion_list
+            .push_back(AsyncIoCompletion::from_operation(op, result as i32));
+        self.eventfd.write(1).unwrap();
+        Ok(())
     }
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
-        self.vhdx_file.lock().unwrap().fsync_sync(
-            user_data,
-            &self.eventfd,
-            &mut self.completion_list,
-        )
+        self.vhdx_file
+            .lock()
+            .unwrap()
+            .flush()
+            .map_err(AsyncIoError::Fsync)?;
+        if let Some(user_data) = user_data {
+            self.completion_list
+                .push_back(AsyncIoCompletion::new(user_data, 0, None));
+            self.eventfd.write(1).unwrap();
+        }
+        Ok(())
     }
 
-    fn next_completed_request(&mut self) -> Option<(u64, i32)> {
+    fn next_completion(&mut self) -> Option<AsyncIoCompletion> {
         self.completion_list.pop_front()
     }
 
