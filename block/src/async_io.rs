@@ -13,6 +13,8 @@ mod owned_io_buffer;
 #[cfg(feature = "io_uring")]
 mod uring_data_io;
 
+use std::io;
+
 pub use aio_data_io::AioDataIo;
 pub use completion::AsyncIoCompletion;
 pub use guest_memory_target::GuestMemoryTarget;
@@ -111,16 +113,106 @@ pub trait AsyncIo: Send {
         iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()>;
+
+    /// Submits one owned data operation.
+    ///
+    /// Takes ownership of `op`.
+    /// Implementations that complete asynchronously must retain it until its
+    /// completion is returned.
+    fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
+        let error =
+            io::Error::other("owned async I/O operations are not supported by this backend");
+        if op.is_read() {
+            Err(AsyncIoError::ReadVectored(error))
+        } else {
+            Err(AsyncIoError::WriteVectored(error))
+        }
+    }
+
+    /// Submits a read from `offset` into guest memory.
+    fn read_to_memory(
+        &mut self,
+        offset: libc::off_t,
+        target: GuestMemoryTarget,
+        user_data: u64,
+    ) -> AsyncIoResult<()> {
+        self.submit_data_operation(AsyncIoOperation::read_to_memory(offset, target, user_data))
+    }
+
+    /// Submits a write to `offset` from guest memory.
+    fn write_from_memory(
+        &mut self,
+        offset: libc::off_t,
+        target: GuestMemoryTarget,
+        user_data: u64,
+    ) -> AsyncIoResult<()> {
+        self.submit_data_operation(AsyncIoOperation::write_from_memory(
+            offset, target, user_data,
+        ))
+    }
+
+    /// Submits a read from `offset` into an owned host-memory buffer.
+    fn read_to_vec(
+        &mut self,
+        offset: libc::off_t,
+        buffer: OwnedIoBuffer,
+        user_data: u64,
+    ) -> AsyncIoResult<()> {
+        self.submit_data_operation(AsyncIoOperation::read_to_vec(offset, buffer, user_data))
+    }
+
+    /// Submits a write to `offset` from an owned host-memory buffer.
+    fn write_from_vec(
+        &mut self,
+        offset: libc::off_t,
+        buffer: OwnedIoBuffer,
+        user_data: u64,
+    ) -> AsyncIoResult<()> {
+        self.submit_data_operation(AsyncIoOperation::write_from_vec(offset, buffer, user_data))
+    }
+
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()>;
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()>;
     fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()>;
-    fn next_completed_request(&mut self) -> Option<(u64, i32)>;
+
+    /// Returns the next owned completion, if one is available.
+    ///
+    /// Read completions from owned host-memory buffers return that buffer here.
+    fn next_completion(&mut self) -> Option<AsyncIoCompletion> {
+        self.next_completed_request()
+            .map(|(user_data, result)| AsyncIoCompletion::new(user_data, result, None))
+    }
+
+    fn next_completed_request(&mut self) -> Option<(u64, i32)> {
+        self.next_completion()
+            .map(|completion| (completion.user_data, completion.result))
+    }
+
     fn batch_requests_enabled(&self) -> bool {
         false
     }
+
     fn submit_batch_requests(&mut self, _batch_request: &[BatchRequest]) -> AsyncIoResult<()> {
         Ok(())
     }
+
+    /// Submits a batch of owned data operations.
+    ///
+    /// Backends either accept the whole batch for eventual completion or return
+    /// an error before taking ownership of any operation.
+    fn submit_batch_operations(
+        &mut self,
+        batch_request: Vec<AsyncIoOperation>,
+    ) -> AsyncIoResult<()> {
+        if batch_request.is_empty() {
+            Ok(())
+        } else {
+            Err(AsyncIoError::SubmitBatchRequests(io::Error::other(
+                "batch requests are not supported by this backend",
+            )))
+        }
+    }
+
     fn alignment(&self) -> u64 {
         SECTOR_SIZE
     }
