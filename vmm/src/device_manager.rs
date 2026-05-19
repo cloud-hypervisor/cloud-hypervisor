@@ -1138,8 +1138,6 @@ pub struct DeviceManager {
     // Addresses for ACPI platform devices e.g. ACPI PM timer, sleep/reset registers
     acpi_platform_addresses: AcpiPlatformAddresses,
 
-    snapshot: Option<Snapshot>,
-
     rate_limit_groups: HashMap<String, Arc<RateLimiterGroup>>,
 
     mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
@@ -1433,7 +1431,6 @@ impl DeviceManager {
             timestamp,
             pending_activations: Arc::new(Mutex::new(Vec::default())),
             acpi_platform_addresses: AcpiPlatformAddresses::default(),
-            snapshot: snapshot.cloned(),
             rate_limit_groups,
             mmio_regions: Arc::new(Mutex::new(Vec::new())),
             #[cfg(feature = "fw_cfg")]
@@ -1463,8 +1460,9 @@ impl DeviceManager {
 
     pub fn create_interrupt_controller(
         &mut self,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<Arc<Mutex<dyn InterruptController>>> {
-        self.add_interrupt_controller()
+        self.add_interrupt_controller(snapshot)
     }
 
     #[allow(clippy::needless_pass_by_value)]
@@ -1474,6 +1472,7 @@ impl DeviceManager {
         console_resize_pipe: Option<Arc<File>>,
         original_termios_opt: Arc<Mutex<Option<termios>>>,
         interrupt_controller: Arc<Mutex<dyn InterruptController>>,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<()> {
         trace_scoped!("create_devices");
 
@@ -1511,7 +1510,7 @@ impl DeviceManager {
         )?;
 
         #[cfg(target_arch = "aarch64")]
-        self.add_legacy_devices(legacy_interrupt_manager.as_ref())?;
+        self.add_legacy_devices(legacy_interrupt_manager.as_ref(), snapshot)?;
 
         {
             self.ged_notification_device = self.add_acpi_devices(
@@ -1531,6 +1530,7 @@ impl DeviceManager {
             legacy_interrupt_manager.as_ref(),
             console_info,
             console_resize_pipe,
+            snapshot,
         )?;
 
         #[cfg(not(target_arch = "riscv64"))]
@@ -1541,8 +1541,8 @@ impl DeviceManager {
         }
         self.legacy_interrupt_manager = Some(legacy_interrupt_manager);
 
-        self.make_virtio_devices()?;
-        self.add_pci_devices()?;
+        self.make_virtio_devices(snapshot)?;
+        self.add_pci_devices(snapshot)?;
 
         // Add pvmemcontrol if required
         #[cfg(feature = "pvmemcontrol")]
@@ -1556,12 +1556,12 @@ impl DeviceManager {
         }
 
         if self.config.clone().lock().unwrap().pvpanic {
-            self.pvpanic_device = self.add_pvpanic_device()?;
+            self.pvpanic_device = self.add_pvpanic_device(snapshot)?;
         }
 
         #[cfg(feature = "ivshmem")]
         if let Some(ivshmem) = self.config.clone().lock().unwrap().ivshmem.as_ref() {
-            self.ivshmem_device = self.add_ivshmem_device(ivshmem)?;
+            self.ivshmem_device = self.add_ivshmem_device(ivshmem, snapshot)?;
         }
 
         Ok(())
@@ -1651,7 +1651,7 @@ impl DeviceManager {
     }
 
     #[allow(unused_variables)]
-    fn add_pci_devices(&mut self) -> DeviceManagerResult<()> {
+    fn add_pci_devices(&mut self, snapshot: Option<&Snapshot>) -> DeviceManagerResult<()> {
         let iommu_id = String::from(IOMMU_DEVICE_NAME);
 
         let iommu_address_width_bits =
@@ -1670,7 +1670,7 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::EventFd)?,
                 self.get_msi_iova_space(),
                 iommu_address_width_bits,
-                state_from_id(self.snapshot.as_ref(), iommu_id.as_str())
+                state_from_id(snapshot, iommu_id.as_str())
                     .map_err(DeviceManagerError::RestoreGetState)?,
             )
             .map_err(DeviceManagerError::CreateVirtioIommu)?;
@@ -1713,6 +1713,7 @@ impl DeviceManager {
                     false,
                     handle.dma_handler,
                     handle.pci_common.pci_device_id,
+                    snapshot,
                 )?;
 
                 // Track device BDF for Generic Initiator support
@@ -1723,10 +1724,10 @@ impl DeviceManager {
                 }
             }
 
-            let mut vfio_iommu_device_ids = self.add_vfio_devices()?;
+            let mut vfio_iommu_device_ids = self.add_vfio_devices(snapshot)?;
             iommu_attached_devices.append(&mut vfio_iommu_device_ids);
 
-            let mut vfio_user_iommu_device_ids = self.add_user_devices()?;
+            let mut vfio_user_iommu_device_ids = self.add_user_devices(snapshot)?;
             iommu_attached_devices.append(&mut vfio_user_iommu_device_ids);
 
             // Add all devices from forced iommu segments
@@ -1752,6 +1753,7 @@ impl DeviceManager {
                     false,
                     None,
                     None,
+                    snapshot,
                 )?;
                 self.iommu_attached_devices = Some((dev_id, iommu_attached_devices));
             }
@@ -1774,6 +1776,7 @@ impl DeviceManager {
     #[cfg(target_arch = "aarch64")]
     fn add_interrupt_controller(
         &mut self,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<Arc<Mutex<dyn InterruptController>>> {
         let interrupt_controller: Arc<Mutex<gic::Gic>> = Arc::new(Mutex::new(
             gic::Gic::new(
@@ -1788,7 +1791,7 @@ impl DeviceManager {
 
         // Restore the vGic if this is in the process of restoration
         let id = String::from(gic::GIC_SNAPSHOT_ID);
-        if let Some(vgic_snapshot) = snapshot_from_id(self.snapshot.as_ref(), &id) {
+        if let Some(vgic_snapshot) = snapshot_from_id(snapshot, &id) {
             // PMU support is optional. Nothing should be impacted if the PMU initialization failed.
             if self
                 .cpu_manager
@@ -1827,6 +1830,7 @@ impl DeviceManager {
     #[cfg(target_arch = "riscv64")]
     fn add_interrupt_controller(
         &mut self,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<Arc<Mutex<dyn InterruptController>>> {
         let interrupt_controller: Arc<Mutex<aia::Aia>> = Arc::new(Mutex::new(
             aia::Aia::new(
@@ -1841,7 +1845,7 @@ impl DeviceManager {
 
         // Restore the vAia if this is in the process of restoration
         let id = String::from(aia::_AIA_SNAPSHOT_ID);
-        if let Some(_vaia_snapshot) = snapshot_from_id(self.snapshot.as_ref(), &id) {
+        if let Some(_vaia_snapshot) = snapshot_from_id(snapshot, &id) {
             // TODO: vAia snapshotting and restoration is scheduled to next stage of riscv64 support.
             // TODO: PMU support is scheduled to next stage of riscv64 support.
             // PMU support is optional. Nothing should be impacted if the PMU initialization failed.
@@ -1864,11 +1868,12 @@ impl DeviceManager {
     #[cfg(target_arch = "x86_64")]
     fn add_interrupt_controller(
         &mut self,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<Arc<Mutex<dyn InterruptController>>> {
         let id = String::from(IOAPIC_DEVICE_NAME);
 
-        let state = state_from_id(self.snapshot.as_ref(), id.as_str())
-            .map_err(DeviceManagerError::RestoreGetState)?;
+        let state =
+            state_from_id(snapshot, id.as_str()).map_err(DeviceManagerError::RestoreGetState)?;
         // Create IOAPIC
         let interrupt_controller = Arc::new(Mutex::new(
             ioapic::Ioapic::new(
@@ -2090,6 +2095,7 @@ impl DeviceManager {
     fn add_legacy_devices(
         &mut self,
         interrupt_manager: &dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<()> {
         // Add a RTC device
         let rtc_irq = self
@@ -2140,8 +2146,7 @@ impl DeviceManager {
         let gpio_device = Arc::new(Mutex::new(devices::legacy::Gpio::new(
             id.clone(),
             interrupt_group,
-            state_from_id(self.snapshot.as_ref(), id.as_str())
-                .map_err(DeviceManagerError::RestoreGetState)?,
+            state_from_id(snapshot, id.as_str()).map_err(DeviceManagerError::RestoreGetState)?,
         )));
 
         self.bus_devices
@@ -2224,6 +2229,7 @@ impl DeviceManager {
         &mut self,
         interrupt_manager: &dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>,
         serial_writer: Option<Box<dyn io::Write + Send>>,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<Arc<Mutex<Serial>>> {
         // Serial is tied to IRQ #4
         let serial_irq = 4;
@@ -2240,8 +2246,7 @@ impl DeviceManager {
             id.clone(),
             interrupt_group,
             serial_writer,
-            state_from_id(self.snapshot.as_ref(), id.as_str())
-                .map_err(DeviceManagerError::RestoreGetState)?,
+            state_from_id(snapshot, id.as_str()).map_err(DeviceManagerError::RestoreGetState)?,
         )));
 
         self.bus_devices
@@ -2275,6 +2280,7 @@ impl DeviceManager {
         &mut self,
         interrupt_manager: &dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>,
         serial_writer: Option<Box<dyn io::Write + Send>>,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<Arc<Mutex<Pl011>>> {
         let id = String::from(SERIAL_DEVICE_NAME);
 
@@ -2297,8 +2303,7 @@ impl DeviceManager {
             interrupt_group,
             serial_writer,
             self.timestamp,
-            state_from_id(self.snapshot.as_ref(), id.as_str())
-                .map_err(DeviceManagerError::RestoreGetState)?,
+            state_from_id(snapshot, id.as_str()).map_err(DeviceManagerError::RestoreGetState)?,
         )));
 
         self.bus_devices
@@ -2339,6 +2344,7 @@ impl DeviceManager {
         &mut self,
         interrupt_manager: &dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>,
         serial_writer: Option<Box<dyn io::Write + Send>>,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<Arc<Mutex<Serial>>> {
         let id = String::from(SERIAL_DEVICE_NAME);
 
@@ -2360,8 +2366,7 @@ impl DeviceManager {
             id.clone(),
             interrupt_group,
             serial_writer,
-            state_from_id(self.snapshot.as_ref(), id.as_str())
-                .map_err(DeviceManagerError::RestoreGetState)?,
+            state_from_id(snapshot, id.as_str()).map_err(DeviceManagerError::RestoreGetState)?,
         )));
 
         self.bus_devices
@@ -2401,6 +2406,7 @@ impl DeviceManager {
         &mut self,
         transport: ConsoleTransport,
         resize_pipe: Option<Arc<File>>,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<Option<Arc<virtio_devices::ConsoleResizer>>> {
         let mut console_config = self.config.lock().unwrap().console.clone();
         let endpoint = match transport {
@@ -2457,8 +2463,7 @@ impl DeviceManager {
             self.exit_evt
                 .try_clone()
                 .map_err(DeviceManagerError::EventFd)?,
-            state_from_id(self.snapshot.as_ref(), id.as_str())
-                .map_err(DeviceManagerError::RestoreGetState)?,
+            state_from_id(snapshot, id.as_str()).map_err(DeviceManagerError::RestoreGetState)?,
         )
         .map_err(DeviceManagerError::CreateVirtioConsole)?;
         let virtio_console_device = Arc::new(Mutex::new(virtio_console_device));
@@ -2497,6 +2502,7 @@ impl DeviceManager {
         interrupt_manager: &dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>,
         console_info: Option<ConsoleInfo>,
         console_resize_pipe: Option<Arc<File>>,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<Arc<Console>> {
         let serial_config = self.config.lock().unwrap().serial.clone();
         if console_info.is_none() {
@@ -2517,7 +2523,7 @@ impl DeviceManager {
         };
 
         if !matches!(console_info.serial, ConsoleTransport::Off) {
-            let serial = self.add_serial_device(interrupt_manager, serial_writer)?;
+            let serial = self.add_serial_device(interrupt_manager, serial_writer, snapshot)?;
             self.serial_manager = match console_info.serial {
                 ConsoleTransport::Pty(_)
                 | ConsoleTransport::Tty(_)
@@ -2560,7 +2566,7 @@ impl DeviceManager {
         }
 
         let console_resizer =
-            self.add_virtio_console_device(console_info.console, console_resize_pipe)?;
+            self.add_virtio_console_device(console_info.console, console_resize_pipe, snapshot)?;
 
         Ok(Arc::new(Console { console_resizer }))
     }
@@ -2618,34 +2624,34 @@ impl DeviceManager {
         Ok(())
     }
 
-    fn make_virtio_devices(&mut self) -> DeviceManagerResult<()> {
+    fn make_virtio_devices(&mut self, snapshot: Option<&Snapshot>) -> DeviceManagerResult<()> {
         // Create "standard" virtio devices (net/block/rng)
-        self.make_virtio_block_devices()?;
-        self.make_virtio_net_devices()?;
-        self.make_virtio_rng_devices()?;
+        self.make_virtio_block_devices(snapshot)?;
+        self.make_virtio_net_devices(snapshot)?;
+        self.make_virtio_rng_devices(snapshot)?;
 
         // Add generic vhost-user if required
-        self.make_generic_vhost_user_devices()?;
+        self.make_generic_vhost_user_devices(snapshot)?;
 
         // Add virtio-fs if required
-        self.make_virtio_fs_devices()?;
+        self.make_virtio_fs_devices(snapshot)?;
 
         // Add virtio-pmem if required
-        self.make_virtio_pmem_devices()?;
+        self.make_virtio_pmem_devices(snapshot)?;
 
         // Add virtio-vsock if required
-        self.make_virtio_vsock_devices()?;
+        self.make_virtio_vsock_devices(snapshot)?;
 
-        self.make_virtio_mem_devices()?;
+        self.make_virtio_mem_devices(snapshot)?;
 
         // Add virtio-balloon if required
-        self.make_virtio_balloon_devices()?;
+        self.make_virtio_balloon_devices(snapshot)?;
 
         // Add virtio-watchdog device
-        self.make_virtio_watchdog_devices()?;
+        self.make_virtio_watchdog_devices(snapshot)?;
 
         // Add vDPA devices if required
-        self.make_vdpa_devices()?;
+        self.make_vdpa_devices(snapshot)?;
 
         Ok(())
     }
@@ -2663,6 +2669,7 @@ impl DeviceManager {
         &mut self,
         disk_cfg: &mut DiskConfig,
         is_hotplug: bool,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
         let id = match disk_cfg.pci_common.id.as_ref() {
             Some(id) => id.clone(),
@@ -2694,7 +2701,7 @@ impl DeviceManager {
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,
                     self.force_access_platform,
-                    state_from_id(self.snapshot.as_ref(), id.as_str())
+                    state_from_id(snapshot, id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
                 ) {
                     Ok(vub_device) => vub_device,
@@ -2829,7 +2836,7 @@ impl DeviceManager {
                 self.exit_evt
                     .try_clone()
                     .map_err(DeviceManagerError::EventFd)?,
-                state_from_id(self.snapshot.as_ref(), id.as_str())
+                state_from_id(snapshot, id.as_str())
                     .map_err(DeviceManagerError::RestoreGetState)?,
                 queue_affinity,
                 disk_cfg.sparse,
@@ -2873,11 +2880,14 @@ impl DeviceManager {
         })
     }
 
-    fn make_virtio_block_devices(&mut self) -> DeviceManagerResult<()> {
+    fn make_virtio_block_devices(
+        &mut self,
+        snapshot: Option<&Snapshot>,
+    ) -> DeviceManagerResult<()> {
         let mut block_devices = self.config.lock().unwrap().disks.take();
         if let Some(disk_list_cfg) = &mut block_devices {
             for disk_cfg in disk_list_cfg.iter_mut() {
-                let device = self.make_virtio_block_device(disk_cfg, false)?;
+                let device = self.make_virtio_block_device(disk_cfg, false, snapshot)?;
                 self.virtio_devices.push(device);
             }
         }
@@ -2889,6 +2899,7 @@ impl DeviceManager {
     fn make_virtio_net_device(
         &mut self,
         net_cfg: &mut NetConfig,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
         let id = match net_cfg.pci_common.id.as_ref() {
             Some(id) => id.clone(),
@@ -2923,7 +2934,7 @@ impl DeviceManager {
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,
                     self.force_access_platform,
-                    state_from_id(self.snapshot.as_ref(), id.as_str())
+                    state_from_id(snapshot, id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
                     net_cfg.offload_tso,
                     net_cfg.offload_ufo,
@@ -2941,7 +2952,7 @@ impl DeviceManager {
                 vhost_user_net as Arc<Mutex<dyn Migratable>>,
             )
         } else {
-            let state = state_from_id(self.snapshot.as_ref(), id.as_str())
+            let state = state_from_id(snapshot, id.as_str())
                 .map_err(DeviceManagerError::RestoreGetState)?;
             let virtio_net = if let Some(ref tap_if_name) = net_cfg.tap {
                 Arc::new(Mutex::new(
@@ -3043,11 +3054,11 @@ impl DeviceManager {
     }
 
     /// Add virto-net and vhost-user-net devices
-    fn make_virtio_net_devices(&mut self) -> DeviceManagerResult<()> {
+    fn make_virtio_net_devices(&mut self, snapshot: Option<&Snapshot>) -> DeviceManagerResult<()> {
         let mut net_devices = self.config.lock().unwrap().net.take();
         if let Some(net_list_cfg) = &mut net_devices {
             for net_cfg in net_list_cfg.iter_mut() {
-                let device = self.make_virtio_net_device(net_cfg)?;
+                let device = self.make_virtio_net_device(net_cfg, snapshot)?;
                 self.virtio_devices.push(device);
             }
         }
@@ -3056,7 +3067,7 @@ impl DeviceManager {
         Ok(())
     }
 
-    fn make_virtio_rng_devices(&mut self) -> DeviceManagerResult<()> {
+    fn make_virtio_rng_devices(&mut self, snapshot: Option<&Snapshot>) -> DeviceManagerResult<()> {
         // Add virtio-rng if required
         let mut rng_config = self.config.lock().unwrap().rng.clone();
         if let Some(rng_path) = rng_config.src.to_str() {
@@ -3080,7 +3091,7 @@ impl DeviceManager {
                     self.exit_evt
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,
-                    state_from_id(self.snapshot.as_ref(), id.as_str())
+                    state_from_id(snapshot, id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
                 )
                 .map_err(DeviceManagerError::CreateVirtioRng)?,
@@ -3107,6 +3118,7 @@ impl DeviceManager {
     fn make_generic_vhost_user_device(
         &mut self,
         generic_vhost_user_cfg: &mut GenericVhostUserConfig,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
         let id = match generic_vhost_user_cfg.pci_common.id.as_ref() {
             Some(id) => id.clone(),
@@ -3134,7 +3146,7 @@ impl DeviceManager {
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,
                     self.force_access_platform,
-                    state_from_id(self.snapshot.as_ref(), id.as_str())
+                    state_from_id(snapshot, id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
                 )
                 .map_err(DeviceManagerError::CreateGenericVhostUser)?,
@@ -3156,11 +3168,15 @@ impl DeviceManager {
         }
     }
 
-    fn make_generic_vhost_user_devices(&mut self) -> DeviceManagerResult<()> {
+    fn make_generic_vhost_user_devices(
+        &mut self,
+        snapshot: Option<&Snapshot>,
+    ) -> DeviceManagerResult<()> {
         let mut generic_vhost_user_devices = self.config.lock().unwrap().generic_vhost_user.clone();
         if let Some(generic_vhost_user_list_cfg) = &mut generic_vhost_user_devices {
             for generic_vhost_user_cfg in generic_vhost_user_list_cfg.iter_mut() {
-                let device = self.make_generic_vhost_user_device(generic_vhost_user_cfg)?;
+                let device =
+                    self.make_generic_vhost_user_device(generic_vhost_user_cfg, snapshot)?;
                 self.virtio_devices.push(device);
             }
         }
@@ -3172,6 +3188,7 @@ impl DeviceManager {
     fn make_virtio_fs_device(
         &mut self,
         fs_cfg: &mut FsConfig,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
         let id = match fs_cfg.pci_common.id.as_ref() {
             Some(id) => id.clone(),
@@ -3200,7 +3217,7 @@ impl DeviceManager {
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,
                     self.force_access_platform,
-                    state_from_id(self.snapshot.as_ref(), id.as_str())
+                    state_from_id(snapshot, id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
                 )
                 .map_err(DeviceManagerError::CreateVirtioFs)?,
@@ -3221,11 +3238,11 @@ impl DeviceManager {
         }
     }
 
-    fn make_virtio_fs_devices(&mut self) -> DeviceManagerResult<()> {
+    fn make_virtio_fs_devices(&mut self, snapshot: Option<&Snapshot>) -> DeviceManagerResult<()> {
         let mut fs_devices = self.config.lock().unwrap().fs.take();
         if let Some(fs_list_cfg) = &mut fs_devices {
             for fs_cfg in fs_list_cfg.iter_mut() {
-                let device = self.make_virtio_fs_device(fs_cfg)?;
+                let device = self.make_virtio_fs_device(fs_cfg, snapshot)?;
                 self.virtio_devices.push(device);
             }
         }
@@ -3237,6 +3254,7 @@ impl DeviceManager {
     fn make_virtio_pmem_device(
         &mut self,
         pmem_cfg: &mut PmemConfig,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
         let id = match pmem_cfg.pci_common.id.as_ref() {
             Some(id) => id.clone(),
@@ -3383,7 +3401,7 @@ impl DeviceManager {
                 self.exit_evt
                     .try_clone()
                     .map_err(DeviceManagerError::EventFd)?,
-                state_from_id(self.snapshot.as_ref(), id.as_str())
+                state_from_id(snapshot, id.as_str())
                     .map_err(DeviceManagerError::RestoreGetState)?,
             )
             .map_err(DeviceManagerError::CreateVirtioPmem)?,
@@ -3406,12 +3424,12 @@ impl DeviceManager {
         })
     }
 
-    fn make_virtio_pmem_devices(&mut self) -> DeviceManagerResult<()> {
+    fn make_virtio_pmem_devices(&mut self, snapshot: Option<&Snapshot>) -> DeviceManagerResult<()> {
         // Add virtio-pmem if required
         let mut pmem_devices = self.config.lock().unwrap().pmem.take();
         if let Some(pmem_list_cfg) = &mut pmem_devices {
             for pmem_cfg in pmem_list_cfg.iter_mut() {
-                let device = self.make_virtio_pmem_device(pmem_cfg)?;
+                let device = self.make_virtio_pmem_device(pmem_cfg, snapshot)?;
                 self.virtio_devices.push(device);
             }
         }
@@ -3423,6 +3441,7 @@ impl DeviceManager {
     fn make_virtio_vsock_device(
         &mut self,
         vsock_cfg: &mut VsockConfig,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
         let id = match vsock_cfg.pci_common.id.as_ref() {
             Some(id) => id.clone(),
@@ -3454,7 +3473,7 @@ impl DeviceManager {
                 self.exit_evt
                     .try_clone()
                     .map_err(DeviceManagerError::EventFd)?,
-                state_from_id(self.snapshot.as_ref(), id.as_str())
+                state_from_id(snapshot, id.as_str())
                     .map_err(DeviceManagerError::RestoreGetState)?,
             )
             .map_err(DeviceManagerError::CreateVirtioVsock)?,
@@ -3476,10 +3495,13 @@ impl DeviceManager {
         })
     }
 
-    fn make_virtio_vsock_devices(&mut self) -> DeviceManagerResult<()> {
+    fn make_virtio_vsock_devices(
+        &mut self,
+        snapshot: Option<&Snapshot>,
+    ) -> DeviceManagerResult<()> {
         let mut vsock = self.config.lock().unwrap().vsock.take();
         if let Some(vsock_cfg) = &mut vsock {
-            let device = self.make_virtio_vsock_device(vsock_cfg)?;
+            let device = self.make_virtio_vsock_device(vsock_cfg, snapshot)?;
             self.virtio_devices.push(device);
         }
         self.config.lock().unwrap().vsock = vsock;
@@ -3487,7 +3509,7 @@ impl DeviceManager {
         Ok(())
     }
 
-    fn make_virtio_mem_devices(&mut self) -> DeviceManagerResult<()> {
+    fn make_virtio_mem_devices(&mut self, snapshot: Option<&Snapshot>) -> DeviceManagerResult<()> {
         let mm = self.memory_manager.clone();
         let mut mm = mm.lock().unwrap();
         for (memory_zone_id, memory_zone) in mm.memory_zones_mut().iter_mut() {
@@ -3509,7 +3531,7 @@ impl DeviceManager {
                             .try_clone()
                             .map_err(DeviceManagerError::EventFd)?,
                         virtio_mem_zone.blocks_state().clone(),
-                        state_from_id(self.snapshot.as_ref(), memory_zone_id.as_str())
+                        state_from_id(snapshot, memory_zone_id.as_str())
                             .map_err(DeviceManagerError::RestoreGetState)?,
                     )
                     .map_err(DeviceManagerError::CreateVirtioMem)?,
@@ -3587,7 +3609,10 @@ impl DeviceManager {
         Ok((pvmemcontrol_bus_device, pvmemcontrol_pci_device))
     }
 
-    fn make_virtio_balloon_devices(&mut self) -> DeviceManagerResult<()> {
+    fn make_virtio_balloon_devices(
+        &mut self,
+        snapshot: Option<&Snapshot>,
+    ) -> DeviceManagerResult<()> {
         if let Some(balloon_config) = &self.config.lock().unwrap().balloon {
             let id = String::from(BALLOON_DEVICE_NAME);
             info!("Creating virtio-balloon device: id = {id}");
@@ -3603,7 +3628,7 @@ impl DeviceManager {
                     self.exit_evt
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,
-                    state_from_id(self.snapshot.as_ref(), id.as_str())
+                    state_from_id(snapshot, id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
                 )
                 .map_err(DeviceManagerError::CreateVirtioBalloon)?,
@@ -3630,7 +3655,10 @@ impl DeviceManager {
         Ok(())
     }
 
-    fn make_virtio_watchdog_devices(&mut self) -> DeviceManagerResult<()> {
+    fn make_virtio_watchdog_devices(
+        &mut self,
+        snapshot: Option<&Snapshot>,
+    ) -> DeviceManagerResult<()> {
         if !self.config.lock().unwrap().watchdog {
             return Ok(());
         }
@@ -3646,7 +3674,7 @@ impl DeviceManager {
                 self.exit_evt
                     .try_clone()
                     .map_err(DeviceManagerError::EventFd)?,
-                state_from_id(self.snapshot.as_ref(), id.as_str())
+                state_from_id(snapshot, id.as_str())
                     .map_err(DeviceManagerError::RestoreGetState)?,
             )
             .map_err(DeviceManagerError::CreateVirtioWatchdog)?,
@@ -3672,6 +3700,7 @@ impl DeviceManager {
     fn make_vdpa_device(
         &mut self,
         vdpa_cfg: &mut VdpaConfig,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
         let id = match vdpa_cfg.pci_common.id.as_ref() {
             Some(id) => id.clone(),
@@ -3695,7 +3724,7 @@ impl DeviceManager {
                 device_path,
                 self.memory_manager.lock().unwrap().guest_memory(),
                 vdpa_cfg.num_queues as u16,
-                state_from_id(self.snapshot.as_ref(), id.as_str())
+                state_from_id(snapshot, id.as_str())
                     .map_err(DeviceManagerError::RestoreGetState)?,
             )
             .map_err(DeviceManagerError::CreateVdpa)?,
@@ -3719,12 +3748,12 @@ impl DeviceManager {
         })
     }
 
-    fn make_vdpa_devices(&mut self) -> DeviceManagerResult<()> {
+    fn make_vdpa_devices(&mut self, snapshot: Option<&Snapshot>) -> DeviceManagerResult<()> {
         // Add vdpa if required
         let mut vdpa_devices = self.config.lock().unwrap().vdpa.take();
         if let Some(vdpa_list_cfg) = &mut vdpa_devices {
             for vdpa_cfg in vdpa_list_cfg.iter_mut() {
-                let device = self.make_vdpa_device(vdpa_cfg)?;
+                let device = self.make_vdpa_device(vdpa_cfg, snapshot)?;
                 self.virtio_devices.push(device);
             }
         }
@@ -3759,6 +3788,7 @@ impl DeviceManager {
     fn add_passthrough_device(
         &mut self,
         device_cfg: &mut DeviceConfig,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<(PciBdf, String)> {
         // If the passthrough device has not been created yet, it is created
         // here and stored in the DeviceManager structure for future needs.
@@ -3771,7 +3801,7 @@ impl DeviceManager {
             );
         }
 
-        self.add_vfio_device(device_cfg)
+        self.add_vfio_device(device_cfg, snapshot)
     }
 
     fn create_vfio_ops(&self) -> DeviceManagerResult<Arc<dyn VfioOps>> {
@@ -3814,6 +3844,7 @@ impl DeviceManager {
     fn add_vfio_device(
         &mut self,
         device_cfg: &mut DeviceConfig,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<(PciBdf, String)> {
         let vfio_name = if let Some(id) = &device_cfg.pci_common.id {
             id.clone()
@@ -3953,7 +3984,7 @@ impl DeviceManager {
             vfio_p2p_dma,
             pci_device_bdf,
             memory_manager.lock().unwrap().memory_slot_allocator(),
-            vm_migration::snapshot_from_id(self.snapshot.as_ref(), vfio_name.as_str()),
+            vm_migration::snapshot_from_id(snapshot, vfio_name.as_str()),
             device_cfg.x_nv_gpudirect_clique,
             device_cfg
                 .x_exclude_mmap_bars
@@ -4062,13 +4093,16 @@ impl DeviceManager {
         Ok(new_resources)
     }
 
-    fn add_vfio_devices(&mut self) -> DeviceManagerResult<Vec<PciBdf>> {
+    fn add_vfio_devices(
+        &mut self,
+        snapshot: Option<&Snapshot>,
+    ) -> DeviceManagerResult<Vec<PciBdf>> {
         let mut iommu_attached_device_ids = Vec::new();
         let mut devices = self.config.lock().unwrap().devices.take();
 
         if let Some(device_list_cfg) = &mut devices {
             for device_cfg in device_list_cfg.iter_mut() {
-                let (device_id, _) = self.add_passthrough_device(device_cfg)?;
+                let (device_id, _) = self.add_passthrough_device(device_cfg, snapshot)?;
                 if device_cfg.pci_common.iommu && self.iommu_device.is_some() {
                     iommu_attached_device_ids.push(device_id);
                 }
@@ -4084,6 +4118,7 @@ impl DeviceManager {
     fn add_vfio_user_device(
         &mut self,
         device_cfg: &mut UserDeviceConfig,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<(PciBdf, String)> {
         let vfio_user_name = if let Some(id) = &device_cfg.pci_common.id {
             id.clone()
@@ -4129,7 +4164,7 @@ impl DeviceManager {
             legacy_interrupt_group,
             pci_device_bdf,
             memory_manager.lock().unwrap().memory_slot_allocator(),
-            vm_migration::snapshot_from_id(self.snapshot.as_ref(), vfio_user_name.as_str()),
+            vm_migration::snapshot_from_id(snapshot, vfio_user_name.as_str()),
         )
         .map_err(DeviceManagerError::VfioUserCreate)?;
 
@@ -4191,12 +4226,15 @@ impl DeviceManager {
         Ok((pci_device_bdf, vfio_user_name))
     }
 
-    fn add_user_devices(&mut self) -> DeviceManagerResult<Vec<PciBdf>> {
+    fn add_user_devices(
+        &mut self,
+        snapshot: Option<&Snapshot>,
+    ) -> DeviceManagerResult<Vec<PciBdf>> {
         let mut user_devices = self.config.lock().unwrap().user_devices.take();
 
         if let Some(device_list_cfg) = &mut user_devices {
             for device_cfg in device_list_cfg.iter_mut() {
-                let (_device_id, _id) = self.add_vfio_user_device(device_cfg)?;
+                let (_device_id, _id) = self.add_vfio_user_device(device_cfg, snapshot)?;
             }
         }
 
@@ -4216,6 +4254,7 @@ impl DeviceManager {
         is_hotplug: bool,
         dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
         pci_device_id: Option<u8>,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<PciBdf> {
         let id = format!("{VIRTIO_PCI_DEVICE_NAME_PREFIX}-{virtio_device_id}");
 
@@ -4313,7 +4352,7 @@ impl DeviceManager {
                 use_64bit_bar_for_virtio_device(device_type, pci_segment_id, is_hotplug),
                 dma_handler,
                 self.pending_activations.clone(),
-                vm_migration::snapshot_from_id(self.snapshot.as_ref(), id.as_str()),
+                vm_migration::snapshot_from_id(snapshot, id.as_str()),
             )
             .map_err(DeviceManagerError::VirtioDevice)?,
         ));
@@ -4347,6 +4386,7 @@ impl DeviceManager {
 
     fn add_pvpanic_device(
         &mut self,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<Option<Arc<Mutex<devices::PvPanicDevice>>>> {
         let id = String::from(PVPANIC_DEVICE_NAME);
         let pci_segment_id = 0x0_u16;
@@ -4356,7 +4396,7 @@ impl DeviceManager {
         let (pci_segment_id, pci_device_bdf, resources) =
             self.pci_resources(&id, pci_segment_id, None)?;
 
-        let snapshot = snapshot_from_id(self.snapshot.as_ref(), id.as_str());
+        let snapshot = snapshot_from_id(snapshot, id.as_str());
 
         let pvpanic_device = devices::PvPanicDevice::new(id.clone(), snapshot)
             .map_err(DeviceManagerError::PvPanicCreate)?;
@@ -4386,6 +4426,7 @@ impl DeviceManager {
     fn add_ivshmem_device(
         &mut self,
         ivshmem_cfg: &IvshmemConfig,
+        snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<Option<Arc<Mutex<devices::IvshmemDevice>>>> {
         let id = String::from(IVSHMEM_DEVICE_NAME);
         let pci_segment_id = 0x0_u16;
@@ -4393,7 +4434,7 @@ impl DeviceManager {
 
         let (pci_segment_id, pci_device_bdf, resources) =
             self.pci_resources(&id, pci_segment_id, None)?;
-        let snapshot = snapshot_from_id(self.snapshot.as_ref(), id.as_str());
+        let snapshot = snapshot_from_id(snapshot, id.as_str());
 
         let ivshmem_ops = Arc::new(Mutex::new(IvshmemHandler {
             memory_manager: self.memory_manager.clone(),
@@ -4634,7 +4675,7 @@ impl DeviceManager {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
 
-        let (bdf, device_name) = self.add_passthrough_device(device_cfg)?;
+        let (bdf, device_name) = self.add_passthrough_device(device_cfg, None)?;
 
         // Update the PCIU bitmap
         self.pci_segments[device_cfg.pci_common.pci_segment as usize].pci_devices_up |=
@@ -4663,7 +4704,7 @@ impl DeviceManager {
             ));
         }
 
-        let (bdf, device_name) = self.add_vfio_user_device(device_cfg)?;
+        let (bdf, device_name) = self.add_vfio_user_device(device_cfg, None)?;
 
         // Update the PCIU bitmap
         self.pci_segments[device_cfg.pci_common.pci_segment as usize].pci_devices_up |=
@@ -5033,6 +5074,7 @@ impl DeviceManager {
             true,
             handle.dma_handler,
             handle.pci_common.pci_device_id,
+            None,
         )?;
 
         // Update the PCIU bitmap
@@ -5065,14 +5107,14 @@ impl DeviceManager {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
 
-        let device = self.make_virtio_block_device(disk_cfg, true)?;
+        let device = self.make_virtio_block_device(disk_cfg, true, None)?;
         self.hotplug_virtio_pci_device(device)
     }
 
     pub fn add_fs(&mut self, fs_cfg: &mut FsConfig) -> DeviceManagerResult<PciDeviceInfo> {
         self.validate_identifier(&fs_cfg.pci_common.id)?;
 
-        let device = self.make_virtio_fs_device(fs_cfg)?;
+        let device = self.make_virtio_fs_device(fs_cfg, None)?;
         self.hotplug_virtio_pci_device(device)
     }
 
@@ -5082,7 +5124,7 @@ impl DeviceManager {
     ) -> DeviceManagerResult<PciDeviceInfo> {
         self.validate_identifier(&generic_vhost_user_cfg.pci_common.id)?;
 
-        let device = self.make_generic_vhost_user_device(generic_vhost_user_cfg)?;
+        let device = self.make_generic_vhost_user_device(generic_vhost_user_cfg, None)?;
         self.hotplug_virtio_pci_device(device)
     }
 
@@ -5093,7 +5135,7 @@ impl DeviceManager {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
 
-        let device = self.make_virtio_pmem_device(pmem_cfg)?;
+        let device = self.make_virtio_pmem_device(pmem_cfg, None)?;
         self.hotplug_virtio_pci_device(device)
     }
 
@@ -5104,7 +5146,7 @@ impl DeviceManager {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
 
-        let device = self.make_virtio_net_device(net_cfg)?;
+        let device = self.make_virtio_net_device(net_cfg, None)?;
         self.hotplug_virtio_pci_device(device)
     }
 
@@ -5115,7 +5157,7 @@ impl DeviceManager {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
 
-        let device = self.make_vdpa_device(vdpa_cfg)?;
+        let device = self.make_vdpa_device(vdpa_cfg, None)?;
         self.hotplug_virtio_pci_device(device)
     }
 
@@ -5126,7 +5168,7 @@ impl DeviceManager {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
 
-        let device = self.make_virtio_vsock_device(vsock_cfg)?;
+        let device = self.make_virtio_vsock_device(vsock_cfg, None)?;
         self.hotplug_virtio_pci_device(device)
     }
 
