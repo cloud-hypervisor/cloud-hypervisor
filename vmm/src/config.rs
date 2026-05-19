@@ -2911,12 +2911,14 @@ impl LandlockConfig {
 #[cfg(feature = "ivshmem")]
 impl IvshmemConfig {
     pub const SYNTAX: &'static str = "Ivshmem device. Specify the backend file path and size \
-    for the shared memory: \"path=</path/to/a/file>, size=<file_size>\" \
+    for the shared memory: \"path=</path/to/a/file>,size=<file_size>,id=<device_id>,\
+    pci_segment=<segment_id>,pci_device_id=<pci_slot>\" \
     \nThe <file_size> must be a power of 2 (e.g., 2M, 4M, etc.), as it represents the size \
     of the memory region mapped to the guest. Default size is 128M.";
     pub fn parse(ivshmem: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser.add("path").add("size");
+        parser.add_all(PciDeviceCommonConfig::OPTIONS);
         parser.parse(ivshmem).map_err(Error::ParseIvshmem)?;
         let path = parser
             .get("path")
@@ -2927,13 +2929,20 @@ impl IvshmemConfig {
             .map_err(Error::ParseIvshmem)?
             .unwrap_or(ByteSized((DEFAULT_IVSHMEM_SIZE << 20) as u64))
             .0;
+        let pci_common = PciDeviceCommonConfig::parse(ivshmem)?;
         Ok(IvshmemConfig {
+            pci_common,
             path,
             size: size as usize,
         })
     }
 
-    pub fn validate(&self) -> ValidationResult<()> {
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        if self.pci_common.iommu {
+            return Err(ValidationError::IommuNotSupported);
+        }
+        self.pci_common.validate(vm_config)?;
+
         let size = self.size as u64;
         let path = &self.path;
         // size must = 2^n
@@ -3376,7 +3385,8 @@ impl VmConfig {
         }
         #[cfg(feature = "ivshmem")]
         if let Some(ivshmem_config) = &self.ivshmem {
-            ivshmem_config.validate()?;
+            ivshmem_config.validate(self)?;
+            Self::validate_identifier(&mut id_list, &ivshmem_config.pci_common.id)?;
         }
 
         Ok(id_list)
@@ -4414,6 +4424,25 @@ mod unit_tests {
                 size: 0,
                 deflate_on_oom: false,
                 free_page_reporting: false,
+            }
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "ivshmem")]
+    fn test_parse_ivshmem() -> Result<()> {
+        assert_eq!(
+            IvshmemConfig::parse("path=/tmp/ivshmem.data,size=2M,pci_segment=1,pci_device_id=7")?,
+            IvshmemConfig {
+                pci_common: PciDeviceCommonConfig {
+                    pci_segment: 1,
+                    pci_device_id: Some(7),
+                    ..Default::default()
+                },
+                path: PathBuf::from("/tmp/ivshmem.data"),
+                size: 2 << 20,
             }
         );
 

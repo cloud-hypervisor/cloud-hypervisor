@@ -837,6 +837,8 @@ pub const DEFAULT_IVSHMEM_SIZE: usize = 128;
 #[cfg(feature = "ivshmem")]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct IvshmemConfig {
+    #[serde(flatten)]
+    pub pci_common: PciDeviceCommonConfig,
     pub path: PathBuf,
     pub size: usize,
 }
@@ -845,6 +847,7 @@ pub struct IvshmemConfig {
 impl Default for IvshmemConfig {
     fn default() -> Self {
         Self {
+            pci_common: PciDeviceCommonConfig::default(),
             path: PathBuf::new(),
             size: DEFAULT_IVSHMEM_SIZE << 20,
         }
