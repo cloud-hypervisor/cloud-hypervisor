@@ -55,9 +55,7 @@ reviewable, and compatible with the project's normal engineering constraints.
   host privileges, workloads, and container setup. To build the integration-test
   code directly without the infrastructure from `./scripts`, set the Rust cfg
   `devcli_testenv` or simply build through `clippy` which automatically includes
-  these code paths; otherwise the integration-test code is not included. Do not
-  assume the tests can be run directly in a restricted agent environment; ask
-  the developer to run them when real integration coverage is needed.
+  these code paths; otherwise the integration-test code is not included.
 
 ### Commit and Patch Formatting
 
