@@ -1,72 +1,46 @@
 // Copyright © 2021 Intel Corporation
 //
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+//
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::io::Error;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::RawFd;
 
-use io_uring::{IoUring, opcode, types};
 use libc::{FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE};
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
+use crate::async_io::{
+    AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, UringDataIo,
+};
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::sparse::{blkdiscard, blkzeroout};
 use crate::{BatchRequest, RequestType, SECTOR_SIZE, is_block_device};
 
 pub struct RawFileAsync {
     fd: RawFd,
-    io_uring: IoUring,
-    eventfd: EventFd,
+    data_io: UringDataIo,
     alignment: u64,
     is_block_device: bool,
 }
 
 impl RawFileAsync {
     pub fn new(fd: RawFd, ring_depth: u32) -> BlockResult<Self> {
-        let io_uring =
-            IoUring::new(ring_depth).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
-        let eventfd =
-            EventFd::new(libc::EFD_NONBLOCK).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
-
-        // Register the io_uring eventfd that will notify when something in
-        // the completion queue is ready.
-        io_uring
-            .submitter()
-            .register_eventfd(eventfd.as_raw_fd())
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
-
+        let data_io =
+            UringDataIo::new(ring_depth).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
         let is_block_device = is_block_device(fd);
 
         Ok(RawFileAsync {
             fd,
-            io_uring,
-            eventfd,
+            data_io,
             alignment: SECTOR_SIZE,
             is_block_device,
         })
-    }
-
-    /// Queue an `IORING_OP_NOP` carrying `user_data` so a synchronously
-    /// completed operation (e.g. a BLK* ioctl) is reaped through the normal
-    /// io_uring completion path.
-    fn submit_nop(&mut self, user_data: u64) -> Result<(), Error> {
-        let (submitter, mut sq, _) = self.io_uring.split();
-        // SAFETY: Nop carries no buffer; only `user_data` is consumed by the
-        // kernel.
-        unsafe {
-            sq.push(&opcode::Nop::new().build().user_data(user_data))
-                .map_err(|e| Error::other(format!("Submission queue is full: {e:?}")))?;
-        };
-        sq.sync();
-        submitter.submit()?;
-        Ok(())
     }
 }
 
 impl AsyncIo for RawFileAsync {
     fn notifier(&self) -> &EventFd {
-        &self.eventfd
+        self.data_io.notifier()
     }
 
     fn alignment(&self) -> u64 {
@@ -79,28 +53,13 @@ impl AsyncIo for RawFileAsync {
         iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        let (submitter, mut sq, _) = self.io_uring.split();
-
-        // SAFETY: we know the file descriptor is valid and we
-        // relied on vm-memory to provide the buffer address.
+        // SAFETY: this legacy trait method's caller must keep the borrowed
+        // iovecs and writable buffers valid until completion.
         unsafe {
-            sq.push(
-                &opcode::Readv::new(types::Fd(self.fd), iovecs.as_ptr(), iovecs.len() as u32)
-                    .offset(offset.try_into().unwrap())
-                    .build()
-                    .user_data(user_data),
-            )
-            .map_err(|e| {
-                AsyncIoError::ReadVectored(Error::other(format!("Submission queue is full: {e:?}")))
-            })?;
-        };
-
-        // Update the submission queue and submit new operations to the
-        // io_uring instance.
-        sq.sync();
-        submitter.submit().map_err(AsyncIoError::ReadVectored)?;
-
-        Ok(())
+            self.data_io
+                .submit_borrowed_operation(self.fd, offset, true, iovecs, user_data)
+        }
+        .map_err(AsyncIoError::ReadVectored)
     }
 
     fn write_vectored(
@@ -109,52 +68,31 @@ impl AsyncIo for RawFileAsync {
         iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        let (submitter, mut sq, _) = self.io_uring.split();
-
-        // SAFETY: we know the file descriptor is valid and we
-        // relied on vm-memory to provide the buffer address.
+        // SAFETY: this legacy trait method's caller must keep the borrowed
+        // iovecs and readable buffers valid until completion.
         unsafe {
-            sq.push(
-                &opcode::Writev::new(types::Fd(self.fd), iovecs.as_ptr(), iovecs.len() as u32)
-                    .offset(offset.try_into().unwrap())
-                    .build()
-                    .user_data(user_data),
-            )
-            .map_err(|e| {
-                AsyncIoError::WriteVectored(Error::other(format!(
-                    "Submission queue is full: {e:?}"
-                )))
-            })?;
-        };
+            self.data_io
+                .submit_borrowed_operation(self.fd, offset, false, iovecs, user_data)
+        }
+        .map_err(AsyncIoError::WriteVectored)
+    }
 
-        // Update the submission queue and submit new operations to the
-        // io_uring instance.
-        sq.sync();
-        submitter.submit().map_err(AsyncIoError::WriteVectored)?;
-
-        Ok(())
+    fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
+        let is_read = op.is_read();
+        self.data_io.submit_operation(self.fd, op).map_err(|e| {
+            if is_read {
+                AsyncIoError::ReadVectored(e)
+            } else {
+                AsyncIoError::WriteVectored(e)
+            }
+        })
     }
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
         if let Some(user_data) = user_data {
-            let (submitter, mut sq, _) = self.io_uring.split();
-
-            // SAFETY: we know the file descriptor is valid.
-            unsafe {
-                sq.push(
-                    &opcode::Fsync::new(types::Fd(self.fd))
-                        .build()
-                        .user_data(user_data),
-                )
-                .map_err(|e| {
-                    AsyncIoError::Fsync(Error::other(format!("Submission queue is full: {e:?}")))
-                })?;
-            };
-
-            // Update the submission queue and submit new operations to the
-            // io_uring instance.
-            sq.sync();
-            submitter.submit().map_err(AsyncIoError::Fsync)?;
+            self.data_io
+                .submit_fsync(self.fd, user_data)
+                .map_err(AsyncIoError::Fsync)?;
         } else {
             // SAFETY: FFI call with a valid fd
             unsafe { libc::fsync(self.fd) };
@@ -163,11 +101,8 @@ impl AsyncIo for RawFileAsync {
         Ok(())
     }
 
-    fn next_completed_request(&mut self) -> Option<(u64, i32)> {
-        self.io_uring
-            .completion()
-            .next()
-            .map(|entry| (entry.user_data(), entry.result()))
+    fn next_completion(&mut self) -> Option<AsyncIoCompletion> {
+        self.data_io.next_completion()
     }
 
     fn batch_requests_enabled(&self) -> bool {
@@ -175,84 +110,29 @@ impl AsyncIo for RawFileAsync {
     }
 
     fn submit_batch_requests(&mut self, batch_request: &[BatchRequest]) -> AsyncIoResult<()> {
-        if !self.batch_requests_enabled() {
-            return Ok(());
-        }
-
-        let (submitter, mut sq, _) = self.io_uring.split();
-        let mut submitted = false;
-
-        // Refuse the whole batch if it can't fit in the SQ to avoid having to unroll a partially
-        // successful push.
-        if batch_request.len() > sq.capacity() - sq.len() {
-            return Err(AsyncIoError::SubmitBatchRequests(Error::other(
-                "io_uring submission queue is full",
-            )));
-        }
-
+        let mut batch = Vec::with_capacity(batch_request.len());
         for req in batch_request {
-            match req.request_type {
-                RequestType::In => {
-                    // SAFETY: we know the file descriptor is valid and we
-                    // relied on vm-memory to provide the buffer address.
-                    unsafe {
-                        sq.push(
-                            &opcode::Readv::new(
-                                types::Fd(self.fd),
-                                req.iovecs.as_ptr(),
-                                req.iovecs.len() as u32,
-                            )
-                            .offset(req.offset as u64)
-                            .build()
-                            .user_data(req.user_data),
-                        )
-                        .map_err(|e| {
-                            AsyncIoError::ReadVectored(Error::other(format!(
-                                "Submission queue is full: {e:?}"
-                            )))
-                        })?;
-                    };
-                    submitted = true;
-                }
-                RequestType::Out => {
-                    // SAFETY: we know the file descriptor is valid and we
-                    // relied on vm-memory to provide the buffer address.
-                    unsafe {
-                        sq.push(
-                            &opcode::Writev::new(
-                                types::Fd(self.fd),
-                                req.iovecs.as_ptr(),
-                                req.iovecs.len() as u32,
-                            )
-                            .offset(req.offset as u64)
-                            .build()
-                            .user_data(req.user_data),
-                        )
-                        .map_err(|e| {
-                            AsyncIoError::WriteVectored(Error::other(format!(
-                                "Submission queue is full: {e:?}"
-                            )))
-                        })?;
-                    };
-                    submitted = true;
-                }
-                _ => {
-                    unreachable!("Unexpected batch request type: {:?}", req.request_type)
-                }
-            }
+            let is_read = match req.request_type {
+                RequestType::In => true,
+                RequestType::Out => false,
+                _ => unreachable!("Unexpected batch request type: {:?}", req.request_type),
+            };
+            batch.push((req.offset, is_read, req.iovecs.as_slice(), req.user_data));
         }
 
-        // Only submit if we actually queued something
-        if submitted {
-            // Update the submission queue and submit new operations to the
-            // io_uring instance.
-            sq.sync();
-            submitter
-                .submit()
-                .map_err(AsyncIoError::SubmitBatchRequests)?;
-        }
+        // SAFETY: this legacy trait method's caller must keep every borrowed
+        // iovec array and buffer valid until its completion.
+        unsafe { self.data_io.submit_borrowed_batch(self.fd, &batch) }
+            .map_err(AsyncIoError::SubmitBatchRequests)
+    }
 
-        Ok(())
+    fn submit_batch_operations(
+        &mut self,
+        batch_request: Vec<AsyncIoOperation>,
+    ) -> AsyncIoResult<()> {
+        self.data_io
+            .submit_batch(self.fd, batch_request)
+            .map_err(AsyncIoError::SubmitBatchRequests)
     }
 
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
@@ -265,31 +145,17 @@ impl AsyncIo for RawFileAsync {
             // Deliver the completion through the normal io_uring path by
             // queuing a NOP carrying `user_data`. The registered eventfd will
             // fire when it completes, just like any other request.
-            return self.submit_nop(user_data).map_err(AsyncIoError::PunchHole);
+            return self
+                .data_io
+                .submit_nop(user_data)
+                .map_err(AsyncIoError::PunchHole);
         }
-
-        let (submitter, mut sq, _) = self.io_uring.split();
 
         let mode = FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE;
 
-        // SAFETY: The file descriptor is known to be valid.
-        unsafe {
-            sq.push(
-                &opcode::Fallocate::new(types::Fd(self.fd), length)
-                    .offset(offset)
-                    .mode(mode)
-                    .build()
-                    .user_data(user_data),
-            )
-            .map_err(|e| {
-                AsyncIoError::PunchHole(Error::other(format!("Submission queue is full: {e:?}")))
-            })?;
-        };
-
-        sq.sync();
-        submitter.submit().map_err(AsyncIoError::PunchHole)?;
-
-        Ok(())
+        self.data_io
+            .submit_fallocate(self.fd, offset, length, mode, user_data)
+            .map_err(AsyncIoError::PunchHole)
     }
 
     fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
@@ -297,31 +163,15 @@ impl AsyncIo for RawFileAsync {
         if self.is_block_device {
             blkzeroout(self.fd, offset, length).map_err(AsyncIoError::WriteZeroes)?;
             return self
+                .data_io
                 .submit_nop(user_data)
                 .map_err(AsyncIoError::WriteZeroes);
         }
 
-        let (submitter, mut sq, _) = self.io_uring.split();
-
         let mode = FALLOC_FL_ZERO_RANGE | FALLOC_FL_KEEP_SIZE;
 
-        // SAFETY: The file descriptor is known to be valid.
-        unsafe {
-            sq.push(
-                &opcode::Fallocate::new(types::Fd(self.fd), length)
-                    .offset(offset)
-                    .mode(mode)
-                    .build()
-                    .user_data(user_data),
-            )
-            .map_err(|e| {
-                AsyncIoError::WriteZeroes(Error::other(format!("Submission queue is full: {e:?}")))
-            })?;
-        };
-
-        sq.sync();
-        submitter.submit().map_err(AsyncIoError::WriteZeroes)?;
-
-        Ok(())
+        self.data_io
+            .submit_fallocate(self.fd, offset, length, mode, user_data)
+            .map_err(AsyncIoError::WriteZeroes)
     }
 }
