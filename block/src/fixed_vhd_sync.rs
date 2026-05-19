@@ -1,12 +1,14 @@
 // Copyright © 2021 Intel Corporation
 //
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+//
 // SPDX-License-Identifier: Apache-2.0
 
 use std::os::unix::io::RawFd;
 
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
+use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
 use crate::raw_sync::RawFileSync;
 
 pub struct FixedVhdSync {
@@ -66,12 +68,32 @@ impl AsyncIo for FixedVhdSync {
         self.raw_file_sync.write_vectored(offset, iovecs, user_data)
     }
 
+    fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
+        let offset = op.offset();
+        if offset as u64 >= self.size {
+            let error = std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Invalid offset {}, can't be larger than file size {}",
+                    offset, self.size
+                ),
+            );
+            return Err(if op.is_read() {
+                AsyncIoError::ReadVectored(error)
+            } else {
+                AsyncIoError::WriteVectored(error)
+            });
+        }
+
+        self.raw_file_sync.submit_data_operation(op)
+    }
+
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
         self.raw_file_sync.fsync(user_data)
     }
 
-    fn next_completed_request(&mut self) -> Option<(u64, i32)> {
-        self.raw_file_sync.next_completed_request()
+    fn next_completion(&mut self) -> Option<AsyncIoCompletion> {
+        self.raw_file_sync.next_completion()
     }
 
     fn punch_hole(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
