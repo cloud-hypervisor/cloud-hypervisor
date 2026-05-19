@@ -1127,6 +1127,17 @@ components:
         - size
       type: object
       properties:
+        id:
+          type: string
+        pci_segment:
+          type: integer
+          format: int16
+        pci_device_id:
+          type: integer
+          format: uint8
+        iommu:
+          type: boolean
+          default: false
         size:
           type: integer
           format: int64

@@ -1896,13 +1896,15 @@ impl RtcConfig {
 
 impl BalloonConfig {
     pub const SYNTAX: &'static str = "Balloon parameters \"size=<balloon_size>,deflate_on_oom=on|off,\
-        free_page_reporting=on|off\"";
+        free_page_reporting=on|off,iommu=on|off,id=<device_id>,pci_segment=<segment_id>,\
+        pci_device_id=<pci_slot>\"";
 
     pub fn parse(balloon: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser.add("size");
         parser.add("deflate_on_oom");
         parser.add("free_page_reporting");
+        parser.add_all(PciDeviceCommonConfig::OPTIONS_IOMMU);
         parser.parse(balloon).map_err(Error::ParseBalloon)?;
 
         let size = parser
@@ -1922,11 +1924,18 @@ impl BalloonConfig {
             .unwrap_or(Toggle(false))
             .0;
 
+        let pci_common = PciDeviceCommonConfig::parse(balloon)?;
+
         Ok(BalloonConfig {
+            pci_common,
             size,
             deflate_on_oom,
             free_page_reporting,
         })
+    }
+
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        self.pci_common.validate(vm_config)
     }
 }
 
@@ -3258,6 +3267,10 @@ impl VmConfig {
         }
 
         if let Some(balloon) = &self.balloon {
+            balloon.validate(self)?;
+            Self::validate_identifier(&mut id_list, &balloon.pci_common.id)?;
+            self.iommu |= balloon.pci_common.iommu;
+
             let ram_size = self.memory.total_size();
             if balloon.size >= ram_size {
                 return Err(ValidationError::BalloonLargerThanRam(
@@ -4370,6 +4383,40 @@ mod unit_tests {
                 ..Default::default()
             }
         );
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_balloon() -> Result<()> {
+        assert_eq!(
+            BalloonConfig::parse(
+                "size=128M,deflate_on_oom=on,free_page_reporting=on,pci_segment=1,pci_device_id=7"
+            )?,
+            BalloonConfig {
+                pci_common: PciDeviceCommonConfig {
+                    pci_segment: 1,
+                    pci_device_id: Some(7),
+                    ..Default::default()
+                },
+                size: 128 << 20,
+                deflate_on_oom: true,
+                free_page_reporting: true,
+            }
+        );
+
+        assert_eq!(
+            BalloonConfig::parse("size=0,iommu=on")?,
+            BalloonConfig {
+                pci_common: PciDeviceCommonConfig {
+                    iommu: true,
+                    ..Default::default()
+                },
+                size: 0,
+                deflate_on_oom: false,
+                free_page_reporting: false,
+            }
+        );
+
         Ok(())
     }
 
@@ -6122,6 +6169,47 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             invalid_config.validate(),
             Err(ValidationError::InvalidPciDeviceId(pci::NUM_DEVICE_IDS + 1))
+        );
+
+        // Invalid balloon BDF - Same ID as Root device
+        let mut invalid_config = valid_config.clone();
+        invalid_config.balloon = Some(BalloonConfig {
+            pci_common: PciDeviceCommonConfig {
+                pci_device_id: Some(pci::PCI_ROOT_DEVICE_ID),
+                ..Default::default()
+            },
+            size: 0,
+            deflate_on_oom: false,
+            free_page_reporting: false,
+        });
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::ReservedPciDeviceId(
+                pci::PCI_ROOT_DEVICE_ID
+            ))
+        );
+
+        // Invalid balloon ID - Duplicate identifier
+        let mut invalid_config = valid_config.clone();
+        invalid_config.balloon = Some(BalloonConfig {
+            pci_common: PciDeviceCommonConfig {
+                id: Some("test0".to_string()),
+                ..Default::default()
+            },
+            size: 0,
+            deflate_on_oom: false,
+            free_page_reporting: false,
+        });
+        invalid_config.disks = Some(vec![DiskConfig {
+            pci_common: PciDeviceCommonConfig {
+                id: Some("test0".to_string()),
+                ..Default::default()
+            },
+            ..disk_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::IdentifierNotUnique("test0".to_string()))
         );
 
         // Invalid console BDF - Same ID as Root device
