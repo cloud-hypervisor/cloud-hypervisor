@@ -3251,7 +3251,9 @@ impl Pausable for Vm {
                 .vm
                 .get_clock()
                 .map_err(|e| MigratableError::Pause(anyhow!("Could not get VM clock: {e}")))?;
-            clock.reset_flags();
+            if !clock.has_realtime() {
+                clock.set_realtime(std::time::SystemTime::now());
+            }
             self.saved_clock = Some(clock);
         }
 
