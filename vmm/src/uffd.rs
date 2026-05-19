@@ -132,12 +132,19 @@ pub(crate) fn create(required_features: u64) -> Result<OwnedFd, Error> {
     Ok(fd)
 }
 
-/// Register a memory range for missing-page fault handling.
-pub(crate) fn register(fd: BorrowedFd<'_>, addr: u64, len: u64) -> Result<u64, Error> {
+/// Register a memory range for fault handling with the given mode flags.
+///
+/// Common modes:
+/// - `UFFDIO_REGISTER_MODE_MISSING`: missing-page faults (snapshot restore)
+/// - `UFFDIO_REGISTER_MODE_MISSING | UFFDIO_REGISTER_MODE_WP`: missing
+///   faults and write-protect tracking. WP-related ioctls
+///   (`UFFDIO_WRITEPROTECT`) are issued by the external manager on
+///   the handed-off fd.
+pub(crate) fn register(fd: BorrowedFd<'_>, addr: u64, len: u64, mode: u64) -> Result<u64, Error> {
     let mut reg = UffdioRegister {
         range_start: addr,
         range_len: len,
-        mode: userfaultfd::UFFDIO_REGISTER_MODE_MISSING,
+        mode,
         ioctls: 0,
     };
     // SAFETY: `reg` is a valid, correctly-sized struct for this ioctl.
