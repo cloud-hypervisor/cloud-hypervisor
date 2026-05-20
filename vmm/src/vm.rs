@@ -90,6 +90,7 @@ use crate::console_devices::{ConsoleDeviceError, ConsoleInfo};
 use crate::coredump::{
     CpuElf64Writable, DumpState, Elf64Writable, GuestDebuggable, GuestDebuggableError, NoteDescType,
 };
+use crate::deserialization_barrier::{ExtractFdMapError, FdUpdateError};
 use crate::device_manager::{DeviceManager, DeviceManagerError};
 use crate::device_tree::DeviceTree;
 #[cfg(feature = "guest_debug")]
@@ -361,6 +362,12 @@ pub enum Error {
 
     #[error("Error locking disk images: Another instance likely holds a lock")]
     LockingError(#[source] DeviceManagerError),
+
+    #[error("Error updating file descriptors: {0}")]
+    FdUpdate(#[source] FdUpdateError),
+
+    #[error("Error creating file descriptor map: {0}")]
+    ExtractFdMap(#[source] ExtractFdMapError),
 
     #[cfg(feature = "fw_cfg")]
     #[error("Fw Cfg missing kernel")]

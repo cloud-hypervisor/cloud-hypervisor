@@ -9,6 +9,7 @@ use std::ffi::{CStr, CString};
 use std::fs::File;
 use std::io::{Error as IoError, Read, Result as IoResult, Write};
 use std::net::{IpAddr, Ipv6Addr};
+use std::os::fd::OwnedFd;
 use std::os::raw::*;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 
@@ -231,21 +232,20 @@ impl Tap {
         Self::open_named("vmtap%d", num_queue_pairs, None)
     }
 
-    pub fn from_tap_fd(fd: RawFd, num_queue_pairs: usize) -> Result<Tap> {
+    pub fn from_tap_fd(fd: OwnedFd, num_queue_pairs: usize) -> Result<Tap> {
         // Ensure that the file is opened non-blocking, this is particularly
         // needed when opened via the shell for macvtap.
         // SAFETY: FFI call
         let ret = unsafe {
-            let mut flags = libc::fcntl(fd, libc::F_GETFL);
+            let mut flags = libc::fcntl(fd.as_raw_fd(), libc::F_GETFL);
             flags |= libc::O_NONBLOCK;
-            libc::fcntl(fd, libc::F_SETFL, flags)
+            libc::fcntl(fd.as_raw_fd(), libc::F_SETFL, flags)
         };
         if ret < 0 {
             return Err(Error::ConfigureTap(IoError::last_os_error()));
         }
 
-        // SAFETY: fd is a tap fd
-        let tap_file = unsafe { File::from_raw_fd(fd) };
+        let tap_file = fd.into();
         let mut ifreq: libc::ifreq = ifreq {
             ifr_name: [0; IFNAMSIZ],
             ifr_ifru: __c_anonymous_ifr_ifru { ifru_flags: 0 },
@@ -713,7 +713,8 @@ mod unit_tests {
         let _tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
 
         let orig_tap = Tap::new(1).unwrap();
-        let fd = orig_tap.as_raw_fd();
+        // SAFETY: The fd is taken from an existing tap device, so it must be valid.
+        let fd = unsafe { OwnedFd::from_raw_fd(orig_tap.as_raw_fd()) };
         let _new_tap = Tap::from_tap_fd(fd, 1).unwrap();
     }
 

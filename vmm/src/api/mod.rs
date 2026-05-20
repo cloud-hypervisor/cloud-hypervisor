@@ -213,7 +213,7 @@ pub enum ApiError {
 }
 pub type ApiResult<T> = Result<T, ApiError>;
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct VmInfoResponse {
     pub config: Box<VmConfig>,
     pub state: VmState,

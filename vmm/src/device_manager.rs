@@ -13,6 +13,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::{File, OpenOptions};
 use std::io::{self, IsTerminal, Seek, SeekFrom, stdout};
 use std::num::Wrapping;
+use std::os::fd::AsFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 #[cfg(not(target_arch = "riscv64"))]
@@ -2986,7 +2987,7 @@ impl DeviceManager {
             } else if let Some(fds) = &net_cfg.fds {
                 let net = virtio_devices::Net::from_tap_fds(
                     id.clone(),
-                    fds,
+                    &fds.iter().map(AsFd::as_fd).collect::<Vec<_>>(),
                     Some(net_cfg.mac),
                     net_cfg.mtu,
                     self.force_access_platform | net_cfg.pci_common.iommu,
@@ -3002,11 +3003,6 @@ impl DeviceManager {
                     net_cfg.offload_csum,
                 )
                 .map_err(DeviceManagerError::CreateVirtioNet)?;
-
-                // SAFETY: 'fds' are valid because TAP devices are created successfully
-                unsafe {
-                    self.config.lock().unwrap().add_preserved_fds(fds.clone());
-                }
 
                 Arc::new(Mutex::new(net))
             } else {
@@ -4826,35 +4822,9 @@ impl DeviceManager {
                     .unwrap()
                     .device_type(),
             );
-            // When the device is added, we close all file descriptors
-            // opened externally for this device. This allows management
-            // software to properly clean up resources, e.g., libvirt can clean
-            // up tap devices.
-            //
-            // TODO: once we allow externally opened FDs for other devices as well,
-            // we should create a descriptive abstraction/function for this
-            // functionality.
             match device_type {
-                VirtioDeviceType::Net => {
-                    let mut config = self.config.lock().unwrap();
-                    let nets = config.net.as_deref_mut().unwrap();
-                    let net_dev_cfg = nets
-                        .iter_mut()
-                        .find(|net| net.pci_common.id.as_deref() == Some(id))
-                        // unwrap: the device could not have been removed without an ID
-                        .unwrap();
-                    let fds = net_dev_cfg.fds.take().unwrap_or(Vec::new());
-
-                    debug!("Closing preserved FDs from virtio-net device: id={id}, fds={fds:?}");
-                    for fd in fds {
-                        config.preserved_fds.as_mut().unwrap().remove(&fd);
-                        // SAFETY: We are closing the only remaining instance of this FD.
-                        unsafe {
-                            libc::close(fd);
-                        }
-                    }
-                }
-                VirtioDeviceType::Block
+                VirtioDeviceType::Net
+                | VirtioDeviceType::Block
                 | VirtioDeviceType::Pmem
                 | VirtioDeviceType::Fs
                 | VirtioDeviceType::Vsock => {}

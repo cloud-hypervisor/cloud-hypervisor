@@ -2,8 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-use std::collections::HashSet;
 use std::net::IpAddr;
+use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 #[cfg(feature = "fw_cfg")]
 use std::str::FromStr;
@@ -12,13 +12,17 @@ use std::{fs, result};
 use arch::CpuProfile;
 use block::ImageType;
 pub use block::fcntl::LockGranularityChoice;
-use log::{debug, warn};
+use log::warn;
 use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_devices::RateLimiterConfig;
 
 use crate::Landlock;
+use crate::deserialization_barrier::{
+    Active, Deserialized, ExportScmRights, Fd, FdIdent, FdMap, FdMarker, FdUpdateError,
+    IngestScmRights, IngestScmRightsError, UpdateFds,
+};
 use crate::landlock::LandlockError;
 
 pub type LandlockResult<T> = result::Result<T, LandlockError>;
@@ -412,8 +416,15 @@ pub fn default_diskconfig_sparse() -> bool {
     true
 }
 
+pub type NetConfig = NetConfigInner<Active>;
+pub type NetConfigDeserialized = NetConfigInner<Deserialized>;
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct NetConfig {
+#[serde(bound(deserialize = "Fd<S>: Deserialize<'de>",))]
+pub struct NetConfigInner<S>
+where
+    S: FdMarker,
+{
     #[serde(flatten)]
     pub pci_common: PciDeviceCommonConfig,
     #[serde(default = "default_netconfig_tap")]
@@ -435,14 +446,8 @@ pub struct NetConfig {
     pub vhost_socket: Option<String>,
     #[serde(default)]
     pub vhost_mode: VhostMode,
-    // Special deserialize handling:
-    // Therefore, we don't serialize FDs, and whatever value is here after
-    // deserialization is invalid.
-    //
-    // Valid FDs are transmitted via a different channel (SCM_RIGHTS message)
-    // and will be populated into this struct on the destination VMM eventually.
-    #[serde(default, deserialize_with = "deserialize_netconfig_fds")]
-    pub fds: Option<Vec<i32>>,
+    #[serde(default)]
+    pub fds: Option<Vec<Fd<S>>>,
     #[serde(default)]
     pub rate_limiter_config: Option<RateLimiterConfig>,
     #[serde(default = "default_netconfig_true")]
@@ -451,6 +456,152 @@ pub struct NetConfig {
     pub offload_ufo: bool,
     #[serde(default = "default_netconfig_true")]
     pub offload_csum: bool,
+}
+
+impl ExportScmRights for NetConfig {
+    type Inactive = NetConfigInner<Deserialized>;
+
+    fn export_fd_list_inner(self, fds: &mut Vec<OwnedFd>) -> Self::Inactive {
+        let inactive_fds = self.fds.map(|active_fds| {
+            active_fds
+                .into_iter()
+                .map(|fd| fd.export_fd_list_inner(fds))
+                .collect()
+        });
+        NetConfigInner {
+            pci_common: self.pci_common,
+            tap: self.tap,
+            ip: self.ip,
+            mask: self.mask,
+            mac: self.mac,
+            host_mac: self.host_mac,
+            mtu: self.mtu,
+            num_queues: self.num_queues,
+            queue_size: self.queue_size,
+            vhost_user: self.vhost_user,
+            vhost_socket: self.vhost_socket,
+            vhost_mode: self.vhost_mode,
+            fds: inactive_fds,
+            rate_limiter_config: self.rate_limiter_config,
+            offload_tso: self.offload_tso,
+            offload_ufo: self.offload_ufo,
+            offload_csum: self.offload_csum,
+        }
+    }
+}
+
+impl UpdateFds for NetConfigDeserialized {
+    type Activated = NetConfig;
+
+    fn update_fds_inner(self, fd_map: &mut FdMap) -> Result<Self::Activated, FdUpdateError> {
+        let fds = 'block: {
+            let Some(id) = &self.pci_common.id else {
+                if let Some(self_fds) = self.fds
+                    && !self_fds.is_empty()
+                {
+                    return Err(FdUpdateError::MissingId);
+                }
+                break 'block None;
+            };
+            let fd_ident = FdIdent::new_net(id.clone());
+
+            let fds = fd_map.remove(&fd_ident);
+            match (self.fds, fds) {
+                (Some(self_fds), Some(fds)) => {
+                    if self_fds.len() > fds.len() {
+                        return Err(FdUpdateError::TooLittleFds(fd_ident));
+                    }
+
+                    if self_fds.len() < fds.len() {
+                        return Err(FdUpdateError::TooManyFds(fd_ident));
+                    }
+
+                    Some(fds)
+                }
+                (Some(self_fds), None) => {
+                    if self_fds.is_empty() {
+                        None
+                    } else {
+                        return Err(FdUpdateError::MissingFds(fd_ident));
+                    }
+                }
+                (None, Some(fds)) => {
+                    if fds.is_empty() {
+                        None
+                    } else {
+                        return Err(FdUpdateError::SuperfluousFds(vec![FdIdent::new_net(
+                            id.clone(),
+                        )]));
+                    }
+                }
+                (None, None) => None,
+            }
+        };
+        Ok(NetConfig {
+            pci_common: self.pci_common,
+            tap: self.tap,
+            ip: self.ip,
+            mask: self.mask,
+            mac: self.mac,
+            host_mac: self.host_mac,
+            mtu: self.mtu,
+            num_queues: self.num_queues,
+            queue_size: self.queue_size,
+            vhost_user: self.vhost_user,
+            vhost_socket: self.vhost_socket,
+            vhost_mode: self.vhost_mode,
+            fds,
+            rate_limiter_config: self.rate_limiter_config,
+            offload_tso: self.offload_tso,
+            offload_ufo: self.offload_ufo,
+            offload_csum: self.offload_csum,
+        })
+    }
+}
+
+impl IngestScmRights for NetConfigDeserialized {
+    type Activated = NetConfig;
+
+    fn ingest_scm_rights_inner(
+        self,
+        fds: &mut Vec<Fd<Active>>,
+    ) -> Result<Self::Activated, IngestScmRightsError> {
+        if let Some(self_fds) = self.fds {
+            if self_fds.len() > fds.len() {
+                return Err(IngestScmRightsError::TooLittleFds);
+            }
+
+            if self_fds.len() < fds.len() {
+                return Err(IngestScmRightsError::TooManyFds);
+            }
+        }
+
+        let fds = if fds.is_empty() {
+            None
+        } else {
+            Some(std::mem::take(fds))
+        };
+
+        Ok(NetConfig {
+            pci_common: self.pci_common,
+            tap: self.tap,
+            ip: self.ip,
+            mask: self.mask,
+            mac: self.mac,
+            host_mac: self.host_mac,
+            mtu: self.mtu,
+            num_queues: self.num_queues,
+            queue_size: self.queue_size,
+            vhost_user: self.vhost_user,
+            vhost_socket: self.vhost_socket,
+            vhost_mode: self.vhost_mode,
+            fds,
+            rate_limiter_config: self.rate_limiter_config,
+            offload_tso: self.offload_tso,
+            offload_ufo: self.offload_ufo,
+            offload_csum: self.offload_csum,
+        })
+    }
 }
 
 pub fn default_netconfig_true() -> bool {
@@ -475,21 +626,6 @@ pub const DEFAULT_NET_QUEUE_SIZE: u16 = 256;
 
 pub fn default_netconfig_queue_size() -> u16 {
     DEFAULT_NET_QUEUE_SIZE
-}
-
-fn deserialize_netconfig_fds<'de, D>(d: D) -> Result<Option<Vec<i32>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let invalid_fds: Option<Vec<i32>> = Option::deserialize(d)?;
-    if let Some(invalid_fds) = invalid_fds {
-        debug!(
-            "FDs in 'NetConfig' won't be deserialized as they are most likely invalid now. Deserializing them as -1."
-        );
-        Ok(Some(vec![-1; invalid_fds.len()]))
-    } else {
-        Ok(None)
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -1081,8 +1217,15 @@ impl ApplyLandlock for LandlockConfig {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct VmConfig {
+pub type VmConfig = VmConfigInner<Active>;
+pub type VmConfigInnerDeserialized = VmConfigInner<Deserialized>;
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(bound(deserialize = "crate::deserialization_barrier::Fd<S>: Deserialize<'de>",))]
+pub struct VmConfigInner<S>
+where
+    S: FdMarker,
+{
     #[serde(default)]
     pub cpus: CpusConfig,
     #[serde(default)]
@@ -1090,7 +1233,7 @@ pub struct VmConfig {
     pub payload: Option<PayloadConfig>,
     pub rate_limit_groups: Option<Box<[RateLimiterGroupConfig]>>,
     pub disks: Option<Vec<DiskConfig>>,
-    pub net: Option<Vec<NetConfig>>,
+    pub net: Option<Vec<NetConfigInner<S>>>,
     #[serde(default)]
     pub rng: RngConfig,
     pub balloon: Option<BalloonConfig>,
@@ -1126,16 +1269,6 @@ pub struct VmConfig {
     pub pci_segments: Option<Box<[PciSegmentConfig]>>,
     pub platform: Option<PlatformConfig>,
     pub tpm: Option<TpmConfig>,
-    // Preserved FDs are the ones that share the same life-time as its holding
-    // VmConfig instance, such as FDs for creating TAP devices.
-    // Preserved FDs will stay open as long as the holding VmConfig instance is
-    // valid, and will be closed when the holding VmConfig instance is destroyed.
-    //
-    // This is populated as devices are added at runtime. Removing them again
-    // causes the FDs to be closed early. This allows management software to
-    // gracefully clean up resources (e.g., libvirt closes tap devices).
-    #[serde(skip)]
-    pub preserved_fds: Option<HashSet<i32>>,
     #[serde(default)]
     pub landlock_enable: bool,
     pub landlock_rules: Option<Box<[LandlockConfig]>>,
@@ -1252,5 +1385,695 @@ impl VmConfig {
         } else {
             self.cpus.max_vcpus
         }
+    }
+}
+
+impl UpdateFds for VmConfigInnerDeserialized {
+    type Activated = VmConfig;
+
+    fn update_fds_inner(self, fd_map: &mut FdMap) -> Result<Self::Activated, FdUpdateError> {
+        let net = {
+            if let Some(net) = self.net {
+                let mut net_configs = Vec::with_capacity(net.len());
+                for net_config in net {
+                    net_configs.push(net_config.update_fds_inner(fd_map)?);
+                }
+                Some(net_configs)
+            } else {
+                None
+            }
+        };
+
+        Ok(VmConfig {
+            cpus: self.cpus,
+            memory: self.memory,
+            payload: self.payload,
+            rate_limit_groups: self.rate_limit_groups,
+            disks: self.disks,
+            net,
+            rng: self.rng,
+            balloon: self.balloon,
+            generic_vhost_user: self.generic_vhost_user,
+            fs: self.fs,
+            pmem: self.pmem,
+            serial: self.serial,
+            console: self.console,
+            #[cfg(target_arch = "x86_64")]
+            debug_console: self.debug_console,
+            devices: self.devices,
+            user_devices: self.user_devices,
+            vdpa: self.vdpa,
+            vsock: self.vsock,
+            #[cfg(feature = "pvmemcontrol")]
+            pvmemcontrol: self.pvmemcontrol,
+            pvpanic: self.pvpanic,
+            iommu: self.iommu,
+            numa: self.numa,
+            watchdog: self.watchdog,
+            rtc: self.rtc,
+            #[cfg(feature = "guest_debug")]
+            gdb: self.gdb,
+            pci_segments: self.pci_segments,
+            platform: self.platform,
+            tpm: self.tpm,
+            landlock_enable: self.landlock_enable,
+            landlock_rules: self.landlock_rules,
+            #[cfg(feature = "ivshmem")]
+            ivshmem: self.ivshmem,
+        })
+    }
+}
+
+impl IngestScmRights for VmConfigInnerDeserialized {
+    type Activated = VmConfig;
+
+    fn ingest_scm_rights_inner(
+        self,
+        fds: &mut Vec<Fd<Active>>,
+    ) -> Result<Self::Activated, IngestScmRightsError> {
+        if fds.is_empty() {
+            let net = if let Some(nets) = self.net {
+                let mut result = Vec::new();
+                for net in nets {
+                    result.push(net.ingest_scm_rights_inner(fds)?);
+                }
+                if result.is_empty() {
+                    None
+                } else {
+                    Some(result)
+                }
+            } else {
+                None
+            };
+            Ok(VmConfig {
+                cpus: self.cpus,
+                memory: self.memory,
+                payload: self.payload,
+                rate_limit_groups: self.rate_limit_groups,
+                disks: self.disks,
+                net,
+                rng: self.rng,
+                balloon: self.balloon,
+                generic_vhost_user: self.generic_vhost_user,
+                fs: self.fs,
+                pmem: self.pmem,
+                serial: self.serial,
+                console: self.console,
+                #[cfg(target_arch = "x86_64")]
+                debug_console: self.debug_console,
+                devices: self.devices,
+                user_devices: self.user_devices,
+                vdpa: self.vdpa,
+                vsock: self.vsock,
+                #[cfg(feature = "pvmemcontrol")]
+                pvmemcontrol: self.pvmemcontrol,
+                pvpanic: self.pvpanic,
+                iommu: self.iommu,
+                numa: self.numa,
+                watchdog: self.watchdog,
+                rtc: self.rtc,
+                #[cfg(feature = "guest_debug")]
+                gdb: self.gdb,
+                pci_segments: self.pci_segments,
+                platform: self.platform,
+                tpm: self.tpm,
+                landlock_enable: self.landlock_enable,
+                landlock_rules: self.landlock_rules,
+                #[cfg(feature = "ivshmem")]
+                ivshmem: self.ivshmem,
+            })
+        } else {
+            Err(IngestScmRightsError::Unsupported)
+        }
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use std::collections::HashMap;
+    use std::fs::File;
+    use std::os::fd::{AsRawFd, OwnedFd, RawFd};
+
+    use net_util::MacAddr;
+
+    use crate::config::{RestoreConfigInner, RestoredNetConfig};
+    use crate::deserialization_barrier::{
+        Active, ExportScmRights, ExtractFdMap, ExtractFdMapError, Fd, FdIdent, FdMap, FdMarker,
+        FdUpdateError, IngestScmRights, IngestScmRightsError, UpdateFds,
+    };
+    use crate::vm_config::{NetConfigInner, PciDeviceCommonConfig, VhostMode, VmConfigInner};
+
+    fn net_fixture<S>(fds: Option<Vec<Fd<S>>>, id: Option<&str>) -> NetConfigInner<S>
+    where
+        S: FdMarker,
+    {
+        NetConfigInner {
+            pci_common: PciDeviceCommonConfig {
+                id: id.map(|id| id.to_owned()),
+                ..Default::default()
+            },
+            tap: None,
+            ip: None,
+            mask: None,
+            mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
+            host_mac: Some(MacAddr::parse_str("12:34:de:ad:be:ef").unwrap()),
+            mtu: None,
+            num_queues: 2,
+            queue_size: 256,
+            vhost_user: false,
+            vhost_socket: None,
+            vhost_mode: VhostMode::Client,
+            fds,
+            rate_limiter_config: None,
+            offload_tso: true,
+            offload_ufo: true,
+            offload_csum: true,
+        }
+    }
+
+    fn restore_config_fixture<S>(
+        net_fds: Option<Vec<RestoredNetConfig<S>>>,
+    ) -> RestoreConfigInner<S>
+    where
+        S: FdMarker,
+    {
+        RestoreConfigInner {
+            source_url: Default::default(),
+            prefault: false,
+            memory_restore_mode: Default::default(),
+            net_fds,
+            resume: false,
+        }
+    }
+
+    fn vm_config_fixture<S>(net: Option<Vec<NetConfigInner<S>>>) -> VmConfigInner<S>
+    where
+        S: FdMarker,
+    {
+        VmConfigInner {
+            cpus: Default::default(),
+            memory: Default::default(),
+            payload: None,
+            rate_limit_groups: None,
+            disks: None,
+            net,
+            rng: Default::default(),
+            balloon: None,
+            generic_vhost_user: None,
+            fs: None,
+            pmem: None,
+            serial: Default::default(),
+            console: Default::default(),
+            #[cfg(target_arch = "x86_64")]
+            debug_console: Default::default(),
+            devices: None,
+            user_devices: None,
+            vdpa: None,
+            vsock: None,
+            #[cfg(feature = "pvmemcontrol")]
+            pvmemcontrol: Default::default(),
+            pvpanic: false,
+            iommu: false,
+            numa: None,
+            watchdog: false,
+            rtc: None,
+            #[cfg(feature = "guest_debug")]
+            gdb: Default::default(),
+            pci_segments: None,
+            platform: None,
+            tpm: None,
+            landlock_enable: false,
+            landlock_rules: None,
+            #[cfg(feature = "ivshmem")]
+            ivshmem: Default::default(),
+        }
+    }
+
+    fn restored_net_config_fixture<S>(fds: Option<Vec<Fd<S>>>) -> RestoredNetConfig<S>
+    where
+        S: FdMarker,
+    {
+        let num_fds = fds.as_ref().map(Vec::len).unwrap_or_default();
+        RestoredNetConfig {
+            id: "test".to_string(),
+            num_fds,
+            fds,
+        }
+    }
+
+    #[test]
+    fn export_scm_rights_netconfig() {
+        let config = net_fixture(None, None);
+        assert!(config.export_fd_list().1.is_empty());
+
+        let config = net_fixture(Some(Vec::new()), None);
+        assert!(config.export_fd_list().1.is_empty());
+
+        let fd: OwnedFd = File::open("/dev/null").unwrap().into();
+        let raw_fd = fd.as_raw_fd();
+        let config = net_fixture(Some(vec![fd.into()]), None);
+        let (config_deactivated, fd_list) = config.export_fd_list();
+        assert_eq!(fd_list.len(), 1);
+        assert_eq!(fd_list[0].as_raw_fd(), raw_fd);
+        assert_eq!(
+            config_deactivated.fds,
+            Some(vec![Fd::new_deserialized(raw_fd)])
+        );
+    }
+
+    #[test]
+    fn export_scm_rights_restore_config() {
+        let config = restore_config_fixture(None);
+        assert!(config.export_fd_list().1.is_empty());
+
+        let config = restore_config_fixture(Some(Vec::new()));
+        assert!(config.export_fd_list().1.is_empty());
+
+        let fd: OwnedFd = File::open("/dev/null").unwrap().into();
+        let raw_fd = fd.as_raw_fd();
+        let config = restore_config_fixture(Some(vec![restored_net_config_fixture(Some(vec![
+            fd.into(),
+        ]))]));
+        let (config_deactivated, fd_list) = config.export_fd_list();
+        assert_eq!(fd_list.len(), 1);
+        assert_eq!(fd_list[0].as_raw_fd(), raw_fd);
+        assert_eq!(
+            config_deactivated.net_fds,
+            Some(vec![restored_net_config_fixture(Some(
+                vec![raw_fd.into(),]
+            ))])
+        );
+    }
+
+    #[test]
+    fn export_scm_rights_restored_net_config() {
+        let config = restored_net_config_fixture(None);
+        assert!(config.export_fd_list().1.is_empty());
+
+        let config = restored_net_config_fixture(Some(Vec::new()));
+        assert!(config.export_fd_list().1.is_empty());
+
+        let fd: OwnedFd = File::open("/dev/null").unwrap().into();
+        let raw_fd = fd.as_raw_fd();
+        let config = restored_net_config_fixture(Some(vec![fd.into()]));
+        let (config_deactivated, fd_list) = config.export_fd_list();
+        assert_eq!(fd_list.len(), 1);
+        assert_eq!(fd_list[0].as_raw_fd(), raw_fd);
+        assert_eq!(config_deactivated.fds, Some(vec![raw_fd.into(),]));
+    }
+
+    #[test]
+    fn extract_fd_map_restored_net_config() {
+        let mut config = restored_net_config_fixture(None);
+        assert!(config.extract_fd_map().unwrap().is_empty());
+
+        let mut config = restored_net_config_fixture(Some(Vec::new()));
+        assert!(config.extract_fd_map().unwrap().is_empty());
+
+        let fd: OwnedFd = File::open("/dev/null").unwrap().into();
+        let raw_fd = fd.as_raw_fd();
+        let mut config = restored_net_config_fixture(Some(vec![fd.into()]));
+        let fd_map = config.extract_fd_map().unwrap();
+        assert_eq!(fd_map.len(), 1);
+        assert_eq!(
+            fd_map
+                .get(&FdIdent::Net {
+                    id: config.id.clone()
+                })
+                .unwrap()[0]
+                .as_raw_fd(),
+            raw_fd
+        );
+        assert_eq!(config.fds, None);
+
+        let fd: OwnedFd = File::open("/dev/null").unwrap().into();
+        let mut config = restored_net_config_fixture(Some(vec![fd.into()]));
+        let net_id = FdIdent::Net {
+            id: config.id.clone(),
+        };
+        let mut fd_map = FdMap::new();
+        fd_map.insert(net_id.clone(), Vec::new());
+        assert_eq!(
+            config.extract_fd_map_inner(&mut fd_map),
+            Err(ExtractFdMapError::IdCollision(format!("{net_id:?}")))
+        );
+    }
+
+    #[test]
+    fn extract_fd_map_restore_config() {
+        let mut config = restore_config_fixture(None);
+        assert!(config.extract_fd_map().unwrap().is_empty());
+
+        let mut config = restore_config_fixture(Some(Vec::new()));
+        assert!(config.extract_fd_map().unwrap().is_empty());
+
+        let fd: OwnedFd = File::open("/dev/null").unwrap().into();
+        let raw_fd = fd.as_raw_fd();
+        let mut config =
+            restore_config_fixture(Some(vec![restored_net_config_fixture(Some(vec![
+                fd.into(),
+            ]))]));
+        let fd_map = config.extract_fd_map().unwrap();
+        assert_eq!(fd_map.len(), 1);
+        assert_eq!(
+            fd_map
+                .get(&FdIdent::Net {
+                    id: "test".to_owned()
+                })
+                .unwrap()[0]
+                .as_raw_fd(),
+            raw_fd
+        );
+        assert_eq!(config.net_fds, None);
+
+        let fd: OwnedFd = File::open("/dev/null").unwrap().into();
+        let mut config =
+            restore_config_fixture(Some(vec![restored_net_config_fixture(Some(vec![
+                fd.into(),
+            ]))]));
+        let net_id = FdIdent::Net {
+            id: "test".to_owned(),
+        };
+        let mut fd_map = FdMap::new();
+        fd_map.insert(net_id.clone(), Vec::new());
+        assert_eq!(
+            config.extract_fd_map_inner(&mut fd_map),
+            Err(ExtractFdMapError::IdCollision(format!("{net_id:?}")))
+        );
+    }
+
+    #[test]
+    fn ingest_scm_rights_netconfig() {
+        let fds = Vec::new();
+        let config = net_fixture(None, None);
+        let active_config = config.ingest_scm_rights(fds).unwrap();
+        assert_eq!(active_config, net_fixture(None, None));
+
+        let fds = Vec::new();
+        let config = net_fixture(Some(Vec::new()), None);
+        let active_config = config.ingest_scm_rights(fds).unwrap();
+        assert_eq!(active_config, net_fixture(None, None));
+
+        let fds = (0..5).map(|_| File::open("/dev/null").unwrap()).collect();
+        let config = net_fixture(Some(Vec::new()), None);
+        assert_eq!(
+            config.ingest_scm_rights(fds),
+            Err(IngestScmRightsError::TooManyFds)
+        );
+
+        let fds = Vec::new();
+        let config = net_fixture(
+            Some((0..5).map(|_| Fd::new_deserialized(-1)).collect()),
+            None,
+        );
+        assert_eq!(
+            config.ingest_scm_rights(fds),
+            Err(IngestScmRightsError::TooLittleFds)
+        );
+
+        let fds: Vec<File> = (0..5).map(|_| File::open("/dev/null").unwrap()).collect();
+        let raw_fds: Vec<RawFd> = fds.iter().map(|fd| fd.as_raw_fd()).collect();
+        let config = net_fixture(
+            Some(fds.iter().map(|_| Fd::new_deserialized(-1)).collect()),
+            None,
+        );
+        let active_config = config.ingest_scm_rights(fds).unwrap();
+        active_config
+            .fds
+            .as_ref()
+            .unwrap()
+            .iter()
+            .zip(raw_fds)
+            .for_each(|(fd, raw_fd)| assert_eq!(fd.as_raw_fd(), raw_fd));
+    }
+
+    #[test]
+    fn ingest_scm_rights_restore_config() {
+        let fds = Vec::new();
+        let config = restore_config_fixture(None);
+        let active_config = config.ingest_scm_rights(fds).unwrap();
+        assert_eq!(active_config, restore_config_fixture(None));
+
+        let fds = Vec::new();
+        let config = restore_config_fixture(Some(Vec::new()));
+        let active_config = config.ingest_scm_rights(fds).unwrap();
+        assert_eq!(active_config, restore_config_fixture(None));
+
+        let fds = (0..5).map(|_| File::open("/dev/null").unwrap()).collect();
+        let config = restore_config_fixture(Some(Vec::new()));
+        assert_eq!(
+            config.ingest_scm_rights(fds),
+            Err(IngestScmRightsError::TooManyFds)
+        );
+
+        let fds = Vec::new();
+        let config = restore_config_fixture(Some(
+            (0..5)
+                .map(|_| restored_net_config_fixture(Some(vec![Fd::new_deserialized(-1)])))
+                .collect(),
+        ));
+        assert_eq!(
+            config.ingest_scm_rights(fds),
+            Err(IngestScmRightsError::TooLittleFds)
+        );
+
+        let fds: Vec<File> = (0..5).map(|_| File::open("/dev/null").unwrap()).collect();
+        let raw_fds: Vec<RawFd> = fds.iter().map(|fd| fd.as_raw_fd()).collect();
+        let config = restore_config_fixture(Some(
+            fds.iter()
+                .map(|_| restored_net_config_fixture(Some(vec![Fd::new_deserialized(-1)])))
+                .collect(),
+        ));
+        let active_config = config.ingest_scm_rights(fds).unwrap();
+        active_config
+            .net_fds
+            .as_ref()
+            .unwrap()
+            .iter()
+            .zip(raw_fds)
+            .for_each(|(fd, raw_fd)| assert_eq!(fd.fds.as_ref().unwrap()[0].as_raw_fd(), raw_fd));
+    }
+
+    #[test]
+    fn ingest_scm_rights_restored_net_config() {
+        let fds = Vec::new();
+        let config = restored_net_config_fixture(None);
+        let active_config = config.ingest_scm_rights(fds).unwrap();
+        assert_eq!(active_config, restored_net_config_fixture(None));
+
+        let fds = Vec::new();
+        let config = restored_net_config_fixture(Some(Vec::new()));
+        let active_config = config.ingest_scm_rights(fds).unwrap();
+        assert_eq!(active_config, restored_net_config_fixture(None));
+
+        let fds = (0..5).map(|_| File::open("/dev/null").unwrap()).collect();
+        let config = restored_net_config_fixture(Some(Vec::new()));
+        assert_eq!(
+            config.ingest_scm_rights(fds),
+            Err(IngestScmRightsError::TooManyFds)
+        );
+
+        let fds = Vec::new();
+        let config =
+            restored_net_config_fixture(Some((0..5).map(|_| Fd::new_deserialized(-1)).collect()));
+        assert_eq!(
+            config.ingest_scm_rights(fds),
+            Err(IngestScmRightsError::TooLittleFds)
+        );
+
+        let fds: Vec<File> = (0..5).map(|_| File::open("/dev/null").unwrap()).collect();
+        let raw_fds: Vec<RawFd> = fds.iter().map(|fd| fd.as_raw_fd()).collect();
+        let config = restored_net_config_fixture(Some(
+            fds.iter().map(|_| Fd::new_deserialized(-1)).collect(),
+        ));
+        let active_config = config.ingest_scm_rights(fds).unwrap();
+        active_config
+            .fds
+            .as_ref()
+            .unwrap()
+            .iter()
+            .zip(raw_fds)
+            .for_each(|(fd, raw_fd)| assert_eq!(fd.as_raw_fd(), raw_fd));
+    }
+
+    #[test]
+    fn ingest_scm_rights_vm_config() {
+        let fds = Vec::new();
+        let config = vm_config_fixture(None);
+        let active_config = config.ingest_scm_rights(fds).unwrap();
+        assert_eq!(active_config, vm_config_fixture(None));
+
+        let fds = Vec::new();
+        let config = vm_config_fixture(Some(Vec::new()));
+        let active_config = config.ingest_scm_rights(fds).unwrap();
+        assert_eq!(active_config, vm_config_fixture(None));
+
+        let fds = Vec::new();
+        let config = vm_config_fixture(Some((0..5).map(|_| net_fixture(None, None)).collect()));
+        let active_config = config.ingest_scm_rights(fds).unwrap();
+        assert_eq!(
+            active_config,
+            vm_config_fixture(Some((0..5).map(|_| net_fixture(None, None)).collect()))
+        );
+
+        let fds = (0..5).map(|_| File::open("/dev/null").unwrap()).collect();
+        let config = vm_config_fixture(Some(Vec::new()));
+        assert_eq!(
+            config.ingest_scm_rights(fds),
+            Err(IngestScmRightsError::Unsupported)
+        );
+
+        let fds: Vec<File> = (0..5).map(|_| File::open("/dev/null").unwrap()).collect();
+        let config = vm_config_fixture(Some(fds.iter().map(|_| net_fixture(None, None)).collect()));
+        assert_eq!(
+            config.ingest_scm_rights(fds),
+            Err(IngestScmRightsError::Unsupported)
+        );
+
+        let fds: Vec<File> = (0..5).map(|_| File::open("/dev/null").unwrap()).collect();
+        let config = vm_config_fixture(Some(
+            fds.iter()
+                .map(|_| net_fixture(Some(vec![Fd::new_deserialized(-1)]), None))
+                .collect(),
+        ));
+        assert_eq!(
+            config.ingest_scm_rights(fds),
+            Err(IngestScmRightsError::Unsupported)
+        );
+    }
+
+    #[test]
+    fn update_fds_netconfig() {
+        let fd_ident = FdIdent::new_net("test".to_owned());
+
+        let fd_map = HashMap::new();
+        let config = net_fixture(None, Some("test"));
+        let active_config = config.update_fds(fd_map).unwrap();
+        assert_eq!(active_config, net_fixture(None, Some("test")));
+
+        let fd_map = HashMap::new();
+        let config = net_fixture(Some(Vec::new()), Some("test"));
+        let active_config = config.update_fds(fd_map).unwrap();
+        assert_eq!(active_config, net_fixture(None, Some("test")));
+
+        let fd_map = HashMap::new();
+        let config = net_fixture(None, None);
+        let active_config = config.update_fds(fd_map).unwrap();
+        assert_eq!(active_config, net_fixture(None, None));
+
+        let fd_map = HashMap::new();
+        let config = net_fixture(Some(Vec::new()), None);
+        let active_config = config.update_fds(fd_map).unwrap();
+        assert_eq!(active_config, net_fixture(None, None));
+
+        let fd_map = [(fd_ident.clone(), Vec::new())].into();
+        let config = net_fixture(None, Some("test"));
+        let active_config = config.update_fds(fd_map).unwrap();
+        assert_eq!(active_config, net_fixture(None, Some("test")));
+
+        let fd_map = HashMap::new();
+        let config = net_fixture(
+            Some((0..5).map(|_| Fd::new_deserialized(-1)).collect()),
+            Some("test"),
+        );
+        assert_eq!(
+            config.update_fds(fd_map),
+            Err(FdUpdateError::MissingFds(fd_ident.clone()))
+        );
+
+        let fd_map = HashMap::new();
+        let config = net_fixture(Some(vec![Fd::new_deserialized(-1); 5]), None);
+        assert_eq!(config.update_fds(fd_map), Err(FdUpdateError::MissingId));
+
+        let fds = vec![File::open("/dev/null").unwrap().into(); 5];
+        let fd_map = [(fd_ident.clone(), fds)].into();
+        let config = net_fixture(None, Some("test"));
+        assert_eq!(
+            config.update_fds(fd_map),
+            Err(FdUpdateError::SuperfluousFds(vec![fd_ident.clone()]))
+        );
+
+        let fds = vec![File::open("/dev/null").unwrap().into(); 5];
+        let fds_raw: Vec<_> = fds.iter().map(|fd: &Fd<Active>| fd.as_raw_fd()).collect();
+        let fd_map = [(fd_ident.clone(), fds)].into();
+        let config = net_fixture(Some(vec![Fd::new_deserialized(-1); 5]), Some("test"));
+        let config_active = config.update_fds(fd_map).unwrap();
+        config_active
+            .fds
+            .as_ref()
+            .unwrap()
+            .iter()
+            .zip(fds_raw)
+            .for_each(|(fd, fd_raw)| assert_eq!(fd.as_raw_fd(), fd_raw));
+
+        let fds = vec![File::open("/dev/null").unwrap().into(); 5];
+        let fd_map = [(fd_ident.clone(), fds)].into();
+        let config = net_fixture(None, None);
+        assert_eq!(
+            config.update_fds(fd_map),
+            Err(FdUpdateError::SuperfluousFds(vec![fd_ident.clone()]))
+        );
+
+        let fds = vec![File::open("/dev/null").unwrap().into(); 5];
+        let fd_map = [(fd_ident.clone(), fds)].into();
+        let config = net_fixture(Some(vec![Fd::new_deserialized(-1)]), Some("test"));
+        assert_eq!(
+            config.update_fds(fd_map),
+            Err(FdUpdateError::TooManyFds(fd_ident.clone()))
+        );
+
+        let fds = vec![File::open("/dev/null").unwrap().into(); 5];
+        let fd_map = [(fd_ident.clone(), fds)].into();
+        let config = net_fixture(Some(vec![Fd::new_deserialized(-1); 10]), Some("test"));
+        assert_eq!(
+            config.update_fds(fd_map),
+            Err(FdUpdateError::TooLittleFds(fd_ident.clone()))
+        );
+
+        let fd_map = [(fd_ident.clone(), Vec::new())].into();
+        let config = net_fixture(Some(vec![Fd::new_deserialized(-1); 10]), Some("test"));
+        assert_eq!(
+            config.update_fds(fd_map),
+            Err(FdUpdateError::TooLittleFds(fd_ident.clone()))
+        );
+    }
+
+    #[test]
+    fn update_fds_vm_config() {
+        let fd_map = HashMap::new();
+        let config = vm_config_fixture(Some(vec![net_fixture(Some(Vec::new()), Some("test"))]));
+        let active_config = config.update_fds(fd_map).unwrap();
+        assert_eq!(
+            active_config,
+            vm_config_fixture(Some(vec![net_fixture(None, Some("test"))]))
+        );
+
+        let fd_map = HashMap::new();
+        let config = vm_config_fixture(None);
+        let active_config = config.update_fds(fd_map).unwrap();
+        assert_eq!(active_config, vm_config_fixture(None));
+
+        let fds = vec![File::open("/dev/null").unwrap().into(); 5];
+        let fd_map = [(FdIdent::new_net("test".to_owned()), fds)].into();
+        let config = vm_config_fixture(Some(vec![net_fixture(None, Some("other"))]));
+        assert_eq!(
+            config.update_fds(fd_map),
+            Err(FdUpdateError::SuperfluousFds(vec![FdIdent::new_net(
+                "test".to_owned()
+            )]))
+        );
+
+        let fds = vec![File::open("/dev/null").unwrap().into(); 5];
+        let fd_map = [(FdIdent::new_net("test".to_owned()), fds)].into();
+        let config = vm_config_fixture(Some(vec![net_fixture(
+            Some(vec![Fd::new_deserialized(-1)]),
+            Some("other"),
+        )]));
+        assert_eq!(
+            config.update_fds(fd_map),
+            Err(FdUpdateError::MissingFds(FdIdent::new_net(
+                "other".to_owned()
+            )))
+        );
     }
 }

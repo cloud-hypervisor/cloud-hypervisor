@@ -32,6 +32,7 @@ use crate::api::{
     VmPause, VmPowerButton, VmReboot, VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeDisk,
     VmResizeZone, VmRestore, VmResume, VmSendMigration, VmShutdown, VmSnapshot,
 };
+use crate::deserialization_barrier::IngestScmRightsError;
 use crate::landlock::Landlock;
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::{Error as VmmError, Result};
@@ -66,6 +67,10 @@ pub enum HttpError {
     /// Error from internal API
     #[error("Error from API")]
     ApiError(#[source] ApiError),
+
+    /// Error from SCM_RIGHTS file descriptor handling
+    #[error("Failed to apply file descriptors")]
+    FileDescriptorError(#[from] IngestScmRightsError),
 }
 
 const HTTP_ROOT: &str = "/api/v1";

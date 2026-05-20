@@ -22,6 +22,7 @@ use api::http::HttpApiHandle;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use arch::x86_64::MAX_SUPPORTED_CPUS_LEGACY;
 use console_devices::{ConsoleInfo, pre_create_console_devices};
+use deserialization_barrier::{Active, Deserialized, FdMarker, UpdateFds};
 use event_monitor::event;
 use landlock::LandlockError;
 use libc::{EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW, tcsetattr, termios};
@@ -52,6 +53,7 @@ use crate::api::{
 use crate::config::{MemoryRestoreMode, RestoreConfig, add_to_config};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::GuestDebuggable;
+use crate::deserialization_barrier::{ExtractFdMap, FdMap, FdUpdateError};
 use crate::landlock::Landlock;
 use crate::memory_manager::MemoryManager;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -64,7 +66,7 @@ use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::vm::{Error as VmError, Vm, VmState};
 use crate::vm_config::{
     DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
-    UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
+    UserDeviceConfig, VdpaConfig, VmConfig, VmConfigInner, VsockConfig,
 };
 
 mod acpi;
@@ -586,12 +588,41 @@ where
     Ok((value, duration))
 }
 
+type VmMigrationConfig = VmMigrationConfigInner<Active>;
+type VmMigrationConfigDeserialized = VmMigrationConfigInner<Deserialized>;
+
 #[derive(Clone, Deserialize, Serialize)]
-struct VmMigrationConfig {
-    vm_config: Arc<Mutex<VmConfig>>,
+#[serde(bound(deserialize = "VmConfigInner<S>: Deserialize<'de>",))]
+struct VmMigrationConfigInner<S>
+where
+    S: FdMarker,
+{
+    vm_config: Arc<Mutex<VmConfigInner<S>>>,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     common_cpuid: Vec<hypervisor::arch::x86::CpuIdEntry>,
     memory_manager_data: MemoryManagerSnapshotData,
+}
+
+impl UpdateFds for VmMigrationConfigDeserialized {
+    type Activated = VmMigrationConfig;
+
+    fn update_fds_inner(
+        self,
+        fd_map: &mut FdMap,
+    ) -> result::Result<Self::Activated, FdUpdateError> {
+        let active_vm_config = self
+            .vm_config
+            .lock()
+            .unwrap()
+            .clone()
+            .update_fds_inner(fd_map)?;
+        Ok(VmMigrationConfig {
+            vm_config: Arc::new(Mutex::new(active_vm_config)),
+            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+            common_cpuid: self.common_cpuid,
+            memory_manager_data: self.memory_manager_data,
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1040,9 +1071,16 @@ impl Vmm {
             .read_exact(&mut data)
             .map_err(MigratableError::MigrateSocket)?;
 
-        let vm_migration_config: VmMigrationConfig =
-            serde_json::from_slice(&data).map_err(|e| {
+        let vm_migration_config: VmMigrationConfigDeserialized = serde_json::from_slice(&data)
+            .map_err(|e| {
                 MigratableError::MigrateReceive(anyhow!("Error deserialising config: {e}"))
+            })?;
+
+        //TODO(fd): We currently don't support migrations for VM that use fds for net devs.
+        let vm_migration_config = vm_migration_config
+            .update_fds(HashMap::new())
+            .map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!("Error activating config: {e}"))
             })?;
 
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -1945,21 +1983,32 @@ impl RequestHandler for Vmm {
         }
     }
 
-    fn vm_restore(&mut self, restore_cfg: RestoreConfig) -> result::Result<(), VmError> {
+    fn vm_restore(&mut self, mut restore_cfg: RestoreConfig) -> result::Result<(), VmError> {
         if self.vm.is_some() || self.vm_config.is_some() {
             return Err(VmError::VmAlreadyCreated);
         }
 
-        let source_url = restore_cfg.source_url.as_path().to_str();
+        let source_url = restore_cfg
+            .source_url
+            .as_path()
+            .to_str()
+            .map(ToOwned::to_owned);
         if source_url.is_none() {
             return Err(VmError::InvalidRestoreSourceUrl);
         }
         // Safe to unwrap as we checked it was Some(&str).
         let source_url = source_url.unwrap();
+        let vm_config_deserialized = recv_vm_config(&source_url).map_err(VmError::Restore)?;
 
-        let vm_config = Arc::new(Mutex::new(
-            recv_vm_config(source_url).map_err(VmError::Restore)?,
-        ));
+        let vm_config_activated = vm_config_deserialized
+            .update_fds(
+                restore_cfg
+                    .extract_fd_map()
+                    .map_err(VmError::ExtractFdMap)?,
+            )
+            .map_err(VmError::FdUpdate)?;
+
+        let vm_config = Arc::new(Mutex::new(vm_config_activated));
         restore_cfg
             .validate(&vm_config.lock().unwrap().clone())
             .map_err(VmError::ConfigValidation)?;
@@ -1981,7 +2030,7 @@ impl RequestHandler for Vmm {
         }
 
         self.vm_restore(
-            source_url,
+            &source_url,
             vm_config,
             restore_cfg.prefault,
             restore_cfg.memory_restore_mode,
@@ -2788,7 +2837,6 @@ mod unit_tests {
             pci_segments: None,
             platform: None,
             tpm: None,
-            preserved_fds: None,
             landlock_enable: false,
             landlock_rules: None,
             #[cfg(feature = "ivshmem")]

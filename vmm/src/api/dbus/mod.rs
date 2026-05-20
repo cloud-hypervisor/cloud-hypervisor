@@ -26,8 +26,11 @@ use crate::api::{
     VmPause, VmPowerButton, VmReboot, VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeZone,
     VmRestore, VmResume, VmSendMigration, VmShutdown, VmSnapshot, VmmPing, VmmShutdown,
 };
+use crate::config::RestoreConfigDeserialized;
+use crate::deserialization_barrier::IngestScmRights;
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
-use crate::{Error as VmmError, NetConfig, Result as VmmResult, VmConfig};
+use crate::vm_config::{NetConfigDeserialized, VmConfigInnerDeserialized};
+use crate::{Error as VmmError, Result as VmmResult};
 
 pub type DBusApiShutdownChannels = (oneshot::Sender<()>, oneshot::Receiver<()>);
 
@@ -154,11 +157,13 @@ impl DBusApi {
     }
 
     async fn vm_add_net(&self, net_config: String) -> Result<Optional<String>> {
-        let mut net_config: NetConfig = serde_json::from_str(&net_config).map_err(api_error)?;
+        let mut net_config: NetConfigDeserialized =
+            serde_json::from_str(&net_config).map_err(api_error)?;
         if net_config.fds.is_some() {
             warn!("Ignoring FDs sent via the D-Bus request body");
             net_config.fds = None;
         }
+        let net_config = net_config.ingest_scm_rights(Vec::new()).unwrap();
         self.vm_action(&VmAddNet, net_config).await
     }
 
@@ -213,7 +218,8 @@ impl DBusApi {
         let api_sender = self.clone_api_sender().await;
         let api_notifier = self.clone_api_notifier()?;
 
-        let mut vm_config: Box<VmConfig> = serde_json::from_str(&vm_config).map_err(api_error)?;
+        let mut vm_config: VmConfigInnerDeserialized =
+            serde_json::from_str(&vm_config).map_err(api_error)?;
 
         if let Some(ref mut nets) = vm_config.net {
             if nets.iter().any(|net| net.fds.is_some()) {
@@ -223,6 +229,7 @@ impl DBusApi {
                 net.fds = None;
             }
         }
+        let vm_config = Box::new(vm_config.ingest_scm_rights(Vec::new()).unwrap());
 
         blocking::unblock(move || VmCreate.send(api_notifier, api_sender, vm_config))
             .await
@@ -277,7 +284,13 @@ impl DBusApi {
     }
 
     async fn vm_restore(&self, restore_config: String) -> Result<()> {
-        let restore_config = serde_json::from_str(&restore_config).map_err(api_error)?;
+        let mut restore_config: RestoreConfigDeserialized =
+            serde_json::from_str(&restore_config).map_err(api_error)?;
+        if restore_config.net_fds.is_some() {
+            warn!("Ignoring FDs sent via the D-Bus request body");
+            restore_config.net_fds = None;
+        }
+        let restore_config = restore_config.ingest_scm_rights(Vec::new()).unwrap();
         self.vm_action(&VmRestore, restore_config).await.map(|_| ())
     }
 

@@ -925,15 +925,17 @@ fn main() {
 
 #[cfg(test)]
 mod unit_tests {
+    use std::collections::HashMap;
     use std::path::PathBuf;
 
     use vmm::config::VmParams;
+    use vmm::deserialization_barrier::UpdateFds;
     #[cfg(target_arch = "x86_64")]
     use vmm::vm_config::DebugConsoleConfig;
     use vmm::vm_config::{
         CommonConsoleConfig, ConsoleConfig, ConsoleOutputMode, CoreScheduling, CpuFeatures,
         CpusConfig, HotplugMethod, MemoryConfig, PayloadConfig, PciDeviceCommonConfig, RngConfig,
-        SerialConfig, VmConfig,
+        SerialConfig, VmConfig, VmConfigInnerDeserialized,
     };
 
     use crate::test_util::assert_args_sorted;
@@ -954,7 +956,8 @@ mod unit_tests {
         equal: bool,
     ) -> (VmConfig, VmConfig) {
         let cli_vm_config = get_vm_config_from_vec(cli);
-        let openapi_vm_config: VmConfig = serde_json::from_str(openapi).unwrap();
+        let openapi_vm_config: VmConfigInnerDeserialized = serde_json::from_str(openapi).unwrap();
+        let openapi_vm_config = openapi_vm_config.update_fds(HashMap::new()).unwrap();
 
         if equal {
             assert_eq!(cli_vm_config, openapi_vm_config);
@@ -1056,7 +1059,6 @@ mod unit_tests {
             pci_segments: None,
             platform: None,
             tpm: None,
-            preserved_fds: None,
             landlock_enable: false,
             landlock_rules: None,
             #[cfg(feature = "ivshmem")]
