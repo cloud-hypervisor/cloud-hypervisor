@@ -19,9 +19,8 @@ use crate::qcow::metadata::{
 };
 use crate::qcow::qcow_raw_file::QcowRawFile;
 use crate::qcow_common::{
-    AlignedBuf, aligned_pread, aligned_pwrite, decompress_cluster, gather_from_iovecs,
-    gather_from_iovecs_into, pread_alloc, pread_exact, pwrite_all, scatter_to_iovecs,
-    zero_fill_iovecs,
+    AlignedBuf, aligned_pread, aligned_pwrite, decompress_cluster, pread_alloc, pread_exact,
+    pwrite_all,
 };
 
 pub struct QcowSync {
@@ -80,15 +79,9 @@ impl QcowSync {
         }
     }
 
-    // SAFETY: each iovec must describe writable memory that remains valid for
-    // this synchronous call and must be safe to turn into a mutable Rust slice.
-    unsafe fn read_iovecs(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-    ) -> AsyncIoResult<usize> {
-        let address = offset as u64;
-        let total_len: usize = iovecs.iter().map(|v| v.iov_len).sum();
+    fn read_operation(&mut self, op: &mut AsyncIoOperation) -> AsyncIoResult<usize> {
+        let address = op.offset() as u64;
+        let total_len = op.total_len();
 
         let has_backing = self.backing_file.is_some();
         let mappings = self
@@ -100,8 +93,8 @@ impl QcowSync {
         for mapping in mappings {
             match mapping {
                 ClusterReadMapping::Zero { length } => {
-                    // SAFETY: Guaranteed by read_iovecs' caller.
-                    unsafe { zero_fill_iovecs(iovecs, buf_offset, length as usize) };
+                    op.fill_zeroes_at(buf_offset, length as usize)
+                        .map_err(AsyncIoError::ReadVectored)?;
                     buf_offset += length as usize;
                 }
                 ClusterReadMapping::Allocated {
@@ -120,15 +113,15 @@ impl QcowSync {
                             self.alignment,
                         )
                         .map_err(AsyncIoError::ReadVectored)?;
-                        // SAFETY: Guaranteed by read_iovecs' caller.
-                        unsafe { scatter_to_iovecs(iovecs, buf_offset, abuf.as_slice(len)) };
+                        op.write_bytes_at(buf_offset, abuf.as_slice(len))
+                            .map_err(AsyncIoError::ReadVectored)?;
                     } else {
                         // No O_DIRECT, plain buffer is fine.
                         let mut buf = vec![0u8; len];
                         pread_exact(self.data_file.as_raw_fd(), &mut buf, host_offset)
                             .map_err(AsyncIoError::ReadVectored)?;
-                        // SAFETY: Guaranteed by read_iovecs' caller.
-                        unsafe { scatter_to_iovecs(iovecs, buf_offset, &buf) };
+                        op.write_bytes_at(buf_offset, &buf)
+                            .map_err(AsyncIoError::ReadVectored)?;
                     }
                     buf_offset += len;
                 }
@@ -144,14 +137,11 @@ impl QcowSync {
                     let decompressed =
                         decompress_cluster(&compressed, self.cluster_size as usize, &*self.decoder)
                             .map_err(AsyncIoError::ReadVectored)?;
-                    // SAFETY: Guaranteed by read_iovecs' caller.
-                    unsafe {
-                        scatter_to_iovecs(
-                            iovecs,
-                            buf_offset,
-                            &decompressed[cluster_offset..cluster_offset + length],
-                        );
-                    }
+                    op.write_bytes_at(
+                        buf_offset,
+                        &decompressed[cluster_offset..cluster_offset + length],
+                    )
+                    .map_err(AsyncIoError::ReadVectored)?;
                     buf_offset += length;
                 }
                 ClusterReadMapping::Backing {
@@ -164,8 +154,8 @@ impl QcowSync {
                         .unwrap()
                         .read_at(backing_offset, &mut buf)
                         .map_err(AsyncIoError::ReadVectored)?;
-                    // SAFETY: Guaranteed by read_iovecs' caller.
-                    unsafe { scatter_to_iovecs(iovecs, buf_offset, &buf) };
+                    op.write_bytes_at(buf_offset, &buf)
+                        .map_err(AsyncIoError::ReadVectored)?;
                     buf_offset += length as usize;
                 }
             }
@@ -174,15 +164,9 @@ impl QcowSync {
         Ok(total_len)
     }
 
-    // SAFETY: each iovec must describe readable memory that remains valid for
-    // this synchronous call and must be safe to turn into a shared Rust slice.
-    unsafe fn write_iovecs(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-    ) -> AsyncIoResult<usize> {
-        let address = offset as u64;
-        let total_len: usize = iovecs.iter().map(|v| v.iov_len).sum();
+    fn write_operation(&mut self, op: &AsyncIoOperation) -> AsyncIoResult<usize> {
+        let address = op.offset() as u64;
+        let total_len = op.total_len();
         let mut buf_offset = 0usize;
 
         while buf_offset < total_len {
@@ -221,10 +205,8 @@ impl QcowSync {
                         // O_DIRECT, gather directly into aligned buffer.
                         let mut abuf = AlignedBuf::new(count, self.alignment)
                             .map_err(AsyncIoError::WriteVectored)?;
-                        // SAFETY: Guaranteed by write_iovecs' caller.
-                        unsafe {
-                            gather_from_iovecs_into(iovecs, buf_offset, abuf.as_mut_slice(count));
-                        }
+                        op.read_bytes_at(buf_offset, abuf.as_mut_slice(count))
+                            .map_err(AsyncIoError::WriteVectored)?;
                         aligned_pwrite(
                             self.data_file.as_raw_fd(),
                             abuf.as_slice(count),
@@ -234,8 +216,9 @@ impl QcowSync {
                         .map_err(AsyncIoError::WriteVectored)?;
                     } else {
                         // No O_DIRECT, plain buffer is fine.
-                        // SAFETY: Guaranteed by write_iovecs' caller.
-                        let buf = unsafe { gather_from_iovecs(iovecs, buf_offset, count) };
+                        let mut buf = vec![0u8; count];
+                        op.read_bytes_at(buf_offset, &mut buf)
+                            .map_err(AsyncIoError::WriteVectored)?;
                         pwrite_all(self.data_file.as_raw_fd(), &buf, host_offset)
                             .map_err(AsyncIoError::WriteVectored)?;
                     }
@@ -253,22 +236,12 @@ impl AsyncIo for QcowSync {
         &self.eventfd
     }
 
-    fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
-        let offset = op.offset();
+    fn submit_data_operation(&mut self, mut op: AsyncIoOperation) -> AsyncIoResult<()> {
         let is_read = op.is_read();
-        let iovecs = op.iovecs();
         let total_len = if is_read {
-            // SAFETY: AsyncIoOperation keeps the iovec target alive for this
-            // synchronous call. Host-memory operations also satisfy the
-            // aliasing requirement above; guest-memory-backed iovecs remain a
-            // temporary unsound qcow sync case deferred to a later fix.
-            unsafe { self.read_iovecs(offset, iovecs)? }
+            self.read_operation(&mut op)?
         } else {
-            // SAFETY: AsyncIoOperation keeps the iovec target alive for this
-            // synchronous call. Host-memory operations also satisfy the
-            // aliasing requirement above; guest-memory-backed iovecs remain a
-            // temporary unsound qcow sync case deferred to a later fix.
-            unsafe { self.write_iovecs(offset, iovecs)? }
+            self.write_operation(&op)?
         };
         self.completion_list
             .push_back(AsyncIoCompletion::from_operation(op, total_len as i32));

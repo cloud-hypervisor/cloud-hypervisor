@@ -2,17 +2,17 @@
 //
 // Copyright 2026 The Cloud Hypervisor Authors. All rights reserved.
 //
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+//
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 //! Shared helpers for QCOW2 sync and async backends.
 //!
-//! Position-independent I/O (`pread_exact`, `pwrite_all`) and iovec
-//! scatter/gather helpers used by both `qcow_sync` and `qcow_async`.
+//! Position-independent I/O helpers used by both `qcow_sync` and `qcow_async`.
 
 use std::alloc::{Layout, alloc_zeroed, dealloc};
-use std::cmp::min;
 use std::os::fd::RawFd;
-use std::{io, ptr, slice};
+use std::{io, slice};
 
 use crate::qcow::decoder::Decoder;
 
@@ -187,109 +187,6 @@ pub fn aligned_pwrite(fd: RawFd, buf: &[u8], offset: u64, alignment: usize) -> i
     pread_exact(fd, bounce.as_mut_slice(aligned_len), aligned_offset)?;
     bounce.as_mut_slice(aligned_len)[head..head + buf.len()].copy_from_slice(buf);
     pwrite_all(fd, bounce.as_slice(aligned_len), aligned_offset)
-}
-
-// -- iovec helper functions --
-//
-// Operate on the iovec array as a flat byte stream.
-
-/// Copy data into iovecs starting at the given byte offset.
-///
-/// # Safety
-/// Caller must ensure iovecs point to valid, writable memory of sufficient size.
-pub unsafe fn scatter_to_iovecs(iovecs: &[libc::iovec], start: usize, data: &[u8]) {
-    let mut remaining = data;
-    let mut pos = 0usize;
-    for iov in iovecs {
-        let iov_end = pos + iov.iov_len;
-        if iov_end <= start || remaining.is_empty() {
-            pos = iov_end;
-            continue;
-        }
-        let iov_start = start.saturating_sub(pos);
-        let available = iov.iov_len - iov_start;
-        let count = min(available, remaining.len());
-        // SAFETY: iov_base is valid for iov_len bytes per caller contract.
-        unsafe {
-            let dst = iov.iov_base.cast::<u8>().add(iov_start);
-            ptr::copy_nonoverlapping(remaining.as_ptr(), dst, count);
-        }
-        remaining = &remaining[count..];
-        if remaining.is_empty() {
-            break;
-        }
-        pos = iov_end;
-    }
-}
-
-/// Zero fill iovecs starting at the given byte offset for the given length.
-///
-/// # Safety
-/// Caller must ensure iovecs point to valid, writable memory of sufficient size.
-pub unsafe fn zero_fill_iovecs(iovecs: &[libc::iovec], start: usize, len: usize) {
-    let mut remaining = len;
-    let mut pos = 0usize;
-    for iov in iovecs {
-        let iov_end = pos + iov.iov_len;
-        if iov_end <= start || remaining == 0 {
-            pos = iov_end;
-            continue;
-        }
-        let iov_start = start.saturating_sub(pos);
-        let available = iov.iov_len - iov_start;
-        let count = min(available, remaining);
-        // SAFETY: iov_base is valid for iov_len bytes per caller contract.
-        unsafe {
-            let dst = iov.iov_base.cast::<u8>().add(iov_start);
-            ptr::write_bytes(dst, 0, count);
-        }
-        remaining -= count;
-        if remaining == 0 {
-            break;
-        }
-        pos = iov_end;
-    }
-}
-
-/// Gather bytes from iovecs starting at the given byte offset into `dst`.
-///
-/// # Safety
-/// Caller must ensure iovecs point to valid, readable memory of sufficient size.
-pub unsafe fn gather_from_iovecs_into(iovecs: &[libc::iovec], start: usize, dst: &mut [u8]) {
-    let len = dst.len();
-    let mut written = 0usize;
-    let mut pos = 0usize;
-    for iov in iovecs {
-        let iov_end = pos + iov.iov_len;
-        if iov_end <= start || written == len {
-            pos = iov_end;
-            continue;
-        }
-        let iov_start = start.saturating_sub(pos);
-        let available = iov.iov_len - iov_start;
-        let count = min(available, len - written);
-        // SAFETY: iov_base is valid for iov_len bytes per caller contract.
-        unsafe {
-            let src = iov.iov_base.cast::<u8>().add(iov_start);
-            ptr::copy_nonoverlapping(src, dst.as_mut_ptr().add(written), count);
-        }
-        written += count;
-        if written == len {
-            break;
-        }
-        pos = iov_end;
-    }
-}
-
-/// Gather bytes from iovecs starting at the given byte offset into a Vec.
-///
-/// # Safety
-/// Caller must ensure iovecs point to valid, readable memory of sufficient size.
-pub unsafe fn gather_from_iovecs(iovecs: &[libc::iovec], start: usize, len: usize) -> Vec<u8> {
-    let mut result = vec![0u8; len];
-    // SAFETY: caller guarantees iovecs are valid; result has len bytes.
-    unsafe { gather_from_iovecs_into(iovecs, start, &mut result) };
-    result
 }
 
 #[cfg(test)]
