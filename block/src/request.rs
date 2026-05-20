@@ -6,10 +6,13 @@
 //
 // Copyright © 2020 Intel Corporation
 //
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+//
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::mem;
+use std::sync::Arc;
 use std::time::Instant;
 
 use log::{error, warn};
@@ -27,7 +30,7 @@ use vm_memory::{
 use vm_virtio::{AccessPlatform, Translatable as _};
 
 use crate::aligned_operation::AlignedOperation;
-use crate::async_io::AsyncIo;
+use crate::async_io::{AsyncIo, AsyncIoOperation, GuestMemoryTarget, OwnedIoBuffer};
 use crate::{Error, ExecuteError, request_type, sector};
 
 const SECTOR_SHIFT: u8 = 9;
@@ -500,6 +503,136 @@ impl Request {
         }
 
         Ok(ret)
+    }
+
+    // Builds a read or write operation for IO to or from `mem`.
+    #[allow(dead_code)]
+    fn build_data_operation<B: Bitmap + Send + Sync + 'static>(
+        &self,
+        mem: Arc<vm_memory::GuestMemoryMmap<B>>,
+        offset: libc::off_t,
+        alignment: u64,
+        user_data: u64,
+    ) -> Result<AsyncIoOperation, ExecuteError> {
+        if self.guest_memory_is_aligned(&mem, alignment)? {
+            let target = GuestMemoryTarget::new(mem, &self.data_descriptors)
+                .map_err(ExecuteError::GetHostAddress)?;
+            return Ok(match self.request_type {
+                RequestType::In => AsyncIoOperation::read_to_memory(offset, target, user_data),
+                RequestType::Out => AsyncIoOperation::write_from_memory(offset, target, user_data),
+                _ => unreachable!("unexpected data operation type"),
+            });
+        }
+
+        // The guest-memory buffers are unaligned, so use an aligned bounce buffer.
+        let mut buffer = OwnedIoBuffer::new(self.data_len(), alignment as usize)
+            .map_err(ExecuteError::TemporaryBufferAllocation)?;
+
+        if self.request_type == RequestType::Out {
+            self.copy_guest_to_buffer(&mem, buffer.as_mut_slice())?;
+        }
+
+        Ok(match self.request_type {
+            RequestType::In => AsyncIoOperation::read_to_vec(offset, buffer, user_data),
+            RequestType::Out => AsyncIoOperation::write_from_vec(offset, buffer, user_data),
+            _ => unreachable!("unexpected data operation type"),
+        })
+    }
+
+    // Checks whether `self.data_descriptors` are aligned to `alignment`.
+    #[allow(dead_code)]
+    fn guest_memory_is_aligned<B: Bitmap + 'static>(
+        &self,
+        mem: &vm_memory::GuestMemoryMmap<B>,
+        alignment: u64,
+    ) -> Result<bool, ExecuteError> {
+        if alignment <= 1 {
+            return Ok(true);
+        }
+
+        for &(data_addr, data_len) in &self.data_descriptors {
+            let _: u32 = data_len;
+            const _: () = assert!(
+                core::mem::size_of::<u32>() <= core::mem::size_of::<usize>(),
+                "unsupported platform"
+            );
+            if data_len == 0 {
+                continue;
+            }
+            let data_len = data_len as usize;
+            let origin_ptr = mem
+                .get_slice(data_addr, data_len)
+                .map_err(ExecuteError::GetHostAddress)?;
+            let origin_ptr = origin_ptr.ptr_guard_mut();
+            if !(origin_ptr.as_ptr() as u64).is_multiple_of(alignment)
+                || !(origin_ptr.len() as u64).is_multiple_of(alignment)
+            {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
+    }
+
+    // Returns the sum of the lengths of `self.data_descriptors`.
+    #[allow(dead_code)]
+    fn data_len(&self) -> usize {
+        self.data_descriptors
+            .iter()
+            .map(|(_, len)| *len as usize)
+            .sum()
+    }
+
+    // Marks guest-memory read destinations dirty before submitting async IO.
+    #[allow(dead_code)]
+    fn mark_read_dirty<B: Bitmap + 'static>(
+        &self,
+        mem: &vm_memory::GuestMemoryMmap<B>,
+    ) -> Result<(), ExecuteError> {
+        for (data_addr, data_len) in &self.data_descriptors {
+            mem.get_slice(*data_addr, *data_len as usize)
+                .map_err(ExecuteError::GetHostAddress)?
+                .bitmap()
+                .mark_dirty(0, *data_len as usize);
+        }
+        Ok(())
+    }
+
+    // Copies guest descriptor contents into a contiguous host buffer.
+    #[allow(dead_code)]
+    fn copy_guest_to_buffer<B: Bitmap + 'static>(
+        &self,
+        mem: &vm_memory::GuestMemoryMmap<B>,
+        buffer: &mut [u8],
+    ) -> Result<(), ExecuteError> {
+        let mut offset = 0usize;
+        for (data_addr, data_len) in &self.data_descriptors {
+            let data_len = *data_len as usize;
+            mem.read_slice(&mut buffer[offset..offset + data_len], *data_addr)
+                .map_err(ExecuteError::Read)?;
+            offset += data_len;
+        }
+        Ok(())
+    }
+
+    // Copies a host completion buffer back into guest descriptors.
+    #[allow(dead_code)]
+    fn copy_buffer_to_guest<B: Bitmap + 'static>(
+        &self,
+        mem: &vm_memory::GuestMemoryMmap<B>,
+        buffer: &[u8],
+    ) -> Result<(), Error> {
+        let mut buffer_offset = 0usize;
+        for (data_addr, data_len) in &self.data_descriptors {
+            if buffer_offset >= buffer.len() {
+                break;
+            }
+            let data_len = (*data_len as usize).min(buffer.len() - buffer_offset);
+            mem.write_slice(&buffer[buffer_offset..buffer_offset + data_len], *data_addr)
+                .map_err(Error::GuestMemory)?;
+            buffer_offset += data_len;
+        }
+        Ok(())
     }
 
     pub fn complete_async<B: Bitmap + 'static>(
