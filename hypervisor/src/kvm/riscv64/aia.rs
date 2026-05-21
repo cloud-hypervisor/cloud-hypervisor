@@ -24,6 +24,9 @@ pub struct KvmAiaImsics {
 
     /// Number of CPUs handled by the device
     vcpu_count: u32,
+
+    /// Number of IMSIC interrupt identities configured by KVM
+    imsic_num_ids: u32,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -37,19 +40,16 @@ impl KvmAiaImsics {
 
     /// Setup the device-specific attributes
     fn init_device_attributes(&mut self, nr_irqs: u32) -> Result<()> {
-        // AIA part attributes
-        // Getting the working mode of RISC-V AIA, defaults to EMUL, passible
-        // variants are EMUL, HW_ACCL, AUTO
-        let mut aia_mode = kvm_bindings::KVM_DEV_RISCV_AIA_MODE_EMUL;
+        // Read the working mode selected by KVM. Possible modes are EMUL,
+        // HW_ACCL and AUTO.
+        let mut aia_mode_readback: u32 = 0;
         Self::get_device_attribute(
             &self.device,
             kvm_bindings::KVM_DEV_RISCV_AIA_GRP_CONFIG,
             u64::from(kvm_bindings::KVM_DEV_RISCV_AIA_CONFIG_MODE),
-            &raw mut aia_mode as u64,
+            &raw mut aia_mode_readback as u64,
             0,
         )?;
-
-        // Report AIA MODE
 
         // Setting up the number of wired interrupt sources
         Self::set_device_attribute(
@@ -71,6 +71,7 @@ impl KvmAiaImsics {
         )?;
 
         // Report NR_IDS
+        self.imsic_num_ids = aia_nr_ids;
 
         // Setting up hart_bits
         let max_hart_index = self.vcpu_count as u64 - 1;
@@ -191,6 +192,7 @@ impl KvmAiaImsics {
             vcpu_count: config.vcpu_count,
             aplic_addr: config.aplic_addr,
             imsic_addr: config.imsic_addr,
+            imsic_num_ids: 0,
         };
 
         aia_device.init_device_attributes(config.nr_irqs)?;
@@ -224,6 +226,10 @@ impl Vaia for KvmAiaImsics {
             0,
             kvm_bindings::KVM_DEV_RISCV_IMSIC_SIZE * self.vcpu_count,
         ]
+    }
+
+    fn imsic_num_ids(&self) -> u32 {
+        self.imsic_num_ids
     }
 
     fn vcpu_count(&self) -> u32 {
