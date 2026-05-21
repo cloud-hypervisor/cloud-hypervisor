@@ -8018,6 +8018,12 @@ mod ivshmem {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_restore_offload() {
+        snapshot_restore_common::_test_snapshot_restore_offload();
+    }
+
+    #[test]
     fn test_virtio_pmem_persist_writes() {
         test_virtio_pmem(false, false);
     }
@@ -8651,6 +8657,200 @@ mod snapshot_restore_common {
         });
 
         handle_child_output(r, &output);
+    }
+
+    // Round-trip via the reference offload daemon over the existing
+    // `vm.send-migration local=on` / `vm.receive-migration` endpoints,
+    // proving parity with `vm.snapshot`/`vm.restore`.
+    pub(crate) fn _test_snapshot_restore_offload() {
+        use std::process::Stdio;
+
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
+        let console_text = String::from("On a branch floating down river a cricket, singing.");
+        let offload_dir = String::from(
+            guest
+                .tmp_dir
+                .as_path()
+                .join("offload-store")
+                .to_str()
+                .unwrap(),
+        );
+        std::fs::create_dir(&offload_dir).unwrap();
+        let snapshot_socket = String::from(
+            guest
+                .tmp_dir
+                .as_path()
+                .join("snapshot-offload.sock")
+                .to_str()
+                .unwrap(),
+        );
+
+        // Shared memory required: offload runs over local live migration.
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_source])
+            .args(["--cpus", "boot=2"])
+            .args(["--memory", "size=512M,shared=on"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let snap_daemon: std::sync::Mutex<Option<Child>> = std::sync::Mutex::new(None);
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
+            assert!(guest.get_total_memory().unwrap_or_default() > 400_000);
+            guest.check_devices_common(None, Some(&console_text), None);
+
+            // Daemon binds the socket and listens.
+            let daemon = Command::new(clh_command("offload_daemon"))
+                .args([
+                    "snapshot",
+                    "--socket",
+                    &snapshot_socket,
+                    "--output-dir",
+                    &offload_dir,
+                ])
+                .stderr(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+            *snap_daemon.lock().unwrap() = Some(daemon);
+            // Give the daemon a moment to bind.
+            assert!(wait_until(Duration::from_secs(5), || std::path::Path::new(
+                &snapshot_socket
+            )
+            .exists()));
+
+            // Pause explicitly to mirror typical operator usage.
+            assert!(remote_command(&api_socket_source, "pause", None));
+
+            // Source exits on success, as with any local live migration.
+            assert!(remote_command(
+                &api_socket_source,
+                "send-migration",
+                Some(format!("destination_url=unix:{snapshot_socket},local=on").as_str(),),
+            ));
+
+            // The daemon should exit cleanly after persisting the snapshot.
+            let daemon_output = snap_daemon
+                .lock()
+                .unwrap()
+                .take()
+                .unwrap()
+                .wait_with_output()
+                .unwrap();
+            assert!(
+                daemon_output.status.success(),
+                "offload daemon (snapshot) failed: stderr={}",
+                String::from_utf8_lossy(&daemon_output.stderr)
+            );
+        });
+
+        if let Some(mut daemon) = snap_daemon.into_inner().unwrap() {
+            let _ = daemon.kill();
+            let _ = daemon.wait();
+        }
+        let _ = std::fs::remove_file(&snapshot_socket);
+
+        // Source VM should have exited cleanly on its own.
+        let source_exited_ok = wait_until(Duration::from_secs(30), || {
+            matches!(child.try_wait(), Ok(Some(_)))
+        }) && child.try_wait().unwrap().is_some_and(|s| s.success());
+        if !source_exited_ok {
+            kill_child(&mut child);
+        }
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        // Now bring up a fresh VMM and restore through the offload daemon.
+        let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
+        let restore_socket = String::from(
+            guest
+                .tmp_dir
+                .as_path()
+                .join("restore-offload.sock")
+                .to_str()
+                .unwrap(),
+        );
+
+        let mut dest_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_restored])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            // Wait for the destination VMM to be up and responsive.
+            assert!(wait_until(Duration::from_secs(30), || remote_command(
+                &api_socket_restored,
+                "ping",
+                None
+            )));
+
+            // receive-migration blocks until done; run it in a thread
+            // so we can start the daemon as the sender in parallel.
+            let api_socket_restored_clone = api_socket_restored.clone();
+            let restore_socket_clone = restore_socket.clone();
+            let restore_thread = std::thread::spawn(move || {
+                remote_command(
+                    &api_socket_restored_clone,
+                    "receive-migration",
+                    Some(format!("unix:{restore_socket_clone}").as_str()),
+                )
+            });
+
+            // Wait for CH to bind the socket before starting the daemon.
+            assert!(wait_until(Duration::from_secs(10), || {
+                std::path::Path::new(&restore_socket).exists()
+            }));
+
+            // Daemon in restore (sender) mode with --resume so the
+            // guest is live when we probe it.
+            let daemon = Command::new(clh_command("offload_daemon"))
+                .args([
+                    "restore",
+                    "--socket",
+                    &restore_socket,
+                    "--input-dir",
+                    &offload_dir,
+                    "--resume",
+                ])
+                .stderr(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let daemon_output = daemon.wait_with_output().unwrap();
+            assert!(
+                daemon_output.status.success(),
+                "offload daemon (restore) failed: stderr={}",
+                String::from_utf8_lossy(&daemon_output.stderr)
+            );
+
+            assert!(
+                restore_thread.join().unwrap(),
+                "ch-remote receive-migration command failed"
+            );
+
+            // Restored VM should be functional.
+            guest.wait_for_ssh(Duration::from_secs(30)).unwrap();
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
+            guest.check_devices_common(None, Some(&console_text), None);
+        });
+
+        kill_child(&mut dest_child);
+        let output = dest_child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        let _ = remove_dir_all(offload_dir.as_str());
     }
 }
 
