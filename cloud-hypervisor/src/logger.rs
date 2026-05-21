@@ -20,34 +20,114 @@ pub enum Error {
     UnknownToken(String),
 }
 
+/// Which time source a date/time field should be read from.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum Zone {
+    Utc,
+    Local,
+}
+
+/// An individual broken-down date/time field.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum TimeField {
+    Year,
+    Month,
+    Day,
+    Hour,
+    Minute,
+    Second,
+    Micros,
+    /// Timezone offset like `-08:00` (always `+00:00` for `Zone::Utc`).
+    Offset,
+}
+
 enum Token {
     Literal(String),
     BootTime,
     /// Wallclock using RFC 3339 formatting.
     WallClock,
+    /// UTC glog-style timestamp (e.g. `0521 08:02:15.542701`).
+    Glog,
+    /// Local-time glog-style timestamp (e.g. `0521 08:02:15.542701`).
+    LocalGlog,
     Pid,
     Tid,
     Thread,
+    /// Full level word (e.g. `INFO`).
     Level,
+    /// Single-letter level character, glog style (e.g. `I`).
+    LevelChar,
     Location,
     Msg,
+    /// A broken-down date/time field from either UTC or local wallclock.
+    Time(TimeField, Zone),
 }
 
 impl FromStr for Token {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Detect `local`-prefixed variants for the broken-down time fields.
+        let (name, zone) = match s.strip_prefix("local") {
+            Some(rest) => (rest, Zone::Local),
+            None => (s, Zone::Utc),
+        };
+
+        match name {
+            "year" => return Ok(Self::Time(TimeField::Year, zone)),
+            "month" => return Ok(Self::Time(TimeField::Month, zone)),
+            "day" => return Ok(Self::Time(TimeField::Day, zone)),
+            "hour" => return Ok(Self::Time(TimeField::Hour, zone)),
+            "minute" => return Ok(Self::Time(TimeField::Minute, zone)),
+            "second" => return Ok(Self::Time(TimeField::Second, zone)),
+            "micros" => return Ok(Self::Time(TimeField::Micros, zone)),
+            "offset" => return Ok(Self::Time(TimeField::Offset, zone)),
+            _ => {}
+        }
+
+        // Fall back to tokens that don't take a `local` prefix.
         match s {
             "boottime" => Ok(Self::BootTime),
             "wallclock" => Ok(Self::WallClock),
+            "glog" => Ok(Self::Glog),
+            "localglog" => Ok(Self::LocalGlog),
             "pid" => Ok(Self::Pid),
             "tid" => Ok(Self::Tid),
             "thread" => Ok(Self::Thread),
             "level" => Ok(Self::Level),
+            "levelchar" => Ok(Self::LevelChar),
             "location" => Ok(Self::Location),
             "msg" => Ok(Self::Msg),
             _ => Err(Error::UnknownToken(s.to_string())),
         }
+    }
+}
+
+/// Convert a `log::Level` to its glog single-letter abbreviation.
+fn level_char(level: log::Level) -> char {
+    match level {
+        log::Level::Error => 'E',
+        log::Level::Warn => 'W',
+        log::Level::Info => 'I',
+        log::Level::Debug => 'D',
+        log::Level::Trace => 'T',
+    }
+}
+
+fn write_time_field<W: Write + ?Sized>(
+    out: &mut W,
+    field: TimeField,
+    zoned: &jiff::Zoned,
+) -> std::io::Result<()> {
+    match field {
+        TimeField::Year => write!(out, "{:04}", zoned.year()),
+        TimeField::Month => write!(out, "{:02}", zoned.month()),
+        TimeField::Day => write!(out, "{:02}", zoned.day()),
+        TimeField::Hour => write!(out, "{:02}", zoned.hour()),
+        TimeField::Minute => write!(out, "{:02}", zoned.minute()),
+        TimeField::Second => write!(out, "{:02}", zoned.second()),
+        TimeField::Micros => write!(out, "{:06}", zoned.subsec_nanosecond() / 1000),
+        TimeField::Offset => write!(out, "{}", zoned.strftime("%:z")),
     }
 }
 
@@ -129,6 +209,10 @@ impl log::Log for Logger {
         }
 
         let duration_s = Instant::now().duration_since(self.start).as_secs_f32();
+        // Compute the wallclock timestamps lazily, but at most once per record so
+        // that multiple `{hour}`/`{minute}`/`{second}`/etc. fields stay coherent.
+        let mut zoned_utc: Option<jiff::Zoned> = None;
+        let mut zoned_local: Option<jiff::Zoned> = None;
         let mut out = self.output.lock().unwrap();
         for token in &self.tokens {
             let _ = match token {
@@ -136,7 +220,20 @@ impl log::Log for Logger {
                 // 10: 6 decimal places + sep => whole seconds in range `0..=999` properly aligned
                 Token::BootTime => write!(&mut *out, "{duration_s:>10.6?}"),
                 Token::WallClock => {
-                    write!(out, "{:.6}", jiff::Timestamp::now())
+                    let zoned = zoned_utc.get_or_insert_with(|| {
+                        jiff::Timestamp::now().to_zoned(jiff::tz::TimeZone::UTC)
+                    });
+                    write!(&mut *out, "{:.6}", zoned.timestamp())
+                }
+                Token::Glog => {
+                    let zoned = zoned_utc.get_or_insert_with(|| {
+                        jiff::Timestamp::now().to_zoned(jiff::tz::TimeZone::UTC)
+                    });
+                    write!(&mut *out, "{}", zoned.strftime("%m%d %H:%M:%S%.6f"))
+                }
+                Token::LocalGlog => {
+                    let zoned = zoned_local.get_or_insert_with(jiff::Zoned::now);
+                    write!(&mut *out, "{}", zoned.strftime("%m%d %H:%M:%S%.6f"))
                 }
                 Token::Pid => write!(&mut *out, "{}", self.pid),
                 // SAFETY: gettid(2) always succeeds
@@ -147,11 +244,21 @@ impl log::Log for Logger {
                     std::thread::current().name().unwrap_or("anonymous")
                 ),
                 Token::Level => write!(&mut *out, "{}", record.level()),
+                Token::LevelChar => write!(&mut *out, "{}", level_char(record.level())),
                 Token::Location => match (record.file(), record.line()) {
                     (Some(file), Some(line)) => write!(&mut *out, "{file}:{line}"),
                     _ => write!(&mut *out, "{}", record.target()),
                 },
                 Token::Msg => write!(&mut *out, "{}", record.args()),
+                Token::Time(field, zone) => {
+                    let zoned = match zone {
+                        Zone::Utc => zoned_utc.get_or_insert_with(|| {
+                            jiff::Timestamp::now().to_zoned(jiff::tz::TimeZone::UTC)
+                        }),
+                        Zone::Local => zoned_local.get_or_insert_with(jiff::Zoned::now),
+                    };
+                    write_time_field(&mut *out, *field, zoned)
+                }
             };
         }
         let _ = out.write_all(b"\r\n");
@@ -198,12 +305,32 @@ mod tests {
                 Token::Literal(s) => format!("L({s})"),
                 Token::BootTime => "B".to_string(),
                 Token::WallClock => "W".to_string(),
+                Token::Glog => "G".to_string(),
+                Token::LocalGlog => "LG".to_string(),
                 Token::Pid => "P".to_string(),
                 Token::Tid => "I".to_string(),
                 Token::Thread => "T".to_string(),
                 Token::Level => "V".to_string(),
+                Token::LevelChar => "VC".to_string(),
                 Token::Location => "O".to_string(),
                 Token::Msg => "M".to_string(),
+                Token::Time(field, zone) => {
+                    let z = match zone {
+                        Zone::Utc => "u",
+                        Zone::Local => "l",
+                    };
+                    let f = match field {
+                        TimeField::Year => "Y",
+                        TimeField::Month => "Mo",
+                        TimeField::Day => "D",
+                        TimeField::Hour => "H",
+                        TimeField::Minute => "Mi",
+                        TimeField::Second => "S",
+                        TimeField::Micros => "U",
+                        TimeField::Offset => "Z",
+                    };
+                    format!("T({z}:{f})")
+                }
             })
             .collect::<Vec<_>>()
             .join("|")
@@ -224,12 +351,12 @@ mod tests {
     #[test]
     fn parse_all_known_tokens() {
         let tokens = parse_format(
-            "[{boottime}] {wallclock} {pid}/{tid} <{thread}> {level} {location} -- {msg}",
+            "[{boottime}] {wallclock} {glog} {localglog} {pid}/{tid} <{thread}> {level} {levelchar} {location} -- {msg}",
         )
         .unwrap();
         assert_eq!(
             render(&tokens),
-            "L([)|B|L(] )|W|L( )|P|L(/)|I|L( <)|T|L(> )|V|L( )|O|L( -- )|M"
+            "L([)|B|L(] )|W|L( )|G|L( )|LG|L( )|P|L(/)|I|L( <)|T|L(> )|V|L( )|VC|L( )|O|L( -- )|M"
         );
     }
 
@@ -375,6 +502,134 @@ mod tests {
         assert_eq!(&out[16..17], ":", "got: {out}");
         assert_eq!(&out[19..20], ".", "got: {out}");
         assert!(out.ends_with('Z'), "got: {out}");
+    }
+
+    #[test]
+    fn logger_glog_style_output() {
+        // `{levelchar}{localglog}` => glog-style header like `I0521 08:02:15.542701`.
+        let buf = SharedBuffer::default();
+        let logger = Logger::new(Box::new(buf.clone()), "{levelchar}{localglog}").unwrap();
+
+        logger.log(
+            &log::Record::builder()
+                .args(format_args!(""))
+                .level(log::Level::Info)
+                .target("t")
+                .build(),
+        );
+
+        let out = buf.contents();
+        let out = out.trim();
+        // `IMMDD HH:MM:SS.uuuuuu` => 21 chars.
+        assert_eq!(out.len(), 21, "got: {out}");
+        assert_eq!(&out[0..1], "I", "got: {out}");
+        assert_eq!(&out[5..6], " ", "got: {out}");
+        assert_eq!(&out[8..9], ":", "got: {out}");
+        assert_eq!(&out[11..12], ":", "got: {out}");
+        assert_eq!(&out[14..15], ".", "got: {out}");
+        // Every non-separator character is an ASCII digit.
+        for (i, ch) in out.chars().enumerate() {
+            if [0, 5, 8, 11, 14].contains(&i) {
+                continue;
+            }
+            assert!(ch.is_ascii_digit(), "non-digit at {i}: got {out}");
+        }
+    }
+
+    #[test]
+    fn logger_glog_utc_output_shape() {
+        // `{glog}` alone produces `MMDD HH:MM:SS.uuuuuu` (20 chars).
+        let buf = SharedBuffer::default();
+        let logger = Logger::new(Box::new(buf.clone()), "{glog}").unwrap();
+
+        logger.log(
+            &log::Record::builder()
+                .args(format_args!(""))
+                .level(log::Level::Info)
+                .target("t")
+                .build(),
+        );
+
+        let out = buf.contents();
+        let out = out.trim();
+        assert_eq!(out.len(), 20, "got: {out}");
+        assert_eq!(&out[4..5], " ", "got: {out}");
+        assert_eq!(&out[7..8], ":", "got: {out}");
+        assert_eq!(&out[10..11], ":", "got: {out}");
+        assert_eq!(&out[13..14], ".", "got: {out}");
+    }
+
+    #[test]
+    fn parse_utc_time_fields() {
+        let tokens =
+            parse_format("{year}-{month}-{day}T{hour}:{minute}:{second}.{micros}{offset}").unwrap();
+        assert_eq!(
+            render(&tokens),
+            "T(u:Y)|L(-)|T(u:Mo)|L(-)|T(u:D)|L(T)|T(u:H)|L(:)|T(u:Mi)|L(:)|T(u:S)|L(.)|T(u:U)|T(u:Z)"
+        );
+    }
+
+    #[test]
+    fn parse_local_time_fields() {
+        let tokens = parse_format(
+            "{localyear}-{localmonth}-{localday}T{localhour}:{localminute}:{localsecond}.{localmicros}{localoffset}",
+        )
+        .unwrap();
+        assert_eq!(
+            render(&tokens),
+            "T(l:Y)|L(-)|T(l:Mo)|L(-)|T(l:D)|L(T)|T(l:H)|L(:)|T(l:Mi)|L(:)|T(l:S)|L(.)|T(l:U)|T(l:Z)"
+        );
+    }
+
+    #[test]
+    fn logger_utc_offset_is_zero() {
+        let buf = SharedBuffer::default();
+        let logger = Logger::new(Box::new(buf.clone()), "{offset}").unwrap();
+        logger.log(
+            &log::Record::builder()
+                .args(format_args!(""))
+                .level(log::Level::Info)
+                .target("t")
+                .build(),
+        );
+        assert_eq!(buf.contents().trim(), "+00:00");
+    }
+
+    #[test]
+    fn logger_utc_year_matches_jiff() {
+        let buf = SharedBuffer::default();
+        let logger = Logger::new(Box::new(buf.clone()), "{year}").unwrap();
+        logger.log(
+            &log::Record::builder()
+                .args(format_args!(""))
+                .level(log::Level::Info)
+                .target("t")
+                .build(),
+        );
+        let year: i32 = buf.contents().trim().parse().expect("year is numeric");
+        assert!(year >= 2024, "got: {year}");
+    }
+
+    #[test]
+    fn logger_levelchar_per_level() {
+        for (level, expected) in [
+            (log::Level::Error, "E"),
+            (log::Level::Warn, "W"),
+            (log::Level::Info, "I"),
+            (log::Level::Debug, "D"),
+            (log::Level::Trace, "T"),
+        ] {
+            let buf = SharedBuffer::default();
+            let logger = Logger::new(Box::new(buf.clone()), "{levelchar}").unwrap();
+            logger.log(
+                &log::Record::builder()
+                    .args(format_args!(""))
+                    .level(level)
+                    .target("t")
+                    .build(),
+            );
+            assert_eq!(buf.contents().trim(), expected);
+        }
     }
 
     #[test]
