@@ -23,6 +23,7 @@ members = [
   "event_monitor",
   "hypervisor",
   "net_util",
+  "offload_daemon",
   "option_parser",
   "pci",
   "performance-metrics",
