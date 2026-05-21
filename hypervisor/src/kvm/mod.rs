@@ -834,6 +834,25 @@ impl vm::Vm for KvmVm {
             .create_vcpu(id as u64)
             .map_err(|e| vm::HypervisorVmError::CreateVcpu(e.into()))?;
 
+        #[cfg(target_arch = "riscv64")]
+        {
+            // KVM defaults sstateen0 to zero for new RISC-V vCPUs. When AIA is
+            // exposed, Linux accesses supervisor AIA CSRs during IMSIC init;
+            // leave all state enabled so those CSR accesses do not trap as
+            // illegal instructions in the guest.
+            let sstateen0 = u64::MAX;
+            let sstateen0_id = kvm_bindings::KVM_REG_RISCV as u64
+                | u64::from(kvm_bindings::KVM_REG_SIZE_U64)
+                | u64::from(kvm_bindings::KVM_REG_RISCV_CSR)
+                | u64::from(kvm_bindings::KVM_REG_RISCV_CSR_SMSTATEEN);
+            fd.set_one_reg(sstateen0_id, &sstateen0.to_le_bytes())
+                .map_err(|e| {
+                    vm::HypervisorVmError::CreateVcpu(anyhow!(
+                        "Failed to enable RISC-V sstateen0 for vCPU {id}: {e}"
+                    ))
+                })?;
+        }
+
         #[cfg(target_arch = "x86_64")]
         // Safety: `xsave_size` will not change after vcpu creation because:
         // 1. `xsave_size` depends on cpuid
