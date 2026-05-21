@@ -40,3 +40,61 @@ This level is for the benefit of developers. It should be used for sporadic and 
 Use `-vv` to enable.
 
 For the most verbose of logging messages. It is acceptable to "spam" the log with repeated invocations of the same message. This level of logging would be combined with `--log-file`.
+
+## Format
+
+The `--log-format <FORMAT>` flag controls how each log record is rendered.
+`<FORMAT>` is a template string where tokens enclosed in `{...}` are substituted
+at log time. Literal `{` and `}` can be escaped as `{{` and `}}`.
+
+The default format is:
+
+```text
+cloud-hypervisor: {boottime}s: <{thread}> {level}:{location} -- {msg}
+```
+
+### Common tokens
+
+| Token         | Substituted with                                              |
+|---------------|---------------------------------------------------------------|
+| `{boottime}`  | Seconds since process start (6 decimal places, right-aligned).|
+| `{wallclock}` | UTC RFC 3339 (e.g. `2024-01-15T10:30:45.123456Z`).            |
+| `{glog}`      | UTC glog timestamp `MMDD HH:MM:SS.uuuuuu`.                    |
+| `{localglog}` | Local-time glog timestamp, same shape as `{glog}`.            |
+| `{thread}`    | Thread name (`anonymous` if unnamed).                         |
+| `{level}`     | Log level word (`ERROR`/`WARN`/`INFO`/`DEBUG`/`TRACE`).       |
+| `{levelchar}` | Single-letter glog level: `E`/`W`/`I`/`D`/`T`.                |
+| `{location}`  | `file:line`, or the `log` target if unavailable.              |
+| `{msg}`       | Formatted log message.                                        |
+| `{pid}`       | Process ID.                                                   |
+| `{tid}`       | Kernel thread ID (`gettid(2)`).                               |
+
+### Broken-down date/time fields
+
+Each UTC field has a `local`-prefixed variant that uses the system timezone.
+All wallclock-derived tokens within a single record refer to the same instant.
+
+| UTC         | Local            | Output                                |
+|-------------|------------------|---------------------------------------|
+| `{year}`    | `{localyear}`    | 4-digit year.                         |
+| `{month}`   | `{localmonth}`   | 2-digit month.                        |
+| `{day}`     | `{localday}`     | 2-digit day of month.                 |
+| `{hour}`    | `{localhour}`    | 2-digit hour (24h).                   |
+| `{minute}`  | `{localminute}`  | 2-digit minute.                       |
+| `{second}`  | `{localsecond}`  | 2-digit second.                       |
+| `{micros}`  | `{localmicros}`  | 6-digit microseconds.                 |
+| `{offset}`  | `{localoffset}`  | Timezone offset (`+00:00` for UTC).   |
+
+### Examples
+
+Glog header `I0521 08:02:15.542701`:
+
+```text
+--log-format '{levelchar}{localglog}'
+```
+
+Or built from individual fields:
+
+```text
+--log-format '{levelchar}{localmonth}{localday} {localhour}:{localminute}:{localsecond}.{localmicros}'
+```

@@ -303,7 +303,12 @@ fn get_cli_options_sorted(
             .group("logging"),
         Arg::new("log-format")
             .long("log-format")
-            .help("Log format. Available tokens: {boottime}, {wallclock}, {pid}, {tid}, {thread}, {level}, {location}, {msg}")
+            .help(
+                "Log format. Common tokens: {boottime}, {wallclock}, {glog}, \
+                 {localglog}, {thread}, {level}, {location}, {msg}. See \
+                 docs/logging.md for the full list (per-field date/time tokens, \
+                 local-time variants, glog level letter).",
+            )
             .num_args(1)
             .default_value(logger::DEFAULT_FORMAT)
             .group("logging"),
