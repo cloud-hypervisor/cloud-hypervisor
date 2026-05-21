@@ -231,8 +231,8 @@ fn create_aia_node(fdt: &mut FdtWriter, aia_device: &Arc<Mutex<dyn Vaia>>) -> Fd
         fdt.property_u32("#interrupt-cells", 0u32)?;
         fdt.property_null("interrupt-controller")?;
         fdt.property_null("msi-controller")?;
-        // TODO complete num-ids
-        fdt.property_u32("riscv,num-ids", 2047u32)?;
+        let imsic_num_ids = aia_device.lock().unwrap().imsic_num_ids();
+        fdt.property_u32("riscv,num-ids", imsic_num_ids)?;
         fdt.property_u32("phandle", AIA_IMSIC_PHANDLE)?;
 
         let mut irq_cells = Vec::new();

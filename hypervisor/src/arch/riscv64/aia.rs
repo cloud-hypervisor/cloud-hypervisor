@@ -46,6 +46,9 @@ pub trait Vaia: Send + Sync {
     /// Returns an array with IMSIC device properties
     fn imsic_properties(&self) -> [u32; 4];
 
+    /// Returns the number of IMSIC interrupt identities exposed to the guest
+    fn imsic_num_ids(&self) -> u32;
+
     /// Returns the number of vCPUs this AIA handles
     fn vcpu_count(&self) -> u32;
 
