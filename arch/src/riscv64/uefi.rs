@@ -7,7 +7,7 @@ use std::os::fd::AsFd;
 use std::result;
 
 use thiserror::Error;
-use vm_memory::{GuestAddress, GuestMemory};
+use vm_memory::{Bytes, GuestAddress, GuestMemory};
 
 /// Errors thrown while loading UEFI binary
 #[derive(Debug, Error)]

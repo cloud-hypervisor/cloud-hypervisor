@@ -12,9 +12,7 @@ use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
-#[cfg(not(target_arch = "riscv64"))]
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use std::{io, result, thread};
 
 use anyhow::{Context, anyhow};

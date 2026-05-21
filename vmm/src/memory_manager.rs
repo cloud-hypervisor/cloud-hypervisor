@@ -24,7 +24,7 @@ use anyhow::anyhow;
 use arch::RegionType;
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use hypervisor::HypervisorVmError;
 use libc::_SC_NPROCESSORS_ONLN;
 use log::{debug, error, info, warn};
@@ -445,7 +445,7 @@ pub enum Error {
     #[error("Failed to allocate MMIO address")]
     AllocateMmioAddress,
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     /// Failed to create UEFI flash
     #[error("Failed to create UEFI flash")]
     CreateUefiFlash(#[source] HypervisorVmError),
