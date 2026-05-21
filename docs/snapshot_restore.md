@@ -142,3 +142,116 @@ from the restored VM.
 ## Limitations
 
 VFIO devices is out of scope.
+
+## Offload Snapshot and Restore
+
+Cloud Hypervisor can hand the snapshot payload off to a user-provided
+offload daemon instead of writing files to a `file://` directory. The
+daemon can transform the payload on the fly (encrypt, compress, stream
+to object storage, etc.) without ever touching local disk.
+
+There is no dedicated API surface for offload: the daemon talks to CH
+over the existing local live-migration protocol, playing the migration
+peer role:
+
+- On snapshot, CH acts as the migration sender and the daemon acts as the
+  receiver. The source VM shuts down on success, exactly as it would for a
+  local live migration. Memory is transferred via `SCM_RIGHTS`, CH handing
+  off the daemon one memfd per guest-memory slot.
+- On restore, CH acts as the migration receiver and the daemon acts as the
+  sender. The daemon provides one memfd per slot, populated from its
+  storage, and CH uses those memfds directly as guest RAM backing.
+
+In practice, this means offload is driven through the existing
+`vm.send-migration` / `vm.receive-migration` endpoints (with `local=on`
+and a `unix:<path>` URL). The daemon is just another peer of these
+endpoints. This requires the VM to be configured with shared-memory
+backing, which is the same precondition that applies to local live
+migration today.
+
+### Snapshot offload usage
+
+```bash
+# 1. Run a VM with shared memory.
+./cloud-hypervisor \
+    --api-socket /tmp/cloud-hypervisor.sock \
+    --cpus boot=2 \
+    --memory size=1G,shared=on \
+    --kernel vmlinux \
+    --cmdline "root=/dev/vda1 console=hvc0 rw" \
+    --disk path=focal-server-cloudimg-amd64.raw
+
+# 2. Start your offload daemon. The reference implementation is shipped as
+#    `offload_daemon` and persists snapshot data to a local directory.
+./offload_daemon snapshot \
+    --socket /tmp/offload.sock \
+    --output-dir /var/snapshots/vm1
+
+# 3. Issue a local live migration to the daemon's socket. CH connects to
+#    /tmp/offload.sock, streams the snapshot, and exits on success.
+./ch-remote --api-socket /tmp/cloud-hypervisor.sock pause
+./ch-remote --api-socket /tmp/cloud-hypervisor.sock \
+    send-migration destination_url=unix:/tmp/offload.sock,local=on
+```
+
+### Restore offload usage
+
+```bash
+# 1. Start a CH process.
+./cloud-hypervisor --api-socket /tmp/cloud-hypervisor.sock
+
+# 2. Tell CH to listen for an inbound migration from the offload daemon.
+./ch-remote --api-socket /tmp/cloud-hypervisor.sock \
+    receive-migration receiver_url=unix:/tmp/restore.sock &
+
+# 3. Start the daemon in restore mode pointing at the same saved snapshot.
+#    With --resume, the restored VM starts running on completion;
+#    without it, the VM is left paused (issue `resume` to start it).
+./offload_daemon restore \
+    --socket /tmp/restore.sock \
+    --input-dir /var/snapshots/vm1 \
+    --resume
+```
+
+### The daemon protocol
+
+The daemon implements the local live-migration wire protocol defined in
+`vm-migration/src/protocol.rs`. Two state machines are involved:
+
+- Snapshot mode (migration receiver): walk
+  `Start → MemoryFd (×N) → Config → State → CompletePaused`. For each
+  `MemoryFd` command, receive a guest-memory fd via SCM_RIGHTS on the
+  same UNIX socket.
+- Restore mode (migration sender): walk the same sequence in reverse,
+  emitting one `MemoryFd` per slot (with the memfd attached via SCM_RIGHTS)
+  before sending `Config` and `State`. Finish with either `CompletePaused`
+  (restored VM remains paused) or `Complete` (restored VM resumes).
+
+### Critical invariant on snapshot
+
+On the snapshot path, the daemon must finish reading from every memory fd
+before it ACKs `CompletePaused`. Cloud Hypervisor blocks at the
+`CompletePaused` handshake until the daemon ACKs. Once it ACKs, the source
+VM shuts down and the daemon's fds are the only remaining record of guest
+RAM. The reference daemon dumps each slot to disk and `fsync`s before
+ACKing.
+
+### Reference daemon
+
+The in-tree `offload_daemon` binary is intentionally minimal: it just
+serialises the snapshot to a local directory and replays it back. Its
+purpose is to back the offload integration test and to serve as a
+working example for daemon authors. Use it as a template, not a
+production backend.
+
+### Limitations
+
+- The VM must use shared-memory backing (`shared=on` or file-backed).
+  Anonymous memory is rejected with the same error message that local
+  live migration produces.
+- Orchestrator-supplied network FDs (today carried by `vm.restore`'s
+  `net_fds` field) are not plumbed through `vm.receive-migration`,
+  so VMs whose configuration relies on externally-provided net FDs
+  cannot currently be restored via the offload path.
+- Confidential VMs (CVMs) inherit the live-migration restriction: offload
+  is not supported for CVMs.
