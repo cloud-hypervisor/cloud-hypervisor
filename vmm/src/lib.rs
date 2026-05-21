@@ -587,11 +587,17 @@ where
 }
 
 #[derive(Clone, Deserialize, Serialize)]
-struct VmMigrationConfig {
+pub struct VmMigrationConfig {
     vm_config: Arc<Mutex<VmConfig>>,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     common_cpuid: Vec<hypervisor::arch::x86::CpuIdEntry>,
     memory_manager_data: MemoryManagerSnapshotData,
+}
+
+impl VmMigrationConfig {
+    pub fn memory_manager_data(&self) -> &MemoryManagerSnapshotData {
+        &self.memory_manager_data
+    }
 }
 
 #[derive(Debug, Clone)]
