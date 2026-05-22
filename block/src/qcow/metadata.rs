@@ -882,13 +882,14 @@ impl QcowState {
             }
             return Ok(None);
         }
-        if l2_entry_is_zero(l2_entry) {
-            return Ok(None);
-        }
-
+        // Compressed entries may use bit 0 as part of their layout, so they
+        // must be classified before zero-flagged standard entries.
         if l2_entry_is_compressed(l2_entry) {
             self.deallocate_compressed_cluster(l2_entry)?;
             self.l2_cache.get_mut(l1_index).unwrap()[l2_index] = dealloc_entry;
+            return Ok(None);
+        }
+        if l2_entry_is_zero(l2_entry) {
             return Ok(None);
         }
 
