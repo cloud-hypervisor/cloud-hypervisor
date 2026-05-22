@@ -1895,33 +1895,7 @@ impl cpu::Vcpu for KvmVcpu {
             off += std::mem::size_of::<u64>();
         }
 
-        // Now moving on to floating point registers which are stored in the user_fpsimd_state in the kernel:
-        // https://elixir.bootlin.com/linux/v4.9.62/source/arch/arm64/include/uapi/asm/kvm.h#L53
-        let mut off = offset_of!(kvm_regs, fp_regs.vregs);
-        for i in 0..32 {
-            let mut bytes = [0_u8; 16];
-            self.fd
-                .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U128, off), &mut bytes)
-                .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
-            state.fp_regs.vregs[i] = u128::from_le_bytes(bytes);
-            off += mem::size_of::<u128>();
-        }
-
-        // Floating-point Status Register
-        let off = offset_of!(kvm_regs, fp_regs.fpsr);
-        let mut bytes = [0_u8; 4];
-        self.fd
-            .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U32, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
-        state.fp_regs.fpsr = u32::from_le_bytes(bytes);
-
-        // Floating-point Control Register
-        let off = offset_of!(kvm_regs, fp_regs.fpcr);
-        let mut bytes = [0_u8; 4];
-        self.fd
-            .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U32, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
-        state.fp_regs.fpcr = u32::from_le_bytes(bytes);
+        self.get_fpsimd_regs(&mut state)?;
         Ok(state.into())
     }
 
@@ -2075,32 +2049,7 @@ impl cpu::Vcpu for KvmVcpu {
             off += std::mem::size_of::<u64>();
         }
 
-        let mut off = offset_of!(kvm_regs, fp_regs.vregs);
-        for i in 0..32 {
-            self.fd
-                .set_one_reg(
-                    arm64_core_reg_id!(KVM_REG_SIZE_U128, off),
-                    &kvm_regs_state.fp_regs.vregs[i].to_le_bytes(),
-                )
-                .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
-            off += mem::size_of::<u128>();
-        }
-
-        let off = offset_of!(kvm_regs, fp_regs.fpsr);
-        self.fd
-            .set_one_reg(
-                arm64_core_reg_id!(KVM_REG_SIZE_U32, off),
-                &kvm_regs_state.fp_regs.fpsr.to_le_bytes(),
-            )
-            .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
-
-        let off = offset_of!(kvm_regs, fp_regs.fpcr);
-        self.fd
-            .set_one_reg(
-                arm64_core_reg_id!(KVM_REG_SIZE_U32, off),
-                &kvm_regs_state.fp_regs.fpcr.to_le_bytes(),
-            )
-            .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
+        self.set_fpsimd_regs(&kvm_regs_state)?;
         Ok(())
     }
 
@@ -3449,6 +3398,76 @@ impl cpu::Vcpu for KvmVcpu {
         self.fd
             .set_regs(&regs)
             .map_err(|e: kvm_ioctls::Error| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+
+        Ok(())
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+impl KvmVcpu {
+    fn get_fpsimd_regs(&self, regs: &mut kvm_regs) -> cpu::Result<()> {
+        // Floating point registers are stored in the user_fpsimd_state in the kernel:
+        // https://elixir.bootlin.com/linux/v4.9.62/source/arch/arm64/include/uapi/asm/kvm.h#L53
+        let mut off = offset_of!(kvm_regs, fp_regs.vregs);
+        for i in 0..32 {
+            let mut bytes = [0_u8; 16];
+            self.fd
+                .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U128, off), &mut bytes)
+                .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
+            regs.fp_regs.vregs[i] = u128::from_le_bytes(bytes);
+            off += mem::size_of::<u128>();
+        }
+
+        // Floating-point Status Register
+        let off = offset_of!(kvm_regs, fp_regs.fpsr);
+        let mut bytes = [0_u8; 4];
+        self.fd
+            .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U32, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
+        regs.fp_regs.fpsr = u32::from_le_bytes(bytes);
+
+        // Floating-point Control Register
+        let off = offset_of!(kvm_regs, fp_regs.fpcr);
+        let mut bytes = [0_u8; 4];
+        self.fd
+            .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U32, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
+        regs.fp_regs.fpcr = u32::from_le_bytes(bytes);
+
+        Ok(())
+    }
+
+    fn set_fpsimd_regs(&self, regs: &kvm_regs) -> cpu::Result<()> {
+        // Floating point registers are stored in the user_fpsimd_state in the kernel:
+        // https://elixir.bootlin.com/linux/v4.9.62/source/arch/arm64/include/uapi/asm/kvm.h#L53
+        let mut off = offset_of!(kvm_regs, fp_regs.vregs);
+        for i in 0..32 {
+            self.fd
+                .set_one_reg(
+                    arm64_core_reg_id!(KVM_REG_SIZE_U128, off),
+                    &regs.fp_regs.vregs[i].to_le_bytes(),
+                )
+                .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
+            off += mem::size_of::<u128>();
+        }
+
+        // Floating-point Status Register
+        let off = offset_of!(kvm_regs, fp_regs.fpsr);
+        self.fd
+            .set_one_reg(
+                arm64_core_reg_id!(KVM_REG_SIZE_U32, off),
+                &regs.fp_regs.fpsr.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
+
+        // Floating-point Control Register
+        let off = offset_of!(kvm_regs, fp_regs.fpcr);
+        self.fd
+            .set_one_reg(
+                arm64_core_reg_id!(KVM_REG_SIZE_U32, off),
+                &regs.fp_regs.fpcr.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
 
         Ok(())
     }
