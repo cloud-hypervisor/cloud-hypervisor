@@ -287,6 +287,9 @@ cmd_help() {
     echo "        Run the development container into an interactive, privileged BASH shell."
     echo "        --volumes             Hash separated volumes to be exported. Example --volumes /mnt:/mnt#/myvol:/myvol"
     echo ""
+    echo "    fetch-workloads [--test TEST] [--verify-only]"
+    echo "        Download workload assets needed for integration tests."
+    echo ""
     echo "    help"
     echo "        Display this help message."
     echo ""
@@ -477,6 +480,12 @@ cmd_tests() {
     ensure_latest_ctr
 
     process_volumes_args
+
+    # Fetch workload assets on the host before launching the container.
+    say "Fetching workloads..."
+    python3 "$CLH_SCRIPTS_DIR/fetch_workloads.py" \
+        --workloads-dir "$CLH_INTEGRATION_WORKLOADS" || die "Failed to fetch workloads"
+
     target="$(uname -m)-unknown-linux-${libc}"
 
     rustflags="$RUSTFLAGS"
@@ -660,6 +669,12 @@ build_container() {
         -f "$CLH_CTR_BUILD_DIR/Dockerfile" \
         --build-arg TARGETARCH="$TARGETARCH" \
         "$CLH_CTR_BUILD_DIR"
+}
+
+cmd_fetch-workloads() {
+    ensure_build_dir
+    python3 "$CLH_SCRIPTS_DIR/fetch_workloads.py" \
+        --workloads-dir "$CLH_INTEGRATION_WORKLOADS" "$@"
 }
 
 cmd_build-container() {
