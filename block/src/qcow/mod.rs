@@ -1807,14 +1807,14 @@ impl QcowFile {
             }
             return Ok(());
         }
-        if l2_entry_is_zero(l2_entry) {
-            return Ok(());
-        }
-
         // Compressed clusters cannot use the zero flag optimization, thus fully deallocate instead.
+        // Their layout may also use bit 0, so classify them before zero-flagged standard entries.
         if l2_entry_is_compressed(l2_entry) {
             self.deallocate_compressed_cluster(l2_entry)?;
             self.l2_cache.get_mut(l1_index).unwrap()[l2_index] = dealloc_entry;
+            return Ok(());
+        }
+        if l2_entry_is_zero(l2_entry) {
             return Ok(());
         }
 
@@ -3160,18 +3160,21 @@ mod unit_tests {
         let standard_entry: u64 = 0x1000;
         let zero_flag_entry: u64 = 0x1000 | ZERO_FLAG;
         let compressed_entry: u64 = COMPRESSED_FLAG;
+        let compressed_entry_with_low_bit: u64 = COMPRESSED_FLAG | ZERO_FLAG;
 
         assert!(l2_entry_is_empty(empty_entry));
         assert!(!l2_entry_is_empty(standard_entry));
 
         assert!(!l2_entry_is_compressed(standard_entry));
         assert!(l2_entry_is_compressed(compressed_entry));
+        assert!(l2_entry_is_compressed(compressed_entry_with_low_bit));
 
         assert!(!l2_entry_is_zero(standard_entry));
         assert!(l2_entry_is_zero(zero_flag_entry));
+        assert!(l2_entry_is_zero(compressed_entry_with_low_bit));
 
         // Note: l2_entry_is_zero() only checks bit 0, so compressed entries
-        // must be checked first as the code does in file_read.
+        // must be checked before interpreting bit 0 as a zero flag.
     }
 
     #[test]

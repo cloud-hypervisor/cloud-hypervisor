@@ -340,7 +340,7 @@ impl AsyncIo for QcowSync {
 #[cfg(test)]
 mod unit_tests {
     use std::fs::{File, OpenOptions};
-    use std::io::{Seek, SeekFrom, Write};
+    use std::io::{Read, Seek, SeekFrom, Write};
     use std::os::fd::RawFd;
     use std::path::Path;
     use std::{env, thread};
@@ -356,6 +356,44 @@ mod unit_tests {
     };
     use crate::qcow_common::unit_tests::compress_allocated_clusters;
     use crate::qcow_disk::QcowDisk;
+
+    const TEST_L1_L2_ADDR_MASK: u64 = 0x00ff_ffff_ffff_fe00;
+    const TEST_HEADER_L1_TABLE_OFFSET: u64 = 40;
+    const TEST_COMPRESSED_FLAG: u64 = 1 << 62;
+    const TEST_ZERO_FLAG: u64 = 1;
+
+    fn read_be_u64_at(file: &mut File, offset: u64) -> u64 {
+        let mut bytes = [0u8; 8];
+        file.seek(SeekFrom::Start(offset)).unwrap();
+        file.read_exact(&mut bytes).unwrap();
+        u64::from_be_bytes(bytes)
+    }
+
+    fn write_be_u64_at(file: &mut File, offset: u64, value: u64) {
+        file.seek(SeekFrom::Start(offset)).unwrap();
+        file.write_all(&value.to_be_bytes()).unwrap();
+    }
+
+    fn first_l2_entry_offset(file: &mut File) -> u64 {
+        let l1_table_offset = read_be_u64_at(file, TEST_HEADER_L1_TABLE_OFFSET);
+        let l1_entry = read_be_u64_at(file, l1_table_offset);
+        let l2_table_addr = l1_entry & TEST_L1_L2_ADDR_MASK;
+        assert_ne!(l2_table_addr, 0);
+        l2_table_addr
+    }
+
+    fn set_low_bit_on_first_compressed_l2_entry(file: &mut File) {
+        let l2_entry_offset = first_l2_entry_offset(file);
+        let l2_entry = read_be_u64_at(file, l2_entry_offset);
+        assert_ne!(l2_entry & TEST_COMPRESSED_FLAG, 0);
+        write_be_u64_at(file, l2_entry_offset, l2_entry | TEST_ZERO_FLAG);
+        file.sync_all().unwrap();
+    }
+
+    fn first_l2_entry(file: &mut File) -> u64 {
+        let l2_entry_offset = first_l2_entry_offset(file);
+        read_be_u64_at(file, l2_entry_offset)
+    }
 
     fn create_disk_with_data(
         file_size: u64,
@@ -486,6 +524,41 @@ mod unit_tests {
             read_buf.iter().all(|&b| b == 0),
             "Zeroed region should read as zeros"
         );
+    }
+
+    #[test]
+    fn test_write_zeroes_compressed_entry_checks_compressed_before_zero_bit() {
+        let cluster_size = 1u64 << 16;
+        let data = vec![0xEE; cluster_size as usize];
+        let (temp, disk) = create_disk_with_data(100 * 1024 * 1024, &data, 0, true, false);
+        drop(disk);
+
+        compress_allocated_clusters(&mut temp.as_file().try_clone().unwrap());
+        set_low_bit_on_first_compressed_l2_entry(&mut temp.as_file().try_clone().unwrap());
+
+        let disk = QcowDisk::new(
+            temp.as_file().try_clone().unwrap(),
+            false,
+            false,
+            true,
+            false,
+        )
+        .unwrap();
+        let mut async_io = disk.create_async_io(1).unwrap();
+        async_io.write_zeroes(0, cluster_size, 200).unwrap();
+        let (user_data, result) = async_io.next_completed_request().unwrap();
+        assert_eq!(user_data, 200);
+        assert_eq!(result, 0);
+
+        async_io.fsync(Some(201)).unwrap();
+        let (user_data, result) = async_io.next_completed_request().unwrap();
+        assert_eq!(user_data, 201);
+        assert_eq!(result, 0);
+        drop(async_io);
+        drop(disk);
+
+        let l2_entry = first_l2_entry(&mut temp.as_file().try_clone().unwrap());
+        assert_eq!(l2_entry, 0);
     }
 
     #[test]
