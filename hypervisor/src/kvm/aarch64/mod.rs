@@ -11,8 +11,9 @@
 pub mod gic;
 
 use kvm_bindings::{
-    KVM_REG_ARM_COPROC_MASK, KVM_REG_ARM_CORE, KVM_REG_SIZE_MASK, KVM_REG_SIZE_U32,
-    KVM_REG_SIZE_U64, kvm_mp_state, kvm_one_reg, kvm_regs,
+    KVM_REG_ARM_COPROC_MASK, KVM_REG_ARM_CORE, KVM_REG_ARM64, KVM_REG_ARM64_SVE, KVM_REG_SIZE_MASK,
+    KVM_REG_SIZE_SHIFT, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64, KVM_REG_SIZE_U128, KVM_REG_SIZE_U256,
+    KVM_REG_SIZE_U512, KVM_REG_SIZE_U1024, KVM_REG_SIZE_U2048, kvm_mp_state, kvm_one_reg, kvm_regs,
 };
 pub use kvm_ioctls::{Cap, Kvm};
 use serde::{Deserialize, Serialize};
@@ -70,14 +71,25 @@ pub fn is_system_register(regid: u64) -> bool {
     }
 
     let size = regid & KVM_REG_SIZE_MASK;
-
-    assert!(
-        !(size != KVM_REG_SIZE_U32 && size != KVM_REG_SIZE_U64),
-        "Unexpected register size for system register {size}"
-    );
-
-    true
+    match size {
+        KVM_REG_SIZE_U32 | KVM_REG_SIZE_U64 => true,
+        KVM_REG_SIZE_U128 | KVM_REG_SIZE_U256 | KVM_REG_SIZE_U512 | KVM_REG_SIZE_U1024
+        | KVM_REG_SIZE_U2048 => false,
+        _ => unreachable!("Unexpected register size {size:#x} for register id {regid:#x}"),
+    }
 }
+
+pub fn is_sve_register(regid: u64) -> bool {
+    (regid & KVM_REG_ARM_COPROC_MASK as u64) == KVM_REG_ARM64_SVE as u64
+}
+
+pub fn reg_size(regid: u64) -> usize {
+    let shift = ((regid & KVM_REG_SIZE_MASK) >> KVM_REG_SIZE_SHIFT as u64) as u32;
+    1usize << shift
+}
+
+pub const KVM_ARM64_SVE_VLS_REGID: u64 =
+    KVM_REG_ARM64 | KVM_REG_SIZE_U512 | KVM_REG_ARM64_SVE as u64 | 0xffff;
 
 pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
     macro_rules! check_extension {
@@ -100,9 +112,17 @@ pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
     Ok(())
 }
 
+pub use crate::arch::aarch64::ExtendedReg;
+
+pub const PRE_FINALIZE_IDS: &[u64] = &[KVM_ARM64_SVE_VLS_REGID];
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct VcpuKvmState {
     pub mp_state: kvm_mp_state,
     pub core_regs: kvm_regs,
     pub sys_regs: Vec<kvm_one_reg>,
+    #[serde(default)]
+    pub pre_finalize_regs: Vec<ExtendedReg>,
+    #[serde(default)]
+    pub extended_regs: Vec<ExtendedReg>,
 }

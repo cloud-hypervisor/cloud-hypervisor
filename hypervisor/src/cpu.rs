@@ -18,6 +18,8 @@ use {anyhow::anyhow, vm_memory::GuestAddress};
 use crate::RegList;
 #[cfg(target_arch = "aarch64")]
 use crate::VcpuInit;
+#[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::ExtendedReg;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters};
 #[cfg(feature = "tdx")]
@@ -220,6 +222,16 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to set aarch64 core register")]
     SetAarchCoreRegister(#[source] anyhow::Error),
+    ///
+    /// Getting extended register error
+    ///
+    #[error("Failed to get extended register")]
+    GetExtendedRegister(#[source] anyhow::Error),
+    ///
+    /// Setting extended register error
+    ///
+    #[error("Failed to set extended register")]
+    SetExtendedRegister(#[source] anyhow::Error),
     ///
     /// Getting RISC-V 64-bit core register error
     ///
@@ -459,6 +471,14 @@ pub trait Vcpu: Send + Sync {
 
     #[cfg(target_arch = "aarch64")]
     fn vcpu_finalize(&self, feature: i32) -> Result<()>;
+    ///
+    /// Sets pre-finalize registers (e.g. SVE VLS).
+    /// Must be called after vcpu_init and before vcpu_finalize.
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn set_pre_finalize_regs(&self, _regs: &[ExtendedReg]) -> Result<()> {
+        Ok(())
+    }
     ///
     /// Gets the features that have been finalized for a given CPU.
     ///

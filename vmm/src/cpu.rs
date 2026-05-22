@@ -153,6 +153,10 @@ pub enum Error {
     VcpuArmFinalize(#[source] hypervisor::HypervisorCpuError),
 
     #[cfg(target_arch = "aarch64")]
+    #[error("Error setting pre-finalize registers")]
+    VcpuSetPreFinalizeRegs(#[source] hypervisor::HypervisorCpuError),
+
+    #[cfg(target_arch = "aarch64")]
     #[error("Error initialising GICR base address")]
     VcpuSetGicrBaseAddr(#[source] hypervisor::HypervisorCpuError),
 
@@ -991,15 +995,22 @@ impl CpuManager {
         )?;
 
         if let Some(snapshot) = snapshot {
-            #[cfg(target_arch = "aarch64")]
-            {
-                vcpu.init(self.vm.as_ref())?;
-                vcpu.finalize_sve()?;
-            }
-
             let state: CpuState = snapshot.to_state().map_err(|e| {
                 Error::VcpuCreate(anyhow!("Could not get vCPU state from snapshot {e:?}"))
             })?;
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                vcpu.init(self.vm.as_ref())?;
+                let pre_finalize = state.pre_finalize_regs();
+                if !pre_finalize.is_empty() {
+                    vcpu.vcpu
+                        .set_pre_finalize_regs(pre_finalize)
+                        .map_err(Error::VcpuSetPreFinalizeRegs)?;
+                }
+                vcpu.finalize_sve()?;
+            }
+
             vcpu.vcpu
                 .set_state(&state)
                 .map_err(|e| Error::VcpuCreate(anyhow!("Could not set the vCPU state {e:?}")))?;
