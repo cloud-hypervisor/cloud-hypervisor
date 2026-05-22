@@ -17,7 +17,9 @@ process_common_args "$@"
 WORKLOADS_DIR="$HOME/workloads"
 
 if [ ! -f "$WORKLOADS_DIR/hypervisor-fw" ]; then
-    download_hypervisor_fw
+    echo "Missing workload asset: $WORKLOADS_DIR/hypervisor-fw"
+    echo "Run: python3 scripts/fetch_workloads.py --test vfio"
+    exit 1
 fi
 
 CFLAGS=""

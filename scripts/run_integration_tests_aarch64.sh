@@ -10,24 +10,25 @@ source "$(dirname "$0")"/common-aarch64.sh
 WORKLOADS_LOCK="$WORKLOADS_DIR/integration_test.lock"
 
 update_workloads() {
-    cp scripts/sha1sums-aarch64-common "$WORKLOADS_DIR"
-
     JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.raw"
-    JAMMY_OS_RAW_IMAGE_DOWNLOAD_URL="https://ch-images.azureedge.net/$JAMMY_OS_RAW_IMAGE_NAME"
     JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
-    if [ ! -f "$JAMMY_OS_RAW_IMAGE" ]; then
-        pushd "$WORKLOADS_DIR" || exit
-        time wget --quiet $JAMMY_OS_RAW_IMAGE_DOWNLOAD_URL || exit 1
-        popd || exit
-    fi
 
     JAMMY_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.qcow2"
-    JAMMY_OS_QCOW2_IMAGE_UNCOMPRESSED_DOWNLOAD_URL="https://ch-images.azureedge.net/$JAMMY_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
     JAMMY_OS_QCOW2_UNCOMPRESSED_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
-    if [ ! -f "$JAMMY_OS_QCOW2_UNCOMPRESSED_IMAGE" ]; then
-        pushd "$WORKLOADS_DIR" || exit
-        time wget --quiet $JAMMY_OS_QCOW2_IMAGE_UNCOMPRESSED_DOWNLOAD_URL || exit 1
-        popd || exit
+
+    for required in "$JAMMY_OS_RAW_IMAGE" "$JAMMY_OS_QCOW2_UNCOMPRESSED_IMAGE" \
+        "$WORKLOADS_DIR/CLOUDHV_EFI.fd" \
+        "$WORKLOADS_DIR/cloud-hypervisor-static-aarch64" \
+        "$WORKLOADS_DIR/alpine-minirootfs-aarch64.tar.gz" \
+        "$WORKLOADS_DIR/Image-arm64"; do
+        if [ ! -f "$required" ]; then
+            echo "Missing: $required — run: python3 scripts/fetch_workloads.py --test integration"
+            exit 1
+        fi
+    done
+
+    if [ ! -f "$WORKLOADS_DIR/virtiofsd" ]; then
+        cp /usr/local/bin/virtiofsd "$WORKLOADS_DIR/virtiofsd"
     fi
 
     JAMMY_OS_QCOW2_ZLIB_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-zlib.qcow2"
@@ -76,13 +77,7 @@ update_workloads() {
         popd || exit
     fi
 
-    ALPINE_MINIROOTFS_URL="http://dl-cdn.alpinelinux.org/alpine/v3.11/releases/aarch64/alpine-minirootfs-3.11.3-aarch64.tar.gz"
     ALPINE_MINIROOTFS_TARBALL="$WORKLOADS_DIR/alpine-minirootfs-aarch64.tar.gz"
-    if [ ! -f "$ALPINE_MINIROOTFS_TARBALL" ]; then
-        pushd "$WORKLOADS_DIR" || exit
-        time wget --quiet $ALPINE_MINIROOTFS_URL -O "$ALPINE_MINIROOTFS_TARBALL" || exit 1
-        popd || exit
-    fi
 
     ALPINE_INITRAMFS_IMAGE="$WORKLOADS_DIR/alpine_initramfs.img"
     if [ ! -f "$ALPINE_INITRAMFS_IMAGE" ]; then
@@ -100,54 +95,6 @@ update_workloads() {
         find . -print0 |
             cpio --null --create --verbose --owner root:root --format=newc >"$ALPINE_INITRAMFS_IMAGE"
         popd || exit
-    fi
-
-    # Download aarch64 ovmf
-    if [ ! -f "$WORKLOADS_DIR/CLOUDHV_EFI.fd" ]; then
-        download_aarch64_ovmf
-    fi
-
-    pushd "$WORKLOADS_DIR" || exit
-
-    # Skip checksum verification for custom-provided workloads
-    if [ -n "$CH_CUSTOM_OVMF" ]; then
-        if ! grep -v "CLOUDHV_EFI.fd" sha1sums-aarch64-common | sha1sum --check; then
-            echo "sha1sum validation of images failed, remove invalid images to fix the issue."
-            exit 1
-        fi
-    else
-        if ! sha1sum sha1sums-aarch64-common --check; then
-            echo "sha1sum validation of images failed, remove invalid images to fix the issue."
-            exit 1
-        fi
-    fi
-    popd || exit
-
-    # Download Cloud Hypervisor binary from its last stable release
-    CH_RELEASE_URL="https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/${migratable_version}/cloud-hypervisor-static-aarch64"
-    CH_RELEASE_NAME="cloud-hypervisor-static-aarch64"
-    pushd "$WORKLOADS_DIR" || exit
-    # Repeat a few times to workaround a random wget failure
-    WGET_RETRY_MAX=10
-    wget_retry=0
-
-    until [ "$wget_retry" -ge "$WGET_RETRY_MAX" ]; do
-        time wget $CH_RELEASE_URL -O "$CH_RELEASE_NAME" && break
-        wget_retry=$((wget_retry + 1))
-    done
-
-    if [ $wget_retry -ge "$WGET_RETRY_MAX" ]; then
-        exit 1
-    else
-        chmod +x $CH_RELEASE_NAME
-    fi
-    popd || exit
-
-    # Prepare linux image (build from source or download pre-built)
-    prepare_linux
-
-    if [ ! -f "$WORKLOADS_DIR/virtiofsd" ]; then
-        cp /usr/local/bin/virtiofsd "$WORKLOADS_DIR/virtiofsd"
     fi
 
     BLK_IMAGE="$WORKLOADS_DIR/blk.img"
@@ -174,21 +121,10 @@ update_workloads() {
 
 process_common_args "$@"
 
-migratable_version=v39.0
 test_features=""
 
 if [ "$hypervisor" = "mshv" ]; then
     test_features="--features mshv"
-fi
-
-# if migratable version is set to override the default
-if [ -n "${MIGRATABLE_VERSION}" ]; then
-    # validate the version if matched with vxx.0
-    if ! [[ "${MIGRATABLE_VERSION}" =~ ^v[0-9]{2,}\.[0-9]$ ]]; then
-        echo "MIGRATABLE_VERSION should be in format vxx.0, e.g. v47.0"
-        exit 1
-    fi
-    migratable_version=${MIGRATABLE_VERSION}
 fi
 
 # lock the workloads folder to avoid parallel updating by different containers

@@ -583,7 +583,6 @@ cmd_tests() {
             "${common_env_args[@]}" \
             --env PARALLEL_INTEGRATION_TESTS_NUM="${PARALLEL_INTEGRATION_TESTS_NUM:-}" \
             --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
-            --env MIGRATABLE_VERSION="$MIGRATABLE_VERSION" \
             "$CTR_IMAGE" \
             dbus-run-session ./scripts/run_integration_tests_"$(uname -m)".sh "$@" || fix_dir_perms $? || exit $?
     fi

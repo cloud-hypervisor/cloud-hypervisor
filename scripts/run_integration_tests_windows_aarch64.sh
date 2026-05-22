@@ -18,10 +18,11 @@ fi
 WIN_IMAGE_BASENAME="windows-11-iot-enterprise-aarch64.raw"
 WIN_IMAGE_FILE="$WORKLOADS_DIR/$WIN_IMAGE_BASENAME"
 
-# Download aarch64 OVMF
 OVMF_FW="$WORKLOADS_DIR/CLOUDHV_EFI.fd"
 if [ ! -f "$OVMF_FW" ]; then
-    download_aarch64_ovmf
+    echo "Missing workload asset: $OVMF_FW"
+    echo "Run: python3 scripts/fetch_workloads.py --test windows"
+    exit 1
 fi
 
 # Check if the images are present

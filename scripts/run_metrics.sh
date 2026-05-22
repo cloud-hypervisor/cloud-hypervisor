@@ -20,26 +20,18 @@ if [ "$VM_TYPE" = "confidential" ]; then
     vm_type_arg="--vm-type confidential"
 fi
 
-cp scripts/sha1sums-"${TEST_ARCH}"-common "$WORKLOADS_DIR"
-
 if [ "${TEST_ARCH}" == "aarch64" ]; then
     JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.qcow2"
-else
-    JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.qcow2"
-fi
-
-JAMMY_OS_IMAGE_URL="https://ch-images.azureedge.net/$JAMMY_OS_IMAGE_NAME"
-JAMMY_OS_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_IMAGE_NAME"
-if [ ! -f "$JAMMY_OS_IMAGE" ]; then
-    pushd "$WORKLOADS_DIR" || exit
-    time wget --quiet $JAMMY_OS_IMAGE_URL || exit 1
-    popd || exit
-fi
-
-if [ "${TEST_ARCH}" == "aarch64" ]; then
     JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.raw"
 else
+    JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.qcow2"
     JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.raw"
+fi
+
+JAMMY_OS_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_IMAGE_NAME"
+if [ ! -f "$JAMMY_OS_IMAGE" ]; then
+    echo "Missing: $JAMMY_OS_IMAGE — run: python3 scripts/fetch_workloads.py --test metrics"
+    exit 1
 fi
 
 JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
@@ -49,16 +41,15 @@ if [ ! -f "$JAMMY_OS_RAW_IMAGE" ]; then
     popd || exit
 fi
 
-pushd "$WORKLOADS_DIR" || exit
-if ! grep jammy sha1sums-"${TEST_ARCH}"-common | sha1sum --check; then
-    echo "sha1sum validation of images failed, remove invalid images to fix the issue."
+if [ "${TEST_ARCH}" == "aarch64" ]; then
+    KERNEL_IMAGE="$WORKLOADS_DIR/Image-arm64"
+else
+    KERNEL_IMAGE="$WORKLOADS_DIR/vmlinux-x86_64"
+fi
+if [ ! -f "$KERNEL_IMAGE" ]; then
+    echo "Missing: $KERNEL_IMAGE — run: python3 scripts/fetch_workloads.py --test metrics"
     exit 1
 fi
-
-popd || exit
-
-# Prepare linux image (build from source or download pre-built)
-prepare_linux
 
 CFLAGS=""
 if [[ "${BUILD_TARGET}" == "${TEST_ARCH}-unknown-linux-musl" ]]; then

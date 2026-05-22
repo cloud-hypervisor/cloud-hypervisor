@@ -12,7 +12,6 @@ mkdir -p "$WORKLOADS_DIR/junit"
 
 process_common_args "$@"
 
-migratable_version=v39.0
 # For now these values are default for kvm
 test_features=""
 
@@ -21,26 +20,27 @@ if [ "$hypervisor" = "mshv" ]; then
 fi
 
 # if migratable version is set to override the default
-if [ -n "${MIGRATABLE_VERSION}" ]; then
-    # validate the version if matched with vxx.0
-    if ! [[ "${MIGRATABLE_VERSION}" =~ ^v[0-9]{2,}\.[0-9]$ ]]; then
-        echo "MIGRATABLE_VERSION should be in format vxx.0, e.g. v47.0"
+FW="$WORKLOADS_DIR/hypervisor-fw"
+JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.qcow2"
+JAMMY_OS_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_IMAGE_NAME"
+JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.raw"
+JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
+
+for required in "$FW" "$WORKLOADS_DIR/CLOUDHV.fd" "$JAMMY_OS_IMAGE" \
+    "$WORKLOADS_DIR/vmlinux-x86_64" "$WORKLOADS_DIR/bzImage-x86_64" \
+    "$WORKLOADS_DIR/alpine-minirootfs-x86_64.tar.gz" \
+    "$WORKLOADS_DIR/cloud-hypervisor-static"; do
+    if [ ! -f "$required" ]; then
+        echo "Missing: $required — run: python3 scripts/fetch_workloads.py --test integration"
         exit 1
     fi
-    migratable_version=${MIGRATABLE_VERSION}
+done
+
+if [ ! -f "$JAMMY_OS_RAW_IMAGE" ]; then
+    pushd "$WORKLOADS_DIR" || exit
+    time qemu-img convert -p -f qcow2 -O raw $JAMMY_OS_IMAGE_NAME $JAMMY_OS_RAW_IMAGE_NAME || exit 1
+    popd || exit
 fi
-
-cp scripts/sha1sums-x86_64* "$WORKLOADS_DIR"
-
-if [ ! -f "$WORKLOADS_DIR/hypervisor-fw" ]; then
-    download_hypervisor_fw
-fi
-
-if [ ! -f "$WORKLOADS_DIR/CLOUDHV.fd" ]; then
-    download_amd64_ovmf
-fi
-
-download_x86_guest_images
 
 JAMMY_OS_QCOW_ZLIB_FILE_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0-zlib.qcow2"
 JAMMY_OS_QCOW_ZLIB_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_ZLIB_FILE_IMAGE_NAME"
@@ -90,12 +90,10 @@ if [ ! -f "$JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE" ]; then
     popd || exit
 fi
 
-ALPINE_MINIROOTFS_URL="http://dl-cdn.alpinelinux.org/alpine/v3.11/releases/x86_64/alpine-minirootfs-3.11.3-x86_64.tar.gz"
 ALPINE_MINIROOTFS_TARBALL="$WORKLOADS_DIR/alpine-minirootfs-x86_64.tar.gz"
 if [ ! -f "$ALPINE_MINIROOTFS_TARBALL" ]; then
-    pushd "$WORKLOADS_DIR" || exit
-    time wget --quiet $ALPINE_MINIROOTFS_URL -O "$ALPINE_MINIROOTFS_TARBALL" || exit 1
-    popd || exit
+    echo "Missing: $ALPINE_MINIROOTFS_TARBALL — run: python3 scripts/fetch_workloads.py --test integration"
+    exit 1
 fi
 
 ALPINE_INITRAMFS_IMAGE="$WORKLOADS_DIR/alpine_initramfs.img"
@@ -116,39 +114,9 @@ if [ ! -f "$ALPINE_INITRAMFS_IMAGE" ]; then
     popd || exit
 fi
 
-pushd "$WORKLOADS_DIR" || exit
-# Skip checksum verification for custom-provided workloads
-sha1_exclude=""
-[ -n "$CH_CUSTOM_FIRMWARE" ] && sha1_exclude="${sha1_exclude}|hypervisor-fw"
-[ -n "$CH_CUSTOM_OVMF" ] && sha1_exclude="${sha1_exclude}|CLOUDHV\\.fd"
-sha1_exclude="${sha1_exclude#|}"
-if [ -n "$sha1_exclude" ]; then
-    if ! cat sha1sums-x86_64 sha1sums-x86_64-common | grep -Ev "$sha1_exclude" | sha1sum --check; then
-        echo "sha1sum validation of images failed, remove invalid images to fix the issue."
-        exit 1
-    fi
-else
-    if ! sha1sum sha1sums-x86_64 sha1sums-x86_64-common --check; then
-        echo "sha1sum validation of images failed, remove invalid images to fix the issue."
-        exit 1
-    fi
-fi
-popd || exit
+python3 scripts/fetch_workloads.py --test integration --verify-only || exit 1
 
-# Download Cloud Hypervisor binary from its last stable release for live-upgrade tests
-CH_RELEASE_URL="https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/${migratable_version}/cloud-hypervisor-static"
-CH_RELEASE_NAME="cloud-hypervisor-static"
-pushd "$WORKLOADS_DIR" || exit
-time wget --quiet $CH_RELEASE_URL -O "$CH_RELEASE_NAME" || exit 1
-chmod +x $CH_RELEASE_NAME
-popd || exit
-
-# Build custom kernel based on virtio-pmem and virtio-fs upstream patches
 VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux-x86_64"
-if [ ! -f "$VMLINUX_IMAGE" ]; then
-    # Prepare linux image (build from source or download pre-built)
-    prepare_linux
-fi
 
 VIRTIOFSD="$WORKLOADS_DIR/virtiofsd"
 if [ ! -f "$VIRTIOFSD" ]; then

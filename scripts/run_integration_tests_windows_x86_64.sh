@@ -18,9 +18,10 @@ WIN_IMAGE_FILE="/root/workloads/windows-server-2025-amd64-1.raw"
 WORKLOADS_DIR="/root/workloads"
 OVMF_FW="$WORKLOADS_DIR/CLOUDHV.fd"
 
-# Download amd64 ovmf
 if [ ! -f "$OVMF_FW" ]; then
-    download_amd64_ovmf
+    echo "Missing workload asset: $OVMF_FW"
+    echo "Run: python3 scripts/fetch_workloads.py --test windows"
+    exit 1
 fi
 
 CFLAGS=""

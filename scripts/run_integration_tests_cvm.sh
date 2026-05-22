@@ -15,15 +15,20 @@ process_common_args "$@"
 test_features="--features mshv,igvm,sev_snp"
 build_features="mshv,igvm,sev_snp"
 
-download_x86_guest_images
-cp scripts/sha1sums-x86_64-common "$WORKLOADS_DIR"
-
-pushd "$WORKLOADS_DIR" || exit
-if ! sha1sum sha1sums-x86_64-common --check; then
-    echo "sha1sum validation of images failed, remove invalid images to fix the issue."
+JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.qcow2"
+JAMMY_OS_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_IMAGE_NAME"
+if [ ! -f "$JAMMY_OS_IMAGE" ]; then
+    echo "Missing: $JAMMY_OS_IMAGE — run: python3 scripts/fetch_workloads.py --test cvm"
     exit 1
 fi
-popd || exit
+
+JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.raw"
+JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
+if [ ! -f "$JAMMY_OS_RAW_IMAGE" ]; then
+    pushd "$WORKLOADS_DIR" || exit
+    time qemu-img convert -p -f qcow2 -O raw $JAMMY_OS_IMAGE_NAME $JAMMY_OS_RAW_IMAGE_NAME || exit 1
+    popd || exit
+fi
 
 cargo build --features $build_features --all --release --target "$BUILD_TARGET"
 

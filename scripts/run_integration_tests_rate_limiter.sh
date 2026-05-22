@@ -18,15 +18,11 @@ if [ "$hypervisor" = "mshv" ]; then
     test_features="--features mshv"
 fi
 
-cp scripts/sha1sums-x86_64* "$WORKLOADS_DIR"
-
 JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.qcow2"
-JAMMY_OS_IMAGE_URL="https://ch-images.azureedge.net/$JAMMY_OS_IMAGE_NAME"
 JAMMY_OS_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_IMAGE_NAME"
 if [ ! -f "$JAMMY_OS_IMAGE" ]; then
-    pushd "$WORKLOADS_DIR" || exit
-    time wget --quiet $JAMMY_OS_IMAGE_URL || exit 1
-    popd || exit
+    echo "Missing: $JAMMY_OS_IMAGE — run: python3 scripts/fetch_workloads.py --test rate-limiter"
+    exit 1
 fi
 
 JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.raw"
@@ -37,15 +33,11 @@ if [ ! -f "$JAMMY_OS_RAW_IMAGE" ]; then
     popd || exit
 fi
 
-pushd "$WORKLOADS_DIR" || exit
-if ! grep jammy sha1sums-x86_64-common | sha1sum --check; then
-    echo "sha1sum validation of images failed, remove invalid images to fix the issue."
+VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux-x86_64"
+if [ ! -f "$VMLINUX_IMAGE" ]; then
+    echo "Missing: $VMLINUX_IMAGE — run: python3 scripts/fetch_workloads.py --test rate-limiter"
     exit 1
 fi
-popd || exit
-
-# Prepare linux image (build from source or download pre-built)
-prepare_linux
 
 CFLAGS=""
 if [[ "${BUILD_TARGET}" == "x86_64-unknown-linux-musl" ]]; then
