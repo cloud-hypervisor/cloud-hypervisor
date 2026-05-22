@@ -42,7 +42,10 @@ use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::gic::KvmGicV3Its;
 #[cfg(target_arch = "aarch64")]
-pub use crate::aarch64::{VcpuKvmState, check_required_kvm_extensions, is_system_register};
+pub use crate::aarch64::{
+    ExtendedReg, KVM_ARM64_SVE_VLS_REGID, PRE_FINALIZE_IDS, VcpuKvmState,
+    check_required_kvm_extensions, is_sve_register, is_system_register, reg_size,
+};
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
 #[cfg(target_arch = "riscv64")]
@@ -113,10 +116,10 @@ pub use kvm_bindings::{
 };
 #[cfg(target_arch = "aarch64")]
 use kvm_bindings::{
-    KVM_GUESTDBG_USE_HW, KVM_NR_SPSR, KVM_REG_ARM_CORE, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG,
-    KVM_REG_ARM64_SYSREG_CRM_MASK, KVM_REG_ARM64_SYSREG_CRN_MASK, KVM_REG_ARM64_SYSREG_OP0_MASK,
-    KVM_REG_ARM64_SYSREG_OP1_MASK, KVM_REG_ARM64_SYSREG_OP2_MASK, KVM_REG_SIZE_U32,
-    KVM_REG_SIZE_U64, KVM_REG_SIZE_U128, kvm_regs, user_pt_regs,
+    KVM_GUESTDBG_USE_HW, KVM_NR_SPSR, KVM_REG_ARM_COPROC_MASK, KVM_REG_ARM_CORE, KVM_REG_ARM64,
+    KVM_REG_ARM64_SYSREG, KVM_REG_ARM64_SYSREG_CRM_MASK, KVM_REG_ARM64_SYSREG_CRN_MASK,
+    KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP1_MASK, KVM_REG_ARM64_SYSREG_OP2_MASK,
+    KVM_REG_SIZE_U32, KVM_REG_SIZE_U64, KVM_REG_SIZE_U128, kvm_regs, user_pt_regs,
 };
 #[cfg(target_arch = "riscv64")]
 use kvm_bindings::{KVM_REG_RISCV_CORE, kvm_riscv_core};
@@ -1895,7 +1898,6 @@ impl cpu::Vcpu for KvmVcpu {
             off += std::mem::size_of::<u64>();
         }
 
-        self.get_fpsimd_regs(&mut state)?;
         Ok(state.into())
     }
 
@@ -2049,7 +2051,6 @@ impl cpu::Vcpu for KvmVcpu {
             off += std::mem::size_of::<u64>();
         }
 
-        self.set_fpsimd_regs(&kvm_regs_state)?;
         Ok(())
     }
 
@@ -2636,6 +2637,16 @@ impl cpu::Vcpu for KvmVcpu {
             .map_err(|e| cpu::HypervisorCpuError::VcpuFinalize(e.into()))
     }
 
+    #[cfg(target_arch = "aarch64")]
+    fn set_pre_finalize_regs(&self, regs: &[ExtendedReg]) -> cpu::Result<()> {
+        for reg in regs {
+            self.fd
+                .set_one_reg(reg.id, &reg.data)
+                .map_err(|e| cpu::HypervisorCpuError::SetExtendedRegister(e.into()))?;
+        }
+        Ok(())
+    }
+
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     ///
     /// Gets a list of the guest registers that are supported for the
@@ -2912,42 +2923,64 @@ impl cpu::Vcpu for KvmVcpu {
             mp_state: self.get_mp_state()?.into(),
             ..Default::default()
         };
+
         // Get core registers
         state.core_regs = self.get_regs()?.into();
 
-        // Get systerm register
         // Call KVM_GET_REG_LIST to get all registers available to the guest.
-        // For ArmV8 there are around 500 registers.
-        let mut sys_regs: Vec<kvm_bindings::kvm_one_reg> = Vec::new();
+        // ARM64_REGS_MAX in kvm-bindings caps this at 500.
         let mut reg_list = kvm_bindings::RegList::new(500).unwrap();
         self.fd
             .get_reg_list(&mut reg_list)
             .map_err(|e| cpu::HypervisorCpuError::GetRegList(e.into()))?;
 
-        // At this point reg_list should contain: core registers and system
-        // registers.
-        // The register list contains the number of registers and their ids. We
-        // will be needing to call KVM_GET_ONE_REG on each id in order to save
-        // all of them. We carve out from the list  the core registers which are
-        // represented in the kernel by kvm_regs structure and for which we can
-        // calculate the id based on the offset in the structure.
-        reg_list.retain(|regid| is_system_register(*regid));
+        let mut sys_regs: Vec<kvm_bindings::kvm_one_reg> = Vec::new();
+        let mut pre_finalize_regs: Vec<ExtendedReg> = Vec::new();
+        let mut extended_regs: Vec<ExtendedReg> = Vec::new();
+        let mut has_sve = false;
 
-        // Now, for the rest of the registers left in the previously fetched
-        // register list, we are simply calling KVM_GET_ONE_REG.
-        let indices = reg_list.as_slice();
-        for index in indices.iter() {
-            let mut bytes = [0_u8; 8];
-            self.fd
-                .get_one_reg(*index, &mut bytes)
-                .map_err(|e| cpu::HypervisorCpuError::GetSysRegister(e.into()))?;
-            sys_regs.push(kvm_bindings::kvm_one_reg {
-                id: *index,
-                addr: u64::from_le_bytes(bytes),
-            });
+        for regid in reg_list.as_slice().iter().copied() {
+            if (regid & KVM_REG_ARM_COPROC_MASK as u64) == KVM_REG_ARM_CORE as u64 {
+                // Handled by get_regs() above.
+            } else if is_system_register(regid) {
+                let mut bytes = [0_u8; 8];
+                self.fd
+                    .get_one_reg(regid, &mut bytes)
+                    .map_err(|e| cpu::HypervisorCpuError::GetSysRegister(e.into()))?;
+                sys_regs.push(kvm_bindings::kvm_one_reg {
+                    id: regid,
+                    addr: u64::from_le_bytes(bytes),
+                });
+            } else if is_sve_register(regid) {
+                let size = reg_size(regid);
+                let mut bytes = vec![0u8; size];
+                self.fd
+                    .get_one_reg(regid, &mut bytes)
+                    .map_err(|e| cpu::HypervisorCpuError::GetExtendedRegister(e.into()))?;
+                has_sve = true;
+                let reg = ExtendedReg {
+                    id: regid,
+                    data: bytes,
+                };
+                if PRE_FINALIZE_IDS.contains(&regid) {
+                    pre_finalize_regs.push(reg);
+                } else {
+                    extended_regs.push(reg);
+                }
+            } else {
+                return Err(cpu::HypervisorCpuError::GetExtendedRegister(anyhow!(
+                    "Unsupported register family: {regid:#x}"
+                )));
+            }
+        }
+
+        if !has_sve {
+            self.get_fpsimd_regs(&mut state.core_regs)?;
         }
 
         state.sys_regs = sys_regs;
+        state.pre_finalize_regs = pre_finalize_regs;
+        state.extended_regs = extended_regs;
 
         Ok(state.into())
     }
@@ -3116,8 +3149,24 @@ impl cpu::Vcpu for KvmVcpu {
     #[cfg(target_arch = "aarch64")]
     fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
         let state: VcpuKvmState = state.clone().into();
+
         // Set core registers
         self.set_regs(&state.core_regs.into())?;
+
+        let mut has_sve = state
+            .pre_finalize_regs
+            .iter()
+            .any(|r| is_sve_register(r.id));
+        for reg in &state.extended_regs {
+            has_sve |= is_sve_register(reg.id);
+            self.fd
+                .set_one_reg(reg.id, &reg.data)
+                .map_err(|e| cpu::HypervisorCpuError::SetExtendedRegister(e.into()))?;
+        }
+        if !has_sve {
+            self.set_fpsimd_regs(&state.core_regs)?;
+        }
+
         // Set system registers
         for reg in &state.sys_regs {
             self.fd

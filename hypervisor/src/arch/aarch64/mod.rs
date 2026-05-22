@@ -4,3 +4,11 @@
 
 pub mod gic;
 pub mod regs;
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ExtendedReg {
+    pub id: u64,
+    pub data: Vec<u8>,
+}

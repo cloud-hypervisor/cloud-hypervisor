@@ -161,6 +161,18 @@ pub enum CpuState {
     Mshv(mshv::VcpuMshvState),
 }
 
+#[cfg(target_arch = "aarch64")]
+impl CpuState {
+    pub fn pre_finalize_regs(&self) -> &[arch::aarch64::ExtendedReg] {
+        match self {
+            #[cfg(feature = "kvm")]
+            CpuState::Kvm(state) => &state.pre_finalize_regs,
+            #[cfg(feature = "mshv")]
+            CpuState::Mshv(_) => &[],
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[cfg(target_arch = "x86_64")]
 pub enum ClockData {
