@@ -1,0 +1,87 @@
+# Copyright © 2025 Meta Platforms, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# Workload assets required by integration tests.
+# Use scripts/fetch_workloads.py to download them before running tests.
+
+assets:
+  # Firmware
+  - filename: hypervisor-fw
+    url: https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/download/0.5.0/hypervisor-fw
+    sha1: 540ac358429305d7aa94e15363665d1c9d845982
+    arch: [x86_64]
+    test: [integration, vfio]
+
+  - filename: CLOUDHV.fd
+    url: https://github.com/cloud-hypervisor/edk2/releases/download/ch-1e1b96f126/CLOUDHV.fd
+    sha1: fb2e6834cc482c80a45766f6dcf12474f4fcb74e
+    arch: [x86_64]
+    test: [integration, windows]
+
+  - filename: CLOUDHV_EFI.fd
+    url: https://github.com/cloud-hypervisor/edk2/releases/download/ch-1e1b96f126/CLOUDHV_EFI.fd
+    sha1: ce3656987f9e4238ef8afbd65fca219460c1f767
+    arch: [aarch64]
+    test: [integration, windows]
+
+  # Guest images
+  - filename: jammy-server-cloudimg-amd64-custom-20241017-0.qcow2
+    url: https://ch-images.azureedge.net/jammy-server-cloudimg-amd64-custom-20241017-0.qcow2
+    sha1: 5f10738920efb74f0bf854cadcd1b1fd544e49c8
+    arch: [x86_64]
+    test: [integration, cvm, rate-limiter, metrics]
+
+  - filename: jammy-server-cloudimg-arm64-custom-20220329-0.raw
+    url: https://ch-images.azureedge.net/jammy-server-cloudimg-arm64-custom-20220329-0.raw
+    sha1: 1f2b71be43b8f748f01306c4454e5c921343faa4
+    arch: [aarch64]
+    test: [integration]
+
+  - filename: jammy-server-cloudimg-arm64-custom-20220329-0.qcow2
+    url: https://ch-images.azureedge.net/jammy-server-cloudimg-arm64-custom-20220329-0.qcow2
+    sha1: 7118f4d4cad18c8357bc2ad9824a50f9a82a860a
+    arch: [aarch64]
+    test: [integration]
+
+  # Alpine minirootfs
+  - filename: alpine-minirootfs-x86_64.tar.gz
+    url: http://dl-cdn.alpinelinux.org/alpine/v3.11/releases/x86_64/alpine-minirootfs-3.11.3-x86_64.tar.gz
+    sha1: d4a44acc6014d5f83dea1c625c43d677a95fa75f
+    arch: [x86_64]
+    test: [integration]
+
+  - filename: alpine-minirootfs-aarch64.tar.gz
+    url: http://dl-cdn.alpinelinux.org/alpine/v3.11/releases/aarch64/alpine-minirootfs-3.11.3-aarch64.tar.gz
+    sha1: e4addb6e212a298144f9eb0eb6e36019d013f0e7
+    arch: [aarch64]
+    test: [integration]
+
+  # Kernels
+  - filename: vmlinux-x86_64
+    url: https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v6.16.9-20260508/vmlinux-x86_64
+    arch: [x86_64]
+    test: [integration, rate-limiter, metrics]
+
+  - filename: bzImage-x86_64
+    url: https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v6.16.9-20260508/bzImage-x86_64
+    arch: [x86_64]
+    test: [integration]
+
+  - filename: Image-arm64
+    url: https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v6.16.9-20260508/Image-arm64
+    arch: [aarch64]
+    test: [integration, metrics]
+
+  # Previous release binaries for live-upgrade tests
+  - filename: cloud-hypervisor-static
+    url: https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v39.0/cloud-hypervisor-static
+    executable: true
+    arch: [x86_64]
+    test: [integration]
+
+  - filename: cloud-hypervisor-static-aarch64
+    url: https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v39.0/cloud-hypervisor-static-aarch64
+    executable: true
+    arch: [aarch64]
+    test: [integration]
