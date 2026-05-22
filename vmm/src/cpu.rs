@@ -554,6 +554,7 @@ impl Vcpu {
         #[cfg(target_arch = "aarch64")]
         {
             self.init(vm)?;
+            self.finalize_sve()?;
             self.mpidr = arch::configure_vcpu(self.vcpu.as_ref(), self.id, boot_setup)
                 .map_err(Error::VcpuConfiguration)?;
         }
@@ -607,13 +608,8 @@ impl Vcpu {
     /// Initializes an aarch64 specific vcpu for booting Linux.
     #[cfg(target_arch = "aarch64")]
     pub fn init(&self, vm: &dyn hypervisor::Vm) -> Result<()> {
-        use std::arch::is_aarch64_feature_detected;
-        #[allow(clippy::nonminimal_bool)]
-        let sve_supported =
-            is_aarch64_feature_detected!("sve") || is_aarch64_feature_detected!("sve2");
         let mut kvi = self.vcpu.create_vcpu_init();
 
-        // This reads back the kernel's preferred target type.
         vm.get_preferred_target(&mut kvi)
             .map_err(Error::VcpuArmPreferredTarget)?;
 
@@ -623,6 +619,17 @@ impl Vcpu {
 
         self.vcpu.vcpu_init(&kvi).map_err(Error::VcpuArmInit)?;
 
+        Ok(())
+    }
+
+    /// Finalizes SVE on the vCPU if the host supports it.
+    /// Must be called after init() and before any register access.
+    #[cfg(target_arch = "aarch64")]
+    pub fn finalize_sve(&self) -> Result<()> {
+        use std::arch::is_aarch64_feature_detected;
+        #[allow(clippy::nonminimal_bool)]
+        let sve_supported =
+            is_aarch64_feature_detected!("sve") || is_aarch64_feature_detected!("sve2");
         if sve_supported {
             let finalized_features = self.vcpu.vcpu_get_finalized_features();
             self.vcpu
@@ -984,9 +991,11 @@ impl CpuManager {
         )?;
 
         if let Some(snapshot) = snapshot {
-            // AArch64 vCPUs should be initialized after created.
             #[cfg(target_arch = "aarch64")]
-            vcpu.init(self.vm.as_ref())?;
+            {
+                vcpu.init(self.vm.as_ref())?;
+                vcpu.finalize_sve()?;
+            }
 
             let state: CpuState = snapshot.to_state().map_err(|e| {
                 Error::VcpuCreate(anyhow!("Could not get vCPU state from snapshot {e:?}"))
