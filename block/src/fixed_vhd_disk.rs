@@ -1,5 +1,7 @@
 // Copyright 2026 The Cloud Hypervisor Authors. All rights reserved.
 //
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+//
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fs::File;
@@ -120,11 +122,15 @@ impl disk_file::AsyncDiskFile for FixedVhdDisk {
 mod unit_tests {
     use std::fs::File;
     use std::io::{Seek, SeekFrom, Write};
+    #[cfg(feature = "io_uring")]
+    use std::os::fd::AsRawFd;
 
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
     use crate::async_io::AsyncIo;
+    #[cfg(feature = "io_uring")]
+    use crate::async_io::{AsyncIoOperation, OwnedIoBuffer};
     use crate::disk_file::{AsyncDiskFile, DiskSize, PhysicalSize, Resizable};
 
     /// Minimal fixed VHD footer (disk type = 2, current_size = 0x11223344).
@@ -186,6 +192,20 @@ mod unit_tests {
         let file = make_vhd_file();
         let disk = FixedVhdDisk::new(file, true).unwrap();
         assert_async_io(&disk, true);
+    }
+
+    #[cfg(feature = "io_uring")]
+    #[test]
+    fn io_uring_batch_rejects_request_past_logical_size() {
+        let file = TempFile::new().unwrap().into_file();
+        file.set_len(0x2000).unwrap();
+        let mut async_io = FixedVhdAsync::new(file.as_raw_fd(), 8, 0x1000).unwrap();
+        let op = AsyncIoOperation::read_to_vec(0x800, OwnedIoBuffer::from_vec(vec![0; 0x900]), 1);
+
+        assert!(matches!(
+            async_io.submit_batch_operations(vec![op]),
+            Err(crate::async_io::AsyncIoError::ReadVectored(_))
+        ));
     }
 
     #[test]

@@ -1,5 +1,7 @@
 // Copyright 2026 The Cloud Hypervisor Authors. All rights reserved.
 //
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+//
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 //! Shared test helpers for [`AsyncIo`] backends.
@@ -12,6 +14,11 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 
 use crate::async_io::{AsyncIo, AsyncIoError};
+
+fn next_completion(async_io: &mut dyn AsyncIo) -> (u64, i32) {
+    let completion = async_io.next_completion().expect("No completion");
+    (completion.user_data, completion.result)
+}
 
 /// Tests punching a hole in the middle of a 4 MB file and verifying data
 /// integrity around the hole.
@@ -27,7 +34,7 @@ pub fn test_punch_hole(async_io: &mut dyn AsyncIo, file: &mut File) {
     async_io.punch_hole(offset, length, 1).unwrap();
 
     // Check completion
-    let (user_data, result) = async_io.next_completed_request().unwrap();
+    let (user_data, result) = next_completion(async_io);
     assert_eq!(user_data, 1);
     assert_eq!(result, 0);
 
@@ -84,7 +91,7 @@ pub fn test_write_zeroes(async_io: &mut dyn AsyncIo, file: &mut File) {
     write_zeroes_result.unwrap();
 
     // Check completion
-    let (user_data, result) = async_io.next_completed_request().unwrap();
+    let (user_data, result) = next_completion(async_io);
     assert_eq!(user_data, 2);
     assert_eq!(result, 0);
 
@@ -134,15 +141,15 @@ pub fn test_punch_hole_multiple_operations(async_io: &mut dyn AsyncIo, file: &mu
         .unwrap();
 
     // Check all completions
-    let (user_data, result) = async_io.next_completed_request().unwrap();
+    let (user_data, result) = next_completion(async_io);
     assert_eq!(user_data, 10);
     assert_eq!(result, 0);
 
-    let (user_data, result) = async_io.next_completed_request().unwrap();
+    let (user_data, result) = next_completion(async_io);
     assert_eq!(user_data, 11);
     assert_eq!(result, 0);
 
-    let (user_data, result) = async_io.next_completed_request().unwrap();
+    let (user_data, result) = next_completion(async_io);
     assert_eq!(user_data, 12);
     assert_eq!(result, 0);
 

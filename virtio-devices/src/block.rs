@@ -6,6 +6,8 @@
 //
 // Copyright © 2020 Intel Corporation
 //
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+//
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::cmp::max;
@@ -303,7 +305,7 @@ impl BlockEpollHandler {
             request.writeback = self.writeback.load(Ordering::Acquire);
 
             let result = request.execute_async(
-                desc_chain.memory(),
+                self.mem.memory().into_inner(),
                 self.disk_nsectors.load(Ordering::SeqCst),
                 self.disk_image.as_mut(),
                 &self.serial,
@@ -317,15 +319,7 @@ impl BlockEpollHandler {
             }) = result
             {
                 if let Some(batch_request) = batch_request {
-                    match batch_request.request_type {
-                        RequestType::In | RequestType::Out => batch_requests.push(batch_request),
-                        _ => {
-                            unreachable!(
-                                "Unexpected batch request type: {:?}",
-                                request.request_type()
-                            )
-                        }
-                    }
+                    batch_requests.push(batch_request);
                     batch_inflight_requests.push((desc_chain.head_index(), request));
                 } else {
                     self.inflight_requests
@@ -363,24 +357,26 @@ impl BlockEpollHandler {
             }
         }
 
-        match self.disk_image.submit_batch_requests(&batch_requests) {
-            Ok(()) => {
-                self.inflight_requests.extend(batch_inflight_requests);
-            }
-            Err(e) => {
-                // If batch submission fails, report VIRTIO_BLK_S_IOERR for all requests.
-                for (user_data, request) in batch_inflight_requests {
-                    warn!("Request failed with batch submission: {request:x?} {e:?}");
-                    let desc_index = user_data;
-                    let mem = self.mem.memory();
-                    mem.write_obj(VIRTIO_BLK_S_IOERR as u8, request.status_addr())
-                        .map_err(Error::RequestStatus)?;
-                    queue
-                        .add_used(mem.deref(), desc_index, 1)
-                        .map_err(Error::QueueAddUsed)?;
-                    queue
-                        .enable_notification(mem.deref())
-                        .map_err(Error::QueueEnableNotification)?;
+        if !batch_requests.is_empty() {
+            match self.disk_image.submit_batch_operations(batch_requests) {
+                Ok(()) => {
+                    self.inflight_requests.extend(batch_inflight_requests);
+                }
+                Err(e) => {
+                    // If batch submission fails, report VIRTIO_BLK_S_IOERR for all requests.
+                    for (user_data, request) in batch_inflight_requests {
+                        warn!("Request failed with batch submission: {request:x?} {e:?}");
+                        let desc_index = user_data;
+                        let mem = self.mem.memory();
+                        mem.write_obj(VIRTIO_BLK_S_IOERR as u8, request.status_addr())
+                            .map_err(Error::RequestStatus)?;
+                        queue
+                            .add_used(mem.deref(), desc_index, 1)
+                            .map_err(Error::QueueAddUsed)?;
+                        queue
+                            .enable_notification(mem.deref())
+                            .map_err(Error::QueueEnableNotification)?;
+                    }
                 }
             }
         }
@@ -451,13 +447,14 @@ impl BlockEpollHandler {
         let mut read_ops = Wrapping(0);
         let mut write_ops = Wrapping(0);
 
-        while let Some((user_data, result)) = self.disk_image.next_completed_request() {
-            let desc_index = user_data as u16;
+        while let Some(mut completion) = self.disk_image.next_completion() {
+            let result = completion.result;
+            let desc_index = completion.user_data as u16;
 
             let mut request = self.find_inflight_request(desc_index)?;
 
             request
-                .complete_async(&mem)
+                .complete_async(&mem, &mut completion)
                 .map_err(Error::RequestCompleting)?;
 
             let latency = request.start().elapsed().as_micros() as u64;
