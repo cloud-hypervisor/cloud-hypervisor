@@ -1637,6 +1637,7 @@ dependencies = [
  "serde_json",
  "test_infra",
  "thiserror",
+ "vm-memory",
  "vmm-sys-util",
 ]
 
