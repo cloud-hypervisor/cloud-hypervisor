@@ -29,8 +29,9 @@ use vm_memory::{
 };
 use vm_virtio::{AccessPlatform, Translatable as _};
 
-use crate::aligned_operation::AlignedOperation;
-use crate::async_io::{AsyncIo, AsyncIoOperation, GuestMemoryTarget, OwnedIoBuffer};
+use crate::async_io::{
+    AsyncIo, AsyncIoCompletion, AsyncIoOperation, GuestMemoryTarget, OwnedIoBuffer,
+};
 use crate::{Error, ExecuteError, request_type, sector};
 
 const SECTOR_SHIFT: u8 = 9;
@@ -70,7 +71,7 @@ pub struct ExecuteAsync {
     // `true` if the execution will complete asynchronously
     pub async_complete: bool,
     // request need to be batched for submission if any
-    pub batch_request: Option<BatchRequest>,
+    pub batch_request: Option<AsyncIoOperation>,
 }
 
 #[derive(Debug)]
@@ -80,7 +81,6 @@ pub struct Request {
     data_descriptors: SmallVec<[(GuestAddress, u32); DEFAULT_DESCRIPTOR_VEC_SIZE]>,
     status_addr: GuestAddress,
     pub writeback: bool,
-    aligned_operations: SmallVec<[AlignedOperation; DEFAULT_DESCRIPTOR_VEC_SIZE]>,
     start: Instant,
 }
 
@@ -112,7 +112,6 @@ impl Request {
             data_descriptors: SmallVec::with_capacity(DEFAULT_DESCRIPTOR_VEC_SIZE),
             status_addr: GuestAddress(0),
             writeback: true,
-            aligned_operations: SmallVec::with_capacity(DEFAULT_DESCRIPTOR_VEC_SIZE),
             start: Instant::now(),
         };
 
@@ -237,9 +236,9 @@ impl Request {
         Ok(len)
     }
 
-    pub fn execute_async<B: Bitmap + 'static>(
+    pub fn execute_async<B: Bitmap + Send + Sync + 'static>(
         &mut self,
-        mem: &vm_memory::GuestMemoryMmap<B>,
+        mem: Arc<vm_memory::GuestMemoryMmap<B>>,
         disk_nsectors: u64,
         disk_image: &mut dyn AsyncIo,
         serial: &[u8],
@@ -253,56 +252,6 @@ impl Request {
 
         self.check_data_bounds(disk_nsectors)?;
 
-        let mut iovecs: SmallVec<[libc::iovec; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
-            SmallVec::with_capacity(self.data_descriptors.len());
-        for &(data_addr, data_len) in &self.data_descriptors {
-            let _: u32 = data_len; // compiler-checked documentation
-            const _: () = assert!(
-                core::mem::size_of::<u32>() <= core::mem::size_of::<usize>(),
-                "unsupported platform"
-            );
-            if data_len == 0 {
-                continue;
-            }
-            let data_len = data_len as usize;
-
-            let origin_ptr = mem
-                .get_slice(data_addr, data_len)
-                .map_err(ExecuteError::GetHostAddress)?;
-            assert!(origin_ptr.len() >= data_len);
-            let origin_ptr = origin_ptr.ptr_guard_mut();
-
-            // O_DIRECT requires buffer addresses to be aligned to the
-            // backend device's logical block size. In case it's not properly
-            // aligned, an intermediate buffer is created with the correct
-            // alignment, and a copy from/to the origin buffer is performed,
-            // depending on the type of operation.
-            let iov_base = if (origin_ptr.as_ptr() as u64).is_multiple_of(alignment) {
-                origin_ptr.as_ptr().cast()
-            } else {
-                let mut aligned_op = AlignedOperation::new(data_addr, data_len, alignment as usize)
-                    .map_err(ExecuteError::TemporaryBufferAllocation)?;
-
-                // We need to perform the copy beforehand in case we're writing
-                // data out.
-                if request_type == RequestType::Out {
-                    mem.read_slice(aligned_op.as_bytes_mut(), data_addr)
-                        .map_err(ExecuteError::Read)?;
-                }
-
-                let aligned_ptr = aligned_op.as_mut_ptr();
-                self.aligned_operations.push(aligned_op);
-
-                aligned_ptr.cast()
-            };
-
-            let iovec = libc::iovec {
-                iov_base,
-                iov_len: data_len as libc::size_t,
-            };
-            iovecs.push(iovec);
-        }
-
         let mut ret = ExecuteAsync {
             async_complete: true,
             batch_request: None,
@@ -310,37 +259,52 @@ impl Request {
         // Queue operations expected to be submitted.
         match request_type {
             RequestType::In => {
-                for (data_addr, data_len) in &self.data_descriptors {
-                    mem.get_slice(*data_addr, *data_len as usize)
-                        .map_err(ExecuteError::GetHostAddress)?
-                        .bitmap()
-                        .mark_dirty(0, *data_len as usize);
-                }
+                self.mark_read_dirty(&mem)?;
+                let op = self.build_data_operation(mem, offset, alignment, user_data)?;
                 if disk_image.batch_requests_enabled() {
-                    ret.batch_request = Some(BatchRequest {
-                        offset,
-                        iovecs,
-                        user_data,
-                        request_type,
-                    });
+                    ret.batch_request = Some(op);
                 } else {
-                    disk_image
-                        .read_vectored(offset, &iovecs, user_data)
-                        .map_err(ExecuteError::AsyncRead)?;
+                    match op {
+                        AsyncIoOperation::ReadToMemory {
+                            offset,
+                            target,
+                            user_data,
+                        } => disk_image
+                            .read_to_memory(offset, target, user_data)
+                            .map_err(ExecuteError::AsyncRead)?,
+                        AsyncIoOperation::ReadToVec {
+                            offset,
+                            buffer,
+                            user_data,
+                        } => disk_image
+                            .read_to_vec(offset, buffer, user_data)
+                            .map_err(ExecuteError::AsyncRead)?,
+                        _ => unreachable!("unexpected read operation"),
+                    }
                 }
             }
             RequestType::Out => {
+                let op = self.build_data_operation(mem, offset, alignment, user_data)?;
                 if disk_image.batch_requests_enabled() {
-                    ret.batch_request = Some(BatchRequest {
-                        offset,
-                        iovecs,
-                        user_data,
-                        request_type,
-                    });
+                    ret.batch_request = Some(op);
                 } else {
-                    disk_image
-                        .write_vectored(offset, &iovecs, user_data)
-                        .map_err(ExecuteError::AsyncWrite)?;
+                    match op {
+                        AsyncIoOperation::WriteFromMemory {
+                            offset,
+                            target,
+                            user_data,
+                        } => disk_image
+                            .write_from_memory(offset, target, user_data)
+                            .map_err(ExecuteError::AsyncWrite)?,
+                        AsyncIoOperation::WriteFromVec {
+                            offset,
+                            buffer,
+                            user_data,
+                        } => disk_image
+                            .write_from_vec(offset, buffer, user_data)
+                            .map_err(ExecuteError::AsyncWrite)?,
+                        _ => unreachable!("unexpected write operation"),
+                    }
                 }
             }
             RequestType::Flush => {
@@ -506,7 +470,6 @@ impl Request {
     }
 
     // Builds a read or write operation for IO to or from `mem`.
-    #[allow(dead_code)]
     fn build_data_operation<B: Bitmap + Send + Sync + 'static>(
         &self,
         mem: Arc<vm_memory::GuestMemoryMmap<B>>,
@@ -540,7 +503,6 @@ impl Request {
     }
 
     // Checks whether `self.data_descriptors` are aligned to `alignment`.
-    #[allow(dead_code)]
     fn guest_memory_is_aligned<B: Bitmap + 'static>(
         &self,
         mem: &vm_memory::GuestMemoryMmap<B>,
@@ -575,7 +537,6 @@ impl Request {
     }
 
     // Returns the sum of the lengths of `self.data_descriptors`.
-    #[allow(dead_code)]
     fn data_len(&self) -> usize {
         self.data_descriptors
             .iter()
@@ -584,7 +545,6 @@ impl Request {
     }
 
     // Marks guest-memory read destinations dirty before submitting async IO.
-    #[allow(dead_code)]
     fn mark_read_dirty<B: Bitmap + 'static>(
         &self,
         mem: &vm_memory::GuestMemoryMmap<B>,
@@ -599,7 +559,6 @@ impl Request {
     }
 
     // Copies guest descriptor contents into a contiguous host buffer.
-    #[allow(dead_code)]
     fn copy_guest_to_buffer<B: Bitmap + 'static>(
         &self,
         mem: &vm_memory::GuestMemoryMmap<B>,
@@ -616,7 +575,6 @@ impl Request {
     }
 
     // Copies a host completion buffer back into guest descriptors.
-    #[allow(dead_code)]
     fn copy_buffer_to_guest<B: Bitmap + 'static>(
         &self,
         mem: &vm_memory::GuestMemoryMmap<B>,
@@ -638,14 +596,14 @@ impl Request {
     pub fn complete_async<B: Bitmap + 'static>(
         &mut self,
         mem: &vm_memory::GuestMemoryMmap<B>,
+        completion: &mut AsyncIoCompletion,
     ) -> Result<(), Error> {
-        for aligned_op in self.aligned_operations.drain(..) {
-            // We need to perform the copy after the data has been read inside
-            // the aligned buffer in case we're reading data in.
-            if self.request_type == RequestType::In {
-                mem.write_slice(aligned_op.as_bytes(), aligned_op.data_addr())
-                    .map_err(Error::GuestMemory)?;
-            }
+        if self.request_type == RequestType::In
+            && completion.result > 0
+            && let Some(buffer) = completion.buffer.take()
+        {
+            let len = (completion.result as usize).min(buffer.as_slice().len());
+            self.copy_buffer_to_guest(mem, &buffer.as_slice()[..len])?;
         }
 
         Ok(())
