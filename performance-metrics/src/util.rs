@@ -1,5 +1,7 @@
 // Copyright 2026 The Cloud Hypervisor Authors. All rights reserved.
 //
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+//
 // SPDX-License-Identifier: Apache-2.0
 
 //! Shared benchmark helpers.
@@ -8,12 +10,14 @@ use std::fs::File;
 use std::io::{ErrorKind, Seek, SeekFrom, Write};
 use std::os::unix::fs::FileExt;
 use std::process::Command;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use block::async_io::AsyncIo;
+use block::async_io::{AsyncIo, GuestMemoryTarget};
 use block::qcow::{BackingFileConfig, ImageType, QcowFile, RawFile};
 use block::qcow_disk::QcowDisk;
+use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::tempfile::TempFile;
 
@@ -77,23 +81,7 @@ pub fn qcow_async_tempfile(num_clusters: usize) -> (TempFile, QcowDisk) {
 /// Drain `count` completions from a synchronous async_io backend.
 pub fn drain_completions(async_io: &mut dyn AsyncIo, count: usize) {
     for _ in 0..count {
-        async_io.next_completed_request();
-    }
-}
-
-/// Build an iovec suitable for a read into `buf`.
-pub fn read_iovec(buf: &mut [u8]) -> libc::iovec {
-    libc::iovec {
-        iov_base: buf.as_mut_ptr().cast(),
-        iov_len: buf.len(),
-    }
-}
-
-/// Build an iovec suitable for a write from `buf`.
-pub fn write_iovec(buf: &[u8]) -> libc::iovec {
-    libc::iovec {
-        iov_base: buf.as_ptr().cast::<libc::c_void>().cast_mut(),
-        iov_len: buf.len(),
+        async_io.next_completion();
     }
 }
 
@@ -115,21 +103,81 @@ pub fn deterministic_permutation(n: usize) -> Vec<usize> {
     indices
 }
 
-/// Submit `count` sequential read_vectored calls at `stride`-byte intervals.
-pub fn submit_reads(async_io: &mut dyn AsyncIo, count: usize, stride: u64, iovec: &[libc::iovec]) {
-    for i in 0..count {
-        async_io
-            .read_vectored((i as u64 * stride) as libc::off_t, iovec, i as u64)
-            .expect("read_vectored failed");
+/// Create prefaulted guest memory for one reusable I/O range.
+///
+/// The block microbenchmarks intentionally use this as a hot buffer to keep
+/// cache behavior close to the borrowed-iovec benchmarks they replaced.
+pub fn guest_memory_buffer(len: usize) -> Arc<GuestMemoryMmap> {
+    assert!(
+        len <= u32::MAX as usize,
+        "GuestMemoryTarget ranges are limited to u32 lengths"
+    );
+    let total_len = len.max(1);
+
+    let mem = Arc::new(
+        GuestMemoryMmap::from_ranges(&[(GuestAddress(0), total_len)])
+            .expect("failed to create benchmark guest memory"),
+    );
+    prefault_guest_memory(&mem, total_len);
+    mem
+}
+
+fn prefault_guest_memory(mem: &Arc<GuestMemoryMmap>, total_len: usize) {
+    const PAGE_SIZE: usize = 4096;
+
+    for offset in (0..total_len).step_by(PAGE_SIZE) {
+        mem.write_slice(&[0], GuestAddress(offset as u64))
+            .expect("failed to prefault benchmark guest memory");
     }
 }
 
-/// Submit `count` sequential write_vectored calls at `stride`-byte intervals.
-pub fn submit_writes(async_io: &mut dyn AsyncIo, count: usize, stride: u64, iovec: &[libc::iovec]) {
+/// Create a target for the reusable benchmark guest-memory range.
+pub fn guest_memory_target(mem: &Arc<GuestMemoryMmap>, len: usize) -> GuestMemoryTarget {
+    assert!(
+        len <= u32::MAX as usize,
+        "GuestMemoryTarget ranges are limited to u32 lengths"
+    );
+    let range = [(GuestAddress(0), len as u32)];
+
+    GuestMemoryTarget::new(Arc::clone(mem), &range).expect("failed to create guest memory target")
+}
+
+/// Fill the reusable benchmark guest-memory range with one byte pattern.
+pub fn fill_guest_memory(mem: &Arc<GuestMemoryMmap>, len: usize, value: u8) {
+    let buf = vec![value; len];
+    mem.write_slice(&buf, GuestAddress(0))
+        .expect("failed to initialize benchmark guest memory");
+}
+
+/// Submit `count` sequential read calls at `stride`-byte intervals.
+pub fn submit_reads(
+    async_io: &mut dyn AsyncIo,
+    mem: &Arc<GuestMemoryMmap>,
+    count: usize,
+    stride: u64,
+    len: usize,
+) {
     for i in 0..count {
+        let target = guest_memory_target(mem, len);
         async_io
-            .write_vectored((i as u64 * stride) as libc::off_t, iovec, i as u64)
-            .expect("write_vectored failed");
+            .read_to_memory((i as u64 * stride) as libc::off_t, target, i as u64)
+            .expect("read_to_memory failed");
+    }
+}
+
+/// Submit `count` sequential write calls at `stride`-byte intervals.
+pub fn submit_writes(
+    async_io: &mut dyn AsyncIo,
+    mem: &Arc<GuestMemoryMmap>,
+    count: usize,
+    stride: u64,
+    len: usize,
+) {
+    for i in 0..count {
+        let target = guest_memory_target(mem, len);
+        async_io
+            .write_from_memory((i as u64 * stride) as libc::off_t, target, i as u64)
+            .expect("write_from_memory failed");
     }
 }
 
@@ -139,7 +187,7 @@ pub fn drain_async_completions(async_io: &mut dyn AsyncIo, count: usize) {
     let mut drained = 0usize;
     while drained < count {
         wait_for_eventfd(async_io.notifier());
-        while async_io.next_completed_request().is_some() {
+        while async_io.next_completion().is_some() {
             drained += 1;
         }
     }

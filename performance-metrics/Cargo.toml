@@ -13,6 +13,7 @@ serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 test_infra = { path = "../test_infra" }
 thiserror = { workspace = true }
+vm-memory = { workspace = true, features = ["backend-mmap"] }
 vmm-sys-util = { workspace = true }
 
 [lints]
