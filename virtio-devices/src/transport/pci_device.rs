@@ -221,6 +221,14 @@ impl VirtioPciCfgCap {
             ..Default::default()
         }
     }
+
+    /// Return the BAR offset and clamped access length for a PCI CFG cap
+    /// indirect BAR access.
+    fn bar_access_params(&self, data_len: usize) -> (u64, usize) {
+        let bar_offset = self.cap.offset.to_native() as u64;
+        let cap_length = self.cap.length.to_native() as usize;
+        (bar_offset, cmp::min(cap_length, data_len))
+    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -771,10 +779,10 @@ impl VirtioPciDevice {
                     .unwrap();
             }
         } else {
-            let bar_offset: u32 =
-                // SAFETY: we know self.cap_pci_cfg_info.cap.cap.offset is 32bits long.
-                unsafe { std::mem::transmute(self.cap_pci_cfg_info.cap.cap.offset) };
-            self.read_bar(0, bar_offset as u64, data);
+            let (bar_offset, access_len) = self.cap_pci_cfg_info.cap.bar_access_params(data_len);
+            if access_len > 0 {
+                self.read_bar(0, bar_offset, &mut data[..access_len]);
+            }
         }
     }
 
@@ -792,10 +800,12 @@ impl VirtioPciDevice {
             right[..data_len].copy_from_slice(data);
             None
         } else {
-            let bar_offset: u32 =
-                // SAFETY: we know self.cap_pci_cfg_info.cap.cap.offset is 32bits long.
-                unsafe { std::mem::transmute(self.cap_pci_cfg_info.cap.cap.offset) };
-            self.write_bar(0, bar_offset as u64, data)
+            let (bar_offset, access_len) = self.cap_pci_cfg_info.cap.bar_access_params(data_len);
+            if access_len > 0 {
+                self.write_bar(0, bar_offset, &data[..access_len])
+            } else {
+                None
+            }
         }
     }
 
