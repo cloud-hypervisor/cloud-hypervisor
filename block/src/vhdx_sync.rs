@@ -6,11 +6,10 @@
 
 use std::collections::VecDeque;
 use std::fs::File;
-use std::io::{IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::fd::AsRawFd;
 use std::sync::{Arc, Mutex};
 
-use smallvec::SmallVec;
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{
@@ -18,7 +17,6 @@ use crate::async_io::{
     DiskFileError,
 };
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
-use crate::request::DEFAULT_DESCRIPTOR_VEC_SIZE;
 use crate::vhdx::{Vhdx, VhdxError};
 use crate::{BlockBackend, Error, disk_file};
 
@@ -124,64 +122,30 @@ impl VhdxSync {
         }
     }
 
-    // SAFETY: each iovec must describe writable memory that remains valid for
-    // this synchronous call. The caller must also ensure that creating a
-    // mutable slice from each iovec does not violate Rust aliasing rules.
-    unsafe fn read_iovecs(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-    ) -> AsyncIoResult<usize> {
-        let mut slices: SmallVec<[IoSliceMut; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
-            SmallVec::with_capacity(iovecs.len());
-        for iovec in iovecs.iter() {
-            if iovec.iov_len == 0 {
-                continue;
-            }
-            // SAFETY: Guaranteed by read_iovecs' caller.
-            let slice = unsafe {
-                std::slice::from_raw_parts_mut(iovec.iov_base.cast::<u8>(), iovec.iov_len)
-            };
-            slices.push(IoSliceMut::new(slice));
-        }
-
+    fn read_operation(&mut self, op: &mut AsyncIoOperation) -> AsyncIoResult<usize> {
+        let offset = op.offset();
+        let mut buf = vec![0u8; op.total_len()];
         let mut vhdx = self.vhdx_file.lock().unwrap();
         vhdx.seek(SeekFrom::Start(offset as u64))
             .map_err(AsyncIoError::ReadVectored)?;
-        let mut result = 0usize;
-        for slice in slices.iter_mut() {
-            result += vhdx.read(slice).map_err(AsyncIoError::ReadVectored)?;
-        }
+        let result = vhdx.read(&mut buf).map_err(AsyncIoError::ReadVectored)?;
+        drop(vhdx);
+
+        op.write_bytes_at(0, &buf[..result])
+            .map_err(AsyncIoError::ReadVectored)?;
         Ok(result)
     }
 
-    // SAFETY: each iovec must describe readable memory that remains valid for
-    // this synchronous call. The caller must also ensure that creating a shared
-    // slice from each iovec does not violate Rust aliasing rules.
-    unsafe fn write_iovecs(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-    ) -> AsyncIoResult<usize> {
-        let mut slices: SmallVec<[IoSlice; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
-            SmallVec::with_capacity(iovecs.len());
-        for iovec in iovecs.iter() {
-            if iovec.iov_len == 0 {
-                continue;
-            }
-            // SAFETY: Guaranteed by write_iovecs' caller.
-            let slice =
-                unsafe { std::slice::from_raw_parts(iovec.iov_base.cast::<u8>(), iovec.iov_len) };
-            slices.push(IoSlice::new(slice));
-        }
+    fn write_operation(&mut self, op: &AsyncIoOperation) -> AsyncIoResult<usize> {
+        let offset = op.offset();
+        let mut buf = vec![0u8; op.total_len()];
+        op.read_bytes_at(0, &mut buf)
+            .map_err(AsyncIoError::WriteVectored)?;
 
         let mut vhdx = self.vhdx_file.lock().unwrap();
         vhdx.seek(SeekFrom::Start(offset as u64))
             .map_err(AsyncIoError::WriteVectored)?;
-        let mut result = 0usize;
-        for slice in slices.iter() {
-            result += vhdx.write(slice).map_err(AsyncIoError::WriteVectored)?;
-        }
+        let result = vhdx.write(&buf).map_err(AsyncIoError::WriteVectored)?;
         Ok(result)
     }
 }
@@ -192,21 +156,12 @@ impl AsyncIo for VhdxSync {
     }
 
     fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
-        let offset = op.offset();
         let is_read = op.is_read();
-        let iovecs = op.iovecs();
+        let mut op = op;
         let result = if is_read {
-            // SAFETY: AsyncIoOperation keeps the iovec target alive for this
-            // synchronous call. Host-memory operations also satisfy the
-            // aliasing requirement above; guest-memory-backed iovecs remain a
-            // temporary unsound VHDX case deferred to a later fix.
-            unsafe { self.read_iovecs(offset, iovecs)? }
+            self.read_operation(&mut op)?
         } else {
-            // SAFETY: AsyncIoOperation keeps the iovec target alive for this
-            // synchronous call. Host-memory operations also satisfy the
-            // aliasing requirement above; guest-memory-backed iovecs remain a
-            // temporary unsound VHDX case deferred to a later fix.
-            unsafe { self.write_iovecs(offset, iovecs)? }
+            self.write_operation(&op)?
         };
 
         self.completion_list
