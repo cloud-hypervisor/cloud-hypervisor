@@ -1486,4 +1486,19 @@ mod unit_tests {
             (size_of::<VirtioPciCap64>() as u8) + VIRTIO_PCI_CAP_LEN_OFFSET
         );
     }
+
+    #[test]
+    fn bar_access_params_clamps_to_cap_length() {
+        let mut cap = VirtioPciCfgCap::new();
+        let slice = cap.as_mut_slice();
+
+        // Program cap.offset = 0x14, cap.length = 1 (byte access)
+        slice[6..10].copy_from_slice(&0x14u32.to_le_bytes());
+        slice[10..14].copy_from_slice(&1u32.to_le_bytes());
+
+        // PCI config reads always produce 4 bytes, but cap.length = 1
+        let (bar_offset, access_len) = cap.bar_access_params(4);
+        assert_eq!(bar_offset, 0x14);
+        assert_eq!(access_len, 1);
+    }
 }
