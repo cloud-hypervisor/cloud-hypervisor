@@ -1501,4 +1501,18 @@ mod unit_tests {
         assert_eq!(bar_offset, 0x14);
         assert_eq!(access_len, 1);
     }
+
+    #[test]
+    fn bar_access_params_uses_data_len_when_smaller() {
+        let mut cap = VirtioPciCfgCap::new();
+        let slice = cap.as_mut_slice();
+
+        // cap.length = 4, but caller provides only 2 bytes
+        slice[6..10].copy_from_slice(&0x00u32.to_le_bytes());
+        slice[10..14].copy_from_slice(&4u32.to_le_bytes());
+
+        let (bar_offset, access_len) = cap.bar_access_params(2);
+        assert_eq!(bar_offset, 0);
+        assert_eq!(access_len, 2);
+    }
 }
