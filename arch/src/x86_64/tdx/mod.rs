@@ -2,7 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{self, Read, Seek, SeekFrom};
+use std::mem;
 use std::str::FromStr;
 
 use log::{debug, info};
@@ -15,11 +16,11 @@ use crate::GuestMemoryMmap;
 #[derive(Error, Debug)]
 pub enum TdvfError {
     #[error("Failed read TDVF descriptor")]
-    ReadDescriptor(#[source] std::io::Error),
+    ReadDescriptor(#[source] io::Error),
     #[error("Failed read TDVF descriptor offset")]
-    ReadDescriptorOffset(#[source] std::io::Error),
+    ReadDescriptorOffset(#[source] io::Error),
     #[error("Failed read GUID table")]
-    ReadGuidTable(#[source] std::io::Error),
+    ReadGuidTable(#[source] io::Error),
     #[error("Invalid descriptor signature")]
     InvalidDescriptorSignature,
     #[error("Invalid descriptor size")]
@@ -164,7 +165,7 @@ pub fn parse_tdvf_sections(file: &mut File) -> Result<(Vec<TdvfSection>, bool), 
     file.read_exact(unsafe {
         std::slice::from_raw_parts_mut(
             (&raw mut descriptor).cast(),
-            std::mem::size_of::<TdvfDescriptor>(),
+            mem::size_of::<TdvfDescriptor>(),
         )
     })
     .map_err(TdvfError::ReadDescriptor)?;
@@ -174,8 +175,8 @@ pub fn parse_tdvf_sections(file: &mut File) -> Result<(Vec<TdvfSection>, bool), 
     }
 
     if descriptor.length as usize
-        != std::mem::size_of::<TdvfDescriptor>()
-            + std::mem::size_of::<TdvfSection>() * descriptor.num_sections as usize
+        != mem::size_of::<TdvfDescriptor>()
+            + mem::size_of::<TdvfSection>() * descriptor.num_sections as usize
     {
         return Err(TdvfError::InvalidDescriptorSize);
     }
@@ -191,7 +192,7 @@ pub fn parse_tdvf_sections(file: &mut File) -> Result<(Vec<TdvfSection>, bool), 
     file.read_exact(unsafe {
         std::slice::from_raw_parts_mut(
             sections.as_mut_ptr().cast(),
-            descriptor.num_sections as usize * std::mem::size_of::<TdvfSection>(),
+            descriptor.num_sections as usize * mem::size_of::<TdvfSection>(),
         )
     })
     .map_err(TdvfError::ReadDescriptor)?;
@@ -305,7 +306,7 @@ fn align_hob(v: u64) -> u64 {
 
 impl TdHob {
     fn update_offset<T>(&mut self) {
-        self.current_offset = align_hob(self.current_offset + std::mem::size_of::<T>() as u64);
+        self.current_offset = align_hob(self.current_offset + mem::size_of::<T>() as u64);
     }
 
     pub fn start(offset: u64) -> TdHob {
@@ -322,7 +323,7 @@ impl TdHob {
         // Write end
         let end = HobHeader {
             r#type: HobType::EndOfHobList,
-            length: std::mem::size_of::<HobHeader>() as u16,
+            length: mem::size_of::<HobHeader>() as u16,
             reserved: 0,
         };
         info!("Writing HOB end {:x} {:x?}", self.current_offset, end);
@@ -335,7 +336,7 @@ impl TdHob {
         let handoff = HobHandoffInfoTable {
             header: HobHeader {
                 r#type: HobType::Handoff,
-                length: std::mem::size_of::<HobHandoffInfoTable>() as u16,
+                length: mem::size_of::<HobHandoffInfoTable>() as u16,
                 reserved: 0,
             },
             version: 0x9,
@@ -362,7 +363,7 @@ impl TdHob {
         let resource_descriptor = HobResourceDescriptor {
             header: HobHeader {
                 r#type: HobType::ResourceDescriptor,
-                length: std::mem::size_of::<HobResourceDescriptor>() as u16,
+                length: mem::size_of::<HobResourceDescriptor>() as u16,
                 reserved: 0,
             },
             owner: EfiGuid::default(),
@@ -439,8 +440,8 @@ impl TdHob {
         // We already know the HobGuidType size is 8 bytes multiple, but we
         // need the total size to be 8 bytes multiple. That is why the ACPI
         // table size must be 8 bytes multiple as well.
-        let length = std::mem::size_of::<HobGuidType>() as u16
-            + align_hob(table_content.len() as u64) as u16;
+        let length =
+            mem::size_of::<HobGuidType>() as u16 + align_hob(table_content.len() as u64) as u16;
         let hob_guid_type = HobGuidType {
             header: HobHeader {
                 r#type: HobType::GuidExtension,
@@ -462,7 +463,7 @@ impl TdHob {
         );
         mem.write_obj(hob_guid_type, GuestAddress(self.current_offset))
             .map_err(TdvfError::GuestMemoryWriteHob)?;
-        let current_offset = self.current_offset + std::mem::size_of::<HobGuidType>() as u64;
+        let current_offset = self.current_offset + mem::size_of::<HobGuidType>() as u64;
 
         // In case the table is quite large, let's make sure we can handle
         // retrying until everything has been correctly copied.
@@ -493,7 +494,7 @@ impl TdHob {
             guid_type: HobGuidType {
                 header: HobHeader {
                     r#type: HobType::GuidExtension,
-                    length: std::mem::size_of::<TdPayload>() as u16,
+                    length: mem::size_of::<TdPayload>() as u16,
                     reserved: 0,
                 },
                 // HOB_PAYLOAD_INFO_GUID
