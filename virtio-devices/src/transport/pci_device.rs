@@ -40,9 +40,9 @@ use vmm_sys_util::eventfd::EventFd;
 use super::pci_common_config::VirtioPciCommonConfigState;
 use crate::transport::{VIRTIO_PCI_COMMON_CONFIG_ID, VirtioPciCommonConfig, VirtioTransport};
 use crate::{
-    ActivateResult, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED,
-    DEVICE_FEATURES_OK, DEVICE_INIT, GuestMemoryMmap, VirtioDevice, VirtioDeviceType,
-    VirtioInterrupt, VirtioInterruptType,
+    ActivateResult, ActivationContext, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK,
+    DEVICE_FAILED, DEVICE_FEATURES_OK, DEVICE_INIT, GuestMemoryMmap, VirtioDevice,
+    VirtioDeviceType, VirtioInterrupt, VirtioInterruptType, mark_device_needs_reset,
 };
 
 /// Vector value used to disable MSI for a queue.
@@ -331,22 +331,32 @@ pub struct VirtioPciDeviceActivator {
 
 impl VirtioPciDeviceActivator {
     pub fn activate(mut self) -> ActivateResult {
-        let mut locked_device = self.device.lock().unwrap();
-        locked_device.activate(crate::device::ActivationContext {
+        let result = self.device.lock().unwrap().activate(ActivationContext {
             mem: self.memory.take().unwrap(),
-            interrupt_cb: self.interrupt,
+            interrupt_cb: self.interrupt.clone(),
             queues: self.queues.take().unwrap(),
-            device_status: self.status,
-        })?;
-        self.device_activated.store(true, Ordering::SeqCst);
+            device_status: self.status.clone(),
+        });
 
+        if let Err(e) = &result {
+            mark_device_needs_reset(
+                &self.status,
+                self.interrupt.as_ref(),
+                format_args!("{}: virtio device activation failed: {e:?}", self.id),
+            );
+        } else {
+            self.device_activated.store(true, Ordering::SeqCst);
+        }
+
+        // Release the barrier regardless of outcome. A failing activate()
+        // would otherwise deadlock the vCPU that wrote DRIVER_OK.
         if let Some(barrier) = self.barrier.take() {
             info!("{}: Waiting for barrier", self.id);
             barrier.wait();
             info!("{}: Barrier released", self.id);
         }
 
-        Ok(())
+        result
     }
 }
 
