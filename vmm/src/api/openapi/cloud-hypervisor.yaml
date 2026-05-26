@@ -1144,7 +1144,8 @@ components:
         queue_size:
           type: array
           items:
-            type: uint16
+            type: integer
+            format: uint16
         pci_segment:
           type: integer
           format: int16
@@ -1152,7 +1153,8 @@ components:
           type: integer
           format: uint8
         virtio_id:
-          type: uint32
+          type: integer
+          format: uint32
 
     PmemConfig:
       required:
