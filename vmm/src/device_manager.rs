@@ -88,8 +88,7 @@ use vfio_ioctls::{VfioContainer, VfioDevice, VfioDeviceFd, VfioOps};
 use virtio_devices::transport::{VirtioPciDevice, VirtioPciDeviceActivator, VirtioTransport};
 use virtio_devices::vhost_user::VhostUserConfig;
 use virtio_devices::{
-    AccessPlatformMapping, ActivateError, Block, Endpoint, IommuMapping, VdpaDmaMapping,
-    VirtioMemMappingSource,
+    AccessPlatformMapping, Block, Endpoint, IommuMapping, VdpaDmaMapping, VirtioMemMappingSource,
 };
 use vm_allocator::{AddressAllocator, InterruptAllocError, SystemAllocator};
 use vm_device::dma_mapping::ExternalDmaMapping;
@@ -628,10 +627,6 @@ pub enum DeviceManagerError {
     /// vfio-user socket path already in use by another user device.
     #[error("vfio-user socket path already in use: {0:?}")]
     UserDeviceSocketInUse(std::path::PathBuf),
-
-    /// Error activating virtio device
-    #[error("Error activating virtio device")]
-    VirtioActivate(#[source] ActivateError),
 
     /// Failed retrieving device state from snapshot
     #[error("Failed retrieving device state from snapshot")]
@@ -4699,9 +4694,9 @@ impl DeviceManager {
 
     pub fn activate_virtio_devices(&self) -> DeviceManagerResult<()> {
         for activator in self.pending_activations.lock().unwrap().drain(..) {
-            activator
-                .activate()
-                .map_err(DeviceManagerError::VirtioActivate)?;
+            // Failures are logged and signalled to the guest via
+            // NEEDS_RESET by the activator, hence keep going.
+            let _ = activator.activate();
         }
         Ok(())
     }
