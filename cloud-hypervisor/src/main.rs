@@ -980,7 +980,7 @@ mod unit_tests {
                 max_vcpus: 1,
                 topology: None,
                 kvm_hyperv: false,
-                max_phys_bits: 46,
+                max_phys_bits: 43,
                 affinity: None,
                 features: CpuFeatures::default(),
                 nested: true,

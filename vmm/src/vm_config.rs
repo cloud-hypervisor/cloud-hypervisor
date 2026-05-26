@@ -57,10 +57,13 @@ pub struct CpuTopology {
     pub packages: u16,
 }
 
-// When booting with PVH boot the maximum physical addressable size
-// is a 46 bit address space even when the host supports with 5-level
-// paging.
-pub const DEFAULT_MAX_PHYS_BITS: u8 = 46;
+// Default guest physical address width in bits.
+//
+// PVH boot uses 4-level paging, which supports up to a 48-bit physical
+// address space. However, a KASLR-enabled guest kernel only accepts
+// addresses up to ~11 TB (~43 bits). Combined with Cloud Hypervisor's
+// top-down memory allocation model, 43 bits is the effective maximum.
+pub const DEFAULT_MAX_PHYS_BITS: u8 = 43;
 
 pub fn default_cpuconfig_max_phys_bits() -> u8 {
     DEFAULT_MAX_PHYS_BITS
