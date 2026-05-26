@@ -1525,4 +1525,73 @@ mod unit_tests {
         assert_eq!(bar_offset, 0);
         assert_eq!(access_len, 2);
     }
+
+    struct TestVirtioDevice {
+        result: Mutex<Option<ActivateResult>>,
+    }
+
+    impl VirtioDevice for TestVirtioDevice {
+        fn device_type(&self) -> u32 {
+            0
+        }
+        fn queue_max_sizes(&self) -> &[u16] {
+            &[]
+        }
+        fn activate(&mut self, _context: crate::device::ActivationContext) -> ActivateResult {
+            self.result.lock().unwrap().take().unwrap()
+        }
+    }
+
+    struct TestVirtioInterrupt {
+        triggers: Mutex<Vec<VirtioInterruptType>>,
+    }
+
+    impl VirtioInterrupt for TestVirtioInterrupt {
+        fn trigger(&self, int_type: VirtioInterruptType) -> std::io::Result<()> {
+            self.triggers.lock().unwrap().push(int_type);
+            Ok(())
+        }
+        fn set_notifier(
+            &self,
+            _int_type: u32,
+            _notifier: Option<EventFd>,
+            _vm: &dyn hypervisor::Vm,
+        ) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn make_activator(
+        result: ActivateResult,
+    ) -> (
+        VirtioPciDeviceActivator,
+        Arc<AtomicU8>,
+        Arc<AtomicBool>,
+        Arc<TestVirtioInterrupt>,
+        Arc<Barrier>,
+    ) {
+        let interrupt = Arc::new(TestVirtioInterrupt {
+            triggers: Mutex::new(Vec::new()),
+        });
+        let status = Arc::new(AtomicU8::new(DEVICE_DRIVER_OK as u8));
+        let device_activated = Arc::new(AtomicBool::new(false));
+        let device = Arc::new(Mutex::new(TestVirtioDevice {
+            result: Mutex::new(Some(result)),
+        }));
+        let memory = GuestMemoryAtomic::new(
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+        let barrier = Arc::new(Barrier::new(2));
+        let activator = VirtioPciDeviceActivator {
+            interrupt: interrupt.clone(),
+            memory: Some(memory),
+            device,
+            device_activated: device_activated.clone(),
+            queues: Some(Vec::new()),
+            barrier: Some(barrier.clone()),
+            id: "test-dev".to_string(),
+            status: status.clone(),
+        };
+        (activator, status, device_activated, interrupt, barrier)
+    }
 }
