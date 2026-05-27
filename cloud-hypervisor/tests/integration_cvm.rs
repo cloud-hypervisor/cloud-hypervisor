@@ -220,6 +220,12 @@ mod common_cvm {
     }
 
     #[test]
+    fn test_dmi_system_and_chassis() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
+        _test_dmi_system_and_chassis(&guest);
+    }
+
+    #[test]
     fn test_multiple_network_interfaces() {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
         _test_multiple_network_interfaces(&guest);

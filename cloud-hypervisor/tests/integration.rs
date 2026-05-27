@@ -2052,6 +2052,13 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_dmi_system_and_chassis() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        _test_dmi_system_and_chassis(&guest);
+    }
+
+    #[test]
     fn test_virtio_fs() {
         _test_virtio_fs(&prepare_virtiofsd, false, false, None);
     }
