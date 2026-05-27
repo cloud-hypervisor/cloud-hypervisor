@@ -1535,7 +1535,7 @@ mod common_parallel {
         assert!(
             exec_host_command_output(&format!(
                 "mount {} {}",
-                &loop_dev_path,
+                loop_dev_path,
                 mnt_dir.to_str().unwrap()
             ))
             .status
@@ -1548,7 +1548,7 @@ mod common_parallel {
         assert!(
             exec_host_command_output(&format!(
                 "cp {} {}",
-                &src_qcow2,
+                src_qcow2,
                 dest_qcow2.to_str().unwrap()
             ))
             .status
@@ -3709,7 +3709,7 @@ mod common_parallel {
                     guest.disk_config.disk(DiskType::CloudInit).unwrap()
                 )
                 .as_str(),
-                format!("path={},direct=on,image_type=raw", &loop_dev).as_str(),
+                format!("path={},direct=on,image_type=raw", loop_dev).as_str(),
             ])
             .default_net()
             .capture_output()
@@ -3785,7 +3785,7 @@ mod common_parallel {
         assert!(
             exec_host_command_output(&format!(
                 "mount {} {}",
-                &loop_dev_path,
+                loop_dev_path,
                 mnt_dir.to_str().unwrap()
             ))
             .status
@@ -4350,7 +4350,7 @@ mod common_parallel {
                     guest.disk_config.disk(DiskType::CloudInit).unwrap()
                 )
                 .as_str(),
-                format!("path={},image_type=raw", &loop_dev).as_str(),
+                format!("path={},image_type=raw", loop_dev).as_str(),
             ])
             .default_net()
             .capture_output()
@@ -4526,7 +4526,7 @@ mod common_parallel {
                     guest.disk_config.disk(DiskType::CloudInit).unwrap()
                 )
                 .as_str(),
-                format!("path={},image_type=raw", &dm_dev).as_str(),
+                format!("path={},image_type=raw", dm_dev).as_str(),
             ])
             .default_net()
             .capture_output()
