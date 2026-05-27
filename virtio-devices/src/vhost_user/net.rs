@@ -321,7 +321,7 @@ impl VirtioDevice for Net {
 
             let mut epoll_threads = Vec::new();
             spawn_virtio_thread(
-                &format!("{}_ctrl", &self.id),
+                &format!("{}_ctrl", self.id),
                 &self.seccomp_action,
                 Thread::VirtioVhostNetCtl,
                 &mut epoll_threads,
