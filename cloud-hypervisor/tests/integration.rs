@@ -3709,7 +3709,7 @@ mod common_parallel {
                     guest.disk_config.disk(DiskType::CloudInit).unwrap()
                 )
                 .as_str(),
-                format!("path={},direct=on,image_type=raw", loop_dev).as_str(),
+                format!("path={loop_dev},direct=on,image_type=raw").as_str(),
             ])
             .default_net()
             .capture_output()
@@ -4350,7 +4350,7 @@ mod common_parallel {
                     guest.disk_config.disk(DiskType::CloudInit).unwrap()
                 )
                 .as_str(),
-                format!("path={},image_type=raw", loop_dev).as_str(),
+                format!("path={loop_dev},image_type=raw").as_str(),
             ])
             .default_net()
             .capture_output()
@@ -4526,7 +4526,7 @@ mod common_parallel {
                     guest.disk_config.disk(DiskType::CloudInit).unwrap()
                 )
                 .as_str(),
-                format!("path={},image_type=raw", dm_dev).as_str(),
+                format!("path={dm_dev},image_type=raw").as_str(),
             ])
             .default_net()
             .capture_output()

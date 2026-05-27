@@ -80,7 +80,7 @@ impl TargetApi {
         if output.status.success() {
             true
         } else {
-            eprintln!("Error running ch-remote command: {:?}", &cmd);
+            eprintln!("Error running ch-remote command: {cmd:?}");
             let stderr = String::from_utf8_lossy(&output.stderr);
             eprintln!("stderr: {stderr}");
             false
@@ -1154,7 +1154,7 @@ pub(crate) fn start_live_migration(
 
     // Start to send migration from the source VM
     let args = [
-        format!("--api-socket={}", &src_api_socket),
+        format!("--api-socket={src_api_socket}"),
         "send-migration".to_string(),
         format!(
             "destination_url=unix:{migration_socket},local={}",
