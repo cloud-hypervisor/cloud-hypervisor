@@ -151,17 +151,8 @@ if [ ! -f "$VMLINUX_IMAGE" ]; then
 fi
 
 VIRTIOFSD="$WORKLOADS_DIR/virtiofsd"
-VIRTIOFSD_DIR="virtiofsd_build"
 if [ ! -f "$VIRTIOFSD" ]; then
-    pushd "$WORKLOADS_DIR" || exit
-    git clone "https://gitlab.com/virtio-fs/virtiofsd.git" $VIRTIOFSD_DIR
-    pushd $VIRTIOFSD_DIR || exit
-    git checkout 0f5865629dc995a3e9d5a73b4eb45bb91740bccb
-    time cargo build --release
-    cp target/release/virtiofsd "$VIRTIOFSD" || exit 1
-    popd || exit
-    rm -rf $VIRTIOFSD_DIR
-    popd || exit
+    cp /usr/local/bin/virtiofsd "$VIRTIOFSD"
 fi
 
 BLK_IMAGE="$WORKLOADS_DIR/blk.img"
