@@ -2097,7 +2097,7 @@ pub fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> boo
     if output.status.success() {
         true
     } else {
-        eprintln!("Error running ch-remote command: {:?}", &cmd);
+        eprintln!("Error running ch-remote command: {:?}", cmd);
         let stderr = String::from_utf8_lossy(&output.stderr);
         eprintln!("stderr: {stderr}");
         false
