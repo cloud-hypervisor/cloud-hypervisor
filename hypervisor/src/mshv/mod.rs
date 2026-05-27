@@ -2210,7 +2210,7 @@ impl vm::Vm for MshvVm {
         // Before disabling the dirty page tracking we need
         // to set the dirty bits in the Hypervisor
         // This is a requirement from Microsoft Hypervisor
-        for (_, s) in dirty_log_slots.iter() {
+        for s in dirty_log_slots.values() {
             self.fd
                 .get_dirty_log(
                     s.guest_pfn,
