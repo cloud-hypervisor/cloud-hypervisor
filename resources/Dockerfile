@@ -121,13 +121,13 @@ RUN echo 'source $CARGO_HOME/env' >> "$HOME"/.bashrc \
     && ln -s $CARGO_HOME/env "$HOME"/.cargo/env
 
 # Allow pip to install packages system wide
-# hadolint ignore=DL3003,SC2046
-RUN rm /usr/lib/python3.12/EXTERNALLY-MANAGED \
-        && git clone https://github.com/spdk/spdk \
+# hadolint ignore=DL3003,SC2046,DL3008
+RUN git clone https://github.com/spdk/spdk \
         && cd spdk \
-        && git checkout ef8bcce58f3f02b79c0619a297e4f17e81e62b24 \
+        && git checkout 046ae8c5439e5c45738d5222ee5c85b467e18358 \
         && git submodule update --init \
         && apt-get update \
+        && apt-get install --no-install-recommends -yq python3-jinja2 meson \
         && ./scripts/pkgdep.sh \
         && apt-get clean \
         && ./configure --with-vfio-user \
