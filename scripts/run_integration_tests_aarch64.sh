@@ -9,22 +9,6 @@ source "$(dirname "$0")"/common-aarch64.sh
 
 WORKLOADS_LOCK="$WORKLOADS_DIR/integration_test.lock"
 
-build_virtiofsd() {
-    VIRTIOFSD_DIR="$WORKLOADS_DIR/virtiofsd_build"
-    VIRTIOFSD_REPO="https://gitlab.com/virtio-fs/virtiofsd.git"
-
-    checkout_repo "$VIRTIOFSD_DIR" "$VIRTIOFSD_REPO" main "0f5865629dc995a3e9d5a73b4eb45bb91740bccb"
-
-    if [ ! -f "$VIRTIOFSD_DIR/.built" ]; then
-        pushd "$VIRTIOFSD_DIR" || exit
-        rm -rf target/
-        time RUSTFLAGS="" TARGET_CC="" cargo build --release
-        cp target/release/virtiofsd "$WORKLOADS_DIR/" || exit 1
-        touch .built
-        popd || exit
-    fi
-}
-
 update_workloads() {
     cp scripts/sha1sums-aarch64-common "$WORKLOADS_DIR"
 
@@ -162,8 +146,9 @@ update_workloads() {
     # Prepare linux image (build from source or download pre-built)
     prepare_linux
 
-    # Build virtiofsd
-    build_virtiofsd
+    if [ ! -f "$WORKLOADS_DIR/virtiofsd" ]; then
+        cp /usr/local/bin/virtiofsd "$WORKLOADS_DIR/virtiofsd"
+    fi
 
     BLK_IMAGE="$WORKLOADS_DIR/blk.img"
     MNT_DIR="mount_image"
