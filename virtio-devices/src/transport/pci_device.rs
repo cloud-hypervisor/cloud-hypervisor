@@ -1621,4 +1621,25 @@ mod unit_tests {
         // did not deadlock the vCPU thread.
         waiter.join().expect("barrier waiter deadlocked");
     }
+
+    #[test]
+    fn activate_success_sets_activated_and_does_not_signal_reset() {
+        let (activator, status, device_activated, interrupt, barrier) = make_activator(Ok(()));
+        let initial_status = status.load(Ordering::SeqCst);
+
+        let waiter = std::thread::spawn(move || barrier.wait());
+
+        let result = activator.activate();
+
+        result.unwrap();
+        assert!(device_activated.load(Ordering::SeqCst));
+        assert_eq!(
+            status.load(Ordering::SeqCst) & (DEVICE_NEEDS_RESET as u8),
+            0
+        );
+        assert_eq!(status.load(Ordering::SeqCst), initial_status);
+        assert!(interrupt.triggers.lock().unwrap().is_empty());
+
+        waiter.join().expect("barrier waiter deadlocked");
+    }
 }
