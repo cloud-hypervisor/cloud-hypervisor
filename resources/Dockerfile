@@ -146,6 +146,15 @@ RUN rm /usr/lib/python3.12/EXTERNALLY-MANAGED \
         && cp -rf ./python /usr/local/bin \
         && cd .. && rm -rf spdk
 
+# Build virtiofsd at a pinned commit
+# hadolint ignore=DL3003
+RUN git clone https://gitlab.com/virtio-fs/virtiofsd.git /tmp/virtiofsd \
+        && cd /tmp/virtiofsd \
+        && git checkout 0f5865629dc995a3e9d5a73b4eb45bb91740bccb \
+        && cargo build --release \
+        && cp target/release/virtiofsd /usr/local/bin/virtiofsd \
+        && cd / && rm -rf /tmp/virtiofsd
+
 # Replace the cargo registry and git dirs with symlinks to the host bind-mount
 # paths so that crate downloads are persisted across container invocations.
 RUN rm -rf "$CARGO_HOME/registry" \
