@@ -1365,6 +1365,7 @@ mod unit_tests {
     use vm_device::interrupt::InterruptSourceConfig;
 
     use super::*;
+    use crate::{ActivateError, DEVICE_NEEDS_RESET};
 
     struct TestInterruptSourceGroup {
         event_fd: EventFd,
@@ -1593,5 +1594,31 @@ mod unit_tests {
             status: status.clone(),
         };
         (activator, status, device_activated, interrupt, barrier)
+    }
+
+    #[test]
+    fn activate_failure_marks_needs_reset_and_releases_barrier() {
+        let (activator, status, device_activated, interrupt, barrier) =
+            make_activator(Err(ActivateError::BadActivate));
+
+        // Simulate the vCPU thread blocked on the activation
+        // barrier after writing DRIVER_OK.
+        let waiter = std::thread::spawn(move || barrier.wait());
+
+        let result = activator.activate();
+
+        assert!(matches!(result, Err(ActivateError::BadActivate)));
+        assert!(!device_activated.load(Ordering::SeqCst));
+        assert_ne!(
+            status.load(Ordering::SeqCst) & (DEVICE_NEEDS_RESET as u8),
+            0
+        );
+        let triggers = interrupt.triggers.lock().unwrap();
+        assert_eq!(triggers.len(), 1);
+        assert!(matches!(triggers[0], VirtioInterruptType::Config));
+
+        // The barrier waiter must complete, showing the activator
+        // did not deadlock the vCPU thread.
+        waiter.join().expect("barrier waiter deadlocked");
     }
 }
