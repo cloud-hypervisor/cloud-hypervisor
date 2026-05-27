@@ -112,11 +112,7 @@ RUN export ARCH="$(uname -m)" \
             $RUST_TOOLCHAIN-x86_64-unknown-linux-musl; fi \
     && if [ "$TARGETARCH" = "amd64" ]; then rustup component add rustfmt; fi \
     && if [ "$TARGETARCH" = "amd64" ]; then rustup component add clippy; fi \
-    && cargo install cargo-nextest --locked --version 0.9.128 \
-    && rm -rf "$CARGO_HOME/registry" \
-    && ln -s "$CARGO_REGISTRY_DIR" "$CARGO_HOME/registry" \
-    && rm -rf "$CARGO_HOME/git" \
-    && ln -s "$CARGO_GIT_REGISTRY_DIR" "$CARGO_HOME/git"
+    && cargo install cargo-nextest --locked --version 0.9.128
 
 # Set the rust environment
 # hadolint ignore=SC2016
@@ -149,6 +145,13 @@ RUN rm /usr/lib/python3.12/EXTERNALLY-MANAGED \
         && cp -rf ./python/spdk/ /usr/local/bin/spdk-nvme \
         && cp -rf ./python /usr/local/bin \
         && cd .. && rm -rf spdk
+
+# Replace the cargo registry and git dirs with symlinks to the host bind-mount
+# paths so that crate downloads are persisted across container invocations.
+RUN rm -rf "$CARGO_HOME/registry" \
+    && ln -s "$CARGO_REGISTRY_DIR" "$CARGO_HOME/registry" \
+    && rm -rf "$CARGO_HOME/git" \
+    && ln -s "$CARGO_GIT_REGISTRY_DIR" "$CARGO_HOME/git"
 
 # install ethr tool for performance tests
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
