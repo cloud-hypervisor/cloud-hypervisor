@@ -191,7 +191,7 @@ impl MsiInterruptGroup {
 
     fn set_gsi_routes(&self, routes: &HashMap<u32, RoutingEntry>) -> Result<()> {
         let mut entry_vec: Vec<IrqRoutingEntry> = Vec::new();
-        for (_, entry) in routes.iter() {
+        for entry in routes.values() {
             if entry.masked {
                 continue;
             }
@@ -207,7 +207,7 @@ impl MsiInterruptGroup {
 
 impl InterruptSourceGroup for MsiInterruptGroup {
     fn enable(&self) -> Result<()> {
-        for (_, route) in self.irq_routes.iter() {
+        for route in self.irq_routes.values() {
             route.lock().unwrap().enable(self.vm.as_ref())?;
         }
 
@@ -215,7 +215,7 @@ impl InterruptSourceGroup for MsiInterruptGroup {
     }
 
     fn disable(&self) -> Result<()> {
-        for (_, route) in self.irq_routes.iter() {
+        for route in self.irq_routes.values() {
             route.lock().unwrap().disable(self.vm.as_ref())?;
         }
 
