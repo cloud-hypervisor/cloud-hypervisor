@@ -3968,7 +3968,7 @@ impl DeviceManager {
             // Register DMA mapping in IOMMU.
             // Do not register virtio-mem regions, as they are handled directly by
             // virtio-mem device itself.
-            for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
+            for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
                 for region in zone.regions() {
                     // vfio_dma_map is unsound and ought to be marked as unsafe
                     #[allow(unused_unsafe)]
@@ -4237,7 +4237,7 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
         }
 
-        for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
+        for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
             for region in zone.regions() {
                 vfio_user_pci_device
                     .dma_map(region)
@@ -4378,7 +4378,7 @@ impl DeviceManager {
 
                 // Do not register virtio-mem regions, as they are handled directly by
                 // virtio-mem devices.
-                for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
+                for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
                     for region in zone.regions() {
                         let gpa = region.start_addr().0;
                         let size = region.len();
@@ -4959,7 +4959,7 @@ impl DeviceManager {
                 if let Some(dma_handler) = dev.dma_handler()
                     && !iommu_attached
                 {
-                    for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
+                    for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
                         for region in zone.regions() {
                             let iova = region.start_addr().0;
                             let size = region.len();
@@ -4979,7 +4979,7 @@ impl DeviceManager {
             }
             PciDeviceHandle::VfioUser(vfio_user_pci_device) => {
                 let mut dev = vfio_user_pci_device.lock().unwrap();
-                for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
+                for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
                     for region in zone.regions() {
                         // On error, log, but continue so the loop below removing the mapping from
                         // the devices runs.
