@@ -2325,6 +2325,54 @@ pub(crate) fn _test_dmi_oem_strings(guest: &Guest) {
     handle_child_output(r, &output);
 }
 
+#[cfg(target_arch = "x86_64")]
+pub(crate) fn _test_dmi_system_and_chassis(guest: &Guest) {
+    let fields = [
+        ("system_manufacturer", "system-manufacturer", "Manufacturer"),
+        ("system_product_name", "system-product-name", "ProductName"),
+        ("system_version", "system-version", "Version"),
+        ("system_family", "system-family", "Family"),
+        ("system_sku_number", "system-sku-number", "SkuNumber"),
+        ("chassis_asset_tag", "chassis-asset-tag", "AssetTag"),
+    ];
+
+    let platform = fields
+        .iter()
+        .map(|(key, _, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let mut child = GuestCommand::new(guest)
+        .default_cpus()
+        .default_memory()
+        .default_kernel_cmdline_with_platform(Some(&platform))
+        .default_disks()
+        .default_net()
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    let r = std::panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
+        for (_, dmidecode_field, expected) in fields {
+            assert_eq!(
+                guest
+                    .ssh_command(&format!("sudo dmidecode -s {dmidecode_field}"))
+                    .unwrap()
+                    .trim(),
+                expected,
+                "DMI field {dmidecode_field} mismatch"
+            );
+        }
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+}
+
 pub(crate) fn _test_serial_off(guest: &Guest) {
     let mut child = GuestCommand::new(guest)
         .default_cpus()
