@@ -588,7 +588,7 @@ impl Vm {
             .validate()
             .map_err(Error::ConfigValidation)?;
 
-        info!("Booting VM from config: {:?}", &config);
+        info!("Booting VM from config: {:?}", config);
 
         // Create NUMA nodes based on NumaConfig.
         let numa_nodes =
