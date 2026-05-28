@@ -418,8 +418,7 @@ impl QcowState {
             }))
         } else {
             let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
-            let cluster_size = self.raw_file.cluster_size();
-            if cluster_addr & (cluster_size - 1) != 0 {
+            if !self.is_refcount_addressable_cluster_offset(cluster_addr) {
                 // Fall through to write lock path which sets the corrupt bit
                 return Ok(None);
             }
@@ -476,11 +475,7 @@ impl QcowState {
             })
         } else {
             let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
-            let cluster_size = self.raw_file.cluster_size();
-            if cluster_addr & (cluster_size - 1) != 0 {
-                self.set_corrupt_bit_best_effort();
-                return Err(io::Error::from_raw_os_error(EIO));
-            }
+            self.reject_invalid_cluster_offset(cluster_addr)?;
             let intra_offset = self.raw_file.cluster_offset(address);
             Ok(ClusterReadMapping::Allocated {
                 offset: cluster_addr + intra_offset,
@@ -567,12 +562,8 @@ impl QcowState {
             self.update_cluster_addr(l1_index, l2_index, cluster_addr, &mut set_refcounts)?;
             cluster_addr
         } else {
-            // Already allocated - validate alignment
             let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
-            if cluster_addr & (self.raw_file.cluster_size() - 1) != 0 {
-                self.set_corrupt_bit_best_effort();
-                return Err(io::Error::from_raw_os_error(EIO));
-            }
+            self.reject_invalid_cluster_offset(cluster_addr)?;
             cluster_addr
         };
 
@@ -597,16 +588,26 @@ impl QcowState {
         (address / self.raw_file.cluster_size()) % self.l2_entries
     }
 
+    fn is_refcount_addressable_cluster_offset(&self, cluster_addr: u64) -> bool {
+        cluster_addr & (self.raw_file.cluster_size() - 1) == 0
+            && cluster_addr <= self.refcounts.max_valid_cluster_offset()
+    }
+
+    fn reject_invalid_cluster_offset(&mut self, cluster_addr: u64) -> io::Result<()> {
+        if self.is_refcount_addressable_cluster_offset(cluster_addr) {
+            Ok(())
+        } else {
+            self.set_corrupt_bit_best_effort();
+            Err(io::Error::from_raw_os_error(EIO))
+        }
+    }
+
     // -- Cache and allocation operations requiring exclusive access --
 
     /// Populates the L2 cache for read operations without allocation.
     fn cache_l2_cluster(&mut self, l1_index: usize, l2_addr_disk: u64) -> io::Result<()> {
         if !self.l2_cache.contains_key(l1_index) {
-            let cluster_size = self.raw_file.cluster_size();
-            if l2_addr_disk & (cluster_size - 1) != 0 {
-                self.set_corrupt_bit_best_effort();
-                return Err(io::Error::from_raw_os_error(EIO));
-            }
+            self.reject_invalid_cluster_offset(l2_addr_disk)?;
             let l2_table =
                 VecCache::from_vec(self.raw_file.read_pointer_cluster(l2_addr_disk, None)?);
             let l1_table = &self.l1_table;
@@ -634,11 +635,7 @@ impl QcowState {
                 self.l1_table[l1_index] = new_addr;
                 VecCache::new(self.l2_entries as usize)
             } else {
-                let cluster_size = self.raw_file.cluster_size();
-                if l2_addr_disk & (cluster_size - 1) != 0 {
-                    self.set_corrupt_bit_best_effort();
-                    return Err(io::Error::from_raw_os_error(EIO));
-                }
+                self.reject_invalid_cluster_offset(l2_addr_disk)?;
                 VecCache::from_vec(self.raw_file.read_pointer_cluster(l2_addr_disk, None)?)
             };
             let l1_table = &self.l1_table;
@@ -894,6 +891,7 @@ impl QcowState {
         }
 
         let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
+        self.reject_invalid_cluster_offset(cluster_addr)?;
         let refcount = self
             .refcounts
             .get_cluster_refcount(&mut self.raw_file, cluster_addr)

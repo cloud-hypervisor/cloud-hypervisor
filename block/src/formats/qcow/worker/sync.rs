@@ -359,8 +359,10 @@ mod unit_tests {
 
     const TEST_L1_L2_ADDR_MASK: u64 = 0x00ff_ffff_ffff_fe00;
     const TEST_HEADER_L1_TABLE_OFFSET: u64 = 40;
+    const TEST_CLUSTER_USED_FLAG: u64 = 1 << 63;
     const TEST_COMPRESSED_FLAG: u64 = 1 << 62;
     const TEST_ZERO_FLAG: u64 = 1;
+    const TEST_OUT_OF_BOUNDS_CLUSTER: u64 = 0x0000_0001_4000_0000;
 
     fn read_be_u64_at(file: &mut File, offset: u64) -> u64 {
         let mut bytes = [0u8; 8];
@@ -390,9 +392,21 @@ mod unit_tests {
         file.sync_all().unwrap();
     }
 
+    fn set_first_l2_entry(file: &mut File, l2_entry: u64) {
+        let l2_entry_offset = first_l2_entry_offset(file);
+        write_be_u64_at(file, l2_entry_offset, l2_entry);
+        file.sync_all().unwrap();
+    }
+
     fn first_l2_entry(file: &mut File) -> u64 {
         let l2_entry_offset = first_l2_entry_offset(file);
         read_be_u64_at(file, l2_entry_offset)
+    }
+
+    fn qcow_header_is_corrupt(file: &File) -> bool {
+        let mut raw = RawFile::new(file.try_clone().unwrap(), false);
+        raw.seek(SeekFrom::Start(0)).unwrap();
+        QcowHeader::new(&mut raw).unwrap().is_corrupt()
     }
 
     fn create_disk_with_data(
@@ -493,6 +507,59 @@ mod unit_tests {
         let (user_data, result) = next_completion(async_io.as_mut());
         assert_eq!(user_data, 1);
         assert_eq!(result as usize, data.len());
+    }
+
+    #[test]
+    fn test_qcow_sync_rejects_out_of_bounds_allocated_l2_entry_on_read() {
+        let data = vec![0x5a; 4096];
+        let (temp_file, disk) = create_disk_with_data(100 * 1024 * 1024, &data, 0, true, false);
+        let mut file = temp_file.as_file().try_clone().unwrap();
+
+        set_first_l2_entry(
+            &mut file,
+            TEST_CLUSTER_USED_FLAG | TEST_OUT_OF_BOUNDS_CLUSTER,
+        );
+
+        let mut async_io = disk.create_async_io(1).unwrap();
+        let err = async_io
+            .read_to_vec(0, OwnedIoBuffer::from_vec(vec![0u8; 512]), 1)
+            .expect_err("out-of-bounds allocated L2 entry must fail");
+
+        match err {
+            AsyncIoError::ReadVectored(e) => assert_eq!(e.raw_os_error(), Some(libc::EIO)),
+            other => panic!("unexpected error: {other:?}"),
+        }
+        assert!(
+            qcow_header_is_corrupt(&file),
+            "out-of-bounds allocated L2 entry should set the corrupt bit"
+        );
+    }
+
+    #[test]
+    fn test_qcow_sync_rejects_out_of_bounds_allocated_l2_entry_on_write() {
+        let data = vec![0x5a; 4096];
+        let (temp_file, disk) = create_disk_with_data(100 * 1024 * 1024, &data, 0, true, false);
+        let mut file = temp_file.as_file().try_clone().unwrap();
+
+        set_first_l2_entry(
+            &mut file,
+            TEST_CLUSTER_USED_FLAG | TEST_OUT_OF_BOUNDS_CLUSTER,
+        );
+
+        let mut async_io = disk.create_async_io(1).unwrap();
+        let overwrite = vec![0x11u8; 512];
+        let err = async_io
+            .write_from_vec(0, OwnedIoBuffer::from_vec(overwrite), 1)
+            .expect_err("out-of-bounds allocated L2 entry must fail");
+
+        match err {
+            AsyncIoError::WriteVectored(e) => assert_eq!(e.raw_os_error(), Some(libc::EIO)),
+            other => panic!("unexpected error: {other:?}"),
+        }
+        assert!(
+            qcow_header_is_corrupt(&file),
+            "out-of-bounds allocated L2 entry should set the corrupt bit"
+        );
     }
 
     #[test]
