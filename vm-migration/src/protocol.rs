@@ -120,6 +120,7 @@ use crate::bitpos_iterator::BitposIteratorExt;
 ///     Configured --> StateReceived: State
 ///     StateReceived --> Completed: Complete
 ///     StateReceived --> Completed: CompletePaused
+///     Completed --> Completed: PageFault
 /// ```
 ///
 /// [live-migration protocol]: super::protocol
@@ -140,6 +141,52 @@ pub enum Command {
     /// Finalizes the migration without resuming the VM on the destination.
     /// Sent when the source VM was paused at migration time.
     CompletePaused = 8,
+    /// Request a page to be faulted in. The page content can be sent
+    /// through the response or simply written to the shared memory.
+    PageFault = 9,
+}
+
+/// Role announced as the first message on an additional migration connection.
+#[repr(u16)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
+pub enum ConnectionRole {
+    /// Invalid role. Reserves the zero value so a default/zeroed message
+    /// carries no valid meaning on the wire.
+    #[default]
+    Invalid = 0,
+    /// Dedicated connection carrying precopy memory chunks.
+    PrecopyMemory = 1,
+    /// Dedicated connection carrying page faults.
+    Fault = 2,
+}
+
+impl ConnectionRole {
+    pub fn write_to(self, fd: &mut dyn Write) -> Result<(), MigratableError> {
+        fd.write_all(&(self as u16).to_le_bytes())
+            .map_err(MigratableError::MigrateSocket)
+    }
+
+    pub fn read_from(fd: &mut dyn Read) -> Result<ConnectionRole, MigratableError> {
+        let mut buf = [0u8; 2];
+        fd.read_exact(&mut buf)
+            .map_err(MigratableError::MigrateSocket)?;
+        ConnectionRole::try_from(u16::from_le_bytes(buf))
+    }
+}
+
+impl TryFrom<u16> for ConnectionRole {
+    type Error = MigratableError;
+
+    fn try_from(value: u16) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(ConnectionRole::Invalid),
+            1 => Ok(ConnectionRole::PrecopyMemory),
+            2 => Ok(ConnectionRole::Fault),
+            _ => Err(MigratableError::MigrateReceive(anyhow!(
+                "unknown connection role: {value}"
+            ))),
+        }
+    }
 }
 
 /// Newest migration protocol version sent by this implementation.
@@ -215,6 +262,11 @@ impl Request {
         Self::new(Command::Abandon, 0)
     }
 
+    /// PageFault request always carries a single `MemoryRange`.
+    pub fn page_fault() -> Self {
+        Self::new(Command::PageFault, size_of::<MemoryRange>() as u64)
+    }
+
     pub fn command(&self) -> Command {
         self.command
     }
@@ -262,7 +314,7 @@ impl Request {
 }
 
 #[repr(u16)]
-#[derive(Copy, Clone, PartialEq, Eq, Default)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum Status {
     #[default]
     Invalid,
@@ -337,10 +389,27 @@ impl Response {
 }
 
 #[repr(C)]
-#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryRange {
     pub gpa: u64,
     pub length: u64,
+}
+
+// SAFETY: MemoryRange is two u64 fields with no padding.
+unsafe impl ByteValued for MemoryRange {}
+
+impl MemoryRange {
+    pub fn read_from(fd: &mut dyn Read) -> Result<MemoryRange, MigratableError> {
+        let mut range = MemoryRange::default();
+        fd.read_exact(Self::as_mut_slice(&mut range))
+            .map_err(MigratableError::MigrateSocket)?;
+        Ok(range)
+    }
+
+    pub fn write_to(&self, fd: &mut dyn Write) -> Result<(), MigratableError> {
+        fd.write_all(Self::as_slice(self))
+            .map_err(MigratableError::MigrateSocket)
+    }
 }
 
 /// A set of guest-memory ranges to transfer as one migration payload.
@@ -543,8 +612,10 @@ impl MemoryRangeTable {
 
 #[cfg(test)]
 mod unit_tests {
+    use std::io::Cursor;
+
     use crate::protocol::{
-        CURRENT_PROTOCOL_VERSION, Command, MemoryRange, MemoryRangeTable, Request,
+        CURRENT_PROTOCOL_VERSION, Command, ConnectionRole, MemoryRange, MemoryRangeTable, Request,
     };
 
     #[test]
@@ -571,6 +642,49 @@ mod unit_tests {
 
         const { assert!(CURRENT_PROTOCOL_VERSION < 255) };
         request.sender_protocol_version().unwrap_err();
+    }
+
+    #[test]
+    fn test_page_fault_request_roundtrip() {
+        let req = Request::page_fault();
+        assert_eq!(req.command(), Command::PageFault);
+        assert_eq!(req.length(), size_of::<MemoryRange>() as u64);
+
+        let range = MemoryRange {
+            gpa: 0x4000,
+            length: 0x1000,
+        };
+
+        let mut buf = Vec::new();
+        req.write_to(&mut buf).unwrap();
+        range.write_to(&mut buf).unwrap();
+
+        let mut cursor = Cursor::new(buf);
+        let parsed_req = Request::read_from(&mut cursor).unwrap();
+        assert_eq!(parsed_req.command(), Command::PageFault);
+        assert_eq!(parsed_req.length(), size_of::<MemoryRange>() as u64);
+        let parsed_range = MemoryRange::read_from(&mut cursor).unwrap();
+        assert_eq!(parsed_range, range);
+    }
+
+    #[test]
+    fn test_conn_role_roundtrip() {
+        for role in [ConnectionRole::PrecopyMemory, ConnectionRole::Fault] {
+            let mut buf = Vec::new();
+            role.write_to(&mut buf).unwrap();
+            assert_eq!(buf.len(), size_of::<u16>());
+
+            let mut cursor = Cursor::new(buf);
+            assert_eq!(ConnectionRole::read_from(&mut cursor).unwrap(), role);
+        }
+    }
+
+    #[test]
+    fn test_conn_role_unknown_value_is_rejected() {
+        // An unknown on-the-wire role value must be rejected rather than
+        // producing an out-of-range enum discriminant.
+        let mut cursor = Cursor::new(99u16.to_le_bytes().to_vec());
+        ConnectionRole::read_from(&mut cursor).unwrap_err();
     }
 
     #[test]
@@ -650,10 +764,10 @@ mod unit_tests {
             assert_eq!(
                 chunks,
                 &[
-                    [expected_regions[0].clone()].to_vec(),
-                    [expected_regions[1].clone()].to_vec(),
-                    [expected_regions[2].clone()].to_vec(),
-                    [expected_regions[3].clone()].to_vec(),
+                    [expected_regions[0]].to_vec(),
+                    [expected_regions[1]].to_vec(),
+                    [expected_regions[2]].to_vec(),
+                    [expected_regions[3]].to_vec(),
                 ]
             );
         }
