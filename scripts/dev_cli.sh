@@ -33,7 +33,7 @@ DEST_IGVM_FILES_PATH="$CLH_INTEGRATION_WORKLOADS/igvm_files"
 CTR_IGVM_FILES_PATH="/igvm_files"
 
 # Container networking option
-CTR_CLH_NET="bridge"
+CTR_CLH_NET="none"
 
 # Cargo paths
 # Full path to the cargo registry dir on the host. This appears on the host
@@ -193,7 +193,7 @@ fix_dir_perms() {
         --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
         ${exported_volumes:+$exported_volumes} \
         "$CTR_IMAGE" \
-        chown -R "$(id -u):$(id -g)" "$CTR_CLH_ROOT_DIR"
+        chown -R "$(id -u):$(id -g)" "$CTR_CLH_ROOT_DIR" &>/dev/null
 
     return "$1"
 }
@@ -486,6 +486,17 @@ cmd_tests() {
     python3 "$CLH_SCRIPTS_DIR/fetch_workloads.py" \
         --workloads-dir "$CLH_INTEGRATION_WORKLOADS" || die "Failed to fetch workloads"
 
+    # Vendor cargo dependencies on the host so the container can build
+    # without network access.  Save the config cargo vendor prints to
+    # stdout — it includes replacement entries for git dependencies.
+    say "Vendoring cargo dependencies..."
+    if ! cargo vendor "build/cargo_vendor" \
+        > "$CLH_BUILD_DIR/cargo_vendor_config.toml" \
+        2> "$CLH_BUILD_DIR/cargo_vendor.log"; then
+        cat "$CLH_BUILD_DIR/cargo_vendor.log" >&2
+        die "Failed to vendor dependencies"
+    fi
+
     target="$(uname -m)-unknown-linux-${libc}"
 
     rustflags="$RUSTFLAGS"
@@ -501,6 +512,7 @@ cmd_tests() {
         --rm
         --security-opt seccomp=unconfined
         --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR"
+        "--mount" "type=tmpfs,destination=$CTR_CLH_ROOT_DIR/.cargo"
         ${exported_volumes:+$exported_volumes}
     )
 
@@ -521,7 +533,7 @@ cmd_tests() {
             "${common_env_args[@]}" \
             --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
             "$CTR_IMAGE" \
-            ./scripts/run_unit_tests.sh "$@" || fix_dir_perms $? || exit $?
+            ./scripts/setup_cargo_vendor.sh ./scripts/run_unit_tests.sh "$@" || fix_dir_perms $? || exit $?
     fi
 
     # Copy custom kernel/firmware into the workloads directory on the
@@ -584,7 +596,7 @@ cmd_tests() {
             --env PARALLEL_INTEGRATION_TESTS_NUM="${PARALLEL_INTEGRATION_TESTS_NUM:-}" \
             --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
             "$CTR_IMAGE" \
-            dbus-run-session ./scripts/run_integration_tests_"$(uname -m)".sh "$@" || fix_dir_perms $? || exit $?
+            ./scripts/setup_cargo_vendor.sh dbus-run-session ./scripts/run_integration_tests_"$(uname -m)".sh "$@" || fix_dir_perms $? || exit $?
     fi
 
     if [ "$integration_cvm" = true ]; then
@@ -596,7 +608,7 @@ cmd_tests() {
             "${common_env_args[@]}" \
             --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
             "$CTR_IMAGE" \
-            ./scripts/run_integration_tests_cvm.sh "$@" || fix_dir_perms $? || exit $?
+            ./scripts/setup_cargo_vendor.sh ./scripts/run_integration_tests_cvm.sh "$@" || fix_dir_perms $? || exit $?
     fi
 
     if [ "$integration_vfio" = true ]; then
@@ -605,7 +617,7 @@ cmd_tests() {
             "${common_args[@]}" \
             "${common_env_args[@]}" \
             "$CTR_IMAGE" \
-            ./scripts/run_integration_tests_vfio.sh "$@" || fix_dir_perms $? || exit $?
+            ./scripts/setup_cargo_vendor.sh ./scripts/run_integration_tests_vfio.sh "$@" || fix_dir_perms $? || exit $?
     fi
 
     if [ "$integration_windows" = true ]; then
@@ -614,7 +626,7 @@ cmd_tests() {
             "${common_args[@]}" \
             "${common_env_args[@]}" \
             "$CTR_IMAGE" \
-            ./scripts/run_integration_tests_windows_"$(uname -m)".sh "$@" || fix_dir_perms $? || exit $?
+            ./scripts/setup_cargo_vendor.sh ./scripts/run_integration_tests_windows_"$(uname -m)".sh "$@" || fix_dir_perms $? || exit $?
     fi
 
     if [ "$integration_rate_limiter" = true ]; then
@@ -623,7 +635,7 @@ cmd_tests() {
             "${common_args[@]}" \
             "${common_env_args[@]}" \
             "$CTR_IMAGE" \
-            ./scripts/run_integration_tests_rate_limiter.sh "$@" || fix_dir_perms $? || exit $?
+            ./scripts/setup_cargo_vendor.sh ./scripts/run_integration_tests_rate_limiter.sh "$@" || fix_dir_perms $? || exit $?
     fi
 
     if [ "$metrics" = true ]; then
@@ -639,7 +651,7 @@ cmd_tests() {
             --env RUST_BACKTRACE="${RUST_BACKTRACE}" \
             "${igvm_volume_args[@]}" \
             "$CTR_IMAGE" \
-            ./scripts/run_metrics.sh "$@" || fix_dir_perms $? || exit $?
+            ./scripts/setup_cargo_vendor.sh ./scripts/run_metrics.sh "$@" || fix_dir_perms $? || exit $?
     fi
 
     if [ "$coverage" = true ]; then
@@ -648,7 +660,7 @@ cmd_tests() {
             "${common_args[@]}" \
             "${common_env_args[@]}" \
             "$CTR_IMAGE" \
-            dbus-run-session ./scripts/run_coverage.sh "$@" || fix_dir_perms $? || exit $?
+            ./scripts/setup_cargo_vendor.sh dbus-run-session ./scripts/run_coverage.sh "$@" || fix_dir_perms $? || exit $?
     fi
 
     fix_dir_perms $?
