@@ -349,9 +349,13 @@ pub enum ValidationError {
     /// A DeviceConfig specified both `path` and `fd`.
     #[error("VFIO device config must specify at most one of `path=` or `fd=`")]
     VfioDeviceBothPathAndFd,
-    /// FD-based VFIO requires the `iommufd` platform option to be enabled.
-    #[error("VFIO device `fd=` requires platform `iommufd=on`")]
-    VfioFdRequiresIommufd,
+    /// FD-based VFIO requires an externally-supplied iommufd FD so the
+    /// cdev's bind state can survive across an in-process VM reboot.
+    #[error("VFIO device `fd=` requires platform `iommufd_fd=<fd>`")]
+    VfioFdRequiresIommufdFd,
+    /// `iommufd_fd` was provided without also enabling the iommufd backend.
+    #[error("Platform `iommufd_fd=<fd>` requires `iommufd=on`")]
+    IommufdFdRequiresIommufd,
     /// Provided MTU is lower than what the VIRTIO specification expects
     #[error("Provided MTU {0} is lower than 1280 (expected by VIRTIO specification)")]
     InvalidMtu(u16),
@@ -853,7 +857,8 @@ impl PlatformConfig {
         static SYNTAX: LazyLock<String> = LazyLock::new(|| {
             let mut syntax = "Platform configuration parameters \
             \"num_pci_segments=<num_pci_segments>,iommu_segments=<list_of_segments>,\
-            iommu_address_width=<bits>,iommufd=on|off,vfio_p2p_dma=on|off,system_manufacturer=<dmi_system_manufacturer>,\
+            iommu_address_width=<bits>,iommufd=on|off,iommufd_fd=<fd>,vfio_p2p_dma=on|off,\
+            system_manufacturer=<dmi_system_manufacturer>,\
             system_product_name=<dmi_system_product_name>,system_version=<dmi_system_version>,\
             system_serial_number=<dmi_system_serial_number>,system_uuid=<dmi_system_uuid>,\
             system_sku_number=<dmi_system_sku_number>,system_family=<dmi_system_family>,\
@@ -926,6 +931,7 @@ impl PlatformConfig {
             .add("uuid")
             .add("oem_strings")
             .add("iommufd")
+            .add("iommufd_fd")
             .add("vfio_p2p_dma");
         for field in SMBIOS_STRING_FIELDS {
             parser.add(field.key);
@@ -952,11 +958,14 @@ impl PlatformConfig {
             .convert::<StringList>("oem_strings")
             .map_err(Error::ParsePlatform)?
             .map(|v| v.0.into_boxed_slice());
+        let iommufd_fd = parser
+            .convert::<i32>("iommufd_fd")
+            .map_err(Error::ParsePlatform)?;
+        // `iommufd_fd=<n>` implies `iommufd=on` unless the user explicitly set the value.
         let iommufd = parser
             .convert::<Toggle>("iommufd")
             .map_err(Error::ParsePlatform)?
-            .unwrap_or(Toggle(false))
-            .0;
+            .map_or(iommufd_fd.is_some(), |Toggle(v)| v);
         let vfio_p2p_dma = parser
             .convert::<Toggle>("vfio_p2p_dma")
             .map_err(Error::ParsePlatform)?
@@ -989,6 +998,7 @@ impl PlatformConfig {
             system_sku_number: None,
             chassis_asset_tag: None,
             iommufd,
+            iommufd_fd,
             #[cfg(feature = "tdx")]
             tdx,
             #[cfg(feature = "sev_snp")]
@@ -1045,6 +1055,10 @@ impl PlatformConfig {
             return Err(ValidationError::InvalidIommuAddressWidthBits(
                 self.iommu_address_width_bits,
             ));
+        }
+
+        if self.iommufd_fd.is_some() && !self.iommufd {
+            return Err(ValidationError::IommufdFdRequiresIommufd);
         }
 
         Ok(())
@@ -2461,9 +2475,12 @@ impl DeviceConfig {
             (None, None) => return Err(ValidationError::VfioDeviceNeitherPathNorFd),
             (Some(_), Some(_)) => return Err(ValidationError::VfioDeviceBothPathAndFd),
             (None, Some(_)) => {
-                let iommufd_on = vm_config.platform.as_ref().is_some_and(|p| p.iommufd);
-                if !iommufd_on {
-                    return Err(ValidationError::VfioFdRequiresIommufd);
+                let iommufd_fd_set = vm_config
+                    .platform
+                    .as_ref()
+                    .is_some_and(|p| p.iommufd_fd.is_some());
+                if !iommufd_fd_set {
+                    return Err(ValidationError::VfioFdRequiresIommufdFd);
                 }
             }
             (Some(_), None) => {}
@@ -4873,6 +4890,26 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
     }
 
     #[test]
+    fn test_platform_iommufd_fd_parsing() -> Result<()> {
+        // `iommufd_fd=N` alone implies `iommufd=on`.
+        let p = PlatformConfig::parse("iommufd_fd=42")?;
+        assert!(p.iommufd);
+        assert_eq!(p.iommufd_fd, Some(42));
+
+        // Explicit `iommufd=on,iommufd_fd=N` is the same.
+        let p = PlatformConfig::parse("iommufd=on,iommufd_fd=42")?;
+        assert!(p.iommufd);
+        assert_eq!(p.iommufd_fd, Some(42));
+
+        // No flags → both default to off.
+        let p = PlatformConfig::parse("")?;
+        assert!(!p.iommufd);
+        assert_eq!(p.iommufd_fd, None);
+
+        Ok(())
+    }
+
+    #[test]
     fn test_vsock_parsing() -> Result<()> {
         // socket and cid is required
         VsockConfig::parse("").unwrap_err();
@@ -5276,6 +5313,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             system_uuid: None,
             oem_strings: None,
             iommufd: false,
+            iommufd_fd: None,
             vfio_p2p_dma: default_platformconfig_vfio_p2p_dma(),
             system_manufacturer: None,
             system_product_name: None,
@@ -6145,10 +6183,12 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         ]);
         invalid_config.validate().unwrap_err();
 
-        // An fd-backed DeviceConfig is only valid with iommufd enabled.
+        // An fd-backed DeviceConfig is only valid with
+        // externally-supplied fd is provided for iommufd too
         let mut fd_valid_config = valid_config.clone();
         fd_valid_config.platform = Some(PlatformConfig {
             iommufd: true,
+            iommufd_fd: Some(8),
             ..platform_fixture()
         });
         fd_valid_config.devices = Some(vec![DeviceConfig {
@@ -6158,11 +6198,27 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         }]);
         fd_valid_config.validate().unwrap();
 
-        let mut fd_without_iommufd = fd_valid_config.clone();
-        fd_without_iommufd.platform = None;
+        let mut fd_without_iommufd_fd = fd_valid_config.clone();
+        fd_without_iommufd_fd.platform = Some(PlatformConfig {
+            iommufd: true,
+            iommufd_fd: None,
+            ..platform_fixture()
+        });
         assert!(matches!(
-            fd_without_iommufd.validate(),
-            Err(ValidationError::VfioFdRequiresIommufd),
+            fd_without_iommufd_fd.validate(),
+            Err(ValidationError::VfioFdRequiresIommufdFd),
+        ));
+
+        // iommufd_fd without iommufd=on is rejected at PlatformConfig::validate.
+        let mut iommufd_fd_without_iommufd = valid_config.clone();
+        iommufd_fd_without_iommufd.platform = Some(PlatformConfig {
+            iommufd: false,
+            iommufd_fd: Some(8),
+            ..platform_fixture()
+        });
+        assert!(matches!(
+            iommufd_fd_without_iommufd.validate(),
+            Err(ValidationError::IommufdFdRequiresIommufd),
         ));
 
         // Exactly one of path and fd must be set.
