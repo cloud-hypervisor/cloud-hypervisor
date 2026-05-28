@@ -626,7 +626,7 @@ pub fn generate_common_cpuid(
     }
 
     info!(
-        "Generating guest CPUID for with physical address size: {}",
+        "Generating guest CPUID with physical address size: {}",
         config.phys_bits
     );
 
