@@ -11,7 +11,6 @@ use std::io::{self, Seek, SeekFrom};
 use std::num::NonZeroUsize;
 use std::ops::{BitAnd, Not, Sub};
 use std::os::fd::{AsFd, OwnedFd};
-use std::os::unix::fs::FileExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -57,41 +56,14 @@ use crate::coredump::{
 };
 use crate::migration::url_to_path;
 use crate::sparse::{next_data_extent, write_region_sparse};
+use crate::uffd::{self, FaultResolution, FileUffdMemorySource, UffdMemorySource, UffdRange};
 use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
-use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID, uffd};
+use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID};
 
 struct UffdHandler {
     stop_event: EventFd,
     result_rx: Receiver<Result<(), io::Error>>,
     handle: thread::JoinHandle<()>,
-}
-
-struct UffdRange {
-    host_addr: u64,
-    length: u64,
-    file_offset: u64,
-    page_size: u64,
-}
-
-impl UffdRange {
-    fn num_pages(&self) -> u64 {
-        self.length.div_ceil(self.page_size)
-    }
-
-    fn page_addr(&self, page_idx: u64) -> u64 {
-        self.host_addr + page_idx * self.page_size
-    }
-
-    fn file_pos(&self, page_idx: u64) -> u64 {
-        self.file_offset + page_idx * self.page_size
-    }
-
-    /// Returns the page index containing `addr` if it falls within this range.
-    fn page_index_of(&self, addr: u64) -> Option<u64> {
-        let page_addr = addr & !(self.page_size - 1);
-        (page_addr >= self.host_addr && page_addr < self.host_addr + self.length)
-            .then(|| (page_addr - self.host_addr) / self.page_size)
-    }
 }
 
 pub const MEMORY_MANAGER_ACPI_SIZE: usize = 0x18;
@@ -944,6 +916,19 @@ impl MemoryManager {
             return Ok(());
         }
 
+        let snapshot_file = File::open(file_path).map_err(Error::SnapshotOpen)?;
+        let source: Box<dyn UffdMemorySource> = Box::new(FileUffdMemorySource::new(snapshot_file));
+        self.register_uffd_handler(saved_regions, exit_evt, source)
+    }
+
+    /// Register every range against userfaultfd, then spawn the
+    /// handler thread that resolves faults through the memory source.
+    fn register_uffd_handler(
+        &mut self,
+        saved_regions: &MemoryRangeTable,
+        exit_evt: &EventFd,
+        source: Box<dyn UffdMemorySource>,
+    ) -> Result<(), Error> {
         let guest_memory = self.guest_memory.memory();
         let required_uffd_features = self.required_uffd_features();
 
@@ -962,8 +947,6 @@ impl MemoryManager {
         {
             return Err(UffdError::UnalignedRanges.into());
         }
-
-        let snapshot_file = File::open(file_path).map_err(Error::SnapshotOpen)?;
 
         let uffd_fd = uffd::create(required_uffd_features).map_err(UffdError::Create)?;
 
@@ -1005,7 +988,7 @@ impl MemoryManager {
             handler_ranges.push(UffdRange {
                 host_addr,
                 length: range.length,
-                file_offset,
+                source_offset: file_offset,
                 page_size: range_page_size,
             });
 
@@ -1027,17 +1010,11 @@ impl MemoryManager {
             .name("uffd-handler".to_string())
             .spawn(move || {
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-                    let max_page_size = handler_ranges
-                        .iter()
-                        .map(|r| r.page_size)
-                        .max()
-                        .unwrap_or(base_page_size);
                     let result = Self::uffd_handler_loop(
                         uffd_fd,
                         thread_stop_event,
-                        snapshot_file,
+                        source,
                         &handler_ranges,
-                        max_page_size,
                         &ready_tx,
                     );
 
@@ -1102,25 +1079,17 @@ impl MemoryManager {
         }
     }
 
-    /// Poll the UFFD fd and serve page faults from the snapshot file, while
-    /// opportunistically prefaulting the remaining pages in between faults.
-    ///
-    /// Runs until the fd is closed (EPOLLHUP), `stop_event` fires, or an
-    /// unrecoverable error occurs. Each fault triggers a read from the
-    /// snapshot file followed by a `UFFDIO_COPY` to resolve the fault and
-    /// wake the faulting thread. When no fault is pending, one prefault
-    /// page is copied per loop iteration.
+    /// Serve UFFD faults via `source`, prefaulting one page per idle
+    /// iteration.
     #[expect(clippy::needless_pass_by_value)]
     fn uffd_handler_loop(
         uffd_fd: OwnedFd,
         stop_event: EventFd,
-        snapshot_file: File,
+        mut source: Box<dyn UffdMemorySource>,
         ranges: &[UffdRange],
-        page_size: u64,
         ready_tx: &SyncSender<()>,
     ) -> Result<(), io::Error> {
         let uffd_raw_fd = uffd_fd.as_raw_fd();
-        let mut page_buf = vec![0u8; page_size as usize];
 
         let total_pages: u64 = ranges.iter().map(UffdRange::num_pages).sum();
         let mut pages_served: u64 = 0;
@@ -1245,39 +1214,19 @@ impl MemoryManager {
                     let Some(page_idx) = range.page_index_of(fault_addr) else {
                         continue;
                     };
-                    let page_addr = range.page_addr(page_idx);
-                    let file_pos = range.file_pos(page_idx);
-
-                    snapshot_file
-                        .read_exact_at(&mut page_buf[..range.page_size as usize], file_pos)?;
 
                     loop {
-                        match uffd::copy(
-                            uffd_fd.as_fd(),
-                            page_addr,
-                            page_buf.as_ptr(),
-                            range.page_size,
-                        ) {
-                            Ok(()) => {
+                        match source.resolve(uffd_fd.as_fd(), range, page_idx)? {
+                            FaultResolution::Served => {
                                 pages_served += 1;
                                 served_bitmap[range_idx].set_bit(page_idx as usize);
                                 break;
                             }
-                            Err(e) if e.raw_os_error() == Some(libc::EEXIST) => {
-                                if let Err(e) =
-                                    uffd::wake(uffd_fd.as_fd(), page_addr, range.page_size)
-                                {
-                                    warn!("UFFDIO_WAKE failed at {page_addr:#x}: {e}");
-                                }
-                                served_bitmap[range_idx].set_bit(page_idx as usize);
-                                break;
-                            }
-                            Err(e) if e.raw_os_error() == Some(libc::EAGAIN) => {
-                                // The kernel can report a transient EAGAIN while the fault
-                                // is being resolved; yield and retry instead of aborting restore.
+                            FaultResolution::Retry => {
+                                // The kernel reported a transient state while the fault
+                                // is being resolved; yield and retry instead of aborting.
                                 thread::yield_now();
                             }
-                            Err(e) => return Err(e),
                         }
                     }
                     served = true;
@@ -1328,46 +1277,23 @@ impl MemoryManager {
             };
 
             let range = &ranges[range_idx];
-            let file_pos = range.file_pos(page_idx);
-            let page_addr = range.page_addr(page_idx);
-            let len = range.page_size as usize;
 
-            let advance = match snapshot_file.read_exact_at(&mut page_buf[..len], file_pos) {
-                Ok(()) => match uffd::copy(
-                    uffd_fd.as_fd(),
-                    page_addr,
-                    page_buf.as_ptr(),
-                    range.page_size,
-                ) {
-                    Ok(()) => {
-                        pages_prefaulted += 1;
-                        true
-                    }
-                    Err(e) if e.raw_os_error() == Some(libc::EEXIST) => {
-                        // Should be unreachable: in single-thread mode with
-                        // MISSING-only registration, the only installer is us,
-                        // and the bitmap check above already filtered served
-                        // pages. Treat as a bug signal but keep going.
-                        warn!(
-                            "UFFD prefault: unexpected EEXIST at {page_addr:#x} \
-                             (bitmap/handler bug?)"
-                        );
-                        true
-                    }
-                    Err(e) if e.raw_os_error() == Some(libc::EAGAIN) => {
-                        // Unlike the on-demand handler (which must retry to
-                        // wake the faulting thread), prefault can safely skip:
-                        // any future guest access will simply page-fault and
-                        // be served by the on-demand path.
-                        true
-                    }
-                    Err(e) => {
-                        warn!("UFFD prefault: UFFDIO_COPY error at {page_addr:#x}: {e}");
-                        false
-                    }
-                },
+            let advance = match source.resolve(uffd_fd.as_fd(), range, page_idx) {
+                Ok(FaultResolution::Served) => {
+                    pages_prefaulted += 1;
+                    served_bitmap[range_idx].set_bit(page_idx as usize);
+                    true
+                }
+                Ok(FaultResolution::Retry) => {
+                    // Unlike the on demand handler (which must retry to wake
+                    // the faulting thread), prefault can safely skip: any
+                    // future guest access will simply page-fault and be
+                    // served by the on demand path.
+                    true
+                }
                 Err(e) => {
-                    warn!("UFFD prefault: read error at {file_pos:#x}: {e}");
+                    let page_addr = range.page_addr(page_idx);
+                    warn!("UFFD prefault: source error at {page_addr:#x}: {e}");
                     false
                 }
             };

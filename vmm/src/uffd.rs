@@ -13,10 +13,11 @@
 //! original memory mapping, so it remains compatible with VFIO device
 //! passthrough and shared-memory-backed guest RAM.
 
-use std::fs::OpenOptions;
-use std::io::Error;
+use std::fs::{File, OpenOptions};
+use std::io::{self, Error};
 use std::mem;
 use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
+use std::os::unix::fs::FileExt;
 
 use crate::userfaultfd;
 
@@ -177,6 +178,100 @@ pub(crate) fn copy(fd: BorrowedFd<'_>, dst: u64, src: *const u8, len: u64) -> Re
 struct UffdioRange {
     start: u64,
     len: u64,
+}
+
+/// A guest memory range registered with userfaultfd, plus where its bytes
+/// live in the snapshot file.
+pub(crate) struct UffdRange {
+    pub host_addr: u64,
+    pub length: u64,
+    pub source_offset: u64,
+    pub page_size: u64,
+}
+
+impl UffdRange {
+    pub fn num_pages(&self) -> u64 {
+        self.length.div_ceil(self.page_size)
+    }
+
+    pub fn page_addr(&self, page_idx: u64) -> u64 {
+        self.host_addr + page_idx * self.page_size
+    }
+
+    pub fn page_source_offset(&self, page_idx: u64) -> u64 {
+        self.source_offset + page_idx * self.page_size
+    }
+
+    pub fn page_index_of(&self, addr: u64) -> Option<u64> {
+        let page_addr = addr & !(self.page_size - 1);
+        (page_addr >= self.host_addr && page_addr < self.host_addr + self.length)
+            .then(|| (page_addr - self.host_addr) / self.page_size)
+    }
+}
+
+/// Result of a page fault being resolved.
+pub(crate) enum FaultResolution {
+    /// Page installed.
+    Served,
+    /// Indicates the page couldn't be installed and it's worth retrying.
+    Retry,
+}
+
+/// Provider of guest-memory page contents for a UFFD handler.
+pub(crate) trait UffdMemorySource: Send {
+    fn resolve(
+        &mut self,
+        uffd_fd: BorrowedFd<'_>,
+        range: &UffdRange,
+        page_idx: u64,
+    ) -> Result<FaultResolution, io::Error>;
+}
+
+/// Source that reads pages from a local snapshot file.
+pub(crate) struct FileUffdMemorySource {
+    file: File,
+    buf: Vec<u8>,
+}
+
+impl FileUffdMemorySource {
+    pub fn new(file: File) -> Self {
+        Self {
+            file,
+            buf: Vec::new(),
+        }
+    }
+}
+
+impl UffdMemorySource for FileUffdMemorySource {
+    fn resolve(
+        &mut self,
+        uffd_fd: BorrowedFd<'_>,
+        range: &UffdRange,
+        page_idx: u64,
+    ) -> Result<FaultResolution, io::Error> {
+        let page_size = range.page_size as usize;
+        let page_addr = range.page_addr(page_idx);
+        let file_pos = range.page_source_offset(page_idx);
+
+        if self.buf.len() < page_size {
+            self.buf.resize(page_size, 0);
+        }
+        self.file
+            .read_exact_at(&mut self.buf[..page_size], file_pos)?;
+
+        match copy(uffd_fd, page_addr, self.buf.as_ptr(), range.page_size) {
+            Ok(()) => Ok(FaultResolution::Served),
+            Err(e) if e.raw_os_error() == Some(libc::EEXIST) => {
+                // Installed concurrently. Wake any blocked threads.
+                if let Err(e) = wake(uffd_fd, page_addr, range.page_size) {
+                    log::warn!("UFFDIO_WAKE failed at {page_addr:#x}: {e}");
+                }
+                Ok(FaultResolution::Served)
+            }
+            Err(e) if e.raw_os_error() == Some(libc::EAGAIN) => Ok(FaultResolution::Retry),
+            Err(e) => Err(e),
+        }
+    }
 }
 
 /// Wake threads waiting on a fault in the given range without copying data.
