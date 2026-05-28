@@ -60,28 +60,33 @@ assets:
   # Kernels
   - filename: vmlinux-x86_64
     url: https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v6.16.9-20260508/vmlinux-x86_64
+    sha1: 322b3850a8247077def70845559c6752b7d5f49b
     arch: [x86_64]
     test: [integration, rate-limiter, metrics]
 
   - filename: bzImage-x86_64
     url: https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v6.16.9-20260508/bzImage-x86_64
+    sha1: 18107cf13f1566b5ddae6cbd88e3cb22a28d6a6c
     arch: [x86_64]
     test: [integration]
 
   - filename: Image-arm64
     url: https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v6.16.9-20260508/Image-arm64
+    sha1: 324becf5f9d57266999e25e93d3d7bbe97d35b4e
     arch: [aarch64]
     test: [integration, metrics]
 
   # Previous release binaries for live-upgrade tests
   - filename: cloud-hypervisor-static
     url: https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v39.0/cloud-hypervisor-static
+    sha1: 8516a22620021f2b39abff1836f2f2a8a025cbf9
     executable: true
     arch: [x86_64]
     test: [integration]
 
   - filename: cloud-hypervisor-static-aarch64
     url: https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v39.0/cloud-hypervisor-static-aarch64
+    sha1: 588d0a12f38d87560b4a4cf95a43478064481aa2
     executable: true
     arch: [aarch64]
     test: [integration]
