@@ -278,6 +278,9 @@ pub struct VmReceiveMigrationData {
     /// Directory containing the TLS server certificate (server-cert.pem), the TLS server key (server-key.pem), and the client TLS root CA certificate (ca-cert.pem).
     #[serde(default)]
     pub tls_dir: Option<PathBuf>,
+    /// Enable post-copy migration
+    #[serde(default)]
+    pub postcopy: bool,
 }
 
 #[derive(Debug, Error)]
@@ -291,11 +294,19 @@ pub enum VmReceiveMigrationConfigError {
 
 impl VmReceiveMigrationData {
     pub const SYNTAX: &'static str = "VM receive migration parameters \
-        \"<receiver_url>\" or \"receiver_url=<url>[,tls_dir=<path>]\"";
+        \"<receiver_url>\" or \"receiver_url=<url>[,tls_dir=<path>][,postcopy=on|off]\"";
 
     pub fn parse(migration: &str) -> Result<Self, VmReceiveMigrationConfigError> {
+        if !migration.contains('=') {
+            return Ok(Self {
+                receiver_url: migration.to_string(),
+                tls_dir: None,
+                postcopy: false,
+            });
+        }
+
         let mut parser = OptionParser::new();
-        parser.add("receiver_url").add("tls_dir");
+        parser.add("receiver_url").add("tls_dir").add("postcopy");
         parser
             .parse(migration)
             .map_err(VmReceiveMigrationConfigError::ParseError)?;
@@ -309,10 +320,16 @@ impl VmReceiveMigrationData {
             .convert::<String>("tls_dir")
             .map_err(VmReceiveMigrationConfigError::ParseError)?
             .map(|path| PathBuf::from(&path));
+        let postcopy = parser
+            .convert::<Toggle>("postcopy")
+            .map_err(VmReceiveMigrationConfigError::ParseError)?
+            .unwrap_or(Toggle(false))
+            .0;
 
         let data = Self {
             receiver_url,
             tls_dir,
+            postcopy,
         };
 
         data.validate()?;
@@ -1921,6 +1938,7 @@ mod unit_tests {
             VmReceiveMigrationData {
                 receiver_url: "tcp:192.168.1.1:8080".to_string(),
                 tls_dir: None,
+                postcopy: false,
             }
         );
 
@@ -1947,6 +1965,7 @@ mod unit_tests {
             VmReceiveMigrationData {
                 receiver_url: "tcp:192.168.1.1:8080".to_string(),
                 tls_dir: Some(tls_dir_path),
+                postcopy: false,
             }
         );
 
@@ -1961,6 +1980,32 @@ mod unit_tests {
         VmReceiveMigrationData::parse("receiver_url=tcp:192.168.1.1").unwrap_err();
         VmReceiveMigrationData::parse("receiver_url=tcp:[2001:db8::1]").unwrap_err();
         VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,tls_dir=/tmp").unwrap_err();
+
+        // Bare URL (backward-compatible shorthand): postcopy defaults to off.
+        let data = VmReceiveMigrationData::parse("tcp:127.0.0.1:1234").unwrap();
+        assert_eq!(
+            data,
+            VmReceiveMigrationData {
+                receiver_url: "tcp:127.0.0.1:1234".to_string(),
+                tls_dir: None,
+                postcopy: false,
+            }
+        );
+
+        // Explicit receiver_url with postcopy=on.
+        let data =
+            VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,postcopy=on").unwrap();
+        assert_eq!(
+            data,
+            VmReceiveMigrationData {
+                receiver_url: "unix:/tmp/sock".to_string(),
+                tls_dir: None,
+                postcopy: true,
+            }
+        );
+
+        // Missing receiver_url in keyed form must fail.
+        VmReceiveMigrationData::parse("postcopy=on").unwrap_err();
     }
 
     #[test]

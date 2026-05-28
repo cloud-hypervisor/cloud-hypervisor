@@ -14,11 +14,14 @@
 //! passthrough and shared-memory-backed guest RAM.
 
 use std::fs::{File, OpenOptions};
-use std::io::{self, Error};
+use std::io::{self, Error, Read};
 use std::mem;
-use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::fs::FileExt;
 
+use vm_migration::protocol::{MemoryRange, Request, Response, Status};
+
+use crate::migration_transport::SocketStream;
 use crate::userfaultfd;
 
 #[repr(C)]
@@ -181,7 +184,7 @@ struct UffdioRange {
 }
 
 /// A guest memory range registered with userfaultfd, plus where its bytes
-/// live in the snapshot file.
+/// live for the data source.
 pub(crate) struct UffdRange {
     pub host_addr: u64,
     pub length: u64,
@@ -272,6 +275,125 @@ impl UffdMemorySource for FileUffdMemorySource {
             Err(e) => Err(e),
         }
     }
+}
+
+/// Memory source that provides pages content over a socket.
+pub(crate) struct SocketUffdMemorySource {
+    stream: SocketStream,
+    shared_backing: bool,
+    buf: Vec<u8>,
+}
+
+impl SocketUffdMemorySource {
+    pub fn new(stream: SocketStream, shared_backing: bool) -> Self {
+        Self {
+            stream,
+            shared_backing,
+            buf: Vec::new(),
+        }
+    }
+
+    fn request_page(&mut self, gpa: u64, len: u64) -> Result<(Status, u64), io::Error> {
+        Request::page_fault()
+            .write_to(&mut self.stream)
+            .map_err(io_other)?;
+        MemoryRange { gpa, length: len }
+            .write_to(&mut self.stream)
+            .map_err(io_other)?;
+
+        let resp = Response::read_from(&mut self.stream).map_err(io_other)?;
+        match resp.status() {
+            Status::Ok | Status::Hole => Ok((resp.status(), resp.length())),
+            s => Err(io::Error::other(format!(
+                "peer returned {s:?} for PageFault at gpa={gpa:#x} len={len}",
+            ))),
+        }
+    }
+}
+
+impl UffdMemorySource for SocketUffdMemorySource {
+    fn resolve(
+        &mut self,
+        uffd_fd: BorrowedFd<'_>,
+        range: &UffdRange,
+        page_idx: u64,
+    ) -> Result<FaultResolution, io::Error> {
+        let page_size = range.page_size;
+        let page_addr = range.page_addr(page_idx);
+        let page_gpa = range.page_source_offset(page_idx);
+
+        let (status, resp_len) = self.request_page(page_gpa, page_size)?;
+
+        if status == Status::Hole {
+            // Hole: the backing page is zero. For shared backing the memfd
+            // page is already zero — just wake. For inline, install a zero page.
+            if self.shared_backing {
+                return match wake(uffd_fd, page_addr, page_size) {
+                    Ok(()) => Ok(FaultResolution::Served),
+                    Err(e) if e.raw_os_error() == Some(libc::EAGAIN) => Ok(FaultResolution::Retry),
+                    Err(e) => Err(e),
+                };
+            }
+            let len = page_size as usize;
+            self.buf.resize(len, 0);
+            self.buf[..len].fill(0);
+            return match copy(uffd_fd, page_addr, self.buf.as_ptr(), page_size) {
+                Ok(()) => Ok(FaultResolution::Served),
+                Err(e) if e.raw_os_error() == Some(libc::EEXIST) => {
+                    wake(uffd_fd, page_addr, page_size).ok();
+                    Ok(FaultResolution::Served)
+                }
+                Err(e) if e.raw_os_error() == Some(libc::EAGAIN) => Ok(FaultResolution::Retry),
+                Err(e) => Err(e),
+            };
+        }
+
+        if self.shared_backing {
+            if resp_len != 0 {
+                return Err(io::Error::other(format!(
+                    "shared-backing PageFault response carried {resp_len} unexpected bytes",
+                )));
+            }
+            match wake(uffd_fd, page_addr, page_size) {
+                Ok(()) => Ok(FaultResolution::Served),
+                Err(e) if e.raw_os_error() == Some(libc::EAGAIN) => Ok(FaultResolution::Retry),
+                Err(e) => Err(e),
+            }
+        } else {
+            if resp_len != page_size {
+                return Err(io::Error::other(format!(
+                    "inline PageFault response length {resp_len} != page size {page_size}",
+                )));
+            }
+            let len = page_size as usize;
+            if self.buf.len() < len {
+                self.buf.resize(len, 0);
+            }
+            self.stream.read_exact(&mut self.buf[..len])?;
+            match copy(uffd_fd, page_addr, self.buf.as_ptr(), page_size) {
+                Ok(()) => Ok(FaultResolution::Served),
+                Err(e) if e.raw_os_error() == Some(libc::EEXIST) => {
+                    if let Err(e) = wake(uffd_fd, page_addr, page_size) {
+                        log::warn!("UFFDIO_WAKE failed at {page_addr:#x}: {e}");
+                    }
+                    Ok(FaultResolution::Served)
+                }
+                Err(e) if e.raw_os_error() == Some(libc::EAGAIN) => Ok(FaultResolution::Retry),
+                Err(e) => Err(e),
+            }
+        }
+    }
+}
+
+impl Drop for SocketUffdMemorySource {
+    fn drop(&mut self) {
+        // SAFETY: the fd is valid for the duration of this borrow.
+        unsafe { libc::shutdown(self.stream.as_fd().as_raw_fd(), libc::SHUT_RDWR) };
+    }
+}
+
+fn io_other<E: std::fmt::Display>(e: E) -> io::Error {
+    io::Error::other(e.to_string())
 }
 
 /// Wake threads waiting on a fault in the given range without copying data.

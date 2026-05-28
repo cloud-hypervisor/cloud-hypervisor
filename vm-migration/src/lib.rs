@@ -47,6 +47,9 @@ pub enum UffdError {
     #[error("Region at {addr:#x}+{len:#x} missing COPY/WAKE support")]
     MissingIoctlSupport { addr: u64, len: u64 },
 
+    #[error("Failed to configure socket")]
+    SetSocket(#[source] std::io::Error),
+
     #[error("Failed to spawn handler thread")]
     SpawnThread(#[source] io::Error),
 

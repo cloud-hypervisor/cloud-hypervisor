@@ -349,7 +349,7 @@ impl Request {
 }
 
 #[repr(u16)]
-#[derive(Copy, Clone, PartialEq, Eq, Default)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum Status {
     #[default]
     Invalid,
