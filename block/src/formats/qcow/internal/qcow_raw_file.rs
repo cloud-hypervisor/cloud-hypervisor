@@ -221,50 +221,40 @@ impl QcowRawFile {
         self.read_pointer_table(offset, count, mask)
     }
 
-    /// Internal helper for creating a buffered writer for pointer tables.
-    #[inline]
-    fn setup_pointer_table_writer<T>(
-        &mut self,
-        offset: u64,
-        entries: &impl Iterator<Item = T>,
-    ) -> io::Result<BufWriter<RawFile>> {
-        self.file.seek(SeekFrom::Start(offset))?;
-        let my_file = self.file.try_clone()?;
-        let capacity = entries.size_hint().0 * size_of::<u64>();
-        Ok(BufWriter::with_capacity(capacity, my_file))
-    }
-
     /// Writes a pointer table to `offset` in the file.
     /// Entries are computed on-the-fly by the callback.
+    ///
+    /// The callback may perform metadata I/O on this `QcowRawFile`, so all
+    /// entries are materialized before seeking to the final write offset.
     pub fn write_pointer_table<'a, T: Copy + 'a>(
         &mut self,
         offset: u64,
         entries: impl Iterator<Item = &'a T>,
         mut f: impl FnMut(&mut QcowRawFile, T) -> io::Result<u64>,
     ) -> io::Result<()> {
-        let mut buffer = self.setup_pointer_table_writer(offset, &entries)?;
-
+        let mut buffer = Vec::with_capacity(entries.size_hint().0 * size_of::<u64>());
         for addr in entries {
             let entry = f(self, *addr)?;
-            u64::write_be(&mut buffer, entry)?;
+            buffer.extend_from_slice(&entry.to_be_bytes());
         }
-        buffer.flush()?;
-        Ok(())
+        self.file.seek(SeekFrom::Start(offset))?;
+        self.file.write_all(&buffer)
     }
 
     /// Writes a pointer table directly without transforming values.
+    ///
+    /// Uses the same materialize-then-write path as `write_pointer_table`.
     pub fn write_pointer_table_direct<'a>(
         &mut self,
         offset: u64,
         entries: impl Iterator<Item = &'a u64>,
     ) -> io::Result<()> {
-        let mut buffer = self.setup_pointer_table_writer(offset, &entries)?;
-
+        let mut buffer = Vec::with_capacity(entries.size_hint().0 * size_of::<u64>());
         for &entry in entries {
-            u64::write_be(&mut buffer, entry)?;
+            buffer.extend_from_slice(&entry.to_be_bytes());
         }
-        buffer.flush()?;
-        Ok(())
+        self.file.seek(SeekFrom::Start(offset))?;
+        self.file.write_all(&buffer)
     }
 
     /// Read a refcount block from the file and returns a Vec containing the block.
@@ -365,5 +355,94 @@ impl AsRawFd for QcowRawFile {
 impl AsFd for QcowRawFile {
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.file.as_fd()
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use std::io::{Read, Seek, SeekFrom};
+
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::*;
+
+    fn be_bytes(entries: &[u64]) -> Vec<u8> {
+        let mut v = Vec::with_capacity(std::mem::size_of_val(entries));
+        for e in entries {
+            v.extend_from_slice(&e.to_be_bytes());
+        }
+        v
+    }
+
+    fn find_all(haystack: &[u8], needle: &[u8]) -> Vec<usize> {
+        haystack
+            .windows(needle.len())
+            .enumerate()
+            .filter(|(_, w)| *w == needle)
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    const CLUSTER_SIZE: u64 = 0x10000; // 64 KiB
+    const TARGET_OFFSET: u64 = 0x1000; // where the table must be written
+    const FAR_OFFSET: u64 = 0x9000; // where the callback reads (refcount block)
+    const FILE_LEN: u64 = 0x40000; // 256 KiB filler so all offsets are valid
+
+    fn make_qcow_raw() -> (TempFile, QcowRawFile) {
+        let temp_file = TempFile::new().unwrap();
+        temp_file.as_file().set_len(FILE_LEN).unwrap();
+
+        let file = temp_file.as_file().try_clone().unwrap();
+        let raw = RawFile::new(file, false);
+        let qcow_raw = QcowRawFile::from(raw, CLUSTER_SIZE, 16).expect("QcowRawFile::from");
+        (temp_file, qcow_raw)
+    }
+
+    #[test]
+    fn write_pointer_table_lands_at_offset_despite_callback_seek() {
+        let (temp_file, mut qcow) = make_qcow_raw();
+        let entries: Vec<u64> = vec![0x1111_2222_3333_4444u64; 8]; // 64 bytes
+
+        qcow.write_pointer_table(TARGET_OFFSET, entries.iter(), |q, addr| {
+            let _ = q.read_refcount_block(FAR_OFFSET)?;
+            Ok(addr)
+        })
+        .expect("write_pointer_table");
+
+        let expected = be_bytes(&entries);
+        let mut verify = temp_file.as_file().try_clone().unwrap();
+        let mut whole = Vec::new();
+        verify.read_to_end(&mut whole).unwrap();
+        let found_at = find_all(&whole, &expected);
+
+        let mut at_target = vec![0u8; expected.len()];
+        verify.seek(SeekFrom::Start(TARGET_OFFSET)).unwrap();
+        verify.read_exact(&mut at_target).unwrap();
+
+        assert_eq!(
+            at_target, expected,
+            "pointer table did NOT land at TARGET_OFFSET {TARGET_OFFSET:#x}; \
+             found matching bytes at {found_at:x?}"
+        );
+    }
+
+    #[test]
+    fn write_pointer_table_direct_lands_at_offset() {
+        let (temp_file, mut qcow) = make_qcow_raw();
+        let entries: Vec<u64> = vec![0xAAAA_BBBB_CCCC_DDDDu64; 8];
+
+        qcow.write_pointer_table_direct(TARGET_OFFSET, entries.iter())
+            .expect("write_pointer_table_direct");
+
+        let expected = be_bytes(&entries);
+        let mut verify = temp_file.as_file().try_clone().unwrap();
+        let mut at_target = vec![0u8; expected.len()];
+        verify.seek(SeekFrom::Start(TARGET_OFFSET)).unwrap();
+        verify.read_exact(&mut at_target).unwrap();
+
+        assert_eq!(
+            at_target, expected,
+            "write_pointer_table_direct did not land at {TARGET_OFFSET:#x}"
+        );
     }
 }
