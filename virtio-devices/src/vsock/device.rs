@@ -137,7 +137,7 @@ where
             ) {
                 Ok(mut pkt) => {
                     if self.backend.write().unwrap().recv_pkt(&mut pkt).is_ok() {
-                        match pkt.commit_hdr(&*self.mem.memory()) {
+                        match pkt.commit_hdr(desc_chain.memory()) {
                             Ok(()) => pkt.hdr().len() as u32 + pkt.len(),
                             Err(err) => {
                                 warn!(
