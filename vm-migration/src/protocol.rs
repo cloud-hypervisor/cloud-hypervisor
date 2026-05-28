@@ -120,6 +120,7 @@ use crate::bitpos_iterator::BitposIteratorExt;
 ///     Configured --> StateReceived: State
 ///     StateReceived --> Completed: Complete
 ///     StateReceived --> Completed: CompletePaused
+///     Completed --> Completed: PageFault
 /// ```
 ///
 /// [live-migration protocol]: super::protocol
@@ -140,6 +141,87 @@ pub enum Command {
     /// Finalizes the migration without resuming the VM on the destination.
     /// Sent when the source VM was paused at migration time.
     CompletePaused = 8,
+    /// Asking for a page to be faulted in. The page content can be sent
+    /// through the response or simply written to the shared memory.
+    PageFault = 9,
+}
+
+/// Role announced by the dialer as the first message on an *additional*
+/// migration connection (the very first/control connection is implicit and
+/// sends no header, preserving wire-compatibility with plain live migration).
+///
+/// Lets the receiver route each accepted connection to the right handler:
+/// precopy memory workers vs. the dedicated post-copy/lazy fault channel.
+#[repr(u16)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
+pub enum ConnRole {
+    #[default]
+    Invalid = 0,
+    /// Carries precopy memory pushes (`Command::Memory`).
+    PrecopyMemory = 1,
+    /// Dedicated channel carrying `Command::PageFault` request/response,
+    /// served asynchronously for the whole post-copy/lazy lifetime.
+    Fault = 2,
+}
+
+impl ConnRole {
+    fn from_wire(value: u16) -> Self {
+        match value {
+            1 => ConnRole::PrecopyMemory,
+            2 => ConnRole::Fault,
+            _ => ConnRole::Invalid,
+        }
+    }
+}
+
+/// Fixed-size header sent by the dialer of an additional connection to declare
+/// its [`ConnRole`] before any command traffic.
+///
+/// `role` is stored as a raw `u16` on the wire so the struct can be read with
+/// `ByteValued` without risking an invalid enum discriminant; use
+/// [`ConnHeader::role`] to decode it.
+#[repr(C)]
+#[derive(Default, Copy, Clone)]
+pub struct ConnHeader {
+    role: u16,
+    version: u16,
+    padding: [u8; 4],
+}
+
+// SAFETY: ConnHeader is a series of integers with no implicit padding.
+unsafe impl ByteValued for ConnHeader {}
+
+impl ConnHeader {
+    /// Current header wire version.
+    pub const VERSION: u16 = 1;
+
+    pub fn new(role: ConnRole) -> Self {
+        Self {
+            role: role as u16,
+            version: Self::VERSION,
+            ..Default::default()
+        }
+    }
+
+    pub fn role(&self) -> ConnRole {
+        ConnRole::from_wire(self.role)
+    }
+
+    pub fn version(&self) -> u16 {
+        self.version
+    }
+
+    pub fn read_from(fd: &mut dyn Read) -> Result<ConnHeader, MigratableError> {
+        let mut header = ConnHeader::default();
+        fd.read_exact(Self::as_mut_slice(&mut header))
+            .map_err(MigratableError::MigrateSocket)?;
+        Ok(header)
+    }
+
+    pub fn write_to(&self, fd: &mut dyn Write) -> Result<(), MigratableError> {
+        fd.write_all(Self::as_slice(self))
+            .map_err(MigratableError::MigrateSocket)
+    }
 }
 
 /// Newest migration protocol version sent by this implementation.
@@ -215,6 +297,11 @@ impl Request {
         Self::new(Command::Abandon, 0)
     }
 
+    /// PageFault request always carries a single `MemoryRange`.
+    pub fn page_fault() -> Self {
+        Self::new(Command::PageFault, size_of::<MemoryRange>() as u64)
+    }
+
     pub fn command(&self) -> Command {
         self.command
     }
@@ -268,6 +355,7 @@ pub enum Status {
     Invalid,
     Ok,
     Error,
+    Hole,
 }
 
 #[repr(C)]
@@ -337,10 +425,28 @@ impl Response {
 }
 
 #[repr(C)]
-#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryRange {
     pub gpa: u64,
     pub length: u64,
+}
+
+// SAFETY: MemoryRange is two u64 fields with no padding.
+unsafe impl ByteValued for MemoryRange {}
+
+// Useful helpers for reading/writing MemoryRange content through the socket.
+impl MemoryRange {
+    pub fn read_from(fd: &mut dyn Read) -> Result<MemoryRange, MigratableError> {
+        let mut range = MemoryRange::default();
+        fd.read_exact(Self::as_mut_slice(&mut range))
+            .map_err(MigratableError::MigrateSocket)?;
+        Ok(range)
+    }
+
+    pub fn write_to(&self, fd: &mut dyn Write) -> Result<(), MigratableError> {
+        fd.write_all(Self::as_slice(self))
+            .map_err(MigratableError::MigrateSocket)
+    }
 }
 
 /// A set of guest-memory ranges to transfer as one migration payload.
@@ -543,6 +649,8 @@ impl MemoryRangeTable {
 
 #[cfg(test)]
 mod unit_tests {
+    use std::io::Cursor;
+
     use crate::protocol::{
         CURRENT_PROTOCOL_VERSION, Command, MemoryRange, MemoryRangeTable, Request,
     };
@@ -571,6 +679,29 @@ mod unit_tests {
 
         const { assert!(CURRENT_PROTOCOL_VERSION < 255) };
         request.sender_protocol_version().unwrap_err();
+    }
+
+    #[test]
+    fn test_page_fault_request_roundtrip() {
+        let req = Request::page_fault();
+        assert_eq!(req.command(), Command::PageFault);
+        assert_eq!(req.length(), size_of::<MemoryRange>() as u64);
+
+        let range = MemoryRange {
+            gpa: 0x4000,
+            length: 0x1000,
+        };
+
+        let mut buf = Vec::new();
+        req.write_to(&mut buf).unwrap();
+        range.write_to(&mut buf).unwrap();
+
+        let mut cursor = Cursor::new(buf);
+        let parsed_req = Request::read_from(&mut cursor).unwrap();
+        assert_eq!(parsed_req.command(), Command::PageFault);
+        assert_eq!(parsed_req.length(), size_of::<MemoryRange>() as u64);
+        let parsed_range = MemoryRange::read_from(&mut cursor).unwrap();
+        assert_eq!(parsed_range, range);
     }
 
     #[test]
@@ -650,10 +781,10 @@ mod unit_tests {
             assert_eq!(
                 chunks,
                 &[
-                    [expected_regions[0].clone()].to_vec(),
-                    [expected_regions[1].clone()].to_vec(),
-                    [expected_regions[2].clone()].to_vec(),
-                    [expected_regions[3].clone()].to_vec(),
+                    [expected_regions[0]].to_vec(),
+                    [expected_regions[1]].to_vec(),
+                    [expected_regions[2]].to_vec(),
+                    [expected_regions[3]].to_vec(),
                 ]
             );
         }
