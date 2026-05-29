@@ -37,6 +37,9 @@ pub enum Error {
     /// An I/O error occurred, when attempting to write data to the host-side stream.
     #[error("Error writing to host side stream")]
     StreamWrite(#[source] std::io::Error),
+    /// An I/O error occurred, when reading packet data.
+    #[error("Error reading packet buffer")]
+    PktBufRead,
 }
 
 type Result<T> = std::result::Result<T, Error>;

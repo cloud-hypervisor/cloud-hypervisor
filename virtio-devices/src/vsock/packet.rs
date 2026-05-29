@@ -27,7 +27,7 @@ use vm_virtio::AccessPlatform;
 use vm_virtio::checked_descriptor::DescriptorChainExt;
 
 use super::{Result, VsockError, defs};
-use crate::{GuestMemoryMmap, get_host_address_range};
+use crate::GuestMemoryMmap;
 
 // The vsock packet header is defined by the C struct:
 //
@@ -528,46 +528,6 @@ impl VsockPacket {
             .as_ref()
             .ok_or(VsockError::PktBufMissing)?
             .copy_to_slice(offset, dst)
-    }
-
-    /// Provides in-place, byte-slice access to the vsock packet data buffer.
-    ///
-    /// Note: control packets (e.g. connection request or reset) have no data buffer associated.
-    ///       For those packets, this method will return `None`.
-    /// Also note: calling `len()` on the returned slice will yield the buffer size, which may be
-    ///            (and often is) larger than the length of the packet data. The packet data length
-    ///            is stored in the packet header, and accessible via `VsockPacket::len()`.
-    pub fn buf(&self) -> Option<&[u8]> {
-        match self.buf.as_ref()? {
-            PacketBuffer::Owned(owned) => Some(owned),
-            PacketBuffer::Guest { mem, addr, len } => {
-                let ptr = get_host_address_range(mem, *addr, *len)?;
-
-                // SAFETY: bound checks have already been performed when creating the packet
-                // from the virtq descriptor.
-                Some(unsafe { std::slice::from_raw_parts(ptr.cast(), *len) })
-            }
-        }
-    }
-
-    /// Provides in-place, byte-slice, mutable access to the vsock packet data buffer.
-    ///
-    /// Note: control packets (e.g. connection request or reset) have no data buffer associated.
-    ///       For those packets, this method will return `None`.
-    /// Also note: calling `len()` on the returned slice will yield the buffer size, which may be
-    ///            (and often is) larger than the length of the packet data. The packet data length
-    ///            is stored in the packet header, and accessible via `VsockPacket::len()`.
-    pub fn buf_mut(&mut self) -> Option<&mut [u8]> {
-        match self.buf.as_mut()? {
-            PacketBuffer::Owned(owned) => Some(owned),
-            PacketBuffer::Guest { mem, addr, len } => {
-                let ptr = get_host_address_range(mem, *addr, *len)?;
-
-                // SAFETY: bound checks have already been performed when creating the packet
-                // from the virtq descriptor.
-                Some(unsafe { std::slice::from_raw_parts_mut(ptr, *len) })
-            }
-        }
     }
 
     #[cfg(test)]

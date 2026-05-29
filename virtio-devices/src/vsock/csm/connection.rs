@@ -86,17 +86,25 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::{Duration, Instant};
 
 use log::{debug, error, info, warn};
+use vm_memory::{ReadVolatile, WriteVolatile};
 
 use super::super::defs::uapi;
 use super::super::packet::VsockPacket;
 use super::super::{Result as VsockResult, VsockChannel, VsockEpollListener, VsockError};
-use super::txbuf::TxBuf;
+use super::txbuf::{TxBuf, TxBufSource};
 use super::{ConnState, Error, PendingRx, PendingRxSet, Result, defs};
+
+impl TxBufSource for VsockPacket {
+    fn copy_to_tx_buf(&self, offset: usize, dst: &mut [u8]) -> Result<()> {
+        self.copy_buf_to_slice(offset, dst)
+            .map_err(|_| Error::PktBufRead)
+    }
+}
 
 /// A self-managing connection object, that handles communication between a guest-side AF_VSOCK
 /// socket and a host-side `Read + Write + AsRawFd` stream.
 ///
-pub struct VsockConnection<S: Read + Write + AsRawFd> {
+pub struct VsockConnection<S: Read + ReadVolatile + Write + WriteVolatile + AsRawFd> {
     /// The current connection state.
     state: ConnState,
     /// The local CID. Most of the time this will be the constant `2` (the vsock host CID).
@@ -133,7 +141,7 @@ pub struct VsockConnection<S: Read + Write + AsRawFd> {
 
 impl<S> VsockChannel for VsockConnection<S>
 where
-    S: Read + Write + AsRawFd,
+    S: Read + ReadVolatile + Write + WriteVolatile + AsRawFd,
 {
     /// Fill in a vsock packet, to be delivered to our peer (the guest driver).
     ///
@@ -205,14 +213,14 @@ where
                 return Ok(());
             }
 
-            let buf = pkt.buf_mut().ok_or(VsockError::PktBufMissing)?;
+            let buf_capacity = pkt.buf_capacity().ok_or(VsockError::PktBufMissing)?;
 
             // The maximum amount of data we can read in is limited by both the RX buffer size and
             // the peer available buffer space.
-            let max_len = std::cmp::min(buf.len(), self.peer_avail_credit());
+            let max_len = std::cmp::min(buf_capacity, self.peer_avail_credit());
 
             // Read data from the stream straight to the RX buffer, for maximum throughput.
-            match self.stream.read(&mut buf[..max_len]) {
+            match pkt.read_volatile_from(&mut self.stream, max_len) {
                 Ok(read_cnt) => {
                     if read_cnt == 0 {
                         // A 0-length read means the host stream was closed down. In that case,
@@ -291,7 +299,7 @@ where
             ConnState::Established | ConnState::PeerClosed(_, false)
                 if pkt.op() == uapi::VSOCK_OP_RW =>
             {
-                if pkt.buf().is_none() {
+                if !pkt.has_buf() {
                     info!(
                         "vsock: dropping empty data packet from guest (lp={}, pp={}",
                         self.local_port, self.peer_port
@@ -299,9 +307,7 @@ where
                     return Ok(());
                 }
 
-                // Unwrapping here is safe, since we just checked `pkt.buf()` above.
-                let buf_slice = &pkt.buf().unwrap()[..(pkt.len() as usize)];
-                if let Err(err) = self.send_bytes(buf_slice) {
+                if let Err(err) = self.send_pkt_bytes(pkt) {
                     // If we can't write to the host stream, that's an unrecoverable error, so
                     // we'll terminate this connection.
                     warn!(
@@ -396,7 +402,7 @@ where
 
 impl<S> VsockEpollListener for VsockConnection<S>
 where
-    S: Read + Write + AsRawFd,
+    S: Read + ReadVolatile + Write + WriteVolatile + AsRawFd,
 {
     /// Get the file descriptor that this connection wants polled.
     ///
@@ -481,7 +487,7 @@ where
 
 impl<S> VsockConnection<S>
 where
-    S: Read + Write + AsRawFd,
+    S: Read + ReadVolatile + Write + WriteVolatile + AsRawFd,
 {
     /// Create a new guest-initiated connection object.
     ///
@@ -589,22 +595,24 @@ where
         self.stream.write(buf).map_err(Error::StreamWrite)
     }
 
-    /// Send some raw data (a byte-slice) to the host stream.
+    /// Send packet data to the host stream.
     ///
-    /// Raw data can either be sent straight to the host stream, or to our TX buffer, if the
+    /// Packet data can either be sent straight to the host stream, or to our TX buffer, if the
     /// former fails.
     ///
-    fn send_bytes(&mut self, buf: &[u8]) -> Result<()> {
+    fn send_pkt_bytes(&mut self, pkt: &VsockPacket) -> Result<()> {
+        let len = pkt.len() as usize;
+
         // If there is data in the TX buffer, that means we're already registered for EPOLLOUT
         // events on the underlying stream. Therefore, there's no point in attempting a write
         // at this point. `self.notify()` will get called when EPOLLOUT arrives, and it will
         // attempt to drain the TX buffer then.
         if !self.tx_buf.is_empty() {
-            return self.tx_buf.push(buf);
+            return self.buffer_pkt_bytes(pkt, 0, len);
         }
 
         // The TX buffer is empty, so we can try to write straight to the host stream.
-        let written = match self.stream.write(buf) {
+        let written = match pkt.write_volatile_to(&mut self.stream, 0, len) {
             Ok(cnt) => cnt,
             Err(e) => {
                 // Absorb any would-block errors, since we can always try again later.
@@ -620,13 +628,17 @@ where
         // Move the "forwarded bytes" counter ahead by how much we were able to send out.
         self.fwd_cnt += Wrapping(written as u32);
 
-        // If we couldn't write the whole slice, we'll need to push the remaining data to our
+        // If we couldn't write the whole packet, we'll need to push the remaining data to our
         // buffer.
-        if written < buf.len() {
-            self.tx_buf.push(&buf[written..])?;
+        if written < len {
+            self.buffer_pkt_bytes(pkt, written, len - written)?;
         }
 
         Ok(())
+    }
+
+    fn buffer_pkt_bytes(&mut self, pkt: &VsockPacket, offset: usize, len: usize) -> Result<()> {
+        self.tx_buf.push_from(pkt, offset, len)
     }
 
     /// Check if the credit information the peer has last received from us is outdated.
@@ -677,6 +689,8 @@ mod unit_tests {
 
     use libc::EFD_NONBLOCK;
     use virtio_queue::QueueOwnedT;
+    use vm_memory::bitmap::BitmapSlice;
+    use vm_memory::{VolatileMemoryError, VolatileSlice};
     use vmm_sys_util::eventfd::EventFd;
 
     use super::super::super::unit_tests::TestContext;
@@ -763,9 +777,32 @@ mod unit_tests {
         }
     }
 
+    impl ReadVolatile for TestStream {
+        fn read_volatile<B: BitmapSlice>(
+            &mut self,
+            data: &mut VolatileSlice<B>,
+        ) -> std::result::Result<usize, VolatileMemoryError> {
+            let mut buf = vec![0u8; data.len()];
+            let len = self.read(&mut buf).map_err(VolatileMemoryError::IOError)?;
+            data.copy_from(&buf[..len]);
+            Ok(len)
+        }
+    }
+
+    impl WriteVolatile for TestStream {
+        fn write_volatile<B: BitmapSlice>(
+            &mut self,
+            data: &VolatileSlice<B>,
+        ) -> std::result::Result<usize, VolatileMemoryError> {
+            let mut buf = vec![0u8; data.len()];
+            data.copy_to(&mut buf);
+            self.write(&buf).map_err(VolatileMemoryError::IOError)
+        }
+    }
+
     impl<S> VsockConnection<S>
     where
-        S: Read + Write + AsRawFd,
+        S: Read + ReadVolatile + Write + WriteVolatile + AsRawFd,
     {
         /// Get the fwd_cnt value from the connection.
         pub(crate) fn fwd_cnt(&self) -> Wrapping<u32> {
@@ -894,10 +931,16 @@ mod unit_tests {
         }
 
         fn init_data_pkt(&mut self, data: &[u8]) -> &VsockPacket {
-            assert!(data.len() <= self.pkt.buf().unwrap().len());
+            assert!(data.len() <= self.pkt.buf_capacity().unwrap());
             self.init_pkt(uapi::VSOCK_OP_RW, data.len() as u32);
-            self.pkt.buf_mut().unwrap()[..data.len()].copy_from_slice(data);
+            self.pkt.copy_buf_from_slice(0, data).unwrap();
             &self.pkt
+        }
+
+        fn pkt_data(&self) -> Vec<u8> {
+            let mut data = vec![0u8; self.pkt.len() as usize];
+            self.pkt.copy_buf_to_slice(0, &mut data).unwrap();
+            data
         }
     }
 
@@ -964,7 +1007,7 @@ mod unit_tests {
         ctx.recv();
         assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RW);
         assert_eq!(ctx.pkt.len() as usize, data.len());
-        assert_eq!(ctx.pkt.buf().unwrap()[..ctx.pkt.len() as usize], *data);
+        assert_eq!(ctx.pkt_data().as_slice(), data);
 
         // There's no more data in the stream, so `recv_pkt` should yield `VsockError::NoData`.
         match ctx.conn.recv_pkt(&mut ctx.pkt) {
@@ -1034,7 +1077,7 @@ mod unit_tests {
             ctx.notify_epollin();
             ctx.recv();
             assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RW);
-            assert_eq!(&ctx.pkt.buf().unwrap()[..ctx.pkt.len() as usize], data);
+            assert_eq!(ctx.pkt_data().as_slice(), data);
 
             ctx.init_data_pkt(data);
             ctx.send();
@@ -1234,7 +1277,7 @@ mod unit_tests {
         ctx.set_stream(stream);
 
         // Fill up the TX buffer.
-        let data = vec![0u8; ctx.pkt.buf().unwrap().len()];
+        let data = vec![0u8; ctx.pkt.buf_capacity().unwrap()];
         ctx.init_data_pkt(data.as_slice());
         for _i in 0..(csm_defs::CONN_TX_BUF_SIZE / data.len() as u32) {
             ctx.send();
