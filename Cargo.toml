@@ -77,7 +77,7 @@ igvm_defs = "0.4.0"
 
 # serde crates
 serde = "1.0.228"
-serde_json = "1.0.149"
+serde_json = "1.0.150"
 serde_with = { version = "3.19.0", default-features = false }
 
 # other crates
@@ -94,7 +94,7 @@ flume = "0.12.0"
 itertools = "0.14.0"
 jiff = { version = "0.2", default-features = false, features = ["std"] }
 libc = "0.2.186"
-log = "0.4.29"
+log = "0.4.30"
 sha2 = "0.11.0"
 signal-hook = "0.4.4"
 thiserror = "2.0.18"
