@@ -958,6 +958,22 @@ pub(crate) fn send_migration_socket(
     }
 }
 
+/// Open a dedicated fault connection with the destination VM and announce
+/// the [`ConnectionRole::Fault`] role. Used by the source to serve `PageFault`
+/// requests asynchronously.
+pub(crate) fn open_fault_connection(
+    destination_url: &str,
+    tls_dir: Option<&Path>,
+) -> Result<SocketStream, MigratableError> {
+    let mut socket = send_migration_socket(destination_url, tls_dir)?;
+    ConnectionRole::Fault.write_to(&mut socket)?;
+    // Enable fault request/response round-trips.
+    socket
+        .set_nodelay(true)
+        .map_err(MigratableError::MigrateSocket)?;
+    Ok(socket)
+}
+
 /// Bind a migration listener for the receiver side.
 pub(crate) fn receive_migration_listener(
     receiver_url: &str,
