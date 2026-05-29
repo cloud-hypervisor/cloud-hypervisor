@@ -89,6 +89,7 @@ use virtio_devices::transport::{VirtioPciDevice, VirtioPciDeviceActivator, Virti
 use virtio_devices::vhost_user::VhostUserConfig;
 use virtio_devices::{
     AccessPlatformMapping, Block, Endpoint, IommuMapping, VdpaDmaMapping, VirtioMemMappingSource,
+    VirtioSharedMemory, VirtioSharedMemoryList,
 };
 use vm_allocator::{AddressAllocator, InterruptAllocError, SystemAllocator};
 use vm_device::dma_mapping::ExternalDmaMapping;
@@ -321,6 +322,14 @@ pub enum DeviceManagerError {
     /// Cannot find a memory range for virtio-fs
     #[error("Cannot find a memory range for virtio-fs")]
     FsRangeAllocation,
+
+    /// The virtio-fs DAX cache is enabled but no shm_size was provided
+    #[error("the virtio-fs DAX cache is enabled but no shm_size was provided")]
+    FsMissingCacheSize,
+
+    /// The virtio-fs DAX cache size is not 2MiB aligned
+    #[error("the virtio-fs DAX cache size is not 2MiB aligned")]
+    FsCacheSizeNotAligned,
 
     /// Error creating serial output file
     #[error("Error creating serial output file")]
@@ -3255,6 +3264,64 @@ impl DeviceManager {
         let mut node = device_node!(id);
 
         if let Some(fs_socket) = fs_cfg.socket.to_str() {
+            let cache = if fs_cfg.dax {
+                let cache_size = fs_cfg
+                    .shm_size
+                    .ok_or(DeviceManagerError::FsMissingCacheSize)?;
+                // The DAX window must be 2MiB aligned in order to support hugepages.
+                if cache_size % 0x0020_0000 != 0 {
+                    return Err(DeviceManagerError::FsCacheSizeNotAligned);
+                }
+
+                // The memory needs to be 2MiB aligned in order to support hugepages.
+                let cache_base = self.pci_segments[fs_cfg.pci_common.pci_segment as usize]
+                    .mem64_allocator
+                    .lock()
+                    .unwrap()
+                    .allocate(None, cache_size as GuestUsize, Some(0x0020_0000))
+                    .ok_or(DeviceManagerError::FsRangeAllocation)?
+                    .raw_value();
+
+                // Reserve the DAX window as an anonymous, inaccessible mapping. The backend maps
+                // files into it on demand through the request channel.
+                let mmap_region = MmapRegion::build(
+                    None,
+                    cache_size as usize,
+                    libc::PROT_NONE,
+                    MAP_NORESERVE | libc::MAP_ANONYMOUS | MAP_PRIVATE,
+                )
+                .map_err(DeviceManagerError::NewMmapRegion)?;
+                let host_addr = mmap_region.as_ptr();
+
+                // SAFETY: host_addr points to cache_size bytes of mmap-allocated memory.
+                let mem_slot = unsafe {
+                    self.memory_manager
+                        .lock()
+                        .unwrap()
+                        .create_userspace_mapping(
+                            cache_base,
+                            cache_size as usize,
+                            host_addr,
+                            false,
+                            false,
+                            false,
+                        )
+                        .map_err(DeviceManagerError::MemoryManager)
+                }?;
+
+                Some(VirtioSharedMemoryList {
+                    mem_slot,
+                    addr: GuestAddress(cache_base),
+                    mapping: Arc::new(mmap_region),
+                    region_list: vec![VirtioSharedMemory {
+                        offset: 0,
+                        len: cache_size,
+                    }],
+                })
+            } else {
+                None
+            };
+
             let virtio_fs_device = Arc::new(Mutex::new(
                 virtio_devices::vhost_user::Fs::new(
                     id.clone(),
@@ -3262,7 +3329,7 @@ impl DeviceManager {
                     &fs_cfg.tag,
                     fs_cfg.num_queues,
                     fs_cfg.queue_size,
-                    None,
+                    cache,
                     self.seccomp_action.clone(),
                     self.exit_evt
                         .try_clone()

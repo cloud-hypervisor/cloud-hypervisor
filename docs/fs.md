@@ -91,8 +91,3 @@ mount -t virtiofs myfs mount_dir/
 
 The `tag` needs to be consistent with what has been provided through the
 Cloud Hypervisor command line, which happens to be `myfs` in this example.
-
-## DAX feature
-
-Given the DAX feature is not stable yet from a daemon standpoint, it is not
-available in Cloud Hypervisor.

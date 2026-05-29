@@ -551,6 +551,8 @@ pub struct FsConfig {
     pub num_queues: usize,
     #[serde(default = "default_fsconfig_queue_size")]
     pub queue_size: u16,
+    pub dax: bool,
+    pub shm_size: Option<u64>,
 }
 
 pub fn default_fsconfig_num_queues() -> usize {

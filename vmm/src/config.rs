@@ -2069,6 +2069,8 @@ impl FsConfig {
             .add("queue_size")
             .add("num_queues")
             .add("socket")
+            .add("dax")
+            .add("shm_size")
             .add_all(PciDeviceCommonConfig::OPTIONS);
         parser.parse(fs).map_err(Error::ParseFileSystem)?;
 
@@ -2086,6 +2088,11 @@ impl FsConfig {
             .convert("num_queues")
             .map_err(Error::ParseFileSystem)?
             .unwrap_or_else(default_fsconfig_num_queues);
+        let dax = parser
+            .convert("dax")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or(false);
+        let shm_size = parser.convert("shm_size").map_err(Error::ParseFileSystem)?;
 
         let pci_common = PciDeviceCommonConfig::parse(fs)?;
 
@@ -2095,6 +2102,8 @@ impl FsConfig {
             socket,
             num_queues,
             queue_size,
+            dax,
+            shm_size,
         })
     }
 
@@ -4380,6 +4389,8 @@ mod unit_tests {
             tag: "mytag".to_owned(),
             num_queues: 1,
             queue_size: 1024,
+            dax: false,
+            shm_size: None,
         }
     }
 
