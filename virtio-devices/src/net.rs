@@ -10,9 +10,9 @@ use std::net::IpAddr;
 use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
+use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Barrier};
-use std::{result, thread};
 
 use anyhow::anyhow;
 use event_monitor::event;
@@ -400,7 +400,6 @@ pub struct Net {
     id: String,
     taps: Vec<Tap>,
     config: VirtioNetConfig,
-    ctrl_queue_epoll_thread: Option<thread::JoinHandle<()>>,
     counters: NetCounters,
     seccomp_action: SeccompAction,
     rate_limiter_config: Option<RateLimiterConfig>,
@@ -520,7 +519,6 @@ impl Net {
             id,
             taps,
             config,
-            ctrl_queue_epoll_thread: None,
             counters: NetCounters::default(),
             seccomp_action,
             rate_limiter_config,
@@ -655,11 +653,6 @@ impl Drop for Net {
         }
         // Needed to ensure all references to tap FDs are dropped (#4868)
         self.common.wait_for_epoll_threads();
-        if let Some(thread) = self.ctrl_queue_epoll_thread.take()
-            && let Err(e) = thread.join()
-        {
-            error!("Error joining thread: {e:?}");
-        }
     }
 }
 
@@ -704,6 +697,8 @@ impl VirtioDevice for Net {
         let qp_threads = (num_queues - ctrl_threads) / 2;
         self.common.paused_sync = Some(Arc::new(Barrier::new(1 + qp_threads + ctrl_threads)));
 
+        let mut epoll_threads = Vec::new();
+
         if has_ctrl_queue {
             let ctrl_queue_index = num_queues - 1;
             let (_, mut ctrl_queue, ctrl_queue_evt) = queues.remove(ctrl_queue_index);
@@ -726,7 +721,6 @@ impl VirtioDevice for Net {
             let paused = self.common.paused.clone();
             let paused_sync = self.common.paused_sync.clone();
 
-            let mut epoll_threads = Vec::new();
             spawn_virtio_thread(
                 &format!("{}_ctrl", self.id),
                 &self.seccomp_action,
@@ -737,10 +731,8 @@ impl VirtioDevice for Net {
                 interrupt_cb.clone(),
                 move || ctrl_handler.run_ctrl(&paused, paused_sync.as_ref().unwrap()),
             )?;
-            self.ctrl_queue_epoll_thread = Some(epoll_threads.remove(0));
         }
 
-        let mut epoll_threads = Vec::new();
         let mut taps = self.taps.clone();
         for i in 0..queues.len() / 2 {
             let rx = RxVirtio::new();
@@ -867,12 +859,7 @@ impl Pausable for Net {
     }
 
     fn resume(&mut self) -> result::Result<(), MigratableError> {
-        self.common.resume()?;
-
-        if let Some(ctrl_queue_epoll_thread) = &self.ctrl_queue_epoll_thread {
-            ctrl_queue_epoll_thread.thread().unpark();
-        }
-        Ok(())
+        self.common.resume()
     }
 }
 
