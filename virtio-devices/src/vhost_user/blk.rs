@@ -26,7 +26,6 @@ use super::super::{ActivateResult, VirtioCommon, VirtioDevice, VirtioDeviceType}
 use super::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
 use super::{DEFAULT_VIRTIO_FEATURES, Error, Result};
 use crate::seccomp_filters::Thread;
-use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::{VhostUserCommon, VhostUserState};
 use crate::{GuestMemoryMmap, GuestRegionMmap, VIRTIO_F_ACCESS_PLATFORM};
 
@@ -297,19 +296,15 @@ impl VirtioDevice for Blk {
         let paused = self.vu_common.virtio_common.paused.clone();
         let paused_sync = self.vu_common.virtio_common.paused_sync.clone();
 
-        let mut epoll_threads = Vec::new();
-
-        spawn_virtio_thread(
+        self.vu_common.spawn_worker(
             &self.id,
             &self.seccomp_action,
             Thread::VirtioVhostBlock,
-            &mut epoll_threads,
             &self.exit_evt,
             device_status.clone(),
             interrupt_cb.clone(),
             move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
-        self.vu_common.virtio_common.epoll_threads = Some(epoll_threads);
 
         Ok(())
     }
