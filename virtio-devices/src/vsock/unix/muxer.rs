@@ -969,11 +969,17 @@ mod unit_tests {
             peer_port: u32,
             data: &[u8],
         ) -> &mut VsockPacket {
-            assert!(data.len() <= self.pkt.buf().unwrap().len());
+            assert!(data.len() <= self.pkt.buf_capacity().unwrap());
             self.init_pkt(local_port, peer_port, uapi::VSOCK_OP_RW)
                 .set_len(data.len() as u32);
-            self.pkt.buf_mut().unwrap()[..data.len()].copy_from_slice(data);
+            self.pkt.copy_buf_from_slice(0, data).unwrap();
             &mut self.pkt
+        }
+
+        fn pkt_data(&self) -> Vec<u8> {
+            let mut data = vec![0u8; self.pkt.len() as usize];
+            self.pkt.copy_buf_to_slice(0, &mut data).unwrap();
+            data
         }
 
         fn send(&mut self) {
@@ -1204,7 +1210,7 @@ mod unit_tests {
         assert!(ctx.muxer.has_pending_rx());
         ctx.recv();
         assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RW);
-        assert_eq!(ctx.pkt.buf().unwrap()[..data.len()], data);
+        assert_eq!(ctx.pkt_data().as_slice(), data);
         assert_eq!(ctx.pkt.src_port(), LOCAL_PORT);
         assert_eq!(ctx.pkt.dst_port(), PEER_PORT);
 
@@ -1236,7 +1242,7 @@ mod unit_tests {
         assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RW);
         assert_eq!(ctx.pkt.src_port(), local_port);
         assert_eq!(ctx.pkt.dst_port(), peer_port);
-        assert_eq!(ctx.pkt.buf().unwrap()[..data.len()], data);
+        assert_eq!(ctx.pkt_data().as_slice(), data);
     }
 
     #[test]

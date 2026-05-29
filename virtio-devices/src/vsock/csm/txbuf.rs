@@ -7,6 +7,19 @@ use std::num::Wrapping;
 
 use super::{Error, Result, defs};
 
+pub(super) trait TxBufSource {
+    fn copy_to_tx_buf(&self, offset: usize, dst: &mut [u8]) -> Result<()>;
+}
+
+impl TxBufSource for [u8] {
+    fn copy_to_tx_buf(&self, offset: usize, dst: &mut [u8]) -> Result<()> {
+        let end = offset.checked_add(dst.len()).ok_or(Error::PktBufRead)?;
+        let src = self.get(offset..end).ok_or(Error::PktBufRead)?;
+        dst.copy_from_slice(src);
+        Ok(())
+    }
+}
+
 /// A simple ring-buffer implementation, used by vsock connections to buffer TX (guest -> host)
 /// data.  Memory for this buffer is allocated lazily, since buffering will only be needed when
 /// the host can't read fast enough.
@@ -42,15 +55,22 @@ impl TxBuf {
         (self.head - self.tail).0 as usize
     }
 
-    /// Push a byte slice onto the ring-buffer.
+    /// Push data from a copy source into the ring-buffer.
     ///
-    /// Either the entire source slice will be pushed to the ring-buffer, or none of it, if
-    /// there isn't enough room, in which case `Err(Error::TxBufFull)` is returned.
+    /// Either the entire length will be pushed to the ring-buffer, or none of it, if there
+    /// isn't enough room, in which case `Err(Error::TxBufFull)` is returned.
     ///
-    pub fn push(&mut self, src: &[u8]) -> Result<()> {
-        // Error out if there's no room to push the entire slice.
-        if self.len() + src.len() > Self::SIZE {
+    pub(super) fn push_from<S>(&mut self, src: &S, offset: usize, len: usize) -> Result<()>
+    where
+        S: TxBufSource + ?Sized,
+    {
+        // Error out if there's no room to push the entire length.
+        if self.len() + len > Self::SIZE {
             return Err(Error::TxBufFull);
+        }
+
+        if len == 0 {
+            return Ok(());
         }
 
         let data = self
@@ -60,23 +80,24 @@ impl TxBuf {
         // Buffer head, as an offset into the data slice.
         let head_ofs = self.head.0 as usize % Self::SIZE;
 
-        // Pushing a slice to this buffer can take either one or two slice copies: - one copy,
-        // if the slice fits between `head_ofs` and `Self::SIZE`; or - two copies, if the
+        // Pushing to this buffer can take either one or two copies: - one copy, if the data
+        // fits between `head_ofs` and `Self::SIZE`; or - two copies, if the
         // ring-buffer head wraps around.
 
         // First copy length: we can only go from the head offset up to the total buffer size.
-        let len = std::cmp::min(Self::SIZE - head_ofs, src.len());
-        data[head_ofs..(head_ofs + len)].copy_from_slice(&src[..len]);
+        let first_len = std::cmp::min(Self::SIZE - head_ofs, len);
+        src.copy_to_tx_buf(offset, &mut data[head_ofs..(head_ofs + first_len)])?;
 
-        // If the slice didn't fit, the buffer head will wrap around, and pushing continues
+        // If the data didn't fit, the buffer head will wrap around, and pushing continues
         // from the start of the buffer (`&self.data[0]`).
-        if len < src.len() {
-            data[..(src.len() - len)].copy_from_slice(&src[len..]);
+        if first_len < len {
+            let offset = offset.checked_add(first_len).ok_or(Error::PktBufRead)?;
+            src.copy_to_tx_buf(offset, &mut data[..(len - first_len)])?;
         }
 
-        // Either way, we've just pushed exactly `src.len()` bytes, so that's the amount by
+        // Either way, we've just pushed exactly `len` bytes, so that's the amount by
         // which the (wrapping) buffer head needs to move forward.
-        self.head += Wrapping(src.len() as u32);
+        self.head += Wrapping(len as u32);
 
         Ok(())
     }
@@ -138,6 +159,17 @@ impl TxBuf {
     ///
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Push a byte slice onto the ring-buffer.
+    ///
+    /// A thin convenience wrapper around `push_from`, used only by the unit tests to push a
+    /// plain slice without having to spell out the offset and length. Production code pushes
+    /// directly from a packet buffer via `push_from`.
+    ///
+    #[cfg(test)]
+    pub fn push(&mut self, src: &[u8]) -> Result<()> {
+        self.push_from(src, 0, src.len())
     }
 }
 
@@ -219,6 +251,22 @@ mod unit_tests {
         txbuf.push(&[1, 2, 3, 4]).unwrap();
         assert_eq!(txbuf.flush_to(&mut sink).unwrap(), 4);
         assert_eq!(sink.data, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_push_from_wrap() {
+        let mut txbuf = TxBuf::new();
+        let mut sink = TestSink::new();
+        let tmp: Vec<u8> = vec![0; TxBuf::SIZE - 2];
+        txbuf.push(tmp.as_slice()).unwrap();
+        txbuf.flush_to(&mut sink).unwrap();
+        sink.clear();
+
+        let src = [1, 2, 3, 4];
+        txbuf.push_from(&src[..], 0, src.len()).unwrap();
+
+        assert_eq!(txbuf.flush_to(&mut sink).unwrap(), 4);
+        assert_eq!(sink.data, src);
     }
 
     #[test]
