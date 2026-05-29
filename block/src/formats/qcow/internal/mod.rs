@@ -2434,6 +2434,7 @@ mod unit_tests {
     use vmm_sys_util::tempfile::TempFile;
     use vmm_sys_util::write_zeroes::WriteZeroes;
 
+    use super::header::DEFAULT_CLUSTER_BITS;
     use super::util::{COMPRESSED_FLAG, ZERO_FLAG};
     use super::*;
     use crate::formats::qcow::common::unit_tests::compress_allocated_clusters;
@@ -2693,6 +2694,37 @@ mod unit_tests {
             read_header.backing_file.as_ref().map(|bf| &bf.path),
             header.backing_file.as_ref().map(|bf| &bf.path)
         );
+    }
+
+    /// Write a header to a fresh file with backing_file_offset and
+    /// backing_file_size patched. Panics on setup failures, returns
+    /// the parse result of the patched header.
+    fn read_header_with_patched_backing(offset: u64, size: u32) -> Result<QcowHeader> {
+        let mut header = QcowHeader::create_for_size_and_path(3, 0x10_0000, None)
+            .expect("Failed to create header.");
+        header.backing_file_offset = offset;
+        header.backing_file_size = size;
+        let mut disk_file: RawFile = RawFile::new(
+            TempFile::new()
+                .expect("Failed to create temp file.")
+                .into_file(),
+            false,
+        );
+        header
+            .write_to(&mut disk_file)
+            .expect("Failed to write header.");
+        disk_file.rewind().expect("Failed to rewind disk file.");
+        QcowHeader::new(&mut disk_file)
+    }
+
+    #[test]
+    fn backing_file_offset_at_cluster_boundary() {
+        let cluster_size = 1u64 << DEFAULT_CLUSTER_BITS;
+        let err = read_header_with_patched_backing(cluster_size, 1).unwrap_err();
+        assert!(matches!(
+            err,
+            Error::BackingFileOutsideFirstCluster(_, _, _)
+        ));
     }
 
     /// Helper to create a test file with header extensions
