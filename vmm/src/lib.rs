@@ -28,7 +28,7 @@ use libc::{EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW, tcsetattr, termios};
 use log::{debug, error, info, trace, warn};
 use memory_manager::MemoryManagerSnapshotData;
 use pci::PciBdf;
-use seccompiler::{SeccompAction, apply_filter};
+use seccompiler::{BpfProgram, SeccompAction, apply_filter};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::{Deserialize, Serialize};
 use signal_hook::iterator::{Handle, Signals};
@@ -958,9 +958,9 @@ impl Vmm {
                 // At this point the receiver does not know whether the sender will use extra TCP
                 // connections. If it does not, no worker connections are accepted and memory
                 // requests continue to arrive on the main connection.
-                let connections = listener
-                    .try_clone()
-                    .and_then(|l| ReceiveAdditionalConnections::new(l, guest_memory.clone()))?;
+                let connections = listener.try_clone().and_then(|l| {
+                    ReceiveAdditionalConnections::new(l, guest_memory.clone(), &self.seccomp_action)
+                })?;
                 Ok(ReceiveMigrationConfiguredData {
                     memory_manager,
                     guest_memory,
@@ -1454,6 +1454,7 @@ impl Vmm {
         hypervisor: &dyn hypervisor::Hypervisor,
         send_data_migration: &VmSendMigrationData,
         initial_vm_state: VmState,
+        tcp_worker_seccomp_filter: &BpfProgram,
     ) -> result::Result<(), MigratableError> {
         // State machine that is updated with more context as we progress.
         let mut ctx = OngoingMigrationContext::new();
@@ -1549,6 +1550,7 @@ impl Vmm {
                 &send_data_migration.destination_url,
                 send_data_migration.connections,
                 &vm.guest_memory(),
+                tcp_worker_seccomp_filter,
             )?;
 
             Self::do_memory_migration(
@@ -2778,6 +2780,14 @@ impl RequestHandler for Vmm {
         .map_err(|e| {
             MigratableError::MigrateSend(anyhow!("Error creating migration seccomp filter: {e}"))
         })?;
+        let migration_tcp_worker_seccomp_filter =
+            get_seccomp_filter(&self.seccomp_action, Thread::MigrationTcpWorker, None).map_err(
+                |e| {
+                    MigratableError::MigrateSend(anyhow!(
+                        "Error creating migration TCP worker seccomp filter: {e}"
+                    ))
+                },
+            )?;
 
         let vm_info_snapshot = self.vm_info().map_err(|e| {
             MigratableError::MigrateSend(anyhow!("Failed to query VM info snapshot: {e}"))
@@ -2796,6 +2806,7 @@ impl RequestHandler for Vmm {
             self.check_migration_evt.try_clone().unwrap(),
             send_data_migration,
             migration_seccomp_filter,
+            migration_tcp_worker_seccomp_filter,
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             self.hypervisor.clone(),
             initial_vm_state,
