@@ -219,6 +219,19 @@ fn locality_from_addr(addr: u32) -> u8 {
     (addr >> 12) as u8
 }
 
+fn update_reg(regs: &mut [u32; TPM_CRB_R_MAX], offset: u32, data: &[u8]) -> u32 {
+    let reg_offset = (offset & !0x3) as usize;
+    let byte_offset = (offset & 0x3) as usize;
+    let mut input = [0; 4];
+
+    input[..data.len()].copy_from_slice(data);
+    let value = u32::from_le_bytes(input);
+    let mask = (u32::MAX >> (32 - data.len() * 8)) << (byte_offset * 8);
+
+    regs[reg_offset] = (regs[reg_offset] & !mask) | ((value << (byte_offset * 8)) & mask);
+    regs[reg_offset]
+}
+
 pub struct Tpm {
     emulator: Emulator,
     regs: [u32; TPM_CRB_R_MAX],
@@ -257,7 +270,7 @@ impl Tpm {
     }
 
     fn request_completed(&mut self, success: bool) {
-        self.regs[CRB_CTRL_START as usize] = !CRB_START_INVOKE;
+        self.regs[CRB_CTRL_START as usize] &= !CRB_START_INVOKE;
         if !success {
             set_reg_field(
                 &mut self.regs,
@@ -353,7 +366,7 @@ impl BusDevice for Tpm {
         let read_len: usize = data.len();
 
         if offset >= CRB_DATA_BUFFER
-            && (offset + read_len as u32) < (CRB_DATA_BUFFER + self.data_buff.len() as u32)
+            && (offset + read_len as u32) <= (CRB_DATA_BUFFER + self.data_buff.len() as u32)
         {
             // Read from Data Buffer
             let start: usize = (offset as usize) - (CRB_DATA_BUFFER as usize);
@@ -361,17 +374,21 @@ impl BusDevice for Tpm {
             data[..].clone_from_slice(&self.data_buff[start..end]);
         } else {
             offset &= 0xff;
-            let mut val = self.regs[offset as usize];
+            let reg_offset = offset & !0x3;
+            let mut val = self.regs[reg_offset as usize];
 
             // Per the TCG PC Client Platform TPM Profile (PTP) spec, bit 0
             // of TPM_LOC_STATE_x is `tpmEstablished`. Reflect the live value
             // from the backend rather than the (zero-initialised) shadow.
-            if offset == CRB_LOC_STATE && self.emulator.get_established_bit() {
+            if reg_offset == CRB_LOC_STATE && self.emulator.get_established_bit() {
                 val |= 0x1;
             }
 
             if data.len() <= 4 {
-                data.clone_from_slice(val.to_ne_bytes()[0..read_len].as_ref());
+                let byte_offset = (offset & 0x3) as usize;
+                data.clone_from_slice(
+                    (val >> (byte_offset * 8)).to_ne_bytes()[0..read_len].as_ref(),
+                );
             } else {
                 error!(
                     "Invalid tpm read: offset {:#X}, data length {:?}",
@@ -403,7 +420,7 @@ impl BusDevice for Tpm {
         let write_len = data.len();
 
         if offset >= CRB_DATA_BUFFER
-            && (offset + write_len as u32) < (CRB_DATA_BUFFER + self.data_buff.len() as u32)
+            && (offset + write_len as u32) <= (CRB_DATA_BUFFER + self.data_buff.len() as u32)
         {
             let start: usize = (offset as usize) - (CRB_DATA_BUFFER as usize);
             if start == 0 {
@@ -426,25 +443,28 @@ impl BusDevice for Tpm {
                 return None;
             }
 
-            let mut input: [u8; 4] = [0; 4];
-            input.copy_from_slice(&data[0..4]);
-            let v = u32::from_le_bytes(input);
+            let write_offset = offset;
+            let reg_data_len = cmp::min(write_len, 4 - (offset as usize & 0x3));
+            let mut input = [0; 4];
+            input[..reg_data_len].copy_from_slice(&data[..reg_data_len]);
+            let v = u32::from_le_bytes(input) << ((offset & 0x3) * 8);
+            offset &= !0x3;
 
             match offset {
                 CRB_CTRL_CMD_SIZE_REG => {
-                    self.regs[CRB_CTRL_CMD_SIZE_REG as usize] = v;
+                    update_reg(&mut self.regs, write_offset, &data[..reg_data_len]);
                 }
                 CRB_CTRL_CMD_LADDR => {
-                    self.regs[CRB_CTRL_CMD_LADDR as usize] = v;
+                    update_reg(&mut self.regs, write_offset, &data[..reg_data_len]);
                 }
                 CRB_CTRL_CMD_HADDR => {
-                    self.regs[CRB_CTRL_CMD_HADDR as usize] = v;
+                    update_reg(&mut self.regs, write_offset, &data[..reg_data_len]);
                 }
                 CRB_CTRL_RSP_SIZE => {
-                    self.regs[CRB_CTRL_RSP_SIZE as usize] = v;
+                    update_reg(&mut self.regs, write_offset, &data[..reg_data_len]);
                 }
                 CRB_CTRL_RSP_ADDR => {
-                    self.regs[CRB_CTRL_RSP_ADDR as usize] = v;
+                    update_reg(&mut self.regs, write_offset, &data[..reg_data_len]);
                 }
                 CRB_CTRL_REQ => match v {
                     CRB_CTRL_REQ_CMD_READY => {
@@ -555,5 +575,15 @@ mod unit_tests {
             0xAC,
             concat!("Test: ", stringify!(set_get_reg_field))
         );
+    }
+
+    #[test]
+    fn test_update_reg_partial_write() {
+        let mut regs: [u32; TPM_CRB_R_MAX] = [0; TPM_CRB_R_MAX];
+
+        update_reg(&mut regs, CRB_CTRL_CMD_SIZE_REG, &[0x78, 0x56, 0x34, 0x12]);
+        update_reg(&mut regs, CRB_CTRL_CMD_SIZE_REG + 1, &[0xaa]);
+
+        assert_eq!(regs[CRB_CTRL_CMD_SIZE_REG as usize], 0x1234_aa78);
     }
 }
