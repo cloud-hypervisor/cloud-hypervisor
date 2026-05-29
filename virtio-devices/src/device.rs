@@ -16,6 +16,7 @@ use std::thread;
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
 use log::{error, info, warn};
+use seccompiler::SeccompAction;
 use virtio_bindings::virtio_config::VIRTIO_F_ACCESS_PLATFORM;
 use virtio_queue::Queue;
 use vm_device::UserspaceMapping;
@@ -24,6 +25,9 @@ use vm_migration::{MigratableError, Pausable};
 use vm_virtio::{AccessPlatform, VirtioDeviceType};
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::epoll_helper::EpollHelperError;
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
 use crate::{
     ActivateError, ActivateResult, Error, GuestMemoryMmap, GuestRegionMmap, MmapRegion,
     VIRTIO_F_RING_INDIRECT_DESC,
@@ -329,6 +333,41 @@ impl VirtioCommon {
         self.interrupt_cb = None;
     }
 
+    /// Spawn a worker, push its handle into `self.epoll_threads`, and on
+    /// spawn failure run `self.reset()` to join prior workers.
+    #[expect(clippy::too_many_arguments)]
+    pub fn spawn_worker<F>(
+        &mut self,
+        name: &str,
+        seccomp_action: &SeccompAction,
+        thread_type: Thread,
+        exit_evt: &EventFd,
+        device_status: Arc<AtomicU8>,
+        interrupt_cb: Arc<dyn VirtioInterrupt>,
+        f: F,
+    ) -> Result<(), ActivateError>
+    where
+        F: FnOnce() -> Result<(), EpollHelperError> + Send + 'static,
+    {
+        let mut threads = self.epoll_threads.take().unwrap_or_default();
+        let res = spawn_virtio_thread(
+            name,
+            seccomp_action,
+            thread_type,
+            &mut threads,
+            exit_evt,
+            device_status,
+            interrupt_cb,
+            f,
+        );
+        self.epoll_threads = Some(threads);
+        if let Err(e) = res {
+            self.reset();
+            return Err(e);
+        }
+        Ok(())
+    }
+
     pub fn trigger_interrupt(&self, int_type: VirtioInterruptType) -> std::io::Result<()> {
         if let Some(interrupt_cb) = &self.interrupt_cb {
             interrupt_cb.trigger(int_type)
@@ -430,5 +469,76 @@ impl Pausable for VirtioCommon {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use vmm_sys_util::eventfd::EFD_NONBLOCK;
+
+    use super::*;
+
+    struct NoopInterrupt;
+    impl VirtioInterrupt for NoopInterrupt {
+        fn trigger(&self, _: VirtioInterruptType) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn set_notifier(
+            &self,
+            _: u32,
+            _: Option<EventFd>,
+            _: &dyn hypervisor::Vm,
+        ) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn make_common_with_kill_evt() -> (VirtioCommon, EventFd) {
+        let kill_evt = EventFd::new(EFD_NONBLOCK).unwrap();
+        let kill_evt_clone = kill_evt.try_clone().unwrap();
+        let common = VirtioCommon {
+            kill_evt: Some(kill_evt),
+            ..Default::default()
+        };
+        (common, kill_evt_clone)
+    }
+
+    #[test]
+    fn spawn_worker_appends_to_epoll_threads() {
+        let (mut common, kill_evt_clone) = make_common_with_kill_evt();
+        let started = Arc::new(AtomicUsize::new(0));
+        let started_clone = started.clone();
+
+        let exit_evt = EventFd::new(EFD_NONBLOCK).unwrap();
+        let status = Arc::new(AtomicU8::new(0));
+
+        common
+            .spawn_worker(
+                "test",
+                &SeccompAction::Allow,
+                Thread::VirtioBlock,
+                &exit_evt,
+                status,
+                Arc::new(NoopInterrupt),
+                move || {
+                    started_clone.fetch_add(1, Ordering::SeqCst);
+                    let _ = kill_evt_clone.read();
+                    Ok(())
+                },
+            )
+            .unwrap();
+
+        let threads = common.epoll_threads.as_ref().expect("epoll_threads set");
+        assert_eq!(threads.len(), 1);
+
+        // reset() joins the worker; this confirms the spawn_worker
+        // -> reset() chain (used on spawn failure) actually drains
+        // a real, running worker rather than dropping it detached.
+        common.reset();
+        assert!(common.epoll_threads.is_none());
+        assert!(common.kill_evt.is_none());
+        assert_eq!(started.load(Ordering::SeqCst), 1);
     }
 }
