@@ -68,6 +68,10 @@ pub enum Error {
     BackingFileIo(String /* path */, #[source] io::Error),
     #[error("Backing file open error: {0}")]
     BackingFileOpen(String /* path */, #[source] Box<Error>),
+    #[error(
+        "Backing file name at offset {0:#x} length {1:#x} lies outside first cluster of {2:#x}"
+    )]
+    BackingFileOutsideFirstCluster(u64, u32, u64),
     #[error("Backing file support is disabled")]
     BackingFilesDisabled,
     #[error("Backing file name is too long: {0} bytes over")]
