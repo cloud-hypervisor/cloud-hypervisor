@@ -2747,6 +2747,15 @@ mod unit_tests {
         ));
     }
 
+    #[test]
+    fn backing_file_fits_at_cluster_end() {
+        let cluster_size = 1u64 << DEFAULT_CLUSTER_BITS;
+        let header =
+            read_header_with_patched_backing(cluster_size - 16, 16).expect("Header should parse.");
+        assert_eq!(header.backing_file_offset, cluster_size - 16);
+        assert_eq!(header.backing_file_size, 16);
+    }
+
     /// Helper to create a test file with header extensions
     fn create_header_with_extension(ext_type: u32, ext_data: &[u8]) -> (RawFile, QcowHeader) {
         let header = QcowHeader::create_for_size_and_path(3, 0x10_0000, None)
