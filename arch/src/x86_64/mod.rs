@@ -1413,27 +1413,15 @@ pub fn initramfs_load_addr(
     Ok(aligned_addr)
 }
 
-pub fn get_host_cpu_phys_bits(hypervisor: &dyn hypervisor::Hypervisor) -> u8 {
+pub fn get_host_cpu_phys_bits(_hypervisor: &dyn hypervisor::Hypervisor) -> u8 {
     // SAFETY: call cpuid with valid leaves
     #[allow(unused_unsafe)]
     unsafe {
         let leaf = x86_64::__cpuid(0x8000_0000);
 
-        // Detect and handle AMD SME (Secure Memory Encryption) properly.
-        // Some physical address bits may become reserved when the feature is enabled.
-        // See AMD64 Architecture Programmer's Manual Volume 2, Section 7.10.1
-        let reduced = if leaf.eax >= 0x8000_001f
-            && matches!(hypervisor.get_cpu_vendor(), CpuVendor::AMD)
-            && x86_64::__cpuid(0x8000_001f).eax & 0x1 != 0
-        {
-            (x86_64::__cpuid(0x8000_001f).ebx >> 6) & 0x3f
-        } else {
-            0
-        };
-
         if leaf.eax >= 0x8000_0008 {
             let leaf = x86_64::__cpuid(0x8000_0008);
-            ((leaf.eax & 0xff) - reduced) as u8
+            (leaf.eax & 0xff) as u8
         } else {
             36
         }
