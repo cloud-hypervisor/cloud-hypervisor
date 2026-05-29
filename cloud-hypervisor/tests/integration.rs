@@ -6699,6 +6699,7 @@ mod common_parallel {
     fn start_live_migration_tcp(
         src_api_socket: &str,
         dest_api_socket: &str,
+        dest_event_path: &str,
         connections: NonZeroU32,
     ) -> bool {
         // Get an available TCP port
@@ -6718,8 +6719,15 @@ mod common_parallel {
             .spawn()
             .unwrap();
 
-        // Give the destination some time to start listening
-        thread::sleep(Duration::from_secs(1));
+        let expected_events = [&MetaEvent {
+            event: "migration-receive-ready".to_string(),
+            device_id: None,
+        }];
+        assert!(wait_for_sequential_events(
+            Duration::from_secs(30),
+            &expected_events,
+            dest_event_path
+        ));
 
         // Start the 'send-migration' command on the source
         let connections = connections.get();
@@ -6794,6 +6802,7 @@ mod common_parallel {
         let memory_param: &[&str] = &["--memory", "size=1500M,shared=on"];
         let boot_vcpus = 2;
         let max_vcpus = 4;
+        let dest_event_path = temp_event_monitor_path(&guest.tmp_dir);
         let pmem_temp_file = TempFile::new().unwrap();
         pmem_temp_file.as_file().set_len(128 << 20).unwrap();
         std::process::Command::new("mkfs.ext4")
@@ -6850,6 +6859,10 @@ mod common_parallel {
         dest_api_socket.push_str(".dest");
         let mut dest_child = GuestCommand::new(&guest)
             .args(["--api-socket", &dest_api_socket])
+            .args([
+                "--event-monitor",
+                format!("path={dest_event_path}").as_str(),
+            ])
             .capture_output()
             .spawn()
             .unwrap();
@@ -6893,7 +6906,12 @@ mod common_parallel {
             }
             // Start TCP live migration
             assert!(
-                start_live_migration_tcp(&src_api_socket, &dest_api_socket, connections),
+                start_live_migration_tcp(
+                    &src_api_socket,
+                    &dest_api_socket,
+                    &dest_event_path,
+                    connections
+                ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
         });
@@ -6985,6 +7003,7 @@ mod common_parallel {
 
         let src_vm_path = clh_command("cloud-hypervisor");
         let src_api_socket = temp_api_path(&guest.tmp_dir);
+        let dest_event_path = temp_event_monitor_path(&guest.tmp_dir);
         let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
         src_vm_cmd
             .args(["--cpus", format!("boot={boot_vcpus}").as_str()])
@@ -7001,6 +7020,10 @@ mod common_parallel {
         dest_api_socket.push_str(".dest");
         let mut dest_child = GuestCommand::new(&guest)
             .args(["--api-socket", &dest_api_socket])
+            .args([
+                "--event-monitor",
+                format!("path={dest_event_path}").as_str(),
+            ])
             .capture_output()
             .spawn()
             .unwrap();
@@ -7033,7 +7056,15 @@ mod common_parallel {
                 .spawn()
                 .unwrap();
 
-            thread::sleep(Duration::from_secs(1));
+            let expected_events = [&MetaEvent {
+                event: "migration-receive-ready".to_string(),
+                device_id: None,
+            }];
+            assert!(wait_for_sequential_events(
+                Duration::from_secs(30),
+                &expected_events,
+                &dest_event_path
+            ));
 
             // Use a tight downtime budget (1ms) combined with a 1s timeout so the
             // migration practically cannot converge regardless of strategy.
