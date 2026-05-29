@@ -1247,7 +1247,7 @@ fn main() {
                 let body = body.as_ref().map_or("", |body| body.as_str());
 
                 // Retrieve the list of error messages back.
-                let lines: Vec<&str> = match serde_json::from_str(body) {
+                let lines: Vec<String> = match serde_json::from_str(body) {
                     Ok(json) => json,
                     Err(e) => {
                         return Some(format!(
@@ -1259,7 +1259,8 @@ fn main() {
 
                 let error_status = format!("Server responded with {status_code:?}");
                 // Prepend the error status line to the lines iter.
-                let lines = std::iter::once(error_status.as_str()).chain(lines);
+                let lines =
+                    std::iter::once(error_status.as_str()).chain(lines.iter().map(|s| s.as_str()));
                 let error_msg_multiline = lines
                     .enumerate()
                     .map(|(index, error_msg)| (index + level, error_msg))
@@ -1320,5 +1321,18 @@ mod unit_tests {
         for command in commands {
             assert_args_sorted(|| command.get_arguments());
         }
+    }
+
+    #[test]
+    fn test_error_deserialization() {
+        let body = r#"["Error from API","The VM could not be snapshotted","Cannot send VM snapshot","Failed to send migratable component snapshot","Destination is not a directory: \"/tmp/ch.dump\""]"#;
+        let lines: Result<Vec<String>, _> = serde_json::from_str(body);
+        assert!(lines.is_ok());
+        let lines = lines.unwrap();
+        assert_eq!(lines.len(), 5);
+        assert_eq!(
+            lines[4],
+            r#"Destination is not a directory: "/tmp/ch.dump""#
+        );
     }
 }
