@@ -1127,6 +1127,7 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
             .arg(
                 Arg::new("restore_config")
                     .index(1)
+                    .required(true)
                     .help(RestoreConfig::SYNTAX),
             ),
         Command::new("resume").about("Resume the VM"),
@@ -1144,6 +1145,7 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
             .arg(
                 Arg::new("snapshot_config")
                     .index(1)
+                    .required(true)
                     .help("<destination_url>"),
             ),
     ]
