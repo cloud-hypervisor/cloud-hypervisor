@@ -41,7 +41,6 @@ use super::{
     VirtioDeviceType, VirtioInterruptType,
 };
 use crate::seccomp_filters::Thread;
-use crate::thread_helper::spawn_virtio_thread;
 use crate::{GuestMemoryMmap, VirtioInterrupt};
 
 /// Control queue
@@ -697,8 +696,6 @@ impl VirtioDevice for Net {
         let qp_threads = (num_queues - ctrl_threads) / 2;
         self.common.paused_sync = Some(Arc::new(Barrier::new(1 + qp_threads + ctrl_threads)));
 
-        let mut epoll_threads = Vec::new();
-
         if has_ctrl_queue {
             let ctrl_queue_index = num_queues - 1;
             let (_, mut ctrl_queue, ctrl_queue_evt) = queues.remove(ctrl_queue_index);
@@ -721,11 +718,10 @@ impl VirtioDevice for Net {
             let paused = self.common.paused.clone();
             let paused_sync = self.common.paused_sync.clone();
 
-            spawn_virtio_thread(
+            self.common.spawn_worker(
                 &format!("{}_ctrl", self.id),
                 &self.seccomp_action,
                 Thread::VirtioNetCtl,
-                &mut epoll_threads,
                 &self.exit_evt,
                 self.device_status.clone(),
                 interrupt_cb.clone(),
@@ -798,19 +794,16 @@ impl VirtioDevice for Net {
             let paused = self.common.paused.clone();
             let paused_sync = self.common.paused_sync.clone();
 
-            spawn_virtio_thread(
+            self.common.spawn_worker(
                 &format!("{}_qp{}", self.id.clone(), i),
                 &self.seccomp_action,
                 Thread::VirtioNet,
-                &mut epoll_threads,
                 &self.exit_evt,
                 self.device_status.clone(),
                 interrupt_cb.clone(),
                 move || handler.run(&paused, paused_sync.as_ref().unwrap()),
             )?;
         }
-
-        self.common.epoll_threads = Some(epoll_threads);
 
         event!("virtio-device", "activated", "id", &self.id);
         Ok(())

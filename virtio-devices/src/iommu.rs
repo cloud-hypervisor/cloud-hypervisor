@@ -30,7 +30,6 @@ use super::{
     Error as DeviceError, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice, VirtioDeviceType,
 };
 use crate::seccomp_filters::Thread;
-use crate::thread_helper::spawn_virtio_thread;
 use crate::{DmaRemapping, GuestMemoryMmap, VirtioInterrupt, VirtioInterruptType};
 
 /// Queues sizes
@@ -1334,19 +1333,15 @@ impl VirtioDevice for Iommu {
 
         let paused = self.common.paused.clone();
         let paused_sync = self.common.paused_sync.clone();
-        let mut epoll_threads = Vec::new();
-        spawn_virtio_thread(
+        self.common.spawn_worker(
             &self.id,
             &self.seccomp_action,
             Thread::VirtioIommu,
-            &mut epoll_threads,
             &self.exit_evt,
             device_status.clone(),
             interrupt_cb.clone(),
             move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
-
-        self.common.epoll_threads = Some(epoll_threads);
 
         event!("virtio-device", "activated", "id", &self.id);
         Ok(())
