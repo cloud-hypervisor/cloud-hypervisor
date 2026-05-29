@@ -808,9 +808,11 @@ fn required_common_cpuid_updates(
                 entry.ecx = leaf.ecx;
                 entry.edx = leaf.edx;
             }
-            // Set CPU physical bits
+            // Set CPU physical bits and guest physical bits
             0x8000_0008 => {
-                entry.eax = (entry.eax & 0xffff_ff00) | (config.phys_bits as u32 & 0xff);
+                entry.eax = (entry.eax & 0xff00_ff00)
+                    | (config.phys_bits as u32 & 0xff)
+                    | ((config.phys_bits as u32 & 0xff) << 16);
             }
             0x4000_0001 => {
                 // Enable KVM_FEATURE_MSI_EXT_DEST_ID. This allows the guest to target
