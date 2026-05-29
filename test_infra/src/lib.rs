@@ -1607,7 +1607,9 @@ impl Guest {
 
     #[cfg(target_arch = "x86_64")]
     pub fn check_nvidia_gpu(&self) -> bool {
-        let output = self.ssh_command("nvidia-smi").unwrap();
+        let output = self
+            .ssh_command("nvidia-smi 2>&1; echo CH_NVIDIA_SMI_STATUS:$?")
+            .unwrap_or_else(|e| format!("failed to run nvidia-smi: {e:?}"));
 
         if output.contains("NVIDIA L40S") {
             return true;
@@ -1619,10 +1621,10 @@ impl Guest {
 
         eprintln!(
             "\n\n==== Guest dmesg (nvidia-smi check failed) ====\n\n\
-         {dmesg}\n\
-         \n==== End guest dmesg ====\n\n"
+             {dmesg}\n\
+             \n==== End guest dmesg ====\n\n"
         );
-        eprintln!("nvidia-smi output did not contain 'NVIDIA L40S': {output}");
+        eprintln!("nvidia-smi diagnostic output: {output}");
 
         false
     }
