@@ -11,20 +11,23 @@
 //! the header, and the remaining descriptors (if any) hold the data. The data descriptors are
 //! only present for data packets (VSOCK_OP_RW).
 //!
-//! `VsockPacket` wraps these two buffers and provides direct access to the data stored
-//! in guest memory. This is done to avoid unnecessarily copying data from guest memory
-//! to temporary buffers, before passing it on to the vsock backend.
+//! `VsockPacket` copies the header locally. Contiguous packet data stays in guest memory as a
+//! checked range, so it can be moved with volatile I/O without exposing raw host pointers.
+//! Multi-descriptor TX packets use a local bounce buffer.
 
+use std::io::{self, ErrorKind, Read, Write};
 use std::ops::Deref;
 
 use byteorder::{ByteOrder, LittleEndian};
 use virtio_queue::DescriptorChain;
-use vm_memory::{Address, Bytes, GuestAddress, GuestMemory};
+use vm_memory::{
+    Address, Bytes, GuestAddress, GuestMemory, ReadVolatile, VolatileMemoryError, WriteVolatile,
+};
 use vm_virtio::AccessPlatform;
 use vm_virtio::checked_descriptor::DescriptorChainExt;
 
 use super::{Result, VsockError, defs};
-use crate::get_host_address_range;
+use crate::{GuestMemoryMmap, get_host_address_range};
 
 // The vsock packet header is defined by the C struct:
 //
@@ -92,13 +95,147 @@ const HDROFF_BUF_ALLOC: usize = 36;
 const HDROFF_FWD_CNT: usize = 40;
 
 /// The packet data buffer, which may be either:
-/// - a borrowed slice of guest memory, if the packet data is stored in one contiguous buffer
+/// - a contiguous range of guest memory, if the packet data is stored in one contiguous buffer
 ///   described by a single virtq descriptor;
 /// - an owned, linear buffer, if the packet data is stored in multiple buffers described by
 ///   multiple virtq descriptors.
 enum PacketBuffer {
-    Borrowed { ptr: *mut u8, len: usize },
+    Guest {
+        mem: GuestMemoryMmap,
+        addr: GuestAddress,
+        len: usize,
+    },
     Owned(Box<[u8]>),
+}
+
+impl PacketBuffer {
+    fn guest(mem: GuestMemoryMmap, addr: GuestAddress, len: usize) -> Result<Self> {
+        // Validate the range before storing it.
+        mem.get_slice(addr, len)
+            .map_err(|_| VsockError::GuestMemory)?;
+
+        Ok(Self::Guest { mem, addr, len })
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::Guest { len, .. } => *len,
+            Self::Owned(buf) => buf.len(),
+        }
+    }
+
+    fn check_range(&self, offset: usize, len: usize) -> Result<()> {
+        let end = offset.checked_add(len).ok_or(VsockError::GuestMemory)?;
+        if offset > self.len() || len > self.len() - offset {
+            return Err(VsockError::InvalidPktLen(
+                u32::try_from(end).unwrap_or(u32::MAX),
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn guest_addr(addr: GuestAddress, offset: usize) -> Result<GuestAddress> {
+        addr.checked_add(u64::try_from(offset).map_err(|_| VsockError::GuestMemory)?)
+            .ok_or(VsockError::GuestMemory)
+    }
+
+    fn copy_to_slice(&self, offset: usize, dst: &mut [u8]) -> Result<()> {
+        self.check_range(offset, dst.len())?;
+        if dst.is_empty() {
+            return Ok(());
+        }
+
+        match self {
+            Self::Guest { mem, addr, .. } => {
+                let addr = Self::guest_addr(*addr, offset)?;
+                let slice = mem
+                    .get_slice(addr, dst.len())
+                    .map_err(|_| VsockError::GuestMemory)?;
+                if slice.copy_to(dst) != dst.len() {
+                    return Err(VsockError::GuestMemory);
+                }
+            }
+            Self::Owned(buf) => {
+                dst.copy_from_slice(&buf[offset..offset + dst.len()]);
+            }
+        }
+
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn copy_from_slice(&mut self, offset: usize, src: &[u8]) -> Result<()> {
+        self.check_range(offset, src.len())?;
+        if src.is_empty() {
+            return Ok(());
+        }
+
+        match self {
+            Self::Guest { mem, addr, .. } => {
+                let addr = Self::guest_addr(*addr, offset)?;
+                let slice = mem
+                    .get_slice(addr, src.len())
+                    .map_err(|_| VsockError::GuestMemory)?;
+                slice.copy_from(src);
+            }
+            Self::Owned(buf) => {
+                buf[offset..offset + src.len()].copy_from_slice(src);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn read_volatile_from<R>(&mut self, reader: &mut R, len: usize) -> io::Result<usize>
+    where
+        R: Read + ReadVolatile,
+    {
+        self.check_range(0, len)
+            .map_err(|e| vsock_error_to_io(&e))?;
+
+        match self {
+            Self::Guest { mem, addr, .. } => {
+                let mut slice = mem.get_slice(*addr, len).map_err(|_| {
+                    io::Error::new(ErrorKind::InvalidInput, "invalid guest memory range")
+                })?;
+                reader
+                    .read_volatile(&mut slice)
+                    .map_err(volatile_error_to_io)
+            }
+            Self::Owned(buf) => reader.read(&mut buf[..len]),
+        }
+    }
+
+    fn write_volatile_to<W>(&self, writer: &mut W, offset: usize, len: usize) -> io::Result<usize>
+    where
+        W: Write + WriteVolatile,
+    {
+        self.check_range(offset, len)
+            .map_err(|e| vsock_error_to_io(&e))?;
+
+        match self {
+            Self::Guest { mem, addr, .. } => {
+                let addr = Self::guest_addr(*addr, offset).map_err(|e| vsock_error_to_io(&e))?;
+                let slice = mem.get_slice(addr, len).map_err(|_| {
+                    io::Error::new(ErrorKind::InvalidInput, "invalid guest memory range")
+                })?;
+                writer.write_volatile(&slice).map_err(volatile_error_to_io)
+            }
+            Self::Owned(buf) => writer.write(&buf[offset..offset + len]),
+        }
+    }
+}
+
+fn volatile_error_to_io(err: VolatileMemoryError) -> io::Error {
+    match err {
+        VolatileMemoryError::IOError(err) => err,
+        other => io::Error::other(other),
+    }
+}
+
+fn vsock_error_to_io(err: &VsockError) -> io::Error {
+    io::Error::new(ErrorKind::InvalidInput, format!("{err:?}"))
 }
 
 /// The vsock packet, implemented as a wrapper over a virtq descriptor chain:
@@ -125,8 +262,7 @@ impl VsockPacket {
         access_platform: Option<&dyn AccessPlatform>,
     ) -> Result<Self>
     where
-        M: Clone + Deref,
-        M::Target: GuestMemory,
+        M: Clone + Deref<Target = GuestMemoryMmap>,
     {
         let head = desc_chain
             .next_checked(access_platform)
@@ -173,29 +309,31 @@ impl VsockPacket {
             return Err(VsockError::InvalidPktLen(pkt.len()));
         }
 
-        // For small packets, the data may be stored in the same descriptor as the header.
+        let total_len = pkt.len() as usize;
+
         if !head.has_next() {
-            let buf_size: usize = head.len() as usize - VSOCK_PKT_HDR_SIZE;
-            if buf_size < pkt.len() as usize {
+            // For small packets, data may be stored in the same descriptor as
+            // the header.
+            let buf_size_in_head = head.len() as usize - VSOCK_PKT_HDR_SIZE;
+            // The descriptor must fit the length advertised by the header.
+            if buf_size_in_head < total_len {
                 return Err(VsockError::BufDescTooSmall);
             }
-            let buf_ptr = get_host_address_range(
-                desc_chain.memory(),
-                head.addr()
-                    .checked_add(VSOCK_PKT_HDR_SIZE as u64)
-                    .ok_or(VsockError::GuestMemory)?,
-                buf_size,
-            )
-            .ok_or(VsockError::GuestMemory)?;
-            pkt.buf = Some(PacketBuffer::Borrowed {
-                ptr: buf_ptr,
-                len: buf_size,
-            });
+
+            let buf_addr = head
+                .addr()
+                .checked_add(VSOCK_PKT_HDR_SIZE as u64)
+                .ok_or(VsockError::GuestMemory)?;
+            pkt.buf = Some(PacketBuffer::guest(
+                desc_chain.memory().clone(),
+                buf_addr,
+                total_len,
+            )?);
 
             return Ok(pkt);
         }
 
-        // We have separate header and data descriptors.
+        // The packet data starts in the descriptor after the header.
         let buf_desc = desc_chain
             .next_checked(access_platform)
             .map_err(|_| VsockError::GuestMemory)?
@@ -208,7 +346,6 @@ impl VsockPacket {
 
         if buf_desc.has_next() {
             // Multiple data descriptors -- copy into a linear buffer.
-            let total_len = pkt.len() as usize;
             let mut owned = vec![0u8; total_len];
             let mut offset = 0usize;
             let mut cur_desc = Some(buf_desc);
@@ -245,18 +382,16 @@ impl VsockPacket {
             }
             pkt.buf = Some(PacketBuffer::Owned(owned.into_boxed_slice()));
         } else {
-            // The data buffer should be large enough to fit the size of the data, as described by
-            // the header descriptor.
-            if buf_desc.len() < pkt.len() {
+            // A single data descriptor can be kept as a guest-memory range.
+            // It still has to fit the length advertised by the header.
+            if (buf_desc.len() as usize) < total_len {
                 return Err(VsockError::BufDescTooSmall);
             }
-            let buf_size = buf_desc.len() as usize;
-            let buf_ptr = get_host_address_range(desc_chain.memory(), buf_desc.addr(), buf_size)
-                .ok_or(VsockError::GuestMemory)?;
-            pkt.buf = Some(PacketBuffer::Borrowed {
-                ptr: buf_ptr,
-                len: buf_size,
-            });
+            pkt.buf = Some(PacketBuffer::guest(
+                desc_chain.memory().clone(),
+                buf_desc.addr(),
+                total_len,
+            )?);
         }
 
         Ok(pkt)
@@ -272,8 +407,7 @@ impl VsockPacket {
         access_platform: Option<&dyn AccessPlatform>,
     ) -> Result<Self>
     where
-        M: Clone + Deref,
-        M::Target: GuestMemory,
+        M: Clone + Deref<Target = GuestMemoryMmap>,
     {
         let head = desc_chain
             .next_checked(access_platform)
@@ -304,7 +438,7 @@ impl VsockPacket {
             .map_err(|_| VsockError::GuestMemory)?;
 
         // Prior to Linux v6.3 there are two descriptors
-        if head.has_next() {
+        let (buf_size, buf_addr) = if head.has_next() {
             let buf_desc = desc_chain
                 .next_checked(access_platform)
                 .map_err(|_| VsockError::GuestMemory)?
@@ -318,33 +452,39 @@ impl VsockPacket {
                 return Err(VsockError::BufDescTooSmall);
             }
 
-            Ok(Self {
-                guest_hdr_addr,
-                hdr,
-                buf: Some(PacketBuffer::Borrowed {
-                    ptr: get_host_address_range(desc_chain.memory(), buf_desc.addr(), buf_size)
-                        .ok_or(VsockError::GuestMemory)?,
-                    len: buf_size,
-                }),
-            })
+            if buf_size == 0 {
+                (0, None)
+            } else {
+                (buf_size, Some(buf_desc.addr()))
+            }
         } else {
             let buf_size: usize = head.len() as usize - VSOCK_PKT_HDR_SIZE;
-            Ok(Self {
-                guest_hdr_addr,
-                hdr,
-                buf: Some(PacketBuffer::Borrowed {
-                    ptr: get_host_address_range(
-                        desc_chain.memory(),
-                        head.addr()
-                            .checked_add(VSOCK_PKT_HDR_SIZE as u64)
-                            .ok_or(VsockError::GuestMemory)?,
-                        buf_size,
-                    )
-                    .ok_or(VsockError::GuestMemory)?,
-                    len: buf_size,
-                }),
-            })
-        }
+            if buf_size == 0 {
+                (0, None)
+            } else {
+                let addr = head
+                    .addr()
+                    .checked_add(VSOCK_PKT_HDR_SIZE as u64)
+                    .ok_or(VsockError::GuestMemory)?;
+                (buf_size, Some(addr))
+            }
+        };
+
+        let buf = if let Some(addr) = buf_addr {
+            Some(PacketBuffer::guest(
+                desc_chain.memory().clone(),
+                addr,
+                buf_size,
+            )?)
+        } else {
+            None
+        };
+
+        Ok(Self {
+            guest_hdr_addr,
+            hdr,
+            buf,
+        })
     }
 
     /// Provides in-place, byte-slice, access to the vsock packet header.
@@ -373,6 +513,23 @@ impl VsockPacket {
         Ok(())
     }
 
+    pub fn has_buf(&self) -> bool {
+        self.buf.is_some()
+    }
+
+    /// Return the data buffer capacity, which may be larger than `len()`.
+    pub fn buf_capacity(&self) -> Option<usize> {
+        self.buf.as_ref().map(PacketBuffer::len)
+    }
+
+    /// Copy data from the packet buffer into `dst`.
+    pub fn copy_buf_to_slice(&self, offset: usize, dst: &mut [u8]) -> Result<()> {
+        self.buf
+            .as_ref()
+            .ok_or(VsockError::PktBufMissing)?
+            .copy_to_slice(offset, dst)
+    }
+
     /// Provides in-place, byte-slice access to the vsock packet data buffer.
     ///
     /// Note: control packets (e.g. connection request or reset) have no data buffer associated.
@@ -383,10 +540,12 @@ impl VsockPacket {
     pub fn buf(&self) -> Option<&[u8]> {
         match self.buf.as_ref()? {
             PacketBuffer::Owned(owned) => Some(owned),
-            PacketBuffer::Borrowed { ptr, len } => {
+            PacketBuffer::Guest { mem, addr, len } => {
+                let ptr = get_host_address_range(mem, *addr, *len)?;
+
                 // SAFETY: bound checks have already been performed when creating the packet
                 // from the virtq descriptor.
-                Some(unsafe { std::slice::from_raw_parts((*ptr).cast(), *len) })
+                Some(unsafe { std::slice::from_raw_parts(ptr.cast(), *len) })
             }
         }
     }
@@ -401,12 +560,49 @@ impl VsockPacket {
     pub fn buf_mut(&mut self) -> Option<&mut [u8]> {
         match self.buf.as_mut()? {
             PacketBuffer::Owned(owned) => Some(owned),
-            PacketBuffer::Borrowed { ptr, len } => {
+            PacketBuffer::Guest { mem, addr, len } => {
+                let ptr = get_host_address_range(mem, *addr, *len)?;
+
                 // SAFETY: bound checks have already been performed when creating the packet
                 // from the virtq descriptor.
-                Some(unsafe { std::slice::from_raw_parts_mut(*ptr, *len) })
+                Some(unsafe { std::slice::from_raw_parts_mut(ptr, *len) })
             }
         }
+    }
+
+    #[cfg(test)]
+    pub fn copy_buf_from_slice(&mut self, offset: usize, src: &[u8]) -> Result<()> {
+        self.buf
+            .as_mut()
+            .ok_or(VsockError::PktBufMissing)?
+            .copy_from_slice(offset, src)
+    }
+
+    /// Read bytes directly into the packet buffer.
+    pub fn read_volatile_from<R>(&mut self, reader: &mut R, len: usize) -> io::Result<usize>
+    where
+        R: Read + ReadVolatile,
+    {
+        self.buf
+            .as_mut()
+            .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "missing packet buffer"))?
+            .read_volatile_from(reader, len)
+    }
+
+    /// Write bytes directly from the packet buffer.
+    pub fn write_volatile_to<W>(
+        &self,
+        writer: &mut W,
+        offset: usize,
+        len: usize,
+    ) -> io::Result<usize>
+    where
+        W: Write + WriteVolatile,
+    {
+        self.buf
+            .as_ref()
+            .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "missing packet buffer"))?
+            .write_volatile_to(writer, offset, len)
     }
 
     pub fn src_cid(&self) -> u64 {
@@ -578,10 +774,7 @@ mod unit_tests {
             )
             .unwrap();
             assert_eq!(pkt.hdr().len(), VSOCK_PKT_HDR_SIZE);
-            assert_eq!(
-                pkt.buf().unwrap().len(),
-                handler_ctx.guest_txvq.dtable[1].len.get() as usize
-            );
+            assert_eq!(pkt.buf_capacity().unwrap(), pkt.len() as usize);
         }
 
         // Test case: error on write-only hdr descriptor.
@@ -606,7 +799,7 @@ mod unit_tests {
         {
             create_context!(test_ctx, handler_ctx);
             set_pkt_len(0, &handler_ctx.guest_txvq.dtable[0], &test_ctx.mem);
-            let mut pkt = VsockPacket::from_tx_virtq_head(
+            let pkt = VsockPacket::from_tx_virtq_head(
                 &mut handler_ctx.handler.queues[1]
                     .iter(&test_ctx.mem)
                     .unwrap()
@@ -615,8 +808,8 @@ mod unit_tests {
                 None,
             )
             .unwrap();
-            assert!(pkt.buf().is_none());
-            assert!(pkt.buf_mut().is_none());
+            assert!(!pkt.has_buf());
+            assert!(pkt.buf_capacity().is_none());
         }
 
         // Test case: TX packet has more data than we can handle.
@@ -677,6 +870,14 @@ mod unit_tests {
         guest_txvq.avail.idx.set(1);
 
         set_pkt_len(8 * 1024, &guest_txvq.dtable[0], &test_ctx.mem);
+        test_ctx
+            .mem
+            .write_slice(&[0xaa_u8; 4 * 1024], GuestAddress(0x0061_1000))
+            .unwrap();
+        test_ctx
+            .mem
+            .write_slice(&[0xbb_u8; 4 * 1024], GuestAddress(0x0061_2000))
+            .unwrap();
 
         let pkt = VsockPacket::from_tx_virtq_head(
             &mut queue.iter(&test_ctx.mem).unwrap().next().unwrap(),
@@ -685,7 +886,21 @@ mod unit_tests {
         .unwrap();
 
         assert_eq!(pkt.len(), 8 * 1024);
-        assert_eq!(pkt.buf().unwrap().len(), 8 * 1024);
+        assert_eq!(pkt.buf_capacity().unwrap(), 8 * 1024);
+
+        test_ctx
+            .mem
+            .write_slice(&[0xff_u8; 4 * 1024], GuestAddress(0x0061_1000))
+            .unwrap();
+        test_ctx
+            .mem
+            .write_slice(&[0xff_u8; 4 * 1024], GuestAddress(0x0061_2000))
+            .unwrap();
+
+        let mut data = vec![0u8; 8 * 1024];
+        pkt.copy_buf_to_slice(0, &mut data).unwrap();
+        assert_eq!(&data[..4 * 1024], &[0xaa_u8; 4 * 1024]);
+        assert_eq!(&data[4 * 1024..], &[0xbb_u8; 4 * 1024]);
     }
 
     #[test]
@@ -704,7 +919,7 @@ mod unit_tests {
             .unwrap();
             assert_eq!(pkt.hdr().len(), VSOCK_PKT_HDR_SIZE);
             assert_eq!(
-                pkt.buf().unwrap().len(),
+                pkt.buf_capacity().unwrap(),
                 handler_ctx.guest_rxvq.dtable[1].len.get() as usize
             );
         }
@@ -842,17 +1057,84 @@ mod unit_tests {
         .unwrap();
 
         assert_eq!(
-            pkt.buf().unwrap().len(),
-            handler_ctx.guest_rxvq.dtable[1].len.get() as usize
-        );
-        assert_eq!(
-            pkt.buf_mut().unwrap().len(),
+            pkt.buf_capacity().unwrap(),
             handler_ctx.guest_rxvq.dtable[1].len.get() as usize
         );
 
-        for i in 0..pkt.buf().unwrap().len() {
-            pkt.buf_mut().unwrap()[i] = (i % 0x100) as u8;
-            assert_eq!(pkt.buf().unwrap()[i], (i % 0x100) as u8);
+        let mut payload = vec![0u8; pkt.buf_capacity().unwrap()];
+        for (i, byte) in payload.iter_mut().enumerate() {
+            *byte = (i % 0x100) as u8;
         }
+        pkt.copy_buf_from_slice(0, &payload).unwrap();
+
+        let mut actual = vec![0u8; payload.len()];
+        pkt.copy_buf_to_slice(0, &mut actual).unwrap();
+        assert_eq!(actual, payload);
+    }
+
+    #[test]
+    fn test_tx_packet_data_uses_guest_memory() {
+        create_context!(test_ctx, handler_ctx);
+        set_pkt_len(8, &handler_ctx.guest_txvq.dtable[0], &test_ctx.mem);
+
+        let data_gpa = handler_ctx.guest_txvq.dtable[1].addr.get();
+        let original = [0x11_u8, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
+        test_ctx
+            .mem
+            .write_slice(&original, GuestAddress(data_gpa))
+            .unwrap();
+
+        let pkt = VsockPacket::from_tx_virtq_head(
+            &mut handler_ctx.handler.queues[1]
+                .iter(&test_ctx.mem)
+                .unwrap()
+                .next()
+                .unwrap(),
+            None,
+        )
+        .unwrap();
+
+        test_ctx
+            .mem
+            .write_slice(&[0xff_u8; 8], GuestAddress(data_gpa))
+            .unwrap();
+
+        let mut data = [0u8; 8];
+        pkt.copy_buf_to_slice(0, &mut data).unwrap();
+        assert_eq!(data, [0xff_u8; 8]);
+    }
+
+    #[test]
+    fn test_rx_packet_read_volatile_writes_to_guest() {
+        create_context!(test_ctx, handler_ctx);
+        let mut pkt = VsockPacket::from_rx_virtq_head(
+            &mut handler_ctx.handler.queues[0]
+                .iter(&test_ctx.mem)
+                .unwrap()
+                .next()
+                .unwrap(),
+            None,
+        )
+        .unwrap();
+
+        let data_gpa = handler_ctx.guest_rxvq.dtable[1].addr.get();
+        let mut before = [0u8; 6];
+        test_ctx
+            .mem
+            .read_slice(&mut before, GuestAddress(data_gpa))
+            .unwrap();
+        assert_eq!(&before, &[0u8; 6]);
+
+        let payload = [0xab_u8, 0xcd, 0xef, 0x01, 0x23, 0x45];
+        let mut reader = payload.as_slice();
+        let read = pkt.read_volatile_from(&mut reader, payload.len()).unwrap();
+        pkt.set_len(read as u32);
+
+        let mut after = [0u8; 6];
+        test_ctx
+            .mem
+            .read_slice(&mut after, GuestAddress(data_gpa))
+            .unwrap();
+        assert_eq!(&after, &payload);
     }
 }
