@@ -39,7 +39,6 @@ use vm_virtio::checked_descriptor::DescriptorChainExt;
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::seccomp_filters::Thread;
-use crate::thread_helper::spawn_virtio_thread;
 use crate::{
     ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
     GuestMemoryMmap, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice,
@@ -688,19 +687,16 @@ impl VirtioDevice for Balloon {
 
         let paused = self.common.paused.clone();
         let paused_sync = self.common.paused_sync.clone();
-        let mut epoll_threads = Vec::new();
 
-        spawn_virtio_thread(
+        self.common.spawn_worker(
             &self.id,
             &self.seccomp_action,
             Thread::VirtioBalloon,
-            &mut epoll_threads,
             &self.exit_evt,
             device_status.clone(),
             interrupt_cb.clone(),
             move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
-        self.common.epoll_threads = Some(epoll_threads);
 
         event!("virtio-device", "activated", "id", &self.id);
         Ok(())

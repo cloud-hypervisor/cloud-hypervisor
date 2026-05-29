@@ -51,7 +51,6 @@ use super::{
     VirtioInterruptType,
 };
 use crate::seccomp_filters::Thread;
-use crate::thread_helper::spawn_virtio_thread;
 use crate::{GuestMemoryMmap, VirtioInterrupt};
 
 const SECTOR_SHIFT: u8 = 9;
@@ -405,7 +404,7 @@ impl BlockEpollHandler {
             Ok(()) => {}
             Err(e @ (Error::QueueIterator(_) | Error::QueueDuplicatedHeadIndex)) => {
                 // Virtqueue is corrupted or guest driver is misbehaving; exit
-                // the worker so spawn_virtio_thread marks the device NEEDS_RESET.
+                // the worker so spawn_worker marks the device NEEDS_RESET.
                 return Err(EpollHelperError::HandleEvent(anyhow!(
                     "Failed to process queue (submit): {e}"
                 )));
@@ -1108,7 +1107,6 @@ impl VirtioDevice for Block {
         let writeback = self.is_writeback_enabled(self.config.writeback == 1);
         self.set_writeback_mode(writeback);
 
-        let mut epoll_threads = Vec::new();
         let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
 
         for i in 0..queues.len() {
@@ -1157,11 +1155,10 @@ impl VirtioDevice for Block {
             let paused = self.common.paused.clone();
             let paused_sync = self.common.paused_sync.clone();
 
-            spawn_virtio_thread(
+            self.common.spawn_worker(
                 &format!("{}_q{}", self.id.clone(), i),
                 &self.seccomp_action,
                 Thread::VirtioBlock,
-                &mut epoll_threads,
                 &self.exit_evt,
                 self.device_status.clone(),
                 interrupt_cb.clone(),
@@ -1169,7 +1166,6 @@ impl VirtioDevice for Block {
             )?;
         }
 
-        self.common.epoll_threads = Some(epoll_threads);
         event!("virtio-device", "activated", "id", &self.id);
 
         Ok(())
