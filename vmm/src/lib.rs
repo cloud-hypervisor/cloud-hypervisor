@@ -649,10 +649,17 @@ impl VmOwnership {
 
     /// Returns a mutable reference to the underlying VM, if the VMM currently
     /// owns the VM.
-    fn vm_mut(&mut self) -> Option<&mut Vm> {
+    ///
+    /// # Arguments
+    /// - `none_err`: the error that should be returned when there is no VM
+    ///   Depending on the context, this typically is either
+    ///   [`VmError::VmNotCreated`] or [`VmError::VmNotRunning`].
+    fn vm_mut(&mut self, none_err: VmError) -> result::Result<&mut Vm, VmError> {
         match self {
-            VmOwnership::Owned(vm) => Some(vm),
-            _ => None,
+            VmOwnership::Owned(vm) => Ok(vm),
+            VmOwnership::Migration { .. } => Err(VmError::VmMigrating),
+            // A config might exist but the VM is not yet created nor running.
+            VmOwnership::None => Err(none_err),
         }
     }
 }
@@ -1046,7 +1053,7 @@ impl Vmm {
                 Command::Complete => {
                     let vm = self
                         .vm
-                        .vm_mut()
+                        .vm_mut(VmError::VmNotCreated)
                         .expect("VM should have been created by now");
                     let (_, resume_duration) = measure_ok(|| vm.resume())?;
                     debug!(
@@ -1759,7 +1766,7 @@ impl Vmm {
 
         // Now we can restore the rest of the VM.
         // PANIC: won't panic, we just checked that the VM is there.
-        self.vm.vm_mut().unwrap().restore()
+        self.vm.vm_mut(VmError::VmNotCreated).unwrap().restore()
     }
 
     /// Handles the outcome of the migration thread.
@@ -2037,52 +2044,37 @@ impl RequestHandler for Vmm {
         }
 
         // Now we can boot the VM.
-        match self.vm {
-            VmOwnership::Owned(ref mut vm) => {
-                vm.boot()?;
-                event!("vm", "booted");
-            }
-            VmOwnership::None => {
-                return Err(VmError::VmNotCreated);
-            }
-            _ => unreachable!(),
-        }
+        self.vm.vm_mut(VmError::VmNotCreated)?.boot()?;
+        event!("vm", "booted");
 
         tracer::end();
         Ok(())
     }
 
     fn vm_pause(&mut self) -> result::Result<(), VmError> {
-        match self.vm {
-            VmOwnership::Owned(ref mut vm) => vm.pause().map_err(VmError::Pause),
-            VmOwnership::Migration { .. } => Err(VmError::VmMigrating)?,
-            VmOwnership::None => Err(VmError::VmNotRunning)?,
-        }
+        self.vm
+            .vm_mut(VmError::VmNotRunning)?
+            .pause()
+            .map_err(VmError::Pause)
     }
 
     fn vm_resume(&mut self) -> result::Result<(), VmError> {
-        match self.vm {
-            VmOwnership::Owned(ref mut vm) => vm.resume().map_err(VmError::Resume),
-            VmOwnership::Migration { .. } => Err(VmError::VmMigrating)?,
-            VmOwnership::None => Err(VmError::VmNotRunning)?,
-        }
+        self.vm
+            .vm_mut(VmError::VmNotRunning)?
+            .resume()
+            .map_err(VmError::Resume)
     }
 
     fn vm_snapshot(&mut self, destination_url: &str) -> result::Result<(), VmError> {
-        match self.vm {
-            VmOwnership::Owned(ref mut vm) => {
-                // Drain console_info so that FDs are not reused
-                let _ = self.console_info.take();
-                vm.snapshot()
-                    .map_err(VmError::Snapshot)
-                    .and_then(|snapshot| {
-                        vm.send(&snapshot, destination_url)
-                            .map_err(VmError::SnapshotSend)
-                    })
-            }
-            VmOwnership::Migration { .. } => Err(VmError::VmMigrating)?,
-            VmOwnership::None => Err(VmError::VmNotRunning)?,
-        }
+        let vm = self.vm.vm_mut(VmError::VmNotRunning)?;
+        // Drain console_info so that FDs are not reused
+        let _ = self.console_info.take();
+        vm.snapshot()
+            .map_err(VmError::Snapshot)
+            .and_then(|snapshot| {
+                vm.send(&snapshot, destination_url)
+                    .map_err(VmError::SnapshotSend)
+            })
     }
 
     fn vm_restore(&mut self, restore_cfg: RestoreConfig) -> result::Result<(), VmError> {
@@ -2152,21 +2144,14 @@ impl RequestHandler for Vmm {
 
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     fn vm_coredump(&mut self, destination_url: &str) -> result::Result<(), VmError> {
-        match self.vm {
-            VmOwnership::Owned(ref mut vm) => {
-                vm.coredump(destination_url).map_err(VmError::Coredump)
-            }
-            VmOwnership::Migration { .. } => Err(VmError::VmMigrating),
-            VmOwnership::None => Err(VmError::VmNotRunning),
-        }
+        self.vm
+            .vm_mut(VmError::VmNotRunning)?
+            .coredump(destination_url)
+            .map_err(VmError::Coredump)
     }
 
     fn vm_shutdown(&mut self) -> result::Result<(), VmError> {
-        let vm = match self.vm {
-            VmOwnership::Owned(ref mut vm) => vm,
-            VmOwnership::Migration { .. } => return Err(VmError::VmMigrating),
-            VmOwnership::None => return Err(VmError::VmNotRunning),
-        };
+        let vm = self.vm.vm_mut(VmError::VmNotRunning)?;
         // Drain console_info so that the FDs are not reused
         let _ = self.console_info.take();
         let r = vm.shutdown();
@@ -2180,11 +2165,7 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_reboot(&mut self) -> result::Result<(), VmError> {
-        let vm = match self.vm {
-            VmOwnership::Owned(ref mut vm) => vm,
-            VmOwnership::Migration { .. } => return Err(VmError::VmMigrating),
-            VmOwnership::None => return Err(VmError::VmNotRunning),
-        };
+        let vm = self.vm.vm_mut(VmError::VmNotRunning)?;
 
         event!("vm", "rebooting");
         let config = vm.get_config();
@@ -2364,11 +2345,9 @@ impl RequestHandler for Vmm {
     fn vm_resize_disk(&mut self, id: String, desired_size: u64) -> result::Result<(), VmError> {
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
-        match self.vm {
-            VmOwnership::Owned(ref mut vm) => vm.resize_disk(&id, desired_size),
-            VmOwnership::Migration { .. } => Err(VmError::VmMigrating),
-            VmOwnership::None => Err(VmError::ResizeDisk),
-        }
+        self.vm
+            .vm_mut(VmError::ResizeDisk)?
+            .resize_disk(&id, desired_size)
     }
 
     fn vm_resize_zone(&mut self, id: String, desired_ram: u64) -> result::Result<(), VmError> {
@@ -2704,34 +2683,24 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_counters(&mut self) -> result::Result<Option<Vec<u8>>, VmError> {
-        match self.vm {
-            VmOwnership::Owned(ref mut vm) => {
-                let info = vm.counters().inspect_err(|e| {
-                    error!("Error when getting counters from the VM: {e:?}");
-                })?;
-                serde_json::to_vec(&info)
-                    .map(Some)
-                    .map_err(VmError::SerializeJson)
-            }
-            VmOwnership::Migration { .. } => Err(VmError::VmMigrating),
-            VmOwnership::None => Err(VmError::VmNotRunning),
-        }
+        let info = self
+            .vm
+            .vm_mut(VmError::VmNotRunning)?
+            .counters()
+            .inspect_err(|e| {
+                error!("Error when getting counters from the VM: {e:?}");
+            })?;
+        serde_json::to_vec(&info)
+            .map(Some)
+            .map_err(VmError::SerializeJson)
     }
 
     fn vm_power_button(&mut self) -> result::Result<(), VmError> {
-        match self.vm {
-            VmOwnership::Owned(ref mut vm) => vm.power_button(),
-            VmOwnership::Migration { .. } => Err(VmError::VmMigrating),
-            VmOwnership::None => Err(VmError::VmNotRunning),
-        }
+        self.vm.vm_mut(VmError::VmNotRunning)?.power_button()
     }
 
     fn vm_nmi(&mut self) -> result::Result<(), VmError> {
-        match self.vm {
-            VmOwnership::Owned(ref mut vm) => vm.nmi(),
-            VmOwnership::Migration { .. } => Err(VmError::VmMigrating),
-            VmOwnership::None => Err(VmError::VmNotRunning),
-        }
+        self.vm.vm_mut(VmError::VmNotRunning)?.nmi()
     }
 
     fn vm_receive_migration(
@@ -2862,8 +2831,8 @@ impl RequestHandler for Vmm {
 
         let vm = self
             .vm
-            .vm_mut()
-            .ok_or_else(|| MigratableError::MigrateSend(anyhow!("VM is not running")))?;
+            .vm_mut(VmError::VmNotRunning)
+            .expect("VM ownership should have been validated");
 
         let initial_vm_state = vm.get_state();
         if initial_vm_state != VmState::Running && initial_vm_state != VmState::Paused {
