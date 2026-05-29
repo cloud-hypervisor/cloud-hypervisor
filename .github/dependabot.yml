@@ -8,6 +8,7 @@ updates:
     interval: weekly
   allow:
     - dependency-name: "acpi_tables"
+    - dependency-name: "iommufd-ioctls"
     - dependency-name: "kvm-bindings"
     - dependency-name: "kvm-ioctls"
     - dependency-name: "linux-loader"
@@ -44,6 +45,7 @@ updates:
     semver-patch-days: 3
   ignore:
     - dependency-name: "acpi_tables"
+    - dependency-name: "iommufd-ioctls"
     - dependency-name: "kvm-bindings"
     - dependency-name: "kvm-ioctls"
     - dependency-name: "linux-loader"
