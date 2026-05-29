@@ -502,15 +502,26 @@ impl VsockPacket {
     /// Writes the local copy of the packet header to the guest memory.
     ///
     pub fn commit_hdr<M: GuestMemory>(&mut self, guest_mem: &M) -> Result<()> {
-        if self.len() as usize > defs::MAX_PKT_BUF_SIZE {
-            return Err(VsockError::InvalidPktLen(self.len()));
-        }
+        self.validate_len()?;
 
         guest_mem
             .write(self.hdr(), self.guest_hdr_addr)
             .map_err(|_| VsockError::GuestMemory)?;
 
         Ok(())
+    }
+
+    fn validate_len(&self) -> Result<()> {
+        let len = self.len() as usize;
+        if len > defs::MAX_PKT_BUF_SIZE {
+            return Err(VsockError::InvalidPktLen(self.len()));
+        }
+
+        match &self.buf {
+            Some(buf) if len > buf.len() => Err(VsockError::InvalidPktLen(self.len())),
+            None if len > 0 => Err(VsockError::PktBufMissing),
+            _ => Ok(()),
+        }
     }
 
     pub fn has_buf(&self) -> bool {
@@ -1096,5 +1107,44 @@ mod unit_tests {
             .read_slice(&mut after, GuestAddress(data_gpa))
             .unwrap();
         assert_eq!(&after, &payload);
+    }
+
+    #[test]
+    fn test_commit_hdr_allows_zero_length_packet() {
+        create_context!(test_ctx, handler_ctx);
+        let mut pkt = VsockPacket::from_rx_virtq_head(
+            &mut handler_ctx.handler.queues[0]
+                .iter(&test_ctx.mem)
+                .unwrap()
+                .next()
+                .unwrap(),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(pkt.len(), 0);
+        pkt.commit_hdr(&test_ctx.mem).unwrap();
+    }
+
+    #[test]
+    fn test_commit_hdr_rejects_len_above_buf_capacity() {
+        create_context!(test_ctx, handler_ctx);
+        let mut pkt = VsockPacket::from_rx_virtq_head(
+            &mut handler_ctx.handler.queues[0]
+                .iter(&test_ctx.mem)
+                .unwrap()
+                .next()
+                .unwrap(),
+            None,
+        )
+        .unwrap();
+
+        let cap = pkt.buf_capacity().unwrap() as u32;
+        pkt.set_len(cap + 1);
+
+        match pkt.commit_hdr(&test_ctx.mem) {
+            Err(VsockError::InvalidPktLen(n)) => assert_eq!(n, cap + 1),
+            other => panic!("expected InvalidPktLen, got {other:?}"),
+        }
     }
 }
