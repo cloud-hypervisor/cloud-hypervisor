@@ -54,6 +54,41 @@ pub(super) fn l2_entry_std_cluster_addr(l2_entry: u64) -> u64 {
     l2_entry & L2_TABLE_OFFSET_MASK
 }
 
+/// Returns true if `cluster_addr` is cluster aligned and within
+/// `[cluster_size, max_valid_cluster_offset]`.
+pub(super) fn cluster_addr_is_valid(
+    cluster_addr: u64,
+    cluster_size: u64,
+    max_valid_cluster_offset: u64,
+) -> bool {
+    cluster_addr >= cluster_size
+        && cluster_addr <= max_valid_cluster_offset
+        && cluster_addr.is_multiple_of(cluster_size)
+}
+
+/// Returns true if the compressed cluster address is within spec bounds.
+pub(super) fn compressed_cluster_addr_is_valid(addr: u64) -> bool {
+    addr < (1u64 << 56)
+}
+
+/// Returns true if the entire `[addr, addr+size)` range lies within
+/// `[cluster_size, max_valid_cluster_offset]` and the address is below 2^56.
+pub(super) fn compressed_cluster_range_is_valid(
+    addr: u64,
+    size: usize,
+    cluster_size: u64,
+    max_valid_cluster_offset: u64,
+) -> bool {
+    let Some(end) = addr.checked_add(size as u64) else {
+        return false;
+    };
+    compressed_cluster_addr_is_valid(addr)
+        && addr >= cluster_size
+        && max_valid_cluster_offset
+            .checked_add(cluster_size)
+            .is_some_and(|limit| end <= limit)
+}
+
 /// Make L2 entry for standard (non-compressed) cluster.
 pub(super) fn l2_entry_make_std(cluster_addr: u64) -> u64 {
     (cluster_addr & L2_TABLE_OFFSET_MASK) | CLUSTER_USED_FLAG
