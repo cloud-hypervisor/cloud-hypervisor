@@ -309,7 +309,7 @@ impl VirtioDevice for Blk {
             interrupt_cb.clone(),
             move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
-        self.vu_common.epoll_thread = Some(epoll_threads.remove(0));
+        self.vu_common.virtio_common.epoll_threads = Some(epoll_threads);
 
         Ok(())
     }
@@ -338,11 +338,6 @@ impl Pausable for Blk {
 
     fn resume(&mut self) -> result::Result<(), MigratableError> {
         self.vu_common.virtio_common.resume()?;
-
-        if let Some(epoll_thread) = &self.vu_common.epoll_thread {
-            epoll_thread.thread().unpark();
-        }
-
         self.vu_common.resume()
     }
 }
