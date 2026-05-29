@@ -2770,6 +2770,15 @@ impl RequestHandler for Vmm {
             )));
         }
 
+        let migration_seccomp_filter = get_seccomp_filter(
+            &self.seccomp_action,
+            Thread::MigrationCoordinator,
+            None,
+        )
+        .map_err(|e| {
+            MigratableError::MigrateSend(anyhow!("Error creating migration seccomp filter: {e}"))
+        })?;
+
         let vm_info_snapshot = self.vm_info().map_err(|e| {
             MigratableError::MigrateSend(anyhow!("Failed to query VM info snapshot: {e}"))
         })?;
@@ -2786,6 +2795,7 @@ impl RequestHandler for Vmm {
             vm,
             self.check_migration_evt.try_clone().unwrap(),
             send_data_migration,
+            migration_seccomp_filter,
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             self.hypervisor.clone(),
             initial_vm_state,

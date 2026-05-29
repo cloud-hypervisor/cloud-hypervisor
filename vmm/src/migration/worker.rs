@@ -19,8 +19,10 @@ use std::sync::mpsc::Receiver;
 use std::thread;
 use std::thread::JoinHandle;
 
+use anyhow::anyhow;
 use event_monitor::event;
 use log::warn;
+use seccompiler::{BpfProgram, apply_filter};
 use vm_migration::MigratableError;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -72,6 +74,7 @@ pub struct MigrationWorker {
     vm_receiver: Receiver<Vm>,
     check_migration_evt: EventFd,
     config: VmSendMigrationData,
+    seccomp_filter: BpfProgram,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     initial_vm_state: VmState,
@@ -81,25 +84,40 @@ impl MigrationWorker {
     /// Drives the migration from its start to its end (success, cancellation,
     /// failure)
     fn run(self) -> MigrationThreadOut {
+        let seccomp_res = if self.seccomp_filter.is_empty() {
+            Ok(())
+        } else {
+            apply_filter(&self.seccomp_filter).map_err(|e| {
+                MigratableError::MigrateSend(anyhow!(
+                    "Error applying migration seccomp filter: {e}"
+                ))
+            })
+        };
+
         let mut vm = self.vm_receiver.recv().expect("VMM should send VM");
 
-        event!("vm", "migration-started");
-        let res = Vmm::send_migration(
-            &mut vm,
-            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-            self.hypervisor.as_ref(),
-            &self.config,
-            self.initial_vm_state,
-        )
-        .inspect(|_| event!("vm", "migration-finished"))
-        .inspect_err(|_| event!("vm", "migration-failed"));
+        // We can't propagate errors early because of the complex return type,
+        // therefore we chain the results together.
+        let migration_res = seccomp_res
+            .and_then(|()| {
+                event!("vm", "migration-started");
+                Vmm::send_migration(
+                    &mut vm,
+                    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+                    self.hypervisor.as_ref(),
+                    &self.config,
+                    self.initial_vm_state,
+                )
+            })
+            .inspect(|_| event!("vm", "migration-finished"))
+            .inspect_err(|_| event!("vm", "migration-failed"));
 
         // Notify VMM thread to check migration result.
         self.check_migration_evt.write(1).unwrap();
 
         MigrationThreadOut {
             vm,
-            migration_res: res,
+            migration_res,
             initial_vm_state: self.initial_vm_state,
         }
     }
@@ -112,6 +130,7 @@ impl MigrationWorker {
         vm: Vm,
         check_migration_evt: EventFd,
         config: VmSendMigrationData,
+        seccomp_filter: BpfProgram,
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))] hypervisor: Arc<
             dyn hypervisor::Hypervisor,
         >,
@@ -122,6 +141,7 @@ impl MigrationWorker {
             vm_receiver,
             check_migration_evt,
             config,
+            seccomp_filter,
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             hypervisor,
             initial_vm_state,
