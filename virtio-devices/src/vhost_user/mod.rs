@@ -11,6 +11,7 @@ use std::sync::{Arc, Barrier, Mutex};
 use anyhow::anyhow;
 use event_monitor::event;
 use log::{error, info, warn};
+use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vhost::Error as VhostError;
@@ -27,6 +28,7 @@ use vm_migration::{MigratableError, Pausable, Snapshot};
 use vmm_sys_util::eventfd::EventFd;
 use vu_common_ctrl::VhostUserHandle;
 
+use crate::seccomp_filters::Thread;
 use crate::{
     ActivateError, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
     GuestMemoryMmap, GuestRegionMmap, VIRTIO_F_IN_ORDER, VIRTIO_F_NOTIFICATION_DATA,
@@ -533,6 +535,37 @@ impl VhostUserCommon {
             inflight,
             disconnected: self.disconnected.clone(),
         })
+    }
+
+    /// Like `VirtioCommon::spawn_worker`, but on failure also runs
+    /// `self.reset(id)` to tear down the vhost-user backend.
+    #[expect(clippy::too_many_arguments)]
+    pub fn spawn_worker<F>(
+        &mut self,
+        id: &str,
+        seccomp_action: &SeccompAction,
+        thread_type: Thread,
+        exit_evt: &EventFd,
+        device_status: Arc<std::sync::atomic::AtomicU8>,
+        interrupt_cb: Arc<dyn VirtioInterrupt>,
+        f: F,
+    ) -> std::result::Result<(), ActivateError>
+    where
+        F: FnOnce() -> std::result::Result<(), EpollHelperError> + Send + 'static,
+    {
+        if let Err(e) = self.virtio_common.spawn_worker(
+            id,
+            seccomp_action,
+            thread_type,
+            exit_evt,
+            device_status,
+            interrupt_cb,
+            f,
+        ) {
+            self.reset(id);
+            return Err(e);
+        }
+        Ok(())
     }
 
     pub fn reset(&mut self, id: &str) {
