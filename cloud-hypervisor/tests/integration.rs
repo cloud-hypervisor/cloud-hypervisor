@@ -7032,6 +7032,8 @@ mod common_parallel {
 
         let src_vm_path = clh_command("cloud-hypervisor");
         let src_api_socket = temp_api_path(&guest.tmp_dir);
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
+        let src_event_path = format!("{event_path}.src");
         let dest_event_path = temp_event_monitor_path(&guest.tmp_dir);
         let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
         src_vm_cmd
@@ -7042,6 +7044,7 @@ mod common_parallel {
             .default_disks()
             .args(["--net", net_params.as_str()])
             .args(["--api-socket", &src_api_socket])
+            .args(["--event-monitor", format!("path={src_event_path}").as_str()])
             .capture_output();
         let mut src_child = src_vm_cmd.spawn().unwrap();
 
@@ -7118,6 +7121,18 @@ mod common_parallel {
                 .wait_timeout(Duration::from_secs(60))
                 .unwrap();
 
+            let send_dispatched = match send_status {
+                Some(status) => status.success(),
+                None => {
+                    let _ = send_migration.kill();
+                    false
+                }
+            };
+            assert!(
+                send_dispatched,
+                "send-migration should have dispatched successfully"
+            );
+
             // Clean up receive-migration regardless of its outcome
             if receive_status.is_none() {
                 let _ = receive_migration.kill();
@@ -7129,19 +7144,21 @@ mod common_parallel {
 
             match timeout_strategy {
                 TimeoutStrategy::Cancel => {
-                    // With cancel strategy the send must fail and the source VM
-                    // must keep running.
-                    let send_failed = match send_status {
-                        Some(status) => !status.success(),
-                        None => {
-                            let _ = send_migration.kill();
-                            false
-                        }
-                    };
-                    assert!(
-                        send_failed,
-                        "send-migration should have failed due to 1s timeout with cancel strategy"
-                    );
+                    let expected_events = [
+                        &MetaEvent {
+                            event: "migration-started".to_string(),
+                            device_id: None,
+                        },
+                        &MetaEvent {
+                            event: "migration-failed".to_string(),
+                            device_id: None,
+                        },
+                    ];
+                    assert!(wait_for_sequential_events(
+                        Duration::from_secs(30),
+                        &expected_events,
+                        &src_event_path
+                    ));
 
                     thread::sleep(Duration::from_secs(2));
                     assert!(
@@ -7153,19 +7170,21 @@ mod common_parallel {
                     assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
                 }
                 TimeoutStrategy::Ignore => {
-                    // With Ignore strategy the send must succeed despite the timeout
-                    // being reached, and the source VM must have terminated.
-                    let send_succeeded = match send_status {
-                        Some(status) => status.success(),
-                        None => {
-                            let _ = send_migration.kill();
-                            false
-                        }
-                    };
-                    assert!(
-                        send_succeeded,
-                        "send-migration should have succeeded with timeout_strategy=ignore"
-                    );
+                    let expected_events = [
+                        &MetaEvent {
+                            event: "migration-started".to_string(),
+                            device_id: None,
+                        },
+                        &MetaEvent {
+                            event: "migration-finished".to_string(),
+                            device_id: None,
+                        },
+                    ];
+                    assert!(wait_for_sequential_events(
+                        Duration::from_secs(30),
+                        &expected_events,
+                        &src_event_path
+                    ));
 
                     thread::sleep(Duration::from_secs(3));
                     assert!(
