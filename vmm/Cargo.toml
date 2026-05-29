@@ -63,7 +63,7 @@ hypervisor = { path = "../hypervisor" }
 igvm = { workspace = true, optional = true }
 igvm_defs = { workspace = true, optional = true }
 iommufd-ioctls = { workspace = true, optional = true }
-landlock = "0.4.4"
+landlock = "0.4.5"
 libc = { workspace = true }
 linux-loader = { workspace = true, features = ["bzimage", "elf", "pe"] }
 log = { workspace = true }
