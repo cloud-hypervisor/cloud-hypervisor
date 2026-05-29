@@ -24,7 +24,6 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::seccomp_filters::Thread;
-use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
 use crate::vhost_user::{DEFAULT_VIRTIO_FEATURES, Error, Result, VhostUserCommon, VhostUserState};
 use crate::{
@@ -311,18 +310,15 @@ impl VirtioDevice for Net {
             self.vu_common.virtio_common.paused_sync = Some(Arc::new(Barrier::new(3)));
             let paused_sync = self.vu_common.virtio_common.paused_sync.clone();
 
-            let mut ctrl_threads = Vec::new();
-            spawn_virtio_thread(
+            self.vu_common.virtio_common.spawn_worker(
                 &format!("{}_ctrl", self.id),
                 &self.seccomp_action,
                 Thread::VirtioVhostNetCtl,
-                &mut ctrl_threads,
                 &self.exit_evt,
                 device_status.clone(),
                 interrupt_cb.clone(),
                 move || ctrl_handler.run_ctrl(&paused, paused_sync.as_ref().unwrap()),
             )?;
-            self.vu_common.virtio_common.epoll_threads = Some(ctrl_threads);
         }
 
         let backend_req_handler: Option<FrontendReqHandler<BackendReqHandler>> = None;
@@ -349,16 +345,10 @@ impl VirtioDevice for Net {
         let paused = self.vu_common.virtio_common.paused.clone();
         let paused_sync = self.vu_common.virtio_common.paused_sync.clone();
 
-        let threads = self
-            .vu_common
-            .virtio_common
-            .epoll_threads
-            .get_or_insert_with(Vec::new);
-        spawn_virtio_thread(
+        self.vu_common.spawn_worker(
             &self.id,
             &self.seccomp_action,
             Thread::VirtioVhostNet,
-            threads,
             &self.exit_evt,
             device_status.clone(),
             interrupt_cb.clone(),
