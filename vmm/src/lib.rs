@@ -34,8 +34,8 @@ use serde::{Deserialize, Serialize};
 use signal_hook::iterator::{Handle, Signals};
 use thiserror::Error;
 use tracer::trace_scoped;
-use vm_memory::GuestMemoryAtomic;
 use vm_memory::bitmap::AtomicBitmap;
+use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::protocol::*;
 use vm_migration::{
     MemoryMigrationContext, Migratable, MigratableError, OngoingMigrationContext, Pausable,
@@ -1563,7 +1563,7 @@ impl Vmm {
         // Let every Migratable object know about the migration being started.
         vm.start_migration()?;
 
-        if send_data_migration.local {
+        if send_data_migration.local || send_data_migration.postcopy {
             // Now pause VM (skip if already paused, e.g. migrating a paused VM)
             let downtime_begin = Instant::now();
             if vm.get_state() != VmState::Paused {
@@ -1608,12 +1608,34 @@ impl Vmm {
         vm.release_disk_locks()
             .map_err(|e| MigratableError::UnlockError(anyhow!("{e}")))?;
 
+        // For post-copy, bring up the dedicated fault channel and start serving
+        // before sending State, so the destination can fault pages in during
+        // restore. The VM is already paused here, so guest memory is stable.
+        // Serving runs on its own thread, concurrent with the control stream.
+        let postcopy_serve = if send_data_migration.postcopy {
+            let fault_stream = migration_transport::connect_fault_channel(
+                &send_data_migration.destination_url,
+                send_data_migration.tls_dir.as_deref(),
+            )?;
+            let guest_memory = vm.guest_memory();
+            let handle = thread::Builder::new()
+                .name("migrate-send-postcopy".to_owned())
+                .spawn(move || Self::serve_postcopy(fault_stream, guest_memory))
+                .map_err(|e| {
+                    MigratableError::MigrateSend(anyhow!("spawning post-copy serve thread: {e}"))
+                })?;
+            Some(handle)
+        } else {
+            None
+        };
+
         let (vm_snapshot, snapshot_duration) = measure_ok(|| {
-            // Capture snapshot. This may have side effects, e.g. vhost-user backend inflight drain
             let snapshot = vm.snapshot()?;
 
-            // One final memory iteration to handle side effects from snapshot.
-            if !send_data_migration.local {
+            // Final memory pass for snapshot side effects (e.g. vhost-user
+            // backend drain). Skipped for local and postcopy migrations which
+            // don't use precopy dirty-log.
+            if !send_data_migration.local && !send_data_migration.postcopy {
                 let memory_ranges = vm.dirty_log()?;
                 migration_transport::send_memory_ranges(
                     &vm.guest_memory(),
@@ -1623,7 +1645,6 @@ impl Vmm {
             }
             Ok(snapshot)
         })?;
-
         let (_, send_snapshot_duration) =
             measure_ok(|| migration_transport::send_state(&mut socket, &vm_snapshot))?;
 
@@ -1657,12 +1678,92 @@ impl Vmm {
         debug!("Downtime breakdown: {}", ctx.downtime_ctx);
 
         // Stop logging dirty pages
-        if !send_data_migration.local {
+        if !send_data_migration.local && !send_data_migration.postcopy {
             vm.stop_dirty_log()?;
+        }
+
+        // Wait for the post-copy serve thread to drain all destination
+        // PageFault requests (it returns when the destination closes the fault
+        // channel, i.e. once all pages are resident).
+        if let Some(handle) = postcopy_serve {
+            handle.join().map_err(|e| {
+                MigratableError::MigrateSend(anyhow!("post-copy serve thread panicked: {e:?}"))
+            })??;
         }
 
         // Let every Migratable object know about the migration being complete
         vm.complete_migration()
+    }
+
+    /// Serve `Command::PageFault` requests inline from local guest memory on
+    /// the dedicated fault channel until the destination closes it. Runs on its
+    /// own thread, concurrent with the control stream, so the destination can
+    /// fault pages in during restore. The fault channel already has Nagle
+    /// disabled (see `connect_fault_channel`).
+    //
+    // `guest_memory` is taken by value because this runs on a dedicated thread
+    // that must own it for the serve loop's lifetime; it is only borrowed in the
+    // body.
+    #[allow(clippy::needless_pass_by_value)]
+    fn serve_postcopy(
+        mut socket: SocketStream,
+        guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
+    ) -> result::Result<(), MigratableError> {
+        let mut buf: Vec<u8> = Vec::new();
+        info!("Post-copy: source entering PageFault serve loop");
+
+        loop {
+            let req = match Request::read_from(&mut socket) {
+                Ok(r) => r,
+                Err(MigratableError::MigrateSocket(e))
+                    if matches!(
+                        e.kind(),
+                        io::ErrorKind::UnexpectedEof | io::ErrorKind::BrokenPipe
+                    ) =>
+                {
+                    info!("Post-copy: destination closed the fault channel — drain complete");
+                    return Ok(());
+                }
+                Err(e) => return Err(e),
+            };
+
+            match req.command() {
+                Command::PageFault => {
+                    let range = MemoryRange::read_from(&mut socket)?;
+                    let len = range.length as usize;
+                    const MAX_PAGE: usize = 2 << 20; // 2 MiB
+                    if len == 0 || len > MAX_PAGE {
+                        return Err(MigratableError::MigrateSend(anyhow!(
+                            "Post-copy: invalid page length {len}"
+                        )));
+                    }
+                    buf.resize(len, 0);
+                    let mem = guest_memory.memory();
+                    mem.read_slice(&mut buf[..len], GuestAddress(range.gpa))
+                        .map_err(|e| {
+                            MigratableError::MigrateSend(anyhow!(
+                                "Post-copy: reading guest memory gpa={:#x} len={}: {e}",
+                                range.gpa,
+                                range.length
+                            ))
+                        })?;
+                    Response::new(Status::Ok, range.length).write_to(&mut socket)?;
+                    socket
+                        .write_all(&buf[..len])
+                        .map_err(MigratableError::MigrateSocket)?;
+                }
+                Command::Abandon => {
+                    Response::ok().write_to(&mut socket)?;
+                    info!("Post-copy: received Abandon, exiting serve loop");
+                    return Ok(());
+                }
+                c => {
+                    return Err(MigratableError::MigrateSend(anyhow!(
+                        "Post-copy: unexpected command in serve loop: {c:?}",
+                    )));
+                }
+            }
+        }
     }
 
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -2753,6 +2854,7 @@ impl RequestHandler for Vmm {
 
             // Stop logging dirty pages
             if !send_data_migration.local
+                && !send_data_migration.postcopy
                 && let Err(e) = vm.stop_dirty_log()
             {
                 return e;

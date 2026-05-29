@@ -967,6 +967,22 @@ pub(crate) fn send_migration_socket(
     }
 }
 
+/// Dial a dedicated fault channel to the destination and announce the
+/// [`ConnRole::Fault`] role. Used by the source/daemon to serve `PageFault`
+/// requests asynchronously, independent of the control stream.
+pub(crate) fn connect_fault_channel(
+    destination_url: &str,
+    tls_dir: Option<&Path>,
+) -> Result<SocketStream, MigratableError> {
+    let mut socket = send_migration_socket(destination_url, tls_dir)?;
+    ConnHeader::new(ConnRole::Fault).write_to(&mut socket)?;
+    // Disable Nagle: small fault request/response round-trips.
+    socket
+        .set_nodelay(true)
+        .map_err(MigratableError::MigrateSocket)?;
+    Ok(socket)
+}
+
 /// Bind a migration listener for the receiver side.
 pub(crate) fn receive_migration_listener(
     receiver_url: &str,

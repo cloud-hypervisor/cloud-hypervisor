@@ -439,6 +439,10 @@ pub struct VmSendMigrationData {
     /// Path to the directory containing the TLS root CA certificate (ca-cert.pem), the TLS client certificate (client-cert.pem), and TLS client key (client-key.pem).
     #[serde(default)]
     pub tls_dir: Option<PathBuf>,
+
+    /// Enable post-copy migration. Requires `local=off`.
+    #[serde(default)]
+    pub postcopy: bool,
 }
 
 impl VmSendMigrationData {
@@ -446,7 +450,7 @@ impl VmSendMigrationData {
         \"destination_url=<url>[,local=on|off,\
         downtime_ms=<milliseconds>,timeout_s=<seconds>,\
         timeout_strategy=cancel|ignore,connections=<amount>,\
-        tls_dir=<path>]\"";
+        tls_dir=<path>,postcopy=on|off]\"";
 
     // Same as QEMU.
     pub const DEFAULT_DOWNTIME: Duration = Duration::from_millis(300);
@@ -475,7 +479,8 @@ impl VmSendMigrationData {
             .add("timeout_s")
             .add("timeout_strategy")
             .add("connections")
-            .add("tls_dir");
+            .add("tls_dir")
+            .add("postcopy");
         parser
             .parse(migration)
             .map_err(VmSendMigrationConfigError::ParseError)?;
@@ -531,6 +536,11 @@ impl VmSendMigrationData {
             .convert::<String>("tls_dir")
             .map_err(VmSendMigrationConfigError::ParseError)?
             .map(|path| PathBuf::from(&path));
+        let postcopy = parser
+            .convert::<Toggle>("postcopy")
+            .map_err(VmSendMigrationConfigError::ParseError)?
+            .unwrap_or(Toggle(false))
+            .0;
 
         let data = Self {
             destination_url,
@@ -540,6 +550,7 @@ impl VmSendMigrationData {
             timeout_strategy,
             connections,
             tls_dir,
+            postcopy,
         };
 
         data.validate()?;
@@ -608,6 +619,20 @@ impl VmSendMigrationData {
                     "invalid TLS configuration for send-migration: {e}"
                 ))
             })?;
+        }
+
+        if self.postcopy {
+            if self.local {
+                return Err(VmSendMigrationConfigError::ValidationError(
+                    "postcopy and local options are mutually exclusive.".to_string(),
+                ));
+            }
+
+            if self.connections.get() > 1 {
+                return Err(VmSendMigrationConfigError::ValidationError(
+                    "postcopy currently requires a single connection (connections=1).".to_string(),
+                ));
+            }
         }
 
         Ok(())
@@ -2107,6 +2132,7 @@ mod unit_tests {
                 timeout_strategy: Default::default(),
                 connections: VmSendMigrationData::default_connections(),
                 tls_dir: None,
+                postcopy: false,
             }
         );
 
@@ -2127,7 +2153,23 @@ mod unit_tests {
                 timeout_strategy: TimeoutStrategy::Ignore,
                 connections: NonZeroU32::new(4).unwrap(),
                 tls_dir: Some(tls_dir_path),
+                postcopy: false,
             }
         );
+
+        // Post-copy happy path (TCP only, single connection).
+        let data =
+            VmSendMigrationData::parse("destination_url=tcp:192.168.1.1:8080,postcopy=on").unwrap();
+        assert!(data.postcopy);
+
+        // postcopy + local must be rejected.
+        VmSendMigrationData::parse("destination_url=unix:/tmp/sock,local=on,postcopy=on")
+            .unwrap_err();
+
+        // postcopy + multi-connection must be rejected.
+        VmSendMigrationData::parse(
+            "destination_url=tcp:192.168.1.1:8080,postcopy=on,connections=4",
+        )
+        .unwrap_err();
     }
 }

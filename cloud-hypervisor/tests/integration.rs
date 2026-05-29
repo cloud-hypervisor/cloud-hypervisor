@@ -6731,16 +6731,42 @@ mod common_parallel {
         dest_event_path: &str,
         connections: NonZeroU32,
     ) -> bool {
+        start_live_migration_tcp_with_flags(
+            src_api_socket,
+            dest_api_socket,
+            dest_event_path,
+            connections,
+            false,
+        )
+    }
+
+    #[cfg(not(feature = "mshv"))]
+    fn start_live_migration_tcp_with_flags(
+        src_api_socket: &str,
+        dest_api_socket: &str,
+        dest_event_path: &str,
+        connections: NonZeroU32,
+        postcopy: bool,
+    ) -> bool {
         // Get an available TCP port
         let migration_port = get_available_port();
         let host_ip = "127.0.0.1";
+
+        // Both ends opt into post-copy out-of-band: there is no protocol
+        // negotiation. Destination uses `postcopy=on` on its receive URL;
+        // source uses `postcopy=on` on its send URL.
+        let receive_arg = if postcopy {
+            format!("receiver_url=tcp:0.0.0.0:{migration_port},postcopy=on")
+        } else {
+            format!("receiver_url=tcp:0.0.0.0:{migration_port}")
+        };
 
         // Start the 'receive-migration' command on the destination
         let mut receive_migration = Command::new(clh_command("ch-remote"))
             .args([
                 &format!("--api-socket={dest_api_socket}"),
                 "receive-migration",
-                &format!("receiver_url=tcp:0.0.0.0:{migration_port}"),
+                &receive_arg,
             ])
             .stdin(Stdio::null())
             .stderr(Stdio::piped())
@@ -6760,12 +6786,13 @@ mod common_parallel {
 
         // Start the 'send-migration' command on the source
         let connections = connections.get();
+        let extra = if postcopy { ",postcopy=on" } else { "" };
         let mut send_migration = Command::new(clh_command("ch-remote"))
             .args([
                 &format!("--api-socket={src_api_socket}"),
                 "send-migration",
                 &format!(
-                    "destination_url=tcp:{host_ip}:{migration_port},connections={connections}"
+                    "destination_url=tcp:{host_ip}:{migration_port},connections={connections}{extra}"
                 ),
             ])
             .stdin(Stdio::null())
@@ -7017,6 +7044,102 @@ mod common_parallel {
         }
     }
 
+    // Post-copy live migration. Verifies the destination boots a guest
+    // that touches all of its memory, which forces every page to be
+    // demand-faulted across the network.
+    #[cfg(not(feature = "mshv"))]
+    fn _test_live_migration_tcp_postcopy() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+        let console_text = String::from("On a branch floating down river a cricket, singing.");
+        let net_id = "netpc1";
+        let net_params = format!(
+            "id={},tap=,mac={},ip={},mask=255.255.255.128",
+            net_id, guest.network.guest_mac0, guest.network.host_ip0
+        );
+        let memory_param: &[&str] = &["--memory", "size=512M"];
+        let boot_vcpus = 2;
+
+        let src_vm_path = clh_command("cloud-hypervisor");
+        let src_api_socket = temp_api_path(&guest.tmp_dir);
+        let mut src_child = GuestCommand::new_with_binary_path(&guest, &src_vm_path)
+            .args(["--cpus", format!("boot={boot_vcpus}").as_str()])
+            .args(memory_param)
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .args(["--net", net_params.as_str()])
+            .args(["--api-socket", &src_api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let dest_event_path = temp_event_monitor_path(&guest.tmp_dir);
+        let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
+        dest_api_socket.push_str(".dest");
+        let mut dest_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &dest_api_socket])
+            .args([
+                "--event-monitor",
+                format!("path={dest_event_path}").as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            assert!(guest.get_total_memory().unwrap_or_default() > 400_000);
+            guest.check_devices_common(None, Some(&console_text), None);
+
+            assert!(
+                start_live_migration_tcp_with_flags(
+                    &src_api_socket,
+                    &dest_api_socket,
+                    &dest_event_path,
+                    NonZeroU32::new(1).unwrap(),
+                    /* postcopy */ true,
+                ),
+                "Post-copy live migration command failed."
+            );
+        });
+        if r.is_err() {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Error occurred during post-copy live-migration",
+            );
+        }
+
+        let src_exited_ok = wait_until(Duration::from_secs(60), || {
+            matches!(src_child.try_wait(), Ok(Some(_)))
+        }) && src_child.try_wait().unwrap().is_some_and(|s| s.success());
+        if !src_exited_ok {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Source VM (post-copy) was not terminated successfully.",
+            );
+        }
+
+        let r = std::panic::catch_unwind(|| {
+            // Probing the destination forces page faults across most of
+            // guest memory; if the source serve loop drops bytes, these
+            // checks fail.
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            assert!(guest.get_total_memory().unwrap_or_default() > 400_000);
+            guest.check_devices_common(None, Some(&console_text), None);
+        });
+
+        let _ = dest_child.kill();
+        let dest_output = dest_child.wait_with_output().unwrap();
+        handle_child_output(r, &dest_output);
+    }
+
     #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_tcp_timeout(timeout_strategy: TimeoutStrategy) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -7221,6 +7344,12 @@ mod common_parallel {
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_tcp_parallel_connections() {
         _test_live_migration_tcp(NonZeroU32::new(8).unwrap());
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_live_migration_tcp_postcopy() {
+        _test_live_migration_tcp_postcopy();
     }
 
     #[test]
