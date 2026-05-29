@@ -332,6 +332,18 @@ impl QcowHeader {
             return Err(Error::BackingFileTooLong(header.backing_file_size as usize));
         }
         if header.backing_file_offset != 0 {
+            let cluster_size = 1u64
+                .checked_shl(header.cluster_bits)
+                .ok_or(Error::InvalidClusterSize)?;
+            if header.backing_file_offset >= cluster_size
+                || header.backing_file_offset + u64::from(header.backing_file_size) > cluster_size
+            {
+                return Err(Error::BackingFileOutsideFirstCluster(
+                    header.backing_file_offset,
+                    header.backing_file_size,
+                    cluster_size,
+                ));
+            }
             f.seek(SeekFrom::Start(header.backing_file_offset))
                 .map_err(Error::ReadingHeader)?;
             let mut backing_file_name_bytes = vec![0u8; header.backing_file_size as usize];
