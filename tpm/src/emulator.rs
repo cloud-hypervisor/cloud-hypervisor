@@ -19,6 +19,13 @@ use crate::{
 };
 
 const TPM_REQ_HDR_SIZE: usize = 10;
+const TPM_RC_INITIALIZE: u32 = 0x100;
+const TPM2_STARTUP_CLEAR: [u8; 12] = [
+    0x80, 0x01, // TPM_ST_NO_SESSIONS
+    0x00, 0x00, 0x00, 0x0c, // commandSize
+    0x00, 0x00, 0x01, 0x44, // TPM_CC_Startup
+    0x00, 0x00, // TPM_SU_CLEAR
+];
 
 /* capability flags returned by PTM_GET_CAPABILITY */
 const PTM_CAP_INIT: u64 = 1;
@@ -145,7 +152,35 @@ impl Emulator {
         }
         self.control_socket.set_msgfd(fds[1]);
         debug!("data fd to be configured in swtpm = {:?}", fds[1]);
-        self.run_control_cmd(Commands::CmdSetDatafd, &mut res, 0, mem::size_of::<u32>())?;
+        if let Err(e) =
+            self.run_control_cmd(Commands::CmdSetDatafd, &mut res, 0, mem::size_of::<u32>())
+        {
+            // SAFETY: FFI calls and return values of the unsafe calls are checked
+            unsafe {
+                if libc::close(fds[0]) == -1 {
+                    error!(
+                        "Failed to close TPM data fd after CmdSetDatafd failure: {:?}",
+                        std::io::Error::last_os_error()
+                    );
+                }
+                if libc::close(fds[1]) == -1 {
+                    error!(
+                        "Failed to close TPM swtpm fd after CmdSetDatafd failure: {:?}",
+                        std::io::Error::last_os_error()
+                    );
+                }
+            }
+            return Err(e);
+        }
+        // SAFETY: FFI call and return value of the unsafe call is checked
+        unsafe {
+            if libc::close(fds[1]) == -1 {
+                error!(
+                    "Failed to close local TPM swtpm fd: {:?}",
+                    std::io::Error::last_os_error()
+                );
+            }
+        }
         debug!("data fd in cloud-hypervisor = {:?}", fds[0]);
         self.data_fd = fds[0];
 
@@ -470,6 +505,27 @@ impl Emulator {
             mem::size_of::<u32>(),
         )?;
 
+        self.tpm2_startup_clear()?;
+
+        Ok(())
+    }
+
+    fn tpm2_startup_clear(&mut self) -> Result<()> {
+        let mut buffer = TPM2_STARTUP_CLEAR;
+        let mut cmd = BackendCmd {
+            buffer: &mut buffer,
+            input_len: TPM2_STARTUP_CLEAR.len(),
+        };
+
+        self.deliver_request(&mut cmd)?;
+
+        let response_code = u32::from_be_bytes(buffer[6..10].try_into().unwrap());
+        if response_code != TPM_SUCCESS && response_code != TPM_RC_INITIALIZE {
+            return Err(Error::DeliverRequest(anyhow!(
+                "TPM2_Startup(CLEAR) returned error code: {response_code:#X}"
+            )));
+        }
+
         Ok(())
     }
 
@@ -483,5 +539,22 @@ impl Emulator {
 
     pub fn get_buffer_size(&mut self) -> usize {
         self.set_buffer_size(0).unwrap_or(TPM_CRB_BUFFER_MAX)
+    }
+}
+
+impl Drop for Emulator {
+    fn drop(&mut self) {
+        if self.data_fd >= 0 {
+            // SAFETY: FFI call and return value of the unsafe call is checked
+            unsafe {
+                if libc::close(self.data_fd) == -1 {
+                    error!(
+                        "Failed to close TPM data fd: {:?}",
+                        std::io::Error::last_os_error()
+                    );
+                }
+            }
+            self.data_fd = -1;
+        }
     }
 }
