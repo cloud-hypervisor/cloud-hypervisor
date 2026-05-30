@@ -7,6 +7,7 @@
 //! Contains the async I/O trait, request handling, and file locking
 //! helpers.
 
+pub mod aligned;
 pub mod async_io;
 pub mod fcntl;
 pub mod request;
