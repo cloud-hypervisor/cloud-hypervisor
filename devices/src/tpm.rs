@@ -238,6 +238,13 @@ fn read_reg_value(value: u32, offset: u32) -> u32 {
     value >> (byte_offset * 8)
 }
 
+#[cfg(test)]
+fn read_reg(regs: &[u32; TPM_CRB_R_MAX], offset: u32) -> u32 {
+    let reg_offset = (offset & !0x3) as usize;
+
+    read_reg_value(regs[reg_offset], offset)
+}
+
 fn complete_request(regs: &mut [u32; TPM_CRB_R_MAX], success: bool) {
     regs[CRB_CTRL_START as usize] &= !CRB_START_INVOKE;
     if !success {
@@ -594,5 +601,71 @@ mod unit_tests {
         update_reg(&mut regs, CRB_CTRL_CMD_SIZE_REG + 1, &[0xaa]);
 
         assert_eq!(regs[CRB_CTRL_CMD_SIZE_REG as usize], 0x1234_aa78);
+    }
+
+    #[test]
+    fn test_update_reg_preserves_untouched_byte_lanes() {
+        let mut regs: [u32; TPM_CRB_R_MAX] = [0; TPM_CRB_R_MAX];
+        regs[CRB_CTRL_CMD_LADDR as usize] = 0x1122_3344;
+
+        update_reg(&mut regs, CRB_CTRL_CMD_LADDR + 1, &[0xaa, 0xbb]);
+
+        assert_eq!(regs[CRB_CTRL_CMD_LADDR as usize], 0x11bb_aa44);
+    }
+
+    #[test]
+    fn test_read_reg_partial_read_uses_byte_offset() {
+        let mut regs: [u32; TPM_CRB_R_MAX] = [0; TPM_CRB_R_MAX];
+        regs[CRB_CTRL_CMD_SIZE_REG as usize] = 0x1234_5678;
+
+        assert_eq!(read_reg(&regs, CRB_CTRL_CMD_SIZE_REG + 1) as u8, 0x56);
+        assert_eq!(read_reg(&regs, CRB_CTRL_CMD_SIZE_REG + 2) as u16, 0x1234);
+        assert_eq!(read_reg_value(0x1, CRB_LOC_STATE + 1) as u8, 0);
+    }
+
+    #[test]
+    fn test_complete_request_preserves_reserved_bits() {
+        let mut regs: [u32; TPM_CRB_R_MAX] = [0; TPM_CRB_R_MAX];
+        regs[CRB_CTRL_START as usize] = 0xffff_fffe | CRB_START_INVOKE;
+
+        complete_request(&mut regs, true);
+
+        assert_eq!(regs[CRB_CTRL_START as usize], 0xffff_fffe);
+    }
+
+    #[test]
+    fn test_complete_request_sets_error_status_on_failure() {
+        let mut regs: [u32; TPM_CRB_R_MAX] = [0; TPM_CRB_R_MAX];
+        regs[CRB_CTRL_START as usize] = CRB_START_INVOKE;
+
+        complete_request(&mut regs, false);
+
+        assert_eq!(regs[CRB_CTRL_START as usize], 0);
+        assert_eq!(
+            get_reg_field(&regs, CrbRegister::CtrlSts(CtrlStsFields::TpmSts)),
+            1
+        );
+    }
+
+    #[test]
+    fn test_data_buffer_range_accepts_exact_end_access() {
+        let start = (TPM_CRB_BUFFER_MAX - 4)..TPM_CRB_BUFFER_MAX;
+
+        assert_eq!(
+            data_buffer_range(
+                CRB_DATA_BUFFER + TPM_CRB_BUFFER_MAX as u32 - 4,
+                4,
+                TPM_CRB_BUFFER_MAX
+            ),
+            Some(start)
+        );
+        assert_eq!(
+            data_buffer_range(
+                CRB_DATA_BUFFER + TPM_CRB_BUFFER_MAX as u32 - 3,
+                4,
+                TPM_CRB_BUFFER_MAX
+            ),
+            None
+        );
     }
 }
