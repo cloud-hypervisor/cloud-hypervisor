@@ -116,11 +116,12 @@ impl Emulator {
             )));
         }
 
-        if !emulator.get_established_flag() {
-            return Err(Error::InitializeEmulator(anyhow!(
-                "TPM not in established state"
-            )));
-        }
+        // Note: The TPM establishment flag can only be queried after the TPM
+        // has been initialized via CMD_INIT. swtpm rejects most control
+        // commands (returning PTM_BAD_ORDINAL = 0x0A) before initialization,
+        // so we defer the establishment-flag check to `get_established_flag()`
+        // which is invoked later (e.g. on guest reads of CRB_LOC_STATE) after
+        // `Tpm::reset()` has issued CMD_INIT.
 
         Ok(emulator)
     }
