@@ -27,6 +27,10 @@ const TPM2_STARTUP_CLEAR: [u8; 12] = [
     0x00, 0x00, // TPM_SU_CLEAR
 ];
 
+fn startup_response_is_ok(response_code: u32) -> bool {
+    response_code == TPM_SUCCESS || response_code == TPM_RC_INITIALIZE
+}
+
 /* capability flags returned by PTM_GET_CAPABILITY */
 const PTM_CAP_INIT: u64 = 1;
 const PTM_CAP_SHUTDOWN: u64 = 1 << 1;
@@ -520,7 +524,7 @@ impl Emulator {
         self.deliver_request(&mut cmd)?;
 
         let response_code = u32::from_be_bytes(buffer[6..10].try_into().unwrap());
-        if response_code != TPM_SUCCESS && response_code != TPM_RC_INITIALIZE {
+        if !startup_response_is_ok(response_code) {
             return Err(Error::DeliverRequest(anyhow!(
                 "TPM2_Startup(CLEAR) returned error code: {response_code:#X}"
             )));
