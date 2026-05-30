@@ -10017,6 +10017,16 @@ mod windows {
                 .unwrap_or(0)
         }
 
+        fn tpm_status(&self) -> String {
+            self.ssh_cmd(
+                "powershell -NoProfile -Command \"(Get-PnpDevice -Class SecurityDevices | \
+                 Where-Object { $_.FriendlyName -match 'Trusted Platform Module|TPM' } | \
+                 Select-Object -First 1 -ExpandProperty Status)\"",
+            )
+            .trim()
+            .to_string()
+        }
+
         fn reboot(&self) {
             let _ = self.ssh_cmd("shutdown /r /t 0");
         }
@@ -10256,6 +10266,61 @@ mod windows {
 
         let _ = child_dnsmasq.kill();
         let _ = child_dnsmasq.wait();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_windows_guest_tpm() {
+        let windows_guest = WindowsGuest::new();
+        let (mut swtpm_command, swtpm_socket_path) =
+            prepare_swtpm_daemon(&windows_guest.guest().tmp_dir);
+
+        let mut swtpm_child = swtpm_command.spawn().unwrap();
+        assert!(wait_until(Duration::from_secs(10), || {
+            std::path::Path::new(&swtpm_socket_path).exists()
+        }));
+
+        let mut child = GuestCommand::new(windows_guest.guest())
+            .args(["--cpus", "boot=2,kvm_hyperv=on"])
+            .args(["--memory", "size=4G"])
+            .args(["--kernel", edk2_path().to_str().unwrap()])
+            .args(["--serial", "tty"])
+            .args(["--console", "off"])
+            .args(["--tpm", &format!("socket={swtpm_socket_path}")])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let fd = child.stdout.as_ref().unwrap().as_raw_fd();
+        let pipesize = unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, PIPE_SIZE) };
+        let fd = child.stderr.as_ref().unwrap().as_raw_fd();
+        let pipesize1 = unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, PIPE_SIZE) };
+
+        assert!(pipesize >= PIPE_SIZE && pipesize1 >= PIPE_SIZE);
+
+        let mut child_dnsmasq = windows_guest.run_dnsmasq();
+
+        let r = std::panic::catch_unwind(|| {
+            // Wait to make sure Windows boots up
+            windows_guest.wait_for_boot().unwrap();
+
+            assert_eq!(windows_guest.tpm_status(), "OK");
+            windows_guest.shutdown();
+        });
+
+        let _ = child.wait_timeout(std::time::Duration::from_secs(60));
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        let _ = child_dnsmasq.kill();
+        let _ = child_dnsmasq.wait();
+
+        let _ = swtpm_child.kill();
+        let _ = swtpm_child.wait_with_output().unwrap();
 
         handle_child_output(r, &output);
     }
