@@ -232,6 +232,31 @@ fn update_reg(regs: &mut [u32; TPM_CRB_R_MAX], offset: u32, data: &[u8]) -> u32 
     regs[reg_offset]
 }
 
+fn read_reg_value(value: u32, offset: u32) -> u32 {
+    let byte_offset = (offset & 0x3) as usize;
+
+    value >> (byte_offset * 8)
+}
+
+fn complete_request(regs: &mut [u32; TPM_CRB_R_MAX], success: bool) {
+    regs[CRB_CTRL_START as usize] &= !CRB_START_INVOKE;
+    if !success {
+        set_reg_field(regs, CrbRegister::CtrlSts(CtrlStsFields::TpmSts), 1);
+    }
+}
+
+fn data_buffer_range(offset: u32, len: usize, buffer_len: usize) -> Option<std::ops::Range<usize>> {
+    let end_offset = offset.checked_add(len as u32)?;
+    let buffer_end = CRB_DATA_BUFFER.checked_add(buffer_len as u32)?;
+
+    if offset >= CRB_DATA_BUFFER && end_offset <= buffer_end {
+        let start = (offset - CRB_DATA_BUFFER) as usize;
+        Some(start..start + len)
+    } else {
+        None
+    }
+}
+
 pub struct Tpm {
     emulator: Emulator,
     regs: [u32; TPM_CRB_R_MAX],
@@ -270,14 +295,7 @@ impl Tpm {
     }
 
     fn request_completed(&mut self, success: bool) {
-        self.regs[CRB_CTRL_START as usize] &= !CRB_START_INVOKE;
-        if !success {
-            set_reg_field(
-                &mut self.regs,
-                CrbRegister::CtrlSts(CtrlStsFields::TpmSts),
-                1,
-            );
-        }
+        complete_request(&mut self.regs, success);
     }
 
     fn reset(&mut self) -> Result<()> {
@@ -365,13 +383,9 @@ impl BusDevice for Tpm {
         let mut offset: u32 = offset as u32;
         let read_len: usize = data.len();
 
-        if offset >= CRB_DATA_BUFFER
-            && (offset + read_len as u32) <= (CRB_DATA_BUFFER + self.data_buff.len() as u32)
-        {
+        if let Some(range) = data_buffer_range(offset, read_len, self.data_buff.len()) {
             // Read from Data Buffer
-            let start: usize = (offset as usize) - (CRB_DATA_BUFFER as usize);
-            let end: usize = start + read_len;
-            data[..].clone_from_slice(&self.data_buff[start..end]);
+            data[..].clone_from_slice(&self.data_buff[range]);
         } else {
             offset &= 0xff;
             let reg_offset = offset & !0x3;
@@ -383,12 +397,10 @@ impl BusDevice for Tpm {
             if reg_offset == CRB_LOC_STATE && self.emulator.get_established_bit() {
                 val |= 0x1;
             }
+            val = read_reg_value(val, offset);
 
             if data.len() <= 4 {
-                let byte_offset = (offset & 0x3) as usize;
-                data.clone_from_slice(
-                    (val >> (byte_offset * 8)).to_ne_bytes()[0..read_len].as_ref(),
-                );
+                data.clone_from_slice(val.to_ne_bytes()[0..read_len].as_ref());
             } else {
                 error!(
                     "Invalid tpm read: offset {:#X}, data length {:?}",
@@ -419,17 +431,14 @@ impl BusDevice for Tpm {
         let locality = locality_from_addr(offset) as u32;
         let write_len = data.len();
 
-        if offset >= CRB_DATA_BUFFER
-            && (offset + write_len as u32) <= (CRB_DATA_BUFFER + self.data_buff.len() as u32)
-        {
-            let start: usize = (offset as usize) - (CRB_DATA_BUFFER as usize);
+        if let Some(range) = data_buffer_range(offset, write_len, self.data_buff.len()) {
+            let start = range.start;
             if start == 0 {
                 // If filling data_buff at index 0, reset length to 0
                 self.data_buff_len = 0;
                 self.data_buff.fill(0);
             }
-            let end: usize = start + data.len();
-            self.data_buff[start..end].clone_from_slice(data);
+            self.data_buff[range].clone_from_slice(data);
             self.data_buff_len += data.len();
         } else {
             // Ctrl Commands that take more than 4 bytes as input are not yet supported
