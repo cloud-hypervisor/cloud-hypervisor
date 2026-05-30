@@ -75,8 +75,8 @@ pub struct Emulator {
     caps: PtmCap, /* capabilities of the TPM */
     control_socket: SocketDev,
     data_fd: RawFd,
-    established_flag_cached: bool,
-    established_flag: bool,
+    established_bit_cached: bool,
+    established_bit: bool,
 }
 
 impl Emulator {
@@ -103,8 +103,8 @@ impl Emulator {
             caps: 0,
             control_socket: socket,
             data_fd: -1,
-            established_flag_cached: false,
-            established_flag: false,
+            established_bit_cached: false,
+            established_bit: false,
         };
 
         emulator.prepare_data_fd()?;
@@ -322,11 +322,17 @@ impl Emulator {
         Ok(())
     }
 
-    pub fn get_established_flag(&mut self) -> bool {
+    /// Returns the value of the TPM Establishment bit as defined by the
+    /// TCG PC Client Platform TPM Profile (PTP) specification:
+    ///   * `true`  - a TPM2_Startup from Locality 3 or 4 has occurred
+    ///   * `false` - default state after a cold reset
+    ///
+    /// The value is cached on first successful query.
+    pub fn get_established_bit(&mut self) -> bool {
         let mut est: PtmEst = PtmEst::new();
 
-        if self.established_flag_cached {
-            return self.established_flag;
+        if self.established_bit_cached {
+            return self.established_bit;
         }
 
         if let Err(e) = self.run_control_cmd(
@@ -339,10 +345,10 @@ impl Emulator {
             return false;
         }
 
-        self.established_flag_cached = true;
-        self.established_flag = est.resp.bit == 0;
+        self.established_bit_cached = true;
+        self.established_bit = est.resp.bit != 0;
 
-        self.established_flag
+        self.established_bit
     }
 
     /// Function to write to data socket and read the response from it

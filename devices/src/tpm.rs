@@ -363,7 +363,10 @@ impl BusDevice for Tpm {
             offset &= 0xff;
             let mut val = self.regs[offset as usize];
 
-            if offset == CRB_LOC_STATE && !self.emulator.get_established_flag() {
+            // Per the TCG PC Client Platform TPM Profile (PTP) spec, bit 0
+            // of TPM_LOC_STATE_x is `tpmEstablished`. Reflect the live value
+            // from the backend rather than the (zero-initialised) shadow.
+            if offset == CRB_LOC_STATE && self.emulator.get_established_bit() {
                 val |= 0x1;
             }
 
