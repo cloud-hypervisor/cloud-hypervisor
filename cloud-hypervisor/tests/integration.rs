@@ -5907,7 +5907,6 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))] // See issue #7439
     #[cfg(target_arch = "x86_64")]
     fn test_tpm() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
