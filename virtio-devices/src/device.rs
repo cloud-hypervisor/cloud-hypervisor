@@ -225,17 +225,70 @@ pub trait DmaRemapping {
     ) -> std::result::Result<u64, std::io::Error>;
 }
 
+/// Owns a device's worker threads plus the kill event that stops them.
+///
+/// Dropping signals every worker to exit, unparks any that are parked, and joins them.
+pub struct WorkerThreads {
+    /// shared kill event, a single write wakes all of them.
+    kill_evt: EventFd,
+    // true if the device is paused.
+    paused: Arc<AtomicBool>,
+    // The running worker thread's handles.
+    threads: Vec<thread::JoinHandle<()>>,
+}
+
+impl WorkerThreads {
+    fn new(kill_evt: EventFd, paused: Arc<AtomicBool>) -> Self {
+        WorkerThreads {
+            kill_evt,
+            paused,
+            threads: Vec::new(),
+        }
+    }
+
+    /// Borrow access to the kill eventfd
+    fn kill_evt(&self) -> &EventFd {
+        &self.kill_evt
+    }
+
+    /// Signal the workers to exit without joining; they are joined later when
+    /// this is dropped.
+    pub(crate) fn signal_exit(&self) -> std::io::Result<()> {
+        self.kill_evt.write(1)
+    }
+
+    /// Unpark every worker so threads parked while paused resume their loop.
+    fn unpark(&self) {
+        for t in &self.threads {
+            t.thread().unpark();
+        }
+    }
+}
+
+impl Drop for WorkerThreads {
+    fn drop(&mut self) {
+        // Signal the workers to exit, wake any parked so they observe it, then join.
+        let _ = self.kill_evt.write(1);
+        self.paused.store(false, Ordering::SeqCst);
+        self.unpark();
+        for t in self.threads.drain(..) {
+            if let Err(e) = t.join() {
+                error!("Error joining thread: {e:?}");
+            }
+        }
+    }
+}
+
 /// Structure to handle device state common to all devices
 #[derive(Default)]
 pub struct VirtioCommon {
     pub avail_features: u64,
     pub acked_features: u64,
-    pub kill_evt: Option<EventFd>,
     pub interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     pub pause_evt: Option<EventFd>,
     pub paused: Arc<AtomicBool>,
     pub paused_sync: Option<Arc<Barrier>>,
-    pub epoll_threads: Option<Vec<thread::JoinHandle<()>>>,
+    pub workers: Option<WorkerThreads>,
     pub queue_sizes: Vec<u16>,
     pub queue_evts: Vec<EventFd>,
     pub device_type: u32,
@@ -289,7 +342,9 @@ impl VirtioCommon {
             error!("failed creating kill EventFd: {e}");
             ActivateError::BadActivate
         })?;
-        self.kill_evt = Some(kill_evt);
+        // Create the worker collection up front so it owns the kill event;
+        // handlers clone it via dup_eventfds() before any worker is spawned.
+        self.workers = Some(WorkerThreads::new(kill_evt, self.paused.clone()));
 
         let pause_evt = EventFd::new(EFD_NONBLOCK).map_err(|e| {
             error!("failed creating pause EventFd: {e}");
@@ -306,35 +361,21 @@ impl VirtioCommon {
 
     pub fn reset(&mut self) {
         self.queue_evts.clear();
+        self.pause_evt = None;
 
-        // Resume the virtio thread if it was paused. Reset must always
-        // converge to fresh state, so a resume failure is logged but doesn't
-        // skip the rest of the teardown.
-        if self.pause_evt.take().is_some()
-            && let Err(e) = self.resume()
-        {
-            error!("Failed to resume paused device during reset: {e:?}");
-        }
+        // Clear paused explicitly; the workers' Drop does so too, but only
+        // when they exist, and reset may run before activate().
+        self.paused.store(false, Ordering::SeqCst);
 
-        if let Some(kill_evt) = self.kill_evt.take() {
-            // Ignore the result because there is nothing we can do about it.
-            let _ = kill_evt.write(1);
-        }
-
-        if let Some(mut threads) = self.epoll_threads.take() {
-            for t in threads.drain(..) {
-                if let Err(e) = t.join() {
-                    error!("Error joining thread: {e:?}");
-                }
-            }
-        }
+        // Dropping the workers signals kill_evt, unparks any thread parked
+        // for migration, and joins them.
+        self.workers = None;
 
         // Drop the interrupt callback clone
         self.interrupt_cb = None;
     }
 
-    /// Spawn a worker, push its handle into `self.epoll_threads`, and on
-    /// spawn failure run `self.reset()` to join prior workers.
+    /// Spawn a worker; on failure, reset the device to join prior workers.
     #[expect(clippy::too_many_arguments)]
     pub fn spawn_worker<F>(
         &mut self,
@@ -349,18 +390,23 @@ impl VirtioCommon {
     where
         F: FnOnce() -> Result<(), EpollHelperError> + Send + 'static,
     {
-        let mut threads = self.epoll_threads.take().unwrap_or_default();
-        let res = spawn_virtio_thread(
-            name,
-            seccomp_action,
-            thread_type,
-            &mut threads,
-            exit_evt,
-            device_status,
-            interrupt_cb,
-            f,
-        );
-        self.epoll_threads = Some(threads);
+        // Scope the borrow of `workers` so it ends before the reset() below.
+        let res = {
+            let Some(workers) = self.workers.as_mut() else {
+                error!("spawn_worker called before activate()");
+                return Err(ActivateError::BadActivate);
+            };
+            spawn_virtio_thread(
+                name,
+                seccomp_action,
+                thread_type,
+                &mut workers.threads,
+                exit_evt,
+                device_status,
+                interrupt_cb,
+                f,
+            )
+        };
         if let Err(e) = res {
             self.reset();
             return Err(e);
@@ -376,20 +422,19 @@ impl VirtioCommon {
         }
     }
 
-    // Wait for the worker thread to finish and return
+    // Dropping the workers signals, unparks, and joins them. Idempotent.
     pub fn wait_for_epoll_threads(&mut self) {
-        if let Some(mut threads) = self.epoll_threads.take() {
-            for t in threads.drain(..) {
-                if let Err(e) = t.join() {
-                    error!("Error joining thread: {e:?}");
-                }
-            }
-        }
+        self.workers = None;
     }
 
     pub fn dup_eventfds(&self) -> (EventFd, EventFd) {
         (
-            self.kill_evt.as_ref().unwrap().try_clone().unwrap(),
+            self.workers
+                .as_ref()
+                .unwrap()
+                .kill_evt()
+                .try_clone()
+                .unwrap(),
             self.pause_evt.as_ref().unwrap().try_clone().unwrap(),
         )
     }
@@ -446,10 +491,8 @@ impl Pausable for VirtioCommon {
             VirtioDeviceType::from(self.device_type)
         );
         self.paused.store(false, Ordering::SeqCst);
-        if let Some(epoll_threads) = &self.epoll_threads {
-            for t in epoll_threads.iter() {
-                t.thread().unpark();
-            }
+        if let Some(workers) = &self.workers {
+            workers.unpark();
         }
 
         // Signal each activated queue eventfd so workers process restored queues
@@ -495,19 +538,23 @@ mod unit_tests {
         }
     }
 
-    fn make_common_with_kill_evt() -> (VirtioCommon, EventFd) {
+    /// VirtioCommon with its worker collection created (as activate() does)
+    /// and a kill_evt clone for the spawned worker to watch.
+    fn make_common_with_workers() -> (VirtioCommon, EventFd) {
         let kill_evt = EventFd::new(EFD_NONBLOCK).unwrap();
         let kill_evt_clone = kill_evt.try_clone().unwrap();
+        let common = VirtioCommon::default();
+        let workers = WorkerThreads::new(kill_evt, common.paused.clone());
         let common = VirtioCommon {
-            kill_evt: Some(kill_evt),
-            ..Default::default()
+            workers: Some(workers),
+            ..common
         };
         (common, kill_evt_clone)
     }
 
     #[test]
-    fn spawn_worker_appends_to_epoll_threads() {
-        let (mut common, kill_evt_clone) = make_common_with_kill_evt();
+    fn spawn_worker_appends_to_workers() {
+        let (mut common, kill_evt_clone) = make_common_with_workers();
         let started = Arc::new(AtomicUsize::new(0));
         let started_clone = started.clone();
 
@@ -530,15 +577,60 @@ mod unit_tests {
             )
             .unwrap();
 
-        let threads = common.epoll_threads.as_ref().expect("epoll_threads set");
-        assert_eq!(threads.len(), 1);
+        let workers = common.workers.as_ref().expect("workers set");
+        assert_eq!(workers.threads.len(), 1);
 
-        // reset() joins the worker; this confirms the spawn_worker
-        // -> reset() chain (used on spawn failure) actually drains
-        // a real, running worker rather than dropping it detached.
+        // reset() drops the WorkerThreads and joins the worker, exercising
+        // the spawn-failure cleanup path on a real running thread.
         common.reset();
-        assert!(common.epoll_threads.is_none());
-        assert!(common.kill_evt.is_none());
+        assert!(common.workers.is_none());
         assert_eq!(started.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn dropping_common_joins_workers() {
+        let (mut common, kill_evt_clone) = make_common_with_workers();
+        let started = Arc::new(AtomicUsize::new(0));
+        let started_clone = started.clone();
+
+        let exit_evt = EventFd::new(EFD_NONBLOCK).unwrap();
+        let status = Arc::new(AtomicU8::new(0));
+
+        common
+            .spawn_worker(
+                "test",
+                &SeccompAction::Allow,
+                Thread::VirtioBlock,
+                &exit_evt,
+                status,
+                Arc::new(NoopInterrupt),
+                move || {
+                    started_clone.fetch_add(1, Ordering::SeqCst);
+                    let _ = kill_evt_clone.read();
+                    Ok(())
+                },
+            )
+            .unwrap();
+
+        // Dropping `common` alone must join the worker via WorkerThreads' Drop.
+        drop(common);
+        assert_eq!(started.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn reset_clears_paused_without_workers() {
+        // reset() before any worker was spawned must still clear paused, or
+        // the next activation's workers would park immediately and never run.
+        let mut common = VirtioCommon {
+            pause_evt: Some(EventFd::new(EFD_NONBLOCK).unwrap()),
+            ..Default::default()
+        };
+        common.paused.store(true, Ordering::SeqCst);
+        assert!(common.workers.is_none());
+
+        common.reset();
+
+        assert!(!common.paused.load(Ordering::SeqCst));
+        assert!(common.pause_evt.is_none());
     }
 }
