@@ -562,3 +562,19 @@ impl Drop for Emulator {
         }
     }
 }
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+
+    #[test]
+    fn test_startup_response_accepts_success_and_initialized() {
+        assert!(startup_response_is_ok(TPM_SUCCESS));
+        assert!(startup_response_is_ok(TPM_RC_INITIALIZE));
+    }
+
+    #[test]
+    fn test_startup_response_rejects_other_errors() {
+        assert!(!startup_response_is_ok(0x101));
+    }
+}
