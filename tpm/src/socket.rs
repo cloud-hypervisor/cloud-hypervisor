@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::io::Read;
+use std::io::{ErrorKind, Read};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
@@ -136,5 +136,45 @@ impl SocketDev {
             Error::ReadFromSocket(anyhow!("Failed to read from socket. Error Code {e:?}"))
         })?;
         Ok(size)
+    }
+
+    /// Read exactly `expected` bytes from the socket into `buf[0..expected]`.
+    ///
+    /// swtpm may split a control response into multiple writes on the
+    /// underlying SOCK_STREAM, so a single `read()` is not guaranteed to
+    /// return the full response in one shot. This helper loops until the
+    /// expected number of bytes have been collected (or an error is hit).
+    pub fn read_exact(&mut self, buf: &mut [u8], expected: usize) -> Result<usize> {
+        if self.stream.is_none() {
+            return Err(Error::ReadFromSocket(anyhow!(
+                "Stream for tpm socket was not initialized"
+            )));
+        }
+        if expected > buf.len() {
+            return Err(Error::ReadFromSocket(anyhow!(
+                "Buffer too small: have {} bytes, need {}",
+                buf.len(),
+                expected
+            )));
+        }
+        let mut socket = self.stream.as_ref().unwrap();
+        let mut total = 0usize;
+        while total < expected {
+            match socket.read(&mut buf[total..expected]) {
+                Ok(0) => {
+                    return Err(Error::ReadFromSocket(anyhow!(
+                        "Unexpected EOF while reading from socket: got {total} bytes, expected {expected}"
+                    )));
+                }
+                Ok(n) => total += n,
+                Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
+                Err(e) => {
+                    return Err(Error::ReadFromSocket(anyhow!(
+                        "Failed to read from socket. Error Code {e:?}"
+                    )));
+                }
+            }
+        }
+        Ok(total)
     }
 }

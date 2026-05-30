@@ -254,12 +254,50 @@ impl Emulator {
 
         let mut output = [0u8; 16];
 
-        // Every Control Cmd gets at least a result code in response. Read it
-        let read_size = self.control_socket.read(&mut output).map_err(|e| {
-            Error::RunControlCmd(anyhow!(
-                "Failed while reading response for Control Cmd: {cmd:02X?}. Error: {e:?}"
-            ))
-        })?;
+        // Every Control Cmd gets at least a result code (4 bytes) in response.
+        // The full response length is given by `msg_len_out`. On a SOCK_STREAM
+        // socket the response may arrive in more than one chunk, so we cannot
+        // rely on a single `read()` returning the full payload.
+        //
+        // Additionally, when swtpm encounters an error processing a control
+        // command, the swtpm control protocol returns only the 4-byte result
+        // code (e.g. before CMD_INIT some commands return PTM_BAD_ORDINAL =
+        // 0x0A). In that case we must not block waiting for more bytes, so we
+        // first read the 4-byte result code, and only read the remainder of
+        // `msg_len_out` if the command succeeded.
+        let result_len = mem::size_of::<u32>();
+        self.control_socket
+            .read_exact(&mut output, result_len)
+            .map_err(|e| {
+                Error::RunControlCmd(anyhow!(
+                    "Failed while reading result code for Control Cmd: {cmd:02X?}. Error: {e:?}"
+                ))
+            })?;
+
+        let result_code = u32::from_be_bytes(output[0..result_len].try_into().unwrap());
+        if result_code != TPM_SUCCESS {
+            // swtpm returns only the 4-byte result code on error. Propagate
+            // the failure without attempting to read or parse a payload that
+            // will never arrive.
+            msg.set_member_type(MemberType::Response);
+            msg.set_result_code(result_code);
+            return Err(Error::RunControlCmd(anyhow!(
+                "Control Cmd {cmd:02X?} returned error code : {result_code:#X}"
+            )));
+        }
+
+        let read_size = if msg_len_out > result_len {
+            self.control_socket
+                .read_exact(&mut output[result_len..], msg_len_out - result_len)
+                .map_err(|e| {
+                    Error::RunControlCmd(anyhow!(
+                        "Failed while reading response for Control Cmd: {cmd:02X?}. Error: {e:?}"
+                    ))
+                })?;
+            msg_len_out
+        } else {
+            result_len
+        };
 
         if msg_len_out != 0 {
             msg.update_ptm_with_response(&output[0..read_size])
