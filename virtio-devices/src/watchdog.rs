@@ -270,16 +270,6 @@ impl Watchdog {
     }
 }
 
-impl Drop for Watchdog {
-    fn drop(&mut self) {
-        if let Some(kill_evt) = self.common.kill_evt.take() {
-            // Ignore the result because there is nothing we can do about it.
-            let _ = kill_evt.write(1);
-        }
-        self.common.wait_for_epoll_threads();
-    }
-}
-
 fn timerfd_create() -> Result<RawFd, io::Error> {
     // SAFETY: FFI call, trivially safe
     let res = unsafe { libc::timerfd_create(libc::CLOCK_MONOTONIC, 0) };

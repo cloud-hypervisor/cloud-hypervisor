@@ -1035,16 +1035,6 @@ impl Block {
     }
 }
 
-impl Drop for Block {
-    fn drop(&mut self) {
-        if let Some(kill_evt) = self.common.kill_evt.take() {
-            // Ignore the result because there is nothing we can do about it.
-            let _ = kill_evt.write(1);
-        }
-        self.common.wait_for_epoll_threads();
-    }
-}
-
 impl VirtioDevice for Block {
     fn device_type(&self) -> u32 {
         self.common.device_type

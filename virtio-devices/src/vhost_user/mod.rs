@@ -613,19 +613,8 @@ impl VhostUserCommon {
     }
 
     pub fn shutdown(&mut self) {
-        // Signal workers to exit, unpause them (they may be parked
-        // if the VM was paused for migration), then wait for them
-        // to finish so they drop their Arc<VhostUserHandle> and the
-        // socket fully closes for the destination to reconnect.
-        if let Some(kill_evt) = self.virtio_common.kill_evt.take() {
-            let _ = kill_evt.write(1);
-        }
-        self.virtio_common.paused.store(false, Ordering::SeqCst);
-        if let Some(threads) = self.virtio_common.epoll_threads.as_ref() {
-            for t in threads {
-                t.thread().unpark();
-            }
-        }
+        // Join the workers so they drop their Arc<VhostUserHandle> and the
+        // socket closes, letting the migration destination reconnect.
         self.virtio_common.wait_for_epoll_threads();
 
         // Remove socket path if needed
@@ -862,8 +851,8 @@ impl VhostUserCommon {
 
         // Make sure the device thread is killed in order to prevent from
         // reconnections to the socket.
-        if let Some(kill_evt) = self.virtio_common.kill_evt.take() {
-            kill_evt.write(1).map_err(|e| {
+        if let Some(workers) = self.virtio_common.workers.as_ref() {
+            workers.signal_exit().map_err(|e| {
                 MigratableError::CompleteMigration(anyhow!(
                     "Error killing vhost-user thread: {e:?}"
                 ))

@@ -426,19 +426,6 @@ where
     }
 }
 
-impl<B> Drop for Vsock<B>
-where
-    B: VsockBackend,
-{
-    fn drop(&mut self) {
-        if let Some(kill_evt) = self.common.kill_evt.take() {
-            // Ignore the result because there is nothing we can do about it.
-            let _ = kill_evt.write(1);
-        }
-        self.common.wait_for_epoll_threads();
-    }
-}
-
 impl<B> VirtioDevice for Vsock<B>
 where
     B: VsockBackend + Sync + 'static,
