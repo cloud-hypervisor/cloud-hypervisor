@@ -5932,15 +5932,33 @@ mod common_parallel {
         let mut child = guest_cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
             guest.wait_vm_boot().unwrap();
-            assert_eq!(
-                guest.ssh_command("ls /dev/tpm0").unwrap().trim(),
-                "/dev/tpm0"
-            );
-            guest.ssh_command("sudo tpm2_selftest -f").unwrap();
-            guest
-                .ssh_command("echo 'hello' > /tmp/checksum_test;  ")
-                .unwrap();
-            guest.ssh_command("cmp <(sudo tpm2_pcrevent  /tmp/checksum_test | grep sha256 | awk '{print $2}') <(sha256sum /tmp/checksum_test| awk '{print $1}')").unwrap();
+            let exercise_tpm = || {
+                assert_eq!(
+                    guest.ssh_command("ls /dev/tpm0").unwrap().trim(),
+                    "/dev/tpm0"
+                );
+                guest.ssh_command("sudo tpm2_selftest -f").unwrap();
+                guest
+                    .ssh_command(
+                        "sudo tpm2_getrandom 32 >/tmp/tpm_random \
+                         && test $(wc -c </tmp/tpm_random) -eq 32",
+                    )
+                    .unwrap();
+                guest
+                    .ssh_command("sudo tpm2_getcap properties-fixed | grep -q TPM2_PT_MANUFACTURER")
+                    .unwrap();
+                guest
+                    .ssh_command("sudo tpm2_pcrread sha256:0,1,2,3 >/tmp/tpm_pcrread")
+                    .unwrap();
+                guest
+                    .ssh_command("echo 'hello' > /tmp/checksum_test;  ")
+                    .unwrap();
+                guest.ssh_command("cmp <(sudo tpm2_pcrevent  /tmp/checksum_test | grep sha256 | awk '{print $2}') <(sha256sum /tmp/checksum_test| awk '{print $1}')").unwrap();
+            };
+
+            exercise_tpm();
+            guest.reboot_linux(0);
+            exercise_tpm();
         });
 
         let _ = swtpm_child.kill();
