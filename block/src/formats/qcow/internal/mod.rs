@@ -66,6 +66,8 @@ use crate::error::{BlockError, BlockErrorKind, BlockResult};
 pub enum Error {
     #[error("Backing file I/O error: {0}")]
     BackingFileIo(String /* path */, #[source] io::Error),
+    #[error("Backing file offset {0:#x} with zero size")]
+    BackingFileOffsetWithoutSize(u64),
     #[error("Backing file open error: {0}")]
     BackingFileOpen(String /* path */, #[source] Box<Error>),
     #[error(
