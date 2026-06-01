@@ -135,8 +135,8 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
     let test_timeout = control.test_timeout;
     let (rx, bandwidth) = control.net_control.unwrap();
 
-    let jammy = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-    let mut guest = performance_test_new_guest(Box::new(jammy), control);
+    let disk_config = UbuntuDiskConfig::new(NOBLE_IMAGE_NAME.to_string());
+    let mut guest = performance_test_new_guest(Box::new(disk_config), control);
 
     let num_queues = control.num_queues.unwrap();
     let queue_size = control.queue_size.unwrap();
@@ -175,8 +175,8 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
 }
 
 pub fn performance_net_latency(control: &PerformanceTestControl) -> f64 {
-    let jammy = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-    let mut guest = performance_test_new_guest(Box::new(jammy), control);
+    let disk_config = UbuntuDiskConfig::new(NOBLE_IMAGE_NAME.to_string());
+    let mut guest = performance_test_new_guest(Box::new(disk_config), control);
 
     let num_queues = control.num_queues.unwrap();
     let queue_size = control.queue_size.unwrap();
@@ -322,8 +322,8 @@ fn measure_boot_time(cmd: &mut GuestCommand, test_timeout: u32) -> Result<f64, E
 
 pub fn performance_boot_time(control: &PerformanceTestControl) -> f64 {
     let r = std::panic::catch_unwind(|| {
-        let jammy = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = performance_test_new_guest(Box::new(jammy), control);
+        let disk_config = UbuntuDiskConfig::new(NOBLE_IMAGE_NAME.to_string());
+        let guest = performance_test_new_guest(Box::new(disk_config), control);
         let mut cmd = GuestCommand::new(&guest);
 
         let c = cmd
@@ -346,8 +346,8 @@ pub fn performance_boot_time(control: &PerformanceTestControl) -> f64 {
 
 pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> f64 {
     let r = std::panic::catch_unwind(|| {
-        let jammy = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = performance_test_new_guest(Box::new(jammy), control);
+        let disk_config = UbuntuDiskConfig::new(NOBLE_IMAGE_NAME.to_string());
+        let guest = performance_test_new_guest(Box::new(disk_config), control);
         let mut cmd = GuestCommand::new(&guest);
         let c = cmd
             .default_cpus()
@@ -384,8 +384,8 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
     let bandwidth = block_control.bandwidth;
     let test_file = block_control.test_file;
 
-    let jammy = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-    let mut guest = performance_test_new_guest(Box::new(jammy), control);
+    let disk_config = UbuntuDiskConfig::new(NOBLE_IMAGE_NAME.to_string());
+    let mut guest = performance_test_new_guest(Box::new(disk_config), control);
     let api_socket = guest
         .tmp_dir
         .as_path()
@@ -525,8 +525,8 @@ fn measure_restore_time(
 
 pub fn performance_restore_latency(control: &PerformanceTestControl) -> f64 {
     let r = std::panic::catch_unwind(|| {
-        let jammy = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = performance_test_new_guest(Box::new(jammy), control);
+        let disk_config = UbuntuDiskConfig::new(NOBLE_IMAGE_NAME.to_string());
+        let guest = performance_test_new_guest(Box::new(disk_config), control);
         let api_socket_source = String::from(
             guest
                 .tmp_dir

@@ -301,7 +301,7 @@ pub(crate) fn test_cpu_topology(
     packages: u8,
     use_fw: bool,
 ) {
-    let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+    let disk_config = UbuntuDiskConfig::new(NOBLE_IMAGE_NAME.to_string());
     let guest = Guest::new(Box::new(disk_config));
     let total_vcpus = threads_per_core * cores_per_package * packages;
     let direct_kernel_boot_path = direct_kernel_boot_path();
@@ -420,7 +420,7 @@ pub(crate) fn test_cpu_topology(
 
 #[allow(unused_variables)]
 pub(crate) fn _test_guest_numa_nodes(acpi: bool) {
-    let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+    let disk_config = UbuntuDiskConfig::new(NOBLE_IMAGE_NAME.to_string());
     let guest = Guest::new(Box::new(disk_config));
     let api_socket = temp_api_path(&guest.tmp_dir);
     #[cfg(target_arch = "x86_64")]
@@ -527,7 +527,7 @@ pub(crate) fn test_vhost_user_net(
     generate_host_mac: bool,
     client_mode_daemon: bool,
 ) {
-    let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+    let disk_config = UbuntuDiskConfig::new(NOBLE_IMAGE_NAME.to_string());
     let guest = Guest::new(Box::new(disk_config));
     let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -698,7 +698,7 @@ pub(crate) fn test_vhost_user_blk(
     direct: bool,
     prepare_vhost_user_blk_daemon: Option<&PrepareBlkDaemon>,
 ) {
-    let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+    let disk_config = UbuntuDiskConfig::new(NOBLE_IMAGE_NAME.to_string());
     let guest = Guest::new(Box::new(disk_config));
     let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -840,7 +840,7 @@ pub(crate) fn test_boot_from_vhost_user_blk(
     direct: bool,
     prepare_vhost_user_blk_daemon: Option<&PrepareBlkDaemon>,
 ) {
-    let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+    let disk_config = UbuntuDiskConfig::new(NOBLE_IMAGE_NAME.to_string());
     let guest = Guest::new(Box::new(disk_config));
 
     let kernel_path = direct_kernel_boot_path();
@@ -909,7 +909,7 @@ pub(crate) fn _test_virtio_fs(
     use_generic_vhost_user: bool,
     pci_segment: Option<u16>,
 ) {
-    let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+    let disk_config = UbuntuDiskConfig::new(NOBLE_IMAGE_NAME.to_string());
     let guest = Guest::new(Box::new(disk_config));
     let api_socket = temp_api_path(&guest.tmp_dir);
     let event_path = temp_event_monitor_path(&guest.tmp_dir);
@@ -1148,7 +1148,7 @@ pub(crate) fn _test_virtio_fs(
 }
 
 pub(crate) fn test_virtio_pmem(discard_writes: bool, specify_size: bool) {
-    let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+    let disk_config = UbuntuDiskConfig::new(NOBLE_IMAGE_NAME.to_string());
     let guest = Guest::new(Box::new(disk_config));
 
     let kernel_path = direct_kernel_boot_path();
@@ -1289,7 +1289,7 @@ pub(crate) fn test_memory_mergeable(mergeable: bool) {
     // We assume the number of shared pages in the rest of the system to be constant
     let ksm_ps_init = get_ksm_pages_shared();
 
-    let disk_config1 = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+    let disk_config1 = UbuntuDiskConfig::new(NOBLE_IMAGE_NAME.to_string());
     let guest1 = Guest::new(Box::new(disk_config1));
     let mut child1 = GuestCommand::new(&guest1)
         .default_cpus()
@@ -1315,7 +1315,7 @@ pub(crate) fn test_memory_mergeable(mergeable: bool) {
 
     let ksm_ps_guest1 = get_ksm_pages_shared();
 
-    let disk_config2 = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+    let disk_config2 = UbuntuDiskConfig::new(NOBLE_IMAGE_NAME.to_string());
     let guest2 = Guest::new(Box::new(disk_config2));
     let mut child2 = GuestCommand::new(&guest2)
         .default_cpus()
@@ -1361,7 +1361,7 @@ pub(crate) fn test_memory_mergeable(mergeable: bool) {
 // interface attached to the virtual IOMMU since this is the one used to
 // send all commands through SSH.
 pub(crate) fn _test_virtio_iommu(_acpi: bool /* not needed on x86_64 */) {
-    let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+    let disk_config = UbuntuDiskConfig::new(NOBLE_IMAGE_NAME.to_string());
     let guest = Guest::new(Box::new(disk_config));
 
     #[cfg(target_arch = "x86_64")]

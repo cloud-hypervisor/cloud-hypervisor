@@ -26,21 +26,21 @@ assets:
     test: [integration, windows]
 
   # Guest images
-  - filename: jammy-server-cloudimg-amd64-custom-20241017-0.qcow2
-    url: https://ch-images.azureedge.net/jammy-server-cloudimg-amd64-custom-20241017-0.qcow2
-    sha1: 5f10738920efb74f0bf854cadcd1b1fd544e49c8
+  - filename: noble-server-cloudimg-amd64-custom-20260601-0.qcow2
+    url: https://ch-images.azureedge.net/noble-server-cloudimg-amd64-custom-20260601-0.qcow2
+    sha1: 1ebdbcc64be83c45803b8425a3bd0eebf065ec22
     arch: [x86_64]
     test: [integration, cvm, rate-limiter, metrics]
 
-  - filename: jammy-server-cloudimg-arm64-custom-20220329-0.raw
-    url: https://ch-images.azureedge.net/jammy-server-cloudimg-arm64-custom-20220329-0.raw
-    sha1: 1f2b71be43b8f748f01306c4454e5c921343faa4
+  - filename: noble-server-cloudimg-arm64-custom-20260601-0.raw
+    url: https://ch-images.azureedge.net/noble-server-cloudimg-arm64-custom-20260601-0.raw
+    sha1: f37447d8eadf9a981a53183e680aee4428a330fa
     arch: [aarch64]
     test: [integration]
 
-  - filename: jammy-server-cloudimg-arm64-custom-20220329-0.qcow2
-    url: https://ch-images.azureedge.net/jammy-server-cloudimg-arm64-custom-20220329-0.qcow2
-    sha1: 7118f4d4cad18c8357bc2ad9824a50f9a82a860a
+  - filename: noble-server-cloudimg-arm64-custom-20260601-0.qcow2
+    url: https://ch-images.azureedge.net/noble-server-cloudimg-arm64-custom-20260601-0.qcow2
+    sha1: 2411a8012577aee0c1c99e1170495af6dc279b5f
     arch: [aarch64]
     test: [integration]
 

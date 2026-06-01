@@ -21,23 +21,23 @@ if [ "$VM_TYPE" = "confidential" ]; then
 fi
 
 if [ "${TEST_ARCH}" == "aarch64" ]; then
-    JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.qcow2"
-    JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.raw"
+    NOBLE_OS_IMAGE_NAME="noble-server-cloudimg-arm64-custom-20260601-0.qcow2"
+    NOBLE_OS_RAW_IMAGE_NAME="noble-server-cloudimg-arm64-custom-20260601-0.raw"
 else
-    JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.qcow2"
-    JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.raw"
+    NOBLE_OS_IMAGE_NAME="noble-server-cloudimg-amd64-custom-20260601-0.qcow2"
+    NOBLE_OS_RAW_IMAGE_NAME="noble-server-cloudimg-amd64-custom-20260601-0.raw"
 fi
 
-JAMMY_OS_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_IMAGE_NAME"
-if [ ! -f "$JAMMY_OS_IMAGE" ]; then
-    echo "Missing: $JAMMY_OS_IMAGE — run: python3 scripts/fetch_workloads.py --test metrics"
+NOBLE_OS_IMAGE="$WORKLOADS_DIR/$NOBLE_OS_IMAGE_NAME"
+if [ ! -f "$NOBLE_OS_IMAGE" ]; then
+    echo "Missing: $NOBLE_OS_IMAGE — run: python3 scripts/fetch_workloads.py --test metrics"
     exit 1
 fi
 
-JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
-if [ ! -f "$JAMMY_OS_RAW_IMAGE" ]; then
+NOBLE_OS_RAW_IMAGE="$WORKLOADS_DIR/$NOBLE_OS_RAW_IMAGE_NAME"
+if [ ! -f "$NOBLE_OS_RAW_IMAGE" ]; then
     pushd "$WORKLOADS_DIR" || exit
-    time qemu-img convert -p -f qcow2 -O raw $JAMMY_OS_IMAGE_NAME $JAMMY_OS_RAW_IMAGE_NAME || exit 1
+    time qemu-img convert -p -f qcow2 -O raw $NOBLE_OS_IMAGE_NAME $NOBLE_OS_RAW_IMAGE_NAME || exit 1
     popd || exit
 fi
 
