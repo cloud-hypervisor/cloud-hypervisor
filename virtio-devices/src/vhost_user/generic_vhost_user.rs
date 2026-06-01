@@ -317,7 +317,7 @@ impl VirtioDevice for GenericVhostUser {
 
         // Run a dedicated thread for handling potential reconnections with
         // the backend.
-        let (kill_evt, pause_evt) = self.vu_common.virtio_common.dup_eventfds();
+        let (kill_evt, pause_evt) = self.vu_common.virtio_common.dup_eventfds()?;
 
         let mut handler = self.vu_common.activate(
             mem,

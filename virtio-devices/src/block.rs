@@ -1104,7 +1104,7 @@ impl VirtioDevice for Block {
             queue.set_event_idx(event_idx);
 
             let queue_size = queue.size();
-            let (kill_evt, pause_evt) = self.common.dup_eventfds();
+            let (kill_evt, pause_evt) = self.common.dup_eventfds()?;
             let queue_idx = i as u16;
 
             let mut handler = BlockEpollHandler {

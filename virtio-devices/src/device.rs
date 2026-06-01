@@ -427,16 +427,21 @@ impl VirtioCommon {
         self.workers = None;
     }
 
-    pub fn dup_eventfds(&self) -> (EventFd, EventFd) {
-        (
-            self.workers
-                .as_ref()
-                .unwrap()
-                .kill_evt()
-                .try_clone()
-                .unwrap(),
-            self.pause_evt.as_ref().unwrap().try_clone().unwrap(),
-        )
+    pub fn dup_eventfds(&self) -> Result<(EventFd, EventFd), ActivateError> {
+        let kill_evt = self
+            .workers
+            .as_ref()
+            .ok_or(ActivateError::BadActivate)?
+            .kill_evt()
+            .try_clone()
+            .map_err(ActivateError::CloneEventFd)?;
+        let pause_evt = self
+            .pause_evt
+            .as_ref()
+            .ok_or(ActivateError::BadActivate)?
+            .try_clone()
+            .map_err(ActivateError::CloneEventFd)?;
+        Ok((kill_evt, pause_evt))
     }
 
     pub fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {

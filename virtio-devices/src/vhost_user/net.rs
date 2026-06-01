@@ -289,7 +289,7 @@ impl VirtioDevice for Net {
 
             ctrl_queue.set_event_idx(event_idx);
 
-            let (kill_evt, pause_evt) = self.vu_common.virtio_common.dup_eventfds();
+            let (kill_evt, pause_evt) = self.vu_common.virtio_common.dup_eventfds()?;
 
             let mut ctrl_handler = NetCtrlEpollHandler {
                 mem: mem.clone(),
@@ -330,7 +330,7 @@ impl VirtioDevice for Net {
 
         // Run a dedicated thread for handling potential reconnections with
         // the backend.
-        let (kill_evt, pause_evt) = self.vu_common.virtio_common.dup_eventfds();
+        let (kill_evt, pause_evt) = self.vu_common.virtio_common.dup_eventfds()?;
 
         let mut handler = self.vu_common.activate(
             mem,

@@ -34,9 +34,7 @@ where
     let seccomp_filter = get_seccomp_filter(seccomp_action, thread_type)
         .map_err(ActivateError::CreateSeccompFilter)?;
 
-    let thread_exit_evt = exit_evt
-        .try_clone()
-        .map_err(ActivateError::CloneExitEventFd)?;
+    let thread_exit_evt = exit_evt.try_clone().map_err(ActivateError::CloneEventFd)?;
     let thread_name = name.to_string();
 
     thread::Builder::new()

@@ -729,7 +729,7 @@ impl VirtioDevice for Console {
             error!("Failed to signal console driver: {e:?}");
         }
 
-        let (kill_evt, pause_evt) = self.common.dup_eventfds();
+        let (kill_evt, pause_evt) = self.common.dup_eventfds()?;
 
         let (_, input_queue, input_queue_evt) = queues.remove(0);
         let (_, output_queue, output_queue_evt) = queues.remove(0);

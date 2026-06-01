@@ -1301,7 +1301,7 @@ impl VirtioDevice for Iommu {
             device_status,
         } = context;
         self.common.activate(&queues, interrupt_cb.clone())?;
-        let (kill_evt, pause_evt) = self.common.dup_eventfds();
+        let (kill_evt, pause_evt) = self.common.dup_eventfds()?;
 
         let (_, request_queue, request_queue_evt) = queues.remove(0);
         let (_, _event_queue, _event_queue_evt) = queues.remove(0);
