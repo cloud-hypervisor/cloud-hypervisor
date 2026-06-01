@@ -335,6 +335,13 @@ impl QcowHeader {
             let cluster_size = 1u64
                 .checked_shl(header.cluster_bits)
                 .ok_or(Error::InvalidClusterSize)?;
+            if header.backing_file_offset < u64::from(header.header_size) {
+                return Err(Error::BackingFileOverlapsHeader(
+                    header.backing_file_offset,
+                    header.backing_file_size,
+                    header.header_size,
+                ));
+            }
             if header.backing_file_offset >= cluster_size
                 || header.backing_file_offset + u64::from(header.backing_file_size) > cluster_size
             {

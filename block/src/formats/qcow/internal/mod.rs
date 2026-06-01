@@ -72,6 +72,8 @@ pub enum Error {
         "Backing file name at offset {0:#x} length {1:#x} lies outside first cluster of {2:#x}"
     )]
     BackingFileOutsideFirstCluster(u64, u32, u64),
+    #[error("Backing file name at offset {0:#x} length {1:#x} overlaps header of size {2:#x}")]
+    BackingFileOverlapsHeader(u64, u32, u32),
     #[error("Backing file support is disabled")]
     BackingFilesDisabled,
     #[error("Backing file name is too long: {0} bytes over")]
