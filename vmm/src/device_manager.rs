@@ -5853,7 +5853,7 @@ impl Aml for DeviceManager {
             .to_aml_bytes(sink);
         }
 
-        aml::Name::new("_S5_".into(), &aml::Package::new(vec![&5u8])).to_aml_bytes(sink);
+        create_s5_sleep_state(sink);
 
         aml::Device::new(
             "_SB_.PWRB".into(),
@@ -5877,6 +5877,17 @@ impl Aml for DeviceManager {
             .unwrap()
             .to_aml_bytes(sink);
     }
+}
+
+fn create_s5_sleep_state(sink: &mut dyn acpi_tables::AmlSink) {
+    // More information about the sleep state structure can be found here:
+    // https://uefi.org/htmlspecs/ACPI_Spec_6_4_html/07_Power_and_Performance_Mgmt/oem-supplied-system-level-control-methods.html#sx-system-states
+
+    aml::Name::new(
+        "_S5_".into(),
+        &aml::Package::new(vec![&5u8, &5u8, &0u8, &0u8]),
+    )
+    .to_aml_bytes(sink);
 }
 
 impl Pausable for DeviceManager {
@@ -6127,6 +6138,20 @@ impl Drop for DeviceManager {
 #[cfg(test)]
 mod unit_tests {
     use super::*;
+
+    #[test]
+    fn test_s5_sleep_state_uses_complete_package() {
+        let mut bytes = Vec::new();
+
+        create_s5_sleep_state(&mut bytes);
+
+        assert_eq!(
+            bytes,
+            vec![
+                0x08, b'_', b'S', b'5', b'_', 0x12, 0x08, 0x04, 0x0a, 0x05, 0x0a, 0x05, 0x00, 0x00,
+            ]
+        );
+    }
 
     #[test]
     fn test_hotplugged_block_devices_use_64bit_bars() {
