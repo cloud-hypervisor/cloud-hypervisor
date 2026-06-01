@@ -79,12 +79,27 @@ pub const PORT_FW_CFG_WIDTH: u64 = 0x10;
 
 const FW_CFG_SIGNATURE: u16 = 0x00;
 const FW_CFG_ID: u16 = 0x01;
+const FW_CFG_UUID: u16 = 0x02;
+const FW_CFG_RAM_SIZE: u16 = 0x03;
+const FW_CFG_NOGRAPHIC: u16 = 0x04;
+const FW_CFG_NB_CPUS: u16 = 0x05;
+const FW_CFG_MACHINE_ID: u16 = 0x06;
+const FW_CFG_KERNEL_ADDR: u16 = 0x07;
 const FW_CFG_KERNEL_SIZE: u16 = 0x08;
+const FW_CFG_KERNEL_CMDLINE: u16 = 0x09;
+const FW_CFG_INITRD_ADDR: u16 = 0x0a;
 const FW_CFG_INITRD_SIZE: u16 = 0x0b;
+const FW_CFG_BOOT_DEVICE: u16 = 0x0c;
+const FW_CFG_NUMA: u16 = 0x0d;
+const FW_CFG_BOOT_MENU: u16 = 0x0e;
+const FW_CFG_MAX_CPUS: u16 = 0x0f;
+const FW_CFG_KERNEL_ENTRY: u16 = 0x10;
 const FW_CFG_KERNEL_DATA: u16 = 0x11;
 const FW_CFG_INITRD_DATA: u16 = 0x12;
+const FW_CFG_CMDLINE_ADDR: u16 = 0x13;
 const FW_CFG_CMDLINE_SIZE: u16 = 0x14;
 const FW_CFG_CMDLINE_DATA: u16 = 0x15;
+const FW_CFG_SETUP_ADDR: u16 = 0x16;
 const FW_CFG_SETUP_SIZE: u16 = 0x17;
 const FW_CFG_SETUP_DATA: u16 = 0x18;
 const FW_CFG_FILE_DIR: u16 = 0x19;
@@ -430,10 +445,34 @@ impl FwCfg {
     pub fn new(memory: GuestMemoryAtomic<GuestMemoryMmap<AtomicBitmap>>) -> FwCfg {
         const DEFAULT_ITEM: FwCfgContent = FwCfgContent::Slice(&[]);
         let mut known_items = [DEFAULT_ITEM; FW_CFG_KNOWN_ITEMS];
+        let file_buf = Vec::from(FwCfgFilesHeader { count_be: 0 }.as_mut_bytes());
+
         known_items[FW_CFG_SIGNATURE as usize] = FwCfgContent::Slice(&FW_CFG_DMA_SIGNATURE);
         known_items[FW_CFG_ID as usize] = FwCfgContent::Slice(&FW_CFG_FEATURE);
-        let file_buf = Vec::from(FwCfgFilesHeader { count_be: 0 }.as_mut_bytes());
-        known_items[FW_CFG_FILE_DIR as usize] = FwCfgContent::Bytes(file_buf);
+        known_items[FW_CFG_UUID as usize] = FwCfgContent::Bytes(Default::default()); /* TODO? */
+        known_items[FW_CFG_RAM_SIZE as usize] = FwCfgContent::U64(0); /* TODO? */
+        known_items[FW_CFG_NOGRAPHIC as usize] = FwCfgContent::U16(0); /* TODO? */
+        known_items[FW_CFG_NB_CPUS as usize] = FwCfgContent::U16(0); /* TODO? */
+        known_items[FW_CFG_MACHINE_ID as usize] = FwCfgContent::U16(0); /* TODO? */
+        known_items[FW_CFG_KERNEL_ADDR as usize] = FwCfgContent::U32(0); /* TODO? */
+        known_items[FW_CFG_KERNEL_SIZE as usize] = FwCfgContent::U32(0); /* TODO? */
+        known_items[FW_CFG_KERNEL_CMDLINE as usize] = FwCfgContent::U32(0); /* TODO? */
+        known_items[FW_CFG_INITRD_ADDR as usize] = FwCfgContent::U32(0); /* TODO? */
+        known_items[FW_CFG_INITRD_SIZE as usize] = FwCfgContent::U32(0); /* TODO? */
+        known_items[FW_CFG_BOOT_DEVICE as usize] = FwCfgContent::U16(0); /* TODO? */
+        known_items[FW_CFG_NUMA as usize] = FwCfgContent::Bytes(Default::default()); /* TODO? */
+        known_items[FW_CFG_BOOT_MENU as usize] = FwCfgContent::U16(0); /* TODO? */
+        known_items[FW_CFG_MAX_CPUS as usize] = FwCfgContent::U16(255); /* TODO? */
+        known_items[FW_CFG_KERNEL_ENTRY as usize] = FwCfgContent::U32(0); /* TODO? */
+        known_items[FW_CFG_KERNEL_DATA as usize] = FwCfgContent::Bytes(Default::default()); /* TODO? */
+        known_items[FW_CFG_INITRD_DATA as usize] = FwCfgContent::Bytes(Default::default()); /* TODO? */
+        known_items[FW_CFG_CMDLINE_ADDR as usize] = FwCfgContent::U32(0); /* TODO? */
+        known_items[FW_CFG_CMDLINE_SIZE as usize] = FwCfgContent::U32(0); /* TODO? */
+        known_items[FW_CFG_CMDLINE_DATA as usize] = FwCfgContent::Bytes(Default::default()); /* TODO? */
+        known_items[FW_CFG_SETUP_ADDR as usize] = FwCfgContent::U32(0); /* TODO? */
+        known_items[FW_CFG_SETUP_SIZE as usize] = FwCfgContent::U32(0); /* TODO? */
+        known_items[FW_CFG_SETUP_DATA as usize] = FwCfgContent::Bytes(Default::default()); /* TODO? */
+        known_items[FW_CFG_FILE_DIR as usize] = FwCfgContent::Bytes(file_buf); /* TODO? */
 
         FwCfg {
             selector: 0,
