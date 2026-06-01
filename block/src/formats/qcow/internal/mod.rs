@@ -2748,6 +2748,12 @@ mod unit_tests {
     }
 
     #[test]
+    fn backing_file_offset_inside_header() {
+        let err = read_header_with_patched_backing(64, 16).unwrap_err();
+        assert!(matches!(err, Error::BackingFileOverlapsHeader(_, _, _)));
+    }
+
+    #[test]
     fn backing_file_fits_at_cluster_end() {
         let cluster_size = 1u64 << DEFAULT_CLUSTER_BITS;
         let header =
