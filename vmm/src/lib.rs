@@ -89,6 +89,8 @@ pub mod landlock;
 pub mod memory_manager;
 pub mod migration;
 pub mod migration_transport;
+#[expect(unused)]
+mod migration_worker;
 mod pci_segment;
 pub mod seccomp_filters;
 mod serial_manager;
