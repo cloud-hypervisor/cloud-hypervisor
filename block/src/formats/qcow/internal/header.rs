@@ -336,6 +336,11 @@ impl QcowHeader {
                 header.backing_file_size,
             ));
         }
+        if header.backing_file_offset != 0 && header.backing_file_size == 0 {
+            return Err(Error::BackingFileOffsetWithoutSize(
+                header.backing_file_offset,
+            ));
+        }
         if header.backing_file_offset != 0 {
             let cluster_size = 1u64
                 .checked_shl(header.cluster_bits)
