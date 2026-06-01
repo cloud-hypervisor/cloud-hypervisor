@@ -2754,6 +2754,12 @@ mod unit_tests {
     }
 
     #[test]
+    fn backing_file_size_without_offset() {
+        let err = read_header_with_patched_backing(0, 16).unwrap_err();
+        assert!(matches!(err, Error::BackingFileSizeWithoutOffset(16)));
+    }
+
+    #[test]
     fn backing_file_fits_at_cluster_end() {
         let cluster_size = 1u64 << DEFAULT_CLUSTER_BITS;
         let header =
