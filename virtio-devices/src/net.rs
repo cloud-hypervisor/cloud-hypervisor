@@ -691,7 +691,7 @@ impl VirtioDevice for Net {
 
             ctrl_queue.set_event_idx(event_idx);
 
-            let (kill_evt, pause_evt) = self.common.dup_eventfds();
+            let (kill_evt, pause_evt) = self.common.dup_eventfds()?;
             let mut ctrl_handler = NetCtrlEpollHandler {
                 mem: mem.clone(),
                 kill_evt,
@@ -732,7 +732,7 @@ impl VirtioDevice for Net {
 
             let queue_evt_pair = (queue_evt_0, queue_evt_1);
 
-            let (kill_evt, pause_evt) = self.common.dup_eventfds();
+            let (kill_evt, pause_evt) = self.common.dup_eventfds()?;
 
             let rx_rate_limiter: Option<rate_limiter::RateLimiter> = self
                 .rate_limiter_config

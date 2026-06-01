@@ -378,7 +378,7 @@ impl VirtioDevice for Pmem {
             device_status,
         } = context;
         self.common.activate(&queues, interrupt_cb.clone())?;
-        let (kill_evt, pause_evt) = self.common.dup_eventfds();
+        let (kill_evt, pause_evt) = self.common.dup_eventfds()?;
         if let Some(disk) = self.disk.as_ref() {
             let disk = disk.try_clone().map_err(|e| {
                 error!("failed cloning pmem disk: {e}");

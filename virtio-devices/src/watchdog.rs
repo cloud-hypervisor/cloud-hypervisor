@@ -328,7 +328,7 @@ impl VirtioDevice for Watchdog {
             device_status,
         } = context;
         self.common.activate(&queues, interrupt_cb.clone())?;
-        let (kill_evt, pause_evt) = self.common.dup_eventfds();
+        let (kill_evt, pause_evt) = self.common.dup_eventfds()?;
 
         let reset_evt = self.reset_evt.try_clone().map_err(|e| {
             error!("Failed to clone reset_evt eventfd: {e}");

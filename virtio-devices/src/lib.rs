@@ -108,8 +108,8 @@ const VIRTIO_F_NOTIFICATION_DATA: u32 = 38;
 pub enum ActivateError {
     #[error("Failed to activate virtio device")]
     BadActivate,
-    #[error("Failed to clone exit event fd")]
-    CloneExitEventFd(#[source] std::io::Error),
+    #[error("Failed to clone EventFd")]
+    CloneEventFd(#[source] std::io::Error),
     #[error("Failed to spawn thread")]
     ThreadSpawn(#[source] std::io::Error),
     #[error("Failed to setup vhost-user-fs daemon")]

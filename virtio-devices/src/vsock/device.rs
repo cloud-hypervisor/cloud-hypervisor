@@ -469,7 +469,7 @@ where
             device_status,
         } = context;
         self.common.activate(&queues, interrupt_cb.clone())?;
-        let (kill_evt, pause_evt) = self.common.dup_eventfds();
+        let (kill_evt, pause_evt) = self.common.dup_eventfds()?;
 
         let mut virtqueues = Vec::new();
         let mut queue_evts = Vec::new();

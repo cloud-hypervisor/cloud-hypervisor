@@ -253,7 +253,7 @@ impl VirtioDevice for Rng {
             device_status,
         } = context;
         self.common.activate(&queues, interrupt_cb.clone())?;
-        let (kill_evt, pause_evt) = self.common.dup_eventfds();
+        let (kill_evt, pause_evt) = self.common.dup_eventfds()?;
 
         if let Some(file) = self.random_file.as_ref() {
             let random_file = file.try_clone().map_err(|e| {
