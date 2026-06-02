@@ -399,6 +399,10 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         }
         Ok(cpuid)
     }
+    #[cfg(target_arch = "x86_64")]
+    fn get_feature_msrs(&self) -> hypervisor::Result<Vec<MsrEntry>> {
+        unimplemented!()
+    }
 
     /// Get maximum number of vCPUs
     fn get_max_vcpus(&self) -> u32 {
