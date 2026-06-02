@@ -19,7 +19,7 @@ use std::mem::size_of;
 use std::ops::Deref;
 use std::os::unix::thread::JoinHandleExt;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use std::sync::{Arc, Barrier, Mutex, RwLock, Weak};
+use std::sync::{Arc, Barrier, Mutex, RwLock, RwLockWriteGuard, Weak};
 use std::{cmp, io, result, thread};
 
 use acpi_tables::sdt::Sdt;
@@ -3256,19 +3256,50 @@ impl AcpiCpuHotplugController {
     /// Removes a vCPU from the guest.
     ///
     /// The corresponding vCPU thread will be gracefully stopped and joined.
-    fn remove_vcpu(cpu_id: u32, state: &mut VcpuState) -> Result<()> {
+    fn remove_vcpu(
+        vcpu_states: &[RwLock<VcpuState>],
+        cpu_id: u32,
+        state: RwLockWriteGuard<VcpuState>,
+    ) -> Result<()> {
         info!("Removing vCPU: cpu_id = {cpu_id}");
-        state.kill.store(true, Ordering::SeqCst);
-        state.signal_thread();
-        VcpuState::wait_until_signal_acknowledged(|| &*state)?;
-        state.join_thread()?;
-        state.handle = None;
+        let cpu_id_usize = usize::try_from(cpu_id).unwrap();
 
-        // Once the thread has exited, clear the "kill" so that it can reused
-        state.kill.store(false, Ordering::SeqCst);
+        // Lock phase 1/3: Signal thread
+        {
+            state.kill.store(true, Ordering::SeqCst);
+            state.signal_thread();
+            drop(state);
+        }
+        // Lock phase 2/3: Wait for signal to acknowledge
+        //
+        // An unusual behaving guest could perform MMIO to the
+        // AcpiCpuHotplugController. A normal guest would never do this on a
+        // vCPU that is about to be removed, but we need to protect the VMM
+        // from deadlocks caused by malicious or weird performing guests.
+        let wait_signal_ack_res = {
+            VcpuState::wait_until_signal_acknowledged(|| {
+                vcpu_states[cpu_id_usize].write().unwrap()
+            })
+                .inspect_err(|e| {
+                    warn!("vCPU {cpu_id_usize} did not acknowledge its signal - the vCPU thread may remain in dangling state: {e}");
+                })
+        };
+        // Lock phase 3/3: Gracefully kill the vCPU thread
+        {
+            let mut state = vcpu_states[cpu_id_usize].write().unwrap();
+            let join_res = wait_signal_ack_res.and_then(|()| state.join_thread());
+            if join_res.is_err() {
+                error!("vCPU {cpu_id_usize} thread already joined");
+            }
 
-        // Important that this happens last: CpuManager uses this as synchronization point
-        state.pending_removal.store(false, Ordering::SeqCst);
+            state.handle = None;
+
+            // Once the thread has exited, clear the "kill" so that it can reused
+            state.kill.store(false, Ordering::SeqCst);
+
+            // Important that this happens last: CpuManager uses this as synchronization point
+            state.pending_removal.store(false, Ordering::SeqCst);
+        }
 
         Ok(())
     }
@@ -3328,7 +3359,7 @@ impl BusDevice for AcpiCpuHotplugController {
             Self::CPU_STATUS_OFFSET => {
                 if self.selected_cpu < self.max_vcpus {
                     let vcpu_id = usize::try_from(self.selected_cpu).unwrap();
-                    let mut state = vcpu_states[vcpu_id].write().unwrap();
+                    let state = vcpu_states[vcpu_id].write().unwrap();
                     // The ACPI code writes back a 1 to acknowledge the insertion
                     if (data[0] & (1 << Self::CPU_INSERTING_FLAG) == 1 << Self::CPU_INSERTING_FLAG)
                         && state.hotplug_state.inserting.load(Ordering::Acquire)
@@ -3346,7 +3377,7 @@ impl BusDevice for AcpiCpuHotplugController {
                     }
                     // Trigger removal of vCPU:
                     if data[0] & (1 << Self::CPU_EJECT_FLAG) == 1 << Self::CPU_EJECT_FLAG
-                        && let Err(e) = Self::remove_vcpu(self.selected_cpu, &mut state)
+                        && let Err(e) = Self::remove_vcpu(&vcpu_states, self.selected_cpu, state)
                     {
                         error!("Error removing vCPU: {e:?}");
                     }
