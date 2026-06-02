@@ -12,6 +12,7 @@ libc = { workspace = true }
 log = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+vm-memory = { workspace = true, features = ["backend-mmap"] }
 vm-migration = { path = "../vm-migration" }
 vmm = { path = "../vmm" }
 vmm-sys-util = { workspace = true }

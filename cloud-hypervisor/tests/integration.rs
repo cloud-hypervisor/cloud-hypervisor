@@ -8264,13 +8264,19 @@ mod ivshmem {
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_offload() {
-        snapshot_restore_common::_test_snapshot_restore_offload(false);
+        snapshot_restore_common::_test_snapshot_restore_offload(false, false);
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_offload_virtio_mem() {
-        snapshot_restore_common::_test_snapshot_restore_offload(true);
+        snapshot_restore_common::_test_snapshot_restore_offload(true, false);
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_restore_offload_ondemand() {
+        snapshot_restore_common::_test_snapshot_restore_offload(false, true);
     }
 
     #[test]
@@ -8971,7 +8977,7 @@ mod snapshot_restore_common {
     // Round-trip via the reference offload daemon over the existing
     // `vm.send-migration local=on` / `vm.receive-migration` endpoints,
     // proving parity with `vm.snapshot`/`vm.restore`.
-    pub(crate) fn _test_snapshot_restore_offload(virtio_mem: bool) {
+    pub(crate) fn _test_snapshot_restore_offload(virtio_mem: bool, ondemand: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
@@ -9121,16 +9127,19 @@ mod snapshot_restore_common {
                 None
             )));
 
-            // receive-migration blocks until done; run it in a thread
-            // so we can start the daemon as the sender in parallel.
+            // receive-migration blocks until done. Run it in a thread so
+            // we can start the daemon as the sender in parallel. On demand
+            // mode adds `memory_mode=postcopy`.
             let api_socket_restored_clone = api_socket_restored.clone();
             let restore_socket_clone = restore_socket.clone();
+            let ondemand_for_thread = ondemand;
             let restore_thread = std::thread::spawn(move || {
-                remote_command(
-                    &api_socket_restored_clone,
-                    "receive-migration",
-                    Some(format!("receiver_url=unix:{restore_socket_clone}").as_str()),
-                )
+                let arg = if ondemand_for_thread {
+                    format!("receiver_url=unix:{restore_socket_clone},memory_mode=postcopy")
+                } else {
+                    format!("receiver_url=unix:{restore_socket_clone}")
+                };
+                remote_command(&api_socket_restored_clone, "receive-migration", Some(&arg))
             });
 
             // Wait for CH to bind the socket before starting the daemon.
@@ -9139,26 +9148,35 @@ mod snapshot_restore_common {
             }));
 
             // Daemon in restore (sender) mode with --resume so the
-            // guest is live when we probe it.
+            // guest is live when we probe it. On demand mode adds --ondemand and
+            // keeps the daemon connected to serve PageFault requests.
+            let mut restore_args = vec![
+                "restore".to_string(),
+                "--socket".to_string(),
+                restore_socket.clone(),
+                "--input-dir".to_string(),
+                offload_dir.clone(),
+                "--resume".to_string(),
+            ];
+            if ondemand {
+                restore_args.push("--ondemand".to_string());
+            }
             let daemon = Command::new(clh_command("offload_daemon"))
-                .args([
-                    "restore",
-                    "--socket",
-                    &restore_socket,
-                    "--input-dir",
-                    &offload_dir,
-                    "--resume",
-                ])
+                .args(&restore_args)
                 .stderr(Stdio::piped())
                 .stdout(Stdio::piped())
                 .spawn()
                 .unwrap();
-            let daemon_output = daemon.wait_with_output().unwrap();
-            assert!(
-                daemon_output.status.success(),
-                "offload daemon (restore) failed: stderr={}",
-                String::from_utf8_lossy(&daemon_output.stderr)
-            );
+            if ondemand {
+                drop(daemon);
+            } else {
+                let daemon_output = daemon.wait_with_output().unwrap();
+                assert!(
+                    daemon_output.status.success(),
+                    "offload daemon (restore) failed: stderr={}",
+                    String::from_utf8_lossy(&daemon_output.stderr)
+                );
+            }
 
             assert!(
                 restore_thread.join().unwrap(),
