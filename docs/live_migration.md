@@ -211,3 +211,40 @@ migration process. Via the API or `ch-remote`, you may specify:
   The number of parallel TCP connections to use for migration.
   Must be between `1` and `128`. Defaults to `1`.
   Multiple connections are not supported with local UNIX-socket migration.
+
+## Version Compatibility
+
+Cloud Hypervisor live migration compatibility has two dimensions: the
+Cloud Hypervisor version and the migration protocol version.
+
+Cloud Hypervisor uses a versioned migration protocol for the messages exchanged
+between source and destination. Each Cloud Hypervisor release sends its current
+migration protocol version and accepts that version plus the immediately
+previous protocol version.
+
+This means migration is supported from an older protocol version to the same or
+next protocol version. If the source and destination are more than one migration
+protocol version apart, the VM must be migrated through an intermediate
+Cloud Hypervisor version first.
+
+### Technical Details
+
+The source sends its migration protocol version in the initial `Start` request.
+The destination accepts the migration only if that protocol version is supported.
+A zeroed `Start` command header is handled as protocol `v0`, so older
+deployments that do not explicitly send a protocol version remain compatible.
+
+The migration protocol version covers the protocol spoken after a migration
+connection has been established. Examples include adding a mandatory migration
+command, changing the order of migration protocol messages, or changing the
+framing or encoding of protocol command payloads.
+
+The migration protocol version does not cover migration transport setup. For
+example, choosing TCP vs. UNIX sockets or opening the initial connection needs
+separate compatibility handling.
+
+Migration protocol versioning is separate from snapshot state compatibility.
+Device and VM state changes still need to be handled by the respective snapshot
+serialization/deserialization code. That compatibility is Cloud Hypervisor
+version dependent, but it is not the responsibility of migration protocol
+versioning.
