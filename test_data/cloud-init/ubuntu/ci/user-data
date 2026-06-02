@@ -11,10 +11,17 @@ ssh_pwauth: True
 
 runcmd:
   - [ systemctl, daemon-reload]
+  - [ systemctl, restart, sshd]
   - [ systemctl, enable, notify-booted.service]
   - [ systemctl, start, --no-block, notify-booted.service ]
 
 write_files:
+  -
+    path: /etc/ssh/sshd_config.d/99-disable-penalties.conf
+    permissions: 0644
+    content: |
+        PerSourcePenalties no
+
   -
     path: /etc/systemd/system/vfio.service
     permissions: 0644
@@ -47,7 +54,7 @@ write_files:
         # 1G ram requires 512 pages
         echo 512 | sudo tee /proc/sys/vm/nr_hugepages
         sudo chmod a+rwX /dev/hugepages
-        /mnt/cloud-hypervisor --kernel /mnt/vmlinux-x86_64 --cmdline "console=hvc0 reboot=k panic=1 nomodules root=/dev/vda1 VFIOTAG" --disk path=/mnt/jammy-server-cloudimg-amd64-custom-20241017-0.raw path=/mnt/cloudinit.img --cpus boot=1 --memory size=512M,hotplug_size=1G,hugepages=on --device path=/sys/bus/pci/devices/0000:00:05.0/ path=/sys/bus/pci/devices/0000:00:07.0/ path=/sys/bus/pci/devices/0000:00:08.0/ --api-socket=/tmp/ch_api.sock
+        /mnt/cloud-hypervisor --kernel /mnt/vmlinux-x86_64 --cmdline "console=hvc0 reboot=k panic=1 nomodules root=/dev/vda1 VFIOTAG" --disk path=/mnt/debian-13-generic-amd64-custom-20260602-0.raw path=/mnt/cloudinit.img --cpus boot=1 --memory size=512M,hotplug_size=1G,hugepages=on --device path=/sys/bus/pci/devices/0000:00:05.0/ path=/sys/bus/pci/devices/0000:00:07.0/ path=/sys/bus/pci/devices/0000:00:08.0/ --api-socket=/tmp/ch_api.sock
 
   -
     path: /etc/systemd/system/notify-booted.service

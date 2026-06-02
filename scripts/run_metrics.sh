@@ -21,11 +21,11 @@ if [ "$VM_TYPE" = "confidential" ]; then
 fi
 
 if [ "${TEST_ARCH}" == "aarch64" ]; then
-    GUEST_OS_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.qcow2"
-    GUEST_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.raw"
+    GUEST_OS_IMAGE_NAME="debian-13-generic-arm64-custom-20260602-0.qcow2"
+    GUEST_OS_RAW_IMAGE_NAME="debian-13-generic-arm64-custom-20260602-0.raw"
 else
-    GUEST_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.qcow2"
-    GUEST_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.raw"
+    GUEST_OS_IMAGE_NAME="debian-13-generic-amd64-custom-20260602-0.qcow2"
+    GUEST_OS_RAW_IMAGE_NAME="debian-13-generic-amd64-custom-20260602-0.raw"
 fi
 
 GUEST_OS_IMAGE="$WORKLOADS_DIR/$GUEST_OS_IMAGE_NAME"

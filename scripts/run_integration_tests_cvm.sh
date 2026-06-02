@@ -15,14 +15,14 @@ process_common_args "$@"
 test_features="--features mshv,igvm,sev_snp"
 build_features="mshv,igvm,sev_snp"
 
-GUEST_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.qcow2"
+GUEST_OS_IMAGE_NAME="debian-13-generic-amd64-custom-20260602-0.qcow2"
 GUEST_OS_IMAGE="$WORKLOADS_DIR/$GUEST_OS_IMAGE_NAME"
 if [ ! -f "$GUEST_OS_IMAGE" ]; then
     echo "Missing: $GUEST_OS_IMAGE — run: python3 scripts/fetch_workloads.py --test cvm"
     exit 1
 fi
 
-GUEST_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.raw"
+GUEST_OS_RAW_IMAGE_NAME="debian-13-generic-amd64-custom-20260602-0.raw"
 GUEST_OS_RAW_IMAGE="$WORKLOADS_DIR/$GUEST_OS_RAW_IMAGE_NAME"
 if [ ! -f "$GUEST_OS_RAW_IMAGE" ]; then
     pushd "$WORKLOADS_DIR" || exit

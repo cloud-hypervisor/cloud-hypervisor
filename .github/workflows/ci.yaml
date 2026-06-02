@@ -522,7 +522,7 @@ jobs:
       # Our runner has 16 cores (nproc).
       # We limit parallelism only to avoid exhausting disk space and memory
       # resources, not to save CPU resources.
-      PARALLEL_INTEGRATION_TESTS_NUM: 12
+      PARALLEL_INTEGRATION_TESTS_NUM: 1
     runs-on: garm-jammy-16
     steps:
       - name: Code checkout
@@ -559,7 +559,7 @@ jobs:
       # Our runner has 16 cores (nproc).
       # We limit parallelism only to avoid exhausting disk space and memory
       # resources, not to save CPU resources.
-      PARALLEL_INTEGRATION_TESTS_NUM: 12
+      PARALLEL_INTEGRATION_TESTS_NUM: 1
     strategy:
       fail-fast: false
       matrix:

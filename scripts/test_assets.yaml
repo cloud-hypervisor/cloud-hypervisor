@@ -26,15 +26,15 @@ assets:
     test: [integration, windows]
 
   # Guest images
-  - filename: jammy-server-cloudimg-amd64-custom-20241017-0.qcow2
-    url: https://ch-images.azureedge.net/jammy-server-cloudimg-amd64-custom-20241017-0.qcow2
-    sha1: 5f10738920efb74f0bf854cadcd1b1fd544e49c8
+  - filename: debian-13-generic-amd64-custom-20260602-0.qcow2
+    url: https://ch-images.azureedge.net/debian-13-generic-amd64-custom-20260602-0.qcow2
+    sha1: e52d54c0f9d1289b7c3205ed8b94f05f394a3682
     arch: [x86_64]
     test: [integration, cvm, rate-limiter, metrics]
 
-  - filename: jammy-server-cloudimg-arm64-custom-20220329-0.qcow2
-    url: https://ch-images.azureedge.net/jammy-server-cloudimg-arm64-custom-20220329-0.qcow2
-    sha1: 7118f4d4cad18c8357bc2ad9824a50f9a82a860a
+  - filename: debian-13-generic-arm64-custom-20260602-0.qcow2
+    url: https://ch-images.azureedge.net/debian-13-generic-arm64-custom-20260602-0.qcow2
+    sha1: 1c2153bf32c81ff9eddc5d62f5cd4fce1fc28b7c
     arch: [aarch64]
     test: [integration]
 

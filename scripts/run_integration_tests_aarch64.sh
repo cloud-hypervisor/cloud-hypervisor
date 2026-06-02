@@ -10,10 +10,10 @@ source "$(dirname "$0")"/common-aarch64.sh
 WORKLOADS_LOCK="$WORKLOADS_DIR/integration_test.lock"
 
 update_workloads() {
-    GUEST_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.qcow2"
+    GUEST_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME="debian-13-generic-arm64-custom-20260602-0.qcow2"
     GUEST_OS_QCOW2_UNCOMPRESSED_IMAGE="$WORKLOADS_DIR/$GUEST_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
 
-    GUEST_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.raw"
+    GUEST_OS_RAW_IMAGE_NAME="debian-13-generic-arm64-custom-20260602-0.raw"
     GUEST_OS_RAW_IMAGE="$WORKLOADS_DIR/$GUEST_OS_RAW_IMAGE_NAME"
 
     for required in "$GUEST_OS_QCOW2_UNCOMPRESSED_IMAGE" \
@@ -37,7 +37,7 @@ update_workloads() {
         popd || exit
     fi
 
-    GUEST_OS_QCOW2_ZLIB_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-zlib.qcow2"
+    GUEST_OS_QCOW2_ZLIB_FILE_IMAGE_NAME="debian-13-generic-arm64-custom-20260602-0-zlib.qcow2"
     GUEST_OS_QCOW2_ZLIB_FILE_IMAGE="$WORKLOADS_DIR/$GUEST_OS_QCOW2_ZLIB_FILE_IMAGE_NAME"
     if [ ! -f "$GUEST_OS_QCOW2_ZLIB_FILE_IMAGE" ]; then
         pushd "$WORKLOADS_DIR" || exit
@@ -46,7 +46,7 @@ update_workloads() {
         popd || exit
     fi
 
-    GUEST_OS_QCOW2_ZSTD_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-zstd.qcow2"
+    GUEST_OS_QCOW2_ZSTD_FILE_IMAGE_NAME="debian-13-generic-arm64-custom-20260602-0-zstd.qcow2"
     GUEST_OS_QCOW2_ZSTD_FILE_IMAGE="$WORKLOADS_DIR/$GUEST_OS_QCOW2_ZSTD_FILE_IMAGE_NAME"
     if [ ! -f "$GUEST_OS_QCOW2_ZSTD_FILE_IMAGE" ]; then
         pushd "$WORKLOADS_DIR" || exit
@@ -55,7 +55,7 @@ update_workloads() {
         popd || exit
     fi
 
-    GUEST_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-backing-zstd.qcow2"
+    GUEST_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME="debian-13-generic-arm64-custom-20260602-0-backing-zstd.qcow2"
     GUEST_OS_QCOW_BACKING_ZSTD_FILE_IMAGE="$WORKLOADS_DIR/$GUEST_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME"
     if [ ! -f "$GUEST_OS_QCOW_BACKING_ZSTD_FILE_IMAGE" ]; then
         pushd "$WORKLOADS_DIR" || exit
@@ -63,7 +63,7 @@ update_workloads() {
         popd || exit
     fi
 
-    GUEST_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-backing-uncompressed.qcow2"
+    GUEST_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME="debian-13-generic-arm64-custom-20260602-0-backing-uncompressed.qcow2"
     GUEST_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE="$WORKLOADS_DIR/$GUEST_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME"
     if [ ! -f "$GUEST_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE" ]; then
         pushd "$WORKLOADS_DIR" || exit
@@ -73,7 +73,7 @@ update_workloads() {
         popd || exit
     fi
 
-    GUEST_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-backing-raw.qcow2"
+    GUEST_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME="debian-13-generic-arm64-custom-20260602-0-backing-raw.qcow2"
     GUEST_OS_QCOW_BACKING_RAW_FILE_IMAGE="$WORKLOADS_DIR/$GUEST_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME"
     if [ ! -f "$GUEST_OS_QCOW_BACKING_RAW_FILE_IMAGE" ]; then
         pushd "$WORKLOADS_DIR" || exit
