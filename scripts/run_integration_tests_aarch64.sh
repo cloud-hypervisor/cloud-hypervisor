@@ -10,13 +10,13 @@ source "$(dirname "$0")"/common-aarch64.sh
 WORKLOADS_LOCK="$WORKLOADS_DIR/integration_test.lock"
 
 update_workloads() {
-    JAMMY_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.qcow2"
-    JAMMY_OS_QCOW2_UNCOMPRESSED_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
+    GUEST_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.qcow2"
+    GUEST_OS_QCOW2_UNCOMPRESSED_IMAGE="$WORKLOADS_DIR/$GUEST_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
 
-    JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.raw"
-    JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
+    GUEST_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.raw"
+    GUEST_OS_RAW_IMAGE="$WORKLOADS_DIR/$GUEST_OS_RAW_IMAGE_NAME"
 
-    for required in "$JAMMY_OS_QCOW2_UNCOMPRESSED_IMAGE" \
+    for required in "$GUEST_OS_QCOW2_UNCOMPRESSED_IMAGE" \
         "$WORKLOADS_DIR/CLOUDHV_EFI.fd" \
         "$WORKLOADS_DIR/cloud-hypervisor-static-aarch64" \
         "$WORKLOADS_DIR/alpine-minirootfs-aarch64.tar.gz" \
@@ -31,55 +31,55 @@ update_workloads() {
         cp /usr/local/bin/virtiofsd "$WORKLOADS_DIR/virtiofsd"
     fi
 
-    if [ ! -f "$JAMMY_OS_RAW_IMAGE" ]; then
+    if [ ! -f "$GUEST_OS_RAW_IMAGE" ]; then
         pushd "$WORKLOADS_DIR" || exit
-        time qemu-img convert -p -f qcow2 -O raw $JAMMY_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME $JAMMY_OS_RAW_IMAGE_NAME || exit 1
+        time qemu-img convert -p -f qcow2 -O raw $GUEST_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME $GUEST_OS_RAW_IMAGE_NAME || exit 1
         popd || exit
     fi
 
-    JAMMY_OS_QCOW2_ZLIB_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-zlib.qcow2"
-    JAMMY_OS_QCOW2_ZLIB_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW2_ZLIB_FILE_IMAGE_NAME"
-    if [ ! -f "$JAMMY_OS_QCOW2_ZLIB_FILE_IMAGE" ]; then
+    GUEST_OS_QCOW2_ZLIB_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-zlib.qcow2"
+    GUEST_OS_QCOW2_ZLIB_FILE_IMAGE="$WORKLOADS_DIR/$GUEST_OS_QCOW2_ZLIB_FILE_IMAGE_NAME"
+    if [ ! -f "$GUEST_OS_QCOW2_ZLIB_FILE_IMAGE" ]; then
         pushd "$WORKLOADS_DIR" || exit
         time qemu-img convert -c -f raw -O qcow2 -o compression_type=zlib \
-            "$JAMMY_OS_RAW_IMAGE" $JAMMY_OS_QCOW2_ZLIB_FILE_IMAGE_NAME
+            "$GUEST_OS_RAW_IMAGE" $GUEST_OS_QCOW2_ZLIB_FILE_IMAGE_NAME
         popd || exit
     fi
 
-    JAMMY_OS_QCOW2_ZSTD_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-zstd.qcow2"
-    JAMMY_OS_QCOW2_ZSTD_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW2_ZSTD_FILE_IMAGE_NAME"
-    if [ ! -f "$JAMMY_OS_QCOW2_ZSTD_FILE_IMAGE" ]; then
+    GUEST_OS_QCOW2_ZSTD_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-zstd.qcow2"
+    GUEST_OS_QCOW2_ZSTD_FILE_IMAGE="$WORKLOADS_DIR/$GUEST_OS_QCOW2_ZSTD_FILE_IMAGE_NAME"
+    if [ ! -f "$GUEST_OS_QCOW2_ZSTD_FILE_IMAGE" ]; then
         pushd "$WORKLOADS_DIR" || exit
         time qemu-img convert -c -f raw -O qcow2 -o compression_type=zstd \
-            "$JAMMY_OS_RAW_IMAGE" $JAMMY_OS_QCOW2_ZSTD_FILE_IMAGE_NAME
+            "$GUEST_OS_RAW_IMAGE" $GUEST_OS_QCOW2_ZSTD_FILE_IMAGE_NAME
         popd || exit
     fi
 
-    JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-backing-zstd.qcow2"
-    JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME"
-    if [ ! -f "$JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE" ]; then
+    GUEST_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-backing-zstd.qcow2"
+    GUEST_OS_QCOW_BACKING_ZSTD_FILE_IMAGE="$WORKLOADS_DIR/$GUEST_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME"
+    if [ ! -f "$GUEST_OS_QCOW_BACKING_ZSTD_FILE_IMAGE" ]; then
         pushd "$WORKLOADS_DIR" || exit
-        time qemu-img create -f qcow2 -b "$JAMMY_OS_QCOW2_ZSTD_FILE_IMAGE" -F qcow2 $JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME
+        time qemu-img create -f qcow2 -b "$GUEST_OS_QCOW2_ZSTD_FILE_IMAGE" -F qcow2 $GUEST_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME
         popd || exit
     fi
 
-    JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-backing-uncompressed.qcow2"
-    JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME"
-    if [ ! -f "$JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE" ]; then
-        pushd "$WORKLOADS_DIR" || exit
-        time qemu-img create -f qcow2 \
-            -b "$JAMMY_OS_QCOW2_UNCOMPRESSED_IMAGE" \
-            -F qcow2 $JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME
-        popd || exit
-    fi
-
-    JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-backing-raw.qcow2"
-    JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME"
-    if [ ! -f "$JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE" ]; then
+    GUEST_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-backing-uncompressed.qcow2"
+    GUEST_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE="$WORKLOADS_DIR/$GUEST_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME"
+    if [ ! -f "$GUEST_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE" ]; then
         pushd "$WORKLOADS_DIR" || exit
         time qemu-img create -f qcow2 \
-            -b "$JAMMY_OS_RAW_IMAGE" \
-            -F raw $JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME
+            -b "$GUEST_OS_QCOW2_UNCOMPRESSED_IMAGE" \
+            -F qcow2 $GUEST_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME
+        popd || exit
+    fi
+
+    GUEST_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-backing-raw.qcow2"
+    GUEST_OS_QCOW_BACKING_RAW_FILE_IMAGE="$WORKLOADS_DIR/$GUEST_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME"
+    if [ ! -f "$GUEST_OS_QCOW_BACKING_RAW_FILE_IMAGE" ]; then
+        pushd "$WORKLOADS_DIR" || exit
+        time qemu-img create -f qcow2 \
+            -b "$GUEST_OS_RAW_IMAGE" \
+            -F raw $GUEST_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME
         popd || exit
     fi
 

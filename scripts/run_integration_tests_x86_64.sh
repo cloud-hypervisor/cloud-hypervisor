@@ -21,12 +21,12 @@ fi
 
 # if migratable version is set to override the default
 FW="$WORKLOADS_DIR/hypervisor-fw"
-JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.qcow2"
-JAMMY_OS_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_IMAGE_NAME"
-JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.raw"
-JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
+GUEST_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.qcow2"
+GUEST_OS_IMAGE="$WORKLOADS_DIR/$GUEST_OS_IMAGE_NAME"
+GUEST_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.raw"
+GUEST_OS_RAW_IMAGE="$WORKLOADS_DIR/$GUEST_OS_RAW_IMAGE_NAME"
 
-for required in "$FW" "$WORKLOADS_DIR/CLOUDHV.fd" "$JAMMY_OS_IMAGE" \
+for required in "$FW" "$WORKLOADS_DIR/CLOUDHV.fd" "$GUEST_OS_IMAGE" \
     "$WORKLOADS_DIR/vmlinux-x86_64" "$WORKLOADS_DIR/bzImage-x86_64" \
     "$WORKLOADS_DIR/alpine-minirootfs-x86_64.tar.gz" \
     "$WORKLOADS_DIR/cloud-hypervisor-static"; do
@@ -36,57 +36,57 @@ for required in "$FW" "$WORKLOADS_DIR/CLOUDHV.fd" "$JAMMY_OS_IMAGE" \
     fi
 done
 
-if [ ! -f "$JAMMY_OS_RAW_IMAGE" ]; then
+if [ ! -f "$GUEST_OS_RAW_IMAGE" ]; then
     pushd "$WORKLOADS_DIR" || exit
-    time qemu-img convert -p -f qcow2 -O raw $JAMMY_OS_IMAGE_NAME $JAMMY_OS_RAW_IMAGE_NAME || exit 1
+    time qemu-img convert -p -f qcow2 -O raw $GUEST_OS_IMAGE_NAME $GUEST_OS_RAW_IMAGE_NAME || exit 1
     popd || exit
 fi
 
-JAMMY_OS_QCOW_ZLIB_FILE_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0-zlib.qcow2"
-JAMMY_OS_QCOW_ZLIB_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_ZLIB_FILE_IMAGE_NAME"
-if [ ! -f "$JAMMY_OS_QCOW_ZLIB_FILE_IMAGE" ]; then
+GUEST_OS_QCOW_ZLIB_FILE_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0-zlib.qcow2"
+GUEST_OS_QCOW_ZLIB_FILE_IMAGE="$WORKLOADS_DIR/$GUEST_OS_QCOW_ZLIB_FILE_IMAGE_NAME"
+if [ ! -f "$GUEST_OS_QCOW_ZLIB_FILE_IMAGE" ]; then
     pushd "$WORKLOADS_DIR" || exit
     time qemu-img convert -c -f raw -O qcow2 -o compression_type=zlib \
-        "$JAMMY_OS_RAW_IMAGE" $JAMMY_OS_QCOW_ZLIB_FILE_IMAGE_NAME
+        "$GUEST_OS_RAW_IMAGE" $GUEST_OS_QCOW_ZLIB_FILE_IMAGE_NAME
     popd || exit
 fi
 
-JAMMY_OS_QCOW_ZSTD_FILE_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0-zstd.qcow2"
-JAMMY_OS_QCOW_ZSTD_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_ZSTD_FILE_IMAGE_NAME"
-if [ ! -f "$JAMMY_OS_QCOW_ZSTD_FILE_IMAGE" ]; then
+GUEST_OS_QCOW_ZSTD_FILE_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0-zstd.qcow2"
+GUEST_OS_QCOW_ZSTD_FILE_IMAGE="$WORKLOADS_DIR/$GUEST_OS_QCOW_ZSTD_FILE_IMAGE_NAME"
+if [ ! -f "$GUEST_OS_QCOW_ZSTD_FILE_IMAGE" ]; then
     pushd "$WORKLOADS_DIR" || exit
     time qemu-img convert -c -f raw -O qcow2 -o compression_type=zstd \
-        "$JAMMY_OS_RAW_IMAGE" $JAMMY_OS_QCOW_ZSTD_FILE_IMAGE_NAME
+        "$GUEST_OS_RAW_IMAGE" $GUEST_OS_QCOW_ZSTD_FILE_IMAGE_NAME
     popd || exit
 fi
 
-JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0-backing-zstd.qcow2"
-JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME"
-if [ ! -f "$JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE" ]; then
+GUEST_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0-backing-zstd.qcow2"
+GUEST_OS_QCOW_BACKING_ZSTD_FILE_IMAGE="$WORKLOADS_DIR/$GUEST_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME"
+if [ ! -f "$GUEST_OS_QCOW_BACKING_ZSTD_FILE_IMAGE" ]; then
     pushd "$WORKLOADS_DIR" || exit
     time qemu-img create -f qcow2 \
-        -b "$JAMMY_OS_QCOW_ZSTD_FILE_IMAGE" \
-        -F qcow2 $JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME
+        -b "$GUEST_OS_QCOW_ZSTD_FILE_IMAGE" \
+        -F qcow2 $GUEST_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME
     popd || exit
 fi
 
-JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0-backing-uncompressed.qcow2"
-JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME"
-if [ ! -f "$JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE" ]; then
+GUEST_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0-backing-uncompressed.qcow2"
+GUEST_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE="$WORKLOADS_DIR/$GUEST_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME"
+if [ ! -f "$GUEST_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE" ]; then
     pushd "$WORKLOADS_DIR" || exit
     time qemu-img create -f qcow2 \
-        -b "$JAMMY_OS_IMAGE" \
-        -F qcow2 $JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME
+        -b "$GUEST_OS_IMAGE" \
+        -F qcow2 $GUEST_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME
     popd || exit
 fi
 
-JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0-backing-raw.qcow2"
-JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME"
-if [ ! -f "$JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE" ]; then
+GUEST_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0-backing-raw.qcow2"
+GUEST_OS_QCOW_BACKING_RAW_FILE_IMAGE="$WORKLOADS_DIR/$GUEST_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME"
+if [ ! -f "$GUEST_OS_QCOW_BACKING_RAW_FILE_IMAGE" ]; then
     pushd "$WORKLOADS_DIR" || exit
     time qemu-img create -f qcow2 \
-        -b "$JAMMY_OS_RAW_IMAGE" \
-        -F raw $JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME
+        -b "$GUEST_OS_RAW_IMAGE" \
+        -F raw $GUEST_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME
     popd || exit
 fi
 
@@ -148,7 +148,7 @@ VFIO_DIR="$WORKLOADS_DIR/vfio"
 VFIO_DISK_IMAGE="$WORKLOADS_DIR/vfio.img"
 rm -rf "$VFIO_DIR" "$VFIO_DISK_IMAGE"
 mkdir -p "$VFIO_DIR"
-cp "$JAMMY_OS_RAW_IMAGE" "$VFIO_DIR"
+cp "$GUEST_OS_RAW_IMAGE" "$VFIO_DIR"
 cp "$FW" "$VFIO_DIR"
 cp "$VMLINUX_IMAGE" "$VFIO_DIR" || exit 1
 
