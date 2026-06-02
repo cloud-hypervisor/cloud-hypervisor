@@ -19,7 +19,7 @@ use vmm_sys_util::file_traits::FileSync;
 use vmm_sys_util::seek_hole::SeekHole;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
-use crate::{BlockBackend, query_device_size};
+use crate::{BlockBackend, probe_direct_alignment, query_device_size};
 
 #[derive(Debug)]
 pub struct RawFile {
@@ -29,35 +29,9 @@ pub struct RawFile {
     direct_io: bool,
 }
 
-const BLK_ALIGNMENTS: [usize; 2] = [512, 4096];
-
-fn is_valid_alignment(fd: RawFd, alignment: usize) -> bool {
-    let layout = Layout::from_size_align(alignment, alignment).unwrap();
-    // SAFETY: layout has non-zero size
-    let ptr = unsafe { alloc_zeroed(layout) };
-    assert!(!ptr.is_null());
-
-    // SAFETY: FFI call
-    let ret = unsafe { ::libc::pread(fd, ptr.cast(), alignment, alignment.try_into().unwrap()) };
-
-    // SAFETY: ptr was allocated by alloc_zeroed with layout
-    unsafe { dealloc(ptr, layout) };
-
-    ret >= 0
-}
-
 impl RawFile {
     pub fn new(file: File, direct_io: bool) -> Self {
-        // Assume no alignment restrictions if we aren't using O_DIRECT.
-        let mut alignment = 0;
-        if direct_io {
-            for align in &BLK_ALIGNMENTS {
-                if is_valid_alignment(file.as_raw_fd(), *align) {
-                    alignment = *align;
-                    break;
-                }
-            }
-        }
+        let alignment = probe_direct_alignment(file.as_raw_fd()).map_or(0, |a| a as usize);
         RawFile {
             file,
             alignment,
