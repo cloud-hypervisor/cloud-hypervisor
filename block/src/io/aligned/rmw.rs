@@ -83,6 +83,49 @@ pub fn submit_rmw(fd: RawFd, op: &mut AsyncIoOperation, alignment: u64) -> io::R
     Ok(total_len as i64)
 }
 
+/// Read `buf.len()` bytes from `fd` at `offset`, routing through an
+/// aligned bounce buffer when needed. Bytes past EOF are zero filled.
+pub fn pread_aligned(fd: RawFd, buf: &mut [u8], offset: u64, alignment: u64) -> io::Result<()> {
+    if alignment == 0 || slice_is_aligned(buf, offset, alignment) {
+        pread_padded(fd, buf, offset)?;
+        return Ok(());
+    }
+
+    let range = aligned_range(offset, buf.len() as u64, alignment)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "empty or overflowing range"))?;
+    let mut bounce = OwnedIoBuffer::new(range.aligned_len as usize, alignment as usize)?;
+    pread_padded(fd, bounce.as_mut_slice(), range.aligned_offset)?;
+    let head = range.head_pad as usize;
+    buf.copy_from_slice(&bounce.as_slice()[head..head + buf.len()]);
+    Ok(())
+}
+
+/// Write `buf` to `fd` at `offset`, routing through an aligned bounce
+/// buffer when needed, preserving any surrounding bytes in the head
+/// and tail blocks.
+pub fn pwrite_aligned(fd: RawFd, buf: &[u8], offset: u64, alignment: u64) -> io::Result<()> {
+    if alignment == 0 || slice_is_aligned(buf, offset, alignment) {
+        pwrite_all(fd, buf, offset)?;
+        return Ok(());
+    }
+
+    let range = aligned_range(offset, buf.len() as u64, alignment)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "empty or overflowing range"))?;
+    let mut bounce = OwnedIoBuffer::new(range.aligned_len as usize, alignment as usize)?;
+    pread_padded(fd, bounce.as_mut_slice(), range.aligned_offset)?;
+    let head = range.head_pad as usize;
+    bounce.as_mut_slice()[head..head + buf.len()].copy_from_slice(buf);
+    pwrite_all(fd, bounce.as_slice(), range.aligned_offset)?;
+    Ok(())
+}
+
+fn slice_is_aligned(buf: &[u8], offset: u64, alignment: u64) -> bool {
+    let a = alignment as usize;
+    (buf.as_ptr() as usize).is_multiple_of(a)
+        && buf.len().is_multiple_of(a)
+        && (offset as usize).is_multiple_of(a)
+}
+
 #[cfg(test)]
 mod unit_tests {
     use std::io::Write;
