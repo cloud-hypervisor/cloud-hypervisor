@@ -13,21 +13,29 @@
 //! `state.json`.
 //!
 //! Restore (daemon sends): replays those files back to CH. `--resume` resumes
-//! the VM instead of leaving it paused.
+//! the VM, and `--ondemand` serves pages on demand over the postcopy fault
+//! connection instead of preloading them.
 
 use std::ffi::{CString, NulError};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::unix::fs::FileExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::result;
+use std::sync::Arc;
+use std::{result, thread};
 
 use clap::{Parser, Subcommand};
 use log::{debug, info};
 use thiserror::Error;
+use vm_memory::mmap::{MmapRegion, MmapRegionError};
+use vm_memory::{
+    Address, Bytes, FileOffset, GuestAddress, GuestMemoryError, GuestMemoryRegion, GuestRegionMmap,
+    MemoryRegionAddress,
+};
 use vm_migration::MigratableError;
-use vm_migration::protocol::{Command, Request, Response, Status};
+use vm_migration::protocol::{Command, ConnectionRole, MemoryRange, Request, Response, Status};
 use vmm::VmMigrationConfig;
 use vmm::migration::SNAPSHOT_STATE_FILE;
 use vmm::sparse::copy_region;
@@ -90,6 +98,20 @@ enum Error {
     MissingSlot(u32),
     #[error("Field {0:?} missing from memory_manager_data")]
     MissingField(&'static str),
+    #[error("Mapping memfd for the on demand slot")]
+    Mmap(#[source] MmapRegionError),
+    #[error("Guest region does not match the mapped size")]
+    GuestRegion,
+    #[error("Cloning memfd for mmap")]
+    CloneMemfd(#[source] io::Error),
+    #[error("Spawning the fault serve thread")]
+    SpawnServeThread(#[source] io::Error),
+    #[error("The fault serve thread panicked")]
+    ServeThreadPanic,
+    #[error("PageFault gpa={0:#x} len={1} is not within any slot")]
+    PageFaultUnmapped(u64, u64),
+    #[error("Writing a faulted page into guest memory")]
+    WriteGuestMemory(#[source] GuestMemoryError),
 }
 
 type Result<T> = result::Result<T, Error>;
@@ -128,6 +150,9 @@ enum Mode {
         /// paused (CompletePaused).
         #[arg(long)]
         resume: bool,
+        /// On demand paging.
+        #[arg(long)]
+        ondemand: bool,
     },
 }
 
@@ -141,7 +166,8 @@ fn main() -> Result<()> {
             socket,
             input_dir,
             resume,
-        } => run_restore(&socket, &input_dir, resume),
+            ondemand,
+        } => run_restore(&socket, &input_dir, resume, ondemand),
     }
 }
 
@@ -322,18 +348,22 @@ fn dump_fd_to_path(file: &File, src_offset: u64, size: u64, path: &Path) -> Resu
     Ok(())
 }
 
-/// (slot, size, file_offset) per memory slot, parsed via JSON to avoid
-/// depending on the private fields of `MemoryManagerSnapshotData`.
-///
-/// `file_offset` is non-zero when a zone spans multiple regions sharing one
-/// backing memfd.
+/// (slot, size, file_offset) per memory slot. `file_offset` is non-zero when a
+/// zone spans multiple regions sharing one backing memfd.
 fn slot_sizes(config: &VmMigrationConfig) -> Result<Vec<(u32, u64, u64)>> {
+    Ok(slot_info(config)?
+        .into_iter()
+        .map(|(slot, _gpa, size, file_offset)| (slot, size, file_offset))
+        .collect())
+}
+
+fn slot_info(config: &VmMigrationConfig) -> Result<Vec<(u32, u64, u64, u64)>> {
     parse_guest_ram_mappings(&serde_json::to_value(config.memory_manager_data())?)
 }
 
 /// Parse the `guest_ram_mappings` array out of the serialized
 /// `MemoryManagerSnapshotData`.
-fn parse_guest_ram_mappings(value: &serde_json::Value) -> Result<Vec<(u32, u64, u64)>> {
+fn parse_guest_ram_mappings(value: &serde_json::Value) -> Result<Vec<(u32, u64, u64, u64)>> {
     let mappings = value
         .get("guest_ram_mappings")
         .and_then(|v| v.as_array())
@@ -344,6 +374,10 @@ fn parse_guest_ram_mappings(value: &serde_json::Value) -> Result<Vec<(u32, u64, 
             .get("slot")
             .and_then(|v| v.as_u64())
             .ok_or(Error::MissingField("slot"))? as u32;
+        let gpa = m
+            .get("gpa")
+            .and_then(|v| v.as_u64())
+            .ok_or(Error::MissingField("gpa"))?;
         let size = m
             .get("size")
             .and_then(|v| v.as_u64())
@@ -353,35 +387,50 @@ fn parse_guest_ram_mappings(value: &serde_json::Value) -> Result<Vec<(u32, u64, 
             .and_then(|v| v.as_u64())
             .ok_or(Error::MissingField("file_offset"))?;
         // CH allocates one fresh memslot per GuestRegionMmap, so each
-        // (slot, size, file_offset) appears at most once here.
-        out.push((slot, size, file_offset));
+        // (slot, gpa, size, file_offset) appears at most once here.
+        out.push((slot, gpa, size, file_offset));
     }
     Ok(out)
 }
 
 // Restore mode (migration sender).
-fn run_restore(socket_path: &Path, input_dir: &Path, resume: bool) -> Result<()> {
+fn run_restore(socket_path: &Path, input_dir: &Path, resume: bool, ondemand: bool) -> Result<()> {
     let migration_config_bytes =
         fs::read(input_dir.join(MIGRATION_CONFIG_FILENAME)).map_err(Error::ReadFile)?;
     let migration_config: VmMigrationConfig = serde_json::from_slice(&migration_config_bytes)?;
     let state_bytes = fs::read(input_dir.join(SNAPSHOT_STATE_FILE)).map_err(Error::ReadFile)?;
-    let sizes = slot_sizes(&migration_config)?;
 
     let mut stream = UnixStream::connect(socket_path).map_err(Error::Connect)?;
-    info!("Offload daemon connected to {socket_path:?}");
+    info!("Offload daemon connected to {socket_path:?} (ondemand={ondemand})");
 
     send_request_expect_ok(&mut stream, Request::start(), "Start")?;
 
-    for (slot, size, file_offset) in &sizes {
-        let memfd = create_memfd_with_contents(
-            &input_dir.join(memory_slot_filename(*slot)),
-            *file_offset,
-            *size,
-            &format!("offload-slot-{slot}"),
-        )?;
-        send_memory_fd(&mut stream, *slot, &memfd)?;
+    let mut ondemand_slots: Vec<OnDemandSlot> = Vec::new();
+
+    for (slot, gpa, size, file_offset) in slot_info(&migration_config)? {
+        let disk_path = input_dir.join(memory_slot_filename(slot));
+        let memfd = if ondemand {
+            let memfd = create_empty_memfd(file_offset + size, &format!("offload-slot-{slot}"))?;
+            ondemand_slots.push(OnDemandSlot::new(
+                &memfd,
+                gpa,
+                size,
+                file_offset,
+                &disk_path,
+            )?);
+            memfd
+        } else {
+            create_memfd_with_contents(
+                &disk_path,
+                file_offset,
+                size,
+                &format!("offload-slot-{slot}"),
+            )?
+        };
+        send_memory_fd(&mut stream, slot, &memfd)?;
         debug!(
-            "restore: sent memory fd for slot {slot} ({size} bytes at fd offset {file_offset:#x})"
+            "restore: sent memory fd for slot {slot} ({size} bytes at fd offset \
+             {file_offset:#x}, ondemand={ondemand})"
         );
     }
 
@@ -391,6 +440,29 @@ fn run_restore(socket_path: &Path, input_dir: &Path, resume: bool) -> Result<()>
         &migration_config_bytes,
         "Config",
     )?;
+
+    // For on demand (postcopy) restore the fault connection must be serving before
+    // CH processes State, so connect it here and serve on its own thread.
+    let serve_handle = if ondemand {
+        let slots = Arc::new(ondemand_slots);
+        let mut fault_stream = UnixStream::connect(socket_path).map_err(Error::Connect)?;
+        ConnectionRole::Fault
+            .write_to(&mut fault_stream)
+            .map_err(Error::Protocol)?;
+        info!(
+            "offload daemon: connected dedicated fault connection, serving {} slot(s)",
+            slots.len()
+        );
+        let serve_slots = Arc::clone(&slots);
+        let handle = thread::Builder::new()
+            .name("offload-fault-serve".to_owned())
+            .spawn(move || serve_page_faults(&mut fault_stream, serve_slots.as_slice()))
+            .map_err(Error::SpawnServeThread)?;
+        Some(handle)
+    } else {
+        None
+    };
+
     send_payload_expect_ok(
         &mut stream,
         Request::state(state_bytes.len() as u64),
@@ -405,8 +477,101 @@ fn run_restore(socket_path: &Path, input_dir: &Path, resume: bool) -> Result<()>
     };
     send_request_expect_ok(&mut stream, final_req, "Complete")?;
 
+    if let Some(handle) = serve_handle {
+        info!("Offload daemon: waiting for fault serving to finish");
+        handle.join().map_err(|_| Error::ServeThreadPanic)??;
+    }
+
     info!("Restore replay finished");
     Ok(())
+}
+
+/// Per-slot state for serving PageFault requests in on demand mode.
+struct OnDemandSlot {
+    region: GuestRegionMmap,
+    disk: File,
+}
+
+impl OnDemandSlot {
+    fn new(memfd: &File, gpa: u64, size: u64, file_offset: u64, disk_path: &Path) -> Result<Self> {
+        // Map the same memfd CH maps, so our page writes are visible to it.
+        let fo = FileOffset::new(memfd.try_clone().map_err(Error::CloneMemfd)?, file_offset);
+        let mmap = MmapRegion::build(
+            Some(fo),
+            size as usize,
+            libc::PROT_READ | libc::PROT_WRITE,
+            libc::MAP_SHARED,
+        )
+        .map_err(Error::Mmap)?;
+        let region = GuestRegionMmap::new(mmap, GuestAddress(gpa)).ok_or(Error::GuestRegion)?;
+        let disk = File::open(disk_path).map_err(Error::ReadFile)?;
+        Ok(Self { region, disk })
+    }
+
+    fn contains(&self, gpa: u64, len: u64) -> bool {
+        let base = self.region.start_addr().raw_value();
+        let end = base + self.region.len();
+        gpa >= base && gpa.saturating_add(len) <= end
+    }
+}
+
+fn serve_page_faults(stream: &mut UnixStream, slots: &[OnDemandSlot]) -> Result<()> {
+    let mut served: u64 = 0;
+    loop {
+        let req = match Request::read_from(stream) {
+            Ok(r) => r,
+            Err(e) => {
+                info!("Serve loop: socket closed after {served} PageFault(s) ({e:?})");
+                return Ok(());
+            }
+        };
+        match req.command() {
+            Command::PageFault => {
+                let range = MemoryRange::read_from(stream).map_err(Error::Protocol)?;
+                served += 1;
+                if served <= 5 || served.is_power_of_two() {
+                    info!(
+                        "PageFault #{served}: gpa={:#x} len={}",
+                        range.gpa, range.length
+                    );
+                }
+                let slot = slots
+                    .iter()
+                    .find(|s| s.contains(range.gpa, range.length))
+                    .ok_or(Error::PageFaultUnmapped(range.gpa, range.length))?;
+                let offset = range.gpa - slot.region.start_addr().raw_value();
+                // Reading a sparse hole returns zeros, so a single read+write
+                // path covers both data and unwritten pages.
+                let mut buf = vec![0u8; range.length as usize];
+                slot.disk
+                    .read_exact_at(&mut buf, offset)
+                    .map_err(Error::CopyMemory)?;
+                slot.region
+                    .write_slice(&buf, MemoryRegionAddress(offset))
+                    .map_err(Error::WriteGuestMemory)?;
+                Response::ok().write_to(stream).map_err(Error::Protocol)?;
+            }
+            Command::Abandon => {
+                info!("Serve loop: received Abandon, exiting");
+                Response::ok().write_to(stream).ok();
+                return Ok(());
+            }
+            c => return Err(Error::UnexpectedCommand(c, "a PageFault")),
+        }
+    }
+}
+
+fn create_empty_memfd(size: u64, name: &str) -> Result<File> {
+    let cname = CString::new(name).map_err(Error::MemfdName)?;
+    // SAFETY: memfd_create has no preconditions. We check the return value.
+    let raw = unsafe { libc::memfd_create(cname.as_ptr(), 0) };
+    if raw < 0 {
+        return Err(Error::MemfdCreate(io::Error::last_os_error()));
+    }
+    // SAFETY: `raw` is a fresh fd we now own.
+    let memfd = unsafe { File::from_raw_fd(raw) };
+    memfd.set_len(size).map_err(Error::MemfdSetLen)?;
+    Ok(memfd)
 }
 
 fn send_request_expect_ok(stream: &mut UnixStream, req: Request, name: &'static str) -> Result<()> {
@@ -443,19 +608,6 @@ fn send_memory_fd(stream: &mut UnixStream, slot: u32, memfd: &File) -> Result<()
     expect_ok_response(stream, "MemoryFd")
 }
 
-fn create_empty_memfd(size: u64, name: &str) -> Result<File> {
-    let cname = CString::new(name).map_err(Error::MemfdName)?;
-    // SAFETY: memfd_create has no preconditions. We check the return value.
-    let raw = unsafe { libc::memfd_create(cname.as_ptr(), 0) };
-    if raw < 0 {
-        return Err(Error::MemfdCreate(io::Error::last_os_error()));
-    }
-    // SAFETY: `raw` is a fresh fd we now own.
-    let memfd = unsafe { File::from_raw_fd(raw) };
-    memfd.set_len(size).map_err(Error::MemfdSetLen)?;
-    Ok(memfd)
-}
-
 fn create_memfd_with_contents(
     src_path: &Path,
     file_offset: u64,
@@ -486,13 +638,13 @@ mod tests {
     fn test_parse_guest_ram_mappings() {
         let value = json!({
             "guest_ram_mappings": [
-                { "slot": 0, "size": 4096u64, "file_offset": 0u64, "virtio_mem": true },
-                { "slot": 1, "size": 8192u64, "file_offset": 4096u64 },
+                { "slot": 0, "gpa": 0u64, "size": 4096u64, "file_offset": 0u64, "virtio_mem": true },
+                { "slot": 1, "gpa": 0x4000u64, "size": 8192u64, "file_offset": 4096u64 },
             ]
         });
         assert_eq!(
             parse_guest_ram_mappings(&value).unwrap(),
-            vec![(0, 4096, 0), (1, 8192, 4096)]
+            vec![(0, 0, 4096, 0), (1, 0x4000, 8192, 4096)]
         );
     }
 
@@ -507,7 +659,7 @@ mod tests {
 
     #[test]
     fn test_parse_guest_ram_mappings_missing_field() {
-        let value = json!({ "guest_ram_mappings": [{ "slot": 0, "size": 4096u64 }] });
+        let value = json!({ "guest_ram_mappings": [{ "slot": 0, "gpa": 0u64, "size": 4096u64 }] });
         assert!(matches!(
             parse_guest_ram_mappings(&value),
             Err(Error::MissingField("file_offset"))

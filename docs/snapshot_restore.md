@@ -213,6 +213,25 @@ migration today.
     --resume
 ```
 
+### On demand restore usage
+
+For speeding up a VM restore, the daemon's `--ondemand` mode hands CH
+empty memfds and serves page contents on demand via userfaultfd.
+
+This requires `memory_mode=postcopy` on the receive-migration call so CH
+registers userfaultfd on the memfds before resuming vCPUs and keeps
+the daemon's socket open for `PageFault` requests:
+
+```bash
+./ch-remote --api-socket /tmp/cloud-hypervisor.sock \
+    receive-migration receiver_url=unix:/tmp/restore.sock,memory_mode=postcopy &
+
+./offload_daemon restore \
+    --socket /tmp/restore.sock \
+    --input-dir /var/snapshots/vm1 \
+    --resume --ondemand
+```
+
 ### The daemon protocol
 
 The daemon implements the local live-migration wire protocol defined in

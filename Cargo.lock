@@ -1534,6 +1534,7 @@ dependencies = [
  "log",
  "serde_json",
  "thiserror",
+ "vm-memory",
  "vm-migration",
  "vmm",
  "vmm-sys-util",
