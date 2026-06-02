@@ -394,6 +394,12 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         }
         Ok(cpuid)
     }
+    #[cfg(target_arch = "x86_64")]
+    fn get_msr_based_features(&self) -> hypervisor::Result<Vec<MsrEntry>> {
+        // TODO: This is relevant for CPU profiles which will initially only be available
+        // for the KVM hypervisor.
+        unimplemented!()
+    }
 
     /// Get maximum number of vCPUs
     fn get_max_vcpus(&self) -> u32 {

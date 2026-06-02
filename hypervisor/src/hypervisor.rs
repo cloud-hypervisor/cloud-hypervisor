@@ -101,6 +101,11 @@ pub enum HypervisorError {
     ///
     #[error("Failed to retrieve SEV-SNP capabilities:{0}")]
     SevSnpCapabilities(#[source] anyhow::Error),
+    ///
+    /// Unable to read the requested MSRs
+    ///
+    #[error("Failed to get MSRs")]
+    GetMsrs,
 }
 
 ///
@@ -128,6 +133,11 @@ pub trait Hypervisor: Send + Sync {
     /// Get the supported CpuID
     ///
     fn get_supported_cpuid(&self) -> Result<Vec<CpuIdEntry>>;
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Get the MSR-based features supported by the hardware and hypervisor
+    ///
+    fn get_msr_based_features(&self) -> Result<Vec<crate::arch::x86::MsrEntry>>;
     ///
     /// Check particular extensions if any
     ///
