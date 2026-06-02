@@ -381,6 +381,10 @@ pub enum Error {
     #[error("Memory configuration is not valid")]
     InvalidMemoryParameters,
 
+    /// Memory backing path contains an interior NUL byte.
+    #[error("Memory backing path contains an interior NUL byte")]
+    InvalidMemoryPath(#[source] ffi::NulError),
+
     /// Forbidden operation. Impossible to resize guest memory if it is
     /// backed by user defined memory regions.
     #[error("Impossible to resize guest memory if it is backed by user defined memory regions")]
@@ -495,7 +499,7 @@ fn mmio_address_space_size(phys_bits: u8) -> u64 {
 //
 // See: https://github.com/torvalds/linux/blob/v6.3/fs/hugetlbfs/inode.c#L1169
 fn statfs_get_bsize(path: &str) -> Result<u64, Error> {
-    let path = std::ffi::CString::new(path).map_err(|_| Error::InvalidMemoryParameters)?;
+    let path = ffi::CString::new(path).map_err(Error::InvalidMemoryPath)?;
     let mut buf = std::mem::MaybeUninit::<libc::statfs>::uninit();
 
     // SAFETY: FFI call with a valid path and buffer
