@@ -4,6 +4,8 @@
 
 pub mod rmw;
 
+use crate::async_io::AsyncIoOperation;
+
 /// `[offset, offset + len)` rounded outward to `alignment`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AlignedRange {
@@ -31,6 +33,22 @@ pub fn aligned_range(offset: u64, len: u64, alignment: u64) -> Option<AlignedRan
         head_pad: offset - aligned_offset,
         tail_pad: aligned_end - end,
     })
+}
+
+/// Returns true when `op` can be submitted directly at `alignment`.
+/// Disk offset and every iovec base and length must be aligned.
+pub fn op_is_aligned(op: &AsyncIoOperation, alignment: u64) -> bool {
+    debug_assert!(alignment.is_power_of_two() && alignment > 0);
+    if alignment <= 1 {
+        return true;
+    }
+    let mask = (alignment - 1) as usize;
+    if (op.offset() as u64) & (alignment - 1) != 0 {
+        return false;
+    }
+    op.iovecs()
+        .iter()
+        .all(|iov| (iov.iov_base as usize) & mask == 0 && iov.iov_len & mask == 0)
 }
 
 #[cfg(test)]
