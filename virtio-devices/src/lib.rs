@@ -122,6 +122,8 @@ pub enum ActivateError {
     CreateRateLimiter(#[source] std::io::Error),
     #[error("Failed to activate the vDPA device")]
     ActivateVdpa(#[source] vdpa::Error),
+    #[error("Failed to create TimerFd")]
+    CreateTimerFd(#[source] vmm_sys_util::errno::Error),
 }
 
 pub type ActivateResult = std::result::Result<(), ActivateError>;

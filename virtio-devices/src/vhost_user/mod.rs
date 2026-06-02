@@ -58,8 +58,8 @@ pub enum Error {
     BadQueueNum,
     #[error("Failed binding vhost-user socket")]
     BindSocket(#[source] io::Error),
-    #[error("Creating kill eventfd failed")]
-    CreateKillEventFd(#[source] io::Error),
+    #[error("Creating eventfd failed")]
+    CreateEventFd(#[source] io::Error),
     #[error("Cloning kill eventfd failed")]
     CloneKillEventFd(#[source] io::Error),
     #[error("Invalid descriptor table address")]
