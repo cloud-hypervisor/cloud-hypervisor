@@ -90,30 +90,6 @@ pub enum VsockError {
 }
 type Result<T> = std::result::Result<T, VsockError>;
 
-#[derive(Debug)]
-pub enum VsockEpollHandlerError {
-    /// The vsock data/buffer virtio descriptor length is smaller than expected.
-    BufDescTooSmall,
-    /// The vsock data/buffer virtio descriptor is expected, but missing.
-    BufDescMissing,
-    /// Chained GuestMemory error.
-    GuestMemory,
-    /// Bounds check failed on guest memory pointer.
-    GuestMemoryBounds,
-    /// The vsock header descriptor length is too small.
-    HdrDescTooSmall(u32),
-    /// The vsock header `len` field holds an invalid value.
-    InvalidPktLen(u32),
-    /// A data fetch was attempted when no data was available.
-    NoData,
-    /// A data buffer was expected for the provided packet, but it is missing.
-    PktBufMissing,
-    /// Encountered an unexpected write-only virtio descriptor.
-    UnreadableDescriptor,
-    /// Encountered an unexpected read-only virtio descriptor.
-    UnwritableDescriptor,
-}
-
 /// A passive, event-driven object, that needs to be notified whenever an epoll-able event occurs.
 ///
 /// An event-polling control loop will use `get_polled_fd()` and `get_polled_evset()` to query
