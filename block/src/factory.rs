@@ -12,10 +12,11 @@
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::sync::OnceLock;
-use std::{fmt, fs};
+use std::{fmt, fs, io};
 
 use log::info;
 
+use crate::async_io::DiskFileError;
 #[cfg(feature = "io_uring")]
 use crate::block_io_uring_is_supported;
 use crate::disk_file::AsyncFullDiskFile;
@@ -112,6 +113,17 @@ fn open_vhdx(
     file: fs::File,
     options: &DiskOpenOptions<'_>,
 ) -> BlockResult<Box<dyn AsyncFullDiskFile>> {
+    // TODO: implement O_DIRECT support for vhdx.
+    if options.direct {
+        return Err(BlockError::new(
+            BlockErrorKind::UnsupportedFeature,
+            DiskFileError::NewAsyncIo(io::Error::other(
+                "vhdx does not support direct=true, not implemented",
+            )),
+        )
+        .with_path(options.path));
+    }
+
     info!("Opening VHDX disk file with synchronous backend");
     Ok(Box::new(
         VhdxDisk::new(file).map_err(|e| e.with_path(options.path))?,
