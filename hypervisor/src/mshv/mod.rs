@@ -9,6 +9,8 @@ use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, RwLock};
 
+#[cfg(target_arch = "x86_64")]
+use anyhow::Context;
 use anyhow::anyhow;
 #[cfg(target_arch = "x86_64")]
 use arc_swap::ArcSwap;
@@ -1427,7 +1429,8 @@ impl cpu::Vcpu for MshvVcpu {
     fn set_cpuid2(&self, cpuid: &[CpuIdEntry]) -> cpu::Result<()> {
         let cpuid: Vec<mshv_bindings::hv_cpuid_entry> = cpuid.iter().map(|e| (*e).into()).collect();
         let mshv_cpuid = <CpuId>::from_entries(&cpuid)
-            .map_err(|_| cpu::HypervisorCpuError::SetCpuid(anyhow!("failed to create CpuId")))?;
+            .context("failed to create CpuId")
+            .map_err(cpu::HypervisorCpuError::SetCpuid)?;
 
         self.fd
             .register_intercept_result_cpuid(&mshv_cpuid)

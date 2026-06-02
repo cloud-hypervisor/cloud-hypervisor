@@ -299,7 +299,7 @@ pub enum HypervisorCpuError {
     /// Failed to initialize PMU
     ///
     #[error("Failed to initialize PMU")]
-    InitializePmu,
+    InitializePmu(#[source] anyhow::Error),
     #[cfg(target_arch = "x86_64")]
     ///
     /// Error getting TSC frequency
