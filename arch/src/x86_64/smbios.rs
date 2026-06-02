@@ -28,10 +28,10 @@ pub enum Error {
     Clear,
     /// Failure to write SMBIOS entrypoint structure
     #[error("Failure to write SMBIOS entrypoint structure")]
-    WriteSmbiosEp,
+    WriteSmbiosEp(#[source] vm_memory::GuestMemoryError),
     /// Failure to write additional data to memory
     #[error("Failure to write additional data to memory")]
-    WriteData,
+    WriteData(#[source] vm_memory::GuestMemoryError),
     /// Failure to parse uuid, uuid format may be error
     #[error("Failure to parse uuid: {1}")]
     ParseUuid(#[source] uuid::Error, String),
@@ -207,7 +207,7 @@ fn write_and_incr<T: ByteValued>(
     val: T,
     mut curptr: GuestAddress,
 ) -> Result<GuestAddress> {
-    mem.write_obj(val, curptr).map_err(|_| Error::WriteData)?;
+    mem.write_obj(val, curptr).map_err(Error::WriteData)?;
     curptr = curptr
         .checked_add(mem::size_of::<T>() as u64)
         .ok_or(Error::NotEnoughMemory)?;
@@ -449,7 +449,7 @@ pub fn setup_smbios(mem: &GuestMemoryMmap, smbios: Option<&SmbiosConfig>) -> Res
         };
         smbios_ep.checksum = compute_checksum(&smbios_ep);
         mem.write_obj(smbios_ep, GuestAddress(SMBIOS_START))
-            .map_err(|_| Error::WriteSmbiosEp)?;
+            .map_err(Error::WriteSmbiosEp)?;
     }
 
     Ok(curptr.unchecked_offset_from(physptr) + std::mem::size_of::<Smbios30Entrypoint>() as u64)
@@ -704,6 +704,6 @@ mod unit_tests {
         .unwrap();
 
         let err = setup_smbios(&mem, None).unwrap_err();
-        assert!(matches!(err, Error::WriteData));
+        assert!(matches!(err, Error::WriteData(_)));
     }
 }
