@@ -996,8 +996,10 @@ impl MemoryManager {
         for range in saved_regions.regions() {
             let host_addr = guest_memory
                 .get_host_address(GuestAddress(range.gpa))
-                .map_err(|_| UffdError::GpaTranslation { gpa: range.gpa })?
-                as u64;
+                .map_err(|e| UffdError::GpaTranslation {
+                    gpa: range.gpa,
+                    source: e,
+                })? as u64;
 
             let ioctls = uffd::register(uffd_fd.as_fd(), host_addr, range.length).map_err(|e| {
                 UffdError::Register {
