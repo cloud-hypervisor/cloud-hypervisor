@@ -16,7 +16,7 @@ use std::sync::Arc;
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
-use super::common::{AlignedBuf, decompress_cluster, pread_alloc, pread_exact};
+use super::common::{decompress_cluster, pread_alloc, pread_exact};
 use super::internal::decoder::Decoder;
 use super::internal::metadata::{
     BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
@@ -24,7 +24,8 @@ use super::internal::metadata::{
 use super::internal::qcow_raw_file::QcowRawFile;
 use crate::aligned::rmw::{pread_aligned, pwrite_aligned};
 use crate::async_io::{
-    AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, UringDataIo,
+    AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, OwnedIoBuffer,
+    UringDataIo,
 };
 use crate::{SECTOR_SIZE, pwrite_all};
 
@@ -391,16 +392,16 @@ impl QcowAsync {
                 } => {
                     let len = length as usize;
                     if alignment > 0 {
-                        let mut abuf =
-                            AlignedBuf::new(len, alignment).map_err(AsyncIoError::ReadVectored)?;
+                        let mut abuf = OwnedIoBuffer::new(len, alignment)
+                            .map_err(AsyncIoError::ReadVectored)?;
                         pread_aligned(
                             data_file.as_raw_fd(),
-                            abuf.as_mut_slice(len),
+                            abuf.as_mut_slice(),
                             host_offset,
                             alignment as u64,
                         )
                         .map_err(AsyncIoError::ReadVectored)?;
-                        op.write_bytes_at(buf_offset, abuf.as_slice(len))
+                        op.write_bytes_at(buf_offset, abuf.as_slice())
                             .map_err(AsyncIoError::ReadVectored)?;
                     } else {
                         let mut buf = vec![0u8; len];
@@ -492,13 +493,13 @@ impl QcowAsync {
                 } => {
                     if alignment > 0 {
                         // O_DIRECT, gather directly into aligned buffer.
-                        let mut abuf = AlignedBuf::new(count, alignment)
+                        let mut abuf = OwnedIoBuffer::new(count, alignment)
                             .map_err(AsyncIoError::WriteVectored)?;
-                        op.read_bytes_at(buf_offset, abuf.as_mut_slice(count))
+                        op.read_bytes_at(buf_offset, abuf.as_mut_slice())
                             .map_err(AsyncIoError::WriteVectored)?;
                         pwrite_aligned(
                             data_file.as_raw_fd(),
-                            abuf.as_slice(count),
+                            abuf.as_slice(),
                             host_offset,
                             alignment as u64,
                         )

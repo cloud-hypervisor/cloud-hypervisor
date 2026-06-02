@@ -208,4 +208,145 @@ mod unit_tests {
             );
         }
     }
+
+    #[test]
+    fn test_pread_aligned_pass_through() {
+        // When buffer address, length, and offset are all aligned,
+        // pread_aligned should take the fast path (no bounce buffer).
+        let size = 4096usize;
+        let (_tf, fd) = create_pattern_file(size);
+        let alignment = 512u64;
+
+        // OwnedIoBuffer guarantees buffer address alignment.
+        let mut buf = OwnedIoBuffer::new(size, alignment as usize).unwrap();
+        pread_aligned(fd, buf.as_mut_slice(), 0, alignment).unwrap();
+
+        let expected: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
+        assert_eq!(buf.as_slice(), &expected[..]);
+    }
+
+    #[test]
+    fn test_pread_aligned_bounce_unaligned_buffer() {
+        // Force a misaligned buffer so pread_aligned must take the
+        // bounce path. A plain vec![0u8; 4096] is often page aligned
+        // by the allocator, which would skip the bounce entirely.
+        let size = 4096usize;
+        let (_tf, fd) = create_pattern_file(size);
+        let alignment = 512u64;
+
+        let mut backing = vec![0u8; size + 1];
+        let buf = &mut backing[1..size + 1];
+        pread_aligned(fd, buf, 0, alignment).unwrap();
+
+        let expected: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
+        assert_eq!(buf, &expected[..]);
+    }
+
+    #[test]
+    fn test_pread_aligned_unaligned_offset() {
+        // Read at an offset that is not a multiple of alignment.
+        // pread_aligned should round down the offset, read an aligned
+        // region, then copy the correct slice into the caller buffer.
+        let file_size = 8192usize;
+        let (_tf, fd) = create_pattern_file(file_size);
+        let alignment = 512u64;
+
+        let offset = 100u64;
+        let len = 200usize;
+        let mut buf = vec![0u8; len];
+        pread_aligned(fd, &mut buf, offset, alignment).unwrap();
+
+        let expected: Vec<u8> = (offset as usize..offset as usize + len)
+            .map(|i| (i % 251) as u8)
+            .collect();
+        assert_eq!(buf, expected);
+    }
+
+    #[test]
+    fn test_pwrite_aligned_pass_through() {
+        // When buffer address, length, and offset are all aligned,
+        // pwrite_aligned should take the fast path.
+        let size = 4096usize;
+        let (_tf, fd) = create_pattern_file(size);
+        let alignment = 512u64;
+
+        let data: Vec<u8> = (0..size).map(|i| ((i + 1) % 251) as u8).collect();
+        let mut buf = OwnedIoBuffer::new(size, alignment as usize).unwrap();
+        buf.as_mut_slice().copy_from_slice(&data);
+        pwrite_aligned(fd, buf.as_slice(), 0, alignment).unwrap();
+
+        assert_eq!(read_back(fd, size), data);
+    }
+
+    #[test]
+    fn test_pwrite_aligned_bounce_unaligned_buffer() {
+        // Force a misaligned buffer so pwrite_aligned must take the
+        // bounce path. A plain vec![0u8; 4096] is often page aligned
+        // by the allocator, which would skip the bounce entirely.
+        let size = 4096usize;
+        let (_tf, fd) = create_pattern_file(size);
+        let alignment = 512u64;
+
+        let backing: Vec<u8> = (0..size + 1).map(|i| ((i + 1) % 251) as u8).collect();
+        let data = &backing[1..size + 1];
+        pwrite_aligned(fd, data, 0, alignment).unwrap();
+
+        assert_eq!(read_back(fd, size), data);
+    }
+
+    #[test]
+    fn test_pwrite_aligned_unaligned_offset() {
+        // Write at an offset that is not a multiple of alignment.
+        // pwrite_aligned should do read modify write and preserve
+        // surrounding data.
+        let file_size = 8192usize;
+        let (_tf, fd) = create_pattern_file(file_size);
+        let alignment = 512u64;
+
+        let offset = 100u64;
+        let len = 200usize;
+        let data: Vec<u8> = (0..len).map(|i| ((i + 1) % 239) as u8).collect();
+        pwrite_aligned(fd, &data, offset, alignment).unwrap();
+
+        let whole = read_back(fd, file_size);
+
+        // Before the write region: original pattern.
+        let before: Vec<u8> = (0..offset as usize).map(|i| (i % 251) as u8).collect();
+        assert_eq!(&whole[..offset as usize], &before[..]);
+
+        // The written region.
+        assert_eq!(&whole[offset as usize..offset as usize + len], &data[..]);
+
+        // After the write region: original pattern.
+        let after_start = offset as usize + len;
+        let after: Vec<u8> = (after_start..file_size).map(|i| (i % 251) as u8).collect();
+        assert_eq!(&whole[after_start..], &after[..]);
+    }
+
+    #[test]
+    fn test_pread_pwrite_aligned_4096_alignment() {
+        // Exercise aligned I/O with 4096 byte alignment.
+        let file_size = 16384usize;
+        let (_tf, fd) = create_pattern_file(file_size);
+        let alignment = 4096u64;
+
+        // Write 4096 bytes at offset 4096 via unaligned Vec<u8>.
+        let offset = 4096u64;
+        let len = 4096usize;
+        let data: Vec<u8> = (0..len).map(|i| ((i + 1) % 239) as u8).collect();
+        pwrite_aligned(fd, &data, offset, alignment).unwrap();
+
+        // Read back the written region via unaligned Vec<u8>.
+        let mut buf = vec![0u8; len];
+        pread_aligned(fd, &mut buf, offset, alignment).unwrap();
+        assert_eq!(buf, data);
+
+        // Verify untouched regions.
+        let whole = read_back(fd, file_size);
+        let before: Vec<u8> = (0..offset as usize).map(|i| (i % 251) as u8).collect();
+        assert_eq!(&whole[..offset as usize], &before[..]);
+        let after_start = offset as usize + len;
+        let after: Vec<u8> = (after_start..file_size).map(|i| (i % 251) as u8).collect();
+        assert_eq!(&whole[after_start..], &after[..]);
+    }
 }

@@ -10,9 +10,8 @@
 //!
 //! Position-independent I/O helpers used by both `qcow_sync` and `qcow_async`.
 
-use std::alloc::{Layout, alloc_zeroed, dealloc};
+use std::io;
 use std::os::fd::RawFd;
-use std::{io, slice};
 
 #[cfg(test)]
 use super::internal;
@@ -73,58 +72,6 @@ pub fn decompress_cluster(
         return Err(io::Error::from_raw_os_error(libc::EIO));
     }
     Ok(decompressed)
-}
-
-/// RAII wrapper for an aligned heap buffer required by O_DIRECT.
-pub struct AlignedBuf {
-    ptr: *mut u8,
-    layout: Layout,
-}
-
-impl AlignedBuf {
-    pub fn new(size: usize, alignment: usize) -> io::Result<Self> {
-        let size = size.max(1).next_multiple_of(alignment);
-        let layout = Layout::from_size_align(size, alignment)
-            .map_err(|e| io::Error::other(format!("invalid aligned layout: {e}")))?;
-        // SAFETY: layout has non-zero size.
-        let ptr = unsafe { alloc_zeroed(layout) };
-        if ptr.is_null() {
-            return Err(io::Error::new(
-                io::ErrorKind::OutOfMemory,
-                "aligned allocation failed",
-            ));
-        }
-        Ok(AlignedBuf { ptr, layout })
-    }
-
-    pub fn as_mut_slice(&mut self, len: usize) -> &mut [u8] {
-        let len = len.min(self.layout.size());
-        // SAFETY: ptr is valid for layout.size() bytes; len <= layout.size().
-        unsafe { slice::from_raw_parts_mut(self.ptr, len) }
-    }
-
-    pub fn as_slice(&self, len: usize) -> &[u8] {
-        let len = len.min(self.layout.size());
-        // SAFETY: ptr is valid for layout.size() bytes; len <= layout.size().
-        unsafe { slice::from_raw_parts(self.ptr, len) }
-    }
-
-    #[cfg(test)]
-    pub fn layout(&self) -> &Layout {
-        &self.layout
-    }
-
-    #[cfg(test)]
-    pub fn ptr(&self) -> *const u8 {
-        self.ptr
-    }
-}
-
-impl Drop for AlignedBuf {
-    fn drop(&mut self) {
-        // SAFETY: ptr was allocated by alloc_zeroed with self.layout.
-        unsafe { dealloc(self.ptr, self.layout) };
-    }
 }
 
 #[cfg(test)]
