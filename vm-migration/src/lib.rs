@@ -26,7 +26,11 @@ pub enum UffdError {
     Create(#[source] std::io::Error),
 
     #[error("Cannot translate GPA {gpa:#x} to host address")]
-    GpaTranslation { gpa: u64 },
+    GpaTranslation {
+        gpa: u64,
+        #[source]
+        source: vm_memory::GuestMemoryError,
+    },
 
     #[error("Failed to register region at {addr:#x}+{len:#x}")]
     Register {
