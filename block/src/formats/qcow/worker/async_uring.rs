@@ -16,14 +16,13 @@ use std::sync::Arc;
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
-use super::common::{
-    AlignedBuf, aligned_pread, aligned_pwrite, decompress_cluster, pread_alloc, pread_exact,
-};
+use super::common::{AlignedBuf, decompress_cluster, pread_alloc, pread_exact};
 use super::internal::decoder::Decoder;
 use super::internal::metadata::{
     BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
 };
 use super::internal::qcow_raw_file::QcowRawFile;
+use crate::aligned::rmw::{pread_aligned, pwrite_aligned};
 use crate::async_io::{
     AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, UringDataIo,
 };
@@ -394,11 +393,11 @@ impl QcowAsync {
                     if alignment > 0 {
                         let mut abuf =
                             AlignedBuf::new(len, alignment).map_err(AsyncIoError::ReadVectored)?;
-                        aligned_pread(
+                        pread_aligned(
                             data_file.as_raw_fd(),
                             abuf.as_mut_slice(len),
                             host_offset,
-                            alignment,
+                            alignment as u64,
                         )
                         .map_err(AsyncIoError::ReadVectored)?;
                         op.write_bytes_at(buf_offset, abuf.as_slice(len))
@@ -497,11 +496,11 @@ impl QcowAsync {
                             .map_err(AsyncIoError::WriteVectored)?;
                         op.read_bytes_at(buf_offset, abuf.as_mut_slice(count))
                             .map_err(AsyncIoError::WriteVectored)?;
-                        aligned_pwrite(
+                        pwrite_aligned(
                             data_file.as_raw_fd(),
                             abuf.as_slice(count),
                             host_offset,
-                            alignment,
+                            alignment as u64,
                         )
                         .map_err(AsyncIoError::WriteVectored)?;
                     } else {

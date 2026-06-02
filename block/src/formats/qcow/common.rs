@@ -17,7 +17,6 @@ use std::{io, slice};
 #[cfg(test)]
 use super::internal;
 use super::internal::decoder::Decoder;
-use crate::pwrite_all;
 
 // -- Position independent I/O helpers --
 //
@@ -126,46 +125,6 @@ impl Drop for AlignedBuf {
         // SAFETY: ptr was allocated by alloc_zeroed with self.layout.
         unsafe { dealloc(self.ptr, self.layout) };
     }
-}
-
-/// Read into `buf` via an aligned bounce buffer when O_DIRECT requires it.
-pub fn aligned_pread(fd: RawFd, buf: &mut [u8], offset: u64, alignment: usize) -> io::Result<()> {
-    if alignment == 0
-        || ((buf.as_ptr() as usize).is_multiple_of(alignment)
-            && buf.len().is_multiple_of(alignment)
-            && (offset as usize).is_multiple_of(alignment))
-    {
-        return pread_exact(fd, buf, offset);
-    }
-
-    let aligned_offset = offset & !(alignment as u64 - 1);
-    let head = (offset - aligned_offset) as usize;
-    let aligned_len = (head + buf.len()).next_multiple_of(alignment);
-    let mut bounce = AlignedBuf::new(aligned_len, alignment)?;
-    pread_exact(fd, bounce.as_mut_slice(aligned_len), aligned_offset)?;
-    buf.copy_from_slice(&bounce.as_slice(aligned_len)[head..head + buf.len()]);
-    Ok(())
-}
-
-/// Write `buf` via an aligned bounce buffer when O_DIRECT requires it.
-pub fn aligned_pwrite(fd: RawFd, buf: &[u8], offset: u64, alignment: usize) -> io::Result<()> {
-    if alignment == 0
-        || ((buf.as_ptr() as usize).is_multiple_of(alignment)
-            && buf.len().is_multiple_of(alignment)
-            && (offset as usize).is_multiple_of(alignment))
-    {
-        return pwrite_all(fd, buf, offset);
-    }
-
-    let aligned_offset = offset & !(alignment as u64 - 1);
-    let head = (offset - aligned_offset) as usize;
-    let aligned_len = (head + buf.len()).next_multiple_of(alignment);
-    let mut bounce = AlignedBuf::new(aligned_len, alignment)?;
-
-    // Read-modify-write: read the existing aligned region, overlay our data.
-    pread_exact(fd, bounce.as_mut_slice(aligned_len), aligned_offset)?;
-    bounce.as_mut_slice(aligned_len)[head..head + buf.len()].copy_from_slice(buf);
-    pwrite_all(fd, bounce.as_slice(aligned_len), aligned_offset)
 }
 
 #[cfg(test)]
