@@ -87,22 +87,52 @@ jobs:
           SUPPORTED_LOCATIONS=$(echo "$STORAGE_ACCOUNT_PATHS" | jq -r 'to_entries[] | .key')
 
           for location in $SUPPORTED_LOCATIONS; do
-            family=$(az vm list-skus --size "$SKU" --location "$location" --resource-type "virtualMachines" --query '[0].family' -o tsv)
+            echo "Checking SKU availability for $SKU in $location..."
+            sku_info=$(az vm list-skus --size "$SKU" --location "$location" --resource-type "virtualMachines" -o json)
+
+            if [[ "$(echo "$sku_info" | jq 'length')" -eq 0 ]]; then
+              echo "SKU $SKU is not available in $location"
+              continue
+            fi
+
+            family=$(echo "$sku_info" | jq -r '.[0].family // empty')
             if [[ -z "$family" ]]; then
               echo "Cannot determine VM family for SKU: $SKU in $location"
               continue
             fi
 
-            remaining=$(az vm list-usage --location "$location" --query "[?name.value=='$family'] | [0]" -o json |
-                        jq '(.limit | tonumber) - (.currentValue | tonumber) >= ($ARGS.positional[0] | tonumber)' --jsonargs "$vcpu")
-            if [[ "$remaining" = true ]]; then
-              echo "Sufficient quota found in $location"
+            restrictions=$(echo "$sku_info" | jq '.[0].restrictions // []')
+            if [[ "$(echo "$restrictions" | jq 'length')" -gt 0 ]]; then
+              echo "SKU $SKU has provisioning restrictions in $location:"
+              echo "$restrictions" | jq -r '.[] | "- \(.type): \(.reasonCode // \"unknown\") \(.displayText // \"\")"'
+              continue
+            fi
+
+            usage=$(az vm list-usage --location "$location" -o json)
+            usage_item=$(echo "$usage" | jq --arg family "$family" '
+              ([.[] | select(.name.value | test($family; "i"))] +
+              [.[] | select(.name.value | test("vcpus|cores"; "i"))])
+              | first // empty
+            ')
+
+            if [[ -z "$usage_item" || "$usage_item" == "null" ]]; then
+              echo "Failed to determine vCPU quota for $location"
+              echo "Available usage metric names in $location:"
+              echo "$usage" | jq -r '.[].name.value'
+              continue
+            fi
+
+            available_vcpus=$(echo "$usage_item" | jq '(.limit | tonumber) - (.currentValue | tonumber)')
+            if [[ "$available_vcpus" -ge "$vcpu" ]]; then
+              echo "Found location $location with available capacity and quota ($available_vcpus vCPUs available)"
               echo "location=$location" >> "$GITHUB_OUTPUT"
               exit 0
             fi
+
+            echo "Not enough vCPU quota in $location: $available_vcpus available, need $vcpu"
           done
 
-          echo "No location found with sufficient vCPU quota for SKU: $SKU"
+          echo "No location found with sufficient vCPU quota and SKU capacity for SKU: $SKU"
           exit 1
 
       - name: Create Resource Group
