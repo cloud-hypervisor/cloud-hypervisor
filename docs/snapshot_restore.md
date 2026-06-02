@@ -213,6 +213,32 @@ which is the same precondition that applies to local live migration today.
     --resume
 ```
 
+### Fast (lazy) restore usage
+
+For faster time-to-running, the daemon's `--lazy` mode hands CH empty
+memfds and serves page contents on demand via UFFD. The vCPUs resume
+before any RAM is read from disk; pages stream in as the guest touches
+them.
+
+This requires `postcopy=on` on the receive-migration call so CH
+registers UFFD on the memfds **before** resuming vCPUs and keeps the
+daemon's socket open for `PageFault` requests:
+
+```bash
+./ch-remote --api-socket /tmp/cloud-hypervisor.sock \
+    receive-migration receiver_url=unix:/tmp/restore.sock,postcopy=on &
+
+./offload_daemon restore \
+    --socket /tmp/restore.sock \
+    --input-dir /var/snapshots/vm1 \
+    --resume --lazy
+```
+
+If `postcopy=on` is omitted, CH treats the empty memfds as fully
+populated, closes the socket after the restore handshake, and resumes
+vCPUs against zero-filled RAM — the daemon immediately sees `EOF` on
+the socket and the guest crashes on the first instruction fetch.
+
 ### The daemon protocol
 
 The daemon implements the local live-migration wire protocol defined in

@@ -8020,7 +8020,13 @@ mod ivshmem {
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_offload() {
-        snapshot_restore_common::_test_snapshot_restore_offload();
+        snapshot_restore_common::_test_snapshot_restore_offload(false);
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_restore_offload_lazy() {
+        snapshot_restore_common::_test_snapshot_restore_offload(true);
     }
 
     #[test]
@@ -8662,7 +8668,7 @@ mod snapshot_restore_common {
     // Round-trip via the reference offload daemon over the existing
     // `vm.send-migration local=on` / `vm.receive-migration` endpoints,
     // proving parity with `vm.snapshot`/`vm.restore`.
-    pub(crate) fn _test_snapshot_restore_offload() {
+    pub(crate) fn _test_snapshot_restore_offload(lazy: bool) {
         use std::process::Stdio;
 
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -8796,16 +8802,19 @@ mod snapshot_restore_common {
                 None
             )));
 
-            // receive-migration blocks until done; run it in a thread
-            // so we can start the daemon as the sender in parallel.
+            // receive-migration blocks until done; run it in a thread so
+            // we can start the daemon as the sender in parallel. Lazy
+            // mode adds `postcopy=on` so CH registers UFFD pre-resume.
             let api_socket_restored_clone = api_socket_restored.clone();
             let restore_socket_clone = restore_socket.clone();
+            let lazy_for_thread = lazy;
             let restore_thread = std::thread::spawn(move || {
-                remote_command(
-                    &api_socket_restored_clone,
-                    "receive-migration",
-                    Some(format!("unix:{restore_socket_clone}").as_str()),
-                )
+                let arg = if lazy_for_thread {
+                    format!("receiver_url=unix:{restore_socket_clone},postcopy=on")
+                } else {
+                    format!("unix:{restore_socket_clone}")
+                };
+                remote_command(&api_socket_restored_clone, "receive-migration", Some(&arg))
             });
 
             // Wait for CH to bind the socket before starting the daemon.
@@ -8814,26 +8823,43 @@ mod snapshot_restore_common {
             }));
 
             // Daemon in restore (sender) mode with --resume so the
-            // guest is live when we probe it.
+            // guest is live when we probe it. Lazy mode adds --lazy and
+            // keeps the daemon connected to serve PageFault requests.
+            let mut restore_args = vec![
+                "restore".to_string(),
+                "--socket".to_string(),
+                restore_socket.clone(),
+                "--input-dir".to_string(),
+                offload_dir.clone(),
+                "--resume".to_string(),
+            ];
+            if lazy {
+                restore_args.push("--lazy".to_string());
+            }
             let daemon = Command::new(clh_command("offload_daemon"))
-                .args([
-                    "restore",
-                    "--socket",
-                    &restore_socket,
-                    "--input-dir",
-                    &offload_dir,
-                    "--resume",
-                ])
+                .args(&restore_args)
                 .stderr(Stdio::piped())
                 .stdout(Stdio::piped())
                 .spawn()
                 .unwrap();
-            let daemon_output = daemon.wait_with_output().unwrap();
-            assert!(
-                daemon_output.status.success(),
-                "offload daemon (restore) failed: stderr={}",
-                String::from_utf8_lossy(&daemon_output.stderr)
-            );
+            if lazy {
+                // Lazy: daemon stays running, serving PageFault requests
+                // until the destination CH closes the socket. It exits
+                // on its own when we kill dest_child below; we don't
+                // wait for it here because the daemon's correctness is
+                // implied by the guest checks passing — pages would not
+                // be readable if the daemon weren't serving them.
+                drop(daemon);
+            } else {
+                // Eager: daemon finishes its work and exits once the
+                // restore handshake completes.
+                let daemon_output = daemon.wait_with_output().unwrap();
+                assert!(
+                    daemon_output.status.success(),
+                    "offload daemon (restore) failed: stderr={}",
+                    String::from_utf8_lossy(&daemon_output.stderr)
+                );
+            }
 
             assert!(
                 restore_thread.join().unwrap(),

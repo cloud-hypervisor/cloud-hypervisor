@@ -1577,6 +1577,7 @@ dependencies = [
  "libc",
  "log",
  "serde_json",
+ "vm-memory",
  "vm-migration",
  "vmm",
  "vmm-sys-util",
