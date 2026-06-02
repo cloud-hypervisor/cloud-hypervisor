@@ -16,6 +16,7 @@ mod unix;
 use std::os::unix::io::RawFd;
 
 use packet::VsockPacket;
+use thiserror::Error;
 
 pub use self::device::Vsock;
 pub use self::unix::{VsockUnixBackend, VsockUnixError};
@@ -63,29 +64,43 @@ mod defs {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum VsockError {
     /// The vsock data/buffer virtio descriptor length is smaller than expected.
+    #[error("The vsock data/buffer virtio descriptor length is smaller than expected")]
     BufDescTooSmall,
     /// The vsock data/buffer virtio descriptor is expected, but missing.
+    #[error("The vsock data/buffer virtio descriptor is expected, but missing")]
     BufDescMissing,
     /// Chained GuestMemory error.
+    #[error("Guest memory error")]
     GuestMemory,
+    /// Chained GuestMemory access error.
+    #[error("Guest memory access error")]
+    GuestMemoryAccess(#[source] vm_memory::GuestMemoryError),
     /// Bounds check failed on guest memory pointer.
+    #[error("Bounds check failed on guest memory pointer")]
     GuestMemoryBounds,
     /// The vsock header descriptor length is too small.
+    #[error("The vsock header descriptor length is too small: {0}")]
     HdrDescTooSmall(u32),
     /// The vsock header descriptor is expected, but missing.
+    #[error("The vsock header descriptor is expected, but missing")]
     HdrDescMissing,
     /// The vsock header `len` field holds an invalid value.
+    #[error("The vsock header len field holds an invalid value: {0}")]
     InvalidPktLen(u32),
     /// A data fetch was attempted when no data was available.
+    #[error("A data fetch was attempted when no data was available")]
     NoData,
     /// A data buffer was expected for the provided packet, but it is missing.
+    #[error("A data buffer was expected for the provided packet, but it is missing")]
     PktBufMissing,
     /// Encountered an unexpected write-only virtio descriptor.
+    #[error("Encountered an unexpected write-only virtio descriptor")]
     UnreadableDescriptor,
     /// Encountered an unexpected read-only virtio descriptor.
+    #[error("Encountered an unexpected read-only virtio descriptor")]
     UnwritableDescriptor,
 }
 type Result<T> = std::result::Result<T, VsockError>;

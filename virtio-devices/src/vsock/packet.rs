@@ -290,7 +290,7 @@ impl VsockPacket {
         desc_chain
             .memory()
             .read_slice(hdr.as_mut_slice(), guest_hdr_addr)
-            .map_err(|_| VsockError::GuestMemory)?;
+            .map_err(VsockError::GuestMemoryAccess)?;
 
         let mut pkt = Self {
             guest_hdr_addr,
@@ -361,7 +361,7 @@ impl VsockPacket {
                     desc_chain
                         .memory()
                         .read_slice(&mut owned[offset..offset + to_copy], desc.addr())
-                        .map_err(|_| VsockError::GuestMemory)?;
+                        .map_err(VsockError::GuestMemoryAccess)?;
                     offset += to_copy;
                 }
 
@@ -435,7 +435,7 @@ impl VsockPacket {
         desc_chain
             .memory()
             .read_slice(hdr.as_mut_slice(), guest_hdr_addr)
-            .map_err(|_| VsockError::GuestMemory)?;
+            .map_err(VsockError::GuestMemoryAccess)?;
 
         // Prior to Linux v6.3 there are two descriptors
         let (buf_size, buf_addr) = if head.has_next() {
@@ -506,7 +506,7 @@ impl VsockPacket {
 
         guest_mem
             .write(self.hdr(), self.guest_hdr_addr)
-            .map_err(|_| VsockError::GuestMemory)?;
+            .map_err(VsockError::GuestMemoryAccess)?;
 
         Ok(())
     }
