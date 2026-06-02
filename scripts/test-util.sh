@@ -363,23 +363,3 @@ copy_to_image() {
     mount_and_exec "$IMG" "$MOUNT_DIR" /bin/bash -c "$COPY_COMMAND"
     return $?
 }
-
-# Download x86 guest images
-download_x86_guest_images() {
-    JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.qcow2"
-    JAMMY_OS_IMAGE_URL="https://ch-images.azureedge.net/$JAMMY_OS_IMAGE_NAME"
-    JAMMY_OS_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_IMAGE_NAME"
-    if [ ! -f "$JAMMY_OS_IMAGE" ]; then
-        pushd "$WORKLOADS_DIR" || exit
-        time wget --quiet $JAMMY_OS_IMAGE_URL || exit 1
-        popd || exit
-    fi
-
-    JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.raw"
-    JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
-    if [ ! -f "$JAMMY_OS_RAW_IMAGE" ]; then
-        pushd "$WORKLOADS_DIR" || exit
-        time qemu-img convert -p -f qcow2 -O raw $JAMMY_OS_IMAGE_NAME $JAMMY_OS_RAW_IMAGE_NAME || exit 1
-        popd || exit
-    fi
-}
