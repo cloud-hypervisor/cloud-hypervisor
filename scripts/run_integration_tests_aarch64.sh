@@ -10,13 +10,13 @@ source "$(dirname "$0")"/common-aarch64.sh
 WORKLOADS_LOCK="$WORKLOADS_DIR/integration_test.lock"
 
 update_workloads() {
-    JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.raw"
-    JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
-
     JAMMY_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.qcow2"
     JAMMY_OS_QCOW2_UNCOMPRESSED_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
 
-    for required in "$JAMMY_OS_RAW_IMAGE" "$JAMMY_OS_QCOW2_UNCOMPRESSED_IMAGE" \
+    JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.raw"
+    JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
+
+    for required in "$JAMMY_OS_QCOW2_UNCOMPRESSED_IMAGE" \
         "$WORKLOADS_DIR/CLOUDHV_EFI.fd" \
         "$WORKLOADS_DIR/cloud-hypervisor-static-aarch64" \
         "$WORKLOADS_DIR/alpine-minirootfs-aarch64.tar.gz" \
@@ -29,6 +29,12 @@ update_workloads() {
 
     if [ ! -f "$WORKLOADS_DIR/virtiofsd" ]; then
         cp /usr/local/bin/virtiofsd "$WORKLOADS_DIR/virtiofsd"
+    fi
+
+    if [ ! -f "$JAMMY_OS_RAW_IMAGE" ]; then
+        pushd "$WORKLOADS_DIR" || exit
+        time qemu-img convert -p -f qcow2 -O raw $JAMMY_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME $JAMMY_OS_RAW_IMAGE_NAME || exit 1
+        popd || exit
     fi
 
     JAMMY_OS_QCOW2_ZLIB_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-zlib.qcow2"

@@ -32,12 +32,6 @@ assets:
     arch: [x86_64]
     test: [integration, cvm, rate-limiter, metrics]
 
-  - filename: jammy-server-cloudimg-arm64-custom-20220329-0.raw
-    url: https://ch-images.azureedge.net/jammy-server-cloudimg-arm64-custom-20220329-0.raw
-    sha1: 1f2b71be43b8f748f01306c4454e5c921343faa4
-    arch: [aarch64]
-    test: [integration]
-
   - filename: jammy-server-cloudimg-arm64-custom-20220329-0.qcow2
     url: https://ch-images.azureedge.net/jammy-server-cloudimg-arm64-custom-20220329-0.qcow2
     sha1: 7118f4d4cad18c8357bc2ad9824a50f9a82a860a
