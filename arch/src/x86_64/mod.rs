@@ -1140,8 +1140,9 @@ pub fn generate_ram_ranges(guest_mem: &GuestMemoryMmap) -> super::Result<Vec<Ram
     // Generate the first usable physical memory range before the gap. The e820 map
     // should only report memory above 1MiB.
     let first_ram_range = {
-        let (first_region_start, first_region_end) =
-            ram_regions.first().ok_or(super::Error::MemmapTableSetup)?;
+        let (first_region_start, first_region_end) = ram_regions
+            .first()
+            .ok_or(super::Error::MemmapTableGeneration)?;
         let high_ram_start = layout::HIGH_RAM_START.raw_value();
         let mem_32bit_reserved_start = layout::MEM_32BIT_RESERVED_START.raw_value();
 
@@ -1154,7 +1155,7 @@ pub fn generate_ram_ranges(guest_mem: &GuestMemoryMmap) -> super::Result<Vec<Ram
                 high_ram_start: 0x{high_ram_start:08x}, mem_32bit_reserved_start: 0x{mem_32bit_reserved_start:08x}"
             );
 
-            return Err(super::Error::MemmapTableSetup);
+            return Err(super::Error::MemmapTableGeneration);
         }
 
         info!(
@@ -1265,7 +1266,7 @@ fn configure_pvh(
     for memmap_entry in memmap {
         guest_mem
             .write_obj(memmap_entry, memmap_start_addr)
-            .map_err(|_| super::Error::MemmapTableSetup)?;
+            .map_err(super::Error::MemmapTableSetup)?;
         memmap_start_addr =
             memmap_start_addr.unchecked_add(mem::size_of::<hvm_memmap_table_entry>() as u64);
     }

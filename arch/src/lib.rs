@@ -35,7 +35,9 @@ pub enum Error {
     #[error("The memory map table extends past the end of guest memory")]
     MemmapTablePastRamEnd,
     #[error("Error writing memory map table to guest memory")]
-    MemmapTableSetup,
+    MemmapTableSetup(#[source] vm_memory::GuestMemoryError),
+    #[error("Error generating memory map table")]
+    MemmapTableGeneration,
     #[error("The hvm_start_info structure extends past the end of guest memory")]
     StartInfoPastRamEnd,
     #[error("Error writing hvm_start_info to guest memory")]
