@@ -373,6 +373,18 @@ pub(crate) fn query_direct_alignment(fd: RawFd) -> u64 {
     SECTOR_SIZE
 }
 
+/// Returns the kernel reported direct I/O alignment for `fd`, or `None`
+/// when `fd` was not opened with O_DIRECT.
+pub(crate) fn probe_direct_alignment(fd: RawFd) -> Option<u64> {
+    // SAFETY: fcntl(F_GETFL) is always safe on a valid fd.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags >= 0 && (flags & libc::O_DIRECT) != 0 {
+        Some(query_direct_alignment(fd))
+    } else {
+        None
+    }
+}
+
 /// Probe whether the file/device supports punch hole and zero range
 pub fn probe_sparse_support(file: &File) -> bool {
     let fd = file.as_raw_fd();
