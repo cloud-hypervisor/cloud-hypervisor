@@ -21,7 +21,7 @@ mod common_cvm {
     use super::*;
     macro_rules! basic_cvm_guest {
         ($image_name:expr) => {{
-            let disk_config = UbuntuDiskConfig::new($image_name.to_string());
+            let disk_config = GuestDiskConfig::new($image_name.to_string());
             GuestFactory::new_confidential_guest_factory().create_guest(Box::new(disk_config))
         }};
     }

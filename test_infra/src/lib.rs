@@ -339,15 +339,15 @@ pub trait DiskConfig {
 }
 
 #[derive(Clone)]
-pub struct UbuntuDiskConfig {
+pub struct GuestDiskConfig {
     osdisk_path: String,
     cloudinit_path: String,
     image_name: String,
 }
 
-impl UbuntuDiskConfig {
+impl GuestDiskConfig {
     pub fn new(image_name: String) -> Self {
-        UbuntuDiskConfig {
+        GuestDiskConfig {
             image_name,
             osdisk_path: String::new(),
             cloudinit_path: String::new(),
@@ -438,7 +438,7 @@ fn workspace_root() -> PathBuf {
     panic!("Could not find workspace root");
 }
 
-impl DiskConfig for UbuntuDiskConfig {
+impl DiskConfig for GuestDiskConfig {
     fn prepare_cloudinit(&self, tmp_dir: &TempDir, network: &GuestNetworkConfig) -> String {
         let cloudinit_file_path =
             String::from(tmp_dir.as_path().join("cloudinit").to_str().unwrap());

@@ -874,7 +874,7 @@ pub(crate) fn vm_state(api_socket: &str) -> String {
 }
 
 pub(crate) fn make_virtio_block_guest(factory: &GuestFactory, image_name: &str) -> Guest {
-    let disk_config = UbuntuDiskConfig::new(image_name.to_string());
+    let disk_config = GuestDiskConfig::new(image_name.to_string());
     factory.create_guest(Box::new(disk_config)).with_cpu(4)
 }
 
