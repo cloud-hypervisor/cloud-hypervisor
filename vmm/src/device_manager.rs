@@ -5372,7 +5372,7 @@ impl IvshmemOps for IvshmemHandler {
             None,
             false,
         )
-        .map_err(|_| IvshmemError::CreateUserMemoryRegion)?;
+        .map_err(|e| IvshmemError::CreateUserMemoryRegion(e.into()))?;
         let mem_slot = {
             let mut manager = self.memory_manager.lock().unwrap();
             // SAFETY: guaranteed by MmapRegion invariants
@@ -5387,7 +5387,7 @@ impl IvshmemOps for IvshmemHandler {
                 )
             }
         }
-        .map_err(|_| IvshmemError::CreateUserspaceMapping)?;
+        .map_err(|e| IvshmemError::CreateUserspaceMapping(e.into()))?;
         let region = Arc::new(region);
         let mapping = UserspaceMapping {
             mapping: region.clone(),
@@ -5410,7 +5410,7 @@ impl IvshmemOps for IvshmemHandler {
                 mapping.mem_slot,
             )
         }
-        .map_err(|_| IvshmemError::RemoveUserspaceMapping)?;
+        .map_err(|e| IvshmemError::RemoveUserspaceMapping(e.into()))?;
         Ok(())
     }
 }

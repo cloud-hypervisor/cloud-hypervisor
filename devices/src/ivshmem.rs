@@ -45,11 +45,11 @@ pub enum IvshmemError {
     #[error("Failed to remove user memory region")]
     RemoveUserMemoryRegion,
     #[error("Failed to create user memory region.")]
-    CreateUserMemoryRegion,
+    CreateUserMemoryRegion(#[source] anyhow::Error),
     #[error("Failed to create userspace mapping.")]
-    CreateUserspaceMapping,
+    CreateUserspaceMapping(#[source] anyhow::Error),
     #[error("Failed to remove old userspace mapping.")]
-    RemoveUserspaceMapping,
+    RemoveUserspaceMapping(#[source] anyhow::Error),
 }
 
 #[derive(Copy, Clone)]
