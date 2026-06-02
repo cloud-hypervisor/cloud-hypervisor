@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+pub mod rmw;
+
 /// `[offset, offset + len)` rounded outward to `alignment`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AlignedRange {
