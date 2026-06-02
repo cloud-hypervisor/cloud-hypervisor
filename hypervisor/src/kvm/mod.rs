@@ -28,6 +28,8 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
+#[cfg(target_arch = "x86_64")]
+use anyhow::Context;
 use anyhow::anyhow;
 #[cfg(feature = "sev_snp")]
 use kvm_bindings::kvm_create_guest_memfd;
@@ -2198,7 +2200,8 @@ impl cpu::Vcpu for KvmVcpu {
         let cpuid: Vec<kvm_bindings::kvm_cpuid_entry2> =
             cpuid.iter().map(|e| (*e).into()).collect();
         let kvm_cpuid = <CpuId>::from_entries(&cpuid)
-            .map_err(|_| cpu::HypervisorCpuError::SetCpuid(anyhow!("failed to create CpuId")))?;
+            .context("failed to create CpuId")
+            .map_err(cpu::HypervisorCpuError::SetCpuid)?;
 
         self.fd
             .set_cpuid2(&kvm_cpuid)
@@ -3338,10 +3341,10 @@ impl cpu::Vcpu for KvmVcpu {
         };
         self.fd
             .set_device_attr(&cpu_attr_irq)
-            .map_err(|_| cpu::HypervisorCpuError::InitializePmu)?;
+            .map_err(|e| cpu::HypervisorCpuError::InitializePmu(e.into()))?;
         self.fd
             .set_device_attr(&cpu_attr)
-            .map_err(|_| cpu::HypervisorCpuError::InitializePmu)
+            .map_err(|e| cpu::HypervisorCpuError::InitializePmu(e.into()))
     }
 
     #[cfg(target_arch = "x86_64")]
