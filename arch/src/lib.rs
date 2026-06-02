@@ -39,7 +39,7 @@ pub enum Error {
     #[error("The hvm_start_info structure extends past the end of guest memory")]
     StartInfoPastRamEnd,
     #[error("Error writing hvm_start_info to guest memory")]
-    StartInfoSetup,
+    StartInfoSetup(#[source] vm_memory::GuestMemoryError),
     #[error("Failed to compute initramfs address")]
     InitramfsAddress,
     #[error("Error writing module entry to guest memory")]

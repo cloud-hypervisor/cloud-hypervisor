@@ -1282,7 +1282,7 @@ fn configure_pvh(
     // Write the start_info struct to guest memory.
     guest_mem
         .write_obj(start_info, start_info_addr)
-        .map_err(|_| super::Error::StartInfoSetup)?;
+        .map_err(super::Error::StartInfoSetup)?;
 
     Ok(())
 }
