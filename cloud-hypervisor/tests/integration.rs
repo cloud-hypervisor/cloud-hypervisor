@@ -52,21 +52,21 @@ mod common_parallel {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_jammy_hypervisor_fw() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME)
-            .with_kernel(fw_path(FwType::RustHypervisorFirmware));
+        let guest =
+            basic_regular_guest!(OS_IMAGE).with_kernel(fw_path(FwType::RustHypervisorFirmware));
         _test_simple_launch(&guest);
     }
 
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_jammy_ovmf() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_kernel(fw_path(FwType::Ovmf));
+        let guest = basic_regular_guest!(OS_IMAGE).with_kernel(fw_path(FwType::Ovmf));
         _test_simple_launch(&guest);
     }
 
     #[test]
     fn test_multi_cpu() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         _test_multi_cpu(&guest);
     }
 
@@ -90,7 +90,7 @@ mod common_parallel {
     #[cfg(target_arch = "x86_64")]
     #[cfg(not(feature = "mshv"))]
     fn test_cpu_physical_bits() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let max_phys_bits: u8 = 36;
         let mut child = GuestCommand::new(&guest)
@@ -124,7 +124,7 @@ mod common_parallel {
     }
 
     fn _test_nested_virtualization(nested: bool) {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config)).with_nested(nested);
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
@@ -170,20 +170,20 @@ mod common_parallel {
 
     #[test]
     fn test_cpu_affinity() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(2);
+        let guest = basic_regular_guest!(OS_IMAGE).with_cpu(2);
         _test_cpu_affinity(&guest);
     }
 
     #[test]
     fn test_virtio_queue_affinity() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(4);
+        let guest = basic_regular_guest!(OS_IMAGE).with_cpu(4);
         _test_virtio_queue_affinity(&guest);
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_large_vm() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--cpus", "boot=48"])
@@ -222,7 +222,7 @@ mod common_parallel {
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_huge_memory() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let mut cmd = GuestCommand::new(&guest);
         cmd.default_cpus()
@@ -249,14 +249,14 @@ mod common_parallel {
 
     #[test]
     fn test_power_button() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         _test_power_button(&guest);
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))] // See #7456
     fn test_user_defined_memory_regions() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -342,7 +342,7 @@ mod common_parallel {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_iommu_segments() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
         // Prepare another disk file for the virtio-disk device
@@ -419,25 +419,25 @@ mod common_parallel {
 
     #[test]
     fn test_pci_msi() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         _test_pci_msi(&guest);
     }
 
     #[test]
     fn test_virtio_net_ctrl_queue() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         _test_virtio_net_ctrl_queue(&guest);
     }
 
     #[test]
     fn test_pci_multiple_segments() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         _test_pci_multiple_segments(&guest, MAX_NUM_PCI_SEGMENTS, 15u16);
     }
 
     #[test]
     fn test_pci_multiple_segments_numa_node() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
         #[cfg(target_arch = "x86_64")]
@@ -530,14 +530,14 @@ mod common_parallel {
 
     #[test]
     fn test_direct_kernel_boot() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         _test_direct_kernel_boot(&guest);
     }
 
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_direct_kernel_boot_bzimage() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
         let mut kernel_path = direct_kernel_boot_path();
@@ -582,24 +582,21 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_io_uring() {
-        let guest =
-            make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), JAMMY_IMAGE_NAME);
+        let guest = make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), OS_IMAGE);
         _test_virtio_block(&guest, false, true, false, false, ImageType::Raw);
     }
 
     #[test]
     fn test_virtio_block_aio() {
-        let guest =
-            make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), JAMMY_IMAGE_NAME)
-                .with_cpu(4);
+        let guest = make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), OS_IMAGE)
+            .with_cpu(4);
         _test_virtio_block(&guest, true, false, false, false, ImageType::Raw);
     }
 
     #[test]
     fn test_virtio_block_sync() {
-        let guest =
-            make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), JAMMY_IMAGE_NAME)
-                .with_cpu(4);
+        let guest = make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), OS_IMAGE)
+            .with_cpu(4);
         _test_virtio_block(&guest, true, true, false, false, ImageType::Raw);
     }
 
@@ -645,7 +642,7 @@ mod common_parallel {
     //   - the BLKDISCARD / BLKZEROOUT additions to the VirtioBlock seccomp
     //     whitelist (any of these would otherwise SIGSYS the device thread).
     fn _test_virtio_block_blkdev(disable_io_uring: bool, disable_aio: bool) {
-        let focal = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let focal = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(focal));
         let loopdev = LoopDev::new(guest.tmp_dir.as_path(), 64);
         let kernel_path = direct_kernel_boot_path();
@@ -840,7 +837,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE_QCOW2.to_string());
         let guest = GuestFactory::new_regular_guest_factory()
             .create_guest(Box::new(disk_config))
             .with_cpu(4);
@@ -849,7 +846,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2_zlib() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2_ZLIB.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE_QCOW2_ZLIB.to_string());
         let guest = GuestFactory::new_regular_guest_factory()
             .create_guest(Box::new(disk_config))
             .with_cpu(4);
@@ -860,7 +857,7 @@ mod common_parallel {
     fn test_virtio_block_qcow2_zstd() {
         let guest = make_virtio_block_guest(
             &GuestFactory::new_regular_guest_factory(),
-            JAMMY_IMAGE_NAME_QCOW2_ZSTD,
+            OS_IMAGE_QCOW2_ZSTD,
         );
         _test_virtio_block(&guest, false, false, true, false, ImageType::Qcow2);
     }
@@ -869,7 +866,7 @@ mod common_parallel {
     fn test_virtio_block_qcow2_backing_zstd_file() {
         let guest = make_virtio_block_guest(
             &GuestFactory::new_regular_guest_factory(),
-            JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE,
+            OS_IMAGE_QCOW2_BACKING_ZSTD_FILE,
         );
         _test_virtio_block(&guest, false, false, true, true, ImageType::Qcow2);
     }
@@ -878,7 +875,7 @@ mod common_parallel {
     fn test_virtio_block_qcow2_backing_uncompressed_file() {
         let guest = make_virtio_block_guest(
             &GuestFactory::new_regular_guest_factory(),
-            JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE,
+            OS_IMAGE_QCOW2_BACKING_UNCOMPRESSED_FILE,
         );
         _test_virtio_block(&guest, false, false, true, true, ImageType::Qcow2);
     }
@@ -887,7 +884,7 @@ mod common_parallel {
     fn test_virtio_block_qcow2_backing_raw_file() {
         let guest = make_virtio_block_guest(
             &GuestFactory::new_regular_guest_factory(),
-            JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE,
+            OS_IMAGE_QCOW2_BACKING_RAW_FILE,
         );
         _test_virtio_block(&guest, false, false, true, true, ImageType::Qcow2);
     }
@@ -908,7 +905,7 @@ mod common_parallel {
     where
         F: FnOnce(&Guest) + std::panic::UnwindSafe,
     {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE_QCOW2.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
 
@@ -1505,7 +1502,7 @@ mod common_parallel {
         // Regression test for #8007.
         // Place the QCOW2 OS image on a 4096 byte sector filesystem so
         // O_DIRECT forces 4096 byte alignment on all I/O buffers.
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE_QCOW2.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = edk2_path();
 
@@ -1591,7 +1588,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2_dirty_bit_unclean_shutdown() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE_QCOW2.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
 
@@ -1654,7 +1651,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2_dirty_bit_clean_shutdown() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE_QCOW2.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
 
@@ -1713,7 +1710,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2_corrupt_bit_rejected_for_write() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE_QCOW2.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
 
@@ -1769,7 +1766,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2_corrupt_bit_allowed_readonly() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE_QCOW2.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
 
@@ -1845,8 +1842,8 @@ mod common_parallel {
 
         let mut raw_file_path = workload_path.clone();
         let mut vhd_file_path = workload_path;
-        raw_file_path.push(JAMMY_IMAGE_NAME);
-        vhd_file_path.push(JAMMY_IMAGE_NAME_VHD);
+        raw_file_path.push(OS_IMAGE);
+        vhd_file_path.push(OS_IMAGE_VHD);
 
         // Generate VHD file from RAW file
         std::process::Command::new("qemu-img")
@@ -1859,10 +1856,8 @@ mod common_parallel {
             .arg(vhd_file_path.to_str().unwrap())
             .output()
             .expect("Expect generating VHD image from RAW image");
-        let guest = make_virtio_block_guest(
-            &GuestFactory::new_regular_guest_factory(),
-            JAMMY_IMAGE_NAME_VHD,
-        );
+        let guest =
+            make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), OS_IMAGE_VHD);
         _test_virtio_block(&guest, false, false, false, false, ImageType::FixedVhd);
     }
 
@@ -1873,8 +1868,8 @@ mod common_parallel {
 
         let mut raw_file_path = workload_path.clone();
         let mut vhdx_file_path = workload_path;
-        raw_file_path.push(JAMMY_IMAGE_NAME);
-        vhdx_file_path.push(JAMMY_IMAGE_NAME_VHDX);
+        raw_file_path.push(OS_IMAGE);
+        vhdx_file_path.push(OS_IMAGE_VHDX);
 
         // Generate dynamic VHDX file from RAW file
         std::process::Command::new("qemu-img")
@@ -1886,22 +1881,20 @@ mod common_parallel {
             .arg(vhdx_file_path.to_str().unwrap())
             .output()
             .expect("Expect generating dynamic VHDx image from RAW image");
-        let guest = make_virtio_block_guest(
-            &GuestFactory::new_regular_guest_factory(),
-            JAMMY_IMAGE_NAME_VHDX,
-        );
+        let guest =
+            make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), OS_IMAGE_VHDX);
         _test_virtio_block(&guest, false, false, true, false, ImageType::Vhdx);
     }
 
     #[test]
     fn test_virtio_block_dynamic_vhdx_expand() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         _test_virtio_block_dynamic_vhdx_expand(&guest);
     }
 
     #[test]
     fn test_virtio_block_direct_and_firmware() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
         // The OS disk must be copied to a location that is not backed by
@@ -2025,14 +2018,14 @@ mod common_parallel {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_split_irqchip() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         _test_split_irqchip(&guest);
     }
 
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_dmi_serial_number() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
 
         _test_dmi_serial_number(&guest);
     }
@@ -2040,21 +2033,21 @@ mod common_parallel {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_dmi_uuid() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         _test_dmi_uuid(&guest);
     }
 
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_dmi_oem_strings() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         _test_dmi_oem_strings(&guest);
     }
 
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_dmi_system_and_chassis() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         _test_dmi_system_and_chassis(&guest);
     }
 
@@ -2100,7 +2093,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_rtc() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
         let kernel_path = direct_kernel_boot_path();
@@ -2174,7 +2167,7 @@ mod common_parallel {
 
     #[test]
     fn test_boot_from_virtio_pmem() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
         let kernel_path = direct_kernel_boot_path();
@@ -2229,14 +2222,14 @@ mod common_parallel {
 
     #[test]
     fn test_multiple_network_interfaces() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         _test_multiple_network_interfaces(&guest);
     }
 
     #[test]
     #[cfg(target_arch = "aarch64")]
     fn test_pmu_on() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
@@ -2272,13 +2265,13 @@ mod common_parallel {
 
     #[test]
     fn test_serial_off() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         _test_serial_off(&guest);
     }
 
     #[test]
     fn test_serial_null() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let mut cmd = GuestCommand::new(&guest);
         #[cfg(target_arch = "x86_64")]
@@ -2331,7 +2324,7 @@ mod common_parallel {
 
     #[test]
     fn test_serial_tty() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
         let kernel_path = direct_kernel_boot_path();
@@ -2390,7 +2383,7 @@ mod common_parallel {
 
     #[test]
     fn test_serial_file() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
         let serial_path = guest.tmp_dir.as_path().join("serial-output");
@@ -2458,7 +2451,7 @@ mod common_parallel {
 
     #[test]
     fn test_pty_interaction() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
         let serial_option = if cfg!(target_arch = "x86_64") {
@@ -2504,7 +2497,7 @@ mod common_parallel {
 
     #[test]
     fn test_serial_socket_interaction() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let serial_socket = guest.tmp_dir.as_path().join("serial.socket");
         let serial_socket_pty = guest.tmp_dir.as_path().join("serial.pty");
@@ -2574,13 +2567,13 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_console() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         _test_virtio_console(&guest);
     }
 
     #[test]
     fn test_console_file() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         _test_console_file(&guest);
     }
 
@@ -2600,7 +2593,7 @@ mod common_parallel {
     fn test_vfio() {
         setup_vfio_network_interfaces();
 
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new_from_ip_range(Box::new(disk_config), "172.18", 0);
 
         let mut workload_path = dirs::home_dir().unwrap();
@@ -2855,30 +2848,29 @@ mod common_parallel {
 
     #[test]
     fn test_direct_kernel_boot_noacpi() {
-        let mut guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let mut guest = basic_regular_guest!(OS_IMAGE);
         guest.kernel_cmdline = Some(format!("{DIRECT_KERNEL_BOOT_CMDLINE} acpi=off"));
         _test_direct_kernel_boot_noacpi(&guest);
     }
 
     #[test]
     fn test_virtio_vsock() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         _test_virtio_vsock(&guest, false);
     }
 
     #[test]
     fn test_virtio_vsock_hotplug() {
         #[cfg(target_arch = "x86_64")]
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         #[cfg(target_arch = "aarch64")]
-        let guest =
-            basic_regular_guest!(JAMMY_IMAGE_NAME).with_kernel_path(edk2_path().to_str().unwrap());
+        let guest = basic_regular_guest!(OS_IMAGE).with_kernel_path(edk2_path().to_str().unwrap());
         _test_virtio_vsock(&guest, true);
     }
 
     #[test]
     fn test_api_http_shutdown() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(4);
+        let guest = basic_regular_guest!(OS_IMAGE).with_cpu(4);
 
         let target_api = TargetApi::new_http_api(&guest.tmp_dir);
         _test_api_shutdown(&target_api, &guest);
@@ -2886,7 +2878,7 @@ mod common_parallel {
 
     #[test]
     fn test_api_http_delete() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(4);
+        let guest = basic_regular_guest!(OS_IMAGE).with_cpu(4);
 
         let target_api = TargetApi::new_http_api(&guest.tmp_dir);
         _test_api_delete(&target_api, &guest);
@@ -2894,7 +2886,7 @@ mod common_parallel {
 
     #[test]
     fn test_api_http_pause_resume() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(4);
+        let guest = basic_regular_guest!(OS_IMAGE).with_cpu(4);
 
         let target_api = TargetApi::new_http_api(&guest.tmp_dir);
         _test_api_pause_resume(&target_api, &guest);
@@ -2902,7 +2894,7 @@ mod common_parallel {
 
     #[test]
     fn test_api_http_create_boot() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(4);
+        let guest = basic_regular_guest!(OS_IMAGE).with_cpu(4);
 
         let target_api = TargetApi::new_http_api(&guest.tmp_dir);
         _test_api_create_boot(&target_api, &guest);
@@ -2925,10 +2917,9 @@ mod common_parallel {
     // rescan.
     fn test_pci_bar_reprogramming() {
         #[cfg(target_arch = "aarch64")]
-        let guest =
-            basic_regular_guest!(JAMMY_IMAGE_NAME).with_kernel_path(edk2_path().to_str().unwrap());
+        let guest = basic_regular_guest!(OS_IMAGE).with_kernel_path(edk2_path().to_str().unwrap());
         #[cfg(target_arch = "x86_64")]
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         _test_pci_bar_reprogramming(&guest);
     }
 
@@ -2941,7 +2932,7 @@ mod common_parallel {
     #[cfg(not(feature = "mshv"))] // See issue #7435
     #[cfg(target_arch = "x86_64")]
     fn test_cpu_hotplug() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
         let console_str = "console=ttyS0";
@@ -3025,7 +3016,7 @@ mod common_parallel {
     #[test]
     #[cfg_attr(target_arch = "aarch64", ignore = "See #8187")]
     fn test_memory_hotplug() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -3112,7 +3103,7 @@ mod common_parallel {
     #[test]
     #[cfg(not(feature = "mshv"))] // See #7456
     fn test_virtio_mem() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -3190,7 +3181,7 @@ mod common_parallel {
     #[cfg(target_arch = "x86_64")]
     // Test both vCPU and memory resizing together
     fn test_resize() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -3249,8 +3240,7 @@ mod common_parallel {
     #[test]
     fn test_memory_overhead() {
         let guest_memory_size_kb: u32 = 512 * 1024;
-        let guest =
-            basic_regular_guest!(JAMMY_IMAGE_NAME).with_memory(&format!("{guest_memory_size_kb}K"));
+        let guest = basic_regular_guest!(OS_IMAGE).with_memory(&format!("{guest_memory_size_kb}K"));
         _test_memory_overhead(&guest, guest_memory_size_kb);
     }
 
@@ -3260,7 +3250,7 @@ mod common_parallel {
     // the path for the hotplug disk is not pre-added to Landlock rules, this
     // the test will result in a failure.
     fn test_landlock() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         _test_landlock(&guest);
     }
 
@@ -3270,21 +3260,20 @@ mod common_parallel {
         let kernel_path = direct_kernel_boot_path();
         #[cfg(target_arch = "aarch64")]
         let kernel_path = edk2_path();
-        let guest =
-            basic_regular_guest!(JAMMY_IMAGE_NAME).with_kernel_path(kernel_path.to_str().unwrap());
+        let guest = basic_regular_guest!(OS_IMAGE).with_kernel_path(kernel_path.to_str().unwrap());
         _test_disk_hotplug(&guest, false);
     }
 
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_disk_hotplug_with_landlock() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         _test_disk_hotplug(&guest, true);
     }
 
     #[test]
     fn test_disk_resize() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
         #[cfg(target_arch = "x86_64")]
@@ -3394,7 +3383,7 @@ mod common_parallel {
 
     #[test]
     fn test_disk_resize_qcow2() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
         #[cfg(target_arch = "x86_64")]
@@ -3647,7 +3636,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_topology() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         let test_disk_path = guest.tmp_dir.as_path().join("test.img");
 
         let output = exec_host_command_output(
@@ -3673,7 +3662,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_direct_io_block_device_alignment_4k() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
 
@@ -3759,7 +3748,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_direct_io_file_backed_alignment_4k() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
 
@@ -4003,7 +3992,7 @@ mod common_parallel {
         verify_disk: bool,
         disable_io_uring: bool,
     ) {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
 
@@ -4228,7 +4217,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_write_zeroes_unmap_raw() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
         let test_disk_path = guest.tmp_dir.as_path().join("write_zeroes_unmap_test.raw");
@@ -4326,7 +4315,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_discard_loop_device() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
 
@@ -4435,7 +4424,7 @@ mod common_parallel {
         // gracefully even under repeated attempts.
         //
         // DM topology follows the same pattern used by WindowsDiskConfig.
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
 
@@ -4635,7 +4624,7 @@ mod common_parallel {
         verify_disk: bool,
         disable_io_uring: bool,
     ) {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
 
@@ -4841,7 +4830,7 @@ mod common_parallel {
         const TEST_DISK_SIZE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
         const INITIAL_ALLOCATION_THRESHOLD: u64 = 1024 * 1024;
 
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
 
@@ -4956,7 +4945,7 @@ mod common_parallel {
     fn test_virtio_block_sparse_off_qcow2() {
         const TEST_DISK_SIZE: &str = "2G";
 
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
 
@@ -5059,7 +5048,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_balloon_deflate_on_oom() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
         let kernel_path = direct_kernel_boot_path();
@@ -5121,7 +5110,7 @@ mod common_parallel {
     #[test]
     #[cfg(not(feature = "mshv"))] // See #7456
     fn test_virtio_balloon_free_page_reporting() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
         //Let's start a 4G guest with balloon occupied 2G memory
@@ -5193,7 +5182,7 @@ mod common_parallel {
     }
 
     fn _test_pmem_hotplug(pci_segment: Option<u16>) {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
         #[cfg(target_arch = "x86_64")]
@@ -5323,8 +5312,7 @@ mod common_parallel {
         let kernel_path = direct_kernel_boot_path();
         #[cfg(target_arch = "aarch64")]
         let kernel_path = edk2_path();
-        let guest =
-            basic_regular_guest!(JAMMY_IMAGE_NAME).with_kernel_path(kernel_path.to_str().unwrap());
+        let guest = basic_regular_guest!(OS_IMAGE).with_kernel_path(kernel_path.to_str().unwrap());
 
         _test_net_hotplug(&guest, MAX_NUM_PCI_SEGMENTS, None);
     }
@@ -5335,14 +5323,13 @@ mod common_parallel {
         let kernel_path = direct_kernel_boot_path();
         #[cfg(target_arch = "aarch64")]
         let kernel_path = edk2_path();
-        let guest =
-            basic_regular_guest!(JAMMY_IMAGE_NAME).with_kernel_path(kernel_path.to_str().unwrap());
+        let guest = basic_regular_guest!(OS_IMAGE).with_kernel_path(kernel_path.to_str().unwrap());
         _test_net_hotplug(&guest, MAX_NUM_PCI_SEGMENTS, Some(15));
     }
 
     #[test]
     fn test_initramfs() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
@@ -5391,14 +5378,14 @@ mod common_parallel {
 
     #[test]
     fn test_counters() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         _test_counters(&guest);
     }
 
     #[test]
     #[cfg(feature = "guest_debug")]
     fn test_coredump() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -5446,7 +5433,7 @@ mod common_parallel {
     #[test]
     #[cfg(feature = "guest_debug")]
     fn test_coredump_no_pause() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -5482,37 +5469,37 @@ mod common_parallel {
 
     #[test]
     fn test_pvpanic() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         _test_pvpanic(&guest);
     }
 
     #[test]
     fn test_tap_from_fd() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(2);
+        let guest = basic_regular_guest!(OS_IMAGE).with_cpu(2);
         _test_tap_from_fd(&guest);
     }
 
     #[test]
     #[cfg_attr(target_arch = "aarch64", ignore = "See #5443")]
     fn test_macvtap() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(2);
+        let guest = basic_regular_guest!(OS_IMAGE).with_cpu(2);
         _test_macvtap(&guest, false, "guestmacvtap0", "hostmacvtap0");
     }
 
     #[test]
     #[cfg_attr(target_arch = "aarch64", ignore = "See #5443")]
     fn test_macvtap_hotplug() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(2);
+        let guest = basic_regular_guest!(OS_IMAGE).with_cpu(2);
         _test_macvtap(&guest, true, "guestmacvtap1", "hostmacvtap1");
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_ovs_dpdk() {
-        let disk_config1 = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config1 = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest1 = Guest::new(Box::new(disk_config1));
 
-        let disk_config2 = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config2 = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest2 = Guest::new(Box::new(disk_config2));
         let api_socket_source = format!("{}.1", temp_api_path(&guest2.tmp_dir));
 
@@ -5718,7 +5705,7 @@ mod common_parallel {
 
     #[test]
     fn test_vfio_user() {
-        let jammy_image = JAMMY_IMAGE_NAME.to_string();
+        let jammy_image = OS_IMAGE.to_string();
         let disk_config = UbuntuDiskConfig::new(jammy_image);
         let guest = Guest::new(Box::new(disk_config));
 
@@ -5807,7 +5794,7 @@ mod common_parallel {
         // Before trying to run the test, verify the vdpa_sim_blk module is correctly loaded.
         assert!(exec_host_command_status("lsmod | grep vdpa_sim_blk").success());
 
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(2);
+        let guest = basic_regular_guest!(OS_IMAGE).with_cpu(2);
         _test_vdpa_block(&guest);
     }
 
@@ -5819,7 +5806,7 @@ mod common_parallel {
             return;
         }
 
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
         let kernel_path = direct_kernel_boot_path();
@@ -5909,7 +5896,7 @@ mod common_parallel {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_tpm() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
         let (mut swtpm_command, swtpm_socket_path) = prepare_swtpm_daemon(&guest.tmp_dir);
@@ -5973,7 +5960,7 @@ mod common_parallel {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_double_tty() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let mut cmd = GuestCommand::new(&guest);
         let api_socket = temp_api_path(&guest.tmp_dir);
@@ -6025,7 +6012,7 @@ mod common_parallel {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_nmi() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
         let event_path = temp_event_monitor_path(&guest.tmp_dir);
@@ -6073,7 +6060,7 @@ mod common_parallel {
     // It also verifies dynamic hotplug allocation reuses freed PCI device ID holes.
     #[test]
     fn test_pci_device_id() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
         #[cfg(target_arch = "x86_64")]
@@ -6248,7 +6235,7 @@ mod common_parallel {
     #[test]
     // Test that adding a duplicate PCI device ID fails
     fn test_duplicate_pci_device_id() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
         #[cfg(target_arch = "x86_64")]
@@ -6326,7 +6313,7 @@ mod common_parallel {
     #[test]
     // Test that requesting an invalid device ID fails.
     fn test_invalid_pci_device_id() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
         #[cfg(target_arch = "x86_64")]
@@ -6413,7 +6400,7 @@ mod common_parallel {
     // Note: This test does not use vsock as we can't create two identical vsock on the same host.
     #[cfg(not(feature = "mshv"))]
     fn _test_live_migration(upgrade_test: bool, local: bool, paused: bool) {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
         let console_text = String::from("On a branch floating down river a cricket, singing.");
@@ -6587,7 +6574,7 @@ mod common_parallel {
     //    this disk is not known to the destination VM this step will fail.
     #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_with_landlock() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
         let net_id = "net123";
@@ -6819,7 +6806,7 @@ mod common_parallel {
 
     #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_tcp(connections: NonZeroU32) {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
         let console_text = String::from("On a branch floating down river a cricket, singing.");
@@ -7019,7 +7006,7 @@ mod common_parallel {
 
     #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_tcp_timeout(timeout_strategy: TimeoutStrategy) {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
         let net_id = "net1337";
@@ -7258,7 +7245,7 @@ mod common_parallel {
 
     #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_virtio_fs(local: bool) {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
 
@@ -7455,7 +7442,7 @@ mod dbus_api {
     // booted again.
     #[test]
     fn test_api_dbus_and_http_interleaved() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let dbus_api = TargetApi::new_dbus_api(&guest.tmp_dir);
         let http_api = TargetApi::new_http_api(&guest.tmp_dir);
@@ -7520,7 +7507,7 @@ mod dbus_api {
 
     #[test]
     fn test_api_dbus_create_boot() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = GuestFactory::new_regular_guest_factory()
             .create_guest(Box::new(disk_config))
             .with_cpu(4);
@@ -7531,7 +7518,7 @@ mod dbus_api {
 
     #[test]
     fn test_api_dbus_shutdown() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = GuestFactory::new_regular_guest_factory()
             .create_guest(Box::new(disk_config))
             .with_cpu(4);
@@ -7542,7 +7529,7 @@ mod dbus_api {
 
     #[test]
     fn test_api_dbus_delete() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = GuestFactory::new_regular_guest_factory()
             .create_guest(Box::new(disk_config))
             .with_cpu(4);
@@ -7553,7 +7540,7 @@ mod dbus_api {
 
     #[test]
     fn test_api_dbus_pause_resume() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = GuestFactory::new_regular_guest_factory()
             .create_guest(Box::new(disk_config))
             .with_cpu(4);
@@ -7574,7 +7561,7 @@ mod ivshmem {
 
     #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_ivshmem(local: bool) {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
         let console_text = String::from("On a branch floating down river a cricket, singing.");
@@ -7762,7 +7749,7 @@ mod ivshmem {
 
     #[test]
     fn test_ivshmem() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -7818,7 +7805,7 @@ mod ivshmem {
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_ivshmem() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
 
@@ -8080,7 +8067,7 @@ mod snapshot_restore_common {
     }
 
     pub(crate) fn _test_snapshot_restore(use_hotplug: bool, use_resume_option: bool) {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
 
@@ -8381,7 +8368,7 @@ mod snapshot_restore_common {
         memory_zone_config: &[&str],
         min_total_memory_kib: u32,
     ) {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
 
@@ -8520,7 +8507,7 @@ mod snapshot_restore_common {
     }
 
     pub(crate) fn _test_snapshot_restore_devices(pvpanic: bool) {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
 
@@ -8689,7 +8676,7 @@ mod common_sequential {
     #[cfg(not(feature = "mshv"))] // See issue #7437
     #[ignore = "See #6970"]
     fn test_snapshot_restore_with_fd() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
 
@@ -8922,7 +8909,7 @@ mod common_sequential {
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_virtio_fs() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
 
@@ -9083,7 +9070,7 @@ mod common_sequential {
 
     #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_balloon(upgrade_test: bool, local: bool) {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
         let console_text = String::from("On a branch floating down river a cricket, singing.");
@@ -9287,7 +9274,7 @@ mod common_sequential {
 
     #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_numa(upgrade_test: bool, local: bool) {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
         let console_text = String::from("On a branch floating down river a cricket, singing.");
@@ -9544,10 +9531,10 @@ mod common_sequential {
 
     #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_ovs_dpdk(upgrade_test: bool, local: bool) {
-        let ovs_disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let ovs_disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let ovs_guest = Guest::new(Box::new(ovs_disk_config));
 
-        let migration_disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let migration_disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let migration_guest = Guest::new(Box::new(migration_disk_config));
         let src_api_socket = temp_api_path(&migration_guest.tmp_dir);
 
@@ -9733,7 +9720,7 @@ mod common_sequential {
 
     #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_watchdog(upgrade_test: bool, local: bool) {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
         let console_text = String::from("On a branch floating down river a cricket, singing.");
@@ -9942,7 +9929,7 @@ mod common_sequential {
 
     #[test]
     fn test_watchdog() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let guest = basic_regular_guest!(OS_IMAGE);
         _test_watchdog(&guest);
     }
 
@@ -11612,7 +11599,7 @@ mod aarch64_acpi {
 
     #[test]
     fn test_simple_launch_acpi() {
-        let jammy = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let jammy = UbuntuDiskConfig::new(OS_IMAGE.to_string());
 
         vec![Box::new(jammy)].drain(..).for_each(|disk_config| {
             let guest = Guest::new(disk_config);
@@ -11665,7 +11652,7 @@ mod aarch64_acpi {
 
     #[test]
     fn test_power_button_acpi() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = GuestFactory::new_regular_guest_factory()
             .create_guest(Box::new(disk_config))
             .with_kernel_path(edk2_path().to_str().unwrap());
@@ -11706,7 +11693,7 @@ mod rate_limiter {
     }
 
     fn _test_rate_limiter_net(rx: bool) {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
         let num_queues = 2;
@@ -11775,7 +11762,7 @@ mod rate_limiter {
         let bw_refill_time = 1000; // ms
         let limit_rate = (bw_size * 1000) as f64 / bw_refill_time as f64;
 
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
         let test_img_dir = TempDir::new_with_prefix("/var/tmp/ch").unwrap();
@@ -11862,7 +11849,7 @@ mod rate_limiter {
         let bw_refill_time = 1000; // ms
         let limit_rate = (bw_size * 1000) as f64 / bw_refill_time as f64;
 
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
         let test_img_dir = TempDir::new_with_prefix("/var/tmp/ch").unwrap();
@@ -11999,7 +11986,7 @@ mod fw_cfg {
     #[test]
     #[cfg_attr(feature = "mshv", ignore = "See #7434")]
     fn test_fw_cfg() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let mut cmd = GuestCommand::new(&guest);
 
@@ -12047,7 +12034,7 @@ mod fw_cfg {
     #[test]
     #[cfg_attr(feature = "mshv", ignore = "See #7434")]
     fn test_fw_cfg_string() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let mut cmd = GuestCommand::new(&guest);
 
