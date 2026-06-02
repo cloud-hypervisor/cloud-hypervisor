@@ -11599,35 +11599,37 @@ mod aarch64_acpi {
 
     #[test]
     fn test_simple_launch_acpi() {
-        let jammy = UbuntuDiskConfig::new(OS_IMAGE.to_string());
+        let disk_config = UbuntuDiskConfig::new(OS_IMAGE.to_string());
 
-        vec![Box::new(jammy)].drain(..).for_each(|disk_config| {
-            let guest = Guest::new(disk_config);
+        vec![Box::new(disk_config)]
+            .drain(..)
+            .for_each(|disk_config| {
+                let guest = Guest::new(disk_config);
 
-            let mut child = GuestCommand::new(&guest)
-                .default_cpus()
-                .default_memory()
-                .args(["--kernel", edk2_path().to_str().unwrap()])
-                .default_disks()
-                .default_net()
-                .args(["--serial", "tty", "--console", "off"])
-                .capture_output()
-                .spawn()
-                .unwrap();
+                let mut child = GuestCommand::new(&guest)
+                    .default_cpus()
+                    .default_memory()
+                    .args(["--kernel", edk2_path().to_str().unwrap()])
+                    .default_disks()
+                    .default_net()
+                    .args(["--serial", "tty", "--console", "off"])
+                    .capture_output()
+                    .spawn()
+                    .unwrap();
 
-            let r = std::panic::catch_unwind(|| {
-                guest.wait_vm_boot().unwrap();
+                let r = std::panic::catch_unwind(|| {
+                    guest.wait_vm_boot().unwrap();
 
-                assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
-                assert!(guest.get_total_memory().unwrap_or_default() > 400_000);
-                assert_eq!(guest.get_pci_bridge_class().unwrap_or_default(), "0x060000");
+                    assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
+                    assert!(guest.get_total_memory().unwrap_or_default() > 400_000);
+                    assert_eq!(guest.get_pci_bridge_class().unwrap_or_default(), "0x060000");
+                });
+
+                let _ = child.kill();
+                let output = child.wait_with_output().unwrap();
+
+                handle_child_output(r, &output);
             });
-
-            let _ = child.kill();
-            let output = child.wait_with_output().unwrap();
-
-            handle_child_output(r, &output);
-        });
     }
 
     #[test]
