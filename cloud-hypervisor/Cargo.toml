@@ -26,6 +26,7 @@ serde_json = { workspace = true }
 signal-hook = { workspace = true }
 thiserror = { workspace = true }
 tracer = { path = "../tracer" }
+vm-migration = { path = "../vm-migration" }
 vmm = { path = "../vmm" }
 vmm-sys-util = { workspace = true }
 zbus = { version = "5.15.0", optional = true }
