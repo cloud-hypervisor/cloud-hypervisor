@@ -11,12 +11,10 @@ rust-version.workspace = true
 version = "52.0.0"
 
 [dependencies]
-anyhow = { workspace = true }
 api_client = { path = "../api_client" }
 clap = { workspace = true, features = ["string"] }
 dhat = { workspace = true, optional = true }
 env_logger = { workspace = true }
-epoll = { workspace = true }
 event_monitor = { path = "../event_monitor" }
 hypervisor = { path = "../hypervisor" }
 jiff = { workspace = true }
@@ -27,9 +25,7 @@ seccompiler = { workspace = true }
 serde_json = { workspace = true }
 signal-hook = { workspace = true }
 thiserror = { workspace = true }
-tpm = { path = "../tpm" }
 tracer = { path = "../tracer" }
-vm-memory = { workspace = true }
 vmm = { path = "../vmm" }
 vmm-sys-util = { workspace = true }
 zbus = { version = "5.15.0", optional = true }
