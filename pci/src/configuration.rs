@@ -84,7 +84,7 @@ pub trait PciSubclass {
 }
 
 /// Subclasses of the MultimediaController class.
-#[allow(dead_code)]
+#[expect(dead_code)]
 #[derive(Copy, Clone)]
 pub enum PciMultimediaSubclass {
     VideoController = 0x00,
@@ -101,7 +101,7 @@ impl PciSubclass for PciMultimediaSubclass {
 }
 
 /// Subclasses of the BridgeDevice
-#[allow(dead_code)]
+#[expect(dead_code)]
 #[derive(Copy, Clone)]
 pub enum PciBridgeSubclass {
     HostBridge = 0x00,
