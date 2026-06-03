@@ -27,8 +27,8 @@ use vmm_sys_util::eventfd::EventFd;
 
 use super::{
     ActivateError, ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError,
-    EpollHelperHandler, Error as DeviceError, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice,
-    VirtioDeviceType,
+    EpollHelperHandler, Error as DeviceError, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_VERSION_1,
+    VirtioCommon, VirtioDevice, VirtioDeviceType,
 };
 use crate::seccomp_filters::Thread;
 use crate::{GuestMemoryMmap, VirtioInterrupt, VirtioInterruptType};
@@ -208,6 +208,7 @@ impl Watchdog {
     /// Create a new virtio watchdog device that will reboot VM if the guest hangs
     pub fn new(
         id: String,
+        access_platform_enabled: bool,
         reset_evt: EventFd,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
@@ -226,7 +227,11 @@ impl Watchdog {
 
             (state.avail_features, state.acked_features, true)
         } else {
-            (1u64 << VIRTIO_F_VERSION_1, 0, false)
+            let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
+            if access_platform_enabled {
+                avail_features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
+            }
+            (avail_features, 0, false)
         };
 
         let timer_fd = timerfd_create().map_err(|e| {
