@@ -48,9 +48,9 @@ const SEV_HASH_TABLE_PADDING: usize =
 
 #[derive(IntoBytes, Immutable)]
 pub struct PaddedSevHashTable {
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     hash_table: SevHashTable,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     padding: [u8; SEV_HASH_TABLE_PADDING],
 }
 
