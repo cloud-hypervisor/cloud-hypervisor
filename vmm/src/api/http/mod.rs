@@ -34,6 +34,7 @@ use crate::api::{
 };
 use crate::landlock::Landlock;
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
+use crate::vm::Error as VmError;
 use crate::{Error as VmmError, Result};
 
 pub mod http_endpoint;
@@ -68,6 +69,27 @@ pub enum HttpError {
     ApiError(#[source] ApiError),
 }
 
+impl HttpError {
+    /// Returns the HTTP status code that best matches this error.
+    fn status_code(&self) -> StatusCode {
+        match self {
+            HttpError::SerdeJsonDeserialize(_) | HttpError::BadRequest => StatusCode::BadRequest,
+            HttpError::NotFound => StatusCode::NotFound,
+            HttpError::TooManyRequests => StatusCode::TooManyRequests,
+            HttpError::InternalServerError => StatusCode::InternalServerError,
+            HttpError::ApiError(e) => api_error_status_code(e),
+        }
+    }
+}
+
+/// Maps an [`ApiError`] to an HTTP [`StatusCode`].
+fn api_error_status_code(error: &ApiError) -> StatusCode {
+    match error.source().and_then(|e| e.downcast_ref::<VmError>()) {
+        Some(VmError::VmNotCreated | VmError::VmMissingConfig) => StatusCode::NotFound,
+        _ => StatusCode::InternalServerError,
+    }
+}
+
 const HTTP_ROOT: &str = "/api/v1";
 
 /// Creates the error response's JSON body meant to be sent back to an API client.
@@ -76,8 +98,8 @@ const HTTP_ROOT: &str = "/api/v1";
 /// thus insightful and helpful while balancing technical accuracy and
 /// simplicity.
 #[allow(clippy::needless_pass_by_value)]
-pub fn error_response(error: HttpError, status: StatusCode) -> Response {
-    let mut response = Response::new(Version::Http11, status);
+pub fn error_response(error: HttpError) -> Response {
+    let mut response = Response::new(Version::Http11, error.status_code());
 
     let error: &dyn Error = &error;
     // Write the Display::display() output all errors (from top to root).
@@ -134,12 +156,7 @@ pub trait EndpointHandler {
                     Response::new(Version::Http11, StatusCode::NoContent)
                 }
             }
-            Err(e @ HttpError::BadRequest) => error_response(e, StatusCode::BadRequest),
-            Err(e @ HttpError::SerdeJsonDeserialize(_)) => {
-                error_response(e, StatusCode::BadRequest)
-            }
-            Err(e @ HttpError::TooManyRequests) => error_response(e, StatusCode::TooManyRequests),
-            Err(e) => error_response(e, StatusCode::InternalServerError),
+            Err(e) => error_response(e),
         }
     }
 
@@ -308,12 +325,9 @@ fn handle_http_request(
     let mut response = match HTTP_ROUTES.routes.get(&path) {
         Some(route) => match api_notifier.try_clone() {
             Ok(notifier) => route.handle_request(request, notifier, api_sender.clone()),
-            Err(_) => error_response(
-                HttpError::InternalServerError,
-                StatusCode::InternalServerError,
-            ),
+            Err(_) => error_response(HttpError::InternalServerError),
         },
-        None => error_response(HttpError::NotFound, StatusCode::NotFound),
+        None => error_response(HttpError::NotFound),
     };
 
     response.set_server("Cloud Hypervisor API");
