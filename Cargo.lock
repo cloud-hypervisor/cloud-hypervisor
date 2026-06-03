@@ -456,14 +456,12 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 name = "cloud-hypervisor"
 version = "52.0.0"
 dependencies = [
- "anyhow",
  "api_client",
  "block",
  "clap",
  "dhat",
  "dirs",
  "env_logger",
- "epoll",
  "event_monitor",
  "hypervisor",
  "jiff",
@@ -476,9 +474,7 @@ dependencies = [
  "signal-hook",
  "test_infra",
  "thiserror",
- "tpm",
  "tracer",
- "vm-memory",
  "vmm",
  "vmm-sys-util",
  "wait-timeout",
