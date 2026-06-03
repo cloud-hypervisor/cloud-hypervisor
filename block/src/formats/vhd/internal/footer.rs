@@ -11,7 +11,7 @@ use crate::{DiskTopology, read_aligned_block_size};
 // current_size, disk_type. The remaining fields are parsed for VHD
 // spec completeness and exercised only by unit tests.
 #[derive(Clone, Copy)]
-#[allow(dead_code)]
+#[cfg_attr(not(test), expect(dead_code))]
 pub struct VhdFooter {
     cookie: u64,
     features: u32,
@@ -30,7 +30,6 @@ pub struct VhdFooter {
     saved_state: u8,
 }
 
-#[allow(dead_code)]
 impl VhdFooter {
     pub fn new(file: &mut File) -> std::io::Result<VhdFooter> {
         let blocksize = DiskTopology::probe(file)?.logical_block_size as usize;
@@ -66,6 +65,7 @@ impl VhdFooter {
     pub fn cookie(&self) -> u64 {
         self.cookie
     }
+    #[cfg(test)]
     pub fn features(&self) -> u32 {
         self.features
     }
@@ -75,36 +75,45 @@ impl VhdFooter {
     pub fn data_offset(&self) -> u64 {
         self.data_offset
     }
+    #[cfg(test)]
     pub fn time_stamp(&self) -> u32 {
         self.time_stamp
     }
+    #[cfg(test)]
     pub fn creator_application(&self) -> u32 {
         self.creator_application
     }
+    #[cfg(test)]
     pub fn creator_version(&self) -> u32 {
         self.creator_version
     }
+    #[cfg(test)]
     pub fn creator_host_os(&self) -> u32 {
         self.creator_host_os
     }
+    #[cfg(test)]
     pub fn original_size(&self) -> u64 {
         self.original_size
     }
     pub fn current_size(&self) -> u64 {
         self.current_size
     }
+    #[cfg(test)]
     pub fn disk_geometry(&self) -> u32 {
         self.disk_geometry
     }
     pub fn disk_type(&self) -> u32 {
         self.disk_type
     }
+    #[cfg(test)]
     pub fn checksum(&self) -> u32 {
         self.checksum
     }
+    #[cfg(test)]
     pub fn unique_id(&self) -> u128 {
         self.unique_id
     }
+    #[cfg(test)]
     pub fn saved_state(&self) -> u8 {
         self.saved_state
     }
