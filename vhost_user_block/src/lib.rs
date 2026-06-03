@@ -51,7 +51,6 @@ const POLL_QUEUE_US: u128 = 50;
 type Result<T> = std::result::Result<T, Error>;
 type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
-#[allow(dead_code)]
 #[derive(Error, Debug)]
 enum Error {
     /// Failed to create kill eventfd
