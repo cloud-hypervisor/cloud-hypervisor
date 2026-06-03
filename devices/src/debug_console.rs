@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-//! Module for [`DebugconState`].
+//! Module for [`DebugConsole`].
 
 use std::io;
 use std::io::Write;
@@ -15,9 +15,6 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 
 /// I/O-port.
 pub const DEFAULT_PORT: u64 = 0xe9;
-
-#[derive(Default)]
-pub struct DebugconState {}
 
 /// Emulates a debug console similar to the QEMU debugcon device. This device
 /// is stateless and only prints the bytes (usually text) that are written to
