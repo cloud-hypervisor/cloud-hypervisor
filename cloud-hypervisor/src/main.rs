@@ -902,8 +902,14 @@ fn main() {
 
     let vmm_result = start_vmm(&cmd_arguments, &api_socket_path, api_socket_fd);
 
-    if let Some(ref p) = api_socket_path {
-        let _ = std::fs::remove_file(p);
+    // Remove the socket only when we actually ran (Ok): a failed start may mean
+    // another instance already holds the path, and removing it would clobber
+    // that live socket. A stale socket left by a crash is cleared under the lock
+    // on the next start.
+    if vmm_result.is_ok()
+        && let Some(ref api_socket_path) = api_socket_path
+    {
+        let _ = std::fs::remove_file(api_socket_path);
     }
 
     let exit_code = match vmm_result {
