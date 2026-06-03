@@ -12,6 +12,7 @@ use vm_migration::Migratable;
 
 use crate::device_manager::PciDeviceHandle;
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct DeviceNode {
     pub id: String,

@@ -2737,6 +2737,7 @@ dependencies = [
  "seccompiler",
  "serde",
  "serde_json",
+ "serde_with",
  "serial_buffer",
  "sha2",
  "signal-hook",
