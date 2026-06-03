@@ -439,7 +439,6 @@ unsafe impl Send for Ghcb {}
 unsafe impl Sync for Ghcb {}
 
 /// Vcpu struct for Microsoft Hypervisor
-#[allow(dead_code)]
 pub struct MshvVcpu {
     fd: VcpuFd,
     vp_index: u8,
@@ -448,6 +447,10 @@ pub struct MshvVcpu {
     #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
     vm_ops: Option<Arc<dyn vm::VmOps>>,
+    #[cfg_attr(
+        all(not(target_arch = "x86_64"), not(feature = "sev_snp")),
+        expect(dead_code)
+    )]
     vm_fd: Arc<VmFd>,
     #[cfg(feature = "sev_snp")]
     ghcb: Option<Ghcb>,
