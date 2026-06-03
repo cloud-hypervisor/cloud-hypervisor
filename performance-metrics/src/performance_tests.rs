@@ -13,7 +13,6 @@ use thiserror::Error;
 
 use crate::{ImageFormat, PerformanceTestControl, PerformanceTestOverrides, mean};
 
-#[allow(dead_code)]
 #[derive(Error, Debug)]
 enum Error {
     #[error("boot time could not be parsed")]
