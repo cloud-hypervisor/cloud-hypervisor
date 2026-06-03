@@ -1024,6 +1024,7 @@ fn event_monitor_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendE
         (libc::SYS_futex, vec![]),
         (libc::SYS_landlock_create_ruleset, vec![]),
         (libc::SYS_landlock_restrict_self, vec![]),
+        (libc::SYS_madvise, vec![]),
         (libc::SYS_mmap, vec![]),
         (libc::SYS_munmap, vec![]),
         (libc::SYS_prctl, vec![]),
