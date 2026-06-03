@@ -55,17 +55,16 @@ const _EVENT_Q_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 const PROBE_PROP_SIZE: u32 =
     (size_of::<VirtioIommuProbeProperty>() + size_of::<VirtioIommuProbeResvMem>()) as u32;
 
-/// Virtio IOMMU features
-#[allow(unused)]
+// Virtio IOMMU features
+
 const VIRTIO_IOMMU_F_INPUT_RANGE: u32 = 0;
-#[allow(unused)]
+#[expect(dead_code)]
 const VIRTIO_IOMMU_F_DOMAIN_RANGE: u32 = 1;
-#[allow(unused)]
 const VIRTIO_IOMMU_F_MAP_UNMAP: u32 = 2;
-#[allow(unused)]
+#[expect(dead_code)]
 const VIRTIO_IOMMU_F_BYPASS: u32 = 3;
 const VIRTIO_IOMMU_F_PROBE: u32 = 4;
-#[allow(unused)]
+#[expect(dead_code)]
 const VIRTIO_IOMMU_F_MMIO: u32 = 5;
 const VIRTIO_IOMMU_F_BYPASS_CONFIG: u32 = 6;
 
@@ -121,15 +120,15 @@ struct VirtioIommuReqHead {
 
 /// Virtio IOMMU request status
 const VIRTIO_IOMMU_S_OK: u8 = 0;
-#[allow(unused)]
+#[expect(dead_code)]
 const VIRTIO_IOMMU_S_IOERR: u8 = 1;
-#[allow(unused)]
+#[expect(dead_code)]
 const VIRTIO_IOMMU_S_UNSUPP: u8 = 2;
 const VIRTIO_IOMMU_S_DEVERR: u8 = 3;
 const VIRTIO_IOMMU_S_INVAL: u8 = 4;
 const VIRTIO_IOMMU_S_RANGE: u8 = 5;
 const VIRTIO_IOMMU_S_NOENT: u8 = 6;
-#[allow(unused)]
+#[expect(dead_code)]
 const VIRTIO_IOMMU_S_FAULT: u8 = 7;
 const VIRTIO_IOMMU_S_NOMEM: u8 = 8;
 
@@ -190,10 +189,10 @@ struct VirtioIommuReqUnmap {
 }
 
 /// Virtio IOMMU request PROBE types
-#[allow(unused)]
+#[expect(dead_code)]
 const VIRTIO_IOMMU_PROBE_T_NONE: u16 = 0;
 const VIRTIO_IOMMU_PROBE_T_RESV_MEM: u16 = 1;
-#[allow(unused)]
+#[expect(dead_code)]
 const VIRTIO_IOMMU_PROBE_T_MASK: u16 = 0xfff;
 
 /// PROBE request
@@ -212,7 +211,7 @@ struct VirtioIommuProbeProperty {
 }
 
 /// Virtio IOMMU request PROBE property RESV_MEM subtypes
-#[allow(unused)]
+#[expect(dead_code)]
 const VIRTIO_IOMMU_RESV_MEM_T_RESERVED: u8 = 0;
 const VIRTIO_IOMMU_RESV_MEM_T_MSI: u8 = 1;
 
@@ -226,25 +225,25 @@ struct VirtioIommuProbeResvMem {
 }
 
 /// Virtio IOMMU fault flags
-#[allow(unused)]
+#[expect(dead_code)]
 const VIRTIO_IOMMU_FAULT_F_READ: u32 = 1;
-#[allow(unused)]
+#[expect(dead_code)]
 const VIRTIO_IOMMU_FAULT_F_WRITE: u32 = 1 << 1;
-#[allow(unused)]
+#[expect(dead_code)]
 const VIRTIO_IOMMU_FAULT_F_EXEC: u32 = 1 << 2;
-#[allow(unused)]
+#[expect(dead_code)]
 const VIRTIO_IOMMU_FAULT_F_ADDRESS: u32 = 1 << 8;
 
 /// Virtio IOMMU fault reasons
-#[allow(unused)]
+#[expect(dead_code)]
 const VIRTIO_IOMMU_FAULT_R_UNKNOWN: u32 = 0;
-#[allow(unused)]
+#[expect(dead_code)]
 const VIRTIO_IOMMU_FAULT_R_DOMAIN: u32 = 1;
-#[allow(unused)]
+#[expect(dead_code)]
 const VIRTIO_IOMMU_FAULT_R_MAPPING: u32 = 2;
 
 /// Fault reporting through eventq
-#[allow(unused)]
+#[expect(dead_code)]
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(C, packed)]
 struct VirtioIommuFault {
