@@ -549,13 +549,15 @@ impl Vm {
 
     #[cfg(feature = "sev_snp")]
     pub fn get_default_sev_snp_guest_policy() -> SnpPolicy {
+        // SMT bit must mirror the host, or the PSP rejects SNP_LAUNCH_START.
+        let smt = std::fs::read_to_string("/sys/devices/system/cpu/smt/active")
+            .map(|s| s.trim() == "1")
+            .unwrap_or(false);
+
         SnpPolicy::new()
             .with_abi_minor(0)
             .with_abi_major(0)
-            // SMT permitted: allows the guest to run on an SMT-enabled host.
-            // This is the permissive default; future work can expose this as a
-            // configurable platform option.
-            .with_smt(1)
+            .with_smt(u8::from(smt))
             .with_reserved_must_be_one(1)
             .with_migrate_ma(0)
     }
