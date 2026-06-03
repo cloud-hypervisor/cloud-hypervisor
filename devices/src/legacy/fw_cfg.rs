@@ -234,7 +234,6 @@ pub fn create_file_name(name: &str) -> [u8; FILE_NAME_SIZE] {
     c_name
 }
 
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(Debug, IntoBytes, FromBytes, Clone, Copy)]
 struct BootE820Entry {
