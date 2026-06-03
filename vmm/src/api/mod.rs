@@ -213,6 +213,7 @@ pub enum ApiError {
 }
 pub type ApiResult<T> = Result<T, ApiError>;
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Deserialize, Serialize)]
 pub struct VmInfoResponse {
     pub config: Box<VmConfig>,

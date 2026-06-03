@@ -67,6 +67,7 @@ pub fn default_cpuconfig_max_phys_bits() -> u8 {
     DEFAULT_MAX_PHYS_BITS
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CpusConfig {
     pub boot_vcpus: u32,
@@ -123,6 +124,7 @@ pub fn default_platformconfig_vfio_p2p_dma() -> bool {
     true
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PlatformConfig {
     #[serde(default = "default_platformconfig_num_pci_segments")]
@@ -221,6 +223,7 @@ pub struct PciSegmentConfig {
     pub mmio64_aperture_weight: u32,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct MemoryZoneConfig {
     pub id: String,
@@ -269,6 +272,7 @@ fn default_cpusconfig_nested() -> bool {
     true
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct MemoryConfig {
     pub size: u64,
@@ -335,6 +339,7 @@ pub struct VirtQueueAffinity {
     pub host_cpus: Box<[usize]>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct PciDeviceCommonConfig {
     #[serde(default)]
@@ -347,6 +352,7 @@ pub struct PciDeviceCommonConfig {
     pub pci_device_id: Option<u8>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DiskConfig {
     #[serde(flatten)]
@@ -412,6 +418,7 @@ pub fn default_diskconfig_sparse() -> bool {
     true
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct NetConfig {
     #[serde(flatten)]
@@ -584,6 +591,7 @@ impl ApplyLandlock for GenericVhostUserConfig {
     }
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PmemConfig {
     #[serde(flatten)]
@@ -616,6 +624,7 @@ pub enum ConsoleOutputMode {
 /// Common configuration for plain console configs.
 ///
 /// Independent of PCI or legacy devices.
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CommonConsoleConfig {
     #[serde(default)]
@@ -703,6 +712,7 @@ impl ApplyLandlock for ConsoleConfig {
 }
 
 #[cfg(target_arch = "x86_64")]
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DebugConsoleConfig {
     #[serde(default)]
@@ -736,6 +746,7 @@ impl ApplyLandlock for DebugConsoleConfig {
     }
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DeviceConfig {
     #[serde(flatten)]
@@ -846,6 +857,7 @@ pub struct NumaDistance {
     pub distance: u8,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct NumaConfig {
     pub guest_numa_id: u32,
@@ -898,6 +910,7 @@ pub enum PayloadConfigError {
     FwCfgInvalidItem(String),
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct PayloadConfig {
     #[serde(default)]
@@ -919,6 +932,7 @@ pub struct PayloadConfig {
 }
 
 #[cfg(feature = "fw_cfg")]
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct FwCfgConfig {
     pub e820: bool,
@@ -951,6 +965,7 @@ pub struct FwCfgItemList {
 }
 
 #[cfg(feature = "fw_cfg")]
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct FwCfgItem {
     #[serde(default)]
@@ -1081,6 +1096,7 @@ impl ApplyLandlock for LandlockConfig {
     }
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct VmConfig {
     #[serde(default)]
