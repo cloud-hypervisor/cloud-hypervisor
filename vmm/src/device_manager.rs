@@ -1673,6 +1673,7 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::EventFd)?,
                 self.get_msi_iova_space(),
                 iommu_address_width_bits,
+                self.force_access_platform,
                 state_from_id(snapshot, iommu_id.as_str())
                     .map_err(DeviceManagerError::RestoreGetState)?,
             )
@@ -3728,6 +3729,7 @@ impl DeviceManager {
         let virtio_watchdog_device = Arc::new(Mutex::new(
             virtio_devices::Watchdog::new(
                 id.clone(),
+                self.force_access_platform,
                 self.reset_evt.try_clone().unwrap(),
                 self.seccomp_action.clone(),
                 self.exit_evt

@@ -27,7 +27,8 @@ use vmm_sys_util::eventfd::EventFd;
 
 use super::{
     ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
-    Error as DeviceError, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice, VirtioDeviceType,
+    Error as DeviceError, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice,
+    VirtioDeviceType,
 };
 use crate::seccomp_filters::Thread;
 use crate::{DmaRemapping, GuestMemoryMmap, VirtioInterrupt, VirtioInterruptType};
@@ -1117,6 +1118,7 @@ impl Iommu {
         exit_evt: EventFd,
         msi_iova_space: (u64, u64),
         address_width_bits: u8,
+        access_platform_enabled: bool,
         state: Option<IommuState>,
     ) -> io::Result<(Self, Arc<IommuMapping>)> {
         let (mut avail_features, acked_features, endpoints, domains, paused) =
@@ -1164,6 +1166,10 @@ impl Iommu {
         } else {
             None
         };
+
+        if access_platform_enabled {
+            avail_features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
+        }
 
         let mapping = Arc::new(IommuMapping {
             endpoints: Arc::new(RwLock::new(endpoints)),
