@@ -521,7 +521,6 @@ impl Snapshottable for MsixConfig {
     }
 }
 
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(Clone, Copy, Default, Serialize, Deserialize)]
 pub struct MsixCap {

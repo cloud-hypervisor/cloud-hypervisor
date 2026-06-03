@@ -48,7 +48,6 @@ pub enum PciHeaderType {
 }
 
 /// Classes of PCI nodes.
-#[allow(dead_code)]
 #[derive(Copy, Clone)]
 pub enum PciClassCode {
     TooOld,
@@ -126,7 +125,6 @@ impl PciSubclass for PciBridgeSubclass {
 }
 
 /// Subclass of the SerialBus
-#[allow(dead_code)]
 #[derive(Copy, Clone)]
 pub enum PciSerialBusSubClass {
     Firewire = 0x00,
@@ -142,7 +140,6 @@ impl PciSubclass for PciSerialBusSubClass {
 }
 
 /// Mass Storage Sub Classes
-#[allow(dead_code)]
 #[derive(Copy, Clone)]
 pub enum PciMassStorageSubclass {
     ScsiStorage = 0x00,
@@ -164,7 +161,6 @@ impl PciSubclass for PciMassStorageSubclass {
 }
 
 /// Network Controller Sub Classes
-#[allow(dead_code)]
 #[derive(Copy, Clone)]
 pub enum PciNetworkControllerSubclass {
     EthernetController = 0x00,
@@ -198,7 +194,6 @@ pub trait PciProgrammingInterface {
 
 /// Types of PCI capabilities.
 #[derive(PartialEq, Eq, Copy, Clone)]
-#[allow(dead_code)]
 #[allow(non_camel_case_types)]
 #[repr(u8)]
 pub enum PciCapabilityId {
@@ -256,7 +251,6 @@ impl From<u8> for PciCapabilityId {
 
 /// Types of PCI Express capabilities.
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
-#[allow(dead_code)]
 #[repr(u16)]
 pub enum PciExpressCapabilityId {
     NullCapability = 0x0000,
@@ -1243,7 +1237,6 @@ mod unit_tests {
 
     #[repr(C, packed)]
     #[derive(Clone, Copy, Default)]
-    #[allow(dead_code)]
     struct TestCap {
         len: u8,
         foo: u8,
