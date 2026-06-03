@@ -150,7 +150,7 @@ const KVM_SNP_PAGE_TYPE_CPUID: u32 = 6;
 struct PageTypeConfig {
     isolated_page_size_4kb: u32,
     normal: u32,
-    #[allow(dead_code)]
+    #[cfg_attr(not(feature = "kvm"), expect(dead_code))]
     zero: u32,
     unmeasured: u32,
     cpuid: u32,
@@ -158,11 +158,13 @@ struct PageTypeConfig {
     vmsa: u32,
 }
 
-#[allow(dead_code)]
 #[derive(Copy, Clone)]
 struct GpaPages {
-    pub gpa: u64,
+    #[cfg_attr(not(feature = "sev_snp"), expect(dead_code))]
     pub page_type: u32,
+    #[cfg_attr(not(feature = "sev_snp"), expect(dead_code))]
+    pub gpa: u64,
+    #[allow(dead_code)] // usage pattern too complex, we stick to allow()
     pub page_size: u32,
 }
 
