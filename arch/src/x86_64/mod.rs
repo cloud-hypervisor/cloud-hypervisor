@@ -15,6 +15,7 @@ pub mod regs;
 #[cfg(feature = "tdx")]
 pub mod tdx;
 
+mod arch_capabilities_checks;
 mod helpers;
 mod hyperv_msrs;
 mod mpspec;
@@ -177,6 +178,12 @@ pub enum Error {
     /// purposes.
     #[error("The selected CPU profile cannot be utilized because a necessary MSR was not found")]
     CpuProfileMissingMsr,
+
+    /// Error checking if the host's feature MSRs are compatible with the CPU Profile
+    #[error(
+        "The selected CPU profile cannot be utilized because the host's MSR entries are not compatible with the profile"
+    )]
+    CpuProfileMsrIncompatibility,
 
     // Error writing EBDA address
     #[error("Error writing EBDA address")]
