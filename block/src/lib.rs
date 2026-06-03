@@ -659,7 +659,7 @@ enum BlockSize {
 
 impl DiskTopology {
     // libc::ioctl() takes different types on different architectures
-    fn query_block_size(f: &File, block_size_type: BlockSize) -> std::io::Result<u64> {
+    fn query_block_size<T: AsRawFd>(f: &T, block_size_type: BlockSize) -> std::io::Result<u64> {
         let mut block_size = 0;
         // SAFETY: FFI call with correct arguments
         let ret = unsafe {
@@ -681,11 +681,11 @@ impl DiskTopology {
         Ok(block_size)
     }
 
-    pub fn probe(f: &File) -> std::io::Result<Self> {
+    pub fn probe<T: AsRawFd>(f: &T) -> std::io::Result<Self> {
         if !is_block_device(f.as_raw_fd()) {
             // For regular files opened with O_DIRECT, the logical block size
-            // must reflect the filesystem DIO alignment so the guest issues
-            // correctly sized I/O.
+            // must reflect the filesystem direct I/O alignment so the guest
+            // issues correctly sized I/O.
             // SAFETY: fcntl(F_GETFL) is always safe on a valid fd.
             let flags = unsafe { libc::fcntl(f.as_raw_fd(), libc::F_GETFL) };
             if flags >= 0 && (flags & libc::O_DIRECT) != 0 {
