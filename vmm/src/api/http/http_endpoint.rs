@@ -276,7 +276,7 @@ impl EndpointHandler for VmCreate {
                             .map_err(HttpError::SerdeJsonDeserialize)
                         {
                             Ok(config) => config,
-                            Err(e) => return error_response(e, StatusCode::BadRequest),
+                            Err(e) => return error_response(e),
                         };
 
                         if let Some(ref mut nets) = vm_config.net {
@@ -287,8 +287,8 @@ impl EndpointHandler for VmCreate {
                             // This call sets all FDs to null while doing the same logging as
                             // similar code paths.
                             for cfg in cfgs {
-                                if let Err(e) = attach_fds_to_cfg(vec![], *cfg)
-                                    .map_err(|e| error_response(e, StatusCode::InternalServerError))
+                                if let Err(e) =
+                                    attach_fds_to_cfg(vec![], *cfg).map_err(error_response)
                                 {
                                     return e;
                                 }
@@ -300,7 +300,7 @@ impl EndpointHandler for VmCreate {
                             .map_err(HttpError::ApiError)
                         {
                             Ok(_) => Response::new(Version::Http11, StatusCode::NoContent),
-                            Err(e) => error_response(e, StatusCode::InternalServerError),
+                            Err(e) => error_response(e),
                         }
                     }
 
@@ -308,7 +308,7 @@ impl EndpointHandler for VmCreate {
                 }
             }
 
-            _ => error_response(HttpError::BadRequest, StatusCode::BadRequest),
+            _ => error_response(HttpError::BadRequest),
         }
     }
 }
@@ -570,9 +570,9 @@ impl EndpointHandler for VmInfo {
                     response.set_body(Body::new(info_serialized));
                     response
                 }
-                Err(e) => error_response(e, StatusCode::InternalServerError),
+                Err(e) => error_response(e),
             },
-            _ => error_response(HttpError::BadRequest, StatusCode::BadRequest),
+            _ => error_response(HttpError::BadRequest),
         }
     }
 }
@@ -599,10 +599,10 @@ impl EndpointHandler for VmmPing {
                     response.set_body(Body::new(info_serialized));
                     response
                 }
-                Err(e) => error_response(e, StatusCode::InternalServerError),
+                Err(e) => error_response(e),
             },
 
-            _ => error_response(HttpError::BadRequest, StatusCode::BadRequest),
+            _ => error_response(HttpError::BadRequest),
         }
     }
 }
@@ -624,10 +624,10 @@ impl EndpointHandler for VmmShutdown {
                     .map_err(HttpError::ApiError)
                 {
                     Ok(_) => Response::new(Version::Http11, StatusCode::OK),
-                    Err(e) => error_response(e, StatusCode::InternalServerError),
+                    Err(e) => error_response(e),
                 }
             }
-            _ => error_response(HttpError::BadRequest, StatusCode::BadRequest),
+            _ => error_response(HttpError::BadRequest),
         }
     }
 }
