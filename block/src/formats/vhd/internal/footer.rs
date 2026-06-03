@@ -3,9 +3,41 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fs::File;
-use std::io::{Seek, SeekFrom};
+use std::io::{self, Read, Seek, SeekFrom};
+use std::os::unix::io::AsRawFd;
 
-use crate::{DiskTopology, read_aligned_block_size};
+/// Read the trailing 512 byte sector of `file`, temporarily clearing
+/// O_DIRECT so the unaligned tail read is accepted by the kernel.
+fn read_trailing_sector(file: &mut File) -> io::Result<[u8; 512]> {
+    let fd = file.as_raw_fd();
+    // SAFETY: fcntl(F_GETFL) is always safe on a valid fd.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let cleared = flags & !libc::O_DIRECT;
+    let restore = if cleared == flags {
+        false
+    } else {
+        // SAFETY: F_SETFL with a valid set of flags is safe.
+        if unsafe { libc::fcntl(fd, libc::F_SETFL, cleared) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        true
+    };
+
+    let mut sector = [0u8; 512];
+    let result = file
+        .seek(SeekFrom::End(-512))
+        .and_then(|_| file.read_exact(&mut sector));
+
+    if restore {
+        // SAFETY: restoring previously read flags.
+        unsafe { libc::fcntl(fd, libc::F_SETFL, flags) };
+    }
+
+    result.map(|_| sector)
+}
 
 // Production code uses: cookie, file_format_version, data_offset,
 // current_size, disk_type. The remaining fields are parsed for VHD
@@ -32,16 +64,7 @@ pub struct VhdFooter {
 
 impl VhdFooter {
     pub fn new(file: &mut File) -> std::io::Result<VhdFooter> {
-        let blocksize = DiskTopology::probe(file)?.logical_block_size as usize;
-
-        // Place the cursor in the last block of the file
-        file.seek(SeekFrom::End(0 - (blocksize as i64)))?;
-        // Read in the last block
-        let data = read_aligned_block_size(file)?;
-
-        // We only care about the last sector
-        let offset = blocksize - 512;
-        let sector = &data[offset..];
+        let sector = read_trailing_sector(file)?;
 
         Ok(VhdFooter {
             cookie: u64::from_be_bytes(sector[0..8].try_into().unwrap()),
