@@ -201,6 +201,10 @@ pub enum Error {
     #[error("Error creation API server's socket")]
     CreateApiServerSocket(#[source] io::Error),
 
+    /// The API server socket is already in use by another running instance
+    #[error("API socket {0:?} is already in use by another running instance")]
+    ApiSocketInUse(std::path::PathBuf),
+
     #[cfg(feature = "guest_debug")]
     #[error("Failed to start the GDB thread")]
     GdbThreadSpawn(#[source] io::Error),
