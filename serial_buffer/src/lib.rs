@@ -42,6 +42,11 @@ impl SerialBuffer {
 
         self.buffer.extend(buf);
     }
+
+    /// Replaces the downstream writer, leaving any buffered bytes intact.
+    pub fn set_out(&mut self, out: Box<dyn Write + Send>) {
+        self.out = out;
+    }
 }
 
 impl Write for SerialBuffer {
@@ -107,5 +112,126 @@ impl Write for SerialBuffer {
             }
         }
         self.out.flush()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    use super::SerialBuffer;
+
+    // A writer that appends into a shared Vec so tests can inspect what the
+    // buffer wrote through to its downstream sink.
+    #[derive(Clone)]
+    struct TestSink(Arc<Mutex<Vec<u8>>>);
+
+    impl TestSink {
+        fn new() -> Self {
+            TestSink(Arc::new(Mutex::new(Vec::new())))
+        }
+        fn taken(&self) -> Vec<u8> {
+            self.0.lock().unwrap().clone()
+        }
+    }
+
+    impl Write for TestSink {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    // With no client attached (write_out == false) output is retained in the
+    // ring and replayed in order once a client connects (set_out + write_out).
+    #[test]
+    fn accumulates_while_detached_then_replays_on_connect() {
+        let write_out = Arc::new(AtomicBool::new(false));
+        let mut buf = SerialBuffer::new(Box::new(std::io::sink()), write_out.clone());
+
+        buf.write_all(b"boot: hello\n").unwrap();
+        buf.write_all(b"login: ").unwrap();
+
+        let sink = TestSink::new();
+        buf.set_out(Box::new(sink.clone()));
+        write_out.store(true, Ordering::Release);
+        buf.flush().unwrap();
+
+        assert_eq!(sink.taken(), b"boot: hello\nlogin: ");
+    }
+
+    // Once connected, live writes pass straight through.
+    #[test]
+    fn live_writes_pass_through_after_connect() {
+        let write_out = Arc::new(AtomicBool::new(false));
+        let mut buf = SerialBuffer::new(Box::new(std::io::sink()), write_out.clone());
+
+        let sink = TestSink::new();
+        buf.set_out(Box::new(sink.clone()));
+        write_out.store(true, Ordering::Release);
+        buf.write_all(b"live").unwrap();
+
+        assert_eq!(sink.taken(), b"live");
+    }
+
+    // Output produced while no client is attached is buffered and delivered to
+    // the next client to connect; bytes already drained by a previous client
+    // are not resent.
+    #[test]
+    fn output_while_detached_goes_to_next_client() {
+        let write_out = Arc::new(AtomicBool::new(false));
+        let mut buf = SerialBuffer::new(Box::new(std::io::sink()), write_out.clone());
+
+        // First client: connects, drains "early\n", then disconnects.
+        let first = TestSink::new();
+        buf.set_out(Box::new(first.clone()));
+        write_out.store(true, Ordering::Release);
+        buf.write_all(b"early\n").unwrap();
+        assert_eq!(first.taken(), b"early\n");
+
+        // Disconnect: detach to a discarding sink, keep accumulating.
+        write_out.store(false, Ordering::Release);
+        buf.set_out(Box::new(std::io::sink()));
+        buf.write_all(b"while-away\n").unwrap();
+
+        // Second client: receives what was produced while no one was attached.
+        let second = TestSink::new();
+        buf.set_out(Box::new(second.clone()));
+        write_out.store(true, Ordering::Release);
+        buf.flush().unwrap();
+        assert_eq!(second.taken(), b"while-away\n");
+    }
+
+    // Bytes are delivered once: a second client connecting after the first
+    // already drained the backlog, with no new output in between, gets nothing.
+    #[test]
+    fn drained_bytes_are_not_resent_to_a_second_client() {
+        let write_out = Arc::new(AtomicBool::new(false));
+        let mut buf = SerialBuffer::new(Box::new(std::io::sink()), write_out.clone());
+
+        buf.write_all(b"boot log\n").unwrap();
+
+        // First client drains the backlog.
+        let first = TestSink::new();
+        buf.set_out(Box::new(first.clone()));
+        write_out.store(true, Ordering::Release);
+        buf.flush().unwrap();
+        assert_eq!(first.taken(), b"boot log\n");
+
+        // First disconnects; no new output is produced while detached.
+        write_out.store(false, Ordering::Release);
+        buf.set_out(Box::new(std::io::sink()));
+
+        // Second client connects: nothing left to deliver.
+        let second = TestSink::new();
+        buf.set_out(Box::new(second.clone()));
+        write_out.store(true, Ordering::Release);
+        buf.flush().unwrap();
+        assert!(second.taken().is_empty());
     }
 }
