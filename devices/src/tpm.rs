@@ -27,7 +27,7 @@ pub enum Error {
 }
 type Result<T> = anyhow::Result<T, Error>;
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 #[derive(Copy, Clone)]
 enum LocStateFields {
     TpmEstablished,
@@ -43,7 +43,7 @@ enum LocStsFields {
     BeenSeized,
 }
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 #[derive(Copy, Clone)]
 enum IntfIdFields {
     InterfaceType,
@@ -61,7 +61,7 @@ enum IntfIdFields {
     Rid,
 }
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 #[derive(Copy, Clone)]
 enum IntfId2Fields {
     Vid,
