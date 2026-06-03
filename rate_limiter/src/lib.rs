@@ -546,7 +546,7 @@ pub(crate) mod unit_tests {
         }
 
         // After a restore, we cannot be certain that the last_update field has the same value.
-        #[allow(dead_code)]
+        #[expect(dead_code)]
         fn partial_eq(&self, other: &TokenBucket) -> bool {
             (other.capacity() == self.capacity())
                 && (other.one_time_burst() == self.one_time_burst())
