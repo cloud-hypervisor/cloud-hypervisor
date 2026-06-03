@@ -272,22 +272,6 @@ impl BusDevice for VfioUserPciDevice {
     }
 }
 
-#[repr(u32)]
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-#[allow(dead_code)]
-enum Regions {
-    Bar0,
-    Bar1,
-    Bar2,
-    Bar3,
-    Bar4,
-    Bar5,
-    Rom,
-    Config,
-    Vga,
-    Migration,
-}
-
 struct VfioUserClientWrapper {
     client: Arc<Mutex<Client>>,
 }
