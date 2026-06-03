@@ -5,15 +5,16 @@
 
 use std::collections::BTreeMap;
 use std::error::Error;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::os::unix::io::{IntoRawFd, RawFd};
 use std::os::unix::net::UnixListener;
 use std::panic::AssertUnwindSafe;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use std::sync::mpsc::Sender;
 use std::thread;
 
+use block::fcntl::{LockError, LockGranularity, LockType, try_acquire_lock};
 use log::{error, info};
 use micro_http::{
     Body, HttpServer, MediaType, Method, Request, Response, ServerError, StatusCode, Version,
@@ -328,6 +329,7 @@ fn start_http_thread(
     seccomp_action: &SeccompAction,
     exit_evt: EventFd,
     landlock_enable: bool,
+    api_socket_lock: Option<File>,
 ) -> Result<HttpApiHandle> {
     // Retrieve seccomp filter for API thread
     let api_seccomp_filter = get_seccomp_filter(seccomp_action, Thread::HttpApi, None)
@@ -343,6 +345,9 @@ fn start_http_thread(
     let thread = thread::Builder::new()
         .name("http-server".to_string())
         .spawn(move || {
+            // Keep the API socket lock (if any) alive for the server thread.
+            let _api_socket_lock = api_socket_lock;
+
             // Apply seccomp filter for API thread.
             if !api_seccomp_filter.is_empty() {
                 apply_filter(&api_seccomp_filter)
@@ -402,6 +407,28 @@ fn start_http_thread(
     Ok((thread, api_shutdown_fd))
 }
 
+/// Acquires an exclusive lock for the socket path.
+///
+/// This prevents opening (and potentially deleting) a socket that is in active
+/// use by another Cloud Hypervisor instance.
+fn acquire_api_socket_lock(socket_path: &Path) -> Result<File> {
+    let mut lock_path = socket_path.to_path_buf().into_os_string();
+    lock_path.push(".lock");
+
+    let lock = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .map_err(VmmError::CreateApiServerSocket)?;
+
+    match try_acquire_lock(&lock, LockType::Write, LockGranularity::WholeFile) {
+        Ok(()) => Ok(lock),
+        Err(LockError::AlreadyLocked) => Err(VmmError::ApiSocketInUse(socket_path.to_path_buf())),
+        Err(LockError::Io(e)) => Err(VmmError::CreateApiServerSocket(e)),
+    }
+}
+
 pub fn start_http_path_thread(
     path: &str,
     api_notifier: EventFd,
@@ -411,6 +438,12 @@ pub fn start_http_path_thread(
     landlock_enable: bool,
 ) -> Result<HttpApiHandle> {
     let socket_path = PathBuf::from(path);
+
+    let lock = acquire_api_socket_lock(&socket_path)?;
+    // We hold the lock, so any socket at this path is stale from a crashed
+    // run: remove it before bind. Ignore errors (it is usually not present).
+    let _ = std::fs::remove_file(&socket_path);
+
     let socket_fd = UnixListener::bind(socket_path).map_err(VmmError::CreateApiServerSocket)?;
     // SAFETY: Valid FD just opened
     let server = unsafe { HttpServer::new_from_fd(socket_fd.into_raw_fd()) }
@@ -423,6 +456,7 @@ pub fn start_http_path_thread(
         seccomp_action,
         exit_evt,
         landlock_enable,
+        Some(lock),
     )
 }
 
@@ -443,6 +477,7 @@ pub fn start_http_fd_thread(
         seccomp_action,
         exit_evt,
         landlock_enable,
+        None,
     )
 }
 
