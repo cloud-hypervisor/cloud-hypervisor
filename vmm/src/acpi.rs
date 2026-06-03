@@ -49,7 +49,6 @@ pub const ACPI_RISC_V_IMSIC: u8 = 0x19;
 #[cfg(target_arch = "riscv64")]
 pub const ACPI_RISC_V_APLIC: u8 = 0x1A;
 
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct PciRangeEntry {
@@ -60,7 +59,6 @@ struct PciRangeEntry {
     _reserved: u32,
 }
 
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct MemoryAffinity {
@@ -77,7 +75,7 @@ struct MemoryAffinity {
     _reserved3: u64,
 }
 
-#[allow(dead_code)]
+#[cfg(target_arch = "x86_64")]
 #[repr(C, packed)]
 #[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct ProcessorLocalX2ApicAffinity {
@@ -91,7 +89,7 @@ struct ProcessorLocalX2ApicAffinity {
     _reserved2: u32,
 }
 
-#[allow(dead_code)]
+#[cfg(target_arch = "aarch64")]
 #[repr(C, packed)]
 #[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct ProcessorGiccAffinity {
@@ -112,7 +110,6 @@ struct ProcessorGiccAffinity {
 //
 // Note: Some older Linux kernel versions may incorrectly expect
 // device_handle_type=0 for PCI devices.
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct GenericInitiatorAffinity {
@@ -127,7 +124,7 @@ struct GenericInitiatorAffinity {
 }
 
 impl GenericInitiatorAffinity {
-    #[allow(dead_code)]
+    #[cfg(test)]
     fn from_acpi_device(hid: u64, uid: u32, proximity_domain: u32) -> Self {
         let mut device_handle = [0u8; 16];
         // ACPI 6.6 Table 5-66: ACPI device handle
@@ -228,7 +225,6 @@ impl MemoryAffinity {
     }
 }
 
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct ViotVirtioPciNode {
@@ -240,7 +236,6 @@ struct ViotVirtioPciNode {
     _reserved2: [u8; 8],
 }
 
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct ViotPciRangeNode {
@@ -608,7 +603,6 @@ fn create_dbg2_table(base_address: u64) -> Sdt {
 }
 
 #[cfg(target_arch = "aarch64")]
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct IortBodyBase {
@@ -618,7 +612,6 @@ struct IortBodyBase {
 }
 
 #[cfg(target_arch = "aarch64")]
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct IortNodeCommon {
@@ -631,7 +624,6 @@ struct IortNodeCommon {
 }
 
 #[cfg(target_arch = "aarch64")]
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct IortIdMapping {
@@ -643,7 +635,6 @@ struct IortIdMapping {
 }
 
 #[cfg(target_arch = "aarch64")]
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct IortMemoryAccessProperties {
@@ -654,7 +645,6 @@ struct IortMemoryAccessProperties {
 }
 
 #[cfg(target_arch = "aarch64")]
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct IortItsGroupBase {
@@ -664,7 +654,6 @@ struct IortItsGroupBase {
 }
 
 #[cfg(target_arch = "aarch64")]
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct IortPciRootComplexBase {

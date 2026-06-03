@@ -317,7 +317,6 @@ fn core_scheduling_cookie() -> u64 {
 }
 
 #[cfg(target_arch = "x86_64")]
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(IntoBytes, Immutable, FromBytes)]
 struct LocalX2Apic {
@@ -329,7 +328,7 @@ struct LocalX2Apic {
     pub processor_id: u32,
 }
 
-#[allow(dead_code)]
+#[cfg(target_arch = "x86_64")]
 #[repr(C, packed)]
 #[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct Ioapic {
@@ -342,7 +341,6 @@ struct Ioapic {
 }
 
 #[cfg(target_arch = "aarch64")]
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(IntoBytes, Immutable, FromBytes)]
 struct GicC {
@@ -367,7 +365,6 @@ struct GicC {
 }
 
 #[cfg(target_arch = "aarch64")]
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(IntoBytes, Immutable, FromBytes)]
 struct GicD {
@@ -382,7 +379,6 @@ struct GicD {
 }
 
 #[cfg(target_arch = "aarch64")]
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(IntoBytes, Immutable, FromBytes)]
 struct GicMsiFrame {
@@ -397,7 +393,6 @@ struct GicMsiFrame {
 }
 
 #[cfg(target_arch = "aarch64")]
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(IntoBytes, Immutable, FromBytes)]
 struct GicR {
@@ -409,7 +404,6 @@ struct GicR {
 }
 
 #[cfg(target_arch = "aarch64")]
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(IntoBytes, Immutable, FromBytes)]
 struct GicIts {
@@ -422,7 +416,6 @@ struct GicIts {
 }
 
 #[cfg(target_arch = "aarch64")]
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(IntoBytes, Immutable, FromBytes)]
 struct ProcessorHierarchyNode {
@@ -436,7 +429,6 @@ struct ProcessorHierarchyNode {
 }
 
 #[cfg(target_arch = "riscv64")]
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(IntoBytes, Immutable, FromBytes)]
 struct Imsic {
@@ -456,7 +448,6 @@ struct Imsic {
 }
 
 #[cfg(target_arch = "riscv64")]
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(IntoBytes, Immutable, FromBytes)]
 struct Aplic {
@@ -476,7 +467,7 @@ struct Aplic {
     pub aplic_size: u32,
 }
 
-#[allow(dead_code)]
+#[cfg(target_arch = "x86_64")]
 #[repr(C, packed)]
 #[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct InterruptSourceOverride {
