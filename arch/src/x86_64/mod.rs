@@ -7,6 +7,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
+pub mod arch_capabilities_checks;
 pub mod cpu_profile;
 pub mod interrupts;
 pub mod layout;
@@ -177,6 +178,12 @@ pub enum Error {
     /// purposes.
     #[error("The selected CPU profile cannot be utilized because a necessary MSR was not found")]
     CpuProfileMissingMsr,
+
+    /// Error checking if the host's feature MSRs are compatible with the CPU Profile
+    #[error(
+        "The selected CPU profile cannot be utilized because the host's MSR entries are not compatible with the profile"
+    )]
+    CpuProfileMsrIncompatibility,
 
     // Error writing EBDA address
     #[error("Error writing EBDA address")]
