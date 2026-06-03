@@ -104,7 +104,6 @@ impl GuestMemoryTarget {
     }
 
     /// Returns the raw iovecs to be passed to the kernel for asynchronous I/O.
-    #[allow(dead_code)]
     pub(super) fn iovecs(&self) -> &[libc::iovec] {
         &self.iovecs
     }
