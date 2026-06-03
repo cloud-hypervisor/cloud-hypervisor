@@ -548,6 +548,19 @@ impl Vm {
     pub const HANDLED_SIGNALS: [i32; 1] = [SIGWINCH];
 
     #[cfg(feature = "sev_snp")]
+    fn host_has_cxl() -> bool {
+        std::path::Path::new("/sys/bus/cxl/devices")
+            .read_dir()
+            .map(|mut d| d.next().is_some())
+            .unwrap_or(false)
+    }
+
+    // SEV-SNP guest policy CXL_ALLOW (bit 21). Set on the raw u64: igvm_defs
+    // 0.4.0 folds bits 21..63 into one `reserved` field with no named accessor.
+    #[cfg(feature = "sev_snp")]
+    const SNP_POLICY_CXL_ALLOW: u64 = 1 << 21;
+
+    #[cfg(feature = "sev_snp")]
     pub fn get_default_sev_snp_guest_policy() -> SnpPolicy {
         // SMT bit must mirror the host, or the PSP rejects SNP_LAUNCH_START.
         let smt = std::fs::read_to_string("/sys/devices/system/cpu/smt/active")
@@ -1020,12 +1033,19 @@ impl Vm {
 
         // Extract guest policy from IGVM if available, otherwise use default.
         #[cfg(feature = "igvm")]
-        let guest_policy = igvm_file
+        let mut guest_policy = igvm_file
             .as_ref()
             .and_then(igvm_loader::extract_guest_policy)
             .unwrap_or_else(Self::get_default_sev_snp_guest_policy);
         #[cfg(not(feature = "igvm"))]
-        let guest_policy = Self::get_default_sev_snp_guest_policy();
+        let mut guest_policy = Self::get_default_sev_snp_guest_policy();
+
+        // CXL hosts reject launch (0x7) without CXL_ALLOW, and buildigvm's IGVM
+        // policy omits it — set it on the final policy from either source.
+        if Self::host_has_cxl() {
+            guest_policy =
+                SnpPolicy::from_bits(guest_policy.into_bits() | Self::SNP_POLICY_CXL_ALLOW);
+        }
 
         vm.sev_snp_init(guest_policy)
             .map_err(Error::InitializeSevSnpVm)?;
