@@ -100,7 +100,7 @@ const VIRTIO_F_VERSION_1: u32 = 32;
 const VIRTIO_F_ACCESS_PLATFORM: u32 = 33;
 const VIRTIO_F_IN_ORDER: u32 = 35;
 const VIRTIO_F_ORDER_PLATFORM: u32 = 36;
-#[allow(dead_code)]
+#[expect(dead_code)]
 const VIRTIO_F_SR_IOV: u32 = 37;
 const VIRTIO_F_NOTIFICATION_DATA: u32 = 38;
 
