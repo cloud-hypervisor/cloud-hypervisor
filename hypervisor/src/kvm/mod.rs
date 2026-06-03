@@ -562,10 +562,12 @@ struct KvmDirtyLogSlot {
     guest_memfd: u32,
 }
 
-#[allow(dead_code)]
 struct KvmMemorySlot {
+    #[cfg_attr(not(feature = "sev_snp"), expect(dead_code))]
     guest_memfd: OwnedFd,
+    #[cfg_attr(not(feature = "sev_snp"), expect(dead_code))]
     guest_phys_addr: u64,
+    #[cfg_attr(not(feature = "sev_snp"), expect(dead_code))]
     memory_size: u64,
 }
 
