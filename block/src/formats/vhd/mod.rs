@@ -17,6 +17,7 @@ use std::io;
 use std::os::unix::io::AsRawFd;
 
 pub use internal::footer::is_fixed_vhd;
+use log::warn;
 
 use self::internal::fixed::FixedVhd;
 #[cfg(feature = "io_uring")]
@@ -25,7 +26,7 @@ use self::worker::sync::FixedVhdSync;
 use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError};
 use crate::disk_file::DiskSize;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
-use crate::{BlockBackend, Error, disk_file};
+use crate::{BlockBackend, DiskTopology, Error, disk_file};
 
 #[derive(Debug)]
 pub struct VhdDisk {
@@ -77,7 +78,14 @@ impl disk_file::DiskFd for VhdDisk {
     }
 }
 
-impl disk_file::Geometry for VhdDisk {}
+impl disk_file::Geometry for VhdDisk {
+    fn topology(&self) -> DiskTopology {
+        DiskTopology::probe(&self.inner).unwrap_or_else(|_| {
+            warn!("Unable to get device topology. Using default topology");
+            DiskTopology::default()
+        })
+    }
+}
 
 impl disk_file::SparseCapable for VhdDisk {}
 
