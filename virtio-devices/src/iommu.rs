@@ -82,7 +82,6 @@ const MAX_DOMAINS: usize = 1 << 16;
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(C, packed)]
-#[allow(dead_code)]
 struct VirtioIommuRange32 {
     start: u32,
     end: u32,
@@ -90,7 +89,6 @@ struct VirtioIommuRange32 {
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(C, packed)]
-#[allow(dead_code)]
 struct VirtioIommuRange64 {
     start: u64,
     end: u64,
@@ -98,7 +96,6 @@ struct VirtioIommuRange64 {
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(C, packed)]
-#[allow(dead_code)]
 struct VirtioIommuConfig {
     page_size_mask: u64,
     input_range: VirtioIommuRange64,
@@ -138,7 +135,6 @@ const VIRTIO_IOMMU_S_NOMEM: u8 = 8;
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(C, packed)]
-#[allow(dead_code)]
 struct VirtioIommuReqTail {
     status: u8,
     _reserved: [u8; 3],
@@ -203,7 +199,6 @@ const VIRTIO_IOMMU_PROBE_T_MASK: u16 = 0xfff;
 /// PROBE request
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(C, packed)]
-#[allow(dead_code)]
 struct VirtioIommuReqProbe {
     endpoint: u32,
     _reserved: [u64; 8],
@@ -211,7 +206,6 @@ struct VirtioIommuReqProbe {
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(C, packed)]
-#[allow(dead_code)]
 struct VirtioIommuProbeProperty {
     type_: u16,
     length: u16,
@@ -224,7 +218,6 @@ const VIRTIO_IOMMU_RESV_MEM_T_MSI: u8 = 1;
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(C, packed)]
-#[allow(dead_code)]
 struct VirtioIommuProbeResvMem {
     subtype: u8,
     _reserved: [u8; 3],

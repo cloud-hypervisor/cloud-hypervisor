@@ -62,7 +62,6 @@ enum PciCapabilityType {
 // fields cap_vndr (1 byte) and cap_next (1 byte) defined in the virtio spec.
 const VIRTIO_PCI_CAP_OFFSET: usize = 2;
 
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(Clone, Copy, Default)]
 struct VirtioPciCap {
@@ -103,7 +102,6 @@ impl VirtioPciCap {
     }
 }
 
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(Clone, Copy, Default)]
 struct VirtioPciNotifyCap {
@@ -147,7 +145,6 @@ impl VirtioPciNotifyCap {
     }
 }
 
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(Clone, Copy, Default)]
 struct VirtioPciCap64 {
@@ -186,7 +183,6 @@ impl VirtioPciCap64 {
     }
 }
 
-#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(Clone, Copy, Default)]
 struct VirtioPciCfgCap {
@@ -237,7 +233,6 @@ struct VirtioPciCfgCapInfo {
     cap: VirtioPciCfgCap,
 }
 
-#[allow(dead_code)]
 #[derive(Copy, Clone)]
 pub enum PciVirtioSubclass {
     NonTransitionalBase = 0xff,
