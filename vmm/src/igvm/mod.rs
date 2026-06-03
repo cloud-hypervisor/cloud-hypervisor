@@ -84,7 +84,6 @@ pub enum BootPageAcceptance {
 
 /// The startup memory type used to notify a well behaved host that memory should be present before attempting to
 /// start the guest.
-#[allow(dead_code)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum StartupMemoryType {
     /// The range is normal memory.
