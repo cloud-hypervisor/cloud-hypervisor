@@ -956,9 +956,9 @@ impl Default for FwCfgConfig {
     fn default() -> Self {
         FwCfgConfig {
             e820: true,
-            kernel: true,
-            cmdline: true,
-            initramfs: true,
+            kernel: false,
+            cmdline: false,
+            initramfs: false,
             acpi_tables: true,
             items: None,
         }
