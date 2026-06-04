@@ -76,7 +76,7 @@ jobs:
               fi
             done
 
-            sudo ./scripts/dev_cli.sh tests --hypervisor mshv --integration
+            sudo ./scripts/dev_cli.sh tests --integration
           EOF
 
       - name: Dump dmesg
