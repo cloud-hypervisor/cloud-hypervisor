@@ -144,6 +144,17 @@ ok_or_die() {
     [[ $code -eq 0 ]] || die -c $code "$@"
 }
 
+# Auto-detect the host hypervisor device node and echo its path:
+# /dev/mshv for MSHV, /dev/kvm for KVM. Echoes nothing if neither is
+# present; callers are expected to validate the result.
+detect_hypervisor_device() {
+    if [ -e /dev/mshv ]; then
+        echo "/dev/mshv"
+    elif [ -e /dev/kvm ]; then
+        echo "/dev/kvm"
+    fi
+}
+
 # Make sure the build/ dirs are available. Exit if we can't create them.
 # Upon returning from this call, the caller can be certain the build/ dirs exist.
 #
@@ -259,7 +270,6 @@ cmd_help() {
     echo "        --release             Build the release binaries."
     echo "        --libc                Select the C library Cloud Hypervisor will be built against. Default is gnu"
     echo "        --volumes             Hash separated volumes to be exported. Example --volumes /mnt:/mnt#/myvol:/myvol"
-    echo "        --hypervisor          Underlying hypervisor. Options kvm, mshv"
     echo ""
     echo "    tests [<test type (see below)>] [--libc musl|gnu] [-- [<test scripts args>] [-- [<test binary args>]]] "
     echo "        Run the Cloud Hypervisor tests."
@@ -273,7 +283,6 @@ cmd_help() {
     echo "        --metrics                    Generate performance metrics"
     echo "        --coverage                   Generate code coverage information"
     echo "        --volumes                    Hash separated volumes to be exported. Example --volumes /mnt:/mnt#/myvol:/myvol"
-    echo "        --hypervisor                 Underlying hypervisor. Options kvm, mshv"
     echo "        --vm-type                    Type of VM to run. Options regular, confidential"
     echo "        --all                        Run all tests."
     echo ""
@@ -298,9 +307,7 @@ cmd_help() {
 cmd_build() {
     build="debug"
     libc="gnu"
-    hypervisor="kvm"
     features_build=()
-    exported_device="/dev/kvm"
     while [ $# -gt 0 ]; do
         case "$1" in
         "-h" | "--help") {
@@ -324,10 +331,6 @@ cmd_build() {
             shift
             arg_vols="$1"
             ;;
-        "--hypervisor")
-            shift
-            hypervisor="$1"
-            ;;
         "--features")
             shift
             features_build=(--features "$1")
@@ -347,12 +350,8 @@ cmd_build() {
     ensure_latest_ctr
 
     process_volumes_args
-    if [[ ! ("$hypervisor" = "kvm" || "$hypervisor" = "mshv") ]]; then
-        die "Hypervisor value must be kvm or mshv"
-    fi
-    if [[ "$hypervisor" = "mshv" ]]; then
-        exported_device="/dev/mshv"
-    fi
+    exported_device="$(detect_hypervisor_device)"
+    [ -n "$exported_device" ] || die "No hypervisor device found (/dev/mshv or /dev/kvm)"
     target="$(uname -m)-unknown-linux-${libc}"
 
     cargo_args=("$@")
@@ -371,7 +370,7 @@ cmd_build() {
         --user "$(id -u):$(id -g)" \
         --workdir "$CTR_CLH_ROOT_DIR" \
         --rm \
-        --volume $exported_device \
+        --volume "$exported_device" \
         --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
         ${exported_volumes:+$exported_volumes} \
         --env RUSTFLAGS="$rustflags" \
@@ -412,8 +411,6 @@ cmd_tests() {
     coverage=false
     libc="gnu"
     arg_vols=""
-    hypervisor="kvm"
-    exported_device="/dev/kvm"
     while [ $# -gt 0 ]; do
         case "$1" in
         "-h" | "--help") {
@@ -438,10 +435,6 @@ cmd_tests() {
             shift
             arg_vols="$1"
             ;;
-        "--hypervisor")
-            shift
-            hypervisor="$1"
-            ;;
         "--all") {
             unit=true
             integration=true
@@ -462,19 +455,8 @@ cmd_tests() {
         esac
         shift
     done
-    if [[ ! ("$hypervisor" = "kvm" || "$hypervisor" = "mshv") ]]; then
-        die "Hypervisor value must be kvm or mshv"
-    fi
-
-    if [[ "$hypervisor" = "mshv" ]]; then
-        exported_device="/dev/mshv"
-    fi
-
-    if [ ! -e "${exported_device}" ]; then
-        die "${exported_device} does not exist on the system"
-    fi
-
-    set -- '--hypervisor' "$hypervisor" "$@"
+    exported_device="$(detect_hypervisor_device)"
+    [ -n "$exported_device" ] || die "No hypervisor device found (/dev/mshv or /dev/kvm)"
 
     ensure_build_dir
     ensure_latest_ctr
@@ -515,7 +497,7 @@ cmd_tests() {
         say "Running unit tests for $target..."
         run_container "$DOCKER_RUNTIME" run \
             "${common_args[@]}" \
-            --device $exported_device \
+            --device "$exported_device" \
             --device /dev/net/tun \
             --cap-add net_admin \
             "${common_env_args[@]}" \
