@@ -78,7 +78,7 @@ scripts/dev_cli.sh build [--debug|--release] [--libc musl|gnu] \
 | `--debug`      | yes     | Build debug binaries.                    |
 | `--release`    |         | Build release binaries.                  |
 | `--libc`       | `gnu`   | C library to link against (`musl`/`gnu`).|
-| `--hypervisor` | `kvm`   | Hypervisor backend (`kvm`/`mshv`).       |
+| `--hypervisor` | auto    | Hypervisor backend (`kvm`/`mshv`). Auto-detected from the host device node when omitted. |
 | `--features`   |         | Additional cargo features.               |
 | `--volumes`    |         | Extra host volumes (`/a:/a#/b:/b`).      |
 | `--runtime`    | `docker`| Container runtime (`docker`/`podman`).   |
@@ -112,7 +112,7 @@ scripts/dev_cli.sh tests [<test type>] [--libc musl|gnu] \
 | Flag           | Default | Description                              |
 |----------------|---------|------------------------------------------|
 | `--libc`       | `gnu`   | C library to link against (`musl`/`gnu`).|
-| `--hypervisor` | `kvm`   | Hypervisor backend (`kvm`/`mshv`).       |
+| `--hypervisor` | auto    | Hypervisor backend (`kvm`/`mshv`). Auto-detected from the host device node when omitted. |
 | `--volumes`    |         | Extra host volumes (`/a:/a#/b:/b`).      |
 
 ### Argument passthrough
@@ -134,7 +134,7 @@ The test scripts accept the following common arguments via
 
 | Argument              | Description                                  |
 |-----------------------|----------------------------------------------|
-| `--hypervisor kvm\|mshv` | Select hypervisor (also passed by dev_cli.sh). |
+| `--hypervisor kvm\|mshv` | Override the hypervisor (auto-detected from the host device node when omitted; also passed by dev_cli.sh). |
 | `--test-filter <name>`| Run only tests matching the filter.           |
 | `--test-exclude <name>`| Exclude tests matching the pattern.          |
 | `--build-guest-kernel`| Build the guest kernel from source instead of downloading a prebuilt binary. |
@@ -207,6 +207,10 @@ interfaces can run.
 When the hypervisor is `mshv`, the feature flag `--features mshv` is
 passed to cargo. On x86_64 with KVM, the `tdx` feature is additionally
 enabled if needed (MSHV does not support TDX).
+
+The hypervisor backend is auto-detected from the host device node:
+`/dev/mshv` selects MSHV and `/dev/kvm` selects KVM. Pass
+`--hypervisor kvm|mshv` to override the detection explicitly.
 
 ## Integration tests
 
@@ -341,7 +345,7 @@ guest images and a prebuilt kernel.
 ### Confidential VMs
 
 ```shell
-scripts/dev_cli.sh tests --integration-cvm [--hypervisor mshv]
+scripts/dev_cli.sh tests --integration-cvm
 ```
 
 Runs `scripts/run_integration_tests_cvm.sh`. Builds with `--features
