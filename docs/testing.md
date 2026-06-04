@@ -69,7 +69,7 @@ scripts/dev_cli.sh [flags] <command> [<command args>]
 
 ```shell
 scripts/dev_cli.sh build [--debug|--release] [--libc musl|gnu] \
-    [--hypervisor kvm|mshv] [--features <features>] \
+    [--features <features>] \
     [--volumes /host:/ctr#...] [-- <cargo args>]
 ```
 
@@ -78,7 +78,6 @@ scripts/dev_cli.sh build [--debug|--release] [--libc musl|gnu] \
 | `--debug`      | yes     | Build debug binaries.                    |
 | `--release`    |         | Build release binaries.                  |
 | `--libc`       | `gnu`   | C library to link against (`musl`/`gnu`).|
-| `--hypervisor` | `kvm`   | Hypervisor backend (`kvm`/`mshv`).       |
 | `--features`   |         | Additional cargo features.               |
 | `--volumes`    |         | Extra host volumes (`/a:/a#/b:/b`).      |
 | `--runtime`    | `docker`| Container runtime (`docker`/`podman`).   |
@@ -89,7 +88,7 @@ Arguments after `--` are forwarded directly to `cargo build`.
 
 ```shell
 scripts/dev_cli.sh tests [<test type>] [--libc musl|gnu] \
-    [--hypervisor kvm|mshv] [--volumes /host:/ctr#...] \
+    [--volumes /host:/ctr#...] \
     [-- <script args> [-- <binary args>]]
 ```
 
@@ -112,7 +111,6 @@ scripts/dev_cli.sh tests [<test type>] [--libc musl|gnu] \
 | Flag           | Default | Description                              |
 |----------------|---------|------------------------------------------|
 | `--libc`       | `gnu`   | C library to link against (`musl`/`gnu`).|
-| `--hypervisor` | `kvm`   | Hypervisor backend (`kvm`/`mshv`).       |
 | `--volumes`    |         | Extra host volumes (`/a:/a#/b:/b`).      |
 
 ### Argument passthrough
@@ -134,7 +132,6 @@ The test scripts accept the following common arguments via
 
 | Argument              | Description                                  |
 |-----------------------|----------------------------------------------|
-| `--hypervisor kvm\|mshv` | Select hypervisor (also passed by dev_cli.sh). |
 | `--test-filter <name>`| Run only tests matching the filter.           |
 | `--test-exclude <name>`| Exclude tests matching the pattern.          |
 | `--build-guest-kernel`| Build the guest kernel from source instead of downloading a prebuilt binary. |
@@ -189,7 +186,7 @@ CH_CUSTOM_OVMF=/path/to/CLOUDHV.fd \
 ## Unit tests
 
 ```shell
-scripts/dev_cli.sh tests --unit [--libc musl|gnu] [--hypervisor kvm|mshv]
+scripts/dev_cli.sh tests --unit [--libc musl|gnu]
 ```
 
 Unit tests run `cargo test` on the entire workspace in release mode:
@@ -207,6 +204,10 @@ interfaces can run.
 When the hypervisor is `mshv`, the feature flag `--features mshv` is
 passed to cargo. On x86_64 with KVM, the `tdx` feature is additionally
 enabled if needed (MSHV does not support TDX).
+
+The hypervisor backend is detected automatically from the host device
+node: `/dev/mshv` selects MSHV and `/dev/kvm` selects KVM. There is no
+flag to select it.
 
 ## Integration tests
 
@@ -341,7 +342,7 @@ guest images and a prebuilt kernel.
 ### Confidential VMs
 
 ```shell
-scripts/dev_cli.sh tests --integration-cvm [--hypervisor mshv]
+scripts/dev_cli.sh tests --integration-cvm
 ```
 
 Runs `scripts/run_integration_tests_cvm.sh`. Builds with `--features
