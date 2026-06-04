@@ -3,9 +3,22 @@
 # shellcheck source=/dev/null
 set -x
 
-hypervisor="kvm"
 test_filter=""
 build_kernel=false
+
+# Auto-detect the underlying hypervisor based on the device node exposed
+# by the host kernel: /dev/mshv for MSHV, /dev/kvm for KVM.
+# shellcheck disable=SC2034
+detect_hypervisor() {
+    if [ -e /dev/mshv ]; then
+        hypervisor="mshv"
+    elif [ -e /dev/kvm ]; then
+        hypervisor="kvm"
+    else
+        echo "ERROR: no hypervisor device found (/dev/mshv or /dev/kvm)" >&2
+        exit 1
+    fi
+}
 
 # Download from a url with retries
 # Args:
@@ -98,7 +111,6 @@ cmd_help() {
     echo ""
     echo "Available arguments:"
     echo ""
-    echo "    --hypervisor  Underlying hypervisor. Options kvm, mshv"
     echo "    --test-filter Tests to run"
     echo "    --build-guest-kernel Build guest kernel from source instead of downloading pre-built"
     echo ""
@@ -114,10 +126,6 @@ process_common_args() {
             cmd_help
             exit 1
         } ;;
-        "--hypervisor")
-            shift
-            hypervisor="$1"
-            ;;
         "--test-filter")
             shift
             test_filter="$1"
@@ -140,9 +148,7 @@ process_common_args() {
         esac
         shift
     done
-    if [[ ! ("$hypervisor" = "kvm" || "$hypervisor" = "mshv") ]]; then
-        die "Hypervisor value must be kvm or mshv"
-    fi
+    detect_hypervisor
     # shellcheck disable=SC2034
     test_binary_args=("$@")
 }
