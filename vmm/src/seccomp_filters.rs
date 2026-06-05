@@ -12,6 +12,8 @@ use libc::{
     TIOCSPTLCK, TUNGETFEATURES, TUNGETIFF, TUNSETIFF, TUNSETOFFLOAD, TUNSETVNETHDRSZ,
 };
 use seccompiler::SeccompCmpOp::Eq;
+#[cfg(all(feature = "sev_snp", feature = "kvm"))]
+use seccompiler::SeccompCmpOp::MaskedEq;
 use seccompiler::{
     BackendError, BpfProgram, Error, SeccompAction, SeccompCmpArgLen as ArgLen,
     SeccompCondition as Cond, SeccompFilter, SeccompRule,
@@ -969,7 +971,19 @@ fn http_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
         (libc::SYS_mmap, vec![]),
         (libc::SYS_mprotect, vec![]),
         (libc::SYS_munmap, vec![]),
+        #[cfg(all(feature = "sev_snp", feature = "kvm"))]
+        (
+            libc::SYS_openat,
+            or![and![Cond::new(
+                2, // openat() flags argument
+                ArgLen::Dword,
+                MaskedEq(libc::O_ACCMODE as u64),
+                libc::O_RDONLY as u64,
+            )?]],
+        ),
         (libc::SYS_prctl, vec![]),
+        #[cfg(all(feature = "sev_snp", feature = "kvm"))]
+        (libc::SYS_read, vec![]),
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_recvmsg, vec![]),
         (libc::SYS_rt_sigprocmask, vec![]),
