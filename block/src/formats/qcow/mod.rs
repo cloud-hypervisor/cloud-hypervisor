@@ -123,6 +123,27 @@ impl QcowDisk {
             .unwrap();
         while async_io.next_completed_request().is_some() {}
     }
+
+    /// Synchronous read convenience for tests and benchmarks.
+    #[cfg(test)]
+    pub fn read_all_at(&self, offset: u64, len: usize) -> Vec<u8> {
+        let mut async_io = self.create_async_io(1).unwrap();
+        let mem = Arc::new(GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), len)]).unwrap());
+        let range = [(GuestAddress(0), len as u32)];
+        let target = GuestMemoryTarget::new(Arc::clone(&mem), &range).unwrap();
+        async_io
+            .read_to_memory(offset as libc::off_t, target, 0)
+            .unwrap();
+        while async_io.next_completed_request().is_some() {}
+        let mut buf = vec![0u8; len];
+        mem.read_slice(&mut buf, GuestAddress(0)).unwrap();
+        buf
+    }
+
+    #[cfg(test)]
+    pub(crate) fn metadata(&self) -> &QcowMetadata {
+        &self.metadata
+    }
 }
 
 /// Writes a fresh qcow2 layout into `file`
