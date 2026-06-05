@@ -245,6 +245,8 @@ pub struct MemoryZoneConfig {
     #[serde(default)]
     pub prefault: bool,
     #[serde(default)]
+    pub reserve: bool,
+    #[serde(default)]
     pub mergeable: bool,
 }
 
@@ -293,6 +295,8 @@ pub struct MemoryConfig {
     #[serde(default)]
     pub prefault: bool,
     #[serde(default)]
+    pub reserve: bool,
+    #[serde(default)]
     pub zones: Option<Vec<MemoryZoneConfig>>,
     #[serde(default = "default_memoryconfig_thp")]
     pub thp: bool,
@@ -312,6 +316,7 @@ impl Default for MemoryConfig {
             hugepages: false,
             hugepage_size: None,
             prefault: false,
+            reserve: false,
             zones: None,
             thp: true,
         }

@@ -20,13 +20,14 @@ struct MemoryConfig {
     hugepages: bool,
     hugepage_size: Option<u64>,
     prefault: bool,
+    reserve: bool,
     thp: bool,
     zones: Option<Vec<MemoryZoneConfig>>,
 }
 ```
 
 ```
---memory <memory>	Memory parameters "size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,hotplug_method=acpi|virtio-mem,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off,thp=on|off" [default: size=512M,thp=on]
+--memory <memory>	Memory parameters "size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,hotplug_method=acpi|virtio-mem,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off,reserve=on|off,thp=on|off" [default: size=512M,thp=on]
 ```
 
 ### `size`
@@ -177,6 +178,32 @@ _Example_
 --memory size=1G,prefault=on
 ```
 
+### `reserve`
+
+Specifies if guest memory should be `mmap(2)`-ed _without_ the `MAP_NORESERVE`
+flag, asking the kernel to reserve the backing pages (swap space, or huge pages
+for hugepage-backed memory) for the whole region up front at `mmap` time.
+
+By default Cloud Hypervisor maps guest memory with `MAP_NORESERVE`, so VM
+creation succeeds even when the backing pool cannot satisfy the full guest size.
+The shortfall then surfaces only later, as a `SIGBUS` delivered to the guest when
+it faults a page the pool cannot back. With `reserve=on` the reservation is made
+when the memory is mapped, so an over-committed configuration fails cleanly at VM
+creation with an out-of-memory error instead of crashing the guest at run time.
+This is most useful for hugepage-backed memory, where the huge pages are reserved
+from the pool.
+
+Unlike `prefault`, this does not populate or fault in the memory, so it does not
+slow down boot; it only reserves it.
+
+By default this option is turned off.
+
+_Example_
+
+```
+--memory size=1G,hugepages=on,reserve=on
+```
+
 ### `thp`
 
 Specifies if private anonymous memory for the guest (i.e. `shared=off` and no
@@ -214,12 +241,13 @@ struct MemoryZoneConfig {
     hotplug_size: Option<u64>,
     hotplugged_size: Option<u64>,
     prefault: bool,
+    reserve: bool,
     mergeable: bool,
 }
 ```
 
 ```
---memory-zone <memory-zone>	User defined memory zone parameters "size=<guest_memory_region_size>,file=<backing_file>,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,host_numa_node=<node_id>,id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off,mergeable=on|off"
+--memory-zone <memory-zone>	User defined memory zone parameters "size=<guest_memory_region_size>,file=<backing_file>,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,host_numa_node=<node_id>,id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off,reserve=on|off,mergeable=on|off"
 ```
 
 This parameter expects one or more occurrences, allowing for a list of memory
@@ -421,6 +449,34 @@ _Example_
 ```
 --memory size=0
 --memory-zone id=mem0,size=1G,prefault=on
+```
+
+### `reserve`
+
+Specifies if the memory for this zone should be `mmap(2)`-ed _without_ the
+`MAP_NORESERVE` flag, asking the kernel to reserve the backing pages (swap space,
+or huge pages for hugepage-backed memory) for the whole zone up front at `mmap`
+time.
+
+By default Cloud Hypervisor maps guest memory with `MAP_NORESERVE`, so VM
+creation succeeds even when the backing pool cannot satisfy the full zone size.
+The shortfall then surfaces only later, as a `SIGBUS` delivered to the guest when
+it faults a page the pool cannot back. With `reserve=on` the reservation is made
+when the memory is mapped, so an over-committed configuration fails cleanly at VM
+creation with an out-of-memory error instead of crashing the guest at run time.
+This is most useful for hugepage-backed zones, where the huge pages are reserved
+from the pool.
+
+Unlike `prefault`, this does not populate or fault in the memory, so it does not
+slow down boot; it only reserves it.
+
+By default this option is turned off.
+
+_Example_
+
+```
+--memory size=0
+--memory-zone id=mem0,size=1G,hugepages=on,reserve=on
 ```
 
 ### `mergeable`

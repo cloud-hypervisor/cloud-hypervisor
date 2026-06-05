@@ -278,6 +278,7 @@ pub struct MemoryManager {
     hugepages: bool,
     hugepage_size: Option<u64>,
     prefault: bool,
+    reserve: bool,
     thp: bool,
     user_provided_zones: bool,
     snapshot_memory_ranges: MemoryRangeTable,
@@ -727,6 +728,7 @@ impl MemoryManager {
                     region_start,
                     region_size as usize,
                     prefault.unwrap_or(zone.prefault),
+                    zone.reserve,
                     zone.shared,
                     zone.hugepages,
                     zone.hugepage_size,
@@ -829,6 +831,7 @@ impl MemoryManager {
                         GuestAddress(guest_ram_mapping.gpa),
                         guest_ram_mapping.size as usize,
                         prefault.unwrap_or(zone_config.prefault),
+                        zone_config.reserve,
                         zone_config.shared,
                         zone_config.hugepages,
                         zone_config.hugepage_size,
@@ -1528,6 +1531,7 @@ impl MemoryManager {
                 hotplug_size: config.hotplug_size,
                 hotplugged_size: config.hotplugged_size,
                 prefault: config.prefault,
+                reserve: config.reserve,
                 mergeable: config.mergeable,
             }];
 
@@ -1762,6 +1766,7 @@ impl MemoryManager {
                                 start_addr,
                                 hotplug_size as usize,
                                 prefault.unwrap_or(zone.prefault),
+                                zone.reserve,
                                 zone.shared,
                                 zone.hugepages,
                                 zone.hugepage_size,
@@ -1875,6 +1880,7 @@ impl MemoryManager {
             hugepages: config.hugepages,
             hugepage_size: config.hugepage_size,
             prefault: config.prefault,
+            reserve: config.reserve,
             user_provided_zones,
             snapshot_memory_ranges: MemoryRangeTable::default(),
             memory_zones,
@@ -2042,6 +2048,7 @@ impl MemoryManager {
         file_offset: u64,
         size: usize,
         prefault: bool,
+        reserve: bool,
         shared: bool,
         hugepages: bool,
         hugepage_size: Option<u64>,
@@ -2049,7 +2056,7 @@ impl MemoryManager {
         existing_memory_file: Option<File>,
         thp: bool,
     ) -> Result<MmapRegion<AtomicBitmap>, Error> {
-        let mut mmap_flags = libc::MAP_NORESERVE;
+        let mut mmap_flags = if reserve { 0 } else { libc::MAP_NORESERVE };
 
         // The duplication of mmap_flags ORing here is unfortunate but it also makes
         // the complexity of the handling clear.
@@ -2179,6 +2186,7 @@ impl MemoryManager {
         start_addr: GuestAddress,
         size: usize,
         prefault: bool,
+        reserve: bool,
         shared: bool,
         hugepages: bool,
         hugepage_size: Option<u64>,
@@ -2191,6 +2199,7 @@ impl MemoryManager {
             file_offset,
             size,
             prefault,
+            reserve,
             shared,
             hugepages,
             hugepage_size,
@@ -2306,6 +2315,7 @@ impl MemoryManager {
             start_addr,
             size,
             self.prefault,
+            self.reserve,
             self.shared,
             self.hugepages,
             self.hugepage_size,

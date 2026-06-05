@@ -862,6 +862,9 @@ components:
         prefault:
           type: boolean
           default: false
+        reserve:
+          type: boolean
+          default: false
 
     MemoryConfig:
       required:
@@ -893,6 +896,9 @@ components:
           type: integer
           format: int64
         prefault:
+          type: boolean
+          default: false
+        reserve:
           type: boolean
           default: false
         thp:

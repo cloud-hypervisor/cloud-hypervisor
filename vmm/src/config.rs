@@ -1060,6 +1060,7 @@ impl MemoryConfig {
             .add("hugepages")
             .add("hugepage_size")
             .add("prefault")
+            .add("reserve")
             .add("thp");
         parser.parse(memory).map_err(Error::ParseMemory)?;
 
@@ -1104,6 +1105,11 @@ impl MemoryConfig {
             .map_err(Error::ParseMemory)?
             .unwrap_or(Toggle(false))
             .0;
+        let reserve = parser
+            .convert::<Toggle>("reserve")
+            .map_err(Error::ParseMemory)?
+            .unwrap_or(Toggle(false))
+            .0;
         let thp = parser
             .convert::<Toggle>("thp")
             .map_err(Error::ParseMemory)?
@@ -1125,6 +1131,7 @@ impl MemoryConfig {
                     .add("hotplug_size")
                     .add("hotplugged_size")
                     .add("prefault")
+                    .add("reserve")
                     .add("mergeable");
                 parser.parse(memory_zone).map_err(Error::ParseMemoryZone)?;
 
@@ -1166,6 +1173,11 @@ impl MemoryConfig {
                     .map_err(Error::ParseMemoryZone)?
                     .unwrap_or(Toggle(false))
                     .0;
+                let reserve = parser
+                    .convert::<Toggle>("reserve")
+                    .map_err(Error::ParseMemoryZone)?
+                    .unwrap_or(Toggle(false))
+                    .0;
                 let mergeable = parser
                     .convert::<Toggle>("mergeable")
                     .map_err(Error::ParseMemoryZone)?
@@ -1183,6 +1195,7 @@ impl MemoryConfig {
                     hotplug_size,
                     hotplugged_size,
                     prefault,
+                    reserve,
                     mergeable,
                 });
             }
@@ -1201,6 +1214,7 @@ impl MemoryConfig {
             hugepages,
             hugepage_size,
             prefault,
+            reserve,
             zones,
             thp,
         })
@@ -3974,6 +3988,20 @@ mod unit_tests {
                 ..Default::default()
             }
         );
+        // reserve=on on a zone
+        assert_eq!(
+            MemoryConfig::parse("size=0", Some(vec!["id=mem0,size=1G,reserve=on"]))?,
+            MemoryConfig {
+                size: 0,
+                zones: Some(vec![MemoryZoneConfig {
+                    id: "mem0".to_string(),
+                    size: 1 << 30,
+                    reserve: true,
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            }
+        );
         Ok(())
     }
 
@@ -4035,6 +4063,16 @@ mod unit_tests {
                 hugepage_size: Some(2 << 20),
                 size: 1 << 30,
                 hugepages: true,
+                ..Default::default()
+            }
+        );
+        // reserve=on opts out of MAP_NORESERVE
+        assert_eq!(
+            MemoryConfig::parse("size=1G,hugepages=on,reserve=on", None)?,
+            MemoryConfig {
+                size: 1 << 30,
+                hugepages: true,
+                reserve: true,
                 ..Default::default()
             }
         );
@@ -5227,6 +5265,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 hugepages: false,
                 hugepage_size: None,
                 prefault: false,
+                reserve: false,
                 zones: None,
                 thp: true,
             },
