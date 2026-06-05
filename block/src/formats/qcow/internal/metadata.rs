@@ -520,19 +520,6 @@ impl QcowState {
         }
     }
 
-    /// Maps a single cluster region for a sequential read.
-    pub(crate) fn map_cluster_read(
-        &mut self,
-        address: u64,
-        count: usize,
-        has_backing_file: bool,
-    ) -> io::Result<ClusterReadMapping> {
-        match self.try_map_read(address, count, has_backing_file)? {
-            Some(mapping) => Ok(mapping),
-            None => self.map_read_with_populate(address, count, has_backing_file),
-        }
-    }
-
     /// Write path mapping. Always called under write lock.
     fn map_write(
         &mut self,
