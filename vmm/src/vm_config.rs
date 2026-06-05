@@ -1242,6 +1242,11 @@ impl VmConfig {
             payload.apply_landlock(&mut landlock)?;
         }
 
+        #[cfg(feature = "sev_snp")]
+        if self.platform.as_ref().is_some_and(|p| p.sev_snp) {
+            landlock.add_rule_with_access(Path::new("/dev/sev"), "rw")?;
+        }
+
         if let Some(tpm_config) = &self.tpm {
             tpm_config.apply_landlock(&mut landlock)?;
         }
