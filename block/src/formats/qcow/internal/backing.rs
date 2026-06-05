@@ -176,9 +176,5 @@ pub fn shared_backing_from(bf: BackingFile) -> BlockResult<Arc<dyn BackingRead>>
                 backing_file: backing.map(|bf| shared_backing_from(*bf)).transpose()?,
             }))
         }
-        #[cfg(test)]
-        BackingKind::QcowFile(_) => {
-            unreachable!("QcowFile variant is only used by set_backing_file() in tests")
-        }
     }
 }

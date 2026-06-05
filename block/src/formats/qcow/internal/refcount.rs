@@ -224,41 +224,6 @@ impl RefCount {
         Ok(self.refblock_cache.get(table_index).unwrap()[block_index])
     }
 
-    /// Returns the refcount table for this file. This is only useful for debugging.
-    pub fn ref_table(&self) -> &[u64] {
-        self.ref_table.get_values()
-    }
-
-    /// Returns the refcounts stored in the given block.
-    pub fn refcount_block(
-        &mut self,
-        raw_file: &mut QcowRawFile,
-        table_index: usize,
-    ) -> Result<Option<&[u64]>> {
-        let block_addr_disk = *self.ref_table.get(table_index).ok_or(Error::InvalidIndex)?;
-        if block_addr_disk == 0 {
-            return Ok(None);
-        }
-        if !self.refblock_cache.contains_key(table_index) {
-            let table = VecCache::from_vec(
-                raw_file
-                    .read_refcount_block(block_addr_disk)
-                    .map_err(Error::ReadingRefCounts)?,
-            );
-            // TODO(dgreid) - closure needs to return an error.
-            let ref_table = &self.ref_table;
-            self.refblock_cache
-                .insert(table_index, table, |index, evicted| {
-                    raw_file.write_refcount_block(ref_table[index], evicted.get_values())
-                })
-                .map_err(Error::EvictingRefCounts)?;
-        }
-        // The index must exist as it was just inserted if it didn't already.
-        Ok(Some(
-            self.refblock_cache.get(table_index).unwrap().get_values(),
-        ))
-    }
-
     // Gets the address of the refcount block and the index into the block for the given address.
     fn get_refcount_index(&self, address: u64) -> (usize, usize) {
         let block_index = (address / self.cluster_size) % self.refcount_block_entries;
