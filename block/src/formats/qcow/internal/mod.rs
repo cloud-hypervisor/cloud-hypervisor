@@ -545,7 +545,7 @@ pub(crate) fn parse_qcow(
 
     // Skip refcount rebuilding for readonly files.
     if refcount_rebuild_required && is_writable {
-        QcowFile::rebuild_refcounts(&mut raw_file, header.clone())?;
+        rebuild_refcounts(&mut raw_file, header.clone())?;
     }
 
     let entries_per_cluster = cluster_size / size_of::<u64>() as u64;
@@ -1053,326 +1053,6 @@ impl QcowFile {
         self.l1_table.extend(new_l1_size as usize);
 
         Ok(())
-    }
-
-    /// Rebuild the reference count tables.
-    fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockResult<()> {
-        fn add_ref(
-            refcounts: &mut [u64],
-            cluster_size: u64,
-            cluster_address: u64,
-            max_refcount: u64,
-            refcount_bits: u64,
-        ) -> Result<()> {
-            let idx = (cluster_address / cluster_size) as usize;
-            if idx >= refcounts.len() {
-                return Err(Error::InvalidClusterIndex);
-            }
-            if refcounts[idx] >= max_refcount {
-                return Err(Error::RefcountOverflow(refcount::Error::RefcountOverflow {
-                    value: refcounts[idx] + 1,
-                    max: max_refcount,
-                    refcount_bits,
-                }));
-            }
-            refcounts[idx] += 1;
-            Ok(())
-        }
-
-        // Add a reference to the first cluster (header plus extensions).
-        fn set_header_refcount(
-            refcounts: &mut [u64],
-            cluster_size: u64,
-            max_refcount: u64,
-            refcount_bits: u64,
-        ) -> Result<()> {
-            add_ref(refcounts, cluster_size, 0, max_refcount, refcount_bits)
-        }
-
-        // Add references to the L1 table clusters.
-        fn set_l1_refcounts(
-            refcounts: &mut [u64],
-            header: &QcowHeader,
-            cluster_size: u64,
-            max_refcount: u64,
-            refcount_bits: u64,
-        ) -> Result<()> {
-            let entries_per_cluster = cluster_size / size_of::<u64>() as u64;
-            let l1_clusters = div_round_up_u64(u64::from(header.l1_size), entries_per_cluster);
-            let l1_table_offset = header.l1_table_offset;
-            for i in 0..l1_clusters {
-                add_ref(
-                    refcounts,
-                    cluster_size,
-                    l1_table_offset + i * cluster_size,
-                    max_refcount,
-                    refcount_bits,
-                )?;
-            }
-            Ok(())
-        }
-
-        // Traverse the L1 and L2 tables to find all reachable data clusters.
-        fn set_data_refcounts(
-            refcounts: &mut [u64],
-            header: &QcowHeader,
-            cluster_size: u64,
-            raw_file: &mut QcowRawFile,
-            max_refcount: u64,
-            refcount_bits: u64,
-        ) -> Result<()> {
-            let l1_table = raw_file
-                .read_pointer_table(
-                    header.l1_table_offset,
-                    u64::from(header.l1_size),
-                    Some(L1_TABLE_OFFSET_MASK),
-                )
-                .map_err(Error::ReadingPointers)?;
-            for l1_index in 0..header.l1_size as usize {
-                let l2_addr_disk = *l1_table.get(l1_index).ok_or(Error::InvalidIndex)?;
-                if l2_addr_disk != 0 {
-                    // Add a reference to the L2 table cluster itself.
-                    add_ref(
-                        refcounts,
-                        cluster_size,
-                        l2_addr_disk,
-                        max_refcount,
-                        refcount_bits,
-                    )?;
-
-                    // Read the L2 table and find all referenced data clusters.
-                    let l2_table = raw_file
-                        .read_pointer_table(
-                            l2_addr_disk,
-                            cluster_size / size_of::<u64>() as u64,
-                            Some(L2_TABLE_OFFSET_MASK),
-                        )
-                        .map_err(Error::ReadingPointers)?;
-                    for data_cluster_addr in l2_table {
-                        if data_cluster_addr != 0 {
-                            add_ref(
-                                refcounts,
-                                cluster_size,
-                                data_cluster_addr,
-                                max_refcount,
-                                refcount_bits,
-                            )?;
-                        }
-                    }
-                }
-            }
-
-            Ok(())
-        }
-
-        // Add references to the top-level refcount table clusters.
-        fn set_refcount_table_refcounts(
-            refcounts: &mut [u64],
-            header: &QcowHeader,
-            cluster_size: u64,
-            max_refcount: u64,
-            refcount_bits: u64,
-        ) -> Result<()> {
-            let refcount_table_offset = header.refcount_table_offset;
-            for i in 0..u64::from(header.refcount_table_clusters) {
-                add_ref(
-                    refcounts,
-                    cluster_size,
-                    refcount_table_offset + i * cluster_size,
-                    max_refcount,
-                    refcount_bits,
-                )?;
-            }
-            Ok(())
-        }
-
-        // Allocate clusters for refblocks.
-        // This needs to be done last so that we have the correct refcounts for all other
-        // clusters.
-        fn alloc_refblocks(
-            refcounts: &mut [u64],
-            cluster_size: u64,
-            refblock_clusters: u64,
-            max_refcount: u64,
-            refcount_bits: u64,
-        ) -> Result<Vec<u64>> {
-            let mut ref_table = vec![0; refblock_clusters as usize];
-            let mut first_free_cluster: u64 = 0;
-            for refblock_addr in &mut ref_table {
-                loop {
-                    if first_free_cluster >= refcounts.len() as u64 {
-                        return Err(Error::NotEnoughSpaceForRefcounts);
-                    }
-                    if refcounts[first_free_cluster as usize] == 0 {
-                        break;
-                    }
-                    first_free_cluster += 1;
-                }
-
-                *refblock_addr = first_free_cluster * cluster_size;
-                add_ref(
-                    refcounts,
-                    cluster_size,
-                    *refblock_addr,
-                    max_refcount,
-                    refcount_bits,
-                )?;
-
-                first_free_cluster += 1;
-            }
-
-            Ok(ref_table)
-        }
-
-        // Write the updated reference count blocks and reftable.
-        fn write_refblocks(
-            refcounts: &[u64],
-            mut header: QcowHeader,
-            ref_table: &[u64],
-            raw_file: &mut QcowRawFile,
-            refcount_block_entries: u64,
-        ) -> Result<()> {
-            // Rewrite the header with lazy refcounts enabled while we are rebuilding the tables.
-            header.compatible_features |= COMPATIBLE_FEATURES_LAZY_REFCOUNTS;
-            raw_file.file_mut().rewind().map_err(Error::SeekingFile)?;
-            header.write_to(raw_file.file_mut())?;
-
-            for (i, refblock_addr) in ref_table.iter().enumerate() {
-                // Write a block of refcounts to the location indicated by refblock_addr.
-                let refblock_start = i * (refcount_block_entries as usize);
-                let refblock_end = min(
-                    refcounts.len(),
-                    refblock_start + refcount_block_entries as usize,
-                );
-                let refblock = &refcounts[refblock_start..refblock_end];
-                raw_file
-                    .write_refcount_block(*refblock_addr, refblock)
-                    .map_err(Error::WritingHeader)?;
-
-                // If this is the last (partial) cluster, pad it out to a full refblock cluster.
-                if refblock.len() < refcount_block_entries as usize {
-                    let refblock_padding =
-                        vec![0u64; refcount_block_entries as usize - refblock.len()];
-                    let byte_offset =
-                        refblock.len() as u64 * raw_file.cluster_size() / refcount_block_entries;
-                    raw_file
-                        .write_refcount_block(*refblock_addr + byte_offset, &refblock_padding)
-                        .map_err(Error::WritingHeader)?;
-                }
-            }
-
-            // Rewrite the top-level refcount table.
-            raw_file
-                .write_pointer_table_direct(header.refcount_table_offset, ref_table.iter())
-                .map_err(Error::WritingHeader)?;
-
-            // Rewrite the header again, now with lazy refcounts disabled.
-            header.compatible_features &= !COMPATIBLE_FEATURES_LAZY_REFCOUNTS;
-            raw_file.file_mut().rewind().map_err(Error::SeekingFile)?;
-            header.write_to(raw_file.file_mut())?;
-
-            Ok(())
-        }
-
-        let cluster_size = raw_file.cluster_size();
-
-        let file_size = raw_file
-            .file_mut()
-            .metadata()
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::GettingFileSize(e)))?
-            .len();
-
-        let refcount_bits = 1u64 << header.refcount_order;
-        let max_refcount = if refcount_bits == 64 {
-            u64::MAX
-        } else {
-            (1u64 << refcount_bits) - 1
-        };
-        let refcount_block_entries = cluster_size * 8 / refcount_bits;
-        let pointers_per_cluster = cluster_size / size_of::<u64>() as u64;
-        let data_clusters = div_round_up_u64(header.size, cluster_size);
-        let l2_clusters = div_round_up_u64(data_clusters, pointers_per_cluster);
-        let l1_clusters = div_round_up_u64(l2_clusters, pointers_per_cluster);
-        let header_clusters = div_round_up_u64(size_of::<QcowHeader>() as u64, cluster_size);
-        let max_clusters = data_clusters + l2_clusters + l1_clusters + header_clusters;
-        let mut max_valid_cluster_index = max_clusters;
-        let refblock_clusters = div_round_up_u64(max_valid_cluster_index, refcount_block_entries);
-        let reftable_clusters = div_round_up_u64(refblock_clusters, pointers_per_cluster);
-        // Account for refblocks and the ref table size needed to address them.
-        let refblocks_for_refs = div_round_up_u64(
-            refblock_clusters + reftable_clusters,
-            refcount_block_entries,
-        );
-        let reftable_clusters_for_refs =
-            div_round_up_u64(refblocks_for_refs, refcount_block_entries);
-        max_valid_cluster_index += refblock_clusters + reftable_clusters;
-        max_valid_cluster_index += refblocks_for_refs + reftable_clusters_for_refs;
-
-        if max_valid_cluster_index > MAX_RAM_POINTER_TABLE_SIZE {
-            return Err(BlockError::new(
-                BlockErrorKind::CorruptImage,
-                Error::InvalidRefcountTableSize(max_valid_cluster_index),
-            ));
-        }
-
-        let max_valid_cluster_offset = max_valid_cluster_index * cluster_size;
-        if max_valid_cluster_offset < file_size - cluster_size {
-            return Err(BlockError::new(
-                BlockErrorKind::CorruptImage,
-                Error::InvalidRefcountTableSize(max_valid_cluster_offset),
-            ));
-        }
-
-        let mut refcounts = vec![0; max_valid_cluster_index as usize];
-
-        // Find all references clusters and rebuild refcounts.
-        set_header_refcount(&mut refcounts, cluster_size, max_refcount, refcount_bits)
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
-        set_l1_refcounts(
-            &mut refcounts,
-            &header,
-            cluster_size,
-            max_refcount,
-            refcount_bits,
-        )
-        .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
-        set_data_refcounts(
-            &mut refcounts,
-            &header,
-            cluster_size,
-            raw_file,
-            max_refcount,
-            refcount_bits,
-        )
-        .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
-        set_refcount_table_refcounts(
-            &mut refcounts,
-            &header,
-            cluster_size,
-            max_refcount,
-            refcount_bits,
-        )
-        .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
-
-        // Allocate clusters to store the new reference count blocks.
-        let ref_table = alloc_refblocks(
-            &mut refcounts,
-            cluster_size,
-            refblock_clusters,
-            max_refcount,
-            refcount_bits,
-        )
-        .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
-
-        // Write updated reference counts and point the reftable at them.
-        write_refblocks(
-            &refcounts,
-            header,
-            &ref_table,
-            raw_file,
-            refcount_block_entries,
-        )
-        .map_err(|e| BlockError::new(BlockErrorKind::Io, e))
     }
 
     // Limits the range so that it doesn't exceed the virtual size of the file.
@@ -2093,6 +1773,324 @@ impl QcowFile {
 
         Ok(())
     }
+}
+
+/// Rebuild the reference count tables.
+fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockResult<()> {
+    fn add_ref(
+        refcounts: &mut [u64],
+        cluster_size: u64,
+        cluster_address: u64,
+        max_refcount: u64,
+        refcount_bits: u64,
+    ) -> Result<()> {
+        let idx = (cluster_address / cluster_size) as usize;
+        if idx >= refcounts.len() {
+            return Err(Error::InvalidClusterIndex);
+        }
+        if refcounts[idx] >= max_refcount {
+            return Err(Error::RefcountOverflow(refcount::Error::RefcountOverflow {
+                value: refcounts[idx] + 1,
+                max: max_refcount,
+                refcount_bits,
+            }));
+        }
+        refcounts[idx] += 1;
+        Ok(())
+    }
+
+    // Add a reference to the first cluster (header plus extensions).
+    fn set_header_refcount(
+        refcounts: &mut [u64],
+        cluster_size: u64,
+        max_refcount: u64,
+        refcount_bits: u64,
+    ) -> Result<()> {
+        add_ref(refcounts, cluster_size, 0, max_refcount, refcount_bits)
+    }
+
+    // Add references to the L1 table clusters.
+    fn set_l1_refcounts(
+        refcounts: &mut [u64],
+        header: &QcowHeader,
+        cluster_size: u64,
+        max_refcount: u64,
+        refcount_bits: u64,
+    ) -> Result<()> {
+        let entries_per_cluster = cluster_size / size_of::<u64>() as u64;
+        let l1_clusters = div_round_up_u64(u64::from(header.l1_size), entries_per_cluster);
+        let l1_table_offset = header.l1_table_offset;
+        for i in 0..l1_clusters {
+            add_ref(
+                refcounts,
+                cluster_size,
+                l1_table_offset + i * cluster_size,
+                max_refcount,
+                refcount_bits,
+            )?;
+        }
+        Ok(())
+    }
+
+    // Traverse the L1 and L2 tables to find all reachable data clusters.
+    fn set_data_refcounts(
+        refcounts: &mut [u64],
+        header: &QcowHeader,
+        cluster_size: u64,
+        raw_file: &mut QcowRawFile,
+        max_refcount: u64,
+        refcount_bits: u64,
+    ) -> Result<()> {
+        let l1_table = raw_file
+            .read_pointer_table(
+                header.l1_table_offset,
+                u64::from(header.l1_size),
+                Some(L1_TABLE_OFFSET_MASK),
+            )
+            .map_err(Error::ReadingPointers)?;
+        for l1_index in 0..header.l1_size as usize {
+            let l2_addr_disk = *l1_table.get(l1_index).ok_or(Error::InvalidIndex)?;
+            if l2_addr_disk != 0 {
+                // Add a reference to the L2 table cluster itself.
+                add_ref(
+                    refcounts,
+                    cluster_size,
+                    l2_addr_disk,
+                    max_refcount,
+                    refcount_bits,
+                )?;
+
+                // Read the L2 table and find all referenced data clusters.
+                let l2_table = raw_file
+                    .read_pointer_table(
+                        l2_addr_disk,
+                        cluster_size / size_of::<u64>() as u64,
+                        Some(L2_TABLE_OFFSET_MASK),
+                    )
+                    .map_err(Error::ReadingPointers)?;
+                for data_cluster_addr in l2_table {
+                    if data_cluster_addr != 0 {
+                        add_ref(
+                            refcounts,
+                            cluster_size,
+                            data_cluster_addr,
+                            max_refcount,
+                            refcount_bits,
+                        )?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    // Add references to the top-level refcount table clusters.
+    fn set_refcount_table_refcounts(
+        refcounts: &mut [u64],
+        header: &QcowHeader,
+        cluster_size: u64,
+        max_refcount: u64,
+        refcount_bits: u64,
+    ) -> Result<()> {
+        let refcount_table_offset = header.refcount_table_offset;
+        for i in 0..u64::from(header.refcount_table_clusters) {
+            add_ref(
+                refcounts,
+                cluster_size,
+                refcount_table_offset + i * cluster_size,
+                max_refcount,
+                refcount_bits,
+            )?;
+        }
+        Ok(())
+    }
+
+    // Allocate clusters for refblocks.
+    // This needs to be done last so that we have the correct refcounts for all other
+    // clusters.
+    fn alloc_refblocks(
+        refcounts: &mut [u64],
+        cluster_size: u64,
+        refblock_clusters: u64,
+        max_refcount: u64,
+        refcount_bits: u64,
+    ) -> Result<Vec<u64>> {
+        let mut ref_table = vec![0; refblock_clusters as usize];
+        let mut first_free_cluster: u64 = 0;
+        for refblock_addr in &mut ref_table {
+            loop {
+                if first_free_cluster >= refcounts.len() as u64 {
+                    return Err(Error::NotEnoughSpaceForRefcounts);
+                }
+                if refcounts[first_free_cluster as usize] == 0 {
+                    break;
+                }
+                first_free_cluster += 1;
+            }
+
+            *refblock_addr = first_free_cluster * cluster_size;
+            add_ref(
+                refcounts,
+                cluster_size,
+                *refblock_addr,
+                max_refcount,
+                refcount_bits,
+            )?;
+
+            first_free_cluster += 1;
+        }
+
+        Ok(ref_table)
+    }
+
+    // Write the updated reference count blocks and reftable.
+    fn write_refblocks(
+        refcounts: &[u64],
+        mut header: QcowHeader,
+        ref_table: &[u64],
+        raw_file: &mut QcowRawFile,
+        refcount_block_entries: u64,
+    ) -> Result<()> {
+        // Rewrite the header with lazy refcounts enabled while we are rebuilding the tables.
+        header.compatible_features |= COMPATIBLE_FEATURES_LAZY_REFCOUNTS;
+        raw_file.file_mut().rewind().map_err(Error::SeekingFile)?;
+        header.write_to(raw_file.file_mut())?;
+
+        for (i, refblock_addr) in ref_table.iter().enumerate() {
+            // Write a block of refcounts to the location indicated by refblock_addr.
+            let refblock_start = i * (refcount_block_entries as usize);
+            let refblock_end = min(
+                refcounts.len(),
+                refblock_start + refcount_block_entries as usize,
+            );
+            let refblock = &refcounts[refblock_start..refblock_end];
+            raw_file
+                .write_refcount_block(*refblock_addr, refblock)
+                .map_err(Error::WritingHeader)?;
+
+            // If this is the last (partial) cluster, pad it out to a full refblock cluster.
+            if refblock.len() < refcount_block_entries as usize {
+                let refblock_padding = vec![0u64; refcount_block_entries as usize - refblock.len()];
+                let byte_offset =
+                    refblock.len() as u64 * raw_file.cluster_size() / refcount_block_entries;
+                raw_file
+                    .write_refcount_block(*refblock_addr + byte_offset, &refblock_padding)
+                    .map_err(Error::WritingHeader)?;
+            }
+        }
+
+        // Rewrite the top-level refcount table.
+        raw_file
+            .write_pointer_table_direct(header.refcount_table_offset, ref_table.iter())
+            .map_err(Error::WritingHeader)?;
+
+        // Rewrite the header again, now with lazy refcounts disabled.
+        header.compatible_features &= !COMPATIBLE_FEATURES_LAZY_REFCOUNTS;
+        raw_file.file_mut().rewind().map_err(Error::SeekingFile)?;
+        header.write_to(raw_file.file_mut())?;
+
+        Ok(())
+    }
+
+    let cluster_size = raw_file.cluster_size();
+
+    let file_size = raw_file
+        .file_mut()
+        .metadata()
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::GettingFileSize(e)))?
+        .len();
+
+    let refcount_bits = 1u64 << header.refcount_order;
+    let max_refcount = if refcount_bits == 64 {
+        u64::MAX
+    } else {
+        (1u64 << refcount_bits) - 1
+    };
+    let refcount_block_entries = cluster_size * 8 / refcount_bits;
+    let pointers_per_cluster = cluster_size / size_of::<u64>() as u64;
+    let data_clusters = div_round_up_u64(header.size, cluster_size);
+    let l2_clusters = div_round_up_u64(data_clusters, pointers_per_cluster);
+    let l1_clusters = div_round_up_u64(l2_clusters, pointers_per_cluster);
+    let header_clusters = div_round_up_u64(size_of::<QcowHeader>() as u64, cluster_size);
+    let max_clusters = data_clusters + l2_clusters + l1_clusters + header_clusters;
+    let mut max_valid_cluster_index = max_clusters;
+    let refblock_clusters = div_round_up_u64(max_valid_cluster_index, refcount_block_entries);
+    let reftable_clusters = div_round_up_u64(refblock_clusters, pointers_per_cluster);
+    // Account for refblocks and the ref table size needed to address them.
+    let refblocks_for_refs = div_round_up_u64(
+        refblock_clusters + reftable_clusters,
+        refcount_block_entries,
+    );
+    let reftable_clusters_for_refs = div_round_up_u64(refblocks_for_refs, refcount_block_entries);
+    max_valid_cluster_index += refblock_clusters + reftable_clusters;
+    max_valid_cluster_index += refblocks_for_refs + reftable_clusters_for_refs;
+
+    if max_valid_cluster_index > MAX_RAM_POINTER_TABLE_SIZE {
+        return Err(BlockError::new(
+            BlockErrorKind::CorruptImage,
+            Error::InvalidRefcountTableSize(max_valid_cluster_index),
+        ));
+    }
+
+    let max_valid_cluster_offset = max_valid_cluster_index * cluster_size;
+    if max_valid_cluster_offset < file_size - cluster_size {
+        return Err(BlockError::new(
+            BlockErrorKind::CorruptImage,
+            Error::InvalidRefcountTableSize(max_valid_cluster_offset),
+        ));
+    }
+
+    let mut refcounts = vec![0; max_valid_cluster_index as usize];
+
+    // Find all references clusters and rebuild refcounts.
+    set_header_refcount(&mut refcounts, cluster_size, max_refcount, refcount_bits)
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
+    set_l1_refcounts(
+        &mut refcounts,
+        &header,
+        cluster_size,
+        max_refcount,
+        refcount_bits,
+    )
+    .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
+    set_data_refcounts(
+        &mut refcounts,
+        &header,
+        cluster_size,
+        raw_file,
+        max_refcount,
+        refcount_bits,
+    )
+    .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
+    set_refcount_table_refcounts(
+        &mut refcounts,
+        &header,
+        cluster_size,
+        max_refcount,
+        refcount_bits,
+    )
+    .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
+
+    // Allocate clusters to store the new reference count blocks.
+    let ref_table = alloc_refblocks(
+        &mut refcounts,
+        cluster_size,
+        refblock_clusters,
+        max_refcount,
+        refcount_bits,
+    )
+    .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
+
+    // Write updated reference counts and point the reftable at them.
+    write_refblocks(
+        &refcounts,
+        header,
+        &ref_table,
+        raw_file,
+        refcount_block_entries,
+    )
+    .map_err(|e| BlockError::new(BlockErrorKind::Io, e))
 }
 
 impl AsRawFd for QcowFile {
