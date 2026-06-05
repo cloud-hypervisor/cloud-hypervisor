@@ -351,6 +351,24 @@ impl QcowMetadata {
     pub fn decoder(&self) -> Arc<dyn Decoder> {
         Arc::clone(&self.decoder)
     }
+
+    #[cfg(test)]
+    pub fn header(&self) -> QcowHeader {
+        self.inner.read().unwrap().header.clone()
+    }
+
+    #[cfg(test)]
+    pub fn cluster_refcount(&self, address: u64) -> io::Result<u64> {
+        let mut inner = self.inner.write().unwrap();
+        let QcowState {
+            refcounts,
+            raw_file,
+            ..
+        } = &mut *inner;
+        refcounts
+            .get_cluster_refcount(raw_file, address)
+            .map_err(|e| io::Error::other(format!("get_cluster_refcount: {e}")))
+    }
 }
 
 impl QcowState {

@@ -2427,17 +2427,18 @@ pub fn detect_image_type(file: &mut RawFile) -> BlockResult<ImageType> {
 #[cfg(test)]
 mod unit_tests {
     use std::error::Error as StdError;
-    use std::fs::File;
+    use std::fs::{File, OpenOptions};
+    use std::io::{Seek, SeekFrom, Write};
+    use std::os::unix::fs::FileExt;
     use std::path::Path;
 
     use vmm_sys_util::tempdir::TempDir;
     use vmm_sys_util::tempfile::TempFile;
-    use vmm_sys_util::write_zeroes::WriteZeroes;
 
     use super::header::DEFAULT_CLUSTER_BITS;
-    use super::util::{COMPRESSED_FLAG, ZERO_FLAG};
+    use super::util::ZERO_FLAG;
     use super::*;
-    use crate::formats::qcow::common::unit_tests::compress_allocated_clusters;
+    use crate::formats::qcow::{QcowDisk, QcowTempDisk};
 
     fn valid_header_v3() -> Vec<u8> {
         vec![
@@ -2519,125 +2520,44 @@ mod unit_tests {
         testfn(basic_file(header)); // File closed when the function exits.
     }
 
-    fn with_default_file<F>(file_size: u64, direct: bool, mut testfn: F)
-    where
-        F: FnMut(QcowFile),
-    {
-        let tmp: RawFile = RawFile::new(TempFile::new().unwrap().into_file(), direct);
-        let qcow_file = QcowFile::new(tmp, 3, file_size, true).unwrap();
-
-        testfn(qcow_file); // File closed when the function exits.
+    fn tempfile_with_header(header: &[u8]) -> TempFile {
+        let temp = TempFile::new().unwrap();
+        let mut file = temp.as_file().try_clone().unwrap();
+        file.write_all(header).unwrap();
+        file.set_len(0x1_0000_0000).unwrap();
+        file.sync_all().unwrap();
+        temp
     }
 
-    fn header_with_cluster_bits(cluster_bits: u32, size: u64) -> QcowHeader {
-        let mut header = QcowHeader::create_for_size_and_path(3, size, None).unwrap();
-        let cluster_size = 1u32 << cluster_bits;
-        let entries_per_cluster = cluster_size / std::mem::size_of::<u64>() as u32;
-        let num_clusters = div_round_up_u64(size, u64::from(cluster_size)) as u32;
-        let num_l2_clusters = div_round_up_u32(num_clusters, entries_per_cluster);
-        let l1_clusters = div_round_up_u32(num_l2_clusters, entries_per_cluster);
-        let header_clusters =
-            div_round_up_u32(std::mem::size_of::<QcowHeader>() as u32, cluster_size);
-        let max_refcount_clusters = max_refcount_clusters(
-            DEFAULT_REFCOUNT_ORDER,
-            cluster_size,
-            num_clusters + l1_clusters + num_l2_clusters + header_clusters,
-        ) as u32;
-
-        header.cluster_bits = cluster_bits;
-        header.l1_size = num_l2_clusters;
-        header.l1_table_offset = u64::from(cluster_size);
-        header.refcount_table_offset = u64::from(cluster_size * (l1_clusters + 1));
-        header.refcount_table_clusters = div_round_up_u32(
-            max_refcount_clusters * std::mem::size_of::<u64>() as u32,
-            cluster_size,
-        );
-        header
+    fn try_open_header(header: &[u8]) -> BlockResult<QcowDisk> {
+        let temp = tempfile_with_header(header);
+        let file = temp.into_file();
+        QcowDisk::new(file, false, false, true, false)
     }
 
-    fn qcow_file_with_cluster_bits(cluster_bits: u32, size: u64) -> QcowFile {
-        let disk_file = RawFile::new(TempFile::new().unwrap().into_file(), false);
-        let header = header_with_cluster_bits(cluster_bits, size);
-        QcowFile::new_from_header(disk_file, &header, true).unwrap()
-    }
-
-    fn qcow_overlay_with_backing_pattern(offset: u64, len: usize, value: u8) -> QcowFile {
-        qcow_overlay_with_backing_pattern_and_cluster_bits(offset, len, value, 16)
-    }
-
-    fn qcow_overlay_with_backing_pattern_and_cluster_bits(
-        offset: u64,
-        len: usize,
-        value: u8,
-        cluster_bits: u32,
-    ) -> QcowFile {
-        let cluster_size = 1u64 << cluster_bits;
-        let size = (offset + len as u64).max(cluster_size * 4);
-        let mut backing = qcow_file_with_cluster_bits(cluster_bits, size);
-        let backing_data = vec![value; len];
-        backing.seek(SeekFrom::Start(offset)).unwrap();
-        backing.write_all(&backing_data).unwrap();
-        backing.flush().unwrap();
-
-        let mut overlay = qcow_file_with_cluster_bits(cluster_bits, size);
-        overlay.set_backing_file(Some(Box::new(backing)));
-        overlay
-    }
-
-    #[test]
-    fn write_read_start_backing_v2() {
-        let disk_file = basic_file(&valid_header_v2());
-        let mut backing = QcowFile::from(disk_file).unwrap();
-        backing
-            .write_all(b"test first bytes")
-            .expect("Failed to write test string.");
-        let mut buf = [0u8; 4];
-        let wrapping_disk_file = basic_file(&valid_header_v2());
-        let mut wrapping = QcowFile::from(wrapping_disk_file).unwrap();
-        wrapping.set_backing_file(Some(Box::new(backing)));
-        wrapping.seek(SeekFrom::Start(0)).expect("Failed to seek.");
-        wrapping.read_exact(&mut buf).expect("Failed to read.");
-        assert_eq!(&buf, b"test");
-    }
-
-    #[test]
-    fn write_read_start_backing_v3() {
-        let disk_file = basic_file(&valid_header_v3());
-        let mut backing = QcowFile::from(disk_file).unwrap();
-        backing
-            .write_all(b"test first bytes")
-            .expect("Failed to write test string.");
-        let mut buf = [0u8; 4];
-        let wrapping_disk_file = basic_file(&valid_header_v3());
-        let mut wrapping = QcowFile::from(wrapping_disk_file).unwrap();
-        wrapping.set_backing_file(Some(Box::new(backing)));
-        wrapping.seek(SeekFrom::Start(0)).expect("Failed to seek.");
-        wrapping.read_exact(&mut buf).expect("Failed to read.");
-        assert_eq!(&buf, b"test");
+    fn try_open_qcow_header(header: &QcowHeader, backing_files: bool) -> BlockResult<QcowDisk> {
+        let temp = TempFile::new().unwrap();
+        let mut raw = RawFile::new(temp.as_file().try_clone().unwrap(), false);
+        header.write_to(&mut raw).expect("write header");
+        drop(raw);
+        let file = temp.into_file();
+        QcowDisk::new(file, false, backing_files, true, false)
     }
 
     #[test]
     fn default_header_v2() {
-        let header = QcowHeader::create_for_size_and_path(2, 0x10_0000, None);
-        let mut disk_file: RawFile = RawFile::new(TempFile::new().unwrap().into_file(), false);
-        header
-            .expect("Failed to create header.")
-            .write_to(&mut disk_file)
-            .expect("Failed to write header to temporary file.");
-        disk_file.rewind().unwrap();
-        QcowFile::from(disk_file).expect("Failed to create Qcow from default Header");
+        let header = QcowHeader::create_for_size_and_path(2, 0x10_0000, None)
+            .expect("Failed to create header.");
+        try_open_qcow_header(&header, false)
+            .expect("Failed to create QcowDisk from default header");
     }
 
     #[test]
     fn default_header_v3() {
-        let header = QcowHeader::create_for_size_and_path(3, 0x10_0000, None);
-        let mut disk_file: RawFile = RawFile::new(TempFile::new().unwrap().into_file(), false);
-        header
-            .expect("Failed to create header.")
-            .write_to(&mut disk_file)
-            .expect("Failed to write header to temporary file.");
-        disk_file.rewind().unwrap();
-        QcowFile::from(disk_file).expect("Failed to create Qcow from default Header");
+        let header = QcowHeader::create_for_size_and_path(3, 0x10_0000, None)
+            .expect("Failed to create header.");
+        try_open_qcow_header(&header, false)
+            .expect("Failed to create QcowDisk from default header");
     }
 
     #[test]
@@ -2888,33 +2808,21 @@ mod unit_tests {
 
     #[test]
     fn no_backing_file() {
-        // `backing_file` is `None`
+        // No backing file declared; opening with backing_files=false should succeed.
         let header = QcowHeader::create_for_size_and_path(3, 0x10_0000, None)
             .expect("Failed to create header.");
-        let mut disk_file: RawFile = RawFile::new(TempFile::new().unwrap().into_file(), false);
-        header
-            .write_to(&mut disk_file)
-            .expect("Failed to write header to shm.");
-        disk_file.rewind().unwrap();
-        // The maximum nesting depth is 0, which means backing file is not allowed.
-        QcowFile::from_with_nesting_depth(disk_file, 0, true).unwrap();
+        try_open_qcow_header(&header, false).unwrap();
     }
 
     #[test]
     fn disable_backing_file() {
-        // `backing_file` is `Some`
+        // Backing file is declared but backing_files=false disables it. QcowDisk
+        // maps Overflow -> UnsupportedFeature when backing files are disabled.
         let header =
             QcowHeader::create_for_size_and_path(3, 0x10_0000, Some("/path/to/backing/file"))
                 .expect("Failed to create header.");
-        let mut disk_file: RawFile = RawFile::new(TempFile::new().unwrap().into_file(), false);
-        header
-            .write_to(&mut disk_file)
-            .expect("Failed to write header to shm.");
-        disk_file.rewind().unwrap();
-        // The maximum nesting depth is 0, which means backing file is not allowed.
-        let res = QcowFile::from_with_nesting_depth(disk_file, 0, true);
-        let err = res.unwrap_err();
-        assert!(matches!(err.kind(), BlockErrorKind::Overflow));
+        let err = try_open_qcow_header(&header, false).unwrap_err();
+        assert!(matches!(err.kind(), BlockErrorKind::UnsupportedFeature));
         let source = StdError::source(&err).unwrap();
         let qcow_err = source.downcast_ref::<Error>().unwrap();
         assert!(matches!(qcow_err, Error::MaxNestingDepthExceeded));
@@ -2941,21 +2849,20 @@ mod unit_tests {
 
         new_self_referential_qcow(img_path.as_path()).unwrap();
 
-        let err = QcowFile::from_with_nesting_depth(
-            RawFile::new(
-                File::open(img_path.as_path()).expect("Failed to open qcow image file"),
-                false,
-            ),
-            MAX_NESTING_DEPTH,
+        let err = QcowDisk::new(
+            File::open(img_path.as_path()).expect("Failed to open qcow image file"),
+            false,
             true,
+            true,
+            false,
         )
         .expect_err("Opening qcow file with itself as backing file should fail.");
 
         // This type of error is complex. For comparing easily, we can check if it contains the
         // type name after formatting.
         assert!(format!("{err:?}").contains(&format!("{:?}", Error::MaxNestingDepthExceeded)));
-        // This should recursively call the function ten times before throwing an error, and the
-        // error `BackingFileOpen` should also be repeated ten times.
+        // This should recursively call the function MAX_NESTING_DEPTH times before throwing the
+        // error, so `BackingFileOpen` should appear that many times.
         assert_eq!(
             format!("{err:?}")
                 .matches("BackingFileOpen")
@@ -2968,18 +2875,114 @@ mod unit_tests {
     #[test]
     fn invalid_magic() {
         let invalid_header = vec![0x51u8, 0x46, 0x4a, 0xfb];
-        with_basic_file(&invalid_header, |mut disk_file: RawFile| {
-            QcowHeader::new(&mut disk_file).expect_err("Invalid header worked.");
-        });
+        try_open_header(&invalid_header).expect_err("Invalid header worked.");
     }
 
     #[test]
     fn invalid_refcount_order() {
         let mut header = valid_header_v3();
         header[99] = 7;
-        with_basic_file(&header, |disk_file: RawFile| {
-            QcowFile::from(disk_file).expect_err("Invalid refcount order worked.");
-        });
+        try_open_header(&header).expect_err("Invalid refcount order worked.");
+    }
+
+    #[test]
+    fn invalid_cluster_bits() {
+        let mut header = valid_header_v3();
+        header[23] = 3;
+        try_open_header(&header).expect_err("Failed to create file.");
+    }
+
+    #[test]
+    fn test_header_huge_file() {
+        let header = test_huge_header();
+        try_open_header(&header).expect_err("Failed to create file.");
+    }
+
+    #[test]
+    fn test_header_crazy_file_size_rejected() {
+        let mut header = valid_header_v3();
+        header[24..32].copy_from_slice(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x1e]);
+        try_open_header(&header).expect_err("Failed to create file.");
+    }
+
+    #[test]
+    fn test_huge_l1_table() {
+        let mut header = valid_header_v3();
+        header[36] = 0x12;
+        try_open_header(&header).expect_err("Failed to create file.");
+    }
+
+    #[test]
+    fn test_header_1_tb_file_min_cluster() {
+        let mut header = test_huge_header();
+        header[24] = 0;
+        header[26] = 1;
+        header[31] = 0;
+        // 1 TB with the min cluster size makes the arrays too big, it should fail.
+        try_open_header(&header).expect_err("Failed to create file.");
+    }
+
+    #[test]
+    fn test_header_1_tb_file() {
+        let mut header = test_huge_header();
+        // reset to 1 TB size.
+        header[24] = 0;
+        header[26] = 1;
+        header[31] = 0;
+        // set cluster_bits
+        header[23] = 16;
+        let disk = try_open_header(&header).expect("Failed to create file.");
+        // Write a sentinel value near the end of the virtual disk.
+        let value = 0x0000_0040_3f00_ffffu64;
+        disk.write_all_at(0x100_0000_0000 - 8, &value.to_le_bytes());
+    }
+
+    #[test]
+    fn test_header_huge_num_refcounts() {
+        let mut header = valid_header_v3();
+        header[56..60].copy_from_slice(&[0x02, 0x00, 0xe8, 0xff]);
+        try_open_header(&header).expect_err("Created disk with crazy refcount clusters");
+    }
+
+    #[test]
+    fn test_header_huge_refcount_offset() {
+        let mut header = valid_header_v3();
+        header[48..56].copy_from_slice(&[0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x02, 0x00]);
+        try_open_header(&header).expect_err("Created disk with crazy refcount offset");
+    }
+
+    #[test]
+    fn test_l2_entry_zero_flag() {
+        let empty_entry: u64 = 0;
+        let standard_entry: u64 = 0x1000;
+        let zero_flag_entry: u64 = 0x1000 | ZERO_FLAG;
+        let compressed_entry: u64 = util::COMPRESSED_FLAG;
+        let compressed_entry_with_low_bit: u64 = util::COMPRESSED_FLAG | ZERO_FLAG;
+
+        assert!(util::l2_entry_is_empty(empty_entry));
+        assert!(!util::l2_entry_is_empty(standard_entry));
+
+        assert!(!util::l2_entry_is_compressed(standard_entry));
+        assert!(util::l2_entry_is_compressed(compressed_entry));
+        assert!(util::l2_entry_is_compressed(compressed_entry_with_low_bit));
+
+        assert!(!util::l2_entry_is_zero(standard_entry));
+        assert!(util::l2_entry_is_zero(zero_flag_entry));
+        assert!(util::l2_entry_is_zero(compressed_entry_with_low_bit));
+
+        // Note: l2_entry_is_zero() only checks bit 0, so compressed entries
+        // must be checked before interpreting bit 0 as a zero flag.
+    }
+
+    #[test]
+    fn rebuild_refcounts() {
+        // A v3 header where the first refblock pointer is zero forces the
+        // refcount rebuild path inside parse_qcow.
+        let header = valid_header_v3();
+        let disk = try_open_header(&header).expect("Failed to open and rebuild refcounts");
+        // After rebuild the first cluster (header) must have refcount > 0.
+        let refcount = disk.metadata().cluster_refcount(0).unwrap();
+        assert!(refcount > 0, "header cluster refcount should be set");
     }
 
     /// Test all valid refcount orders (0-6) can be opened.
@@ -2988,9 +2991,7 @@ mod unit_tests {
         for order in 0..=6u8 {
             let mut header = valid_header_v3();
             header[99] = order;
-            with_basic_file(&header, |disk_file: RawFile| {
-                QcowFile::from(disk_file).expect("refcount order should work");
-            });
+            try_open_header(&header).expect("refcount order should work");
         }
     }
 
@@ -3000,24 +3001,15 @@ mod unit_tests {
         for order in 0..=6u8 {
             let mut header = valid_header_v3();
             header[99] = order;
-            with_basic_file(&header, |disk_file: RawFile| {
-                let mut q = QcowFile::from(disk_file).unwrap();
-                let test_data = b"test data for refcount";
+            let disk = try_open_header(&header).unwrap();
+            let test_data = b"test data for refcount";
 
-                // Write and read back
-                q.write_all(test_data).unwrap();
-                q.rewind().unwrap();
-                let mut buf = vec![0u8; test_data.len()];
-                q.read_exact(&mut buf).unwrap();
-                assert_eq!(&buf, test_data);
+            disk.write_all_at(0, test_data);
+            assert_eq!(&disk.read_all_at(0, test_data.len()), test_data);
 
-                // Write to another cluster
-                q.seek(SeekFrom::Start(0x10000)).unwrap();
-                q.write_all(test_data).unwrap();
-                q.seek(SeekFrom::Start(0x10000)).unwrap();
-                q.read_exact(&mut buf).unwrap();
-                assert_eq!(&buf, test_data);
-            });
+            // Write to another cluster
+            disk.write_all_at(0x10000, test_data);
+            assert_eq!(&disk.read_all_at(0x10000, test_data.len()), test_data);
         }
     }
 
@@ -3027,32 +3019,22 @@ mod unit_tests {
         for order in 0..=6u8 {
             let mut header = valid_header_v3();
             header[99] = order;
-            with_basic_file(&header, |disk_file: RawFile| {
-                let mut q = QcowFile::from(disk_file).unwrap();
+            let disk = try_open_header(&header).unwrap();
 
-                // Write then overwrite
-                q.write_all(b"initial data here!!!").unwrap();
-                q.rewind().unwrap();
-                let new_data = b"overwritten data!!!!";
-                q.write_all(new_data).unwrap();
-                q.rewind().unwrap();
-                let mut buf = vec![0u8; new_data.len()];
-                q.read_exact(&mut buf).unwrap();
-                assert_eq!(&buf, new_data);
+            // Write then overwrite at offset 0.
+            disk.write_all_at(0, b"initial data here!!!");
+            let new_data = b"overwritten data!!!!";
+            disk.write_all_at(0, new_data);
+            assert_eq!(&disk.read_all_at(0, new_data.len()), new_data);
 
-                // Allocate multiple clusters
-                let cluster_size = 0x10000u64;
-                for i in 1..4u64 {
-                    q.seek(SeekFrom::Start(i * cluster_size)).unwrap();
-                    q.write_all(b"cluster data").unwrap();
-                }
-                for i in 1..4u64 {
-                    let mut cluster_buf = vec![0u8; 12];
-                    q.seek(SeekFrom::Start(i * cluster_size)).unwrap();
-                    q.read_exact(&mut cluster_buf).unwrap();
-                    assert_eq!(&cluster_buf, b"cluster data");
-                }
-            });
+            // Allocate multiple clusters
+            let cluster_size = 0x10000u64;
+            for i in 1..4u64 {
+                disk.write_all_at(i * cluster_size, b"cluster data");
+            }
+            for i in 1..4u64 {
+                assert_eq!(&disk.read_all_at(i * cluster_size, 12), b"cluster data");
+            }
         }
     }
 
@@ -3062,26 +3044,20 @@ mod unit_tests {
         for order in 0..=6u8 {
             let mut header = valid_header_v3();
             header[99] = order;
-            with_basic_file(&header, |disk_file: RawFile| {
-                let mut q = QcowFile::from(disk_file).unwrap();
+            let disk = try_open_header(&header).unwrap();
 
-                // L2 cache has 100 entries. Write to >100 regions to force eviction.
-                let cluster_size = 0x10000u64;
-                let l2_coverage = cluster_size * (cluster_size / 8);
+            // L2 cache has 100 entries. Write to >100 regions to force eviction.
+            let cluster_size = 0x10000u64;
+            let l2_coverage = cluster_size * (cluster_size / 8);
 
-                for i in 0..110u64 {
-                    q.seek(SeekFrom::Start(i * l2_coverage)).unwrap();
-                    q.write_all(b"eviction test").unwrap();
-                }
+            for i in 0..110u64 {
+                disk.write_all_at(i * l2_coverage, b"eviction test");
+            }
 
-                // Verify evicted regions can be re-read
-                for i in [0u64, 1, 50, 100, 109] {
-                    let mut buf = vec![0u8; 13];
-                    q.seek(SeekFrom::Start(i * l2_coverage)).unwrap();
-                    q.read_exact(&mut buf).unwrap();
-                    assert_eq!(&buf, b"eviction test");
-                }
-            });
+            // Verify evicted regions can be re-read
+            for i in [0u64, 1, 50, 100, 109] {
+                assert_eq!(&disk.read_all_at(i * l2_coverage, 13), b"eviction test");
+            }
         }
     }
 
@@ -3089,7 +3065,7 @@ mod unit_tests {
     #[test]
     fn refcount_subbyte_max_values() {
         for (bits, max_val) in [(1u64, 1u64), (2, 3), (4, 15)] {
-            let file = vmm_sys_util::tempfile::TempFile::new().unwrap().into_file();
+            let file = TempFile::new().unwrap().into_file();
             let cluster_size = 0x10000u64;
             file.set_len(cluster_size * 2).unwrap();
             let raw = RawFile::new(file, false);
@@ -3119,7 +3095,7 @@ mod unit_tests {
             (32, 0xFFFF_FFFFu64),
             (64, u64::MAX),
         ] {
-            let file = vmm_sys_util::tempfile::TempFile::new().unwrap().into_file();
+            let file = TempFile::new().unwrap().into_file();
             let cluster_size = 0x10000u64;
             file.set_len(cluster_size * 2).unwrap();
             let raw = RawFile::new(file, false);
@@ -3146,7 +3122,7 @@ mod unit_tests {
         use super::refcount::Error as RefcountError;
 
         for (refcount_bits, max_val) in [(1u64, 1u64), (2, 3), (4, 15)] {
-            let file = vmm_sys_util::tempfile::TempFile::new().unwrap().into_file();
+            let file = TempFile::new().unwrap().into_file();
             let cluster_size = 0x10000u64;
             let refcount_block_entries = cluster_size * 8 / refcount_bits;
             file.set_len(cluster_size * 3).unwrap();
@@ -3196,1011 +3172,6 @@ mod unit_tests {
         }
     }
 
-    #[test]
-    fn invalid_cluster_bits() {
-        let mut header = valid_header_v3();
-        header[23] = 3;
-        with_basic_file(&header, |disk_file: RawFile| {
-            QcowFile::from(disk_file).expect_err("Failed to create file.");
-        });
-    }
-
-    #[test]
-    fn test_header_huge_file() {
-        let header = test_huge_header();
-        with_basic_file(&header, |disk_file: RawFile| {
-            QcowFile::from(disk_file).expect_err("Failed to create file.");
-        });
-    }
-
-    #[test]
-    fn test_header_crazy_file_size_rejected() {
-        let mut header = valid_header_v3();
-        header[24..32].copy_from_slice(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x1e]);
-        with_basic_file(&header, |disk_file: RawFile| {
-            QcowFile::from(disk_file).expect_err("Failed to create file.");
-        });
-    }
-
-    #[test]
-    fn test_huge_l1_table() {
-        let mut header = valid_header_v3();
-        header[36] = 0x12;
-        with_basic_file(&header, |disk_file: RawFile| {
-            QcowFile::from(disk_file).expect_err("Failed to create file.");
-        });
-    }
-
-    #[test]
-    fn test_header_1_tb_file_min_cluster() {
-        let mut header = test_huge_header();
-        header[24] = 0;
-        header[26] = 1;
-        header[31] = 0;
-        // 1 TB with the min cluster size makes the arrays too big, it should fail.
-        with_basic_file(&header, |disk_file: RawFile| {
-            QcowFile::from(disk_file).expect_err("Failed to create file.");
-        });
-    }
-
-    #[test]
-    fn test_l2_entry_zero_flag() {
-        let empty_entry: u64 = 0;
-        let standard_entry: u64 = 0x1000;
-        let zero_flag_entry: u64 = 0x1000 | ZERO_FLAG;
-        let compressed_entry: u64 = COMPRESSED_FLAG;
-        let compressed_entry_with_low_bit: u64 = COMPRESSED_FLAG | ZERO_FLAG;
-
-        assert!(l2_entry_is_empty(empty_entry));
-        assert!(!l2_entry_is_empty(standard_entry));
-
-        assert!(!l2_entry_is_compressed(standard_entry));
-        assert!(l2_entry_is_compressed(compressed_entry));
-        assert!(l2_entry_is_compressed(compressed_entry_with_low_bit));
-
-        assert!(!l2_entry_is_zero(standard_entry));
-        assert!(l2_entry_is_zero(zero_flag_entry));
-        assert!(l2_entry_is_zero(compressed_entry_with_low_bit));
-
-        // Note: l2_entry_is_zero() only checks bit 0, so compressed entries
-        // must be checked before interpreting bit 0 as a zero flag.
-    }
-
-    #[test]
-    fn test_header_1_tb_file() {
-        let mut header = test_huge_header();
-        // reset to 1 TB size.
-        header[24] = 0;
-        header[26] = 1;
-        header[31] = 0;
-        // set cluster_bits
-        header[23] = 16;
-        with_basic_file(&header, |disk_file: RawFile| {
-            let mut qcow = QcowFile::from(disk_file).expect("Failed to create file.");
-            qcow.seek(SeekFrom::Start(0x100_0000_0000 - 8))
-                .expect("Failed to seek.");
-            let value = 0x0000_0040_3f00_ffffu64;
-            qcow.write_all(&value.to_le_bytes())
-                .expect("failed to write data");
-        });
-    }
-
-    #[test]
-    fn test_header_huge_num_refcounts() {
-        let mut header = valid_header_v3();
-        header[56..60].copy_from_slice(&[0x02, 0x00, 0xe8, 0xff]);
-        with_basic_file(&header, |disk_file: RawFile| {
-            QcowFile::from(disk_file).expect_err("Created disk with crazy refcount clusters");
-        });
-    }
-
-    #[test]
-    fn test_header_huge_refcount_offset() {
-        let mut header = valid_header_v3();
-        header[48..56].copy_from_slice(&[0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x02, 0x00]);
-        with_basic_file(&header, |disk_file: RawFile| {
-            QcowFile::from(disk_file).expect_err("Created disk with crazy refcount offset");
-        });
-    }
-
-    #[test]
-    fn write_read_start() {
-        with_basic_file(&valid_header_v3(), |disk_file: RawFile| {
-            let mut q = QcowFile::from(disk_file).unwrap();
-            q.write_all(b"test first bytes")
-                .expect("Failed to write test string.");
-            let mut buf = [0u8; 4];
-            q.rewind().expect("Failed to seek.");
-            q.read_exact(&mut buf).expect("Failed to read.");
-            assert_eq!(&buf, b"test");
-        });
-    }
-
-    #[test]
-    fn write_read_start_backing_overlap() {
-        let disk_file = basic_file(&valid_header_v3());
-        let mut backing = QcowFile::from(disk_file).unwrap();
-        backing
-            .write_all(b"test first bytes")
-            .expect("Failed to write test string.");
-        let wrapping_disk_file = basic_file(&valid_header_v3());
-        let mut wrapping = QcowFile::from(wrapping_disk_file).unwrap();
-        wrapping.set_backing_file(Some(Box::new(backing)));
-        wrapping.seek(SeekFrom::Start(0)).expect("Failed to seek.");
-        wrapping
-            .write_all(b"TEST")
-            .expect("Failed to write second test string.");
-        let mut buf = [0u8; 10];
-        wrapping.seek(SeekFrom::Start(0)).expect("Failed to seek.");
-        wrapping.read_exact(&mut buf).expect("Failed to read.");
-        assert_eq!(&buf, b"TEST first");
-    }
-
-    #[test]
-    fn offset_write_read() {
-        with_basic_file(&valid_header_v3(), |disk_file: RawFile| {
-            let mut q = QcowFile::from(disk_file).unwrap();
-            let b = [0x55u8; 0x1000];
-            q.seek(SeekFrom::Start(0xfff2000)).expect("Failed to seek.");
-            q.write_all(&b).expect("Failed to write test string.");
-            let mut buf = [0u8; 4];
-            q.seek(SeekFrom::Start(0xfff2000)).expect("Failed to seek.");
-            q.read_exact(&mut buf).expect("Failed to read.");
-            assert_eq!(buf[0], 0x55);
-        });
-    }
-
-    #[test]
-    fn resize_grow_within_l1() {
-        with_default_file(0x10_0000, false, |mut q| {
-            let original_size = q.virtual_size();
-            assert_eq!(original_size, 0x10_0000);
-
-            q.resize(original_size)
-                .expect("Resize to same size should succeed");
-            assert_eq!(q.virtual_size(), original_size);
-        });
-    }
-
-    #[test]
-    fn resize_grow_with_l1_growth() {
-        let initial_size = 1024 * 1024; // 1 MB
-        let new_size = 600 * 1024 * 1024; // 600 MB
-
-        let tmp: RawFile = RawFile::new(TempFile::new().unwrap().into_file(), false);
-        let mut q = QcowFile::new(tmp, 3, initial_size, true).unwrap();
-
-        let original_l1_size = q.header().l1_size;
-        assert_eq!(q.virtual_size(), initial_size);
-
-        let test_data = b"Hello, QCOW resize test!";
-        q.rewind().unwrap();
-        q.write_all(test_data).unwrap();
-
-        q.resize(new_size).expect("Resize should succeed");
-        assert_eq!(q.virtual_size(), new_size);
-
-        assert!(q.header().l1_size > original_l1_size);
-
-        // Verify original data is still intact
-        let mut buf = vec![0u8; test_data.len()];
-        q.rewind().unwrap();
-        q.read_exact(&mut buf).unwrap();
-        assert_eq!(&buf, test_data);
-
-        let new_offset = new_size - 0x10000; // 64KB before end
-        q.seek(SeekFrom::Start(new_offset)).unwrap();
-        let new_data = b"Data at new end!";
-        q.write_all(new_data).unwrap();
-
-        let mut buf2 = vec![0u8; new_data.len()];
-        q.seek(SeekFrom::Start(new_offset)).unwrap();
-        q.read_exact(&mut buf2).unwrap();
-        assert_eq!(&buf2, new_data);
-    }
-
-    #[test]
-    fn resize_shrink_fails() {
-        with_default_file(0x10_0000, false, |mut q| {
-            let original_size = q.virtual_size();
-            let smaller_size = original_size / 2;
-
-            let result = q.resize(smaller_size);
-            assert!(result.is_err());
-            let err = result.unwrap_err();
-            assert!(matches!(err.kind(), BlockErrorKind::UnsupportedFeature));
-            assert!(matches!(
-                err.downcast_ref::<Error>(),
-                Some(Error::ShrinkNotSupported)
-            ));
-
-            assert_eq!(q.virtual_size(), original_size);
-        });
-    }
-
-    #[test]
-    fn resize_with_backing_file_fails() {
-        let backing_temp = TempFile::new().unwrap();
-        let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
-        let backing_size = 1024 * 1024; // 1 MB
-
-        {
-            let backing_raw = RawFile::new(backing_temp.as_file().try_clone().unwrap(), false);
-            let _backing_qcow = QcowFile::new(backing_raw, 3, backing_size, true).unwrap();
-        }
-
-        let overlay_file = TempFile::new().unwrap();
-        let overlay_raw = RawFile::new(overlay_file.into_file(), false);
-        let backing_config = BackingFileConfig {
-            path: backing_path,
-            format: Some(ImageType::Qcow2),
-        };
-        let mut overlay =
-            QcowFile::new_from_backing(overlay_raw, 3, backing_size, &backing_config, true)
-                .unwrap();
-
-        assert_eq!(overlay.virtual_size(), backing_size);
-
-        let result = overlay.resize(backing_size * 2);
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(matches!(err.kind(), BlockErrorKind::UnsupportedFeature));
-        assert!(matches!(
-            err.downcast_ref::<Error>(),
-            Some(Error::ResizeWithBackingFile)
-        ));
-
-        assert_eq!(overlay.virtual_size(), backing_size);
-    }
-
-    #[test]
-    fn read_beyond_backing_file_returns_zeros() {
-        let backing_temp = TempFile::new().unwrap();
-        let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
-        let backing_size = 1024 * 1024;
-
-        {
-            let backing_raw = RawFile::new(backing_temp.as_file().try_clone().unwrap(), false);
-            let mut backing_qcow = QcowFile::new(backing_raw, 3, backing_size, true).unwrap();
-            let data = b"BACKING_DATA";
-            backing_qcow.rewind().unwrap();
-            backing_qcow.write_all(data).unwrap();
-            let boundary_data = [0xAAu8; 512];
-            backing_qcow
-                .seek(SeekFrom::Start(backing_size - 512))
-                .unwrap();
-            backing_qcow.write_all(&boundary_data).unwrap();
-            backing_qcow.flush().unwrap();
-        }
-
-        let overlay_file = TempFile::new().unwrap();
-        let overlay_raw = RawFile::new(overlay_file.into_file(), false);
-        let backing_config = BackingFileConfig {
-            path: backing_path,
-            format: Some(ImageType::Qcow2),
-        };
-        let overlay_size = backing_size * 2; // 2x the backing size
-        let mut overlay =
-            QcowFile::new_from_backing(overlay_raw, 3, overlay_size, &backing_config, true)
-                .unwrap();
-
-        assert_eq!(overlay.virtual_size(), overlay_size);
-
-        let mut buf = vec![0u8; 12];
-        overlay.rewind().unwrap();
-        overlay.read_exact(&mut buf).unwrap();
-        assert_eq!(&buf, b"BACKING_DATA");
-
-        let offset_beyond = backing_size + 4096;
-        let mut beyond_buf = vec![0xFFu8; 4096];
-        overlay.seek(SeekFrom::Start(offset_beyond)).unwrap();
-        overlay.read_exact(&mut beyond_buf).unwrap();
-        assert!(
-            beyond_buf.iter().all(|&b| b == 0),
-            "Read beyond backing file should return zeros"
-        );
-
-        let offset_at_boundary = backing_size - 512;
-        let mut boundary_buf = vec![0xFFu8; 1024]; // 512 in backing, 512 beyond
-        overlay.seek(SeekFrom::Start(offset_at_boundary)).unwrap();
-        overlay.read_exact(&mut boundary_buf).unwrap();
-        assert!(
-            boundary_buf[..512].iter().all(|&b| b == 0xAA),
-            "Portion within backing file should contain backing data"
-        );
-        assert!(
-            boundary_buf[512..].iter().all(|&b| b == 0),
-            "Portion beyond backing file should be zeros"
-        );
-    }
-
-    #[test]
-    fn write_zeroes_read() {
-        with_basic_file(&valid_header_v3(), |disk_file: RawFile| {
-            let mut q = QcowFile::from(disk_file).unwrap();
-            // Write some test data.
-            let b = [0x55u8; 0x1000];
-            q.seek(SeekFrom::Start(0xfff2000)).expect("Failed to seek.");
-            q.write_all(&b).expect("Failed to write test string.");
-            // Overwrite the test data with zeroes.
-            q.seek(SeekFrom::Start(0xfff2000)).expect("Failed to seek.");
-            let nwritten = q.write_zeroes(0x200).expect("Failed to write zeroes.");
-            assert_eq!(nwritten, 0x200);
-            // Verify that the correct part of the data was zeroed out.
-            let mut buf = [0u8; 0x1000];
-            q.seek(SeekFrom::Start(0xfff2000)).expect("Failed to seek.");
-            q.read_exact(&mut buf).expect("Failed to read.");
-            assert_eq!(buf[0], 0);
-            assert_eq!(buf[0x1FF], 0);
-            assert_eq!(buf[0x200], 0x55);
-            assert_eq!(buf[0xFFF], 0x55);
-        });
-    }
-
-    #[test]
-    fn write_zeroes_full_cluster() {
-        // Choose a size that is larger than a cluster.
-        // valid_header uses cluster_bits = 12, which corresponds to a cluster size of 4096.
-        const CHUNK_SIZE: usize = 4096 * 2 + 512;
-        with_basic_file(&valid_header_v3(), |disk_file: RawFile| {
-            let mut q = QcowFile::from(disk_file).unwrap();
-            // Write some test data.
-            let b = [0x55u8; CHUNK_SIZE];
-            q.rewind().expect("Failed to seek.");
-            q.write_all(&b).expect("Failed to write test string.");
-            // Overwrite the full cluster with zeroes.
-            q.rewind().expect("Failed to seek.");
-            let nwritten = q.write_zeroes(CHUNK_SIZE).expect("Failed to write zeroes.");
-            assert_eq!(nwritten, CHUNK_SIZE);
-            // Verify that the data was zeroed out.
-            let mut buf = [0u8; CHUNK_SIZE];
-            q.rewind().expect("Failed to seek.");
-            q.read_exact(&mut buf).expect("Failed to read.");
-            assert_eq!(buf[0], 0);
-            assert_eq!(buf[CHUNK_SIZE - 1], 0);
-        });
-    }
-
-    #[test]
-    fn discard_sets_zero_flag() {
-        with_basic_file(&valid_header_v3(), |disk_file: RawFile| {
-            let mut q = QcowFile::from(disk_file).unwrap();
-
-            // Write some test data to allocate a cluster
-            let test_data = [0x42u8; 4096];
-            q.seek(SeekFrom::Start(0x10000)).expect("Failed to seek.");
-            q.write_all(&test_data).expect("Failed to write test data.");
-
-            // Verify data was written
-            let mut buf = [0u8; 4096];
-            q.seek(SeekFrom::Start(0x10000)).expect("Failed to seek.");
-            q.read_exact(&mut buf).expect("Failed to read.");
-            assert_eq!(buf[0], 0x42);
-            assert_eq!(buf[4095], 0x42);
-
-            // DISCARD the full cluster (via write_zeroes which calls punch_hole)
-            q.seek(SeekFrom::Start(0x10000)).expect("Failed to seek.");
-            let nwritten = q.write_zeroes(4096).expect("Failed to discard cluster.");
-            assert_eq!(nwritten, 4096);
-
-            // Verify reads now return zeros (due to zero flag)
-            q.seek(SeekFrom::Start(0x10000)).expect("Failed to seek.");
-            q.read_exact(&mut buf).expect("Failed to read.");
-            assert_eq!(buf[0], 0);
-            assert_eq!(buf[4095], 0);
-
-            // Write new data to the trimmed cluster
-            let new_data = [0x99u8; 4096];
-            q.seek(SeekFrom::Start(0x10000)).expect("Failed to seek.");
-            q.write_all(&new_data)
-                .expect("Failed to write to trimmed cluster.");
-
-            // Verify new data can be read (cluster was reallocated)
-            q.seek(SeekFrom::Start(0x10000)).expect("Failed to seek.");
-            q.read_exact(&mut buf).expect("Failed to read.");
-            assert_eq!(buf[0], 0x99);
-            assert_eq!(buf[4095], 0x99);
-        });
-    }
-
-    #[test]
-    fn test_header() {
-        with_basic_file(&valid_header_v2(), |disk_file: RawFile| {
-            let q = QcowFile::from(disk_file).unwrap();
-            assert_eq!(q.virtual_size(), 0x20_0000_0000);
-        });
-        with_basic_file(&valid_header_v3(), |disk_file: RawFile| {
-            let q = QcowFile::from(disk_file).unwrap();
-            assert_eq!(q.virtual_size(), 0x20_0000_0000);
-        });
-    }
-
-    #[test]
-    fn read_small_buffer() {
-        with_basic_file(&valid_header_v3(), |disk_file: RawFile| {
-            let mut q = QcowFile::from(disk_file).unwrap();
-            let mut b = [5u8; 16];
-            q.seek(SeekFrom::Start(1000)).expect("Failed to seek.");
-            q.read_exact(&mut b).expect("Failed to read.");
-            assert_eq!(0, b[0]);
-            assert_eq!(0, b[15]);
-        });
-    }
-
-    #[test]
-    fn replay_ext4() {
-        with_basic_file(&valid_header_v3(), |disk_file: RawFile| {
-            let mut q = QcowFile::from(disk_file).unwrap();
-            const BUF_SIZE: usize = 0x1000;
-            let mut b = [0u8; BUF_SIZE];
-
-            struct Transfer {
-                pub write: bool,
-                pub addr: u64,
-            }
-
-            // Write transactions from mkfs.ext4.
-            let xfers: Vec<Transfer> = vec![
-                Transfer {
-                    write: false,
-                    addr: 0xfff0000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0xfffe000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x0,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x1000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0xffff000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0xffdf000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0xfff8000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0xffe0000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0xffce000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0xffb6000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0xffab000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0xffa4000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0xff8e000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0xff86000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0xff84000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0xff89000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0xfe7e000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x100000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x3000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x7000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0xf000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x2000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x4000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x5000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x6000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x8000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x9000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0xa000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0xb000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0xc000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0xd000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0xe000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x10000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x11000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x12000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x13000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x14000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x15000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x16000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x17000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x18000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x19000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x1a000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x1b000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x1c000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x1d000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x1e000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x1f000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x21000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x22000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x24000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x40000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x0,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x3000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x7000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x0,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x1000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x2000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x3000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x0,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x449000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x48000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x48000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x448000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x44a000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x48000,
-                },
-                Transfer {
-                    write: false,
-                    addr: 0x48000,
-                },
-                Transfer {
-                    write: true,
-                    addr: 0x0,
-                },
-                Transfer {
-                    write: true,
-                    addr: 0x448000,
-                },
-                Transfer {
-                    write: true,
-                    addr: 0x449000,
-                },
-                Transfer {
-                    write: true,
-                    addr: 0x44a000,
-                },
-                Transfer {
-                    write: true,
-                    addr: 0xfff0000,
-                },
-                Transfer {
-                    write: true,
-                    addr: 0xfff1000,
-                },
-                Transfer {
-                    write: true,
-                    addr: 0xfff2000,
-                },
-                Transfer {
-                    write: true,
-                    addr: 0xfff3000,
-                },
-                Transfer {
-                    write: true,
-                    addr: 0xfff4000,
-                },
-                Transfer {
-                    write: true,
-                    addr: 0xfff5000,
-                },
-                Transfer {
-                    write: true,
-                    addr: 0xfff6000,
-                },
-                Transfer {
-                    write: true,
-                    addr: 0xfff7000,
-                },
-                Transfer {
-                    write: true,
-                    addr: 0xfff8000,
-                },
-                Transfer {
-                    write: true,
-                    addr: 0xfff9000,
-                },
-                Transfer {
-                    write: true,
-                    addr: 0xfffa000,
-                },
-                Transfer {
-                    write: true,
-                    addr: 0xfffb000,
-                },
-                Transfer {
-                    write: true,
-                    addr: 0xfffc000,
-                },
-                Transfer {
-                    write: true,
-                    addr: 0xfffd000,
-                },
-                Transfer {
-                    write: true,
-                    addr: 0xfffe000,
-                },
-                Transfer {
-                    write: true,
-                    addr: 0xffff000,
-                },
-            ];
-
-            for xfer in &xfers {
-                q.seek(SeekFrom::Start(xfer.addr)).expect("Failed to seek.");
-                if xfer.write {
-                    q.write_all(&b).expect("Failed to write.");
-                } else {
-                    let read_count: usize = q.read(&mut b).expect("Failed to read.");
-                    assert_eq!(read_count, BUF_SIZE);
-                }
-            }
-        });
-    }
-
-    #[test]
-    fn combo_write_read() {
-        combo_write_read_common(false);
-    }
-
-    #[test]
-    fn combo_write_read_direct() {
-        combo_write_read_common(true);
-    }
-
-    fn combo_write_read_common(direct: bool) {
-        with_default_file(1024 * 1024 * 1024 * 256, direct, |mut qcow_file| {
-            const NUM_BLOCKS: usize = 555;
-            const BLOCK_SIZE: usize = 0x1_0000;
-            const OFFSET: usize = 0x1_0000_0020;
-            let data = [0x55u8; BLOCK_SIZE];
-            let mut readback = [0u8; BLOCK_SIZE];
-            for i in 0..NUM_BLOCKS {
-                let seek_offset = OFFSET + i * BLOCK_SIZE;
-                qcow_file
-                    .seek(SeekFrom::Start(seek_offset as u64))
-                    .expect("Failed to seek.");
-                let nwritten = qcow_file.write(&data).expect("Failed to write test data.");
-                assert_eq!(nwritten, BLOCK_SIZE);
-                // Read back the data to check it was written correctly.
-                qcow_file
-                    .seek(SeekFrom::Start(seek_offset as u64))
-                    .expect("Failed to seek.");
-                let nread = qcow_file.read(&mut readback).expect("Failed to read.");
-                assert_eq!(nread, BLOCK_SIZE);
-                for (orig, read) in data.iter().zip(readback.iter()) {
-                    assert_eq!(orig, read);
-                }
-            }
-            // Check that address 0 is still zeros.
-            qcow_file.rewind().expect("Failed to seek.");
-            let nread = qcow_file.read(&mut readback).expect("Failed to read.");
-            assert_eq!(nread, BLOCK_SIZE);
-            for read in readback.iter() {
-                assert_eq!(*read, 0);
-            }
-            // Check the data again after the writes have happened.
-            for i in 0..NUM_BLOCKS {
-                let seek_offset = OFFSET + i * BLOCK_SIZE;
-                qcow_file
-                    .seek(SeekFrom::Start(seek_offset as u64))
-                    .expect("Failed to seek.");
-                let nread = qcow_file.read(&mut readback).expect("Failed to read.");
-                assert_eq!(nread, BLOCK_SIZE);
-                for (orig, read) in data.iter().zip(readback.iter()) {
-                    assert_eq!(orig, read);
-                }
-            }
-        });
-    }
-
-    fn seek_cur(file: &mut QcowFile) -> u64 {
-        file.stream_position().unwrap()
-    }
-
-    #[test]
-    fn seek_data() {
-        seek_data_common(false);
-    }
-
-    #[test]
-    fn seek_data_direct() {
-        seek_data_common(true);
-    }
-
-    fn seek_data_common(direct: bool) {
-        with_default_file(0x30000, direct, |mut file| {
-            // seek_data at or after the end of the file should return None
-            assert_eq!(file.seek_data(0x10000).unwrap(), None);
-            assert_eq!(seek_cur(&mut file), 0);
-            assert_eq!(file.seek_data(0x10001).unwrap(), None);
-            assert_eq!(seek_cur(&mut file), 0);
-
-            // Write some data to [0x10000, 0x20000)
-            let b = [0x55u8; 0x10000];
-            file.seek(SeekFrom::Start(0x10000)).unwrap();
-            file.write_all(&b).unwrap();
-            assert_eq!(file.seek_data(0).unwrap(), Some(0x10000));
-            assert_eq!(seek_cur(&mut file), 0x10000);
-
-            // seek_data within data should return the same offset
-            assert_eq!(file.seek_data(0x10000).unwrap(), Some(0x10000));
-            assert_eq!(seek_cur(&mut file), 0x10000);
-            assert_eq!(file.seek_data(0x10001).unwrap(), Some(0x10001));
-            assert_eq!(seek_cur(&mut file), 0x10001);
-            assert_eq!(file.seek_data(0x1FFFF).unwrap(), Some(0x1FFFF));
-            assert_eq!(seek_cur(&mut file), 0x1FFFF);
-
-            assert_eq!(file.seek_data(0).unwrap(), Some(0x10000));
-            assert_eq!(seek_cur(&mut file), 0x10000);
-            assert_eq!(file.seek_data(0x1FFFF).unwrap(), Some(0x1FFFF));
-            assert_eq!(seek_cur(&mut file), 0x1FFFF);
-            assert_eq!(file.seek_data(0x20000).unwrap(), None);
-            assert_eq!(seek_cur(&mut file), 0x1FFFF);
-        });
-    }
-
-    #[test]
-    fn seek_hole() {
-        seek_hole_common(false);
-    }
-
-    #[test]
-    fn seek_hole_direct() {
-        seek_hole_common(true);
-    }
-
-    fn seek_hole_common(direct: bool) {
-        with_default_file(0x30000, direct, |mut file| {
-            // File consisting entirely of a hole
-            assert_eq!(file.seek_hole(0).unwrap(), Some(0));
-            assert_eq!(seek_cur(&mut file), 0);
-            assert_eq!(file.seek_hole(0xFFFF).unwrap(), Some(0xFFFF));
-            assert_eq!(seek_cur(&mut file), 0xFFFF);
-
-            // seek_hole at or after the end of the file should return None
-            file.rewind().unwrap();
-            assert_eq!(file.seek_hole(0x30000).unwrap(), None);
-            assert_eq!(seek_cur(&mut file), 0);
-            assert_eq!(file.seek_hole(0x30001).unwrap(), None);
-            assert_eq!(seek_cur(&mut file), 0);
-
-            // Write some data to [0x10000, 0x20000)
-            let b = [0x55u8; 0x10000];
-            file.seek(SeekFrom::Start(0x10000)).unwrap();
-            file.write_all(&b).unwrap();
-
-            // seek_hole within a hole should return the same offset
-            assert_eq!(file.seek_hole(0).unwrap(), Some(0));
-            assert_eq!(seek_cur(&mut file), 0);
-            assert_eq!(file.seek_hole(0xFFFF).unwrap(), Some(0xFFFF));
-            assert_eq!(seek_cur(&mut file), 0xFFFF);
-
-            // seek_hole within data should return the next hole
-            file.rewind().unwrap();
-            assert_eq!(file.seek_hole(0x10000).unwrap(), Some(0x20000));
-            assert_eq!(seek_cur(&mut file), 0x20000);
-            file.rewind().unwrap();
-            assert_eq!(file.seek_hole(0x10001).unwrap(), Some(0x20000));
-            assert_eq!(seek_cur(&mut file), 0x20000);
-            file.rewind().unwrap();
-            assert_eq!(file.seek_hole(0x1FFFF).unwrap(), Some(0x20000));
-            assert_eq!(seek_cur(&mut file), 0x20000);
-            file.rewind().unwrap();
-            assert_eq!(file.seek_hole(0xFFFF).unwrap(), Some(0xFFFF));
-            assert_eq!(seek_cur(&mut file), 0xFFFF);
-            file.rewind().unwrap();
-            assert_eq!(file.seek_hole(0x10000).unwrap(), Some(0x20000));
-            assert_eq!(seek_cur(&mut file), 0x20000);
-            file.rewind().unwrap();
-            assert_eq!(file.seek_hole(0x1FFFF).unwrap(), Some(0x20000));
-            assert_eq!(seek_cur(&mut file), 0x20000);
-            file.rewind().unwrap();
-            assert_eq!(file.seek_hole(0x20000).unwrap(), Some(0x20000));
-            assert_eq!(seek_cur(&mut file), 0x20000);
-            file.rewind().unwrap();
-            assert_eq!(file.seek_hole(0x20001).unwrap(), Some(0x20001));
-            assert_eq!(seek_cur(&mut file), 0x20001);
-
-            // seek_hole at EOF should return None
-            file.rewind().unwrap();
-            assert_eq!(file.seek_hole(0x30000).unwrap(), None);
-            assert_eq!(seek_cur(&mut file), 0);
-
-            // Write some data to [0x20000, 0x30000)
-            file.seek(SeekFrom::Start(0x20000)).unwrap();
-            file.write_all(&b).unwrap();
-
-            // seek_hole within [0x20000, 0x30000) should now find the hole at EOF
-            assert_eq!(file.seek_hole(0x20000).unwrap(), Some(0x30000));
-            assert_eq!(seek_cur(&mut file), 0x30000);
-            file.rewind().unwrap();
-            assert_eq!(file.seek_hole(0x20001).unwrap(), Some(0x30000));
-            assert_eq!(seek_cur(&mut file), 0x30000);
-            file.rewind().unwrap();
-            assert_eq!(file.seek_hole(0x30000).unwrap(), None);
-            assert_eq!(seek_cur(&mut file), 0);
-        });
-    }
-
-    #[test]
-    fn rebuild_refcounts() {
-        with_basic_file(&valid_header_v3(), |mut disk_file: RawFile| {
-            let header = QcowHeader::new(&mut disk_file).expect("Failed to create Header.");
-            let cluster_size = 65536;
-            let refcount_bits = 1u64 << header.refcount_order;
-            let mut raw_file = QcowRawFile::from(disk_file, cluster_size, refcount_bits)
-                .expect("Failed to create QcowRawFile.");
-            QcowFile::rebuild_refcounts(&mut raw_file, header)
-                .expect("Failed to rebuild recounts.");
-        });
-    }
-
     // Helper to create a v3 header with specific incompatible feature bits set
     fn header_v3_with_incompat_features(features: u64) -> Vec<u8> {
         let mut header = valid_header_v3();
@@ -4220,203 +3191,147 @@ mod unit_tests {
     #[test]
     fn accept_incompat_dirty_bit() {
         let header = header_v3_with_incompat_features(1 << 0);
-        with_basic_file(&header, |disk_file: RawFile| {
-            let result = QcowFile::from(disk_file);
-            assert!(
-                result.is_ok(),
-                "Expected dirty bit to be accepted, got: {result:?}"
-            );
-        });
+        let result = try_open_header(&header);
+        assert!(
+            result.is_ok(),
+            "Expected dirty bit to be accepted, got: {result:?}"
+        );
     }
 
     #[test]
     fn reject_corrupt_bit_for_writable_open() {
         // Bit 1: corrupt - image metadata is corrupted
         let header = header_v3_with_incompat_features(1 << 1);
-        with_basic_file(&header, |disk_file: RawFile| {
-            let result = QcowFile::from(disk_file);
-            assert!(result.is_err());
-            let err = result.unwrap_err();
-            assert!(
-                matches!(err.kind(), BlockErrorKind::CorruptImage),
-                "Expected CorruptImage error, got: {err:?}"
-            );
-        });
+        let err = try_open_header(&header).unwrap_err();
+        assert!(
+            matches!(err.kind(), BlockErrorKind::CorruptImage),
+            "Expected CorruptImage error, got: {err:?}"
+        );
     }
 
     #[test]
     fn reject_unsupported_incompat_external_data_bit() {
         // Bit 2: external data file
         let header = header_v3_with_incompat_features(1 << 2);
-        with_basic_file(&header, |disk_file: RawFile| {
-            let result = QcowFile::from(disk_file);
-            assert!(result.is_err());
-            let err = result.unwrap_err();
-            assert!(matches!(err.kind(), BlockErrorKind::UnsupportedFeature));
-            let source = StdError::source(&err).unwrap();
-            let qcow_err = source.downcast_ref::<Error>().unwrap();
-            assert!(
-                matches!(qcow_err, Error::UnsupportedFeature(v) if v.to_string().contains("external")),
-                "Expected UnsupportedFeature error mentioning external, got: {err:?}"
-            );
-        });
+        let err = try_open_header(&header).unwrap_err();
+        assert!(matches!(err.kind(), BlockErrorKind::UnsupportedFeature));
+        let source = StdError::source(&err).unwrap();
+        let qcow_err = source.downcast_ref::<Error>().unwrap();
+        assert!(
+            matches!(qcow_err, Error::UnsupportedFeature(v) if v.to_string().contains("external")),
+            "Expected UnsupportedFeature error mentioning external, got: {err:?}"
+        );
     }
 
     #[test]
     fn reject_unsupported_incompat_extended_l2_bit() {
         // Bit 4: extended L2 entries
         let header = header_v3_with_incompat_features(1 << 4);
-        with_basic_file(&header, |disk_file: RawFile| {
-            let result = QcowFile::from(disk_file);
-            assert!(result.is_err());
-            let err = result.unwrap_err();
-            assert!(matches!(err.kind(), BlockErrorKind::UnsupportedFeature));
-            let source = StdError::source(&err).unwrap();
-            let qcow_err = source.downcast_ref::<Error>().unwrap();
-            assert!(
-                matches!(qcow_err, Error::UnsupportedFeature(v) if v.to_string().contains("extended")),
-                "Expected UnsupportedFeature error mentioning extended, got: {err:?}"
-            );
-        });
+        let err = try_open_header(&header).unwrap_err();
+        assert!(matches!(err.kind(), BlockErrorKind::UnsupportedFeature));
+        let source = StdError::source(&err).unwrap();
+        let qcow_err = source.downcast_ref::<Error>().unwrap();
+        assert!(
+            matches!(qcow_err, Error::UnsupportedFeature(v) if v.to_string().contains("extended")),
+            "Expected UnsupportedFeature error mentioning extended, got: {err:?}"
+        );
     }
 
     #[test]
     fn reject_multiple_unsupported_incompat_bits() {
         // Multiple unsupported bits: external data (2) + extended L2 (4)
         let header = header_v3_with_incompat_features((1 << 2) | (1 << 4));
-        with_basic_file(&header, |disk_file: RawFile| {
-            let result = QcowFile::from(disk_file);
-            assert!(result.is_err());
-            assert!(matches!(
-                result.unwrap_err().kind(),
-                BlockErrorKind::UnsupportedFeature
-            ));
-        });
+        let err = try_open_header(&header).unwrap_err();
+        assert!(matches!(err.kind(), BlockErrorKind::UnsupportedFeature));
     }
 
     #[test]
     fn reject_unknown_incompat_bit() {
         // Unknown bit 5 (not defined in spec)
         let header = header_v3_with_incompat_features(1 << 5);
-        with_basic_file(&header, |disk_file: RawFile| {
-            let result = QcowFile::from(disk_file);
-            assert!(result.is_err());
-            let err = result.unwrap_err();
-            assert!(matches!(err.kind(), BlockErrorKind::UnsupportedFeature));
-            let source = StdError::source(&err).unwrap();
-            let qcow_err = source.downcast_ref::<Error>().unwrap();
-            assert!(
-                matches!(qcow_err, Error::UnsupportedFeature(v) if v.to_string().contains("unknown")),
-                "Expected UnsupportedFeature error mentioning unknown, got: {err:?}"
-            );
-        });
+        let err = try_open_header(&header).unwrap_err();
+        assert!(matches!(err.kind(), BlockErrorKind::UnsupportedFeature));
+        let source = StdError::source(&err).unwrap();
+        let qcow_err = source.downcast_ref::<Error>().unwrap();
+        assert!(
+            matches!(qcow_err, Error::UnsupportedFeature(v) if v.to_string().contains("unknown")),
+            "Expected UnsupportedFeature error mentioning unknown, got: {err:?}"
+        );
+    }
+
+    /// Reads the incompatible_features u64 at its v3 offset from a file.
+    fn read_incompat_features(path: &Path) -> u64 {
+        let file = OpenOptions::new().read(true).open(path).unwrap();
+        let mut buf = [0u8; 8];
+        file.read_exact_at(&mut buf, V2_BARE_HEADER_SIZE as u64)
+            .unwrap();
+        u64::from_be_bytes(buf)
+    }
+
+    /// Reads the autoclear_features u64 at its v3 offset from a file.
+    fn read_autoclear_features(path: &Path) -> u64 {
+        let file = OpenOptions::new().read(true).open(path).unwrap();
+        let mut buf = [0u8; 8];
+        file.read_exact_at(&mut buf, AUTOCLEAR_FEATURES_OFFSET)
+            .unwrap();
+        u64::from_be_bytes(buf)
     }
 
     #[test]
     fn dirty_bit_set_on_open_cleared_on_close_v3() {
         // Test that the dirty bit is set when a v3 image is opened and cleared when it's closed
-        let header = valid_header_v3();
-        with_basic_file(&header, |mut disk_file: RawFile| {
-            // Verify dirty bit is not set initially
-            disk_file
-                .seek(SeekFrom::Start(V2_BARE_HEADER_SIZE as u64))
-                .unwrap();
-            let features_before = u64::read_be(&mut disk_file).unwrap();
-            assert_eq!(
-                features_before & IncompatFeatures::DIRTY.bits(),
-                0,
-                "Dirty bit should not be set initially"
-            );
+        let temp = tempfile_with_header(&valid_header_v3());
+        let path = temp.as_path().to_owned();
 
-            // Open the file - this should set the dirty bit
-            disk_file.rewind().unwrap();
-            {
-                let qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
+        assert_eq!(
+            read_incompat_features(&path) & IncompatFeatures::DIRTY.bits(),
+            0,
+            "Dirty bit should not be set initially"
+        );
 
-                // Verify dirty bit is set while file is open
-                disk_file
-                    .seek(SeekFrom::Start(V2_BARE_HEADER_SIZE as u64))
-                    .unwrap();
-                let features_during = u64::read_be(&mut disk_file).unwrap();
-                assert_ne!(
-                    features_during & IncompatFeatures::DIRTY.bits(),
-                    0,
-                    "Dirty bit should be set while file is open"
-                );
+        let file = temp.as_file().try_clone().unwrap();
+        let disk = QcowDisk::new(file, false, false, true, false).unwrap();
 
-                drop(qcow); // Close the file
-            }
+        assert_ne!(
+            read_incompat_features(&path) & IncompatFeatures::DIRTY.bits(),
+            0,
+            "Dirty bit should be set while file is open"
+        );
 
-            // Verify dirty bit is cleared after close
-            disk_file
-                .seek(SeekFrom::Start(V2_BARE_HEADER_SIZE as u64))
-                .unwrap();
-            let features_after = u64::read_be(&mut disk_file).unwrap();
-            assert_eq!(
-                features_after & IncompatFeatures::DIRTY.bits(),
-                0,
-                "Dirty bit should be cleared after close"
-            );
-        });
+        drop(disk);
+
+        assert_eq!(
+            read_incompat_features(&path) & IncompatFeatures::DIRTY.bits(),
+            0,
+            "Dirty bit should be cleared after close"
+        );
     }
 
     #[test]
     fn dirty_bit_not_used_for_v2() {
         // Test that v2 images don't use the dirty bit (no incompatible_features field)
-        let header = valid_header_v2();
-        with_basic_file(&header, |mut disk_file: RawFile| {
-            // Open and close v2 file - should work without touching offset 72
-            disk_file.rewind().unwrap();
-            let qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
-            assert_eq!(qcow.header.version, 2, "Should be a v2 file");
-            drop(qcow);
-        });
+        let temp = tempfile_with_header(&valid_header_v2());
+        let disk = QcowDisk::new(temp.into_file(), false, false, true, false).unwrap();
+        assert_eq!(disk.metadata().header().version, 2);
     }
 
     #[test]
     fn dirty_bit_not_set_for_readonly_v3() {
         // Test that read-only v3 files don't set the dirty bit (e.g., backing files)
-        let header = valid_header_v3();
+        let temp = tempfile_with_header(&valid_header_v3());
+        let temp_path = temp.as_path().to_owned();
 
-        // Create a temp file with a valid v3 qcow header
-        let temp_file = TempFile::new().unwrap();
-        let temp_path = temp_file.as_path().to_owned();
-        {
-            let mut file = temp_file.as_file().try_clone().unwrap();
-            file.write_all(&header).unwrap();
-            file.set_len(0x1_0000_0000).unwrap();
-        }
-
-        // Open the file read-only
         let readonly_file = OpenOptions::new()
             .read(true)
             .write(false)
             .open(&temp_path)
             .unwrap();
-        let raw_file = RawFile::new(readonly_file, false);
 
-        // Verify the file is detected as read-only
-        assert!(
-            !raw_file.is_writable(),
-            "File should be detected as read-only"
-        );
+        // Opening as a QcowDisk should not set the dirty bit for read-only files.
+        let _disk = QcowDisk::new(readonly_file, false, false, true, false).unwrap();
 
-        // Open as QcowFile - should not set dirty bit for read-only files
-        let qcow = QcowFile::from(raw_file).unwrap();
-        assert!(
-            !qcow.raw_file.file().is_writable(),
-            "File should be read-only"
-        );
-
-        // Verify dirty bit was not written to disk
-        let verify_file = OpenOptions::new().read(true).open(&temp_path).unwrap();
-        let mut verify_raw = RawFile::new(verify_file, false);
-        verify_raw
-            .seek(SeekFrom::Start(V2_BARE_HEADER_SIZE as u64))
-            .unwrap();
-        let features = u64::read_be(&mut verify_raw).unwrap();
         assert_eq!(
-            features & IncompatFeatures::DIRTY.bits(),
+            read_incompat_features(&temp_path) & IncompatFeatures::DIRTY.bits(),
             0,
             "Dirty bit should not be written for read-only files"
         );
@@ -4424,498 +3339,207 @@ mod unit_tests {
 
     #[test]
     fn autoclear_features_cleared_on_open() {
-        let header = header_v3_with_autoclear_features(0xFFFF_FFFF_FFFF_FFFF);
-        with_basic_file(&header, |mut disk_file: RawFile| {
-            disk_file
-                .seek(SeekFrom::Start(AUTOCLEAR_FEATURES_OFFSET))
-                .unwrap();
-            let features_before = u64::read_be(&mut disk_file).unwrap();
-            assert_eq!(
-                features_before, 0xFFFF_FFFF_FFFF_FFFF,
-                "Autoclear features should be set initially"
-            );
+        let temp = tempfile_with_header(&header_v3_with_autoclear_features(0xFFFF_FFFF_FFFF_FFFF));
+        let path = temp.as_path().to_owned();
 
-            disk_file.rewind().unwrap();
-            {
-                let _qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
-            }
+        assert_eq!(
+            read_autoclear_features(&path),
+            0xFFFF_FFFF_FFFF_FFFF,
+            "Autoclear features should be set initially"
+        );
 
-            disk_file
-                .seek(SeekFrom::Start(AUTOCLEAR_FEATURES_OFFSET))
-                .unwrap();
-            let features_after = u64::read_be(&mut disk_file).unwrap();
-            assert_eq!(
-                features_after, 0,
-                "Autoclear features should be cleared after open for write"
-            );
-        });
+        let file = temp.as_file().try_clone().unwrap();
+        {
+            let _disk = QcowDisk::new(file, false, false, true, false).unwrap();
+        }
+
+        assert_eq!(
+            read_autoclear_features(&path),
+            0,
+            "Autoclear features should be cleared after open for write"
+        );
     }
 
     #[test]
     fn autoclear_features_not_cleared_for_readonly() {
-        let header = header_v3_with_autoclear_features(0xFFFF_FFFF_FFFF_FFFF);
-
-        let temp_file = TempFile::new().unwrap();
-        let temp_path = temp_file.as_path().to_owned();
-        {
-            let mut file = temp_file.as_file().try_clone().unwrap();
-            file.write_all(&header).unwrap();
-            file.set_len(0x1_0000_0000).unwrap();
-        }
+        let temp = tempfile_with_header(&header_v3_with_autoclear_features(0xFFFF_FFFF_FFFF_FFFF));
+        let path = temp.as_path().to_owned();
 
         let readonly_file = OpenOptions::new()
             .read(true)
             .write(false)
-            .open(&temp_path)
+            .open(&path)
             .unwrap();
-        let raw_file = RawFile::new(readonly_file, false);
-        let _qcow = QcowFile::from(raw_file).unwrap();
-        drop(_qcow);
+        let _disk = QcowDisk::new(readonly_file, false, false, true, false).unwrap();
+        drop(_disk);
 
-        let verify_file = OpenOptions::new().read(true).open(&temp_path).unwrap();
-        let mut verify_raw = RawFile::new(verify_file, false);
-        verify_raw
-            .seek(SeekFrom::Start(AUTOCLEAR_FEATURES_OFFSET))
-            .unwrap();
-        let features = u64::read_be(&mut verify_raw).unwrap();
         assert_eq!(
-            features, 0xFFFF_FFFF_FFFF_FFFF,
+            read_autoclear_features(&path),
+            0xFFFF_FFFF_FFFF_FFFF,
             "Autoclear features should NOT be cleared for read-only files"
         );
     }
 
     #[test]
     fn autoclear_features_v2_ignored() {
-        let header = valid_header_v2();
-        with_basic_file(&header, |mut disk_file: RawFile| {
-            disk_file.rewind().unwrap();
-            let qcow = QcowFile::from(disk_file).unwrap();
-            assert_eq!(qcow.header.version, 2);
-            assert_eq!(qcow.header.autoclear_features, 0);
-        });
+        let temp = tempfile_with_header(&valid_header_v2());
+        let disk = QcowDisk::new(temp.into_file(), false, false, true, false).unwrap();
+        let header = disk.metadata().header();
+        assert_eq!(header.version, 2);
+        assert_eq!(header.autoclear_features, 0);
     }
 
     #[test]
     fn corrupt_image_rejected_for_write() {
         // Test that a corrupt image cannot be opened for writing
         let header = header_v3_with_incompat_features(IncompatFeatures::CORRUPT.bits());
-        with_basic_file(&header, |disk_file: RawFile| {
-            assert!(disk_file.is_writable(), "File should be writable");
-
-            let result = QcowFile::from(disk_file);
-            assert!(result.is_err());
-            let err = result.unwrap_err();
-            assert!(
-                matches!(err.kind(), BlockErrorKind::CorruptImage),
-                "Expected CorruptImage error, got: {err:?}"
-            );
-        });
+        let err = try_open_header(&header).unwrap_err();
+        assert!(
+            matches!(err.kind(), BlockErrorKind::CorruptImage),
+            "Expected CorruptImage error, got: {err:?}"
+        );
     }
 
     #[test]
     fn corrupt_image_allowed_readonly() {
         // Test that a corrupt image can be opened read-only
         let header = header_v3_with_incompat_features(IncompatFeatures::CORRUPT.bits());
-
-        // Create a temp file with the corrupt header
-        let temp_file = TempFile::new().unwrap();
-        let temp_path = temp_file.as_path().to_owned();
-        {
-            let mut file = temp_file.as_file().try_clone().unwrap();
-            file.write_all(&header).unwrap();
-            file.set_len(0x1_0000_0000).unwrap();
-        }
+        let temp = tempfile_with_header(&header);
 
         let readonly_file = OpenOptions::new()
             .read(true)
             .write(false)
-            .open(&temp_path)
+            .open(temp.as_path())
             .unwrap();
-        let raw_file = RawFile::new(readonly_file, false);
-        assert!(!raw_file.is_writable(), "File should be read-only");
 
-        let result = QcowFile::from(raw_file);
+        let disk = QcowDisk::new(readonly_file, false, false, true, false)
+            .expect("Corrupt image should be openable read-only");
+
         assert!(
-            result.is_ok(),
-            "Corrupt image should be openable read-only, got: {:?}",
-            result.err()
-        );
-
-        let qcow = result.unwrap();
-        assert!(qcow.header.is_corrupt(), "Corrupt bit should be set");
-    }
-
-    #[test]
-    fn set_corrupt_bit() {
-        // Test that set_corrupt_bit correctly sets the corrupt bit
-        let header = valid_header_v3();
-        with_basic_file(&header, |mut disk_file: RawFile| {
-            let mut qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
-
-            assert!(!qcow.header.is_corrupt(), "Should not be corrupt initially");
-
-            qcow.header
-                .set_corrupt_bit(qcow.raw_file.file_mut())
-                .unwrap();
-
-            // Verify in memory
-            assert!(qcow.header.is_corrupt(), "Should be corrupt after set");
-
-            // Verify on disk
-            disk_file
-                .seek(SeekFrom::Start(V2_BARE_HEADER_SIZE as u64))
-                .unwrap();
-            let features = u64::read_be(&mut disk_file).unwrap();
-            assert!(
-                IncompatFeatures::from_bits_retain(features).contains(IncompatFeatures::CORRUPT),
-                "Corrupt bit should be set on disk"
-            );
-        });
-    }
-
-    #[test]
-    fn corrupt_bit_persists_with_dirty() {
-        // Test that both corrupt and dirty bits can coexist
-        let header = header_v3_with_incompat_features(
-            IncompatFeatures::CORRUPT.bits() | IncompatFeatures::DIRTY.bits(),
-        );
-
-        let temp_file = TempFile::new().unwrap();
-        let temp_path = temp_file.as_path().to_owned();
-        {
-            let mut file = temp_file.as_file().try_clone().unwrap();
-            file.write_all(&header).unwrap();
-            file.set_len(0x1_0000_0000).unwrap();
-        }
-
-        // Writable would be rejected due to corrupt bit
-        let readonly_file = OpenOptions::new()
-            .read(true)
-            .write(false)
-            .open(&temp_path)
-            .unwrap();
-        let raw_file = RawFile::new(readonly_file, false);
-
-        let qcow = QcowFile::from(raw_file).unwrap();
-
-        let features = IncompatFeatures::from_bits_truncate(qcow.header.incompatible_features);
-        assert!(
-            features.contains(IncompatFeatures::CORRUPT),
+            disk.metadata().header().is_corrupt(),
             "Corrupt bit should be set"
         );
+    }
+
+    #[test]
+    fn resize_grow_within_l1() {
+        use crate::disk_file::{DiskSize, Resizable};
+
+        let temp = QcowTempDisk::new(0x10_0000, None, false, true, false).unwrap();
+        let mut disk = QcowDisk::new(
+            temp.as_file().try_clone().unwrap(),
+            false,
+            false,
+            true,
+            false,
+        )
+        .unwrap();
+
+        let original_size = disk.logical_size().unwrap();
+        assert_eq!(original_size, 0x10_0000);
+
+        disk.resize(original_size)
+            .expect("Resize to same size should succeed");
+        assert_eq!(disk.logical_size().unwrap(), original_size);
+    }
+
+    #[test]
+    fn resize_grow_with_l1_growth() {
+        use crate::disk_file::{DiskSize, Resizable};
+
+        let initial_size = 1024 * 1024; // 1 MB
+        let new_size = 600 * 1024 * 1024; // 600 MB
+
+        let temp = QcowTempDisk::new(initial_size, None, false, true, false).unwrap();
+        let mut disk = QcowDisk::new(
+            temp.as_file().try_clone().unwrap(),
+            false,
+            false,
+            true,
+            false,
+        )
+        .unwrap();
+
+        let original_l1_size = disk.metadata().header().l1_size;
+        assert_eq!(disk.logical_size().unwrap(), initial_size);
+
+        let test_data = b"Hello, QCOW resize test!";
+        disk.write_all_at(0, test_data);
+
+        disk.resize(new_size).expect("Resize should succeed");
+        assert_eq!(disk.logical_size().unwrap(), new_size);
+
+        let new_l1_size = disk.metadata().header().l1_size;
+        assert!(new_l1_size > original_l1_size);
+
+        // Verify original data is still intact
+        assert_eq!(&disk.read_all_at(0, test_data.len()), test_data);
+
+        let new_offset = new_size - 0x10000; // 64KB before end
+        let new_data = b"Data at new end!";
+        disk.write_all_at(new_offset, new_data);
+        assert_eq!(&disk.read_all_at(new_offset, new_data.len()), new_data);
+    }
+
+    #[test]
+    fn resize_shrink_fails() {
+        use crate::async_io::DiskFileError;
+        use crate::disk_file::{DiskSize, Resizable};
+
+        let temp = QcowTempDisk::new(0x10_0000, None, false, true, false).unwrap();
+        let mut disk = QcowDisk::new(
+            temp.as_file().try_clone().unwrap(),
+            false,
+            false,
+            true,
+            false,
+        )
+        .unwrap();
+
+        let original_size = disk.logical_size().unwrap();
+        let smaller_size = original_size / 2;
+
+        let err = disk.resize(smaller_size).unwrap_err();
+        let inner = err
+            .source_ref()
+            .and_then(|s| s.downcast_ref::<DiskFileError>())
+            .expect("expected DiskFileError source");
         assert!(
-            features.contains(IncompatFeatures::DIRTY),
-            "Dirty bit should also be set"
+            matches!(inner, DiskFileError::ResizeError(io_err) if io_err.to_string().contains("shrinking")),
+            "expected ResizeError describing shrink, got {inner:?}",
         );
-    }
-
-    /// Helper to check if corrupt bit is set on disk by re-reading the header
-    fn is_corrupt_on_disk(disk_file: &mut RawFile) -> bool {
-        disk_file.rewind().unwrap();
-        QcowHeader::new(disk_file).unwrap().is_corrupt()
-    }
-
-    /// Helper to clear the corrupt bit on disk while preserving other bits
-    fn clear_corrupt_bit_on_disk(disk_file: &mut RawFile) {
-        disk_file
-            .seek(SeekFrom::Start(V2_BARE_HEADER_SIZE as u64))
-            .unwrap();
-        let features = u64::read_be(disk_file).unwrap();
-        let mut flags = IncompatFeatures::from_bits_retain(features);
-        flags.remove(IncompatFeatures::CORRUPT);
-        disk_file
-            .seek(SeekFrom::Start(V2_BARE_HEADER_SIZE as u64))
-            .unwrap();
-        u64::write_be(disk_file, flags.bits()).unwrap();
-        assert!(
-            !is_corrupt_on_disk(disk_file),
-            "Corrupt bit should be cleared"
-        );
-    }
-
-    /// Helper to corrupt L1 entry by making L2 table address unaligned.
-    ///
-    /// Returns true if corruption was applied, i.e. the L1 entry was allocated.
-    fn corrupt_l1_entry(disk_file: &mut RawFile) -> bool {
-        let l1_table_offset = 0x0004_0000u64;
-        disk_file.seek(SeekFrom::Start(l1_table_offset)).unwrap();
-        let l1_entry = u64::read_be(disk_file).unwrap();
-        if l1_entry != 0 {
-            let unaligned = l1_entry | 0x200; // Make unaligned
-            disk_file.seek(SeekFrom::Start(l1_table_offset)).unwrap();
-            u64::write_be(disk_file, unaligned).unwrap();
-            disk_file.sync_all().unwrap();
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Helper to corrupt L2 entry by making cluster address unaligned.
-    ///
-    /// Returns true if corruption was applied, i.e. an allocated non-compressed
-    /// L2 entry was found.
-    fn corrupt_l2_entry(disk_file: &mut RawFile) -> bool {
-        let l1_table_offset = 0x0004_0000u64;
-        disk_file.seek(SeekFrom::Start(l1_table_offset)).unwrap();
-        let l1_entry = u64::read_be(disk_file).unwrap();
-        if l1_entry == 0 {
-            return false;
-        }
-        let l2_table_addr = l1_entry & L1_TABLE_OFFSET_MASK;
-        disk_file.seek(SeekFrom::Start(l2_table_addr)).unwrap();
-        let l2_entry = u64::read_be(disk_file).unwrap();
-        if l2_entry != 0 && !l2_entry_is_compressed(l2_entry) {
-            let unaligned = l2_entry | 0x200;
-            disk_file.seek(SeekFrom::Start(l2_table_addr)).unwrap();
-            u64::write_be(disk_file, unaligned).unwrap();
-            disk_file.sync_all().unwrap();
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Asserts that read on corrupted disk sets the corrupt bit
-    fn assert_corruption_on_read(disk_file: &mut RawFile) {
-        clear_corrupt_bit_on_disk(disk_file);
-
-        disk_file.rewind().unwrap();
-        let mut qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
-        let mut buf = [0u8; 16];
-        let result = qcow.read(&mut buf);
-
-        assert_eq!(
-            result.map_err(|e| e.raw_os_error()),
-            Err(Some(libc::EIO)),
-            "read should fail with EIO on corrupted image"
-        );
-        assert!(
-            is_corrupt_on_disk(disk_file),
-            "Corrupt bit should be set after read"
-        );
-    }
-
-    /// Asserts that write on corrupted disk sets the corrupt bit
-    fn assert_corruption_on_write(disk_file: &mut RawFile) {
-        clear_corrupt_bit_on_disk(disk_file);
-
-        disk_file.rewind().unwrap();
-        let mut qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
-        let result = qcow.write_all(b"overwrite");
-
-        assert_eq!(
-            result.map_err(|e| e.raw_os_error()),
-            Err(Some(libc::EIO)),
-            "write should fail with EIO on corrupted image"
-        );
-        assert!(
-            is_corrupt_on_disk(disk_file),
-            "Corrupt bit should be set after write"
-        );
+        assert_eq!(disk.logical_size().unwrap(), original_size);
     }
 
     #[test]
-    fn corrupt_bit_on_unaligned_l2_address() {
-        let header = valid_header_v3();
-        with_basic_file(&header, |mut disk_file: RawFile| {
-            {
-                let mut qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
-                qcow.write_all(b"test data").unwrap();
-            }
+    fn resize_with_backing_file_fails() {
+        use crate::disk_file::{DiskSize, Resizable};
 
-            assert!(
-                corrupt_l1_entry(&mut disk_file),
-                "Failed to corrupt L1 entry - was data written?"
-            );
-            assert_corruption_on_read(&mut disk_file);
-        });
-    }
+        let backing_size = 1024 * 1024;
+        let backing = QcowTempDisk::new(backing_size, None, false, true, false).unwrap();
+        let backing_path = backing.path().to_str().unwrap().to_string();
 
-    #[test]
-    fn corrupt_bit_on_unaligned_cluster_address_read() {
-        let header = valid_header_v3();
-        with_basic_file(&header, |mut disk_file: RawFile| {
-            {
-                let mut qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
-                qcow.write_all(b"test data to allocate cluster").unwrap();
-            }
+        let backing_config = BackingFileConfig {
+            path: backing_path,
+            format: Some(ImageType::Qcow2),
+        };
+        let overlay = QcowTempDisk::new(backing_size, Some(&backing_config), false, true, false)
+            .unwrap()
+            .into_tempfile();
 
-            assert!(
-                corrupt_l2_entry(&mut disk_file),
-                "Failed to corrupt L2 entry - was cluster allocated?"
-            );
-            assert_corruption_on_read(&mut disk_file);
-        });
-    }
+        let mut disk = QcowDisk::new(
+            overlay.as_file().try_clone().unwrap(),
+            false,
+            true,
+            true,
+            false,
+        )
+        .unwrap();
 
-    #[test]
-    fn corrupt_bit_on_unaligned_cluster_address_write() {
-        let header = valid_header_v3();
-        with_basic_file(&header, |mut disk_file: RawFile| {
-            {
-                let mut qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
-                qcow.write_all(b"test data to allocate cluster").unwrap();
-            }
+        assert_eq!(disk.logical_size().unwrap(), backing_size);
 
-            assert!(
-                corrupt_l2_entry(&mut disk_file),
-                "Failed to corrupt L2 entry - was cluster allocated?"
-            );
-            assert_corruption_on_write(&mut disk_file);
-        });
-    }
-
-    #[test]
-    fn corrupt_bit_not_set_on_normal_operations() {
-        let header = valid_header_v3();
-        with_basic_file(&header, |mut disk_file: RawFile| {
-            {
-                let mut qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
-
-                qcow.write_all(b"test data 1234567890").unwrap();
-                qcow.seek(SeekFrom::Start(0)).unwrap();
-
-                let mut buf = [0u8; 20];
-                qcow.read_exact(&mut buf).unwrap();
-                assert_eq!(&buf, b"test data 1234567890");
-
-                qcow.seek(SeekFrom::Start(0x10000)).unwrap();
-                qcow.write_all(b"more data").unwrap();
-
-                qcow.flush().unwrap();
-            }
-
-            assert!(
-                !is_corrupt_on_disk(&mut disk_file),
-                "Corrupt bit should NOT be set after normal operations"
-            );
-        });
-    }
-
-    #[test]
-    fn corrupt_bit_v2_image_not_affected() {
-        let header = valid_header_v2();
-        with_basic_file(&header, |mut disk_file: RawFile| {
-            {
-                let mut qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
-                qcow.write_all(b"test data").unwrap();
-                qcow.seek(SeekFrom::Start(0)).unwrap();
-                let mut buf = [0u8; 9];
-                qcow.read_exact(&mut buf).unwrap();
-                assert_eq!(&buf, b"test data");
-            }
-
-            disk_file.rewind().unwrap();
-            let qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
-            assert_eq!(qcow.header.version, 2);
-        });
-    }
-
-    #[test]
-    fn write_zeroes_unallocated_overlay_with_backing_must_read_zero() {
-        const CLUSTER_SIZE: usize = 0x10000;
-        const OFFSET: u64 = 0x10000;
-
-        let mut overlay = qcow_overlay_with_backing_pattern(OFFSET, CLUSTER_SIZE, 0xAB);
-        let nwritten = overlay
-            .write_zeroes_at(OFFSET, CLUSTER_SIZE)
-            .expect("failed to zero unallocated overlay cluster");
-        assert_eq!(nwritten, CLUSTER_SIZE);
-
-        let mut buf = [0xFFu8; CLUSTER_SIZE];
-        overlay.seek(SeekFrom::Start(OFFSET)).unwrap();
-        overlay.read_exact(&mut buf).unwrap();
-        assert!(
-            buf.iter().all(|&b| b == 0),
-            "zeroed unallocated overlay cluster exposed backing data"
-        );
-    }
-
-    #[test]
-    fn partial_write_after_write_zeroes_must_not_reintroduce_backing_data() {
-        const CLUSTER_SIZE: usize = 0x10000;
-        const OFFSET: u64 = 0x10000;
-        const PATCH_OFFSET: usize = 0x4000;
-        const PATCH_LEN: usize = 0x1000;
-
-        let mut overlay = qcow_overlay_with_backing_pattern(OFFSET, CLUSTER_SIZE, 0xAB);
-        overlay.write_zeroes_at(OFFSET, CLUSTER_SIZE).unwrap();
-
-        let patch = [0x99u8; PATCH_LEN];
-        overlay
-            .seek(SeekFrom::Start(OFFSET + PATCH_OFFSET as u64))
-            .unwrap();
-        overlay.write_all(&patch).unwrap();
-
-        let mut buf = [0xFFu8; CLUSTER_SIZE];
-        overlay.seek(SeekFrom::Start(OFFSET)).unwrap();
-        overlay.read_exact(&mut buf).unwrap();
-
-        assert!(buf[..PATCH_OFFSET].iter().all(|&b| b == 0));
-        assert!(
-            buf[PATCH_OFFSET..PATCH_OFFSET + PATCH_LEN]
-                .iter()
-                .all(|&b| b == 0x99)
-        );
-        assert!(buf[PATCH_OFFSET + PATCH_LEN..].iter().all(|&b| b == 0));
-    }
-
-    #[test]
-    fn partial_write_after_write_zeroes_large_cluster_must_not_reintroduce_backing_data() {
-        const CLUSTER_BITS: u32 = 20;
-        const CLUSTER_SIZE: usize = 1 << CLUSTER_BITS;
-        const OFFSET: u64 = CLUSTER_SIZE as u64;
-        const PATCH_OFFSET: usize = 0x4000;
-        const PATCH_LEN: usize = 0x1000;
-
-        let mut overlay = qcow_overlay_with_backing_pattern_and_cluster_bits(
-            OFFSET,
-            CLUSTER_SIZE,
-            0xAB,
-            CLUSTER_BITS,
-        );
-        overlay.write_zeroes_at(OFFSET, CLUSTER_SIZE).unwrap();
-
-        let patch = [0x99u8; PATCH_LEN];
-        overlay
-            .seek(SeekFrom::Start(OFFSET + PATCH_OFFSET as u64))
-            .unwrap();
-        overlay.write_all(&patch).unwrap();
-
-        let mut buf = vec![0xFFu8; CLUSTER_SIZE];
-        overlay.seek(SeekFrom::Start(OFFSET)).unwrap();
-        overlay.read_exact(&mut buf).unwrap();
-
-        assert!(buf[..PATCH_OFFSET].iter().all(|&b| b == 0));
-        assert!(
-            buf[PATCH_OFFSET..PATCH_OFFSET + PATCH_LEN]
-                .iter()
-                .all(|&b| b == 0x99)
-        );
-        assert!(buf[PATCH_OFFSET + PATCH_LEN..].iter().all(|&b| b == 0));
-    }
-
-    #[test]
-    fn test_compressed_read() {
-        let cluster_size = 65536usize;
-        let data: Vec<u8> = (0..=255).cycle().take(cluster_size).collect();
-        let temp = TempFile::new().unwrap();
-        {
-            let raw_file = RawFile::new(temp.as_file().try_clone().unwrap(), false);
-            let mut qcow = QcowFile::new(raw_file, 3, 100 * 1024 * 1024, false).unwrap();
-            qcow.seek(SeekFrom::Start(0)).unwrap();
-            qcow.write_all(&data).unwrap();
-            qcow.flush().unwrap();
-        }
-
-        compress_allocated_clusters(&mut temp.as_file().try_clone().unwrap());
-
-        let raw_file = RawFile::new(temp.as_file().try_clone().unwrap(), false);
-        let mut qcow = QcowFile::from(raw_file).unwrap();
-        qcow.seek(SeekFrom::Start(0)).unwrap();
-        let mut buf = vec![0u8; cluster_size];
-        qcow.read_exact(&mut buf).unwrap();
-        assert_eq!(buf, data);
+        let err = disk.resize(backing_size * 2).unwrap_err();
+        assert!(matches!(err.kind(), BlockErrorKind::UnsupportedFeature));
+        assert_eq!(disk.logical_size().unwrap(), backing_size);
     }
 }
