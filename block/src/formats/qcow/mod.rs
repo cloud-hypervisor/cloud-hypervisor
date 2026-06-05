@@ -12,27 +12,31 @@ pub mod internal;
 pub mod worker;
 
 use std::fs::File;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 use std::io::Seek;
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 use std::{fmt, io};
 
+#[cfg(any(test, feature = "test-utils"))]
 use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 use vmm_sys_util::tempfile::TempFile;
 
 use self::internal::backing::shared_backing_from;
 use self::internal::metadata::{BackingRead, QcowMetadata};
 use self::internal::qcow_raw_file::QcowRawFile;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 use self::internal::{BackingFileConfig, Error as QcowError, QcowHeader};
 use self::internal::{MAX_NESTING_DEPTH, RawFile, parse_qcow};
 #[cfg(feature = "io_uring")]
 use self::worker::async_uring::QcowAsync;
 use self::worker::sync::QcowSync;
-use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError, GuestMemoryTarget};
+#[cfg(any(test, feature = "test-utils"))]
+use crate::async_io::GuestMemoryTarget;
+use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError};
 use crate::disk_file;
+#[cfg(any(test, feature = "test-utils"))]
 use crate::disk_file::AsyncDiskFile;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 
@@ -106,6 +110,7 @@ impl QcowDisk {
     }
 
     /// Synchronous write convenience for tests and benchmarks.
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn write_all_at(&self, offset: u64, data: &[u8]) {
         let mut async_io = self.create_async_io(1).unwrap();
         let mem =
@@ -121,7 +126,7 @@ impl QcowDisk {
 }
 
 /// Writes a fresh qcow2 layout into `file`
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 pub(crate) fn create_image(
     file: &File,
     virtual_size: u64,
@@ -152,13 +157,13 @@ pub(crate) fn create_image(
 }
 
 /// Helper struct to create a new qcow2 image in a temporary file.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 pub struct QcowTempDisk {
     tmp: TempFile,
     disk: QcowDisk,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 impl QcowTempDisk {
     /// Creates a new qcow2 image in a temporary file with optional
     /// backing file. Flags are passed to QcowDisk::new.

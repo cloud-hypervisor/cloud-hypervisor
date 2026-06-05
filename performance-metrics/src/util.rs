@@ -7,7 +7,7 @@
 //! Shared benchmark helpers.
 
 use std::fs::File;
-use std::io::{ErrorKind, Seek, SeekFrom, Write};
+use std::io::ErrorKind;
 use std::os::unix::fs::FileExt;
 use std::process::Command;
 use std::sync::Arc;
@@ -15,8 +15,8 @@ use std::thread;
 use std::time::Duration;
 
 use block::async_io::{AsyncIo, GuestMemoryTarget};
-use block::formats::qcow::QcowDisk;
-use block::formats::qcow::internal::{BackingFileConfig, ImageType, QcowFile, RawFile};
+use block::formats::qcow::internal::{BackingFileConfig, ImageType};
+use block::formats::qcow::{QcowDisk, QcowTempDisk};
 use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::tempfile::TempFile;
@@ -37,21 +37,18 @@ pub fn sized_tempfile(num_blocks: usize) -> TempFile {
 /// the tempfile handle.
 ///
 /// Each cluster is default QCOW2 cluster size of 64 KiB. The image is
-/// created via `QcowFile::new` then populated with writes so that the
-/// clusters are actually allocated in the L2 / refcount tables.
+/// created via `QcowTempDisk::new` then populated with writes via the
+/// synchronous AsyncIo backend so that the clusters are actually
+/// allocated in the L2 / refcount tables.
 fn create_qcow_tempfile(num_clusters: usize) -> TempFile {
-    let tmp = TempFile::new().expect("failed to create tempfile");
     let virtual_size = QCOW_CLUSTER_SIZE * num_clusters as u64;
-    let raw = RawFile::new(tmp.as_file().try_clone().unwrap(), false);
-    let mut qcow = QcowFile::new(raw, 3, virtual_size, true).expect("failed to create QCOW2 file");
+    let tmp_disk = QcowTempDisk::new(virtual_size, None, false, true, false)
+        .expect("failed to create QCOW2 file");
     let buf = vec![0xA5u8; QCOW_CLUSTER_SIZE as usize];
-    for i in 0..num_clusters {
-        qcow.seek(SeekFrom::Start(i as u64 * QCOW_CLUSTER_SIZE))
-            .expect("seek failed");
-        qcow.write_all(&buf).expect("write failed");
+    for i in 0..num_clusters as u64 {
+        tmp_disk.disk().write_all_at(i * QCOW_CLUSTER_SIZE, &buf);
     }
-    qcow.flush().expect("flush failed");
-    tmp
+    tmp_disk.into_tempfile()
 }
 
 /// Create a QCOW2 image with `num_clusters` allocated clusters opened
@@ -196,11 +193,10 @@ pub fn drain_async_completions(async_io: &mut dyn AsyncIo, count: usize) {
 /// Create an empty QCOW2 image sized for `num_clusters` clusters.
 /// No data clusters are allocated.
 fn create_empty_qcow_tempfile(num_clusters: usize) -> TempFile {
-    let tmp = TempFile::new().expect("failed to create tempfile");
     let virtual_size = QCOW_CLUSTER_SIZE * num_clusters as u64;
-    let raw = RawFile::new(tmp.as_file().try_clone().unwrap(), false);
-    QcowFile::new(raw, 3, virtual_size, true).expect("failed to create qcow2 file");
-    tmp
+    QcowTempDisk::new(virtual_size, None, false, true, false)
+        .expect("failed to create qcow2 file")
+        .into_tempfile()
 }
 
 /// Empty QCOW2 opened via QcowDisk with synchronous backend.
@@ -241,16 +237,13 @@ fn create_overlay_tempfiles(num_clusters: usize) -> (TempFile, TempFile) {
         }
     }
 
-    let overlay = TempFile::new().expect("failed to create overlay tempfile");
-    {
-        let raw = RawFile::new(overlay.as_file().try_clone().unwrap(), false);
-        let backing_config = BackingFileConfig {
-            path: backing.as_path().to_str().unwrap().to_string(),
-            format: Some(ImageType::Raw),
-        };
-        QcowFile::new_from_backing(raw, 3, virtual_size, &backing_config, true)
-            .expect("failed to create overlay qcow2");
-    }
+    let backing_config = BackingFileConfig {
+        path: backing.as_path().to_str().unwrap().to_string(),
+        format: Some(ImageType::Raw),
+    };
+    let overlay = QcowTempDisk::new(virtual_size, Some(&backing_config), false, true, false)
+        .expect("failed to create overlay qcow2")
+        .into_tempfile();
 
     (backing, overlay)
 }
@@ -360,17 +353,14 @@ pub const L2_ENTRIES_PER_TABLE: usize = QCOW_CLUSTER_SIZE as usize / 8;
 /// spanning `num_l2_tables` L2 tables.
 fn create_sparse_qcow_tempfile(num_l2_tables: usize) -> TempFile {
     let virtual_size = QCOW_CLUSTER_SIZE * (num_l2_tables as u64 * L2_ENTRIES_PER_TABLE as u64);
-    let tmp = TempFile::new().expect("failed to create tempfile");
-    let raw = RawFile::new(tmp.as_file().try_clone().unwrap(), false);
-    let mut qcow = QcowFile::new(raw, 3, virtual_size, true).expect("failed to create qcow2 file");
+    let tmp_disk = QcowTempDisk::new(virtual_size, None, false, true, false)
+        .expect("failed to create qcow2 file");
     let buf = vec![0xA5u8; QCOW_CLUSTER_SIZE as usize];
-    for i in 0..num_l2_tables {
-        let offset = i as u64 * L2_ENTRIES_PER_TABLE as u64 * QCOW_CLUSTER_SIZE;
-        qcow.seek(SeekFrom::Start(offset)).expect("seek failed");
-        qcow.write_all(&buf).expect("write failed");
+    for i in 0..num_l2_tables as u64 {
+        let offset = i * L2_ENTRIES_PER_TABLE as u64 * QCOW_CLUSTER_SIZE;
+        tmp_disk.disk().write_all_at(offset, &buf);
     }
-    qcow.flush().expect("flush failed");
-    tmp
+    tmp_disk.into_tempfile()
 }
 
 /// Sparse QCOW2 opened via QcowDisk with synchronous backend.
