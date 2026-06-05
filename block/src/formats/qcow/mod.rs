@@ -12,17 +12,21 @@ pub mod internal;
 pub mod worker;
 
 use std::fs::File;
+#[cfg(test)]
 use std::io::Seek;
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 use std::{fmt, io};
 
+#[cfg(test)]
+use vmm_sys_util::tempfile::TempFile;
+
 use self::internal::backing::shared_backing_from;
 use self::internal::metadata::{BackingRead, QcowMetadata};
 use self::internal::qcow_raw_file::QcowRawFile;
-use self::internal::{
-    BackingFileConfig, Error as QcowError, MAX_NESTING_DEPTH, QcowHeader, RawFile, parse_qcow,
-};
+#[cfg(test)]
+use self::internal::{BackingFileConfig, Error as QcowError, QcowHeader};
+use self::internal::{MAX_NESTING_DEPTH, RawFile, parse_qcow};
 #[cfg(feature = "io_uring")]
 use self::worker::async_uring::QcowAsync;
 use self::worker::sync::QcowSync;
@@ -101,7 +105,7 @@ impl QcowDisk {
 }
 
 /// Writes a fresh qcow2 layout into `file`
-#[expect(dead_code)]
+#[cfg(test)]
 pub(crate) fn create_image(
     file: &File,
     virtual_size: u64,
@@ -129,6 +133,58 @@ pub(crate) fn create_image(
     // Flush dirty caches and clear the dirty bit
     QcowMetadata::new(inner).shutdown();
     Ok(())
+}
+
+/// Helper struct to create a new qcow2 image in a temporary file.
+#[cfg(test)]
+pub struct QcowTempDisk {
+    tmp: TempFile,
+    disk: QcowDisk,
+}
+
+#[cfg(test)]
+impl QcowTempDisk {
+    /// Creates a new qcow2 image in a temporary file with optional
+    /// backing file. Flags are passed to QcowDisk::new.
+    pub fn new(
+        virtual_size: u64,
+        backing_config: Option<&BackingFileConfig>,
+        direct_io: bool,
+        sparse: bool,
+        use_io_uring: bool,
+    ) -> BlockResult<Self> {
+        let tmp = TempFile::new().map_err(io::Error::from)?;
+        create_image(tmp.as_file(), virtual_size, backing_config)?;
+        let file = tmp
+            .as_file()
+            .try_clone()
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::Clone(e)))?;
+        let disk = QcowDisk::new(
+            file,
+            direct_io,
+            backing_config.is_some(),
+            sparse,
+            use_io_uring,
+        )?;
+        Ok(Self { tmp, disk })
+    }
+
+    pub fn path(&self) -> &std::path::Path {
+        self.tmp.as_path()
+    }
+
+    pub fn as_file(&self) -> &File {
+        self.tmp.as_file()
+    }
+
+    pub fn disk(&self) -> &QcowDisk {
+        &self.disk
+    }
+
+    /// Drops the disk handle and returns the underlying TempFile.
+    pub fn into_tempfile(self) -> TempFile {
+        self.tmp
+    }
 }
 
 impl Drop for QcowDisk {
