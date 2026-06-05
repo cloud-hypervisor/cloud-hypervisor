@@ -342,6 +342,7 @@ mod unit_tests {
     use std::io::{Read, Seek, SeekFrom, Write};
     use std::os::fd::RawFd;
     use std::path::Path;
+    use std::sync::Arc;
     use std::{env, thread};
 
     use vmm_sys_util::tempdir::TempDir;
@@ -351,11 +352,12 @@ mod unit_tests {
     use crate::async_io::{AsyncIoCompletion, OwnedIoBuffer};
     use crate::disk_file::{AsyncDiskFile, DiskSize, Resizable};
     use crate::error::BlockErrorKind;
-    use crate::formats::qcow::QcowDisk;
+    use crate::formats::qcow;
     use crate::formats::qcow::common::unit_tests::compress_allocated_clusters;
     use crate::formats::qcow::internal::{
-        BackingFileConfig, Error as QcowError, ImageType, QcowFile, QcowHeader, RawFile,
+        BackingFileConfig, Error as QcowError, ImageType, QcowHeader, RawFile,
     };
+    use crate::formats::qcow::{QcowDisk, QcowTempDisk};
 
     const TEST_L1_L2_ADDR_MASK: u64 = 0x00ff_ffff_ffff_fe00;
     const TEST_HEADER_L1_TABLE_OFFSET: u64 = 40;
@@ -416,14 +418,15 @@ mod unit_tests {
         sparse: bool,
         direct_io: bool,
     ) -> (TempFile, QcowDisk) {
-        let temp_file = TempFile::new().unwrap();
-        {
-            let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
-            let mut qcow_file = QcowFile::new(raw_file, 3, file_size, sparse).unwrap();
-            qcow_file.seek(SeekFrom::Start(offset)).unwrap();
-            qcow_file.write_all(data).unwrap();
-            qcow_file.flush().unwrap();
-        }
+        let temp_file = if data.is_empty() {
+            QcowTempDisk::new(file_size, None, false, sparse, false)
+                .unwrap()
+                .into_tempfile()
+        } else {
+            let tmp_disk = QcowTempDisk::new(file_size, None, false, sparse, false).unwrap();
+            tmp_disk.disk().write_all_at(offset, data);
+            tmp_disk.into_tempfile()
+        };
         let disk = QcowDisk::new(
             temp_file.as_file().try_clone().unwrap(),
             direct_io,
@@ -446,15 +449,13 @@ mod unit_tests {
         backing_temp.as_file().sync_all().unwrap();
         let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
 
-        let overlay_temp = TempFile::new().unwrap();
-        {
-            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
-            let backing_config = BackingFileConfig {
-                path: backing_path,
-                format: Some(ImageType::Raw),
-            };
-            QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
-        }
+        let backing_config = BackingFileConfig {
+            path: backing_path,
+            format: Some(ImageType::Raw),
+        };
+        let overlay_temp = QcowTempDisk::new(file_size, Some(&backing_config), false, true, false)
+            .unwrap()
+            .into_tempfile();
 
         let disk = QcowDisk::new(
             overlay_temp.as_file().try_clone().unwrap(),
@@ -644,17 +645,20 @@ mod unit_tests {
         let data = vec![0xFF; 64 * 1024];
         let (_temp, _) = create_disk_with_data(100 * 1024 * 1024, &[], 0, true, false);
 
-        // Write data at multiple offsets via QcowFile first, then punch
+        // Populate four 64 KiB regions at 128 KiB strides so the subsequent
+        // punch_hole calls have allocated clusters to operate on.
         {
-            let temp_file = _temp.as_file().try_clone().unwrap();
-            let raw_file = RawFile::new(temp_file, false);
-            let mut qcow_file = QcowFile::from(raw_file).unwrap();
+            let disk = QcowDisk::new(
+                _temp.as_file().try_clone().unwrap(),
+                false,
+                false,
+                true,
+                false,
+            )
+            .unwrap();
             for i in 0..4u64 {
-                let off = i * 128 * 1024;
-                qcow_file.seek(SeekFrom::Start(off)).unwrap();
-                qcow_file.write_all(&data).unwrap();
+                disk.write_all_at(i * 128 * 1024, &data);
             }
-            qcow_file.flush().unwrap();
         }
 
         let disk = QcowDisk::new(
@@ -819,16 +823,13 @@ mod unit_tests {
         backing_temp.as_file().sync_all().unwrap();
         let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
 
-        let overlay_temp = TempFile::new().unwrap();
-        {
-            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
-            let backing_config = BackingFileConfig {
-                path: backing_path,
-                format: Some(ImageType::Raw),
-            };
-            let _overlay =
-                QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
-        }
+        let backing_config = BackingFileConfig {
+            path: backing_path,
+            format: Some(ImageType::Raw),
+        };
+        let overlay_temp = QcowTempDisk::new(file_size, Some(&backing_config), false, true, false)
+            .unwrap()
+            .into_tempfile();
 
         let file = overlay_temp.as_file().try_clone().unwrap();
         let disk = QcowDisk::new(file, direct_io, true, true, false).unwrap();
@@ -883,22 +884,18 @@ mod unit_tests {
     }
 
     fn create_qcow2_overlay(overlay_path: &Path, backing_path: &str, file_size: u64) {
-        let raw = RawFile::new(
-            OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(overlay_path)
-                .unwrap(),
-            false,
-        );
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(overlay_path)
+            .unwrap();
         let backing_config = BackingFileConfig {
             path: backing_path.to_string(),
             format: Some(ImageType::Raw),
         };
-        let _overlay =
-            QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
+        qcow::create_image(&file, file_size, Some(&backing_config)).unwrap();
     }
 
     fn create_qcow2_overlay_header(overlay_path: &Path, backing_path: &str, file_size: u64) {
@@ -1115,29 +1112,21 @@ mod unit_tests {
     }
 
     fn test_backing_file_read_qcow2_backing_impl(direct_io: bool) {
-        let backing_temp = TempFile::new().unwrap();
         let cluster_size = 1u64 << 16;
         let file_size = cluster_size * 4;
         let pattern: Vec<u8> = (0..file_size as usize).map(|i| (i % 251) as u8).collect();
-        {
-            let raw = RawFile::new(backing_temp.as_file().try_clone().unwrap(), false);
-            let mut qcow = QcowFile::new(raw, 3, file_size, true).unwrap();
-            qcow.seek(SeekFrom::Start(0)).unwrap();
-            qcow.write_all(&pattern).unwrap();
-            qcow.flush().unwrap();
-        }
+        let backing = QcowTempDisk::new(file_size, None, false, true, false).unwrap();
+        backing.disk().write_all_at(0, &pattern);
+        let backing_temp = backing.into_tempfile();
         let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
 
-        let overlay_temp = TempFile::new().unwrap();
-        {
-            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
-            let backing_config = BackingFileConfig {
-                path: backing_path,
-                format: Some(ImageType::Qcow2),
-            };
-            let _overlay =
-                QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
-        }
+        let backing_config = BackingFileConfig {
+            path: backing_path,
+            format: Some(ImageType::Qcow2),
+        };
+        let overlay_temp = QcowTempDisk::new(file_size, Some(&backing_config), false, true, false)
+            .unwrap()
+            .into_tempfile();
 
         let file = overlay_temp.as_file().try_clone().unwrap();
         let disk = QcowDisk::new(file, direct_io, true, true, false).unwrap();
@@ -1238,29 +1227,21 @@ mod unit_tests {
     fn test_multi_queue_concurrent_reads_qcow2_backing_impl(direct_io: bool) {
         // Same as above but reads go through a Qcow2Backing,
         // exercising concurrent metadata resolution + pread64 in the backing.
-        let backing_temp = TempFile::new().unwrap();
         let cluster_size = 1u64 << 16;
         let file_size = cluster_size * 16;
         let pattern: Vec<u8> = (0..file_size as usize).map(|i| (i % 251) as u8).collect();
-        {
-            let raw = RawFile::new(backing_temp.as_file().try_clone().unwrap(), false);
-            let mut qcow = QcowFile::new(raw, 3, file_size, true).unwrap();
-            qcow.seek(SeekFrom::Start(0)).unwrap();
-            qcow.write_all(&pattern).unwrap();
-            qcow.flush().unwrap();
-        }
+        let backing = QcowTempDisk::new(file_size, None, false, true, false).unwrap();
+        backing.disk().write_all_at(0, &pattern);
+        let backing_temp = backing.into_tempfile();
         let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
 
-        let overlay_temp = TempFile::new().unwrap();
-        {
-            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
-            let backing_config = BackingFileConfig {
-                path: backing_path,
-                format: Some(ImageType::Qcow2),
-            };
-            let _overlay =
-                QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
-        }
+        let backing_config = BackingFileConfig {
+            path: backing_path,
+            format: Some(ImageType::Qcow2),
+        };
+        let overlay_temp = QcowTempDisk::new(file_size, Some(&backing_config), false, true, false)
+            .unwrap()
+            .into_tempfile();
 
         let file = overlay_temp.as_file().try_clone().unwrap();
         let disk = Arc::new(QcowDisk::new(file, direct_io, true, true, false).unwrap());
@@ -1313,37 +1294,37 @@ mod unit_tests {
         let base_path = base_temp.as_path().to_str().unwrap().to_string();
 
         // Layer 1: qcow2 mid pointing at raw base, write to cluster 0 only
-        let mid_temp = TempFile::new().unwrap();
         let mid_pattern = vec![0xBBu8; cluster_size as usize];
-        {
-            let raw = RawFile::new(mid_temp.as_file().try_clone().unwrap(), false);
-            let backing_config = BackingFileConfig {
+        let mid = QcowTempDisk::new(
+            file_size,
+            Some(&BackingFileConfig {
                 path: base_path,
                 format: Some(ImageType::Raw),
-            };
-            let mut mid =
-                QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
-            mid.seek(SeekFrom::Start(0)).unwrap();
-            mid.write_all(&mid_pattern).unwrap();
-            mid.flush().unwrap();
-        }
+            }),
+            false,
+            true,
+            false,
+        )
+        .unwrap();
+        mid.disk().write_all_at(0, &mid_pattern);
+        let mid_temp = mid.into_tempfile();
         let mid_path = mid_temp.as_path().to_str().unwrap().to_string();
 
         // Layer 2: qcow2 overlay pointing at qcow2 mid, write to cluster 1 only
-        let overlay_temp = TempFile::new().unwrap();
         let overlay_pattern = vec![0xCCu8; cluster_size as usize];
-        {
-            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
-            let backing_config = BackingFileConfig {
+        let overlay = QcowTempDisk::new(
+            file_size,
+            Some(&BackingFileConfig {
                 path: mid_path,
                 format: Some(ImageType::Qcow2),
-            };
-            let mut overlay =
-                QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
-            overlay.seek(SeekFrom::Start(cluster_size)).unwrap();
-            overlay.write_all(&overlay_pattern).unwrap();
-            overlay.flush().unwrap();
-        }
+            }),
+            false,
+            true,
+            false,
+        )
+        .unwrap();
+        overlay.disk().write_all_at(cluster_size, &overlay_pattern);
+        let overlay_temp = overlay.into_tempfile();
 
         let file = overlay_temp.as_file().try_clone().unwrap();
         let disk = QcowDisk::new(file, direct_io, true, true, false).unwrap();
@@ -1399,26 +1380,18 @@ mod unit_tests {
         let file_size = cluster_size * num_clusters;
         let pattern: Vec<u8> = (0..file_size as usize).map(|i| (i % 251) as u8).collect();
 
-        let backing_temp = TempFile::new().unwrap();
-        {
-            let raw = RawFile::new(backing_temp.as_file().try_clone().unwrap(), false);
-            let mut qcow = QcowFile::new(raw, 3, file_size, true).unwrap();
-            qcow.seek(SeekFrom::Start(0)).unwrap();
-            qcow.write_all(&pattern).unwrap();
-            qcow.flush().unwrap();
-        }
+        let backing = QcowTempDisk::new(file_size, None, false, true, false).unwrap();
+        backing.disk().write_all_at(0, &pattern);
+        let backing_temp = backing.into_tempfile();
         let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
 
-        let overlay_temp = TempFile::new().unwrap();
-        {
-            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
-            let backing_config = BackingFileConfig {
-                path: backing_path,
-                format: Some(ImageType::Qcow2),
-            };
-            let _overlay =
-                QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
-        }
+        let backing_config = BackingFileConfig {
+            path: backing_path,
+            format: Some(ImageType::Qcow2),
+        };
+        let overlay_temp = QcowTempDisk::new(file_size, Some(&backing_config), false, true, false)
+            .unwrap()
+            .into_tempfile();
 
         let file = overlay_temp.as_file().try_clone().unwrap();
         let disk = QcowDisk::new(file, direct_io, true, true, false).unwrap();
@@ -1471,26 +1444,21 @@ mod unit_tests {
         let backing_size = cluster_size * 2;
         let overlay_size = cluster_size * 4; // overlay is larger than backing
 
-        let backing_temp = TempFile::new().unwrap();
-        {
-            let raw = RawFile::new(backing_temp.as_file().try_clone().unwrap(), false);
-            let mut qcow = QcowFile::new(raw, 3, backing_size, true).unwrap();
-            qcow.seek(SeekFrom::Start(0)).unwrap();
-            qcow.write_all(&vec![0xAA; backing_size as usize]).unwrap();
-            qcow.flush().unwrap();
-        }
+        let backing = QcowTempDisk::new(backing_size, None, false, true, false).unwrap();
+        backing
+            .disk()
+            .write_all_at(0, &vec![0xAA; backing_size as usize]);
+        let backing_temp = backing.into_tempfile();
         let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
 
-        let overlay_temp = TempFile::new().unwrap();
-        {
-            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
-            let backing_config = BackingFileConfig {
-                path: backing_path,
-                format: Some(ImageType::Qcow2),
-            };
-            let _overlay =
-                QcowFile::new_from_backing(raw, 3, overlay_size, &backing_config, true).unwrap();
-        }
+        let backing_config = BackingFileConfig {
+            path: backing_path,
+            format: Some(ImageType::Qcow2),
+        };
+        let overlay_temp =
+            QcowTempDisk::new(overlay_size, Some(&backing_config), false, true, false)
+                .unwrap()
+                .into_tempfile();
 
         let file = overlay_temp.as_file().try_clone().unwrap();
         let disk = QcowDisk::new(file, direct_io, true, true, false).unwrap();
@@ -1520,27 +1488,20 @@ mod unit_tests {
         let backing_size = cluster_size * 2;
         let overlay_size = cluster_size * 4;
 
-        let backing_temp = TempFile::new().unwrap();
         let backing_data = vec![0xBBu8; backing_size as usize];
-        {
-            let raw = RawFile::new(backing_temp.as_file().try_clone().unwrap(), false);
-            let mut qcow = QcowFile::new(raw, 3, backing_size, true).unwrap();
-            qcow.seek(SeekFrom::Start(0)).unwrap();
-            qcow.write_all(&backing_data).unwrap();
-            qcow.flush().unwrap();
-        }
+        let backing = QcowTempDisk::new(backing_size, None, false, true, false).unwrap();
+        backing.disk().write_all_at(0, &backing_data);
+        let backing_temp = backing.into_tempfile();
         let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
 
-        let overlay_temp = TempFile::new().unwrap();
-        {
-            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
-            let backing_config = BackingFileConfig {
-                path: backing_path,
-                format: Some(ImageType::Qcow2),
-            };
-            let _overlay =
-                QcowFile::new_from_backing(raw, 3, overlay_size, &backing_config, true).unwrap();
-        }
+        let backing_config = BackingFileConfig {
+            path: backing_path,
+            format: Some(ImageType::Qcow2),
+        };
+        let overlay_temp =
+            QcowTempDisk::new(overlay_size, Some(&backing_config), false, true, false)
+                .unwrap()
+                .into_tempfile();
 
         let file = overlay_temp.as_file().try_clone().unwrap();
         let disk = QcowDisk::new(file, direct_io, true, true, false).unwrap();
@@ -1584,16 +1545,14 @@ mod unit_tests {
         backing_temp.as_file().sync_all().unwrap();
         let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
 
-        let overlay_temp = TempFile::new().unwrap();
-        {
-            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
-            let backing_config = BackingFileConfig {
-                path: backing_path,
-                format: Some(ImageType::Raw),
-            };
-            let _overlay =
-                QcowFile::new_from_backing(raw, 3, overlay_size, &backing_config, true).unwrap();
-        }
+        let backing_config = BackingFileConfig {
+            path: backing_path,
+            format: Some(ImageType::Raw),
+        };
+        let overlay_temp =
+            QcowTempDisk::new(overlay_size, Some(&backing_config), false, true, false)
+                .unwrap()
+                .into_tempfile();
 
         let file = overlay_temp.as_file().try_clone().unwrap();
         let disk = QcowDisk::new(file, direct_io, true, true, false).unwrap();
@@ -1635,26 +1594,18 @@ mod unit_tests {
         let file_size = cluster_size * 4;
         let pattern: Vec<u8> = (0..file_size as usize).map(|i| (i % 251) as u8).collect();
 
-        let backing_temp = TempFile::new().unwrap();
-        {
-            let raw = RawFile::new(backing_temp.as_file().try_clone().unwrap(), false);
-            let mut qcow = QcowFile::new(raw, 3, file_size, true).unwrap();
-            qcow.seek(SeekFrom::Start(0)).unwrap();
-            qcow.write_all(&pattern).unwrap();
-            qcow.flush().unwrap();
-        }
+        let backing = QcowTempDisk::new(file_size, None, false, true, false).unwrap();
+        backing.disk().write_all_at(0, &pattern);
+        let backing_temp = backing.into_tempfile();
         let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
 
-        let overlay_temp = TempFile::new().unwrap();
-        {
-            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
-            let backing_config = BackingFileConfig {
-                path: backing_path,
-                format: Some(ImageType::Qcow2),
-            };
-            let _overlay =
-                QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
-        }
+        let backing_config = BackingFileConfig {
+            path: backing_path,
+            format: Some(ImageType::Qcow2),
+        };
+        let overlay_temp = QcowTempDisk::new(file_size, Some(&backing_config), false, true, false)
+            .unwrap()
+            .into_tempfile();
 
         let file = overlay_temp.as_file().try_clone().unwrap();
         let disk = QcowDisk::new(file, direct_io, true, true, false).unwrap();
@@ -1702,16 +1653,13 @@ mod unit_tests {
         backing_temp.as_file().sync_all().unwrap();
         let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
 
-        let overlay_temp = TempFile::new().unwrap();
-        {
-            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
-            let backing_config = BackingFileConfig {
-                path: backing_path,
-                format: Some(ImageType::Raw),
-            };
-            let _overlay =
-                QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
-        }
+        let backing_config = BackingFileConfig {
+            path: backing_path,
+            format: Some(ImageType::Raw),
+        };
+        let overlay_temp = QcowTempDisk::new(file_size, Some(&backing_config), false, true, false)
+            .unwrap()
+            .into_tempfile();
 
         let file = overlay_temp.as_file().try_clone().unwrap();
         let disk = QcowDisk::new(file, direct_io, true, true, false).unwrap();
@@ -1812,16 +1760,13 @@ mod unit_tests {
         backing_temp.as_file().sync_all().unwrap();
         let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
 
-        let overlay_temp = TempFile::new().unwrap();
-        {
-            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
-            let backing_config = BackingFileConfig {
-                path: backing_path,
-                format: Some(ImageType::Raw),
-            };
-            let _overlay =
-                QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
-        }
+        let backing_config = BackingFileConfig {
+            path: backing_path,
+            format: Some(ImageType::Raw),
+        };
+        let overlay_temp = QcowTempDisk::new(file_size, Some(&backing_config), false, true, false)
+            .unwrap()
+            .into_tempfile();
 
         let file = overlay_temp.as_file().try_clone().unwrap();
         let disk = QcowDisk::new(file, direct_io, true, true, false).unwrap();
@@ -1972,16 +1917,13 @@ mod unit_tests {
         backing_temp.as_file().sync_all().unwrap();
         let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
 
-        let overlay_temp = TempFile::new().unwrap();
-        {
-            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
-            let backing_config = BackingFileConfig {
-                path: backing_path,
-                format: Some(ImageType::Raw),
-            };
-            let _overlay =
-                QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
-        }
+        let backing_config = BackingFileConfig {
+            path: backing_path,
+            format: Some(ImageType::Raw),
+        };
+        let overlay_temp = QcowTempDisk::new(file_size, Some(&backing_config), false, true, false)
+            .unwrap()
+            .into_tempfile();
 
         let file = overlay_temp.as_file().try_clone().unwrap();
         let mut disk = QcowDisk::new(file, false, true, true, false).unwrap();
