@@ -1249,23 +1249,12 @@ pub fn get_seccomp_filter(
 ) -> Result<BpfProgram, Error> {
     match seccomp_action {
         SeccompAction::Allow => Ok(vec![]),
-        SeccompAction::Log => SeccompFilter::new(
-            get_seccomp_rules(thread_type, hypervisor_type)
-                .map_err(Error::Backend)?
-                .into_iter()
-                .collect(),
-            SeccompAction::Log,
-            SeccompAction::Allow,
-            consts::ARCH.try_into().unwrap(),
-        )
-        .and_then(|filter| filter.try_into())
-        .map_err(Error::Backend),
         _ => SeccompFilter::new(
             get_seccomp_rules(thread_type, hypervisor_type)
                 .map_err(Error::Backend)?
                 .into_iter()
                 .collect(),
-            SeccompAction::Trap,
+            seccomp_action.clone(),
             SeccompAction::Allow,
             consts::ARCH.try_into().unwrap(),
         )
