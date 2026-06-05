@@ -90,6 +90,7 @@ mod kvm {
     pub const KVM_CREATE_IRQCHIP: u64 = 0xae60;
     pub const KVM_RUN: u64 = 0xae80;
     pub const KVM_SET_MP_STATE: u64 = 0x4004_ae99;
+    pub const KVM_X86_SET_MSR_FILTER: u64 = 0x4188aec6;
     pub const KVM_SET_GSI_ROUTING: u64 = 0x4008_ae6a;
     pub const KVM_SET_DEVICE_ATTR: u64 = 0x4018_aee1;
     pub const KVM_HAS_DEVICE_ATTR: u64 = 0x4018_aee3;
@@ -260,6 +261,7 @@ fn create_vmm_ioctl_seccomp_rule_common_kvm() -> Result<Vec<SeccompRule>, Backen
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_HAS_DEVICE_ATTR,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_GSI_ROUTING)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_MP_STATE)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, KVM_X86_SET_MSR_FILTER,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_ONE_REG)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_REGS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_USER_MEMORY_REGION,)?],
