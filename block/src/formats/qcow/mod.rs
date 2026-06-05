@@ -18,6 +18,7 @@ use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 use std::{fmt, io};
 
+use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
 #[cfg(test)]
 use vmm_sys_util::tempfile::TempFile;
 
@@ -30,8 +31,9 @@ use self::internal::{MAX_NESTING_DEPTH, RawFile, parse_qcow};
 #[cfg(feature = "io_uring")]
 use self::worker::async_uring::QcowAsync;
 use self::worker::sync::QcowSync;
-use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError};
+use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError, GuestMemoryTarget};
 use crate::disk_file;
+use crate::disk_file::AsyncDiskFile;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 
 /// Unified DiskFile wrapper for QCOW2 disk images.
@@ -101,6 +103,20 @@ impl QcowDisk {
             data_raw_file,
             use_io_uring,
         })
+    }
+
+    /// Synchronous write convenience for tests and benchmarks.
+    pub fn write_all_at(&self, offset: u64, data: &[u8]) {
+        let mut async_io = self.create_async_io(1).unwrap();
+        let mem =
+            Arc::new(GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), data.len())]).unwrap());
+        mem.write_slice(data, GuestAddress(0)).unwrap();
+        let range = [(GuestAddress(0), data.len() as u32)];
+        let target = GuestMemoryTarget::new(Arc::clone(&mem), &range).unwrap();
+        async_io
+            .write_from_memory(offset as libc::off_t, target, 0)
+            .unwrap();
+        while async_io.next_completed_request().is_some() {}
     }
 }
 
@@ -288,9 +304,6 @@ impl disk_file::AsyncDiskFile for QcowDisk {
 
 #[cfg(test)]
 mod unit_tests {
-    use vmm_sys_util::tempfile::TempFile;
-
-    use self::internal::{QcowFile, RawFile};
     use super::*;
     use crate::async_io::AsyncIo;
     use crate::disk_file::{AsyncDiskFile, DiskSize, PhysicalSize};
@@ -298,12 +311,10 @@ mod unit_tests {
     const TEST_SIZE: u64 = 0x5566_7788;
 
     fn make_qcow_file() -> File {
-        let temp_file = TempFile::new().unwrap();
-        {
-            let raw = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
-            QcowFile::new(raw, 3, TEST_SIZE, true).unwrap();
-        }
-        temp_file.into_file()
+        QcowTempDisk::new(TEST_SIZE, None, false, true, false)
+            .unwrap()
+            .into_tempfile()
+            .into_file()
     }
 
     #[test]
