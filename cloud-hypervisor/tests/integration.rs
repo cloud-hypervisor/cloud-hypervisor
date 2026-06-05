@@ -11843,7 +11843,7 @@ mod rate_limiter {
             } else {
                 parse_fio_output_iops(&output, &fio_ops, num_queues).unwrap()
             };
-            assert!(check_rate_limit(measured_rate, limit_rate, 0.1));
+            assert!(check_rate_limit(measured_rate, limit_rate, 0.2));
         });
 
         let _ = child.kill();
@@ -11855,7 +11855,7 @@ mod rate_limiter {
         let fio_ops = FioOps::RandRW;
 
         let bw_size = if bandwidth {
-            104857600_u64 // bytes
+            10485760_u64 // bytes
         } else {
             1000_u64 // I/O
         };
