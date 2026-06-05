@@ -1148,6 +1148,9 @@ pub struct DeviceManager {
     #[cfg(feature = "ivshmem")]
     // ivshmem device
     ivshmem_device: Option<Arc<Mutex<devices::IvshmemDevice>>>,
+
+    #[cfg(feature = "fw_cfg")]
+    boot_order: HashMap<u16, String>,
 }
 
 /// Create per-PCI-segment MMIO allocators over the range `[start, end]`.
@@ -1438,6 +1441,8 @@ impl DeviceManager {
             #[cfg(feature = "ivshmem")]
             ivshmem_device: None,
             _acpi_cpu_hotplug_controller: acpi_cpu_hotplug_controller,
+            #[cfg(feature = "fw_cfg")]
+            boot_order: HashMap::new(),
         };
 
         let device_manager = Arc::new(Mutex::new(device_manager));
@@ -2879,6 +2884,11 @@ impl DeviceManager {
             .lock()
             .unwrap()
             .insert(id.clone(), device_node!(id, migratable_device));
+
+        #[cfg(feature = "fw_cfg")]
+        if let Some(bootindex) = disk_cfg.bootindex {
+            self.boot_order.insert(bootindex, id.clone());
+        }
 
         Ok(MetaVirtioDevice {
             virtio_device,
@@ -4434,11 +4444,31 @@ impl DeviceManager {
         }
 
         // Update the device tree with correct resource information.
+        #[cfg(feature = "fw_cfg")]
+        let node_id = node.id.clone();
+
         node.resources = new_resources;
         node.migratable = Some(Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn Migratable>>);
         node.pci_bdf = Some(pci_device_bdf);
         node.pci_device_handle = Some(PciDeviceHandle::Virtio(virtio_pci_device));
-        self.device_tree.lock().unwrap().insert(id, node);
+        self.device_tree.lock().unwrap().insert(id.clone(), node);
+
+        #[cfg(feature = "fw_cfg")]
+        {
+            // Find the virtio device in the boot item list
+            let boot_entry = self
+                .boot_order
+                .iter()
+                .find(|(_k, v)| *v == virtio_device_id);
+
+            // Update the device ID in the boot item list
+            if let Some((k, _)) = boot_entry {
+                self.boot_order.insert(
+                    *k,
+                    self.device_tree.lock().unwrap().fw_cfg_path_by_id(&node_id),
+                );
+            }
+        }
 
         Ok(pci_device_bdf)
     }
@@ -5362,6 +5392,19 @@ impl DeviceManager {
             debug!("Drop VfioOps given no active VFIO devices.");
             self.vfio_ops = None;
         }
+    }
+
+    /// Returns a list of devices to boot from in the order expected
+    #[cfg(feature = "fw_cfg")]
+    pub fn get_bootitems(&self) -> Vec<String> {
+        let mut result: Vec<String> = Vec::new();
+        let mut keys: Vec<u16> = self.boot_order.clone().into_keys().collect();
+        keys.sort();
+
+        for k in &keys {
+            result.push(self.boot_order.get(k).unwrap().clone());
+        }
+        result
     }
 }
 
