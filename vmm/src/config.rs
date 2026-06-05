@@ -1373,6 +1373,7 @@ impl PciDeviceCommonConfig {
 }
 
 impl DiskConfig {
+    #[cfg(not(feature = "fw_cfg"))]
     pub const SYNTAX: &'static str = "Disk parameters \
          \"path=<disk_image_path>,readonly=on|off,direct=on|off,iommu=on|off,\
          num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,\
@@ -1384,6 +1385,20 @@ impl DiskConfig {
          queue_affinity=<list_of_queue_indices_with_their_associated_cpuset>,\
          serial=<serial_number>,backing_files=on|off,sparse=on|off,\
          image_type=<raw,qcow2,vhd,vhdx>,lock_granularity=byte-range|full";
+
+    #[cfg(feature = "fw_cfg")]
+    pub const SYNTAX: &'static str = "Disk parameters \
+         \"path=<disk_image_path>,readonly=on|off,direct=on|off,iommu=on|off,\
+         num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,\
+         vhost_user=on|off,socket=<vhost_user_socket_path>,\
+         bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
+         ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,\
+         id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>,\
+         rate_limit_group=<group_id>,\
+         queue_affinity=<list_of_queue_indices_with_their_associated_cpuset>,\
+         serial=<serial_number>,backing_files=on|off,sparse=on|off,\
+         image_type=<raw,qcow2,vhd,vhdx>,lock_granularity=byte-range|full,\
+         bootindex=<index>";
 
     pub fn parse(disk: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -1411,6 +1426,9 @@ impl DiskConfig {
             .add("image_type")
             .add("lock_granularity")
             .add_all(PciDeviceCommonConfig::OPTIONS_IOMMU);
+
+        #[cfg(feature = "fw_cfg")]
+        parser.add("bootindex");
 
         parser.parse(disk).map_err(Error::ParseDisk)?;
 
@@ -1541,6 +1559,11 @@ impl DiskConfig {
 
         let pci_common = PciDeviceCommonConfig::parse(disk)?;
 
+        #[cfg(feature = "fw_cfg")]
+        let bootindex = parser
+            .convert::<u16>("bootindex")
+            .map_err(Error::ParseDisk)?;
+
         Ok(DiskConfig {
             pci_common,
             path,
@@ -1560,6 +1583,8 @@ impl DiskConfig {
             sparse,
             image_type,
             lock_granularity,
+            #[cfg(feature = "fw_cfg")]
+            bootindex,
         })
     }
 
@@ -4134,6 +4159,8 @@ mod unit_tests {
             sparse: true,
             image_type: ImageType::Unknown,
             lock_granularity: LockGranularityChoice::default(),
+            #[cfg(feature = "fw_cfg")]
+            bootindex: Default::default(),
         }
     }
 

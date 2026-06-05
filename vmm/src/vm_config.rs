@@ -391,6 +391,9 @@ pub struct DiskConfig {
     pub image_type: ImageType,
     #[serde(default)]
     pub lock_granularity: LockGranularityChoice,
+    #[cfg(feature = "fw_cfg")]
+    #[serde(default)]
+    pub bootindex: Option<u16>,
 }
 
 impl ApplyLandlock for DiskConfig {
