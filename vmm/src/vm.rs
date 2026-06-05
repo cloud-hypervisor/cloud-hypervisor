@@ -38,7 +38,7 @@ use devices::AcpiNotificationFlags;
 #[cfg(target_arch = "aarch64")]
 use devices::interrupt_controller;
 #[cfg(feature = "fw_cfg")]
-use devices::legacy::fw_cfg::FwCfgItem;
+use devices::legacy::fw_cfg::{FwCfgContent, FwCfgItem};
 use event_monitor::event;
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
@@ -1218,8 +1218,8 @@ impl Vm {
             initramfs_option = initramfs;
         }
         let mut fw_cfg_item_list_option: Option<Vec<FwCfgItem>> = None;
+        let mut fw_cfg_item_list = vec![];
         if let Some(fw_cfg_items) = &fw_cfg_config.items {
-            let mut fw_cfg_item_list = vec![];
             for fw_cfg_item in fw_cfg_items.item_list.clone() {
                 let content = match (fw_cfg_item.string, fw_cfg_item.file) {
                     (Some(string_val), None) => {
@@ -1238,6 +1238,28 @@ impl Vm {
                     content,
                 });
             }
+        }
+        // Create bootorder entry in fw_cfg
+        {
+            let mut content: Vec<u8> = Vec::new();
+            let bootitems = device_manager.lock().unwrap().get_bootitems();
+            for (index, boot_item) in bootitems.iter().enumerate() {
+                let cstring = std::ffi::CString::new(boot_item.as_str()).unwrap();
+                if index == (bootitems.len() - 1) {
+                    content.extend_from_slice(cstring.as_bytes_with_nul());
+                } else {
+                    content.extend_from_slice(cstring.as_bytes());
+                    content.extend_from_slice(std::ffi::CString::new("\n").unwrap().as_bytes());
+                }
+            }
+            let bootorder_item = FwCfgItem {
+                name: "bootorder".to_string(),
+                content: FwCfgContent::Bytes(content),
+            };
+            fw_cfg_item_list.push(bootorder_item);
+        }
+
+        if !fw_cfg_item_list.is_empty() {
             fw_cfg_item_list_option = Some(fw_cfg_item_list);
         }
 
