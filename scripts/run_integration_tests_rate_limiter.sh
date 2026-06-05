@@ -51,7 +51,7 @@ cargo build --features mshv --all --release --target "$BUILD_TARGET"
 export RUST_BACKTRACE=1
 export RUSTFLAGS="$RUSTFLAGS"
 
-time cargo nextest run -p cloud-hypervisor --no-tests=pass $test_features --test-threads=1 "rate_limiter::$test_filter" -- ${test_binary_args[*]}
+time cargo nextest run -p cloud-hypervisor --no-tests=pass --no-fail-fast $test_features --test-threads=1 "rate_limiter::$test_filter" -- ${test_binary_args[*]}
 RES=$?
 
 exit $RES

@@ -713,9 +713,6 @@ jobs:
         run: scripts/dev_cli.sh tests --integration-windows --libc musl
   integration-rate-limiter:
     name: integration-rate-limiter
-    needs: [preflight, dco, quality, build]
-    if: >-
-      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
     runs-on: garm-jammy-16
     env:
       AUTH_DOWNLOAD_TOKEN: ${{ secrets.AUTH_DOWNLOAD_TOKEN }}
