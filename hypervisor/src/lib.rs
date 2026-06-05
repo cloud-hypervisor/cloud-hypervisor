@@ -33,6 +33,13 @@ pub mod kvm;
 #[cfg(feature = "mshv")]
 pub mod mshv;
 
+/// Apple Hypervisor.framework implementation module (macOS, arm64)
+#[cfg(feature = "hvf")]
+pub mod hvf;
+
+/// Cross-platform compatibility shims (e.g. macOS EventFd)
+pub mod compat;
+
 /// Hypervisor related module
 mod hypervisor;
 
@@ -70,6 +77,8 @@ pub enum HypervisorType {
     Kvm,
     #[cfg(feature = "mshv")]
     Mshv,
+    #[cfg(feature = "hvf")]
+    Hvf,
 }
 
 pub fn new() -> std::result::Result<Arc<dyn Hypervisor>, HypervisorError> {
@@ -81,6 +90,11 @@ pub fn new() -> std::result::Result<Arc<dyn Hypervisor>, HypervisorError> {
     #[cfg(feature = "mshv")]
     if mshv::MshvHypervisor::is_available()? {
         return mshv::MshvHypervisor::new();
+    }
+
+    #[cfg(feature = "hvf")]
+    if hvf::HvfHypervisor::is_available()? {
+        return hvf::HvfHypervisor::new();
     }
 
     Err(HypervisorError::HypervisorCreate(anyhow!(
@@ -144,6 +158,8 @@ pub enum MpState {
     Kvm(kvm_bindings::kvm_mp_state),
     #[cfg(feature = "mshv")]
     Mshv, /* MSHV does not support MpState yet */
+    #[cfg(feature = "hvf")]
+    Hvf, /* HVF has no explicit MP state */
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -159,6 +175,8 @@ pub enum CpuState {
     Kvm(kvm::VcpuKvmState),
     #[cfg(feature = "mshv")]
     Mshv(mshv::VcpuMshvState),
+    #[cfg(feature = "hvf")]
+    Hvf(hvf::VcpuHvfState),
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -169,6 +187,8 @@ impl CpuState {
             CpuState::Kvm(state) => &state.pre_finalize_regs,
             #[cfg(feature = "mshv")]
             CpuState::Mshv(_) => &[],
+            #[cfg(feature = "hvf")]
+            CpuState::Hvf(_) => &[],
         }
     }
 }
@@ -230,6 +250,8 @@ pub enum IrqRoutingEntry {
     Kvm(kvm_bindings::kvm_irq_routing_entry),
     #[cfg(feature = "mshv")]
     Mshv(mshv_bindings::mshv_user_irq_entry),
+    #[cfg(feature = "hvf")]
+    Hvf(hvf::HvfIrqRoutingEntry),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -238,6 +260,8 @@ pub enum VcpuInit {
     Kvm(kvm_bindings::kvm_vcpu_init),
     #[cfg(all(feature = "mshv", target_arch = "aarch64"))]
     Mshv(mshv_bindings::MshvVcpuInit),
+    #[cfg(all(feature = "hvf", target_arch = "aarch64"))]
+    Hvf(hvf::HvfVcpuInit),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -246,6 +270,8 @@ pub enum RegList {
     Kvm(kvm_bindings::RegList),
     #[cfg(all(feature = "mshv", target_arch = "aarch64"))]
     Mshv(mshv_bindings::MshvRegList),
+    #[cfg(all(feature = "hvf", target_arch = "aarch64"))]
+    Hvf(hvf::HvfRegList),
 }
 
 pub enum Register {
@@ -262,6 +288,8 @@ pub enum StandardRegisters {
     Kvm(kvm_bindings::kvm_riscv_core),
     #[cfg(any(feature = "mshv", feature = "mshv_emulator"))]
     Mshv(mshv_bindings::StandardRegisters),
+    #[cfg(all(feature = "hvf", target_arch = "aarch64"))]
+    Hvf(hvf::HvfStandardRegisters),
 }
 
 macro_rules! set_x86_64_reg {
@@ -353,6 +381,8 @@ macro_rules! set_aarch64_reg {
                         StandardRegisters::Kvm(s) => s.regs.$reg_name = val,
                         #[cfg(feature = "mshv")]
                         StandardRegisters::Mshv(s) => s.$reg_name = val,
+                        #[cfg(feature = "hvf")]
+                        StandardRegisters::Hvf(s) => s.$reg_name = val,
                     }
                 }
             }
@@ -371,6 +401,8 @@ macro_rules! get_aarch64_reg {
                         StandardRegisters::Kvm(s) => s.regs.$reg_name,
                         #[cfg(feature = "mshv")]
                         StandardRegisters::Mshv(s) => s.$reg_name,
+                        #[cfg(feature = "hvf")]
+                        StandardRegisters::Hvf(s) => s.$reg_name,
                     }
                 }
             }

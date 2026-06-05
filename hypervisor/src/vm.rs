@@ -20,7 +20,8 @@ use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
 #[cfg(feature = "sev_snp")]
 use igvm_defs::SnpPolicy;
 use thiserror::Error;
-use vmm_sys_util::eventfd::EventFd;
+
+use crate::compat::EventFd;
 
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
@@ -384,7 +385,8 @@ pub trait Vm: Send + Sync + Any {
     /// Set guest clock.
     #[cfg(target_arch = "x86_64")]
     fn set_clock(&self, data: &ClockData) -> Result<()>;
-    /// Create a device that is used for passthrough
+    /// Create a device that is used for passthrough (Linux/VFIO only)
+    #[cfg(target_os = "linux")]
     fn create_passthrough_device(&self) -> Result<vfio_ioctls::VfioDeviceFd>;
     /// Start logging dirty pages
     fn start_dirty_log(&self) -> Result<()>;

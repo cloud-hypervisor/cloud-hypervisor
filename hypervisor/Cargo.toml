@@ -7,6 +7,9 @@ rust-version.workspace = true
 version = "0.1.0"
 
 [features]
+# Apple Hypervisor.framework backend (macOS, arm64). Links the system
+# Hypervisor.framework via build.rs; pulls in no external crates.
+hvf = []
 kvm = ["kvm-bindings", "kvm-ioctls", "vfio-ioctls/kvm"]
 mshv = ["mshv-bindings", "mshv-ioctls", "mshv_emulator", "vfio-ioctls/mshv"]
 mshv_emulator = ["iced-x86", "mshv-bindings"]
@@ -38,7 +41,6 @@ serde_with = { workspace = true, default-features = false, features = [
   "macros",
 ] }
 thiserror = { workspace = true }
-vfio-ioctls = { workspace = true, default-features = false }
 vm-memory = { workspace = true, features = [
   "backend-atomic",
   "backend-bitmap",
@@ -46,6 +48,11 @@ vm-memory = { workspace = true, features = [
 ] }
 vmm-sys-util = { workspace = true, features = ["with-serde"] }
 zerocopy = { workspace = true, features = ["derive"] }
+
+# VFIO passthrough is Linux-only (ioctl/eventfd based); keep it off other hosts
+# such as macOS so the crate can build there for the Hypervisor.framework backend.
+[target.'cfg(target_os = "linux")'.dependencies]
+vfio-ioctls = { workspace = true, default-features = false }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies.iced-x86]
 default-features = false
