@@ -56,6 +56,17 @@ pub const SYSREG_TPIDR_EL0: u16 = 0xde82;
 pub const SYSREG_TPIDRRO_EL0: u16 = 0xde83;
 pub const SYSREG_SP_EL1: u16 = 0xe208;
 
+// hv_interrupt_type_t
+pub const HV_INTERRUPT_TYPE_IRQ: u32 = 0;
+#[allow(dead_code)]
+pub const HV_INTERRUPT_TYPE_FIQ: u32 = 1;
+
+// hv_gic_distributor_reg_t — register offsets within the distributor.
+#[allow(dead_code)]
+pub const HV_GIC_DIST_REG_GICD_CTLR: u32 = 0x0000;
+#[allow(dead_code)]
+pub const HV_GIC_DIST_REG_GICD_TYPER: u32 = 0x0004;
+
 /// `hv_vcpu_exit_exception_t`.
 #[repr(C)]
 pub struct HvVcpuExitException {
@@ -84,4 +95,43 @@ unsafe extern "C" {
     pub fn hv_vcpu_set_sys_reg(vcpu: u64, reg: u16, value: u64) -> i32;
     pub fn hv_vcpu_get_sys_reg(vcpu: u64, reg: u16, value: *mut u64) -> i32;
     pub fn hv_vcpu_run(vcpu: u64) -> i32;
+    pub fn hv_vcpu_set_pending_interrupt(vcpu: u64, ty: u32, pending: bool) -> i32;
+    pub fn hv_vcpu_set_vtimer_mask(vcpu: u64, masked: bool) -> i32;
+
+    // GIC configuration object (os_object, released with os_release).
+    pub fn hv_gic_config_create() -> *mut c_void;
+    pub fn hv_gic_config_set_distributor_base(config: *mut c_void, base: u64) -> i32;
+    pub fn hv_gic_config_set_redistributor_base(config: *mut c_void, base: u64) -> i32;
+    // MSI/ITS region setup — reserved for when irqfd/GSI routing lands.
+    #[allow(dead_code)]
+    pub fn hv_gic_config_set_msi_region_base(config: *mut c_void, base: u64) -> i32;
+    #[allow(dead_code)]
+    pub fn hv_gic_config_set_msi_interrupt_range(config: *mut c_void, base: u32, count: u32)
+        -> i32;
+
+    // GIC lifecycle, register access and interrupt injection.
+    pub fn hv_gic_create(config: *mut c_void) -> i32;
+    #[allow(dead_code)]
+    pub fn hv_gic_reset() -> i32;
+    pub fn hv_gic_set_spi(intid: u32, level: bool) -> i32;
+    pub fn hv_gic_get_distributor_reg(reg: u32, value: *mut u64) -> i32;
+    #[allow(dead_code)]
+    pub fn hv_gic_set_distributor_reg(reg: u32, value: u64) -> i32;
+    #[allow(dead_code)]
+    pub fn hv_gic_get_redistributor_size(size: *mut usize) -> i32;
+    #[allow(dead_code)]
+    pub fn hv_gic_get_distributor_size(size: *mut usize) -> i32;
+    #[allow(dead_code)]
+    pub fn hv_gic_get_spi_interrupt_range(base: *mut u32, count: *mut u32) -> i32;
+
+    // GIC state save/restore (os_object state handle).
+    pub fn hv_gic_state_create() -> *mut c_void;
+    pub fn hv_gic_state_get_size(state: *mut c_void, size: *mut usize) -> i32;
+    pub fn hv_gic_state_get_data(state: *mut c_void, data: *mut c_void) -> i32;
+    pub fn hv_gic_set_state(data: *const c_void, size: usize) -> i32;
+}
+
+unsafe extern "C" {
+    /// Release an `os_object` (e.g. an `hv_gic_config_t`/`hv_gic_state_t`).
+    pub fn os_release(object: *mut c_void);
 }

@@ -232,3 +232,67 @@ fn hvf_snapshot_restore_midflight() {
         );
     }
 }
+
+/// Create a managed GICv3 through the real `Vm::create_vgic` trait path, prove
+/// it is live by reading `GICD_TYPER`, then round-trip its state through
+/// `state()`/`set_state()` — the same mechanism guest-interrupt snapshots use.
+#[test]
+fn hvf_vgic_create_and_state_roundtrip() {
+    use hypervisor::arch::aarch64::gic::VgicConfig;
+    use hypervisor::hvf::gic::HvfGicV3;
+
+    // GICv3 layout in guest-physical space, clear of the RAM window and
+    // 16 KiB-page aligned.
+    let config = VgicConfig {
+        vcpu_count: 1,
+        dist_addr: 0x1000_0000,
+        dist_size: 0x1_0000,
+        redists_addr: 0x1010_0000,
+        redists_size: 0x20_0000,
+        msi_addr: 0,
+        msi_size: 0,
+        nr_irqs: 256,
+    };
+
+    let hv = hypervisor::new().expect("hypervisor::new() — is the test binary codesigned?");
+    let vm = hv
+        .create_vm(HypervisorVmConfig {
+            nested: false,
+            smt_enabled: false,
+        })
+        .expect("create_vm");
+
+    // Ordering matters: hv_gic_create must run after the VM exists but before
+    // any vCPU is created.
+    let gic = vm.create_vgic(&config).expect("create_vgic");
+
+    // GICD_TYPER (offset 0x4) must be readable from the live distributor and
+    // advertise a non-empty SPI space (ITLinesNumber in bits [4:0]).
+    let typer = {
+        let mut guard = gic.lock().unwrap();
+        let concrete = guard
+            .as_any_concrete_mut()
+            .downcast_mut::<HvfGicV3>()
+            .expect("HVF GIC concrete type");
+        let typer = concrete
+            .distributor_reg(hypervisor::hvf::gic::GICD_TYPER)
+            .expect("read GICD_TYPER from live GIC");
+        // SPI assertion is also driven through the public set_spi path.
+        concrete.set_spi(32, true).expect("assert SPI 32");
+        concrete.set_spi(32, false).expect("deassert SPI 32");
+        typer
+    };
+    assert_ne!(typer & 0x1f, 0, "GICD_TYPER reported zero interrupt lines");
+
+    // Snapshot the controller and restore it — the rehydration round-trip.
+    let snap = gic.lock().unwrap().state().expect("GIC state()");
+    let snap_clone = snap.clone();
+    assert!(
+        matches!(&snap, hypervisor::arch::aarch64::gic::GicState::Hvf(s) if !s.data.is_empty()),
+        "expected non-empty HVF GIC state blob"
+    );
+    gic.lock()
+        .unwrap()
+        .set_state(&snap_clone)
+        .expect("GIC set_state() restore");
+}

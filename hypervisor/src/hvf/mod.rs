@@ -22,6 +22,7 @@
 use std::any::Any;
 use std::ffi::c_void;
 use std::ptr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::anyhow;
@@ -37,6 +38,8 @@ use crate::{
 
 mod ffi;
 use ffi::*;
+pub mod gic;
+use gic::HvfGicV3;
 
 type CpuResult<T> = std::result::Result<T, HypervisorCpuError>;
 type VmResult<T> = std::result::Result<T, HypervisorVmError>;
@@ -144,6 +147,8 @@ impl crate::Hypervisor for HvfHypervisor {
         }
         Ok(Arc::new(HvfVm {
             mappings: Mutex::new(Vec::new()),
+            gic: Mutex::new(None),
+            vcpu_created: AtomicBool::new(false),
         }))
     }
 
@@ -170,6 +175,8 @@ struct Mapping {
 /// One HVF VM. Owns the process-global VM lifetime and the IPA mappings.
 pub struct HvfVm {
     mappings: Mutex<Vec<Mapping>>,
+    gic: Mutex<Option<Arc<Mutex<HvfGicV3>>>>,
+    vcpu_created: AtomicBool,
 }
 
 impl Drop for HvfVm {
@@ -210,6 +217,7 @@ impl Vm for HvfVm {
                 ret as u32
             )));
         }
+        self.vcpu_created.store(true, Ordering::SeqCst);
         Ok(Box::new(HvfVcpu {
             id: vcpu_id,
             index: id,
@@ -218,10 +226,26 @@ impl Vm for HvfVm {
         }))
     }
 
-    fn create_vgic(&self, _config: &VgicConfig) -> VmResult<Arc<Mutex<dyn Vgic>>> {
-        Err(HypervisorVmError::CreateVgic(anyhow!(
-            "HVF GIC (hv_gic) support is not yet implemented"
-        )))
+    fn create_vgic(&self, config: &VgicConfig) -> VmResult<Arc<Mutex<dyn Vgic>>> {
+        // hv_gic_create must run after the VM exists but before any vCPU is
+        // created; enforce that ordering (and single creation) here rather than
+        // relying on HVF to reject a misordered call.
+        if self.vcpu_created.load(Ordering::SeqCst) {
+            return Err(HypervisorVmError::CreateVgic(anyhow!(
+                "hv_gic must be created before any vCPU"
+            )));
+        }
+        let mut slot = self.gic.lock().unwrap();
+        if slot.is_some() {
+            return Err(HypervisorVmError::CreateVgic(anyhow!(
+                "GIC already created for this VM"
+            )));
+        }
+        let gic =
+            HvfGicV3::new(config).map_err(|e| HypervisorVmError::CreateVgic(anyhow!("{e}")))?;
+        let gic = Arc::new(Mutex::new(gic));
+        *slot = Some(gic.clone());
+        Ok(gic)
     }
 
     fn register_ioevent(
@@ -656,7 +680,23 @@ impl Vcpu for HvfVcpu {
                     ))),
                 }
             }
-            HV_EXIT_REASON_VTIMER_ACTIVATED => Ok(VmExit::Ignore),
+            HV_EXIT_REASON_VTIMER_ACTIVATED => {
+                // The virtual timer fired and was auto-masked on exit. Follow
+                // Apple's documented pattern: assert the vCPU IRQ line and
+                // unmask the timer so the guest can service and re-arm it.
+                //
+                // UNVERIFIED: no test drives a real GIC-enabled guest that
+                // programs CNTV and takes the timer PPI, so end-to-end timer
+                // interrupt delivery is not yet proven. The code is the correct
+                // first step but must not be claimed as working delivery.
+                if let Err(rc) = gic::inject_vtimer(self.id) {
+                    return Err(HypervisorCpuError::RunVcpu(anyhow!(
+                        "failed to inject vtimer interrupt: {:#010x}",
+                        rc as u32
+                    )));
+                }
+                Ok(VmExit::Ignore)
+            }
             HV_EXIT_REASON_CANCELED => Ok(VmExit::Ignore),
             other => Err(HypervisorCpuError::RunVcpu(anyhow!(
                 "unexpected HVF exit reason: {other}"
