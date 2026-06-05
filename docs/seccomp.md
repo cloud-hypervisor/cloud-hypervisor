@@ -57,6 +57,22 @@ $ ausyscall 47
 recvmsg
 ```
 
+### Returning EPERM instead of killing the VMM
+
+Append `--seccomp errno` to make prohibited system calls return `EPERM` to the
+caller instead of terminating the process. This lets the VMM keep running so a
+regression caused by an unknown syscall can be observed without an immediate
+crash, at the cost of turning the violation into a soft failure visible only as
+a syscall error.
+
+By default the kernel does not log `errno` actions. To audit them, ensure
+`errno` is included in the host's `kernel.seccomp.actions_logged` sysctl, for
+example:
+
+```
+# sysctl -w kernel.seccomp.actions_logged='kill_process kill_thread trap errno log'
+```
+
 ### Further debug with `strace`
 
 One more way of debugging seccomp related issues is to use the `strace` tool as
