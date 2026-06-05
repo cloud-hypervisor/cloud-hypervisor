@@ -12,6 +12,7 @@ pub mod internal;
 pub mod worker;
 
 use std::fs::File;
+use std::io::Seek;
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 use std::{fmt, io};
@@ -19,7 +20,9 @@ use std::{fmt, io};
 use self::internal::backing::shared_backing_from;
 use self::internal::metadata::{BackingRead, QcowMetadata};
 use self::internal::qcow_raw_file::QcowRawFile;
-use self::internal::{MAX_NESTING_DEPTH, RawFile, parse_qcow};
+use self::internal::{
+    BackingFileConfig, Error as QcowError, MAX_NESTING_DEPTH, QcowHeader, RawFile, parse_qcow,
+};
 #[cfg(feature = "io_uring")]
 use self::worker::async_uring::QcowAsync;
 use self::worker::sync::QcowSync;
@@ -95,6 +98,37 @@ impl QcowDisk {
             use_io_uring,
         })
     }
+}
+
+/// Writes a fresh qcow2 layout into `file`
+#[expect(dead_code)]
+pub(crate) fn create_image(
+    file: &File,
+    virtual_size: u64,
+    backing_config: Option<&BackingFileConfig>,
+) -> BlockResult<()> {
+    let path = backing_config.map(|cfg| cfg.path.as_str());
+    let mut header = QcowHeader::create_for_size_and_path(3, virtual_size, path)
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
+    if let Some(cfg) = backing_config
+        && let Some(backing_file) = &mut header.backing_file
+    {
+        backing_file.format = cfg.format;
+    }
+    let mut raw = RawFile::new(
+        file.try_clone()
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::Clone(e)))?,
+        false,
+    );
+    raw.rewind()
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, QcowError::SeekingFile(e)))?;
+    header
+        .write_to(&mut raw)
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
+    let (inner, _backing, _sparse) = parse_qcow(raw, MAX_NESTING_DEPTH, true)?;
+    // Flush dirty caches and clear the dirty bit
+    QcowMetadata::new(inner).shutdown();
+    Ok(())
 }
 
 impl Drop for QcowDisk {
