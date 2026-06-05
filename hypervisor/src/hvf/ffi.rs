@@ -26,6 +26,7 @@ pub const HV_MEMORY_WRITE: u64 = 1 << 1;
 pub const HV_MEMORY_EXEC: u64 = 1 << 2;
 
 // ESR_EL2 exception classes (syndrome >> 26).
+pub const EC_WFX: u64 = 0x01; // WFI/WFE trapped
 pub const EC_HVC64: u64 = 0x16;
 pub const EC_DATA_ABORT_LOWER: u64 = 0x24; // from a lower EL (the guest)
 pub const EC_DATA_ABORT_SAME: u64 = 0x25; // from the current EL
@@ -55,6 +56,9 @@ pub const SYSREG_TPIDR_EL1: u16 = 0xc684;
 pub const SYSREG_TPIDR_EL0: u16 = 0xde82;
 pub const SYSREG_TPIDRRO_EL0: u16 = 0xde83;
 pub const SYSREG_SP_EL1: u16 = 0xe208;
+pub const SYSREG_MPIDR_EL1: u16 = 0xc005;
+/// MPIDR_EL1 bit[31] is RES1 on AArch64; affinity fields occupy Aff0..Aff3.
+pub const MPIDR_RES1: u64 = 1 << 31;
 
 // hv_interrupt_type_t
 pub const HV_INTERRUPT_TYPE_IRQ: u32 = 0;

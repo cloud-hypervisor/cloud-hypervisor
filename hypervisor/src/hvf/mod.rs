@@ -92,6 +92,7 @@ pub struct VcpuHvfState {
 /// EL1 system registers captured on snapshot. This curated set is the analogue
 /// of KVM's ONE_REG list and the future home of KVM->HVF state translation.
 const SNAPSHOT_SYS_REGS: &[u16] = &[
+    SYSREG_MPIDR_EL1,
     SYSREG_MDSCR_EL1,
     SYSREG_SCTLR_EL1,
     SYSREG_CPACR_EL1,
@@ -451,6 +452,25 @@ impl HvfVcpu {
         Ok(v)
     }
 
+    /// Establish this vCPU's affinity in MPIDR_EL1.
+    ///
+    /// HVF leaves MPIDR_EL1 reading 0, which lacks the architectural RES1 bit
+    /// and — more importantly — leaves Apple's managed GIC unable to associate
+    /// the vCPU with its redistributor (the GIC keys redistributors by MPIDR
+    /// affinity). Without this, an asserted SPI becomes pending in the
+    /// distributor but never forwards to the CPU interface, so the guest never
+    /// takes the interrupt. Pack the linear cpu index into the architectural
+    /// Aff0[7:0]/Aff1[15:8]/Aff2[23:16]/Aff3[39:32] fields. This is verified for
+    /// vCPU0; the exact hv_gic redistributor affinity ordering for multiple
+    /// vCPUs remains to be validated when HVF multi-vCPU support lands.
+    fn set_mpidr_affinity(&self, cpu_id: u32) -> CpuResult<()> {
+        let aff = (u64::from(cpu_id) & 0xff)
+            | ((u64::from(cpu_id) >> 8 & 0xff) << 8)
+            | ((u64::from(cpu_id) >> 16 & 0xff) << 16)
+            | ((u64::from(cpu_id) >> 24 & 0xff) << 32);
+        self.set_sysreg(SYSREG_MPIDR_EL1, MPIDR_RES1 | aff)
+    }
+
     /// Service a stage-2 data abort (MMIO) by decoding ESR and calling VmOps.
     fn handle_data_abort(&self, esr: u64, ipa: u64) -> CpuResult<()> {
         let iss = esr & 0x01ff_ffff;
@@ -579,12 +599,13 @@ impl Vcpu for HvfVcpu {
         self.get_sysreg(sys_reg as u16)
     }
 
-    fn setup_regs(&self, _cpu_id: u32, boot_ip: u64, fdt_start: u64) -> CpuResult<()> {
+    fn setup_regs(&self, cpu_id: u32, boot_ip: u64, fdt_start: u64) -> CpuResult<()> {
         // EL1h, with DAIF interrupts masked, ready for a cold boot.
         self.set_reg(HV_REG_CPSR, PSTATE_EL1H_DAIF)?;
         self.set_reg(HV_REG_PC, boot_ip)?;
         // Linux/PSCI boot protocol: x0 = device-tree blob address.
         self.set_reg(0, fdt_start)?;
+        self.set_mpidr_affinity(cpu_id)?;
         Ok(())
     }
 
@@ -632,8 +653,21 @@ impl Vcpu for HvfVcpu {
         // Some EL1 system registers may be read-only on a given core; restoring
         // them is best-effort and must not abort the whole restore.
         let _ = self.set_sysreg(SYSREG_SP_EL1, s.sp_el1);
+        let mut restored_mpidr = false;
         for &(id, v) in &s.sysregs {
-            let _ = self.set_sysreg(id, v);
+            if id == SYSREG_MPIDR_EL1 {
+                // MPIDR affinity is load-bearing for GIC interrupt delivery, so
+                // it is restored with a hard failure rather than best-effort.
+                self.set_sysreg(SYSREG_MPIDR_EL1, v)?;
+                restored_mpidr = true;
+            } else {
+                let _ = self.set_sysreg(id, v);
+            }
+        }
+        if !restored_mpidr {
+            // Older snapshots predate capturing MPIDR; synthesize it from this
+            // vCPU's index so a restored guest can still take interrupts.
+            self.set_mpidr_affinity(self.index)?;
         }
         Ok(())
     }
@@ -657,6 +691,20 @@ impl Vcpu for HvfVcpu {
                 match ec {
                     EC_DATA_ABORT_LOWER | EC_DATA_ABORT_SAME => {
                         self.handle_data_abort(esr, ipa)?;
+                        Ok(VmExit::Ignore)
+                    }
+                    EC_WFX => {
+                        // Trapped WFI/WFE: the guest is idling for an interrupt.
+                        // Advance past the instruction so that on re-entry any
+                        // interrupt the GIC has since made pending (an asserted
+                        // SPI or the virtual timer) is taken. ESR bit0 (TI)
+                        // distinguishes WFE from WFI; both are treated the same.
+                        // NOTE: this only handles the trapped-WFx exit. The
+                        // blocked-in-kernel WFI wakeup path (which would need an
+                        // explicit hv_vcpus_exit kick after a cross-thread
+                        // injection) is not yet exercised or verified.
+                        let pc = self.get_reg(HV_REG_PC)?;
+                        self.set_reg(HV_REG_PC, pc.wrapping_add(4))?;
                         Ok(VmExit::Ignore)
                     }
                     EC_HVC64 => {

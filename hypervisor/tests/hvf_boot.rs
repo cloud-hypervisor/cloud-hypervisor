@@ -296,3 +296,204 @@ fn hvf_vgic_create_and_state_roundtrip() {
         .set_state(&snap_clone)
         .expect("GIC set_state() restore");
 }
+
+// ===================================================================
+// End-to-end interrupt delivery: a real GICv3 guest takes an injected SPI.
+// ===================================================================
+
+// GICv3 layout for the interrupt test, clear of the RAM window (0x4000_0000)
+// and the marker MMIO page, all 16 KiB-aligned.
+const IRQ_GICD_BASE: u64 = 0x0800_0000;
+const IRQ_REDIST_BASE: u64 = 0x0801_0000;
+const IRQ_MARKER: u64 = 0x0900_0000;
+const IRQ_READY: u64 = 0x0a00_0000;
+const IRQ_SPI_INTID: u32 = 32;
+
+// A GICv3 guest (source kept in the session notes as gicv3_guest.S). It brings
+// up the GICv3 CPU interface and distributor, enables SPI 32, unmasks IRQs and
+// idles in WFI. On the injected interrupt it acknowledges (ICC_IAR1_EL1),
+// writes the INTID to IRQ_MARKER (a trapping MMIO store the host records),
+// EOIs, and PSCI-offs.
+//
+// The three slices are loaded at their respective offsets into the
+// zero-initialized guest RAM (boot at 0, IRQ vector at 0x1280, handler at
+// 0x1800); VBAR_EL1 is set by the guest to RAM_BASE + 0x1000.
+#[rustfmt::skip]
+const IRQ_BOOT: [u8; 248] = [
+    0x00, 0x00, 0xa8, 0xd2, 0x00, 0x00, 0x42, 0x91,
+    0x1f, 0x00, 0x00, 0x91, 0x01, 0x00, 0xa8, 0xd2,
+    0x21, 0x04, 0x40, 0x91, 0x01, 0xc0, 0x18, 0xd5,
+    0xdf, 0x3f, 0x03, 0xd5, 0x20, 0x00, 0x80, 0xd2,
+    0xa0, 0xcc, 0x18, 0xd5, 0xdf, 0x3f, 0x03, 0xd5,
+    0x00, 0x1e, 0x80, 0xd2, 0x00, 0x46, 0x18, 0xd5,
+    0x20, 0x00, 0x80, 0xd2, 0xe0, 0xcc, 0x18, 0xd5,
+    0xdf, 0x3f, 0x03, 0xd5, 0x02, 0x00, 0xa1, 0xd2,
+    0x60, 0x02, 0x80, 0x52, 0x40, 0x00, 0x00, 0xb9,
+    0x20, 0x00, 0x80, 0x52, 0x40, 0x84, 0x00, 0xb9,
+    0x5f, 0x20, 0x04, 0xb9, 0x03, 0x20, 0x8c, 0xd2,
+    0x43, 0x00, 0x03, 0x8b, 0xa4, 0x00, 0x38, 0xd5,
+    0xe5, 0xff, 0x9f, 0xd2, 0xe5, 0x1f, 0xa0, 0xf2,
+    0xe5, 0x1f, 0xc0, 0xf2, 0x84, 0x00, 0x05, 0x8a,
+    0x64, 0x00, 0x00, 0xf9, 0x20, 0x00, 0x80, 0x52,
+    0x40, 0x04, 0x01, 0xb9, 0x9f, 0x3f, 0x03, 0xd5,
+    0xdf, 0x3f, 0x03, 0xd5, 0x07, 0x40, 0xa1, 0xd2,
+    0xff, 0x00, 0x00, 0xb9, 0xff, 0x42, 0x03, 0xd5,
+    0x06, 0x00, 0xa8, 0xd2, 0xc6, 0x04, 0x00, 0xf1,
+    0xe1, 0xff, 0xff, 0x54, 0x01, 0x20, 0xa1, 0xd2,
+    0x40, 0xcc, 0x38, 0xd5, 0x00, 0x00, 0x62, 0xb2,
+    0x20, 0x00, 0x00, 0xb9, 0xe0, 0xcc, 0x38, 0xd5,
+    0x00, 0x00, 0x62, 0xb2, 0x20, 0x00, 0x00, 0xb9,
+    0x00, 0x46, 0x38, 0xd5, 0x00, 0x00, 0x62, 0xb2,
+    0x20, 0x00, 0x00, 0xb9, 0x80, 0xcc, 0x38, 0xd5,
+    0x00, 0x00, 0x62, 0xb2, 0x20, 0x00, 0x00, 0xb9,
+    0xa0, 0xcc, 0x38, 0xd5, 0x00, 0x00, 0x62, 0xb2,
+    0x20, 0x00, 0x00, 0xb9, 0x60, 0xcb, 0x38, 0xd5,
+    0x00, 0x00, 0x62, 0xb2, 0x20, 0x00, 0x00, 0xb9,
+    0x00, 0x01, 0x80, 0xd2, 0x00, 0x80, 0xb0, 0xf2,
+    0x02, 0x00, 0x00, 0xd4, 0x00, 0x00, 0x00, 0x14,
+];
+// `b irq_handler` installed at the "Current EL SPx, IRQ" vector (offset 0x280).
+#[rustfmt::skip]
+const IRQ_VECTOR: [u8; 4] = [0x60, 0x01, 0x00, 0x14];
+// `b sync_handler` installed at the synchronous vectors (offsets 0x000/0x200).
+#[rustfmt::skip]
+const SYNC_VECTOR_0X000: [u8; 4] = [0xc0, 0x01, 0x00, 0x14];
+#[rustfmt::skip]
+const SYNC_VECTOR_0X200: [u8; 4] = [0x40, 0x01, 0x00, 0x14];
+// Diagnostic synchronous-fault reporter at offset 0x1700: writes ESR_EL1 (with
+// the high bit set so it can't be mistaken for an INTID) to the marker, then
+// powers off — so an unexpected fault surfaces as data instead of a hang.
+#[rustfmt::skip]
+const SYNC_HANDLER: [u8; 32] = [
+    0x00, 0x52, 0x38, 0xd5, 0x00, 0x00, 0x61, 0xb2, // mrs x0,ESR_EL1; orr x0,x0,#0x80000000
+    0x01, 0x20, 0xa1, 0xd2, 0x20, 0x00, 0x00, 0xb9, // mov x1,#0x09000000; str w0,[x1]
+    0x00, 0x01, 0x80, 0xd2, 0x00, 0x80, 0xb0, 0xf2, // mov x0,#8; movk x0,#0x8400,lsl#16
+    0x02, 0x00, 0x00, 0xd4, 0x00, 0x00, 0x00, 0x14, // hvc #0; b .
+];
+#[rustfmt::skip]
+const IRQ_HANDLER: [u8; 32] = [
+    0x00, 0xcc, 0x38, 0xd5, 0x01, 0x20, 0xa1, 0xd2, // mrs x0,ICC_IAR1_EL1; mov x1,#0x09000000
+    0x20, 0x00, 0x00, 0xb9, 0x20, 0xcc, 0x18, 0xd5, // str w0,[x1]; msr ICC_EOIR1_EL1,x0
+    0x00, 0x01, 0x80, 0xd2, 0x00, 0x80, 0xb0, 0xf2, // mov x0,#8; movk x0,#0x8400,lsl#16
+    0x02, 0x00, 0x00, 0xd4, 0x00, 0x00, 0x00, 0x14, // hvc #0; b .
+];
+
+/// Records the first 32-bit MMIO write to `IRQ_MARKER` — the value the guest's
+/// IRQ handler wrote (the acknowledged INTID) — and, on the guest's "GIC
+/// configured" signal (`IRQ_READY`), asserts SPI 32 from the vCPU's OWNING
+/// thread via `hv_gic_set_spi`. Injecting on the owning thread (inside the MMIO
+/// exit handler) is what actually wires the pending SPI into this vCPU's
+/// virtual CPU interface; a cross-thread assert updates distributor state but
+/// never reaches the interface.
+struct MarkerVmOps {
+    marker: Mutex<Vec<u32>>,
+    gic: Mutex<Option<Arc<Mutex<dyn hypervisor::arch::aarch64::gic::Vgic>>>>,
+    injected: Mutex<bool>,
+}
+
+impl VmOps for MarkerVmOps {
+    fn guest_mem_write(&self, _gpa: u64, buf: &[u8]) -> VmOpsResult<usize> {
+        Ok(buf.len())
+    }
+    fn guest_mem_read(&self, _gpa: u64, buf: &mut [u8]) -> VmOpsResult<usize> {
+        Ok(buf.len())
+    }
+    fn mmio_read(&self, _gpa: u64, data: &mut [u8]) -> VmOpsResult<()> {
+        data.fill(0);
+        Ok(())
+    }
+    fn mmio_write(&self, gpa: u64, data: &[u8]) -> VmOpsResult<()> {
+        if gpa == IRQ_READY {
+            // Owning-thread injection: the guest has finished configuring the
+            // GIC and is about to unmask IRQs. Assert SPI 32 now.
+            if let Some(gic) = self.gic.lock().unwrap().as_ref() {
+                let mut guard = gic.lock().unwrap();
+                let concrete = guard
+                    .as_any_concrete_mut()
+                    .downcast_mut::<hypervisor::hvf::gic::HvfGicV3>()
+                    .expect("HVF GIC concrete type");
+                concrete.set_spi(IRQ_SPI_INTID, true).expect("assert SPI 32");
+                *self.injected.lock().unwrap() = true;
+            }
+        } else if gpa == IRQ_MARKER {
+            let n = data.len().min(4);
+            let mut v = [0u8; 4];
+            v[..n].copy_from_slice(&data[..n]);
+            self.marker.lock().unwrap().push(u32::from_le_bytes(v));
+        }
+        Ok(())
+    }
+}
+
+/// Boot a real GICv3 guest, inject SPI 32 from the host via `hv_gic_set_spi`,
+/// and prove the guest actually *took* the interrupt: its IRQ handler runs,
+/// acknowledges INTID 32, records it through MMIO, EOIs, and powers off.
+///
+/// This converts the previously-UNVERIFIED interrupt-injection path into a
+/// hardware-verified end-to-end delivery test.
+#[test]
+fn hvf_guest_takes_injected_spi() {
+    use hypervisor::arch::aarch64::gic::VgicConfig;
+
+    let ram = HostRam::new(RAM_SIZE);
+    ram.load(0x0000, &IRQ_BOOT);
+    ram.load(0x1000, &SYNC_VECTOR_0X000);
+    ram.load(0x1200, &SYNC_VECTOR_0X200);
+    ram.load(0x1280, &IRQ_VECTOR);
+    ram.load(0x1700, &SYNC_HANDLER);
+    ram.load(0x1800, &IRQ_HANDLER);
+
+    let vm_ops = Arc::new(MarkerVmOps {
+        marker: Mutex::new(Vec::new()),
+        gic: Mutex::new(None),
+        injected: Mutex::new(false),
+    });
+
+    let hv = hypervisor::new().expect("hypervisor::new() — is the test binary codesigned?");
+    let vm = hv
+        .create_vm(HypervisorVmConfig {
+            nested: false,
+            smt_enabled: false,
+        })
+        .expect("create_vm");
+    // SAFETY: ram outlives the mapping.
+    unsafe {
+        vm.create_user_memory_region(0, RAM_BASE, ram.size, ram.ptr, false, false)
+            .expect("map ram");
+    }
+
+    let config = VgicConfig {
+        vcpu_count: 1,
+        dist_addr: IRQ_GICD_BASE,
+        dist_size: 0x1_0000,
+        redists_addr: IRQ_REDIST_BASE,
+        redists_size: 0x2_0000,
+        msi_addr: 0,
+        msi_size: 0,
+        nr_irqs: 256,
+    };
+    // GIC must be created before the vCPU.
+    let gic = vm.create_vgic(&config).expect("create_vgic");
+    // Hand the GIC to the VmOps so the guest's "configured" signal can assert
+    // the SPI from the vCPU's owning thread (inside the MMIO exit handler).
+    *vm_ops.gic.lock().unwrap() = Some(gic.clone());
+
+    let mut vcpu = vm.create_vcpu(0, Some(vm_ops.clone())).expect("create_vcpu");
+    vcpu.setup_regs(0, RAM_BASE, 0).expect("setup_regs");
+
+    let exit = run_to_shutdown(vcpu.as_mut());
+    let marker = vm_ops.marker.lock().unwrap().clone();
+    assert!(
+        *vm_ops.injected.lock().unwrap(),
+        "guest never signalled GIC-configured / SPI was not injected"
+    );
+    assert!(
+        matches!(exit, VmExit::Shutdown),
+        "expected Shutdown after IRQ handler, got {exit:?}"
+    );
+    assert_eq!(
+        marker.first().copied(),
+        Some(IRQ_SPI_INTID),
+        "guest IRQ handler did not run / acknowledged the wrong INTID"
+    );
+}
