@@ -150,6 +150,7 @@ impl RequestHandler for StubApiRequestHandler {
                     hugepages: false,
                     hugepage_size: None,
                     prefault: false,
+                    reserve: false,
                     zones: None,
                     thp: true,
                 },

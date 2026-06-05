@@ -321,7 +321,7 @@ fn get_cli_options_sorted(
                      hotplug_method=acpi|virtio-mem,\
                      hotplug_size=<hotpluggable_memory_size>,\
                      hotplugged_size=<hotplugged_memory_size>,\
-                     prefault=on|off,thp=on|off\"",
+                     prefault=on|off,reserve=on|off,thp=on|off\"",
             )
             .default_value(default_memory)
             .group("vm-config"),
@@ -335,7 +335,7 @@ fn get_cli_options_sorted(
                      host_numa_node=<node_id>,\
                      id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>,\
                      hotplugged_size=<hotplugged_memory_size>,\
-                     prefault=on|off\"",
+                     prefault=on|off,reserve=on|off\"",
             )
             .num_args(1..)
             .action(ArgAction::Append)
@@ -1003,6 +1003,7 @@ mod unit_tests {
                 hugepages: false,
                 hugepage_size: None,
                 prefault: false,
+                reserve: false,
                 zones: None,
                 thp: true,
             },
