@@ -876,6 +876,8 @@ impl vm::Vm for KvmVm {
             hyperv_synic: AtomicBool::new(false),
             #[cfg(target_arch = "x86_64")]
             xsave_size,
+            #[cfg(target_arch = "x86_64")]
+            has_xcrs: self.check_extension(Cap::Xcrs),
             #[cfg(feature = "sev_snp")]
             vm_fd: self.fd.clone(),
             #[cfg(feature = "sev_snp")]
@@ -1758,6 +1760,8 @@ pub struct KvmVcpu {
     hyperv_synic: AtomicBool,
     #[cfg(target_arch = "x86_64")]
     xsave_size: i32,
+    #[cfg(target_arch = "x86_64")]
+    has_xcrs: bool,
     #[cfg(feature = "sev_snp")]
     vm_fd: Arc<VmFd>,
     #[cfg(feature = "sev_snp")]
@@ -2853,7 +2857,11 @@ impl cpu::Vcpu for KvmVcpu {
         } else {
             self.get_xsave()?
         };
-        let xcrs = self.get_xcrs()?;
+        let xcrs: ExtendedControlRegisters = if self.has_xcrs {
+            self.get_xcrs()?
+        } else {
+            Default::default()
+        };
         let lapic_state = self.get_lapic()?;
         let fpu = self.get_fpu()?;
         let nested_state = self.nested_state()?;
@@ -3116,7 +3124,9 @@ impl cpu::Vcpu for KvmVcpu {
         } else {
             self.set_xsave(&state.xsave)?;
         }
-        self.set_xcrs(&state.xcrs)?;
+        if self.has_xcrs {
+            self.set_xcrs(&state.xcrs)?;
+        }
         self.set_lapic(&state.lapic_state)?;
         self.set_fpu(&state.fpu)?;
         if let Some(nested_state) = state.nested_state {
