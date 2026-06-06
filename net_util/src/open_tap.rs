@@ -4,7 +4,7 @@
 
 use std::net::IpAddr;
 use std::path::Path;
-use std::{fs, io};
+use std::{fs, io, num, result};
 
 use log::warn;
 use thiserror::Error;
@@ -14,7 +14,7 @@ use super::{MacAddr, Tap, TapError, vnet_hdr_len};
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Failed to convert an hexadecimal string into an integer")]
-    ConvertHexStringToInt(#[source] std::num::ParseIntError),
+    ConvertHexStringToInt(#[source] num::ParseIntError),
     #[error("Error related to the multiqueue support (no support TAP side)")]
     MultiQueueNoTapSupport,
     #[error("Error related to the multiqueue support (no support device side)")]
@@ -37,7 +37,7 @@ pub enum Error {
     TapEnable(#[source] TapError),
 }
 
-type Result<T> = std::result::Result<T, Error>;
+type Result<T> = result::Result<T, Error>;
 
 fn check_mq_support(if_name: &Option<&str>, queue_pairs: usize) -> Result<()> {
     if let Some(tap_name) = if_name {

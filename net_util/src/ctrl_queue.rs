@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use std::result;
+
 use log::{debug, error, info, warn};
 use thiserror::Error;
 use virtio_bindings::virtio_net::{
@@ -45,7 +47,7 @@ pub enum Error {
     QueueEnableNotification(#[source] virtio_queue::Error),
 }
 
-type Result<T> = std::result::Result<T, Error>;
+type Result<T> = result::Result<T, Error>;
 
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy, Default)]
