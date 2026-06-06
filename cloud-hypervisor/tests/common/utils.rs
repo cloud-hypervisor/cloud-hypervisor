@@ -780,14 +780,13 @@ pub(super) fn pty_read(mut pty: std::fs::File) -> Receiver<String> {
     let (tx, rx) = mpsc::channel::<String>();
     thread::spawn(move || {
         loop {
-            thread::sleep(std::time::Duration::new(1, 0));
-            let mut buf = [0; 512];
+            let mut buf = [0; 4096];
             match pty.read(&mut buf) {
-                Ok(_bytes) => {
-                    let output = std::str::from_utf8(&buf).unwrap().to_string();
-                    match tx.send(output) {
-                        Ok(_) => (),
-                        Err(_) => break,
+                Ok(0) => break,
+                Ok(bytes) => {
+                    let output = String::from_utf8_lossy(&buf[..bytes]).into_owned();
+                    if tx.send(output).is_err() {
+                        break;
                     }
                 }
                 Err(_) => break,

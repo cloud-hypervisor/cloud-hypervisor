@@ -2536,7 +2536,7 @@ mod common_parallel {
 
         let mut socat_command = Command::new("socat");
         let socat_args = [
-            &format!("pty,link={},raw", serial_socket_pty.display()),
+            &format!("pty,link={},raw,echo=0", serial_socket_pty.display()),
             &format!("UNIX-CONNECT:{}", serial_socket.display()),
         ];
         socat_command.args(socat_args);
