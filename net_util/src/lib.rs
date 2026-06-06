@@ -15,7 +15,7 @@ use std::io::Error as IoError;
 use std::net::IpAddr;
 use std::os::raw::c_uint;
 use std::os::unix::io::{FromRawFd, RawFd};
-use std::{io, mem, net};
+use std::{io, mem, net, result};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -41,7 +41,7 @@ pub enum Error {
     CreateSocket(#[source] IoError),
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = result::Result<T, Error>;
 
 #[repr(C, packed)]
 #[derive(Copy, Clone, Debug, Default, Serialize, Deserialize)]
@@ -102,7 +102,7 @@ fn create_unix_socket() -> Result<net::UdpSocket> {
 }
 
 fn vnet_hdr_len() -> usize {
-    std::mem::size_of::<virtio_net_hdr_v1>()
+    mem::size_of::<virtio_net_hdr_v1>()
 }
 
 pub fn register_listener(
@@ -110,7 +110,7 @@ pub fn register_listener(
     fd: RawFd,
     ev_type: epoll::Events,
     data: u64,
-) -> std::result::Result<(), io::Error> {
+) -> io::Result<()> {
     epoll::ctl(
         epoll_fd,
         epoll::ControlOptions::EPOLL_CTL_ADD,
@@ -124,7 +124,7 @@ pub fn unregister_listener(
     fd: RawFd,
     ev_type: epoll::Events,
     data: u64,
-) -> std::result::Result<(), io::Error> {
+) -> io::Result<()> {
     epoll::ctl(
         epoll_fd,
         epoll::ControlOptions::EPOLL_CTL_DEL,

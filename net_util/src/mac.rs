@@ -131,7 +131,7 @@ pub enum MacAddrParseError {
 impl FromStr for MacAddr {
     type Err = MacAddrParseError;
 
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         MacAddr::parse_str(s).map_err(|_| MacAddrParseError::InvalidValue(s.to_owned()))
     }
 }

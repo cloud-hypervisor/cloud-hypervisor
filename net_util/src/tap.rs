@@ -11,6 +11,7 @@ use std::io::{Error as IoError, Read, Result as IoResult, Write};
 use std::net::{IpAddr, Ipv6Addr};
 use std::os::raw::*;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::{mem, result, str};
 
 use libc::{__c_anonymous_ifr_ifru, IFNAMSIZ, ifreq};
 use thiserror::Error;
@@ -48,7 +49,7 @@ pub enum Error {
     InvalidNetmask,
 }
 
-pub type Result<T> = ::std::result::Result<T, Error>;
+pub type Result<T> = result::Result<T, Error>;
 
 /// Handle for a network tap interface.
 ///
@@ -69,7 +70,7 @@ impl PartialEq for Tap {
     }
 }
 
-impl std::clone::Clone for Tap {
+impl Clone for Tap {
     fn clone(&self) -> Self {
         Tap {
             tap_file: self.tap_file.try_clone().unwrap(),
@@ -342,9 +343,7 @@ impl Tap {
 
                 let ifreq = libc::in6_ifreq {
                     // SAFETY: addr can be safely transmuted to in6_addr
-                    ifr6_addr: unsafe {
-                        std::mem::transmute::<[u8; 16], libc::in6_addr>(addr.octets())
-                    },
+                    ifr6_addr: unsafe { mem::transmute::<[u8; 16], libc::in6_addr>(addr.octets()) },
                     ifr6_prefixlen: prefixlen as u32,
                     ifr6_ifindex: ifindex,
                 };
@@ -512,8 +511,7 @@ impl Tap {
     /// also always created from Rust strings, thus valid UTF-8.
     pub fn if_name_as_str(&self) -> &str {
         // Panicking here is fine, see function documentation.
-        std::str::from_utf8(self.if_name.as_bytes())
-            .expect("Tap interface name should be valid UTF-8")
+        str::from_utf8(self.if_name.as_bytes()).expect("Tap interface name should be valid UTF-8")
     }
 
     #[cfg(fuzzing)]
