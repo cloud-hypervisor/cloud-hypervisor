@@ -4,7 +4,7 @@
 //
 
 use std::collections::VecDeque;
-use std::io::Write;
+use std::io::{self, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -45,7 +45,7 @@ impl SerialBuffer {
 }
 
 impl Write for SerialBuffer {
-    fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         // Simply fill the buffer if we're not allowed to write to the out
         // device.
         if !self.write_out.load(Ordering::Acquire) {
@@ -77,7 +77,7 @@ impl Write for SerialBuffer {
                     }
                 }
                 Err(e) => {
-                    if !matches!(e.kind(), std::io::ErrorKind::WouldBlock) {
+                    if !matches!(e.kind(), io::ErrorKind::WouldBlock) {
                         return Err(e);
                     }
                     self.fill_buffer(&buf[offset..]);
@@ -95,7 +95,7 @@ impl Write for SerialBuffer {
 
     // This function flushes the content of the buffer to the out device if
     // it is allowed to, otherwise this is a no-op.
-    fn flush(&mut self) -> Result<(), std::io::Error> {
+    fn flush(&mut self) -> io::Result<()> {
         if !self.write_out.load(Ordering::Acquire) {
             return Ok(());
         }
