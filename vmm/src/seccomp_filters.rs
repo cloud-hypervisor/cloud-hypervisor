@@ -544,6 +544,10 @@ fn create_api_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
     Ok(or![and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO as _)?]])
 }
 
+fn create_serial_manager_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
+    Ok(or![and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO as _)?]])
+}
+
 fn create_signal_handler_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
     Ok(or![
         and![Cond::new(1, ArgLen::Dword, Eq, TCGETS as _)?],
@@ -1046,6 +1050,7 @@ fn serial_manager_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_exit, vec![]),
         (libc::SYS_fcntl, vec![]),
         (libc::SYS_futex, vec![]),
+        (libc::SYS_ioctl, create_serial_manager_ioctl_seccomp_rule()?),
         (libc::SYS_madvise, vec![]),
         (libc::SYS_mmap, vec![]),
         (libc::SYS_munmap, vec![]),
@@ -1054,6 +1059,7 @@ fn serial_manager_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_rt_sigprocmask, vec![]),
         (libc::SYS_rt_sigreturn, vec![]),
+        (libc::SYS_sendto, vec![]),
         (libc::SYS_shutdown, vec![]),
         (libc::SYS_sigaltstack, vec![]),
         (libc::SYS_write, vec![]),
