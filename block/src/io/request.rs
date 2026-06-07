@@ -703,3 +703,55 @@ fn iovec_split(iov: &[(GuestAddress, u32)], offset: u64) -> Result<(Iovec, Iovec
     }
     Ok((head, tail))
 }
+
+#[cfg(test)]
+mod unit_tests {
+    use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
+
+    use super::{Error, iovec_read_bytes, iovec_split};
+
+    fn make_mem() -> GuestMemoryMmap<()> {
+        GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1_0000)]).unwrap()
+    }
+
+    #[test]
+    fn iovec_read_bytes_spans_descriptors() {
+        let mem = make_mem();
+        let a = GuestAddress(0x1000);
+        let b = GuestAddress(0x2000);
+        mem.write_slice(&[0xAA; 4], a).unwrap();
+        mem.write_slice(&[0xBB; 12], b).unwrap();
+        let iov = [(a, 4u32), (b, 12u32)];
+        let mut out = [0u8; 16];
+        iovec_read_bytes(&mem, &iov, 0, &mut out).unwrap();
+        assert_eq!(&out[..4], &[0xAA; 4]);
+        assert_eq!(&out[4..], &[0xBB; 12]);
+    }
+
+    #[test]
+    fn iovec_read_bytes_short_iov_errors() {
+        let mem = make_mem();
+        let iov = [(GuestAddress(0x1000), 8u32)];
+        let mut out = [0u8; 16];
+        assert!(matches!(
+            iovec_read_bytes(&mem, &iov, 0, &mut out),
+            Err(Error::DescriptorLengthTooSmall)
+        ));
+    }
+
+    #[test]
+    fn iovec_split_at_boundary() {
+        let iov = [(GuestAddress(0x1000), 8u32), (GuestAddress(0x2000), 16u32)];
+        let (head, tail) = iovec_split(&iov, 8).unwrap();
+        assert_eq!(head.as_slice(), &[(GuestAddress(0x1000), 8)]);
+        assert_eq!(tail.as_slice(), &[(GuestAddress(0x2000), 16)]);
+    }
+
+    #[test]
+    fn iovec_split_inside_descriptor() {
+        let iov = [(GuestAddress(0x1000), 20u32)];
+        let (head, tail) = iovec_split(&iov, 16).unwrap();
+        assert_eq!(head.as_slice(), &[(GuestAddress(0x1000), 16)]);
+        assert_eq!(tail.as_slice(), &[(GuestAddress(0x1010), 4)]);
+    }
+}
