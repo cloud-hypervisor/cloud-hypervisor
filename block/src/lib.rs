@@ -39,8 +39,7 @@ use serde::{Deserialize, Serialize};
 pub use sparse::{BLKDISCARD, BLKZEROOUT};
 use thiserror::Error;
 use virtio_bindings::virtio_blk::*;
-use vm_memory::bitmap::Bitmap;
-use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError};
+use vm_memory::{ByteValued, GuestAddress, GuestMemoryError};
 use vmm_sys_util::{aio, ioctl_io_nr, ioctl_ior_nr};
 
 use crate::async_io::AsyncIoError;
@@ -178,35 +177,6 @@ impl ExecuteError {
         };
         status as u8
     }
-}
-
-pub fn request_type<B: Bitmap + 'static>(
-    mem: &vm_memory::GuestMemoryMmap<B>,
-    desc_addr: GuestAddress,
-) -> result::Result<RequestType, Error> {
-    let type_ = mem.read_obj(desc_addr).map_err(Error::GuestMemory)?;
-    match type_ {
-        VIRTIO_BLK_T_IN => Ok(RequestType::In),
-        VIRTIO_BLK_T_OUT => Ok(RequestType::Out),
-        VIRTIO_BLK_T_FLUSH => Ok(RequestType::Flush),
-        VIRTIO_BLK_T_GET_ID => Ok(RequestType::GetDeviceId),
-        VIRTIO_BLK_T_DISCARD => Ok(RequestType::Discard),
-        VIRTIO_BLK_T_WRITE_ZEROES => Ok(RequestType::WriteZeroes),
-        t => Ok(RequestType::Unsupported(t)),
-    }
-}
-
-fn sector<B: Bitmap + 'static>(
-    mem: &vm_memory::GuestMemoryMmap<B>,
-    desc_addr: GuestAddress,
-) -> result::Result<u64, Error> {
-    const SECTOR_OFFSET: usize = 8;
-    let addr = match mem.checked_offset(desc_addr, SECTOR_OFFSET) {
-        Some(v) => v,
-        None => return Err(Error::CheckedOffset(desc_addr, SECTOR_OFFSET)),
-    };
-
-    mem.read_obj(addr).map_err(Error::GuestMemory)
 }
 
 #[derive(Copy, Clone, Debug, Default, Serialize, Deserialize)]

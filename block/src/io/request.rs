@@ -18,7 +18,8 @@ use std::time::Instant;
 use log::{error, warn};
 use smallvec::SmallVec;
 use virtio_bindings::virtio_blk::{
-    VIRTIO_BLK_T_DISCARD, VIRTIO_BLK_T_WRITE_ZEROES, VIRTIO_BLK_WRITE_ZEROES_FLAG_UNMAP,
+    VIRTIO_BLK_T_DISCARD, VIRTIO_BLK_T_FLUSH, VIRTIO_BLK_T_GET_ID, VIRTIO_BLK_T_IN,
+    VIRTIO_BLK_T_OUT, VIRTIO_BLK_T_WRITE_ZEROES, VIRTIO_BLK_WRITE_ZEROES_FLAG_UNMAP,
     virtio_blk_discard_write_zeroes,
 };
 use virtio_queue::DescriptorChain;
@@ -33,7 +34,7 @@ use vm_virtio::checked_descriptor::DescriptorChainExt;
 use crate::async_io::{
     AsyncIo, AsyncIoCompletion, AsyncIoOperation, GuestMemoryTarget, OwnedIoBuffer,
 };
-use crate::{Error, ExecuteError, request_type, sector};
+use crate::{Error, ExecuteError};
 
 const SECTOR_SHIFT: u8 = 9;
 pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
@@ -62,6 +63,8 @@ pub enum RequestType {
 
 pub const DEFAULT_DESCRIPTOR_VEC_SIZE: usize = 32;
 
+type Iovec = SmallVec<[(GuestAddress, u32); DEFAULT_DESCRIPTOR_VEC_SIZE]>;
+
 pub struct ExecuteAsync {
     // `true` if the execution will complete asynchronously
     pub async_complete: bool,
@@ -84,91 +87,79 @@ impl Request {
         desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<vm_memory::GuestMemoryMmap<B>>>,
         access_platform: Option<&dyn AccessPlatform>,
     ) -> Result<Request, Error> {
-        let hdr_desc = desc_chain
+        let mut readable: Iovec = SmallVec::new();
+        let mut writable: Iovec = SmallVec::new();
+
+        while let Some(desc) = desc_chain
             .next_checked(access_platform)
             .map_err(|addr| Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(addr)))?
-            .ok_or_else(|| {
+        {
+            if desc.is_empty() {
+                continue;
+            }
+            if desc.is_write_only() {
+                writable.push((desc.addr(), desc.len()));
+            } else if writable.is_empty() {
+                readable.push((desc.addr(), desc.len()));
+            } else {
+                error!("Readable descriptor follows a writable one");
+                return Err(Error::UnexpectedReadOnlyDescriptor);
+            }
+        }
+
+        if readable.is_empty() {
+            return Err(if writable.is_empty() {
                 error!("Missing head descriptor");
                 Error::DescriptorChainTooShort
-            })?;
-
-        // The head contains the request type which MUST be readable.
-        if hdr_desc.is_write_only() {
-            return Err(Error::UnexpectedWriteOnlyDescriptor);
+            } else {
+                error!("Missing readable head descriptor");
+                Error::UnexpectedWriteOnlyDescriptor
+            });
         }
 
-        let hdr_desc_addr = hdr_desc.addr();
+        let mem = desc_chain.memory();
+        let mut hdr = [0u8; 16];
+        iovec_read_bytes(mem, &readable, 0, &mut hdr)?;
+        let req_type = match u32::from_le_bytes(hdr[0..4].try_into().unwrap()) {
+            VIRTIO_BLK_T_IN => RequestType::In,
+            VIRTIO_BLK_T_OUT => RequestType::Out,
+            VIRTIO_BLK_T_FLUSH => RequestType::Flush,
+            VIRTIO_BLK_T_GET_ID => RequestType::GetDeviceId,
+            VIRTIO_BLK_T_DISCARD => RequestType::Discard,
+            VIRTIO_BLK_T_WRITE_ZEROES => RequestType::WriteZeroes,
+            t => RequestType::Unsupported(t),
+        };
+        let req_sector = u64::from_le_bytes(hdr[8..16].try_into().unwrap());
 
-        let mut req = Request {
-            request_type: request_type(desc_chain.memory(), hdr_desc_addr)?,
-            sector: sector(desc_chain.memory(), hdr_desc_addr)?,
-            data_descriptors: SmallVec::with_capacity(DEFAULT_DESCRIPTOR_VEC_SIZE),
-            status_addr: GuestAddress(0),
-            writeback: true,
-            start: Instant::now(),
+        let writable_total: u64 = writable.iter().map(|(_, l)| *l as u64).sum();
+        if writable_total < 1 {
+            error!("Missing status descriptor: request type = {req_type:?}");
+            return Err(Error::DescriptorChainTooShort);
+        }
+        let (writable_data, writable_tail) = iovec_split(&writable, writable_total - 1)?;
+        let status_addr = writable_tail[0].0;
+
+        let data_descriptors = match req_type {
+            RequestType::In | RequestType::GetDeviceId => writable_data,
+            RequestType::Out | RequestType::Discard | RequestType::WriteZeroes => {
+                let data = iovec_split(&readable, 16)?.1;
+                if data.is_empty() {
+                    error!("Missing data descriptor: request type = {req_type:?}");
+                    return Err(Error::DescriptorChainTooShort);
+                }
+                data
+            }
+            RequestType::Flush | RequestType::Unsupported(_) => Iovec::new(),
         };
 
-        let status_desc;
-        let mut desc = desc_chain
-            .next_checked(access_platform)
-            .map_err(|addr| Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(addr)))?
-            .ok_or_else(|| {
-                error!("Only head descriptor present: request = {req:?}");
-                Error::DescriptorChainTooShort
-            })?;
-
-        if desc.has_next() {
-            req.data_descriptors.reserve_exact(1);
-            while desc.has_next() {
-                if desc.is_write_only() && req.request_type == RequestType::Out {
-                    return Err(Error::UnexpectedWriteOnlyDescriptor);
-                }
-                if desc.is_write_only() && req.request_type == RequestType::Discard {
-                    return Err(Error::UnexpectedWriteOnlyDescriptor);
-                }
-                if desc.is_write_only() && req.request_type == RequestType::WriteZeroes {
-                    return Err(Error::UnexpectedWriteOnlyDescriptor);
-                }
-                if !desc.is_write_only() && req.request_type == RequestType::In {
-                    return Err(Error::UnexpectedReadOnlyDescriptor);
-                }
-                if !desc.is_write_only() && req.request_type == RequestType::GetDeviceId {
-                    return Err(Error::UnexpectedReadOnlyDescriptor);
-                }
-
-                req.data_descriptors.push((desc.addr(), desc.len()));
-                desc = desc_chain
-                    .next_checked(access_platform)
-                    .map_err(|addr| {
-                        Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(addr))
-                    })?
-                    .ok_or_else(|| {
-                        error!("DescriptorChain corrupted: request = {req:?}");
-                        Error::DescriptorChainTooShort
-                    })?;
-            }
-            status_desc = desc;
-        } else {
-            status_desc = desc;
-            // Only flush requests are allowed to skip the data descriptor.
-            if req.request_type != RequestType::Flush {
-                error!("Need a data descriptor: request = {req:?}");
-                return Err(Error::DescriptorChainTooShort);
-            }
-        }
-
-        // The status MUST always be writable.
-        if !status_desc.is_write_only() {
-            return Err(Error::UnexpectedReadOnlyDescriptor);
-        }
-
-        if status_desc.is_empty() {
-            return Err(Error::DescriptorLengthTooSmall);
-        }
-
-        req.status_addr = status_desc.addr();
-
-        Ok(req)
+        Ok(Request {
+            request_type: req_type,
+            sector: req_sector,
+            data_descriptors,
+            status_addr,
+            writeback: true,
+            start: Instant::now(),
+        })
     }
 
     pub fn execute<T: Seek + Read + Write, B: Bitmap + 'static>(
@@ -650,4 +641,65 @@ impl Request {
         }
         Ok(())
     }
+}
+
+fn iovec_read_bytes<B: Bitmap + 'static>(
+    mem: &vm_memory::GuestMemoryMmap<B>,
+    iov: &[(GuestAddress, u32)],
+    offset: u64,
+    out: &mut [u8],
+) -> Result<(), Error> {
+    let total = out.len();
+    let mut skip = offset;
+    let mut filled = 0usize;
+    for &(addr, len) in iov {
+        let len = len as u64;
+        if skip >= len {
+            skip -= len;
+            continue;
+        }
+        let avail = (len - skip) as usize;
+        let take = avail.min(total - filled);
+        let src = addr
+            .checked_add(skip)
+            .ok_or(Error::CheckedOffset(addr, skip as usize))?;
+        mem.read_slice(&mut out[filled..filled + take], src)
+            .map_err(Error::GuestMemory)?;
+        filled += take;
+        skip = 0;
+        if filled == total {
+            return Ok(());
+        }
+    }
+    Err(Error::DescriptorLengthTooSmall)
+}
+
+fn iovec_split(iov: &[(GuestAddress, u32)], offset: u64) -> Result<(Iovec, Iovec), Error> {
+    let mut head: Iovec = SmallVec::new();
+    let mut tail: Iovec = SmallVec::new();
+    let mut consumed = 0u64;
+    for &(addr, len) in iov {
+        let len_u64 = len as u64;
+        if consumed >= offset {
+            tail.push((addr, len));
+            continue;
+        }
+        if consumed + len_u64 <= offset {
+            head.push((addr, len));
+            consumed += len_u64;
+            continue;
+        }
+        let take = (offset - consumed) as u32;
+        head.push((addr, take));
+        let rem_len = len - take;
+        let rem_addr = addr
+            .checked_add(take as u64)
+            .ok_or(Error::CheckedOffset(addr, take as usize))?;
+        tail.push((rem_addr, rem_len));
+        consumed = offset;
+    }
+    if consumed < offset {
+        return Err(Error::DescriptorLengthTooSmall);
+    }
+    Ok((head, tail))
 }
