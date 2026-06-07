@@ -1804,7 +1804,11 @@ impl Guest {
             .or_else(|| self.get_expected_memory())
             .unwrap_or_default();
 
-        assert!(self.get_total_memory().unwrap_or_default() > memory);
+        let total = self.get_total_memory().unwrap_or_default();
+        assert!(
+            total > memory,
+            "guest MemTotal {total} kB is not greater than expected {memory} kB"
+        );
     }
 }
 
