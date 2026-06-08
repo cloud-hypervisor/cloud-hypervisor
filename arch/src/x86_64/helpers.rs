@@ -26,6 +26,24 @@ pub(crate) fn deserialize_u32_hex<'de, D: Deserializer<'de>>(
     })
 }
 
+/// 64-bit version of `serialize_u32_hex`
+pub(crate) fn serialize_u64_hex<S: Serializer>(
+    input: &u64,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    serializer.serialize_str(&format!("{input:#x}"))
+}
+
+/// 64-bit version of `deserialize_u32_hex`
+pub(crate) fn deserialize_u64_hex<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<u64, D::Error> {
+    let hex: &str = <&str>::deserialize(deserializer)?;
+    u64::from_str_radix(hex.strip_prefix("0x").unwrap_or(""), 16).map_err(|_| {
+        <D::Error as serde::de::Error>::custom(format!("{hex} is not a hex encoded 64 bit integer"))
+    })
+}
+
 #[cfg(test)]
 mod unit_tests {
     use proptest::prelude::*;
