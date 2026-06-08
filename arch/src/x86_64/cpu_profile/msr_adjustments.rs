@@ -90,3 +90,32 @@ impl FeatureMsrAdjustment {
         }
     }
 }
+
+/// Data describing MSR adjustments related to a CPU profile.
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub struct MsrProfileData {
+    /// Describes feature MSR adjustments necessary to become compatible with
+    /// the desired target.
+    pub adjustments: Vec<(RegisterAddress, FeatureMsrAdjustment)>,
+    /// List of the MSRs that the CPU profile __explicitly__ permits.
+    /// The upcoming CPU profile generation tool queries `Hypervisor::get_msr_index_list` and
+    /// `Hypervisor::get_feature_msrs` and then selects a subset of the present MSRs
+    /// to be set here.
+    ///
+    /// When applying a CPU profile then the union of the sets of MSRs obtained from the
+    /// two aforementioned hypervisor methods must necessarily contain all MSRs listed here.
+    /// Otherwise the host is considered incompatible with the CPU profile. An exception
+    /// is made for missing Hyper-V MSRs when `kvm_hyperv=off`.
+    ///
+    /// ## Implicitly permitted MSRs
+    ///
+    /// There are a quite a few MSRs that are/may be supported by the host and hypervisor, but
+    /// which the hypervisor does not directly advertise. This includes the x2APIC related MSRs,
+    /// MSR_EFER, MSR_FSBASE, MSR_GS_BASE, the various MCE related MSRs and more.
+    ///
+    /// Such MSRs tend to be either always supported (via emulation), or have a CPUID bit describing whether the
+    /// MSR is supported.
+    ///
+    /// We have decided to implicitly permit all such MSRs in the context of CPU profiles.
+    pub permitted_msrs: Vec<RegisterAddress>,
+}

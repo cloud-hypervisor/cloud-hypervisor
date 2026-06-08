@@ -9,6 +9,7 @@ use hypervisor::arch::x86::CpuIdEntry;
 use crate::x86_64::cpu_profile::cpuid_adjustments::{
     CpuidOutputRegisterAdjustments, CpuidProfileData, MissingCpuidEntriesError,
 };
+use crate::x86_64::cpu_profile::msr_adjustments::MsrProfileData;
 use crate::x86_64::{AMX_TILECFG_BIT, AMX_TILEDATA_BIT, CpuidReg};
 
 /// Mask indicating availability of the AMX TILECFG state component
@@ -58,6 +59,15 @@ impl CpuProfile {
 
     /// Obtain CPUID adjustment data related to the CPU profile.
     fn cpuid_data(&self) -> Option<CpuidProfileData> {
+        // TODO: Auto generate this through a build script once
+        // we introduce actual CPU profiles.
+        match self {
+            CpuProfile::Host => None,
+        }
+    }
+
+    /// Obtain MSR adjustment data related to the given CPU profile.
+    fn msr_data(&self) -> Option<MsrProfileData> {
         // TODO: Auto generate this through a build script once
         // we introduce actual CPU profiles.
         match self {
