@@ -91,3 +91,14 @@ impl FeatureMsrAdjustment {
         }
     }
 }
+
+/// Data describing MSR adjustments related to a CPU profile.
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub struct MsrProfileData {
+    /// Describes feature MSR adjustments necessary to become compatible with
+    /// the desired target.
+    pub adjustments: Vec<(RegisterAddress, FeatureMsrAdjustment)>,
+    /// List of all MSRs that the CPU profile permits. MSRs supported by the host that
+    /// are outside of this list need to be denied by a filter.
+    pub permitted_msrs: Vec<RegisterAddress>,
+}
