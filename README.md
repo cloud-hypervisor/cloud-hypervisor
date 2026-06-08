@@ -203,7 +203,7 @@ To build the kernel:
 
 ```shell
 # Clone the Cloud Hypervisor Linux branch
-$ git clone --depth 1 https://github.com/cloud-hypervisor/linux.git -b ch-6.12.8 linux-cloud-hypervisor
+$ git clone --depth 1 https://github.com/cloud-hypervisor/linux.git -b ch-6.16.9 linux-cloud-hypervisor
 $ pushd linux-cloud-hypervisor
 $ make ch_defconfig
 # Do native build of the x86-64 kernel
