@@ -102,3 +102,11 @@ pub struct MsrProfileData {
     /// are outside of this list need to be denied by a filter.
     pub permitted_msrs: Vec<RegisterAddress>,
 }
+
+/// Computed MSR updates required to be compatible with a given CPU profile.
+pub struct RequiredMsrUpdates {
+    /// Feature MSRs to be set
+    pub feature_msrs: Vec<MsrEntry>,
+    /// MSRs that must be denied via a filter
+    pub denied_msrs: Vec<u32>,
+}

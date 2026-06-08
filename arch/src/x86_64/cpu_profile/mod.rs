@@ -3,14 +3,20 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::collections::HashSet;
+
 use hypervisor::CpuVendor;
-use hypervisor::arch::x86::CpuIdEntry;
+use hypervisor::arch::x86::{CpuIdEntry, MsrEntry};
+use log::error;
 
 use crate::x86_64::cpu_profile::cpuid_adjustments::{
     CpuidOutputRegisterAdjustments, CpuidProfileData, MissingCpuidEntriesError,
 };
-use crate::x86_64::cpu_profile::msr_adjustments::MsrProfileData;
-use crate::x86_64::{AMX_TILECFG_BIT, AMX_TILEDATA_BIT, CpuidReg};
+use crate::x86_64::cpu_profile::msr_adjustments::{
+    FeatureMsrAdjustment, MsrProfileData, RequiredMsrUpdates,
+};
+use crate::x86_64::hyperv_msrs::HYPERV_MSRS;
+use crate::x86_64::{AMX_TILECFG_BIT, AMX_TILEDATA_BIT, CpuidReg, Error};
 
 /// Mask indicating availability of the AMX TILECFG state component
 const TILECFG_MASK: u32 = 1_u32 << AMX_TILECFG_BIT;
@@ -72,6 +78,66 @@ impl CpuProfile {
         // we introduce actual CPU profiles.
         match self {
             CpuProfile::Host => None,
+        }
+    }
+
+    /// Compute the MSR-related updates required by the chosen CPU profile.
+    ///
+    /// This method does **not** perform any compatibility checks beyond
+    /// ensuring that all expected MSRs are present.
+    ///
+    /// The caller is responsible for ensuring that the returned feature MSRs
+    /// may be utilized.
+    ///
+    /// If (KVM) hyper-V is not desired, then passing `kvm_hyperv = false` will permit
+    /// missing MSRs that are **purely Hyper-V related**.
+    ///
+    /// The Host profile guarantees that `Ok(None)` is returned.
+    pub(in crate::x86_64) fn required_msr_updates(
+        &self,
+        feature_msrs: &[MsrEntry],
+        msr_index_list: &[u32],
+        kvm_hyperv: bool,
+    ) -> Result<Option<RequiredMsrUpdates>, Error> {
+        let Some(MsrProfileData {
+            adjustments,
+            permitted_msrs,
+        }) = self.msr_data()
+        else {
+            return Ok(None);
+        };
+
+        let adjusted_feature_msrs = FeatureMsrAdjustment::adjust_to(&adjustments, feature_msrs)?;
+
+        let all: HashSet<u32> = feature_msrs
+            .iter()
+            .map(|entry| &entry.index)
+            .chain(msr_index_list)
+            .copied()
+            .collect();
+
+        let mut permitted: HashSet<u32> = permitted_msrs.into_iter().map(|r| r.0).collect();
+
+        if !kvm_hyperv {
+            for msr in HYPERV_MSRS {
+                let _ = permitted.remove(&msr);
+            }
+        }
+
+        let denied_msrs: Vec<u32> = all.difference(&permitted).copied().collect();
+
+        if all.len() - denied_msrs.len() != permitted.len() {
+            for msr in &permitted {
+                if !all.contains(msr) {
+                    error!("Did not find required MSR:={msr:#x}");
+                }
+            }
+            Err(Error::CpuProfileMissingMsr)
+        } else {
+            Ok(Some(RequiredMsrUpdates {
+                feature_msrs: adjusted_feature_msrs,
+                denied_msrs,
+            }))
         }
     }
 }
