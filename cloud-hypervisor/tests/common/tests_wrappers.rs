@@ -2547,7 +2547,7 @@ pub(crate) fn _test_direct_kernel_boot_noacpi(guest: &Guest) {
         guest.wait_vm_boot().unwrap();
 
         assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
-        assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+        guest.validate_memory(None);
     });
 
     kill_child(&mut child);
@@ -2650,10 +2650,16 @@ pub(crate) fn _test_memory_overhead(guest: &Guest, guest_memory_size_kb: u32) {
 
     guest.wait_vm_boot().unwrap();
 
+    let max_overhead = if on_kvm_sev_snp() {
+        MAXIMUM_VMM_OVERHEAD_KB_SEV_SNP
+    } else {
+        MAXIMUM_VMM_OVERHEAD_KB
+    };
+
     let r = std::panic::catch_unwind(|| {
         let overhead = get_vmm_overhead(child.id(), guest_memory_size_kb);
-        eprintln!("Guest memory overhead: {overhead} vs {MAXIMUM_VMM_OVERHEAD_KB}");
-        assert!(overhead <= MAXIMUM_VMM_OVERHEAD_KB);
+        eprintln!("Guest memory overhead: {overhead} vs {max_overhead}");
+        assert!(overhead <= max_overhead);
     });
 
     kill_child(&mut child);

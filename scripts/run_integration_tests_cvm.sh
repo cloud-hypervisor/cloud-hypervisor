@@ -12,8 +12,12 @@ mkdir -p "$WORKLOADS_DIR/junit"
 
 process_common_args "$@"
 
-test_features="--features mshv,igvm,sev_snp"
-build_features="mshv,igvm,sev_snp"
+if [ "$hypervisor" = "mshv" ]; then
+    build_features="mshv,igvm,sev_snp"
+else # kvm
+    build_features="kvm,igvm,sev_snp,fw_cfg"
+fi
+test_features="--features $build_features"
 
 JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.qcow2"
 JAMMY_OS_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_IMAGE_NAME"

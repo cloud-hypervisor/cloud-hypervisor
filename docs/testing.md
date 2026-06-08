@@ -354,6 +354,33 @@ mshv,igvm,sev_snp` and requires IGVM files to be present at
 
 **Test group:** `common_cvm` (`nproc / 4` threads, retries 3).
 
+#### KVM SEV-SNP
+
+```shell
+scripts/dev_cli.sh tests --integration-cvm --hypervisor kvm
+```
+
+With `--hypervisor kvm` the script builds with `--features
+kvm,igvm,sev_snp,fw_cfg`. On KVM the IGVM is an Oak stage0 firmware image
+and the guest kernel is supplied separately (read by stage0 over fw_cfg);
+the harness selects this boot model when a guest kernel is present at
+`/igvm_files/bzImage`. When no `--test-filter`
+is given it runs the full `common_cvm` set.
+
+Prerequisites:
+
+- An AMD SEV-SNP-capable KVM host with `/dev/kvm` and `/dev/sev` present
+  and SNP enabled.
+- A KVM-bootable stage0 IGVM file at `/usr/share/cloud-hypervisor/cvm` and
+  a guest kernel at `/igvm_files/bzImage`.
+
+To scope the run to a single test explicitly:
+
+```shell
+scripts/dev_cli.sh tests --integration-cvm --hypervisor kvm \
+    -- --test-filter test_jammy_simple_launch
+```
+
 ## Performance metrics
 
 ```shell
