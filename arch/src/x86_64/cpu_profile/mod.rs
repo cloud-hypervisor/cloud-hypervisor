@@ -17,6 +17,7 @@ const TILECFG_MASK: u32 = 1_u32 << AMX_TILECFG_BIT;
 const TILEDATA_MASK: u32 = 1_u32 << AMX_TILEDATA_BIT;
 
 pub mod cpuid_adjustments;
+pub mod msr_adjustments;
 
 // TODO: Auto generate the CpuProfile enum with a build script once we introduce user facing CPU profiles.
 
