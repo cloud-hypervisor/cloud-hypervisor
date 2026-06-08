@@ -17,6 +17,7 @@ use std::{io, slice};
 #[cfg(test)]
 use super::internal;
 use super::internal::decoder::Decoder;
+use crate::pwrite_all;
 
 // -- Position independent I/O helpers --
 //
@@ -73,30 +74,6 @@ pub fn decompress_cluster(
         return Err(io::Error::from_raw_os_error(libc::EIO));
     }
     Ok(decompressed)
-}
-
-/// Write all bytes to fd at offset, looping on short writes.
-pub fn pwrite_all(fd: RawFd, buf: &[u8], offset: u64) -> io::Result<()> {
-    let mut total = 0usize;
-    while total < buf.len() {
-        // SAFETY: buf and fd are valid for the lifetime of the call.
-        let ret = unsafe {
-            libc::pwrite64(
-                fd,
-                buf[total..].as_ptr().cast(),
-                buf.len() - total,
-                (offset + total as u64) as libc::off_t,
-            )
-        };
-        if ret < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        if ret == 0 {
-            return Err(io::Error::other("pwrite64 wrote 0 bytes"));
-        }
-        total += ret as usize;
-    }
-    Ok(())
 }
 
 /// RAII wrapper for an aligned heap buffer required by O_DIRECT.

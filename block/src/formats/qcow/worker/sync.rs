@@ -14,7 +14,6 @@ use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
 use super::common::{
     AlignedBuf, aligned_pread, aligned_pwrite, decompress_cluster, pread_alloc, pread_exact,
-    pwrite_all,
 };
 use super::internal::decoder::Decoder;
 use super::internal::metadata::{
@@ -22,6 +21,7 @@ use super::internal::metadata::{
 };
 use super::internal::qcow_raw_file::QcowRawFile;
 use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
+use crate::pwrite_all;
 
 pub struct QcowSync {
     metadata: Arc<QcowMetadata>,

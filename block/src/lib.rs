@@ -13,6 +13,7 @@ pub mod error;
 pub mod factory;
 #[path = "io/mod.rs"]
 mod io_impl;
+pub(crate) use io_impl::pwrite_all;
 pub use io_impl::{async_io, fcntl, request};
 pub mod formats;
 mod sparse;
