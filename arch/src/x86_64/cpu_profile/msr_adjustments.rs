@@ -89,3 +89,19 @@ impl FeatureMsrAdjustment {
         }
     }
 }
+
+/// Data describing MSR adjustments related to a CPU profile.
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub struct MsrProfileData {
+    /// Describes feature MSR adjustments necessary to become compatible with
+    /// the desired target.
+    pub adjustments: Vec<(RegisterAddress, FeatureMsrAdjustment)>,
+    /// List of the MSRs that the CPU profile requires.
+    ///
+    /// When applying a CPU profile then the union of the sets of MSRs obtained
+    /// from `Hypervisor::get_feature_msrs` and `Hypervisor::get_msr_index_list`
+    /// must necessarily contain all MSRs listed here. Otherwise the host is
+    /// considered incompatible with the CPU profile. Exceptions are made for
+    /// missing Hyper-V MSRs when `kvm_hyperv=off`.
+    pub required_msrs: Vec<RegisterAddress>,
+}
