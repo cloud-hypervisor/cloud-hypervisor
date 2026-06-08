@@ -170,6 +170,13 @@ pub enum Error {
     )]
     MissingExpectedCpuidEntry(#[source] MissingCpuidEntriesError),
 
+    /// Error when trying to apply a CPU profile because a necessary MSR was not found.
+    ///
+    /// We encourage functions returning this variant to log all missing MSRs for debugging
+    /// purposes.
+    #[error("The selected CPU profile cannot be utilized because a necessary MSR was not found")]
+    CpuProfileMissingMsr,
+
     // Error writing EBDA address
     #[error("Error writing EBDA address")]
     EbdaSetup(#[source] vm_memory::GuestMemoryError),
