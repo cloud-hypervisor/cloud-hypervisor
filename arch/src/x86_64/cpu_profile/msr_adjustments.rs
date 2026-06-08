@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::collections::HashSet;
+
 use hypervisor::arch::x86::MsrEntry;
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
@@ -118,4 +120,13 @@ pub struct MsrProfileData {
     ///
     /// We have decided to implicitly permit all such MSRs in the context of CPU profiles.
     pub permitted_msrs: Vec<RegisterAddress>,
+}
+
+/// Computed MSR updates the hypervisor backend must apply to achieve compatibility with a given CPU profile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequiredMsrUpdates {
+    /// Feature MSRs to be set.
+    pub feature_msrs: Vec<MsrEntry>,
+    /// MSRs supported by the host that are not permitted by the CPU profile.
+    pub denied_msrs: HashSet<u32>,
 }
