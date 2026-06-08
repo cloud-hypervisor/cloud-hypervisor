@@ -939,6 +939,7 @@ pub struct PayloadConfig {
 #[cfg(feature = "fw_cfg")]
 #[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
 pub struct FwCfgConfig {
     pub e820: bool,
     pub kernel: bool,
