@@ -528,6 +528,9 @@ pub trait BlockBackend: Read + Write + Seek + Send + Debug {
     fn logical_size(&self) -> Result<u64, Error>;
     /// Returns the physical size of the underlying file.
     fn physical_size(&self) -> Result<u64, Error>;
+    fn alignment(&self) -> u64 {
+        SECTOR_SIZE
+    }
 }
 
 #[derive(Debug)]
