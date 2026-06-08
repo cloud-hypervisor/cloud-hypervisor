@@ -1411,6 +1411,14 @@ impl Guest {
             "cmdline": self.kernel_cmdline.as_deref().unwrap(),
             "host_data": generate_host_data(),
             });
+            // On the KVM direct-kernel path the kernel is supplied separately
+            // and read by stage0 over fw_cfg (see on_kvm_sev_snp).
+            if let Some(kernel) = sev_snp_direct_kernel() {
+                body["payload"]["kernel"] = serde_json::json!(kernel.to_str().unwrap());
+                body["payload"]["fw_cfg_config"] = serde_json::json!({
+                    "initramfs": false,
+                });
+            }
         } else {
             body["payload"] = serde_json::json!({
             "kernel": self.kernel_path.as_deref().unwrap(),
@@ -2027,6 +2035,19 @@ impl<'a> GuestCommand<'a> {
                 "--igvm",
                 igvm.to_str().expect("IGVM path is not valid UTF-8"),
             ]);
+            // On the KVM direct-kernel path the kernel is supplied separately
+            // (see on_kvm_sev_snp); pass it plus the guest cmdline so
+            // console/serial tests route output as in a regular direct boot.
+            if let Some(kernel) = sev_snp_direct_kernel() {
+                self.command.args([
+                    "--kernel",
+                    kernel.to_str().expect("kernel path is not valid UTF-8"),
+                ]);
+                if let Some(cmdline) = &self.guest.kernel_cmdline {
+                    self.command.args(["--cmdline", cmdline]);
+                }
+                self.command.args(["--fw-cfg-config", "initramfs=off"]);
+            }
             self.command
                 .args(["--host-data", generate_host_data().as_str()]);
             self.command.args([
@@ -2540,6 +2561,16 @@ impl Display for GuestVmType {
             GuestVmType::Confidential => write!(f, "confidential"),
         }
     }
+}
+
+fn sev_snp_direct_kernel() -> Option<PathBuf> {
+    let kernel_path = PathBuf::from("/igvm_files/bzImage");
+    kernel_path.exists().then_some(kernel_path)
+}
+
+// True on the KVM SEV-SNP direct-kernel path.
+pub fn on_kvm_sev_snp() -> bool {
+    sev_snp_direct_kernel().is_some()
 }
 
 // Get the direct igvm boot file path based on the console type
