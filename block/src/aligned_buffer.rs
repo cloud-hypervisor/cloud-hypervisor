@@ -102,7 +102,6 @@ impl AlignedBuffer {
     }
 
     /// Read the full aligned region from `f` into this buffer.
-    #[cfg_attr(not(test), expect(dead_code))]
     pub fn read_exact_from(&mut self, f: &impl FileExt) -> io::Result<()> {
         let offset = self.aligned_offset;
         f.read_exact_at(self.full_mut_slice(), offset)
