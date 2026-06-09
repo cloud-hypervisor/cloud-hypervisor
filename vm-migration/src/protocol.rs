@@ -75,6 +75,7 @@
 //! ```
 
 use std::io::{Read, Write};
+use std::{mem, slice};
 
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -440,7 +441,7 @@ impl MemoryRangeTable {
         // `MemoryRange`s so the memory is valid for `length` bytes.
         // During the lifetime of the slice, neither the backing vector nor the pointed to memory are accessed.
         let data_slice_bytes =
-            unsafe { std::slice::from_raw_parts_mut(data.as_mut_ptr().cast(), length as usize) };
+            unsafe { slice::from_raw_parts_mut(data.as_mut_ptr().cast(), length as usize) };
 
         fd.read_exact(data_slice_bytes)
             .map_err(MigratableError::MigrateSocket)?;
@@ -449,13 +450,13 @@ impl MemoryRangeTable {
     }
 
     pub fn length(&self) -> u64 {
-        (std::mem::size_of::<MemoryRange>() * self.data.len()) as u64
+        (mem::size_of::<MemoryRange>() * self.data.len()) as u64
     }
 
     pub fn write_to(&self, fd: &mut dyn Write) -> Result<(), MigratableError> {
         // SAFETY: the slice is constructed with the correct arguments
         fd.write_all(unsafe {
-            std::slice::from_raw_parts(self.data.as_ptr().cast(), self.length() as usize)
+            slice::from_raw_parts(self.data.as_ptr().cast(), self.length() as usize)
         })
         .map_err(MigratableError::MigrateSocket)
     }
