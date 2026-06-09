@@ -3,24 +3,26 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::os::unix::io::RawFd;
+use std::{num, str};
 
 use thiserror::Error;
+use vmm_sys_util::errno;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("Error writing to or reading from HTTP socket")]
-    Socket(#[source] std::io::Error),
+    Socket(#[source] io::Error),
     #[error("Error sending file descriptors")]
-    SocketSendFds(#[source] vmm_sys_util::errno::Error),
+    SocketSendFds(#[source] errno::Error),
     #[error("Error parsing HTTP status code")]
-    StatusCodeParsing(#[source] std::num::ParseIntError),
+    StatusCodeParsing(#[source] num::ParseIntError),
     #[error("HTTP output is missing protocol statement")]
     MissingProtocol,
     #[error("Error parsing HTTP Content-Length field")]
-    ContentLengthParsing(#[source] std::num::ParseIntError),
+    ContentLengthParsing(#[source] num::ParseIntError),
     #[error("Server responded with error {0:?}: {1:?}")]
     ServerResponse(
         StatusCode,
@@ -100,7 +102,7 @@ fn parse_http_response(socket: &mut dyn Read) -> Result<Option<String>, Error> {
         if count == 0 {
             break;
         }
-        res.push_str(std::str::from_utf8(&bytes[0..count]).unwrap());
+        res.push_str(str::from_utf8(&bytes[0..count]).unwrap());
 
         // End of headers
         if let Some(o) = res.find("\r\n\r\n") {
