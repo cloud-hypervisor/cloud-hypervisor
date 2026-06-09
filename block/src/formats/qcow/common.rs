@@ -7,52 +7,12 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 //! Shared helpers for QCOW2 sync and async backends.
-//!
-//! Position-independent I/O helpers used by both `qcow_sync` and `qcow_async`.
 
 use std::io;
-use std::os::fd::RawFd;
 
 #[cfg(test)]
 use super::internal;
 use super::internal::decoder::Decoder;
-
-// -- Position independent I/O helpers --
-//
-// Duplicated file descriptors share the kernel file description and thus the
-// file position. Using seek then read from multiple queues races on that
-// shared position. pread64 and pwrite64 are atomic and never touch the position.
-
-/// Read exactly the requested bytes at offset, looping on short reads.
-pub fn pread_exact(fd: RawFd, buf: &mut [u8], offset: u64) -> io::Result<()> {
-    let mut total = 0usize;
-    while total < buf.len() {
-        // SAFETY: buf and fd are valid for the lifetime of the call.
-        let ret = unsafe {
-            libc::pread64(
-                fd,
-                buf[total..].as_mut_ptr().cast(),
-                buf.len() - total,
-                (offset + total as u64) as libc::off_t,
-            )
-        };
-        if ret < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        if ret == 0 {
-            return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
-        }
-        total += ret as usize;
-    }
-    Ok(())
-}
-
-/// Allocate a buffer and pread exactly `len` bytes at `offset`.
-pub fn pread_alloc(fd: RawFd, offset: u64, len: usize) -> io::Result<Vec<u8>> {
-    let mut buf = vec![0u8; len];
-    pread_exact(fd, &mut buf, offset)?;
-    Ok(buf)
-}
 
 /// Decompress a full QCOW2 cluster from compressed data.
 ///
@@ -74,44 +34,17 @@ pub fn decompress_cluster(
     Ok(decompressed)
 }
 
-/// Write all bytes to fd at offset, looping on short writes.
-pub fn pwrite_all(fd: RawFd, buf: &[u8], offset: u64) -> io::Result<()> {
-    let mut total = 0usize;
-    while total < buf.len() {
-        // SAFETY: buf and fd are valid for the lifetime of the call.
-        let ret = unsafe {
-            libc::pwrite64(
-                fd,
-                buf[total..].as_ptr().cast(),
-                buf.len() - total,
-                (offset + total as u64) as libc::off_t,
-            )
-        };
-        if ret < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        if ret == 0 {
-            return Err(io::Error::other("pwrite64 wrote 0 bytes"));
-        }
-        total += ret as usize;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 pub(crate) mod unit_tests {
     use std::fs::File;
     use std::io::{Read, Seek, SeekFrom, Write};
-    use std::os::unix::fs::FileExt;
-    use std::os::unix::io::AsRawFd;
 
     use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
     use flate2::Compression;
     use flate2::write::DeflateEncoder;
-    use vmm_sys_util::tempfile::TempFile;
 
+    use super::decompress_cluster;
     use super::internal::decoder::ZlibDecoder;
-    use super::{decompress_cluster, pread_alloc};
 
     const COMPRESSED_FLAG: u64 = 1 << 62;
     const CLUSTER_USED_FLAG: u64 = 1 << 63;
@@ -134,10 +67,6 @@ pub(crate) mod unit_tests {
     }
 
     /// Compress every allocated cluster in a QCOW2 image file in place.
-    ///
-    /// Walks L1 -> L2 tables, compresses each standard cluster with raw
-    /// deflate, appends the compressed payload at the end of the file,
-    /// and rewrites the L2 entry with the compressed layout.
     pub fn compress_allocated_clusters(file: &mut File) {
         file.seek(SeekFrom::Start(HEADER_CLUSTER_BITS_OFFSET))
             .unwrap();
@@ -190,12 +119,6 @@ pub(crate) mod unit_tests {
                 file.seek(SeekFrom::Start(append_offset)).unwrap();
                 file.write_all(&compressed).unwrap();
 
-                // The L2 entry encodes the compressed size in units of
-                // 512 byte sectors. The reader decodes the sector count
-                // back and computes: nsectors * 512 - (addr & 511).
-                // Because addr is 512 aligned, this yields nsectors * 512
-                // which rounds up to the next sector boundary. The file
-                // must contain enough bytes for that rounded up pread.
                 let padded_len = (compressed.len() + 511) & !511;
                 if padded_len > compressed.len() {
                     let padding = vec![0u8; padded_len - compressed.len()];
@@ -212,22 +135,6 @@ pub(crate) mod unit_tests {
         }
 
         file.flush().unwrap();
-    }
-
-    #[test]
-    fn test_pread_alloc() {
-        let temp = TempFile::new().unwrap();
-        let file = temp.as_file();
-        let data: Vec<u8> = (0..=255).cycle().take(4096).collect();
-        file.write_all_at(&data, 0).unwrap();
-
-        let buf = pread_alloc(file.as_raw_fd(), 0, 4096).unwrap();
-        assert_eq!(buf, data);
-
-        let buf = pread_alloc(file.as_raw_fd(), 100, 200).unwrap();
-        assert_eq!(buf, &data[100..300]);
-
-        pread_alloc(file.as_raw_fd(), 4000, 200).unwrap_err();
     }
 
     #[test]
