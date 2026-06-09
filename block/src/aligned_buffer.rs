@@ -13,7 +13,6 @@ use std::{io, slice};
 /// at `as_slice()`/`as_mut_slice()` (accounting for head padding when the
 /// requested offset is not alignment-aligned). The full aligned region is
 /// used internally for pread/pwrite via `FileExt`.
-#[allow(dead_code)]
 pub(crate) struct AlignedBuffer {
     ptr: *mut u8,
     layout: Layout,
@@ -23,7 +22,6 @@ pub(crate) struct AlignedBuffer {
     aligned_offset: u64,
 }
 
-#[allow(dead_code)]
 impl AlignedBuffer {
     /// Create a new aligned buffer for I/O at `offset` of `len` bytes with
     /// the given `alignment` requirement.
@@ -104,6 +102,7 @@ impl AlignedBuffer {
     }
 
     /// Read the full aligned region from `f` into this buffer.
+    #[cfg_attr(not(test), expect(dead_code))]
     pub fn read_exact_from(&mut self, f: &impl FileExt) -> io::Result<()> {
         let offset = self.aligned_offset;
         f.read_exact_at(self.full_mut_slice(), offset)
