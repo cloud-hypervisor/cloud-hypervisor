@@ -8,18 +8,17 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::alloc::{Layout, alloc_zeroed, dealloc};
 use std::fs::{File, Metadata};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::fs::FileExt;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::slice;
 
 use vmm_sys_util::file_traits::FileSync;
 use vmm_sys_util::seek_hole::SeekHole;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
+use crate::aligned_buffer::AlignedBuffer;
 use crate::{BlockBackend, query_device_size};
 
 #[derive(Debug)]
@@ -32,19 +31,12 @@ pub struct RawFile {
 
 const BLK_ALIGNMENTS: [usize; 2] = [512, 4096];
 
-fn is_valid_alignment(fd: RawFd, alignment: usize) -> bool {
-    let layout = Layout::from_size_align(alignment, alignment).unwrap();
-    // SAFETY: layout has non-zero size
-    let ptr = unsafe { alloc_zeroed(layout) };
-    assert!(!ptr.is_null());
-
-    // SAFETY: FFI call
-    let ret = unsafe { ::libc::pread(fd, ptr.cast(), alignment, alignment.try_into().unwrap()) };
-
-    // SAFETY: ptr was allocated by alloc_zeroed with layout
-    unsafe { dealloc(ptr, layout) };
-
-    ret >= 0
+fn is_valid_alignment(file: &File, alignment: usize) -> bool {
+    let mut abuf = match AlignedBuffer::new(alignment as u64, alignment, alignment) {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+    abuf.read_from(file).is_ok()
 }
 
 impl RawFile {
@@ -53,7 +45,7 @@ impl RawFile {
         let mut alignment = 0;
         if direct_io {
             for align in &BLK_ALIGNMENTS {
-                if is_valid_alignment(file.as_raw_fd(), *align) {
+                if is_valid_alignment(&file, *align) {
                     alignment = *align;
                     break;
                 }
@@ -65,16 +57,6 @@ impl RawFile {
             position: 0,
             direct_io,
         }
-    }
-
-    fn round_up(&self, offset: u64) -> u64 {
-        let align: u64 = self.alignment.try_into().unwrap();
-        offset.div_ceil(align) * align
-    }
-
-    fn round_down(&self, offset: u64) -> u64 {
-        let align: u64 = self.alignment.try_into().unwrap();
-        (offset / align) * align
     }
 
     fn is_aligned(&self, buf: &[u8]) -> bool {
@@ -136,6 +118,10 @@ impl RawFile {
 
 impl Read for RawFile {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
         if self.is_aligned(buf) {
             match self.file.read(buf) {
                 Ok(r) => {
@@ -145,77 +131,22 @@ impl Read for RawFile {
                 Err(e) => Err(e),
             }
         } else {
-            let rounded_pos: u64 = self.round_down(self.position);
-            let file_offset: usize = self
-                .position
-                .checked_sub(rounded_pos)
-                .unwrap()
-                .try_into()
-                .unwrap();
-            let buf_len: usize = buf.len();
-            let rounded_len: usize = self
-                .round_up(
-                    file_offset
-                        .checked_add(buf_len)
-                        .unwrap()
-                        .try_into()
-                        .unwrap(),
-                )
-                .try_into()
-                .unwrap();
-
-            let layout = Layout::from_size_align(rounded_len, self.alignment).unwrap();
-            // SAFETY: layout has non-zero size
-            let tmp_ptr = unsafe { alloc_zeroed(layout) };
-            if tmp_ptr.is_null() {
-                return Err(io::Error::last_os_error());
-            }
-
-            // SAFETY: tmp_ptr is valid and at least rounded_len long
-            let tmp_buf = unsafe { slice::from_raw_parts_mut(tmp_ptr, rounded_len) };
-
-            // This can eventually replaced with read_at once its interface
-            // has been stabilized.
-            // SAFETY: FFI call. All parameters are valid.
-            let ret = unsafe {
-                ::libc::pread64(
-                    self.file.as_raw_fd(),
-                    tmp_buf.as_mut_ptr().cast(),
-                    tmp_buf.len(),
-                    rounded_pos.try_into().unwrap(),
-                )
-            };
-            if ret < 0 {
-                // SAFETY: tmp_ptr was allocated by alloc_zeroed with layout
-                unsafe { dealloc(tmp_ptr, layout) };
-                return Err(io::Error::last_os_error());
-            }
-
-            let read: usize = ret.try_into().unwrap();
-            if read < file_offset {
-                // SAFETY: tmp_ptr was allocated by alloc_zeroed with layout
-                unsafe { dealloc(tmp_ptr, layout) };
-                return Ok(0);
-            }
-
-            let mut to_copy = read - file_offset;
-            if to_copy > buf_len {
-                to_copy = buf_len;
-            }
-
-            buf.copy_from_slice(&tmp_buf[file_offset..(file_offset + buf_len)]);
-            // SAFETY: tmp_ptr was allocated by alloc_zeroed with layout
-            unsafe { dealloc(tmp_ptr, layout) };
-
-            self.seek(SeekFrom::Current(to_copy.try_into().unwrap()))
-                .unwrap();
-            Ok(to_copy)
+            let buf_len = buf.len();
+            let mut abuf = AlignedBuffer::new(self.position, buf_len, self.alignment)?;
+            let bytes_read = abuf.read_from(&self.file)?;
+            buf[..bytes_read].copy_from_slice(&abuf.as_slice()[..bytes_read]);
+            self.seek(SeekFrom::Current(bytes_read.try_into().unwrap()))?;
+            Ok(bytes_read)
         }
     }
 }
 
 impl Write for RawFile {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
         if self.is_aligned(buf) {
             match self.file.write(buf) {
                 Ok(r) => {
@@ -225,86 +156,13 @@ impl Write for RawFile {
                 Err(e) => Err(e),
             }
         } else {
-            let rounded_pos: u64 = self.round_down(self.position);
-            let file_offset: usize = self
-                .position
-                .checked_sub(rounded_pos)
-                .unwrap()
-                .try_into()
-                .unwrap();
-            let buf_len: usize = buf.len();
-            let rounded_len: usize = self
-                .round_up(
-                    file_offset
-                        .checked_add(buf_len)
-                        .unwrap()
-                        .try_into()
-                        .unwrap(),
-                )
-                .try_into()
-                .unwrap();
-
-            let layout = Layout::from_size_align(rounded_len, self.alignment).unwrap();
-            // SAFETY: layout has non-zero size
-            let tmp_ptr = unsafe { alloc_zeroed(layout) };
-            if tmp_ptr.is_null() {
-                return Err(io::Error::last_os_error());
-            }
-
-            // SAFETY: tmp_ptr is at least rounded_len long
-            let tmp_buf = unsafe { slice::from_raw_parts_mut(tmp_ptr, rounded_len) };
-
-            // This can eventually replaced with read_at once its interface
-            // has been stabilized.
-            // SAFETY: FFI call
-            let ret = unsafe {
-                ::libc::pread64(
-                    self.file.as_raw_fd(),
-                    tmp_buf.as_mut_ptr().cast(),
-                    tmp_buf.len(),
-                    rounded_pos.try_into().unwrap(),
-                )
-            };
-            if ret < 0 {
-                // SAFETY: tmp_ptr was allocated by alloc_zeroed with layout
-                unsafe { dealloc(tmp_ptr, layout) };
-                return Err(io::Error::last_os_error());
-            }
-
-            tmp_buf[file_offset..(file_offset + buf_len)].copy_from_slice(buf);
-
-            // This can eventually replaced with write_at once its interface
-            // has been stabilized.
-            // SAFETY: FFI call
-            let ret = unsafe {
-                ::libc::pwrite64(
-                    self.file.as_raw_fd(),
-                    tmp_buf.as_ptr().cast(),
-                    tmp_buf.len(),
-                    rounded_pos.try_into().unwrap(),
-                )
-            };
-
-            // SAFETY: tmp_ptr was allocated by alloc_zeroed with layout
-            unsafe { dealloc(tmp_ptr, layout) };
-
-            if ret < 0 {
-                return Err(io::Error::last_os_error());
-            }
-
-            let written: usize = ret.try_into().unwrap();
-            if written < file_offset {
-                Ok(0)
-            } else {
-                let mut to_seek = written - file_offset;
-                if to_seek > buf_len {
-                    to_seek = buf_len;
-                }
-
-                self.seek(SeekFrom::Current(to_seek.try_into().unwrap()))
-                    .unwrap();
-                Ok(to_seek)
-            }
+            let buf_len = buf.len();
+            let mut abuf = AlignedBuffer::new(self.position, buf_len, self.alignment)?;
+            abuf.read_from(&self.file)?;
+            abuf.as_mut_slice().copy_from_slice(buf);
+            abuf.write_to(&self.file)?;
+            self.seek(SeekFrom::Current(buf_len.try_into().unwrap()))?;
+            Ok(buf_len)
         }
     }
 
@@ -413,5 +271,103 @@ impl FileExt for RawFile {
 
     fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
         self.file.write_at(buf, offset)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs::File;
+    use std::io::{Read, Seek, SeekFrom, Write};
+    use std::os::unix::fs::FileExt;
+
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::*;
+
+    const TEST_ALIGNMENT: usize = 512;
+
+    fn create_pattern_file(size: usize) -> TempFile {
+        let tf = TempFile::new().unwrap();
+        let pattern: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
+        tf.as_file().write_all(&pattern).unwrap();
+        tf.as_file().sync_all().unwrap();
+        tf
+    }
+
+    fn raw_with_alignment(file: File) -> RawFile {
+        RawFile {
+            file,
+            alignment: TEST_ALIGNMENT,
+            position: 0,
+            direct_io: true,
+        }
+    }
+
+    #[test]
+    fn test_alignment_probe_accepts_short_read() {
+        let tf = create_pattern_file(1);
+
+        assert!(is_valid_alignment(tf.as_file(), TEST_ALIGNMENT));
+    }
+
+    #[test]
+    fn test_unaligned_read_returns_short_read_at_eof() {
+        let file_size = 100usize;
+        let tf = create_pattern_file(file_size);
+        let mut raw = raw_with_alignment(tf.as_file().try_clone().unwrap());
+        raw.seek(SeekFrom::Start(10)).unwrap();
+
+        let mut buf = vec![0u8; 200];
+        let bytes_read = raw.read(&mut buf).unwrap();
+
+        let expected: Vec<u8> = (10..file_size).map(|i| (i % 251) as u8).collect();
+        assert_eq!(bytes_read, expected.len());
+        assert_eq!(&buf[..bytes_read], &expected[..]);
+        assert_eq!(raw.position, file_size as u64);
+    }
+
+    #[test]
+    fn test_unaligned_read_beyond_eof_returns_zero() {
+        let tf = create_pattern_file(100);
+        let mut raw = raw_with_alignment(tf.as_file().try_clone().unwrap());
+        raw.seek(SeekFrom::Start(200)).unwrap();
+
+        let mut buf = vec![0u8; 16];
+        let bytes_read = raw.read(&mut buf).unwrap();
+
+        assert_eq!(bytes_read, 0);
+        assert_eq!(raw.position, 200);
+    }
+
+    #[test]
+    fn test_unaligned_write_extends_at_eof() {
+        let file_size = 100usize;
+        let tf = create_pattern_file(file_size);
+        let mut raw = raw_with_alignment(tf.as_file().try_clone().unwrap());
+        raw.seek(SeekFrom::Start(file_size as u64)).unwrap();
+
+        let data = b"xyz";
+        let bytes_written = raw.write(data).unwrap();
+
+        assert_eq!(bytes_written, data.len());
+        assert_eq!(raw.position, (file_size + data.len()) as u64);
+
+        let mut readback = vec![0u8; file_size + data.len()];
+        tf.as_file().read_exact_at(&mut readback, 0).unwrap();
+        let expected_prefix: Vec<u8> = (0..file_size).map(|i| (i % 251) as u8).collect();
+        assert_eq!(&readback[..file_size], &expected_prefix[..]);
+        assert_eq!(&readback[file_size..], data);
+    }
+
+    #[test]
+    fn test_empty_unaligned_io_is_noop() {
+        let tf = create_pattern_file(100);
+        let mut raw = raw_with_alignment(tf.as_file().try_clone().unwrap());
+        raw.seek(SeekFrom::Start(1)).unwrap();
+
+        let mut read_buf = [];
+        assert_eq!(raw.read(&mut read_buf).unwrap(), 0);
+        assert_eq!(raw.write(&[]).unwrap(), 0);
+        assert_eq!(raw.position, 1);
     }
 }
