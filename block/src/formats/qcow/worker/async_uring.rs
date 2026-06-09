@@ -10,13 +10,14 @@
 
 use std::cmp::{max, min};
 use std::io;
+use std::os::unix::fs::FileExt;
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
-use super::common::{decompress_cluster, pread_alloc, pread_exact, pwrite_all};
+use super::common::decompress_cluster;
 use super::internal::decoder::Decoder;
 use super::internal::metadata::{
     BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
@@ -399,7 +400,9 @@ impl QcowAsync {
                             .map_err(AsyncIoError::ReadVectored)?;
                     } else {
                         let mut buf = vec![0u8; len];
-                        pread_exact(data_file.as_raw_fd(), &mut buf, host_offset)
+                        data_file
+                            .file()
+                            .read_exact_at(&mut buf, host_offset)
                             .map_err(AsyncIoError::ReadVectored)?;
                         op.write_bytes_at(buf_offset, &buf)
                             .map_err(AsyncIoError::ReadVectored)?;
@@ -412,9 +415,11 @@ impl QcowAsync {
                     cluster_offset,
                     length,
                 } => {
-                    let compressed =
-                        pread_alloc(data_file.as_raw_fd(), host_offset, compressed_size)
-                            .map_err(AsyncIoError::ReadVectored)?;
+                    let mut compressed = vec![0u8; compressed_size];
+                    data_file
+                        .file()
+                        .read_exact_at(&mut compressed, host_offset)
+                        .map_err(AsyncIoError::ReadVectored)?;
                     let decompressed =
                         decompress_cluster(&compressed, cluster_size as usize, decoder)
                             .map_err(AsyncIoError::ReadVectored)?;
@@ -498,7 +503,9 @@ impl QcowAsync {
                         let mut buf = vec![0u8; count];
                         op.read_bytes_at(buf_offset, &mut buf)
                             .map_err(AsyncIoError::WriteVectored)?;
-                        pwrite_all(data_file.as_raw_fd(), &buf, host_offset)
+                        data_file
+                            .file()
+                            .write_all_at(&buf, host_offset)
                             .map_err(AsyncIoError::WriteVectored)?;
                     }
                 }
