@@ -459,6 +459,7 @@ impl<C> VhostUserState<C> {
 pub struct VhostUserCommon {
     pub virtio_common: VirtioCommon,
     pub vu: Option<Arc<Mutex<VhostUserHandle>>>,
+    pub guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     pub acked_protocol_features: u64,
     pub socket_path: String,
     pub vu_num_queues: usize,
@@ -481,6 +482,8 @@ impl VhostUserCommon {
         kill_evt: EventFd,
         pause_evt: EventFd,
     ) -> std::result::Result<VhostUserEpollHandler<T>, ActivateError> {
+        self.guest_memory = Some(mem.clone());
+
         if self.disconnected.load(Ordering::Relaxed) {
             warn!(
                 "Not activating disconnected vhost-user device for socket {}",
@@ -626,17 +629,13 @@ impl VhostUserCommon {
         self.vu = None;
     }
 
-    fn add_memory_region_internal(
-        &self,
-        guest_memory: &Option<GuestMemoryAtomic<GuestMemoryMmap>>,
-        region: &Arc<GuestRegionMmap>,
-    ) -> Result<()> {
+    fn add_memory_region_internal(&self, region: &Arc<GuestRegionMmap>) -> Result<()> {
         if let Some(vu) = &self.vu {
             if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits()
                 != 0
             {
                 return vu.lock().unwrap().add_memory_region(region);
-            } else if let Some(guest_memory) = guest_memory {
+            } else if let Some(guest_memory) = &self.guest_memory {
                 return vu
                     .lock()
                     .unwrap()
@@ -649,7 +648,6 @@ impl VhostUserCommon {
 
     pub fn add_memory_region(
         &mut self,
-        guest_memory: &Option<GuestMemoryAtomic<GuestMemoryMmap>>,
         region: &Arc<GuestRegionMmap>,
     ) -> std::result::Result<(), crate::Error> {
         if self.disconnected.load(Ordering::Relaxed) {
@@ -659,7 +657,7 @@ impl VhostUserCommon {
             );
         }
 
-        if let Err(e) = self.add_memory_region_internal(guest_memory, region) {
+        if let Err(e) = self.add_memory_region_internal(region) {
             if e.is_transport_lost() {
                 warn!(
                     "Failed updating memory on vhost-user backend for socket {}: {e:?}; \
@@ -784,12 +782,9 @@ impl VhostUserCommon {
         Ok(snapshot)
     }
 
-    pub fn start_dirty_log(
-        &mut self,
-        guest_memory: &Option<GuestMemoryAtomic<GuestMemoryMmap>>,
-    ) -> std::result::Result<(), MigratableError> {
+    pub fn start_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
         if let Some(vu) = &self.vu {
-            if let Some(guest_memory) = guest_memory {
+            if let Some(guest_memory) = &self.guest_memory {
                 let last_ram_addr = guest_memory.memory().last_addr().raw_value();
                 vu.lock()
                     .unwrap()
@@ -821,12 +816,9 @@ impl VhostUserCommon {
         }
     }
 
-    pub fn dirty_log(
-        &mut self,
-        guest_memory: &Option<GuestMemoryAtomic<GuestMemoryMmap>>,
-    ) -> std::result::Result<MemoryRangeTable, MigratableError> {
+    pub fn dirty_log(&mut self) -> std::result::Result<MemoryRangeTable, MigratableError> {
         if let Some(vu) = &self.vu {
-            if let Some(guest_memory) = guest_memory {
+            if let Some(guest_memory) = &self.guest_memory {
                 let last_ram_addr = guest_memory.memory().last_addr().raw_value();
                 vu.lock().unwrap().dirty_log(last_ram_addr).map_err(|e| {
                     MigratableError::DirtyLog(anyhow!(

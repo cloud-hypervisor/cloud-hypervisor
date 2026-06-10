@@ -13,7 +13,7 @@ use serde_with::{Bytes, serde_as};
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler};
 use vm_device::UserspaceMapping;
-use vm_memory::{ByteValued, GuestMemoryAtomic};
+use vm_memory::ByteValued;
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -23,8 +23,8 @@ use super::{DEFAULT_VIRTIO_FEATURES, Error, Result};
 use crate::seccomp_filters::Thread;
 use crate::vhost_user::{VhostUserCommon, VhostUserState};
 use crate::{
-    ActivateResult, GuestMemoryMmap, GuestRegionMmap, MmapRegion, VIRTIO_F_ACCESS_PLATFORM,
-    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioSharedMemoryList,
+    ActivateResult, GuestRegionMmap, MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon,
+    VirtioDevice, VirtioDeviceType, VirtioSharedMemoryList,
 };
 
 const NUM_QUEUE_OFFSET: usize = 1;
@@ -65,7 +65,6 @@ pub struct Fs {
     // which will be automatically dropped when the device is dropped
     cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
     seccomp_action: SeccompAction,
-    guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     exit_evt: EventFd,
     access_platform_enabled: bool,
 }
@@ -198,7 +197,6 @@ impl Fs {
             config,
             cache,
             seccomp_action,
-            guest_memory: None,
             exit_evt,
             access_platform_enabled,
         })
@@ -250,7 +248,6 @@ impl VirtioDevice for Fs {
         self.vu_common
             .virtio_common
             .activate(&queues, interrupt_cb.clone())?;
-        self.guest_memory = Some(mem.clone());
 
         let backend_req_handler: Option<FrontendReqHandler<BackendReqHandler>> = None;
         // Run a dedicated thread for handling potential reconnections with
@@ -312,7 +309,7 @@ impl VirtioDevice for Fs {
         &mut self,
         region: &Arc<GuestRegionMmap>,
     ) -> std::result::Result<(), crate::Error> {
-        self.vu_common.add_memory_region(&self.guest_memory, region)
+        self.vu_common.add_memory_region(region)
     }
 
     fn userspace_mappings(&self) -> Vec<UserspaceMapping> {
@@ -355,7 +352,7 @@ impl Transportable for Fs {}
 
 impl Migratable for Fs {
     fn start_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
-        self.vu_common.start_dirty_log(&self.guest_memory)
+        self.vu_common.start_dirty_log()
     }
 
     fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
@@ -363,7 +360,7 @@ impl Migratable for Fs {
     }
 
     fn dirty_log(&mut self) -> std::result::Result<MemoryRangeTable, MigratableError> {
-        self.vu_common.dirty_log(&self.guest_memory)
+        self.vu_common.dirty_log()
     }
 
     fn start_migration(&mut self) -> std::result::Result<(), MigratableError> {
