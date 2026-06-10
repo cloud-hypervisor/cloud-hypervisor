@@ -468,6 +468,8 @@ pub struct VhostUserCommon {
     pub vring_bases: Option<Vec<u64>>,
     /// Indicates that the backend is no longer reachable. Shared with EPollHandler.
     pub disconnected: Arc<AtomicBool>,
+    saved_dirty_log: Option<MemoryRangeTable>,
+    dirty_logging: bool,
 }
 
 impl VhostUserCommon {
@@ -776,6 +778,10 @@ impl VhostUserCommon {
         let snapshot = Snapshot::new_from_state(state)?;
 
         if self.migration_started {
+            // Local migration does not enable dirty logging.
+            if self.dirty_logging {
+                self.saved_dirty_log = Some(self.dirty_log()?);
+            }
             self.shutdown();
         }
 
@@ -793,7 +799,9 @@ impl VhostUserCommon {
                         MigratableError::StartDirtyLog(anyhow!(
                             "Error starting migration for vhost-user backend: {e:?}"
                         ))
-                    })
+                    })?;
+                self.dirty_logging = true;
+                Ok(())
             } else {
                 Err(MigratableError::StartDirtyLog(anyhow!(
                     "Missing guest memory"
@@ -810,10 +818,11 @@ impl VhostUserCommon {
                 MigratableError::StopDirtyLog(anyhow!(
                     "Error stopping migration for vhost-user backend: {e:?}"
                 ))
-            })
-        } else {
-            Ok(())
+            })?;
         }
+
+        self.dirty_logging = false;
+        Ok(())
     }
 
     pub fn dirty_log(&mut self) -> std::result::Result<MemoryRangeTable, MigratableError> {
@@ -829,7 +838,7 @@ impl VhostUserCommon {
                 Err(MigratableError::DirtyLog(anyhow!("Missing guest memory")))
             }
         } else {
-            Ok(MemoryRangeTable::default())
+            Ok(self.saved_dirty_log.take().unwrap_or_default())
         }
     }
 
@@ -840,6 +849,7 @@ impl VhostUserCommon {
 
     pub fn complete_migration(&mut self) -> std::result::Result<(), MigratableError> {
         self.migration_started = false;
+        self.dirty_logging = false;
 
         // Make sure the device thread is killed in order to prevent from
         // reconnections to the socket.
