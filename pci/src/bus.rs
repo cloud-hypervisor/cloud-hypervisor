@@ -144,7 +144,7 @@ impl PciBus {
         }
     }
 
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(clippy::needless_pass_by_value)]
     pub fn register_mapping(
         &self,
         dev: Arc<dyn BusDeviceSync>,

@@ -194,7 +194,6 @@ pub trait PciProgrammingInterface {
 
 /// Types of PCI capabilities.
 #[derive(PartialEq, Eq, Copy, Clone)]
-#[allow(non_camel_case_types)]
 #[repr(u8)]
 pub enum PciCapabilityId {
     ListId = 0,
@@ -531,7 +530,7 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 impl PciConfiguration {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         vendor_id: u16,
         device_id: u16,
