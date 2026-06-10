@@ -11997,7 +11997,6 @@ mod fw_cfg {
     use crate::*;
 
     #[test]
-    #[cfg_attr(feature = "mshv", ignore = "See #7434")]
     fn test_fw_cfg() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -12045,7 +12044,6 @@ mod fw_cfg {
     }
 
     #[test]
-    #[cfg_attr(feature = "mshv", ignore = "See #7434")]
     fn test_fw_cfg_string() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));

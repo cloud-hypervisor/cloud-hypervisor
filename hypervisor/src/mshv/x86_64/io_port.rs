@@ -296,7 +296,7 @@ impl MshvVcpu {
 
 #[cfg(test)]
 mod tests {
-    use mshv_bindings::hv_x64_io_port_access_info;
+    use mshv_bindings::{hv_x64_intercept_message_header, hv_x64_io_port_access_info};
 
     use super::*;
 
@@ -319,11 +319,15 @@ mod tests {
                 .set_rep_prefix(rep_prefix as u8);
         }
 
-        let mut info = hv_x64_io_port_intercept_message::default();
-        info.access_info = access_info;
-        info.header.intercept_access_type = access_type;
-        info.rcx = rcx;
-        info
+        hv_x64_io_port_intercept_message {
+            header: hv_x64_intercept_message_header {
+                intercept_access_type: access_type,
+                ..Default::default()
+            },
+            access_info,
+            rcx,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -341,7 +345,7 @@ mod tests {
         let bad_size = io_port_info(3, false, false, HV_INTERCEPT_ACCESS_READ as u8, 0);
         let bad_access = io_port_info(1, false, false, 0xff, 0);
 
-        assert!(MshvVcpu::io_port_access_len(&bad_size).is_err());
-        assert!(MshvVcpu::io_port_is_write(&bad_access).is_err());
+        MshvVcpu::io_port_access_len(&bad_size).unwrap_err();
+        MshvVcpu::io_port_is_write(&bad_access).unwrap_err();
     }
 }
