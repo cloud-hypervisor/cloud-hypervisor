@@ -4,6 +4,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use std::result;
 use std::sync::{Arc, Mutex};
 
 use byteorder::{ByteOrder, LittleEndian};
@@ -528,7 +529,7 @@ pub enum Error {
     #[error("rom bar address {0} not a power of two")]
     RomBarSizeInvalid(u64),
 }
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = result::Result<T, Error>;
 
 impl PciConfiguration {
     #[allow(clippy::too_many_arguments)]
@@ -1145,7 +1146,7 @@ impl Snapshottable for PciConfiguration {
         String::from(PCI_CONFIGURATION_ID)
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_state(&self.state())
     }
 }

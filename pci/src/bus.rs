@@ -7,6 +7,7 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::ops::DerefMut;
+use std::result;
 use std::sync::{Arc, Barrier, Mutex};
 
 use byteorder::{ByteOrder, LittleEndian};
@@ -53,7 +54,7 @@ pub enum PciRootError {
     #[error("Valid PCI device identifier but already used: {0}")]
     AlreadyInUsePciDeviceSlot(usize),
 }
-pub type Result<T> = std::result::Result<T, PciRootError>;
+pub type Result<T> = result::Result<T, PciRootError>;
 
 /// Emulates the PCI Root bridge device.
 pub struct PciRoot {
@@ -554,6 +555,7 @@ fn parse_io_config_address(config_address: u32) -> (usize, usize, usize, usize) 
 #[cfg(test)]
 mod unit_tests {
     use std::error::Error;
+    use std::io;
     use std::result::Result;
 
     use super::*;
@@ -570,7 +572,7 @@ mod unit_tests {
             _len: u64,
             _pci_dev: &mut dyn PciDevice,
             _region_type: PciBarRegionType,
-        ) -> Result<(), std::io::Error> {
+        ) -> Result<(), io::Error> {
             Ok(())
         }
     }
