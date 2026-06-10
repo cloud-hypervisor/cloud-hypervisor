@@ -19,7 +19,7 @@ use std::fmt::{self, Debug, Display};
 use std::num::ParseIntError;
 use std::str::FromStr;
 
-use serde::de::Visitor;
+use serde::de::{self, Visitor};
 
 pub use self::bus::{
     NUM_DEVICE_IDS, PCI_ROOT_DEVICE_ID, PciBus, PciConfigIo, PciConfigMmio, PciRoot, PciRootError,
@@ -75,7 +75,7 @@ impl Visitor<'_> for PciBdfVisitor {
 
     fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
     where
-        E: serde::de::Error,
+        E: de::Error,
     {
         Ok(v.into())
     }
@@ -157,7 +157,7 @@ impl From<&PciBdf> for u16 {
 }
 
 impl Debug for PciBdf {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "{:04x}:{:02x}:{:02x}.{:01x}",
@@ -170,7 +170,7 @@ impl Debug for PciBdf {
 }
 
 impl Display for PciBdf {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "{:04x}:{:02x}:{:02x}.{:01x}",

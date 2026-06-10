@@ -6,7 +6,7 @@
 
 use core::ffi::c_int;
 use core::ptr::null_mut;
-use std::io::{Error, ErrorKind};
+use std::io::{self, Error, ErrorKind};
 use std::os::fd::{AsRawFd as _, BorrowedFd};
 
 use libc::size_t;
@@ -55,7 +55,7 @@ impl MmapRegion {
         fd: BorrowedFd,
         offset1: u64,
         offset2: u64,
-    ) -> std::io::Result<Self> {
+    ) -> io::Result<Self> {
         const BAD_LENGTH: &str = "Offsets must fit in libc::off_t";
         const BAD_OFFSET: &str = "Mapping length must fit \
 in both isize and libc::size_t";

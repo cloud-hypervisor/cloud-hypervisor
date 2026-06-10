@@ -11,7 +11,7 @@ use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_device::interrupt::{
-    InterruptIndex, InterruptSourceConfig, InterruptSourceGroup, MsiIrqSourceConfig,
+    self, InterruptIndex, InterruptSourceConfig, InterruptSourceGroup, MsiIrqSourceConfig,
 };
 use vm_memory::ByteValued;
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
@@ -96,9 +96,9 @@ macro_rules! impl_method {
 
 impl InterruptSourceGroup for MaybeMutInterruptSourceGroup {
     impl_method! {
-        fn trigger(&self, index: InterruptIndex) -> vm_device::interrupt::Result<()>;
+        fn trigger(&self, index: InterruptIndex) -> interrupt::Result<()>;
 
-        fn notifier(&self, index: InterruptIndex) -> Option<vmm_sys_util::eventfd::EventFd>;
+        fn notifier(&self, index: InterruptIndex) -> Option<EventFd>;
 
         fn update(
             &self,
@@ -106,9 +106,9 @@ impl InterruptSourceGroup for MaybeMutInterruptSourceGroup {
             config: InterruptSourceConfig,
             masked: bool,
             set_gsi: bool,
-        ) -> vm_device::interrupt::Result<()>;
+        ) -> interrupt::Result<()>;
 
-        fn set_gsi(&self) -> vm_device::interrupt::Result<()>;
+        fn set_gsi(&self) -> interrupt::Result<()>;
     }
 }
 
@@ -118,7 +118,7 @@ impl MaybeMutInterruptSourceGroup {
         index: InterruptIndex,
         eventfd: Option<EventFd>,
         vm: &dyn hypervisor::Vm,
-    ) -> std::io::Result<()> {
+    ) -> io::Result<()> {
         match self {
             Self::Immutable(_) => panic!(
                 "Attempted to set a notifier of an immutable source.  You must mark your device as needing a mutable source by having sets_irqfd() return true."
@@ -516,7 +516,7 @@ impl Snapshottable for MsixConfig {
         String::from(MSIX_CONFIG_ID)
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_state(&self.state())
     }
 }
