@@ -55,8 +55,9 @@ pub enum ConnState {
     PeerInit,
     /// The connection handshake has been performed successfully, and data can now be exchanged.
     Established,
-    /// The host (AF_UNIX) socket was closed.
-    LocalClosed,
+    /// The host (AF_UNIX) socket has been (partially) shut down. The tuple represents the host
+    /// R/W indication: (will_not_recv_anymore_data, will_not_send_anymore_data).
+    LocalClosed(bool, bool),
     /// A VSOCK_OP_SHUTDOWN packet was received from the guest. The tuple represents the guest R/W
     /// indication: (will_not_recv_anymore_data, will_not_send_anymore_data).
     PeerClosed(bool, bool),

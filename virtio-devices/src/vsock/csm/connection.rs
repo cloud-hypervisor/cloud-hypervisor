@@ -140,6 +140,9 @@ pub struct VsockConnection<S: Read + ReadVolatile + Write + WriteVolatile + AsRa
     /// Whether we've already shut down the write half of the host stream, after the guest
     /// half-closed its send side.
     host_write_shutdown: bool,
+    /// Whether the host stream has hung up (EPOLLHUP); distinguishes a full close from a host
+    /// send-side half-close on a zero-length read.
+    host_hung_up: bool,
 }
 
 impl<S> VsockChannel for VsockConnection<S>
@@ -200,6 +203,10 @@ where
                 // A data packet is only valid for established connections, and connections for
                 // which our peer has initiated a graceful shutdown, but can still receive data.
                 ConnState::Established | ConnState::PeerClosed(false, _) => (),
+                // A full host close (EPOLLHUP) after a host send-side half-close drives a read
+                // here; let it reach the full-close handler below to surface a clean shutdown
+                // rather than a forceful reset.
+                ConnState::LocalClosed(_, true) if self.host_hung_up => (),
                 _ => {
                     // Any other connection state is invalid at this point, and we need to kill it
                     // with fire.
@@ -209,8 +216,11 @@ where
             }
 
             // Oh wait, before we start bringing in the big data, can our peer handle receiving so
-            // much bytes goodness?
-            if self.need_credit_update_from_peer() {
+            // much bytes goodness? A hung-up host send side has no data left to deliver, so skip
+            // the credit dance (it could otherwise strand the teardown) and let the read return 0.
+            if self.need_credit_update_from_peer()
+                && !matches!(self.state, ConnState::LocalClosed(_, true))
+            {
                 self.last_fwd_cnt_to_peer = self.fwd_cnt;
                 pkt.set_op(uapi::VSOCK_OP_CREDIT_REQUEST);
                 return Ok(());
@@ -226,16 +236,39 @@ where
             match pkt.read_volatile_from(&mut self.stream, max_len) {
                 Ok(read_cnt) => {
                     if read_cnt == 0 {
-                        // A 0-length read means the host stream was closed down. In that case,
-                        // we'll ask our peer to shut down the connection. We can neither send nor
-                        // receive any more data.
-                        self.state = ConnState::LocalClosed;
-                        self.expiry = Some(
-                            Instant::now() + Duration::from_millis(defs::CONN_SHUTDOWN_TIMEOUT_MS),
-                        );
-                        pkt.set_op(uapi::VSOCK_OP_SHUTDOWN)
-                            .set_flag(uapi::VSOCK_FLAGS_SHUTDOWN_RCV)
-                            .set_flag(uapi::VSOCK_FLAGS_SHUTDOWN_SEND);
+                        if self.host_hung_up {
+                            // A 0-length read with EPOLLHUP is a full host close: we can neither
+                            // send nor receive any more data.
+                            self.state = ConnState::LocalClosed(true, true);
+                            self.expiry = Some(
+                                Instant::now()
+                                    + Duration::from_millis(defs::CONN_SHUTDOWN_TIMEOUT_MS),
+                            );
+                            pkt.set_op(uapi::VSOCK_OP_SHUTDOWN)
+                                .set_flag(uapi::VSOCK_FLAGS_SHUTDOWN_RCV)
+                                .set_flag(uapi::VSOCK_FLAGS_SHUTDOWN_SEND);
+                        } else if matches!(self.state, ConnState::PeerClosed(_, true)) {
+                            // Host send-side half-close, but the guest already closed its send
+                            // side: nothing can flow either way. Terminate once the TX buffer
+                            // drains, rather than reopening the connection for guest writes.
+                            self.state = ConnState::PeerClosed(true, true);
+                            if self.tx_buf.is_empty() {
+                                pkt.set_op(uapi::VSOCK_OP_RST);
+                            } else {
+                                self.expiry = Some(
+                                    Instant::now()
+                                        + Duration::from_millis(defs::CONN_SHUTDOWN_TIMEOUT_MS),
+                                );
+                                pkt.set_op(uapi::VSOCK_OP_SHUTDOWN)
+                                    .set_flag(uapi::VSOCK_FLAGS_SHUTDOWN_SEND);
+                            }
+                        } else {
+                            // Signal only the host send-side shutdown and keep the connection
+                            // alive for guest-to-host writes.
+                            self.state = ConnState::LocalClosed(false, true);
+                            pkt.set_op(uapi::VSOCK_OP_SHUTDOWN)
+                                .set_flag(uapi::VSOCK_FLAGS_SHUTDOWN_SEND);
+                        }
                     } else {
                         // On a successful data read, we fill in the packet with the RW op, and
                         // length of the read data.
@@ -299,7 +332,9 @@ where
             // Most frequent case: this is an established connection that needs to forward some
             // data to the host stream. Also works for a connection that has begun shutting
             // down, but the peer still has some data to send.
-            ConnState::Established | ConnState::PeerClosed(_, false)
+            ConnState::Established
+            | ConnState::PeerClosed(_, false)
+            | ConnState::LocalClosed(false, _)
                 if pkt.op() == uapi::VSOCK_OP_RW =>
             {
                 if !pkt.has_buf() {
@@ -372,6 +407,22 @@ where
                 }
             }
 
+            // Host send side already closed; if the guest now closes its send side too, record the
+            // send-off (further RW packets are dropped) and terminate once the TX buffer drains.
+            ConnState::LocalClosed(_, _) if pkt.op() == uapi::VSOCK_OP_SHUTDOWN => {
+                let send_off = pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_SEND != 0;
+                if send_off {
+                    self.state = ConnState::PeerClosed(true, true);
+                    if self.tx_buf.is_empty() {
+                        self.pending_rx.insert(PendingRx::Rst);
+                    } else {
+                        self.expiry = Some(
+                            Instant::now() + Duration::from_millis(defs::CONN_SHUTDOWN_TIMEOUT_MS),
+                        );
+                    }
+                }
+            }
+
             // A credit update from our peer is valid only in a state which allows data
             // transfer towards the peer.
             ConnState::Established | ConnState::PeerInit | ConnState::PeerClosed(false, _)
@@ -382,7 +433,10 @@ where
 
             // A credit request from our peer is valid only in a state which allows data
             // transfer from the peer. We'll respond with a credit update packet.
-            ConnState::Established | ConnState::PeerInit | ConnState::PeerClosed(_, false)
+            ConnState::Established
+            | ConnState::PeerInit
+            | ConnState::PeerClosed(_, false)
+            | ConnState::LocalClosed(false, _)
                 if pkt.op() == uapi::VSOCK_OP_CREDIT_REQUEST =>
             {
                 self.pending_rx.insert(PendingRx::CreditUpdate);
@@ -437,7 +491,16 @@ where
         // We're generally interested in being notified when data can be read from the host
         // stream, unless we're in a state which doesn't allow moving data from host to guest.
         match self.state {
-            ConnState::Killed | ConnState::LocalClosed | ConnState::PeerClosed(true, _) => (),
+            ConnState::Killed | ConnState::PeerClosed(true, _) => (),
+            // The host send side is closed but it can still receive guest-to-host data, so the
+            // connection stays alive. Watch for EPOLLHUP (but not EPOLLIN, which would spin on the
+            // read EOF) so that an eventual full host close is still observed while the guest is
+            // idle, rather than leaving the fd unwatched until the next guest write.
+            ConnState::LocalClosed(_, true) => {
+                if !self.host_hung_up {
+                    evset.insert(epoll::Events::EPOLLHUP);
+                }
+            }
             _ if self.need_credit_update_from_peer() => (),
             _ => evset.insert(epoll::Events::EPOLLIN),
         }
@@ -447,6 +510,11 @@ where
     /// Notify the connection about an event (or set of events) that it was interested in.
     ///
     fn notify(&mut self, evset: epoll::Events) {
+        if evset.contains(epoll::Events::EPOLLHUP) {
+            self.host_hung_up = true;
+            self.pending_rx.insert(PendingRx::Rw);
+        }
+
         if evset.contains(epoll::Events::EPOLLIN) {
             // Data can be read from the host stream. Setting a Rw pending indication, so that
             // the muxer will know to call `recv_pkt()` later.
@@ -527,6 +595,7 @@ where
             pending_rx: PendingRxSet::from(PendingRx::Response),
             expiry: None,
             host_write_shutdown: false,
+            host_hung_up: false,
         }
     }
 
@@ -555,6 +624,7 @@ where
             pending_rx: PendingRxSet::from(PendingRx::Request),
             expiry: None,
             host_write_shutdown: false,
+            host_hung_up: false,
         }
     }
 
@@ -956,6 +1026,12 @@ mod unit_tests {
             assert!(self.conn.has_pending_rx());
         }
 
+        fn notify_epollin_hup(&mut self) {
+            self.conn
+                .notify(epoll::Events::EPOLLIN | epoll::Events::EPOLLHUP);
+            assert!(self.conn.has_pending_rx());
+        }
+
         fn notify_epollout(&mut self) {
             self.conn.notify(epoll::Events::EPOLLOUT);
         }
@@ -1050,7 +1126,7 @@ mod unit_tests {
         }
 
         // A recv attempt in an invalid state should yield an instant reset packet.
-        ctx.conn.state = ConnState::LocalClosed;
+        ctx.conn.state = ConnState::LocalClosed(true, true);
         ctx.notify_epollin();
         ctx.recv();
         assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RST);
@@ -1062,11 +1138,11 @@ mod unit_tests {
         let mut stream = TestStream::new();
         stream.read_state = StreamState::Closed;
         ctx.set_stream(stream);
-        ctx.notify_epollin();
+        ctx.notify_epollin_hup();
         ctx.recv();
-        // When the host-side stream is closed, we can neither send not receive any more data.
-        // Therefore, the vsock shutdown packet that we'll deliver to the guest must contain both
-        // the no-more-send and the no-more-recv indications.
+        // When the host-side stream is fully closed (a read EOF accompanied by EPOLLHUP), we can
+        // neither send nor receive any more data. Therefore, the vsock shutdown packet that we'll
+        // deliver to the guest must contain both the no-more-send and the no-more-recv indications.
         assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_SHUTDOWN);
         assert_ne!(ctx.pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_SEND, 0);
         assert_ne!(ctx.pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_RCV, 0);
@@ -1077,6 +1153,188 @@ mod unit_tests {
             ctx.conn.expiry().unwrap()
                 < Instant::now() + Duration::from_millis(defs::CONN_SHUTDOWN_TIMEOUT_MS)
         );
+    }
+
+    #[test]
+    fn test_local_read_eof_sends_half_shutdown() {
+        let mut ctx = CsmTestContext::new_established();
+        let mut stream = TestStream::new();
+        stream.read_state = StreamState::Closed;
+        ctx.set_stream(stream);
+
+        ctx.notify_epollin();
+        ctx.recv();
+
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_SHUTDOWN);
+        assert_ne!(ctx.pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_SEND, 0);
+        assert_eq!(ctx.pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_RCV, 0);
+    }
+
+    #[test]
+    fn test_local_read_eof_polls_for_hup() {
+        // After a host send-side half-close the connection stays alive for guest-to-host writes, so
+        // it must remain registered for EPOLLHUP (but not EPOLLIN, which would spin on the read
+        // EOF) to observe an eventual full host close even while the guest is idle.
+        let mut ctx = CsmTestContext::new_established();
+        let mut stream = TestStream::new();
+        stream.read_state = StreamState::Closed;
+        ctx.set_stream(stream);
+
+        ctx.notify_epollin();
+        ctx.recv();
+        assert_eq!(ctx.conn.state, ConnState::LocalClosed(false, true));
+
+        let evset = ctx.conn.get_polled_evset();
+        assert!(evset.contains(epoll::Events::EPOLLHUP));
+        assert!(!evset.contains(epoll::Events::EPOLLIN));
+    }
+
+    #[test]
+    fn test_local_read_eof_preserves_guest_to_host_writes() {
+        let mut ctx = CsmTestContext::new_established();
+        let mut stream = TestStream::new();
+        stream.read_state = StreamState::Closed;
+        ctx.set_stream(stream);
+
+        ctx.notify_epollin();
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_SHUTDOWN);
+
+        let data = &[5, 6, 7, 8];
+        ctx.init_data_pkt(data);
+        ctx.send();
+        assert_eq!(ctx.conn.stream.write_buf, data.to_vec());
+    }
+
+    #[test]
+    fn test_local_half_close_then_hup_sends_full_shutdown() {
+        // After a host send-side half-close, an eventual full host close (EPOLLHUP) must surface a
+        // clean bidirectional shutdown with the kill timer, not a forceful reset.
+        let mut ctx = CsmTestContext::new_established();
+        let mut stream = TestStream::new();
+        stream.read_state = StreamState::Closed;
+        ctx.set_stream(stream);
+
+        // Host send-side half-close: a read EOF without EPOLLHUP.
+        ctx.notify_epollin();
+        ctx.recv();
+        assert_eq!(ctx.conn.state, ConnState::LocalClosed(false, true));
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_SHUTDOWN);
+
+        // The host then fully closes: EPOLLHUP fires while we are idle.
+        ctx.conn.notify(epoll::Events::EPOLLHUP);
+        assert!(ctx.conn.has_pending_rx());
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_SHUTDOWN);
+        assert_ne!(ctx.pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_SEND, 0);
+        assert_ne!(ctx.pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_RCV, 0);
+        assert_eq!(ctx.conn.state, ConnState::LocalClosed(true, true));
+        assert!(ctx.conn.will_expire());
+    }
+
+    #[test]
+    fn test_local_half_close_then_hup_terminates_with_zero_credit() {
+        // The full-close teardown after a host half-close must not get stuck behind flow control:
+        // even with no peer credit it surfaces the shutdown (and kill timer), never a stranding
+        // credit request.
+        let mut ctx = CsmTestContext::new_established();
+        let mut stream = TestStream::new();
+        stream.read_state = StreamState::Closed;
+        ctx.set_stream(stream);
+
+        ctx.notify_epollin();
+        ctx.recv();
+        assert_eq!(ctx.conn.state, ConnState::LocalClosed(false, true));
+
+        // The guest has no receive buffer space left when the host fully closes.
+        ctx.set_peer_credit(0);
+        ctx.conn.notify(epoll::Events::EPOLLHUP);
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_SHUTDOWN);
+        assert_ne!(ctx.pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_SEND, 0);
+        assert_ne!(ctx.pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_RCV, 0);
+        assert!(ctx.conn.will_expire());
+    }
+
+    #[test]
+    fn test_local_read_eof_then_peer_send_shutdown_terminates() {
+        // After a host send-side half-close, a guest send-side shutdown should terminate the
+        // connection (RST).
+        let mut ctx = CsmTestContext::new_established();
+        let mut stream = TestStream::new();
+        stream.read_state = StreamState::Closed;
+        ctx.set_stream(stream);
+
+        ctx.notify_epollin();
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_SHUTDOWN);
+        assert_eq!(ctx.conn.state, ConnState::LocalClosed(false, true));
+
+        ctx.init_pkt(uapi::VSOCK_OP_SHUTDOWN, 0)
+            .set_flags(uapi::VSOCK_FLAGS_SHUTDOWN_SEND);
+        ctx.send();
+        assert_eq!(ctx.conn.state, ConnState::PeerClosed(true, true));
+        assert!(ctx.conn.has_pending_rx());
+
+        // The guest's send-off is now recorded, so a further RW packet is dropped, not forwarded.
+        let data = &[1, 2, 3, 4];
+        ctx.init_data_pkt(data);
+        ctx.send();
+        assert!(ctx.conn.stream.write_buf.is_empty());
+
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RST);
+    }
+
+    #[test]
+    fn test_local_closed_peer_send_shutdown_drains_then_terminates() {
+        // With guest-to-host data still buffered, a guest send-side shutdown after a host
+        // half-close must defer termination until the TX buffer drains, then queue an RST.
+        let mut ctx = CsmTestContext::new_established();
+        let mut stream = TestStream::new();
+        stream.write_state = StreamState::WouldBlock;
+        ctx.set_stream(stream);
+        let data = &[1, 2, 3, 4];
+        ctx.init_data_pkt(data);
+        ctx.send();
+        assert!(!ctx.conn.tx_buf.is_empty());
+
+        // The host has already half-closed its send side.
+        ctx.conn.state = ConnState::LocalClosed(false, true);
+
+        // The guest closes its send side too; termination is deferred while data is buffered.
+        ctx.init_pkt(uapi::VSOCK_OP_SHUTDOWN, 0)
+            .set_flags(uapi::VSOCK_FLAGS_SHUTDOWN_SEND);
+        ctx.send();
+        assert_eq!(ctx.conn.state, ConnState::PeerClosed(true, true));
+        assert!(!ctx.conn.has_pending_rx());
+
+        // Once the buffer drains, an RST is queued.
+        ctx.set_stream(TestStream::new());
+        ctx.notify_epollout();
+        assert!(ctx.conn.tx_buf.is_empty());
+        assert!(ctx.conn.has_pending_rx());
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RST);
+    }
+
+    #[test]
+    fn test_peer_send_shutdown_then_local_read_eof_terminates() {
+        // The reverse order of the above: the guest closes its send side first, then the host
+        // closes its send side. No data can flow either way, so this must terminate (RST) rather
+        // than reopen the connection for guest-to-host writes.
+        let mut ctx = CsmTestContext::new_established();
+        ctx.init_pkt(uapi::VSOCK_OP_SHUTDOWN, 0)
+            .set_flags(uapi::VSOCK_FLAGS_SHUTDOWN_SEND);
+        ctx.send();
+        assert_eq!(ctx.conn.state, ConnState::PeerClosed(false, true));
+
+        let mut stream = TestStream::new();
+        stream.read_state = StreamState::Closed;
+        ctx.set_stream(stream);
+        ctx.notify_epollin();
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RST);
     }
 
     #[test]
