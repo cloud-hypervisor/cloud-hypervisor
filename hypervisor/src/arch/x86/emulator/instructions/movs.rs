@@ -13,7 +13,6 @@
 use anyhow::anyhow;
 
 use crate::arch::x86::emulator::instructions::*;
-use crate::arch::x86::regs::DF;
 
 macro_rules! movs {
     ($bound:ty) => {
@@ -23,13 +22,14 @@ macro_rules! movs {
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
         ) -> Result<(), EmulationError<Exception>> {
-            let mut count: u64 = if insn.has_rep_prefix() {
+            let rcx = if insn.has_rep_prefix() {
                 state
                     .read_reg(Register::ECX)
                     .map_err(|e| EmulationError::InvalidOperand(anyhow!(e)))?
             } else {
-                1
+                0
             };
+            let mut count = string_op_repeat_count(insn.has_rep_prefix(), rcx);
 
             let mut rsi = state
                 .read_reg(Register::RSI)
@@ -38,7 +38,7 @@ macro_rules! movs {
                 .read_reg(Register::RDI)
                 .map_err(|e| EmulationError::InvalidOperand(anyhow!(e)))?;
 
-            let df = (state.flags() & DF) != 0;
+            let backwards = string_op_backwards(state.flags());
             let len = std::mem::size_of::<$bound>();
 
             while count > 0 {
@@ -58,13 +58,8 @@ macro_rules! movs {
                     .write_memory(dst, &memory[0..len])
                     .map_err(EmulationError::PlatformEmulationError)?;
 
-                if df {
-                    rsi = rsi.wrapping_sub(len as u64);
-                    rdi = rdi.wrapping_sub(len as u64);
-                } else {
-                    rsi = rsi.wrapping_add(len as u64);
-                    rdi = rdi.wrapping_add(len as u64);
-                }
+                rsi = advance_string_op_index(rsi, len, backwards);
+                rdi = advance_string_op_index(rdi, len, backwards);
                 count -= 1;
             }
 
