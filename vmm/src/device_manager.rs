@@ -5020,6 +5020,13 @@ impl DeviceManager {
             }
         };
 
+        if let Some(iommu) = &self.iommu_device {
+            iommu
+                .lock()
+                .unwrap()
+                .remove_external_mapping(pci_device_bdf.into());
+        }
+
         if remove_dma_handler {
             for virtio_mem_device in self.virtio_mem_devices.iter() {
                 let source = VirtioMemMappingSource::Device(pci_device_bdf.into());

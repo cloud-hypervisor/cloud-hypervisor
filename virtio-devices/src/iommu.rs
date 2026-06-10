@@ -1244,6 +1244,14 @@ impl Iommu {
         self.ext_mapping.lock().unwrap().insert(device_id, mapping);
     }
 
+    /// Removes a mapping added with `add_external_mapping`.
+    pub fn remove_external_mapping(
+        &mut self,
+        device_id: u32,
+    ) -> Option<Arc<dyn ExternalDmaMapping>> {
+        self.ext_mapping.lock().unwrap().remove(&device_id)
+    }
+
     #[cfg(fuzzing)]
     pub fn wait_for_epoll_threads(&mut self) {
         self.common.wait_for_epoll_threads();
@@ -1362,3 +1370,73 @@ impl Snapshottable for Iommu {
 }
 impl Transportable for Iommu {}
 impl Migratable for Iommu {}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+    use std::sync::{Arc, Weak};
+
+    use seccompiler::SeccompAction;
+    use vm_device::dma_mapping::ExternalDmaMapping;
+    use vmm_sys_util::eventfd::{EFD_NONBLOCK, EventFd};
+
+    use super::Iommu;
+
+    /// Test stub for VfioDmaMapping.
+    struct MockMapping;
+
+    impl ExternalDmaMapping for MockMapping {
+        fn map(&self, _iova: u64, _gpa: u64, _size: u64) -> Result<(), io::Error> {
+            Ok(())
+        }
+
+        fn unmap(&self, _iova: u64, _size: u64) -> Result<(), io::Error> {
+            Ok(())
+        }
+    }
+
+    fn new_iommu() -> Iommu {
+        let (iommu, _mapping) = Iommu::new(
+            "test-iommu".to_string(),
+            SeccompAction::Allow,
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+            (0, 0),
+            64,
+            false,
+            None,
+        )
+        .unwrap();
+        iommu
+    }
+
+    /// Tests removing a mapping works and releases the ref.
+    #[test]
+    fn remove_external_mapping() {
+        let mut iommu = new_iommu();
+
+        let mapping: Arc<dyn ExternalDmaMapping> = Arc::new(MockMapping);
+        let weak: Weak<dyn ExternalDmaMapping> = Arc::downgrade(&mapping);
+
+        iommu.add_external_mapping(0x100, mapping);
+
+        // Removing the mapping succeeds.
+        let removed = iommu.remove_external_mapping(0x100);
+        assert!(removed.is_some());
+
+        // Dropping the returned Arc drops the last reference.
+        drop(removed);
+        assert!(
+            weak.upgrade().is_none(),
+            "iommu must not retain a reference after removal"
+        );
+
+        // Removing the same id again is a nop.
+        assert!(
+            iommu.remove_external_mapping(0x100).is_none(),
+            "removal is idempotent"
+        );
+
+        // Removing a bogus ID doesn't crash.
+        assert!(iommu.remove_external_mapping(0x999).is_none());
+    }
+}
