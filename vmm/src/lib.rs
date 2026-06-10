@@ -1527,8 +1527,22 @@ impl Vmm {
         vm.release_disk_locks()
             .map_err(|e| MigratableError::UnlockError(anyhow!("{e}")))?;
 
-        // Capture snapshot and send it
-        let (vm_snapshot, snapshot_duration) = measure_ok(|| vm.snapshot())?;
+        let (vm_snapshot, snapshot_duration) = measure_ok(|| {
+            // Capture snapshot. This may have side effects, e.g. vhost-user backend inflight drain
+            let snapshot = vm.snapshot()?;
+
+            // One final memory iteration to handle side effects from snapshot.
+            if !send_data_migration.local {
+                let memory_ranges = vm.dirty_log()?;
+                migration_transport::send_memory_ranges(
+                    &vm.guest_memory(),
+                    &memory_ranges,
+                    &mut socket,
+                )?;
+            }
+            Ok(snapshot)
+        })?;
+
         let (_, send_snapshot_duration) =
             measure_ok(|| migration_transport::send_state(&mut socket, &vm_snapshot))?;
 
