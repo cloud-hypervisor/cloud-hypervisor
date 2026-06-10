@@ -16,6 +16,7 @@ use crate::arch::x86::{
 };
 
 pub mod emulator;
+pub mod io_port;
 
 ///
 /// Export generically-named wrappers of mshv_bindings for Unix-based platforms
