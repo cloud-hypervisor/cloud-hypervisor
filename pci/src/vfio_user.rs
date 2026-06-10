@@ -73,7 +73,7 @@ impl PciSubclass for PciVfioUserSubclass {
 }
 
 impl VfioUserPciDevice {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         vm: Arc<dyn hypervisor::Vm>,

@@ -615,8 +615,6 @@ impl VfioCommon {
         }
     }
 
-    // The `allocator` argument is unused on `aarch64`
-    #[allow(unused_variables)]
     pub(crate) fn allocate_bars(
         &mut self,
         allocator: &mut SystemAllocator,
@@ -817,12 +815,9 @@ impl VfioCommon {
                 bar_id += 1;
             }
         }
-
         Ok(bars)
     }
 
-    // The `allocator` argument is unused on `aarch64`
-    #[allow(unused_variables)]
     pub(crate) fn free_bars(
         &mut self,
         allocator: &mut SystemAllocator,
@@ -1493,7 +1488,7 @@ pub struct VfioPciDevice {
 
 impl VfioPciDevice {
     /// Constructs a new Vfio Pci device for the given Vfio device
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         vm: Arc<dyn hypervisor::Vm>,
@@ -1790,7 +1785,6 @@ impl VfioPciDevice {
                     // Only needed if p2p_dma is enabled.
                     if !self.iommu_attached && self.p2p_dma {
                         // vfio_dma_map should be unsafe but isn't.
-                        #[allow(unused_unsafe)]
                         // SAFETY: MmapRegion invariants guarantee that
                         // user_memory_region.mapping.addr() points to
                         // user_memory_region.mapping.len() bytes of
@@ -2037,7 +2031,6 @@ iova 0x{:x}, size 0x{:x}: {}, ",
                     // Only needed if p2p_dma is enabled.
                     if !self.iommu_attached && self.p2p_dma {
                         // vfio_dma_map is unsound and ought to be marked as unsafe
-                        #[allow(unused_unsafe)]
                         // SAFETY: MmapRegion invariants guarantee that
                         // host_addr points to len bytes of
                         // valid memory that will only be unmapped with munmap().
@@ -2158,7 +2151,6 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M
         };
 
         // vfio_dma_map is unsound and ought to be marked as unsafe
-        #[allow(unused_unsafe)]
         // SAFETY: find_user_address and GuestMemory::get_slice() guarantee that
         // the returned pointer is valid for up to `usize_size` bytes.
         // `usize_size` is always equal to `size` due to the above `try_into()` call.
