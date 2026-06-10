@@ -17,7 +17,7 @@ use virtio_bindings::virtio_blk::{
     VIRTIO_BLK_F_GEOMETRY, VIRTIO_BLK_F_MQ, VIRTIO_BLK_F_RO, VIRTIO_BLK_F_SEG_MAX,
     VIRTIO_BLK_F_SIZE_MAX, VIRTIO_BLK_F_TOPOLOGY, VIRTIO_BLK_F_WRITE_ZEROES,
 };
-use vm_memory::{ByteValued, GuestMemoryAtomic};
+use vm_memory::ByteValued;
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -27,7 +27,7 @@ use super::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
 use super::{DEFAULT_VIRTIO_FEATURES, Error, Result};
 use crate::seccomp_filters::Thread;
 use crate::vhost_user::{VhostUserCommon, VhostUserState};
-use crate::{GuestMemoryMmap, GuestRegionMmap, VIRTIO_F_ACCESS_PLATFORM};
+use crate::{GuestRegionMmap, VIRTIO_F_ACCESS_PLATFORM};
 
 const DEFAULT_QUEUE_NUMBER: usize = 1;
 
@@ -40,7 +40,6 @@ pub struct Blk {
     vu_common: VhostUserCommon,
     id: String,
     config: VirtioBlockConfig,
-    guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
     access_platform_enabled: bool,
@@ -191,7 +190,6 @@ impl Blk {
             },
             id,
             config,
-            guest_memory: None,
             seccomp_action,
             exit_evt,
             access_platform_enabled,
@@ -275,7 +273,6 @@ impl VirtioDevice for Blk {
         self.vu_common
             .virtio_common
             .activate(&queues, interrupt_cb.clone())?;
-        self.guest_memory = Some(mem.clone());
 
         let backend_req_handler: Option<FrontendReqHandler<BackendReqHandler>> = None;
 
@@ -321,7 +318,7 @@ impl VirtioDevice for Blk {
         &mut self,
         region: &Arc<GuestRegionMmap>,
     ) -> std::result::Result<(), crate::Error> {
-        self.vu_common.add_memory_region(&self.guest_memory, region)
+        self.vu_common.add_memory_region(region)
     }
 }
 
@@ -350,7 +347,7 @@ impl Transportable for Blk {}
 
 impl Migratable for Blk {
     fn start_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
-        self.vu_common.start_dirty_log(&self.guest_memory)
+        self.vu_common.start_dirty_log()
     }
 
     fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
@@ -358,7 +355,7 @@ impl Migratable for Blk {
     }
 
     fn dirty_log(&mut self) -> std::result::Result<MemoryRangeTable, MigratableError> {
-        self.vu_common.dirty_log(&self.guest_memory)
+        self.vu_common.dirty_log()
     }
 
     fn start_migration(&mut self) -> std::result::Result<(), MigratableError> {

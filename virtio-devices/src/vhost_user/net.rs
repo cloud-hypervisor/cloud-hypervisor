@@ -18,7 +18,7 @@ use virtio_bindings::virtio_net::{
 };
 use virtio_bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use virtio_queue::QueueT;
-use vm_memory::{ByteValued, GuestMemoryAtomic};
+use vm_memory::ByteValued;
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -27,8 +27,8 @@ use crate::seccomp_filters::Thread;
 use crate::vhost_user::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
 use crate::vhost_user::{DEFAULT_VIRTIO_FEATURES, Error, Result, VhostUserCommon, VhostUserState};
 use crate::{
-    ActivateResult, GuestMemoryMmap, GuestRegionMmap, NetCtrlEpollHandler,
-    VIRTIO_F_ACCESS_PLATFORM, VirtioCommon, VirtioDevice, VirtioDeviceType,
+    ActivateResult, GuestRegionMmap, NetCtrlEpollHandler, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon,
+    VirtioDevice, VirtioDeviceType,
 };
 
 const DEFAULT_QUEUE_NUMBER: usize = 2;
@@ -42,7 +42,6 @@ pub struct Net {
     vu_common: VhostUserCommon,
     id: String,
     config: VirtioNetConfig,
-    guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
     access_platform_enabled: bool,
@@ -218,7 +217,6 @@ impl Net {
                 ..Default::default()
             },
             config,
-            guest_memory: None,
             seccomp_action,
             exit_evt,
             access_platform_enabled,
@@ -271,7 +269,6 @@ impl VirtioDevice for Net {
         self.vu_common
             .virtio_common
             .activate(&queues, interrupt_cb.clone())?;
-        self.guest_memory = Some(mem.clone());
 
         let num_queues = queues.len();
         let event_idx = self
@@ -370,7 +367,7 @@ impl VirtioDevice for Net {
         &mut self,
         region: &Arc<GuestRegionMmap>,
     ) -> std::result::Result<(), crate::Error> {
-        self.vu_common.add_memory_region(&self.guest_memory, region)
+        self.vu_common.add_memory_region(region)
     }
 }
 
@@ -399,7 +396,7 @@ impl Transportable for Net {}
 
 impl Migratable for Net {
     fn start_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
-        self.vu_common.start_dirty_log(&self.guest_memory)
+        self.vu_common.start_dirty_log()
     }
 
     fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
@@ -407,7 +404,7 @@ impl Migratable for Net {
     }
 
     fn dirty_log(&mut self) -> std::result::Result<MemoryRangeTable, MigratableError> {
-        self.vu_common.dirty_log(&self.guest_memory)
+        self.vu_common.dirty_log()
     }
 
     fn start_migration(&mut self) -> std::result::Result<(), MigratableError> {
