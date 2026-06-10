@@ -33,8 +33,9 @@
 
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::unix::fs::FileExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 
@@ -43,6 +44,7 @@ use clap::{Parser, Subcommand};
 use log::{debug, info};
 use vm_migration::protocol::{Command, Request, Response, Status};
 use vmm::VmMigrationConfig;
+use vmm::sparse::write_region_sparse;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
 const MIGRATION_CONFIG_FILENAME: &str = "migration_config.json";
@@ -233,30 +235,34 @@ fn dump_memory_slots(
     Ok(())
 }
 
+/// Copy `size` bytes from `src` (at `src_off`) to `dst` (at `dst_off`), keeping
+/// `dst` sparse — holes are left as holes (read back as zero). `dst` must already
+/// be sized. Defers to `vmm::sparse::write_region_sparse`, falling back to a
+/// dense copy when the source filesystem doesn't support sparse-seek.
+fn copy_sparse(src: &File, src_off: u64, dst: &File, dst_off: u64, size: u64) -> Result<()> {
+    if write_region_sparse(src, src_off, dst, dst_off, size)? {
+        return Ok(());
+    }
+    // Dense fallback: source filesystem lacks SEEK_HOLE (e.g. hugetlbfs).
+    let mut buf = vec![0u8; 1 << 20];
+    let mut done = 0u64;
+    while done < size {
+        let this = std::cmp::min((size - done) as usize, buf.len());
+        src.read_exact_at(&mut buf[..this], src_off + done)?;
+        dst.write_all_at(&buf[..this], dst_off + done)?;
+        done += this as u64;
+    }
+    Ok(())
+}
+
 fn dump_fd_to_path(file: &File, src_offset: u64, size: u64, path: &Path) -> Result<()> {
-    let mut out = OpenOptions::new()
+    let out = OpenOptions::new()
         .create(true)
         .truncate(true)
         .write(true)
         .open(path)?;
     out.set_len(size)?;
-    // dup so our own offset doesn't disturb CH's view of the shared fd.
-    // SAFETY: dup() has no preconditions; result is checked.
-    let raw = unsafe { libc::dup(file.as_raw_fd()) };
-    if raw < 0 {
-        bail!("dup memory fd: {}", std::io::Error::last_os_error());
-    }
-    // SAFETY: `raw` is a fresh fd we now own.
-    let mut src = unsafe { File::from_raw_fd(raw) };
-    src.seek(SeekFrom::Start(src_offset))?;
-    let mut remaining = size;
-    let mut buf = vec![0u8; 1 << 20];
-    while remaining > 0 {
-        let want = std::cmp::min(remaining as usize, buf.len());
-        src.read_exact(&mut buf[..want])?;
-        out.write_all(&buf[..want])?;
-        remaining -= want as u64;
-    }
+    copy_sparse(file, src_offset, &out, 0, size)?;
     out.sync_all()?;
     Ok(())
 }
@@ -426,18 +432,11 @@ fn create_memfd_with_contents(
     // CH will mmap the fd at `file_offset` for `size` bytes; size the
     // memfd so that range is in-bounds. Bytes before `file_offset` are
     // zero-filled by memfd_create and never read.
-    let mut memfd = create_empty_memfd(file_offset + size, name)?;
-    memfd.seek(SeekFrom::Start(file_offset))?;
-    let mut src = File::open(src_path).with_context(|| format!("opening {src_path:?}"))?;
-    let mut remaining = size;
-    let mut buf = vec![0u8; 1 << 20];
-    while remaining > 0 {
-        let want = std::cmp::min(remaining as usize, buf.len());
-        src.read_exact(&mut buf[..want])
-            .with_context(|| format!("reading from {src_path:?}"))?;
-        memfd.write_all(&buf[..want])?;
-        remaining -= want as u64;
-    }
-    memfd.seek(SeekFrom::Start(0))?;
+    let memfd = create_empty_memfd(file_offset + size, name)?;
+    let src = File::open(src_path).with_context(|| format!("opening {src_path:?}"))?;
+    // The snapshot file is sparse; copy only its populated extents so the memfd
+    // stays sparse too. Holes are left as holes (read back as zero).
+    copy_sparse(&src, 0, &memfd, file_offset, size)
+        .with_context(|| format!("copying from {src_path:?}"))?;
     Ok(memfd)
 }
