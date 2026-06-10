@@ -217,6 +217,8 @@ const TDG_VP_VMCALL_SUCCESS: u64 = 0;
 const TDG_VP_VMCALL_INVALID_OPERAND: u64 = 0x8000000000000000;
 /// Maximum number of MSR ranges that KVM can filter
 pub const KVM_MSR_FILTER_MAX_RANGES: usize = 16;
+/// Maximum size in bytes of an MSR filter range bitmap
+pub const KVM_MAX_BITMAP_SIZE: usize = 0x600;
 
 #[cfg(feature = "tdx")]
 ioctl_iowr_nr!(KVM_MEMORY_ENCRYPT_OP, KVMIO, 0xba, std::os::raw::c_ulong);
@@ -1505,6 +1507,25 @@ impl vm::Vm for KvmVm {
     /// Downcast to the underlying KvmVm type
     fn as_any(&self) -> &dyn Any {
         self
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn deny_msrs(&mut self, forbidden_msrs: Vec<u32>) -> vm::Result<()> {
+        // We do not want to restore denied MSRs
+        self.msrs.retain(|msr| !forbidden_msrs.contains(&msr.index));
+
+        let mut filter_range_buffer = Default::default();
+        let mut bitmap_arena = Vec::new();
+        let filter = MsrFilterRange::denied_to_filter::<
+            KVM_MSR_FILTER_MAX_RANGES,
+            KVM_MAX_BITMAP_SIZE,
+        >(forbidden_msrs, &mut bitmap_arena, &mut filter_range_buffer)
+        .map_err(|size| vm::HypervisorVmError::DenyMsrsTooLargeBitmap {
+            size,
+            max_size: KVM_MAX_BITMAP_SIZE,
+        })?;
+
+        self.msr_filter(filter, false)
     }
 }
 

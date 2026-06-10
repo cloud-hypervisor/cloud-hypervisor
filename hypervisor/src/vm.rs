@@ -77,6 +77,11 @@ pub enum HypervisorVmError {
     #[error("Could not filter the given MSR ranges. Error code:={error_code}")]
     MsrFilter { error_code: i32 },
     ///
+    #[error(
+        "Could not deny MSRs: This requires a bitmap of size:={size} bytes, but max_size:={max_size} bytes"
+    )]
+    DenyMsrsTooLargeBitmap { size: usize, max_size: usize },
+    ///
     /// Identity map address error
     ///
     #[error("Failed to set identity map address")]
@@ -483,6 +488,14 @@ pub trait Vm: Send + Sync + Any {
     fn enable_x2apic_api(&self) -> Result<()> {
         unimplemented!("x2Apic is only supported on KVM/Linux hosts")
     }
+
+    #[cfg(target_arch = "x86_64")]
+    /// Setup a filter that denies the guest from accessing the MSRs in `forbidden_msrs`.
+    ///
+    /// # Important
+    ///
+    /// This method should be called once before creating any vCPUs and never again.
+    fn deny_msrs(&mut self, forbidden_msrs: Vec<u32>) -> Result<()>;
 }
 
 pub trait VmOps: Send + Sync {

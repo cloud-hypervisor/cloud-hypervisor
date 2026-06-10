@@ -2621,4 +2621,9 @@ impl vm::Vm for MshvVm {
         }
         Ok(())
     }
+
+    fn deny_msrs(&mut self, _forbidden_msrs: Vec<u32>) -> vm::Result<()> {
+        // TODO: CPU Profiles will first be rolled out for the KVM hypervisor and we leave this as unimplemented for now.
+        unimplemented!()
+    }
 }

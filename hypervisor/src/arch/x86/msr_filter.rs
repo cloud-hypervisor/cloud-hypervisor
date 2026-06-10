@@ -236,8 +236,9 @@ fn range_indices_to_filter<'a, 'b, const MAX_FILTERS: usize, const MAX_BITMAP_SI
 
 #[cfg(test)]
 mod unit_tests {
-    use super::MsrFilterRange;
     use proptest::prelude::*;
+
+    use super::MsrFilterRange;
 
     const MAX_FILTERS: usize = 16;
     const MAX_BITMAP_SIZE: usize = 0x600;
