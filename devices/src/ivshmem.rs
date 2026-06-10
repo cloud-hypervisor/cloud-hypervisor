@@ -10,7 +10,6 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 
 use anyhow::anyhow;
-use byteorder::{ByteOrder, LittleEndian};
 use log::{debug, error, warn};
 use pci::{
     BarReprogrammingParams, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable,
@@ -335,8 +334,8 @@ impl PciDevice for IvshmemDevice {
         match bar_idx {
             // bar 0
             0 => {
-                // ivshmem don't use interrupt, we return zero now.
-                LittleEndian::write_u32(data, 0);
+                // ivshmem doesn't use an interrupt, we return zero now.
+                data.fill(0);
             }
             // bar 2
             1 => warn!("Unexpected read ivshmem memory idx: {offset}"),
