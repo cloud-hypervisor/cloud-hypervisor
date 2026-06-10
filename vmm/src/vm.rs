@@ -928,7 +928,6 @@ impl Vm {
                 console_resize_pipe,
                 original_termios,
                 snapshot,
-                #[cfg(feature = "igvm")]
                 igvm_file,
             );
         }
@@ -1007,7 +1006,7 @@ impl Vm {
         console_resize_pipe: Option<&Arc<File>>,
         original_termios: &Arc<Mutex<Option<termios>>>,
         snapshot: Option<&Snapshot>,
-        #[cfg(feature = "igvm")] igvm_file: Option<IgvmFile>,
+        igvm_file: Option<IgvmFile>,
     ) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {
         // Create boot vCPUs before SEV-SNP initialization
         cpu_manager
@@ -1017,27 +1016,17 @@ impl Vm {
             .map_err(Error::CpuManager)?;
 
         // Extract guest policy from IGVM if available, otherwise use default.
-        #[cfg(feature = "igvm")]
         let guest_policy = igvm_file
             .as_ref()
             .and_then(igvm_loader::extract_guest_policy)
             .unwrap_or_else(Self::get_default_sev_snp_guest_policy);
-        #[cfg(not(feature = "igvm"))]
-        let guest_policy = Self::get_default_sev_snp_guest_policy();
 
         vm.sev_snp_init(guest_policy)
             .map_err(Error::InitializeSevSnpVm)?;
 
         // Load payload for SEV-SNP (IGVM parser needs cpu_manager for cpuid)
         let load_payload_handle = if snapshot.is_none() {
-            Self::load_payload_async(
-                memory_manager,
-                config,
-                #[cfg(feature = "igvm")]
-                cpu_manager,
-                #[cfg(feature = "igvm")]
-                igvm_file,
-            )?
+            Self::load_payload_async(memory_manager, config, cpu_manager, igvm_file)?
         } else {
             None
         };
@@ -1382,7 +1371,7 @@ impl Vm {
             #[allow(unused_mut)]
             let mut hv_config: hypervisor::HypervisorVmConfig =
                 vm_config.as_ref().lock().unwrap().deref().into();
-            #[cfg(all(feature = "igvm", feature = "sev_snp"))]
+            #[cfg(feature = "sev_snp")]
             if let Some(ref igvm) = igvm_file {
                 hv_config.vmsa_features = igvm_loader::extract_sev_features(igvm);
             }

@@ -35,7 +35,7 @@ pvmemcontrol = ["devices/pvmemcontrol"]
 sev_snp = [
   "arch/sev_snp",
   "hypervisor/sev_snp",
-  "igvm_defs",
+  "igvm",
   "virtio-devices/sev_snp",
 ]
 tdx = ["arch/tdx", "hypervisor/tdx"]
