@@ -102,6 +102,9 @@ uuid = { version = "1.23.2" }
 wait-timeout = "0.2.1"
 zerocopy = { version = "0.8.50", default-features = false }
 
+# Test dependencies
+proptest = "1.0.0"
+
 [workspace.lints.clippy]
 # Any clippy lint (group) in alphabetical order:
 # https://rust-lang.github.io/rust-clippy/master/index.html
