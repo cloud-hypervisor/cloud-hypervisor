@@ -8678,9 +8678,16 @@ mod common_sequential {
             return;
         }
 
+        // reserve=on opts the hugepage-backed zone out of MAP_NORESERVE, so
+        // the 2MiB pages are reserved from the pool at mmap time. Hugepages
+        // are the most likely place to want this, and exercising it here keeps
+        // the reserve path covered across both the source boot and the
+        // demand-paged UFFD restore. The skip guard above already requires the
+        // 256 free pages this zone needs, and the source VM is killed before
+        // restore, so the pool only ever has to back one VM at a time.
         snapshot_restore_common::_test_snapshot_restore_uffd(
             "size=0",
-            &["id=mem0,size=512M,hugepages=on,hugepage_size=2M"],
+            &["id=mem0,size=512M,hugepages=on,hugepage_size=2M,reserve=on"],
             480_000,
         );
     }
