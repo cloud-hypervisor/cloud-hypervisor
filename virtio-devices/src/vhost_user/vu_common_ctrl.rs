@@ -338,6 +338,17 @@ impl VhostUserHandle {
             && let Some(acked_protocol_features) =
                 VhostUserProtocolFeatures::from_bits(acked_protocol_features)
         {
+            // Query the back-end's available protocol features before setting
+            // them. This mirrors the boot-time negotiation sequence and is
+            // required for REPLY_ACK to work: a vhost-user back-end only enables
+            // sending acks once it has reported its protocol features through
+            // GET_PROTOCOL_FEATURES. Skipping this step leaves the back-end
+            // unable to ack later NEED_REPLY requests (e.g. SET_FEATURES),
+            // which would deadlock the restore path.
+            self.vu
+                .get_protocol_features()
+                .map_err(Error::VhostUserGetProtocolFeatures)?;
+
             self.vu
                 .set_protocol_features(acked_protocol_features)
                 .map_err(Error::VhostUserSetProtocolFeatures)?;
