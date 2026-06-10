@@ -181,7 +181,13 @@ fn create_virtio_net_ctl_ioctl_seccomp_rule() -> Vec<SeccompRule> {
 }
 
 fn virtio_net_ctl_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
-    vec![(libc::SYS_ioctl, create_virtio_net_ctl_ioctl_seccomp_rule())]
+    vec![
+        (libc::SYS_getsockname, vec![]),
+        (libc::SYS_ioctl, create_virtio_net_ctl_ioctl_seccomp_rule()),
+        (libc::SYS_socket, vec![]),
+        (libc::SYS_timerfd_settime, vec![]),
+        (libc::SYS_write, vec![]),
+    ]
 }
 
 fn virtio_pmem_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
