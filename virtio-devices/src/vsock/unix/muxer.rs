@@ -889,6 +889,7 @@ mod unit_tests {
     use std::cmp::min;
     use std::fs;
     use std::io::Write;
+    use std::net::Shutdown;
     use std::path::{Path, PathBuf};
 
     use virtio_queue::QueueOwnedT;
@@ -1276,6 +1277,37 @@ mod unit_tests {
         };
         assert!(!ctx.muxer.conn_map.contains_key(&key));
         assert!(!ctx.muxer.local_port_set.contains(&local_port));
+    }
+
+    #[test]
+    fn test_local_send_half_close() {
+        let peer_port = 1025;
+        let mut ctx = MuxerTestContext::new("local_send_half_close");
+        let (mut stream, local_port) = ctx.local_connect(peer_port);
+
+        stream.shutdown(Shutdown::Write).unwrap();
+        ctx.notify_muxer();
+        assert!(ctx.muxer.has_pending_rx());
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_SHUTDOWN);
+        assert_ne!(ctx.pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_SEND, 0);
+        assert_eq!(ctx.pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_RCV, 0);
+        assert_eq!(ctx.pkt.src_port(), local_port);
+        assert_eq!(ctx.pkt.dst_port(), peer_port);
+
+        let data = [1, 2, 3, 4];
+        ctx.init_data_pkt(local_port, peer_port, &data);
+        ctx.send();
+
+        let mut buf = vec![0u8; data.len()];
+        stream.read_exact(buf.as_mut_slice()).unwrap();
+        assert_eq!(buf.as_slice(), &data);
+
+        let key = ConnMapKey {
+            local_port,
+            peer_port,
+        };
+        assert!(ctx.muxer.conn_map.contains_key(&key));
     }
 
     #[test]
