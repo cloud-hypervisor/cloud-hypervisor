@@ -137,6 +137,9 @@ pub struct VsockConnection<S: Read + ReadVolatile + Write + WriteVolatile + AsRa
     /// Instant when this connection should be scheduled for immediate termination, due to some
     /// timeout condition having been fulfilled.
     expiry: Option<Instant>,
+    /// Whether we've already shut down the write half of the host stream, after the guest
+    /// half-closed its send side.
+    host_write_shutdown: bool,
 }
 
 impl<S> VsockChannel for VsockConnection<S>
@@ -350,18 +353,22 @@ where
                             Instant::now() + Duration::from_millis(defs::CONN_SHUTDOWN_TIMEOUT_MS),
                         );
                     }
+                } else if send_off {
+                    // The guest half-closed its send side; surface that as an EOF to the host.
+                    self.shutdown_host_write_side();
                 }
             }
 
             // The peer wants to update a shutdown request, with more receive/send indications.
             // The same logic as above applies.
-            ConnState::PeerClosed(ref mut recv_off, ref mut send_off)
-                if pkt.op() == uapi::VSOCK_OP_SHUTDOWN =>
-            {
-                *recv_off = *recv_off || (pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_RCV != 0);
-                *send_off = *send_off || (pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_SEND != 0);
-                if *recv_off && *send_off && self.tx_buf.is_empty() {
+            ConnState::PeerClosed(recv_off, send_off) if pkt.op() == uapi::VSOCK_OP_SHUTDOWN => {
+                let recv_off = recv_off || (pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_RCV != 0);
+                let new_send_off = send_off || (pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_SEND != 0);
+                self.state = ConnState::PeerClosed(recv_off, new_send_off);
+                if recv_off && new_send_off && self.tx_buf.is_empty() {
                     self.pending_rx.insert(PendingRx::Rst);
+                } else if new_send_off && !send_off {
+                    self.shutdown_host_write_side();
                 }
             }
 
@@ -476,6 +483,11 @@ where
             // before forceful termination, the wait might be over.
             if self.state == ConnState::PeerClosed(true, true) && self.tx_buf.is_empty() {
                 self.pending_rx.insert(PendingRx::Rst);
+            } else if matches!(self.state, ConnState::PeerClosed(_, true)) && self.tx_buf.is_empty()
+            {
+                // A deferred guest send-side half-close: now that the TX buffer is drained, we can
+                // surface the EOF to the host.
+                self.shutdown_host_write_side();
             } else if self.peer_needs_credit_update() {
                 // If we've freed up some more buffer space, we may need to let the peer know it
                 // can safely send more data our way.
@@ -514,6 +526,7 @@ where
             last_fwd_cnt_to_peer: Wrapping(0),
             pending_rx: PendingRxSet::from(PendingRx::Response),
             expiry: None,
+            host_write_shutdown: false,
         }
     }
 
@@ -541,6 +554,7 @@ where
             last_fwd_cnt_to_peer: Wrapping(0),
             pending_rx: PendingRxSet::from(PendingRx::Request),
             expiry: None,
+            host_write_shutdown: false,
         }
     }
 
@@ -639,6 +653,26 @@ where
 
     fn buffer_pkt_bytes(&mut self, pkt: &VsockPacket, offset: usize, len: usize) -> Result<()> {
         self.tx_buf.push_from(pkt, offset, len)
+    }
+
+    /// Propagate a guest send-side half-close to the host stream, so the host peer reads an EOF.
+    /// This is deferred while the TX buffer still holds guest data, since shutting down the write
+    /// half now would drop those not-yet-flushed bytes; `notify()` retries once the buffer drains.
+    fn shutdown_host_write_side(&mut self) {
+        if self.host_write_shutdown || !self.tx_buf.is_empty() {
+            return;
+        }
+        // SAFETY: the stream owns the socket fd by construction and `shutdown` doesn't touch process
+        // memory
+        if unsafe { libc::shutdown(self.stream.as_raw_fd(), libc::SHUT_WR) } != 0 {
+            warn!(
+                "vsock: error shutting down host write side (lp={}, pp={}): {:?}",
+                self.local_port,
+                self.peer_port,
+                std::io::Error::last_os_error()
+            );
+        }
+        self.host_write_shutdown = true;
     }
 
     /// Check if the credit information the peer has last received from us is outdated.
@@ -1114,6 +1148,33 @@ mod unit_tests {
             ctx.recv();
             assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RST);
         }
+    }
+
+    #[test]
+    fn test_peer_send_shutdown_defers_host_write_until_drained() {
+        // If the TX buffer still holds guest data when the guest half-closes its send side, the
+        // host write-side shutdown must be deferred until the buffer drains, so no data is lost.
+        let mut ctx = CsmTestContext::new_established();
+        let mut stream = TestStream::new();
+        stream.write_state = StreamState::WouldBlock;
+        ctx.set_stream(stream);
+
+        let data = &[1, 2, 3, 4];
+        ctx.init_data_pkt(data);
+        ctx.send();
+        assert!(!ctx.conn.tx_buf.is_empty());
+
+        ctx.init_pkt(uapi::VSOCK_OP_SHUTDOWN, 0)
+            .set_flags(uapi::VSOCK_FLAGS_SHUTDOWN_SEND);
+        ctx.send();
+        // Not shut down yet: the TX buffer still holds data.
+        assert!(!ctx.conn.host_write_shutdown);
+
+        // Once the buffer drains, the shutdown is issued.
+        ctx.set_stream(TestStream::new());
+        ctx.notify_epollout();
+        assert!(ctx.conn.tx_buf.is_empty());
+        assert!(ctx.conn.host_write_shutdown);
     }
 
     #[test]

@@ -1324,6 +1324,46 @@ mod unit_tests {
     }
 
     #[test]
+    fn test_peer_send_half_close() {
+        // Regression test for the systemd sd_notify (vsock-stream) deadlock: the guest writes its
+        // message, half-closes its send side, then waits for the host to close. The muxer must
+        // surface the guest's half-close as an EOF on the host stream (while keeping the connection
+        // alive), otherwise both ends block forever.
+        let peer_port = 1025;
+        let local_port = 1026;
+        let mut ctx = MuxerTestContext::new("peer_send_half_close");
+
+        let mut sock = ctx.create_local_listener(local_port);
+        ctx.init_pkt(local_port, peer_port, uapi::VSOCK_OP_REQUEST);
+        ctx.send();
+        let mut stream = sock.accept();
+
+        assert!(ctx.muxer.has_pending_rx());
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RESPONSE);
+
+        // The guest sends its message, then half-closes its send side.
+        let data = &[1, 2, 3, 4];
+        ctx.init_data_pkt(local_port, peer_port, data);
+        ctx.send();
+        ctx.init_pkt(local_port, peer_port, uapi::VSOCK_OP_SHUTDOWN)
+            .set_flag(uapi::VSOCK_FLAGS_SHUTDOWN_SEND);
+        ctx.send();
+
+        // The host should read the message followed by an EOF, and the connection should still be
+        // alive (the muxer did not tear it down).
+        let mut buf = vec![0u8; 16];
+        assert_eq!(stream.read(buf.as_mut_slice()).unwrap(), data.len());
+        assert_eq!(&buf[..data.len()], data);
+        assert_eq!(stream.read(buf.as_mut_slice()).unwrap(), 0);
+        let key = ConnMapKey {
+            local_port,
+            peer_port,
+        };
+        assert!(ctx.muxer.conn_map.contains_key(&key));
+    }
+
+    #[test]
     fn test_muxer_rxq() {
         let mut ctx = MuxerTestContext::new("muxer_rxq");
         let local_port = 1026;
