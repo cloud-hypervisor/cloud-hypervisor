@@ -97,6 +97,7 @@ mod serial_manager;
 ))]
 pub(crate) mod sev;
 mod sigwinch_listener;
+pub mod sparse;
 mod sync_utils;
 mod uffd;
 mod userfaultfd;
