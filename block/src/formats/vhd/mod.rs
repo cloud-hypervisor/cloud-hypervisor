@@ -132,15 +132,12 @@ impl disk_file::AsyncDiskFile for VhdDisk {
 mod unit_tests {
     use std::fs::File;
     use std::io::{Seek, SeekFrom, Write};
-    #[cfg(feature = "io_uring")]
     use std::os::fd::AsRawFd;
 
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
-    use crate::async_io::AsyncIo;
-    #[cfg(feature = "io_uring")]
-    use crate::async_io::{AsyncIoError, AsyncIoOperation, OwnedIoBuffer};
+    use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoOperation, OwnedIoBuffer};
     use crate::disk_file::{AsyncDiskFile, DiskSize, PhysicalSize, Resizable};
 
     /// Minimal fixed VHD footer (disk type = 2, current_size = 0x11223344).
@@ -204,9 +201,56 @@ mod unit_tests {
         assert_async_io(&disk, true);
     }
 
+    #[test]
+    fn sync_rejects_read_straddling_logical_size() {
+        let file = TempFile::new().unwrap().into_file();
+        file.set_len(0x2000).unwrap();
+        let mut sync_io = FixedVhdSync::new(file.as_raw_fd(), 0x1000).unwrap();
+        let op = AsyncIoOperation::read_to_vec(0x800, OwnedIoBuffer::from_vec(vec![0; 0x900]), 1);
+
+        assert!(matches!(
+            sync_io.submit_data_operation(op),
+            Err(AsyncIoError::ReadVectored(_))
+        ));
+    }
+
+    #[test]
+    fn sync_rejects_write_straddling_logical_size() {
+        let file = TempFile::new().unwrap().into_file();
+        file.set_len(0x2000).unwrap();
+        let mut sync_io = FixedVhdSync::new(file.as_raw_fd(), 0x1000).unwrap();
+        let op =
+            AsyncIoOperation::write_from_vec(0x800, OwnedIoBuffer::from_vec(vec![0; 0x900]), 1);
+
+        assert!(matches!(
+            sync_io.submit_data_operation(op),
+            Err(AsyncIoError::WriteVectored(_))
+        ));
+    }
+
+    #[test]
+    fn sync_accepts_operation_exactly_filling_logical_size() {
+        let file = TempFile::new().unwrap().into_file();
+        file.set_len(0x2000).unwrap();
+        let mut sync_io = FixedVhdSync::new(file.as_raw_fd(), 0x1000).unwrap();
+        // end == size: boundary must be accepted
+        let op = AsyncIoOperation::read_to_vec(0, OwnedIoBuffer::from_vec(vec![0; 0x1000]), 1);
+        sync_io.submit_data_operation(op).unwrap();
+    }
+
+    #[test]
+    fn sync_accepts_operation_at_last_byte() {
+        let file = TempFile::new().unwrap().into_file();
+        file.set_len(0x2000).unwrap();
+        let mut sync_io = FixedVhdSync::new(file.as_raw_fd(), 0x1000).unwrap();
+        // end = 0xFFF + 1 = 0x1000 == size: boundary must be accepted
+        let op = AsyncIoOperation::read_to_vec(0xFFF, OwnedIoBuffer::from_vec(vec![0; 1]), 1);
+        sync_io.submit_data_operation(op).unwrap();
+    }
+
     #[cfg(feature = "io_uring")]
     #[test]
-    fn io_uring_batch_rejects_request_past_logical_size() {
+    fn io_uring_batch_rejects_request_straddling_logical_size() {
         let file = TempFile::new().unwrap().into_file();
         file.set_len(0x2000).unwrap();
         let mut async_io = FixedVhdAsync::new(file.as_raw_fd(), 8, 0x1000).unwrap();
@@ -214,6 +258,20 @@ mod unit_tests {
 
         assert!(matches!(
             async_io.submit_batch_requests(vec![op]),
+            Err(AsyncIoError::ReadVectored(_))
+        ));
+    }
+
+    #[cfg(feature = "io_uring")]
+    #[test]
+    fn io_uring_rejects_single_op_straddling_logical_size() {
+        let file = TempFile::new().unwrap().into_file();
+        file.set_len(0x2000).unwrap();
+        let mut async_io = FixedVhdAsync::new(file.as_raw_fd(), 8, 0x1000).unwrap();
+        let op = AsyncIoOperation::read_to_vec(0x800, OwnedIoBuffer::from_vec(vec![0; 0x900]), 1);
+
+        assert!(matches!(
+            async_io.submit_data_operation(op),
             Err(AsyncIoError::ReadVectored(_))
         ));
     }

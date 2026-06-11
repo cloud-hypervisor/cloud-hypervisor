@@ -12,6 +12,7 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
 use crate::error::BlockResult;
 use crate::formats::raw::worker::async_uring::RawAsync;
+use crate::formats::vhd::worker::common::validate_operation_bounds;
 
 pub struct FixedVhdAsync {
     raw_file_async: RawAsync,
@@ -27,37 +28,6 @@ impl FixedVhdAsync {
             size,
         })
     }
-
-    fn validate_operation_bounds(&self, op: &AsyncIoOperation) -> AsyncIoResult<()> {
-        let offset = u64::try_from(op.offset()).map_err(|_| self.bounds_error(op))?;
-        let len = u64::try_from(op.total_len()).map_err(|_| self.bounds_error(op))?;
-        let end = offset
-            .checked_add(len)
-            .ok_or_else(|| self.bounds_error(op))?;
-
-        if end > self.size {
-            return Err(self.bounds_error(op));
-        }
-
-        Ok(())
-    }
-
-    fn bounds_error(&self, op: &AsyncIoOperation) -> AsyncIoError {
-        let error = io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "Invalid request offset {} and length {}, can't exceed file size {}",
-                op.offset(),
-                op.total_len(),
-                self.size
-            ),
-        );
-        if op.is_read() {
-            AsyncIoError::ReadVectored(error)
-        } else {
-            AsyncIoError::WriteVectored(error)
-        }
-    }
 }
 
 impl AsyncIo for FixedVhdAsync {
@@ -66,7 +36,7 @@ impl AsyncIo for FixedVhdAsync {
     }
 
     fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
-        self.validate_operation_bounds(&op)?;
+        validate_operation_bounds(&op, self.size)?;
         self.raw_file_async.submit_data_operation(op)
     }
 
@@ -96,7 +66,7 @@ impl AsyncIo for FixedVhdAsync {
 
     fn submit_batch_requests(&mut self, batch_request: Vec<AsyncIoOperation>) -> AsyncIoResult<()> {
         for op in &batch_request {
-            self.validate_operation_bounds(op)?;
+            validate_operation_bounds(op, self.size)?;
         }
 
         self.raw_file_async.submit_batch_requests(batch_request)

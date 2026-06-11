@@ -11,6 +11,7 @@ use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
 use crate::formats::raw::worker::sync::RawSync;
+use crate::formats::vhd::worker::common::validate_operation_bounds;
 
 pub struct FixedVhdSync {
     raw_file_sync: RawSync,
@@ -32,22 +33,7 @@ impl AsyncIo for FixedVhdSync {
     }
 
     fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
-        let offset = op.offset();
-        if offset as u64 >= self.size {
-            let error = io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "Invalid offset {}, can't be larger than file size {}",
-                    offset, self.size
-                ),
-            );
-            return Err(if op.is_read() {
-                AsyncIoError::ReadVectored(error)
-            } else {
-                AsyncIoError::WriteVectored(error)
-            });
-        }
-
+        validate_operation_bounds(&op, self.size)?;
         self.raw_file_sync.submit_data_operation(op)
     }
 
