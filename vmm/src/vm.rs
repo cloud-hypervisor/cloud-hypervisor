@@ -560,8 +560,8 @@ impl Vm {
             .with_migrate_ma(0)
     }
 
-    #[allow(clippy::needless_pass_by_value)]
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::needless_pass_by_value)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new_from_memory_manager(
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
@@ -751,7 +751,7 @@ impl Vm {
     }
 
     /// Create and configure the CPU manager.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn create_cpu_manager(
         config: &Arc<Mutex<VmConfig>>,
         vm: Arc<dyn hypervisor::Vm>,
@@ -828,7 +828,7 @@ impl Vm {
     }
 
     /// Create and configure the device manager.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn create_device_manager(
         io_bus: Arc<Bus>,
         mmio_bus: Arc<Bus>,
@@ -881,7 +881,7 @@ impl Vm {
     /// - KVM (x86_64, aarch64, riscv64)
     /// - MSHV (x86_64, aarch64)
     /// - SEV-SNP (MSHV with confidential computing)
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn hypervisor_specific_init(
         vm: &Arc<dyn hypervisor::Vm>,
         memory_manager: &Arc<Mutex<MemoryManager>>,
@@ -995,7 +995,7 @@ impl Vm {
 
     /// Initialize SEV-SNP specific components.
     #[cfg(feature = "sev_snp")]
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn init_sev_snp(
         vm: &Arc<dyn hypervisor::Vm>,
         memory_manager: &Arc<Mutex<MemoryManager>>,
@@ -1325,7 +1325,7 @@ impl Vm {
         Ok(numa_nodes)
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         vm_config: Arc<Mutex<VmConfig>>,
         exit_evt: EventFd,
@@ -1496,7 +1496,7 @@ impl Vm {
         Ok(cmdline)
     }
 
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(clippy::needless_pass_by_value)]
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     fn load_firmware(
         mut firmware: &File,
@@ -1561,7 +1561,7 @@ impl Vm {
     }
 
     #[cfg(feature = "igvm")]
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(clippy::needless_pass_by_value)]
     fn load_igvm(
         igvm_file: IgvmFile,
         memory_manager: Arc<Mutex<MemoryManager>>,
@@ -1619,7 +1619,7 @@ impl Vm {
     ///
     /// For x86_64, the boot path is the same.
     #[cfg(target_arch = "x86_64")]
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(clippy::needless_pass_by_value)]
     fn load_kernel(
         mut kernel: File,
         cmdline: Option<Cmdline>,

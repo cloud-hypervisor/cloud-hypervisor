@@ -842,8 +842,8 @@ impl VcpuState {
 }
 
 impl CpuManager {
-    #[allow(unused_variables)]
-    #[allow(clippy::too_many_arguments)]
+    #[expect(unused_variables)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         config: &CpusConfig,
         vm: Arc<dyn hypervisor::Vm>,

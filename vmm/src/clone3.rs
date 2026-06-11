@@ -7,7 +7,6 @@ pub const CLONE_CLEAR_SIGHAND: u64 = 0x100000000;
 
 #[repr(C)]
 #[derive(Default)]
-#[allow(non_camel_case_types)]
 pub struct clone_args {
     pub flags: u64,
     pub pidfd: u64,

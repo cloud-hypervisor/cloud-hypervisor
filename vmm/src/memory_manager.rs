@@ -1140,7 +1140,7 @@ impl MemoryManager {
     /// snapshot file followed by a `UFFDIO_COPY` to resolve the fault and
     /// wake the faulting thread. When no fault is pending, one prefault
     /// page is copied per loop iteration.
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(clippy::needless_pass_by_value)]
     fn uffd_handler_loop(
         uffd_fd: OwnedFd,
         stop_event: EventFd,
@@ -1643,7 +1643,6 @@ impl MemoryManager {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         vm: Arc<dyn hypervisor::Vm>,
         config: &MemoryConfig,
@@ -1899,7 +1898,7 @@ impl MemoryManager {
         Ok(Arc::new(Mutex::new(memory_manager)))
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new_from_snapshot(
         snapshot: &Snapshot,
         vm: Arc<dyn hypervisor::Vm>,
@@ -2042,7 +2041,7 @@ impl MemoryManager {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn create_ram_region_raw(
         backing_file: &Option<PathBuf>,
         file_offset: u64,
@@ -2179,7 +2178,7 @@ impl MemoryManager {
         Ok(region)
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn create_ram_region(
         backing_file: &Option<PathBuf>,
         file_offset: u64,
