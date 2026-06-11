@@ -1197,7 +1197,7 @@ fn use_64bit_bar_for_virtio_device(
 }
 
 impl DeviceManager {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         io_bus: Arc<Bus>,
         mmio_bus: Arc<Bus>,
@@ -1465,7 +1465,7 @@ impl DeviceManager {
         self.add_interrupt_controller(snapshot)
     }
 
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(clippy::needless_pass_by_value)]
     pub fn create_devices(
         &mut self,
         console_info: Option<ConsoleInfo>,
@@ -4305,7 +4305,7 @@ impl DeviceManager {
         Ok(vec![])
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn add_virtio_pci_device(
         &mut self,
         virtio_device: Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
@@ -4842,7 +4842,6 @@ impl DeviceManager {
             .pci_device_handle
             .as_ref()
             .ok_or(DeviceManagerError::MissingPciDevice)?;
-        #[allow(irrefutable_let_patterns)]
         if let PciDeviceHandle::Virtio(virtio_pci_device) = pci_device_handle {
             let device_type = VirtioDeviceType::from(
                 virtio_pci_device

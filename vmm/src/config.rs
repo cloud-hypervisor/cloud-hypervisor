@@ -1046,7 +1046,7 @@ impl PlatformConfig {
 }
 
 impl MemoryConfig {
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(clippy::needless_pass_by_value)]
     pub fn parse(memory: &str, memory_zones: Option<Vec<&str>>) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
@@ -4517,7 +4517,6 @@ mod unit_tests {
     }
 
     #[track_caller]
-    #[allow(clippy::too_many_arguments)]
     fn make_vhost_user_config(
         socket: &str,
         virtio_id: u64,

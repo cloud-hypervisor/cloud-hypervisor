@@ -447,8 +447,7 @@ pub fn start_event_monitor_thread(
         .map_err(Error::EventMonitorThreadSpawn)
 }
 
-#[allow(unused_variables)]
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn start_vmm_thread(
     vmm_version: VmmVersionInfo,
     http_path: &Option<String>,
@@ -717,7 +716,7 @@ impl Vmm {
 
         for signal in signals.forever() {
             match signal {
-                #[allow(clippy::collapsible_match)]
+                #[expect(clippy::collapsible_match)]
                 SIGTERM | SIGINT => {
                     if exit_evt.write(1).is_err() {
                         // Resetting the terminal is usually done as the VMM exits

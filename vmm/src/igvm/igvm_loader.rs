@@ -273,7 +273,7 @@ pub fn extract_sev_features(igvm_file: &IgvmFile) -> u64 {
 /// NOTE: KVM and MSHV have different page type values and CPUID/VMSA handling.
 /// Hypervisor-specific code paths are gated by runtime type checks. A future
 /// refactor could split these into separate KVM/MSHV loader implementations.
-#[allow(clippy::needless_pass_by_value)]
+#[expect(clippy::needless_pass_by_value)]
 pub fn load_igvm(
     igvm_file: IgvmFile,
     memory_manager: Arc<Mutex<MemoryManager>>,
