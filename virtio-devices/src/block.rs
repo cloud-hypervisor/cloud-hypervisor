@@ -16,9 +16,10 @@ use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
-use std::{io, result};
+use std::time::{Duration, Instant};
+use std::{io, result, thread};
 
 use anyhow::anyhow;
 use block::async_io::{AsyncIo, AsyncIoError};
@@ -149,6 +150,26 @@ impl Default for BlockCounters {
     }
 }
 
+/// Releases one active request count when dropped.
+struct ActiveRequestGuard {
+    counter: Arc<AtomicUsize>,
+}
+
+impl ActiveRequestGuard {
+    fn new(counter: &Arc<AtomicUsize>) -> Self {
+        Self {
+            counter: counter.clone(),
+        }
+    }
+}
+
+impl Drop for ActiveRequestGuard {
+    fn drop(&mut self) {
+        let previous = self.counter.fetch_sub(1, Ordering::SeqCst);
+        debug_assert!(previous > 0);
+    }
+}
+
 struct BlockEpollHandler {
     queue_index: u16,
     queue: Queue,
@@ -163,6 +184,11 @@ struct BlockEpollHandler {
     counters: BlockCounters,
     queue_evt: EventFd,
     inflight_requests: VecDeque<(u16, Request)>,
+    // The active count includes `inflight_requests` plus requests in transition
+    // from the queue to inflight or inflight to completion.
+    active_request_count: Arc<AtomicUsize>,
+    // True when draining before pause.
+    draining_active_requests: Arc<AtomicBool>,
     rate_limiter: Option<RateLimiterGroupHandle>,
     access_platform: Option<Arc<dyn AccessPlatform>>,
     host_cpus: Option<Box<[usize]>>,
@@ -215,6 +241,16 @@ impl BlockEpollHandler {
     }
 
     fn process_queue_submit(&mut self) -> Result<()> {
+        // Artificially bump the active counter while submitting so pause doesn't
+        // race and read a zero.
+        self.active_request_count.fetch_add(1, Ordering::SeqCst);
+        let _active_request = ActiveRequestGuard::new(&self.active_request_count);
+        // Clone the Arc so the `self.queue` mutable borrow is allowed.
+        let draining_active_requests = self.draining_active_requests.clone();
+        if draining_active_requests.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+
         let queue = &mut self.queue;
         let queue_size = queue.size();
         let mut batch_requests = Vec::new();
@@ -225,6 +261,9 @@ impl BlockEpollHandler {
             // Cap a single drain at the virtqueue size. A compliant driver won't submit more that
             // queue_size, but a buggy or malicious one can keep adding as the VMM is reading.
             if processed >= queue_size {
+                break;
+            }
+            if draining_active_requests.load(Ordering::SeqCst) {
                 break;
             }
             processed += 1;
@@ -323,6 +362,7 @@ impl BlockEpollHandler {
                 } else {
                     self.inflight_requests
                         .push_back((desc_chain.head_index(), request));
+                    self.active_request_count.fetch_add(1, Ordering::SeqCst);
                 }
             } else {
                 let status = match result {
@@ -359,7 +399,10 @@ impl BlockEpollHandler {
         if !batch_requests.is_empty() {
             match self.disk_image.submit_batch_requests(batch_requests) {
                 Ok(()) => {
+                    let batch_len = batch_inflight_requests.len();
                     self.inflight_requests.extend(batch_inflight_requests);
+                    self.active_request_count
+                        .fetch_add(batch_len, Ordering::SeqCst);
                 }
                 Err(e) => {
                     // If batch submission fails, report VIRTIO_BLK_S_IOERR for all requests.
@@ -451,6 +494,7 @@ impl BlockEpollHandler {
             let desc_index = completion.user_data as u16;
 
             let mut request = self.find_inflight_request(desc_index)?;
+            let _active_request = ActiveRequestGuard::new(&self.active_request_count);
 
             request
                 .complete_async(&mem, &mut completion)
@@ -724,6 +768,8 @@ pub struct Block {
     disable_sector0_writes: bool,
     lock_granularity_choice: LockGranularityChoice,
     device_status: Arc<AtomicU8>,
+    active_request_count: Arc<AtomicUsize>,
+    draining_active_requests: Arc<AtomicBool>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -888,7 +934,37 @@ impl Block {
             disable_sector0_writes,
             lock_granularity_choice: lock_granularity,
             device_status: Arc::new(AtomicU8::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            draining_active_requests: Arc::new(AtomicBool::new(false)),
         })
+    }
+
+    fn wait_for_active_requests(&self) -> result::Result<(), anyhow::Error> {
+        const BLOCK_PAUSE_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
+        const BLOCK_PAUSE_FIRST_DRAIN_WARNING: Duration = Duration::from_secs(1);
+        const BLOCK_PAUSE_DRAIN_WARNING_INTERVAL: Duration = Duration::from_secs(5);
+
+        let started = Instant::now();
+        let mut next_warning = BLOCK_PAUSE_FIRST_DRAIN_WARNING;
+
+        loop {
+            let active = self.active_request_count.load(Ordering::SeqCst);
+            if active == 0 {
+                return Ok(());
+            }
+
+            let elapsed = started.elapsed();
+            if elapsed >= BLOCK_PAUSE_DRAIN_TIMEOUT {
+                return Err(anyhow!("timed out draining block requests"));
+            }
+
+            if elapsed >= next_warning {
+                warn!("pause: still waiting for {active} active block requests after {elapsed:?}");
+                next_warning += BLOCK_PAUSE_DRAIN_WARNING_INTERVAL;
+            }
+
+            thread::yield_now();
+        }
     }
 
     fn read_only(&self) -> bool {
@@ -1140,6 +1216,8 @@ impl VirtioDevice for Block {
                 host_cpus: self.queue_affinity.get(&queue_idx).cloned(),
                 acked_features: self.common.acked_features,
                 disable_sector0_writes: self.disable_sector0_writes,
+                active_request_count: self.active_request_count.clone(),
+                draining_active_requests: self.draining_active_requests.clone(),
             };
 
             let paused = self.common.paused.clone();
@@ -1163,6 +1241,8 @@ impl VirtioDevice for Block {
 
     fn reset(&mut self) {
         self.common.reset();
+        self.draining_active_requests.store(false, Ordering::SeqCst);
+        self.active_request_count.store(0, Ordering::SeqCst);
         self.set_writeback_mode(true);
         event!("virtio-device", "reset", "id", &self.id);
     }
@@ -1229,10 +1309,22 @@ impl VirtioDevice for Block {
 
 impl Pausable for Block {
     fn pause(&mut self) -> result::Result<(), MigratableError> {
-        self.common.pause()
+        self.draining_active_requests.store(true, Ordering::SeqCst);
+
+        // Drain before parking the worker threads: the workers are what
+        // complete in-flight I/O, so they must keep running until the count
+        // reaches zero. Roll back the drain flag if any step fails.
+        let result = self
+            .wait_for_active_requests()
+            .map_err(MigratableError::Pause)
+            .and_then(|()| self.common.pause());
+
+        self.draining_active_requests.store(false, Ordering::SeqCst);
+        result
     }
 
     fn resume(&mut self) -> result::Result<(), MigratableError> {
+        self.draining_active_requests.store(false, Ordering::SeqCst);
         self.common.resume()
     }
 }
