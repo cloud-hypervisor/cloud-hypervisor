@@ -534,7 +534,7 @@ pub struct Vm {
     // The hypervisor abstracted virtual machine.
     vm: Arc<dyn hypervisor::Vm>,
     #[cfg(target_arch = "x86_64")]
-    saved_clock: Option<hypervisor::ClockData>,
+    saved_clock: Option<hypervisor::ClockState>,
     #[cfg(not(target_arch = "riscv64"))]
     numa_nodes: NumaNodes,
     #[cfg_attr(any(not(feature = "kvm"), target_arch = "aarch64"), allow(dead_code))]
@@ -3229,14 +3229,10 @@ impl Pausable for Vm {
 
         #[cfg(target_arch = "x86_64")]
         {
-            let mut clock = self
+            self.saved_clock = self
                 .vm
-                .get_clock()
-                .map_err(|e| MigratableError::Pause(anyhow!("Could not get VM clock: {e}")))?;
-            if !clock.has_realtime() {
-                clock.set_realtime(std::time::SystemTime::now());
-            }
-            self.saved_clock = Some(clock);
+                .snapshot_clock()
+                .map_err(|e| MigratableError::Pause(anyhow!("Could not capture guest clock: {e}")))?;
         }
 
         // Before pausing the vCPUs activate any pending virtio devices that might
@@ -3267,14 +3263,14 @@ impl Pausable for Vm {
             .valid_transition(new_state)
             .map_err(|e| MigratableError::Resume(anyhow!("Invalid transition: {e:?}")))?;
 
-        // Restore KVM clock BEFORE vCPUs start running, so they see correct
-        // TSC/kvmclock from the first instruction after resume.
+        // Restore the guest clock BEFORE the vCPUs start running, so they see the
+        // corrected time from the first instruction after resume.
         #[cfg(target_arch = "x86_64")]
         {
-            if let Some(clock) = &self.saved_clock {
-                self.vm
-                    .set_clock(clock)
-                    .map_err(|e| MigratableError::Resume(anyhow!("Could not set VM clock: {e}")))?;
+            if let Some(state) = &self.saved_clock {
+                self.vm.restore_clock(state).map_err(|e| {
+                    MigratableError::Resume(anyhow!("Could not restore guest clock: {e}"))
+                })?;
             }
         }
 
@@ -3297,7 +3293,7 @@ impl Pausable for Vm {
 #[derive(Serialize, Deserialize)]
 pub struct VmSnapshot {
     #[cfg(target_arch = "x86_64")]
-    pub clock: Option<hypervisor::ClockData>,
+    pub clock: Option<hypervisor::ClockState>,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     pub common_cpuid: Vec<hypervisor::arch::x86::CpuIdEntry>,
 }
