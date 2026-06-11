@@ -78,7 +78,9 @@ use x86_64::check_required_kvm_extensions;
 pub use x86_64::{CpuId, ExtendedControlRegisters, MsrEntries, VcpuKvmState};
 
 #[cfg(target_arch = "x86_64")]
-use crate::{ClockData, ClockState};
+use crate::ClockData;
+#[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm")))]
+use crate::ClockState;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{
     CpuIdEntry, FpuState, LapicState, MTRR_MSR_INDICES, MsrEntry, NUM_IOAPIC_PINS,
@@ -119,9 +121,11 @@ pub use kvm_bindings::{
 #[cfg(target_arch = "aarch64")]
 use kvm_bindings::{
     KVM_GUESTDBG_USE_HW, KVM_NR_SPSR, KVM_REG_ARM_COPROC_MASK, KVM_REG_ARM_CORE, KVM_REG_ARM64,
-    KVM_REG_ARM64_SYSREG, KVM_REG_ARM64_SYSREG_CRM_MASK, KVM_REG_ARM64_SYSREG_CRN_MASK,
-    KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP1_MASK, KVM_REG_ARM64_SYSREG_OP2_MASK,
-    KVM_REG_SIZE_U32, KVM_REG_SIZE_U64, KVM_REG_SIZE_U128, kvm_regs, user_pt_regs,
+    KVM_REG_ARM64_SYSREG, KVM_REG_ARM64_SYSREG_CRM_MASK, KVM_REG_ARM64_SYSREG_CRM_SHIFT,
+    KVM_REG_ARM64_SYSREG_CRN_MASK, KVM_REG_ARM64_SYSREG_CRN_SHIFT, KVM_REG_ARM64_SYSREG_OP0_MASK,
+    KVM_REG_ARM64_SYSREG_OP0_SHIFT, KVM_REG_ARM64_SYSREG_OP1_MASK, KVM_REG_ARM64_SYSREG_OP1_SHIFT,
+    KVM_REG_ARM64_SYSREG_OP2_MASK, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64, KVM_REG_SIZE_U128, kvm_regs,
+    user_pt_regs,
 };
 #[cfg(target_arch = "riscv64")]
 use kvm_bindings::{KVM_REG_RISCV_CORE, kvm_riscv_core};
@@ -144,6 +148,21 @@ use crate::RegList;
 use crate::arch::aarch64::regs;
 #[cfg(target_arch = "x86_64")]
 use crate::kvm::x86_64::XsaveStateError;
+
+// `KVM_REG_ARM_TIMER_CNT`, the timer-counter firmware register the kernel defines
+// as `ARM64_SYS_REG(3, 3, 14, 3, 2)`. kvm-bindings exposes no constant for it, so
+// build the id the way the kernel's `ARM64_SYS_REG` macro would. The kernel pins
+// the EL0 virtual-timer reg encodings by value (CVAL/CNT were historically
+// swapped), so CNT must be exactly op0=3, op1=3, crn=14, crm=3, op2=2.
+#[cfg(target_arch = "aarch64")]
+const KVM_REG_ARM_TIMER_CNT: u64 = KVM_REG_ARM64
+    | KVM_REG_SIZE_U64
+    | KVM_REG_ARM64_SYSREG as u64
+    | ((3_u64 << KVM_REG_ARM64_SYSREG_OP0_SHIFT) & KVM_REG_ARM64_SYSREG_OP0_MASK as u64)
+    | ((3_u64 << KVM_REG_ARM64_SYSREG_OP1_SHIFT) & KVM_REG_ARM64_SYSREG_OP1_MASK as u64)
+    | ((14_u64 << KVM_REG_ARM64_SYSREG_CRN_SHIFT) & KVM_REG_ARM64_SYSREG_CRN_MASK as u64)
+    | ((3_u64 << KVM_REG_ARM64_SYSREG_CRM_SHIFT) & KVM_REG_ARM64_SYSREG_CRM_MASK as u64)
+    | (2_u64 & KVM_REG_ARM64_SYSREG_OP2_MASK as u64);
 
 #[cfg(target_arch = "x86_64")]
 ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
@@ -1266,8 +1285,28 @@ impl vm::Vm for KvmVm {
 
     /// Capture kvmclock (filling realtime) for snapshot/migration.
     #[cfg(target_arch = "x86_64")]
-    fn snapshot_clock(&self) -> vm::Result<Option<ClockState>> {
+    fn snapshot_clock(&self, _boot_vcpu: &dyn cpu::Vcpu) -> vm::Result<Option<ClockState>> {
         Ok(Some(ClockState::X86(self.get_clock()?.with_realtime_filled())))
+    }
+
+    /// Capture the guest virtual counter and host wall clock for
+    /// snapshot/migration. The vCPUs must be paused.
+    #[cfg(target_arch = "aarch64")]
+    fn snapshot_clock(&self, boot_vcpu: &dyn cpu::Vcpu) -> vm::Result<Option<ClockState>> {
+        // cntvct and the host wall clock must be sampled back-to-back; cntfrq is
+        // static, so read it last.
+        let cntvct = boot_vcpu
+            .get_cntvct()
+            .map_err(|e| vm::HypervisorVmError::CaptureTimerState(e.into()))?;
+        let host_realtime_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| vm::HypervisorVmError::CaptureTimerState(e.into()))?
+            .as_nanos() as u64;
+        Ok(Some(ClockState::Aarch64(crate::TimerState {
+            cntvct,
+            host_realtime_ns,
+            cntfrq: crate::arch::aarch64::get_cntfrq(),
+        })))
     }
 
     /// Restore kvmclock before the vCPUs resume.
@@ -2731,6 +2770,18 @@ impl cpu::Vcpu for KvmVcpu {
         let mut bytes = [0_u8; 8];
         self.fd
             .get_one_reg(id, &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetSysRegister(e.into()))?;
+        Ok(u64::from_le_bytes(bytes))
+    }
+
+    ///
+    /// Gets the guest virtual counter via `KVM_REG_ARM_TIMER_CNT`.
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn get_cntvct(&self) -> cpu::Result<u64> {
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .get_one_reg(KVM_REG_ARM_TIMER_CNT, &mut bytes)
             .map_err(|e| cpu::HypervisorCpuError::GetSysRegister(e.into()))?;
         Ok(u64::from_le_bytes(bytes))
     }

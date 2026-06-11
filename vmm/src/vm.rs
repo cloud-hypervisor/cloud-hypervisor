@@ -100,7 +100,7 @@ use crate::landlock::LandlockError;
 use crate::memory_manager::{
     Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData,
 };
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm")))]
 use crate::migration::get_vm_snapshot;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::migration::url_to_file;
@@ -533,7 +533,7 @@ pub struct Vm {
     #[cfg_attr(any(not(feature = "kvm"), target_arch = "aarch64"), allow(dead_code))]
     // The hypervisor abstracted virtual machine.
     vm: Arc<dyn hypervisor::Vm>,
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm")))]
     saved_clock: Option<hypervisor::ClockState>,
     #[cfg(not(target_arch = "riscv64"))]
     numa_nodes: NumaNodes,
@@ -687,7 +687,7 @@ impl Vm {
             .transpose()
             .map_err(Error::InitramfsFile)?;
 
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm")))]
         let saved_clock = if let Some(snapshot) = snapshot.as_ref() {
             let vm_snapshot = get_vm_snapshot(snapshot).map_err(Error::Restore)?;
             vm_snapshot.clock
@@ -712,7 +712,7 @@ impl Vm {
             cpu_manager,
             memory_manager,
             vm,
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm")))]
             saved_clock,
             #[cfg(not(target_arch = "riscv64"))]
             numa_nodes,
@@ -3227,14 +3227,6 @@ impl Pausable for Vm {
             .valid_transition(new_state)
             .map_err(|e| MigratableError::Pause(anyhow!("Invalid transition: {e:?}")))?;
 
-        #[cfg(target_arch = "x86_64")]
-        {
-            self.saved_clock = self
-                .vm
-                .snapshot_clock()
-                .map_err(|e| MigratableError::Pause(anyhow!("Could not capture guest clock: {e}")))?;
-        }
-
         // Before pausing the vCPUs activate any pending virtio devices that might
         // need activation between starting the pause (or e.g. a migration it's part of)
         self.activate_virtio_devices().map_err(|e| {
@@ -3242,6 +3234,18 @@ impl Pausable for Vm {
         })?;
 
         self.cpu_manager.lock().unwrap().pause()?;
+
+        // Capture the guest clock once the vCPUs are paused: aarch64 reads the
+        // boot vCPU's virtual counter, which requires the vCPU to be quiesced.
+        #[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm")))]
+        {
+            let boot_vcpu = self.cpu_manager.lock().unwrap().boot_vcpu();
+            let boot_vcpu = boot_vcpu.lock().unwrap();
+            self.saved_clock = self
+                .vm
+                .snapshot_clock(boot_vcpu.hypervisor_vcpu())
+                .map_err(|e| MigratableError::Pause(anyhow!("Could not capture guest clock: {e}")))?;
+        }
         self.device_manager.lock().unwrap().pause()?;
 
         self.vm
@@ -3292,7 +3296,8 @@ impl Pausable for Vm {
 
 #[derive(Serialize, Deserialize)]
 pub struct VmSnapshot {
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm")))]
+    #[serde(default)]
     pub clock: Option<hypervisor::ClockState>,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     pub common_cpuid: Vec<hypervisor::arch::x86::CpuIdEntry>,
@@ -3354,7 +3359,7 @@ impl Snapshottable for Vm {
         };
 
         let vm_snapshot_state = VmSnapshot {
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm")))]
             clock: self.saved_clock,
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             common_cpuid,
