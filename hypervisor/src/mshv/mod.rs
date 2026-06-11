@@ -77,14 +77,14 @@ pub use {
     mshv_bindings::mshv_device_attr as DeviceAttr, mshv_ioctls, mshv_ioctls::DeviceFd,
 };
 
-#[cfg(target_arch = "x86_64")]
-use crate::{ClockData, ClockState};
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::regs;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{CpuIdEntry, FpuState, MsrEntry};
+#[cfg(target_arch = "x86_64")]
+use crate::{ClockData, ClockRestoreMode, ClockState};
 use crate::{CpuState, IoEventAddress, IrqRoutingEntry, MpState};
 
 pub const PAGE_SHIFT: usize = 12;
@@ -1329,6 +1329,11 @@ impl cpu::Vcpu for MshvVcpu {
         unimplemented!()
     }
 
+    #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+    fn set_cntvct(&self, _val: u64) -> cpu::Result<()> {
+        unimplemented!()
+    }
+
     #[cfg(target_arch = "aarch64")]
     fn get_reg_list(&self, _reg_list: &mut crate::RegList) -> cpu::Result<()> {
         unimplemented!()
@@ -2213,7 +2218,12 @@ impl vm::Vm for MshvVm {
 
     /// Restore the partition reference time before the vCPUs resume.
     #[cfg(target_arch = "x86_64")]
-    fn restore_clock(&self, state: &ClockState) -> vm::Result<()> {
+    fn restore_clock(
+        &self,
+        _vcpus: &[&dyn cpu::Vcpu],
+        state: &ClockState,
+        _mode: ClockRestoreMode,
+    ) -> vm::Result<()> {
         self.set_clock(state)
     }
 

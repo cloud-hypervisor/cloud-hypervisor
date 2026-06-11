@@ -625,7 +625,7 @@ pub struct VmmThreadHandle {
 
 /// Models the current ownership and associated state of the VM from the
 /// perspective of the VMM.
-#[cfg_attr(feature = "tdx", expect(clippy::large_enum_variant))]
+#[allow(clippy::large_enum_variant)]
 pub enum VmOwnership {
     Owned(Vm),
     None,
