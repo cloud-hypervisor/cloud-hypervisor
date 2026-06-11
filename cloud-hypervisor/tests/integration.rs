@@ -7981,19 +7981,43 @@ mod ivshmem {
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_hotplug_virtiomem() {
-        snapshot_restore_common::_test_snapshot_restore(true, false);
+        snapshot_restore_common::_test_snapshot_restore(
+            snapshot_restore_common::SnapshotRestoreTest {
+                use_hotplug: true,
+                ..Default::default()
+            },
+        );
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))] // See issue #7437
     fn test_snapshot_restore_basic() {
-        snapshot_restore_common::_test_snapshot_restore(false, false);
+        snapshot_restore_common::_test_snapshot_restore(
+            snapshot_restore_common::SnapshotRestoreTest::default(),
+        );
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_with_resume() {
-        snapshot_restore_common::_test_snapshot_restore(false, true);
+        snapshot_restore_common::_test_snapshot_restore(
+            snapshot_restore_common::SnapshotRestoreTest {
+                use_resume_option: true,
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_check_guest_time() {
+        snapshot_restore_common::_test_snapshot_restore(
+            snapshot_restore_common::SnapshotRestoreTest {
+                use_resume_option: true,
+                check_clock: true,
+                ..Default::default()
+            },
+        );
     }
 
     #[test]
@@ -8039,6 +8063,12 @@ mod snapshot_restore_common {
     use std::process::Command;
 
     use crate::*;
+
+    // Off-host interval simulated between snapshot and restore, and the maximum
+    // guest-vs-host clock skew tolerated afterwards. The interval must exceed the
+    // tolerance so a guest that fails to advance on restore is caught.
+    const CLOCK_DOWNTIME_SECS: u64 = 30;
+    const CLOCK_SKEW_TOLERANCE_SECS: i64 = 15;
 
     pub(crate) fn snapshot_and_check_events(
         api_socket: &str,
@@ -8089,7 +8119,20 @@ mod snapshot_restore_common {
         ));
     }
 
-    pub(crate) fn _test_snapshot_restore(use_hotplug: bool, use_resume_option: bool) {
+    /// Easy disambiguation between snapshot/restore variants.
+    #[derive(Clone, Copy, Default)]
+    pub(crate) struct SnapshotRestoreTest {
+        pub use_hotplug: bool,
+        pub use_resume_option: bool,
+        pub check_clock: bool,
+    }
+
+    pub(crate) fn _test_snapshot_restore(cfg: SnapshotRestoreTest) {
+        let SnapshotRestoreTest {
+            use_hotplug,
+            use_resume_option,
+            check_clock,
+        } = cfg;
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
@@ -8115,6 +8158,15 @@ mod snapshot_restore_common {
         let socket = temp_vsock_path(&guest.tmp_dir);
         let event_path = temp_event_monitor_path(&guest.tmp_dir);
 
+        // x86_64: force kvm-clock — the restore catch-up moves kvmclock (KVM_SET_CLOCK),
+        // not the tsc clocksource, so a tsc guest wouldn't catch up. aarch64 ignores this
+        // (CNTVCT is advanced directly).
+        let boot_cmdline = if check_clock && cfg!(target_arch = "x86_64") {
+            format!("{DIRECT_KERNEL_BOOT_CMDLINE} clocksource=kvm-clock")
+        } else {
+            DIRECT_KERNEL_BOOT_CMDLINE.to_string()
+        };
+
         let mut child = GuestCommand::new(&guest)
             .args(["--api-socket", &api_socket_source])
             .args(["--event-monitor", format!("path={event_path}").as_str()])
@@ -8133,7 +8185,7 @@ mod snapshot_restore_common {
             ])
             .args(["--net", net_params.as_str()])
             .args(["--vsock", format!("cid=3,socket={socket}").as_str()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--cmdline", &boot_cmdline])
             .capture_output()
             .spawn()
             .unwrap();
@@ -8238,6 +8290,12 @@ mod snapshot_restore_common {
             .arg(socket.as_str())
             .output()
             .unwrap();
+
+        // Simulate an off-host interval between snapshot and restore so the guest
+        // clock must visibly catch up on restore (asserted after resume below).
+        if check_clock {
+            thread::sleep(Duration::from_secs(CLOCK_DOWNTIME_SECS));
+        }
 
         let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
         let event_path_restored = format!("{}.2", temp_event_monitor_path(&guest.tmp_dir));
@@ -8373,6 +8431,31 @@ mod snapshot_restore_common {
             }
 
             guest.check_devices_common(Some(&socket), Some(&console_text), None);
+
+            if check_clock {
+                // Across the off-host interval the restored guest's wall clock
+                // must catch up to real time: x86_64 via kvmclock
+                // (KVM_CLOCK_REALTIME), aarch64 via the CNTVCT advance. The test
+                // network is isolated, so the guest cannot NTP-correct itself --
+                // any catch-up is the restore path's doing.
+                let host_secs = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i64;
+                let guest_secs = guest
+                    .ssh_command("date -u +%s")
+                    .unwrap()
+                    .trim()
+                    .parse::<i64>()
+                    .unwrap();
+                let skew = (host_secs - guest_secs).abs();
+                assert!(
+                    skew <= CLOCK_SKEW_TOLERANCE_SECS,
+                    "guest clock is {skew}s from host after restore \
+                     (host={host_secs}, guest={guest_secs}); the \
+                     {CLOCK_DOWNTIME_SECS}s off-host interval was not applied"
+                );
+            }
         });
         // Shutdown the target VM and check console output
         kill_child(&mut child);
