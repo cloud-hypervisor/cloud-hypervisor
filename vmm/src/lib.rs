@@ -2531,10 +2531,7 @@ impl RequestHandler for Vmm {
         &mut self,
         receive_data_migration: VmReceiveMigrationData,
     ) -> result::Result<(), MigratableError> {
-        info!(
-            "Receiving migration: receiver_url = {}",
-            receive_data_migration.receiver_url
-        );
+        info!("Receiving migration: {receive_data_migration:?}");
 
         let mut listener =
             migration_transport::receive_migration_listener(&receive_data_migration.receiver_url)?;
