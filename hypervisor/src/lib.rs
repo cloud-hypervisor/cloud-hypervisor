@@ -226,9 +226,28 @@ impl ClockData {
 }
 
 /// Guest clock state preserved across pause/resume and snapshot/restore
-/// (`ClockData` on x86).
+/// (`ClockData` on x86, `TimerState` on aarch64+kvm.
+/// The platform where it has not guest clock, `Option<ClockState>` will be None.
 #[cfg(target_arch = "x86_64")]
 pub type ClockState = ClockData;
+#[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+pub type ClockState = TimerState;
+#[cfg(not(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm"))))]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub enum ClockState {}
+
+/// Guest timer state captured on aarch64 for snapshot/migration: the guest
+/// virtual counter (`CNTVCT_EL0`) plus the host wall clock and counter
+/// frequency needed to advance it to current wall time on restore. aarch64 has
+/// no `KVM_SET_CLOCK`/`KVM_CLOCK_REALTIME`, so the VMM records these and does the
+/// advance itself.
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+pub struct TimerState {
+    pub cntvct: u64,
+    pub host_realtime_ns: u64,
+    pub cntfrq: u64,
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct HypervisorVmConfig {

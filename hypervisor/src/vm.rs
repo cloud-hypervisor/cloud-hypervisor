@@ -23,7 +23,8 @@ use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
 #[cfg(target_arch = "x86_64")]
-use crate::{ClockData, ClockState};
+use crate::ClockData;
+use crate::ClockState;
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
 #[cfg(target_arch = "riscv64")]
@@ -139,6 +140,12 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to set clock")]
     SetClock(#[source] anyhow::Error),
+    ///
+    /// Capture guest timer state error (aarch64)
+    ///
+    #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+    #[error("Failed to capture the guest timer state")]
+    CaptureTimerState(#[source] anyhow::Error),
     ///
     /// Create passthrough device
     ///
@@ -385,9 +392,10 @@ pub trait Vm: Send + Sync + Any {
     #[cfg(target_arch = "x86_64")]
     fn set_clock(&self, data: &ClockData) -> Result<()>;
     /// Capture the guest clock for snapshot/migration while the VM is paused.
-    /// `Ok(None)` means this backend has no clock to preserve.
-    #[cfg(target_arch = "x86_64")]
-    fn snapshot_clock(&self) -> Result<Option<ClockState>> {
+    /// `Ok(None)` means this backend has no clock to preserve. `boot_vcpu` is the
+    /// boot vCPU, used by backends whose clock is per-vCPU state (e.g the aarch64
+    /// counter);
+    fn snapshot_clock(&self, _boot_vcpu: &dyn Vcpu) -> Result<Option<ClockState>> {
         Ok(None)
     }
     /// Re-establish the guest clock before the vCPUs resume.

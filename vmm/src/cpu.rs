@@ -499,6 +499,12 @@ pub struct Vcpu {
 }
 
 impl Vcpu {
+    /// Borrow the underlying hypervisor vCPU, for guest-clock capture/restore
+    /// because the aarch64 counter is per-vCPU state
+    pub fn hypervisor_vcpu(&self) -> &dyn hypervisor::Vcpu {
+        self.vcpu.as_ref()
+    }
+
     /// Constructs a new VCPU for `vm`.
     ///
     /// # Arguments
@@ -1689,6 +1695,11 @@ impl CpuManager {
             .iter()
             .map(|cpu| cpu.lock().unwrap().get_mpidr())
             .collect()
+    }
+
+    /// The boot vCPU (vCPU 0), or `None` before the vCPUs are created.
+    pub fn boot_vcpu(&self) -> Option<Arc<Mutex<Vcpu>>> {
+        self.vcpus.first().cloned()
     }
 
     #[cfg(target_arch = "aarch64")]
