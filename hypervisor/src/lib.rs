@@ -49,6 +49,8 @@ mod cpu;
 mod device;
 
 use std::sync::Arc;
+#[cfg(target_arch = "x86_64")]
+use std::time::SystemTime;
 
 use anyhow::anyhow;
 use concat_idents::concat_idents;
@@ -196,7 +198,7 @@ impl ClockData {
         }
     }
 
-    pub fn set_realtime(&mut self, realtime: std::time::SystemTime) {
+    pub fn set_realtime(&mut self, realtime: SystemTime) {
         match self {
             #[cfg(feature = "kvm")]
             ClockData::Kvm(s) => {
@@ -211,7 +213,22 @@ impl ClockData {
             }
         }
     }
+
+    /// Returns the clock with `CLOCK_REALTIME` filled from the host wall clock
+    /// when absent, so a later restore can advance the guest to current wall
+    /// time. No-op for backends without a realtime field (e.g. MSHV).
+    pub fn with_realtime_filled(mut self) -> Self {
+        if !self.has_realtime() {
+            self.set_realtime(SystemTime::now());
+        }
+        self
+    }
 }
+
+/// Guest clock state preserved across pause/resume and snapshot/restore
+/// (`ClockData` on x86).
+#[cfg(target_arch = "x86_64")]
+pub type ClockState = ClockData;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct HypervisorVmConfig {

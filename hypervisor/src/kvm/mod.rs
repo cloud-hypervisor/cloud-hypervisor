@@ -78,7 +78,7 @@ use x86_64::check_required_kvm_extensions;
 pub use x86_64::{CpuId, ExtendedControlRegisters, MsrEntries, VcpuKvmState};
 
 #[cfg(target_arch = "x86_64")]
-use crate::ClockData;
+use crate::{ClockData, ClockState};
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{
     CpuIdEntry, FpuState, LapicState, MTRR_MSR_INDICES, MsrEntry, NUM_IOAPIC_PINS,
@@ -1262,6 +1262,18 @@ impl vm::Vm for KvmVm {
         self.fd
             .set_clock(&data)
             .map_err(|e| vm::HypervisorVmError::SetClock(e.into()))
+    }
+
+    /// Capture kvmclock (filling realtime) for snapshot/migration.
+    #[cfg(target_arch = "x86_64")]
+    fn snapshot_clock(&self) -> vm::Result<Option<ClockState>> {
+        Ok(Some(self.get_clock()?.with_realtime_filled()))
+    }
+
+    /// Restore kvmclock before the vCPUs resume.
+    #[cfg(target_arch = "x86_64")]
+    fn restore_clock(&self, state: &ClockState) -> vm::Result<()> {
+        self.set_clock(state)
     }
 
     /// Create a device that is used for passthrough
