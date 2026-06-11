@@ -13,12 +13,9 @@ use std::sync::{Arc, Barrier, Mutex};
 use byteorder::{ByteOrder, LittleEndian};
 use log::warn;
 use thiserror::Error;
-use vm_device::{Bus, BusDevice, BusDeviceSync};
+use vm_device::BusDevice;
 
-use crate::PciBarConfiguration;
-use crate::configuration::{
-    PciBarRegionType, PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType,
-};
+use crate::configuration::{PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType};
 use crate::device::{BarReprogrammingParams, DeviceRelocation, Error as PciDeviceError, PciDevice};
 
 /// Denotes the PCI device ID of a bus' root bridge device.
@@ -38,12 +35,6 @@ pub enum PciRootError {
     /// Could not allocate an IRQ number.
     #[error("Could not allocate an IRQ number")]
     AllocateIrq,
-    /// Could not add a device to the port io bus.
-    #[error("Could not add a device to the port io bus")]
-    PioInsert(#[source] vm_device::BusError),
-    /// Could not add a device to the mmio bus.
-    #[error("Could not add a device to the mmio bus")]
-    MmioInsert(#[source] vm_device::BusError),
     /// Could not find an available device slot on the PCI bus.
     #[error("Could not find an available device slot on the PCI bus")]
     NoPciDeviceSlotAvailable,
@@ -143,31 +134,6 @@ impl PciBus {
             device_reloc,
             device_ids,
         }
-    }
-
-    #[expect(clippy::needless_pass_by_value)]
-    pub fn register_mapping(
-        &self,
-        dev: Arc<dyn BusDeviceSync>,
-        io_bus: &Bus,
-        mmio_bus: &Bus,
-        bars: Vec<PciBarConfiguration>,
-    ) -> Result<()> {
-        for bar in bars {
-            match bar.region_type() {
-                PciBarRegionType::IoRegion => {
-                    io_bus
-                        .insert(dev.clone(), bar.addr(), bar.size())
-                        .map_err(PciRootError::PioInsert)?;
-                }
-                PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
-                    mmio_bus
-                        .insert(dev.clone(), bar.addr(), bar.size())
-                        .map_err(PciRootError::MmioInsert)?;
-                }
-            }
-        }
-        Ok(())
     }
 
     pub fn add_device(&mut self, device_id: u8, device: Arc<Mutex<dyn PciDevice>>) -> Result<()> {
@@ -559,6 +525,7 @@ mod unit_tests {
     use std::result::Result;
 
     use super::*;
+    use crate::configuration::PciBarRegionType;
 
     #[derive(Debug)]
     /// Helper struct that mocks the implementation of DeviceRelocation

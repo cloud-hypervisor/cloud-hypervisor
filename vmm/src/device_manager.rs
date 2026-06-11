@@ -74,8 +74,8 @@ use libc::{
 };
 use log::{debug, error, info, warn};
 use pci::{
-    DeviceRelocation, MmioRegion, PciBarRegionType, PciBdf, PciDevice, VfioDmaMapping,
-    VfioPciDevice, VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError,
+    DeviceRelocation, MmioRegion, PciBarConfiguration, PciBarRegionType, PciBdf, PciDevice,
+    VfioDmaMapping, VfioPciDevice, VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError,
 };
 use rate_limiter::group::RateLimiterGroup;
 use seccompiler::SeccompAction;
@@ -305,6 +305,14 @@ pub enum DeviceManagerError {
     /// Cannot add PCI device
     #[error("Cannot add PCI device")]
     AddPciDevice(#[source] pci::PciRootError),
+
+    /// Could not add a device to the port io bus
+    #[error("Could not add a device to the port io bus")]
+    PioInsert(#[source] vm_device::BusError),
+
+    /// Could not add a device to the mmio bus
+    #[error("Could not add a device to the mmio bus")]
+    MmioInsert(#[source] vm_device::BusError),
 
     /// Cannot open persistent memory file
     #[error("Cannot open persistent memory file")]
@@ -4120,25 +4128,16 @@ impl DeviceManager {
             )
             .map_err(DeviceManagerError::AllocateBars)?;
 
-        let mut pci_bus = self.pci_segments[segment_id as usize]
+        self.pci_segments[segment_id as usize]
             .pci_bus
             .lock()
-            .unwrap();
-
-        pci_bus
+            .unwrap()
             .add_device(bdf.device(), pci_device)
             .map_err(DeviceManagerError::AddPciDevice)?;
 
         self.bus_devices.push(Arc::clone(&bus_device));
 
-        pci_bus
-            .register_mapping(
-                bus_device,
-                self.address_manager.io_bus.as_ref(),
-                self.address_manager.mmio_bus.as_ref(),
-                bars.clone(),
-            )
-            .map_err(DeviceManagerError::AddPciDevice)?;
+        self.register_bar_mapping(bus_device, &bars)?;
 
         let mut new_resources = Vec::new();
         for bar in bars {
@@ -4152,6 +4151,31 @@ impl DeviceManager {
         }
 
         Ok(new_resources)
+    }
+
+    #[expect(clippy::needless_pass_by_value)]
+    fn register_bar_mapping(
+        &mut self,
+        bus_device: Arc<dyn BusDeviceSync>,
+        bars: &[PciBarConfiguration],
+    ) -> DeviceManagerResult<()> {
+        for bar in bars {
+            match bar.region_type() {
+                PciBarRegionType::IoRegion => {
+                    self.address_manager
+                        .io_bus
+                        .insert(bus_device.clone(), bar.addr(), bar.size())
+                        .map_err(DeviceManagerError::PioInsert)?;
+                }
+                PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
+                    self.address_manager
+                        .mmio_bus
+                        .insert(bus_device.clone(), bar.addr(), bar.size())
+                        .map_err(DeviceManagerError::MmioInsert)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn add_vfio_devices(
