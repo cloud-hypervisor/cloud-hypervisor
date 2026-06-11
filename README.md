@@ -190,7 +190,7 @@ to load a payload/bootitem(s):
 - Provide kernel \[+ cmdline\]\ [+ initrd\]
 
 Please note that our Cloud Hypervisor firmware (`hypervisor-fw`) has a Xen PVH
-boot entry, therefore it can also be booted via the `--kernel` parameter, as 
+boot entry, therefore it can also be booted via the `--kernel` parameter, as
 seen in some examples.
 
 ### Custom Kernel and Disk Image
@@ -406,3 +406,5 @@ list](https://lists.cloudhypervisor.org/g/dev/).
 ## Security issues
 
 Please contact the maintainers listed in the MAINTAINERS.md file with security issues.
+
+XXX
