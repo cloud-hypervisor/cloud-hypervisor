@@ -23,7 +23,6 @@ pub const VIRTIO_MSI_NO_VECTOR: u16 = 0xffff;
 
 // Types taken from linux/virtio_ids.h
 #[derive(Copy, Clone, Debug)]
-#[allow(non_camel_case_types)]
 #[repr(C)]
 pub enum VirtioDeviceType {
     Net = 1,
