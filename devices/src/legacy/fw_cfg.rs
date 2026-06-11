@@ -12,6 +12,8 @@
 /// No kernel requirement if above functionality is not required,
 /// only firmware must implement mechanism to interact with this fw_cfg device
 use std::{
+    cmp,
+    ffi::CString,
     fs::File,
     io::{ErrorKind, Read, Result, Seek, SeekFrom},
     mem::offset_of,
@@ -21,6 +23,8 @@ use std::{
 
 use acpi_tables::rsdp::Rsdp;
 use arch::RegionType;
+#[cfg(target_arch = "aarch64")]
+use arch::aarch64::arch_memory_regions;
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::layout::{
     MEM_32BIT_DEVICES_START, MEM_32BIT_RESERVED_START, RAM_64BIT_START, RAM_START as HIGH_RAM_START,
@@ -161,7 +165,7 @@ impl FwCfgContent {
             FwCfgContent::Slice(s) => s.len(),
             FwCfgContent::U32(n) => size_of_val(n),
         };
-        u32::try_from(ret).map_err(|_| std::io::ErrorKind::InvalidInput.into())
+        u32::try_from(ret).map_err(|_| ErrorKind::InvalidInput.into())
     }
     fn access(&self, offset: u32) -> FwCfgContentAccess<'_> {
         FwCfgContentAccess {
@@ -229,7 +233,7 @@ pub const FILE_NAME_SIZE: usize = 56;
 
 pub fn create_file_name(name: &str) -> [u8; FILE_NAME_SIZE] {
     let mut c_name = [0u8; FILE_NAME_SIZE];
-    let c_len = std::cmp::min(FILE_NAME_SIZE - 1, name.len());
+    let c_len = cmp::min(FILE_NAME_SIZE - 1, name.len());
     c_name[0..c_len].copy_from_slice(&name.as_bytes()[0..c_len]);
     c_name
 }
@@ -438,7 +442,7 @@ impl FwCfg {
         mem_size: Option<usize>,
         kernel: Option<File>,
         initramfs: Option<File>,
-        cmdline: Option<std::ffi::CString>,
+        cmdline: Option<CString>,
         fw_cfg_item_list: Option<Vec<FwCfgItem>>,
         #[cfg(target_arch = "x86_64")] kvm_sev_snp_enabled: bool,
     ) -> Result<()> {
@@ -483,7 +487,7 @@ impl FwCfg {
             (STAGE0_START_ADDRESS, STAGE0_SIZE, RegionType::Reserved),
         ];
         #[cfg(target_arch = "aarch64")]
-        let mut mem_regions = arch::aarch64::arch_memory_regions();
+        let mut mem_regions = arch_memory_regions();
         if mem_size < MEM_32BIT_DEVICES_START.0 as usize {
             mem_regions.push((
                 HIGH_RAM_START,
@@ -562,7 +566,7 @@ impl FwCfg {
         address: u64,
     ) -> Result<u32> {
         let content_size = content.size()?.saturating_sub(offset);
-        let op_size = std::cmp::min(content_size, len);
+        let op_size = cmp::min(content_size, len);
         let mut access = content.access(offset);
         let mut buf = vec![0u8; op_size as usize];
         access.read_exact(buf.as_mut_bytes())?;
@@ -687,7 +691,7 @@ impl FwCfg {
         Ok(())
     }
 
-    pub fn add_kernel_cmdline(&mut self, s: std::ffi::CString) {
+    pub fn add_kernel_cmdline(&mut self, s: CString) {
         let bytes = s.into_bytes_with_nul();
         self.known_items[FW_CFG_CMDLINE_SIZE as usize] = FwCfgContent::U32(bytes.len() as u32);
         self.known_items[FW_CFG_CMDLINE_DATA as usize] = FwCfgContent::Bytes(bytes);

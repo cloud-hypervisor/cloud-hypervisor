@@ -5,6 +5,8 @@
 
 use std::{io, result};
 
+#[cfg(target_arch = "aarch64")]
+use hypervisor::arch::aarch64::gic;
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -41,7 +43,7 @@ pub enum Error {
     #[cfg(target_arch = "aarch64")]
     /// Failed restoring GIC device.
     #[error("Failed restoring GIC device")]
-    RestoreGic(#[source] hypervisor::arch::aarch64::gic::Error),
+    RestoreGic(#[source] gic::Error),
     #[cfg(target_arch = "riscv64")]
     /// Failed creating AIA device.
     #[error("Failed creating AIA device")]

@@ -17,6 +17,7 @@ use thiserror::Error;
 use vm_device::BusDevice;
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
+use vmm_sys_util::errno;
 
 use crate::{read_le_u32, write_le_u32};
 
@@ -84,7 +85,7 @@ pub struct Pl011 {
     read_trigger: u32,
     irq: Arc<dyn InterruptSourceGroup>,
     out: Option<Box<dyn io::Write + Send>>,
-    timestamp: std::time::Instant,
+    timestamp: Instant,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -217,7 +218,7 @@ impl Pl011 {
     }
 
     /// Queues raw bytes for the guest to read and signals the interrupt
-    pub fn queue_input_bytes(&mut self, c: &[u8]) -> vmm_sys_util::errno::Result<()> {
+    pub fn queue_input_bytes(&mut self, c: &[u8]) -> errno::Result<()> {
         self.read_fifo.extend(c);
         self.read_count += c.len() as u32;
         self.flags &= !PL011_FLAG_RXFE;
@@ -234,7 +235,7 @@ impl Pl011 {
         Ok(())
     }
 
-    pub fn flush_output(&mut self) -> result::Result<(), io::Error> {
+    pub fn flush_output(&mut self) -> io::Result<()> {
         if let Some(out) = self.out.as_mut() {
             out.flush()?;
         }
@@ -362,7 +363,7 @@ impl Pl011 {
         }
     }
 
-    fn trigger_interrupt(&mut self) -> result::Result<(), io::Error> {
+    fn trigger_interrupt(&mut self) -> io::Result<()> {
         self.irq.trigger(0)
     }
 }
@@ -443,7 +444,7 @@ impl Snapshottable for Pl011 {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_state(&self.state())
     }
 }
@@ -468,7 +469,7 @@ mod unit_tests {
     }
 
     impl InterruptSourceGroup for TestInterrupt {
-        fn trigger(&self, _index: InterruptIndex) -> result::Result<(), std::io::Error> {
+        fn trigger(&self, _index: InterruptIndex) -> io::Result<()> {
             self.event_fd.write(1)
         }
         fn update(
@@ -477,10 +478,10 @@ mod unit_tests {
             _config: InterruptSourceConfig,
             _masked: bool,
             _set_gsi: bool,
-        ) -> result::Result<(), std::io::Error> {
+        ) -> io::Result<()> {
             Ok(())
         }
-        fn set_gsi(&self) -> result::Result<(), std::io::Error> {
+        fn set_gsi(&self) -> io::Result<()> {
             Ok(())
         }
         fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {

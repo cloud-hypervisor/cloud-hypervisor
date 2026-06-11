@@ -4,6 +4,7 @@
 //
 
 use std::cmp;
+use std::ops::Range;
 use std::path::Path;
 use std::sync::{Arc, Barrier};
 
@@ -252,7 +253,7 @@ fn complete_request(regs: &mut [u32; TPM_CRB_R_MAX], success: bool) {
     }
 }
 
-fn data_buffer_range(offset: u32, len: usize, buffer_len: usize) -> Option<std::ops::Range<usize>> {
+fn data_buffer_range(offset: u32, len: usize, buffer_len: usize) -> Option<Range<usize>> {
     let end_offset = offset.checked_add(len as u32)?;
     let buffer_end = CRB_DATA_BUFFER.checked_add(buffer_len as u32)?;
 
