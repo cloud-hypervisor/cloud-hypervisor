@@ -3,10 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::any::Any;
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::sync::{Arc, Barrier, RwLock};
-use std::{io, result};
+use std::{fmt, io, mem, ptr, result};
 
 use log::{debug, warn};
 use num_enum::TryFromPrimitive;
@@ -53,7 +54,7 @@ pub enum Error {
     #[error("Unknown function code: {0}")]
     UnknownFunctionCode(u64),
     #[error("Libc call fail")]
-    LibcFail(#[source] std::io::Error),
+    LibcFail(#[source] io::Error),
 }
 
 #[derive(Copy, Clone)]
@@ -107,8 +108,8 @@ struct PvmemcontrolTransport {
     command: PvmemcontrolTransportCommand,
 }
 
-const PVMEMCONTROL_DEVICE_MMIO_SIZE: u64 = std::mem::size_of::<PvmemcontrolTransport>() as u64;
-const PVMEMCONTROL_DEVICE_MMIO_ALIGN: u64 = std::mem::align_of::<PvmemcontrolTransport>() as u64;
+const PVMEMCONTROL_DEVICE_MMIO_SIZE: u64 = mem::size_of::<PvmemcontrolTransport>() as u64;
+const PVMEMCONTROL_DEVICE_MMIO_ALIGN: u64 = mem::align_of::<PvmemcontrolTransport>() as u64;
 
 impl PvmemcontrolTransport {
     fn ack() -> Self {
@@ -190,8 +191,8 @@ struct PvmemcontrolResp {
     arg1: Le64,
 }
 
-impl std::fmt::Debug for PvmemcontrolResp {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for PvmemcontrolResp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let PvmemcontrolResp {
             ret_errno,
             ret_code,
@@ -292,7 +293,7 @@ impl PvmemcontrolDevice {
         let buf_phys_addr = GuestAddress(buf_phys_addr.into());
         if !guest_memory.memory().check_range(
             buf_phys_addr,
-            std::mem::size_of::<PvmemcontrolResp>().max(std::mem::size_of::<PvmemcontrolReq>()),
+            mem::size_of::<PvmemcontrolResp>().max(mem::size_of::<PvmemcontrolReq>()),
         ) {
             warn!("guest sent invalid phys addr {:#x}", buf_phys_addr.0);
             return PvmemcontrolDevice::new(
@@ -348,7 +349,7 @@ impl PvmemcontrolDevice {
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap<AtomicBitmap>>,
         command: PvmemcontrolTransportCommand,
     ) {
-        let state = std::mem::replace(&mut self.state, PvmemcontrolState::Broken);
+        let state = mem::replace(&mut self.state, PvmemcontrolState::Broken);
 
         *self = match command {
             PvmemcontrolTransportCommand::Reset => Self::reset(),
@@ -488,7 +489,7 @@ impl PvmemcontrolBusDevice {
         let name_ptr = if let Some(name) = &name {
             name.as_ptr()
         } else {
-            std::ptr::null()
+            ptr::null()
         };
         debug!("addr {addr:X} length {length} name {name:?}");
 
@@ -616,7 +617,7 @@ impl PvmemcontrolBusDevice {
     }
 
     fn handle_guest_write(&self, offset: u64, data: &[u8]) {
-        if offset as usize != std::mem::offset_of!(PvmemcontrolTransport, command) {
+        if offset as usize != mem::offset_of!(PvmemcontrolTransport, command) {
             if data.len() != 4 && data.len() != 8 {
                 warn!("guest write is not 4 or 8 bytes long");
                 return;
@@ -716,7 +717,7 @@ impl PciDevice for PvmemcontrolPciDevice {
         self.configuration.restore_bar_addr(params);
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
 
@@ -770,7 +771,7 @@ impl PciDevice for PvmemcontrolPciDevice {
         Ok(())
     }
 
-    fn move_bar(&mut self, old_base: u64, new_base: u64) -> result::Result<(), io::Error> {
+    fn move_bar(&mut self, old_base: u64, new_base: u64) -> io::Result<()> {
         for bar in self.bar_regions.iter_mut() {
             if bar.addr() == old_base {
                 *bar = bar.set_address(new_base);
@@ -781,11 +782,11 @@ impl PciDevice for PvmemcontrolPciDevice {
 }
 
 impl Pausable for PvmemcontrolPciDevice {
-    fn pause(&mut self) -> std::result::Result<(), MigratableError> {
+    fn pause(&mut self) -> result::Result<(), MigratableError> {
         Ok(())
     }
 
-    fn resume(&mut self) -> std::result::Result<(), MigratableError> {
+    fn resume(&mut self) -> result::Result<(), MigratableError> {
         Ok(())
     }
 }
@@ -795,7 +796,7 @@ impl Snapshottable for PvmemcontrolPciDevice {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         let mut snapshot = Snapshot::new_from_state(&())?;
 
         // Snapshot PciConfiguration

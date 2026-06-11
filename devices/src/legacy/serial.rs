@@ -177,7 +177,7 @@ impl Serial {
         Ok(())
     }
 
-    pub fn flush_output(&mut self) -> result::Result<(), io::Error> {
+    pub fn flush_output(&mut self) -> io::Result<()> {
         if let Some(out) = self.out.as_mut() {
             out.flush()?;
         }
@@ -229,7 +229,7 @@ impl Serial {
         Ok(())
     }
 
-    fn trigger_interrupt(&mut self) -> result::Result<(), io::Error> {
+    fn trigger_interrupt(&mut self) -> io::Result<()> {
         self.interrupt.trigger(0)
     }
 
@@ -330,7 +330,7 @@ impl Snapshottable for Serial {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_state(&self.state())
     }
 }
@@ -355,7 +355,7 @@ mod unit_tests {
     }
 
     impl InterruptSourceGroup for TestInterrupt {
-        fn trigger(&self, _index: InterruptIndex) -> result::Result<(), std::io::Error> {
+        fn trigger(&self, _index: InterruptIndex) -> io::Result<()> {
             self.event_fd.write(1)
         }
         fn update(
@@ -364,10 +364,10 @@ mod unit_tests {
             _config: InterruptSourceConfig,
             _masked: bool,
             _set_gsi: bool,
-        ) -> result::Result<(), std::io::Error> {
+        ) -> io::Result<()> {
             Ok(())
         }
-        fn set_gsi(&self) -> result::Result<(), std::io::Error> {
+        fn set_gsi(&self) -> io::Result<()> {
             Ok(())
         }
         fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {

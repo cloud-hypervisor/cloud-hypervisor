@@ -5,8 +5,8 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
-use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+use std::{io, mem, thread};
 
 use acpi_tables::{Aml, AmlSink, aml};
 use log::{error, info, warn};
@@ -59,7 +59,7 @@ impl BusDevice for AcpiShutdownDevice {
             while !self.vcpus_kill_signalled.load(Ordering::SeqCst) {
                 // This is more effective than thread::yield_now() at
                 // avoiding a priority inversion with the VMM thread
-                thread::sleep(std::time::Duration::from_millis(1));
+                thread::sleep(Duration::from_millis(1));
             }
         }
         // The ACPI DSDT table specifies the S5 sleep state (shutdown) as value 5
@@ -76,7 +76,7 @@ impl BusDevice for AcpiShutdownDevice {
             while !self.vcpus_kill_signalled.load(Ordering::SeqCst) {
                 // This is more effective than thread::yield_now() at
                 // avoiding a priority inversion with the VMM thread
-                thread::sleep(std::time::Duration::from_millis(1));
+                thread::sleep(Duration::from_millis(1));
             }
         }
         None
@@ -105,10 +105,7 @@ impl AcpiGedDevice {
         }
     }
 
-    pub fn notify(
-        &mut self,
-        notification_type: AcpiNotificationFlags,
-    ) -> Result<(), std::io::Error> {
+    pub fn notify(&mut self, notification_type: AcpiNotificationFlags) -> io::Result<()> {
         self.notification_type |= notification_type;
         self.interrupt.trigger(0)
     }
@@ -238,7 +235,7 @@ impl Default for AcpiPmTimerDevice {
 
 impl BusDevice for AcpiPmTimerDevice {
     fn read(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {
-        if data.len() != std::mem::size_of::<u32>() {
+        if data.len() != mem::size_of::<u32>() {
             warn!("Invalid sized read of PM timer: {}", data.len());
             return;
         }

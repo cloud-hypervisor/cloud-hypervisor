@@ -314,7 +314,7 @@ impl Snapshottable for Gpio {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_state(&self.state())
     }
 }
@@ -338,7 +338,7 @@ mod unit_tests {
     }
 
     impl InterruptSourceGroup for TestInterrupt {
-        fn trigger(&self, _index: InterruptIndex) -> result::Result<(), std::io::Error> {
+        fn trigger(&self, _index: InterruptIndex) -> io::Result<()> {
             self.event_fd.write(1)
         }
 
@@ -348,11 +348,11 @@ mod unit_tests {
             _config: InterruptSourceConfig,
             _masked: bool,
             _set_gsi: bool,
-        ) -> result::Result<(), std::io::Error> {
+        ) -> io::Result<()> {
             Ok(())
         }
 
-        fn set_gsi(&self) -> result::Result<(), std::io::Error> {
+        fn set_gsi(&self) -> io::Result<()> {
             Ok(())
         }
 
