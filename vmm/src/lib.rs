@@ -63,8 +63,8 @@ use crate::migration_transport::{
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::vm::{Error as VmError, Vm, VmState};
 use crate::vm_config::{
-    DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
-    UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
+    DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, MemoryZoneConfig, NetConfig,
+    PmemConfig, UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
 };
 
 mod acpi;
@@ -890,7 +890,7 @@ impl Vmm {
         listener: &ReceiveListener,
         state: ReceiveMigrationState,
         req: &Request,
-        _receive_data_migration: &VmReceiveMigrationData,
+        receive_data_migration: &VmReceiveMigrationData,
     ) -> std::result::Result<ReceiveMigrationState, MigratableError> {
         use ReceiveMigrationState::*;
 
@@ -904,7 +904,12 @@ impl Vmm {
             |socket: &mut SocketStream,
              memory_files: HashMap<u32, File>|
              -> std::result::Result<ReceiveMigrationConfiguredData, MigratableError> {
-                let memory_manager = self.vm_receive_config(req, socket, memory_files)?;
+                let memory_manager = self.vm_receive_config(
+                    req,
+                    socket,
+                    memory_files,
+                    receive_data_migration.updated_zones.clone(),
+                )?;
                 let guest_memory = memory_manager.lock().unwrap().guest_memory();
                 // Create the additional-connection receiver even in the single-connection case.
                 // At this point the receiver does not know whether the sender will use extra TCP
@@ -1032,6 +1037,7 @@ impl Vmm {
         req: &Request,
         socket: &mut T,
         existing_memory_files: HashMap<u32, File>,
+        updated_zones: Vec<MemoryZoneConfig>,
     ) -> std::result::Result<Arc<Mutex<MemoryManager>>, MigratableError>
     where
         T: Read,
@@ -1056,6 +1062,42 @@ impl Vmm {
 
         let config = vm_migration_config.vm_config.clone();
         self.vm_config = Some(vm_migration_config.vm_config);
+
+        // Adopt host nodes.
+        if !updated_zones.is_empty() {
+            let mut vm_config = self.vm_config.as_mut().unwrap().lock().unwrap();
+            let config_zones = vm_config.memory.zones.as_mut().ok_or_else(|| {
+                // MemoryZoneConfigs were provided but the initial config didn't contain any
+                MigratableError::MigrateReceive(anyhow!(
+                    "Updating memory zone data is forbidden as VM was instantiated without any zones"
+                ))
+            })?;
+
+            for zone in updated_zones {
+                // We currently only support to move MemoryZones to different host nodes. We therefore ensure that
+                // there exists a memory zone in the new config that matches the same size and ID for each memory
+                // zone of the old config.
+                let matched_zone = config_zones.iter_mut().find(|z| z.id == zone.id).ok_or_else(|| {
+                    // We did not find a match for a memory zone that was defined in the old config, so we cannot
+                    // update it.
+                    MigratableError::MigrateReceive(anyhow!(
+                        "Failed to associate new memory zone information with ID {} to an existing zone",
+                        zone.id
+                    ))
+                })?;
+                if matched_zone.size != zone.size {
+                    return Err(MigratableError::MigrateReceive(anyhow!(
+                        "Size update of memory zone with ID {} not allowed. Tried to resize from {:018x?} to {:018x?}",
+                        zone.id,
+                        zone.size,
+                        matched_zone.size
+                    )));
+                }
+                // Override the host numa node
+                matched_zone.host_numa_node = zone.host_numa_node;
+            }
+        }
+
         self.console_info = Some(pre_create_console_devices(self).map_err(|e| {
             MigratableError::MigrateReceive(anyhow!("Error creating console devices: {e:?}"))
         })?);
