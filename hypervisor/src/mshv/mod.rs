@@ -1324,6 +1324,11 @@ impl cpu::Vcpu for MshvVcpu {
         Ok(res)
     }
 
+    #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+    fn get_cntvct(&self) -> cpu::Result<u64> {
+        unimplemented!()
+    }
+
     #[cfg(target_arch = "aarch64")]
     fn get_reg_list(&self, _reg_list: &mut crate::RegList) -> cpu::Result<()> {
         unimplemented!()
@@ -2202,7 +2207,7 @@ impl vm::Vm for MshvVm {
 
     /// Capture the partition reference time for snapshot/migration.
     #[cfg(target_arch = "x86_64")]
-    fn snapshot_clock(&self) -> vm::Result<Option<ClockState>> {
+    fn snapshot_clock(&self, _boot_vcpu: &dyn cpu::Vcpu) -> vm::Result<Option<ClockState>> {
         Ok(Some(self.get_clock()?.with_realtime_filled()))
     }
 
