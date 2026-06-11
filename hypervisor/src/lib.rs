@@ -208,6 +208,26 @@ impl ClockData {
             }
         }
     }
+
+    /// Returns the clock with `CLOCK_REALTIME` filled from the host wall clock
+    /// when absent, so a later restore can advance the guest to current wall
+    /// time. No-op for backends without a realtime field (e.g. MSHV).
+    pub fn with_realtime_filled(mut self) -> Self {
+        if !self.has_realtime() {
+            self.set_realtime(std::time::SystemTime::now());
+        }
+        self
+    }
+}
+
+/// Serializable guest-clock state carried across pause/resume(x86) and snapshot/restore
+/// `#[serde(untagged)]` keeps the wire form identical to the bare per-arch clock it replaces,
+/// so existing snapshots still restore.
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+#[cfg(target_arch = "x86_64")]
+pub enum ClockState {
+    X86(ClockData),
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
