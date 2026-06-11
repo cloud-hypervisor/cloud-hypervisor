@@ -18,7 +18,7 @@ use thiserror::Error;
 ///
 /// The device does not care where it exists in address space as each method is only given an offset
 /// into its allocated portion of address space.
-#[allow(unused_variables)]
+#[expect(unused_variables)]
 pub trait BusDevice: Send {
     /// Reads at `offset` from this device
     fn read(&mut self, base: u64, offset: u64, data: &mut [u8]) {}
@@ -28,7 +28,7 @@ pub trait BusDevice: Send {
     }
 }
 
-#[allow(unused_variables)]
+#[expect(unused_variables)]
 pub trait BusDeviceSync: Send + Sync {
     /// Reads at `offset` from this device
     fn read(&self, base: u64, offset: u64, data: &mut [u8]) {}
@@ -136,7 +136,6 @@ impl Bus {
         dev.upgrade().map(|d| (*range, d.clone()))
     }
 
-    #[allow(clippy::type_complexity)]
     fn resolve(&self, addr: u64) -> Option<(u64, u64, Arc<dyn BusDeviceSync>)> {
         if let Some((range, dev)) = self.first_before(addr) {
             let offset = addr - range.base;
@@ -150,7 +149,7 @@ impl Bus {
     /// Inserts a bus device into the bus.
     ///
     /// The bus will only hold a weak reference to the object.
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(clippy::needless_pass_by_value)]
     pub fn insert(&self, device: Arc<dyn BusDeviceSync>, base: u64, len: u64) -> Result<()> {
         if len == 0 {
             return Err(Error::ZeroSizedRange);

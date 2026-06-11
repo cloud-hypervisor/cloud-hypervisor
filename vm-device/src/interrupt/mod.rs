@@ -164,7 +164,6 @@ pub trait InterruptSourceGroup: Send + Sync {
     /// An interrupt notifier allows for external components and processes
     /// to inject interrupts into a guest, by writing to the [`EventFd`] returned
     /// by this method.
-    #[allow(unused_variables)]
     fn notifier(&self, index: InterruptIndex) -> Option<EventFd>;
 
     /// Update the interrupt source group configuration.

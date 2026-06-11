@@ -34,7 +34,7 @@ pub enum PciBarType {
 }
 
 /// Enumeration for device resources.
-#[allow(missing_docs)]
+#[expect(missing_docs)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Resource {
     /// IO Port address range.
