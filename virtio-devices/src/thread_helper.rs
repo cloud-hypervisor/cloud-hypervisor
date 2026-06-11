@@ -16,7 +16,7 @@ use crate::epoll_helper::EpollHelperError;
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::{ActivateError, VirtioInterrupt, mark_device_needs_reset};
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub(crate) fn spawn_virtio_thread<F>(
     name: &str,
     seccomp_action: &SeccompAction,

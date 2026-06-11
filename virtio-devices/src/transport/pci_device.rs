@@ -418,7 +418,7 @@ pub struct VirtioPciDevice {
 
 impl VirtioPciDevice {
     /// Constructs a new PCI transport for the given virtio device.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         memory: GuestMemoryAtomic<GuestMemoryMmap>,

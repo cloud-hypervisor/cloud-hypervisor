@@ -416,7 +416,7 @@ pub struct NetState {
 
 impl Net {
     /// Create a new virtio network device with the given TAP interface.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new_with_tap(
         id: String,
         taps: Vec<Tap>,
@@ -528,7 +528,7 @@ impl Net {
 
     /// Create a new virtio network device with the given IP address and
     /// netmask.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         if_name: Option<&str>,
@@ -576,7 +576,7 @@ impl Net {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn from_tap_fds(
         id: String,
         fds: &[RawFd],

@@ -493,7 +493,7 @@ pub struct Balloon {
 
 impl Balloon {
     // Create a new virtio-balloon.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         size: u64,

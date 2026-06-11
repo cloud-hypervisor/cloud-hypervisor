@@ -159,7 +159,7 @@ impl VhostUserHandle {
         Ok((acked_features, acked_protocol_features.bits()))
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn setup_vhost_user<S: VhostUserFrontendReqHandler>(
         &mut self,
         mem: &GuestMemoryMmap,
@@ -352,7 +352,7 @@ impl VhostUserHandle {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn reinitialize_vhost_user<S: VhostUserFrontendReqHandler>(
         &mut self,
         mem: &GuestMemoryMmap,

@@ -737,7 +737,7 @@ pub struct BlockState {
 
 impl Block {
     /// Create a new virtio block device that operates on the given file.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         disk_image: Box<dyn AsyncFullDiskFile>,

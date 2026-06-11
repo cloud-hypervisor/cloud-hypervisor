@@ -366,7 +366,7 @@ where
 {
     /// Create a new virtio-vsock device with the given VM CID and vsock
     /// backend.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         cid: u32,
