@@ -516,6 +516,11 @@ pub trait Vcpu: Send + Sync {
     #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
     fn get_cntvct(&self) -> Result<u64>;
     ///
+    /// Sets the guest virtual counter (`CNTVCT_EL0`).
+    ///
+    #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+    fn set_cntvct(&self, val: u64) -> Result<()>;
+    ///
     /// Gets the value of a non-core register on RISC-V 64-bit
     ///
     #[cfg(target_arch = "riscv64")]

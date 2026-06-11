@@ -25,7 +25,7 @@ use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
 #[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm")))]
-use crate::ClockState;
+use crate::{ClockRestoreMode, ClockState};
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
 #[cfg(target_arch = "riscv64")]
@@ -147,6 +147,20 @@ pub enum HypervisorVmError {
     #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
     #[error("Failed to capture the guest timer state")]
     CaptureTimerState(#[source] anyhow::Error),
+    ///
+    /// Restore guest timer state error (aarch64)
+    ///
+    #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+    #[error("Failed to restore the guest timer state")]
+    RestoreTimerState(#[source] anyhow::Error),
+    ///
+    /// Counter frequency mismatch on restore (aarch64)
+    ///
+    #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+    #[error(
+        "Saved counter frequency ({saved} Hz) != host ({host} Hz); refusing to advance guest counter"
+    )]
+    CntfrqMismatch { saved: u64, host: u64 },
     ///
     /// Create passthrough device
     ///
@@ -400,9 +414,18 @@ pub trait Vm: Send + Sync + Any {
     fn snapshot_clock(&self, _boot_vcpu: &dyn Vcpu) -> Result<Option<ClockState>> {
         Ok(None)
     }
-    /// Re-establish the guest clock before the vCPUs resume.
-    #[cfg(target_arch = "x86_64")]
-    fn restore_clock(&self, _state: &ClockState) -> Result<()> {
+    /// Re-establish the guest clock before the vCPUs resume. `mode` distinguishes a
+    /// same-host pause/resume (the clock kept running) from a restore/migration where
+    /// it must catch up to wall time; x86 ignores it (kvmclock is re-applied on every
+    /// resume). aarch64 writes the counter on all `vcpus` (older kernels track the
+    /// offset per-vCPU); x86 ignores `vcpus`.
+    #[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm")))]
+    fn restore_clock(
+        &self,
+        _vcpus: &[&dyn Vcpu],
+        _state: &ClockState,
+        _mode: ClockRestoreMode,
+    ) -> Result<()> {
         Ok(())
     }
     /// Create a device that is used for passthrough

@@ -500,7 +500,8 @@ pub struct Vcpu {
 
 impl Vcpu {
     /// Borrow the underlying hypervisor vCPU, for guest-clock capture/restore
-    /// (the aarch64 counter is per-vCPU state read through the boot vCPU).
+    /// (the aarch64 counter is per-vCPU state: captured from the boot vCPU,
+    /// restored on every vCPU).
     #[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm")))]
     pub fn hypervisor_vcpu(&self) -> &dyn hypervisor::Vcpu {
         self.vcpu.as_ref()
@@ -1693,7 +1694,7 @@ impl CpuManager {
             .collect()
     }
 
-    /// The boot vCPU (vCPU 0), used to capture/restore the guest clock.
+    /// The boot vCPU (vCPU 0), used to capture the guest clock.
     #[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm")))]
     pub fn boot_vcpu(&self) -> Arc<Mutex<Vcpu>> {
         self.vcpus[0].clone()

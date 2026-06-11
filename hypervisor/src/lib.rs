@@ -246,6 +246,18 @@ pub struct TimerState {
     pub cntfrq: u64,
 }
 
+/// How the guest clock is re-established when the vCPUs resume: a same-host
+/// pause/resume left it running, whereas a snapshot restore / migration-receive
+/// means the guest was off-host and the clock must catch up to wall time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm")))]
+pub enum ClockRestoreMode {
+    /// Same-host pause -> resume; the clock kept running, nothing to advance.
+    SameHostResume,
+    /// Restored from a snapshot or migrated in; advance to current wall time.
+    SnapshotRestore,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct HypervisorVmConfig {
     #[cfg(feature = "tdx")]
