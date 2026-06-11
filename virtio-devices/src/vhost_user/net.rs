@@ -49,7 +49,7 @@ pub struct Net {
 
 impl Net {
     /// Create a new vhost-user-net device
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         mac_addr: MacAddr,

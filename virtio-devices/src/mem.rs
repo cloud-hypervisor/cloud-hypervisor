@@ -746,7 +746,7 @@ pub struct Mem {
 
 impl Mem {
     // Create a new virtio-mem device.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         region: &Arc<GuestRegionMmap>,

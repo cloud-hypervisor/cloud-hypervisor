@@ -473,7 +473,7 @@ pub struct VhostUserCommon {
 }
 
 impl VhostUserCommon {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn activate<T: VhostUserFrontendReqHandler>(
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,

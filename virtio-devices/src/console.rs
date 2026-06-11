@@ -131,7 +131,7 @@ impl Endpoint {
 }
 
 impl ConsoleEpollHandler {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn new(
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         input_queue: Queue,

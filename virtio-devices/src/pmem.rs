@@ -282,7 +282,7 @@ pub struct PmemState {
 }
 
 impl Pmem {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         disk: File,

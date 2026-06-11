@@ -59,7 +59,7 @@ pub struct GenericVhostUser {
 
 impl GenericVhostUser {
     /// Create a new generic vhost-user device.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         path: &str,

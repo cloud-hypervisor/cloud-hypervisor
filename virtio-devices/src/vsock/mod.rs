@@ -205,7 +205,7 @@ pub mod unit_tests {
         pub evset: Option<epoll::Events>,
     }
     impl TestBackend {
-        #[allow(clippy::new_without_default)]
+        #[expect(clippy::new_without_default)]
         pub fn new() -> Self {
             Self {
                 evfd: EventFd::new(EFD_NONBLOCK).unwrap(),
@@ -270,7 +270,7 @@ pub mod unit_tests {
     }
 
     impl TestContext {
-        #[allow(clippy::new_without_default)]
+        #[expect(clippy::new_without_default)]
         pub fn new() -> Self {
             const CID: u32 = 52;
             const MEM_SIZE: usize = 1024 * 1024 * 128;
