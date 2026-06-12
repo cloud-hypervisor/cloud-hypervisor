@@ -37,9 +37,9 @@ pub struct VhdxDisk {
 }
 
 impl VhdxDisk {
-    pub fn new(f: File) -> BlockResult<Self> {
+    pub fn new(f: File, direct_io: bool) -> BlockResult<Self> {
         Ok(VhdxDisk {
-            vhdx_file: Arc::new(Mutex::new(Vhdx::new(f).map_err(|e| {
+            vhdx_file: Arc::new(Mutex::new(Vhdx::new(f, direct_io).map_err(|e| {
                 let kind = match &e {
                     VhdxError::NotVhdx(_)
                     | VhdxError::ParseVhdxHeader(_)
