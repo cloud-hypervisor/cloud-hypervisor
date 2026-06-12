@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::{io, result, thread};
+use std::{io, mem, result, thread};
 
 use anyhow::{Context, anyhow};
 #[cfg(feature = "dbus_api")]
@@ -28,7 +28,7 @@ use libc::{EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW, tcsetattr, termios};
 use log::{debug, error, info, trace, warn};
 use memory_manager::MemoryManagerSnapshotData;
 use pci::PciBdf;
-use seccompiler::{SeccompAction, apply_filter};
+use seccompiler::{BpfProgram, SeccompAction, apply_filter};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::{Deserialize, Serialize};
 use signal_hook::iterator::{Handle, Signals};
@@ -56,10 +56,11 @@ use crate::landlock::Landlock;
 use crate::memory_manager::MemoryManager;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::migration::get_vm_snapshot;
-use crate::migration::{recv_vm_config, recv_vm_state};
-use crate::migration_transport::{
-    ReceiveAdditionalConnections, ReceiveListener, SendAdditionalConnections, SocketStream,
+use crate::migration::transport::{
+    self, ReceiveAdditionalConnections, ReceiveListener, SendAdditionalConnections, SocketStream,
 };
+use crate::migration::worker::{MigrationThreadOut, MigrationWorker, MigrationWorkerHandle};
+use crate::migration::{recv_vm_config, recv_vm_state};
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::vm::{Error as VmError, Vm, VmState};
 use crate::vm_config::{
@@ -85,7 +86,6 @@ pub mod interrupt;
 pub mod landlock;
 pub mod memory_manager;
 pub mod migration;
-pub mod migration_transport;
 mod pci_segment;
 pub mod seccomp_filters;
 mod serial_manager;
@@ -266,6 +266,7 @@ pub enum EpollDispatch {
     ActivateVirtioDevices = 3,
     Debug = 4,
     GuestExit = 5,
+    CheckMigration = 6,
     Unknown,
 }
 
@@ -279,6 +280,7 @@ impl From<u64> for EpollDispatch {
             3 => ActivateVirtioDevices,
             4 => Debug,
             5 => GuestExit,
+            6 => CheckMigration,
             _ => Unknown,
         }
     }
@@ -618,6 +620,45 @@ pub struct VmmThreadHandle {
     pub http_api_handle: Option<HttpApiHandle>,
 }
 
+/// Tracks whether the VMM can mutate the VM or a migration worker owns it.
+pub enum VmOwnership {
+    Owned(Vm),
+    /// The VM is temporarily owned by an ongoing migration worker.
+    Migration {
+        migration_worker_handle: MigrationWorkerHandle,
+        /// Snapshot returned while the VMM cannot inspect the worker-owned VM.
+        vm_info_response: VmInfoResponse,
+    },
+    None,
+}
+
+impl VmOwnership {
+    /// Takes the VM if it is currently owned by the VMM.
+    fn take_vm(&mut self) -> Option<Vm> {
+        match mem::replace(self, Self::None) {
+            VmOwnership::Owned(vm) => Some(vm),
+            old => {
+                *self = old;
+                None
+            }
+        }
+    }
+
+    /// Returns the owned VM, or errors while the migration worker owns it.
+    fn vm_mut_or_none(&mut self) -> result::Result<Option<&mut Vm>, VmError> {
+        match self {
+            VmOwnership::Owned(vm) => Ok(Some(vm)),
+            VmOwnership::Migration { .. } => Err(VmError::VmMigrating),
+            VmOwnership::None => Ok(None),
+        }
+    }
+
+    /// Returns the owned VM, or `none_err` when no VM exists.
+    fn vm_mut(&mut self, none_err: VmError) -> result::Result<&mut Vm, VmError> {
+        self.vm_mut_or_none()?.ok_or(none_err)
+    }
+}
+
 pub struct Vmm {
     epoll: EpollContext,
     exit_evt: EventFd,
@@ -629,7 +670,7 @@ pub struct Vmm {
     #[cfg(feature = "guest_debug")]
     vm_debug_evt: EventFd,
     version: VmmVersionInfo,
-    vm: Option<Vm>,
+    vm: VmOwnership,
     vm_config: Option<Arc<Mutex<VmConfig>>>,
     seccomp_action: SeccompAction,
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
@@ -640,6 +681,7 @@ pub struct Vmm {
     console_resize_pipe: Option<Arc<File>>,
     console_info: Option<ConsoleInfo>,
     no_shutdown: bool,
+    check_migration_evt: EventFd,
 }
 
 /// Just a wrapper for the data that goes into
@@ -809,6 +851,7 @@ impl Vmm {
         let reset_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
         let guest_exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
         let activate_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
+        let check_migration_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
 
         epoll
             .add_event(&exit_evt, EpollDispatch::Exit)
@@ -835,6 +878,10 @@ impl Vmm {
             .add_event(&debug_evt, EpollDispatch::Debug)
             .map_err(Error::Epoll)?;
 
+        epoll
+            .add_event(&check_migration_evt, EpollDispatch::CheckMigration)
+            .map_err(Error::Epoll)?;
+
         Ok(Vmm {
             epoll,
             exit_evt,
@@ -846,7 +893,7 @@ impl Vmm {
             #[cfg(feature = "guest_debug")]
             vm_debug_evt,
             version: vmm_version,
-            vm: None,
+            vm: VmOwnership::None,
             vm_config: None,
             seccomp_action,
             hypervisor,
@@ -857,6 +904,7 @@ impl Vmm {
             console_resize_pipe: None,
             console_info: None,
             no_shutdown,
+            check_migration_evt,
         })
     }
 
@@ -909,9 +957,9 @@ impl Vmm {
                 // At this point the receiver does not know whether the sender will use extra TCP
                 // connections. If it does not, no worker connections are accepted and memory
                 // requests continue to arrive on the main connection.
-                let connections = listener
-                    .try_clone()
-                    .and_then(|l| ReceiveAdditionalConnections::new(l, guest_memory.clone()))?;
+                let connections = listener.try_clone().and_then(|l| {
+                    ReceiveAdditionalConnections::new(l, guest_memory.clone(), &self.seccomp_action)
+                })?;
                 Ok(ReceiveMigrationConfiguredData {
                     memory_manager,
                     guest_memory,
@@ -960,11 +1008,7 @@ impl Vmm {
                 // When multiple TCP connections are configured, the worker connections carry
                 // all memory commands and the main connection is used only for control traffic.
                 Command::Memory => {
-                    migration_transport::receive_memory_ranges(
-                        &config_data.guest_memory,
-                        req,
-                        socket,
-                    )
+                    transport::receive_memory_ranges(&config_data.guest_memory, req, socket)
                     .inspect_err(|_| {
                         // connections.cleanup() already logs all errors that occurred in one of the
                         // threads. Furthermore, this path is only taken in the single-connection case,
@@ -1002,9 +1046,10 @@ impl Vmm {
                     Ok(Completed)
                 }
                 Command::Complete => {
-                    // The unwrap is safe, because the state machine makes sure we called
-                    // vm_receive_state before, which creates the VM.
-                    let vm = self.vm.as_mut().unwrap();
+                    let vm = self
+                        .vm
+                        .vm_mut(VmError::VmNotCreated)
+                        .expect("VM should have been created by now");
                     let (_, resume_duration) = measure_ok(|| vm.resume())?;
                     debug!(
                         "Migration (incoming): resume:{}ms",
@@ -1200,7 +1245,7 @@ impl Vmm {
             Ok(vm)
         })?;
 
-        self.vm = Some(vm);
+        self.vm = VmOwnership::Owned(vm);
 
         Ok((receive_duration, restore_duration))
     }
@@ -1402,23 +1447,26 @@ impl Vmm {
         Ok(())
     }
 
-    /// Performs a migration including all its phases.
+    /// Performs a migration.
+    ///
+    /// Runs after-migration cleanup only on success. Callers must handle failed
+    /// migrations.
     fn send_migration(
         vm: &mut Vm,
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         hypervisor: &dyn hypervisor::Hypervisor,
         send_data_migration: &VmSendMigrationData,
         initial_vm_state: VmState,
+        tcp_worker_seccomp_filter: &BpfProgram,
     ) -> result::Result<(), MigratableError> {
         // State machine that is updated with more context as we progress.
         let mut ctx = OngoingMigrationContext::new();
 
         // Set up the socket connection
-        let mut socket =
-            migration_transport::send_migration_socket(&send_data_migration.destination_url)?;
+        let mut socket = transport::send_migration_socket(&send_data_migration.destination_url)?;
 
         // Start the migration
-        migration_transport::send_request_expect_ok(
+        transport::send_request_expect_ok(
             &mut socket,
             Request::start(),
             MigratableError::MigrateSend(anyhow!("Error starting migration")),
@@ -1484,7 +1532,7 @@ impl Vmm {
             common_cpuid,
             memory_manager_data: vm.memory_manager_data(),
         };
-        migration_transport::send_config(&mut socket, &vm_migration_config)?;
+        transport::send_config(&mut socket, &vm_migration_config)?;
 
         // Let every Migratable object know about the migration being started.
         vm.start_migration()?;
@@ -1502,10 +1550,11 @@ impl Vmm {
             )
             .expect("migration context should transition to VmPaused for local migration");
         } else {
-            let mut mem_send = migration_transport::SendAdditionalConnections::new(
+            let mut mem_send = transport::SendAdditionalConnections::new(
                 &send_data_migration.destination_url,
                 send_data_migration.connections,
                 &vm.guest_memory(),
+                tcp_worker_seccomp_filter,
             )?;
 
             Self::do_memory_migration(
@@ -1538,17 +1587,13 @@ impl Vmm {
             // One final memory iteration to handle side effects from snapshot.
             if !send_data_migration.local {
                 let memory_ranges = vm.dirty_log()?;
-                migration_transport::send_memory_ranges(
-                    &vm.guest_memory(),
-                    &memory_ranges,
-                    &mut socket,
-                )?;
+                transport::send_memory_ranges(&vm.guest_memory(), &memory_ranges, &mut socket)?;
             }
             Ok(snapshot)
         })?;
 
         let (_, send_snapshot_duration) =
-            measure_ok(|| migration_transport::send_state(&mut socket, &vm_snapshot))?;
+            measure_ok(|| transport::send_state(&mut socket, &vm_snapshot))?;
 
         // Complete the migration.
         // When this returns, we know the VM was resumed (if it was running
@@ -1560,7 +1605,7 @@ impl Vmm {
             Request::complete_paused()
         };
         let (_, complete_duration) = measure_ok(|| {
-            migration_transport::send_request_expect_ok(
+            transport::send_request_expect_ok(
                 &mut socket,
                 complete_req,
                 MigratableError::MigrateSend(anyhow!("Error completing migration")),
@@ -1646,6 +1691,10 @@ impl Vmm {
         prefault: bool,
         memory_restore_mode: MemoryRestoreMode,
     ) -> std::result::Result<(), VmError> {
+        if matches!(self.vm, VmOwnership::Migration { .. }) {
+            return Err(VmError::VmMigrating);
+        }
+
         let snapshot = recv_vm_state(source_url).map_err(VmError::Restore)?;
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         let vm_snapshot = get_vm_snapshot(&snapshot).map_err(VmError::Restore)?;
@@ -1694,7 +1743,7 @@ impl Vmm {
             Some(prefault),
             Some(memory_restore_mode),
         )?;
-        self.vm = Some(vm);
+        self.vm = VmOwnership::Owned(vm);
 
         if self
             .vm_config
@@ -1709,10 +1758,64 @@ impl Vmm {
         }
 
         // Now we can restore the rest of the VM.
-        if let Some(ref mut vm) = self.vm {
-            vm.restore()
-        } else {
-            Err(VmError::VmNotCreated)
+        // PANIC: won't panic, we just checked that the VM is there.
+        self.vm.vm_mut(VmError::VmNotCreated).unwrap().restore()
+    }
+
+    /// Handles the outcome of the migration thread.
+    ///
+    /// Called after the migration thread notifies the VMM event loop on
+    /// success, cancellation, or failure.
+    fn check_migration_outcome(&mut self) {
+        let VmOwnership::Migration {
+            migration_worker_handle,
+            ..
+        } = mem::replace(&mut self.vm, VmOwnership::None)
+        else {
+            panic!("Should only be called after a migration was started");
+        };
+        let MigrationThreadOut {
+            vm,
+            migration_res,
+            initial_vm_state,
+            ..
+        } = migration_worker_handle.join();
+
+        let mut try_resume_vm = |mut vm: Vm| {
+            // A late failure may leave the VM paused.
+            if initial_vm_state == VmState::Running && vm.get_state() == VmState::Paused {
+                match vm.resume() {
+                    Ok(_) => {
+                        info!("Resumed VM successfully after failed migration");
+                    }
+                    Err(e) => {
+                        error!("Failed resuming VM after failed migration: {e}");
+                        self.exit_evt.write(1).unwrap();
+                    }
+                }
+            }
+
+            // Ensure full VM performance. The operation is idempotent.
+            let _ = vm.stop_dirty_log().inspect_err(|e| {
+                warn!("Failed stopping dirty log after resuming VM: {e} - VM performance might be slower than usual");
+            });
+
+            self.vm = VmOwnership::Owned(vm);
+        };
+
+        match migration_res {
+            Ok(()) => {
+                self.vm = VmOwnership::None;
+                drop(vm);
+
+                if let Err(e) = self.exit_evt.write(1) {
+                    error!("Failed shutting down the VM after migration: {e}");
+                }
+            }
+            Err(e) => {
+                error!("Migration failed: {e}");
+                try_resume_vm(vm);
+            }
         }
     }
 
@@ -1776,7 +1879,7 @@ impl Vmm {
                         }
                     }
                     EpollDispatch::ActivateVirtioDevices => {
-                        if let Some(ref vm) = self.vm {
+                        if let VmOwnership::Owned(ref vm) = self.vm {
                             let count = self.activate_evt.read().map_err(Error::EventFdRead)?;
                             info!("Trying to activate pending virtio devices: count = {count}");
                             vm.activate_virtio_devices()
@@ -1801,7 +1904,7 @@ impl Vmm {
                             // Read from the API receiver channel
                             let gdb_request = gdb_receiver.recv().map_err(Error::GdbRequestRecv)?;
 
-                            let response = if let Some(ref mut vm) = self.vm {
+                            let response = if let VmOwnership::Owned(ref mut vm) = self.vm {
                                 vm.debug_request(&gdb_request.payload, gdb_request.cpu_id)
                             } else {
                                 Err(VmError::VmNotRunning)
@@ -1816,6 +1919,14 @@ impl Vmm {
                     }
                     #[cfg(not(feature = "guest_debug"))]
                     EpollDispatch::Debug => {}
+                    EpollDispatch::CheckMigration => {
+                        info!("VM migration check event");
+                        // Consume the event.
+                        self.check_migration_evt
+                            .read()
+                            .map_err(Error::EventFdRead)?;
+                        self.check_migration_outcome();
+                    }
                 }
             }
         }
@@ -1863,111 +1974,108 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_boot(&mut self) -> result::Result<(), VmError> {
+        if matches!(self.vm, VmOwnership::Migration { .. }) {
+            return Err(VmError::VmMigrating);
+        }
+
         tracer::start();
         info!("Booting VM");
         event!("vm", "booting");
-        let r = {
-            trace_scoped!("vm_boot");
-            // If we don't have a config, we cannot boot a VM.
-            if self.vm_config.is_none() {
-                return Err(VmError::VmMissingConfig);
-            }
 
-            // console_info is set to None in vm_shutdown. re-populate here if empty
-            if self.console_info.is_none() {
-                self.console_info =
-                    Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
-            }
-
-            // Create a new VM if we don't have one yet.
-            if self.vm.is_none() {
-                let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
-                let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
-                let guest_exit_evt = self
-                    .guest_exit_evt
-                    .try_clone()
-                    .map_err(VmError::EventFdClone)?;
-                #[cfg(feature = "guest_debug")]
-                let vm_debug_evt = self
-                    .vm_debug_evt
-                    .try_clone()
-                    .map_err(VmError::EventFdClone)?;
-                let activate_evt = self
-                    .activate_evt
-                    .try_clone()
-                    .map_err(VmError::EventFdClone)?;
-
-                if let Some(ref vm_config) = self.vm_config {
-                    let vm = Vm::new(
-                        Arc::clone(vm_config),
-                        exit_evt,
-                        reset_evt,
-                        guest_exit_evt,
-                        #[cfg(feature = "guest_debug")]
-                        vm_debug_evt,
-                        &self.seccomp_action,
-                        self.hypervisor.clone(),
-                        activate_evt,
-                        self.console_info.clone(),
-                        self.console_resize_pipe.clone(),
-                        Arc::clone(&self.original_termios_opt),
-                        None,
-                        None,
-                        None,
-                        None,
-                    )?;
-
-                    self.vm = Some(vm);
-                }
-            }
-
-            // Now we can boot the VM.
-            if let Some(ref mut vm) = self.vm {
-                vm.boot()
-            } else {
-                Err(VmError::VmNotCreated)
-            }
-        };
-        tracer::end();
-        if r.is_ok() {
-            event!("vm", "booted");
+        trace_scoped!("vm_boot");
+        // If we don't have a config, we cannot boot a VM.
+        if self.vm_config.is_none() {
+            return Err(VmError::VmMissingConfig);
         }
-        r
+
+        // console_info is set to None in vm_shutdown. re-populate here if empty
+        if self.console_info.is_none() {
+            self.console_info =
+                Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
+        }
+
+        // Create a new VM if we don't have one yet.
+        if matches!(self.vm, VmOwnership::None) {
+            let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
+            let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
+            let guest_exit_evt = self
+                .guest_exit_evt
+                .try_clone()
+                .map_err(VmError::EventFdClone)?;
+            #[cfg(feature = "guest_debug")]
+            let vm_debug_evt = self
+                .vm_debug_evt
+                .try_clone()
+                .map_err(VmError::EventFdClone)?;
+            let activate_evt = self
+                .activate_evt
+                .try_clone()
+                .map_err(VmError::EventFdClone)?;
+
+            if let Some(ref vm_config) = self.vm_config {
+                let vm = Vm::new(
+                    Arc::clone(vm_config),
+                    exit_evt,
+                    reset_evt,
+                    guest_exit_evt,
+                    #[cfg(feature = "guest_debug")]
+                    vm_debug_evt,
+                    &self.seccomp_action,
+                    self.hypervisor.clone(),
+                    activate_evt,
+                    self.console_info.clone(),
+                    self.console_resize_pipe.clone(),
+                    Arc::clone(&self.original_termios_opt),
+                    None,
+                    None,
+                    None,
+                    None,
+                )?;
+
+                self.vm = VmOwnership::Owned(vm);
+            }
+        }
+
+        // Now we can boot the VM.
+        self.vm.vm_mut(VmError::VmNotCreated)?.boot()?;
+        event!("vm", "booted");
+
+        tracer::end();
+        Ok(())
     }
 
     fn vm_pause(&mut self) -> result::Result<(), VmError> {
-        if let Some(ref mut vm) = self.vm {
-            vm.pause().map_err(VmError::Pause)
-        } else {
-            Err(VmError::VmNotRunning)
-        }
+        self.vm
+            .vm_mut(VmError::VmNotRunning)?
+            .pause()
+            .map_err(VmError::Pause)
     }
 
     fn vm_resume(&mut self) -> result::Result<(), VmError> {
-        if let Some(ref mut vm) = self.vm {
-            vm.resume().map_err(VmError::Resume)
-        } else {
-            Err(VmError::VmNotRunning)
-        }
+        self.vm
+            .vm_mut(VmError::VmNotRunning)?
+            .resume()
+            .map_err(VmError::Resume)
     }
 
     fn vm_snapshot(&mut self, destination_url: &str) -> result::Result<(), VmError> {
-        if let Some(ref mut vm) = self.vm {
-            // Drain console_info so that FDs are not reused
-            let _ = self.console_info.take();
-            vm.snapshot()
-                .map_err(VmError::Snapshot)
-                .and_then(|snapshot| {
-                    vm.send(&snapshot, destination_url)
-                        .map_err(VmError::SnapshotSend)
-                })
-        } else {
-            Err(VmError::VmNotRunning)
-        }
+        let vm = self.vm.vm_mut(VmError::VmNotRunning)?;
+        // Drain console_info so that FDs are not reused
+        let _ = self.console_info.take();
+        vm.snapshot()
+            .map_err(VmError::Snapshot)
+            .and_then(|snapshot| {
+                vm.send(&snapshot, destination_url)
+                    .map_err(VmError::SnapshotSend)
+            })
     }
 
     fn vm_restore(&mut self, restore_cfg: RestoreConfig) -> result::Result<(), VmError> {
-        if self.vm.is_some() || self.vm_config.is_some() {
+        if self.vm.vm_mut_or_none()?.is_some() {
+            return Err(VmError::VmAlreadyCreated);
+        }
+
+        if self.vm_config.is_some() {
             return Err(VmError::VmAlreadyCreated);
         }
 
@@ -2027,21 +2135,18 @@ impl RequestHandler for Vmm {
 
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     fn vm_coredump(&mut self, destination_url: &str) -> result::Result<(), VmError> {
-        if let Some(ref mut vm) = self.vm {
-            vm.coredump(destination_url).map_err(VmError::Coredump)
-        } else {
-            Err(VmError::VmNotRunning)
-        }
+        self.vm
+            .vm_mut(VmError::VmNotRunning)?
+            .coredump(destination_url)
+            .map_err(VmError::Coredump)
     }
 
     fn vm_shutdown(&mut self) -> result::Result<(), VmError> {
-        let r = if let Some(ref mut vm) = self.vm.take() {
-            // Drain console_info so that the FDs are not reused
-            let _ = self.console_info.take();
-            vm.shutdown()
-        } else {
-            Err(VmError::VmNotRunning)
-        };
+        let vm = self.vm.vm_mut(VmError::VmNotRunning)?;
+        // Drain console_info so that the FDs are not reused
+        let _ = self.console_info.take();
+        let r = vm.shutdown();
+        self.vm = VmOwnership::None;
 
         if r.is_ok() {
             event!("vm", "shutdown");
@@ -2051,16 +2156,13 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_reboot(&mut self) -> result::Result<(), VmError> {
-        event!("vm", "rebooting");
+        let vm = self.vm.vm_mut(VmError::VmNotRunning)?;
 
+        event!("vm", "rebooting");
+        let config = vm.get_config();
         // First we stop the current VM
-        let config = if let Some(mut vm) = self.vm.take() {
-            let config = vm.get_config();
-            vm.shutdown()?;
-            config
-        } else {
-            return Err(VmError::VmNotCreated);
-        };
+        vm.shutdown()?;
+        self.vm = VmOwnership::None;
 
         // vm.shutdown() closes all the console devices, so set console_info to None
         // so that the closed FD #s are not reused.
@@ -2115,7 +2217,7 @@ impl RequestHandler for Vmm {
         // And we boot it
         vm.boot()?;
 
-        self.vm = Some(vm);
+        self.vm = VmOwnership::Owned(vm);
 
         event!("vm", "rebooted");
 
@@ -2123,35 +2225,40 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_info(&self) -> result::Result<VmInfoResponse, VmError> {
-        match &self.vm_config {
-            Some(vm_config) => {
-                let state = match &self.vm {
-                    Some(vm) => vm.get_state(),
-                    None => VmState::Created,
-                };
-                let config = vm_config.lock().unwrap().clone();
-
-                let mut memory_actual_size =
-                    config.memory.total_size() - config.memory.hotplugged_size();
-                if let Some(vm) = &self.vm {
-                    memory_actual_size = memory_actual_size.saturating_sub(vm.balloon_size());
-                    memory_actual_size += vm.virtio_mem_plugged_size();
-                }
-
-                let device_tree = self
-                    .vm
-                    .as_ref()
-                    .map(|vm| vm.device_tree().lock().unwrap().clone());
-
-                Ok(VmInfoResponse {
-                    config: Box::new(config),
-                    state,
-                    memory_actual_size,
-                    device_tree,
-                })
-            }
-            None => Err(VmError::VmNotCreated),
+        if let VmOwnership::Migration {
+            vm_info_response, ..
+        } = &self.vm
+        {
+            return Ok(vm_info_response.clone());
         }
+
+        let vm_config = self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
+        let vm_config = vm_config.lock().unwrap().clone();
+
+        let state = match &self.vm {
+            VmOwnership::Owned(vm) => vm.get_state(),
+            VmOwnership::None => VmState::Created,
+            VmOwnership::Migration { .. } => unreachable!("migration path is handled above"),
+        };
+
+        let base_memory_actual_size =
+            vm_config.memory.total_size() - vm_config.memory.hotplugged_size();
+        let (memory_actual_size, device_tree) = match &self.vm {
+            VmOwnership::Owned(vm) => (
+                base_memory_actual_size.saturating_sub(vm.balloon_size())
+                    + vm.virtio_mem_plugged_size(),
+                Some(vm.device_tree().lock().unwrap().clone()),
+            ),
+            VmOwnership::None => (base_memory_actual_size, None),
+            VmOwnership::Migration { .. } => unreachable!("migration path is handled above"),
+        };
+
+        Ok(VmInfoResponse {
+            config: Box::new(vm_config),
+            state,
+            memory_actual_size,
+            device_tree,
+        })
     }
 
     fn vmm_ping(&self) -> VmmPingResponse {
@@ -2173,13 +2280,12 @@ impl RequestHandler for Vmm {
             return Ok(());
         }
 
-        // If a VM is booted, we first try to shut it down.
-        if self.vm.is_some() {
+        if self.vm.vm_mut_or_none()?.is_some() {
+            // If a VM is booted, we first try to shut it down.
             self.vm_shutdown()?;
         }
 
         self.vm_config = None;
-
         event!("vm", "deleted");
 
         Ok(())
@@ -2199,10 +2305,9 @@ impl RequestHandler for Vmm {
     ) -> result::Result<(), VmError> {
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
-        if let Some(ref mut vm) = self.vm {
+        if let Some(vm) = self.vm.vm_mut_or_none()? {
             vm.resize(desired_vcpus, desired_ram, desired_balloon)
-                .inspect_err(|e| error!("Error when resizing VM: {e:?}"))?;
-            Ok(())
+                .inspect_err(|e| error!("Error when resizing VM: {e:?}"))
         } else {
             let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
             if let Some(desired_vcpus) = desired_vcpus {
@@ -2216,6 +2321,7 @@ impl RequestHandler for Vmm {
             {
                 balloon_config.size = desired_balloon;
             }
+
             Ok(())
         }
     }
@@ -2223,17 +2329,15 @@ impl RequestHandler for Vmm {
     fn vm_resize_disk(&mut self, id: String, desired_size: u64) -> result::Result<(), VmError> {
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
-        if let Some(ref mut vm) = self.vm {
-            return vm.resize_disk(&id, desired_size);
-        }
-
-        Err(VmError::ResizeDisk)
+        self.vm
+            .vm_mut(VmError::ResizeDisk)?
+            .resize_disk(&id, desired_size)
     }
 
     fn vm_resize_zone(&mut self, id: String, desired_ram: u64) -> result::Result<(), VmError> {
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
-        if let Some(ref mut vm) = self.vm {
+        if let Some(vm) = self.vm.vm_mut_or_none()? {
             vm.resize_zone(&id, desired_ram)
                 .inspect_err(|e| error!("Error when resizing zone: {e:?}"))?;
             Ok(())
@@ -2268,7 +2372,7 @@ impl RequestHandler for Vmm {
             config.validate().map_err(VmError::ConfigValidation)?;
         }
 
-        if let Some(ref mut vm) = self.vm {
+        if let Some(vm) = self.vm.vm_mut_or_none()? {
             let info = vm.add_device(device_cfg).inspect_err(|e| {
                 error!("Error when adding new device to the VM: {e:?}");
             })?;
@@ -2296,7 +2400,7 @@ impl RequestHandler for Vmm {
             config.validate().map_err(VmError::ConfigValidation)?;
         }
 
-        if let Some(ref mut vm) = self.vm {
+        if let Some(vm) = self.vm.vm_mut_or_none()? {
             let info = vm.add_user_device(device_cfg).inspect_err(|e| {
                 error!("Error when adding new user device to the VM: {e:?}");
             })?;
@@ -2312,7 +2416,7 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_remove_device(&mut self, id: String) -> result::Result<(), VmError> {
-        if let Some(ref mut vm) = self.vm {
+        if let Some(vm) = self.vm.vm_mut_or_none()? {
             vm.remove_device(&id)
                 .inspect_err(|e| error!("Error when removing device from the VM: {e:?}"))?;
             Ok(())
@@ -2338,7 +2442,7 @@ impl RequestHandler for Vmm {
             config.validate().map_err(VmError::ConfigValidation)?;
         }
 
-        if let Some(ref mut vm) = self.vm {
+        if let Some(vm) = self.vm.vm_mut_or_none()? {
             let info = vm.add_disk(disk_cfg).inspect_err(|e| {
                 error!("Error when adding new disk to the VM: {e:?}");
             })?;
@@ -2363,7 +2467,7 @@ impl RequestHandler for Vmm {
             config.validate().map_err(VmError::ConfigValidation)?;
         }
 
-        if let Some(ref mut vm) = self.vm {
+        if let Some(vm) = self.vm.vm_mut_or_none()? {
             let info = vm.add_fs(fs_cfg).inspect_err(|e| {
                 error!("Error when adding new fs to the VM: {e:?}");
             })?;
@@ -2394,7 +2498,7 @@ impl RequestHandler for Vmm {
             config.validate().map_err(VmError::ConfigValidation)?;
         }
 
-        if let Some(ref mut vm) = self.vm {
+        if let Some(vm) = self.vm.vm_mut_or_none()? {
             let info = vm
                 .add_generic_vhost_user(generic_vhost_user_cfg)
                 .inspect_err(|e| {
@@ -2421,7 +2525,7 @@ impl RequestHandler for Vmm {
             config.validate().map_err(VmError::ConfigValidation)?;
         }
 
-        if let Some(ref mut vm) = self.vm {
+        if let Some(vm) = self.vm.vm_mut_or_none()? {
             let info = vm.add_pmem(pmem_cfg).inspect_err(|e| {
                 error!("Error when adding new pmem device to the VM: {e:?}");
             })?;
@@ -2446,7 +2550,7 @@ impl RequestHandler for Vmm {
             config.validate().map_err(VmError::ConfigValidation)?;
         }
 
-        if let Some(ref mut vm) = self.vm {
+        if let Some(vm) = self.vm.vm_mut_or_none()? {
             let info = vm.add_net(net_cfg).inspect_err(|e| {
                 error!("Error when adding new network device to the VM: {e:?}");
             })?;
@@ -2471,7 +2575,7 @@ impl RequestHandler for Vmm {
             config.validate().map_err(VmError::ConfigValidation)?;
         }
 
-        if let Some(ref mut vm) = self.vm {
+        if let Some(vm) = self.vm.vm_mut_or_none()? {
             let info = vm.add_vdpa(vdpa_cfg).inspect_err(|e| {
                 error!("Error when adding new vDPA device to the VM: {e:?}");
             })?;
@@ -2501,7 +2605,7 @@ impl RequestHandler for Vmm {
             config.validate().map_err(VmError::ConfigValidation)?;
         }
 
-        if let Some(ref mut vm) = self.vm {
+        if let Some(vm) = self.vm.vm_mut_or_none()? {
             let info = vm.add_vsock(vsock_cfg).inspect_err(|e| {
                 error!("Error when adding new vsock device to the VM: {e:?}");
             })?;
@@ -2517,48 +2621,56 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_counters(&mut self) -> result::Result<Option<Vec<u8>>, VmError> {
-        if let Some(ref mut vm) = self.vm {
-            let info = vm.counters().inspect_err(|e| {
+        let info = self
+            .vm
+            .vm_mut(VmError::VmNotRunning)?
+            .counters()
+            .inspect_err(|e| {
                 error!("Error when getting counters from the VM: {e:?}");
             })?;
-            serde_json::to_vec(&info)
-                .map(Some)
-                .map_err(VmError::SerializeJson)
-        } else {
-            Err(VmError::VmNotRunning)
-        }
+        serde_json::to_vec(&info)
+            .map(Some)
+            .map_err(VmError::SerializeJson)
     }
 
     fn vm_power_button(&mut self) -> result::Result<(), VmError> {
-        if let Some(ref mut vm) = self.vm {
-            vm.power_button()
-        } else {
-            Err(VmError::VmNotRunning)
-        }
+        self.vm.vm_mut(VmError::VmNotRunning)?.power_button()
     }
 
     fn vm_nmi(&mut self) -> result::Result<(), VmError> {
-        if let Some(ref mut vm) = self.vm {
-            vm.nmi()
-        } else {
-            Err(VmError::VmNotRunning)
-        }
+        self.vm.vm_mut(VmError::VmNotRunning)?.nmi()
     }
 
     fn vm_receive_migration(
         &mut self,
         receive_data_migration: VmReceiveMigrationData,
     ) -> result::Result<(), MigratableError> {
+        if self
+            .vm
+            .vm_mut_or_none()
+            .map_err(|_| {
+                MigratableError::MigrateReceive(anyhow!("There is already an ongoing migration"))
+            })?
+            .is_some()
+        {
+            return Err(MigratableError::MigrateReceive(anyhow!(
+                "Can't receive a migration when a VM is created"
+            )));
+        }
+
         info!(
             "Receiving migration: receiver_url = {}",
             receive_data_migration.receiver_url
         );
 
+        if self.vm_config.is_some() {
+            warn!("The existing VM config will be overwritten");
+        }
+
         let mut listener =
-            migration_transport::receive_migration_listener(&receive_data_migration.receiver_url)?;
+            transport::receive_migration_listener(&receive_data_migration.receiver_url)?;
 
         event!("vm", "migration-receive-ready");
-
         // Accept the connection and get the socket
         let mut socket = listener.accept()?;
 
@@ -2595,7 +2707,7 @@ impl RequestHandler for Vmm {
 
         if let ReceiveMigrationState::Aborted = state {
             event!("vm", "migration-receive-failed");
-            self.vm = None;
+            self.vm = VmOwnership::None;
             self.vm_config = None;
         } else {
             event!("vm", "migration-receive-finished");
@@ -2604,10 +2716,26 @@ impl RequestHandler for Vmm {
         Ok(())
     }
 
+    /// Dispatches a migration.
+    ///
+    /// Returns an error if the migration thread cannot be spawned. Once
+    /// spawned, [`Vmm::check_migration_outcome`] will be called after the
+    /// thread exits (on success, cancellation, or failure).
     fn vm_send_migration(
         &mut self,
         send_data_migration: VmSendMigrationData,
     ) -> result::Result<(), MigratableError> {
+        if self
+            .vm
+            .vm_mut_or_none()
+            .map_err(|_| {
+                MigratableError::MigrateSend(anyhow!("There is already an ongoing migration"))
+            })?
+            .is_none()
+        {
+            return Err(MigratableError::MigrateSend(anyhow!("VM is not running")));
+        }
+
         send_data_migration
             .validate()
             .context("Invalid send migration configuration")
@@ -2638,8 +2766,8 @@ impl RequestHandler for Vmm {
 
         let vm = self
             .vm
-            .as_mut()
-            .ok_or_else(|| MigratableError::MigrateSend(anyhow!("VM is not running")))?;
+            .vm_mut(VmError::VmNotRunning)
+            .expect("VM ownership should have been validated");
 
         let initial_vm_state = vm.get_state();
         if initial_vm_state != VmState::Running && initial_vm_state != VmState::Paused {
@@ -2648,45 +2776,57 @@ impl RequestHandler for Vmm {
             )));
         }
 
-        event!("vm", "migration-started");
-        Self::send_migration(
-            vm,
-            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-            self.hypervisor.as_ref(),
-            &send_data_migration,
-            initial_vm_state,
+        let migration_seccomp_filter = get_seccomp_filter(
+            &self.seccomp_action,
+            Thread::MigrationCoordinator,
+            None,
         )
-        .map_err(|migration_err| {
-            error!("Migration failed: {migration_err:?}");
-            event!("vm", "migration-failed");
+        .map_err(|e| {
+            MigratableError::MigrateSend(anyhow!("Error creating migration seccomp filter: {e}"))
+        })?;
+        let migration_tcp_worker_seccomp_filter =
+            get_seccomp_filter(&self.seccomp_action, Thread::MigrationTcpWorker, None).map_err(
+                |e| {
+                    MigratableError::MigrateSend(anyhow!(
+                        "Error creating migration TCP worker seccomp filter: {e}"
+                    ))
+                },
+            )?;
 
-            // Stop logging dirty pages only for non-local migrations
-            if !send_data_migration.local
-                && let Err(e) = vm.stop_dirty_log()
-            {
-                return e;
-            }
-
-            // Only resume if the VM was originally running; a VM that was already
-            // paused before migration should remain paused after failure.
-            if initial_vm_state == VmState::Running
-                && vm.get_state() == VmState::Paused
-                && let Err(e) = vm.resume()
-            {
-                return e;
-            }
-
-            migration_err
+        let vm_info_snapshot = self.vm_info().map_err(|e| {
+            MigratableError::MigrateSend(anyhow!("Failed to query VM info snapshot: {e}"))
         })?;
 
-        event!("vm", "migration-finished");
+        // Take VM ownership. This also means that API events can no longer
+        // change the VM (e.g. net device hotplug).
+        let vm = self
+            .vm
+            .take_vm()
+            .expect("should have VM ownership as we just checked it");
 
-        // Shutdown the VM after the migration succeeded
-        self.exit_evt.write(1).map_err(|e| {
-            MigratableError::MigrateSend(anyhow!(
-                "Failed shutting down the VM after migration: {e:?}"
-            ))
-        })
+        // Start migration thread:
+        match MigrationWorker::spawn(
+            vm,
+            self.check_migration_evt.try_clone().unwrap(),
+            send_data_migration,
+            migration_seccomp_filter,
+            migration_tcp_worker_seccomp_filter,
+            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+            self.hypervisor.clone(),
+            initial_vm_state,
+        ) {
+            Ok(handle) => {
+                self.vm = VmOwnership::Migration {
+                    migration_worker_handle: handle,
+                    vm_info_response: vm_info_snapshot,
+                };
+                Ok(())
+            }
+            Err(e) => {
+                self.vm = VmOwnership::Owned(e.vm);
+                Err(MigratableError::MigrateSend(e.spawn_error.into()))
+            }
+        }
     }
 }
 
