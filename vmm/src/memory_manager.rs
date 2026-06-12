@@ -601,6 +601,18 @@ impl BusDevice for MemoryManager {
     }
 }
 
+/// Memory range policy.
+#[derive(Clone, Copy)]
+pub enum MemoryRangePolicy {
+    /// Send every region in full.
+    Full,
+    /// Send every region in full, except those already persisted through a
+    /// shared, hardlinked backing file.
+    SkipPersisted,
+    /// Send only the populated ranges of each region, skipping holes.
+    Sparse,
+}
+
 impl MemoryManager {
     /// Creates all memory regions based on the available RAM ranges defined
     /// by `ram_regions`, and based on the description of the memory zones.
@@ -2685,7 +2697,7 @@ impl MemoryManager {
 
     pub fn memory_range_table(
         &self,
-        snapshot: bool,
+        mode: MemoryRangePolicy,
     ) -> result::Result<MemoryRangeTable, MigratableError> {
         let mut table = MemoryRangeTable::default();
 
@@ -2695,31 +2707,66 @@ impl MemoryManager {
             }
 
             for region in memory_zone.regions() {
-                if snapshot
-                    && let Some(file_offset) = region.file_offset()
-                    && (region.flags() & libc::MAP_SHARED == libc::MAP_SHARED)
-                    && Self::is_hardlink(file_offset.file())
-                {
-                    // In this very specific case, we know the memory
-                    // region is backed by a file on the host filesystem
-                    // that can be accessed by the user, and additionally
-                    // the mapping is shared, which means that modifications
-                    // to the content are written to the actual file.
-                    // When meeting these conditions, we can skip the
-                    // copy of the memory content for this specific region,
-                    // as we can assume the user will have it saved through
-                    // the backing file already.
-                    continue;
+                let gpa = region.start_addr().raw_value();
+                let len = region.len();
+
+                let shared_file_offset = region
+                    .file_offset()
+                    .filter(|_| region.flags() & libc::MAP_SHARED == libc::MAP_SHARED);
+
+                match mode {
+                    MemoryRangePolicy::Full => {}
+                    MemoryRangePolicy::SkipPersisted => {
+                        // Content already persisted through the backing file.
+                        if let Some(file_offset) = shared_file_offset
+                            && Self::is_hardlink(file_offset.file())
+                        {
+                            continue;
+                        }
+                    }
+                    MemoryRangePolicy::Sparse => {
+                        if let Some(file_offset) = shared_file_offset
+                            && let Some(ranges) = Self::sparse_extents(file_offset, gpa, len)
+                        {
+                            for range in ranges {
+                                table.push(range);
+                            }
+                            continue;
+                        }
+                    }
                 }
 
-                table.push(MemoryRange {
-                    gpa: region.start_addr().raw_value(),
-                    length: region.len(),
-                });
+                table.push(MemoryRange { gpa, length: len });
             }
         }
 
         Ok(table)
+    }
+
+    /// Return the populated extents of a memory range, or `None` if the
+    /// caller should fall back onto sending the entire region.
+    fn sparse_extents(file_offset: &FileOffset, gpa: u64, len: u64) -> Option<Vec<MemoryRange>> {
+        let offset = file_offset.start();
+        let end = offset + len;
+        let mut cursor = offset;
+        let mut ranges = Vec::new();
+        loop {
+            match next_data_extent(file_offset.file().as_fd(), cursor, end) {
+                Ok(Some((data_offset, ext_len))) => {
+                    let range_gpa = data_offset
+                        .checked_sub(offset)
+                        .and_then(|delta| gpa.checked_add(delta))?;
+                    ranges.push(MemoryRange {
+                        gpa: range_gpa,
+                        length: ext_len,
+                    });
+                    cursor = data_offset + ext_len;
+                }
+                Ok(None) => break,
+                Err(_) => return None,
+            }
+        }
+        Some(ranges)
     }
 
     pub fn snapshot_data(&self) -> MemoryManagerSnapshotData {
@@ -2793,7 +2840,7 @@ impl MemoryManager {
         dump_state: &DumpState,
     ) -> result::Result<(), GuestDebuggableError> {
         let snapshot_memory_ranges = self
-            .memory_range_table(false)
+            .memory_range_table(MemoryRangePolicy::Full)
             .map_err(|e| GuestDebuggableError::Coredump(e.into()))?;
 
         if snapshot_memory_ranges.is_empty() {
@@ -3200,7 +3247,7 @@ impl Snapshottable for MemoryManager {
     }
 
     fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
-        let memory_ranges = self.memory_range_table(true)?;
+        let memory_ranges = self.memory_range_table(MemoryRangePolicy::SkipPersisted)?;
 
         // Store locally this list of ranges as it will be used through the
         // Transportable::send() implementation. The point is to avoid the

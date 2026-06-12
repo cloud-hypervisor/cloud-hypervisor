@@ -56,7 +56,7 @@ use crate::config::{MemoryRestoreMode, RestoreConfig, add_to_config};
 use crate::coredump::GuestDebuggable;
 use crate::device_manager::DeviceManager;
 use crate::landlock::Landlock;
-use crate::memory_manager::MemoryManager;
+use crate::memory_manager::{MemoryManager, MemoryRangePolicy};
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::migration::get_vm_snapshot;
 use crate::migration::transport::{
@@ -1112,7 +1112,10 @@ impl Vmm {
                     ))
                 })?;
             let mm = config_data.memory_manager.clone();
-            let saved_regions = mm.lock().unwrap().memory_range_table(false)?;
+            let saved_regions = mm
+                .lock()
+                .unwrap()
+                .memory_range_table(MemoryRangePolicy::Full)?;
             mm.lock()
                 .unwrap()
                 .start_postcopy_serving(
@@ -1372,7 +1375,7 @@ impl Vmm {
             let iteration_begin = Instant::now();
 
             let iteration_table = if ctx.iteration == 0 {
-                vm.memory_range_table()?
+                vm.memory_range_table(MemoryRangePolicy::Sparse)?
             } else {
                 // TODO do this in a thread #7816
                 vm.dirty_log()?
