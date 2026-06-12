@@ -12,6 +12,7 @@ use std::alloc::{Layout, alloc_zeroed, dealloc};
 use std::fs::{File, Metadata};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::fd::{AsFd, BorrowedFd};
+use std::os::unix::fs::FileExt;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::slice;
 
@@ -402,5 +403,15 @@ impl AsRawFd for RawFile {
 impl AsFd for RawFile {
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.file.as_fd()
+    }
+}
+
+impl FileExt for RawFile {
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+        self.file.read_at(buf, offset)
+    }
+
+    fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
+        self.file.write_at(buf, offset)
     }
 }
