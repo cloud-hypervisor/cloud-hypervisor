@@ -105,7 +105,7 @@ use crate::landlock::LandlockError;
 #[cfg(feature = "tdx")]
 use crate::memory_manager;
 use crate::memory_manager::{
-    Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData,
+    Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData, MemoryRangePolicy,
 };
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::migration::url_to_file;
@@ -3029,11 +3029,11 @@ impl Vm {
         Ok(())
     }
 
-    pub fn memory_range_table(&self) -> result::Result<MemoryRangeTable, MigratableError> {
-        self.memory_manager
-            .lock()
-            .unwrap()
-            .memory_range_table(false)
+    pub fn memory_range_table(
+        &self,
+        mode: MemoryRangePolicy,
+    ) -> result::Result<MemoryRangeTable, MigratableError> {
+        self.memory_manager.lock().unwrap().memory_range_table(mode)
     }
 
     pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemoryMmap> {
