@@ -165,7 +165,7 @@ pub enum ExceptionClass {
     BRK = 0b111100,
 }
 
-#[allow(non_upper_case_globals)]
+#[expect(non_upper_case_globals)]
 // PSR (Processor State Register) bits.
 // Taken from arch/arm64/include/uapi/asm/ptrace.h.
 const PSR_MODE_EL1h: u64 = 0x0000_0005;

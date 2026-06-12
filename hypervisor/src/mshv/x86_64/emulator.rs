@@ -23,7 +23,7 @@ pub struct MshvEmulatorContext<'a> {
 
 impl MshvEmulatorContext<'_> {
     // Do the actual gva -> gpa translation
-    #[allow(non_upper_case_globals)]
+    #[expect(non_upper_case_globals)]
     fn translate(&self, gva: u64, flags: u32) -> Result<u64, PlatformError> {
         if let Some((cached_gva, cached_gpa)) = self.mapping
             && cached_gva == gva

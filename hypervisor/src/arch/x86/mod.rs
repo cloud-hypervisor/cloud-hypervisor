@@ -20,9 +20,7 @@ use crate::CpuVendor;
 #[cfg(all(feature = "mshv_emulator", target_arch = "x86_64"))]
 pub mod emulator;
 pub mod gdt;
-#[allow(non_camel_case_types)]
-#[allow(non_snake_case)]
-#[allow(non_upper_case_globals)]
+#[expect(non_upper_case_globals)]
 pub mod msr_index;
 
 // MTRR constants

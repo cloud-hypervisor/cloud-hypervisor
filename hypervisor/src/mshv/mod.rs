@@ -233,7 +233,7 @@ pub struct MshvHypervisor {
 
 impl MshvHypervisor {
     /// Create a hypervisor based on Mshv
-    #[allow(clippy::new_ret_no_self)]
+    #[expect(clippy::new_ret_no_self)]
     pub fn new() -> hypervisor::Result<Arc<dyn hypervisor::Hypervisor>> {
         let mshv_obj =
             Mshv::new().map_err(|e| hypervisor::HypervisorError::HypervisorCreate(e.into()))?;
@@ -586,7 +586,7 @@ impl cpu::Vcpu for MshvVcpu {
         Ok(())
     }
 
-    #[allow(non_upper_case_globals)]
+    #[expect(non_upper_case_globals)]
     fn run(&mut self) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
         match self.fd.run() {
             Ok(x) => match x.header.message_type {

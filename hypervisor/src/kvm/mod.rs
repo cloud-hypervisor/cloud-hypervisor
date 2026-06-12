@@ -1512,7 +1512,7 @@ pub type KvmResult<T> = result::Result<T, KvmError>;
 
 impl KvmHypervisor {
     /// Create a hypervisor based on Kvm
-    #[allow(clippy::new_ret_no_self)]
+    #[expect(clippy::new_ret_no_self)]
     pub fn new() -> hypervisor::Result<Arc<dyn hypervisor::Hypervisor>> {
         let kvm_obj = Kvm::new().map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
         let api_version = kvm_obj.get_api_version();
