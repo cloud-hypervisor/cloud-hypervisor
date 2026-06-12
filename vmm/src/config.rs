@@ -1365,17 +1365,23 @@ impl PciDeviceCommonConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        if let Some(platform_config) = vm_config.platform.as_ref() {
-            if self.pci_segment >= platform_config.num_pci_segments {
-                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
-            }
+        let num_pci_segments = vm_config
+            .platform
+            .as_ref()
+            .map_or(DEFAULT_NUM_PCI_SEGMENTS, |platform_config| {
+                platform_config.num_pci_segments
+            });
 
-            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
-                && iommu_segments.contains(&self.pci_segment)
-                && !self.iommu
-            {
-                return Err(ValidationError::OnIommuSegment(self.pci_segment));
-            }
+        if self.pci_segment >= num_pci_segments {
+            return Err(ValidationError::InvalidPciSegment(self.pci_segment));
+        }
+
+        if let Some(platform_config) = vm_config.platform.as_ref()
+            && let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
+            && iommu_segments.contains(&self.pci_segment)
+            && !self.iommu
+        {
+            return Err(ValidationError::OnIommuSegment(self.pci_segment));
         }
 
         if let Some(device_id) = self.pci_device_id {
