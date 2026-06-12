@@ -2892,8 +2892,7 @@ mod unit_tests {
     #[test]
     fn test_vmm_vm_cold_add_user_device() {
         let mut vmm = create_dummy_vmm();
-        let user_device_config =
-            UserDeviceConfig::parse("socket=/path/to/socket,id=8,pci_segment=2").unwrap();
+        let user_device_config = UserDeviceConfig::parse("socket=/path/to/socket,id=8").unwrap();
 
         assert!(matches!(
             vmm.vm_add_user_device(user_device_config.clone()),
