@@ -789,6 +789,8 @@ pub fn generate_common_cpuid(
             eax: (1 << 1) // AccessPartitionReferenceCounter
                    | (1 << 2) // AccessSynicRegs
                    | (1 << 3) // AccessSyntheticTimerRegs
+                   | (1 << 5) // AccessHypercallMsrs
+                   | (1 << 6) // AccessVpIndex
                    | (1 << 9), // AccessPartitionReferenceTsc
             edx: 1 << 3, // CPU dynamic partitioning
             ..Default::default()
