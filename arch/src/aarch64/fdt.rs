@@ -204,7 +204,7 @@ pub fn get_cache_shared(cache_level: CacheLevel) -> bool {
 }
 
 /// Creates the flattened device tree for this aarch64 VM.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHasher>(
     guest_mem: &GuestMemoryMmap,
     cmdline: &str,

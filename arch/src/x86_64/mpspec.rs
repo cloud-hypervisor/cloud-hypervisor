@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
-#![allow(non_camel_case_types)]
 use vm_memory::ByteValued;
 
 pub const MP_PROCESSOR: ::std::os::raw::c_uint = 0;
