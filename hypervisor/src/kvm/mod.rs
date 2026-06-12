@@ -576,9 +576,9 @@ pub struct KvmVm {
     fd: Arc<VmFd>,
     #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
-    #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+    #[cfg(feature = "sev_snp")]
     sev_fd: Option<x86_64::sev::SevFd>,
-    #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+    #[cfg(feature = "sev_snp")]
     snp_guest_policy: std::sync::OnceLock<u64>,
     dirty_log_slots: RwLock<HashMap<u32, KvmDirtyLogSlot>>,
     memory_slots: Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
@@ -700,7 +700,7 @@ impl KvmVm {
 /// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
 /// ```
 impl vm::Vm for KvmVm {
-    #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+    #[cfg(feature = "sev_snp")]
     fn sev_snp_init(&self, guest_policy: igvm_defs::SnpPolicy) -> vm::Result<()> {
         self.sev_fd
             .as_ref()
@@ -713,7 +713,7 @@ impl vm::Vm for KvmVm {
         Ok(())
     }
 
-    #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+    #[cfg(feature = "sev_snp")]
     fn import_isolated_pages(
         &self,
         page_type: u32,
@@ -751,7 +751,7 @@ impl vm::Vm for KvmVm {
         Ok(())
     }
 
-    #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+    #[cfg(feature = "sev_snp")]
     fn complete_isolated_import(
         &self,
         snp_id_block: igvm_defs::IGVM_VHS_SNP_ID_BLOCK,
