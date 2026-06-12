@@ -1717,12 +1717,12 @@ mod unit_tests {
                     "--serial",
                     "null",
                     "--console",
-                    "tty,pci_segment=1,pci_device_id=7",
+                    "tty,pci_segment=0,pci_device_id=7",
                 ],
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
                     "serial": {"mode": "Null"},
-                    "console": {"mode": "Tty", "iommu": false, "pci_segment": 1, "pci_device_id": 7}
+                    "console": {"mode": "Tty", "iommu": false, "pci_segment": 0, "pci_device_id": 7}
                 }"#,
                 true,
             ),
