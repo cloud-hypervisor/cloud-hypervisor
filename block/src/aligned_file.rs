@@ -31,7 +31,6 @@ pub(crate) struct AlignedFile {
     alignment: usize,
 }
 
-#[cfg_attr(not(test), expect(dead_code))]
 impl AlignedFile {
     /// Wrap `file`, probing the O_DIRECT block alignment when `direct_io`.
     pub fn new(file: File, direct_io: bool) -> Self {
