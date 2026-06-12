@@ -22,7 +22,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     disk_file.write_all(&bytes[..]).unwrap();
     disk_file.seek(SeekFrom::Start(0)).unwrap();
 
-    let mut vhdx = match Vhdx::new(disk_file) {
+    let mut vhdx = match Vhdx::new(disk_file, false) {
         Ok(vhdx) => vhdx,
         Err(_) => return Corpus::Reject,
     };
