@@ -686,6 +686,10 @@ pub enum DeviceManagerError {
         specified: ImageType,
         detected: ImageType,
     },
+
+    /// Invalid PCI segment id
+    #[error("Invalid PCI segment id: {0}")]
+    InvalidPciSegment(u16),
 }
 
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
@@ -4667,8 +4671,12 @@ impl DeviceManager {
 
             (pci_segment_id, pci_device_bdf, resources)
         } else {
-            let pci_device_bdf =
-                self.pci_segments[pci_segment_id as usize].allocate_device_id(pci_device_id)?;
+            let pci_segment = self
+                .pci_segments
+                .get(pci_segment_id as usize)
+                .ok_or_else(|| DeviceManagerError::InvalidPciSegment(pci_segment_id))?;
+
+            let pci_device_bdf = pci_segment.allocate_device_id(pci_device_id)?;
 
             (pci_segment_id, pci_device_bdf, None)
         })
