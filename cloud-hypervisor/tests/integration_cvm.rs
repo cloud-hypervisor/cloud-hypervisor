@@ -10,7 +10,7 @@
 #![allow(dead_code)]
 mod common;
 
-#[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+#[cfg(feature = "sev_snp")]
 mod common_cvm {
     use block::ImageType;
     use common::tests_wrappers::*;

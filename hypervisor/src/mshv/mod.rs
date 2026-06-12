@@ -447,10 +447,7 @@ pub struct MshvVcpu {
     #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
     vm_ops: Option<Arc<dyn vm::VmOps>>,
-    #[cfg_attr(
-        all(not(target_arch = "x86_64"), not(feature = "sev_snp")),
-        expect(dead_code)
-    )]
+    #[cfg_attr(not(target_arch = "x86_64"), expect(dead_code))]
     vm_fd: Arc<VmFd>,
     #[cfg(feature = "sev_snp")]
     ghcb: Option<Ghcb>,

@@ -368,7 +368,7 @@ pub enum ValidationError {
     #[cfg(feature = "sev_snp")]
     #[error("Invalid host data format")]
     InvalidHostData,
-    #[cfg(all(feature = "sev_snp", feature = "igvm"))]
+    #[cfg(feature = "sev_snp")]
     #[error("SEV-SNP requires an IGVM payload (--payload igvm=<path>)")]
     SevSnpRequiresIgvm,
     /// Restore expects all net ids that have fds
