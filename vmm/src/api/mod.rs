@@ -56,8 +56,8 @@ use crate::device_tree::DeviceTree;
 use crate::migration_transport::MAX_MIGRATION_CONNECTIONS;
 use crate::vm::{Error as VmError, VmState};
 use crate::vm_config::{
-    DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
-    UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
+    DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, MemoryZoneConfig, NetConfig,
+    PmemConfig, UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
 };
 
 /// API errors are sent back from the VMM API server through the ApiResponse.
@@ -270,6 +270,9 @@ pub struct VmCoredumpData {
 pub struct VmReceiveMigrationData {
     /// URL for the reception of migration state
     pub receiver_url: String,
+    /// Optional memory zone reconfiguration data
+    #[serde(default)]
+    pub updated_zones: Vec<MemoryZoneConfig>,
 }
 
 #[derive(Copy, Clone, Default, Deserialize, Serialize, Debug, PartialEq, Eq)]
