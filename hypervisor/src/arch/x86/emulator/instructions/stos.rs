@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#![allow(non_camel_case_types)]
+#![expect(non_camel_case_types)]
 
 //
 // STOS - Store String
