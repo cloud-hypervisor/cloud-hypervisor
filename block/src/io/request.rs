@@ -428,15 +428,15 @@ impl Request {
                     });
                 }
 
-                let wz_offset = wz_sector * SECTOR_SIZE;
-                if wz_offset == 0 && disable_sector0_writes {
-                    return Err(ExecuteError::BadRequest(Error::InvalidOffset));
-                }
-
                 let top = wz_sector
                     .checked_add(wz_num_sectors as u64)
                     .ok_or(ExecuteError::BadRequest(Error::InvalidOffset))?;
                 if top > disk_nsectors {
+                    return Err(ExecuteError::BadRequest(Error::InvalidOffset));
+                }
+
+                let wz_offset = wz_sector * SECTOR_SIZE;
+                if wz_offset == 0 && disable_sector0_writes {
                     return Err(ExecuteError::BadRequest(Error::InvalidOffset));
                 }
 
