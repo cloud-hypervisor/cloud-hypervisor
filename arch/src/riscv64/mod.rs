@@ -160,7 +160,6 @@ fn isa_string_from_host() -> Result<String, Error> {
 }
 
 /// Configures the system and should be called once per vm before starting vcpu threads.
-#[allow(clippy::too_many_arguments)]
 pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHasher>(
     guest_mem: &GuestMemoryMmap,
     cmdline: &str,
