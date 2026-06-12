@@ -19,82 +19,47 @@ use vmm_sys_util::file_traits::FileSync;
 use vmm_sys_util::seek_hole::SeekHole;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
-use crate::aligned_buffer::AlignedBuffer;
+use crate::aligned_file::AlignedFile;
 use crate::{BlockBackend, query_device_size};
 
 #[derive(Debug)]
 pub struct RawFile {
-    file: File,
-    alignment: usize,
+    aligned: AlignedFile,
     position: u64,
     direct_io: bool,
 }
 
-const BLK_ALIGNMENTS: [usize; 2] = [512, 4096];
-
-fn is_valid_alignment(file: &File, alignment: usize) -> bool {
-    let mut abuf = match AlignedBuffer::new(alignment as u64, alignment, alignment) {
-        Ok(b) => b,
-        Err(_) => return false,
-    };
-    abuf.read_from(file).is_ok()
-}
-
 impl RawFile {
     pub fn new(file: File, direct_io: bool) -> Self {
-        // Assume no alignment restrictions if we aren't using O_DIRECT.
-        let mut alignment = 0;
-        if direct_io {
-            for align in &BLK_ALIGNMENTS {
-                if is_valid_alignment(&file, *align) {
-                    alignment = *align;
-                    break;
-                }
-            }
-        }
         RawFile {
-            file,
-            alignment,
+            aligned: AlignedFile::new(file, direct_io),
             position: 0,
             direct_io,
         }
     }
 
-    fn is_aligned(&self, buf: &[u8]) -> bool {
-        if self.alignment == 0 {
-            return true;
-        }
-
-        let align64: u64 = self.alignment.try_into().unwrap();
-
-        self.position.is_multiple_of(align64)
-            && (buf.as_ptr() as usize).is_multiple_of(self.alignment)
-            && buf.len().is_multiple_of(self.alignment)
-    }
-
     pub fn set_len(&self, size: u64) -> io::Result<()> {
-        self.file.set_len(size)
+        self.aligned.file().set_len(size)
     }
 
     pub fn metadata(&self) -> io::Result<Metadata> {
-        self.file.metadata()
+        self.aligned.file().metadata()
     }
 
     pub fn try_clone(&self) -> io::Result<RawFile> {
         Ok(RawFile {
-            file: self.file.try_clone().expect("RawFile cloning failed"),
-            alignment: self.alignment,
+            aligned: self.aligned.try_clone()?,
             position: self.position,
             direct_io: self.direct_io,
         })
     }
 
     pub fn sync_all(&self) -> io::Result<()> {
-        self.file.sync_all()
+        self.aligned.file().sync_all()
     }
 
     pub fn sync_data(&self) -> io::Result<()> {
-        self.file.sync_data()
+        self.aligned.file().sync_data()
     }
 
     pub fn is_direct(&self) -> bool {
@@ -102,13 +67,13 @@ impl RawFile {
     }
 
     pub fn alignment(&self) -> usize {
-        self.alignment
+        self.aligned.alignment()
     }
 
     /// Returns true if the file was opened with write access.
     pub fn is_writable(&self) -> bool {
         // SAFETY: fcntl with F_GETFL is safe and doesn't modify the file descriptor
-        let flags = unsafe { libc::fcntl(self.file.as_raw_fd(), libc::F_GETFL) };
+        let flags = unsafe { libc::fcntl(self.aligned.file().as_raw_fd(), libc::F_GETFL) };
         if flags < 0 {
             return false;
         }
@@ -119,92 +84,66 @@ impl RawFile {
 
 impl Read for RawFile {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if buf.is_empty() {
-            return Ok(0);
-        }
-
-        if self.is_aligned(buf) {
-            match self.file.read(buf) {
-                Ok(r) => {
-                    self.position = self.position.checked_add(r.try_into().unwrap()).unwrap();
-                    Ok(r)
-                }
-                Err(e) => Err(e),
-            }
-        } else {
-            let buf_len = buf.len();
-            let mut abuf = AlignedBuffer::new(self.position, buf_len, self.alignment)?;
-            let bytes_read = abuf.read_from(&self.file)?;
-            buf[..bytes_read].copy_from_slice(&abuf.as_slice()[..bytes_read]);
-            self.seek(SeekFrom::Current(bytes_read.try_into().unwrap()))?;
-            Ok(bytes_read)
-        }
+        let n = self.aligned.read_at(buf, self.position)?;
+        self.position += n as u64;
+        Ok(n)
     }
 }
 
 impl Write for RawFile {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if buf.is_empty() {
-            return Ok(0);
-        }
-
-        if self.is_aligned(buf) {
-            match self.file.write(buf) {
-                Ok(r) => {
-                    self.position = self.position.checked_add(r.try_into().unwrap()).unwrap();
-                    Ok(r)
-                }
-                Err(e) => Err(e),
-            }
-        } else {
-            let buf_len = buf.len();
-            let mut abuf = AlignedBuffer::new(self.position, buf_len, self.alignment)?;
-            abuf.read_from(&self.file)?;
-            abuf.as_mut_slice().copy_from_slice(buf);
-            abuf.write_to(&self.file)?;
-            self.seek(SeekFrom::Current(buf_len.try_into().unwrap()))?;
-            Ok(buf_len)
-        }
+        let n = self.aligned.write_at(buf, self.position)?;
+        self.position += n as u64;
+        Ok(n)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.file.sync_all()
+        self.aligned.file().sync_all()
     }
 }
 
 impl Seek for RawFile {
-    fn seek(&mut self, newpos: SeekFrom) -> io::Result<u64> {
-        match self.file.seek(newpos) {
-            Ok(pos) => {
-                self.position = pos;
-                Ok(pos)
-            }
-            Err(e) => Err(e),
-        }
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        let newpos = match pos {
+            SeekFrom::Start(o) => o,
+            SeekFrom::Current(d) => self
+                .position
+                .checked_add_signed(d)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid seek"))?,
+            SeekFrom::End(d) => self
+                .aligned
+                .file()
+                .metadata()?
+                .len()
+                .checked_add_signed(d)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid seek"))?,
+        };
+        self.position = newpos;
+        Ok(newpos)
     }
 }
 
 impl WriteZeroesAt for RawFile {
     fn write_zeroes_at(&mut self, offset: u64, length: usize) -> io::Result<usize> {
-        self.file.write_zeroes_at(offset, length)
+        self.aligned.file_mut().write_zeroes_at(offset, length)
     }
 }
 
 impl PunchHole for RawFile {
     fn punch_hole(&mut self, offset: u64, length: u64) -> io::Result<()> {
-        self.file.punch_hole(offset, length)
+        self.aligned.file_mut().punch_hole(offset, length)
     }
 }
 
 impl FileSync for RawFile {
     fn fsync(&mut self) -> io::Result<()> {
-        self.file.fsync()
+        self.aligned.file_mut().fsync()
     }
 }
 
 impl SeekHole for RawFile {
     fn seek_hole(&mut self, offset: u64) -> io::Result<Option<u64>> {
-        match self.file.seek_hole(offset) {
+        match self.aligned.file_mut().seek_hole(offset) {
             Ok(pos) => {
                 if let Some(p) = pos {
                     self.position = p;
@@ -216,7 +155,7 @@ impl SeekHole for RawFile {
     }
 
     fn seek_data(&mut self, offset: u64) -> io::Result<Option<u64>> {
-        match self.file.seek_data(offset) {
+        match self.aligned.file_mut().seek_data(offset) {
             Ok(pos) => {
                 if let Some(p) = pos {
                     self.position = p;
@@ -230,13 +169,13 @@ impl SeekHole for RawFile {
 
 impl BlockBackend for RawFile {
     fn logical_size(&self) -> result::Result<u64, crate::Error> {
-        Ok(query_device_size(&self.file)
+        Ok(query_device_size(self.aligned.file())
             .map_err(crate::Error::RawFileError)?
             .0)
     }
 
     fn physical_size(&self) -> result::Result<u64, crate::Error> {
-        Ok(query_device_size(&self.file)
+        Ok(query_device_size(self.aligned.file())
             .map_err(crate::Error::RawFileError)?
             .1)
     }
@@ -245,8 +184,7 @@ impl BlockBackend for RawFile {
 impl Clone for RawFile {
     fn clone(&self) -> Self {
         RawFile {
-            file: self.file.try_clone().expect("RawFile cloning failed"),
-            alignment: self.alignment,
+            aligned: self.aligned.try_clone().expect("RawFile cloning failed"),
             position: self.position,
             direct_io: self.direct_io,
         }
@@ -255,23 +193,23 @@ impl Clone for RawFile {
 
 impl AsRawFd for RawFile {
     fn as_raw_fd(&self) -> RawFd {
-        self.file.as_raw_fd()
+        self.aligned.file().as_raw_fd()
     }
 }
 
 impl AsFd for RawFile {
     fn as_fd(&self) -> BorrowedFd<'_> {
-        self.file.as_fd()
+        self.aligned.file().as_fd()
     }
 }
 
 impl FileExt for RawFile {
     fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
-        self.file.read_at(buf, offset)
+        self.aligned.read_at(buf, offset)
     }
 
     fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
-        self.file.write_at(buf, offset)
+        self.aligned.write_at(buf, offset)
     }
 }
 
@@ -296,19 +234,11 @@ mod tests {
     }
 
     fn raw_with_alignment(file: File) -> RawFile {
-        RawFile {
-            file,
-            alignment: TEST_ALIGNMENT,
-            position: 0,
-            direct_io: true,
-        }
-    }
-
-    #[test]
-    fn test_alignment_probe_accepts_short_read() {
-        let tf = create_pattern_file(1);
-
-        assert!(is_valid_alignment(tf.as_file(), TEST_ALIGNMENT));
+        // A tempfile is not O_DIRECT, but its aligned probe read still
+        // succeeds, so RawFile::new selects the smallest candidate (512).
+        let raw = RawFile::new(file, true);
+        assert_eq!(raw.alignment(), TEST_ALIGNMENT);
+        raw
     }
 
     #[test]
