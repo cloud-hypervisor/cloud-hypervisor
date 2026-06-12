@@ -112,6 +112,7 @@ fn virtio_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_fallocate, vec![]),
         (libc::SYS_fcntl, vec![]),
         (libc::SYS_fdatasync, vec![]),
+        (libc::SYS_fstat, vec![]),
         (libc::SYS_fsync, vec![]),
         (libc::SYS_ftruncate, vec![]),
         (libc::SYS_getrandom, vec![]),
@@ -121,6 +122,7 @@ fn virtio_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_io_submit, vec![]),
         (libc::SYS_io_uring_enter, vec![]),
         (libc::SYS_lseek, vec![]),
+        (libc::SYS_newfstatat, vec![]),
         (libc::SYS_pread64, vec![]),
         (libc::SYS_preadv, vec![]),
         (libc::SYS_pwritev, vec![]),
@@ -128,6 +130,7 @@ fn virtio_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_sched_getaffinity, vec![]),
         (libc::SYS_sched_setaffinity, vec![]),
         (libc::SYS_set_robust_list, vec![]),
+        (libc::SYS_statx, vec![]),
         (libc::SYS_timerfd_settime, vec![]),
     ]
 }
