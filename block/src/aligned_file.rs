@@ -68,6 +68,13 @@ impl AlignedFile {
             alignment: self.alignment,
         })
     }
+
+    /// Wrap `file` with an explicit alignment, bypassing the probe. Used by
+    /// tests to force the bounce/RMW path without a real O_DIRECT fd.
+    #[cfg(test)]
+    pub fn with_alignment(file: File, alignment: usize) -> Self {
+        AlignedFile { file, alignment }
+    }
 }
 
 impl FileExt for AlignedFile {

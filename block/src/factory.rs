@@ -114,7 +114,7 @@ fn open_vhdx(
 ) -> BlockResult<Box<dyn AsyncFullDiskFile>> {
     info!("Opening VHDX disk file with synchronous backend");
     Ok(Box::new(
-        VhdxDisk::new(file).map_err(|e| e.with_path(options.path))?,
+        VhdxDisk::new(file, options.direct).map_err(|e| e.with_path(options.path))?,
     ))
 }
 

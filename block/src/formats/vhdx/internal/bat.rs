@@ -2,17 +2,17 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::fs::File;
-use std::io::{self, Seek, SeekFrom};
 use std::mem::size_of;
-use std::result;
+use std::os::unix::fs::FileExt;
+use std::{io, result};
 
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{ByteOrder, LittleEndian};
 use remain::sorted;
 use thiserror::Error;
 
 use super::header::RegionTableEntry;
 use super::metadata::DiskSpec;
+use crate::aligned_file::AlignedFile;
 
 // Payload BAT Entry States
 pub const PAYLOAD_BLOCK_NOT_PRESENT: u64 = 0;
@@ -48,7 +48,7 @@ pub struct BatEntry(pub u64);
 impl BatEntry {
     // Read all BAT entries presented on the disk and insert them to a vector
     pub fn collect_bat_entries(
-        f: &mut File,
+        f: &AlignedFile,
         disk_spec: &DiskSpec,
         bat_entry: &RegionTableEntry,
     ) -> Result<Vec<BatEntry>> {
@@ -64,14 +64,10 @@ impl BatEntry {
         let mut bat: Vec<BatEntry> = Vec::with_capacity(bat_entry.length as usize);
         let offset = bat_entry.file_offset;
         for i in 0..entry_count {
-            f.seek(SeekFrom::Start(offset + i * size_of::<u64>() as u64))
+            let mut entry = [0u8; size_of::<u64>()];
+            f.read_exact_at(&mut entry, offset + i * size_of::<u64>() as u64)
                 .map_err(VhdxBatError::ReadBat)?;
-
-            let bat_entry = BatEntry(
-                f.read_u64::<LittleEndian>()
-                    .map_err(VhdxBatError::ReadBat)?,
-            );
-            bat.insert(i as usize, bat_entry);
+            bat.insert(i as usize, BatEntry(LittleEndian::read_u64(&entry)));
         }
 
         Ok(bat)
@@ -85,13 +81,11 @@ impl BatEntry {
 
     // Routine for writing BAT entries to the disk
     pub fn write_bat_entries(
-        f: &mut File,
+        f: &AlignedFile,
         bat_offset: u64,
         bat_entries: &[BatEntry],
     ) -> Result<()> {
         for i in 0..bat_entries.len() as u64 {
-            f.seek(SeekFrom::Start(bat_offset + i * size_of::<u64>() as u64))
-                .map_err(VhdxBatError::WriteBat)?;
             let bat_entry = match bat_entries.get(i as usize) {
                 Some(entry) => entry.0,
                 None => {
@@ -99,7 +93,9 @@ impl BatEntry {
                 }
             };
 
-            f.write_u64::<LittleEndian>(bat_entry)
+            let mut buf = [0u8; size_of::<u64>()];
+            LittleEndian::write_u64(&mut buf, bat_entry);
+            f.write_all_at(&buf, bat_offset + i * size_of::<u64>() as u64)
                 .map_err(VhdxBatError::WriteBat)?;
         }
         Ok(())
