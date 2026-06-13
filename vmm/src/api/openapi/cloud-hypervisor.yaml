@@ -1512,6 +1512,8 @@ components:
             Directory containing the TLS server certificate (server-cert.pem), the TLS
             server key (server-key.pem), and the client TLS root CA certificate (ca-cert.pem).
             TLS is only supported with tcp:<host>:<port> receiver URLs.
+        postcopy:
+          type: boolean
 
     TimeoutStrategy:
       type: string
@@ -1565,6 +1567,8 @@ components:
             Directory containing the TLS root CA certificate (ca-cert.pem), the TLS client
             certificate (client-cert.pem), and TLS client key (client-key.pem).
             TLS is only supported with tcp:<host>:<port> destination URLs.
+        postcopy:
+          type: boolean
 
     VmAddUserDevice:
       required:

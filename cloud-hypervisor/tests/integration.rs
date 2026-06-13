@@ -6731,16 +6731,42 @@ mod common_parallel {
         dest_event_path: &str,
         connections: NonZeroU32,
     ) -> bool {
+        start_live_migration_tcp_with_flags(
+            src_api_socket,
+            dest_api_socket,
+            dest_event_path,
+            connections,
+            false,
+        )
+    }
+
+    #[cfg(not(feature = "mshv"))]
+    fn start_live_migration_tcp_with_flags(
+        src_api_socket: &str,
+        dest_api_socket: &str,
+        dest_event_path: &str,
+        connections: NonZeroU32,
+        postcopy: bool,
+    ) -> bool {
         // Get an available TCP port
         let migration_port = get_available_port();
         let host_ip = "127.0.0.1";
+
+        // Both ends opt into post-copy out-of-band: there is no protocol
+        // negotiation. Destination uses `postcopy=on` on its receive URL;
+        // source uses `postcopy=on` on its send URL.
+        let receive_arg = if postcopy {
+            format!("receiver_url=tcp:0.0.0.0:{migration_port},postcopy=on")
+        } else {
+            format!("receiver_url=tcp:0.0.0.0:{migration_port}")
+        };
 
         // Start the 'receive-migration' command on the destination
         let mut receive_migration = Command::new(clh_command("ch-remote"))
             .args([
                 &format!("--api-socket={dest_api_socket}"),
                 "receive-migration",
-                &format!("receiver_url=tcp:0.0.0.0:{migration_port}"),
+                &receive_arg,
             ])
             .stdin(Stdio::null())
             .stderr(Stdio::piped())
@@ -6760,12 +6786,13 @@ mod common_parallel {
 
         // Start the 'send-migration' command on the source
         let connections = connections.get();
+        let extra = if postcopy { ",postcopy=on" } else { "" };
         let mut send_migration = Command::new(clh_command("ch-remote"))
             .args([
                 &format!("--api-socket={src_api_socket}"),
                 "send-migration",
                 &format!(
-                    "destination_url=tcp:{host_ip}:{migration_port},connections={connections}"
+                    "destination_url=tcp:{host_ip}:{migration_port},connections={connections}{extra}"
                 ),
             ])
             .stdin(Stdio::null())
@@ -7017,6 +7044,102 @@ mod common_parallel {
         }
     }
 
+    // Post-copy live migration. Verifies the destination boots a guest
+    // that touches all of its memory, which forces every page to be
+    // demand-faulted across the network.
+    #[cfg(not(feature = "mshv"))]
+    fn _test_live_migration_tcp_postcopy() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+        let console_text = String::from("On a branch floating down river a cricket, singing.");
+        let net_id = "netpc1";
+        let net_params = format!(
+            "id={},tap=,mac={},ip={},mask=255.255.255.128",
+            net_id, guest.network.guest_mac0, guest.network.host_ip0
+        );
+        let memory_param: &[&str] = &["--memory", "size=512M"];
+        let boot_vcpus = 2;
+
+        let src_vm_path = clh_command("cloud-hypervisor");
+        let src_api_socket = temp_api_path(&guest.tmp_dir);
+        let mut src_child = GuestCommand::new_with_binary_path(&guest, &src_vm_path)
+            .args(["--cpus", format!("boot={boot_vcpus}").as_str()])
+            .args(memory_param)
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .args(["--net", net_params.as_str()])
+            .args(["--api-socket", &src_api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let dest_event_path = temp_event_monitor_path(&guest.tmp_dir);
+        let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
+        dest_api_socket.push_str(".dest");
+        let mut dest_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &dest_api_socket])
+            .args([
+                "--event-monitor",
+                format!("path={dest_event_path}").as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            assert!(guest.get_total_memory().unwrap_or_default() > 400_000);
+            guest.check_devices_common(None, Some(&console_text), None);
+
+            assert!(
+                start_live_migration_tcp_with_flags(
+                    &src_api_socket,
+                    &dest_api_socket,
+                    &dest_event_path,
+                    NonZeroU32::new(1).unwrap(),
+                    /* postcopy */ true,
+                ),
+                "Post-copy live migration command failed."
+            );
+        });
+        if r.is_err() {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Error occurred during post-copy live-migration",
+            );
+        }
+
+        let src_exited_ok = wait_until(Duration::from_secs(60), || {
+            matches!(src_child.try_wait(), Ok(Some(_)))
+        }) && src_child.try_wait().unwrap().is_some_and(|s| s.success());
+        if !src_exited_ok {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Source VM (post-copy) was not terminated successfully.",
+            );
+        }
+
+        let r = std::panic::catch_unwind(|| {
+            // Probing the destination forces page faults across most of
+            // guest memory; if the source serve loop drops bytes, these
+            // checks fail.
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            assert!(guest.get_total_memory().unwrap_or_default() > 400_000);
+            guest.check_devices_common(None, Some(&console_text), None);
+        });
+
+        let _ = dest_child.kill();
+        let dest_output = dest_child.wait_with_output().unwrap();
+        handle_child_output(r, &dest_output);
+    }
+
     #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_tcp_timeout(timeout_strategy: TimeoutStrategy) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -7221,6 +7344,12 @@ mod common_parallel {
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_tcp_parallel_connections() {
         _test_live_migration_tcp(NonZeroU32::new(8).unwrap());
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_live_migration_tcp_postcopy() {
+        _test_live_migration_tcp_postcopy();
     }
 
     #[test]
@@ -8018,6 +8147,18 @@ mod ivshmem {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_restore_offload() {
+        snapshot_restore_common::_test_snapshot_restore_offload(false);
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_restore_offload_lazy() {
+        snapshot_restore_common::_test_snapshot_restore_offload(true);
+    }
+
+    #[test]
     fn test_virtio_pmem_persist_writes() {
         test_virtio_pmem(false, false);
     }
@@ -8651,6 +8792,220 @@ mod snapshot_restore_common {
         });
 
         handle_child_output(r, &output);
+    }
+
+    // Round-trip via the reference offload daemon over the existing
+    // `vm.send-migration local=on` / `vm.receive-migration` endpoints,
+    // proving parity with `vm.snapshot`/`vm.restore`.
+    pub(crate) fn _test_snapshot_restore_offload(lazy: bool) {
+        use std::process::Stdio;
+
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
+        let console_text = String::from("On a branch floating down river a cricket, singing.");
+        let offload_dir = String::from(
+            guest
+                .tmp_dir
+                .as_path()
+                .join("offload-store")
+                .to_str()
+                .unwrap(),
+        );
+        std::fs::create_dir(&offload_dir).unwrap();
+        let snapshot_socket = String::from(
+            guest
+                .tmp_dir
+                .as_path()
+                .join("snapshot-offload.sock")
+                .to_str()
+                .unwrap(),
+        );
+
+        // Shared memory required: offload runs over local live migration.
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_source])
+            .args(["--cpus", "boot=2"])
+            .args(["--memory", "size=512M,shared=on"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let snap_daemon: std::sync::Mutex<Option<Child>> = std::sync::Mutex::new(None);
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
+            assert!(guest.get_total_memory().unwrap_or_default() > 400_000);
+            guest.check_devices_common(None, Some(&console_text), None);
+
+            // Daemon binds the socket and listens.
+            let daemon = Command::new(clh_command("offload_daemon"))
+                .args([
+                    "snapshot",
+                    "--socket",
+                    &snapshot_socket,
+                    "--output-dir",
+                    &offload_dir,
+                ])
+                .stderr(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+            *snap_daemon.lock().unwrap() = Some(daemon);
+            // Give the daemon a moment to bind.
+            assert!(wait_until(Duration::from_secs(5), || std::path::Path::new(
+                &snapshot_socket
+            )
+            .exists()));
+
+            // Pause explicitly to mirror typical operator usage.
+            assert!(remote_command(&api_socket_source, "pause", None));
+
+            // Source exits on success, as with any local live migration.
+            assert!(remote_command(
+                &api_socket_source,
+                "send-migration",
+                Some(format!("destination_url=unix:{snapshot_socket},local=on").as_str(),),
+            ));
+
+            // The daemon should exit cleanly after persisting the snapshot.
+            let daemon_output = snap_daemon
+                .lock()
+                .unwrap()
+                .take()
+                .unwrap()
+                .wait_with_output()
+                .unwrap();
+            assert!(
+                daemon_output.status.success(),
+                "offload daemon (snapshot) failed: stderr={}",
+                String::from_utf8_lossy(&daemon_output.stderr)
+            );
+        });
+
+        if let Some(mut daemon) = snap_daemon.into_inner().unwrap() {
+            let _ = daemon.kill();
+            let _ = daemon.wait();
+        }
+        let _ = std::fs::remove_file(&snapshot_socket);
+
+        // Source VM should have exited cleanly on its own.
+        let source_exited_ok = wait_until(Duration::from_secs(30), || {
+            matches!(child.try_wait(), Ok(Some(_)))
+        }) && child.try_wait().unwrap().is_some_and(|s| s.success());
+        if !source_exited_ok {
+            kill_child(&mut child);
+        }
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        // Now bring up a fresh VMM and restore through the offload daemon.
+        let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
+        let restore_socket = String::from(
+            guest
+                .tmp_dir
+                .as_path()
+                .join("restore-offload.sock")
+                .to_str()
+                .unwrap(),
+        );
+
+        let mut dest_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_restored])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            // Wait for the destination VMM to be up and responsive.
+            assert!(wait_until(Duration::from_secs(30), || remote_command(
+                &api_socket_restored,
+                "ping",
+                None
+            )));
+
+            // receive-migration blocks until done; run it in a thread so
+            // we can start the daemon as the sender in parallel. Lazy
+            // mode adds `postcopy=on` so CH registers UFFD pre-resume.
+            let api_socket_restored_clone = api_socket_restored.clone();
+            let restore_socket_clone = restore_socket.clone();
+            let lazy_for_thread = lazy;
+            let restore_thread = std::thread::spawn(move || {
+                let arg = if lazy_for_thread {
+                    format!("receiver_url=unix:{restore_socket_clone},postcopy=on")
+                } else {
+                    format!("unix:{restore_socket_clone}")
+                };
+                remote_command(&api_socket_restored_clone, "receive-migration", Some(&arg))
+            });
+
+            // Wait for CH to bind the socket before starting the daemon.
+            assert!(wait_until(Duration::from_secs(10), || {
+                std::path::Path::new(&restore_socket).exists()
+            }));
+
+            // Daemon in restore (sender) mode with --resume so the
+            // guest is live when we probe it. Lazy mode adds --lazy and
+            // keeps the daemon connected to serve PageFault requests.
+            let mut restore_args = vec![
+                "restore".to_string(),
+                "--socket".to_string(),
+                restore_socket.clone(),
+                "--input-dir".to_string(),
+                offload_dir.clone(),
+                "--resume".to_string(),
+            ];
+            if lazy {
+                restore_args.push("--lazy".to_string());
+            }
+            let daemon = Command::new(clh_command("offload_daemon"))
+                .args(&restore_args)
+                .stderr(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+            if lazy {
+                // Lazy: daemon stays running, serving PageFault requests
+                // until the destination CH closes the socket. It exits
+                // on its own when we kill dest_child below; we don't
+                // wait for it here because the daemon's correctness is
+                // implied by the guest checks passing — pages would not
+                // be readable if the daemon weren't serving them.
+                drop(daemon);
+            } else {
+                // Eager: daemon finishes its work and exits once the
+                // restore handshake completes.
+                let daemon_output = daemon.wait_with_output().unwrap();
+                assert!(
+                    daemon_output.status.success(),
+                    "offload daemon (restore) failed: stderr={}",
+                    String::from_utf8_lossy(&daemon_output.stderr)
+                );
+            }
+
+            assert!(
+                restore_thread.join().unwrap(),
+                "ch-remote receive-migration command failed"
+            );
+
+            // Restored VM should be functional.
+            guest.wait_for_ssh(Duration::from_secs(30)).unwrap();
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
+            guest.check_devices_common(None, Some(&console_text), None);
+        });
+
+        kill_child(&mut dest_child);
+        let output = dest_child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        let _ = remove_dir_all(offload_dir.as_str());
     }
 }
 

@@ -6,8 +6,7 @@
 use std::io::{self, ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::num::{NonZeroU32, ParseIntError};
-use std::os::fd::{AsFd, BorrowedFd};
-use std::os::unix::io::AsRawFd;
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::result::Result;
@@ -26,7 +25,7 @@ use vm_memory::{
     Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, ReadVolatile, VolatileMemoryError,
     VolatileSlice, WriteVolatile,
 };
-use vm_migration::protocol::{Command, MemoryRangeTable, Request, Response};
+use vm_migration::protocol::{Command, ConnHeader, ConnRole, MemoryRangeTable, Request, Response};
 use vm_migration::tls::{TlsServerConfig, TlsStream};
 use vm_migration::{MigratableError, Snapshot};
 use vmm_sys_util::eventfd::EventFd;
@@ -159,6 +158,40 @@ impl Write for SocketStream {
     }
 }
 
+impl SocketStream {
+    pub(crate) fn set_read_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
+        match self {
+            SocketStream::Unix(s) => s.set_read_timeout(dur),
+            SocketStream::Tcp(s) => s.set_read_timeout(dur),
+            SocketStream::Tls(s) => {
+                let fd = s.as_fd().as_raw_fd();
+                // SAFETY: fd is borrowed from the TLS stream and forgotten
+                // immediately; the TLS stream retains ownership.
+                let tcp = unsafe { TcpStream::from_raw_fd(fd) };
+                let r = tcp.set_read_timeout(dur);
+                std::mem::forget(tcp);
+                r
+            }
+        }
+    }
+
+    pub(crate) fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
+        match self {
+            SocketStream::Unix(_) => Ok(()),
+            SocketStream::Tcp(s) => s.set_nodelay(nodelay),
+            SocketStream::Tls(s) => {
+                let fd = s.as_fd().as_raw_fd();
+                // SAFETY: fd is borrowed from the TLS stream and forgotten
+                // immediately; the TLS stream retains ownership.
+                let tcp = unsafe { TcpStream::from_raw_fd(fd) };
+                let r = tcp.set_nodelay(nodelay);
+                std::mem::forget(tcp);
+                r
+            }
+        }
+    }
+}
+
 impl AsFd for SocketStream {
     fn as_fd(&self) -> BorrowedFd<'_> {
         match self {
@@ -263,6 +296,7 @@ impl ReceiveAdditionalConnections {
     pub(crate) fn new(
         listener: ReceiveListener,
         guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
+        fault_tx: Sender<SocketStream>,
     ) -> Result<Self, MigratableError> {
         let event_fd = EventFd::new(0)
             .context("Error creating terminate fd")
@@ -275,7 +309,9 @@ impl ReceiveAdditionalConnections {
 
         let accept_thread = thread::Builder::new()
             .name("migrate-receive-accept-connections".to_owned())
-            .spawn(move || Self::accept_connections(listener, &terminate_fd, &guest_memory))
+            .spawn(move || {
+                Self::accept_connections(listener, &terminate_fd, &guest_memory, &fault_tx)
+            })
             .context("Error creating connection accept thread")
             .map_err(MigratableError::MigrateReceive)?;
 
@@ -289,6 +325,7 @@ impl ReceiveAdditionalConnections {
         mut listener: ReceiveListener,
         terminate_fd: &EventFd,
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+        fault_tx: &Sender<SocketStream>,
     ) -> Result<(), MigratableError> {
         let mut threads: Vec<thread::JoinHandle<Result<(), MigratableError>>> = Vec::new();
         let mut first_err = loop {
@@ -304,6 +341,48 @@ impl ReceiveAdditionalConnections {
                 break Err(MigratableError::MigrateReceive(anyhow!(
                     "Received more than {MAX_MIGRATION_CONNECTIONS} additional migration connections."
                 )));
+            }
+
+            // Read the role header with a timeout so a stalled peer can't block
+            // acceptance of other connections.
+            socket
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .map_err(MigratableError::MigrateSocket)?;
+            let header = match ConnHeader::read_from(&mut socket) {
+                Ok(header) => header,
+                Err(e) => {
+                    warn!("Dropping connection: failed to read ConnHeader: {e}");
+                    continue;
+                }
+            };
+            socket
+                .set_read_timeout(None)
+                .map_err(MigratableError::MigrateSocket)?;
+
+            if header.version() != ConnHeader::VERSION {
+                warn!(
+                    "Dropping connection: unsupported ConnHeader version {}",
+                    header.version()
+                );
+                continue;
+            }
+
+            match header.role() {
+                ConnRole::Fault => {
+                    // Hand the fault channel to the main thread; no memory worker for it.
+                    if let Err(e) = fault_tx.send(socket) {
+                        break Err(MigratableError::MigrateReceive(anyhow!(
+                            "Failed to hand off fault channel: {e}"
+                        )));
+                    }
+                    continue;
+                }
+                ConnRole::PrecopyMemory => {}
+                ConnRole::Invalid => {
+                    break Err(MigratableError::MigrateReceive(anyhow!(
+                        "Additional connection announced an invalid role"
+                    )));
+                }
             }
 
             let guest_memory = guest_memory.clone();
@@ -539,6 +618,7 @@ impl SendAdditionalConnections {
         // this case we create one additional thread for each connection.
         for n in 0..configured_connections {
             let mut socket = send_migration_socket(destination, tls_dir)?;
+            ConnHeader::new(ConnRole::PrecopyMemory).write_to(&mut socket)?;
             let guest_memory = guest_memory.clone();
             let message_rx = message_rx.clone();
             let worker_error = worker_error.clone();
@@ -885,6 +965,22 @@ pub(crate) fn send_migration_socket(
 
         Ok(SocketStream::Unix(socket))
     }
+}
+
+/// Dial a dedicated fault channel to the destination and announce the
+/// [`ConnRole::Fault`] role. Used by the source/daemon to serve `PageFault`
+/// requests asynchronously, independent of the control stream.
+pub(crate) fn connect_fault_channel(
+    destination_url: &str,
+    tls_dir: Option<&Path>,
+) -> Result<SocketStream, MigratableError> {
+    let mut socket = send_migration_socket(destination_url, tls_dir)?;
+    ConnHeader::new(ConnRole::Fault).write_to(&mut socket)?;
+    // Disable Nagle: small fault request/response round-trips.
+    socket
+        .set_nodelay(true)
+        .map_err(MigratableError::MigrateSocket)?;
+    Ok(socket)
 }
 
 /// Bind a migration listener for the receiver side.

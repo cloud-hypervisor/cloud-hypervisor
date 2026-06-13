@@ -364,6 +364,9 @@ migration process. Via the API or `ch-remote`, you may specify:
   The number of parallel TCP connections to use for migration.
   Must be between `1` and `128`. Defaults to `1`.
   Multiple connections are not supported with local UNIX-socket migration.
+- `postcopy <on|off>`: \
+  Enable post-copy live migration. The destination faults in guest pages on
+  demand over a dedicated channel. Defaults to `off`.
 
 ## Version Compatibility
 
