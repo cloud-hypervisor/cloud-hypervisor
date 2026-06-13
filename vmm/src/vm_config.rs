@@ -159,6 +159,9 @@ pub struct PlatformConfig {
     pub sev_snp: bool,
     #[serde(default)]
     pub iommufd: bool,
+    // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
+    #[serde(default, deserialize_with = "deserialize_platformconfig_iommufd_fd")]
+    pub iommufd_fd: Option<i32>,
     #[serde(default = "default_platformconfig_vfio_p2p_dma")]
     pub vfio_p2p_dma: bool,
 }
@@ -204,6 +207,21 @@ impl PlatformConfig {
         };
 
         (!smbios.is_empty()).then_some(smbios)
+    }
+}
+
+fn deserialize_platformconfig_iommufd_fd<'de, D>(d: D) -> Result<Option<i32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let invalid_fd: Option<i32> = Option::deserialize(d)?;
+    if invalid_fd.is_some() {
+        debug!(
+            "FD in 'PlatformConfig::iommufd_fd' won't be deserialized as it is most likely invalid now. Deserializing it as -1."
+        );
+        Ok(Some(-1))
+    } else {
+        Ok(None)
     }
 }
 
@@ -758,16 +776,40 @@ impl ApplyLandlock for DebugConsoleConfig {
 pub struct DeviceConfig {
     #[serde(flatten)]
     pub pci_common: PciDeviceCommonConfig,
-    pub path: PathBuf,
+    #[serde(default)]
+    pub path: Option<PathBuf>,
+    // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
+    #[serde(default, deserialize_with = "deserialize_deviceconfig_fd")]
+    pub fd: Option<i32>,
     #[serde(default)]
     pub x_nv_gpudirect_clique: Option<u8>,
     #[serde(default)]
     pub x_exclude_mmap_bars: Vec<u64>,
 }
 
+fn deserialize_deviceconfig_fd<'de, D>(d: D) -> Result<Option<i32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let invalid_fd: Option<i32> = Option::deserialize(d)?;
+    if invalid_fd.is_some() {
+        debug!(
+            "FD in 'DeviceConfig' won't be deserialized as it is most likely invalid now. Deserializing it as -1."
+        );
+        Ok(Some(-1))
+    } else {
+        Ok(None)
+    }
+}
+
 impl ApplyLandlock for DeviceConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        let device_path = fs::read_link(self.path.as_path()).map_err(LandlockError::OpenPath)?;
+        // When the device is supplied via an externally-opened FD, there is no
+        // path to grant access to: the file is already open. Skip the rule.
+        let Some(path) = self.path.as_deref() else {
+            return Ok(());
+        };
+        let device_path = fs::read_link(path).map_err(LandlockError::OpenPath)?;
         let iommu_group = device_path.file_name();
         let iommu_group_str = iommu_group
             .ok_or(LandlockError::InvalidPath)?

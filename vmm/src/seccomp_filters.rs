@@ -123,6 +123,7 @@ mod kvm {
 
 mod iommufd {
     // See include/uapi/linux/iommufd.h in the kernel code.
+    pub const IOMMU_DESTROY: u64 = 0x3b80;
     pub const IOMMU_IOAS_ALLOC: u64 = 0x3b81;
     pub const IOMMU_IOAS_MAP: u64 = 0x3b85;
     pub const IOMMU_IOAS_UNMAP: u64 = 0x3b86;
@@ -284,6 +285,7 @@ fn create_vmm_ioctl_seccomp_rule_common_kvm() -> Result<Vec<SeccompRule>, Backen
 fn create_vmm_ioctl_seccomp_rule_iommufd() -> Result<Vec<SeccompRule>, BackendError> {
     use iommufd::*;
     Ok(or![
+        and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_DESTROY)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_ALLOC)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_MAP)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_UNMAP)?],
@@ -838,6 +840,7 @@ fn create_vcpu_ioctl_seccomp_rule_hypervisor(
 fn create_vcpu_ioctl_seccomp_rule_iommufd() -> Result<Vec<SeccompRule>, BackendError> {
     use iommufd::*;
     Ok(or![
+        and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_DESTROY)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_MAP)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_UNMAP)?],
         and![Cond::new(

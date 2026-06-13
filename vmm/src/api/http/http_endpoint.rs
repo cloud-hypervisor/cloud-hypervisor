@@ -45,7 +45,7 @@ use crate::api::VmCoredump;
 use crate::api::http::http_endpoint::fds_helper::{attach_fds_to_cfg, attach_fds_to_cfgs};
 use crate::api::http::{EndpointHandler, HttpError, error_response};
 use crate::api::{
-    AddDisk, ApiAction, ApiError, ApiRequest, NetConfig, VmAddDevice, VmAddFs,
+    AddDisk, ApiAction, ApiError, ApiRequest, DeviceConfig, NetConfig, VmAddDevice, VmAddFs,
     VmAddGenericVhostUser, VmAddNet, VmAddPmem, VmAddUserDevice, VmAddVdpa, VmAddVsock, VmBoot,
     VmConfig, VmCounters, VmDelete, VmNmi, VmPause, VmPowerButton, VmReboot, VmReceiveMigration,
     VmRemoveDevice, VmResize, VmResizeDisk, VmResizeZone, VmRestore, VmResume, VmSendMigration,
@@ -118,7 +118,7 @@ mod fds_helper {
 
         use super::{ConfigWithFDs, ConfigWithVariableFDs};
         use crate::config::RestoredNetConfig;
-        use crate::vm_config::NetConfig;
+        use crate::vm_config::{DeviceConfig, NetConfig};
 
         impl ConfigWithFDs for NetConfig {
             fn id(&self) -> Option<&str> {
@@ -131,6 +131,24 @@ mod fds_helper {
 
             fn set_fds(&mut self, fds: Option<Vec<RawFd>>) {
                 self.fds = fds;
+            }
+        }
+
+        impl ConfigWithFDs for DeviceConfig {
+            fn id(&self) -> Option<&str> {
+                self.pci_common.id.as_deref()
+            }
+
+            fn fds_from_http_body(&self) -> Option<&[RawFd]> {
+                // A DeviceConfig carries at most one FD.
+                self.fd.as_ref().map(std::slice::from_ref)
+            }
+
+            fn set_fds(&mut self, fds: Option<Vec<RawFd>>) {
+                // The VmAddDevice PutHandler enforces `fds.len() <= 1`
+                // before calling into this trait, so `pop()` yields the
+                // single FD when present.
+                self.fd = fds.and_then(|mut v| v.pop());
             }
         }
 
@@ -295,6 +313,19 @@ impl EndpointHandler for VmCreate {
                             }
                         }
 
+                        if let Some(ref mut devices) = vm_config.devices {
+                            // For the VmCreate call, we do not accept FDs from the socket currently.
+                            // This call sets all FDs to null while doing the same logging as
+                            // similar code paths.
+                            for cfg in devices.iter_mut() {
+                                if let Err(e) = attach_fds_to_cfg(vec![], cfg)
+                                    .map_err(|e| error_response(e, StatusCode::InternalServerError))
+                                {
+                                    return e;
+                                }
+                            }
+                        }
+
                         match crate::api::VmCreate
                             .send(api_notifier, api_sender, vm_config)
                             .map_err(HttpError::ApiError)
@@ -417,7 +448,6 @@ vm_action_put_handler!(VmResume);
 vm_action_put_handler!(VmPowerButton);
 vm_action_put_handler!(VmNmi);
 
-vm_action_put_handler_body!(VmAddDevice);
 vm_action_put_handler_body!(AddDisk);
 vm_action_put_handler_body!(VmAddFs);
 vm_action_put_handler_body!(VmAddGenericVhostUser);
@@ -434,6 +464,34 @@ vm_action_put_handler_body!(VmSendMigration);
 
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 vm_action_put_handler_body!(VmCoredump);
+
+// Special handling for VFIO devices backed by an externally-opened cdev FD.
+// See module description for more info.
+impl PutHandler for VmAddDevice {
+    fn handle_request(
+        &'static self,
+        api_notifier: EventFd,
+        api_sender: Sender<ApiRequest>,
+        body: &Option<Body>,
+        files: Vec<File>,
+    ) -> std::result::Result<Option<Body>, HttpError> {
+        if let Some(body) = body {
+            // A DeviceConfig is backed by at most one FD.
+            if files.len() > 1 {
+                return Err(HttpError::BadRequest);
+            }
+            let mut device_cfg: DeviceConfig = serde_json::from_slice(body.raw())?;
+            attach_fds_to_cfg(files, &mut device_cfg)?;
+
+            self.send(api_notifier, api_sender, device_cfg)
+                .map_err(HttpError::ApiError)
+        } else {
+            Err(HttpError::BadRequest)
+        }
+    }
+}
+
+impl GetHandler for VmAddDevice {}
 
 // Special handling for virtio-net devices backed by network FDs.
 // See module description for more info.
