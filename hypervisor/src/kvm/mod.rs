@@ -3146,21 +3146,45 @@ impl cpu::Vcpu for KvmVcpu {
         // expected amount, we fallback onto a slower method by setting MSRs
         // by chunks. This is the only way to make sure we try to set as many
         // MSRs as possible, even if some MSRs are not supported.
-        let expected_num_msrs = state.msrs.len();
-        let num_msrs = self.set_msrs(&state.msrs)?;
+        // For Hyper-V (Windows) guests, restoring MSR_IA32_TSC per-vCPU desyncs
+        // the vCPU TSC offsets: KVM_SET_TSC_KHZ first lands a synchronized
+        // offset, then the per-vCPU MSR_IA32_TSC value write re-derives the
+        // offset against a slightly later host TSC, so each vCPU ends with a
+        // different offset. KVM masterclock then never engages and the Hyper-V
+        // TSC reference page is left stale (sequence 0); Windows falls back to
+        // trapping HV_X64_MSR_TIME_REF_COUNT on every QueryPerformanceCounter
+        // (~18x slower clock reads). The synchronized offset from
+        // KVM_SET_TSC_KHZ already gives a consistent guest TSC across vCPUs, so
+        // skip the value restore for Hyper-V guests; reenlightenment handles the
+        // resulting TSC discontinuity. Non-Hyper-V (Linux) guests are unaffected.
+        let msrs_filtered: Vec<MsrEntry>;
+        let msrs: &[MsrEntry] = if state.hyperv_synic {
+            msrs_filtered = state
+                .msrs
+                .iter()
+                .filter(|m| m.index != crate::arch::x86::msr_index::MSR_IA32_TSC)
+                .cloned()
+                .collect();
+            &msrs_filtered
+        } else {
+            &state.msrs
+        };
+
+        let expected_num_msrs = msrs.len();
+        let num_msrs = self.set_msrs(msrs)?;
         if num_msrs != expected_num_msrs {
             let mut faulty_msr_index = num_msrs;
 
             loop {
                 warn!(
                     "Detected faulty MSR 0x{:x} while setting MSRs",
-                    state.msrs[faulty_msr_index].index
+                    msrs[faulty_msr_index].index
                 );
 
                 // Skip the first bad MSR
                 let start_pos = faulty_msr_index + 1;
 
-                let sub_msr_entries = &state.msrs[start_pos..];
+                let sub_msr_entries = &msrs[start_pos..];
 
                 let num_msrs = self.set_msrs(sub_msr_entries)?;
 
