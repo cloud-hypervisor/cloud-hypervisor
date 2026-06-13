@@ -78,7 +78,7 @@ pub use {
 };
 
 #[cfg(target_arch = "x86_64")]
-use crate::ClockData;
+use crate::{ClockData, ClockRestoreMode, ClockState};
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
 #[cfg(target_arch = "aarch64")]
@@ -1324,6 +1324,16 @@ impl cpu::Vcpu for MshvVcpu {
         Ok(res)
     }
 
+    #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+    fn get_cntvct(&self) -> cpu::Result<u64> {
+        unimplemented!()
+    }
+
+    #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+    fn set_cntvct(&self, _val: u64) -> cpu::Result<()> {
+        unimplemented!()
+    }
+
     #[cfg(target_arch = "aarch64")]
     fn get_reg_list(&self, _reg_list: &mut crate::RegList) -> cpu::Result<()> {
         unimplemented!()
@@ -2198,6 +2208,24 @@ impl vm::Vm for MshvVm {
                 data.ref_time,
             )
             .map_err(|e| vm::HypervisorVmError::SetClock(e.into()))
+    }
+
+    /// Capture the partition reference time for snapshot/migration.
+    #[cfg(target_arch = "x86_64")]
+    fn snapshot_clock(&self, _boot_vcpu: &dyn crate::cpu::Vcpu) -> vm::Result<Option<ClockState>> {
+        Ok(Some(ClockState::X86(self.get_clock()?.with_realtime_filled())))
+    }
+
+    /// Restore the partition reference time before the vCPUs resume.
+    #[cfg(target_arch = "x86_64")]
+    fn restore_clock(
+        &self,
+        _vcpus: &[&dyn crate::cpu::Vcpu],
+        state: &ClockState,
+        _mode: ClockRestoreMode,
+    ) -> vm::Result<()> {
+        let ClockState::X86(clock) = state;
+        self.set_clock(clock)
     }
 
     /// Downcast to the underlying MshvVm type

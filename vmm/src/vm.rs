@@ -100,7 +100,7 @@ use crate::landlock::LandlockError;
 use crate::memory_manager::{
     Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData,
 };
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm")))]
 use crate::migration::get_vm_snapshot;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::migration::url_to_file;
@@ -515,6 +515,17 @@ pub fn physical_bits(hypervisor: &dyn hypervisor::Hypervisor, max_phys_bits: u8)
     cmp::min(host_phys_bits, max_phys_bits)
 }
 
+/// Guest clock baseline captured for snapshot/restore, plus how it must be
+/// re-established on the next resume. `mode` is runtime-only (`SnapshotRestore`
+/// after restore/migration-receive, `SameHostResume` for a live same-host capture)
+/// and is not serialized: it is re-derived from "was this VM built from a snapshot".
+#[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm")))]
+#[derive(Clone, Copy)]
+struct SavedClock {
+    mode: hypervisor::ClockRestoreMode,
+    state: hypervisor::ClockState,
+}
+
 pub struct Vm {
     #[cfg(feature = "tdx")]
     kernel: Option<File>,
@@ -528,8 +539,8 @@ pub struct Vm {
     #[cfg_attr(any(not(feature = "kvm"), target_arch = "aarch64"), allow(dead_code))]
     // The hypervisor abstracted virtual machine.
     vm: Arc<dyn hypervisor::Vm>,
-    #[cfg(target_arch = "x86_64")]
-    saved_clock: Option<hypervisor::ClockData>,
+    #[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm")))]
+    saved_clock: Option<SavedClock>,
     #[cfg(not(target_arch = "riscv64"))]
     numa_nodes: NumaNodes,
     #[cfg_attr(any(not(feature = "kvm"), target_arch = "aarch64"), allow(dead_code))]
@@ -682,10 +693,15 @@ impl Vm {
             .transpose()
             .map_err(Error::InitramfsFile)?;
 
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm")))]
         let saved_clock = if let Some(snapshot) = snapshot.as_ref() {
             let vm_snapshot = get_vm_snapshot(snapshot).map_err(Error::Restore)?;
-            vm_snapshot.clock
+            // Restored or migrated in: the guest clock must catch up to wall time
+            // on resume (the counter was reset to the saved value).
+            vm_snapshot.clock.map(|state| SavedClock {
+                mode: hypervisor::ClockRestoreMode::SnapshotRestore,
+                state,
+            })
         } else {
             None
         };
@@ -707,7 +723,7 @@ impl Vm {
             cpu_manager,
             memory_manager,
             vm,
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm")))]
             saved_clock,
             #[cfg(not(target_arch = "riscv64"))]
             numa_nodes,
@@ -3203,18 +3219,6 @@ impl Pausable for Vm {
             .valid_transition(new_state)
             .map_err(|e| MigratableError::Pause(anyhow!("Invalid transition: {e:?}")))?;
 
-        #[cfg(target_arch = "x86_64")]
-        {
-            let mut clock = self
-                .vm
-                .get_clock()
-                .map_err(|e| MigratableError::Pause(anyhow!("Could not get VM clock: {e}")))?;
-            if !clock.has_realtime() {
-                clock.set_realtime(std::time::SystemTime::now());
-            }
-            self.saved_clock = Some(clock);
-        }
-
         // Before pausing the vCPUs activate any pending virtio devices that might
         // need activation between starting the pause (or e.g. a migration it's part of)
         self.activate_virtio_devices().map_err(|e| {
@@ -3222,6 +3226,24 @@ impl Pausable for Vm {
         })?;
 
         self.cpu_manager.lock().unwrap().pause()?;
+
+        // Capture the guest clock once the vCPUs are paused: aarch64 reads the
+        // boot vCPU's virtual counter, which requires the vCPU to be quiesced.
+        #[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm")))]
+        {
+            let boot_vcpu = self.cpu_manager.lock().unwrap().boot_vcpu();
+            let boot_vcpu = boot_vcpu.lock().unwrap();
+            // Captured live; a same-host resume must not re-advance (the counter
+            // free-ran across the pause), so needs_advance is false.
+            self.saved_clock = self
+                .vm
+                .snapshot_clock(boot_vcpu.hypervisor_vcpu())
+                .map_err(|e| MigratableError::Pause(anyhow!("Could not capture guest clock: {e}")))?
+                .map(|state| SavedClock {
+                    mode: hypervisor::ClockRestoreMode::SameHostResume,
+                    state,
+                });
+        }
         self.device_manager.lock().unwrap().pause()?;
 
         self.vm
@@ -3243,14 +3265,20 @@ impl Pausable for Vm {
             .valid_transition(new_state)
             .map_err(|e| MigratableError::Resume(anyhow!("Invalid transition: {e:?}")))?;
 
-        // Restore KVM clock BEFORE vCPUs start running, so they see correct
-        // TSC/kvmclock from the first instruction after resume.
-        #[cfg(target_arch = "x86_64")]
+        // Restore the guest clock BEFORE the vCPUs start running, so they see the
+        // corrected time from the first instruction after resume.
+        #[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm")))]
         {
-            if let Some(clock) = &self.saved_clock {
+            if let Some(saved) = &self.saved_clock {
+                let vcpus = self.cpu_manager.lock().unwrap().vcpus();
+                let guards: Vec<_> = vcpus.iter().map(|v| v.lock().unwrap()).collect();
+                let hv_vcpus: Vec<&dyn hypervisor::Vcpu> =
+                    guards.iter().map(|g| g.hypervisor_vcpu()).collect();
                 self.vm
-                    .set_clock(clock)
-                    .map_err(|e| MigratableError::Resume(anyhow!("Could not set VM clock: {e}")))?;
+                    .restore_clock(&hv_vcpus, &saved.state, saved.mode)
+                    .map_err(|e| {
+                        MigratableError::Resume(anyhow!("Could not restore guest clock: {e}"))
+                    })?;
             }
         }
 
@@ -3272,8 +3300,9 @@ impl Pausable for Vm {
 
 #[derive(Serialize, Deserialize)]
 pub struct VmSnapshot {
-    #[cfg(target_arch = "x86_64")]
-    pub clock: Option<hypervisor::ClockData>,
+    #[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm")))]
+    #[serde(default)]
+    pub clock: Option<hypervisor::ClockState>,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     pub common_cpuid: Vec<hypervisor::arch::x86::CpuIdEntry>,
 }
@@ -3334,8 +3363,8 @@ impl Snapshottable for Vm {
         };
 
         let vm_snapshot_state = VmSnapshot {
-            #[cfg(target_arch = "x86_64")]
-            clock: self.saved_clock,
+            #[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm")))]
+            clock: self.saved_clock.map(|saved| saved.state),
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             common_cpuid,
         };
