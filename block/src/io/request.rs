@@ -651,3 +651,62 @@ impl Request {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod unit_tests {
+    use std::sync::Arc;
+
+    use vm_memory::{Bytes as _, GuestMemoryMmap};
+    use vmm_sys_util::eventfd::EventFd;
+
+    use super::*;
+    use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoOperation, AsyncIoResult};
+
+    struct PanicAsyncIo(EventFd);
+
+    impl AsyncIo for PanicAsyncIo {
+        fn notifier(&self) -> &EventFd {
+            &self.0
+        }
+        fn submit_data_operation(&mut self, _: AsyncIoOperation) -> AsyncIoResult<()> {
+            unreachable!()
+        }
+        fn fsync(&mut self, _: Option<u64>) -> AsyncIoResult<()> {
+            unreachable!()
+        }
+        fn punch_hole(&mut self, _: u64, _: u64, _: u64) -> AsyncIoResult<()> {
+            unreachable!()
+        }
+        fn write_zeroes(&mut self, _: u64, _: u64, _: u64) -> AsyncIoResult<()> {
+            unreachable!()
+        }
+        fn next_completed_request(&mut self) -> Option<AsyncIoCompletion> {
+            None
+        }
+    }
+
+    #[test]
+    fn write_zeroes_rejects_sector_arithmetic_overflow() {
+        let mem = Arc::new(GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 4096)]).unwrap());
+        mem.write_slice(&(u64::MAX - 100).to_le_bytes(), GuestAddress(0))
+            .unwrap();
+        mem.write_slice(&1000u32.to_le_bytes(), GuestAddress(8))
+            .unwrap();
+
+        let mut request = Request {
+            request_type: RequestType::WriteZeroes,
+            sector: 0,
+            data_descriptors: SmallVec::from_slice(&[(GuestAddress(0), DISCARD_WZ_SEG_SIZE)]),
+            status_addr: GuestAddress(0),
+            writeback: true,
+            start: Instant::now(),
+        };
+        let mut disk = PanicAsyncIo(EventFd::new(0).unwrap());
+
+        let Err(ExecuteError::BadRequest(Error::InvalidOffset)) =
+            request.execute_async(mem, 1024, &mut disk, &[], false, 0)
+        else {
+            panic!("expected BadRequest(InvalidOffset)");
+        };
+    }
+}
