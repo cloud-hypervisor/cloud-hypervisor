@@ -11,17 +11,19 @@ use std::os::unix::io::RawFd;
 
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::aligned::submit::{Dispatch, dispatch_op};
 use crate::async_io::{
     AioDataIo, AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult,
 };
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::sparse::{punch_hole, write_zeroes};
-use crate::{SECTOR_SIZE, is_block_device};
+use crate::{SECTOR_SIZE, is_block_device, probe_direct_alignment};
 
 pub struct RawAio {
     fd: RawFd,
     data_io: AioDataIo,
     alignment: u64,
+    direct: bool,
     is_block_device: bool,
 }
 
@@ -30,11 +32,16 @@ impl RawAio {
         let data_io =
             AioDataIo::new(queue_depth).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
         let is_block_device = is_block_device(fd);
+        let (alignment, direct) = match probe_direct_alignment(fd) {
+            Some(a) => (a, true),
+            None => (SECTOR_SIZE, false),
+        };
 
         Ok(RawAio {
             fd,
             data_io,
-            alignment: SECTOR_SIZE,
+            alignment,
+            direct,
             is_block_device,
         })
     }
@@ -50,6 +57,14 @@ impl AsyncIo for RawAio {
     }
 
     fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
+        let op = match dispatch_op(self.fd, self.direct, self.alignment, op)? {
+            Dispatch::Done(c) => {
+                self.data_io.inject_completion(c);
+                return Ok(());
+            }
+            Dispatch::Pending(op) => op,
+        };
+
         let is_read = op.is_read();
         self.data_io.submit_operation(self.fd, op).map_err(|e| {
             if is_read {

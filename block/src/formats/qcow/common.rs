@@ -10,9 +10,8 @@
 //!
 //! Position-independent I/O helpers used by both `qcow_sync` and `qcow_async`.
 
-use std::alloc::{Layout, alloc_zeroed, dealloc};
+use std::io;
 use std::os::fd::RawFd;
-use std::{io, slice};
 
 #[cfg(test)]
 use super::internal;
@@ -73,122 +72,6 @@ pub fn decompress_cluster(
         return Err(io::Error::from_raw_os_error(libc::EIO));
     }
     Ok(decompressed)
-}
-
-/// Write all bytes to fd at offset, looping on short writes.
-pub fn pwrite_all(fd: RawFd, buf: &[u8], offset: u64) -> io::Result<()> {
-    let mut total = 0usize;
-    while total < buf.len() {
-        // SAFETY: buf and fd are valid for the lifetime of the call.
-        let ret = unsafe {
-            libc::pwrite64(
-                fd,
-                buf[total..].as_ptr().cast(),
-                buf.len() - total,
-                (offset + total as u64) as libc::off_t,
-            )
-        };
-        if ret < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        if ret == 0 {
-            return Err(io::Error::other("pwrite64 wrote 0 bytes"));
-        }
-        total += ret as usize;
-    }
-    Ok(())
-}
-
-/// RAII wrapper for an aligned heap buffer required by O_DIRECT.
-pub struct AlignedBuf {
-    ptr: *mut u8,
-    layout: Layout,
-}
-
-impl AlignedBuf {
-    pub fn new(size: usize, alignment: usize) -> io::Result<Self> {
-        let size = size.max(1).next_multiple_of(alignment);
-        let layout = Layout::from_size_align(size, alignment)
-            .map_err(|e| io::Error::other(format!("invalid aligned layout: {e}")))?;
-        // SAFETY: layout has non-zero size.
-        let ptr = unsafe { alloc_zeroed(layout) };
-        if ptr.is_null() {
-            return Err(io::Error::new(
-                io::ErrorKind::OutOfMemory,
-                "aligned allocation failed",
-            ));
-        }
-        Ok(AlignedBuf { ptr, layout })
-    }
-
-    pub fn as_mut_slice(&mut self, len: usize) -> &mut [u8] {
-        let len = len.min(self.layout.size());
-        // SAFETY: ptr is valid for layout.size() bytes; len <= layout.size().
-        unsafe { slice::from_raw_parts_mut(self.ptr, len) }
-    }
-
-    pub fn as_slice(&self, len: usize) -> &[u8] {
-        let len = len.min(self.layout.size());
-        // SAFETY: ptr is valid for layout.size() bytes; len <= layout.size().
-        unsafe { slice::from_raw_parts(self.ptr, len) }
-    }
-
-    #[cfg(test)]
-    pub fn layout(&self) -> &Layout {
-        &self.layout
-    }
-
-    #[cfg(test)]
-    pub fn ptr(&self) -> *const u8 {
-        self.ptr
-    }
-}
-
-impl Drop for AlignedBuf {
-    fn drop(&mut self) {
-        // SAFETY: ptr was allocated by alloc_zeroed with self.layout.
-        unsafe { dealloc(self.ptr, self.layout) };
-    }
-}
-
-/// Read into `buf` via an aligned bounce buffer when O_DIRECT requires it.
-pub fn aligned_pread(fd: RawFd, buf: &mut [u8], offset: u64, alignment: usize) -> io::Result<()> {
-    if alignment == 0
-        || ((buf.as_ptr() as usize).is_multiple_of(alignment)
-            && buf.len().is_multiple_of(alignment)
-            && (offset as usize).is_multiple_of(alignment))
-    {
-        return pread_exact(fd, buf, offset);
-    }
-
-    let aligned_offset = offset & !(alignment as u64 - 1);
-    let head = (offset - aligned_offset) as usize;
-    let aligned_len = (head + buf.len()).next_multiple_of(alignment);
-    let mut bounce = AlignedBuf::new(aligned_len, alignment)?;
-    pread_exact(fd, bounce.as_mut_slice(aligned_len), aligned_offset)?;
-    buf.copy_from_slice(&bounce.as_slice(aligned_len)[head..head + buf.len()]);
-    Ok(())
-}
-
-/// Write `buf` via an aligned bounce buffer when O_DIRECT requires it.
-pub fn aligned_pwrite(fd: RawFd, buf: &[u8], offset: u64, alignment: usize) -> io::Result<()> {
-    if alignment == 0
-        || ((buf.as_ptr() as usize).is_multiple_of(alignment)
-            && buf.len().is_multiple_of(alignment)
-            && (offset as usize).is_multiple_of(alignment))
-    {
-        return pwrite_all(fd, buf, offset);
-    }
-
-    let aligned_offset = offset & !(alignment as u64 - 1);
-    let head = (offset - aligned_offset) as usize;
-    let aligned_len = (head + buf.len()).next_multiple_of(alignment);
-    let mut bounce = AlignedBuf::new(aligned_len, alignment)?;
-
-    // Read-modify-write: read the existing aligned region, overlay our data.
-    pread_exact(fd, bounce.as_mut_slice(aligned_len), aligned_offset)?;
-    bounce.as_mut_slice(aligned_len)[head..head + buf.len()].copy_from_slice(buf);
-    pwrite_all(fd, bounce.as_slice(aligned_len), aligned_offset)
 }
 
 #[cfg(test)]

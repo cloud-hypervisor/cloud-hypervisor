@@ -16,19 +16,19 @@ use std::sync::Arc;
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
-use super::common::{
-    AlignedBuf, aligned_pread, aligned_pwrite, decompress_cluster, pread_alloc, pread_exact,
-    pwrite_all,
-};
+use super::common::{decompress_cluster, pread_alloc, pread_exact};
 use super::internal::decoder::Decoder;
 use super::internal::metadata::{
     BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
 };
 use super::internal::qcow_raw_file::QcowRawFile;
-use crate::SECTOR_SIZE;
+use crate::aligned::rmw::{pread_aligned, pwrite_aligned};
+use crate::aligned::submit::{Dispatch, dispatch_op};
 use crate::async_io::{
-    AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, UringDataIo,
+    AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, OwnedIoBuffer,
+    UringDataIo,
 };
+use crate::{SECTOR_SIZE, pwrite_all};
 
 /// Per queue QCOW2 I/O worker using io_uring.
 ///
@@ -44,10 +44,8 @@ pub struct QcowAsync {
     data_file: QcowRawFile,
     backing_file: Option<Arc<dyn BackingRead>>,
     sparse: bool,
-    /// O_DIRECT alignment requirement (0 = no alignment needed).
-    alignment: usize,
-    /// I/O alignment for the AsyncIo trait (at least SECTOR_SIZE).
-    io_alignment: u64,
+    alignment: u64,
+    direct: bool,
     cluster_size: u64,
     decoder: Arc<dyn Decoder>,
     data_io: UringDataIo,
@@ -61,8 +59,9 @@ impl QcowAsync {
         sparse: bool,
         ring_depth: u32,
     ) -> io::Result<Self> {
-        let alignment = data_file.file().alignment();
-        let io_alignment = max(alignment as u64, SECTOR_SIZE);
+        let direct_alignment = data_file.file().alignment();
+        let direct = direct_alignment > 0;
+        let alignment = max(direct_alignment as u64, SECTOR_SIZE);
 
         Ok(QcowAsync {
             cluster_size: metadata.cluster_size(),
@@ -72,7 +71,7 @@ impl QcowAsync {
             backing_file,
             sparse,
             alignment,
-            io_alignment,
+            direct,
             data_io: UringDataIo::new(ring_depth)?,
         })
     }
@@ -127,6 +126,7 @@ impl QcowAsync {
             &mut op,
             total_len,
             self.alignment,
+            self.direct,
             self.cluster_size,
             &*self.decoder,
         ) {
@@ -160,6 +160,7 @@ impl QcowAsync {
             &self.data_file,
             &self.backing_file,
             self.alignment,
+            self.direct,
             self.cluster_size,
         ) {
             return Err(Box::new((op, e)));
@@ -179,8 +180,16 @@ impl AsyncIo for QcowAsync {
         if op.is_read() {
             match self.prepare_read_operation(op) {
                 Ok(Some(op)) => {
+                    let fd = self.data_file.as_raw_fd();
+                    let op = match dispatch_op(fd, self.direct, self.alignment, op)? {
+                        Dispatch::Done(c) => {
+                            self.data_io.inject_completion(c);
+                            return Ok(());
+                        }
+                        Dispatch::Pending(op) => op,
+                    };
                     self.data_io
-                        .submit_operation(self.data_file.as_raw_fd(), op)
+                        .submit_operation(fd, op)
                         .map_err(AsyncIoError::ReadVectored)?;
                 }
                 Ok(None) => {}
@@ -278,16 +287,20 @@ impl AsyncIo for QcowAsync {
     }
 
     fn alignment(&self) -> u64 {
-        self.io_alignment
+        self.alignment
     }
 
     fn submit_batch_requests(&mut self, batch_request: Vec<AsyncIoOperation>) -> AsyncIoResult<()> {
+        let fd = self.data_file.as_raw_fd();
         let mut async_reads = Vec::new();
 
         for op in batch_request {
             if op.is_read() {
                 match self.prepare_read_operation(op) {
-                    Ok(Some(op)) => async_reads.push(op),
+                    Ok(Some(op)) => match dispatch_op(fd, self.direct, self.alignment, op)? {
+                        Dispatch::Done(c) => self.data_io.inject_completion(c),
+                        Dispatch::Pending(op) => async_reads.push(op),
+                    },
                     Ok(None) => {}
                     Err(boxed) => {
                         let (op, e) = *boxed;
@@ -308,7 +321,7 @@ impl AsyncIo for QcowAsync {
 
         if !async_reads.is_empty() {
             self.data_io
-                .submit_batch(self.data_file.as_raw_fd(), async_reads)
+                .submit_batch(fd, async_reads)
                 .map_err(AsyncIoError::SubmitBatchRequests)?;
         }
 
@@ -322,7 +335,7 @@ impl QcowAsync {
     /// Returns `Some(host_offset)` if the entire read falls within a single
     /// allocated cluster (fast path). Otherwise handles the read
     /// synchronously via `scatter_read_sync` and returns `None`.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn resolve_read(
         metadata: &QcowMetadata,
         data_file: &QcowRawFile,
@@ -330,7 +343,8 @@ impl QcowAsync {
         address: u64,
         op: &mut AsyncIoOperation,
         total_len: usize,
-        alignment: usize,
+        alignment: u64,
+        direct: bool,
         cluster_size: u64,
         decoder: &dyn Decoder,
     ) -> AsyncIoResult<Option<u64>> {
@@ -340,14 +354,10 @@ impl QcowAsync {
             .map_err(AsyncIoError::ReadVectored)?;
 
         // The fast path returns a host offset so the caller can submit a
-        // single io_uring readv with the original iovecs.  This only works
-        // without O_DIRECT because it requires I/O
-        // size and file offset to be multiples of the device sector size.
-        // Guest requests can be smaller (e.g. 512 byte UEFI reads on a
-        // 4096 byte sector device), so O_DIRECT reads fall through to the
-        // alignment aware synchronous path instead.
-        if alignment == 0
-            && mappings.len() == 1
+        // single io_uring readv. Misaligned O_DIRECT reads are handled by
+        // dispatch_op in submit_data_operation, so direct I/O does not
+        // disqualify the fast path.
+        if mappings.len() == 1
             && let ClusterReadMapping::Allocated {
                 offset: host_offset,
                 length,
@@ -363,6 +373,7 @@ impl QcowAsync {
             data_file,
             backing_file,
             alignment,
+            direct,
             cluster_size,
             decoder,
         )?;
@@ -370,12 +381,14 @@ impl QcowAsync {
     }
 
     /// Scatter-read cluster mappings synchronously into an owned operation.
+    #[expect(clippy::too_many_arguments)]
     fn scatter_read_sync(
         mappings: Vec<ClusterReadMapping>,
         op: &mut AsyncIoOperation,
         data_file: &QcowRawFile,
         backing_file: &Option<Arc<dyn BackingRead>>,
-        alignment: usize,
+        alignment: u64,
+        direct: bool,
         cluster_size: u64,
         decoder: &dyn Decoder,
     ) -> AsyncIoResult<()> {
@@ -392,17 +405,17 @@ impl QcowAsync {
                     length,
                 } => {
                     let len = length as usize;
-                    if alignment > 0 {
-                        let mut abuf =
-                            AlignedBuf::new(len, alignment).map_err(AsyncIoError::ReadVectored)?;
-                        aligned_pread(
+                    if direct {
+                        let mut abuf = OwnedIoBuffer::new(len, alignment as usize)
+                            .map_err(AsyncIoError::ReadVectored)?;
+                        pread_aligned(
                             data_file.as_raw_fd(),
-                            abuf.as_mut_slice(len),
+                            abuf.as_mut_slice(),
                             host_offset,
                             alignment,
                         )
                         .map_err(AsyncIoError::ReadVectored)?;
-                        op.write_bytes_at(buf_offset, abuf.as_slice(len))
+                        op.write_bytes_at(buf_offset, abuf.as_slice())
                             .map_err(AsyncIoError::ReadVectored)?;
                     } else {
                         let mut buf = vec![0u8; len];
@@ -452,13 +465,15 @@ impl QcowAsync {
     }
 
     /// Write owned operation data cluster-by-cluster with COW from backing file.
+    #[expect(clippy::too_many_arguments)]
     fn cow_write_sync(
         address: u64,
         op: &AsyncIoOperation,
         metadata: &QcowMetadata,
         data_file: &QcowRawFile,
         backing_file: &Option<Arc<dyn BackingRead>>,
-        alignment: usize,
+        alignment: u64,
+        direct: bool,
         cluster_size: u64,
     ) -> AsyncIoResult<()> {
         let total_len = op.total_len();
@@ -492,15 +507,15 @@ impl QcowAsync {
                 ClusterWriteMapping::Allocated {
                     offset: host_offset,
                 } => {
-                    if alignment > 0 {
+                    if direct {
                         // O_DIRECT, gather directly into aligned buffer.
-                        let mut abuf = AlignedBuf::new(count, alignment)
+                        let mut abuf = OwnedIoBuffer::new(count, alignment as usize)
                             .map_err(AsyncIoError::WriteVectored)?;
-                        op.read_bytes_at(buf_offset, abuf.as_mut_slice(count))
+                        op.read_bytes_at(buf_offset, abuf.as_mut_slice())
                             .map_err(AsyncIoError::WriteVectored)?;
-                        aligned_pwrite(
+                        pwrite_aligned(
                             data_file.as_raw_fd(),
-                            abuf.as_slice(count),
+                            abuf.as_slice(),
                             host_offset,
                             alignment,
                         )

@@ -9,26 +9,33 @@ use std::os::unix::io::RawFd;
 
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::aligned::submit::{Dispatch, dispatch_op};
 use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
 use crate::sparse::{punch_hole, write_zeroes};
-use crate::{SECTOR_SIZE, is_block_device};
+use crate::{SECTOR_SIZE, is_block_device, probe_direct_alignment};
 
 pub struct RawSync {
     fd: RawFd,
     eventfd: EventFd,
     completion_list: VecDeque<AsyncIoCompletion>,
     alignment: u64,
+    direct: bool,
     is_block_device: bool,
 }
 
 impl RawSync {
     pub fn new(fd: RawFd) -> Self {
         let is_block_device = is_block_device(fd);
+        let (alignment, direct) = match probe_direct_alignment(fd) {
+            Some(a) => (a, true),
+            None => (SECTOR_SIZE, false),
+        };
         RawSync {
             fd,
             eventfd: EventFd::new(libc::EFD_NONBLOCK).expect("Failed creating EventFd for RawFile"),
             completion_list: VecDeque::new(),
-            alignment: SECTOR_SIZE,
+            alignment,
+            direct,
             is_block_device,
         }
     }
@@ -44,6 +51,15 @@ impl AsyncIo for RawSync {
     }
 
     fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
+        let op = match dispatch_op(self.fd, self.direct, self.alignment, op)? {
+            Dispatch::Done(completion) => {
+                self.completion_list.push_back(completion);
+                self.eventfd.write(1).unwrap();
+                return Ok(());
+            }
+            Dispatch::Pending(op) => op,
+        };
+
         let offset = op.offset();
         let is_read = op.is_read();
         let iovecs = op.iovecs();

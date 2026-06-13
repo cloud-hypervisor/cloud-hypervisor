@@ -30,6 +30,10 @@ impl AsyncIo for FixedVhdSync {
         self.raw_file_sync.notifier()
     }
 
+    fn alignment(&self) -> u64 {
+        self.raw_file_sync.alignment()
+    }
+
     fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
         let offset = op.offset();
         if offset as u64 >= self.size {
