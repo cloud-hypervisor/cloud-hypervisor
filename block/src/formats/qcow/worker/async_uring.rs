@@ -10,22 +10,21 @@
 
 use std::cmp::{max, min};
 use std::io;
+use std::os::unix::fs::FileExt;
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
-use super::common::{
-    AlignedBuf, aligned_pread, aligned_pwrite, decompress_cluster, pread_alloc, pread_exact,
-    pwrite_all,
-};
+use super::common::decompress_cluster;
 use super::internal::decoder::Decoder;
 use super::internal::metadata::{
     BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
 };
 use super::internal::qcow_raw_file::QcowRawFile;
 use crate::SECTOR_SIZE;
+use crate::aligned_buffer::AlignedBuffer;
 use crate::async_io::{
     AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, UringDataIo,
 };
@@ -393,20 +392,17 @@ impl QcowAsync {
                 } => {
                     let len = length as usize;
                     if alignment > 0 {
-                        let mut abuf =
-                            AlignedBuf::new(len, alignment).map_err(AsyncIoError::ReadVectored)?;
-                        aligned_pread(
-                            data_file.as_raw_fd(),
-                            abuf.as_mut_slice(len),
-                            host_offset,
-                            alignment,
-                        )
-                        .map_err(AsyncIoError::ReadVectored)?;
-                        op.write_bytes_at(buf_offset, abuf.as_slice(len))
+                        let mut abuf = AlignedBuffer::new(host_offset, len, alignment)
+                            .map_err(AsyncIoError::ReadVectored)?;
+                        abuf.read_exact_from(data_file.file())
+                            .map_err(AsyncIoError::ReadVectored)?;
+                        op.write_bytes_at(buf_offset, abuf.as_slice())
                             .map_err(AsyncIoError::ReadVectored)?;
                     } else {
                         let mut buf = vec![0u8; len];
-                        pread_exact(data_file.as_raw_fd(), &mut buf, host_offset)
+                        data_file
+                            .file()
+                            .read_exact_at(&mut buf, host_offset)
                             .map_err(AsyncIoError::ReadVectored)?;
                         op.write_bytes_at(buf_offset, &buf)
                             .map_err(AsyncIoError::ReadVectored)?;
@@ -419,9 +415,11 @@ impl QcowAsync {
                     cluster_offset,
                     length,
                 } => {
-                    let compressed =
-                        pread_alloc(data_file.as_raw_fd(), host_offset, compressed_size)
-                            .map_err(AsyncIoError::ReadVectored)?;
+                    let mut compressed = vec![0u8; compressed_size];
+                    data_file
+                        .file()
+                        .read_exact_at(&mut compressed, host_offset)
+                        .map_err(AsyncIoError::ReadVectored)?;
                     let decompressed =
                         decompress_cluster(&compressed, cluster_size as usize, decoder)
                             .map_err(AsyncIoError::ReadVectored)?;
@@ -493,24 +491,21 @@ impl QcowAsync {
                     offset: host_offset,
                 } => {
                     if alignment > 0 {
-                        // O_DIRECT, gather directly into aligned buffer.
-                        let mut abuf = AlignedBuf::new(count, alignment)
+                        let mut abuf = AlignedBuffer::new(host_offset, count, alignment)
                             .map_err(AsyncIoError::WriteVectored)?;
-                        op.read_bytes_at(buf_offset, abuf.as_mut_slice(count))
+                        abuf.read_exact_from(data_file.file())
                             .map_err(AsyncIoError::WriteVectored)?;
-                        aligned_pwrite(
-                            data_file.as_raw_fd(),
-                            abuf.as_slice(count),
-                            host_offset,
-                            alignment,
-                        )
-                        .map_err(AsyncIoError::WriteVectored)?;
+                        op.read_bytes_at(buf_offset, abuf.as_mut_slice())
+                            .map_err(AsyncIoError::WriteVectored)?;
+                        abuf.write_to(data_file.file())
+                            .map_err(AsyncIoError::WriteVectored)?;
                     } else {
-                        // No O_DIRECT, plain buffer is fine.
                         let mut buf = vec![0u8; count];
                         op.read_bytes_at(buf_offset, &mut buf)
                             .map_err(AsyncIoError::WriteVectored)?;
-                        pwrite_all(data_file.as_raw_fd(), &buf, host_offset)
+                        data_file
+                            .file()
+                            .write_all_at(&buf, host_offset)
                             .map_err(AsyncIoError::WriteVectored)?;
                     }
                 }

@@ -14,6 +14,8 @@ pub mod factory;
 #[path = "io/mod.rs"]
 mod io_impl;
 pub use io_impl::{async_io, fcntl, request};
+pub(crate) mod aligned_buffer;
+pub(crate) mod aligned_file;
 pub mod formats;
 mod sparse;
 use std::alloc::{Layout, alloc_zeroed};

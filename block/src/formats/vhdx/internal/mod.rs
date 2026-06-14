@@ -17,6 +17,7 @@ use self::header::{RegionInfo, RegionTableEntry, VhdxHeader, VhdxHeaderError};
 use self::io::VhdxIoError;
 use self::metadata::{DiskSpec, VhdxMetadataError};
 use crate::BlockBackend;
+use crate::aligned_file::AlignedFile;
 
 mod bat;
 mod header;
@@ -46,7 +47,7 @@ pub type Result<T> = std::result::Result<T, VhdxError>;
 
 #[derive(Debug)]
 pub struct Vhdx {
-    file: File,
+    aligned: AlignedFile,
     vhdx_header: VhdxHeader,
     region_entries: BTreeMap<u64, u64>,
     bat_entry: RegionTableEntry,
@@ -60,11 +61,13 @@ pub struct Vhdx {
 impl Vhdx {
     /// Parse the Vhdx header, BAT, and metadata from a file and store info
     // in Vhdx structure.
-    pub fn new(mut file: File) -> Result<Vhdx> {
-        let vhdx_header = VhdxHeader::new(&mut file).map_err(VhdxError::ParseVhdxHeader)?;
+    pub fn new(file: File, direct_io: bool) -> Result<Vhdx> {
+        let aligned = AlignedFile::new(file, direct_io);
+
+        let vhdx_header = VhdxHeader::new(&aligned).map_err(VhdxError::ParseVhdxHeader)?;
 
         let collected_entries = RegionInfo::new(
-            &mut file,
+            &aligned,
             header::REGION_TABLE_1_START,
             vhdx_header.region_entry_count(),
         )
@@ -74,12 +77,12 @@ impl Vhdx {
         let mdr_entry = collected_entries.mdr_entry;
 
         let disk_spec =
-            DiskSpec::new(&mut file, &mdr_entry).map_err(VhdxError::ParseVhdxMetadata)?;
-        let bat_entries = BatEntry::collect_bat_entries(&mut file, &disk_spec, &bat_entry)
+            DiskSpec::new(&aligned, &mdr_entry).map_err(VhdxError::ParseVhdxMetadata)?;
+        let bat_entries = BatEntry::collect_bat_entries(&aligned, &disk_spec, &bat_entry)
             .map_err(VhdxError::ReadBatEntry)?;
 
         Ok(Vhdx {
-            file,
+            aligned,
             vhdx_header,
             region_entries: collected_entries.region_entries,
             bat_entry,
@@ -104,7 +107,7 @@ impl Read for Vhdx {
         let sector_index = self.current_offset / self.disk_spec.logical_sector_size as u64;
 
         let result = io::read(
-            &mut self.file,
+            &self.aligned,
             buf,
             &self.disk_spec,
             &self.bat_entries,
@@ -125,7 +128,7 @@ impl Read for Vhdx {
 
 impl Write for Vhdx {
     fn flush(&mut self) -> std::result::Result<(), std::io::Error> {
-        self.file.flush()
+        self.aligned.file_mut().flush()
     }
 
     /// Wrapper function to satisfy Write trait implementation for VHDx disk.
@@ -137,12 +140,12 @@ impl Write for Vhdx {
         if self.first_write {
             self.first_write = false;
             self.vhdx_header
-                .update(&mut self.file)
+                .update(&self.aligned)
                 .map_err(|e| std::io::Error::other(format!("Failed to update VHDx header: {e}")))?;
         }
 
         let result = io::write(
-            &mut self.file,
+            &self.aligned,
             buf,
             &mut self.disk_spec,
             self.bat_entry.file_offset,
@@ -207,7 +210,8 @@ impl BlockBackend for Vhdx {
     }
 
     fn physical_size(&self) -> std::result::Result<u64, crate::Error> {
-        self.file
+        self.aligned
+            .file()
             .metadata()
             .map(|m| m.len())
             .map_err(crate::Error::GetFileMetadata)
@@ -217,7 +221,7 @@ impl BlockBackend for Vhdx {
 impl Clone for Vhdx {
     fn clone(&self) -> Self {
         Vhdx {
-            file: self.file.try_clone().unwrap(),
+            aligned: self.aligned.try_clone().unwrap(),
             vhdx_header: self.vhdx_header.clone(),
             region_entries: self.region_entries.clone(),
             bat_entry: self.bat_entry,
@@ -232,7 +236,7 @@ impl Clone for Vhdx {
 
 impl AsRawFd for Vhdx {
     fn as_raw_fd(&self) -> RawFd {
-        self.file.as_raw_fd()
+        self.aligned.file().as_raw_fd()
     }
 }
 
@@ -246,4 +250,65 @@ pub(crate) fn uuid_from_guid(buf: &[u8]) -> Uuid {
         BigEndian::read_u16(&buf[6..8]),
         buf[8..16].try_into().unwrap(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::process::Command;
+
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::*;
+
+    /// Generate a small dynamic VHDX with `qemu-img`. Returns `None` (and the
+    /// test is skipped) when `qemu-img` is unavailable, e.g. in minimal CI.
+    fn dynamic_vhdx(size_mib: u64) -> Option<TempFile> {
+        let tf = TempFile::new().unwrap();
+        let path = tf.as_path();
+        let status = Command::new("qemu-img")
+            .args(["create", "-f", "vhdx", "-o", "subformat=dynamic"])
+            .arg(path)
+            .arg(format!("{size_mib}M"))
+            .status();
+        match status {
+            Ok(s) if s.success() => Some(tf),
+            _ => None,
+        }
+    }
+
+    /// An unaligned sector write under a forced O_DIRECT alignment must go
+    /// through `AlignedFile`'s read-modify-write bounce (the data block and the
+    /// BAT update both land at unaligned host offsets) and read back intact.
+    #[test]
+    fn unaligned_write_is_rmw() {
+        let Some(tf) = dynamic_vhdx(16) else {
+            eprintln!("skipping unaligned_write_is_rmw: qemu-img unavailable");
+            return;
+        };
+
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(tf.as_path())
+            .unwrap();
+        let mut vhdx = Vhdx::new(file, false).unwrap();
+
+        // Force a non-zero alignment so all of vhdx's positioned I/O exercises
+        // the bounce/RMW path even though the tempfile is not really O_DIRECT.
+        vhdx.aligned = AlignedFile::with_alignment(vhdx.aligned.file().try_clone().unwrap(), 512);
+
+        let sector = vhdx.disk_spec.logical_sector_size as usize;
+        let data: Vec<u8> = (0..sector).map(|i| ((i + 1) % 251) as u8).collect();
+
+        // Write at virtual offset 0 (allocates a new data block + rewrites BAT).
+        vhdx.seek(SeekFrom::Start(0)).unwrap();
+        assert_eq!(vhdx.write(&data).unwrap(), data.len());
+        vhdx.flush().unwrap();
+
+        // Read it back through a fresh, forced-alignment handle.
+        let mut readback = vec![0u8; sector];
+        vhdx.seek(SeekFrom::Start(0)).unwrap();
+        assert_eq!(vhdx.read(&mut readback).unwrap(), readback.len());
+        assert_eq!(readback, data);
+    }
 }
