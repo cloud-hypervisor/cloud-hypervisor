@@ -12,13 +12,24 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result};
 
 use anyhow::anyhow;
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use byteorder::{ByteOrder, LittleEndian};
 use hypervisor::HypervisorVmError;
 use libc::{_SC_PAGESIZE, sysconf};
-use log::{error, info};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use vfio_bindings::bindings::vfio::*;
+use vfio_bindings::bindings::vfio::{
+    vfio_device_mig_state_VFIO_DEVICE_STATE_ERROR as VFIO_DEV_STATE_ERROR,
+    vfio_device_mig_state_VFIO_DEVICE_STATE_PRE_COPY as VFIO_DEV_STATE_PRE_COPY,
+    vfio_device_mig_state_VFIO_DEVICE_STATE_PRE_COPY_P2P as VFIO_DEV_STATE_PRE_COPY_P2P,
+    vfio_device_mig_state_VFIO_DEVICE_STATE_RESUMING as VFIO_DEV_STATE_RESUMING,
+    vfio_device_mig_state_VFIO_DEVICE_STATE_RUNNING as VFIO_DEV_STATE_RUNNING,
+    vfio_device_mig_state_VFIO_DEVICE_STATE_RUNNING_P2P as VFIO_DEV_STATE_RUNNING_P2P,
+    vfio_device_mig_state_VFIO_DEVICE_STATE_STOP as VFIO_DEV_STATE_STOP,
+    vfio_device_mig_state_VFIO_DEVICE_STATE_STOP_COPY as VFIO_DEV_STATE_STOP_COPY, *,
+};
 use vfio_ioctls::{VfioDevice, VfioIrq, VfioOps, VfioRegionInfoCap, VfioRegionSparseMmapArea};
 use vm_allocator::page_size::{
     align_page_size_down, align_page_size_up, get_page_size, is_4k_aligned, is_4k_multiple,
@@ -46,6 +57,7 @@ use crate::{
 };
 
 pub(crate) const VFIO_COMMON_ID: &str = "vfio_common";
+pub(crate) const VFIO_MIGRATION_ID: &str = "vfio_migration";
 
 #[derive(Debug, Error)]
 pub enum VfioPciError {
@@ -77,6 +89,8 @@ pub enum VfioPciError {
     RetrievePciConfigurationState(#[source] anyhow::Error),
     #[error("Failed to retrieve VfioCommonState")]
     RetrieveVfioCommonState(#[source] anyhow::Error),
+    #[error("Failed to restore VFIO migration state")]
+    RestoreMigration(#[source] anyhow::Error),
 }
 
 #[derive(Copy, Clone)]
@@ -364,6 +378,41 @@ pub enum VfioError {
     KernelVfio(#[source] vfio_ioctls::VfioError),
     #[error("VFIO user error")]
     VfioUser(#[source] vfio_user::Error),
+    #[error("VFIO device does not support migration")]
+    NoMigrationSupport,
+    #[error("VFIO device reported unknown migration state {0}")]
+    InvalidMigrationState(u32),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub(crate) enum VfioMigrationState {
+    Error = VFIO_DEV_STATE_ERROR,
+    Stop = VFIO_DEV_STATE_STOP,
+    Running = VFIO_DEV_STATE_RUNNING,
+    StopCopy = VFIO_DEV_STATE_STOP_COPY,
+    Resuming = VFIO_DEV_STATE_RESUMING,
+    RunningP2P = VFIO_DEV_STATE_RUNNING_P2P,
+    PreCopy = VFIO_DEV_STATE_PRE_COPY,
+    PreCopyP2P = VFIO_DEV_STATE_PRE_COPY_P2P,
+}
+
+impl TryFrom<u32> for VfioMigrationState {
+    type Error = VfioError;
+
+    fn try_from(value: u32) -> Result<Self, VfioError> {
+        match value {
+            VFIO_DEV_STATE_ERROR => Ok(Self::Error),
+            VFIO_DEV_STATE_STOP => Ok(Self::Stop),
+            VFIO_DEV_STATE_RUNNING => Ok(Self::Running),
+            VFIO_DEV_STATE_STOP_COPY => Ok(Self::StopCopy),
+            VFIO_DEV_STATE_RESUMING => Ok(Self::Resuming),
+            VFIO_DEV_STATE_RUNNING_P2P => Ok(Self::RunningP2P),
+            VFIO_DEV_STATE_PRE_COPY => Ok(Self::PreCopy),
+            VFIO_DEV_STATE_PRE_COPY_P2P => Ok(Self::PreCopyP2P),
+            other => Err(VfioError::InvalidMigrationState(other)),
+        }
+    }
 }
 
 pub(crate) trait Vfio: Send + Sync {
@@ -437,6 +486,22 @@ pub(crate) trait Vfio: Send + Sync {
     fn unmask_irq(&self, _irq_index: u32) -> Result<(), VfioError> {
         unimplemented!()
     }
+
+    fn query_migration_support(&self) -> Result<Option<u64>, VfioError> {
+        Ok(None)
+    }
+
+    fn set_migration_state(&self, _state: VfioMigrationState) -> Result<(), VfioError> {
+        Err(VfioError::NoMigrationSupport)
+    }
+
+    fn read_migration_data_to_end(&self) -> Result<Vec<u8>, VfioError> {
+        Err(VfioError::NoMigrationSupport)
+    }
+
+    fn write_migration_data(&self, _data: &[u8]) -> Result<(), VfioError> {
+        Err(VfioError::NoMigrationSupport)
+    }
 }
 
 struct VfioDeviceWrapper {
@@ -479,6 +544,30 @@ impl Vfio for VfioDeviceWrapper {
             .unmask_irq(irq_index)
             .map_err(VfioError::KernelVfio)
     }
+
+    fn query_migration_support(&self) -> Result<Option<u64>, VfioError> {
+        self.device
+            .query_migration_support()
+            .map_err(VfioError::KernelVfio)
+    }
+
+    fn set_migration_state(&self, state: VfioMigrationState) -> Result<(), VfioError> {
+        self.device
+            .set_migration_state(state as u32)
+            .map_err(VfioError::KernelVfio)
+    }
+
+    fn read_migration_data_to_end(&self) -> Result<Vec<u8>, VfioError> {
+        self.device
+            .read_migration_data_to_end()
+            .map_err(VfioError::KernelVfio)
+    }
+
+    fn write_migration_data(&self, data: &[u8]) -> Result<(), VfioError> {
+        self.device
+            .write_migration_data(data)
+            .map_err(VfioError::KernelVfio)
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -486,6 +575,11 @@ struct VfioCommonState {
     intx_state: Option<IntxState>,
     msi_state: Option<MsiState>,
     msix_state: Option<MsixState>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct VfioMigrationData {
+    blob: String,
 }
 
 pub(crate) struct ConfigPatch {
@@ -503,6 +597,7 @@ pub(crate) struct VfioCommon {
     pub(crate) patches: HashMap<usize, ConfigPatch>,
     x_nv_gpudirect_clique: Option<u8>,
     x_exclude_mmap_bars: Vec<u8>,
+    pub(crate) migration_flags: Option<u64>,
 }
 
 #[derive(Default)]
@@ -542,6 +637,27 @@ impl VfioCommon {
             pci_configuration_state,
         );
 
+        let migration_flags = match vfio_wrapper.query_migration_support() {
+            Ok(Some(flags)) => {
+                info!(
+                    "VFIO device {bdf} supports migration v2 (flags=0x{flags:x}, \
+                     STOP_COPY={}, P2P={}, PRE_COPY={})",
+                    flags & VFIO_MIGRATION_STOP_COPY as u64 != 0,
+                    flags & VFIO_MIGRATION_P2P as u64 != 0,
+                    flags & VFIO_MIGRATION_PRE_COPY as u64 != 0,
+                );
+                Some(flags)
+            }
+            Ok(None) => {
+                debug!("VFIO device {bdf} does not support migration v2");
+                None
+            }
+            Err(e) => {
+                warn!("VFIO device {bdf} migration probe failed, treating as non-migratable: {e}");
+                None
+            }
+        };
+
         let mut vfio_common = VfioCommon {
             mmio_regions: Vec::new(),
             configuration,
@@ -556,6 +672,7 @@ impl VfioCommon {
             patches: HashMap::new(),
             x_nv_gpudirect_clique: config.x_nv_gpudirect_clique,
             x_exclude_mmap_bars: config.x_exclude_mmap_bars,
+            migration_flags,
         };
 
         let state: Option<VfioCommonState> = snapshot
@@ -580,6 +697,48 @@ impl VfioCommon {
 
         if let Some(state) = state.as_ref() {
             vfio_common.set_state(state, msi_state, msix_state)?;
+
+            if vfio_common.migration_flags.is_some() {
+                let mig: Option<VfioMigrationData> =
+                    vm_migration::state_from_id(snapshot, VFIO_MIGRATION_ID).map_err(|e| {
+                        VfioPciError::RestoreMigration(anyhow!(
+                            "Failed to get VfioMigrationData from Snapshot: {e}"
+                        ))
+                    })?;
+
+                if let Some(mig) = mig {
+                    let blob = BASE64_STANDARD.decode(mig.blob.as_bytes()).map_err(|e| {
+                        VfioPciError::RestoreMigration(anyhow!(
+                            "Failed to base64-decode migration blob: {e}"
+                        ))
+                    })?;
+                    vfio_common
+                        .load_migration_data(&blob)
+                        .map_err(|e| VfioPciError::RestoreMigration(anyhow!("{e}")))?;
+                }
+            }
+
+            // Push PCI_COMMAND to the device as set_state() does not.
+            let cmd = (vfio_common
+                .configuration
+                .read_reg(crate::configuration::COMMAND_REG)
+                & 0xFFFF) as u16;
+            vfio_common.vfio_wrapper.write_config(
+                (crate::configuration::COMMAND_REG * PCI_CONFIG_REGISTER_SIZE) as u32,
+                &cmd.to_le_bytes(),
+            );
+
+            // Rearm VFIO_DEVICE_SET_IRQS as set_state() only restores
+            // in-memory MSI/MSI-X state, not the kernel eventfds.
+            if let Some(msi) = &vfio_common.interrupt.msi
+                && msi.cfg.enabled()
+            {
+                vfio_common.enable_msi()?;
+            } else if let Some(msix) = &vfio_common.interrupt.msix
+                && msix.bar.enabled()
+            {
+                vfio_common.enable_msix()?;
+            }
         } else {
             vfio_common.parse_capabilities(bdf);
             vfio_common.initialize_legacy_interrupt()?;
@@ -791,14 +950,19 @@ impl VfioCommon {
                 .set_region_type(region_type)
                 .set_prefetchable(prefetchable);
 
-            if bar_id == VFIO_PCI_ROM_REGION_INDEX {
-                self.configuration
-                    .add_pci_rom_bar(&bar, flags & 0x1)
-                    .map_err(|e| PciDeviceError::IoRegistrationFailed(bar_addr.raw_value(), e))?;
-            } else {
-                self.configuration
-                    .add_pci_bar(&bar)
-                    .map_err(|e| PciDeviceError::IoRegistrationFailed(bar_addr.raw_value(), e))?;
+            // Skip on restore as BARs come from the saved PciConfiguration state.
+            if resources.is_none() {
+                if bar_id == VFIO_PCI_ROM_REGION_INDEX {
+                    self.configuration
+                        .add_pci_rom_bar(&bar, flags & 0x1)
+                        .map_err(|e| {
+                            PciDeviceError::IoRegistrationFailed(bar_addr.raw_value(), e)
+                        })?;
+                } else {
+                    self.configuration.add_pci_bar(&bar).map_err(|e| {
+                        PciDeviceError::IoRegistrationFailed(bar_addr.raw_value(), e)
+                    })?;
+                }
             }
 
             bars.push(bar);
@@ -1325,6 +1489,20 @@ impl VfioCommon {
         // to the device region to update the MSI Enable bit.
         self.vfio_wrapper.write_config((reg + offset) as u32, data);
 
+        // Mirror into the shadow so snapshot() captures PCI_COMMAND.
+        // Avoid write_config_register as it drains pending_bar_reprogram.
+        let byte_offset = reg_idx * PCI_CONFIG_REGISTER_SIZE + offset as usize;
+        match data.len() {
+            1 => self.configuration.write_byte(byte_offset, data[0]),
+            2 => self
+                .configuration
+                .write_word(byte_offset, u16::from(data[0]) | (u16::from(data[1]) << 8)),
+            4 => self
+                .configuration
+                .write_reg(reg_idx, LittleEndian::read_u32(data)),
+            _ => {}
+        }
+
         // Return pending BAR repgrogramming if MSE bit is set
         let mut ret_param = self.configuration.pending_bar_reprogram();
         if !ret_param.is_empty() {
@@ -1436,6 +1614,57 @@ impl VfioCommon {
 
         Ok(())
     }
+
+    pub(crate) fn transition_migration_state(
+        &self,
+        target: VfioMigrationState,
+    ) -> anyhow::Result<()> {
+        debug!("VFIO migration transition -> {target:?}");
+        self.vfio_wrapper
+            .set_migration_state(target)
+            .map_err(|e| anyhow!("VFIO set_migration_state({target:?}) failed: {e}"))
+    }
+
+    pub(crate) fn save_migration_data(&self) -> Result<Vec<u8>, MigratableError> {
+        let result = (|| -> Result<Vec<u8>, MigratableError> {
+            self.transition_migration_state(VfioMigrationState::StopCopy)
+                .map_err(MigratableError::Snapshot)?;
+
+            let data = self
+                .vfio_wrapper
+                .read_migration_data_to_end()
+                .map_err(|e| {
+                    MigratableError::Snapshot(anyhow!("VFIO migration data read failed: {e}"))
+                })?;
+
+            self.transition_migration_state(VfioMigrationState::Stop)
+                .map_err(MigratableError::Snapshot)?;
+            Ok(data)
+        })();
+
+        if result.is_err() {
+            let _ = self.transition_migration_state(VfioMigrationState::Stop);
+        }
+        result
+    }
+
+    pub(crate) fn load_migration_data(&self, data: &[u8]) -> Result<(), MigratableError> {
+        // Leave the device in RESUMING and resume() drives it back to RUNNING.
+        let result = (|| -> Result<(), MigratableError> {
+            self.transition_migration_state(VfioMigrationState::Resuming)
+                .map_err(MigratableError::Restore)?;
+
+            self.vfio_wrapper.write_migration_data(data).map_err(|e| {
+                MigratableError::Restore(anyhow!("VFIO migration data write failed: {e}"))
+            })?;
+            Ok(())
+        })();
+
+        if result.is_err() {
+            let _ = self.transition_migration_state(VfioMigrationState::Stop);
+        }
+        result
+    }
 }
 
 impl Pausable for VfioCommon {}
@@ -1459,6 +1688,17 @@ impl Snapshottable for VfioCommon {
         // Snapshot MSI-X
         if let Some(msix) = &mut self.interrupt.msix {
             vfio_common_snapshot.add_snapshot(msix.bar.id(), msix.bar.snapshot()?);
+        }
+
+        if self.migration_flags.is_some() {
+            let data = self.save_migration_data()?;
+            let mig = VfioMigrationData {
+                blob: BASE64_STANDARD.encode(&data),
+            };
+            vfio_common_snapshot.add_snapshot(
+                VFIO_MIGRATION_ID.to_string(),
+                Snapshot::new_from_state(&mig)?,
+            );
         }
 
         Ok(vfio_common_snapshot)
@@ -2067,7 +2307,25 @@ iova 0x{:x}, size 0x{:x}: {}, ",
     }
 }
 
-impl Pausable for VfioPciDevice {}
+impl Pausable for VfioPciDevice {
+    fn pause(&mut self) -> std::result::Result<(), MigratableError> {
+        if self.common.migration_flags.is_some() {
+            self.common
+                .transition_migration_state(VfioMigrationState::Stop)
+                .map_err(MigratableError::Pause)?;
+        }
+        Ok(())
+    }
+
+    fn resume(&mut self) -> std::result::Result<(), MigratableError> {
+        if self.common.migration_flags.is_some() {
+            self.common
+                .transition_migration_state(VfioMigrationState::Running)
+                .map_err(MigratableError::Resume)?;
+        }
+        Ok(())
+    }
+}
 
 impl Snapshottable for VfioPciDevice {
     fn id(&self) -> String {
@@ -2171,5 +2429,239 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M
                      iova 0x{iova:x}, size 0x{size:x}: {e:?}"
                 ))
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use super::*;
+
+    // Trait default behavior and state enum round trip.
+
+    #[test]
+    fn vfio_migration_state_round_trips() {
+        for state in [
+            VfioMigrationState::Error,
+            VfioMigrationState::Stop,
+            VfioMigrationState::Running,
+            VfioMigrationState::StopCopy,
+            VfioMigrationState::Resuming,
+            VfioMigrationState::RunningP2P,
+            VfioMigrationState::PreCopy,
+            VfioMigrationState::PreCopyP2P,
+        ] {
+            let raw = state as u32;
+            assert_eq!(VfioMigrationState::try_from(raw).unwrap(), state);
+        }
+    }
+
+    #[test]
+    fn vfio_migration_state_invalid_errors() {
+        match VfioMigrationState::try_from(999_u32) {
+            Err(VfioError::InvalidMigrationState(999)) => {}
+            other => panic!("expected InvalidMigrationState(999), got {other:?}"),
+        }
+    }
+
+    struct DefaultVfio;
+    impl Vfio for DefaultVfio {}
+
+    #[test]
+    fn default_query_migration_support_returns_none() {
+        assert!(matches!(DefaultVfio.query_migration_support(), Ok(None)));
+    }
+
+    #[test]
+    fn default_set_migration_state_errors() {
+        assert!(matches!(
+            DefaultVfio.set_migration_state(VfioMigrationState::Stop),
+            Err(VfioError::NoMigrationSupport)
+        ));
+    }
+
+    // Save and load state machine flows, driven through a mock Vfio wrapper
+    // that records state transitions and stores the migration data in memory.
+
+    #[derive(Default)]
+    struct MockVfioState {
+        transitions: Vec<VfioMigrationState>,
+        save_blob: Vec<u8>,
+        loaded: Vec<u8>,
+        fail_at: Option<VfioMigrationState>,
+    }
+
+    struct MockVfio {
+        state: Mutex<MockVfioState>,
+    }
+
+    impl MockVfio {
+        fn for_save(blob: Vec<u8>) -> Arc<Self> {
+            Arc::new(Self {
+                state: Mutex::new(MockVfioState {
+                    save_blob: blob,
+                    ..Default::default()
+                }),
+            })
+        }
+
+        fn for_load() -> Arc<Self> {
+            Arc::new(Self {
+                state: Mutex::new(MockVfioState::default()),
+            })
+        }
+
+        fn failing_at(target: VfioMigrationState) -> Arc<Self> {
+            Arc::new(Self {
+                state: Mutex::new(MockVfioState {
+                    fail_at: Some(target),
+                    ..Default::default()
+                }),
+            })
+        }
+
+        fn transitions(&self) -> Vec<VfioMigrationState> {
+            self.state.lock().unwrap().transitions.clone()
+        }
+
+        fn loaded(&self) -> Vec<u8> {
+            self.state.lock().unwrap().loaded.clone()
+        }
+    }
+
+    impl Vfio for MockVfio {
+        fn set_migration_state(&self, state: VfioMigrationState) -> Result<(), VfioError> {
+            let mut s = self.state.lock().unwrap();
+            s.transitions.push(state);
+            if s.fail_at == Some(state) {
+                return Err(VfioError::NoMigrationSupport);
+            }
+            Ok(())
+        }
+
+        fn read_migration_data_to_end(&self) -> Result<Vec<u8>, VfioError> {
+            Ok(self.state.lock().unwrap().save_blob.clone())
+        }
+
+        fn write_migration_data(&self, data: &[u8]) -> Result<(), VfioError> {
+            self.state.lock().unwrap().loaded.extend_from_slice(data);
+            Ok(())
+        }
+
+        fn region_write(&self, _index: u32, _offset: u64, _data: &[u8]) {}
+    }
+
+    struct MockMsiInterruptManager;
+    impl InterruptManager for MockMsiInterruptManager {
+        type GroupConfig = MsiIrqGroupConfig;
+        fn create_group(
+            &self,
+            _: MsiIrqGroupConfig,
+        ) -> std::io::Result<Arc<dyn InterruptSourceGroup>> {
+            unimplemented!("not exercised by the migration-helper tests")
+        }
+        fn destroy_group(&self, _: Arc<dyn InterruptSourceGroup>) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn test_vfio_common(vfio_wrapper: Arc<dyn Vfio>, migration_flags: Option<u64>) -> VfioCommon {
+        let configuration = PciConfiguration::new(
+            0,
+            0,
+            0,
+            PciClassCode::Other,
+            &PciVfioSubclass::VfioSubclass,
+            None,
+            PciHeaderType::Device,
+            0,
+            0,
+            None,
+            None,
+        );
+        VfioCommon {
+            configuration,
+            mmio_regions: Vec::new(),
+            interrupt: Interrupt {
+                intx: None,
+                msi: None,
+                msix: None,
+            },
+            msi_interrupt_manager: Arc::new(MockMsiInterruptManager),
+            legacy_interrupt_group: None,
+            vfio_wrapper,
+            patches: HashMap::new(),
+            x_nv_gpudirect_clique: None,
+            x_exclude_mmap_bars: Vec::new(),
+            migration_flags,
+        }
+    }
+
+    #[test]
+    fn save_migration_data_happy_path() {
+        let blob = b"hello migration".to_vec();
+        let mock = MockVfio::for_save(blob.clone());
+        let common = test_vfio_common(mock.clone(), Some(1));
+        let got = common.save_migration_data().unwrap();
+        assert_eq!(got, blob);
+        assert_eq!(
+            mock.transitions(),
+            vec![VfioMigrationState::StopCopy, VfioMigrationState::Stop]
+        );
+    }
+
+    #[test]
+    fn save_migration_data_recovers_on_failure() {
+        let mock = MockVfio::failing_at(VfioMigrationState::StopCopy);
+        let common = test_vfio_common(mock.clone(), Some(1));
+        let err = common.save_migration_data().unwrap_err();
+        assert!(matches!(err, MigratableError::Snapshot(_)));
+        assert_eq!(
+            mock.transitions(),
+            vec![VfioMigrationState::StopCopy, VfioMigrationState::Stop]
+        );
+    }
+
+    #[test]
+    fn load_migration_data_happy_path() {
+        let blob = b"restore me".to_vec();
+        let mock = MockVfio::for_load();
+        let common = test_vfio_common(mock.clone(), Some(1));
+        common.load_migration_data(&blob).unwrap();
+        assert_eq!(mock.loaded(), blob);
+        // Device is left in RESUMING so resume() can drive it to RUNNING.
+        assert_eq!(mock.transitions(), vec![VfioMigrationState::Resuming]);
+    }
+
+    #[test]
+    fn load_migration_data_recovers_on_failure() {
+        let mock = MockVfio::failing_at(VfioMigrationState::Resuming);
+        let common = test_vfio_common(mock.clone(), Some(1));
+        let err = common.load_migration_data(b"ignored").unwrap_err();
+        assert!(matches!(err, MigratableError::Restore(_)));
+        assert_eq!(
+            mock.transitions(),
+            vec![VfioMigrationState::Resuming, VfioMigrationState::Stop]
+        );
+    }
+
+    // A guest write to a non BAR, non MSI config register must mirror into
+    // the PciConfiguration shadow so a later snapshot() picks up the live
+    // value.
+    #[test]
+    fn write_config_register_mirrors_non_bar_into_shadow() {
+        let mock = MockVfio::for_load();
+        let mut common = test_vfio_common(mock, Some(1));
+
+        // PCI_COMMAND is reg index 1. Write the 16 bit command word only.
+        let cmd: u16 = 0x0406;
+        common.write_config_register(crate::configuration::COMMAND_REG, 0, &cmd.to_le_bytes());
+
+        let got = common
+            .configuration
+            .read_reg(crate::configuration::COMMAND_REG)
+            & 0xFFFF;
+        assert_eq!(got as u16, cmd);
     }
 }
