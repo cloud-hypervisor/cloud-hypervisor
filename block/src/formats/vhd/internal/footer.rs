@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fs::File;
-use std::io::{Seek, SeekFrom};
+use std::io::{self, Seek, SeekFrom};
 
 use crate::{DiskTopology, read_aligned_block_size};
 
@@ -31,7 +31,7 @@ pub struct VhdFooter {
 }
 
 impl VhdFooter {
-    pub fn new(file: &mut File) -> std::io::Result<VhdFooter> {
+    pub fn new(file: &mut File) -> io::Result<VhdFooter> {
         let blocksize = DiskTopology::probe(file)?.logical_block_size as usize;
 
         // Place the cursor in the last block of the file
@@ -120,7 +120,7 @@ impl VhdFooter {
 }
 
 /// Determine image type through file parsing.
-pub fn is_fixed_vhd(f: &mut File) -> std::io::Result<bool> {
+pub fn is_fixed_vhd(f: &mut File) -> io::Result<bool> {
     let footer = VhdFooter::new(f)?;
 
     // "conectix" => 0x636f6e6563746978

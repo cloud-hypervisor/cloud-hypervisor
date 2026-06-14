@@ -140,7 +140,7 @@ mod unit_tests {
     use super::*;
     use crate::async_io::AsyncIo;
     #[cfg(feature = "io_uring")]
-    use crate::async_io::{AsyncIoOperation, OwnedIoBuffer};
+    use crate::async_io::{AsyncIoError, AsyncIoOperation, OwnedIoBuffer};
     use crate::disk_file::{AsyncDiskFile, DiskSize, PhysicalSize, Resizable};
 
     /// Minimal fixed VHD footer (disk type = 2, current_size = 0x11223344).
@@ -214,7 +214,7 @@ mod unit_tests {
 
         assert!(matches!(
             async_io.submit_batch_requests(vec![op]),
-            Err(crate::async_io::AsyncIoError::ReadVectored(_))
+            Err(AsyncIoError::ReadVectored(_))
         ));
     }
 

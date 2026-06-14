@@ -6,6 +6,7 @@ use std::collections::btree_map::BTreeMap;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
+use std::{result, slice};
 
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt};
 use remain::sorted;
@@ -60,7 +61,7 @@ pub enum VhdxHeaderError {
     #[error("Failed to read headers {0}")]
     ReadHeader(#[source] io::Error),
     #[error("Failed to read metadata {0}")]
-    ReadMetadata(#[source] std::io::Error),
+    ReadMetadata(#[source] io::Error),
     #[error("Failed to read region table entries {0}")]
     ReadRegionTableEntries(#[source] io::Error),
     #[error("Failed to read region table header {0}")]
@@ -85,7 +86,7 @@ pub enum VhdxHeaderError {
     WriteHeader(#[source] io::Error),
 }
 
-pub type Result<T> = std::result::Result<T, VhdxHeaderError>;
+pub type Result<T> = result::Result<T, VhdxHeaderError>;
 
 #[derive(Clone, Debug)]
 pub struct FileTypeIdentifier {
@@ -152,7 +153,7 @@ impl Header {
     fn write_to_buffer(&self, buffer: &mut [u8; HEADER_SIZE as usize]) {
         // SAFETY: self is a valid header.
         let reference =
-            unsafe { std::slice::from_raw_parts((&raw const *self).cast(), HEADER_SIZE as usize) };
+            unsafe { slice::from_raw_parts((&raw const *self).cast(), HEADER_SIZE as usize) };
         *buffer = reference.try_into().unwrap();
     }
 
@@ -337,7 +338,7 @@ pub struct RegionTableEntry {
 impl RegionTableEntry {
     /// Reads one Region Entry from a Region Table index that starts from 0
     pub fn new(buffer: &[u8]) -> Result<RegionTableEntry> {
-        assert!(buffer.len() == std::mem::size_of::<RegionTableEntry>());
+        assert!(buffer.len() == size_of::<RegionTableEntry>());
         // SAFETY: the assertion above makes sure the buffer size is correct.
         let mut region_table_entry: RegionTableEntry = unsafe { *(buffer.as_ptr().cast()) };
 

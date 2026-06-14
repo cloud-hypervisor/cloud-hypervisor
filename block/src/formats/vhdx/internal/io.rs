@@ -4,6 +4,7 @@
 
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::result;
 
 use remain::sorted;
 use thiserror::Error;
@@ -32,7 +33,7 @@ pub enum VhdxIoError {
     WriteBat(#[source] VhdxBatError),
 }
 
-pub type Result<T> = std::result::Result<T, VhdxIoError>;
+pub type Result<T> = result::Result<T, VhdxIoError>;
 
 macro_rules! align {
     ($n:expr, $align:expr) => {{ $n.div_ceil($align) * $align }};

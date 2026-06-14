@@ -328,7 +328,7 @@ impl QcowRawFile {
         self.file.write_all(&data[0..cluster_size])
     }
 
-    pub fn physical_size(&self) -> Result<u64, std::io::Error> {
+    pub fn physical_size(&self) -> io::Result<u64> {
         self.file.metadata().map(|m| m.len())
     }
 }
@@ -361,13 +361,14 @@ impl AsFd for QcowRawFile {
 #[cfg(test)]
 mod unit_tests {
     use std::io::{Read, Seek, SeekFrom};
+    use std::mem;
 
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
 
     fn be_bytes(entries: &[u64]) -> Vec<u8> {
-        let mut v = Vec::with_capacity(std::mem::size_of_val(entries));
+        let mut v = Vec::with_capacity(mem::size_of_val(entries));
         for e in entries {
             v.extend_from_slice(&e.to_be_bytes());
         }

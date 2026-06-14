@@ -338,7 +338,7 @@ impl AsyncIo for QcowSync {
 
 #[cfg(test)]
 mod unit_tests {
-    use std::fs::{File, OpenOptions};
+    use std::fs::{File, OpenOptions, create_dir};
     use std::io::{Read, Seek, SeekFrom, Write};
     use std::os::fd::RawFd;
     use std::path::Path;
@@ -969,8 +969,8 @@ mod unit_tests {
         let test_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
         let overlay_dir = test_dir.as_path().join("overlay");
         let sibling_dir = test_dir.as_path().join("sibling");
-        std::fs::create_dir(&overlay_dir).unwrap();
-        std::fs::create_dir(&sibling_dir).unwrap();
+        create_dir(&overlay_dir).unwrap();
+        create_dir(&sibling_dir).unwrap();
 
         let backing_path = sibling_dir.join("backing.raw");
         let overlay_path = overlay_dir.join("overlay.qcow2");

@@ -5,6 +5,7 @@
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
 use std::mem::size_of;
+use std::result;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use remain::sorted;
@@ -39,7 +40,7 @@ pub enum VhdxBatError {
     WriteBat(#[source] io::Error),
 }
 
-pub type Result<T> = std::result::Result<T, VhdxBatError>;
+pub type Result<T> = result::Result<T, VhdxBatError>;
 
 #[derive(Default, Clone, Debug)]
 pub struct BatEntry(pub u64);

@@ -4,7 +4,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::io;
+use std::{io, result};
 
 use libc::EINVAL;
 use thiserror::Error;
@@ -41,7 +41,7 @@ pub enum Error {
     },
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = result::Result<T, Error>;
 
 /// Represents the refcount entries for an open qcow file.
 #[derive(Clone, Debug)]
@@ -174,7 +174,7 @@ impl RefCount {
             if addr != 0 {
                 raw_file.write_refcount_block(addr, block.get_values())?;
             } else {
-                return Err(std::io::Error::from_raw_os_error(EINVAL));
+                return Err(io::Error::from_raw_os_error(EINVAL));
             }
             block.mark_clean();
         }
