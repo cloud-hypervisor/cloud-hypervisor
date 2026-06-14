@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::unix::io::{AsRawFd, RawFd};
 
 use super::footer::VhdFooter;
@@ -17,7 +17,7 @@ pub struct FixedVhd {
 }
 
 impl FixedVhd {
-    pub fn new(mut file: File) -> std::io::Result<Self> {
+    pub fn new(mut file: File) -> io::Result<Self> {
         let footer = VhdFooter::new(&mut file)?;
 
         Ok(Self {
@@ -35,7 +35,7 @@ impl AsRawFd for FixedVhd {
 }
 
 impl Read for FixedVhd {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match self.file.read(buf) {
             Ok(r) => {
                 self.position = self.position.checked_add(r.try_into().unwrap()).unwrap();
@@ -47,7 +47,7 @@ impl Read for FixedVhd {
 }
 
 impl Write for FixedVhd {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match self.file.write(buf) {
             Ok(r) => {
                 self.position = self.position.checked_add(r.try_into().unwrap()).unwrap();
@@ -57,13 +57,13 @@ impl Write for FixedVhd {
         }
     }
 
-    fn flush(&mut self) -> std::io::Result<()> {
+    fn flush(&mut self) -> io::Result<()> {
         self.file.sync_all()
     }
 }
 
 impl Seek for FixedVhd {
-    fn seek(&mut self, newpos: SeekFrom) -> std::io::Result<u64> {
+    fn seek(&mut self, newpos: SeekFrom) -> io::Result<u64> {
         match self.file.seek(newpos) {
             Ok(pos) => {
                 self.position = pos;

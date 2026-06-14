@@ -4,8 +4,11 @@
 
 use std::collections::btree_map::BTreeMap;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{
+    Error as IoError, ErrorKind as IoErrorKind, Read, Result as IoResult, Seek, SeekFrom, Write,
+};
 use std::os::fd::{AsRawFd, RawFd};
+use std::result;
 
 use byteorder::{BigEndian, ByteOrder};
 use remain::sorted;
@@ -42,7 +45,7 @@ pub enum VhdxError {
     WriteFailed(#[source] VhdxIoError),
 }
 
-pub type Result<T> = std::result::Result<T, VhdxError>;
+pub type Result<T> = result::Result<T, VhdxError>;
 
 #[derive(Debug)]
 pub struct Vhdx {
@@ -99,7 +102,7 @@ impl Vhdx {
 impl Read for Vhdx {
     /// Wrapper function to satisfy Read trait implementation for VHDx disk.
     /// Convert the offset to sector index and buffer length to sector count.
-    fn read(&mut self, buf: &mut [u8]) -> std::result::Result<usize, std::io::Error> {
+    fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
         let sector_count = (buf.len() as u64).div_ceil(self.disk_spec.logical_sector_size as u64);
         let sector_index = self.current_offset / self.disk_spec.logical_sector_size as u64;
 
@@ -112,7 +115,7 @@ impl Read for Vhdx {
             sector_count,
         )
         .map_err(|e| {
-            std::io::Error::other(format!(
+            IoError::other(format!(
                 "Failed reading {sector_count} sectors from VHDx at index {sector_index}: {e}"
             ))
         })?;
@@ -124,13 +127,13 @@ impl Read for Vhdx {
 }
 
 impl Write for Vhdx {
-    fn flush(&mut self) -> std::result::Result<(), std::io::Error> {
+    fn flush(&mut self) -> IoResult<()> {
         self.file.flush()
     }
 
     /// Wrapper function to satisfy Write trait implementation for VHDx disk.
     /// Convert the offset to sector index and buffer length to sector count.
-    fn write(&mut self, buf: &[u8]) -> std::result::Result<usize, std::io::Error> {
+    fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
         let sector_count = (buf.len() as u64).div_ceil(self.disk_spec.logical_sector_size as u64);
         let sector_index = self.current_offset / self.disk_spec.logical_sector_size as u64;
 
@@ -138,7 +141,7 @@ impl Write for Vhdx {
             self.first_write = false;
             self.vhdx_header
                 .update(&mut self.file)
-                .map_err(|e| std::io::Error::other(format!("Failed to update VHDx header: {e}")))?;
+                .map_err(|e| IoError::other(format!("Failed to update VHDx header: {e}")))?;
         }
 
         let result = io::write(
@@ -151,7 +154,7 @@ impl Write for Vhdx {
             sector_count,
         )
         .map_err(|e| {
-            std::io::Error::other(format!(
+            IoError::other(format!(
                 "Failed writing {sector_count} sectors on VHDx at index {sector_index}: {e}"
             ))
         })?;
@@ -165,7 +168,7 @@ impl Write for Vhdx {
 impl Seek for Vhdx {
     /// Wrapper function to satisfy Seek trait implementation for VHDx disk.
     /// Updates the offset field in the Vhdx struct.
-    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+    fn seek(&mut self, pos: SeekFrom) -> IoResult<u64> {
         let new_offset: Option<u64> = match pos {
             SeekFrom::Start(off) => Some(off),
             SeekFrom::End(off) => {
@@ -194,19 +197,19 @@ impl Seek for Vhdx {
             return Ok(o);
         }
 
-        Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
+        Err(IoError::new(
+            IoErrorKind::InvalidData,
             "Failed seek operation",
         ))
     }
 }
 
 impl BlockBackend for Vhdx {
-    fn logical_size(&self) -> std::result::Result<u64, crate::Error> {
+    fn logical_size(&self) -> result::Result<u64, crate::Error> {
         Ok(self.virtual_disk_size())
     }
 
-    fn physical_size(&self) -> std::result::Result<u64, crate::Error> {
+    fn physical_size(&self) -> result::Result<u64, crate::Error> {
         self.file
             .metadata()
             .map(|m| m.len())

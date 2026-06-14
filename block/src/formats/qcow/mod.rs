@@ -15,6 +15,8 @@ use std::fs::File;
 #[cfg(any(test, feature = "test-utils"))]
 use std::io::Seek;
 use std::os::unix::io::AsRawFd;
+#[cfg(any(test, feature = "test-utils"))]
+use std::path::Path;
 use std::sync::Arc;
 use std::{fmt, io};
 
@@ -211,7 +213,7 @@ impl QcowTempDisk {
         Ok(Self { tmp, disk })
     }
 
-    pub fn path(&self) -> &std::path::Path {
+    pub fn path(&self) -> &Path {
         self.tmp.as_path()
     }
 

@@ -13,6 +13,7 @@ pub mod internal;
 pub(crate) mod worker;
 
 use std::fs::File;
+use std::io;
 use std::os::fd::AsRawFd;
 use std::sync::{Arc, Mutex};
 
@@ -89,7 +90,7 @@ impl disk_file::Resizable for VhdxDisk {
     fn resize(&mut self, _size: u64) -> BlockResult<()> {
         Err(BlockError::new(
             BlockErrorKind::UnsupportedFeature,
-            DiskFileError::ResizeError(std::io::Error::other("resize not supported for VHDX")),
+            DiskFileError::ResizeError(io::Error::other("resize not supported for VHDX")),
         )
         .with_op(ErrorOp::Resize))
     }

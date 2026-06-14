@@ -5,6 +5,7 @@
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::mem::size_of;
+use std::result;
 
 use byteorder::{LittleEndian, ReadBytesExt};
 use remain::sorted;
@@ -83,7 +84,7 @@ pub enum VhdxMetadataError {
     UnsupportedFlag,
 }
 
-pub type Result<T> = std::result::Result<T, VhdxMetadataError>;
+pub type Result<T> = result::Result<T, VhdxMetadataError>;
 
 #[derive(Default, Clone, Debug)]
 pub struct DiskSpec {
@@ -278,7 +279,7 @@ struct MetadataTableHeader {
 
 impl MetadataTableHeader {
     pub fn new(buffer: &[u8]) -> Result<MetadataTableHeader> {
-        assert!(buffer.len() == std::mem::size_of::<MetadataTableHeader>());
+        assert!(buffer.len() == size_of::<MetadataTableHeader>());
         // SAFETY: the assertion above makes sure the buffer size is correct.
         let metadata_table_header: MetadataTableHeader = unsafe { *(buffer.as_ptr().cast()) };
 
@@ -311,7 +312,7 @@ pub struct MetadataTableEntry {
 impl MetadataTableEntry {
     /// Parse one metadata entry from the buffer
     fn new(buffer: &[u8]) -> Result<MetadataTableEntry> {
-        assert!(buffer.len() == std::mem::size_of::<MetadataTableEntry>());
+        assert!(buffer.len() == size_of::<MetadataTableEntry>());
         // SAFETY: the assertion above makes sure the buffer size is correct.
         let mut metadata_table_entry: MetadataTableEntry = unsafe { *(buffer.as_ptr().cast()) };
 

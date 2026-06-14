@@ -13,7 +13,7 @@ use std::fs::{File, Metadata};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::slice;
+use std::{result, slice};
 
 use vmm_sys_util::file_traits::FileSync;
 use vmm_sys_util::seek_hole::SeekHole;
@@ -88,15 +88,15 @@ impl RawFile {
             && buf.len().is_multiple_of(self.alignment)
     }
 
-    pub fn set_len(&self, size: u64) -> std::io::Result<()> {
+    pub fn set_len(&self, size: u64) -> io::Result<()> {
         self.file.set_len(size)
     }
 
-    pub fn metadata(&self) -> std::io::Result<Metadata> {
+    pub fn metadata(&self) -> io::Result<Metadata> {
         self.file.metadata()
     }
 
-    pub fn try_clone(&self) -> std::io::Result<RawFile> {
+    pub fn try_clone(&self) -> io::Result<RawFile> {
         Ok(RawFile {
             file: self.file.try_clone().expect("RawFile cloning failed"),
             alignment: self.alignment,
@@ -105,11 +105,11 @@ impl RawFile {
         })
     }
 
-    pub fn sync_all(&self) -> std::io::Result<()> {
+    pub fn sync_all(&self) -> io::Result<()> {
         self.file.sync_all()
     }
 
-    pub fn sync_data(&self) -> std::io::Result<()> {
+    pub fn sync_data(&self) -> io::Result<()> {
         self.file.sync_data()
     }
 
@@ -134,7 +134,7 @@ impl RawFile {
 }
 
 impl Read for RawFile {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.is_aligned(buf) {
             match self.file.read(buf) {
                 Ok(r) => {
@@ -214,7 +214,7 @@ impl Read for RawFile {
 }
 
 impl Write for RawFile {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if self.is_aligned(buf) {
             match self.file.write(buf) {
                 Ok(r) => {
@@ -307,13 +307,13 @@ impl Write for RawFile {
         }
     }
 
-    fn flush(&mut self) -> std::io::Result<()> {
+    fn flush(&mut self) -> io::Result<()> {
         self.file.sync_all()
     }
 }
 
 impl Seek for RawFile {
-    fn seek(&mut self, newpos: SeekFrom) -> std::io::Result<u64> {
+    fn seek(&mut self, newpos: SeekFrom) -> io::Result<u64> {
         match self.file.seek(newpos) {
             Ok(pos) => {
                 self.position = pos;
@@ -325,25 +325,25 @@ impl Seek for RawFile {
 }
 
 impl WriteZeroesAt for RawFile {
-    fn write_zeroes_at(&mut self, offset: u64, length: usize) -> std::io::Result<usize> {
+    fn write_zeroes_at(&mut self, offset: u64, length: usize) -> io::Result<usize> {
         self.file.write_zeroes_at(offset, length)
     }
 }
 
 impl PunchHole for RawFile {
-    fn punch_hole(&mut self, offset: u64, length: u64) -> std::io::Result<()> {
+    fn punch_hole(&mut self, offset: u64, length: u64) -> io::Result<()> {
         self.file.punch_hole(offset, length)
     }
 }
 
 impl FileSync for RawFile {
-    fn fsync(&mut self) -> std::io::Result<()> {
+    fn fsync(&mut self) -> io::Result<()> {
         self.file.fsync()
     }
 }
 
 impl SeekHole for RawFile {
-    fn seek_hole(&mut self, offset: u64) -> std::io::Result<Option<u64>> {
+    fn seek_hole(&mut self, offset: u64) -> io::Result<Option<u64>> {
         match self.file.seek_hole(offset) {
             Ok(pos) => {
                 if let Some(p) = pos {
@@ -355,7 +355,7 @@ impl SeekHole for RawFile {
         }
     }
 
-    fn seek_data(&mut self, offset: u64) -> std::io::Result<Option<u64>> {
+    fn seek_data(&mut self, offset: u64) -> io::Result<Option<u64>> {
         match self.file.seek_data(offset) {
             Ok(pos) => {
                 if let Some(p) = pos {
@@ -369,13 +369,13 @@ impl SeekHole for RawFile {
 }
 
 impl BlockBackend for RawFile {
-    fn logical_size(&self) -> std::result::Result<u64, crate::Error> {
+    fn logical_size(&self) -> result::Result<u64, crate::Error> {
         Ok(query_device_size(&self.file)
             .map_err(crate::Error::RawFileError)?
             .0)
     }
 
-    fn physical_size(&self) -> std::result::Result<u64, crate::Error> {
+    fn physical_size(&self) -> result::Result<u64, crate::Error> {
         Ok(query_device_size(&self.file)
             .map_err(crate::Error::RawFileError)?
             .1)

@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::collections::VecDeque;
+use std::io;
 use std::os::unix::io::RawFd;
 
 use vmm_sys_util::eventfd::EventFd;
@@ -74,7 +75,7 @@ impl AsyncIo for RawSync {
             }
         };
         if result < 0 {
-            let error = std::io::Error::last_os_error();
+            let error = io::Error::last_os_error();
             return Err(if is_read {
                 AsyncIoError::ReadVectored(error)
             } else {
@@ -93,7 +94,7 @@ impl AsyncIo for RawSync {
         // SAFETY: FFI call
         let result = unsafe { libc::fsync(self.fd as libc::c_int) };
         if result < 0 {
-            return Err(AsyncIoError::Fsync(std::io::Error::last_os_error()));
+            return Err(AsyncIoError::Fsync(io::Error::last_os_error()));
         }
 
         if let Some(user_data) = user_data {

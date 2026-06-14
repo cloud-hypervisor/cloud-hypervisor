@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use std::{io, result};
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -11,12 +13,12 @@ pub enum Error {
     #[error("Zlib unexpected status: {0:?}")]
     ZlibUnexpectedStatus(flate2::Status),
     #[error("Zstd decompress error")]
-    ZstdDecompress(#[source] std::io::Error),
+    ZstdDecompress(#[source] io::Error),
     #[error("Zstd: failed to fill buffer")]
-    ZstdFillBuffer(#[source] std::io::Error),
+    ZstdFillBuffer(#[source] io::Error),
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = result::Result<T, Error>;
 
 /// Generic trait for decoding zlib/zstd formats
 pub trait Decoder: Send + Sync {

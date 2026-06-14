@@ -4,6 +4,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use std::io;
 use std::os::unix::io::RawFd;
 
 use vmm_sys_util::eventfd::EventFd;
@@ -42,8 +43,8 @@ impl FixedVhdAsync {
     }
 
     fn bounds_error(&self, op: &AsyncIoOperation) -> AsyncIoError {
-        let error = std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
+        let error = io::Error::new(
+            io::ErrorKind::InvalidData,
             format!(
                 "Invalid request offset {} and length {}, can't exceed file size {}",
                 op.offset(),
@@ -78,13 +79,13 @@ impl AsyncIo for FixedVhdAsync {
     }
 
     fn punch_hole(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
-        Err(AsyncIoError::PunchHole(std::io::Error::other(
+        Err(AsyncIoError::PunchHole(io::Error::other(
             "punch_hole not supported for fixed VHD",
         )))
     }
 
     fn write_zeroes(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
-        Err(AsyncIoError::WriteZeroes(std::io::Error::other(
+        Err(AsyncIoError::WriteZeroes(io::Error::other(
             "write_zeroes not supported for fixed VHD",
         )))
     }

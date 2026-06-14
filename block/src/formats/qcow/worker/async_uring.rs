@@ -525,7 +525,7 @@ impl QcowAsync {
 mod unit_tests {
     use std::io::Write;
     use std::sync::Arc;
-    use std::thread;
+    use std::{mem, thread};
 
     use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
     use vmm_sys_util::tempfile::TempFile;
@@ -902,7 +902,7 @@ mod unit_tests {
         let mut completion_a = wait_for_completion(async_io.as_mut());
         let mut completion_b = wait_for_completion(async_io.as_mut());
         if completion_a.user_data > completion_b.user_data {
-            std::mem::swap(&mut completion_a, &mut completion_b);
+            mem::swap(&mut completion_a, &mut completion_b);
         }
         assert_eq!(completion_tuple(&completion_a), (30, 4096));
         assert_eq!(completion_tuple(&completion_b), (40, 4096));

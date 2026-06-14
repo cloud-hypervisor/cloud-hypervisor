@@ -21,7 +21,7 @@ use std::io::{self, Seek, SeekFrom};
 use std::mem::size_of;
 use std::os::fd::AsRawFd;
 use std::path::Path;
-use std::str;
+use std::{result, str};
 
 pub use header::{
     BackingFileConfig, CompressionType, ImageType, IncompatFeatures, MissingFeatureError,
@@ -159,7 +159,7 @@ pub enum Error {
     WritingHeader(#[source] io::Error),
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = result::Result<T, Error>;
 
 /// Concrete backing file variants.
 pub(crate) enum BackingKind {
