@@ -94,14 +94,32 @@ impl Vhdx {
     pub fn virtual_disk_size(&self) -> u64 {
         self.disk_spec.virtual_disk_size
     }
+
+    /// Translate the current offset and a transfer length in bytes to a
+    /// sector index and count. I/O is performed in whole logical sectors,
+    /// so both the offset and the length must be multiples of the logical
+    /// sector size.
+    fn sector_span(&self, len: usize) -> std::result::Result<(u64, u64), std::io::Error> {
+        let sector_size = self.disk_spec.logical_sector_size as u64;
+        if self.current_offset % sector_size != 0 || len as u64 % sector_size != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "Unaligned VHDx access of {len} bytes at offset {} (logical sector size is {sector_size})",
+                    self.current_offset
+                ),
+            ));
+        }
+
+        Ok((self.current_offset / sector_size, len as u64 / sector_size))
+    }
 }
 
 impl Read for Vhdx {
     /// Wrapper function to satisfy Read trait implementation for VHDx disk.
     /// Convert the offset to sector index and buffer length to sector count.
     fn read(&mut self, buf: &mut [u8]) -> std::result::Result<usize, std::io::Error> {
-        let sector_count = (buf.len() as u64).div_ceil(self.disk_spec.logical_sector_size as u64);
-        let sector_index = self.current_offset / self.disk_spec.logical_sector_size as u64;
+        let (sector_index, sector_count) = self.sector_span(buf.len())?;
 
         let result = io::read(
             &mut self.file,
@@ -131,8 +149,7 @@ impl Write for Vhdx {
     /// Wrapper function to satisfy Write trait implementation for VHDx disk.
     /// Convert the offset to sector index and buffer length to sector count.
     fn write(&mut self, buf: &[u8]) -> std::result::Result<usize, std::io::Error> {
-        let sector_count = (buf.len() as u64).div_ceil(self.disk_spec.logical_sector_size as u64);
-        let sector_index = self.current_offset / self.disk_spec.logical_sector_size as u64;
+        let (sector_index, sector_count) = self.sector_span(buf.len())?;
 
         if self.first_write {
             self.first_write = false;
