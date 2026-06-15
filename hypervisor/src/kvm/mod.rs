@@ -1570,6 +1570,21 @@ impl vm::Vm for KvmVm {
     fn as_any(&self) -> &dyn Any {
         self
     }
+
+    #[cfg(target_arch = "x86_64")]
+    fn deny_msrs(&self, denied_msrs: Vec<u32>) -> vm::Result<()> {
+        if !self.check_extension(Cap::X86MsrFilter) {
+            return Err(vm::HypervisorVmError::MsrFilterCapability);
+        }
+
+        let mut bitmap_arena = Vec::new();
+        let filter_ranges = x86_64::denied_msrs_to_filter(denied_msrs, &mut bitmap_arena)?;
+
+        // We use MsrFilterDefaultAction::ALLOW to permit MSRs that are not contained in `denied_msrs`.
+        self.fd
+            .set_msr_filter(kvm_ioctls::MsrFilterDefaultAction::ALLOW, &filter_ranges)
+            .map_err(|e| vm::HypervisorVmError::MsrFilter { err_no: e.errno() })
+    }
 }
 
 #[cfg(feature = "tdx")]

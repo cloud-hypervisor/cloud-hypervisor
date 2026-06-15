@@ -294,6 +294,18 @@ pub enum HypervisorVmError {
     ///
     #[error("Unable to filter permitted MSRs: the necessary MSR filter is too large")]
     MsrFilterSize,
+
+    ///
+    /// Failed to verify the existence of the MSR Filter extension
+    ///
+    #[error("Failed to check support for the MSR filter capability")]
+    MsrFilterCapability,
+
+    ///
+    /// Failed to set an MSR filter
+    ///
+    #[error("Failed to set MSR filter: err_no={err_no}")]
+    MsrFilter { err_no: i32 },
 }
 ///
 /// Result type for returning from a function
@@ -516,6 +528,15 @@ pub trait Vm: Send + Sync + Any {
     fn enable_x2apic_api(&self) -> Result<()> {
         unimplemented!("x2Apic is only supported on KVM/Linux hosts")
     }
+
+    #[cfg(target_arch = "x86_64")]
+    /// Instruct the VM to deny the guest from accessing any MSR that is
+    /// contained in `denied_msrs`.
+    ///
+    /// # Important
+    ///
+    /// This method should be called once before creating any vCPUs and never again.
+    fn deny_msrs(&self, denied_msrs: Vec<u32>) -> Result<()>;
 }
 
 pub trait VmOps: Send + Sync {

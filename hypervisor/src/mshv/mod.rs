@@ -2587,4 +2587,11 @@ impl vm::Vm for MshvVm {
         }
         Ok(())
     }
+
+    #[cfg(target_arch = "x86_64")]
+    fn deny_msrs(&self, _denied_msrs: Vec<u32>) -> vm::Result<()> {
+        // TODO: This is only used for CPU profiles. Provide a proper impl
+        // when we want CPU profiles to work with MSHV.
+        unimplemented!()
+    }
 }
