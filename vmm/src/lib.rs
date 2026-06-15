@@ -2617,6 +2617,15 @@ impl RequestHandler for Vmm {
         &mut self,
         receive_data_migration: VmReceiveMigrationData,
     ) -> result::Result<(), MigratableError> {
+        match &self.vm {
+            VmOwnership::Owned(_vm) => {
+                return Err(MigratableError::MigrateReceive(anyhow!(
+                    "Can't receive a migration when a VM is already created"
+                )));
+            }
+            VmOwnership::None => {}
+        }
+
         receive_data_migration
             .validate()
             .context("Invalid receive migration configuration")
@@ -2632,6 +2641,10 @@ impl RequestHandler for Vmm {
             &receive_data_migration.receiver_url,
             receive_data_migration.tls_dir.as_deref(),
         )?;
+
+        if self.vm_config.is_some() {
+            warn!("The existing VM config will be overwritten");
+        }
 
         event!("vm", "migration-receive-ready");
 
