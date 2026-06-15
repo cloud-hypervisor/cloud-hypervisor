@@ -282,8 +282,20 @@ impl BlockEpollHandler {
                 return Err(Error::QueueDuplicatedHeadIndex);
             }
 
-            let mut request = Request::parse(&mut desc_chain, self.access_platform.as_deref())
-                .map_err(Error::RequestParsing)?;
+            let mut request = match Request::parse(&mut desc_chain, self.access_platform.as_deref())
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    warn!("Failed to parse virtio-blk request at head {head}: {e}");
+                    queue
+                        .add_used(desc_chain.memory(), head, 0)
+                        .map_err(Error::QueueAddUsed)?;
+                    queue
+                        .enable_notification(desc_chain.memory())
+                        .map_err(Error::QueueEnableNotification)?;
+                    continue;
+                }
+            };
 
             // For virtio spec compliance
             // "A device MUST set the status byte to VIRTIO_BLK_S_IOERR for a write request
