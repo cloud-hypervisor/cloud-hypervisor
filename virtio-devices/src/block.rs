@@ -1352,3 +1352,83 @@ impl Snapshottable for Block {
 }
 impl Transportable for Block {}
 impl Migratable for Block {}
+
+#[cfg(test)]
+mod unit_tests {
+    use std::io::Result as IoResult;
+
+    use block::async_io::{AsyncIoCompletion, AsyncIoOperation, AsyncIoResult};
+    use hypervisor::Vm;
+    use vm_memory::GuestAddress;
+    use vm_virtio::queue::testing::VirtQueue as GuestQ;
+    use vmm_sys_util::eventfd::EFD_NONBLOCK;
+
+    use super::*;
+
+    struct Noop(EventFd);
+    impl VirtioInterrupt for Noop {
+        fn trigger(&self, _: VirtioInterruptType) -> IoResult<()> {
+            Ok(())
+        }
+        fn set_notifier(&self, _: u32, _: Option<EventFd>, _: &dyn Vm) -> IoResult<()> {
+            Ok(())
+        }
+    }
+    impl AsyncIo for Noop {
+        fn notifier(&self) -> &EventFd {
+            &self.0
+        }
+        fn submit_data_operation(&mut self, _: AsyncIoOperation) -> AsyncIoResult<()> {
+            unreachable!()
+        }
+        fn fsync(&mut self, _: Option<u64>) -> AsyncIoResult<()> {
+            unreachable!()
+        }
+        fn punch_hole(&mut self, _: u64, _: u64, _: u64) -> AsyncIoResult<()> {
+            unreachable!()
+        }
+        fn write_zeroes(&mut self, _: u64, _: u64, _: u64) -> AsyncIoResult<()> {
+            unreachable!()
+        }
+        fn next_completed_request(&mut self) -> Option<AsyncIoCompletion> {
+            None
+        }
+    }
+
+    #[test]
+    fn parse_failure_reclaims_head() {
+        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
+        let vq = GuestQ::new(GuestAddress(0x1000), &mem, 4);
+        vq.dtable[0].set(0x2000, 16, 0, 0);
+        vq.avail.ring[0].set(0);
+        vq.avail.idx.set(1);
+
+        let evt = || EventFd::new(EFD_NONBLOCK).unwrap();
+        let mut handler = BlockEpollHandler {
+            queue_index: 0,
+            queue: vq.create_queue(),
+            mem: GuestMemoryAtomic::new(mem.clone()),
+            disk_image: Box::new(Noop(evt())),
+            disk_nsectors: Arc::new(AtomicU64::new(0)),
+            interrupt_cb: Arc::new(Noop(evt())),
+            serial: Box::default(),
+            kill_evt: evt(),
+            pause_evt: evt(),
+            writeback: Arc::new(AtomicBool::new(false)),
+            counters: BlockCounters::default(),
+            queue_evt: evt(),
+            inflight_requests: VecDeque::new(),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            draining_active_requests: Arc::new(AtomicBool::new(false)),
+            rate_limiter: None,
+            access_platform: None,
+            host_cpus: None,
+            acked_features: 0,
+            disable_sector0_writes: false,
+        };
+
+        handler.process_queue_submit().unwrap();
+
+        assert_eq!(vq.used.idx.get(), 1);
+    }
+}
