@@ -504,7 +504,7 @@ impl Request {
         for &(data_addr, data_len) in &self.data_descriptors {
             let _: u32 = data_len;
             const _: () = assert!(
-                core::mem::size_of::<u32>() <= core::mem::size_of::<usize>(),
+                mem::size_of::<u32>() <= mem::size_of::<usize>(),
                 "unsupported platform"
             );
             if data_len == 0 {
