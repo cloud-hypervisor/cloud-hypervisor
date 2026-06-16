@@ -57,14 +57,14 @@
 //! * The virtual device backend requests the interrupt manager to create an interrupt group
 //!   according to guest configuration information
 
-use std::io::{Error, ErrorKind};
+use std::io::{self, Error, ErrorKind};
 use std::sync::{Arc, Mutex};
 
 pub use hypervisor::{InterruptSourceConfig, LegacyIrqSourceConfig, MsiIrqSourceConfig};
 use vmm_sys_util::eventfd::EventFd;
 
 /// Reuse std::io::Result to simplify interoperability among crates.
-pub type Result<T> = std::io::Result<T>;
+pub type Result<T> = io::Result<T>;
 
 /// Data type to store an interrupt source identifier.
 pub type InterruptIndex = u32;
