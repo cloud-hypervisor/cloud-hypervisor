@@ -85,7 +85,7 @@ pub enum OptionParserError {
 }
 type OptionParserResult<T> = result::Result<T, OptionParserError>;
 
-fn split_commas(s: &str) -> OptionParserResult<Vec<String>> {
+pub fn split_commas(s: &str) -> OptionParserResult<Vec<String>> {
     let mut list: Vec<String> = Vec::new();
     let mut opened_brackets = 0u64;
     let mut in_quotes = false;
