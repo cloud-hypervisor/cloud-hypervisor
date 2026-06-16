@@ -272,6 +272,7 @@ impl UringDataIo {
 
 #[cfg(test)]
 mod tests {
+    use std::io;
     use std::os::fd::AsRawFd;
     use std::thread::sleep;
     use std::time::Duration;
@@ -308,18 +309,18 @@ mod tests {
 
         assert_eq!(
             data_io.submit_fsync(fd, 7).unwrap_err().kind(),
-            std::io::ErrorKind::AlreadyExists
+            io::ErrorKind::AlreadyExists
         );
         assert_eq!(
             data_io.submit_nop(7).unwrap_err().kind(),
-            std::io::ErrorKind::AlreadyExists
+            io::ErrorKind::AlreadyExists
         );
         assert_eq!(
             data_io
                 .submit_fallocate(fd, 0, 512, 0, 7)
                 .unwrap_err()
                 .kind(),
-            std::io::ErrorKind::AlreadyExists
+            io::ErrorKind::AlreadyExists
         );
 
         let completion = wait_for_completion(&mut data_io);

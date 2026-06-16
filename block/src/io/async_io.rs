@@ -13,7 +13,7 @@ mod owned_io_buffer;
 #[cfg(feature = "io_uring")]
 mod uring_data_io;
 
-use std::io;
+use std::{io, result};
 
 pub use aio_data_io::AioDataIo;
 pub use completion::AsyncIoCompletion;
@@ -31,21 +31,21 @@ use crate::SECTOR_SIZE;
 pub enum DiskFileError {
     /// Failed getting disk file size.
     #[error("Failed getting disk file size")]
-    Size(#[source] std::io::Error),
+    Size(#[source] io::Error),
     /// Failed creating a new AsyncIo.
     #[error("Failed creating a new AsyncIo")]
-    NewAsyncIo(#[source] std::io::Error),
+    NewAsyncIo(#[source] io::Error),
     /// Unsupported operation.
     #[error("Unsupported operation")]
     Unsupported,
     /// Resize failed
     #[error("Resize failed")]
-    ResizeError(#[source] std::io::Error),
+    ResizeError(#[source] io::Error),
     #[error("Failed cloning disk file")]
-    Clone(#[source] std::io::Error),
+    Clone(#[source] io::Error),
 }
 
-pub type DiskFileResult<T> = std::result::Result<T, DiskFileError>;
+pub type DiskFileResult<T> = result::Result<T, DiskFileError>;
 
 /// A wrapper for [`RawFd`] capturing the lifetime of a corresponding disk file.
 ///
@@ -79,25 +79,25 @@ impl AsRawFd for BorrowedDiskFd<'_> {
 pub enum AsyncIoError {
     /// Failed vectored reading from file.
     #[error("Failed vectored reading from file")]
-    ReadVectored(#[source] std::io::Error),
+    ReadVectored(#[source] io::Error),
     /// Failed vectored writing to file.
     #[error("Failed vectored writing to file")]
-    WriteVectored(#[source] std::io::Error),
+    WriteVectored(#[source] io::Error),
     /// Failed synchronizing file.
     #[error("Failed synchronizing file")]
-    Fsync(#[source] std::io::Error),
+    Fsync(#[source] io::Error),
     /// Failed punching hole.
     #[error("Failed punching hole")]
-    PunchHole(#[source] std::io::Error),
+    PunchHole(#[source] io::Error),
     /// Failed writing zeroes.
     #[error("Failed writing zeroes")]
-    WriteZeroes(#[source] std::io::Error),
+    WriteZeroes(#[source] io::Error),
     /// Failed submitting batch requests.
     #[error("Failed submitting batch requests")]
-    SubmitBatchRequests(#[source] std::io::Error),
+    SubmitBatchRequests(#[source] io::Error),
 }
 
-pub type AsyncIoResult<T> = std::result::Result<T, AsyncIoError>;
+pub type AsyncIoResult<T> = result::Result<T, AsyncIoError>;
 
 pub trait AsyncIo: Send {
     fn notifier(&self) -> &EventFd;

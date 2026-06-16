@@ -7,8 +7,8 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::collections::{HashMap, VecDeque};
-use std::io;
 use std::os::fd::{AsRawFd, RawFd};
+use std::{io, slice};
 
 use log::warn;
 use vmm_sys_util::aio;
@@ -66,7 +66,7 @@ impl AioDataIo {
     pub fn submit_operation(&mut self, fd: RawFd, op: AsyncIoOperation) -> io::Result<()> {
         validate_batch(
             |user_data| self.in_flight.contains_key(&user_data),
-            std::slice::from_ref(&op),
+            slice::from_ref(&op),
         )?;
 
         let user_data = op.user_data();
@@ -171,7 +171,7 @@ impl AioDataIo {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
+    use std::io::{self, Write};
     use std::os::fd::AsRawFd;
     use std::thread::sleep;
     use std::time::Duration;
@@ -208,7 +208,7 @@ mod tests {
 
         assert_eq!(
             data_io.submit_fsync(fd, 7).unwrap_err().kind(),
-            std::io::ErrorKind::AlreadyExists
+            io::ErrorKind::AlreadyExists
         );
 
         let completion = wait_for_completion(&mut data_io);

@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::alloc::{Layout, alloc_zeroed, dealloc};
-use std::{fmt, io};
+use std::{fmt, io, slice};
 
 // Storage owned by an async I/O request for host-memory buffers.
 //
@@ -62,7 +62,7 @@ impl OwnedIoBufferStorage {
             Self::Aligned { ptr, len, .. } => {
                 // SAFETY: alloc_zeroed initialized `len` bytes at `ptr` and the
                 // allocation is owned by Self.
-                unsafe { std::slice::from_raw_parts(*ptr, *len) }
+                unsafe { slice::from_raw_parts(*ptr, *len) }
             }
         }
     }
@@ -74,7 +74,7 @@ impl OwnedIoBufferStorage {
                 // SAFETY: alloc_zeroed initialized `len` bytes at `ptr`,
                 // &mut self ensures unique access, and the allocation is
                 // owned by Self.
-                unsafe { std::slice::from_raw_parts_mut(*ptr, *len) }
+                unsafe { slice::from_raw_parts_mut(*ptr, *len) }
             }
         }
     }

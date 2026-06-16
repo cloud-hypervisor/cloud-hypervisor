@@ -63,17 +63,17 @@ pub enum Error {
     #[error("Guest gave us a descriptor that was too short to use")]
     DescriptorLengthTooSmall,
     #[error("Failed to detect image type")]
-    DetectImageType(#[source] std::io::Error),
+    DetectImageType(#[source] io::Error),
     #[error("Failure in fixed vhd")]
-    FixedVhdError(#[source] std::io::Error),
+    FixedVhdError(#[source] io::Error),
     #[error("Getting a block's metadata failed")]
-    GetFileMetadata(#[source] std::io::Error),
+    GetFileMetadata(#[source] io::Error),
     #[error("The requested operation would cause a seek beyond disk end")]
     InvalidOffset,
     #[error("Failure in qcow")]
     QcowError(#[source] qcow::Error),
     #[error("Failure in raw file")]
-    RawFileError(#[source] std::io::Error),
+    RawFileError(#[source] io::Error),
     #[error("The requested operation does not support multiple descriptors")]
     TooManyDescriptors,
     #[error("Request contains too many segments ({0}, max {MAX_DISCARD_WRITE_ZEROES_SEG})")]
@@ -316,7 +316,7 @@ pub fn block_io_uring_is_supported() -> bool {
 pub(crate) fn is_block_device(fd: RawFd) -> bool {
     // SAFETY: `libc::stat` is POD; zero-initialization is a valid bit pattern
     // and `fstat` overwrites every field it cares about on success.
-    let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+    let mut stat: libc::stat = unsafe { mem::zeroed() };
     // SAFETY: FFI call with a valid fd and a valid out-pointer.
     let ret = unsafe { libc::fstat(fd, &mut stat) };
     ret == 0 && stat.st_mode & S_IFMT == S_IFBLK
@@ -471,7 +471,7 @@ const QCOW_MAGIC: u32 = 0x5146_49fb;
 const VHDX_SIGN: u64 = 0x656C_6966_7864_6876;
 
 /// Read a block into memory aligned by the source block size (needed for O_DIRECT)
-pub fn read_aligned_block_size(f: &mut File) -> std::io::Result<Vec<u8>> {
+pub fn read_aligned_block_size(f: &mut File) -> io::Result<Vec<u8>> {
     let blocksize = DiskTopology::probe(f)?.logical_block_size as usize;
     // SAFETY: We are allocating memory that is naturally aligned (size = alignment) and we meet
     // requirements for safety from Vec::from_raw_parts() as we are using the global allocator
@@ -593,7 +593,7 @@ enum BlockSize {
 
 impl DiskTopology {
     // libc::ioctl() takes different types on different architectures
-    fn query_block_size(f: &File, block_size_type: BlockSize) -> std::io::Result<u64> {
+    fn query_block_size(f: &File, block_size_type: BlockSize) -> io::Result<u64> {
         let mut block_size = 0;
         // SAFETY: FFI call with correct arguments
         let ret = unsafe {
@@ -609,7 +609,7 @@ impl DiskTopology {
             )
         };
         if ret != 0 {
-            return Err(std::io::Error::last_os_error());
+            return Err(io::Error::last_os_error());
         }
 
         Ok(block_size)
@@ -666,7 +666,7 @@ impl DiskTopology {
         SECTOR_SIZE
     }
 
-    pub fn probe(f: &File) -> std::io::Result<Self> {
+    pub fn probe(f: &File) -> io::Result<Self> {
         if !is_block_device(f.as_raw_fd()) {
             // For regular files opened with O_DIRECT, the logical block size
             // must reflect the filesystem DIO alignment so the guest issues
@@ -877,7 +877,7 @@ mod unit_tests {
 
     #[test]
     fn test_query_device_size_rejects_char_device() {
-        let f = std::fs::File::open("/dev/zero").unwrap();
+        let f = File::open("/dev/zero").unwrap();
         let err = query_device_size(&f).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
     }
