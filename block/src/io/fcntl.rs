@@ -201,20 +201,23 @@ pub fn try_acquire_lock<Fd: AsRawFd>(
 ) -> Result<(), LockError> {
     let flock = get_flock(lock_type, granularity);
 
-    let res = fcntl(file.as_raw_fd(), FcntlArg::F_OFD_SETLK(&flock));
-    match res {
-        0 => Ok(()),
-        -1 => {
-            let io_error = io::Error::last_os_error();
-            let errno = io_error.raw_os_error().unwrap();
-            match errno {
-                // See man page for error code:
-                // <https://man7.org/linux/man-pages/man2/fcntl.2.html>
-                libc::EAGAIN | libc::EACCES => Err(LockError::AlreadyLocked),
-                _ => Err(LockError::Io(io_error)),
+    loop {
+        let res = fcntl(file.as_raw_fd(), FcntlArg::F_OFD_SETLK(&flock));
+        match res {
+            0 => return Ok(()),
+            -1 => {
+                let io_error = io::Error::last_os_error();
+                let errno = io_error.raw_os_error().unwrap();
+                match errno {
+                    // See man page for error code:
+                    // <https://man7.org/linux/man-pages/man2/fcntl.2.html>
+                    libc::EAGAIN | libc::EACCES => return Err(LockError::AlreadyLocked),
+                    libc::EINTR => continue,
+                    _ => return Err(LockError::Io(io_error)),
+                }
             }
+            val => panic!("Unexpected return value from fcntl(): {val}"),
         }
-        val => panic!("Unexpected return value from fcntl(): {val}"),
     }
 }
 
