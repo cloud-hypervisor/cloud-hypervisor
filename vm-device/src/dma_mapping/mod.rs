@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 
+use std::io;
+
 /// Trait to trigger DMA mapping updates for devices managed by virtio-iommu
 ///
 /// Trait meant for triggering the DMA mapping update related to an external
@@ -10,8 +12,8 @@
 /// guest.
 pub trait ExternalDmaMapping: Send + Sync {
     /// Map a memory range
-    fn map(&self, iova: u64, gpa: u64, size: u64) -> std::result::Result<(), std::io::Error>;
+    fn map(&self, iova: u64, gpa: u64, size: u64) -> io::Result<()>;
 
     /// Unmap a memory range
-    fn unmap(&self, iova: u64, size: u64) -> std::result::Result<(), std::io::Error>;
+    fn unmap(&self, iova: u64, size: u64) -> io::Result<()>;
 }

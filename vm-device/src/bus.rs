@@ -10,7 +10,7 @@
 use std::cmp::Ordering;
 use std::collections::btree_map::BTreeMap;
 use std::sync::{Arc, Barrier, Mutex, RwLock, Weak};
-use std::{convert, io, result};
+use std::{convert, io, ptr, result};
 
 use thiserror::Error;
 
@@ -201,7 +201,7 @@ impl Bus {
 
         for (key, value) in device_list.iter() {
             let value = value.upgrade().unwrap();
-            if core::ptr::eq(Arc::as_ptr(&value), device) {
+            if ptr::eq(Arc::as_ptr(&value), device) {
                 remove_key_list.push(*key);
             }
         }
