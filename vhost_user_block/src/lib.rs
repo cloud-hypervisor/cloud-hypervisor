@@ -48,8 +48,8 @@ const BLK_SIZE: u32 = 512;
 // and the overhead of the emulation layer.
 const POLL_QUEUE_US: u128 = 50;
 
-type Result<T> = std::result::Result<T, Error>;
-type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
+type Result<T> = result::Result<T, Error>;
+type VhostUserBackendResult<T> = io::Result<T>;
 
 #[derive(Error, Debug)]
 enum Error {
