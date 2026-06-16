@@ -179,6 +179,8 @@ where
 
 #[cfg(test)]
 mod unit_tests {
+    use std::io;
+
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::{Queue, QueueT};
     use vm_memory::bitmap::AtomicBitmap;
@@ -401,10 +403,10 @@ mod unit_tests {
     }
 
     impl AccessPlatform for OffsetTranslator {
-        fn translate_gva(&self, base: u64, _size: u64) -> std::io::Result<u64> {
+        fn translate_gva(&self, base: u64, _size: u64) -> io::Result<u64> {
             Ok(base - self.gva_base + self.gpa_base)
         }
-        fn translate_gpa(&self, base: u64, _size: u64) -> std::io::Result<u64> {
+        fn translate_gpa(&self, base: u64, _size: u64) -> io::Result<u64> {
             Ok(base - self.gpa_base + self.gva_base)
         }
     }
@@ -436,11 +438,11 @@ mod unit_tests {
     struct FailingTranslator;
 
     impl AccessPlatform for FailingTranslator {
-        fn translate_gva(&self, _base: u64, _size: u64) -> std::io::Result<u64> {
-            Err(std::io::Error::other("translation failed"))
+        fn translate_gva(&self, _base: u64, _size: u64) -> io::Result<u64> {
+            Err(io::Error::other("translation failed"))
         }
-        fn translate_gpa(&self, _base: u64, _size: u64) -> std::io::Result<u64> {
-            Err(std::io::Error::other("translation failed"))
+        fn translate_gpa(&self, _base: u64, _size: u64) -> io::Result<u64> {
+            Err(io::Error::other("translation failed"))
         }
     }
 
