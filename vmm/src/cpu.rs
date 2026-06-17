@@ -563,11 +563,16 @@ impl Vcpu {
     /// * `kernel_entry_point` - Kernel entry point address in guest memory and boot protocol used.
     /// * `guest_memory` - Guest memory.
     /// * `cpuid` - (x86_64) CpuId, wrapper over the `kvm_cpuid2` structure.
+    #[cfg_attr(
+        all(target_arch = "x86_64", feature = "igvm"),
+        expect(clippy::too_many_arguments)
+    )]
     pub fn configure(
         &mut self,
         #[cfg(target_arch = "aarch64")] vm: &dyn hypervisor::Vm,
         boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
         #[cfg(target_arch = "x86_64")] cpuid: Vec<CpuIdEntry>,
+        #[cfg(target_arch = "x86_64")] feature_msrs: &[MsrEntry],
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
         #[cfg(target_arch = "x86_64")] topology: (u16, u16, u16, u16),
         #[cfg(target_arch = "x86_64")] nested: bool,
@@ -603,6 +608,7 @@ impl Vcpu {
                 self.id,
                 boot_setup,
                 cpuid,
+                feature_msrs,
                 kvm_hyperv,
                 self.vendor,
                 topology,
@@ -1138,6 +1144,7 @@ impl CpuManager {
         vcpu.configure(
             boot_setup,
             self.cpuid.clone(),
+            &self.feature_msrs,
             self.config.kvm_hyperv,
             topology,
             self.config.nested,
@@ -3478,7 +3485,7 @@ mod unit_tests {
             .create_vm(HypervisorVmConfig::default())
             .expect("new VM fd creation failed");
         let vcpu = vm.create_vcpu(0, None, vec![]).unwrap();
-        setup_msrs(vcpu.as_ref()).unwrap();
+        setup_msrs(vcpu.as_ref(), &[]).unwrap();
 
         // This test will check against the last MSR entry configured (the tenth one).
         // See create_msr_entries for details.
