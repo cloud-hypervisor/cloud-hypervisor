@@ -119,7 +119,7 @@ pub struct VhostUserNetBackend {
 }
 
 impl VhostUserNetBackend {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn new(
         ip_addr: IpAddr,
         host_mac: MacAddr,
