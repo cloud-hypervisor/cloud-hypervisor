@@ -3,19 +3,16 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-// TODO: Trim qualified paths in this crate, then drop this expectation.
-#![expect(clippy::absolute_paths)]
-
 // Custom harness to run performance tests
 mod micro_bench_block;
 mod performance_tests;
 mod util;
 
-use std::process::Command;
+use std::process::{self, Command};
 use std::sync::Arc;
 use std::sync::mpsc::channel;
 use std::time::Duration;
-use std::{env, fmt, thread};
+use std::{env, fmt, fs, io, panic, path, str, thread};
 
 use clap::{Arg, ArgAction, Command as ClapCommand};
 use performance_tests::*;
@@ -151,7 +148,7 @@ pub enum ImageFormat {
     Vhdx,
 }
 
-impl std::str::FromStr for ImageFormat {
+impl str::FromStr for ImageFormat {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -1733,7 +1730,7 @@ fn run_test_with_timeout(
                 test.name, test.control, overrides
             );
 
-            let output = match std::panic::catch_unwind(|| test.run(&overrides)) {
+            let output = match panic::catch_unwind(|| test.run(&overrides)) {
                 Ok(test_result) => {
                     println!(
                         "Test '{}' .. ok: mean = {}, std_dev = {}",
@@ -1914,7 +1911,7 @@ fn main() {
     {
         if overrides.vm_type == GuestVmType::Confidential {
             eprintln!("Confidential VM is currently not supported on Arm64");
-            std::process::exit(1);
+            process::exit(1);
         }
     }
 
@@ -1943,7 +1940,7 @@ fn main() {
                         .push(PerformanceTestResult::failed(test.name));
                 } else {
                     eprintln!("Aborting test due to error: '{e:?}'");
-                    std::process::exit(1);
+                    process::exit(1);
                 }
             }
         }
@@ -1953,18 +1950,18 @@ fn main() {
         cleanup_tests();
     }
 
-    let mut report_file: Box<dyn std::io::Write + Send> =
+    let mut report_file: Box<dyn io::Write + Send> =
         if let Some(file) = cmd_arguments.get_one::<String>("report-file") {
             Box::new(
-                std::fs::File::create(std::path::Path::new(file))
+                fs::File::create(path::Path::new(file))
                     .map_err(|e| {
                         eprintln!("Error opening report file: {file}: {e}");
-                        std::process::exit(1);
+                        process::exit(1);
                     })
                     .unwrap(),
             )
         } else {
-            Box::new(std::io::stdout())
+            Box::new(io::stdout())
         };
 
     report_file
@@ -1975,11 +1972,11 @@ fn main() {
         )
         .map_err(|e| {
             eprintln!("Error writing report file: {e}");
-            std::process::exit(1);
+            process::exit(1);
         })
         .unwrap();
 
     if has_failure {
-        std::process::exit(1);
+        process::exit(1);
     }
 }
