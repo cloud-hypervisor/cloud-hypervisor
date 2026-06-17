@@ -27,7 +27,7 @@ use std::result;
 use std::sync::Arc;
 
 use log::warn;
-use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::pem::{self, PemObject};
 use rustls::pki_types::{CertificateDer, InvalidDnsNameError, PrivateKeyDer, ServerName};
 use rustls::server::{VerifierBuilderError, WebPkiClientVerifier};
 use rustls::{
@@ -182,13 +182,13 @@ pub enum TlsError {
     RustlsVerifierBuilderError(#[source] VerifierBuilderError),
 
     #[error("Rustls protocol IO error")]
-    RustlsIoError(#[from] std::io::Error),
+    RustlsIoError(#[from] io::Error),
 
     #[error("TLS handshake stalled: no read/write progress while handshake is still in progress")]
     HandshakeError,
 
     #[error("Error handling PEM file")]
-    RustlsPemError(#[from] rustls::pki_types::pem::Error),
+    RustlsPemError(#[from] pem::Error),
 }
 
 /// Wraps the concrete rustls stream for either side (server or client) of the
@@ -478,7 +478,7 @@ fn load_private_key(key_path: &Path) -> result::Result<PrivateKeyDer<'static>, M
 mod tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
-    use std::{fs, process};
+    use std::{env, fs, process};
 
     use super::*;
 
@@ -492,7 +492,7 @@ mod tests {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let path = std::env::temp_dir().join(format!(
+            let path = env::temp_dir().join(format!(
                 "cloud-hypervisor-{name}-{}-{unique}",
                 process::id()
             ));
