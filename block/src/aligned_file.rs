@@ -5,11 +5,10 @@
 use std::fs::File;
 use std::io;
 use std::os::unix::fs::FileExt;
+use std::os::unix::io::AsRawFd;
 
 use crate::aligned_buffer::AlignedBuffer;
-
-/// O_DIRECT block-alignment candidates, smallest first.
-const BLK_ALIGNMENTS: [usize; 2] = [512, 4096];
+use crate::{SECTOR_SIZE, probe_direct_alignment};
 
 /// True when `buf_ptr`/`len`/`offset` already satisfy `alignment`
 /// (`alignment == 0` means no O_DIRECT, so everything is "aligned").
@@ -32,21 +31,13 @@ pub(crate) struct AlignedFile {
 }
 
 impl AlignedFile {
-    /// Wrap `file`, probing the O_DIRECT block alignment when `direct_io`.
+    /// Wrap `file`, querying the O_DIRECT block alignment when `direct_io`.
     pub fn new(file: File, direct_io: bool) -> Self {
-        let mut alignment = 0;
-        if direct_io {
-            for align in &BLK_ALIGNMENTS {
-                // Probe: an aligned read at `align` succeeds (a short read at
-                // EOF still counts) iff the fd accepts that O_DIRECT block size.
-                let ok = AlignedBuffer::new(*align as u64, *align, *align)
-                    .is_ok_and(|mut b| b.read_from(&file).is_ok());
-                if ok {
-                    alignment = *align;
-                    break;
-                }
-            }
-        }
+        let alignment = if direct_io {
+            probe_direct_alignment(file.as_raw_fd()).unwrap_or(SECTOR_SIZE) as usize
+        } else {
+            0
+        };
         AlignedFile { file, alignment }
     }
 
@@ -130,8 +121,8 @@ mod tests {
     #[test]
     fn new_probes_alignment_and_accessors() {
         let tf = pattern_file(8192);
-        // Non-O_DIRECT tempfile: an aligned read at `align` still succeeds,
-        // so the probe selects 512 (exercises new + probe).
+        // A tempfile is not O_DIRECT, so probe_direct_alignment reports
+        // None and new() falls back to SECTOR_SIZE (512).
         let mut af = AlignedFile::new(tf.as_file().try_clone().unwrap(), true);
         assert_eq!(af.alignment(), 512);
         let _ = af.file();
