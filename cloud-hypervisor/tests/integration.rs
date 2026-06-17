@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 #![cfg(any(devcli_testenv, clippy))]
-#![allow(clippy::undocumented_unsafe_blocks)]
+#![expect(clippy::undocumented_unsafe_blocks)]
 // TODO: Trim qualified paths in this crate, then drop this expectation.
 #![expect(clippy::absolute_paths)]
 // When enabling the `mshv` feature, we skip quite some tests and
