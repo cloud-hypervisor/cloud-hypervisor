@@ -116,10 +116,8 @@ impl Write for SerialBuffer {
 }
 
 #[cfg(test)]
-// TODO: Trim qualified paths in these tests, then drop this expectation.
-#[expect(clippy::absolute_paths)]
 mod tests {
-    use std::io::Write;
+    use std::io::{self, Write};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
 
@@ -140,11 +138,11 @@ mod tests {
     }
 
     impl Write for TestSink {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
             self.0.lock().unwrap().extend_from_slice(buf);
             Ok(buf.len())
         }
-        fn flush(&mut self) -> std::io::Result<()> {
+        fn flush(&mut self) -> io::Result<()> {
             Ok(())
         }
     }
@@ -154,7 +152,7 @@ mod tests {
     #[test]
     fn accumulates_while_detached_then_replays_on_connect() {
         let write_out = Arc::new(AtomicBool::new(false));
-        let mut buf = SerialBuffer::new(Box::new(std::io::sink()), write_out.clone());
+        let mut buf = SerialBuffer::new(Box::new(io::sink()), write_out.clone());
 
         buf.write_all(b"boot: hello\n").unwrap();
         buf.write_all(b"login: ").unwrap();
@@ -171,7 +169,7 @@ mod tests {
     #[test]
     fn live_writes_pass_through_after_connect() {
         let write_out = Arc::new(AtomicBool::new(false));
-        let mut buf = SerialBuffer::new(Box::new(std::io::sink()), write_out.clone());
+        let mut buf = SerialBuffer::new(Box::new(io::sink()), write_out.clone());
 
         let sink = TestSink::new();
         buf.set_out(Box::new(sink.clone()));
@@ -187,7 +185,7 @@ mod tests {
     #[test]
     fn output_while_detached_goes_to_next_client() {
         let write_out = Arc::new(AtomicBool::new(false));
-        let mut buf = SerialBuffer::new(Box::new(std::io::sink()), write_out.clone());
+        let mut buf = SerialBuffer::new(Box::new(io::sink()), write_out.clone());
 
         // First client: connects, drains "early\n", then disconnects.
         let first = TestSink::new();
@@ -198,7 +196,7 @@ mod tests {
 
         // Disconnect: detach to a discarding sink, keep accumulating.
         write_out.store(false, Ordering::Release);
-        buf.set_out(Box::new(std::io::sink()));
+        buf.set_out(Box::new(io::sink()));
         buf.write_all(b"while-away\n").unwrap();
 
         // Second client: receives what was produced while no one was attached.
@@ -214,7 +212,7 @@ mod tests {
     #[test]
     fn drained_bytes_are_not_resent_to_a_second_client() {
         let write_out = Arc::new(AtomicBool::new(false));
-        let mut buf = SerialBuffer::new(Box::new(std::io::sink()), write_out.clone());
+        let mut buf = SerialBuffer::new(Box::new(io::sink()), write_out.clone());
 
         buf.write_all(b"boot log\n").unwrap();
 
@@ -227,7 +225,7 @@ mod tests {
 
         // First disconnects; no new output is produced while detached.
         write_out.store(false, Ordering::Release);
-        buf.set_out(Box::new(std::io::sink()));
+        buf.set_out(Box::new(io::sink()));
 
         // Second client connects: nothing left to deliver.
         let second = TestSink::new();
