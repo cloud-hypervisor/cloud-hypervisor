@@ -727,6 +727,35 @@ jobs:
       - name: Run rate-limiter integration tests
         timeout-minutes: 20
         run: scripts/dev_cli.sh tests --integration-rate-limiter
+  integration-sev-snp:
+    name: integration-sev-snp
+    needs: [preflight, dco, quality, build]
+    if: >-
+      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
+    timeout-minutes: 30
+    runs-on: noble-sevsnp
+    steps:
+      # Self-hosted runners reuse their workdir; a previous privileged
+      # container run can leave root-owned files behind.
+      - name: Fix workspace permissions
+        run: sudo chown -R "$(id -un):$(id -gn)" "${GITHUB_WORKSPACE}"
+      - name: Code checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Sanity-check SEV-SNP prerequisites
+        run: |
+          set -eufo pipefail
+          echo "Checking hypervisor device nodes..."
+          test -e /dev/kvm || { echo "::error::/dev/kvm missing"; exit 1; }
+          test -e /dev/sev || { echo "::error::/dev/sev missing"; exit 1; }
+          echo "Checking staged IGVM/kernel artifacts..."
+          test -d /usr/share/cloud-hypervisor/cvm \
+            || { echo "::error::/usr/share/cloud-hypervisor/cvm missing"; exit 1; }
+          ls -l /usr/share/cloud-hypervisor/cvm
+      - name: Run CVM (SEV-SNP) integration tests
+        timeout-minutes: 20
+        run: scripts/dev_cli.sh tests --integration-cvm --hypervisor kvm
   # The single required-status check. Branch protection requires this one job.
   all-green:
     name: all-green
@@ -739,6 +768,7 @@ jobs:
       - gitlint
       - hadolint
       - integration-arm64
+      - integration-sev-snp
       # VFIO worker is failing #8160
       # - integration-vfio
       - integration-windows
