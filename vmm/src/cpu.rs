@@ -234,6 +234,9 @@ pub enum Error {
 
     #[error("Error enabling core scheduling")]
     CoreScheduling(#[source] io::Error),
+
+    #[error("Error generating MSR configuration update")]
+    MsrConfigurationUpdate(#[source] arch::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -709,6 +712,8 @@ pub struct CpuManager {
     interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
     #[cfg(target_arch = "x86_64")]
     cpuid: Vec<CpuIdEntry>,
+    #[cfg(target_arch = "x86_64")]
+    msr_config_update: Option<VcpuMsrConfigUpdate>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     vm: Arc<dyn hypervisor::Vm>,
     vcpus_kill_signalled: Arc<AtomicBool>,
@@ -932,11 +937,22 @@ impl CpuManager {
             .map_err(Error::CommonCpuId)?
         };
 
+        #[cfg(target_arch = "x86_64")]
+        let msr_config_update = arch::x86_64::generate_required_msr_updates(
+            hypervisor.as_ref(),
+            config.profile,
+            config.kvm_hyperv,
+            config.nested,
+        )
+        .map_err(Error::MsrConfigurationUpdate)?;
+
         Ok(Arc::new(Mutex::new(CpuManager {
             config: config.clone(),
             interrupt_controller: None,
             #[cfg(target_arch = "x86_64")]
             cpuid,
+            #[cfg(target_arch = "x86_64")]
+            msr_config_update,
             vm,
             vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
             vcpus_pause_signalled: Arc::new(AtomicBool::new(false)),
@@ -986,7 +1002,7 @@ impl CpuManager {
             #[cfg(target_arch = "x86_64")]
             self.hypervisor.get_cpu_vendor(),
             #[cfg(target_arch = "x86_64")]
-            Default::default(),
+            self.msr_config_update.clone(),
         )?;
 
         if let Some(snapshot) = snapshot {
