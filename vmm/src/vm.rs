@@ -821,15 +821,17 @@ impl Vm {
         .map_err(Error::CpuManager)?;
 
         #[cfg(target_arch = "x86_64")]
-        cpu_manager
-            .lock()
-            .unwrap()
-            .populate_cpuid(
-                hypervisor.as_ref(),
-                #[cfg(feature = "tdx")]
-                tdx_enabled,
-            )
-            .map_err(Error::CpuManager)?;
+        {
+            let mut guard = cpu_manager.lock().unwrap();
+            guard
+                .populate_cpuid(
+                    hypervisor.as_ref(),
+                    #[cfg(feature = "tdx")]
+                    tdx_enabled,
+                )
+                .map_err(Error::CpuManager)?;
+            guard.prepare_msr_updates().map_err(Error::CpuManager)?;
+        }
 
         Ok(cpu_manager)
     }

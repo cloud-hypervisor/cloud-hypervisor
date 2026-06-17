@@ -26,6 +26,8 @@ use anyhow::anyhow;
 #[cfg(target_arch = "x86_64")]
 use arch::x86_64;
 #[cfg(target_arch = "x86_64")]
+use arch::x86_64::cpu_profile::msr_adjustments::RequiredMsrUpdates;
+#[cfg(target_arch = "x86_64")]
 use arch::x86_64::get_x2apic_id;
 use arch::{EntryPoint, NumaNodes, layout};
 #[cfg(target_arch = "aarch64")]
@@ -234,6 +236,14 @@ pub enum Error {
 
     #[error("Error enabling core scheduling")]
     CoreScheduling(#[source] io::Error),
+
+    #[error(
+        "Failed to prepare MSR updates required by the chosen CPU profile: one or more MSR compatibility checks failed"
+    )]
+    MsrUpdateCompatibilityCheck(#[source] arch::Error),
+
+    #[error("Failed to set MSR filter according to the chosen CPU profile")]
+    CpuProfileMsrFilter(#[source] hypervisor::HypervisorVmError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -724,6 +734,8 @@ pub struct CpuManager {
     cpuid: Vec<CpuIdEntry>,
     #[cfg(target_arch = "x86_64")]
     msr_state_buffer: Vec<MsrEntry>,
+    #[cfg(target_arch = "x86_64")]
+    feature_msrs: Vec<MsrEntry>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     vm: Arc<dyn hypervisor::Vm>,
     vcpus_kill_signalled: Arc<AtomicBool>,
@@ -942,6 +954,8 @@ impl CpuManager {
                 .into_iter()
                 .map(|index| MsrEntry { index, data: 0 })
                 .collect(),
+            #[cfg(target_arch = "x86_64")]
+            feature_msrs: Vec::new(),
             vm,
             vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
             vcpus_pause_signalled: Arc::new(AtomicBool::new(false)),
@@ -991,6 +1005,35 @@ impl CpuManager {
             .map_err(Error::CommonCpuId)?
         };
 
+        Ok(())
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    /// Prepares the CpuManager for MSR related updates associated with the chosen CPU profile (if any).
+    ///
+    /// This includes:
+    /// - Storing feature MSRs to be set upon vCPU configuration.
+    /// - Setting up a filter to deny the guest from accessing MSRs deemed incompatible with the selected CPU profile.
+    ///
+    /// This method is effectively a no-op if the selected CPU profile is "Host".
+    pub fn prepare_msr_updates(&mut self) -> Result<()> {
+        let cpu_profile = self.config.profile;
+        let kvm_hyperv = self.config.kvm_hyperv;
+        if let Some(RequiredMsrUpdates {
+            feature_msrs,
+            denied_msrs,
+        }) =
+            x86_64::generate_required_msr_updates(self.hypervisor.as_ref(), cpu_profile, kvm_hyperv)
+                .map_err(Error::MsrUpdateCompatibilityCheck)?
+        {
+            self.feature_msrs = feature_msrs;
+            // Remove denied MSRs from the internal MSR state buffer
+            self.msr_state_buffer
+                .retain(|msr_entry| !denied_msrs.contains(&msr_entry.index));
+            self.vm
+                .deny_msrs(denied_msrs.into_iter().collect())
+                .map_err(Error::CpuProfileMsrFilter)?;
+        }
         Ok(())
     }
 
