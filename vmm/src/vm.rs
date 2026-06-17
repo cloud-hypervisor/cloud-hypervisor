@@ -1988,6 +1988,16 @@ impl Vm {
 
         // TODO: PMU support for riscv64 is scheduled to next stage.
 
+        let timebase_frequency = self
+            .cpu_manager
+            .lock()
+            .unwrap()
+            .vcpus()
+            .first()
+            .and_then(|vcpu| vcpu.lock().unwrap().get_timebase_frequency().ok())
+            .map(|f| f as u32)
+            .unwrap_or(0x989680);
+
         arch::configure_system(
             &mem,
             cmdline.as_cstring().unwrap().to_str().unwrap(),
@@ -1996,6 +2006,7 @@ impl Vm {
             &initramfs_config,
             &pci_space_info,
             &vaia,
+            timebase_frequency,
         )
         .map_err(Error::ConfigureSystem)?;
 

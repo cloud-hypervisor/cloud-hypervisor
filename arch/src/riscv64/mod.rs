@@ -168,6 +168,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
     initrd: &Option<super::InitramfsConfig>,
     pci_space_info: &[PciSpaceInfo],
     aia_device: &Arc<Mutex<dyn Vaia>>,
+    timebase_frequency: u32,
 ) -> super::Result<()> {
     let isa_string = isa_string_from_host()?;
     let fdt_final = fdt::create_fdt(
@@ -179,6 +180,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
         aia_device,
         initrd,
         pci_space_info,
+        timebase_frequency,
     )
     .map_err(|_| Error::SetupFdt)?;
 

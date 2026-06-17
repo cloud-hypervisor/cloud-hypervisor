@@ -71,6 +71,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     aia_device: &Arc<Mutex<dyn Vaia>>,
     initrd: &Option<InitramfsConfig>,
     pci_space_info: &[PciSpaceInfo],
+    timebase_frequency: u32,
 ) -> FdtWriterResult<Vec<u8>> {
     // Allocate stuff necessary for the holding the blob.
     let mut fdt = FdtWriter::new()?;
@@ -86,7 +87,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     // Properties
     fdt.property_u32("#address-cells", ADDRESS_CELLS)?;
     fdt.property_u32("#size-cells", SIZE_CELLS)?;
-    create_cpu_nodes(&mut fdt, num_vcpu, isa_string)?;
+    create_cpu_nodes(&mut fdt, num_vcpu, isa_string, timebase_frequency)?;
     create_memory_node(&mut fdt, guest_mem)?;
     create_chosen_node(&mut fdt, cmdline, initrd)?;
     create_aia_node(&mut fdt, aia_device)?;
@@ -110,14 +111,17 @@ pub fn write_fdt_to_memory(fdt_final: &[u8], guest_mem: &GuestMemoryMmap) -> Res
 }
 
 // Following are the auxiliary function for creating the different nodes that we append to our FDT.
-fn create_cpu_nodes(fdt: &mut FdtWriter, num_cpus: u32, isa_string: &str) -> FdtWriterResult<()> {
+fn create_cpu_nodes(
+    fdt: &mut FdtWriter,
+    num_cpus: u32,
+    isa_string: &str,
+    timebase_frequency: u32,
+) -> FdtWriterResult<()> {
     // See https://elixir.bootlin.com/linux/v6.10/source/Documentation/devicetree/bindings/riscv/cpus.yaml
     let cpus = fdt.begin_node("cpus")?;
     // As per documentation, on RISC-V 64-bit systems value should be set to 1.
     fdt.property_u32("#address-cells", 0x01)?;
     fdt.property_u32("#size-cells", 0x0)?;
-    // TODO: Retrieve CPU frequency from cpu timer regs
-    let timebase_frequency: u32 = 0x989680;
     fdt.property_u32("timebase-frequency", timebase_frequency)?;
 
     for cpu_index in 0..num_cpus {
