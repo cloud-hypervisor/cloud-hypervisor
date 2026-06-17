@@ -5,7 +5,7 @@
 
 use std::os::unix::io::RawFd;
 use std::path::Path;
-use std::{mem, ptr};
+use std::{io, mem, ptr};
 
 use anyhow::anyhow;
 use libc::{sockaddr_storage, socklen_t};
@@ -150,7 +150,7 @@ impl Emulator {
             if ret == -1 {
                 return Err(Error::PrepareDataFd(anyhow!(
                     "Failed to prepare data fd for tpm emulator. Error Code {:?}",
-                    std::io::Error::last_os_error()
+                    io::Error::last_os_error()
                 )));
             }
         }
@@ -164,13 +164,13 @@ impl Emulator {
                 if libc::close(fds[0]) == -1 {
                     error!(
                         "Failed to close TPM data fd after CmdSetDatafd failure: {:?}",
-                        std::io::Error::last_os_error()
+                        io::Error::last_os_error()
                     );
                 }
                 if libc::close(fds[1]) == -1 {
                     error!(
                         "Failed to close TPM swtpm fd after CmdSetDatafd failure: {:?}",
-                        std::io::Error::last_os_error()
+                        io::Error::last_os_error()
                     );
                 }
             }
@@ -181,7 +181,7 @@ impl Emulator {
             if libc::close(fds[1]) == -1 {
                 error!(
                     "Failed to close local TPM swtpm fd: {:?}",
-                    std::io::Error::last_os_error()
+                    io::Error::last_os_error()
                 );
             }
         }
@@ -199,12 +199,12 @@ impl Emulator {
                 libc::SOL_SOCKET,
                 libc::SO_RCVTIMEO,
                 (&raw const tv).cast(),
-                std::mem::size_of::<libc::timeval>() as u32,
+                mem::size_of::<libc::timeval>() as u32,
             );
             if ret == -1 {
                 return Err(Error::PrepareDataFd(anyhow!(
                     "Failed to set receive timeout on data fd socket. Error Code {:?}",
-                    std::io::Error::last_os_error()
+                    io::Error::last_os_error()
                 )));
             }
         }
@@ -422,7 +422,7 @@ impl Emulator {
             if ret == -1 {
                 return Err(Error::SendReceive(anyhow!(
                     "Failed to send tpm command over Data FD. Error Code {:?}",
-                    std::io::Error::last_os_error()
+                    io::Error::last_os_error()
                 )));
             }
         }
@@ -441,7 +441,7 @@ impl Emulator {
             if ret == -1 {
                 return Err(Error::SendReceive(anyhow!(
                     "Failed to receive response for tpm command over Data FD. Error Code {:?}",
-                    std::io::Error::last_os_error()
+                    io::Error::last_os_error()
                 )));
             }
             output_len = ret as usize;
@@ -554,7 +554,7 @@ impl Drop for Emulator {
                 if libc::close(self.data_fd) == -1 {
                     error!(
                         "Failed to close TPM data fd: {:?}",
-                        std::io::Error::last_os_error()
+                        io::Error::last_os_error()
                     );
                 }
             }
