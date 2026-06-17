@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#![allow(clippy::undocumented_unsafe_blocks)]
+#![expect(clippy::undocumented_unsafe_blocks)]
 // TODO: Trim qualified paths in this crate, then drop this expectation.
 #![expect(clippy::absolute_paths)]
 
@@ -721,7 +721,7 @@ pub fn rate_limited_copy<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::
     Err(io::Error::last_os_error())
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[expect(clippy::needless_pass_by_value)]
 pub fn handle_child_output(
     r: Result<(), std::boxed::Box<dyn std::any::Any + std::marker::Send>>,
     output: &std::process::Output,
