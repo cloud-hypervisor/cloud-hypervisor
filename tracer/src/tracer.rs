@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#![allow(static_mut_refs)]
+#![expect(static_mut_refs)]
 
 use std::cell::OnceCell;
 use std::collections::HashMap;
