@@ -40,6 +40,8 @@ use crate::async_io::{
 /// before the host offset is known.
 pub struct QcowAsync {
     metadata: Arc<QcowMetadata>,
+    // Drop before data_file so pending SQEs can be submitted while fd is valid.
+    data_io: UringDataIo,
     data_file: QcowRawFile,
     backing_file: Option<Arc<dyn BackingRead>>,
     sparse: bool,
@@ -49,7 +51,6 @@ pub struct QcowAsync {
     io_alignment: u64,
     cluster_size: u64,
     decoder: Arc<dyn Decoder>,
-    data_io: UringDataIo,
 }
 
 impl QcowAsync {
@@ -67,12 +68,12 @@ impl QcowAsync {
             cluster_size: metadata.cluster_size(),
             decoder: metadata.decoder(),
             metadata,
+            data_io: UringDataIo::new(ring_depth)?,
             data_file,
             backing_file,
             sparse,
             alignment,
             io_alignment,
-            data_io: UringDataIo::new(ring_depth)?,
         })
     }
 

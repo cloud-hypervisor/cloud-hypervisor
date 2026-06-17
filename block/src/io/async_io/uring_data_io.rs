@@ -5,11 +5,11 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::collections::{HashMap, VecDeque};
-use std::io;
 use std::os::fd::{AsRawFd, RawFd};
+use std::{io, mem};
 
 use io_uring::{IoUring, opcode, squeue, types};
-use log::warn;
+use log::{error, warn};
 use vmm_sys_util::eventfd::EventFd;
 
 use super::common::{duplicate_user_data_error, validate_batch};
@@ -19,9 +19,6 @@ use super::{AsyncIoCompletion, AsyncIoOperation};
 ///
 /// Holds the `IoUring` and its `EventFd`. Tracks ops that are pending.
 pub struct UringDataIo {
-    // Keep `io_uring` before `in_flight`. Rust drops fields in declaration
-    // order, so dropping the ring tears down kernel access before retained
-    // operations release the buffers referenced by their iovecs.
     io_uring: IoUring,
     // The `EventFd` for completion signals.
     eventfd: EventFd,
@@ -270,6 +267,54 @@ impl UringDataIo {
     }
 }
 
+impl Drop for UringDataIo {
+    fn drop(&mut self) {
+        // Closing the ring fd does not cancel io_uring ops that have started.
+        // Wait for CQEs before releasing retained iovecs.
+        if self.needs_submit_retry {
+            if let Err(e) = self.io_uring.submitter().submit() {
+                warn!("io_uring drain submit failed for retained SQEs: {e}");
+            }
+            self.needs_submit_retry = false;
+        }
+
+        let max_drain_iterations = self.in_flight.len().saturating_mul(2);
+        let mut drain_iterations = 0;
+        while !self.in_flight.is_empty() {
+            if drain_iterations == max_drain_iterations {
+                error!(
+                    "io_uring drain abandoned with {} operations still in flight after {} drain iterations",
+                    self.in_flight.len(),
+                    drain_iterations
+                );
+                // Keep retained buffers mapped if the ring cannot be drained.
+                mem::forget(mem::take(&mut self.in_flight));
+                break;
+            }
+            drain_iterations += 1;
+
+            if let Some(entry) = self.io_uring.completion().next() {
+                self.in_flight.remove(&entry.user_data());
+                continue;
+            }
+
+            // No completion ready: block in the kernel until at least one is.
+            if let Err(e) = self.io_uring.submitter().submit_and_wait(1) {
+                if e.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                error!(
+                    "io_uring drain abandoned with {} operations still in flight: {e}",
+                    self.in_flight.len()
+                );
+                // Keep retained buffers mapped if the ring cannot be drained.
+                mem::forget(mem::take(&mut self.in_flight));
+                break;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io;
@@ -326,6 +371,29 @@ mod tests {
         let completion = wait_for_completion(&mut data_io);
         assert_eq!(completion.user_data, 7);
         assert_eq!(completion.result, 512);
+    }
+
+    #[test]
+    fn uring_drop_drains_in_flight_operations() {
+        let file = TempFile::new().unwrap().into_file();
+        file.set_len(8192).unwrap();
+        let fd = file.as_raw_fd();
+        let mut data_io = UringDataIo::new(8).unwrap();
+
+        for user_data in 0..4 {
+            data_io
+                .submit_operation(
+                    fd,
+                    AsyncIoOperation::read_to_vec(
+                        0,
+                        OwnedIoBuffer::from_vec(vec![0; 512]),
+                        user_data,
+                    ),
+                )
+                .unwrap();
+        }
+
+        drop(data_io);
     }
 
     #[test]
