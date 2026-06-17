@@ -34,7 +34,7 @@ pub enum LockError {
 }
 
 /// Commands for use with [`fcntl`].
-#[allow(non_camel_case_types)]
+#[expect(non_camel_case_types)]
 enum FcntlArg<'a> {
     /// Set an OFD lock from the given lock description.
     F_OFD_SETLK(&'a libc::flock),
