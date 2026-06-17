@@ -321,7 +321,7 @@ impl QcowAsync {
     /// Returns `Some(host_offset)` if the entire read falls within a single
     /// allocated cluster (fast path). Otherwise handles the read
     /// synchronously via `scatter_read_sync` and returns `None`.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn resolve_read(
         metadata: &QcowMetadata,
         data_file: &QcowRawFile,
