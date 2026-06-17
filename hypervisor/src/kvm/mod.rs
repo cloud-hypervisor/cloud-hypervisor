@@ -3346,9 +3346,14 @@ impl cpu::Vcpu for KvmVcpu {
     /// vm.enable_split_irq().unwrap();
     /// let vcpu = vm.create_vcpu(0, None, vec![]).unwrap();
     /// let state = vcpu.state().unwrap();
-    /// vcpu.set_state(&state).unwrap();
+    /// let crucial_msrs = &[];
+    /// vcpu.set_state(&state, crucial_msrs).unwrap();
     /// ```
-    fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
+    fn set_state(
+        &self,
+        state: &CpuState,
+        #[cfg(target_arch = "x86_64")] crucial_msrs: &[u32],
+    ) -> cpu::Result<()> {
         let state: VcpuKvmState = state.clone().into();
         self.set_cpuid2(&state.cpuid)?;
         self.set_mp_state(state.mp_state.into())?;
@@ -3385,7 +3390,10 @@ impl cpu::Vcpu for KvmVcpu {
         let num_msrs = self.set_msrs(&state.msrs)?;
         if num_msrs != expected_num_msrs {
             let mut faulty_msr_index = num_msrs;
-
+            let msr_address = state.msrs[faulty_msr_index].index;
+            if crucial_msrs.contains(&msr_address) {
+                return Err(cpu::HypervisorCpuError::SetCrucialMsr { msr_address });
+            }
             loop {
                 warn!(
                     "Detected faulty MSR 0x{:x} while setting MSRs",

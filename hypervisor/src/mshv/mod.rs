@@ -1467,7 +1467,8 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Set CPU state for x86_64 guest.
     ///
-    fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
+    fn set_state(&self, state: &CpuState, _crucial_msrs: &[u32]) -> cpu::Result<()> {
+        // TODO: Take crucial_msrs into account if/when incorporating CPU profile support for MSHV.
         let mut state: VcpuMshvState = state.clone().into();
         self.set_msrs(&state.msrs)?;
         self.set_vcpu_events(&state.vcpu_events)?;

@@ -1085,8 +1085,19 @@ impl CpuManager {
                 vcpu.finalize_sve()?;
             }
 
+            // Note that in the case of CPU profiles we can only trust
+            // compatibility with the profile if `set_state` manages to set all
+            // feature MSRs.
             vcpu.vcpu
-                .set_state(&state)
+                .set_state(
+                    &state,
+                    #[cfg(target_arch = "x86_64")]
+                    &self
+                        .feature_msrs
+                        .iter()
+                        .map(|msr| msr.index)
+                        .collect::<Vec<u32>>(),
+                )
                 .map_err(|e| Error::VcpuCreate(anyhow!("Could not set the vCPU state {e:?}")))?;
 
             vcpu.saved_state = Some(state);

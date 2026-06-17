@@ -100,6 +100,12 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to set Msr entries")]
     SetMsrEntries(#[source] anyhow::Error),
+
+    ///
+    /// Setting crucial MSR entry failed
+    ///
+    #[error("Failed to set crucial MSR msr:={msr_address}")]
+    SetCrucialMsr { msr_address: u32 },
     ///
     /// Getting Msr entries error
     ///
@@ -573,9 +579,17 @@ pub trait Vcpu: Send + Sync {
     fn state(&self) -> Result<CpuState>;
     ///
     /// Set the vCPU state.
-    /// This function is required when restoring the VM
+    /// This function is required when restoring the VM.
     ///
-    fn set_state(&self, state: &CpuState) -> Result<()>;
+    /// On x86_64 there is an additional argument `crucial_msrs`
+    /// instructing the implementer that an error should be
+    /// returned if any MSRS in this slice failed to be set.
+    ///
+    fn set_state(
+        &self,
+        state: &CpuState,
+        #[cfg(target_arch = "x86_64")] crucial_msrs: &[u32],
+    ) -> Result<()>;
     ///
     /// Triggers the running of the current virtual CPU returning an exit reason.
     ///
