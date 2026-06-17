@@ -3,6 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
+// TODO: Trim qualified paths in this crate, then drop this expectation.
+#![expect(clippy::absolute_paths)]
+
 use std::collections::BTreeMap;
 use std::{io, result};
 

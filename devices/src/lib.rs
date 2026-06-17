@@ -7,6 +7,9 @@
 
 //! Emulates virtual and hardware devices.
 
+// TODO: Trim qualified paths in this crate, then drop this expectation.
+#![cfg_attr(target_arch = "x86_64", expect(clippy::absolute_paths))]
+
 pub mod acpi;
 #[cfg(target_arch = "riscv64")]
 pub mod aia;

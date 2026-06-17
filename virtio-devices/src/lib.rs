@@ -10,6 +10,9 @@
 
 //! Implements virtio devices, queues, and transport mechanisms.
 
+// TODO: Trim qualified paths in this crate, then drop this expectation.
+#![expect(clippy::absolute_paths)]
+
 use std::io;
 use std::sync::atomic::{AtomicU8, Ordering};
 

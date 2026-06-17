@@ -8,6 +8,9 @@
 //! Implements platform specific functionality.
 //! Supported platforms: x86_64, aarch64, riscv64.
 
+// TODO: Trim qualified paths in this crate, then drop this expectation.
+#![expect(clippy::absolute_paths)]
+
 use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::Arc;
