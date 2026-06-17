@@ -818,6 +818,7 @@ impl Vm {
             igvm_enabled,
         )
         .map_err(Error::CpuManager)?;
+
         Ok(cpu_manager)
     }
 
