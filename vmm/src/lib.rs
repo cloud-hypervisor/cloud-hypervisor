@@ -660,14 +660,6 @@ impl VmOwnership {
             VmOwnership::None => Err(none_error),
         }
     }
-
-    /// Returns an error if the VM is currently migrated.
-    fn ok_or_migrating(&self) -> result::Result<(), VmError> {
-        match self {
-            VmOwnership::Migration { .. } => Err(VmError::VmMigrating),
-            _ => Ok(()),
-        }
-    }
 }
 
 pub struct Vmm {
@@ -1712,73 +1704,78 @@ impl Vmm {
         prefault: bool,
         memory_restore_mode: MemoryRestoreMode,
     ) -> std::result::Result<(), VmError> {
-        self.vm.ok_or_migrating()?;
+        match &self.vm {
+            VmOwnership::Owned(_) => Err(VmError::VmAlreadyCreated),
+            VmOwnership::Migration { .. } => Err(VmError::VmMigrating),
+            VmOwnership::None => {
+                let snapshot = recv_vm_state(source_url).map_err(VmError::Restore)?;
+                #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+                let vm_snapshot = get_vm_snapshot(&snapshot).map_err(VmError::Restore)?;
 
-        let snapshot = recv_vm_state(source_url).map_err(VmError::Restore)?;
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-        let vm_snapshot = get_vm_snapshot(&snapshot).map_err(VmError::Restore)?;
+                #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+                self.vm_check_cpuid_compatibility(&vm_config, &vm_snapshot.common_cpuid)
+                    .map_err(VmError::Restore)?;
 
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-        self.vm_check_cpuid_compatibility(&vm_config, &vm_snapshot.common_cpuid)
-            .map_err(VmError::Restore)?;
+                self.vm_config = Some(Arc::clone(&vm_config));
 
-        self.vm_config = Some(Arc::clone(&vm_config));
+                // Always re-populate the 'console_info' based on the new 'vm_config'
+                self.console_info =
+                    Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
 
-        // Always re-populate the 'console_info' based on the new 'vm_config'
-        self.console_info =
-            Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
+                let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
+                let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
+                let guest_exit_evt = self
+                    .guest_exit_evt
+                    .try_clone()
+                    .map_err(VmError::EventFdClone)?;
+                #[cfg(feature = "guest_debug")]
+                let debug_evt = self
+                    .vm_debug_evt
+                    .try_clone()
+                    .map_err(VmError::EventFdClone)?;
+                let activate_evt = self
+                    .activate_evt
+                    .try_clone()
+                    .map_err(VmError::EventFdClone)?;
 
-        let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
-        let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
-        let guest_exit_evt = self
-            .guest_exit_evt
-            .try_clone()
-            .map_err(VmError::EventFdClone)?;
-        #[cfg(feature = "guest_debug")]
-        let debug_evt = self
-            .vm_debug_evt
-            .try_clone()
-            .map_err(VmError::EventFdClone)?;
-        let activate_evt = self
-            .activate_evt
-            .try_clone()
-            .map_err(VmError::EventFdClone)?;
+                let mut vm = Vm::new(
+                    vm_config,
+                    exit_evt,
+                    reset_evt,
+                    guest_exit_evt,
+                    #[cfg(feature = "guest_debug")]
+                    debug_evt,
+                    &self.seccomp_action,
+                    self.hypervisor.clone(),
+                    activate_evt,
+                    self.console_info.clone(),
+                    self.console_resize_pipe.clone(),
+                    Arc::clone(&self.original_termios_opt),
+                    Some(&snapshot),
+                    Some(source_url),
+                    Some(prefault),
+                    Some(memory_restore_mode),
+                )?;
 
-        let vm = Vm::new(
-            vm_config,
-            exit_evt,
-            reset_evt,
-            guest_exit_evt,
-            #[cfg(feature = "guest_debug")]
-            debug_evt,
-            &self.seccomp_action,
-            self.hypervisor.clone(),
-            activate_evt,
-            self.console_info.clone(),
-            self.console_resize_pipe.clone(),
-            Arc::clone(&self.original_termios_opt),
-            Some(&snapshot),
-            Some(source_url),
-            Some(prefault),
-            Some(memory_restore_mode),
-        )?;
-        self.vm = VmOwnership::Owned(vm);
+                if self
+                    .vm_config
+                    .as_ref()
+                    .unwrap()
+                    .lock()
+                    .unwrap()
+                    .landlock_enable
+                {
+                    let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
+                    apply_landlock(&mut config).map_err(VmError::ApplyLandlock)?;
+                }
 
-        if self
-            .vm_config
-            .as_ref()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .landlock_enable
-        {
-            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
-            apply_landlock(&mut config).map_err(VmError::ApplyLandlock)?;
+                // Now we can restore the rest of the VM.
+                // PANIC: won't panic, we just checked that the VM is there.
+                vm.restore()?;
+                self.vm = VmOwnership::Owned(vm);
+                Ok(())
+            }
         }
-
-        // Now we can restore the rest of the VM.
-        // PANIC: won't panic, we just checked that the VM is there.
-        self.vm.as_mut().unwrap().restore()
     }
 
     /// Handles the outcome of the migration worker thread.
@@ -1979,7 +1976,10 @@ fn apply_landlock(vm_config: &mut VmConfig) -> result::Result<(), LandlockError>
 
 impl RequestHandler for Vmm {
     fn vm_create(&mut self, config: Box<VmConfig>) -> result::Result<(), VmError> {
-        self.vm.ok_or_migrating()?;
+        match &self.vm {
+            VmOwnership::Migration { .. } => return Err(VmError::VmMigrating),
+            VmOwnership::Owned(_) | VmOwnership::None => {}
+        }
 
         // We only store the passed VM config.
         // The VM will be created when being asked to boot it.
@@ -2003,78 +2003,81 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_boot(&mut self) -> result::Result<(), VmError> {
-        self.vm.ok_or_migrating()?;
+        match &self.vm {
+            VmOwnership::Owned(_) => Err(VmError::VmAlreadyCreated),
+            VmOwnership::Migration { .. } => Err(VmError::VmMigrating),
+            VmOwnership::None => {
+                tracer::start();
+                info!("Booting VM");
+                event!("vm", "booting");
 
-        tracer::start();
-        info!("Booting VM");
-        event!("vm", "booting");
-        let r = {
-            trace_scoped!("vm_boot");
-            // If we don't have a config, we cannot boot a VM.
-            if self.vm_config.is_none() {
-                return Err(VmError::VmMissingConfig);
-            }
+                let r = (|| {
+                    trace_scoped!("vm_boot");
+                    // If we don't have a config, we cannot boot a VM.
+                    if self.vm_config.is_none() {
+                        return Err(VmError::VmMissingConfig);
+                    }
 
-            // console_info is set to None in vm_shutdown. re-populate here if empty
-            if self.console_info.is_none() {
-                self.console_info =
-                    Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
-            }
+                    // console_info is set to None in vm_shutdown. re-populate here if empty
+                    if self.console_info.is_none() {
+                        self.console_info = Some(
+                            pre_create_console_devices(self)
+                                .map_err(VmError::CreateConsoleDevices)?,
+                        );
+                    }
 
-            // Create a new VM if we don't have one yet.
-            if matches!(&self.vm, VmOwnership::None) {
-                let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
-                let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
-                let guest_exit_evt = self
-                    .guest_exit_evt
-                    .try_clone()
-                    .map_err(VmError::EventFdClone)?;
-                #[cfg(feature = "guest_debug")]
-                let vm_debug_evt = self
-                    .vm_debug_evt
-                    .try_clone()
-                    .map_err(VmError::EventFdClone)?;
-                let activate_evt = self
-                    .activate_evt
-                    .try_clone()
-                    .map_err(VmError::EventFdClone)?;
+                    // Create a new VM if we don't have one yet.
+                    let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
+                    let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
+                    let guest_exit_evt = self
+                        .guest_exit_evt
+                        .try_clone()
+                        .map_err(VmError::EventFdClone)?;
+                    #[cfg(feature = "guest_debug")]
+                    let vm_debug_evt = self
+                        .vm_debug_evt
+                        .try_clone()
+                        .map_err(VmError::EventFdClone)?;
+                    let activate_evt = self
+                        .activate_evt
+                        .try_clone()
+                        .map_err(VmError::EventFdClone)?;
 
-                if let Some(ref vm_config) = self.vm_config {
-                    let vm = Vm::new(
-                        Arc::clone(vm_config),
-                        exit_evt,
-                        reset_evt,
-                        guest_exit_evt,
-                        #[cfg(feature = "guest_debug")]
-                        vm_debug_evt,
-                        &self.seccomp_action,
-                        self.hypervisor.clone(),
-                        activate_evt,
-                        self.console_info.clone(),
-                        self.console_resize_pipe.clone(),
-                        Arc::clone(&self.original_termios_opt),
-                        None,
-                        None,
-                        None,
-                        None,
-                    )?;
+                    if let Some(ref vm_config) = self.vm_config {
+                        let mut vm = Vm::new(
+                            Arc::clone(vm_config),
+                            exit_evt,
+                            reset_evt,
+                            guest_exit_evt,
+                            #[cfg(feature = "guest_debug")]
+                            vm_debug_evt,
+                            &self.seccomp_action,
+                            self.hypervisor.clone(),
+                            activate_evt,
+                            self.console_info.clone(),
+                            self.console_resize_pipe.clone(),
+                            Arc::clone(&self.original_termios_opt),
+                            None,
+                            None,
+                            None,
+                            None,
+                        )?;
 
-                    self.vm = VmOwnership::Owned(vm);
+                        let r = vm.boot();
+                        self.vm = VmOwnership::Owned(vm);
+                        r
+                    } else {
+                        Err(VmError::VmNotCreated)
+                    }
+                })();
+
+                tracer::end();
+                if r.is_ok() {
+                    event!("vm", "booted");
                 }
+                r
             }
-
-            // Now we can boot the VM.
-            if let VmOwnership::Owned(vm) = &mut self.vm {
-                vm.boot()
-            } else {
-                Err(VmError::VmNotCreated)
-            }
-        };
-        tracer::end();
-        if r.is_ok() {
-            event!("vm", "booted");
         }
-        r
     }
 
     fn vm_pause(&mut self) -> result::Result<(), VmError> {
@@ -2111,64 +2114,68 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_restore(&mut self, restore_cfg: RestoreConfig) -> result::Result<(), VmError> {
-        self.vm.ok_or_migrating()?;
+        match &self.vm {
+            VmOwnership::Owned(_) => Err(VmError::VmAlreadyCreated),
+            VmOwnership::Migration { .. } => Err(VmError::VmMigrating),
+            VmOwnership::None => {
+                if self.vm_config.is_some() {
+                    return Err(VmError::VmAlreadyCreated);
+                }
 
-        if self.vm_config.is_some() || matches!(self.vm, VmOwnership::Owned(_)) {
-            return Err(VmError::VmAlreadyCreated);
-        }
+                let source_url = restore_cfg.source_url.as_path().to_str();
+                if source_url.is_none() {
+                    return Err(VmError::InvalidRestoreSourceUrl);
+                }
+                // Safe to unwrap as we checked it was Some(&str).
+                let source_url = source_url.unwrap();
 
-        let source_url = restore_cfg.source_url.as_path().to_str();
-        if source_url.is_none() {
-            return Err(VmError::InvalidRestoreSourceUrl);
-        }
-        // Safe to unwrap as we checked it was Some(&str).
-        let source_url = source_url.unwrap();
+                let vm_config = Arc::new(Mutex::new(
+                    recv_vm_config(source_url).map_err(VmError::Restore)?,
+                ));
+                restore_cfg
+                    .validate(&vm_config.lock().unwrap().clone())
+                    .map_err(VmError::ConfigValidation)?;
 
-        let vm_config = Arc::new(Mutex::new(
-            recv_vm_config(source_url).map_err(VmError::Restore)?,
-        ));
-        restore_cfg
-            .validate(&vm_config.lock().unwrap().clone())
-            .map_err(VmError::ConfigValidation)?;
-
-        // Update VM's net configurations with new fds received for restore operation
-        if let (Some(restored_nets), Some(vm_net_configs)) =
-            (restore_cfg.net_fds, &mut vm_config.lock().unwrap().net)
-        {
-            for net in restored_nets.iter() {
-                for net_config in vm_net_configs.iter_mut() {
-                    // update only if the net dev is backed by FDs
-                    if net_config.pci_common.id.as_ref() == Some(&net.id)
-                        && net_config.fds.is_some()
-                    {
-                        net_config.fds.clone_from(&net.fds);
+                // Update VM's net configurations with new fds received for restore operation
+                if let (Some(restored_nets), Some(vm_net_configs)) =
+                    (restore_cfg.net_fds, &mut vm_config.lock().unwrap().net)
+                {
+                    for net in restored_nets.iter() {
+                        for net_config in vm_net_configs.iter_mut() {
+                            // update only if the net dev is backed by FDs
+                            if net_config.pci_common.id.as_ref() == Some(&net.id)
+                                && net_config.fds.is_some()
+                            {
+                                net_config.fds.clone_from(&net.fds);
+                            }
+                        }
                     }
                 }
-            }
-        }
 
-        self.vm_restore(
-            source_url,
-            vm_config,
-            restore_cfg.prefault,
-            restore_cfg.memory_restore_mode,
-        )
-        .and_then(|()| {
-            if restore_cfg.resume {
-                self.vm_resume()
-            } else {
+                self.vm_restore(
+                    source_url,
+                    vm_config,
+                    restore_cfg.prefault,
+                    restore_cfg.memory_restore_mode,
+                )
+                .and_then(|()| {
+                    if restore_cfg.resume {
+                        self.vm_resume()
+                    } else {
+                        Ok(())
+                    }
+                })
+                .map_err(|e| {
+                    error!("VM Restore failed: {e:?}");
+                    if let Err(e) = self.vm_delete() {
+                        return e;
+                    }
+                    e
+                })?;
+
                 Ok(())
             }
-        })
-        .map_err(|e| {
-            error!("VM Restore failed: {e:?}");
-            if let Err(e) = self.vm_delete() {
-                return e;
-            }
-            e
-        })?;
-
-        Ok(())
+        }
     }
 
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
