@@ -256,9 +256,8 @@ pub(crate) fn uuid_from_guid(buf: &[u8]) -> Uuid {
 }
 
 #[cfg(test)]
-// TODO: Trim qualified paths in these tests, then drop this expectation.
-#[expect(clippy::absolute_paths)]
 mod tests {
+    use std::fs;
     use std::process::Command;
 
     use vmm_sys_util::tempfile::TempFile;
@@ -291,7 +290,7 @@ mod tests {
             return;
         };
 
-        let file = std::fs::OpenOptions::new()
+        let file = fs::OpenOptions::new()
             .read(true)
             .write(true)
             .open(tf.as_path())
