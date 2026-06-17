@@ -4,6 +4,8 @@
 //
 
 #![allow(clippy::undocumented_unsafe_blocks)]
+// TODO: Trim qualified paths in this crate, then drop this expectation.
+#![expect(clippy::absolute_paths)]
 
 use std::collections::HashMap;
 use std::ffi::OsStr;

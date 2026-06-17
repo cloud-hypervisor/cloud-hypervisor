@@ -116,6 +116,8 @@ impl Write for SerialBuffer {
 }
 
 #[cfg(test)]
+// TODO: Trim qualified paths in these tests, then drop this expectation.
+#[expect(clippy::absolute_paths)]
 mod tests {
     use std::io::Write;
     use std::sync::atomic::{AtomicBool, Ordering};

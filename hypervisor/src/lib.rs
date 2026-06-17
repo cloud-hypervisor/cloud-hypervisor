@@ -21,6 +21,9 @@
 //! - riscv64 (experimental)
 //!
 
+// TODO: Trim qualified paths in this crate, then drop this expectation.
+#![expect(clippy::absolute_paths)]
+
 /// Architecture specific definitions
 #[macro_use]
 pub mod arch;
