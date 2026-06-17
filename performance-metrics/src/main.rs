@@ -378,7 +378,7 @@ mod adjuster {
         v / (1_000_000_000_f64)
     }
 
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case)]
     pub fn Bps_to_MiBps(v: f64) -> f64 {
         v / (1 << 20) as f64
     }
