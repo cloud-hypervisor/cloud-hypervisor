@@ -124,7 +124,7 @@ use kvm_bindings::{
     KVM_REG_SIZE_U32, KVM_REG_SIZE_U64, KVM_REG_SIZE_U128, kvm_regs, user_pt_regs,
 };
 #[cfg(target_arch = "riscv64")]
-use kvm_bindings::{KVM_REG_RISCV_CORE, kvm_riscv_core};
+use kvm_bindings::{KVM_REG_RISCV_CORE, KVM_REG_RISCV_TIMER, kvm_riscv_core};
 #[cfg(feature = "tdx")]
 use kvm_bindings::{KVM_X86_SW_PROTECTED_VM, KVMIO};
 #[cfg(target_arch = "x86_64")]
@@ -2728,6 +2728,18 @@ impl cpu::Vcpu for KvmVcpu {
     #[cfg(target_arch = "riscv64")]
     fn get_non_core_reg(&self, _non_core_reg: u32) -> cpu::Result<u64> {
         unimplemented!()
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    fn get_timebase_frequency(&self) -> cpu::Result<u64> {
+        use kvm_bindings::kvm_riscv_timer;
+        let freq_offset = offset_of!(kvm_riscv_timer, frequency);
+        let id = riscv64_reg_id!(KVM_REG_RISCV_TIMER, freq_offset);
+        let mut freq_bytes = [0u8; 8];
+        self.fd
+            .get_one_reg(id, &mut freq_bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetNonCoreRegister(e.into()))?;
+        Ok(u64::from_le_bytes(freq_bytes))
     }
 
     ///
