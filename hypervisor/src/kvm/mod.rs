@@ -140,7 +140,9 @@ use log::error;
 use thiserror::Error;
 use vfio_ioctls::VfioDeviceFd;
 #[cfg(target_arch = "x86_64")]
-use vmm_sys_util::{fam::FamStruct, ioctl_io_nr};
+use vmm_sys_util::ioctl::ioctl_with_ref;
+#[cfg(target_arch = "x86_64")]
+use vmm_sys_util::{fam::FamStruct, ioctl_io_nr, ioctl_iow_nr};
 #[cfg(feature = "tdx")]
 use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_iowr_nr};
 
@@ -173,6 +175,28 @@ const NANOS_PER_SECOND: u128 = 1_000_000_000;
 
 #[cfg(target_arch = "x86_64")]
 ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
+// kvm-ioctls only exposes the vCPU device-attribute ioctls for aarch64.
+#[cfg(target_arch = "x86_64")]
+ioctl_iow_nr!(
+    KVM_SET_DEVICE_ATTR,
+    kvm_bindings::KVMIO,
+    0xe1,
+    kvm_bindings::kvm_device_attr
+);
+#[cfg(target_arch = "x86_64")]
+ioctl_iow_nr!(
+    KVM_GET_DEVICE_ATTR,
+    kvm_bindings::KVMIO,
+    0xe2,
+    kvm_bindings::kvm_device_attr
+);
+#[cfg(target_arch = "x86_64")]
+ioctl_iow_nr!(
+    KVM_HAS_DEVICE_ATTR,
+    kvm_bindings::KVMIO,
+    0xe3,
+    kvm_bindings::kvm_device_attr
+);
 
 #[cfg(feature = "sev_snp")]
 use igvm_defs::PAGE_SIZE_4K;
@@ -1919,6 +1943,29 @@ impl KvmVcpu {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
+impl KvmVcpu {
+    /// Device attribute selecting the vCPU's L1 TSC offset, `addr` pointing at
+    /// the caller's `u64` buffer.
+    fn tsc_offset_attr(addr: u64) -> DeviceAttr {
+        DeviceAttr {
+            group: kvm_bindings::KVM_VCPU_TSC_CTRL,
+            attr: u64::from(kvm_bindings::KVM_VCPU_TSC_OFFSET),
+            addr,
+            flags: 0,
+        }
+    }
+
+    /// Whether the host kernel supports the vCPU TSC offset attribute (Linux
+    /// 5.16+).
+    fn has_tsc_offset_attr(&self) -> bool {
+        let attr = Self::tsc_offset_attr(0);
+        // SAFETY: FFI call with a valid kvm_device_attr; `addr` is unused here.
+        let ret = unsafe { ioctl_with_ref(&self.fd, KVM_HAS_DEVICE_ATTR(), &attr) };
+        ret == 0
+    }
+}
+
 /// Implementation of Vcpu trait for KVM
 ///
 /// # Examples
@@ -3534,6 +3581,43 @@ impl cpu::Vcpu for KvmVcpu {
             }
             Ok(_) => Ok(()),
         }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Read the vCPU's L1 TSC offset, or `None` if the host kernel lacks the
+    /// attribute (Linux < 5.16).
+    ///
+    fn tsc_offset(&self) -> cpu::Result<Option<u64>> {
+        if !self.has_tsc_offset_attr() {
+            return Ok(None);
+        }
+        let mut offset = 0u64;
+        let attr = Self::tsc_offset_attr(&raw mut offset as u64);
+        // SAFETY: FFI call; `attr.addr` points to `offset`, filled in by the kernel.
+        let ret = unsafe { ioctl_with_ref(&self.fd, KVM_GET_DEVICE_ATTR(), &attr) };
+        if ret < 0 {
+            return Err(cpu::HypervisorCpuError::GetTscOffset(
+                io::Error::last_os_error().into(),
+            ));
+        }
+        Ok(Some(offset))
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Set the vCPU's L1 TSC offset.
+    ///
+    fn set_tsc_offset(&self, offset: u64) -> cpu::Result<()> {
+        let attr = Self::tsc_offset_attr(&raw const offset as u64);
+        // SAFETY: FFI call; `attr.addr` points to `offset`, read by the kernel.
+        let ret = unsafe { ioctl_with_ref(&self.fd, KVM_SET_DEVICE_ATTR(), &attr) };
+        if ret < 0 {
+            return Err(cpu::HypervisorCpuError::SetTscOffset(
+                io::Error::last_os_error().into(),
+            ));
+        }
+        Ok(())
     }
 
     #[cfg(target_arch = "x86_64")]
