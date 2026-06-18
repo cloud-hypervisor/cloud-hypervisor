@@ -1120,7 +1120,34 @@ impl CpuManager {
             )?);
         }
 
+        #[cfg(target_arch = "x86_64")]
+        if snapshot.is_some() {
+            Self::synchronize_tsc_offsets(&vcpus);
+        }
+
         Ok(vcpus)
+    }
+
+    // Synchronize TSC offsets (mitigates each vCPU being restored at a slightly different time)
+    // and allows the TSC masterclock to engage.
+    #[cfg(target_arch = "x86_64")]
+    fn synchronize_tsc_offsets(vcpus: &[Arc<Mutex<Vcpu>>]) {
+        let Some(reference) = vcpus.first() else {
+            return;
+        };
+        let offset = match reference.lock().unwrap().vcpu.tsc_offset() {
+            Ok(Some(offset)) => offset,
+            Ok(None) => return,
+            Err(e) => {
+                warn!("Could not read vCPU TSC offset for resync: {e}");
+                return;
+            }
+        };
+        for vcpu in vcpus {
+            if let Err(e) = vcpu.lock().unwrap().vcpu.set_tsc_offset(offset) {
+                warn!("Could not synchronize vCPU TSC offset: {e}");
+            }
+        }
     }
 
     #[cfg(target_arch = "aarch64")]

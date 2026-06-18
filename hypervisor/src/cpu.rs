@@ -311,6 +311,18 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to set TSC frequency")]
     SetTscKhz(#[source] anyhow::Error),
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Error getting TSC offset
+    ///
+    #[error("Failed to get TSC offset")]
+    GetTscOffset(#[source] anyhow::Error),
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Error setting TSC offset
+    ///
+    #[error("Failed to set TSC offset")]
+    SetTscOffset(#[source] anyhow::Error),
     ///
     /// Error reading value at given GPA
     ///
@@ -610,6 +622,21 @@ pub trait Vcpu: Send + Sync {
     /// Set the frequency of the TSC if available
     ///
     fn set_tsc_khz(&self, _freq: u32) -> Result<()> {
+        Ok(())
+    }
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Read the vCPU's TSC offset, or `None` when the hypervisor does not
+    /// expose it.
+    ///
+    fn tsc_offset(&self) -> Result<Option<u64>> {
+        Ok(None)
+    }
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Set the vCPU's TSC offset if available.
+    ///
+    fn set_tsc_offset(&self, _offset: u64) -> Result<()> {
         Ok(())
     }
     #[cfg(target_arch = "x86_64")]
