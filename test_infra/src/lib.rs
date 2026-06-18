@@ -4,15 +4,14 @@
 //
 
 #![expect(clippy::undocumented_unsafe_blocks)]
-// TODO: Trim qualified paths in this crate, then drop this expectation.
-#![expect(clippy::absolute_paths)]
 
+use std::any::Any;
 use std::collections::HashMap;
-use std::ffi::OsStr;
+use std::ffi::{CString, OsStr};
 use std::fmt::{Display, Formatter};
 use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::os::unix::process::CommandExt;
@@ -21,7 +20,7 @@ use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::str::FromStr;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
-use std::{env, fmt, fs, io, thread};
+use std::{env, fmt, fs, io, mem, num, panic, thread};
 
 use rand::Rng;
 use serde_json::Value;
@@ -132,19 +131,19 @@ pub enum WaitTimeoutError {
     #[error("exit status indicates failure")]
     ExitStatus,
     #[error("general failure")]
-    General(#[source] std::io::Error),
+    General(#[source] io::Error),
 }
 
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Failed to parse")]
-    Parsing(#[source] std::num::ParseIntError),
+    Parsing(#[source] num::ParseIntError),
     #[error("ssh command failed")]
     SshCommand(#[from] SshCommandError),
     #[error("waiting for boot failed")]
     WaitForBoot(#[source] WaitForBootError),
     #[error("reading log file failed")]
-    EthrLogFile(#[source] std::io::Error),
+    EthrLogFile(#[source] io::Error),
     #[error("parsing log file failed")]
     EthrLogParse,
     #[error("parsing fio output failed")]
@@ -152,7 +151,7 @@ pub enum Error {
     #[error("parsing iperf3 output failed")]
     Iperf3Parse,
     #[error("spawning process failed")]
-    Spawn(#[source] std::io::Error),
+    Spawn(#[source] io::Error),
     #[error("waiting for timeout failed")]
     WaitTimeout(#[source] WaitTimeoutError),
 }
@@ -222,15 +221,15 @@ pub const DEFAULT_CVM_TCP_LISTENER_TIMEOUT: u32 = 140;
 #[derive(Error, Debug)]
 pub enum WaitForBootError {
     #[error("Failed to wait for epoll")]
-    EpollWait(#[source] std::io::Error),
+    EpollWait(#[source] io::Error),
     #[error("Failed to listen for boot")]
-    Listen(#[source] std::io::Error),
+    Listen(#[source] io::Error),
     #[error("Epoll wait timeout")]
     EpollWaitTimeout,
     #[error("wrong guest address")]
     WrongGuestAddr,
     #[error("Failed to accept a TCP request")]
-    Accept(#[source] std::io::Error),
+    Accept(#[source] io::Error),
 }
 
 impl GuestNetworkConfig {
@@ -239,7 +238,7 @@ impl GuestNetworkConfig {
         expected_guest_addr: &str,
         custom_timeout: u32,
     ) -> Result<(), WaitForBootError> {
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let listen_addr = format!("0.0.0.0:{port}");
         let mut s = String::new();
 
@@ -284,7 +283,7 @@ impl GuestNetworkConfig {
             match listener.accept() {
                 Ok((_, addr)) => {
                     // Make sure the connection is from the expected 'guest_addr'
-                    if addr.ip() != std::net::IpAddr::from_str(expected_guest_addr).unwrap() {
+                    if addr.ip() != IpAddr::from_str(expected_guest_addr).unwrap() {
                         s = format!(
                             "Expecting the guest ip '{}' while being connected with ip '{}'",
                             expected_guest_addr,
@@ -382,21 +381,21 @@ impl WindowsDiskConfig {
 impl Drop for WindowsDiskConfig {
     fn drop(&mut self) {
         // dmsetup remove windows-snapshot-1
-        std::process::Command::new("dmsetup")
+        Command::new("dmsetup")
             .arg("remove")
             .arg(self.windows_snapshot.as_str())
             .output()
             .expect("Expect removing Windows snapshot with 'dmsetup' to succeed");
 
         // dmsetup remove windows-snapshot-cow-1
-        std::process::Command::new("dmsetup")
+        Command::new("dmsetup")
             .arg("remove")
             .arg(self.windows_snapshot_cow.as_str())
             .output()
             .expect("Expect removing Windows snapshot CoW with 'dmsetup' to succeed");
 
         // losetup -d <loopback_device>
-        std::process::Command::new("losetup")
+        Command::new("losetup")
             .args(["-d", self.loopback_device.as_str()])
             .output()
             .expect("Expect removing loopback device to succeed");
@@ -511,7 +510,7 @@ impl DiskConfig for UbuntuDiskConfig {
             .write_all(network_config_string.as_bytes())
             .expect("Expected writing out network-config to succeed");
 
-        std::process::Command::new("mkdosfs")
+        Command::new("mkdosfs")
             .args(["-n", "CIDATA"])
             .args(["-C", cloudinit_file_path.as_str()])
             .arg("8192")
@@ -521,7 +520,7 @@ impl DiskConfig for UbuntuDiskConfig {
         ["user-data", "meta-data", "network-config"]
             .iter()
             .for_each(|x| {
-                std::process::Command::new("mcopy")
+                Command::new("mcopy")
                     .arg("-o")
                     .args(["-i", cloudinit_file_path.as_str()])
                     .args(["-s", cloud_init_directory.join(x).to_str().unwrap(), "::"])
@@ -580,14 +579,14 @@ impl DiskConfig for WindowsDiskConfig {
         // Create and truncate CoW file for device mapper
         let cow_file_size: u64 = 1 << 30;
         let cow_file_blk_size = cow_file_size >> 9;
-        let cow_file = std::fs::File::create(snapshot_cow_path.as_str())
+        let cow_file = fs::File::create(snapshot_cow_path.as_str())
             .expect("Expect creating CoW image to succeed");
         cow_file
             .set_len(cow_file_size)
             .expect("Expect truncating CoW image to succeed");
 
         // losetup --find --show /tmp/snapshot_cow
-        let loopback_device = std::process::Command::new("losetup")
+        let loopback_device = Command::new("losetup")
             .arg("--find")
             .arg("--show")
             .arg(snapshot_cow_path.as_str())
@@ -605,7 +604,7 @@ impl DiskConfig for WindowsDiskConfig {
         );
 
         // dmsetup create windows-snapshot-cow-1 --table '0 2097152 linear /dev/loop1 0'
-        std::process::Command::new("dmsetup")
+        Command::new("dmsetup")
             .arg("create")
             .arg(windows_snapshot_cow.as_str())
             .args([
@@ -618,13 +617,13 @@ impl DiskConfig for WindowsDiskConfig {
         let windows_snapshot = format!("windows-snapshot-{}", random_extension.to_str().unwrap());
 
         // dmsetup mknodes
-        std::process::Command::new("dmsetup")
+        Command::new("dmsetup")
             .arg("mknodes")
             .output()
             .expect("Expect device mapper nodes to be ready");
 
         // dmsetup create windows-snapshot-1 --table '0 41943040 snapshot /dev/mapper/windows-base /dev/mapper/windows-snapshot-cow-1 P 8'
-        std::process::Command::new("dmsetup")
+        Command::new("dmsetup")
             .arg("create")
             .arg(windows_snapshot.as_str())
             .args([
@@ -640,7 +639,7 @@ impl DiskConfig for WindowsDiskConfig {
             .expect("Expect creating Windows snapshot with 'dmsetup' to succeed");
 
         // dmsetup mknodes
-        std::process::Command::new("dmsetup")
+        Command::new("dmsetup")
             .arg("mknodes")
             .output()
             .expect("Expect device mapper nodes to be ready");
@@ -686,8 +685,8 @@ impl DiskConfig for WindowsDiskConfig {
 pub fn rate_limited_copy<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::Result<u64> {
     for i in 0..10 {
         let free_bytes = unsafe {
-            let mut stats = std::mem::MaybeUninit::zeroed();
-            let fs_name = std::ffi::CString::new("/tmp").unwrap();
+            let mut stats = mem::MaybeUninit::zeroed();
+            let fs_name = CString::new("/tmp").unwrap();
             libc::statvfs(fs_name.as_ptr(), stats.as_mut_ptr());
 
             let free_blocks = stats.assume_init().f_bfree;
@@ -699,7 +698,7 @@ pub fn rate_limited_copy<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::
         // Make sure there is at least 6 GiB of space
         if free_bytes < 6 << 30 {
             eprintln!("Not enough space on disk ({free_bytes}). Attempt {i} of 10. Sleeping.");
-            thread::sleep(std::time::Duration::new(60, 0));
+            thread::sleep(Duration::new(60, 0));
             continue;
         }
 
@@ -709,7 +708,7 @@ pub fn rate_limited_copy<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::
                     && errno == libc::ENOSPC
                 {
                     eprintln!("Copy returned ENOSPC. Attempt {i} of 10. Sleeping.");
-                    thread::sleep(std::time::Duration::new(60, 0));
+                    thread::sleep(Duration::new(60, 0));
                     continue;
                 }
 
@@ -722,10 +721,7 @@ pub fn rate_limited_copy<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::
 }
 
 #[expect(clippy::needless_pass_by_value)]
-pub fn handle_child_output(
-    r: Result<(), std::boxed::Box<dyn std::any::Any + std::marker::Send>>,
-    output: &std::process::Output,
-) {
+pub fn handle_child_output(r: Result<(), Box<dyn Any + Send>>, output: &Output) {
     use std::os::unix::process::ExitStatusExt;
     if r.is_ok() && output.status.success() {
         return;
@@ -772,7 +768,7 @@ pub const DEFAULT_SSH_TIMEOUT: u8 = 10;
 #[derive(Error, Debug)]
 pub enum SshCommandError {
     #[error("ssh connection failed")]
-    Connection(#[source] std::io::Error),
+    Connection(#[source] io::Error),
     #[error("ssh handshake failed")]
     Handshake(#[source] ssh2::Error),
     #[error("ssh authentication failed")]
@@ -786,13 +782,13 @@ pub enum SshCommandError {
     #[error("the exit code indicates failure: {0}")]
     NonZeroExitStatus(i32),
     #[error("failed to read file")]
-    FileRead(#[source] std::io::Error),
+    FileRead(#[source] io::Error),
     #[error("failed to read metadata")]
-    FileMetadata(#[source] std::io::Error),
+    FileMetadata(#[source] io::Error),
     #[error("scp send failed")]
     ScpSend(#[source] ssh2::Error),
     #[error("scp write failed")]
-    WriteAll(#[source] std::io::Error),
+    WriteAll(#[source] io::Error),
     #[error("scp send EOF failed")]
     SendEof(#[source] ssh2::Error),
     #[error("scp wait EOF failed")]
@@ -882,7 +878,7 @@ fn scp_to_guest_with_auth(
                 }
             }
         }
-        thread::sleep(std::time::Duration::new((timeout * counter).into(), 0));
+        thread::sleep(Duration::new((timeout * counter).into(), 0));
     }
     Ok(())
 }
@@ -983,7 +979,7 @@ pub fn ssh_command_ip_with_auth_retry(
                 }
             }
         }
-        thread::sleep(std::time::Duration::new((timeout_s * counter).into(), 0));
+        thread::sleep(Duration::new((timeout_s * counter).into(), 0));
     }
 }
 
@@ -1045,7 +1041,7 @@ pub fn exec_host_command_status(command: &str) -> ExitStatus {
 }
 
 pub fn exec_host_command_output(command: &str) -> Output {
-    let output = std::process::Command::new("bash")
+    let output = Command::new("bash")
         .args(["-c", command])
         .output()
         .unwrap_or_else(|e| panic!("Expected '{command}' to run. Error: {e:?}"));
@@ -1193,7 +1189,7 @@ fn next_guest_id() -> u8 {
 }
 
 // Safe to implement as we know we have no interior mutability
-impl std::panic::RefUnwindSafe for Guest {}
+impl panic::RefUnwindSafe for Guest {}
 
 impl Guest {
     pub fn new_from_ip_range(mut disk_config: Box<dyn DiskConfig>, class: &str, id: u8) -> Self {
@@ -1369,10 +1365,10 @@ impl Guest {
     /// the guest has probably shutdown.
     pub fn wait_for_ssh_unresponsive(&self, timeout: Duration) -> bool {
         let addr = format!("{}:22", self.network.guest_ip0)
-            .parse::<std::net::SocketAddr>()
+            .parse::<SocketAddr>()
             .unwrap();
         wait_until(timeout, || {
-            std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(2)).is_err()
+            TcpStream::connect_timeout(&addr, Duration::from_secs(2)).is_err()
         })
     }
 
@@ -1596,7 +1592,7 @@ impl Guest {
         });
 
         // Make sure socat is listening, which might take a few second on slow systems
-        thread::sleep(std::time::Duration::new(10, 0));
+        thread::sleep(Duration::new(10, 0));
 
         // Write something to vsock from the host
         assert!(
@@ -1966,7 +1962,7 @@ impl<'a> GuestCommand<'a> {
             if pipesize >= PIPE_SIZE && pipesize1 >= PIPE_SIZE {
                 Ok(child)
             } else {
-                Err(std::io::Error::other(format!(
+                Err(io::Error::other(format!(
                     "resizing pipe w/ 'fnctl' failed: stdout pipesize {pipesize}, stderr pipesize {pipesize1}"
                 )))
             }
@@ -2151,7 +2147,7 @@ pub fn remote_command_w_output(
 }
 
 pub fn parse_iperf3_output(output: &[u8], sender: bool, bandwidth: bool) -> Result<f64, Error> {
-    std::panic::catch_unwind(|| {
+    panic::catch_unwind(|| {
         let s = String::from_utf8_lossy(output);
         let v: Value = serde_json::from_str(&s).expect("'iperf3' parse error: invalid json output");
 
@@ -2214,7 +2210,7 @@ impl fmt::Display for FioOps {
 }
 
 pub fn parse_fio_output(output: &str, fio_ops: &FioOps, num_jobs: u32) -> Result<f64, Error> {
-    std::panic::catch_unwind(|| {
+    panic::catch_unwind(|| {
         let v: Value =
             serde_json::from_str(output).expect("'fio' parse error: invalid json output");
         let jobs = v["jobs"]
@@ -2267,7 +2263,7 @@ pub fn parse_fio_output(output: &str, fio_ops: &FioOps, num_jobs: u32) -> Result
 }
 
 pub fn parse_fio_output_iops(output: &str, fio_ops: &FioOps, num_jobs: u32) -> Result<f64, Error> {
-    std::panic::catch_unwind(|| {
+    panic::catch_unwind(|| {
         let v: Value =
             serde_json::from_str(output).expect("'fio' parse error: invalid json output");
         let jobs = v["jobs"]
@@ -2423,7 +2419,7 @@ pub fn measure_virtio_net_throughput(
 }
 
 pub fn parse_ethr_latency_output(output: &[u8]) -> Result<Vec<f64>, Error> {
-    std::panic::catch_unwind(|| {
+    panic::catch_unwind(|| {
         let s = String::from_utf8_lossy(output);
         let mut latency = Vec::new();
         for l in s.lines() {
