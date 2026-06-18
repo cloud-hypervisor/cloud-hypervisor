@@ -37,6 +37,7 @@ use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
     GuestMemoryRegion,
 };
+use vmm_sys_util::fam;
 
 use crate::x86_64::cpu_profile::cpuid_adjustments::MissingCpuidEntriesError;
 use crate::{CpuProfile, GuestMemoryMmap, InitramfsConfig, RegionType};
@@ -144,11 +145,11 @@ pub enum Error {
 
     /// Error populating CPUID with KVM HyperV emulation details
     #[error("Error populating CPUID with KVM HyperV emulation details")]
-    CpuidKvmHyperV(#[source] vmm_sys_util::fam::Error),
+    CpuidKvmHyperV(#[source] fam::Error),
 
     /// Error populating CPUID with CPU identification
     #[error("Error populating CPUID with CPU identification")]
-    CpuidIdentification(#[source] vmm_sys_util::fam::Error),
+    CpuidIdentification(#[source] fam::Error),
 
     /// Error checking CPUID compatibility
     #[error("Error checking CPUID compatibility")]
@@ -651,7 +652,7 @@ pub fn generate_common_cpuid(
         cpuid.retain(|c| c.function != i);
         // SAFETY: call cpuid with valid leaves
         #[allow(unused_unsafe)]
-        let leaf = unsafe { std::arch::x86_64::__cpuid(i) };
+        let leaf = unsafe { x86_64::__cpuid(i) };
         cpuid.push(CpuIdEntry {
             function: i,
             eax: leaf.eax,
@@ -783,10 +784,10 @@ fn required_common_cpuid_updates(
                     && entry.ecx == 0
                     && entry.edx == 0
                     // SAFETY: cpuid called with valid leaves
-                    && unsafe { std::arch::x86_64::__cpuid(0x8000_0000).eax } >= 0x8000_0005 =>
+                    && unsafe { x86_64::__cpuid(0x8000_0000).eax } >= 0x8000_0005 =>
             {
                 // SAFETY: cpuid called with valid leaves
-                let leaf = unsafe { std::arch::x86_64::__cpuid(0x8000_0005) };
+                let leaf = unsafe { x86_64::__cpuid(0x8000_0005) };
                 entry.eax = leaf.eax;
                 entry.ebx = leaf.ebx;
                 entry.ecx = leaf.ecx;
@@ -799,10 +800,10 @@ fn required_common_cpuid_updates(
                     && entry.ecx == 0
                     && entry.edx == 0
                     // SAFETY: cpuid called with valid leaves
-                    && unsafe { std::arch::x86_64::__cpuid(0x8000_0000).eax } >= 0x8000_0006 =>
+                    && unsafe { x86_64::__cpuid(0x8000_0000).eax } >= 0x8000_0006 =>
             {
                 // SAFETY: cpuid called with valid leaves
-                let leaf = unsafe { std::arch::x86_64::__cpuid(0x8000_0006) };
+                let leaf = unsafe { x86_64::__cpuid(0x8000_0006) };
                 entry.eax = leaf.eax;
                 entry.ebx = leaf.ebx;
                 entry.ecx = leaf.ecx;
@@ -971,9 +972,7 @@ pub fn configure_vcpu(
         // Need to check that the TSC doesn't vary with dynamic frequency
         #[allow(unused_unsafe)]
         // SAFETY: cpuid called with valid leaves
-        if unsafe { std::arch::x86_64::__cpuid(0x8000_0007) }.edx & (1u32 << INVARIANT_TSC_EDX_BIT)
-            > 0
-        {
+        if unsafe { x86_64::__cpuid(0x8000_0007) }.edx & (1u32 << INVARIANT_TSC_EDX_BIT) > 0 {
             CpuidPatch::set_cpuid_reg(&mut cpuid, 0x4000_0000, None, CpuidReg::EAX, 0x4000_0010);
             cpuid.retain(|c| c.function != 0x4000_0010);
             cpuid.push(CpuIdEntry {
