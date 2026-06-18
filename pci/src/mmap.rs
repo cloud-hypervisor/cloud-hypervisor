@@ -10,6 +10,7 @@ use std::io::{self, Error, ErrorKind};
 use std::os::fd::{AsRawFd as _, BorrowedFd};
 
 use libc::size_t;
+use log::warn;
 
 /// A region of `mmap()`-allocated memory that calls `munmap()` when dropped.
 /// This guarantees that the buffer is valid and that its address space
@@ -26,7 +27,16 @@ pub struct MmapRegion {
 impl Drop for MmapRegion {
     fn drop(&mut self) {
         // SAFETY: guaranteed by type validity invariant
-        unsafe { assert_eq!(libc::munmap(self.addr.cast(), self.len), 0) }
+        let ret = unsafe { libc::munmap(self.addr.cast(), self.len) };
+
+        if ret != 0 {
+            warn!(
+                "Failed to munmap region address {:p} length 0x{:x}, {}, leaking...",
+                self.addr,
+                self.len,
+                Error::last_os_error()
+            );
+        }
     }
 }
 // SAFETY: the caller is responsible for avoiding data races
