@@ -2148,27 +2148,18 @@ impl Vm {
         if let Some(zones) = &mut memory_config.zones {
             for zone in zones.iter_mut() {
                 if zone.id == id {
-                    if desired_memory >= zone.size {
-                        let hotplugged_size = desired_memory - zone.size;
-                        self.memory_manager
-                            .lock()
-                            .unwrap()
-                            .resize_zone(id, desired_memory - zone.size)
-                            .map_err(Error::MemoryManager)?;
-                        // We update the memory zone config regardless of the
-                        // actual 'resize-zone' operation result (happened or
-                        // not), so that if the VM reboots it will be running
-                        // with the last configured memory zone size.
-                        zone.hotplugged_size = Some(hotplugged_size);
+                    self.memory_manager
+                        .lock()
+                        .unwrap()
+                        .resize_zone(zone, desired_memory)
+                        .map_err(Error::MemoryManager)?;
+                    // We update the memory zone config regardless of the
+                    // actual 'resize-zone' operation result (happened or
+                    // not), so that if the VM reboots it will be running
+                    // with the last configured memory zone size.
+                    zone.hotplugged_size = Some(desired_memory - zone.size);
 
-                        return Ok(());
-                    }
-                    error!(
-                        "Invalid to ask less ({}) than boot RAM ({}) for \
-                        this memory zone",
-                        desired_memory, zone.size,
-                    );
-                    return Err(Error::ResizeZone);
+                    return Ok(());
                 }
             }
         }

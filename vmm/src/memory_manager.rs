@@ -391,6 +391,11 @@ pub enum Error {
     #[error("Impossible to resize guest memory if it is backed by user defined memory regions")]
     InvalidResizeWithMemoryZones,
 
+    /// Forbidden operation. Impossible to resize guest memory below the boot
+    /// RAM as it is not removable with virtio-mem.
+    #[error("Invalid resize request: desired_size = {0} below boot size = {1}")]
+    InvalidResizeBelowBootSize(u64, u64),
+
     /// It's invalid to try applying a NUMA policy to a memory zone that is
     /// memory mapped with MAP_SHARED.
     #[error(
@@ -2618,14 +2623,19 @@ impl MemoryManager {
         let mut region: Option<Arc<GuestRegionMmap>> = None;
         match self.hotplug_method {
             HotplugMethod::VirtioMem => {
-                if desired_ram >= self.boot_ram {
-                    if !self.dynamic {
-                        return Ok(region);
-                    }
-
-                    self.virtio_mem_resize(DEFAULT_MEMORY_ZONE, desired_ram - self.boot_ram)?;
-                    self.current_ram = desired_ram;
+                if desired_ram < self.boot_ram {
+                    return Err(Error::InvalidResizeBelowBootSize(
+                        desired_ram,
+                        self.boot_ram,
+                    ));
                 }
+
+                if !self.dynamic {
+                    return Ok(region);
+                }
+
+                self.virtio_mem_resize(DEFAULT_MEMORY_ZONE, desired_ram - self.boot_ram)?;
+                self.current_ram = desired_ram;
             }
             HotplugMethod::Acpi => {
                 if desired_ram > self.current_ram {
@@ -2642,7 +2652,7 @@ impl MemoryManager {
         Ok(region)
     }
 
-    pub fn resize_zone(&mut self, id: &str, virtio_mem_size: u64) -> Result<(), Error> {
+    pub fn resize_zone(&mut self, zone: &MemoryZoneConfig, desired_ram: u64) -> Result<(), Error> {
         if !self.user_provided_zones {
             error!(
                 "Not allowed to resize guest memory zone when no zone is \
@@ -2651,7 +2661,11 @@ impl MemoryManager {
             return Err(Error::ResizeZone);
         }
 
-        self.virtio_mem_resize(id, virtio_mem_size)
+        if desired_ram < zone.size {
+            return Err(Error::InvalidResizeBelowBootSize(desired_ram, zone.size));
+        }
+
+        self.virtio_mem_resize(&zone.id, desired_ram - zone.size)
     }
 
     pub fn is_hardlink(f: &File) -> bool {
