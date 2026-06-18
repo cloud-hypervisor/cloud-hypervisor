@@ -20,7 +20,7 @@ jobs:
       ci: ${{ steps.changes.outputs.ci }}
       docs: ${{ steps.changes.outputs.docs }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: changes
@@ -69,7 +69,7 @@ jobs:
     needs: [preflight]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Set up Python 3.x
         uses: actions/setup-python@v6
         with:
@@ -90,7 +90,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # PR head, not the merge ref, so gitlint sees the PR's commits.
           ref: ${{ github.event.pull_request.head.sha }}
@@ -113,7 +113,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Code checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Get changed files in PR
@@ -151,7 +151,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Code checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Install build dependencies
@@ -166,7 +166,7 @@ jobs:
     if: needs.preflight.outputs.cargo == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions-rust-lang/audit@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -177,7 +177,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Run the shell script checkers
         uses: luizm/action-sh-checker@883217215b11c1fabbf00eb1a9a041f62d74c744 # v0.10.0
         env:
@@ -190,7 +190,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Lint Dockerfile
         uses: hadolint/hadolint-action@2332a7b74a6de0dda2e2221d575162eba76ba5e5 # v3.3.0
         with:
@@ -205,7 +205,7 @@ jobs:
     if: needs.preflight.outputs.full == 'true' || needs.preflight.outputs.cargo == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: REUSE Compliance Check
         uses: fsfe/reuse-action@v6
   formatting:
@@ -223,7 +223,7 @@ jobs:
       RUSTFLAGS: -D warnings
     steps:
       - name: Code checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Install Rust toolchain (${{ matrix.rust }})
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -241,7 +241,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Code checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Install dependencies
@@ -271,7 +271,7 @@ jobs:
       RUSTFLAGS: -D warnings
     steps:
       - name: Code checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Install Rust toolchain (${{ matrix.rust }})
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -290,7 +290,7 @@ jobs:
     runs-on: ubuntu-latest
     container: openapitools/openapi-generator-cli
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Validate OpenAPI
         run: |
           /usr/local/bin/docker-entrypoint.sh validate -i vmm/src/api/openapi/cloud-hypervisor.yaml
@@ -300,7 +300,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: crate-ci/typos@37bb98842b0d8c4ffebdb75301a13db0267cef89 # v1.47.2
   quality:
     name: quality
@@ -328,7 +328,7 @@ jobs:
             experimental: false
     steps:
       - name: Code checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Install Rust toolchain (${{ matrix.rust }})
@@ -470,7 +470,7 @@ jobs:
           - x86_64-unknown-linux-musl
     steps:
       - name: Code checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Install musl-gcc
@@ -526,7 +526,7 @@ jobs:
     runs-on: garm-jammy-16
     steps:
       - name: Code checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Install Docker
@@ -571,7 +571,7 @@ jobs:
     runs-on: ${{ format('{0}-16', matrix.runner) }}
     steps:
       - name: Code checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Install Docker
@@ -610,7 +610,7 @@ jobs:
       - name: Fix workspace permissions
         run: sudo chown -R runner:runner ${GITHUB_WORKSPACE}
       - name: Code checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Run unit tests (musl)
@@ -661,7 +661,7 @@ jobs:
       - name: Fix workspace permissions
         run: sudo chown -R github-runner:github-runner "${GITHUB_WORKSPACE}"
       - name: Code checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Run VFIO integration tests
@@ -679,7 +679,7 @@ jobs:
     runs-on: garm-jammy-16
     steps:
       - name: Code checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Install Docker
@@ -722,7 +722,7 @@ jobs:
   #     AUTH_DOWNLOAD_TOKEN: ${{ secrets.AUTH_DOWNLOAD_TOKEN }}
   #   steps:
   #     - name: Code checkout
-  #       uses: actions/checkout@v6
+  #       uses: actions/checkout@v7
   #       with:
   #         fetch-depth: 0
   #     - name: Run rate-limiter integration tests
@@ -741,7 +741,7 @@ jobs:
       - name: Fix workspace permissions
         run: sudo chown -R "$(id -un):$(id -gn)" "${GITHUB_WORKSPACE}"
       - name: Code checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Sanity-check SEV-SNP prerequisites
@@ -768,7 +768,7 @@ jobs:
   #     AUTH_DOWNLOAD_TOKEN: ${{ secrets.AUTH_DOWNLOAD_TOKEN }}
   #   steps:
   #     - name: Code checkout
-  #       uses: actions/checkout@v6
+  #       uses: actions/checkout@v7
   #       with:
   #         fetch-depth: 0
   #     - name: Run rate-limiter integration tests
