@@ -42,6 +42,7 @@ use super::{
     EpollHelperHandler, Error as DeviceError, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice,
     VirtioDeviceType,
 };
+use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::{GuestMemoryMmap, GuestRegionMmap, VirtioInterrupt, VirtioInterruptType};
 
@@ -119,11 +120,11 @@ pub enum Error {
     #[error("Invalid configuration")]
     ValidateError(#[source] anyhow::Error),
     #[error("Failed discarding memory range")]
-    DiscardMemoryRange(#[source] std::io::Error),
+    DiscardMemoryRange(#[source] io::Error),
     #[error("Failed DMA mapping")]
-    DmaMap(#[source] std::io::Error),
+    DmaMap(#[source] io::Error),
     #[error("Failed DMA unmapping")]
-    DmaUnmap(#[source] std::io::Error),
+    DmaUnmap(#[source] io::Error),
     #[error("Invalid DMA mapping handler")]
     InvalidDmaMappingHandler,
     #[error("Failed adding used index")]
@@ -943,8 +944,8 @@ impl VirtioDevice for Mem {
         self.read_config_from_slice(self.config.lock().unwrap().as_slice(), offset, data);
     }
 
-    fn activate(&mut self, context: crate::device::ActivationContext) -> ActivateResult {
-        let crate::device::ActivationContext {
+    fn activate(&mut self, context: ActivationContext) -> ActivateResult {
+        let ActivationContext {
             mem,
             interrupt_cb,
             mut queues,
@@ -1023,7 +1024,7 @@ impl Snapshottable for Mem {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_state(&self.state())
     }
 }

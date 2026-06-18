@@ -84,6 +84,7 @@ use std::io::{ErrorKind, Read, Write};
 use std::num::Wrapping;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::{Duration, Instant};
+use std::{cmp, io};
 
 use log::{debug, error, info, warn};
 use vm_memory::{ReadVolatile, WriteVolatile};
@@ -230,7 +231,7 @@ where
 
             // The maximum amount of data we can read in is limited by both the RX buffer size and
             // the peer available buffer space.
-            let max_len = std::cmp::min(buf_capacity, self.peer_avail_credit());
+            let max_len = cmp::min(buf_capacity, self.peer_avail_credit());
 
             // Read data from the stream straight to the RX buffer, for maximum throughput.
             match pkt.read_volatile_from(&mut self.stream, max_len) {
@@ -739,7 +740,7 @@ where
                 "vsock: error shutting down host write side (lp={}, pp={}): {:?}",
                 self.local_port,
                 self.peer_port,
-                std::io::Error::last_os_error()
+                io::Error::last_os_error()
             );
         }
         self.host_write_shutdown = true;
@@ -790,6 +791,7 @@ where
 #[cfg(test)]
 mod unit_tests {
     use std::io::{Error as IoError, Result as IoResult};
+    use std::{result, thread};
 
     use libc::EFD_NONBLOCK;
     use virtio_queue::QueueOwnedT;
@@ -853,7 +855,7 @@ mod unit_tests {
                     if self.read_buf.is_empty() {
                         return Err(IoError::new(ErrorKind::WouldBlock, "EAGAIN"));
                     }
-                    let len = std::cmp::min(data.len(), self.read_buf.len());
+                    let len = cmp::min(data.len(), self.read_buf.len());
                     assert_ne!(len, 0);
                     data[..len].copy_from_slice(&self.read_buf[..len]);
                     self.read_buf = self.read_buf.split_off(len);
@@ -885,7 +887,7 @@ mod unit_tests {
         fn read_volatile<B: BitmapSlice>(
             &mut self,
             data: &mut VolatileSlice<B>,
-        ) -> std::result::Result<usize, VolatileMemoryError> {
+        ) -> result::Result<usize, VolatileMemoryError> {
             let mut buf = vec![0u8; data.len()];
             let len = self.read(&mut buf).map_err(VolatileMemoryError::IOError)?;
             data.copy_from(&buf[..len]);
@@ -897,7 +899,7 @@ mod unit_tests {
         fn write_volatile<B: BitmapSlice>(
             &mut self,
             data: &VolatileSlice<B>,
-        ) -> std::result::Result<usize, VolatileMemoryError> {
+        ) -> result::Result<usize, VolatileMemoryError> {
             let mut buf = vec![0u8; data.len()];
             data.copy_to(&mut buf);
             self.write(&buf).map_err(VolatileMemoryError::IOError)
@@ -1101,9 +1103,7 @@ mod unit_tests {
         assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_REQUEST);
         assert!(ctx.conn.will_expire());
         assert!(!ctx.conn.has_expired());
-        std::thread::sleep(std::time::Duration::from_millis(
-            defs::CONN_REQUEST_TIMEOUT_MS,
-        ));
+        thread::sleep(Duration::from_millis(defs::CONN_REQUEST_TIMEOUT_MS));
         assert!(ctx.conn.has_expired());
     }
 

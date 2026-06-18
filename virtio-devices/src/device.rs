@@ -11,7 +11,7 @@ use std::io::Write;
 use std::num::Wrapping;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Barrier};
-use std::thread;
+use std::{cmp, io, result, thread};
 
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
@@ -39,7 +39,7 @@ pub enum VirtioInterruptType {
 }
 
 pub trait VirtioInterrupt: Send + Sync {
-    fn trigger(&self, int_type: VirtioInterruptType) -> std::result::Result<(), std::io::Error>;
+    fn trigger(&self, int_type: VirtioInterruptType) -> io::Result<()>;
     fn notifier(&self, _int_type: VirtioInterruptType) -> Option<EventFd> {
         None
     }
@@ -48,7 +48,7 @@ pub trait VirtioInterrupt: Send + Sync {
         int_type: u32,
         notifier: Option<EventFd>,
         vm: &dyn hypervisor::Vm,
-    ) -> std::io::Result<()>;
+    ) -> io::Result<()>;
 }
 
 #[derive(Clone)]
@@ -139,7 +139,7 @@ pub trait VirtioDevice: Send {
     fn set_shm_regions(
         &mut self,
         _shm_regions: VirtioSharedMemoryList,
-    ) -> std::result::Result<(), Error> {
+    ) -> result::Result<(), Error> {
         std::unimplemented!()
     }
 
@@ -149,10 +149,7 @@ pub trait VirtioDevice: Send {
     /// after a shutdown() can lead to unpredictable results.
     fn shutdown(&mut self) {}
 
-    fn add_memory_region(
-        &mut self,
-        _region: &Arc<GuestRegionMmap>,
-    ) -> std::result::Result<(), Error> {
+    fn add_memory_region(&mut self, _region: &Arc<GuestRegionMmap>) -> result::Result<(), Error> {
         Ok(())
     }
 
@@ -181,7 +178,7 @@ pub trait VirtioDevice: Send {
             return;
         }
         if let Some(end) = offset.checked_add(data.len() as u64) {
-            data.write_all(&config[offset as usize..std::cmp::min(end, config_len) as usize])
+            data.write_all(&config[offset as usize..cmp::min(end, config_len) as usize])
                 .unwrap();
         }
     }
@@ -209,20 +206,10 @@ pub trait DmaRemapping {
     /// Provide a way to translate GVA address ranges into GPAs. The
     /// implementation must reject translations whose [addr, addr+size)
     /// span isn't entirely covered by a single mapping.
-    fn translate_gva(
-        &self,
-        id: u32,
-        addr: u64,
-        size: u64,
-    ) -> std::result::Result<u64, std::io::Error>;
+    fn translate_gva(&self, id: u32, addr: u64, size: u64) -> io::Result<u64>;
     /// Provide a way to translate GPA address ranges into GVAs. Same
     /// span requirement as `translate_gva`.
-    fn translate_gpa(
-        &self,
-        id: u32,
-        addr: u64,
-        size: u64,
-    ) -> std::result::Result<u64, std::io::Error>;
+    fn translate_gpa(&self, id: u32, addr: u64, size: u64) -> io::Result<u64>;
 }
 
 /// Owns a device's worker threads plus the kill event that stops them.
@@ -253,7 +240,7 @@ impl WorkerThreads {
 
     /// Signal the workers to exit without joining; they are joined later when
     /// this is dropped.
-    pub(crate) fn signal_exit(&self) -> std::io::Result<()> {
+    pub(crate) fn signal_exit(&self) -> io::Result<()> {
         self.kill_evt.write(1)
     }
 
@@ -414,7 +401,7 @@ impl VirtioCommon {
         Ok(())
     }
 
-    pub fn trigger_interrupt(&self, int_type: VirtioInterruptType) -> std::io::Result<()> {
+    pub fn trigger_interrupt(&self, int_type: VirtioInterruptType) -> io::Result<()> {
         if let Some(interrupt_cb) = &self.interrupt_cb {
             interrupt_cb.trigger(int_type)
         } else {
@@ -462,7 +449,7 @@ impl VirtioCommon {
 }
 
 impl Pausable for VirtioCommon {
-    fn pause(&mut self) -> std::result::Result<(), MigratableError> {
+    fn pause(&mut self) -> result::Result<(), MigratableError> {
         info!(
             "Pausing virtio-{}",
             VirtioDeviceType::from(self.device_type)
@@ -490,7 +477,7 @@ impl Pausable for VirtioCommon {
         Ok(())
     }
 
-    fn resume(&mut self) -> std::result::Result<(), MigratableError> {
+    fn resume(&mut self) -> result::Result<(), MigratableError> {
         info!(
             "Resuming virtio-{}",
             VirtioDeviceType::from(self.device_type)
@@ -530,7 +517,7 @@ mod unit_tests {
 
     struct NoopInterrupt;
     impl VirtioInterrupt for NoopInterrupt {
-        fn trigger(&self, _: VirtioInterruptType) -> std::io::Result<()> {
+        fn trigger(&self, _: VirtioInterruptType) -> io::Result<()> {
             Ok(())
         }
         fn set_notifier(
@@ -538,7 +525,7 @@ mod unit_tests {
             _: u32,
             _: Option<EventFd>,
             _: &dyn hypervisor::Vm,
-        ) -> std::io::Result<()> {
+        ) -> io::Result<()> {
             Ok(())
         }
     }

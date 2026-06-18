@@ -44,6 +44,7 @@ use std::fs::File;
 use std::io::{self, ErrorKind, Read};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::str;
 
 use log::{debug, error, info, warn};
 
@@ -514,7 +515,7 @@ impl VsockMuxer {
         if command.len < connect_prefix.len() {
             return match opt_new_line_position {
                 Some(_) => Err(Error::InvalidPortRequest),
-                None => Err(Error::UnixRead(std::io::ErrorKind::WouldBlock.into())),
+                None => Err(Error::UnixRead(io::ErrorKind::WouldBlock.into())),
             };
         }
 
@@ -530,12 +531,12 @@ impl VsockMuxer {
 
         // we parsed correctly `connect ` but need to wait for `\n`
         let new_line_position =
-            opt_new_line_position.ok_or(Error::UnixRead(std::io::ErrorKind::WouldBlock.into()))?;
+            opt_new_line_position.ok_or(Error::UnixRead(io::ErrorKind::WouldBlock.into()))?;
 
         // we now have the newline, we will treat everything in between as the port
         let port_string_as_bytes = &command.buf[connect_prefix.len()..new_line_position];
 
-        std::str::from_utf8(port_string_as_bytes)
+        str::from_utf8(port_string_as_bytes)
             .map_err(|_| Error::InvalidPortRequest)?
             .trim()
             .parse::<u32>()
@@ -887,10 +888,11 @@ impl VsockMuxer {
 #[cfg(test)]
 mod unit_tests {
     use std::cmp::min;
-    use std::fs;
     use std::io::Write;
     use std::net::Shutdown;
     use std::path::{Path, PathBuf};
+    use std::time::Duration;
+    use std::{fs, thread};
 
     use virtio_queue::QueueOwnedT;
 
@@ -921,7 +923,7 @@ mod unit_tests {
 
     impl Drop for MuxerTestContext {
         fn drop(&mut self) {
-            std::fs::remove_file(self.muxer.host_sock_path.as_str()).unwrap();
+            fs::remove_file(self.muxer.host_sock_path.as_str()).unwrap();
         }
     }
 
@@ -1094,7 +1096,7 @@ mod unit_tests {
     }
     impl Drop for LocalListener {
         fn drop(&mut self) {
-            std::fs::remove_file(&self.path).unwrap();
+            fs::remove_file(&self.path).unwrap();
         }
     }
 
@@ -1499,9 +1501,7 @@ mod unit_tests {
         assert!(!ctx.muxer.has_pending_rx());
 
         // Wait for the kill timers to expire.
-        std::thread::sleep(std::time::Duration::from_millis(
-            csm_defs::CONN_SHUTDOWN_TIMEOUT_MS,
-        ));
+        thread::sleep(Duration::from_millis(csm_defs::CONN_SHUTDOWN_TIMEOUT_MS));
 
         // Trigger a kill queue sweep, by requesting a new connection.
         ctx.init_pkt(

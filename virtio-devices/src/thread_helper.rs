@@ -7,6 +7,7 @@ use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU8;
 use std::thread::{self, JoinHandle};
+use std::{panic, result};
 
 use log::error;
 use seccompiler::{SeccompAction, apply_filter};
@@ -28,7 +29,7 @@ pub(crate) fn spawn_virtio_thread<F>(
     f: F,
 ) -> Result<(), ActivateError>
 where
-    F: FnOnce() -> std::result::Result<(), EpollHelperError>,
+    F: FnOnce() -> result::Result<(), EpollHelperError>,
     F: Send + 'static,
 {
     let seccomp_filter = get_seccomp_filter(seccomp_action, thread_type)
@@ -47,7 +48,7 @@ where
                 thread_exit_evt.write(1).ok();
                 return;
             }
-            match std::panic::catch_unwind(AssertUnwindSafe(f)) {
+            match panic::catch_unwind(AssertUnwindSafe(f)) {
                 Err(_) => {
                     error!("{thread_name} thread panicked");
                     thread_exit_evt.write(1).ok();
