@@ -7,7 +7,7 @@ use std::mem::size_of;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, RwLock};
-use std::{io, result};
+use std::{io, mem, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
@@ -30,6 +30,7 @@ use super::{
     Error as DeviceError, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice,
     VirtioDeviceType,
 };
+use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::{DmaRemapping, GuestMemoryMmap, VirtioInterrupt, VirtioInterruptType};
 
@@ -985,7 +986,7 @@ fn inclusive_end(addr: u64, size: u64) -> Option<u64> {
     addr.checked_add(size - 1)
 }
 
-fn span_end(addr: u64, size: u64) -> std::result::Result<u64, io::Error> {
+fn span_end(addr: u64, size: u64) -> io::Result<u64> {
     inclusive_end(addr, size).ok_or_else(|| {
         io::Error::other(format!(
             "translate span overflow or zero size: addr 0x{addr:x} size 0x{size:x}"
@@ -994,12 +995,7 @@ fn span_end(addr: u64, size: u64) -> std::result::Result<u64, io::Error> {
 }
 
 impl DmaRemapping for IommuMapping {
-    fn translate_gva(
-        &self,
-        id: u32,
-        addr: u64,
-        size: u64,
-    ) -> std::result::Result<u64, std::io::Error> {
+    fn translate_gva(&self, id: u32, addr: u64, size: u64) -> io::Result<u64> {
         debug!("Translate GVA addr 0x{addr:x} size 0x{size:x}");
         let end = span_end(addr, size)?;
         if let Some(domain_id) = self.endpoints.read().unwrap().get(&id) {
@@ -1030,12 +1026,7 @@ impl DmaRemapping for IommuMapping {
         )))
     }
 
-    fn translate_gpa(
-        &self,
-        id: u32,
-        addr: u64,
-        size: u64,
-    ) -> std::result::Result<u64, std::io::Error> {
+    fn translate_gpa(&self, id: u32, addr: u64, size: u64) -> io::Result<u64> {
         debug!("Translate GPA addr 0x{addr:x} size 0x{size:x}");
         let end = span_end(addr, size)?;
         if let Some(domain_id) = self.endpoints.read().unwrap().get(&id) {
@@ -1080,10 +1071,10 @@ impl AccessPlatformMapping {
 }
 
 impl AccessPlatform for AccessPlatformMapping {
-    fn translate_gva(&self, base: u64, size: u64) -> std::result::Result<u64, std::io::Error> {
+    fn translate_gva(&self, base: u64, size: u64) -> io::Result<u64> {
         self.mapping.translate_gva(self.id, base, size)
     }
-    fn translate_gpa(&self, base: u64, size: u64) -> std::result::Result<u64, std::io::Error> {
+    fn translate_gpa(&self, base: u64, size: u64) -> io::Result<u64> {
         self.mapping.translate_gpa(self.id, base, size)
     }
 }
@@ -1283,7 +1274,7 @@ impl VirtioDevice for Iommu {
         // The "bypass" field is the only mutable field
         let bypass_offset =
             (&raw const self.config.bypass as u64) - (&raw const self.config as u64);
-        if offset != bypass_offset || data.len() != std::mem::size_of_val(&self.config.bypass) {
+        if offset != bypass_offset || data.len() != mem::size_of_val(&self.config.bypass) {
             error!(
                 "Attempt to write to read-only field: offset {:x} length {}",
                 offset,
@@ -1299,8 +1290,8 @@ impl VirtioDevice for Iommu {
         self.update_bypass();
     }
 
-    fn activate(&mut self, context: crate::device::ActivationContext) -> ActivateResult {
-        let crate::device::ActivationContext {
+    fn activate(&mut self, context: ActivationContext) -> ActivateResult {
+        let ActivationContext {
             mem,
             interrupt_cb,
             mut queues,
@@ -1364,7 +1355,7 @@ impl Snapshottable for Iommu {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_state(&self.state())
     }
 }

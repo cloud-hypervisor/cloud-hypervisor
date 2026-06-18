@@ -4,9 +4,11 @@
 //
 
 use std::mem::size_of;
+use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{io, result};
 
 use anyhow::anyhow;
@@ -16,7 +18,7 @@ use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
-use vm_memory::{Address, ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic};
+use vm_memory::{Address, ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, guest_memory};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
@@ -178,9 +180,9 @@ enum Error {
     #[error("Failed to translate guest address")]
     AddressTranslation(#[source] io::Error),
     #[error("Failed to read request from guest memory")]
-    GuestMemoryRead(#[source] vm_memory::guest_memory::Error),
+    GuestMemoryRead(#[source] guest_memory::Error),
     #[error("Failed to write to guest memory")]
-    GuestMemoryWrite(#[source] vm_memory::guest_memory::Error),
+    GuestMemoryWrite(#[source] guest_memory::Error),
     #[error("Failed adding used index")]
     QueueAddUsed(#[source] virtio_queue::Error),
 }
@@ -228,7 +230,7 @@ impl RtcEpollHandler {
         desc_chain: &mut virtio_queue::DescriptorChain<M>,
     ) -> Result<u32, Error>
     where
-        M: std::ops::Deref,
+        M: Deref,
         M::Target: vm_memory::GuestMemory,
     {
         let req_desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
@@ -416,7 +418,7 @@ impl RtcEpollHandler {
                 // clock for chronyd in MSHV L2 guests, so readings must track the L1 host's
                 // NTP-disciplined wall clock. CLOCK_MONOTONIC would drift from L1 wall time
                 // as NTP adjusts, causing L2-L1 divergence.
-                0 => match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+                0 => match SystemTime::now().duration_since(UNIX_EPOCH) {
                     Ok(now) => {
                         let nanos = now.as_nanos();
                         if nanos > u64::MAX as u128 {
@@ -683,7 +685,7 @@ impl Snapshottable for Rtc {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_state(&self.state())
     }
 }

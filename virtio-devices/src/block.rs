@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
-use std::{io, result, thread};
+use std::{io, mem, result, thread};
 
 use anyhow::anyhow;
 use block::async_io::{AsyncIo, AsyncIoError};
@@ -51,6 +51,7 @@ use super::{
     EpollHelperHandler, Error as DeviceError, VirtioCommon, VirtioDevice, VirtioDeviceType,
     VirtioInterruptType,
 };
+use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::{GuestMemoryMmap, VirtioInterrupt};
 
@@ -651,7 +652,7 @@ impl BlockEpollHandler {
         // Prepare the CPU set the current queue thread is expected to run onto.
         let cpuset = self.host_cpus.as_ref().map(|host_cpus| {
             // SAFETY: all zeros is a valid pattern
-            let mut cpuset: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+            let mut cpuset: libc::cpu_set_t = unsafe { mem::zeroed() };
             // SAFETY: FFI call, trivially safe
             unsafe { libc::CPU_ZERO(&mut cpuset) };
             for host_cpu in host_cpus {
@@ -665,9 +666,8 @@ impl BlockEpollHandler {
         if let Some(cpuset) = cpuset.as_ref() {
             let cpuset: *const libc::cpu_set_t = cpuset;
             // SAFETY: FFI call with correct arguments
-            let ret = unsafe {
-                libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), cpuset)
-            };
+            let ret =
+                unsafe { libc::sched_setaffinity(0, mem::size_of::<libc::cpu_set_t>(), cpuset) };
 
             if ret != 0 {
                 error!(
@@ -1148,8 +1148,7 @@ impl VirtioDevice for Block {
         // The "writeback" field is the only mutable field
         let writeback_offset =
             (&raw const self.config.writeback as u64) - (&raw const self.config as u64);
-        if offset != writeback_offset || data.len() != std::mem::size_of_val(&self.config.writeback)
-        {
+        if offset != writeback_offset || data.len() != mem::size_of_val(&self.config.writeback) {
             error!(
                 "Attempt to write to read-only field: offset {:x} length {}",
                 offset,
@@ -1162,8 +1161,8 @@ impl VirtioDevice for Block {
         self.set_writeback_mode(writeback);
     }
 
-    fn activate(&mut self, context: crate::device::ActivationContext) -> ActivateResult {
-        let crate::device::ActivationContext {
+    fn activate(&mut self, context: ActivationContext) -> ActivateResult {
+        let ActivationContext {
             mem,
             interrupt_cb,
             mut queues,
@@ -1346,7 +1345,7 @@ impl Snapshottable for Block {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_state(&self.state())
     }
 }

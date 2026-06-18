@@ -8,10 +8,10 @@
 use std::fs::File;
 use std::io::{self, Read};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
 use std::time::Instant;
+use std::{ptr, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
@@ -20,7 +20,7 @@ use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
-use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic};
+use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic, guest_memory};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::checked_descriptor::DescriptorChainExt;
 use vmm_sys_util::eventfd::EventFd;
@@ -30,6 +30,7 @@ use super::{
     EpollHelperHandler, Error as DeviceError, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_VERSION_1,
     VirtioCommon, VirtioDevice, VirtioDeviceType,
 };
+use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::{GuestMemoryMmap, VirtioInterrupt, VirtioInterruptType};
 
@@ -59,7 +60,7 @@ enum Error {
     #[error("Invalid descriptor")]
     InvalidDescriptor,
     #[error("Failed to write to guest memory")]
-    GuestMemoryWrite(#[source] vm_memory::guest_memory::Error),
+    GuestMemoryWrite(#[source] guest_memory::Error),
 }
 
 struct WatchdogEpollHandler {
@@ -299,7 +300,7 @@ fn timerfd_setup(timer: &File, secs: i64) -> Result<(), io::Error> {
 
     let res =
         // SAFETY: FFI call with correct arguments
-        unsafe { libc::timerfd_settime(timer.as_raw_fd(), 0, &periodic, std::ptr::null_mut()) };
+        unsafe { libc::timerfd_settime(timer.as_raw_fd(), 0, &periodic, ptr::null_mut()) };
 
     if res < 0 {
         Err(io::Error::last_os_error())
@@ -325,8 +326,8 @@ impl VirtioDevice for Watchdog {
         self.common.ack_features(value);
     }
 
-    fn activate(&mut self, context: crate::device::ActivationContext) -> ActivateResult {
-        let crate::device::ActivationContext {
+    fn activate(&mut self, context: ActivationContext) -> ActivateResult {
+        let ActivationContext {
             mem,
             interrupt_cb,
             mut queues,
@@ -407,7 +408,7 @@ impl Snapshottable for Watchdog {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_state(&self.state())
     }
 }

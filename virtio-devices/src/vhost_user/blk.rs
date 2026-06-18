@@ -25,6 +25,7 @@ use vmm_sys_util::eventfd::EventFd;
 use super::super::{ActivateResult, VirtioCommon, VirtioDevice, VirtioDeviceType};
 use super::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
 use super::{DEFAULT_VIRTIO_FEATURES, Error, Result};
+use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::vhost_user::{VhostUserCommon, VhostUserState};
 use crate::{GuestRegionMmap, VIRTIO_F_ACCESS_PLATFORM};
@@ -196,7 +197,7 @@ impl Blk {
         })
     }
 
-    fn state(&self) -> std::result::Result<State, MigratableError> {
+    fn state(&self) -> result::Result<State, MigratableError> {
         self.vu_common.state(self.config)
     }
 }
@@ -236,8 +237,7 @@ impl VirtioDevice for Blk {
         // The "writeback" field is the only mutable field
         let writeback_offset =
             (&raw const self.config.writeback as u64) - (&raw const self.config as u64);
-        if offset != writeback_offset || data.len() != std::mem::size_of_val(&self.config.writeback)
-        {
+        if offset != writeback_offset || data.len() != mem::size_of_val(&self.config.writeback) {
             error!(
                 "Attempt to write to read-only field: offset {:x} length {}",
                 offset,
@@ -263,8 +263,8 @@ impl VirtioDevice for Blk {
         }
     }
 
-    fn activate(&mut self, context: crate::device::ActivationContext) -> ActivateResult {
-        let crate::device::ActivationContext {
+    fn activate(&mut self, context: ActivationContext) -> ActivateResult {
+        let ActivationContext {
             mem,
             interrupt_cb,
             queues,
@@ -317,7 +317,7 @@ impl VirtioDevice for Blk {
     fn add_memory_region(
         &mut self,
         region: &Arc<GuestRegionMmap>,
-    ) -> std::result::Result<(), crate::Error> {
+    ) -> result::Result<(), crate::Error> {
         self.vu_common.add_memory_region(region)
     }
 }
@@ -339,30 +339,30 @@ impl Snapshottable for Blk {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         self.vu_common.snapshot(&self.state()?)
     }
 }
 impl Transportable for Blk {}
 
 impl Migratable for Blk {
-    fn start_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
+    fn start_dirty_log(&mut self) -> result::Result<(), MigratableError> {
         self.vu_common.start_dirty_log()
     }
 
-    fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
+    fn stop_dirty_log(&mut self) -> result::Result<(), MigratableError> {
         self.vu_common.stop_dirty_log()
     }
 
-    fn dirty_log(&mut self) -> std::result::Result<MemoryRangeTable, MigratableError> {
+    fn dirty_log(&mut self) -> result::Result<MemoryRangeTable, MigratableError> {
         self.vu_common.dirty_log()
     }
 
-    fn start_migration(&mut self) -> std::result::Result<(), MigratableError> {
+    fn start_migration(&mut self) -> result::Result<(), MigratableError> {
         self.vu_common.start_migration()
     }
 
-    fn complete_migration(&mut self) -> std::result::Result<(), MigratableError> {
+    fn complete_migration(&mut self) -> result::Result<(), MigratableError> {
         self.vu_common.complete_migration()
     }
 }

@@ -4,6 +4,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use std::env;
+
 use block::{BLKDISCARD, BLKZEROOUT};
 use libc::{FIONBIO, TIOCGWINSZ, TUNSETOFFLOAD};
 use seccompiler::SeccompCmpOp::Eq;
@@ -373,7 +375,7 @@ pub fn get_seccomp_filter(
             get_seccomp_rules(thread_type).into_iter().collect(),
             SeccompAction::Log,
             SeccompAction::Allow,
-            std::env::consts::ARCH.try_into().unwrap(),
+            env::consts::ARCH.try_into().unwrap(),
         )
         .and_then(|filter| filter.try_into())
         .map_err(Error::Backend),
@@ -381,7 +383,7 @@ pub fn get_seccomp_filter(
             get_seccomp_rules(thread_type).into_iter().collect(),
             SeccompAction::Trap,
             SeccompAction::Allow,
-            std::env::consts::ARCH.try_into().unwrap(),
+            env::consts::ARCH.try_into().unwrap(),
         )
         .and_then(|filter| filter.try_into())
         .map_err(Error::Backend),

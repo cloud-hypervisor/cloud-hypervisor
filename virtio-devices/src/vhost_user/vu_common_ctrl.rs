@@ -1,7 +1,6 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::ffi;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -9,6 +8,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
+use std::{ffi, fs, io, mem, slice};
 
 use log::{error, info};
 use vhost::vhost_kern::vhost_binding::VHOST_VRING_F_LOG;
@@ -228,7 +228,7 @@ impl VhostUserHandle {
                 desc_table_addr: get_host_address_range(
                     mem,
                     GuestAddress(queue.desc_table()),
-                    actual_size * std::mem::size_of::<RawDescriptor>(),
+                    actual_size * mem::size_of::<RawDescriptor>(),
                 )
                 .ok_or(Error::DescriptorTableAddress)? as u64,
                 // The used ring is {flags: u16; idx: u16; virtq_used_elem [{id: u16, len: u16}; actual_size]},
@@ -385,7 +385,7 @@ impl VhostUserHandle {
     ) -> Result<Self> {
         if server {
             if unlink_socket {
-                std::fs::remove_file(socket_path).map_err(Error::RemoveSocketPath)?;
+                fs::remove_file(socket_path).map_err(Error::RemoveSocketPath)?;
             }
 
             info!("Binding vhost-user listener...");
@@ -467,7 +467,7 @@ impl VhostUserHandle {
                 loop {
                     match epoll.wait(-1, &mut events) {
                         Ok(_) => break,
-                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                        Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                         Err(e) => return Err(Error::EpollWait(e)),
                     }
                 }
@@ -640,7 +640,7 @@ impl VhostUserHandle {
             )
         };
         if res < 0 {
-            return Err(Error::SetSeals(std::io::Error::last_os_error()));
+            return Err(Error::SetSeals(io::Error::last_os_error()));
         }
 
         // Mmap shm_log region
@@ -744,7 +744,7 @@ impl VhostUserHandle {
             let bitmap: &[u64] = unsafe {
                 // Cast the pointer to u64
                 let ptr = region.as_ptr().cast();
-                std::slice::from_raw_parts(ptr, len)
+                slice::from_raw_parts(ptr, len)
             };
             Ok(MemoryRangeTable::from_dirty_bitmap(
                 bitmap.iter().copied(),
@@ -757,12 +757,12 @@ impl VhostUserHandle {
     }
 }
 
-fn memfd_create(name: &ffi::CStr, flags: u32) -> std::result::Result<RawFd, std::io::Error> {
+fn memfd_create(name: &ffi::CStr, flags: u32) -> io::Result<RawFd> {
     // SAFETY: FFI call with valid arguments
     let res = unsafe { libc::syscall(libc::SYS_memfd_create, name.as_ptr(), flags) };
 
     if res < 0 {
-        Err(std::io::Error::last_os_error())
+        Err(io::Error::last_os_error())
     } else {
         Ok(res as RawFd)
     }

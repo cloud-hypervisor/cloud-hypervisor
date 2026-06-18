@@ -12,7 +12,7 @@ use std::fs::File;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::Barrier;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
+use std::{io, result, thread};
 
 use log::info;
 use thiserror::Error;
@@ -26,13 +26,13 @@ pub struct EpollHelper {
 #[derive(Error, Debug)]
 pub enum EpollHelperError {
     #[error("Failed to create Fd")]
-    CreateFd(#[source] std::io::Error),
+    CreateFd(#[source] io::Error),
     #[error("Failed to epoll_ctl")]
-    Ctl(#[source] std::io::Error),
+    Ctl(#[source] io::Error),
     #[error("IO error")]
-    IoError(#[source] std::io::Error),
+    IoError(#[source] io::Error),
     #[error("Failed to epoll_wait")]
-    Wait(#[source] std::io::Error),
+    Wait(#[source] io::Error),
     #[error("Failed to get virtio-queue index")]
     QueueRingIndex(#[source] virtio_queue::Error),
     #[error("Failed to handle virtio device events")]
@@ -82,10 +82,7 @@ pub trait EpollHelperHandler {
 }
 
 impl EpollHelper {
-    pub fn new(
-        kill_evt: &EventFd,
-        pause_evt: &EventFd,
-    ) -> std::result::Result<Self, EpollHelperError> {
+    pub fn new(kill_evt: &EventFd, pause_evt: &EventFd) -> result::Result<Self, EpollHelperError> {
         // Create the epoll file descriptor
         let epoll_fd = epoll::create(true).map_err(EpollHelperError::CreateFd)?;
         // Use 'File' to enforce closing on 'epoll_fd'
@@ -102,7 +99,7 @@ impl EpollHelper {
         Ok(helper)
     }
 
-    pub fn add_event(&mut self, fd: RawFd, id: u16) -> std::result::Result<(), EpollHelperError> {
+    pub fn add_event(&mut self, fd: RawFd, id: u16) -> result::Result<(), EpollHelperError> {
         self.add_event_custom(fd, id, epoll::Events::EPOLLIN)
     }
 
@@ -111,7 +108,7 @@ impl EpollHelper {
         fd: RawFd,
         id: u16,
         evts: epoll::Events,
-    ) -> std::result::Result<(), EpollHelperError> {
+    ) -> result::Result<(), EpollHelperError> {
         epoll::ctl(
             self.epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_ADD,
@@ -126,7 +123,7 @@ impl EpollHelper {
         fd: RawFd,
         id: u16,
         evts: epoll::Events,
-    ) -> std::result::Result<(), EpollHelperError> {
+    ) -> result::Result<(), EpollHelperError> {
         epoll::ctl(
             self.epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_MOD,
@@ -141,7 +138,7 @@ impl EpollHelper {
         fd: RawFd,
         id: u16,
         evts: epoll::Events,
-    ) -> std::result::Result<(), EpollHelperError> {
+    ) -> result::Result<(), EpollHelperError> {
         epoll::ctl(
             self.epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_DEL,
@@ -156,7 +153,7 @@ impl EpollHelper {
         paused: &AtomicBool,
         paused_sync: &Barrier,
         handler: &mut dyn EpollHelperHandler,
-    ) -> std::result::Result<(), EpollHelperError> {
+    ) -> result::Result<(), EpollHelperError> {
         self.run_with_timeout(paused, paused_sync, handler, -1, false)
     }
 
@@ -168,7 +165,7 @@ impl EpollHelper {
         handler: &mut dyn EpollHelperHandler,
         timeout: i32,
         enable_event_list: bool,
-    ) -> std::result::Result<(), EpollHelperError> {
+    ) -> result::Result<(), EpollHelperError> {
         const EPOLL_EVENTS_LEN: usize = 100;
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
 
@@ -185,7 +182,7 @@ impl EpollHelper {
                 match epoll::wait(self.epoll_file.as_raw_fd(), timeout, &mut events[..]) {
                     Ok(res) => res,
                     Err(e) => {
-                        if e.kind() == std::io::ErrorKind::Interrupted {
+                        if e.kind() == io::ErrorKind::Interrupted {
                             // It's well defined from the epoll_wait() syscall
                             // documentation that the epoll loop can be interrupted
                             // before any of the requested events occurred or the
@@ -255,7 +252,7 @@ impl EpollHelper {
         handler: &mut dyn EpollHelperHandler,
         _timeout: i32,
         _enable_event_list: bool,
-    ) -> std::result::Result<(), EpollHelperError> {
+    ) -> result::Result<(), EpollHelperError> {
         const EPOLL_EVENTS_LEN: usize = 100;
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
 
@@ -263,7 +260,7 @@ impl EpollHelper {
             let num_events = match epoll::wait(self.epoll_file.as_raw_fd(), 0, &mut events[..]) {
                 Ok(res) => res,
                 Err(e) => {
-                    if e.kind() == std::io::ErrorKind::Interrupted {
+                    if e.kind() == io::ErrorKind::Interrupted {
                         // It's well defined from the epoll_wait() syscall
                         // documentation that the epoll loop can be interrupted
                         // before any of the requested events occurred or the

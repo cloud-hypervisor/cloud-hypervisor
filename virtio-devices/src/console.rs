@@ -29,6 +29,7 @@ use super::{
     Error as DeviceError, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice,
     VirtioDeviceType, VirtioInterruptType,
 };
+use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::{GuestMemoryMmap, VirtioInterrupt};
 
@@ -711,8 +712,8 @@ impl VirtioDevice for Console {
         self.read_config_from_slice(self.config.lock().unwrap().as_slice(), offset, data);
     }
 
-    fn activate(&mut self, context: crate::device::ActivationContext) -> ActivateResult {
-        let crate::device::ActivationContext {
+    fn activate(&mut self, context: ActivationContext) -> ActivateResult {
+        let ActivationContext {
             mem,
             interrupt_cb,
             mut queues,
@@ -797,7 +798,7 @@ impl Snapshottable for Console {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_state(&self.state())
     }
 }
