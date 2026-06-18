@@ -902,6 +902,7 @@ fn vcpu_thread_rules(
         ),
         (libc::SYS_fcntl, vec![]),
         (libc::SYS_fstat, vec![]),
+        (libc::SYS_fsync, vec![]),
         (libc::SYS_futex, vec![]),
         (libc::SYS_getcwd, vec![]),
         (libc::SYS_getrandom, vec![]),
