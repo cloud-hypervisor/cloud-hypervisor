@@ -127,7 +127,7 @@ fn open_fixed_vhd(
         if io_uring_supported() {
             info!("Opening fixed VHD disk file with io_uring backend");
             return Ok(Box::new(
-                VhdDisk::new(file, true).map_err(|e| e.with_path(options.path))?,
+                VhdDisk::new(file, true, options.direct).map_err(|e| e.with_path(options.path))?,
             ));
         }
         info!("io_uring runtime probe failed for fixed VHD, using synchronous backend");
@@ -135,7 +135,7 @@ fn open_fixed_vhd(
 
     info!("Opening fixed VHD disk file with synchronous backend");
     Ok(Box::new(
-        VhdDisk::new(file, false).map_err(|e| e.with_path(options.path))?,
+        VhdDisk::new(file, false, options.direct).map_err(|e| e.with_path(options.path))?,
     ))
 }
 
