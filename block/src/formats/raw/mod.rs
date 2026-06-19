@@ -20,7 +20,7 @@ use self::worker::async_uring::RawAsync;
 use self::worker::sync::RawSync;
 use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError};
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
-use crate::{DiskTopology, disk_file, probe_sparse_support, query_device_size};
+use crate::{AlignedFile, DiskTopology, disk_file, probe_sparse_support, query_device_size};
 
 pub(crate) mod worker;
 
@@ -46,11 +46,16 @@ pub enum RawBackend {
 pub struct RawDisk {
     file: File,
     backend: RawBackend,
+    direct: bool,
 }
 
 impl RawDisk {
-    pub fn new(file: File, backend: RawBackend) -> Self {
-        Self { file, backend }
+    pub fn new(file: File, backend: RawBackend, direct: bool) -> Self {
+        Self {
+            file,
+            backend,
+            direct,
+        }
     }
 }
 
@@ -131,15 +136,21 @@ impl disk_file::AsyncDiskFile for RawDisk {
         Ok(Box::new(RawDisk {
             file,
             backend: self.backend,
+            direct: self.direct,
         }))
     }
 
     fn create_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
+        let file = self
+            .file
+            .try_clone()
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::Clone(e)))?;
+        let raw_file = AlignedFile::new(file, self.direct);
         match self.backend {
-            RawBackend::Sync => Ok(Box::new(RawSync::new(self.file.as_raw_fd()))),
+            RawBackend::Sync => Ok(Box::new(RawSync::new(raw_file))),
             #[cfg(feature = "io_uring")]
-            RawBackend::IoUring => Ok(Box::new(RawAsync::new(self.file.as_raw_fd(), ring_depth)?)),
-            RawBackend::Aio => Ok(Box::new(RawAio::new(self.file.as_raw_fd(), ring_depth)?)),
+            RawBackend::IoUring => Ok(Box::new(RawAsync::new(raw_file, ring_depth)?)),
+            RawBackend::Aio => Ok(Box::new(RawAio::new(raw_file, ring_depth)?)),
         }
     }
 }
@@ -165,7 +176,7 @@ mod unit_tests {
     #[test]
     fn new_sync_returns_correct_size() {
         let file = make_raw_file();
-        let disk = RawDisk::new(file, RawBackend::Sync);
+        let disk = RawDisk::new(file, RawBackend::Sync, false);
         assert_eq!(disk.logical_size().unwrap(), TEST_SIZE);
     }
 
@@ -201,14 +212,14 @@ mod unit_tests {
     #[test]
     fn sync_backend_disables_batch_requests() {
         let file = make_raw_file();
-        let disk = RawDisk::new(file, RawBackend::Sync);
+        let disk = RawDisk::new(file, RawBackend::Sync, false);
         assert_sync_backend(&disk);
     }
 
     #[test]
     fn aio_backend_disables_batch_requests() {
         let file = make_raw_file();
-        let disk = RawDisk::new(file, RawBackend::Aio);
+        let disk = RawDisk::new(file, RawBackend::Aio, false);
         assert_aio_backend(&disk);
     }
 
@@ -216,7 +227,7 @@ mod unit_tests {
     #[test]
     fn io_uring_backend_enables_batch_requests() {
         let file = make_raw_file();
-        let disk = RawDisk::new(file, RawBackend::IoUring);
+        let disk = RawDisk::new(file, RawBackend::IoUring, false);
         assert_io_uring_backend(&disk);
     }
 
@@ -228,14 +239,14 @@ mod unit_tests {
     #[test]
     fn try_clone_preserves_sync_backend() {
         let file = make_raw_file();
-        let disk = RawDisk::new(file, RawBackend::Sync);
+        let disk = RawDisk::new(file, RawBackend::Sync, false);
         assert_try_clone(&disk, RawBackend::Sync);
     }
 
     #[test]
     fn try_clone_preserves_aio_backend() {
         let file = make_raw_file();
-        let disk = RawDisk::new(file, RawBackend::Aio);
+        let disk = RawDisk::new(file, RawBackend::Aio, false);
         assert_try_clone(&disk, RawBackend::Aio);
     }
 
@@ -243,14 +254,14 @@ mod unit_tests {
     #[test]
     fn try_clone_preserves_io_uring_backend() {
         let file = make_raw_file();
-        let disk = RawDisk::new(file, RawBackend::IoUring);
+        let disk = RawDisk::new(file, RawBackend::IoUring, false);
         assert_try_clone(&disk, RawBackend::IoUring);
     }
 
     #[test]
     fn resize_changes_file_size() {
         let file = make_raw_file();
-        let mut disk = RawDisk::new(file, RawBackend::Aio);
+        let mut disk = RawDisk::new(file, RawBackend::Aio, false);
         let new_size = TEST_SIZE * 2;
         disk.resize(new_size).unwrap();
         assert_eq!(disk.logical_size().unwrap(), new_size);
@@ -259,7 +270,7 @@ mod unit_tests {
     #[test]
     fn physical_size_reports_allocated_blocks() {
         let file = make_raw_file();
-        let disk = RawDisk::new(file, RawBackend::Aio);
+        let disk = RawDisk::new(file, RawBackend::Aio, false);
         // Sparse file: physical size is less than logical size.
         assert!(disk.physical_size().unwrap() < disk.logical_size().unwrap());
     }

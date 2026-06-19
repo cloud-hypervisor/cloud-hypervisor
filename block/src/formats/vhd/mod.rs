@@ -25,7 +25,7 @@ use self::worker::sync::FixedVhdSync;
 use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError};
 use crate::disk_file::DiskSize;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
-use crate::{BlockBackend, Error, disk_file};
+use crate::{AlignedFile, BlockBackend, Error, disk_file};
 
 #[derive(Debug)]
 pub struct VhdDisk {
@@ -103,15 +103,15 @@ impl disk_file::AsyncDiskFile for VhdDisk {
 
     fn create_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
         let size = self.logical_size()?;
+        let file = self.inner.file().try_clone().map_err(|e| {
+            BlockError::new(BlockErrorKind::Io, DiskFileError::NewAsyncIo(e)).with_op(ErrorOp::Open)
+        })?;
+        let raw_file = AlignedFile::new(file, false);
 
         if self.use_io_uring {
             #[cfg(feature = "io_uring")]
             {
-                return Ok(Box::new(FixedVhdAsync::new(
-                    self.inner.as_raw_fd(),
-                    ring_depth,
-                    size,
-                )?));
+                return Ok(Box::new(FixedVhdAsync::new(raw_file, ring_depth, size)?));
             }
 
             #[cfg(not(feature = "io_uring"))]
@@ -119,12 +119,7 @@ impl disk_file::AsyncDiskFile for VhdDisk {
         }
 
         let _ = ring_depth;
-        Ok(Box::new(
-            FixedVhdSync::new(self.inner.as_raw_fd(), size).map_err(|e| {
-                BlockError::new(BlockErrorKind::Io, DiskFileError::NewAsyncIo(e))
-                    .with_op(ErrorOp::Open)
-            })?,
-        ))
+        Ok(Box::new(FixedVhdSync::new(raw_file, size)))
     }
 }
 
@@ -132,7 +127,6 @@ impl disk_file::AsyncDiskFile for VhdDisk {
 mod unit_tests {
     use std::fs::File;
     use std::io::{Seek, SeekFrom, Write};
-    use std::os::fd::AsRawFd;
 
     use vmm_sys_util::tempfile::TempFile;
 
@@ -205,7 +199,8 @@ mod unit_tests {
     fn sync_rejects_read_straddling_logical_size() {
         let file = TempFile::new().unwrap().into_file();
         file.set_len(0x2000).unwrap();
-        let mut sync_io = FixedVhdSync::new(file.as_raw_fd(), 0x1000).unwrap();
+        let mut sync_io =
+            FixedVhdSync::new(AlignedFile::new(file.try_clone().unwrap(), false), 0x1000);
         let op = AsyncIoOperation::read_to_vec(0x800, OwnedIoBuffer::from_vec(vec![0; 0x900]), 1);
 
         assert!(matches!(
@@ -218,7 +213,8 @@ mod unit_tests {
     fn sync_rejects_write_straddling_logical_size() {
         let file = TempFile::new().unwrap().into_file();
         file.set_len(0x2000).unwrap();
-        let mut sync_io = FixedVhdSync::new(file.as_raw_fd(), 0x1000).unwrap();
+        let mut sync_io =
+            FixedVhdSync::new(AlignedFile::new(file.try_clone().unwrap(), false), 0x1000);
         let op =
             AsyncIoOperation::write_from_vec(0x800, OwnedIoBuffer::from_vec(vec![0; 0x900]), 1);
 
@@ -232,7 +228,8 @@ mod unit_tests {
     fn sync_accepts_operation_exactly_filling_logical_size() {
         let file = TempFile::new().unwrap().into_file();
         file.set_len(0x2000).unwrap();
-        let mut sync_io = FixedVhdSync::new(file.as_raw_fd(), 0x1000).unwrap();
+        let mut sync_io =
+            FixedVhdSync::new(AlignedFile::new(file.try_clone().unwrap(), false), 0x1000);
         // end == size: boundary must be accepted
         let op = AsyncIoOperation::read_to_vec(0, OwnedIoBuffer::from_vec(vec![0; 0x1000]), 1);
         sync_io.submit_data_operation(op).unwrap();
@@ -242,7 +239,8 @@ mod unit_tests {
     fn sync_accepts_operation_at_last_byte() {
         let file = TempFile::new().unwrap().into_file();
         file.set_len(0x2000).unwrap();
-        let mut sync_io = FixedVhdSync::new(file.as_raw_fd(), 0x1000).unwrap();
+        let mut sync_io =
+            FixedVhdSync::new(AlignedFile::new(file.try_clone().unwrap(), false), 0x1000);
         // end = 0xFFF + 1 = 0x1000 == size: boundary must be accepted
         let op = AsyncIoOperation::read_to_vec(0xFFF, OwnedIoBuffer::from_vec(vec![0; 1]), 1);
         sync_io.submit_data_operation(op).unwrap();
@@ -253,7 +251,12 @@ mod unit_tests {
     fn io_uring_batch_rejects_request_straddling_logical_size() {
         let file = TempFile::new().unwrap().into_file();
         file.set_len(0x2000).unwrap();
-        let mut async_io = FixedVhdAsync::new(file.as_raw_fd(), 8, 0x1000).unwrap();
+        let mut async_io = FixedVhdAsync::new(
+            AlignedFile::new(file.try_clone().unwrap(), false),
+            8,
+            0x1000,
+        )
+        .unwrap();
         let op = AsyncIoOperation::read_to_vec(0x800, OwnedIoBuffer::from_vec(vec![0; 0x900]), 1);
 
         assert!(matches!(
@@ -267,7 +270,12 @@ mod unit_tests {
     fn io_uring_rejects_single_op_straddling_logical_size() {
         let file = TempFile::new().unwrap().into_file();
         file.set_len(0x2000).unwrap();
-        let mut async_io = FixedVhdAsync::new(file.as_raw_fd(), 8, 0x1000).unwrap();
+        let mut async_io = FixedVhdAsync::new(
+            AlignedFile::new(file.try_clone().unwrap(), false),
+            8,
+            0x1000,
+        )
+        .unwrap();
         let op = AsyncIoOperation::read_to_vec(0x800, OwnedIoBuffer::from_vec(vec![0; 0x900]), 1);
 
         assert!(matches!(

@@ -26,6 +26,10 @@ impl FixedVhd {
             position: 0,
         })
     }
+
+    pub(crate) fn file(&self) -> &File {
+        &self.file
+    }
 }
 
 impl AsRawFd for FixedVhd {

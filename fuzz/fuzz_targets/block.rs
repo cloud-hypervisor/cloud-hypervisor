@@ -54,7 +54,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     let queue_affinity = BTreeMap::new();
     let mut block = Block::new(
         "tmp".to_owned(),
-        Box::new(RawDisk::new(disk_file, RawBackend::Sync)),
+        Box::new(RawDisk::new(disk_file, RawBackend::Sync, false)),
         PathBuf::from(""),
         false,
         false,
