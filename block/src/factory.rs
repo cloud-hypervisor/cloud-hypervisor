@@ -151,7 +151,11 @@ fn open_raw(
     if !options.disable_io_uring {
         if io_uring_supported() {
             info!("Opening RAW disk file with io_uring backend");
-            return Ok(Box::new(RawDisk::new(file, RawBackend::IoUring)));
+            return Ok(Box::new(RawDisk::new(
+                file,
+                RawBackend::IoUring,
+                options.direct,
+            )));
         }
         info!("io_uring runtime probe failed for RAW, trying next backend");
     }
@@ -159,13 +163,21 @@ fn open_raw(
     if !options.disable_aio {
         if aio_supported() {
             info!("Opening RAW disk file with AIO backend");
-            return Ok(Box::new(RawDisk::new(file, RawBackend::Aio)));
+            return Ok(Box::new(RawDisk::new(
+                file,
+                RawBackend::Aio,
+                options.direct,
+            )));
         }
         info!("AIO runtime probe failed for RAW, using synchronous backend");
     }
 
     info!("Opening RAW disk file with synchronous backend");
-    Ok(Box::new(RawDisk::new(file, RawBackend::Sync)))
+    Ok(Box::new(RawDisk::new(
+        file,
+        RawBackend::Sync,
+        options.direct,
+    )))
 }
 
 fn open_qcow2(

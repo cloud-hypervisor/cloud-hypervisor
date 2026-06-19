@@ -28,7 +28,7 @@ use crate::util::{
 pub fn micro_bench_aio_drain(control: &PerformanceTestControl) -> f64 {
     let num_ops = control.num_ops.expect("num_ops required") as usize;
     let tmp = util::sized_tempfile(num_ops);
-    let disk = RawDisk::new(tmp.as_file().try_clone().unwrap(), RawBackend::Aio);
+    let disk = RawDisk::new(tmp.as_file().try_clone().unwrap(), RawBackend::Aio, false);
     let mut aio = disk
         .create_async_io(num_ops as u32)
         .expect("failed to create AIO context");

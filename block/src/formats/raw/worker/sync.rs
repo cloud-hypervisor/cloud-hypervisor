@@ -6,16 +6,17 @@
 
 use std::collections::VecDeque;
 use std::io;
-use std::os::unix::io::RawFd;
+use std::os::unix::io::AsRawFd;
 
 use vmm_sys_util::eventfd::EventFd;
 
+use super::{operation_is_aligned, run_unaligned_operation};
 use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
 use crate::sparse::{punch_hole, write_zeroes};
-use crate::{SECTOR_SIZE, is_block_device};
+use crate::{AlignedFile, is_block_device};
 
 pub struct RawSync {
-    fd: RawFd,
+    raw_file: AlignedFile,
     eventfd: EventFd,
     completion_list: VecDeque<AsyncIoCompletion>,
     alignment: u64,
@@ -23,13 +24,14 @@ pub struct RawSync {
 }
 
 impl RawSync {
-    pub fn new(fd: RawFd) -> Self {
-        let is_block_device = is_block_device(fd);
+    pub fn new(raw_file: AlignedFile) -> Self {
+        let is_block_device = is_block_device(raw_file.as_raw_fd());
+        let alignment = raw_file.alignment() as u64;
         RawSync {
-            fd,
+            raw_file,
             eventfd: EventFd::new(libc::EFD_NONBLOCK).expect("Failed creating EventFd for RawFile"),
             completion_list: VecDeque::new(),
-            alignment: SECTOR_SIZE,
+            alignment,
             is_block_device,
         }
     }
@@ -44,47 +46,54 @@ impl AsyncIo for RawSync {
         self.alignment
     }
 
-    fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
-        let offset = op.offset();
+    fn submit_data_operation(&mut self, mut op: AsyncIoOperation) -> AsyncIoResult<()> {
         let is_read = op.is_read();
-        let iovecs = op.iovecs();
 
-        let result = if is_read {
-            // SAFETY: the memory pointed to by `iovecs` is backed by the op,
-            // and valid for the kernel to write to by construction of
-            // AsyncIoOperation.
-            unsafe {
-                libc::preadv(
-                    self.fd as libc::c_int,
-                    iovecs.as_ptr(),
-                    iovecs.len() as libc::c_int,
-                    offset,
-                )
-            }
-        } else {
-            // SAFETY: the memory pointed to by `iovecs` is backed by the op,
-            // and valid for the kernel to read from by construction of
-            // AsyncIoOperation.
-            unsafe {
-                libc::pwritev(
-                    self.fd as libc::c_int,
-                    iovecs.as_ptr(),
-                    iovecs.len() as libc::c_int,
-                    offset,
-                )
-            }
-        };
-        if result < 0 {
-            let error = io::Error::last_os_error();
-            return Err(if is_read {
-                AsyncIoError::ReadVectored(error)
+        let result = if operation_is_aligned(&op, self.alignment) {
+            let fd = self.raw_file.as_raw_fd();
+            let offset = op.offset();
+            let iovecs = op.iovecs();
+
+            let result = if is_read {
+                // SAFETY: the memory pointed to by `iovecs` is backed by the op,
+                // and valid for the kernel to write to by construction of
+                // AsyncIoOperation.
+                unsafe {
+                    libc::preadv(
+                        fd as libc::c_int,
+                        iovecs.as_ptr(),
+                        iovecs.len() as libc::c_int,
+                        offset,
+                    )
+                }
             } else {
-                AsyncIoError::WriteVectored(error)
-            });
-        }
+                // SAFETY: the memory pointed to by `iovecs` is backed by the op,
+                // and valid for the kernel to read from by construction of
+                // AsyncIoOperation.
+                unsafe {
+                    libc::pwritev(
+                        fd as libc::c_int,
+                        iovecs.as_ptr(),
+                        iovecs.len() as libc::c_int,
+                        offset,
+                    )
+                }
+            };
+            if result < 0 {
+                let error = io::Error::last_os_error();
+                return Err(if is_read {
+                    AsyncIoError::ReadVectored(error)
+                } else {
+                    AsyncIoError::WriteVectored(error)
+                });
+            }
+            result as i32
+        } else {
+            run_unaligned_operation(&self.raw_file, &mut op)?
+        };
 
         self.completion_list
-            .push_back(AsyncIoCompletion::from_operation(op, result as i32));
+            .push_back(AsyncIoCompletion::from_operation(op, result));
         self.eventfd.write(1).unwrap();
 
         Ok(())
@@ -92,7 +101,7 @@ impl AsyncIo for RawSync {
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
         // SAFETY: FFI call
-        let result = unsafe { libc::fsync(self.fd as libc::c_int) };
+        let result = unsafe { libc::fsync(self.raw_file.as_raw_fd() as libc::c_int) };
         if result < 0 {
             return Err(AsyncIoError::Fsync(io::Error::last_os_error()));
         }
@@ -111,8 +120,13 @@ impl AsyncIo for RawSync {
     }
 
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
-        punch_hole(self.fd, self.is_block_device, offset, length)
-            .map_err(AsyncIoError::PunchHole)?;
+        punch_hole(
+            self.raw_file.as_raw_fd(),
+            self.is_block_device,
+            offset,
+            length,
+        )
+        .map_err(AsyncIoError::PunchHole)?;
         self.completion_list
             .push_back(AsyncIoCompletion::new(user_data, 0, None));
         self.eventfd.write(1).unwrap();
@@ -120,8 +134,13 @@ impl AsyncIo for RawSync {
     }
 
     fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
-        write_zeroes(self.fd, self.is_block_device, offset, length)
-            .map_err(AsyncIoError::WriteZeroes)?;
+        write_zeroes(
+            self.raw_file.as_raw_fd(),
+            self.is_block_device,
+            offset,
+            length,
+        )
+        .map_err(AsyncIoError::WriteZeroes)?;
         self.completion_list
             .push_back(AsyncIoCompletion::new(user_data, 0, None));
         self.eventfd.write(1).unwrap();
@@ -131,8 +150,6 @@ impl AsyncIo for RawSync {
 
 #[cfg(test)]
 mod unit_tests {
-    use std::os::unix::io::AsRawFd;
-
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
@@ -142,7 +159,7 @@ mod unit_tests {
     fn test_punch_hole() {
         let temp_file = TempFile::new().unwrap();
         let mut file = temp_file.into_file();
-        let mut async_io = RawSync::new(file.as_raw_fd());
+        let mut async_io = RawSync::new(AlignedFile::new(file.try_clone().unwrap(), false));
         tests::test_punch_hole(&mut async_io, &mut file);
     }
 
@@ -150,7 +167,7 @@ mod unit_tests {
     fn test_write_zeroes() {
         let temp_file = TempFile::new().unwrap();
         let mut file = temp_file.into_file();
-        let mut async_io = RawSync::new(file.as_raw_fd());
+        let mut async_io = RawSync::new(AlignedFile::new(file.try_clone().unwrap(), false));
         tests::test_write_zeroes(&mut async_io, &mut file);
     }
 
@@ -158,7 +175,7 @@ mod unit_tests {
     fn test_punch_hole_multiple_operations() {
         let temp_file = TempFile::new().unwrap();
         let mut file = temp_file.into_file();
-        let mut async_io = RawSync::new(file.as_raw_fd());
+        let mut async_io = RawSync::new(AlignedFile::new(file.try_clone().unwrap(), false));
         tests::test_punch_hole_multiple_operations(&mut async_io, &mut file);
     }
 }
