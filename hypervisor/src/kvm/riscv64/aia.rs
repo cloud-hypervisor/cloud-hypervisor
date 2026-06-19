@@ -31,8 +31,20 @@ pub struct KvmAiaImsics {
     imsic_num_ids: u32,
 }
 
+/// Snapshot state for the RISC-V AIA (APLIC + IMSIC) device.
+///
+/// Saves the full register state to support live migration.
+/// Only non-zero registers are stored to keep the snapshot compact.
 #[derive(Clone, Default, Serialize, Deserialize)]
-pub struct AiaImsicsState {}
+pub struct AiaImsicsState {
+    imsic_num_ids: u32,
+    /// APLIC register snapshot: sparse (offset, value) pairs.
+    /// Offset is the 4-byte-aligned MMIO offset in range 0x0000..=0x3FFC.
+    aplic_regs: Vec<(u32, u32)>,
+    /// IMSIC register snapshot: sparse (vcpu_index, iselect, value) tuples.
+    /// iselect is the register selector in range 0x70..=0xFF.
+    imsic_regs: Vec<(u32, u32, u32)>,
+}
 
 impl KvmAiaImsics {
     /// Device trees specific constants
@@ -195,6 +207,54 @@ impl KvmAiaImsics {
         })
     }
 
+    fn get_aplic_reg(&self, offset: u32) -> Result<u32> {
+        let mut val: u32 = 0;
+        Self::get_device_attribute(
+            &self.device,
+            kvm_bindings::KVM_DEV_RISCV_AIA_GRP_APLIC,
+            offset as u64,
+            &raw mut val as u64,
+            0,
+        )?;
+        Ok(val)
+    }
+
+    fn set_aplic_reg(&self, offset: u32, value: u32) -> Result<()> {
+        Self::set_device_attribute(
+            &self.device,
+            kvm_bindings::KVM_DEV_RISCV_AIA_GRP_APLIC,
+            offset as u64,
+            &raw const value as u64,
+            0,
+        )
+    }
+
+    fn get_imsic_reg(&self, vcpu_id: u32, iselect: u32) -> Result<u32> {
+        let attr = ((vcpu_id as u64) << kvm_bindings::KVM_DEV_RISCV_AIA_IMSIC_ISEL_BITS)
+            | (iselect as u64);
+        let mut val: u32 = 0;
+        Self::get_device_attribute(
+            &self.device,
+            kvm_bindings::KVM_DEV_RISCV_AIA_GRP_IMSIC,
+            attr,
+            &raw mut val as u64,
+            0,
+        )?;
+        Ok(val)
+    }
+
+    fn set_imsic_reg(&self, vcpu_id: u32, iselect: u32, value: u32) -> Result<()> {
+        let attr = ((vcpu_id as u64) << kvm_bindings::KVM_DEV_RISCV_AIA_IMSIC_ISEL_BITS)
+            | (iselect as u64);
+        Self::set_device_attribute(
+            &self.device,
+            kvm_bindings::KVM_DEV_RISCV_AIA_GRP_IMSIC,
+            attr,
+            &raw const value as u64,
+            0,
+        )
+    }
+
     /// Method to initialize the AIA device
     pub fn new(vm: &dyn Vm, config: &VaiaConfig) -> Result<KvmAiaImsics> {
         // This is inside KVM module
@@ -259,21 +319,54 @@ impl Vaia for KvmAiaImsics {
         self
     }
 
-    /// Save the state of AIA.
     fn state(&self) -> Result<AiaImsicsState> {
-        unimplemented!()
+        let mut aplic_regs = Vec::new();
+        for offset in (0..=0x3FFCu32).step_by(4) {
+            match self.get_aplic_reg(offset) {
+                Ok(val) if val != 0 => aplic_regs.push((offset, val)),
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+
+        // Valid IMSIC iselects vary by word size:
+        //   32-bit: 0x70, 0x72, 0x80..=0xFF (130 registers)
+        //   64-bit: 0x70, 0x72, 0x80/0x82/.../0xBE, 0xC0/0xC2/.../0xFE (66 registers)
+        // Iterate the full range and skip invalid iselects (kernel returns ENOENT/EINVAL).
+        let mut imsic_regs = Vec::new();
+        for vcpu_id in 0..self.vcpu_count {
+            for iselect in 0x70u32..=0xFF {
+                match self.get_imsic_reg(vcpu_id, iselect) {
+                    Ok(val) if val != 0 => imsic_regs.push((vcpu_id, iselect, val)),
+                    Ok(_) => {}
+                    Err(_) => {}
+                }
+            }
+        }
+
+        Ok(AiaImsicsState {
+            imsic_num_ids: self.imsic_num_ids,
+            aplic_regs,
+            imsic_regs,
+        })
     }
 
-    /// Restore the state of AIA_IMSICs.
-    fn set_state(&mut self, _state: &AiaImsicsState) -> Result<()> {
-        unimplemented!()
+    fn set_state(&mut self, state: &AiaImsicsState) -> Result<()> {
+        self.imsic_num_ids = state.imsic_num_ids;
+        for &(offset, value) in &state.aplic_regs {
+            self.set_aplic_reg(offset, value)?;
+        }
+        for &(vcpu_id, iselect, value) in &state.imsic_regs {
+            self.set_imsic_reg(vcpu_id, iselect, value)?;
+        }
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod unit_tests {
     use crate::HypervisorVmConfig;
-    use crate::arch::riscv64::aia::VaiaConfig;
+    use crate::arch::riscv64::aia::{Vaia, VaiaConfig};
     use crate::kvm::KvmAiaImsics;
 
     fn create_test_vaia_config() -> VaiaConfig {
@@ -293,5 +386,23 @@ mod unit_tests {
 
         let vaia_config = create_test_vaia_config();
         assert!(KvmAiaImsics::new(&*vm, &vaia_config).is_ok());
+    }
+
+    #[test]
+    fn test_state_roundtrip() {
+        let hv = crate::new().unwrap();
+        let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
+        let _vcpu = vm.create_vcpu(0, None).unwrap();
+
+        let vaia_config = create_test_vaia_config();
+        let mut vaia = KvmAiaImsics::new(&*vm, &vaia_config).unwrap();
+
+        let saved = vaia.state().unwrap();
+        vaia.set_state(&saved).unwrap();
+
+        let restored = vaia.state().unwrap();
+        assert_eq!(restored.imsic_num_ids, saved.imsic_num_ids);
+        assert_eq!(restored.aplic_regs.len(), saved.aplic_regs.len());
+        assert_eq!(restored.imsic_regs.len(), saved.imsic_regs.len());
     }
 }
