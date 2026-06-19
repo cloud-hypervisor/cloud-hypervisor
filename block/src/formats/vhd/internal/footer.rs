@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fs::File;
-use std::io::{self, Seek, SeekFrom};
+use std::io::{self, Read, Seek, SeekFrom};
 
-use crate::{DiskTopology, read_aligned_block_size};
+use crate::AlignedFile;
 
 // Production code uses: cookie, file_format_version, data_offset,
 // current_size, disk_type. The remaining fields are parsed for VHD
@@ -32,16 +32,10 @@ pub struct VhdFooter {
 
 impl VhdFooter {
     pub fn new(file: &mut File) -> io::Result<VhdFooter> {
-        let blocksize = DiskTopology::probe(file)?.logical_block_size as usize;
-
-        // Place the cursor in the last block of the file
-        file.seek(SeekFrom::End(0 - (blocksize as i64)))?;
-        // Read in the last block
-        let data = read_aligned_block_size(file)?;
-
-        // We only care about the last sector
-        let offset = blocksize - 512;
-        let sector = &data[offset..];
+        let mut aligned = AlignedFile::new(file.try_clone()?, true);
+        aligned.seek(SeekFrom::End(-512))?;
+        let mut sector = [0u8; 512];
+        aligned.read_exact(&mut sector)?;
 
         Ok(VhdFooter {
             cookie: u64::from_be_bytes(sector[0..8].try_into().unwrap()),
