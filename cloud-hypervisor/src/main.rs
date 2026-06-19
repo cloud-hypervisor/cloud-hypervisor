@@ -13,7 +13,7 @@ use std::path::Path;
 #[cfg(feature = "guest_debug")]
 use std::path::PathBuf;
 use std::sync::mpsc::channel;
-use std::{any, cmp, env, io, num, process};
+use std::{any, cmp, env, io, num, process, str, thread};
 
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use event_monitor::event;
@@ -47,6 +47,41 @@ use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::block_signal;
 
 use crate::logger::Logger;
+
+// Linux exposes seccomp's SIGSYS payload via the siginfo_t layout; this struct mirrors the
+// fields we need so the handler can read the syscall and arch.
+#[repr(C)]
+struct SeccompSiginfo {
+    si_signo: libc::c_int,
+    si_errno: libc::c_int,
+    si_code: libc::c_int,
+    _pad0: libc::c_int,
+    si_call_addr: *mut libc::c_void,
+    si_syscall: libc::c_int,
+    si_arch: libc::c_uint,
+}
+
+fn handle_sigsys(info: &libc::siginfo_t) {
+    // SAFETY: The handler only reads the provided siginfo pointer, writes a
+    // diagnostic message, and then delegates to the default SIGSYS handler.
+    unsafe {
+        let current_thread = thread::current();
+        let thread_name = current_thread.name().unwrap_or("<unknown>");
+        let tid = libc::syscall(libc::SYS_gettid) as i64;
+        let info = &*(info as *const libc::siginfo_t as *const SeccompSiginfo);
+        eprintln!(
+            concat!(
+                "\n==== Possible seccomp violation ====\n",
+                "Syscall number: {} (arch: {:#x}, tid: {}, thread: {})\n",
+                "Try running with `strace -ff` to identify the cause and open an issue: ",
+                "https://github.com/cloud-hypervisor/cloud-hypervisor/issues/new",
+            ),
+            info.si_syscall, info.si_arch, tid, thread_name,
+        );
+
+        low_level::emulate_default_handler(SIGSYS).unwrap();
+    }
+}
 
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
@@ -563,20 +598,13 @@ fn start_vmm(
     };
 
     if seccomp_action == SeccompAction::Trap {
-        // SAFETY: We only using signal_hook for managing signals and only execute signal
+        // SAFETY: We only use signal_hook for managing signals and only execute signal
         // handler safe functions (writing to stderr) and manipulating signals.
         unsafe {
-            low_level::register(SIGSYS, || {
-                eprintln!(
-                    "\n==== Possible seccomp violation ====\n\
-                Try running with `strace -ff` to identify the cause and open an issue: \
-                https://github.com/cloud-hypervisor/cloud-hypervisor/issues/new"
-                );
-                low_level::emulate_default_handler(SIGSYS).unwrap();
-            })
+            signal_hook_registry::register_sigaction(SIGSYS, handle_sigsys)
+                .map_err(|e| error!("Error adding SIGSYS signal handler: {e}"))
+                .ok();
         }
-        .map_err(|e| error!("Error adding SIGSYS signal handler: {e}"))
-        .ok();
     }
 
     // SAFETY: Trivially safe.

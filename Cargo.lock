@@ -485,6 +485,7 @@ dependencies = [
  "seccompiler",
  "serde_json",
  "signal-hook",
+ "signal-hook-registry",
  "test_infra",
  "thiserror",
  "tracer",
