@@ -1515,6 +1515,17 @@ components:
             Directory containing the TLS server certificate (server-cert.pem), the TLS
             server key (server-key.pem), and the client TLS root CA certificate (ca-cert.pem).
             TLS is only supported with tcp:<host>:<port> receiver URLs.
+        memory_mode:
+          $ref: "#/components/schemas/MigrationMode"
+
+    MigrationMode:
+      type: string
+      enum: ["Precopy", "Postcopy"]
+      default: "Precopy"
+      description: >
+        Memory transfer mode. Precopy transfers all guest memory before the
+        destination resumes. Postcopy resumes the destination first and faults
+        guest pages in on demand.
 
     TimeoutStrategy:
       type: string
@@ -1568,6 +1579,8 @@ components:
             Directory containing the TLS root CA certificate (ca-cert.pem), the TLS client
             certificate (client-cert.pem), and TLS client key (client-key.pem).
             TLS is only supported with tcp:<host>:<port> destination URLs.
+        memory_mode:
+          $ref: "#/components/schemas/MigrationMode"
 
     VmAddUserDevice:
       required:
