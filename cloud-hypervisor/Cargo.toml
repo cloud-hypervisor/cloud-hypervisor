@@ -24,6 +24,7 @@ option_parser = { path = "../option_parser" }
 seccompiler = { workspace = true }
 serde_json = { workspace = true }
 signal-hook = { workspace = true }
+signal-hook-registry = { workspace = true }
 thiserror = { workspace = true }
 tracer = { path = "../tracer" }
 vm-migration = { path = "../vm-migration" }

@@ -555,6 +555,12 @@ fn create_serial_manager_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Backen
     Ok(or![and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO as _)?]])
 }
 
+// Syscalls needed by all threads, because they are used in the seccomp signal
+// handler.
+fn common_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
+    Ok(vec![(libc::SYS_gettid, vec![])])
+}
+
 fn create_signal_handler_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
     Ok(or![
         and![Cond::new(1, ArgLen::Dword, Eq, TCGETS as _)?],
@@ -580,7 +586,6 @@ fn signal_handler_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_mmap, vec![]),
         (libc::SYS_munmap, vec![]),
         (libc::SYS_prctl, vec![]),
-        (libc::SYS_gettid, vec![]),
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_rt_sigprocmask, vec![]),
         (libc::SYS_rt_sigreturn, vec![]),
@@ -1120,22 +1125,25 @@ fn get_seccomp_rules(
     thread_type: Thread,
     hypervisor_type: Option<HypervisorType>,
 ) -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
-    match thread_type {
-        Thread::HttpApi => Ok(http_api_thread_rules()?),
+    let mut rules = common_thread_rules()?;
+    let specific_rules = match thread_type {
+        Thread::HttpApi => http_api_thread_rules()?,
         #[cfg(feature = "dbus_api")]
-        Thread::DBusApi => Ok(dbus_api_thread_rules()?),
-        Thread::EventMonitor => Ok(event_monitor_thread_rules()?),
-        Thread::SerialManager => Ok(serial_manager_thread_rules()?),
-        Thread::SignalHandler => Ok(signal_handler_thread_rules()?),
-        Thread::Vcpu => Ok(vcpu_thread_rules(
+        Thread::DBusApi => dbus_api_thread_rules()?,
+        Thread::EventMonitor => event_monitor_thread_rules()?,
+        Thread::SerialManager => serial_manager_thread_rules()?,
+        Thread::SignalHandler => signal_handler_thread_rules()?,
+        Thread::Vcpu => vcpu_thread_rules(
             hypervisor_type.expect("hypervisor_type is required for Vcpu threads"),
-        )?),
-        Thread::Vmm => Ok(vmm_thread_rules(
-            hypervisor_type.expect("hypervisor_type is required for Vmm threads"),
-        )?),
-        Thread::PtyForeground => Ok(pty_foreground_thread_rules()?),
-        Thread::MigrateSendPostcopy => Ok(migrate_send_postcopy_thread_rules()?),
-    }
+        )?,
+        Thread::Vmm => {
+            vmm_thread_rules(hypervisor_type.expect("hypervisor_type is required for Vmm threads"))?
+        }
+        Thread::PtyForeground => pty_foreground_thread_rules()?,
+        Thread::MigrateSendPostcopy => migrate_send_postcopy_thread_rules()?,
+    };
+    rules.extend(specific_rules);
+    Ok(rules)
 }
 
 /// Generate a BPF program based on the seccomp_action value
