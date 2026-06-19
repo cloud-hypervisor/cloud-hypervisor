@@ -9,7 +9,6 @@ pub(crate) mod decoder;
 mod header;
 pub(crate) mod metadata;
 pub(crate) mod qcow_raw_file;
-mod raw_file;
 mod refcount;
 mod util;
 mod vec_cache;
@@ -34,7 +33,6 @@ use header::{
 };
 use log::warn;
 use qcow_raw_file::{BeUint, QcowRawFile};
-pub use raw_file::RawFile;
 use refcount::RefCount;
 use remain::sorted;
 use thiserror::Error;
@@ -42,6 +40,7 @@ pub(crate) use util::MAX_NESTING_DEPTH;
 use util::{L1_TABLE_OFFSET_MASK, L2_TABLE_OFFSET_MASK, div_round_up_u32, div_round_up_u64};
 use vec_cache::{CacheMap, VecCache};
 
+use crate::aligned_file::AlignedFile;
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 
 #[sorted]
@@ -164,7 +163,7 @@ pub type Result<T> = result::Result<T, Error>;
 /// Concrete backing file variants.
 pub(crate) enum BackingKind {
     /// Raw backing file.
-    Raw(RawFile),
+    Raw(AlignedFile),
     /// QCOW2 backing parsed into metadata and raw file.
     Qcow {
         inner: Box<metadata::QcowState>,
@@ -206,7 +205,7 @@ impl BackingFile {
                 )
             })?;
 
-        let mut raw_file = RawFile::new(backing_raw_file, direct_io);
+        let mut raw_file = AlignedFile::new(backing_raw_file, direct_io);
 
         // Determine backing file format from header extension or auto-detect
         let backing_format = match config.format {
@@ -274,7 +273,7 @@ impl Debug for BackingFile {
 ///
 /// Used by [`crate::formats::qcow::QcowDisk`] when opening an image.
 pub(crate) fn parse_qcow(
-    mut file: RawFile,
+    mut file: AlignedFile,
     max_nesting_depth: u32,
     sparse: bool,
 ) -> BlockResult<(metadata::QcowState, Option<BackingFile>, bool)> {
@@ -874,7 +873,7 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
 }
 
 /// Detect the type of an image file by checking for a valid qcow2 header.
-pub fn detect_image_type(file: &mut RawFile) -> BlockResult<ImageType> {
+pub fn detect_image_type(file: &mut AlignedFile) -> BlockResult<ImageType> {
     let orig_seek = file
         .stream_position()
         .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SeekingFile(e)))?;
@@ -975,8 +974,9 @@ mod unit_tests {
         ]
     }
 
-    fn basic_file(header: &[u8]) -> RawFile {
-        let mut disk_file: RawFile = RawFile::new(TempFile::new().unwrap().into_file(), false);
+    fn basic_file(header: &[u8]) -> AlignedFile {
+        let mut disk_file: AlignedFile =
+            AlignedFile::new(TempFile::new().unwrap().into_file(), false);
         disk_file.write_all(header).unwrap();
         disk_file.set_len(0x1_0000_0000).unwrap();
         disk_file.rewind().unwrap();
@@ -985,7 +985,7 @@ mod unit_tests {
 
     fn with_basic_file<F>(header: &[u8], mut testfn: F)
     where
-        F: FnMut(RawFile),
+        F: FnMut(AlignedFile),
     {
         testfn(basic_file(header)); // File closed when the function exits.
     }
@@ -1007,7 +1007,7 @@ mod unit_tests {
 
     fn try_open_qcow_header(header: &QcowHeader, backing_files: bool) -> BlockResult<QcowDisk> {
         let temp = TempFile::new().unwrap();
-        let mut raw = RawFile::new(temp.as_file().try_clone().unwrap(), false);
+        let mut raw = AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
         header.write_to(&mut raw).expect("write header");
         drop(raw);
         let file = temp.into_file();
@@ -1032,13 +1032,13 @@ mod unit_tests {
 
     #[test]
     fn header_read() {
-        with_basic_file(&valid_header_v2(), |mut disk_file: RawFile| {
+        with_basic_file(&valid_header_v2(), |mut disk_file: AlignedFile| {
             let header = QcowHeader::new(&mut disk_file).expect("Failed to create Header.");
             assert_eq!(header.version, 2);
             assert_eq!(header.refcount_order, DEFAULT_REFCOUNT_ORDER);
             assert_eq!(header.header_size, V2_BARE_HEADER_SIZE);
         });
-        with_basic_file(&valid_header_v3(), |mut disk_file: RawFile| {
+        with_basic_file(&valid_header_v3(), |mut disk_file: AlignedFile| {
             let header = QcowHeader::new(&mut disk_file).expect("Failed to create Header.");
             assert_eq!(header.version, 3);
             assert_eq!(header.refcount_order, DEFAULT_REFCOUNT_ORDER);
@@ -1050,7 +1050,8 @@ mod unit_tests {
     fn header_v2_with_backing() {
         let header = QcowHeader::create_for_size_and_path(2, 0x10_0000, Some("/my/path/to/a/file"))
             .expect("Failed to create header.");
-        let mut disk_file: RawFile = RawFile::new(TempFile::new().unwrap().into_file(), false);
+        let mut disk_file: AlignedFile =
+            AlignedFile::new(TempFile::new().unwrap().into_file(), false);
         header
             .write_to(&mut disk_file)
             .expect("Failed to write header to shm.");
@@ -1070,7 +1071,8 @@ mod unit_tests {
     fn header_v3_with_backing() {
         let header = QcowHeader::create_for_size_and_path(3, 0x10_0000, Some("/my/path/to/a/file"))
             .expect("Failed to create header.");
-        let mut disk_file: RawFile = RawFile::new(TempFile::new().unwrap().into_file(), false);
+        let mut disk_file: AlignedFile =
+            AlignedFile::new(TempFile::new().unwrap().into_file(), false);
         header
             .write_to(&mut disk_file)
             .expect("Failed to write header to shm.");
@@ -1094,7 +1096,7 @@ mod unit_tests {
             .expect("Failed to create header.");
         header.backing_file_offset = offset;
         header.backing_file_size = size;
-        let mut disk_file: RawFile = RawFile::new(
+        let mut disk_file: AlignedFile = AlignedFile::new(
             TempFile::new()
                 .expect("Failed to create temp file.")
                 .into_file(),
@@ -1165,11 +1167,12 @@ mod unit_tests {
     }
 
     /// Helper to create a test file with header extensions
-    fn create_header_with_extension(ext_type: u32, ext_data: &[u8]) -> (RawFile, QcowHeader) {
+    fn create_header_with_extension(ext_type: u32, ext_data: &[u8]) -> (AlignedFile, QcowHeader) {
         let header = QcowHeader::create_for_size_and_path(3, 0x10_0000, None)
             .expect("Failed to create header.");
 
-        let mut disk_file: RawFile = RawFile::new(TempFile::new().unwrap().into_file(), false);
+        let mut disk_file: AlignedFile =
+            AlignedFile::new(TempFile::new().unwrap().into_file(), false);
         header.write_to(&mut disk_file).unwrap();
 
         // Write extension
@@ -1304,7 +1307,7 @@ mod unit_tests {
     /// the file until stack overflow.
     fn new_self_referential_qcow(path: &Path) -> Result<()> {
         let header = QcowHeader::create_for_size_and_path(3, 0x10_0000, path.to_str())?;
-        let mut disk_file = RawFile::new(
+        let mut disk_file = AlignedFile::new(
             File::create(path).expect("Failed to create image file."),
             false,
         );
@@ -1538,7 +1541,7 @@ mod unit_tests {
             let file = TempFile::new().unwrap().into_file();
             let cluster_size = 0x10000u64;
             file.set_len(cluster_size * 2).unwrap();
-            let raw = RawFile::new(file, false);
+            let raw = AlignedFile::new(file, false);
             let mut qcow_raw = QcowRawFile::from(raw, cluster_size, bits).unwrap();
 
             let entries = (cluster_size * 8 / bits) as usize;
@@ -1568,7 +1571,7 @@ mod unit_tests {
             let file = TempFile::new().unwrap().into_file();
             let cluster_size = 0x10000u64;
             file.set_len(cluster_size * 2).unwrap();
-            let raw = RawFile::new(file, false);
+            let raw = AlignedFile::new(file, false);
             let mut qcow_raw = QcowRawFile::from(raw, cluster_size, bits).unwrap();
 
             let entries = (cluster_size * 8 / bits) as usize;
@@ -1597,7 +1600,7 @@ mod unit_tests {
             let refcount_block_entries = cluster_size * 8 / refcount_bits;
             file.set_len(cluster_size * 3).unwrap();
 
-            let raw = RawFile::new(file, false);
+            let raw = AlignedFile::new(file, false);
             let mut qcow_raw = QcowRawFile::from(raw, cluster_size, refcount_bits).unwrap();
 
             // Set up refcount table pointing to refcount block

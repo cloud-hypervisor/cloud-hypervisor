@@ -12,11 +12,11 @@ use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use vmm_sys_util::write_zeroes::WriteZeroes;
 
-use super::RawFile;
+use crate::aligned_file::AlignedFile;
 
 // Type aliases for the refcount read/write function pointers
-type RefcountReader = fn(&mut RawFile, usize) -> io::Result<Vec<u64>>;
-type RefcountWriter = fn(&mut RawFile, &[u64]) -> io::Result<()>;
+type RefcountReader = fn(&mut AlignedFile, usize) -> io::Result<Vec<u64>>;
+type RefcountWriter = fn(&mut AlignedFile, &[u64]) -> io::Result<()>;
 
 /// Big-endian file access trait.
 pub(super) trait BeUint: Sized + Copy {
@@ -88,7 +88,7 @@ impl BeUint for u64 {
 }
 
 /// Read byte-aligned refcounts.
-fn read_refcount<T: BeUint>(file: &mut RawFile, count: usize) -> io::Result<Vec<u64>> {
+fn read_refcount<T: BeUint>(file: &mut AlignedFile, count: usize) -> io::Result<Vec<u64>> {
     let bytes_per_entry = size_of::<T>();
     let mut data = vec![0u8; count * bytes_per_entry];
     file.read_exact(&mut data)?;
@@ -99,7 +99,7 @@ fn read_refcount<T: BeUint>(file: &mut RawFile, count: usize) -> io::Result<Vec<
 }
 
 /// Write byte-aligned refcounts.
-fn write_refcount<T: BeUint + TryFrom<u64>>(file: &mut RawFile, table: &[u64]) -> io::Result<()>
+fn write_refcount<T: BeUint + TryFrom<u64>>(file: &mut AlignedFile, table: &[u64]) -> io::Result<()>
 where
     <T as TryFrom<u64>>::Error: Debug,
 {
@@ -114,7 +114,7 @@ where
 
 /// Read sub-byte refcounts. Bit 0 is the least significant bit.
 fn read_refcount_subbyte<const BITS: usize>(
-    file: &mut RawFile,
+    file: &mut AlignedFile,
     count: usize,
 ) -> io::Result<Vec<u64>> {
     const { assert!(BITS == 1 || BITS == 2 || BITS == 4) };
@@ -134,7 +134,10 @@ fn read_refcount_subbyte<const BITS: usize>(
 }
 
 /// Write sub-byte refcounts. Bit 0 is the least significant bit.
-fn write_refcount_subbyte<const BITS: usize>(file: &mut RawFile, table: &[u64]) -> io::Result<()> {
+fn write_refcount_subbyte<const BITS: usize>(
+    file: &mut AlignedFile,
+    table: &[u64],
+) -> io::Result<()> {
     const { assert!(BITS == 1 || BITS == 2 || BITS == 4) };
     let entries_per_byte = 8 / BITS;
     let mask = (1u64 << BITS) - 1;
@@ -154,7 +157,7 @@ fn write_refcount_subbyte<const BITS: usize>(file: &mut RawFile, table: &[u64]) 
 /// A qcow file. Allows reading/writing clusters and appending clusters.
 #[derive(Debug)]
 pub struct QcowRawFile {
-    file: RawFile,
+    file: AlignedFile,
     cluster_size: u64,
     cluster_mask: u64,
     refcount_block_entries: u64,
@@ -165,7 +168,7 @@ pub struct QcowRawFile {
 impl QcowRawFile {
     /// Creates a `QcowRawFile` from the given `File`, `None` is returned if `cluster_size` is not
     /// a power of two or refcount_bits is invalid.
-    pub fn from(file: RawFile, cluster_size: u64, refcount_bits: u64) -> Option<Self> {
+    pub fn from(file: AlignedFile, cluster_size: u64, refcount_bits: u64) -> Option<Self> {
         if !cluster_size.is_power_of_two() {
             return None;
         }
@@ -289,12 +292,12 @@ impl QcowRawFile {
     }
 
     /// Returns a reference to the underlying file.
-    pub fn file(&self) -> &RawFile {
+    pub fn file(&self) -> &AlignedFile {
         &self.file
     }
 
     /// Returns a mutable reference to the underlying file.
-    pub fn file_mut(&mut self) -> &mut RawFile {
+    pub fn file_mut(&mut self) -> &mut AlignedFile {
         &mut self.file
     }
 
@@ -394,7 +397,7 @@ mod unit_tests {
         temp_file.as_file().set_len(FILE_LEN).unwrap();
 
         let file = temp_file.as_file().try_clone().unwrap();
-        let raw = RawFile::new(file, false);
+        let raw = AlignedFile::new(file, false);
         let qcow_raw = QcowRawFile::from(raw, CLUSTER_SIZE, 16).expect("QcowRawFile::from");
         (temp_file, qcow_raw)
     }

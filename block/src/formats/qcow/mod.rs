@@ -30,10 +30,11 @@ use self::internal::metadata::{BackingRead, QcowMetadata};
 use self::internal::qcow_raw_file::QcowRawFile;
 #[cfg(any(test, feature = "test-utils"))]
 use self::internal::{BackingFileConfig, Error as QcowError, QcowHeader};
-use self::internal::{MAX_NESTING_DEPTH, RawFile, parse_qcow};
+use self::internal::{MAX_NESTING_DEPTH, parse_qcow};
 #[cfg(feature = "io_uring")]
 use self::worker::async_uring::QcowAsync;
 use self::worker::sync::QcowSync;
+use crate::aligned_file::AlignedFile;
 #[cfg(any(test, feature = "test-utils"))]
 use crate::async_io::GuestMemoryTarget;
 use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError};
@@ -91,7 +92,7 @@ impl QcowDisk {
         }
 
         let max_nesting_depth = if backing_files { MAX_NESTING_DEPTH } else { 0 };
-        let raw_file = RawFile::new(file, direct_io);
+        let raw_file = AlignedFile::new(file, direct_io);
         let (inner, backing_file, sparse) = parse_qcow(raw_file, max_nesting_depth, sparse)
             .map_err(|e| {
                 let e = if !backing_files && matches!(e.kind(), BlockErrorKind::Overflow) {
@@ -163,7 +164,7 @@ pub(crate) fn create_image(
     {
         backing_file.format = cfg.format;
     }
-    let mut raw = RawFile::new(
+    let mut raw = AlignedFile::new(
         file.try_clone()
             .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::Clone(e)))?,
         false,
