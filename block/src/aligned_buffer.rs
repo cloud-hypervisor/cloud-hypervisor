@@ -101,12 +101,6 @@ impl AlignedBuffer {
         unsafe { slice::from_raw_parts_mut(self.ptr, self.aligned_len) }
     }
 
-    /// Read the full aligned region from `f` into this buffer.
-    pub fn read_exact_from(&mut self, f: &impl FileExt) -> io::Result<()> {
-        let offset = self.aligned_offset;
-        f.read_exact_at(self.full_mut_slice(), offset)
-    }
-
     /// Read into the buffer from `f`, tolerating a short read at EOF.
     ///
     /// Returns the number of caller-logical bytes now valid in `as_slice()`,
@@ -168,7 +162,7 @@ mod tests {
         let alignment = 512;
 
         let mut abuf = AlignedBuffer::new(0, size, alignment).unwrap();
-        abuf.read_exact_from(tf.as_file()).unwrap();
+        abuf.read_from(tf.as_file()).unwrap();
 
         let expected: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
         assert_eq!(abuf.as_slice(), &expected[..]);
@@ -179,7 +173,7 @@ mod tests {
         let tf = create_pattern_file(512);
         let mut abuf = AlignedBuffer::new(100, 0, 512).unwrap();
 
-        abuf.read_exact_from(tf.as_file()).unwrap();
+        abuf.read_from(tf.as_file()).unwrap();
         abuf.write_to(tf.as_file()).unwrap();
 
         assert!(abuf.as_slice().is_empty());
@@ -195,7 +189,7 @@ mod tests {
         let offset = 100u64;
         let len = 200usize;
         let mut abuf = AlignedBuffer::new(offset, len, alignment).unwrap();
-        abuf.read_exact_from(tf.as_file()).unwrap();
+        abuf.read_from(tf.as_file()).unwrap();
 
         let expected: Vec<u8> = (offset as usize..offset as usize + len)
             .map(|i| (i % 251) as u8)
@@ -230,7 +224,7 @@ mod tests {
         let data: Vec<u8> = (0..len).map(|i| ((i + 1) % 239) as u8).collect();
 
         let mut abuf = AlignedBuffer::new(offset, len, alignment).unwrap();
-        abuf.read_exact_from(tf.as_file()).unwrap();
+        abuf.read_from(tf.as_file()).unwrap();
         abuf.as_mut_slice().copy_from_slice(&data);
         abuf.write_to(tf.as_file()).unwrap();
 
@@ -256,12 +250,12 @@ mod tests {
         let data: Vec<u8> = (0..len).map(|i| ((i + 1) % 239) as u8).collect();
 
         let mut abuf = AlignedBuffer::new(offset, len, alignment).unwrap();
-        abuf.read_exact_from(tf.as_file()).unwrap();
+        abuf.read_from(tf.as_file()).unwrap();
         abuf.as_mut_slice().copy_from_slice(&data);
         abuf.write_to(tf.as_file()).unwrap();
 
         let mut abuf = AlignedBuffer::new(offset, len, alignment).unwrap();
-        abuf.read_exact_from(tf.as_file()).unwrap();
+        abuf.read_from(tf.as_file()).unwrap();
         assert_eq!(abuf.as_slice(), &data[..]);
 
         let mut whole = vec![0u8; file_size];
