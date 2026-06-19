@@ -15,7 +15,7 @@ pub mod factory;
 mod io_impl;
 pub use io_impl::{async_io, fcntl, request};
 pub(crate) mod aligned_buffer;
-pub(crate) mod aligned_file;
+pub mod aligned_file;
 pub mod formats;
 mod sparse;
 use std::alloc::{Layout, alloc_zeroed};
@@ -29,6 +29,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::{cmp, mem, result};
 
+pub use aligned_file::AlignedFile;
 use formats::qcow::internal as qcow;
 #[cfg(feature = "io_uring")]
 use io_uring::{IoUring, Probe, opcode};

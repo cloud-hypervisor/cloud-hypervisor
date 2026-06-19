@@ -18,8 +18,8 @@ use vmm_sys_util::file_traits::FileSync;
 
 use super::decoder::{Decoder, ZlibDecoder, ZstdDecoder};
 use super::qcow_raw_file::BeUint;
-use super::raw_file::RawFile;
 use super::{Error, Result, div_round_up_u32, div_round_up_u64};
+use crate::aligned_file::AlignedFile;
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -210,7 +210,7 @@ pub struct QcowHeader {
 impl QcowHeader {
     /// Read header extensions, optionally collecting feature names for error reporting.
     pub(super) fn read_header_extensions(
-        f: &mut RawFile,
+        f: &mut AlignedFile,
         header: &mut QcowHeader,
         mut feature_table: Option<&mut Vec<(u8, String)>>,
     ) -> Result<()> {
@@ -269,7 +269,7 @@ impl QcowHeader {
     }
 
     /// Creates a QcowHeader from a reference to a file.
-    pub fn new(f: &mut RawFile) -> Result<QcowHeader> {
+    pub fn new(f: &mut AlignedFile) -> Result<QcowHeader> {
         f.rewind().map_err(Error::ReadingHeader)?;
         let magic = u32::read_be(f).map_err(Error::ReadingHeader)?;
         if magic != QCOW_MAGIC {
@@ -277,12 +277,12 @@ impl QcowHeader {
         }
 
         // Reads the next u32 from the file.
-        fn read_u32_be(f: &mut RawFile) -> Result<u32> {
+        fn read_u32_be(f: &mut AlignedFile) -> Result<u32> {
             u32::read_be(f).map_err(Error::ReadingHeader)
         }
 
         // Reads the next u64 from the file.
-        fn read_u64_be(f: &mut RawFile) -> Result<u64> {
+        fn read_u64_be(f: &mut AlignedFile) -> Result<u64> {
             u64::read_be(f).map_err(Error::ReadingHeader)
         }
 

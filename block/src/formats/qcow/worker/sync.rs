@@ -340,13 +340,14 @@ mod unit_tests {
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
+    use crate::aligned_file::AlignedFile;
     use crate::async_io::{AsyncIoCompletion, OwnedIoBuffer};
     use crate::disk_file::{AsyncDiskFile, DiskSize, Resizable};
     use crate::error::BlockErrorKind;
     use crate::formats::qcow;
     use crate::formats::qcow::common::unit_tests::compress_allocated_clusters;
     use crate::formats::qcow::internal::{
-        BackingFileConfig, Error as QcowError, ImageType, QcowHeader, RawFile,
+        BackingFileConfig, Error as QcowError, ImageType, QcowHeader,
     };
     use crate::formats::qcow::{QcowDisk, QcowTempDisk};
 
@@ -397,7 +398,7 @@ mod unit_tests {
     }
 
     fn qcow_header_is_corrupt(file: &File) -> bool {
-        let mut raw = RawFile::new(file.try_clone().unwrap(), false);
+        let mut raw = AlignedFile::new(file.try_clone().unwrap(), false);
         raw.seek(SeekFrom::Start(0)).unwrap();
         QcowHeader::new(&mut raw).unwrap().is_corrupt()
     }
