@@ -21,7 +21,6 @@ use std::os::fd::OwnedFd;
 use std::os::unix::io::AsRawFd;
 #[cfg(feature = "tdx")]
 use std::os::unix::io::RawFd;
-use std::result;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use std::sync::Mutex;
 #[cfg(target_arch = "x86_64")]
@@ -29,6 +28,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 #[cfg(target_arch = "aarch64")]
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::{io, result};
 
 #[cfg(target_arch = "x86_64")]
 use anyhow::Context;
@@ -1549,7 +1549,7 @@ fn tdx_command(
     command: TdxCommand,
     flags: u32,
     data: *const libc::c_void,
-) -> std::result::Result<(), std::io::Error> {
+) -> result::Result<(), io::Error> {
     #[repr(C)]
     struct TdxIoctlCmd {
         command: TdxCommand,
@@ -1575,7 +1575,7 @@ fn tdx_command(
     };
 
     if ret < 0 {
-        return Err(std::io::Error::last_os_error());
+        return Err(io::Error::last_os_error());
     }
     Ok(())
 }
@@ -1636,7 +1636,7 @@ impl KvmHypervisor {
     pub fn is_available() -> hypervisor::Result<bool> {
         match std::fs::metadata("/dev/kvm") {
             Ok(_) => Ok(true),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
             Err(err) => Err(hypervisor::HypervisorError::HypervisorAvailableCheck(
                 err.into(),
             )),
@@ -1912,7 +1912,7 @@ impl KvmVcpu {
             if ret != 0 {
                 error!(
                     "Error punching hole in the guest_memfd: gpa={gpa:#x} offset={offset:#x} len={len:#x}: {}",
-                    std::io::Error::last_os_error()
+                    io::Error::last_os_error()
                 );
             }
         }
@@ -2454,7 +2454,7 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     /// Triggers the running of the current virtual CPU returning an exit reason.
     ///
-    fn run(&mut self) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
+    fn run(&mut self) -> result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
         match self.fd.run() {
             Ok(run) => match run {
                 #[cfg(target_arch = "x86_64")]
