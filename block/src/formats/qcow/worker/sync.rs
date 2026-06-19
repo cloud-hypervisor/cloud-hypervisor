@@ -18,7 +18,6 @@ use super::internal::metadata::{
     BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
 };
 use super::internal::qcow_raw_file::QcowRawFile;
-use crate::aligned_buffer::AlignedBuffer;
 use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
 
 pub struct QcowSync {
@@ -27,8 +26,6 @@ pub struct QcowSync {
     /// See the backing_file field on QcowDisk.
     backing_file: Option<Arc<dyn BackingRead>>,
     sparse: bool,
-    /// O_DIRECT alignment requirement (0 = no alignment needed).
-    alignment: usize,
     cluster_size: u64,
     decoder: Arc<dyn Decoder>,
     eventfd: EventFd,
@@ -42,7 +39,6 @@ impl QcowSync {
         backing_file: Option<Arc<dyn BackingRead>>,
         sparse: bool,
     ) -> Self {
-        let alignment = data_file.file().alignment();
         QcowSync {
             cluster_size: metadata.cluster_size(),
             decoder: metadata.decoder(),
@@ -50,7 +46,6 @@ impl QcowSync {
             data_file,
             backing_file,
             sparse,
-            alignment,
             eventfd: EventFd::new(libc::EFD_NONBLOCK)
                 .expect("Failed creating EventFd for QcowSync"),
             completion_list: VecDeque::new(),
@@ -100,22 +95,13 @@ impl QcowSync {
                     length,
                 } => {
                     let len = length as usize;
-                    if self.alignment > 0 {
-                        let mut abuf = AlignedBuffer::new(host_offset, len, self.alignment)
-                            .map_err(AsyncIoError::ReadVectored)?;
-                        abuf.read_exact_from(self.data_file.file())
-                            .map_err(AsyncIoError::ReadVectored)?;
-                        op.write_bytes_at(buf_offset, abuf.as_slice())
-                            .map_err(AsyncIoError::ReadVectored)?;
-                    } else {
-                        let mut buf = vec![0u8; len];
-                        self.data_file
-                            .file()
-                            .read_exact_at(&mut buf, host_offset)
-                            .map_err(AsyncIoError::ReadVectored)?;
-                        op.write_bytes_at(buf_offset, &buf)
-                            .map_err(AsyncIoError::ReadVectored)?;
-                    }
+                    let mut buf = vec![0u8; len];
+                    self.data_file
+                        .file()
+                        .read_exact_at(&mut buf, host_offset)
+                        .map_err(AsyncIoError::ReadVectored)?;
+                    op.write_bytes_at(buf_offset, &buf)
+                        .map_err(AsyncIoError::ReadVectored)?;
                     buf_offset += len;
                 }
                 ClusterReadMapping::Compressed {
@@ -196,24 +182,13 @@ impl QcowSync {
                 ClusterWriteMapping::Allocated {
                     offset: host_offset,
                 } => {
-                    if self.alignment > 0 {
-                        let mut abuf = AlignedBuffer::new(host_offset, count, self.alignment)
-                            .map_err(AsyncIoError::WriteVectored)?;
-                        abuf.read_exact_from(self.data_file.file())
-                            .map_err(AsyncIoError::WriteVectored)?;
-                        op.read_bytes_at(buf_offset, abuf.as_mut_slice())
-                            .map_err(AsyncIoError::WriteVectored)?;
-                        abuf.write_to(self.data_file.file())
-                            .map_err(AsyncIoError::WriteVectored)?;
-                    } else {
-                        let mut buf = vec![0u8; count];
-                        op.read_bytes_at(buf_offset, &mut buf)
-                            .map_err(AsyncIoError::WriteVectored)?;
-                        self.data_file
-                            .file()
-                            .write_all_at(&buf, host_offset)
-                            .map_err(AsyncIoError::WriteVectored)?;
-                    }
+                    let mut buf = vec![0u8; count];
+                    op.read_bytes_at(buf_offset, &mut buf)
+                        .map_err(AsyncIoError::WriteVectored)?;
+                    self.data_file
+                        .file()
+                        .write_all_at(&buf, host_offset)
+                        .map_err(AsyncIoError::WriteVectored)?;
                 }
             }
             buf_offset += count;
