@@ -295,7 +295,7 @@ fn parse_boot_time_output(output: &[u8]) -> Result<f64, Error> {
     })
 }
 
-fn measure_boot_time(cmd: &mut GuestCommand, test_timeout: u32) -> Result<f64, Error> {
+fn measure_boot_time(cmd: &mut GuestCommand, guest: &Guest) -> Result<f64, Error> {
     let mut child = cmd
         .capture_output()
         .verbosity(VerbosityLevel::Warn)
@@ -303,9 +303,10 @@ fn measure_boot_time(cmd: &mut GuestCommand, test_timeout: u32) -> Result<f64, E
         .spawn()
         .unwrap();
 
-    thread::sleep(Duration::new(test_timeout as u64, 0));
+    let boot_result = guest.wait_vm_boot();
     let _ = child.kill();
     let output = child.wait_with_output().unwrap();
+    boot_result?;
 
     parse_boot_time_output(&output.stderr).inspect_err(|_| {
         eprintln!(
@@ -330,9 +331,10 @@ pub fn performance_boot_time(control: &PerformanceTestControl) -> f64 {
             .args(["--memory", "size=1G"])
             .default_kernel_cmdline()
             .args(["--console", "off"])
+            .default_net()
             .default_disks();
 
-        measure_boot_time(c, control.test_timeout).unwrap()
+        measure_boot_time(c, &guest).unwrap()
     });
 
     match r {
@@ -348,12 +350,15 @@ pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> f64 {
         let jammy = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = performance_test_new_guest(Box::new(jammy), control);
         let mut cmd = GuestCommand::new(&guest);
+        let cloud_init = guest.disk_config.disk(DiskType::CloudInit).unwrap();
         let c = cmd
             .default_cpus()
             .args(["--memory", "size=1G,hugepages=on"])
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", "root=/dev/pmem0p1 console=ttyS0 quiet rw"])
             .args(["--console", "off"])
+            .default_net()
+            .args(["--disk", format!("path={cloud_init}").as_str()])
             .args([
                 "--pmem",
                 format!(
@@ -363,7 +368,7 @@ pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> f64 {
                 .as_str(),
             ]);
 
-        measure_boot_time(c, control.test_timeout).unwrap()
+        measure_boot_time(c, &guest).unwrap()
     });
 
     match r {
