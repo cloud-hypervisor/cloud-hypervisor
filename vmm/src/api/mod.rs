@@ -270,6 +270,31 @@ pub struct VmCoredumpData {
     pub destination_url: String,
 }
 
+/// Memory transfer mode for a migration.
+#[derive(Copy, Clone, Default, Deserialize, Serialize, Debug, PartialEq, Eq)]
+pub enum MigrationMode {
+    /// Transfer all guest memory before the destination resumes.
+    #[default]
+    Precopy,
+    /// Resume the destination first and fault guest pages in on demand.
+    /// This is an experimental mode. It uses a single connection even
+    /// when parallel connections are configured. Pages are served on
+    /// demand, but a background faulting mechanism also pulls in the
+    /// remaining pages to speed up completion.
+    Postcopy,
+}
+
+impl FromStr for MigrationMode {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "precopy" => Ok(MigrationMode::Precopy),
+            "postcopy" => Ok(MigrationMode::Postcopy),
+            _ => Err(format!("Invalid migration mode: {s}")),
+        }
+    }
+}
+
 #[derive(Clone, Deserialize, Serialize, Default, Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct VmReceiveMigrationData {
@@ -278,6 +303,9 @@ pub struct VmReceiveMigrationData {
     /// Directory containing the TLS server certificate (server-cert.pem), the TLS server key (server-key.pem), and the client TLS root CA certificate (ca-cert.pem).
     #[serde(default)]
     pub tls_dir: Option<PathBuf>,
+    /// Memory transfer mode.
+    #[serde(default)]
+    pub memory_mode: MigrationMode,
 }
 
 #[derive(Debug, Error)]
@@ -291,11 +319,11 @@ pub enum VmReceiveMigrationConfigError {
 
 impl VmReceiveMigrationData {
     pub const SYNTAX: &'static str = "VM receive migration parameters \
-        \"<receiver_url>\" or \"receiver_url=<url>[,tls_dir=<path>]\"";
+        \"<receiver_url>\" or \"receiver_url=<url>[,tls_dir=<path>][,memory_mode=precopy|postcopy]\"";
 
     pub fn parse(migration: &str) -> Result<Self, VmReceiveMigrationConfigError> {
         let mut parser = OptionParser::new();
-        parser.add("receiver_url").add("tls_dir");
+        parser.add("receiver_url").add("tls_dir").add("memory_mode");
         parser
             .parse(migration)
             .map_err(VmReceiveMigrationConfigError::ParseError)?;
@@ -309,10 +337,15 @@ impl VmReceiveMigrationData {
             .convert::<String>("tls_dir")
             .map_err(VmReceiveMigrationConfigError::ParseError)?
             .map(|path| PathBuf::from(&path));
+        let memory_mode = parser
+            .convert::<MigrationMode>("memory_mode")
+            .map_err(VmReceiveMigrationConfigError::ParseError)?
+            .unwrap_or_default();
 
         let data = Self {
             receiver_url,
             tls_dir,
+            memory_mode,
         };
 
         data.validate()?;
@@ -422,6 +455,9 @@ pub struct VmSendMigrationData {
     /// Path to the directory containing the TLS root CA certificate (ca-cert.pem), the TLS client certificate (client-cert.pem), and TLS client key (client-key.pem).
     #[serde(default)]
     pub tls_dir: Option<PathBuf>,
+    /// Memory transfer mode.
+    #[serde(default)]
+    pub memory_mode: MigrationMode,
 }
 
 impl VmSendMigrationData {
@@ -429,7 +465,7 @@ impl VmSendMigrationData {
         \"destination_url=<url>[,local=on|off,\
         downtime_ms=<milliseconds>,timeout_s=<seconds>,\
         timeout_strategy=cancel|ignore,connections=<amount>,\
-        tls_dir=<path>]\"";
+        tls_dir=<path>,memory_mode=precopy|postcopy]\"";
 
     // Same as QEMU.
     pub const DEFAULT_DOWNTIME: Duration = Duration::from_millis(300);
@@ -458,7 +494,8 @@ impl VmSendMigrationData {
             .add("timeout_s")
             .add("timeout_strategy")
             .add("connections")
-            .add("tls_dir");
+            .add("tls_dir")
+            .add("memory_mode");
         parser
             .parse(migration)
             .map_err(VmSendMigrationConfigError::ParseError)?;
@@ -514,6 +551,10 @@ impl VmSendMigrationData {
             .convert::<String>("tls_dir")
             .map_err(VmSendMigrationConfigError::ParseError)?
             .map(|path| PathBuf::from(&path));
+        let memory_mode = parser
+            .convert::<MigrationMode>("memory_mode")
+            .map_err(VmSendMigrationConfigError::ParseError)?
+            .unwrap_or_default();
 
         let data = Self {
             destination_url,
@@ -523,6 +564,7 @@ impl VmSendMigrationData {
             timeout_strategy,
             connections,
             tls_dir,
+            memory_mode,
         };
 
         data.validate()?;
@@ -591,6 +633,21 @@ impl VmSendMigrationData {
                     "invalid TLS configuration for send-migration: {e}"
                 ))
             })?;
+        }
+
+        if matches!(self.memory_mode, MigrationMode::Postcopy) {
+            if self.local {
+                return Err(VmSendMigrationConfigError::ValidationError(
+                    "memory_mode=postcopy and local options are mutually exclusive.".to_string(),
+                ));
+            }
+
+            if self.connections.get() > 1 {
+                return Err(VmSendMigrationConfigError::ValidationError(
+                    "memory_mode=postcopy currently requires a single connection (connections=1)."
+                        .to_string(),
+                ));
+            }
         }
 
         Ok(())
@@ -1921,6 +1978,7 @@ mod unit_tests {
             VmReceiveMigrationData {
                 receiver_url: "tcp:192.168.1.1:8080".to_string(),
                 tls_dir: None,
+                memory_mode: MigrationMode::Precopy,
             }
         );
 
@@ -1947,6 +2005,7 @@ mod unit_tests {
             VmReceiveMigrationData {
                 receiver_url: "tcp:192.168.1.1:8080".to_string(),
                 tls_dir: Some(tls_dir_path),
+                memory_mode: MigrationMode::Precopy,
             }
         );
 
@@ -1961,6 +2020,33 @@ mod unit_tests {
         VmReceiveMigrationData::parse("receiver_url=tcp:192.168.1.1").unwrap_err();
         VmReceiveMigrationData::parse("receiver_url=tcp:[2001:db8::1]").unwrap_err();
         VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,tls_dir=/tmp").unwrap_err();
+
+        // memory_mode defaults to precopy when not specified.
+        let data = VmReceiveMigrationData::parse("receiver_url=tcp:127.0.0.1:1234").unwrap();
+        assert_eq!(
+            data,
+            VmReceiveMigrationData {
+                receiver_url: "tcp:127.0.0.1:1234".to_string(),
+                tls_dir: None,
+                memory_mode: MigrationMode::Precopy,
+            }
+        );
+
+        // Explicit receiver_url with memory_mode=postcopy.
+        let data =
+            VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,memory_mode=postcopy")
+                .unwrap();
+        assert_eq!(
+            data,
+            VmReceiveMigrationData {
+                receiver_url: "unix:/tmp/sock".to_string(),
+                tls_dir: None,
+                memory_mode: MigrationMode::Postcopy,
+            }
+        );
+
+        // Missing receiver_url in keyed form must fail.
+        VmReceiveMigrationData::parse("memory_mode=postcopy").unwrap_err();
     }
 
     #[test]
@@ -2062,6 +2148,7 @@ mod unit_tests {
                 timeout_strategy: Default::default(),
                 connections: VmSendMigrationData::default_connections(),
                 tls_dir: None,
+                memory_mode: MigrationMode::Precopy,
             }
         );
 
@@ -2082,7 +2169,24 @@ mod unit_tests {
                 timeout_strategy: TimeoutStrategy::Ignore,
                 connections: NonZeroU32::new(4).unwrap(),
                 tls_dir: Some(tls_dir_path),
+                memory_mode: MigrationMode::Precopy,
             }
         );
+
+        // Postcopy happy path (TCP only, single connection).
+        let data =
+            VmSendMigrationData::parse("destination_url=tcp:192.168.1.1:8080,memory_mode=postcopy")
+                .unwrap();
+        assert_eq!(data.memory_mode, MigrationMode::Postcopy);
+
+        // memory_mode=postcopy + local must be rejected.
+        VmSendMigrationData::parse("destination_url=unix:/tmp/sock,local=on,memory_mode=postcopy")
+            .unwrap_err();
+
+        // memory_mode=postcopy + multi-connection must be rejected.
+        VmSendMigrationData::parse(
+            "destination_url=tcp:192.168.1.1:8080,memory_mode=postcopy,connections=4",
+        )
+        .unwrap_err();
     }
 }
