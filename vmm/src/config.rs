@@ -486,6 +486,7 @@ pub struct VmParams<'a> {
     #[cfg(feature = "pvmemcontrol")]
     pub pvmemcontrol: bool,
     pub pvpanic: bool,
+    pub guest_events: bool,
     pub numa: Option<Vec<&'a str>>,
     pub watchdog: bool,
     pub rtc: Option<&'a str>,
@@ -555,6 +556,7 @@ impl<'a> VmParams<'a> {
         #[cfg(feature = "pvmemcontrol")]
         let pvmemcontrol = args.get_flag("pvmemcontrol");
         let pvpanic = args.get_flag("pvpanic");
+        let guest_events = args.get_flag("guest-events");
         let numa: Option<Vec<&str>> = args
             .get_many::<String>("numa")
             .map(|x| x.map(|y| y as &str).collect());
@@ -607,6 +609,7 @@ impl<'a> VmParams<'a> {
             #[cfg(feature = "pvmemcontrol")]
             pvmemcontrol,
             pvpanic,
+            guest_events,
             numa,
             watchdog,
             rtc,
@@ -3673,6 +3676,7 @@ impl VmConfig {
             #[cfg(feature = "pvmemcontrol")]
             pvmemcontrol,
             pvpanic: vm_params.pvpanic,
+            guest_events: vm_params.guest_events,
             iommu: false, // updated in VmConfig::validate()
             numa,
             watchdog: vm_params.watchdog,
@@ -5154,6 +5158,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             #[cfg(feature = "pvmemcontrol")]
             pvmemcontrol: None,
             pvpanic: false,
+            guest_events: false,
             iommu: false,
             numa: None,
             watchdog: false,
@@ -5410,6 +5415,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             #[cfg(feature = "pvmemcontrol")]
             pvmemcontrol: None,
             pvpanic: false,
+            guest_events: false,
             iommu: false,
             numa: None,
             watchdog: false,

@@ -619,6 +619,7 @@ dependencies = [
  "bitflags 2.13.0",
  "byteorder",
  "event_monitor",
+ "flume",
  "hypervisor",
  "libc",
  "linux-loader",

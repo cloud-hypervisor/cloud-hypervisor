@@ -391,6 +391,12 @@ fn get_cli_options_sorted(
             .num_args(0)
             .action(ArgAction::SetTrue)
             .group("vm-config"),
+        Arg::new("guest-events")
+            .long("guest-events")
+            .help("Enable guest events device")
+            .num_args(0)
+            .action(ArgAction::SetTrue)
+            .group("vm-config"),
         Arg::new("rate-limit-group")
             .long("rate-limit-group")
             .help(RateLimiterGroupConfig::SYNTAX)
@@ -1060,6 +1066,7 @@ mod unit_tests {
             vdpa: None,
             vsock: None,
             pvpanic: false,
+            guest_events: false,
             #[cfg(feature = "pvmemcontrol")]
             pvmemcontrol: None,
             iommu: false,

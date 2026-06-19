@@ -2106,6 +2106,16 @@ impl DeviceManager {
             .insert(debug_port, 0x80, 0x1)
             .map_err(DeviceManagerError::BusError)?;
 
+        if self.config.lock().unwrap().guest_events {
+            let guest_event_device = Arc::new(Mutex::new(devices::legacy::GuestEventDevice::new()));
+            self.bus_devices
+                .push(Arc::clone(&guest_event_device) as Arc<dyn BusDeviceSync>);
+            self.address_manager
+                .io_bus
+                .insert(guest_event_device, 0x680, 0x1)
+                .map_err(DeviceManagerError::BusError)?;
+        }
+
         Ok(())
     }
 
@@ -2192,6 +2202,25 @@ impl DeviceManager {
             .lock()
             .unwrap()
             .insert(id.clone(), device_node!(id, gpio_device));
+
+        if self.config.lock().unwrap().guest_events {
+            let guest_event_device = Arc::new(Mutex::new(devices::legacy::GuestEventDevice::new()));
+            self.bus_devices
+                .push(Arc::clone(&guest_event_device) as Arc<dyn BusDeviceSync>);
+            let addr = arch::layout::LEGACY_GUEST_EVENT_MAPPED_IO_START;
+            self.address_manager
+                .mmio_bus
+                .insert(guest_event_device, addr.0, MMIO_LEN)
+                .map_err(DeviceManagerError::BusError)?;
+            self.id_to_dev_info.insert(
+                (DeviceType::GuestEvent, "guest-event".to_string()),
+                MmioDeviceInfo {
+                    addr: addr.0,
+                    len: MMIO_LEN,
+                    irq: 0,
+                },
+            );
+        }
 
         Ok(())
     }

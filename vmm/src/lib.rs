@@ -758,7 +758,6 @@ impl Vmm {
 
         for signal in signals.forever() {
             match signal {
-                #[expect(clippy::collapsible_match)]
                 SIGTERM | SIGINT => {
                     if exit_evt.write(1).is_err() {
                         // Resetting the terminal is usually done as the VMM exits
@@ -2901,6 +2900,7 @@ mod unit_tests {
             #[cfg(feature = "pvmemcontrol")]
             pvmemcontrol: None,
             pvpanic: false,
+            guest_events: false,
             iommu: false,
             numa: None,
             watchdog: false,

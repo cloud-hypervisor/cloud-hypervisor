@@ -803,6 +803,18 @@ fn create_serial_node<T: DeviceInfoForFdt + Clone + Debug>(
     Ok(())
 }
 
+fn create_guest_event_node<T: DeviceInfoForFdt + Clone + Debug>(
+    fdt: &mut FdtWriter,
+    dev_info: &T,
+) -> FdtWriterResult<()> {
+    let reg_prop = [dev_info.addr(), dev_info.length()];
+    let node = fdt.begin_node(&format!("guest-event@{:x}", dev_info.addr()))?;
+    fdt.property_string("compatible", "guest-event")?;
+    fdt.property_array_u64("reg", &reg_prop)?;
+    fdt.end_node(node)?;
+    Ok(())
+}
+
 fn create_rtc_node<T: DeviceInfoForFdt + Clone + Debug>(
     fdt: &mut FdtWriter,
     dev_info: &T,
@@ -891,6 +903,7 @@ fn create_devices_node<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
     for ((device_type, _device_id), info) in dev_info {
         match device_type {
             DeviceType::Gpio => create_gpio_node(fdt, info)?,
+            DeviceType::GuestEvent => create_guest_event_node(fdt, info)?,
             DeviceType::Rtc => create_rtc_node(fdt, info)?,
             DeviceType::Serial => create_serial_node(fdt, info)?,
             DeviceType::Virtio(_) => {

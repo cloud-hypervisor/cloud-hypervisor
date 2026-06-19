@@ -1183,6 +1183,8 @@ pub struct VmConfig {
     #[serde(default)]
     pub pvpanic: bool,
     #[serde(default)]
+    pub guest_events: bool,
+    #[serde(default)]
     pub iommu: bool,
     pub numa: Option<Box<[NumaConfig]>>,
     #[serde(default)]

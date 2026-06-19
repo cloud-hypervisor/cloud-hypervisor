@@ -38,3 +38,5 @@ pub use self::rtc_pl031::Rtc;
 pub use self::serial::Serial;
 #[cfg(target_arch = "aarch64")]
 pub use self::uart_pl011::Pl011;
+pub mod guest_event;
+pub use self::guest_event::GuestEventDevice;

@@ -176,6 +176,9 @@ pub enum DeviceType {
     /// Device Type: fw_cfg.
     #[cfg(feature = "fw_cfg")]
     FwCfg,
+    /// Device Type: GuestEvent.
+    #[cfg(target_arch = "aarch64")]
+    GuestEvent,
 }
 
 /// Default (smallest) memory page size for the supported architectures.
