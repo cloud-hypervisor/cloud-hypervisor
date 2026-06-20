@@ -317,7 +317,7 @@ impl BlockEpollHandler {
                     .add_used(desc_chain.memory(), desc_chain.head_index(), 1)
                     .map_err(Error::QueueAddUsed)?;
                 queue
-                    .enable_notification(self.mem.memory().deref())
+                    .enable_notification(desc_chain.memory())
                     .map_err(Error::QueueEnableNotification)?;
                 continue;
             }
@@ -404,7 +404,7 @@ impl BlockEpollHandler {
                     .add_used(desc_chain.memory(), desc_chain.head_index(), len)
                     .map_err(Error::QueueAddUsed)?;
                 queue
-                    .enable_notification(self.mem.memory().deref())
+                    .enable_notification(desc_chain.memory())
                     .map_err(Error::QueueEnableNotification)?;
             }
         }
