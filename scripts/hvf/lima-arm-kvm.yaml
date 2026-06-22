@@ -1,0 +1,55 @@
+# lima-arm-kvm.yaml — an aarch64 Linux VM with NESTED KVM, for capturing a real
+# cloud-hypervisor arm64 snapshot entirely on an Apple Silicon Mac.
+#
+# Requirements (checked by capture-on-mac.sh):
+#   * Apple M3 or later   (first Apple Silicon with hardware nested virt)
+#   * macOS 15 (Sequoia) or newer
+#   * Lima >= 1.0
+#
+# `nestedVirtualization: true` makes Lima ask Virtualization.framework to set
+# `isNestedVirtualizationEnabled`, which exposes /dev/kvm INSIDE this guest.
+# cloud-hypervisor then runs as a normal KVM VMM in here.
+
+vmType: "vz"
+nestedVirtualization: true
+arch: "aarch64"
+
+images:
+  - location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-arm64.img"
+    arch: "aarch64"
+
+cpus: 4
+memory: "8GiB"
+disk: "40GiB"
+
+# The Mac's copy of this repo is mounted writable so the captured snapshot lands
+# straight back on the host. capture-on-mac.sh passes the repo root as $LIMA_REPO.
+mounts:
+  - location: "~"
+    writable: false
+  - location: "/tmp/lima"
+    writable: true
+
+# Confirm nested KVM actually came up the moment the guest boots.
+provision:
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux
+      if [ -e /dev/kvm ]; then
+        echo "lima-arm-kvm: /dev/kvm present — nested virtualization OK"
+        chgrp kvm /dev/kvm || true
+        chmod 666 /dev/kvm || true
+      else
+        echo "lima-arm-kvm: WARNING /dev/kvm MISSING — nested virt not active" >&2
+      fi
+
+probes:
+  - description: "/dev/kvm to be available (nested virtualization)"
+    script: |
+      #!/bin/bash
+      set -eu
+      timeout 60s bash -c 'until [ -e /dev/kvm ]; do sleep 1; done'
+    hint: |
+      /dev/kvm did not appear. Nested virtualization requires an Apple M3+ chip
+      and macOS 15+. Verify with: sysctl -n machdep.cpu.brand_string
