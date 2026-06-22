@@ -152,8 +152,12 @@ unsafe extern "C" {
     pub fn hv_gic_reset() -> i32;
     pub fn hv_gic_set_spi(intid: u32, level: bool) -> i32;
     pub fn hv_gic_get_distributor_reg(reg: u32, value: *mut u64) -> i32;
-    #[allow(dead_code)]
     pub fn hv_gic_set_distributor_reg(reg: u32, value: u64) -> i32;
+    // Per-vCPU redistributor registers. `reg` is an `hv_gic_redistributor_reg_t`
+    // — the architectural GICR offset (e.g. ISENABLER0 = 0x10100 in the SGI
+    // frame), exactly the offsets KVM's VGIC redistributor dump uses.
+    pub fn hv_gic_get_redistributor_reg(vcpu: u64, reg: u32, value: *mut u64) -> i32;
+    pub fn hv_gic_set_redistributor_reg(vcpu: u64, reg: u32, value: u64) -> i32;
     #[allow(dead_code)]
     pub fn hv_gic_get_redistributor_size(size: *mut usize) -> i32;
     #[allow(dead_code)]

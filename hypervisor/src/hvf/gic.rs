@@ -135,6 +135,20 @@ impl HvfGicV3 {
         Ok(v)
     }
 
+    /// Write a distributor register by its architectural GICD offset. Used to
+    /// rehydrate a KVM snapshot's distributor state field-by-field via the
+    /// per-register API (no opaque blob required).
+    pub fn set_distributor_reg(&self, reg: u32, value: u64) -> GicResult<()> {
+        // SAFETY: FFI.
+        dev_set("hv_gic_set_distributor_reg", unsafe {
+            hv_gic_set_distributor_reg(reg, value)
+        })
+    }
+
+    // Per-vCPU redistributor registers are reached through the vCPU's own
+    // `hv_vcpu_t` handle (see `HvfVcpu::{redistributor_reg,set_redistributor_reg}`),
+    // which the GIC does not own, so no redistributor accessor lives here.
+
     /// Assert or deassert a shared peripheral interrupt by INTID.
     pub fn set_spi(&self, intid: u32, level: bool) -> GicResult<()> {
         // SAFETY: FFI.

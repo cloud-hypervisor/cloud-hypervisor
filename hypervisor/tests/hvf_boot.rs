@@ -1101,3 +1101,158 @@ fn hvf_guest_wfi_woken_by_cross_thread_irq() {
         "guest did not take the cross-thread SPI as INTID 32 after WFI (marker={marker:#x?})"
     );
 }
+
+/// Prove on real hardware that the GIC distributor + redistributor halves of a
+/// REAL cloud-hypervisor KVM snapshot can be rehydrated field-by-field through
+/// Apple's per-register API — NO opaque `hv_gic` state blob required.
+///
+/// This is the empirical answer to "can we work the GIC blob out without
+/// reverse-engineering Apple's private layout?": yes. KVM dumps the
+/// distributor/redistributor register space as `dist`/`rdist` u32 vectors;
+/// `gic_ingest::{dist_to_hvf,redist_to_hvf}` re-walk them onto the architectural
+/// GICD/GICR offsets, which ARE Apple's `hv_gic_{distributor,redistributor}_reg_t`
+/// enum values. Here we translate the committed real-snapshot fixture, write
+/// every pair into a live managed GIC via `set_distributor_reg` /
+/// `HvfVcpu::set_redistributor_reg`, read them back, and assert the load-bearing
+/// interrupt-routing state survived — including PPI 27 (the EL1 virtual timer
+/// M2 proved a restored guest must keep) in the per-vCPU redistributor.
+///
+/// Writes are applied in the translator's emission order (which mirrors KVM's
+/// restore order: ICENABLER before ISENABLER, etc.) so the set/clear-register
+/// aliasing resolves to the captured enable state.
+#[cfg(feature = "kvm-snapshot")]
+#[test]
+fn hvf_gic_dist_redist_per_register_rehydration() {
+    use hypervisor::hvf::gic::HvfGicV3;
+    use hypervisor::hvf::translate::gic_ingest::{dist_to_hvf, redist_to_hvf};
+
+    // Parse the REAL captured GIC node (same fixture the unit tests use).
+    let gic_json = include_str!("data/kvm_arm64_gic.json");
+    let v: serde_json::Value = serde_json::from_str(gic_json).expect("parse gic fixture");
+    let to_u32 = |k: &str| -> Vec<u32> {
+        v["Kvm"][k]
+            .as_array()
+            .expect("array field")
+            .iter()
+            .map(|n| n.as_u64().expect("u64") as u32)
+            .collect()
+    };
+    let dist = to_u32("dist");
+    let rdist = to_u32("rdist");
+
+    let dist_pairs = dist_to_hvf(&dist).expect("translate distributor dump");
+    let redist_pairs = redist_to_hvf(&rdist).expect("translate redistributor dump");
+
+    // Bring up a live managed GICv3 + one vCPU (the redistributor is keyed by
+    // the vCPU's MPIDR affinity, which setup_regs establishes).
+    let ram = HostRam::new(RAM_SIZE);
+    let config = irq_vgic_config();
+    let vm_ops = Arc::new(RecordingVmOps {
+        writes: Mutex::new(Vec::new()),
+    });
+
+    let hv = hypervisor::new().expect("hypervisor::new() — is the test binary codesigned?");
+    let vm = hv
+        .create_vm(HypervisorVmConfig {
+            nested: false,
+            smt_enabled: false,
+        })
+        .expect("create_vm");
+    // SAFETY: ram outlives the mapping.
+    unsafe {
+        vm.create_user_memory_region(0, RAM_BASE, ram.size, ram.ptr, false, false)
+            .expect("map ram");
+    }
+    let gic = vm.create_vgic(&config).expect("create_vgic");
+    let mut vcpu = vm.create_vcpu(0, Some(vm_ops.clone())).expect("create_vcpu");
+    vcpu.setup_regs(0, RAM_BASE, 0).expect("setup_regs");
+
+    // --- Distributor: write every translated pair, then read load-bearing regs.
+    {
+        let mut guard = gic.lock().unwrap();
+        let concrete = guard
+            .as_any_concrete_mut()
+            .downcast_mut::<HvfGicV3>()
+            .expect("HVF GIC concrete type");
+
+        let mut write_failures = Vec::new();
+        for &(reg, val) in &dist_pairs {
+            if concrete.set_distributor_reg(reg, val).is_err() {
+                write_failures.push(reg);
+            }
+        }
+        assert!(
+            write_failures.is_empty(),
+            "GIC rejected distributor writes at offsets {write_failures:#x?}"
+        );
+
+        // GICD_IGROUPR1 (0x84): SPIs 32..63 routed to group 1 (non-secure).
+        assert_eq!(
+            concrete.distributor_reg(0x84).expect("read GICD_IGROUPR1") as u32,
+            0xffff_ffff,
+            "GICD_IGROUPR1 group routing did not survive rehydration"
+        );
+        // GICD_ISENABLER1 (0x104): virtio SPIs 42/43 enabled in the live guest.
+        assert_eq!(
+            concrete.distributor_reg(0x104).expect("read GICD_ISENABLER1") as u32,
+            0xc00,
+            "GICD_ISENABLER1 enable state did not survive rehydration"
+        );
+        // GICD_IPRIORITYR8 (0x420): first SPI priority block (0xa0 each).
+        assert_eq!(
+            concrete.distributor_reg(0x420).expect("read GICD_IPRIORITYR8") as u32,
+            0xa0a0_a0a0,
+            "GICD_IPRIORITYR8 priorities did not survive rehydration"
+        );
+        // GICD_IROUTER32 (0x6100): the first SPI's 64-bit affinity route.
+        let expected_irouter = dist_pairs
+            .iter()
+            .find(|&&(reg, _)| reg == 0x6100)
+            .map(|&(_, v)| v)
+            .expect("IROUTER32 present in translation");
+        assert_eq!(
+            concrete.distributor_reg(0x6100).expect("read GICD_IROUTER32"),
+            expected_irouter,
+            "GICD_IROUTER32 affinity route did not survive rehydration"
+        );
+    }
+
+    // --- Redistributor: per-vCPU, written through the vCPU's own handle.
+    {
+        let concrete = vcpu
+            .as_any_concrete_mut()
+            .downcast_mut::<hypervisor::hvf::HvfVcpu>()
+            .expect("HVF vCPU concrete type");
+
+        let mut write_failures = Vec::new();
+        for &(reg, val) in &redist_pairs {
+            if concrete.set_redistributor_reg(reg, val).is_err() {
+                write_failures.push(reg);
+            }
+        }
+        assert!(
+            write_failures.is_empty(),
+            "GIC rejected redistributor writes at offsets {write_failures:#x?}"
+        );
+
+        // GICR_IGROUPR0 (0x10080): all SGIs/PPIs group 1.
+        assert_eq!(
+            concrete.redistributor_reg(0x10080).expect("read GICR_IGROUPR0") as u32,
+            0xffff_ffff,
+            "GICR_IGROUPR0 group routing did not survive rehydration"
+        );
+        // GICR_ISENABLER0 (0x10100): SGIs 0..7 (0xff) AND PPI 27 (bit 27) — the
+        // EL1 virtual-timer interrupt M2 proved a restored guest must keep.
+        assert_eq!(
+            concrete.redistributor_reg(0x10100).expect("read GICR_ISENABLER0") as u32,
+            0x0800_00ff,
+            "GICR_ISENABLER0 (SGIs + PPI27 vtimer) did not survive rehydration"
+        );
+        // GICR_IPRIORITYR0 (0x10400): first SGI/PPI priority block.
+        assert_eq!(
+            concrete.redistributor_reg(0x10400).expect("read GICR_IPRIORITYR0") as u32,
+            0xa0a0_a0a0,
+            "GICR_IPRIORITYR0 priorities did not survive rehydration"
+        );
+    }
+}

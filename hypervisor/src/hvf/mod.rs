@@ -530,6 +530,38 @@ impl HvfVcpu {
         Ok(())
     }
 
+    /// Read a managed-GIC redistributor register for THIS vCPU.
+    ///
+    /// `reg` is an architectural GICR offset (RD_base or SGI frame); Apple's
+    /// `hv_gic_redistributor_reg_t` enum values are those same offsets, so this
+    /// is the per-register restore path for the redistributor half of a
+    /// translated KVM snapshot (see `hvf::translate::gic_ingest::redist_to_hvf`).
+    pub fn redistributor_reg(&self, reg: u32) -> CpuResult<u64> {
+        let mut v = 0u64;
+        // SAFETY: FFI on the owning thread; out-param valid.
+        let ret = unsafe { hv_gic_get_redistributor_reg(self.id, reg, &mut v) };
+        if ret != HV_SUCCESS {
+            return Err(HypervisorCpuError::GetSysRegister(anyhow!(
+                "hv_gic_get_redistributor_reg({reg:#x}) failed: {:#010x}",
+                ret as u32
+            )));
+        }
+        Ok(v)
+    }
+
+    /// Write a managed-GIC redistributor register for THIS vCPU.
+    pub fn set_redistributor_reg(&self, reg: u32, val: u64) -> CpuResult<()> {
+        // SAFETY: FFI on the owning thread.
+        let ret = unsafe { hv_gic_set_redistributor_reg(self.id, reg, val) };
+        if ret != HV_SUCCESS {
+            return Err(HypervisorCpuError::SetSysRegister(anyhow!(
+                "hv_gic_set_redistributor_reg({reg:#x}) failed: {:#010x}",
+                ret as u32
+            )));
+        }
+        Ok(())
+    }
+
     /// Service a stage-2 data abort (MMIO) by decoding ESR and calling VmOps.
     fn handle_data_abort(&self, esr: u64, ipa: u64) -> CpuResult<()> {
         let iss = esr & 0x01ff_ffff;
