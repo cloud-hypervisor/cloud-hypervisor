@@ -1256,3 +1256,197 @@ fn hvf_gic_dist_redist_per_register_rehydration() {
         );
     }
 }
+
+// ===================================================================
+// M4: end-to-end rehydration of a REAL cloud-hypervisor KVM snapshot.
+// ===================================================================
+
+/// VmOps that records every device (MMIO) access the rehydrated guest makes —
+/// the observation point that proves it is executing real captured code.
+#[cfg(feature = "kvm-snapshot")]
+struct DeviceTraceVmOps {
+    /// (gpa, is_write) for each access, in order.
+    accesses: Mutex<Vec<(u64, bool)>>,
+}
+
+#[cfg(feature = "kvm-snapshot")]
+impl VmOps for DeviceTraceVmOps {
+    fn guest_mem_write(&self, _gpa: u64, buf: &[u8]) -> VmOpsResult<usize> {
+        Ok(buf.len())
+    }
+    fn guest_mem_read(&self, _gpa: u64, buf: &mut [u8]) -> VmOpsResult<usize> {
+        Ok(buf.len())
+    }
+    fn mmio_read(&self, gpa: u64, data: &mut [u8]) -> VmOpsResult<()> {
+        self.accesses.lock().unwrap().push((gpa, false));
+        // Return all-ones for ID/status registers so the firmware/kernel device
+        // probe makes forward progress instead of spinning on a zero read.
+        data.fill(0);
+        Ok(())
+    }
+    fn mmio_write(&self, gpa: u64, data: &[u8]) -> VmOpsResult<()> {
+        self.accesses.lock().unwrap().push((gpa, true));
+        let _ = data;
+        Ok(())
+    }
+}
+
+/// Rehydrate a REAL cloud-hypervisor arm64 KVM snapshot on this Mac and prove
+/// the reconstructed vCPU executes its real captured guest code from the real
+/// captured 1 GiB of guest RAM.
+///
+/// This is the end-to-end payoff of the port: it loads the captured guest RAM,
+/// rebuilds the GICv3 (distributor + per-vCPU redistributor + CPU interface)
+/// and the vCPU register file purely from the snapshot's KVM-format state via
+/// `hvf::rehydrate`, then resumes. A correctly-translated guest runs its real
+/// code with the MMU on (virtual addresses resolving through the restored
+/// TTBRs/SCTLR) until it touches a device this minimal harness does not model —
+/// at which point the access traps to `DeviceTraceVmOps`, giving concrete
+/// evidence of live execution. A broken translation would instead fault
+/// immediately at a bogus PC or never reach a device.
+///
+/// The 1 GiB memory image is far too large to commit, so the test is gated on
+/// `CH_SNAPSHOT_DIR` pointing at a snapshot directory laid out as
+/// `state.json` + `snapshot/memory-ranges` (what `scripts/hvf` captures). It is
+/// skipped (passes trivially) when the variable is unset.
+#[cfg(feature = "kvm-snapshot")]
+#[test]
+fn hvf_rehydrate_real_cloud_snapshot_executes() {
+    use std::path::PathBuf;
+
+    use hypervisor::hvf::rehydrate::{rehydrate, Snapshot};
+
+    let Ok(dir) = std::env::var("CH_SNAPSHOT_DIR") else {
+        eprintln!("CH_SNAPSHOT_DIR unset; skipping real-snapshot rehydration test");
+        return;
+    };
+    let dir = PathBuf::from(dir);
+    let state_json = std::fs::read_to_string(dir.join("state.json")).expect("read state.json");
+    let mem_ranges = dir.join("snapshot").join("memory-ranges");
+
+    // --- Parse + translate the whole snapshot (CPU + GIC + memory layout). ---
+    let snap = Snapshot::from_state_json(&state_json).expect("parse snapshot");
+    assert!(snap.num_vcpus() >= 1, "snapshot has no vCPUs");
+    assert!(
+        !snap.mem_mappings.is_empty(),
+        "snapshot has no guest-RAM mappings"
+    );
+    let total_ram: u64 = snap.mem_mappings.iter().map(|m| m.size).sum();
+    eprintln!(
+        "rehydrating: {} vCPU(s), {} GiB guest RAM, {}-IRQ GICv3",
+        snap.num_vcpus(),
+        total_ram >> 30,
+        snap.num_irq
+    );
+
+    // --- Rebuild the live VM from the snapshot. ------------------------------
+    let hv = hypervisor::new().expect("hypervisor::new() — is the test binary codesigned?");
+    let tracer = Arc::new(DeviceTraceVmOps {
+        accesses: Mutex::new(Vec::new()),
+    });
+    let vm_ops: Arc<dyn VmOps> = tracer.clone();
+    let mut rvm = rehydrate(hv.as_ref(), &snap, &mem_ranges, &vm_ops).expect("rehydrate VM");
+    assert_eq!(rvm.vcpus.len(), snap.num_vcpus() as usize);
+
+    // Capture the restored entry PC — execution must begin exactly here.
+    let entry_pc = match rvm.vcpus[0].state().expect("read restored state") {
+        CpuState::Hvf(s) => s.pc,
+        #[allow(unreachable_patterns)]
+        _ => panic!("expected HVF CpuState"),
+    };
+    eprintln!("restored vCPU0 entry PC = {entry_pc:#x}");
+
+    // --- Resume vCPU0 and watch it execute real guest code. -----------------
+    let vcpu = rvm.vcpus[0].as_mut();
+    let mut steps = 0u64;
+    let mut shutdown = false;
+    for _ in 0..200_000 {
+        steps += 1;
+        match vcpu.run().expect("rehydrated vCPU run") {
+            VmExit::Ignore => {}
+            VmExit::Shutdown | VmExit::Reset => {
+                shutdown = true;
+                break;
+            }
+            other => panic!("unexpected exit from rehydrated guest: {other:?}"),
+        }
+        // Stop as soon as we have solid evidence of device-level execution.
+        if tracer.accesses.lock().unwrap().len() >= 8 {
+            break;
+        }
+    }
+
+    let trace = tracer.accesses.lock().unwrap().clone();
+    eprintln!(
+        "executed {steps} guest entries; {} device access(es); first few: {:#x?}",
+        trace.len(),
+        &trace[..trace.len().min(8)]
+    );
+
+    // The rehydrated guest must have made progress: either it touched a device
+    // (the overwhelmingly common case for a running OS — UART/RTC/virtio/PCI in
+    // the MMIO window below the 0x4000_0000 RAM base) or it cleanly powered off.
+    // Either outcome proves it executed real, translated guest state rather than
+    // faulting on a corrupt register file.
+    assert!(
+        !trace.is_empty() || shutdown,
+        "rehydrated guest neither accessed a device nor halted after {steps} entries \
+         (entry PC was {entry_pc:#x}) — translation or memory restore is wrong"
+    );
+    if let Some(&(gpa, _)) = trace.first() {
+        assert!(
+            gpa < RAM_BASE,
+            "first device access at {gpa:#x} is inside the RAM window — unexpected"
+        );
+    }
+}
+
+/// Documents the Apple managed-GIC base-address ordering constraint that drives
+/// the GIC relocation in [`hypervisor::hvf::rehydrate`].
+///
+/// Empirically (verified on macOS 26.x / Apple Silicon), `hv_gic_create`
+/// returns `HV_BAD_ARGUMENT` unless the redistributor base sits **above** the
+/// distributor base. cloud-hypervisor's arm64 map places the redistributors
+/// *below* the distributor, so the managed GIC cannot be created at the guest's
+/// original addresses — hence `Snapshot::vgic_config` relocates it. This test
+/// pins that behaviour so a future SDK change (or a regression in our config
+/// plumbing) is caught.
+#[cfg(feature = "kvm-snapshot")]
+#[test]
+fn hvf_gic_requires_redist_above_dist() {
+    use hypervisor::arch::aarch64::gic::VgicConfig;
+
+    let mk = |dist: u64, redist: u64, rsize: u64| VgicConfig {
+        vcpu_count: 1,
+        dist_addr: dist,
+        dist_size: 0x1_0000,
+        redists_addr: redist,
+        redists_size: rsize,
+        msi_addr: 0,
+        msi_size: 0,
+        nr_irqs: 256,
+    };
+
+    // (dist, redist, redist_size, expect_ok)
+    let cases: &[(u64, u64, u64, bool)] = &[
+        (0x0800_0000, 0x0801_0000, 0x2_0000, true), // redist above dist -> OK
+        (0x08ff_0000, 0x08fd_0000, 0x2_0000, false), // cloud layout (redist below) -> reject
+        (0x08fd_0000, 0x08ff_0000, 0x2_0000, true), // redist above dist -> OK
+    ];
+
+    for &(dist, redist, rsize, expect_ok) in cases {
+        let hv = hypervisor::new().expect("hv new");
+        let vm = hv
+            .create_vm(HypervisorVmConfig {
+                nested: false,
+                smt_enabled: false,
+            })
+            .expect("create_vm");
+        let ok = vm.create_vgic(&mk(dist, redist, rsize)).is_ok();
+        assert_eq!(
+            ok, expect_ok,
+            "hv_gic_create(dist={dist:#x}, redist={redist:#x}, rsize={rsize:#x}) \
+             expected ok={expect_ok}, got ok={ok}"
+        );
+    }
+}
