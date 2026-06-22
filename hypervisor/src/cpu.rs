@@ -10,6 +10,12 @@
 //
 //
 
+#[cfg(feature = "tdx")]
+use std::io;
+use std::result;
+
+#[cfg(feature = "sev_snp")]
+use igvm::snp_defs::SevVmsa;
 use thiserror::Error;
 #[cfg(not(target_arch = "riscv64"))]
 use {anyhow::anyhow, vm_memory::GuestAddress};
@@ -287,7 +293,7 @@ pub enum HypervisorCpuError {
     ///
     #[cfg(feature = "tdx")]
     #[error("Failed to initialize TDX")]
-    InitializeTdx(#[source] std::io::Error),
+    InitializeTdx(#[source] io::Error),
     ///
     /// Unknown TDX VM call
     ///
@@ -573,7 +579,7 @@ pub trait Vcpu: Send + Sync {
     ///
     /// Triggers the running of the current virtual CPU returning an exit reason.
     ///
-    fn run(&mut self) -> std::result::Result<VmExit, HypervisorCpuError>;
+    fn run(&mut self) -> result::Result<VmExit, HypervisorCpuError>;
     #[cfg(target_arch = "x86_64")]
     ///
     /// Translate guest virtual address to guest physical address
@@ -657,7 +663,7 @@ pub trait Vcpu: Send + Sync {
         unimplemented!()
     }
     #[cfg(feature = "sev_snp")]
-    fn setup_sev_snp_regs(&self, _vmsa: igvm::snp_defs::SevVmsa) -> Result<()> {
+    fn setup_sev_snp_regs(&self, _vmsa: SevVmsa) -> Result<()> {
         unimplemented!()
     }
 

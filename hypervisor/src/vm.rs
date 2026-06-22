@@ -11,6 +11,9 @@
 //
 
 use std::any::Any;
+#[cfg(any(feature = "sev_snp", feature = "tdx"))]
+use std::io;
+use std::result;
 use std::sync::Arc;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use std::sync::Mutex;
@@ -219,26 +222,26 @@ pub enum HypervisorVmError {
     /// Error initializing SEV-SNP on the VM
     ///
     #[error("Failed to initialize SEV-SNP")]
-    InitializeSevSnp(#[source] std::io::Error),
+    InitializeSevSnp(#[source] io::Error),
 
     #[cfg(feature = "tdx")]
     ///
     /// Error initializing TDX on the VM
     ///
     #[error("Failed to initialize TDX")]
-    InitializeTdx(#[source] std::io::Error),
+    InitializeTdx(#[source] io::Error),
     #[cfg(feature = "tdx")]
     ///
     /// Error finalizing the TDX configuration on the VM
     ///
     #[error("Failed to finalize TDX")]
-    FinalizeTdx(#[source] std::io::Error),
+    FinalizeTdx(#[source] io::Error),
     #[cfg(feature = "tdx")]
     ///
     /// Error initializing the TDX memory region
     ///
     #[error("Failed to initialize memory region TDX")]
-    InitMemRegionTdx(#[source] std::io::Error),
+    InitMemRegionTdx(#[source] io::Error),
     ///
     /// Create Vgic error
     ///
@@ -289,7 +292,7 @@ pub enum HypervisorVmError {
 ///
 /// Result type for returning from a function
 ///
-pub type Result<T> = std::result::Result<T, HypervisorVmError>;
+pub type Result<T> = result::Result<T, HypervisorVmError>;
 
 /// Configuration data for legacy interrupts.
 ///

@@ -6,6 +6,7 @@
 
 use core::fmt::Debug;
 use std::fmt::{self, Display};
+use std::result;
 
 use thiserror::Error;
 
@@ -147,4 +148,4 @@ pub trait PlatformEmulator {
     fn fetch(&self, ip: u64, instruction_bytes: &mut [u8]) -> Result<(), PlatformError>;
 }
 
-pub type EmulationResult<S, E> = std::result::Result<S, EmulationError<E>>;
+pub type EmulationResult<S, E> = result::Result<S, EmulationError<E>>;

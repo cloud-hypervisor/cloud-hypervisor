@@ -3,13 +3,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::any::Any;
-use std::result;
+use std::{mem, result};
 
 use serde::de::Error as SerdeError;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use thiserror::Error;
 
+#[cfg(feature = "kvm")]
+use crate::kvm::aarch64::gic::Gicv3ItsState;
+#[cfg(feature = "mshv")]
+use crate::mshv::aarch64::gic::MshvGicV2MState;
 use crate::{CpuState, HypervisorDeviceError, HypervisorVmError};
 
 /// Errors thrown while setting up the VGIC.
@@ -42,13 +46,13 @@ pub struct VgicConfig {
 #[derive(Clone, Serialize)]
 pub enum GicState {
     #[cfg(feature = "kvm")]
-    Kvm(crate::kvm::aarch64::gic::Gicv3ItsState),
+    Kvm(Gicv3ItsState),
     #[cfg(feature = "mshv")]
-    MshvGicV2M(crate::mshv::aarch64::gic::MshvGicV2MState),
+    MshvGicV2M(MshvGicV2MState),
 }
 
 impl<'de> Deserialize<'de> for GicState {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    fn deserialize<D>(deserializer: D) -> result::Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
@@ -57,24 +61,19 @@ impl<'de> Deserialize<'de> for GicState {
         #[derive(Deserialize)]
         pub enum GicStateDefaultDeserialize {
             #[cfg(feature = "kvm")]
-            Kvm(crate::kvm::aarch64::gic::Gicv3ItsState),
+            Kvm(Gicv3ItsState),
             #[cfg(feature = "mshv")]
-            MshvGicV2M(crate::mshv::aarch64::gic::MshvGicV2MState),
+            MshvGicV2M(MshvGicV2MState),
         }
 
         const {
-            assert!(
-                std::mem::size_of::<GicStateDefaultDeserialize>()
-                    == std::mem::size_of::<GicState>()
-            );
+            assert!(mem::size_of::<GicStateDefaultDeserialize>() == mem::size_of::<GicState>());
         };
 
         let value: serde_json::Value = Deserialize::deserialize(deserializer)?;
 
         #[cfg(feature = "kvm")]
-        if let Ok(gicv3_its_state) =
-            crate::kvm::aarch64::gic::Gicv3ItsState::deserialize(value.clone())
-        {
+        if let Ok(gicv3_its_state) = Gicv3ItsState::deserialize(value.clone()) {
             return Ok(GicState::Kvm(gicv3_its_state));
         }
 
