@@ -10,9 +10,13 @@ use std::fs::File;
 use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
 use std::os::unix::io::{FromRawFd, RawFd};
+use std::sync::Arc;
 
-use block::formats::qcow::internal::{QcowFile, RawFile};
+use block::async_io::GuestMemoryTarget;
+use block::disk_file::AsyncDiskFile;
+use block::formats::qcow::QcowDisk;
 use libfuzzer_sys::{fuzz_target, Corpus};
+use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
 
 // Take the first 64 bits of data as an address and the next 64 bits as data to
 // store there. The rest of the data is used as a qcow image.
@@ -28,11 +32,37 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     let mut disk_file: File = unsafe { File::from_raw_fd(shm) };
     disk_file.write_all(&bytes[16..]).unwrap();
     disk_file.seek(SeekFrom::Start(0)).unwrap();
-    if let Ok(mut qcow) = QcowFile::from(RawFile::new(disk_file, false)) {
-        if qcow.seek(SeekFrom::Start(addr)).is_ok() {
-            let _ = qcow.write_all(&value.to_le_bytes());
-        }
+
+    let Ok(disk) = QcowDisk::new(disk_file, false, false, true, false) else {
+        return Corpus::Keep;
+    };
+    let Ok(mut async_io) = disk.create_async_io(1) else {
+        return Corpus::Keep;
+    };
+
+    let len = size_of::<u64>();
+    let Ok(mem) = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), len)]) else {
+        return Corpus::Keep;
+    };
+    let mem = Arc::new(mem);
+    let _ = mem.write_slice(&value.to_le_bytes(), GuestAddress(0));
+    let range = [(GuestAddress(0), len as u32)];
+    let off = addr as libc::off_t;
+
+    if let Ok(target) = GuestMemoryTarget::new(Arc::clone(&mem), &range) {
+        let _ = async_io.write_from_memory(off, target, 0);
+        while async_io.next_completed_request().is_some() {}
     }
+    if let Ok(target) = GuestMemoryTarget::new(Arc::clone(&mem), &range) {
+        let _ = async_io.read_to_memory(off, target, 1);
+        while async_io.next_completed_request().is_some() {}
+    }
+    let _ = async_io.write_zeroes(addr, len as u64, 2);
+    while async_io.next_completed_request().is_some() {}
+    let _ = async_io.punch_hole(addr, len as u64, 3);
+    while async_io.next_completed_request().is_some() {}
+    let _ = async_io.fsync(Some(4));
+    while async_io.next_completed_request().is_some() {}
 
     Corpus::Keep
 });

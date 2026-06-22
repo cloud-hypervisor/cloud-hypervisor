@@ -15,6 +15,7 @@
 //! checked range, so it can be moved with volatile I/O without exposing raw host pointers.
 //! Multi-descriptor TX packets use a local bounce buffer.
 
+use std::cmp;
 use std::io::{self, ErrorKind, Read, Write};
 use std::ops::Deref;
 
@@ -357,7 +358,7 @@ impl VsockPacket {
 
                 let desc_len = desc.len() as usize;
                 if desc_len > 0 && offset < total_len {
-                    let to_copy = std::cmp::min(desc_len, total_len - offset);
+                    let to_copy = cmp::min(desc_len, total_len - offset);
                     desc_chain
                         .memory()
                         .read_slice(&mut owned[offset..offset + to_copy], desc.addr())
@@ -678,7 +679,7 @@ impl VsockPacket {
 
 #[cfg(test)]
 mod unit_tests {
-    use virtio_bindings::virtio_ring::VRING_DESC_F_WRITE;
+    use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::QueueOwnedT;
     use vm_memory::GuestAddress;
     use vm_virtio::queue::testing::{VirtQueue as GuestQ, VirtqDesc as GuestQDesc};
@@ -823,17 +824,13 @@ mod unit_tests {
         guest_txvq.dtable[0].set(
             0x0061_0000,
             VSOCK_PKT_HDR_SIZE as u32,
-            virtio_bindings::virtio_ring::VRING_DESC_F_NEXT
-                .try_into()
-                .unwrap(),
+            VRING_DESC_F_NEXT.try_into().unwrap(),
             1,
         );
         guest_txvq.dtable[1].set(
             0x0061_1000,
             4 * 1024,
-            virtio_bindings::virtio_ring::VRING_DESC_F_NEXT
-                .try_into()
-                .unwrap(),
+            VRING_DESC_F_NEXT.try_into().unwrap(),
             2,
         );
         guest_txvq.dtable[2].set(0x0061_2000, 4 * 1024, 0, 0);

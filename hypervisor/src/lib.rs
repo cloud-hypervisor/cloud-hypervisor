@@ -21,6 +21,9 @@
 //! - riscv64 (experimental)
 //!
 
+// TODO: Trim qualified paths in this crate, then drop this expectation.
+#![expect(clippy::absolute_paths)]
+
 /// Architecture specific definitions
 #[macro_use]
 pub mod arch;
@@ -53,6 +56,8 @@ mod cpu;
 mod device;
 
 use std::sync::Arc;
+#[cfg(target_arch = "x86_64")]
+use std::time::SystemTime;
 
 use anyhow::anyhow;
 use concat_idents::concat_idents;
@@ -213,7 +218,7 @@ impl ClockData {
         }
     }
 
-    pub fn set_realtime(&mut self, realtime: std::time::SystemTime) {
+    pub fn set_realtime(&mut self, realtime: SystemTime) {
         match self {
             #[cfg(feature = "kvm")]
             ClockData::Kvm(s) => {
@@ -228,6 +233,51 @@ impl ClockData {
             }
         }
     }
+
+    /// Returns the clock with `CLOCK_REALTIME` filled from the host wall clock
+    /// when absent, so a later restore can advance the guest to current wall
+    /// time. No-op for backends without a realtime field (e.g. MSHV).
+    pub fn with_realtime_filled(mut self) -> Self {
+        if !self.has_realtime() {
+            self.set_realtime(SystemTime::now());
+        }
+        self
+    }
+}
+
+/// Guest clock state preserved across pause/resume and snapshot/restore
+/// (`ClockData` on x86, `TimerState` on aarch64+kvm.
+/// The platform where it has not guest clock, `Option<ClockState>` will be None.
+#[cfg(target_arch = "x86_64")]
+pub type ClockState = ClockData;
+#[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+pub type ClockState = TimerState;
+#[cfg(not(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "kvm"))))]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub enum ClockState {}
+
+/// Guest timer state captured on aarch64 for snapshot/migration: the guest
+/// virtual counter (`CNTVCT_EL0`) plus the host wall clock and counter
+/// frequency needed to advance it to current wall time on restore. aarch64 has
+/// no `KVM_SET_CLOCK`/`KVM_CLOCK_REALTIME`, so the VMM records these and does the
+/// advance itself.
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+pub struct TimerState {
+    pub cntvct: u64,
+    pub host_realtime_ns: u64,
+    pub cntfrq: u64,
+}
+
+/// How the guest clock is re-established when the vCPUs resume: a same-host
+/// pause/resume left it running, whereas a snapshot restore / migration-receive
+/// means the guest was off-host and the clock must catch up to wall time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClockRestoreMode {
+    /// Same-host pause -> resume; the clock kept running, nothing to advance.
+    SameHostResume,
+    /// Restored from a snapshot or migrated in; advance to current wall time.
+    SnapshotRestore,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

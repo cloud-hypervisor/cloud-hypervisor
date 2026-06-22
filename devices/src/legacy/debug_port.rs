@@ -4,6 +4,7 @@
 //
 
 use std::fmt;
+use std::sync::{Arc, Barrier};
 use std::time::Instant;
 
 use log::{error, warn};
@@ -66,12 +67,7 @@ impl BusDevice for DebugPort {
         error!("Invalid read to debug port");
     }
 
-    fn write(
-        &mut self,
-        _base: u64,
-        _offset: u64,
-        data: &[u8],
-    ) -> Option<std::sync::Arc<std::sync::Barrier>> {
+    fn write(&mut self, _base: u64, _offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         let elapsed = self.timestamp.elapsed();
 
         let code = data[0];

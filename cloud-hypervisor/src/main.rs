@@ -3,6 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+// TODO: Trim qualified paths in this crate, then drop this expectation.
+#![expect(clippy::absolute_paths)]
+
 mod logger;
 #[cfg(test)]
 mod test_util;
@@ -321,7 +324,7 @@ fn get_cli_options_sorted(
                      hotplug_method=acpi|virtio-mem,\
                      hotplug_size=<hotpluggable_memory_size>,\
                      hotplugged_size=<hotplugged_memory_size>,\
-                     prefault=on|off,thp=on|off\"",
+                     prefault=on|off,reserve=on|off,thp=on|off\"",
             )
             .default_value(default_memory)
             .group("vm-config"),
@@ -335,7 +338,7 @@ fn get_cli_options_sorted(
                      host_numa_node=<node_id>,\
                      id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>,\
                      hotplugged_size=<hotplugged_memory_size>,\
-                     prefault=on|off\"",
+                     prefault=on|off,reserve=on|off\"",
             )
             .num_args(1..)
             .action(ArgAction::Append)
@@ -880,6 +883,11 @@ fn main() {
 
     if cmd_arguments.get_flag("version") {
         println!("{} {}", env!("CARGO_BIN_NAME"), env!("BUILD_VERSION"));
+        let migration_protocol_versions = vm_migration::protocol::supported_protocol_versions()
+            .map(|version| version.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("Migration Protocol Versions: {migration_protocol_versions}");
 
         if cmd_arguments.get_count("v") != 0 {
             println!("Enabled features: {:?}", vmm::feature_list());
@@ -1003,6 +1011,7 @@ mod unit_tests {
                 hugepages: false,
                 hugepage_size: None,
                 prefault: false,
+                reserve: false,
                 zones: None,
                 thp: true,
             },
@@ -1711,12 +1720,12 @@ mod unit_tests {
                     "--serial",
                     "null",
                     "--console",
-                    "tty,pci_segment=1,pci_device_id=7",
+                    "tty,pci_segment=0,pci_device_id=7",
                 ],
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
                     "serial": {"mode": "Null"},
-                    "console": {"mode": "Tty", "iommu": false, "pci_segment": 1, "pci_device_id": 7}
+                    "console": {"mode": "Tty", "iommu": false, "pci_segment": 0, "pci_device_id": 7}
                 }"#,
                 true,
             ),

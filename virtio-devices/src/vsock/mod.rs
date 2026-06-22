@@ -14,6 +14,7 @@ mod packet;
 mod unix;
 
 use std::os::unix::io::RawFd;
+use std::result;
 
 use packet::VsockPacket;
 use thiserror::Error;
@@ -103,7 +104,7 @@ pub enum VsockError {
     #[error("Encountered an unexpected read-only virtio descriptor")]
     UnwritableDescriptor,
 }
-type Result<T> = std::result::Result<T, VsockError>;
+type Result<T> = result::Result<T, VsockError>;
 
 /// A passive, event-driven object, that needs to be notified whenever an epoll-able event occurs.
 ///
@@ -158,6 +159,7 @@ pub trait VsockBackend: VsockChannel + VsockEpollListener + Send {
 
 #[cfg(any(test, fuzzing))]
 pub mod unit_tests {
+    use std::io;
     use std::os::unix::io::AsRawFd;
     use std::path::PathBuf;
     use std::sync::{Arc, RwLock};
@@ -178,10 +180,7 @@ pub mod unit_tests {
     pub struct NoopVirtioInterrupt {}
 
     impl VirtioInterrupt for NoopVirtioInterrupt {
-        fn trigger(
-            &self,
-            _int_type: VirtioInterruptType,
-        ) -> std::result::Result<(), std::io::Error> {
+        fn trigger(&self, _int_type: VirtioInterruptType) -> io::Result<()> {
             Ok(())
         }
 
@@ -190,7 +189,7 @@ pub mod unit_tests {
             _interrupt: u32,
             _eventfd: Option<EventFd>,
             _vm: &dyn hypervisor::Vm,
-        ) -> std::io::Result<()> {
+        ) -> io::Result<()> {
             unimplemented!()
         }
     }
@@ -205,7 +204,7 @@ pub mod unit_tests {
         pub evset: Option<epoll::Events>,
     }
     impl TestBackend {
-        #[allow(clippy::new_without_default)]
+        #[expect(clippy::new_without_default)]
         pub fn new() -> Self {
             Self {
                 evfd: EventFd::new(EFD_NONBLOCK).unwrap(),
@@ -270,7 +269,7 @@ pub mod unit_tests {
     }
 
     impl TestContext {
-        #[allow(clippy::new_without_default)]
+        #[expect(clippy::new_without_default)]
         pub fn new() -> Self {
             const CID: u32 = 52;
             const MEM_SIZE: usize = 1024 * 1024 * 128;

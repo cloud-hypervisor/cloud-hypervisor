@@ -114,7 +114,7 @@ fn open_vhdx(
 ) -> BlockResult<Box<dyn AsyncFullDiskFile>> {
     info!("Opening VHDX disk file with synchronous backend");
     Ok(Box::new(
-        VhdxDisk::new(file).map_err(|e| e.with_path(options.path))?,
+        VhdxDisk::new(file, options.direct).map_err(|e| e.with_path(options.path))?,
     ))
 }
 
@@ -127,7 +127,7 @@ fn open_fixed_vhd(
         if io_uring_supported() {
             info!("Opening fixed VHD disk file with io_uring backend");
             return Ok(Box::new(
-                VhdDisk::new(file, true).map_err(|e| e.with_path(options.path))?,
+                VhdDisk::new(file, true, options.direct).map_err(|e| e.with_path(options.path))?,
             ));
         }
         info!("io_uring runtime probe failed for fixed VHD, using synchronous backend");
@@ -135,7 +135,7 @@ fn open_fixed_vhd(
 
     info!("Opening fixed VHD disk file with synchronous backend");
     Ok(Box::new(
-        VhdDisk::new(file, false).map_err(|e| e.with_path(options.path))?,
+        VhdDisk::new(file, false, options.direct).map_err(|e| e.with_path(options.path))?,
     ))
 }
 
@@ -151,7 +151,11 @@ fn open_raw(
     if !options.disable_io_uring {
         if io_uring_supported() {
             info!("Opening RAW disk file with io_uring backend");
-            return Ok(Box::new(RawDisk::new(file, RawBackend::IoUring)));
+            return Ok(Box::new(RawDisk::new(
+                file,
+                RawBackend::IoUring,
+                options.direct,
+            )));
         }
         info!("io_uring runtime probe failed for RAW, trying next backend");
     }
@@ -159,13 +163,21 @@ fn open_raw(
     if !options.disable_aio {
         if aio_supported() {
             info!("Opening RAW disk file with AIO backend");
-            return Ok(Box::new(RawDisk::new(file, RawBackend::Aio)));
+            return Ok(Box::new(RawDisk::new(
+                file,
+                RawBackend::Aio,
+                options.direct,
+            )));
         }
         info!("AIO runtime probe failed for RAW, using synchronous backend");
     }
 
     info!("Opening RAW disk file with synchronous backend");
-    Ok(Box::new(RawDisk::new(file, RawBackend::Sync)))
+    Ok(Box::new(RawDisk::new(
+        file,
+        RawBackend::Sync,
+        options.direct,
+    )))
 }
 
 fn open_qcow2(
@@ -205,13 +217,12 @@ fn open_qcow2(
 
 #[cfg(test)]
 mod unit_tests {
-    use std::io::Write;
     use std::path::Path;
 
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
-    use crate::qcow::{QcowFile, RawFile};
+    use crate::formats::qcow;
 
     fn default_options(path: &Path) -> DiskOpenOptions<'_> {
         DiskOpenOptions {
@@ -247,12 +258,9 @@ mod unit_tests {
 
     #[test]
     fn detect_qcow2_image() {
-        let tmp = TempFile::new().unwrap();
-        {
-            let raw = RawFile::new(tmp.as_file().try_clone().unwrap(), false);
-            let mut qcow = QcowFile::new(raw, 3, 100 * 1024 * 1024, true).unwrap();
-            qcow.flush().unwrap();
-        }
+        let tmp = qcow::QcowTempDisk::new(100 * 1024 * 1024, None, false, true, false)
+            .unwrap()
+            .into_tempfile();
         let path = tmp.as_path().to_owned();
         let options = default_options(&path);
         let opened = open_disk(&options).unwrap();

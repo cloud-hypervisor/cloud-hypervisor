@@ -10,7 +10,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 use std::sync::{Arc, Mutex, RwLock};
-use std::{io, process};
+use std::{io, process, result};
 
 use libc::EFD_NONBLOCK;
 use log::error;
@@ -32,8 +32,8 @@ use vmm_sys_util::eventfd::EventFd;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<BitmapMmapRegion>;
 
-pub type Result<T> = std::result::Result<T, Error>;
-type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
+pub type Result<T> = result::Result<T, Error>;
+type VhostUserBackendResult<T> = io::Result<T>;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -70,9 +70,9 @@ pub const SYNTAX: &str = "vhost-user-net backend parameters \
 \"ip=<ip_addr>,mask=<net_mask>,socket=<socket_path>,client=on|off,\
 num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,tap=<if_name>\"";
 
-impl std::convert::From<Error> for std::io::Error {
+impl From<Error> for io::Error {
     fn from(e: Error) -> Self {
-        std::io::Error::other(e)
+        io::Error::other(e)
     }
 }
 
@@ -119,7 +119,7 @@ pub struct VhostUserNetBackend {
 }
 
 impl VhostUserNetBackend {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn new(
         ip_addr: IpAddr,
         host_mac: MacAddr,

@@ -3,6 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+// TODO: Trim qualified paths in this crate, then drop this expectation.
+#![expect(clippy::absolute_paths)]
+
 #[cfg(test)]
 #[path = "../test_util.rs"]
 mod test_util;
@@ -71,6 +74,8 @@ enum Error {
     ReadingFile(#[source] std::io::Error),
     #[error("Invalid disk size")]
     InvalidDiskSize(#[source] ByteSizedParseError),
+    #[error("Error parsing receive migration configuration")]
+    ReceiveMigrationConfig(#[from] vmm::api::VmReceiveMigrationConfigError),
     #[error("Error parsing send migration configuration")]
     SendMigrationConfig(#[from] vmm::api::VmSendMigrationConfigError),
 }
@@ -369,14 +374,14 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
                 .map_err(Error::HttpApiClient)
         }
         Some("add-device") => {
-            let device_config = add_device_config(
+            let (device_config, fds) = add_device_config(
                 matches
                     .subcommand_matches("add-device")
                     .unwrap()
                     .get_one::<String>("device_config")
                     .unwrap(),
             )?;
-            simple_api_command(socket, "PUT", "add-device", Some(&device_config))
+            simple_api_command_with_fds(socket, "PUT", "add-device", Some(&device_config), &fds)
                 .map_err(Error::HttpApiClient)
         }
         Some("remove-device") => {
@@ -534,7 +539,7 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
                     .unwrap()
                     .get_one::<String>("receive_migration_config")
                     .unwrap(),
-            );
+            )?;
             simple_api_command(
                 socket,
                 "PUT",
@@ -607,7 +612,7 @@ fn dbus_api_do_command(matches: &ArgMatches, proxy: &DBusApi1ProxyBlocking<'_>) 
             proxy.api_vm_resize_zone(&resize_zone)
         }
         Some("add-device") => {
-            let device_config = add_device_config(
+            let (device_config, _fds) = add_device_config(
                 matches
                     .subcommand_matches("add-device")
                     .unwrap()
@@ -753,7 +758,7 @@ fn dbus_api_do_command(matches: &ArgMatches, proxy: &DBusApi1ProxyBlocking<'_>) 
                     .unwrap()
                     .get_one::<String>("receive_migration_config")
                     .unwrap(),
-            );
+            )?;
             proxy.api_vm_receive_migration(&receive_migration_data)
         }
         Some("create") => {
@@ -833,11 +838,21 @@ fn resize_zone_config(id: &str, size: &str) -> Result<String, Error> {
     Ok(serde_json::to_string(&resize_zone).unwrap())
 }
 
-fn add_device_config(config: &str) -> Result<String, Error> {
-    let device_config = DeviceConfig::parse(config).map_err(Error::AddDeviceConfig)?;
+fn add_device_config(config: &str) -> Result<(String, Vec<i32>), Error> {
+    let mut device_config = DeviceConfig::parse(config).map_err(Error::AddDeviceConfig)?;
+
+    // DeviceConfig is modified on purpose here by taking the file
+    // descriptor out. Keeping it and sending it over to the server side
+    // process would not make any sense since the file descriptor may be
+    // represented with different values.
+    let fds = device_config
+        .fd
+        .take()
+        .map(|fd| vec![fd])
+        .unwrap_or_default();
     let device_config = serde_json::to_string(&device_config).unwrap();
 
-    Ok(device_config)
+    Ok((device_config, fds))
 }
 
 fn add_user_device_config(config: &str) -> Result<String, Error> {
@@ -941,12 +956,10 @@ fn coredump_config(destination_url: &str) -> String {
     serde_json::to_string(&coredump_config).unwrap()
 }
 
-fn receive_migration_data(url: &str) -> String {
-    let receive_migration_data = vmm::api::VmReceiveMigrationData {
-        receiver_url: url.to_owned(),
-    };
-
-    serde_json::to_string(&receive_migration_data).unwrap()
+fn receive_migration_data(config: &str) -> Result<String, Error> {
+    let receive_migration_data =
+        vmm::api::VmReceiveMigrationData::parse(config).map_err(Error::ReceiveMigrationConfig)?;
+    Ok(serde_json::to_string(&receive_migration_data).unwrap())
 }
 
 fn send_migration_data(config: &str) -> Result<String, Error> {
@@ -1069,7 +1082,7 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
             .arg(
                 Arg::new("receive_migration_config")
                     .index(1)
-                    .help("<receiver_url>"),
+                    .help(vmm::api::VmReceiveMigrationData::SYNTAX),
             ),
         Command::new("remove-device")
             .about("Remove VFIO and PCI device")
@@ -1219,7 +1232,7 @@ fn main() {
 
     if let Err(top_error) = target_api.do_command(&matches) {
         // Helper to join strings with a newline.
-        #[allow(clippy::needless_pass_by_value)]
+        #[expect(clippy::needless_pass_by_value)]
         fn join_strs(mut acc: String, next: String) -> String {
             if !acc.is_empty() {
                 acc.push('\n');

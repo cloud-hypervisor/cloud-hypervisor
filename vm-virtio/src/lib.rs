@@ -11,6 +11,7 @@
 //! Implements virtio queues
 
 use std::fmt::{self, Debug};
+use std::io;
 
 use virtio_queue::{Queue, QueueT};
 use vm_memory::GuestAddress;
@@ -23,7 +24,6 @@ pub const VIRTIO_MSI_NO_VECTOR: u16 = 0xffff;
 
 // Types taken from linux/virtio_ids.h
 #[derive(Copy, Clone, Debug)]
-#[allow(non_camel_case_types)]
 #[repr(C)]
 pub enum VirtioDeviceType {
     Net = 1,
@@ -98,9 +98,9 @@ impl fmt::Display for VirtioDeviceType {
 /// translated.
 pub trait AccessPlatform: Send + Sync + Debug {
     /// Provide a way to translate GVA address ranges into GPAs.
-    fn translate_gva(&self, base: u64, size: u64) -> std::result::Result<u64, std::io::Error>;
+    fn translate_gva(&self, base: u64, size: u64) -> io::Result<u64>;
     /// Provide a way to translate GPA address ranges into GVAs.
-    fn translate_gpa(&self, base: u64, size: u64) -> std::result::Result<u64, std::io::Error>;
+    fn translate_gpa(&self, base: u64, size: u64) -> io::Result<u64>;
 }
 
 pub trait Translatable {
@@ -108,14 +108,14 @@ pub trait Translatable {
         &self,
         access_platform: Option<&dyn AccessPlatform>,
         len: usize,
-    ) -> std::result::Result<Self, std::io::Error>
+    ) -> io::Result<Self>
     where
         Self: Sized;
     fn translate_gpa(
         &self,
         access_platform: Option<&dyn AccessPlatform>,
         len: usize,
-    ) -> std::result::Result<Self, std::io::Error>
+    ) -> io::Result<Self>
     where
         Self: Sized;
 }
@@ -125,14 +125,14 @@ impl Translatable for GuestAddress {
         &self,
         access_platform: Option<&dyn AccessPlatform>,
         len: usize,
-    ) -> std::result::Result<Self, std::io::Error> {
+    ) -> io::Result<Self> {
         Ok(GuestAddress(self.0.translate_gva(access_platform, len)?))
     }
     fn translate_gpa(
         &self,
         access_platform: Option<&dyn AccessPlatform>,
         len: usize,
-    ) -> std::result::Result<Self, std::io::Error> {
+    ) -> io::Result<Self> {
         Ok(GuestAddress(self.0.translate_gpa(access_platform, len)?))
     }
 }
@@ -142,7 +142,7 @@ impl Translatable for u64 {
         &self,
         access_platform: Option<&dyn AccessPlatform>,
         len: usize,
-    ) -> std::result::Result<Self, std::io::Error> {
+    ) -> io::Result<Self> {
         if let Some(access_platform) = access_platform {
             access_platform.translate_gva(*self, len as u64)
         } else {
@@ -153,7 +153,7 @@ impl Translatable for u64 {
         &self,
         access_platform: Option<&dyn AccessPlatform>,
         len: usize,
-    ) -> std::result::Result<Self, std::io::Error> {
+    ) -> io::Result<Self> {
         if let Some(access_platform) = access_platform {
             access_platform.translate_gpa(*self, len as u64)
         } else {

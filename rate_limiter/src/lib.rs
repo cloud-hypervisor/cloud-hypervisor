@@ -44,11 +44,11 @@
 //! trait and provides an *event-handler* as part of its API. This *event-handler*
 //! needs to be called by the user on every event on the rate limiter's `AsRawFd` FD.
 
-use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+use std::{cmp, io};
 
 use log::error;
 use thiserror::Error;
@@ -65,7 +65,7 @@ pub enum Error {
     SpuriousRateLimiterEvent(&'static str),
     /// The event handler encounters while TimerFd::wait()
     #[error("Failed to wait for the timer")]
-    TimerFdWaitError(#[source] std::io::Error),
+    TimerFdWaitError(#[source] io::Error),
 }
 
 // Interval at which the refill timer will run when limiter is at capacity.
@@ -220,7 +220,7 @@ impl TokenBucket {
             self.one_time_burst += tokens;
             return;
         }
-        self.budget = std::cmp::min(self.budget + tokens, self.size);
+        self.budget = cmp::min(self.budget + tokens, self.size);
     }
 
     /// Returns the capacity of the token bucket.
@@ -359,7 +359,7 @@ impl RateLimiter {
             libc::fcntl(fd, libc::F_SETFL, flags)
         };
         if ret < 0 {
-            return Err(std::io::Error::last_os_error());
+            return Err(io::Error::last_os_error());
         }
 
         Ok(RateLimiter {
@@ -463,10 +463,10 @@ impl RateLimiter {
             // `timer_fd::wait()` won't block (which is different from its default behavior.)
             match guard.timer_fd.wait() {
                 Err(e) => {
-                    let err: std::io::Error = e.into();
+                    let err: io::Error = e.into();
                     match err.kind() {
-                        std::io::ErrorKind::Interrupted => (),
-                        std::io::ErrorKind::WouldBlock => {
+                        io::ErrorKind::Interrupted => (),
+                        io::ErrorKind::WouldBlock => {
                             return Err(Error::SpuriousRateLimiterEvent(
                                 "Rate limiter event handler called without a present timer",
                             ));

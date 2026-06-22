@@ -57,14 +57,14 @@
 //! * The virtual device backend requests the interrupt manager to create an interrupt group
 //!   according to guest configuration information
 
-use std::io::{Error, ErrorKind};
+use std::io::{self, Error, ErrorKind};
 use std::sync::{Arc, Mutex};
 
 pub use hypervisor::{InterruptSourceConfig, LegacyIrqSourceConfig, MsiIrqSourceConfig};
 use vmm_sys_util::eventfd::EventFd;
 
 /// Reuse std::io::Result to simplify interoperability among crates.
-pub type Result<T> = std::io::Result<T>;
+pub type Result<T> = io::Result<T>;
 
 /// Data type to store an interrupt source identifier.
 pub type InterruptIndex = u32;
@@ -164,7 +164,6 @@ pub trait InterruptSourceGroup: Send + Sync {
     /// An interrupt notifier allows for external components and processes
     /// to inject interrupts into a guest, by writing to the [`EventFd`] returned
     /// by this method.
-    #[allow(unused_variables)]
     fn notifier(&self, index: InterruptIndex) -> Option<EventFd>;
 
     /// Update the interrupt source group configuration.

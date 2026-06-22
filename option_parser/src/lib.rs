@@ -27,8 +27,9 @@
 //! ```
 
 use std::collections::HashMap;
-use std::fmt::{Display, Write};
+use std::fmt::{self, Display, Write};
 use std::num::ParseIntError;
+use std::result;
 use std::str::FromStr;
 
 use thiserror::Error;
@@ -82,7 +83,7 @@ pub enum OptionParserError {
     #[error("invalid value: {0}")]
     InvalidValue(String),
 }
-type OptionParserResult<T> = std::result::Result<T, OptionParserError>;
+type OptionParserResult<T> = result::Result<T, OptionParserError>;
 
 fn split_commas(s: &str) -> OptionParserResult<Vec<String>> {
     let mut list: Vec<String> = Vec::new();
@@ -302,7 +303,7 @@ pub enum ToggleParseError {
 impl Parseable for Toggle {
     type Err = ToggleParseError;
 
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "" => Ok(Toggle(false)),
             "on" => Ok(Toggle(true)),
@@ -329,7 +330,7 @@ pub enum ByteSizedParseError {
 impl FromStr for ByteSized {
     type Err = ByteSizedParseError;
 
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
         Ok(ByteSized({
             let s = s.trim();
             let shift = if s.ends_with('K') {
@@ -356,7 +357,7 @@ impl FromStr for ByteSized {
 pub struct IntegerList(pub Vec<u64>);
 
 impl Display for IntegerList {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_char('[')?;
         let mut iter = self.0.iter();
         if let Some(first) = iter.next() {
@@ -379,7 +380,7 @@ pub enum IntegerListParseError {
 impl Parseable for IntegerList {
     type Err = IntegerListParseError;
 
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
         let mut integer_list = Vec::new();
         let ranges_list: Vec<&str> = s
             .trim()
@@ -486,7 +487,7 @@ pub enum TupleError {
 impl<S: Parseable, T: TupleValue> Parseable for Tuple<S, T> {
     type Err = TupleError;
 
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
         let mut list: Vec<(S, T)> = Vec::new();
         let body = s
             .trim()
@@ -562,7 +563,7 @@ where
     T: FromStr + Sized,
 {
     type Err = <T as FromStr>::Err;
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
         dequote(s).parse()
     }
 }
@@ -570,7 +571,7 @@ where
 impl Parseable for StringList {
     type Err = StringListParseError;
 
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
         let string_list: Vec<String> =
             split_commas(s.trim().trim_matches(|c| c == '[' || c == ']'))
                 .map_err(|_| StringListParseError::InvalidValue(s.to_owned()))?

@@ -12,19 +12,35 @@ pub mod internal;
 pub mod worker;
 
 use std::fs::File;
+#[cfg(any(test, feature = "test-utils"))]
+use std::io::Seek;
 use std::os::unix::io::AsRawFd;
+#[cfg(any(test, feature = "test-utils"))]
+use std::path::Path;
 use std::sync::Arc;
 use std::{fmt, io};
+
+#[cfg(any(test, feature = "test-utils"))]
+use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
+#[cfg(any(test, feature = "test-utils"))]
+use vmm_sys_util::tempfile::TempFile;
 
 use self::internal::backing::shared_backing_from;
 use self::internal::metadata::{BackingRead, QcowMetadata};
 use self::internal::qcow_raw_file::QcowRawFile;
-use self::internal::{MAX_NESTING_DEPTH, RawFile, parse_qcow};
+#[cfg(any(test, feature = "test-utils"))]
+use self::internal::{BackingFileConfig, Error as QcowError, QcowHeader};
+use self::internal::{MAX_NESTING_DEPTH, parse_qcow};
 #[cfg(feature = "io_uring")]
 use self::worker::async_uring::QcowAsync;
 use self::worker::sync::QcowSync;
+use crate::aligned_file::AlignedFile;
+#[cfg(any(test, feature = "test-utils"))]
+use crate::async_io::GuestMemoryTarget;
 use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError};
 use crate::disk_file;
+#[cfg(any(test, feature = "test-utils"))]
+use crate::disk_file::AsyncDiskFile;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 
 /// Unified DiskFile wrapper for QCOW2 disk images.
@@ -76,7 +92,7 @@ impl QcowDisk {
         }
 
         let max_nesting_depth = if backing_files { MAX_NESTING_DEPTH } else { 0 };
-        let raw_file = RawFile::new(file, direct_io);
+        let raw_file = AlignedFile::new(file, direct_io);
         let (inner, backing_file, sparse) = parse_qcow(raw_file, max_nesting_depth, sparse)
             .map_err(|e| {
                 let e = if !backing_files && matches!(e.kind(), BlockErrorKind::Overflow) {
@@ -94,6 +110,125 @@ impl QcowDisk {
             data_raw_file,
             use_io_uring,
         })
+    }
+
+    /// Synchronous write convenience for tests and benchmarks.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn write_all_at(&self, offset: u64, data: &[u8]) {
+        let mut async_io = self.create_async_io(1).unwrap();
+        let mem =
+            Arc::new(GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), data.len())]).unwrap());
+        mem.write_slice(data, GuestAddress(0)).unwrap();
+        let range = [(GuestAddress(0), data.len() as u32)];
+        let target = GuestMemoryTarget::new(Arc::clone(&mem), &range).unwrap();
+        async_io
+            .write_from_memory(offset as libc::off_t, target, 0)
+            .unwrap();
+        while async_io.next_completed_request().is_some() {}
+    }
+
+    /// Synchronous read convenience for tests and benchmarks.
+    #[cfg(test)]
+    pub fn read_all_at(&self, offset: u64, len: usize) -> Vec<u8> {
+        let mut async_io = self.create_async_io(1).unwrap();
+        let mem = Arc::new(GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), len)]).unwrap());
+        let range = [(GuestAddress(0), len as u32)];
+        let target = GuestMemoryTarget::new(Arc::clone(&mem), &range).unwrap();
+        async_io
+            .read_to_memory(offset as libc::off_t, target, 0)
+            .unwrap();
+        while async_io.next_completed_request().is_some() {}
+        let mut buf = vec![0u8; len];
+        mem.read_slice(&mut buf, GuestAddress(0)).unwrap();
+        buf
+    }
+
+    #[cfg(test)]
+    pub(crate) fn metadata(&self) -> &QcowMetadata {
+        &self.metadata
+    }
+}
+
+/// Writes a fresh qcow2 layout into `file`
+#[cfg(any(test, feature = "test-utils"))]
+pub(crate) fn create_image(
+    file: &File,
+    virtual_size: u64,
+    backing_config: Option<&BackingFileConfig>,
+) -> BlockResult<()> {
+    let path = backing_config.map(|cfg| cfg.path.as_str());
+    let mut header = QcowHeader::create_for_size_and_path(3, virtual_size, path)
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
+    if let Some(cfg) = backing_config
+        && let Some(backing_file) = &mut header.backing_file
+    {
+        backing_file.format = cfg.format;
+    }
+    let mut raw = AlignedFile::new(
+        file.try_clone()
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::Clone(e)))?,
+        false,
+    );
+    raw.rewind()
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, QcowError::SeekingFile(e)))?;
+    header
+        .write_to(&mut raw)
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
+    let (inner, _backing, _sparse) = parse_qcow(raw, MAX_NESTING_DEPTH, true)?;
+    // Flush dirty caches and clear the dirty bit
+    QcowMetadata::new(inner).shutdown();
+    Ok(())
+}
+
+/// Helper struct to create a new qcow2 image in a temporary file.
+#[cfg(any(test, feature = "test-utils"))]
+pub struct QcowTempDisk {
+    tmp: TempFile,
+    disk: QcowDisk,
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl QcowTempDisk {
+    /// Creates a new qcow2 image in a temporary file with optional
+    /// backing file. Flags are passed to QcowDisk::new.
+    pub fn new(
+        virtual_size: u64,
+        backing_config: Option<&BackingFileConfig>,
+        direct_io: bool,
+        sparse: bool,
+        use_io_uring: bool,
+    ) -> BlockResult<Self> {
+        let tmp = TempFile::new().map_err(io::Error::from)?;
+        create_image(tmp.as_file(), virtual_size, backing_config)?;
+        let file = tmp
+            .as_file()
+            .try_clone()
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::Clone(e)))?;
+        let disk = QcowDisk::new(
+            file,
+            direct_io,
+            backing_config.is_some(),
+            sparse,
+            use_io_uring,
+        )?;
+        Ok(Self { tmp, disk })
+    }
+
+    pub fn path(&self) -> &Path {
+        self.tmp.as_path()
+    }
+
+    pub fn as_file(&self) -> &File {
+        self.tmp.as_file()
+    }
+
+    pub fn disk(&self) -> &QcowDisk {
+        &self.disk
+    }
+
+    /// Drops the disk handle and returns the underlying TempFile.
+    pub fn into_tempfile(self) -> TempFile {
+        self.tmp
     }
 }
 
@@ -198,9 +333,6 @@ impl disk_file::AsyncDiskFile for QcowDisk {
 
 #[cfg(test)]
 mod unit_tests {
-    use vmm_sys_util::tempfile::TempFile;
-
-    use self::internal::{QcowFile, RawFile};
     use super::*;
     use crate::async_io::AsyncIo;
     use crate::disk_file::{AsyncDiskFile, DiskSize, PhysicalSize};
@@ -208,12 +340,10 @@ mod unit_tests {
     const TEST_SIZE: u64 = 0x5566_7788;
 
     fn make_qcow_file() -> File {
-        let temp_file = TempFile::new().unwrap();
-        {
-            let raw = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
-            QcowFile::new(raw, 3, TEST_SIZE, true).unwrap();
-        }
-        temp_file.into_file()
+        QcowTempDisk::new(TEST_SIZE, None, false, true, false)
+            .unwrap()
+            .into_tempfile()
+            .into_file()
     }
 
     #[test]

@@ -2,14 +2,15 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::os::unix::fs::FileExt;
+use std::{io, result};
 
 use remain::sorted;
 use thiserror::Error;
 
 use super::bat::{self, BatEntry, VhdxBatError};
 use super::metadata::{self, DiskSpec};
+use crate::aligned_file::AlignedFile;
 
 const SECTOR_SIZE: u64 = 512;
 
@@ -32,7 +33,7 @@ pub enum VhdxIoError {
     WriteBat(#[source] VhdxBatError),
 }
 
-pub type Result<T> = std::result::Result<T, VhdxIoError>;
+pub type Result<T> = result::Result<T, VhdxIoError>;
 
 macro_rules! align {
     ($n:expr, $align:expr) => {{ $n.div_ceil($align) * $align }};
@@ -86,7 +87,7 @@ impl Sector {
 /// VHDx IO read routine: requires relative sector index and count for the
 /// requested data.
 pub fn read(
-    f: &mut File,
+    f: &AlignedFile,
     buf: &mut [u8],
     disk_spec: &DiskSpec,
     bat: &[BatEntry],
@@ -114,11 +115,10 @@ pub fn read(
             | bat::PAYLOAD_BLOCK_UNMAPPED
             | bat::PAYLOAD_BLOCK_ZERO => {}
             bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
-                f.seek(SeekFrom::Start(sector.file_offset))
-                    .map_err(VhdxIoError::ReadSectorBlock)?;
-                f.read_exact(
+                f.read_exact_at(
                     &mut buf
                         [read_count..(read_count + (sector.free_sectors * SECTOR_SIZE) as usize)],
+                    sector.file_offset,
                 )
                 .map_err(VhdxIoError::ReadSectorBlock)?;
             }
@@ -139,7 +139,7 @@ pub fn read(
 /// VHDx IO write routine: requires relative sector index and count for the
 /// requested data.
 pub fn write(
-    f: &mut File,
+    f: &AlignedFile,
     buf: &[u8],
     disk_spec: &mut DiskSpec,
     bat_offset: u64,
@@ -172,7 +172,9 @@ pub fn write(
                     .checked_add(disk_spec.block_size as u64)
                     .ok_or(VhdxIoError::InvalidDiskSize)?;
 
-                f.set_len(new_size).map_err(VhdxIoError::ResizeFile)?;
+                f.file()
+                    .set_len(new_size)
+                    .map_err(VhdxIoError::ResizeFile)?;
                 disk_spec.image_size = new_size;
 
                 let new_bat_entry =
@@ -184,10 +186,9 @@ pub fn write(
                     break;
                 }
 
-                f.seek(SeekFrom::Start(file_offset))
-                    .map_err(VhdxIoError::ReadSectorBlock)?;
-                f.write_all(
+                f.write_all_at(
                     &buf[write_count..(write_count + (sector.free_sectors * SECTOR_SIZE) as usize)],
+                    file_offset,
                 )
                 .map_err(VhdxIoError::ReadSectorBlock)?;
             }
@@ -196,10 +197,9 @@ pub fn write(
                     break;
                 }
 
-                f.seek(SeekFrom::Start(sector.file_offset))
-                    .map_err(VhdxIoError::ReadSectorBlock)?;
-                f.write_all(
+                f.write_all_at(
                     &buf[write_count..(write_count + (sector.free_sectors * SECTOR_SIZE) as usize)],
+                    sector.file_offset,
                 )
                 .map_err(VhdxIoError::ReadSectorBlock)?;
             }

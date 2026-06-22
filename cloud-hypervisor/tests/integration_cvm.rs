@@ -3,14 +3,16 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 #![cfg(any(devcli_testenv, clippy))]
-#![allow(clippy::undocumented_unsafe_blocks)]
+#![expect(clippy::undocumented_unsafe_blocks)]
+// TODO: Trim qualified paths in this crate, then drop this expectation.
+#![expect(clippy::absolute_paths)]
 // When enabling the `mshv` feature, we skip quite some tests and
 // hence have known dead-code. This annotation silences dead-code
 // related warnings for our quality workflow to pass.
 #![allow(dead_code)]
 mod common;
 
-#[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+#[cfg(feature = "sev_snp")]
 mod common_cvm {
     use block::ImageType;
     use common::tests_wrappers::*;
@@ -98,6 +100,7 @@ mod common_cvm {
     }
 
     #[test]
+    #[cfg(not(feature = "kvm"))]
     fn test_pci_multiple_segments() {
         // Use 8 segments to test the multiple segment support since it's more than the default 6
         //  supported by Linux
@@ -208,18 +211,21 @@ mod common_cvm {
     }
 
     #[test]
+    #[cfg(not(feature = "kvm"))]
     fn test_dmi_uuid() {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
         _test_dmi_uuid(&guest);
     }
 
     #[test]
+    #[cfg(not(feature = "kvm"))]
     fn test_dmi_oem_strings() {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
         _test_dmi_oem_strings(&guest);
     }
 
     #[test]
+    #[cfg(not(feature = "kvm"))]
     fn test_dmi_system_and_chassis() {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
         _test_dmi_system_and_chassis(&guest);
@@ -324,6 +330,7 @@ mod common_cvm {
     }
 
     #[test]
+    #[cfg(not(feature = "kvm"))]
     fn test_vdpa_block() {
         assert!(exec_host_command_status("lsmod | grep vdpa_sim_blk").success());
 

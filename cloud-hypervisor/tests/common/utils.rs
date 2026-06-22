@@ -23,6 +23,8 @@ use wait_timeout::ChildExt;
 const QCOW2_INCOMPATIBLE_FEATURES_OFFSET: u64 = 72;
 // 10MB is our maximum accepted overhead.
 pub(crate) const MAXIMUM_VMM_OVERHEAD_KB: u32 = 10 * 1024;
+// The KVM SEV-SNP build (igvm+sev_snp+fw_cfg) has a larger size
+pub(crate) const MAXIMUM_VMM_OVERHEAD_KB_SEV_SNP: u32 = 12 * 1024;
 
 // This enum exists to make it more convenient to
 // implement test for both D-Bus and REST APIs.
@@ -780,14 +782,13 @@ pub(super) fn pty_read(mut pty: std::fs::File) -> Receiver<String> {
     let (tx, rx) = mpsc::channel::<String>();
     thread::spawn(move || {
         loop {
-            thread::sleep(std::time::Duration::new(1, 0));
-            let mut buf = [0; 512];
+            let mut buf = [0; 4096];
             match pty.read(&mut buf) {
-                Ok(_bytes) => {
-                    let output = std::str::from_utf8(&buf).unwrap().to_string();
-                    match tx.send(output) {
-                        Ok(_) => (),
-                        Err(_) => break,
+                Ok(0) => break,
+                Ok(bytes) => {
+                    let output = String::from_utf8_lossy(&buf[..bytes]).into_owned();
+                    if tx.send(output).is_err() {
+                        break;
                     }
                 }
                 Err(_) => break,
@@ -1135,7 +1136,7 @@ pub(crate) fn start_live_migration(
         .args([
             &format!("--api-socket={dest_api_socket}"),
             "receive-migration",
-            &format! {"unix:{migration_socket}"},
+            &format!("receiver_url=unix:{migration_socket}"),
         ])
         .stderr(Stdio::piped())
         .stdout(Stdio::piped())

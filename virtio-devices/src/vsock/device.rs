@@ -12,7 +12,7 @@ use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, RwLock};
-use std::{io, result};
+use std::{fs, io, result};
 
 use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
@@ -47,6 +47,7 @@ use vmm_sys_util::eventfd::EventFd;
 /// - a backend FD.
 ///
 use super::{VsockBackend, VsockPacket};
+use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::{
     ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
@@ -366,7 +367,7 @@ where
 {
     /// Create a new virtio-vsock device with the given VM CID and vsock
     /// backend.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         cid: u32,
@@ -461,8 +462,8 @@ where
         }
     }
 
-    fn activate(&mut self, context: crate::device::ActivationContext) -> ActivateResult {
-        let crate::device::ActivationContext {
+    fn activate(&mut self, context: ActivationContext) -> ActivateResult {
+        let ActivationContext {
             mem,
             interrupt_cb,
             queues,
@@ -512,7 +513,7 @@ where
     }
 
     fn shutdown(&mut self) {
-        std::fs::remove_file(&self.path).ok();
+        fs::remove_file(&self.path).ok();
     }
 
     fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
@@ -545,7 +546,7 @@ where
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_state(&self.state())
     }
 }
@@ -554,6 +555,8 @@ impl<B> Migratable for Vsock<B> where B: VsockBackend + Sync + 'static {}
 
 #[cfg(test)]
 mod unit_tests {
+    use std::sync::atomic::AtomicU8;
+
     use libc::EFD_NONBLOCK;
 
     use super::super::unit_tests::{NoopVirtioInterrupt, TestContext};
@@ -621,11 +624,11 @@ mod unit_tests {
         let memory = GuestMemoryAtomic::new(ctx.mem.clone());
 
         // Test a bad activation.
-        let bad_activate = ctx.device.activate(crate::device::ActivationContext {
+        let bad_activate = ctx.device.activate(ActivationContext {
             mem: memory.clone(),
             interrupt_cb: Arc::new(NoopVirtioInterrupt {}),
             queues: Vec::new(),
-            device_status: Arc::new(std::sync::atomic::AtomicU8::new(0)),
+            device_status: Arc::new(AtomicU8::new(0)),
         });
         match bad_activate {
             Err(ActivateError::BadActivate) => (),
@@ -634,7 +637,7 @@ mod unit_tests {
 
         // Test a correct activation.
         ctx.device
-            .activate(crate::device::ActivationContext {
+            .activate(ActivationContext {
                 mem: memory,
                 interrupt_cb: Arc::new(NoopVirtioInterrupt {}),
                 queues: vec![
@@ -654,7 +657,7 @@ mod unit_tests {
                         EventFd::new(EFD_NONBLOCK).unwrap(),
                     ),
                 ],
-                device_status: Arc::new(std::sync::atomic::AtomicU8::new(0)),
+                device_status: Arc::new(AtomicU8::new(0)),
             })
             .unwrap();
     }

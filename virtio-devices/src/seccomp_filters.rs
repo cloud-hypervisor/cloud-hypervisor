@@ -4,6 +4,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use std::env;
+
 use block::{BLKDISCARD, BLKZEROOUT};
 use libc::{FIONBIO, TIOCGWINSZ, TUNSETOFFLOAD};
 use seccompiler::SeccompCmpOp::Eq;
@@ -112,6 +114,7 @@ fn virtio_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_fallocate, vec![]),
         (libc::SYS_fcntl, vec![]),
         (libc::SYS_fdatasync, vec![]),
+        (libc::SYS_fstat, vec![]),
         (libc::SYS_fsync, vec![]),
         (libc::SYS_ftruncate, vec![]),
         (libc::SYS_getrandom, vec![]),
@@ -121,6 +124,7 @@ fn virtio_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_io_submit, vec![]),
         (libc::SYS_io_uring_enter, vec![]),
         (libc::SYS_lseek, vec![]),
+        (libc::SYS_newfstatat, vec![]),
         (libc::SYS_pread64, vec![]),
         (libc::SYS_preadv, vec![]),
         (libc::SYS_pwritev, vec![]),
@@ -128,6 +132,7 @@ fn virtio_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_sched_getaffinity, vec![]),
         (libc::SYS_sched_setaffinity, vec![]),
         (libc::SYS_set_robust_list, vec![]),
+        (libc::SYS_statx, vec![]),
         (libc::SYS_timerfd_settime, vec![]),
     ]
 }
@@ -293,6 +298,7 @@ fn virtio_vsock_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_ioctl, create_vsock_ioctl_seccomp_rule()),
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_sendto, vec![]),
+        (libc::SYS_shutdown, vec![]),
         (libc::SYS_socket, vec![]),
     ]
 }
@@ -369,7 +375,7 @@ pub fn get_seccomp_filter(
             get_seccomp_rules(thread_type).into_iter().collect(),
             SeccompAction::Log,
             SeccompAction::Allow,
-            std::env::consts::ARCH.try_into().unwrap(),
+            env::consts::ARCH.try_into().unwrap(),
         )
         .and_then(|filter| filter.try_into())
         .map_err(Error::Backend),
@@ -377,7 +383,7 @@ pub fn get_seccomp_filter(
             get_seccomp_rules(thread_type).into_iter().collect(),
             SeccompAction::Trap,
             SeccompAction::Allow,
-            std::env::consts::ARCH.try_into().unwrap(),
+            env::consts::ARCH.try_into().unwrap(),
         )
         .and_then(|filter| filter.try_into())
         .map_err(Error::Backend),

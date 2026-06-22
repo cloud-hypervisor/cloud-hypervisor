@@ -217,6 +217,8 @@ impl BusDevice for Rtc {
 
 #[cfg(test)]
 mod unit_tests {
+    use std::{fmt, ptr};
+
     use super::*;
     use crate::{
         read_be_u16, read_be_u32, read_le_i32, read_le_u16, read_le_u64, write_be_u16,
@@ -252,7 +254,7 @@ mod unit_tests {
                 tm_yday: 0,
                 tm_isdst: 0,
                 tm_gmtoff: 0,
-                tm_zone: std::ptr::null(),
+                tm_zone: ptr::null(),
             };
 
             // SAFETY: the parameters are valid.
@@ -273,8 +275,8 @@ mod unit_tests {
         }
     }
 
-    impl std::fmt::Display for LocalTime {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    impl fmt::Display for LocalTime {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             write!(
                 f,
                 "{}-{:02}-{:02}T{:02}:{:02}:{:02}.{:09}",

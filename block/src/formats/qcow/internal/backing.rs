@@ -6,23 +6,25 @@
 
 //! Thread safe backing file readers for QCOW2 images.
 
+use std::fs::File;
 use std::io;
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
+use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
+use std::os::unix::fs::FileExt;
 use std::sync::Arc;
 
 use super::decoder::Decoder;
 use super::metadata::{BackingRead, ClusterReadMapping, QcowMetadata};
 use super::{BackingFile, BackingKind, Error as QcowError};
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
-use crate::formats::qcow::common::{decompress_cluster, pread_alloc, pread_exact};
+use crate::formats::qcow::common::decompress_cluster;
 
-/// Raw backing file using pread64 on a duplicated fd.
+/// Raw backing file using position-independent reads on a duplicated fd.
 pub(crate) struct RawBacking {
-    pub(crate) fd: OwnedFd,
+    pub(crate) file: File,
     pub(crate) virtual_size: u64,
 }
 
-// SAFETY: The only I/O operation is pread64 which is position independent
+// SAFETY: The only I/O operation is read_at which is position independent
 // and safe for concurrent use from multiple threads.
 unsafe impl Sync for RawBacking {}
 
@@ -34,9 +36,9 @@ impl BackingRead for RawBacking {
         }
         let available = (self.virtual_size - address) as usize;
         if available >= buf.len() {
-            pread_exact(self.fd.as_raw_fd(), buf, address)
+            self.file.read_exact_at(buf, address)
         } else {
-            pread_exact(self.fd.as_raw_fd(), &mut buf[..available], address)?;
+            self.file.read_exact_at(&mut buf[..available], address)?;
             buf[available..].fill(0);
             Ok(())
         }
@@ -51,14 +53,14 @@ impl BackingRead for RawBacking {
 /// are handled recursively via the optional `backing_file` field.
 pub(crate) struct Qcow2Backing {
     pub(crate) metadata: Arc<QcowMetadata>,
-    pub(crate) data_fd: OwnedFd,
+    pub(crate) data_file: File,
     pub(crate) backing_file: Option<Arc<dyn BackingRead>>,
     pub(crate) cluster_size: u64,
     pub(crate) decoder: Arc<dyn Decoder>,
 }
 
 // SAFETY: All reads go through QcowMetadata which uses RwLock
-// and pread64 which is position independent and thread safe.
+// and read_exact_at which is position independent and thread safe.
 unsafe impl Sync for Qcow2Backing {}
 
 impl BackingRead for Qcow2Backing {
@@ -79,8 +81,6 @@ impl BackingRead for Qcow2Backing {
 }
 
 impl Qcow2Backing {
-    /// Resolve cluster mappings via metadata then read allocated clusters
-    /// with pread64.
     fn read_clusters(&self, address: u64, buf: &mut [u8]) -> io::Result<()> {
         let total_len = buf.len();
         let has_backing = self.backing_file.is_some();
@@ -100,8 +100,7 @@ impl Qcow2Backing {
                     offset: host_offset,
                     length,
                 } => {
-                    pread_exact(
-                        self.data_fd.as_raw_fd(),
+                    self.data_file.read_exact_at(
                         &mut buf[buf_offset..buf_offset + length as usize],
                         host_offset,
                     )?;
@@ -113,8 +112,8 @@ impl Qcow2Backing {
                     cluster_offset,
                     length,
                 } => {
-                    let compressed =
-                        pread_alloc(self.data_fd.as_raw_fd(), host_offset, compressed_size)?;
+                    let mut compressed = vec![0u8; compressed_size];
+                    self.data_file.read_exact_at(&mut compressed, host_offset)?;
                     let decompressed = decompress_cluster(
                         &compressed,
                         self.cluster_size as usize,
@@ -162,23 +161,19 @@ pub fn shared_backing_from(bf: BackingFile) -> BlockResult<Arc<dyn BackingRead>>
 
     match kind {
         BackingKind::Raw(raw_file) => {
-            let fd = dup_fd(raw_file.as_fd())?;
-            Ok(Arc::new(RawBacking { fd, virtual_size }))
+            let file = File::from(dup_fd(raw_file.as_fd())?);
+            Ok(Arc::new(RawBacking { file, virtual_size }))
         }
         BackingKind::Qcow { inner, backing } => {
-            let data_fd = dup_fd(inner.raw_file.as_fd())?;
+            let data_file = File::from(dup_fd(inner.raw_file.as_fd())?);
             let metadata = Arc::new(QcowMetadata::new(*inner));
             Ok(Arc::new(Qcow2Backing {
                 cluster_size: metadata.cluster_size(),
                 decoder: metadata.decoder(),
                 metadata,
-                data_fd,
+                data_file,
                 backing_file: backing.map(|bf| shared_backing_from(*bf)).transpose()?,
             }))
-        }
-        #[cfg(test)]
-        BackingKind::QcowFile(_) => {
-            unreachable!("QcowFile variant is only used by set_backing_file() in tests")
         }
     }
 }

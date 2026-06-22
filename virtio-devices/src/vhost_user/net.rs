@@ -18,17 +18,18 @@ use virtio_bindings::virtio_net::{
 };
 use virtio_bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use virtio_queue::QueueT;
-use vm_memory::{ByteValued, GuestMemoryAtomic};
+use vm_memory::ByteValued;
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::vhost_user::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
 use crate::vhost_user::{DEFAULT_VIRTIO_FEATURES, Error, Result, VhostUserCommon, VhostUserState};
 use crate::{
-    ActivateResult, GuestMemoryMmap, GuestRegionMmap, NetCtrlEpollHandler,
-    VIRTIO_F_ACCESS_PLATFORM, VirtioCommon, VirtioDevice, VirtioDeviceType,
+    ActivateResult, GuestRegionMmap, NetCtrlEpollHandler, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon,
+    VirtioDevice, VirtioDeviceType,
 };
 
 const DEFAULT_QUEUE_NUMBER: usize = 2;
@@ -42,7 +43,6 @@ pub struct Net {
     vu_common: VhostUserCommon,
     id: String,
     config: VirtioNetConfig,
-    guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
     access_platform_enabled: bool,
@@ -50,7 +50,7 @@ pub struct Net {
 
 impl Net {
     /// Create a new vhost-user-net device
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         mac_addr: MacAddr,
@@ -218,14 +218,13 @@ impl Net {
                 ..Default::default()
             },
             config,
-            guest_memory: None,
             seccomp_action,
             exit_evt,
             access_platform_enabled,
         })
     }
 
-    fn state(&self) -> std::result::Result<State, MigratableError> {
+    fn state(&self) -> result::Result<State, MigratableError> {
         self.vu_common.state(self.config)
     }
 }
@@ -261,8 +260,8 @@ impl VirtioDevice for Net {
         self.read_config_from_slice(self.config.as_slice(), offset, data);
     }
 
-    fn activate(&mut self, context: crate::device::ActivationContext) -> ActivateResult {
-        let crate::device::ActivationContext {
+    fn activate(&mut self, context: ActivationContext) -> ActivateResult {
+        let ActivationContext {
             mem,
             interrupt_cb,
             mut queues,
@@ -271,7 +270,6 @@ impl VirtioDevice for Net {
         self.vu_common
             .virtio_common
             .activate(&queues, interrupt_cb.clone())?;
-        self.guest_memory = Some(mem.clone());
 
         let num_queues = queues.len();
         let event_idx = self
@@ -369,8 +367,8 @@ impl VirtioDevice for Net {
     fn add_memory_region(
         &mut self,
         region: &Arc<GuestRegionMmap>,
-    ) -> std::result::Result<(), crate::Error> {
-        self.vu_common.add_memory_region(&self.guest_memory, region)
+    ) -> result::Result<(), crate::Error> {
+        self.vu_common.add_memory_region(region)
     }
 }
 
@@ -391,30 +389,30 @@ impl Snapshottable for Net {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         self.vu_common.snapshot(&self.state()?)
     }
 }
 impl Transportable for Net {}
 
 impl Migratable for Net {
-    fn start_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
-        self.vu_common.start_dirty_log(&self.guest_memory)
+    fn start_dirty_log(&mut self) -> result::Result<(), MigratableError> {
+        self.vu_common.start_dirty_log()
     }
 
-    fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
+    fn stop_dirty_log(&mut self) -> result::Result<(), MigratableError> {
         self.vu_common.stop_dirty_log()
     }
 
-    fn dirty_log(&mut self) -> std::result::Result<MemoryRangeTable, MigratableError> {
-        self.vu_common.dirty_log(&self.guest_memory)
+    fn dirty_log(&mut self) -> result::Result<MemoryRangeTable, MigratableError> {
+        self.vu_common.dirty_log()
     }
 
-    fn start_migration(&mut self) -> std::result::Result<(), MigratableError> {
+    fn start_migration(&mut self) -> result::Result<(), MigratableError> {
         self.vu_common.start_migration()
     }
 
-    fn complete_migration(&mut self) -> std::result::Result<(), MigratableError> {
+    fn complete_migration(&mut self) -> result::Result<(), MigratableError> {
         self.vu_common.complete_migration()
     }
 }

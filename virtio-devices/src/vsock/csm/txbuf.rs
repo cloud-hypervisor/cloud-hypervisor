@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::cmp;
 use std::io::Write;
 use std::num::Wrapping;
 
@@ -85,7 +86,7 @@ impl TxBuf {
         // ring-buffer head wraps around.
 
         // First copy length: we can only go from the head offset up to the total buffer size.
-        let first_len = std::cmp::min(Self::SIZE - head_ofs, len);
+        let first_len = cmp::min(Self::SIZE - head_ofs, len);
         src.copy_to_tx_buf(offset, &mut data[head_ofs..(head_ofs + first_len)])?;
 
         // If the data didn't fit, the buffer head will wrap around, and pushing continues
@@ -125,7 +126,7 @@ impl TxBuf {
         //   head.
 
         // First write length: the lesser of tail to slice end, or tail to head.
-        let len_to_write = std::cmp::min(Self::SIZE - tail_ofs, self.len());
+        let len_to_write = cmp::min(Self::SIZE - tail_ofs, self.len());
 
         // It's safe to unwrap here, since we've already checked if the buffer was empty.
         let data = self.data.as_ref().unwrap();
@@ -201,7 +202,7 @@ mod unit_tests {
             if self.err.is_some() {
                 return Err(self.err.take().unwrap());
             }
-            let len_to_push = std::cmp::min(self.capacity - self.data.len(), src.len());
+            let len_to_push = cmp::min(self.capacity - self.data.len(), src.len());
             self.data.extend_from_slice(&src[..len_to_push]);
             Ok(len_to_push)
         }

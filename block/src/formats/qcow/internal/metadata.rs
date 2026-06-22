@@ -351,6 +351,24 @@ impl QcowMetadata {
     pub fn decoder(&self) -> Arc<dyn Decoder> {
         Arc::clone(&self.decoder)
     }
+
+    #[cfg(test)]
+    pub fn header(&self) -> QcowHeader {
+        self.inner.read().unwrap().header.clone()
+    }
+
+    #[cfg(test)]
+    pub fn cluster_refcount(&self, address: u64) -> io::Result<u64> {
+        let mut inner = self.inner.write().unwrap();
+        let QcowState {
+            refcounts,
+            raw_file,
+            ..
+        } = &mut *inner;
+        refcounts
+            .get_cluster_refcount(raw_file, address)
+            .map_err(|e| io::Error::other(format!("get_cluster_refcount: {e}")))
+    }
 }
 
 impl QcowState {
@@ -499,19 +517,6 @@ impl QcowState {
             ClusterReadMapping::Zero {
                 length: count as u64,
             }
-        }
-    }
-
-    /// Maps a single cluster region for a sequential read.
-    pub(crate) fn map_cluster_read(
-        &mut self,
-        address: u64,
-        count: usize,
-        has_backing_file: bool,
-    ) -> io::Result<ClusterReadMapping> {
-        match self.try_map_read(address, count, has_backing_file)? {
-            Some(mapping) => Ok(mapping),
-            None => self.map_read_with_populate(address, count, has_backing_file),
         }
     }
 

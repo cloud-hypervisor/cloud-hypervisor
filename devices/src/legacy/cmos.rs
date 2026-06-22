@@ -7,6 +7,7 @@
 use std::cmp::min;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
+use std::time::Duration;
 use std::{mem, thread};
 
 // https://github.com/rust-lang/libc/issues/1848
@@ -84,7 +85,7 @@ impl BusDevice for Cmos {
                         while !vcpus_kill_signalled.load(Ordering::SeqCst) {
                             // This is more effective than thread::yield_now() at
                             // avoiding a priority inversion with the VMM thread
-                            thread::sleep(std::time::Duration::from_millis(1));
+                            thread::sleep(Duration::from_millis(1));
                         }
                     }
                 } else {

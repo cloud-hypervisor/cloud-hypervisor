@@ -7,6 +7,7 @@ use std::any::Any;
 use std::os::fd::AsFd;
 use std::os::unix::prelude::AsRawFd;
 use std::sync::{Arc, Barrier, Mutex};
+use std::{io, result};
 
 use hypervisor::HypervisorVmError;
 use log::{error, info};
@@ -57,7 +58,7 @@ pub enum VfioUserPciDeviceError {
     #[error("Failed to create VfioCommon")]
     CreateVfioCommon(#[source] VfioPciError),
     #[error("Other OS error")]
-    Other(#[source] std::io::Error),
+    Other(#[source] io::Error),
 }
 
 #[derive(Copy, Clone)]
@@ -72,7 +73,7 @@ impl PciSubclass for PciVfioUserSubclass {
 }
 
 impl VfioUserPciDevice {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         vm: Arc<dyn hypervisor::Vm>,
@@ -429,7 +430,7 @@ impl PciDevice for VfioUserPciDevice {
         self.common.write_bar(base, offset, data)
     }
 
-    fn move_bar(&mut self, old_base: u64, new_base: u64) -> Result<(), std::io::Error> {
+    fn move_bar(&mut self, old_base: u64, new_base: u64) -> Result<(), io::Error> {
         info!("Moving BAR 0x{old_base:x} -> 0x{new_base:x}");
         for mmio_region in self.common.mmio_regions.iter_mut() {
             if mmio_region.start.raw_value() == old_base {
@@ -448,7 +449,7 @@ impl PciDevice for VfioUserPciDevice {
                             false,
                         )
                     }
-                    .map_err(std::io::Error::other)?;
+                    .map_err(io::Error::other)?;
 
                     // Update the user memory region with the correct start address.
                     if new_base > old_base {
@@ -469,7 +470,7 @@ impl PciDevice for VfioUserPciDevice {
                             false,
                         )
                     }
-                    .map_err(std::io::Error::other)?;
+                    .map_err(io::Error::other)?;
                 }
                 info!("Moved bar 0x{old_base:x} -> 0x{new_base:x}");
             }
@@ -516,7 +517,7 @@ impl Snapshottable for VfioUserPciDevice {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         let mut vfio_pci_dev_snapshot = Snapshot::default();
 
         // Snapshot VfioCommon
@@ -540,47 +541,45 @@ impl<M: GuestAddressSpace> VfioUserDmaMapping<M> {
 }
 
 impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioUserDmaMapping<M> {
-    fn map(&self, iova: u64, gpa: u64, size: u64) -> std::result::Result<(), std::io::Error> {
+    fn map(&self, iova: u64, gpa: u64, size: u64) -> result::Result<(), io::Error> {
         let mem = self.memory.memory();
         let guest_addr = GuestAddress(gpa);
         let Some(region) = mem.find_region(guest_addr) else {
-            return Err(std::io::Error::other(format!(
-                "Region not found for 0x{gpa:x}"
-            )));
+            return Err(io::Error::other(format!("Region not found for 0x{gpa:x}")));
         };
 
         // Check that the range fits in the region.
         let region_offset = guest_addr
             .checked_offset_from(region.start_addr())
-            .ok_or_else(|| std::io::Error::other(format!("gpa 0x{gpa:x} below region start")))?;
+            .ok_or_else(|| io::Error::other(format!("gpa 0x{gpa:x} below region start")))?;
         let region_remaining = (region.len())
             .checked_sub(region_offset)
-            .ok_or_else(|| std::io::Error::other(format!("gpa 0x{gpa:x} past region end")))?;
+            .ok_or_else(|| io::Error::other(format!("gpa 0x{gpa:x} past region end")))?;
         if size > region_remaining {
-            return Err(std::io::Error::other(format!(
+            return Err(io::Error::other(format!(
                 "DMA map (gpa 0x{gpa:x}, size 0x{size:x}) extends past region end"
             )));
         }
 
         let file_offset = region.file_offset().ok_or_else(|| {
-            std::io::Error::other(format!("region for gpa 0x{gpa:x} has no backing file"))
+            io::Error::other(format!("region for gpa 0x{gpa:x} has no backing file"))
         })?;
         let offset = region_offset
             .checked_add(file_offset.start())
-            .ok_or_else(|| std::io::Error::other("offset overflow in DMA map"))?;
+            .ok_or_else(|| io::Error::other("offset overflow in DMA map"))?;
 
         self.client
             .lock()
             .unwrap()
             .dma_map(offset, iova, size, file_offset.file().as_raw_fd())
-            .map_err(|e| std::io::Error::other(format!("Error mapping region: {e}")))
+            .map_err(|e| io::Error::other(format!("Error mapping region: {e}")))
     }
 
-    fn unmap(&self, iova: u64, size: u64) -> std::result::Result<(), std::io::Error> {
+    fn unmap(&self, iova: u64, size: u64) -> result::Result<(), io::Error> {
         self.client
             .lock()
             .unwrap()
             .dma_unmap(iova, size)
-            .map_err(|e| std::io::Error::other(format!("Error unmapping region: {e}")))
+            .map_err(|e| io::Error::other(format!("Error unmapping region: {e}")))
     }
 }

@@ -73,9 +73,25 @@
 //!    Source->>Destination: Complete
 //!    Destination-->>Source: OK
 //! ```
+//!
+//! ## Protocol Versioning
+//!
+//! `Start` carries the sender's migration protocol version.
+//! A zeroed version field is treated as legacy protocol `v0`.
+//!
+//! The destination validates that version and replies with a plain `OK` or
+//! `Error`.
+//!
+//! Only the current and immediately previous protocol versions are
+//! supported. Compatibility is one-way, from older protocol versions
+//! to newer ones.
 
 use std::io::{Read, Write};
+use std::mem::size_of;
+use std::ops::RangeInclusive;
+use std::{mem, slice};
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use vm_memory::ByteValued;
@@ -126,18 +142,33 @@ pub enum Command {
     CompletePaused = 8,
 }
 
+/// Newest migration protocol version sent by this implementation.
+pub const CURRENT_PROTOCOL_VERSION: u16 = 0;
+
+/// Returns the current migration protocol version and the previous version, if any.
+pub fn supported_protocol_versions() -> RangeInclusive<u16> {
+    CURRENT_PROTOCOL_VERSION.saturating_sub(1)..=CURRENT_PROTOCOL_VERSION
+}
+
 #[repr(C)]
 #[derive(Default, Copy, Clone)]
 pub struct Request {
     command: Command,
-    padding: [u8; 6],
-    length: u64, // Length of payload for command excluding the Request struct
+    command_headers: [u8; 6],
+    /// Length of payload for command excluding the Request struct
+    length: u64,
 }
 
 // SAFETY: Request contains a series of integers with no implicit padding
 unsafe impl ByteValued for Request {}
 
 impl Request {
+    fn encode_sender_version(version: u16) -> [u8; 6] {
+        let mut command_headers = [0; 6];
+        command_headers[..size_of::<u16>()].copy_from_slice(&version.to_le_bytes());
+        command_headers
+    }
+
     pub fn new(command: Command, length: u64) -> Self {
         Self {
             command,
@@ -147,7 +178,11 @@ impl Request {
     }
 
     pub fn start() -> Self {
-        Self::new(Command::Start, 0)
+        Self {
+            command: Command::Start,
+            command_headers: Self::encode_sender_version(CURRENT_PROTOCOL_VERSION),
+            length: 0,
+        }
     }
 
     pub fn state(length: u64) -> Self {
@@ -186,6 +221,30 @@ impl Request {
 
     pub fn length(&self) -> u64 {
         self.length
+    }
+
+    pub fn command_headers(&self) -> &[u8; 6] {
+        &self.command_headers
+    }
+
+    /// Returns the sender protocol version from a `Start` request if it is supported.
+    pub fn sender_protocol_version(&self) -> Result<u16, MigratableError> {
+        assert_eq!(
+            self.command(),
+            Command::Start,
+            "sender_protocol_version() must only be called for Start requests",
+        );
+
+        // The protocol version is stored in the first two header bytes, the remaining bytes are ignored.
+        let sender_version = u16::from_le_bytes([self.command_headers[0], self.command_headers[1]]);
+        if !supported_protocol_versions().any(|version| version == sender_version) {
+            let supported_versions = supported_protocol_versions().join(", ");
+            return Err(MigratableError::MigrateReceive(anyhow!(
+                "Migration protocol version {sender_version} doesn't match supported versions: {supported_versions}"
+            )));
+        }
+
+        Ok(sender_version)
     }
 
     pub fn read_from(fd: &mut dyn Read) -> Result<Request, MigratableError> {
@@ -440,7 +499,7 @@ impl MemoryRangeTable {
         // `MemoryRange`s so the memory is valid for `length` bytes.
         // During the lifetime of the slice, neither the backing vector nor the pointed to memory are accessed.
         let data_slice_bytes =
-            unsafe { std::slice::from_raw_parts_mut(data.as_mut_ptr().cast(), length as usize) };
+            unsafe { slice::from_raw_parts_mut(data.as_mut_ptr().cast(), length as usize) };
 
         fd.read_exact(data_slice_bytes)
             .map_err(MigratableError::MigrateSocket)?;
@@ -449,13 +508,13 @@ impl MemoryRangeTable {
     }
 
     pub fn length(&self) -> u64 {
-        (std::mem::size_of::<MemoryRange>() * self.data.len()) as u64
+        (mem::size_of::<MemoryRange>() * self.data.len()) as u64
     }
 
     pub fn write_to(&self, fd: &mut dyn Write) -> Result<(), MigratableError> {
         // SAFETY: the slice is constructed with the correct arguments
         fd.write_all(unsafe {
-            std::slice::from_raw_parts(self.data.as_ptr().cast(), self.length() as usize)
+            slice::from_raw_parts(self.data.as_ptr().cast(), self.length() as usize)
         })
         .map_err(MigratableError::MigrateSocket)
     }
@@ -484,7 +543,35 @@ impl MemoryRangeTable {
 
 #[cfg(test)]
 mod unit_tests {
-    use crate::protocol::{MemoryRange, MemoryRangeTable};
+    use crate::protocol::{
+        CURRENT_PROTOCOL_VERSION, Command, MemoryRange, MemoryRangeTable, Request,
+    };
+
+    #[test]
+    fn test_start_request_ignores_residual_command_headers_bytes() {
+        let request = Request {
+            command: Command::Start,
+            command_headers: [1, 0, 0xaa, 0xbb, 0xcc, 0xdd],
+            length: 0,
+        };
+
+        assert_eq!(
+            u16::from_le_bytes([request.command_headers()[0], request.command_headers()[1]]),
+            1
+        );
+    }
+
+    #[test]
+    fn test_sender_protocol_version_rejects_unsupported_version() {
+        let request = Request {
+            command: Command::Start,
+            command_headers: [255, 0, 0, 0, 0, 0],
+            length: 0,
+        };
+
+        const { assert!(CURRENT_PROTOCOL_VERSION < 255) };
+        request.sender_protocol_version().unwrap_err();
+    }
 
     #[test]
     fn test_memory_range_table_from_dirty_ranges_iter() {

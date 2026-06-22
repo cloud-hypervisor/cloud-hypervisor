@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#![allow(static_mut_refs)]
+#![expect(static_mut_refs)]
 
 use std::cell::OnceCell;
 use std::collections::HashMap;
@@ -11,6 +11,7 @@ use std::fs::File;
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use log::warn;
@@ -57,7 +58,7 @@ impl Tracer {
     }
 
     fn add_event(&mut self, event: TraceEvent) {
-        let current = std::thread::current();
+        let current = thread::current();
         let thread_name = current.name().unwrap_or("");
         let mut events = self.events.lock().unwrap();
         if let Some(thread_events) = events.get_mut(thread_name) {
@@ -68,7 +69,7 @@ impl Tracer {
     }
 
     fn increase_thread_depth(&mut self) {
-        let current = std::thread::current();
+        let current = thread::current();
         let thread_name = current.name().unwrap_or("");
         if let Some(depth) = self.thread_depths.get_mut(thread_name) {
             depth.fetch_add(1, Ordering::SeqCst);
@@ -79,7 +80,7 @@ impl Tracer {
     }
 
     fn decrease_thread_depth(&mut self) {
-        let current = std::thread::current();
+        let current = thread::current();
         let thread_name = current.name().unwrap_or("");
         if let Some(depth) = self.thread_depths.get_mut(thread_name) {
             depth.fetch_sub(1, Ordering::SeqCst);
@@ -89,7 +90,7 @@ impl Tracer {
     }
 
     fn thread_depth(&self) -> u64 {
-        let current = std::thread::current();
+        let current = thread::current();
         let thread_name = current.name().unwrap_or("");
         self.thread_depths
             .get(thread_name)

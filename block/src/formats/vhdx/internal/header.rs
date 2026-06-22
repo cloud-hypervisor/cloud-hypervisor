@@ -3,14 +3,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::collections::btree_map::BTreeMap;
-use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
+use std::os::unix::fs::FileExt;
+use std::{io, result, slice};
 
-use byteorder::{ByteOrder, LittleEndian, ReadBytesExt};
+use byteorder::{ByteOrder, LittleEndian};
 use remain::sorted;
 use thiserror::Error;
 use uuid::Uuid;
+
+use crate::aligned_file::AlignedFile;
 
 const VHDX_SIGN: u64 = 0x656C_6966_7864_6876; // "vhdxfile"
 const HEADER_SIGN: u32 = 0x6461_6568; // "head"
@@ -60,7 +62,7 @@ pub enum VhdxHeaderError {
     #[error("Failed to read headers {0}")]
     ReadHeader(#[source] io::Error),
     #[error("Failed to read metadata {0}")]
-    ReadMetadata(#[source] std::io::Error),
+    ReadMetadata(#[source] io::Error),
     #[error("Failed to read region table entries {0}")]
     ReadRegionTableEntries(#[source] io::Error),
     #[error("Failed to read region table header {0}")]
@@ -71,21 +73,13 @@ pub enum VhdxHeaderError {
     RegionOverlap,
     #[error("Reserved region has non-zero value")]
     ReservedIsNonZero,
-    #[error("Failed to seek in File Type Identifier {0}")]
-    SeekFileTypeIdentifier(#[source] io::Error),
-    #[error("Failed to seek in headers {0}")]
-    SeekHeader(#[source] io::Error),
-    #[error("Failed to seek in region table entries {0}")]
-    SeekRegionTableEntries(#[source] io::Error),
-    #[error("Failed to seek in region table header {0}")]
-    SeekRegionTableHeader(#[source] io::Error),
     #[error("We do not recognize this entry")]
     UnrecognizedRegionEntry,
     #[error("Failed to write header {0}")]
     WriteHeader(#[source] io::Error),
 }
 
-pub type Result<T> = std::result::Result<T, VhdxHeaderError>;
+pub type Result<T> = result::Result<T, VhdxHeaderError>;
 
 #[derive(Clone, Debug)]
 pub struct FileTypeIdentifier {
@@ -94,12 +88,11 @@ pub struct FileTypeIdentifier {
 
 impl FileTypeIdentifier {
     /// Reads the File Type Identifier structure from a reference VHDx file
-    pub fn new(f: &mut File) -> Result<FileTypeIdentifier> {
-        f.seek(SeekFrom::Start(FILE_START))
-            .map_err(VhdxHeaderError::SeekFileTypeIdentifier)?;
-        let _signature = f
-            .read_u64::<LittleEndian>()
+    pub fn new(f: &AlignedFile) -> Result<FileTypeIdentifier> {
+        let mut buf = [0u8; size_of::<u64>()];
+        f.read_exact_at(&mut buf, FILE_START)
             .map_err(VhdxHeaderError::ReadFileTypeIdentifier)?;
+        let _signature = LittleEndian::read_u64(&buf);
         if _signature != VHDX_SIGN {
             return Err(VhdxHeaderError::InvalidVHDXSign);
         }
@@ -125,13 +118,11 @@ pub struct Header {
 
 impl Header {
     /// Reads the Header structure from a reference VHDx file
-    pub fn new(f: &mut File, start: u64) -> Result<Header> {
+    pub fn new(f: &AlignedFile, start: u64) -> Result<Header> {
         // Read the whole header into a buffer. We will need it for
         // calculating checksum.
         let mut buffer = [0; HEADER_SIZE as usize];
-        f.seek(SeekFrom::Start(start))
-            .map_err(VhdxHeaderError::SeekHeader)?;
-        f.read_exact(&mut buffer)
+        f.read_exact_at(&mut buffer, start)
             .map_err(VhdxHeaderError::ReadHeader)?;
 
         // SAFETY: buffer is of correct size and has been successfully filled.
@@ -152,13 +143,13 @@ impl Header {
     fn write_to_buffer(&self, buffer: &mut [u8; HEADER_SIZE as usize]) {
         // SAFETY: self is a valid header.
         let reference =
-            unsafe { std::slice::from_raw_parts((&raw const *self).cast(), HEADER_SIZE as usize) };
+            unsafe { slice::from_raw_parts((&raw const *self).cast(), HEADER_SIZE as usize) };
         *buffer = reference.try_into().unwrap();
     }
 
     /// Creates and returns new updated header from the provided current header
     fn update_header(
-        f: &mut File,
+        f: &AlignedFile,
         current_header: &Header,
         change_data_guid: bool,
         mut file_write_guid: u128,
@@ -192,9 +183,8 @@ impl Header {
         new_header.checksum = calculate_checksum(&mut buffer, size_of::<u32>());
         new_header.write_to_buffer(&mut buffer);
 
-        f.seek(SeekFrom::Start(start))
-            .map_err(VhdxHeaderError::SeekHeader)?;
-        f.write(&buffer).map_err(VhdxHeaderError::WriteHeader)?;
+        f.write_all_at(&buffer, start)
+            .map_err(VhdxHeaderError::WriteHeader)?;
 
         Ok(new_header)
     }
@@ -211,13 +201,11 @@ struct RegionTableHeader {
 
 impl RegionTableHeader {
     /// Reads the Region Table Header structure from a reference VHDx file
-    pub fn new(f: &mut File, start: u64) -> Result<RegionTableHeader> {
+    pub fn new(f: &AlignedFile, start: u64) -> Result<RegionTableHeader> {
         // Read the whole header into a buffer. We will need it for calculating
         // checksum.
         let mut buffer = [0u8; REGION_SIZE as usize];
-        f.seek(SeekFrom::Start(start))
-            .map_err(VhdxHeaderError::SeekRegionTableHeader)?;
-        f.read_exact(&mut buffer)
+        f.read_exact_at(&mut buffer, start)
             .map_err(VhdxHeaderError::ReadRegionTableHeader)?;
 
         // SAFETY: buffer is of correct size and has been successfully filled.
@@ -252,7 +240,7 @@ pub struct RegionInfo {
 impl RegionInfo {
     /// Collect all entries in a BTreeMap from the Region Table and identifies
     /// BAT and metadata regions
-    pub fn new(f: &mut File, region_start: u64, entry_count: u32) -> Result<RegionInfo> {
+    pub fn new(f: &AlignedFile, region_start: u64, entry_count: u32) -> Result<RegionInfo> {
         let mut bat_entry: Option<RegionTableEntry> = None;
         let mut mdr_entry: Option<RegionTableEntry> = None;
 
@@ -260,13 +248,12 @@ impl RegionInfo {
         let mut region_entries = BTreeMap::new();
 
         let mut buffer = [0; REGION_SIZE as usize];
-        // Seek after the Region Table Header
-        f.seek(SeekFrom::Start(
+        // Read after the Region Table Header
+        f.read_exact_at(
+            &mut buffer,
             region_start + size_of::<RegionTableHeader>() as u64,
-        ))
-        .map_err(VhdxHeaderError::SeekRegionTableEntries)?;
-        f.read_exact(&mut buffer)
-            .map_err(VhdxHeaderError::ReadRegionTableEntries)?;
+        )
+        .map_err(VhdxHeaderError::ReadRegionTableEntries)?;
 
         for _ in 0..entry_count {
             let entry =
@@ -337,7 +324,7 @@ pub struct RegionTableEntry {
 impl RegionTableEntry {
     /// Reads one Region Entry from a Region Table index that starts from 0
     pub fn new(buffer: &[u8]) -> Result<RegionTableEntry> {
-        assert!(buffer.len() == std::mem::size_of::<RegionTableEntry>());
+        assert!(buffer.len() == size_of::<RegionTableEntry>());
         // SAFETY: the assertion above makes sure the buffer size is correct.
         let mut region_table_entry: RegionTableEntry = unsafe { *(buffer.as_ptr().cast()) };
 
@@ -365,7 +352,7 @@ pub struct VhdxHeader {
 
 impl VhdxHeader {
     /// Creates a VhdxHeader from a reference to a file
-    pub fn new(f: &mut File) -> Result<VhdxHeader> {
+    pub fn new(f: &AlignedFile) -> Result<VhdxHeader> {
         Ok(VhdxHeader {
             _file_type_identifier: FileTypeIdentifier::new(f)?,
             header_1: Header::new(f, HEADER_1_START)?,
@@ -402,7 +389,7 @@ impl VhdxHeader {
     /// current one. Returns both headers as a tuple sequenced the way it was
     /// received from the parameter list.
     fn update_header(
-        f: &mut File,
+        f: &AlignedFile,
         header_1: Result<Header>,
         header_2: Result<Header>,
         guid: u128,
@@ -425,7 +412,7 @@ impl VhdxHeader {
 
     // Update the provided headers according to the spec
     fn update_headers(
-        f: &mut File,
+        f: &AlignedFile,
         header_1: Result<Header>,
         header_2: Result<Header>,
         guid: u128,
@@ -435,7 +422,7 @@ impl VhdxHeader {
         VhdxHeader::update_header(f, Ok(header_1), Ok(header_2), guid)
     }
 
-    pub fn update(&mut self, f: &mut File) -> Result<()> {
+    pub fn update(&mut self, f: &AlignedFile) -> Result<()> {
         let headers = VhdxHeader::update_headers(f, Ok(self.header_1), Ok(self.header_2), 0)?;
         self.header_1 = headers.0;
         self.header_2 = headers.1;

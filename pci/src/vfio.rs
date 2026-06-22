@@ -5,11 +5,11 @@
 
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
-use std::io;
 use std::os::fd::BorrowedFd;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::sync::{Arc, Barrier, Mutex};
+use std::{cmp, io, result};
 
 use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
@@ -34,6 +34,7 @@ use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestUsiz
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::configuration::{COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK};
 use crate::mmap::MmapRegion;
 use crate::msi::{MSI_CONFIG_ID, MsiConfigState};
 use crate::msix::{MaybeMutInterruptSourceGroup, MsixConfigState};
@@ -270,7 +271,7 @@ impl Interrupt {
 pub struct UserMemoryRegion {
     pub slot: u32,
     pub start: u64,
-    pub mapping: Arc<crate::mmap::MmapRegion>,
+    pub mapping: Arc<MmapRegion>,
 }
 
 #[derive(Clone)]
@@ -602,7 +603,7 @@ impl VfioCommon {
             let (pba_offset, pba_size) = msix_cap.pba_range();
             let msix_sz = align_page_size_up(table_size + pba_size);
             // Expand region to hold RW and trap region which both page size aligned
-            let size = std::cmp::max(region_size * 2, msix_sz * 2);
+            let size = cmp::max(region_size * 2, msix_sz * 2);
             // let table starts from the middle of the region
             msix_cap.table_set_offset((size / 2) as u32);
             msix_cap.pba_set_offset((size / 2 + pba_offset - table_offset) as u32);
@@ -614,8 +615,6 @@ impl VfioCommon {
         }
     }
 
-    // The `allocator` argument is unused on `aarch64`
-    #[allow(unused_variables)]
     pub(crate) fn allocate_bars(
         &mut self,
         allocator: &mut SystemAllocator,
@@ -774,7 +773,7 @@ impl VfioCommon {
                         .allocate(
                             restored_bar_addr,
                             region_size,
-                            Some(std::cmp::max(
+                            Some(cmp::max(
                                 // SAFETY: FFI call. Trivially safe.
                                 unsafe { sysconf(_SC_PAGESIZE) as GuestUsize },
                                 region_size,
@@ -816,12 +815,9 @@ impl VfioCommon {
                 bar_id += 1;
             }
         }
-
         Ok(bars)
     }
 
-    // The `allocator` argument is unused on `aarch64`
-    #[allow(unused_variables)]
     pub(crate) fn free_bars(
         &mut self,
         allocator: &mut SystemAllocator,
@@ -1332,9 +1328,8 @@ impl VfioCommon {
         // Return pending BAR repgrogramming if MSE bit is set
         let mut ret_param = self.configuration.pending_bar_reprogram();
         if !ret_param.is_empty() {
-            if self.read_config_register(crate::configuration::COMMAND_REG)
-                & crate::configuration::COMMAND_REG_MEMORY_SPACE_MASK
-                == crate::configuration::COMMAND_REG_MEMORY_SPACE_MASK
+            if self.read_config_register(COMMAND_REG) & COMMAND_REG_MEMORY_SPACE_MASK
+                == COMMAND_REG_MEMORY_SPACE_MASK
             {
                 info!("BAR reprogramming parameter is returned: {ret_param:x?}");
                 self.configuration.clear_pending_bar_reprogram();
@@ -1450,7 +1445,7 @@ impl Snapshottable for VfioCommon {
         String::from(VFIO_COMMON_ID)
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         let mut vfio_common_snapshot = Snapshot::new_from_state(&self.state())?;
 
         // Snapshot PciConfiguration
@@ -1493,7 +1488,7 @@ pub struct VfioPciDevice {
 
 impl VfioPciDevice {
     /// Constructs a new Vfio Pci device for the given Vfio device
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         vm: Arc<dyn hypervisor::Vm>,
@@ -1759,7 +1754,7 @@ impl VfioPciDevice {
                                 "Could not mmap sparse area (offset = 0x{:x}, size = 0x{:x}): {}",
                                 mmap_offset,
                                 mmap_len,
-                                std::io::Error::last_os_error()
+                                io::Error::last_os_error()
                             );
                             return Err(VfioPciError::MmapArea);
                         }
@@ -1790,7 +1785,6 @@ impl VfioPciDevice {
                     // Only needed if p2p_dma is enabled.
                     if !self.iommu_attached && self.p2p_dma {
                         // vfio_dma_map should be unsafe but isn't.
-                        #[allow(unused_unsafe)]
                         // SAFETY: MmapRegion invariants guarantee that
                         // user_memory_region.mapping.addr() points to
                         // user_memory_region.mapping.len() bytes of
@@ -2037,7 +2031,6 @@ iova 0x{:x}, size 0x{:x}: {}, ",
                     // Only needed if p2p_dma is enabled.
                     if !self.iommu_attached && self.p2p_dma {
                         // vfio_dma_map is unsound and ought to be marked as unsafe
-                        #[allow(unused_unsafe)]
                         // SAFETY: MmapRegion invariants guarantee that
                         // host_addr points to len bytes of
                         // valid memory that will only be unmapped with munmap().
@@ -2081,7 +2074,7 @@ impl Snapshottable for VfioPciDevice {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         let mut vfio_pci_dev_snapshot = Snapshot::default();
 
         // Snapshot VfioCommon
@@ -2123,7 +2116,7 @@ impl<M: GuestAddressSpace> VfioDmaMapping<M> {
 }
 
 impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M> {
-    fn map(&self, iova: u64, gpa: u64, size: u64) -> std::result::Result<(), io::Error> {
+    fn map(&self, iova: u64, gpa: u64, size: u64) -> result::Result<(), io::Error> {
         let Ok(usize_size): Result<usize, _> = size.try_into() else {
             return Err(io::Error::other(format!("size {size} overflows usize")));
         };
@@ -2158,7 +2151,6 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M
         };
 
         // vfio_dma_map is unsound and ought to be marked as unsafe
-        #[allow(unused_unsafe)]
         // SAFETY: find_user_address and GuestMemory::get_slice() guarantee that
         // the returned pointer is valid for up to `usize_size` bytes.
         // `usize_size` is always equal to `size` due to the above `try_into()` call.
@@ -2170,7 +2162,7 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M
         })
     }
 
-    fn unmap(&self, iova: u64, size: u64) -> std::result::Result<(), io::Error> {
+    fn unmap(&self, iova: u64, size: u64) -> result::Result<(), io::Error> {
         self.vfio_ops
             .vfio_dma_unmap(iova, size as usize)
             .map_err(|e| {

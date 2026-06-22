@@ -10,12 +10,29 @@ use iced_x86::*;
 use crate::arch::emulator::{EmulationError, PlatformEmulator, PlatformError};
 use crate::arch::x86::Exception;
 use crate::arch::x86::emulator::CpuStateManager;
+use crate::arch::x86::regs::DF;
 
 pub mod cmp;
 pub mod mov;
 pub mod movs;
 pub mod or;
 pub mod stos;
+
+pub fn string_op_repeat_count(has_rep_prefix: bool, rcx: u64) -> u64 {
+    if has_rep_prefix { rcx } else { 1 }
+}
+
+pub fn string_op_backwards(rflags: u64) -> bool {
+    (rflags & DF) != 0
+}
+
+pub fn advance_string_op_index(index: u64, len: usize, backwards: bool) -> u64 {
+    if backwards {
+        index.wrapping_sub(len as u64)
+    } else {
+        index.wrapping_add(len as u64)
+    }
+}
 
 fn get_op<T: CpuStateManager>(
     insn: &Instruction,
@@ -136,4 +153,29 @@ pub trait InstructionHandler<T: CpuStateManager> {
         state: &mut T,
         platform: &mut dyn PlatformEmulator<CpuState = T>,
     ) -> Result<(), EmulationError<Exception>>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_string_op_repeat_count() {
+        assert_eq!(string_op_repeat_count(false, 0), 1);
+        assert_eq!(string_op_repeat_count(false, 7), 1);
+        assert_eq!(string_op_repeat_count(true, 7), 7);
+        assert_eq!(string_op_repeat_count(true, 0), 0);
+    }
+
+    #[test]
+    fn test_string_op_backwards() {
+        assert!(!string_op_backwards(0));
+        assert!(string_op_backwards(DF));
+    }
+
+    #[test]
+    fn test_advance_string_op_index() {
+        assert_eq!(advance_string_op_index(0x1000, 4, false), 0x1004);
+        assert_eq!(advance_string_op_index(0x1000, 4, true), 0xffc);
+    }
 }

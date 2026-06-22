@@ -11,6 +11,7 @@ pub mod uefi;
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::hash::BuildHasher;
 use std::sync::{Arc, Mutex};
 
 use hypervisor::arch::aarch64::gic::Vgic;
@@ -121,8 +122,8 @@ pub fn arch_memory_regions() -> Vec<(GuestAddress, usize, RegionType)> {
 }
 
 /// Configures the system and should be called once per vm before starting vcpu threads.
-#[allow(clippy::too_many_arguments)]
-pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHasher>(
+#[expect(clippy::too_many_arguments)]
+pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
     guest_mem: &GuestMemoryMmap,
     cmdline: &str,
     vcpu_mpidr: &[u64],

@@ -8,7 +8,7 @@ use core::panic::AssertUnwindSafe;
 use std::fs::File;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::{Arc, Mutex};
-use std::{io, result, thread};
+use std::{io, panic, result, thread};
 
 use log::{error, info, warn};
 use thiserror::Error;
@@ -222,7 +222,7 @@ impl RateLimiterGroup {
         thread::Builder::new()
             .name(format!("rate-limit-group-{}", inner.id))
             .spawn(move || {
-                let res = std::panic::catch_unwind(AssertUnwindSafe(move || {
+                let res = panic::catch_unwind(AssertUnwindSafe(move || {
                     const EPOLL_EVENTS_LEN: usize = 2;
 
                     let mut events =

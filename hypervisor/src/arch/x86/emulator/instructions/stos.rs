@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#![allow(non_camel_case_types)]
+#![expect(non_camel_case_types)]
 
 //
 // STOS - Store String
@@ -13,7 +13,6 @@
 use anyhow::anyhow;
 
 use crate::arch::x86::emulator::instructions::*;
-use crate::arch::x86::regs::DF;
 
 macro_rules! stos {
     ($bound:ty) => {
@@ -23,13 +22,14 @@ macro_rules! stos {
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
         ) -> Result<(), EmulationError<Exception>> {
-            let mut count: u64 = if insn.has_rep_prefix() {
+            let rcx = if insn.has_rep_prefix() {
                 state
                     .read_reg(Register::ECX)
                     .map_err(|e| EmulationError::InvalidOperand(anyhow!(e)))?
             } else {
-                1
+                0
             };
+            let mut count = string_op_repeat_count(insn.has_rep_prefix(), rcx);
 
             let rax = state
                 .read_reg(Register::RAX)
@@ -39,7 +39,7 @@ macro_rules! stos {
                 .read_reg(Register::RDI)
                 .map_err(|e| EmulationError::InvalidOperand(anyhow!(e)))?;
 
-            let df = (state.flags() & DF) != 0;
+            let backwards = string_op_backwards(state.flags());
             let len = std::mem::size_of::<$bound>();
             let rax_bytes = rax.to_le_bytes();
 
@@ -52,11 +52,7 @@ macro_rules! stos {
                     .write_memory(dst, &rax_bytes[0..len])
                     .map_err(EmulationError::PlatformEmulationError)?;
 
-                if df {
-                    rdi = rdi.wrapping_sub(len as u64);
-                } else {
-                    rdi = rdi.wrapping_add(len as u64);
-                }
+                rdi = advance_string_op_index(rdi, len, backwards);
                 count -= 1;
             }
 

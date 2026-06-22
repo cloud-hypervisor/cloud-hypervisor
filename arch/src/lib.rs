@@ -13,12 +13,13 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::{fmt, result};
 
-use serde::de::IntoDeserializer;
+use serde::de::{IntoDeserializer, value};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use vm_memory::bitmap::AtomicBitmap;
 
-type GuestMemoryMmap = vm_memory::GuestMemoryMmap<vm_memory::bitmap::AtomicBitmap>;
-type GuestRegionMmap = vm_memory::GuestRegionMmap<vm_memory::bitmap::AtomicBitmap>;
+type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
+type GuestRegionMmap = vm_memory::GuestRegionMmap<AtomicBitmap>;
 
 /// Type for returning error code.
 #[derive(Debug, Error)]
@@ -71,7 +72,7 @@ pub enum CpuProfile {
 
 // Note that this trait impl is architecture agnostic and may thus reside here.
 impl FromStr for CpuProfile {
-    type Err = serde::de::value::Error;
+    type Err = value::Error;
     fn from_str(s: &str) -> result::Result<Self, Self::Err> {
         Self::deserialize(s.into_deserializer())
     }

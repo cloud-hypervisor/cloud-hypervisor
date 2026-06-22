@@ -18,6 +18,7 @@ use crate::arch::x86::{
 
 #[macro_use]
 mod instructions;
+pub use instructions::{advance_string_op_index, string_op_backwards, string_op_repeat_count};
 
 /// x86 CPU modes
 #[derive(Debug, PartialEq, Eq)]

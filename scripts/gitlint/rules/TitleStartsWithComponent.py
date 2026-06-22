@@ -47,6 +47,7 @@ class TitleStartsWithComponent(LineRule):
             'main',
             'misc',
             'net_util',
+            'offload_daemon',
             'openapi',
             'option_parser',
             'pci',

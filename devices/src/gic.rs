@@ -38,7 +38,7 @@ pub struct Gic {
 }
 
 impl Gic {
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(clippy::needless_pass_by_value)]
     pub fn new(
         vcpu_count: u32,
         interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
@@ -155,7 +155,7 @@ impl Snapshottable for Gic {
         GIC_SNAPSHOT_ID.to_string()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         let vgic = self.vgic.as_ref().unwrap().clone();
         let state = vgic.lock().unwrap().state().unwrap();
         Snapshot::new_from_state(&state)
@@ -163,7 +163,7 @@ impl Snapshottable for Gic {
 }
 
 impl Pausable for Gic {
-    fn pause(&mut self) -> std::result::Result<(), MigratableError> {
+    fn pause(&mut self) -> result::Result<(), MigratableError> {
         // Flush tables to guest RAM
         let vgic = self.vgic.as_ref().unwrap().clone();
         vgic.lock().unwrap().save_data_tables().map_err(|e| {

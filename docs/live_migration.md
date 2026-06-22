@@ -191,6 +191,159 @@ the destination host and continue running there. The source VM instance
 will terminate normally. All ongoing processes and connections within
 the VM should remain intact after the migration.
 
+#### Encryption
+
+TCP migration can be protected with TLS by passing `tls_dir=<path>` to
+both `receive-migration` and `send-migration`.
+
+The destination host needs a directory containing:
+
+- `ca-cert.pem`: the CA certificate used to verify source certificates
+- `server-cert.pem`: the certificate presented by the destination
+- `server-key.pem`: the private key for `server-cert.pem`
+
+The source host needs a directory containing:
+
+- `ca-cert.pem`: the CA certificate used to verify the destination
+  certificate
+- `client-cert.pem`: the certificate presented by the source
+- `client-key.pem`: the private key for `client-cert.pem`
+
+Protect the private key files with file mode `0600` to reduce the risk
+of accidental disclosure:
+
+```console
+$ chmod 600 server-key.pem client-key.pem
+```
+
+Current TCP migration uses mutual TLS (mTLS) authentication. The source
+verifies the destination certificate against `ca-cert.pem` and presents
+`client-cert.pem` and `client-key.pem`. The destination presents
+`server-cert.pem` and `server-key.pem`, and only accepts client
+certificates that chain to `ca-cert.pem`.
+
+Example receiver command:
+
+```console
+dst $ ch-remote --api-socket=/tmp/api receive-migration receiver_url=tcp:0.0.0.0:{port},tls_dir=/path/to/dst-tls
+```
+
+Example sender command:
+
+```console
+src $ ch-remote --api-socket=/tmp/api send-migration destination_url=tcp:{dst}:{port},tls_dir=/path/to/src-tls
+```
+
+TLS encryption is only supported with `tcp:<host>:<port>` migration
+URLs, not with local UNIX-socket migration.
+
+The commands below describe how to create the encryption material necessary
+to perform a same-host TCP migration with TLS.
+
+##### Setup the Certificate Authority
+
+First, set up the CA with a private key and a self-signed certificate.
+
+```console
+$ certtool --generate-privkey \
+           --outfile ca-key.pem
+```
+
+To generate the certificate, provide at least your organization name in a template file, for example `ca.info`:
+
+```text
+cn = Name of your organization
+ca
+cert_signing_key
+```
+
+Then you can create the certificate:
+
+```console
+$ certtool --generate-self-signed \
+           --load-privkey ca-key.pem \
+           --template ca.info \
+           --outfile ca-cert.pem
+```
+
+##### Issuing host certificates
+
+Generate a private key and a certificate for each side. Cloud Hypervisor enforces mTLS, thus you also need a key for the migration sender.
+
+The certificates also require template data. You can use separate templates for sender and receiver, but this example uses a single template, `hosts.info`:
+
+```text
+organization = Name of your organization
+cn = localhost
+tls_www_server
+tls_www_client
+signing_key
+dns_name = localhost
+ip_address = 127.0.0.1
+```
+
+Then you can create the necessary files for the client (migration sender):
+
+```console
+$ certtool --generate-privkey \
+           --outfile client-key.pem
+
+$ certtool --generate-certificate \
+           --load-ca-certificate ca-cert.pem \
+           --load-ca-privkey ca-key.pem \
+           --load-privkey client-key.pem \
+           --template hosts.info \
+           --outfile client-cert.pem
+```
+
+And the necessary files for the server (migration receiver):
+
+```console
+$ certtool --generate-privkey \
+           --outfile server-key.pem
+
+$ certtool --generate-certificate \
+           --load-ca-certificate ca-cert.pem \
+           --load-ca-privkey ca-key.pem \
+           --load-privkey server-key.pem \
+           --template hosts.info \
+           --outfile server-cert.pem
+```
+
+For a same-host test, place these files in a single directory and use that directory as `tls_dir` for both commands.
+
+##### Performing the Migration
+
+On the receiver side, we prepare an empty VM:
+
+```console
+dst $ cloud-hypervisor --api-socket /tmp/api-rcv
+```
+
+In a different terminal, prepare to receive the migration:
+
+```console
+dst $ ch-remote --api-socket=/tmp/api-rcv receive-migration receiver_url=tcp:0.0.0.0:9000,tls_dir=/path/to/certificates
+```
+
+On the sender side, we start a VM:
+
+```console
+src $ cloud-hypervisor \
+        --serial tty --console off \
+        --cpus boot=2 --memory size=4G \
+        --kernel /var/images/linux \
+        --initramfs /var/images/initrd \
+        --cmdline "console=ttyS0" \
+        --api-socket /tmp/api-src
+```
+
+After a few seconds the VM should be up and you can interact with it. Then trigger the migration:
+
+```console
+src $ ch-remote --api-socket=/tmp/api-src send-migration destination_url=tcp:localhost:9000,tls_dir=/path/to/certificates
+```
+
 #### Migration Parameters
 
 Cloud Hypervisor supports additional parameters to control the
@@ -211,3 +364,40 @@ migration process. Via the API or `ch-remote`, you may specify:
   The number of parallel TCP connections to use for migration.
   Must be between `1` and `128`. Defaults to `1`.
   Multiple connections are not supported with local UNIX-socket migration.
+
+## Version Compatibility
+
+Cloud Hypervisor live migration compatibility has two dimensions: the
+Cloud Hypervisor version and the migration protocol version.
+
+Cloud Hypervisor uses a versioned migration protocol for the messages exchanged
+between source and destination. Each Cloud Hypervisor release sends its current
+migration protocol version and accepts that version plus the immediately
+previous protocol version.
+
+This means migration is supported from an older protocol version to the same or
+next protocol version. If the source and destination are more than one migration
+protocol version apart, the VM must be migrated through an intermediate
+Cloud Hypervisor version first.
+
+### Technical Details
+
+The source sends its migration protocol version in the initial `Start` request.
+The destination accepts the migration only if that protocol version is supported.
+A zeroed `Start` command header is handled as protocol `v0`, so older
+deployments that do not explicitly send a protocol version remain compatible.
+
+The migration protocol version covers the protocol spoken after a migration
+connection has been established. Examples include adding a mandatory migration
+command, changing the order of migration protocol messages, or changing the
+framing or encoding of protocol command payloads.
+
+The migration protocol version does not cover migration transport setup. For
+example, choosing TCP vs. UNIX sockets or opening the initial connection needs
+separate compatibility handling.
+
+Migration protocol versioning is separate from snapshot state compatibility.
+Device and VM state changes still need to be handled by the respective snapshot
+serialization/deserialization code. That compatibility is Cloud Hypervisor
+version dependent, but it is not the responsibility of migration protocol
+versioning.

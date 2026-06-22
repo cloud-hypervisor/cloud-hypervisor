@@ -17,9 +17,9 @@
 use std::io::{self, Write};
 use std::mem::size_of;
 use std::os::unix::io::AsRawFd;
-use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
+use std::{cmp, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
@@ -38,6 +38,7 @@ use vm_virtio::AccessPlatform;
 use vm_virtio::checked_descriptor::DescriptorChainExt;
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::{
     ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
@@ -76,9 +77,9 @@ pub enum Error {
     #[error("Guest gave us bad memory addresses.")]
     GuestMemory(#[source] GuestMemoryError),
     #[error("Fallocate fail.")]
-    FallocateFail(#[source] std::io::Error),
+    FallocateFail(#[source] io::Error),
     #[error("Madvise fail.")]
-    MadviseFail(#[source] std::io::Error),
+    MadviseFail(#[source] io::Error),
     #[error("Invalid queue index: {0}")]
     InvalidQueueIndex(usize),
     #[error("Failed to signal")]
@@ -201,7 +202,7 @@ impl BalloonEpollHandler {
         // No underflow possible because range_base was found in the region by `find_region`.
         let offset = range_base.0 - region.start_addr().0;
         let region_limit = region.len() - offset;
-        let len = std::cmp::min(range_len as u64, region_limit);
+        let len = cmp::min(range_len as u64, region_limit);
         if len < range_len as u64 {
             warn!(
                 "Clamping reported range at GPA 0x{:x} from {} to {} bytes \
@@ -493,7 +494,7 @@ pub struct Balloon {
 
 impl Balloon {
     // Create a new virtio-balloon.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         size: u64,
@@ -631,13 +632,13 @@ impl VirtioDevice for Balloon {
 
         if let Some(end) = offset.checked_add(config.len() as u64) {
             let mut offset_config =
-                &mut config[offset as usize..std::cmp::min(end, config_len) as usize];
+                &mut config[offset as usize..cmp::min(end, config_len) as usize];
             offset_config.write_all(data).unwrap();
         }
     }
 
-    fn activate(&mut self, context: crate::device::ActivationContext) -> ActivateResult {
-        let crate::device::ActivationContext {
+    fn activate(&mut self, context: ActivationContext) -> ActivateResult {
+        let ActivationContext {
             mem,
             interrupt_cb,
             mut queues,
@@ -721,7 +722,7 @@ impl Snapshottable for Balloon {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_state(&self.state())
     }
 }

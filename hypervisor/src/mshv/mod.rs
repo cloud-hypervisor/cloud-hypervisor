@@ -77,14 +77,14 @@ pub use {
     mshv_bindings::mshv_device_attr as DeviceAttr, mshv_ioctls, mshv_ioctls::DeviceFd,
 };
 
-#[cfg(target_arch = "x86_64")]
-use crate::ClockData;
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::regs;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{CpuIdEntry, FpuState, MsrEntry};
+#[cfg(target_arch = "x86_64")]
+use crate::{ClockData, ClockRestoreMode, ClockState};
 use crate::{CpuState, IoEventAddress, IrqRoutingEntry, MpState};
 
 pub const PAGE_SHIFT: usize = 12;
@@ -233,7 +233,7 @@ pub struct MshvHypervisor {
 
 impl MshvHypervisor {
     /// Create a hypervisor based on Mshv
-    #[allow(clippy::new_ret_no_self)]
+    #[expect(clippy::new_ret_no_self)]
     pub fn new() -> hypervisor::Result<Arc<dyn hypervisor::Hypervisor>> {
         let mshv_obj =
             Mshv::new().map_err(|e| hypervisor::HypervisorError::HypervisorCreate(e.into()))?;
@@ -447,10 +447,7 @@ pub struct MshvVcpu {
     #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
     vm_ops: Option<Arc<dyn vm::VmOps>>,
-    #[cfg_attr(
-        all(not(target_arch = "x86_64"), not(feature = "sev_snp")),
-        expect(dead_code)
-    )]
+    #[cfg_attr(not(target_arch = "x86_64"), expect(dead_code))]
     vm_fd: Arc<VmFd>,
     #[cfg(feature = "sev_snp")]
     ghcb: Option<Ghcb>,
@@ -589,7 +586,7 @@ impl cpu::Vcpu for MshvVcpu {
         Ok(())
     }
 
-    #[allow(non_upper_case_globals)]
+    #[expect(non_upper_case_globals)]
     fn run(&mut self) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
         match self.fd.run() {
             Ok(x) => match x.header.message_type {
@@ -619,70 +616,7 @@ impl cpu::Vcpu for MshvVcpu {
                 #[cfg(target_arch = "x86_64")]
                 hv_message_type_HVMSG_X64_IO_PORT_INTERCEPT => {
                     let info = x.to_ioport_info().unwrap();
-                    let access_info = info.access_info;
-                    // SAFETY: access_info is valid, otherwise we won't be here
-                    let len = unsafe { access_info.__bindgen_anon_1.access_size() } as usize;
-                    let is_write = info.header.intercept_access_type == 1;
-                    let port = info.port_number;
-                    let mut data: [u8; 4] = [0; 4];
-                    let mut ret_rax = info.rax;
-
-                    /*
-                     * XXX: Ignore QEMU fw_cfg (0x5xx) and debug console (0x402) ports.
-                     *
-                     * Cloud Hypervisor doesn't support fw_cfg at the moment. It does support 0x402
-                     * under the "fwdebug" feature flag. But that feature is not enabled by default
-                     * and is considered legacy.
-                     *
-                     * OVMF unconditionally pokes these IO ports with string IO.
-                     *
-                     * Instead of trying to implement string IO support now which does not do much
-                     * now, skip those ports explicitly to avoid panicking.
-                     *
-                     * Proper string IO support can be added once we gain the ability to translate
-                     * guest virtual addresses to guest physical addresses on MSHV.
-                     */
-                    match port {
-                        0x402 | 0x510 | 0x511 | 0x514 => {
-                            self.advance_rip_update_rax(&info, ret_rax)?;
-                            return Ok(cpu::VmExit::Ignore);
-                        }
-                        _ => {}
-                    }
-
-                    assert!(
-                        // SAFETY: access_info is valid, otherwise we won't be here
-                        (unsafe { access_info.__bindgen_anon_1.string_op() } != 1),
-                        "String IN/OUT not supported"
-                    );
-                    assert!(
-                        // SAFETY: access_info is valid, otherwise we won't be here
-                        (unsafe { access_info.__bindgen_anon_1.rep_prefix() } != 1),
-                        "Rep IN/OUT not supported"
-                    );
-
-                    if is_write {
-                        let data = (info.rax as u32).to_le_bytes();
-                        if let Some(vm_ops) = &self.vm_ops {
-                            vm_ops
-                                .pio_write(port.into(), &data[0..len])
-                                .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
-                        }
-                    } else {
-                        if let Some(vm_ops) = &self.vm_ops {
-                            vm_ops
-                                .pio_read(port.into(), &mut data[0..len])
-                                .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
-                        }
-
-                        let v = u32::from_le_bytes(data);
-                        /* Preserve high bits in EAX but clear out high bits in RAX */
-                        let mask = 0xffffffff >> (32 - len * 8);
-                        let eax = (info.rax as u32 & !mask) | (v & mask);
-                        ret_rax = eax as u64;
-                    }
-
-                    self.advance_rip_update_rax(&info, ret_rax)?;
+                    self.handle_io_port_intercept(&info)?;
                     Ok(cpu::VmExit::Ignore)
                 }
                 #[cfg(target_arch = "aarch64")]
@@ -1388,6 +1322,16 @@ impl cpu::Vcpu for MshvVcpu {
         // SAFETY: Accessing a union element from bindgen generated definition.
         let res = unsafe { reg_assocs[0].value.reg64 };
         Ok(res)
+    }
+
+    #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+    fn get_cntvct(&self) -> cpu::Result<u64> {
+        unimplemented!()
+    }
+
+    #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+    fn set_cntvct(&self, _val: u64) -> cpu::Result<()> {
+        unimplemented!()
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -2268,6 +2212,23 @@ impl vm::Vm for MshvVm {
                 data.ref_time,
             )
             .map_err(|e| vm::HypervisorVmError::SetClock(e.into()))
+    }
+
+    /// Capture the partition reference time for snapshot/migration.
+    #[cfg(target_arch = "x86_64")]
+    fn snapshot_clock(&self, _boot_vcpu: &dyn cpu::Vcpu) -> vm::Result<Option<ClockState>> {
+        Ok(Some(self.get_clock()?.with_realtime_filled()))
+    }
+
+    /// Restore the partition reference time before the vCPUs resume.
+    #[cfg(target_arch = "x86_64")]
+    fn restore_clock(
+        &self,
+        _vcpus: &[&dyn cpu::Vcpu],
+        state: &ClockState,
+        _mode: ClockRestoreMode,
+    ) -> vm::Result<()> {
+        self.set_clock(state)
     }
 
     /// Downcast to the underlying MshvVm type

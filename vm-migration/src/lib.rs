@@ -3,6 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
+use std::collections::BTreeMap;
+use std::{io, result};
+
 use anyhow::anyhow;
 pub use context::{
     CompletedMigrationContext, DowntimeContext, MemoryMigrationContext, MigrationContextError,
@@ -16,6 +19,7 @@ use crate::protocol::MemoryRangeTable;
 mod bitpos_iterator;
 mod context;
 pub mod protocol;
+pub mod tls;
 
 #[derive(Error, Debug)]
 pub enum UffdError {
@@ -23,7 +27,7 @@ pub enum UffdError {
     UnalignedRanges,
 
     #[error("Failed to create userfaultfd")]
-    Create(#[source] std::io::Error),
+    Create(#[source] io::Error),
 
     #[error("Cannot translate GPA {gpa:#x} to host address")]
     GpaTranslation {
@@ -37,20 +41,20 @@ pub enum UffdError {
         addr: u64,
         len: u64,
         #[source]
-        source: std::io::Error,
+        source: io::Error,
     },
 
     #[error("Region at {addr:#x}+{len:#x} missing COPY/WAKE support")]
     MissingIoctlSupport { addr: u64, len: u64 },
 
     #[error("Failed to spawn handler thread")]
-    SpawnThread(#[source] std::io::Error),
+    SpawnThread(#[source] io::Error),
 
     #[error("Handler terminated before startup completed")]
     HandlerStartup,
 
     #[error("Handler failed after startup")]
-    HandlerFailed(#[source] std::io::Error),
+    HandlerFailed(#[source] io::Error),
 }
 
 #[derive(Error, Debug)]
@@ -77,7 +81,7 @@ pub enum MigratableError {
     OnDemandRestore(#[source] UffdError),
 
     #[error("Socket error")]
-    MigrateSocket(#[source] std::io::Error),
+    MigrateSocket(#[source] io::Error),
 
     #[error("Failed to start migration for migratable component")]
     StartDirtyLog(#[source] anyhow::Error),
@@ -99,17 +103,20 @@ pub enum MigratableError {
 
     #[error("Lifecycle operation skipped for disconnected component {0}")]
     DeviceDisconnected(String),
+
+    #[error("Error setting up a TLS-encrypted connection")]
+    Tls(#[source] tls::TlsError),
 }
 
 /// A Pausable component can be paused and resumed.
 pub trait Pausable {
     /// Pause the component.
-    fn pause(&mut self) -> std::result::Result<(), MigratableError> {
+    fn pause(&mut self) -> result::Result<(), MigratableError> {
         Ok(())
     }
 
     /// Resume the component.
-    fn resume(&mut self) -> std::result::Result<(), MigratableError> {
+    fn resume(&mut self) -> result::Result<(), MigratableError> {
         Ok(())
     }
 }
@@ -163,7 +170,7 @@ impl SnapshotData {
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub struct Snapshot {
     /// The Snapshottable component snapshots.
-    pub snapshots: std::collections::BTreeMap<String, Snapshot>,
+    pub snapshots: BTreeMap<String, Snapshot>,
 
     /// The Snapshottable component's snapshot data.
     /// A map of snapshot sections, indexed by the section ids.
@@ -226,7 +233,7 @@ pub trait Snapshottable: Pausable {
     }
 
     /// Take a component snapshot.
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         Ok(Snapshot::default())
     }
 }
@@ -247,7 +254,7 @@ pub trait Transportable: Pausable + Snapshottable {
         &self,
         _snapshot: &Snapshot,
         _destination_url: &str,
-    ) -> std::result::Result<(), MigratableError> {
+    ) -> result::Result<(), MigratableError> {
         Ok(())
     }
 
@@ -257,7 +264,7 @@ pub trait Transportable: Pausable + Snapshottable {
     ///
     /// * `source_url` - The source URL to fetch the snapshot from. This could be an HTTP
     ///   endpoint, a TCP address or a local file.
-    fn recv(&self, _source_url: &str) -> std::result::Result<Snapshot, MigratableError> {
+    fn recv(&self, _source_url: &str) -> result::Result<Snapshot, MigratableError> {
         Ok(Snapshot::default())
     }
 }
@@ -271,23 +278,23 @@ pub trait Transportable: Pausable + Snapshottable {
 /// Moreover a migratable component can be transported to a remote or local
 /// destination and thus must be Transportable.
 pub trait Migratable: Send + Pausable + Snapshottable + Transportable {
-    fn start_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
+    fn start_dirty_log(&mut self) -> result::Result<(), MigratableError> {
         Ok(())
     }
 
-    fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
+    fn stop_dirty_log(&mut self) -> result::Result<(), MigratableError> {
         Ok(())
     }
 
-    fn dirty_log(&mut self) -> std::result::Result<MemoryRangeTable, MigratableError> {
+    fn dirty_log(&mut self) -> result::Result<MemoryRangeTable, MigratableError> {
         Ok(MemoryRangeTable::default())
     }
 
-    fn start_migration(&mut self) -> std::result::Result<(), MigratableError> {
+    fn start_migration(&mut self) -> result::Result<(), MigratableError> {
         Ok(())
     }
 
-    fn complete_migration(&mut self) -> std::result::Result<(), MigratableError> {
+    fn complete_migration(&mut self) -> result::Result<(), MigratableError> {
         Ok(())
     }
 }

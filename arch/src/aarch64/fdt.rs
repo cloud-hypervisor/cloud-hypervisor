@@ -9,11 +9,13 @@
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fmt::Debug;
+use std::hash::BuildHasher;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::{cmp, fs, result, str};
 
 use byteorder::{BigEndian, ByteOrder};
+use fdt_parser::node::FdtNode;
 use hypervisor::arch::aarch64::gic::Vgic;
 use hypervisor::arch::aarch64::regs::{
     AARCH64_ARCH_TIMER_HYP_IRQ, AARCH64_ARCH_TIMER_PHYS_NONSECURE_IRQ,
@@ -204,8 +206,8 @@ pub fn get_cache_shared(cache_level: CacheLevel) -> bool {
 }
 
 /// Creates the flattened device tree for this aarch64 VM.
-#[allow(clippy::too_many_arguments)]
-pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHasher>(
+#[expect(clippy::too_many_arguments)]
+pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
     guest_mem: &GuestMemoryMmap,
     cmdline: &str,
     vcpu_mpidr: &[u64],
@@ -879,7 +881,7 @@ fn create_fw_cfg_node<T: DeviceInfoForFdt + Clone + Debug>(
     Ok(())
 }
 
-fn create_devices_node<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHasher>(
+fn create_devices_node<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
     fdt: &mut FdtWriter,
     dev_info: &HashMap<(DeviceType, String), T, S>,
 ) -> FdtWriterResult<()> {
@@ -1145,7 +1147,7 @@ pub fn print_fdt(dtb: &[u8]) {
     }
 }
 
-fn print_node(node: fdt_parser::node::FdtNode<'_, '_>, n_spaces: usize) {
+fn print_node(node: FdtNode<'_, '_>, n_spaces: usize) {
     debug!("{:indent$}{}/", "", node.name, indent = n_spaces);
     for property in node.properties() {
         let name = property.name;

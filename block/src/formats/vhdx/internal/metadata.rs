@@ -2,16 +2,17 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom};
 use std::mem::size_of;
+use std::os::unix::fs::FileExt;
+use std::{io, result};
 
-use byteorder::{LittleEndian, ReadBytesExt};
+use byteorder::{ByteOrder, LittleEndian};
 use remain::sorted;
 use thiserror::Error;
 use uuid::Uuid;
 
 use super::header::RegionTableEntry;
+use crate::aligned_file::AlignedFile;
 
 const METADATA_SIGN: u64 = 0x6174_6164_6174_656D;
 const METADATA_ENTRY_SIZE: usize = 32;
@@ -83,7 +84,7 @@ pub enum VhdxMetadataError {
     UnsupportedFlag,
 }
 
-pub type Result<T> = std::result::Result<T, VhdxMetadataError>;
+pub type Result<T> = result::Result<T, VhdxMetadataError>;
 
 #[derive(Default, Clone, Debug)]
 pub struct DiskSpec {
@@ -102,17 +103,18 @@ pub struct DiskSpec {
 impl DiskSpec {
     /// Parse all metadata from the provided file and store info in DiskSpec
     /// structure.
-    pub fn new(f: &mut File, metadata_region: &RegionTableEntry) -> Result<DiskSpec> {
+    pub fn new(f: &AlignedFile, metadata_region: &RegionTableEntry) -> Result<DiskSpec> {
         let mut disk_spec = DiskSpec::default();
         let mut metadata_presence: u16 = 0;
         let mut offset = 0;
-        let metadata = f.metadata().map_err(VhdxMetadataError::ReadMetadata)?;
+        let metadata = f
+            .file()
+            .metadata()
+            .map_err(VhdxMetadataError::ReadMetadata)?;
         disk_spec.image_size = metadata.len();
 
         let mut buffer = [0u8; METADATA_TABLE_MAX_SIZE];
-        f.seek(SeekFrom::Start(metadata_region.file_offset))
-            .map_err(VhdxMetadataError::ReadMetadata)?;
-        f.read_exact(&mut buffer)
+        f.read_exact_at(&mut buffer, metadata_region.file_offset)
             .map_err(VhdxMetadataError::ReadMetadata)?;
 
         let metadata_header =
@@ -123,18 +125,16 @@ impl DiskSpec {
             let metadata_entry =
                 MetadataTableEntry::new(&buffer[offset..offset + size_of::<MetadataTableEntry>()])?;
 
-            f.seek(SeekFrom::Start(
-                metadata_region.file_offset + metadata_entry.offset as u64,
-            ))
-            .map_err(VhdxMetadataError::ReadMetadata)?;
+            let item_offset = metadata_region.file_offset + metadata_entry.offset as u64;
 
             if metadata_entry.item_id
                 == Uuid::parse_str(METADATA_FILE_PARAMETER)
                     .map_err(VhdxMetadataError::InvalidUuid)?
             {
-                disk_spec.block_size = f
-                    .read_u32::<LittleEndian>()
+                let mut item = [0u8; 2 * size_of::<u32>()];
+                f.read_exact_at(&mut item, item_offset)
                     .map_err(VhdxMetadataError::ReadMetadata)?;
+                disk_spec.block_size = LittleEndian::read_u32(&item[0..4]);
 
                 // MUST be at least 1 MiB and not greater than 256 MiB
                 if disk_spec.block_size < BLOCK_SIZE_MIN || disk_spec.block_size > BLOCK_SIZE_MAX {
@@ -146,9 +146,7 @@ impl DiskSpec {
                     return Err(VhdxMetadataError::InvalidBlockSize);
                 }
 
-                let bits = f
-                    .read_u32::<LittleEndian>()
-                    .map_err(VhdxMetadataError::ReadMetadata)?;
+                let bits = LittleEndian::read_u32(&item[4..8]);
                 disk_spec.has_parent = bits & BLOCK_HAS_PARENT != 0;
 
                 metadata_presence |= METADATA_FILE_PARAMETER_PRESENT;
@@ -156,27 +154,30 @@ impl DiskSpec {
                 == Uuid::parse_str(METADATA_VIRTUAL_DISK_SIZE)
                     .map_err(VhdxMetadataError::InvalidUuid)?
             {
-                disk_spec.virtual_disk_size = f
-                    .read_u64::<LittleEndian>()
+                let mut item = [0u8; size_of::<u64>()];
+                f.read_exact_at(&mut item, item_offset)
                     .map_err(VhdxMetadataError::ReadMetadata)?;
+                disk_spec.virtual_disk_size = LittleEndian::read_u64(&item);
 
                 metadata_presence |= METADATA_VIRTUAL_DISK_SIZE_PRESENT;
             } else if metadata_entry.item_id
                 == Uuid::parse_str(METADATA_VIRTUAL_DISK_ID)
                     .map_err(VhdxMetadataError::InvalidUuid)?
             {
-                disk_spec.disk_id = f
-                    .read_u128::<LittleEndian>()
+                let mut item = [0u8; size_of::<u128>()];
+                f.read_exact_at(&mut item, item_offset)
                     .map_err(VhdxMetadataError::ReadMetadata)?;
+                disk_spec.disk_id = LittleEndian::read_u128(&item);
 
                 metadata_presence |= METADATA_VIRTUAL_DISK_ID_PRESENT;
             } else if metadata_entry.item_id
                 == Uuid::parse_str(METADATA_LOGICAL_SECTOR_SIZE)
                     .map_err(VhdxMetadataError::InvalidUuid)?
             {
-                disk_spec.logical_sector_size = f
-                    .read_u32::<LittleEndian>()
+                let mut item = [0u8; size_of::<u32>()];
+                f.read_exact_at(&mut item, item_offset)
                     .map_err(VhdxMetadataError::ReadMetadata)?;
+                disk_spec.logical_sector_size = LittleEndian::read_u32(&item);
                 if !(disk_spec.logical_sector_size == 512 || disk_spec.logical_sector_size == 4096)
                 {
                     return Err(VhdxMetadataError::InvalidLogicalSectorSize);
@@ -187,9 +188,10 @@ impl DiskSpec {
                 == Uuid::parse_str(METADATA_PHYSICAL_SECTOR_SIZE)
                     .map_err(VhdxMetadataError::InvalidUuid)?
             {
-                disk_spec.physical_sector_size = f
-                    .read_u32::<LittleEndian>()
+                let mut item = [0u8; size_of::<u32>()];
+                f.read_exact_at(&mut item, item_offset)
                     .map_err(VhdxMetadataError::ReadMetadata)?;
+                disk_spec.physical_sector_size = LittleEndian::read_u32(&item);
                 if !(disk_spec.physical_sector_size == 512
                     || disk_spec.physical_sector_size == 4096)
                 {
@@ -278,7 +280,7 @@ struct MetadataTableHeader {
 
 impl MetadataTableHeader {
     pub fn new(buffer: &[u8]) -> Result<MetadataTableHeader> {
-        assert!(buffer.len() == std::mem::size_of::<MetadataTableHeader>());
+        assert!(buffer.len() == size_of::<MetadataTableHeader>());
         // SAFETY: the assertion above makes sure the buffer size is correct.
         let metadata_table_header: MetadataTableHeader = unsafe { *(buffer.as_ptr().cast()) };
 
@@ -311,7 +313,7 @@ pub struct MetadataTableEntry {
 impl MetadataTableEntry {
     /// Parse one metadata entry from the buffer
     fn new(buffer: &[u8]) -> Result<MetadataTableEntry> {
-        assert!(buffer.len() == std::mem::size_of::<MetadataTableEntry>());
+        assert!(buffer.len() == size_of::<MetadataTableEntry>());
         // SAFETY: the assertion above makes sure the buffer size is correct.
         let mut metadata_table_entry: MetadataTableEntry = unsafe { *(buffer.as_ptr().cast()) };
 

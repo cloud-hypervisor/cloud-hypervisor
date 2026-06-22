@@ -4,6 +4,8 @@
 //! This module implements our vsock connection state machine. The heavy lifting is done by
 //! `connection::VsockConnection`, while this file only defines some constants and helper structs.
 
+use std::{io, result};
+
 use thiserror::Error;
 
 mod connection;
@@ -33,16 +35,16 @@ pub enum Error {
     TxBufFull,
     /// An I/O error occurred, when attempting to flush the connection TX buffer.
     #[error("Error flushing TX buffer")]
-    TxBufFlush(#[source] std::io::Error),
+    TxBufFlush(#[source] io::Error),
     /// An I/O error occurred, when attempting to write data to the host-side stream.
     #[error("Error writing to host side stream")]
-    StreamWrite(#[source] std::io::Error),
+    StreamWrite(#[source] io::Error),
     /// An I/O error occurred, when reading packet data.
     #[error("Error reading packet buffer")]
     PktBufRead,
 }
 
-type Result<T> = std::result::Result<T, Error>;
+type Result<T> = result::Result<T, Error>;
 
 /// A vsock connection state.
 ///
@@ -55,8 +57,9 @@ pub enum ConnState {
     PeerInit,
     /// The connection handshake has been performed successfully, and data can now be exchanged.
     Established,
-    /// The host (AF_UNIX) socket was closed.
-    LocalClosed,
+    /// The host (AF_UNIX) socket has been (partially) shut down. The tuple represents the host
+    /// R/W indication: (will_not_recv_anymore_data, will_not_send_anymore_data).
+    LocalClosed(bool, bool),
     /// A VSOCK_OP_SHUTDOWN packet was received from the guest. The tuple represents the guest R/W
     /// indication: (will_not_recv_anymore_data, will_not_send_anymore_data).
     PeerClosed(bool, bool),

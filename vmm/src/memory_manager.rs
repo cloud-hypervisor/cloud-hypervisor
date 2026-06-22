@@ -10,7 +10,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom};
 use std::num::NonZeroUsize;
 use std::ops::{BitAnd, Not, Sub};
-use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
+use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::fs::FileExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::{Path, PathBuf};
@@ -56,44 +56,9 @@ use crate::coredump::{
     CoredumpMemoryRegion, CoredumpMemoryRegions, DumpState, GuestDebuggableError,
 };
 use crate::migration::url_to_path;
+use crate::sparse::{next_data_extent, write_region_sparse};
 use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
 use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID, uffd};
-
-/// Find the next populated (data) extent in `[cursor, end)` of `fd`,
-/// driven by `lseek(SEEK_DATA)` / `lseek(SEEK_HOLE)`. Returns
-/// `Ok(Some((offset, len)))` for the next data extent within the window,
-/// or `Ok(None)` if there is no more data. Returns `Err` if the fd or
-/// filesystem does not support `SEEK_HOLE` (e.g. hugetlbfs) or for any
-/// other I/O error. Callers should treat a first-call error as "fall
-/// back to the dense path".
-fn next_data_extent(fd: BorrowedFd<'_>, cursor: u64, end: u64) -> io::Result<Option<(u64, u64)>> {
-    let raw = fd.as_raw_fd();
-    // SAFETY: BorrowedFd guarantees the fd is valid for the lifetime of
-    // the borrow; lseek does not consume or close it.
-    let data_off = unsafe { libc::lseek(raw, cursor as i64, libc::SEEK_DATA) };
-    if data_off < 0 {
-        let e = io::Error::last_os_error();
-        // ENXIO from SEEK_DATA means there is no more data at or after
-        // cursor. Any other error means the filesystem does not support
-        // SEEK_HOLE; the caller falls back to the dense path.
-        return if e.raw_os_error() == Some(libc::ENXIO) {
-            Ok(None)
-        } else {
-            Err(e)
-        };
-    }
-    let data_off = data_off as u64;
-    if data_off >= end {
-        return Ok(None);
-    }
-    // SAFETY: same as above.
-    let hole_off = unsafe { libc::lseek(raw, data_off as i64, libc::SEEK_HOLE) };
-    if hole_off < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let hole_off = (hole_off as u64).min(end);
-    Ok(Some((data_off, hole_off - data_off)))
-}
 
 struct UffdHandler {
     stop_event: EventFd,
@@ -278,6 +243,7 @@ pub struct MemoryManager {
     hugepages: bool,
     hugepage_size: Option<u64>,
     prefault: bool,
+    reserve: bool,
     thp: bool,
     user_provided_zones: bool,
     snapshot_memory_ranges: MemoryRangeTable,
@@ -389,6 +355,11 @@ pub enum Error {
     /// backed by user defined memory regions.
     #[error("Impossible to resize guest memory if it is backed by user defined memory regions")]
     InvalidResizeWithMemoryZones,
+
+    /// Forbidden operation. Impossible to resize guest memory below the boot
+    /// RAM as it is not removable with virtio-mem.
+    #[error("Invalid resize request: desired_size = {0} below boot size = {1}")]
+    InvalidResizeBelowBootSize(u64, u64),
 
     /// It's invalid to try applying a NUMA policy to a memory zone that is
     /// memory mapped with MAP_SHARED.
@@ -727,6 +698,7 @@ impl MemoryManager {
                     region_start,
                     region_size as usize,
                     prefault.unwrap_or(zone.prefault),
+                    zone.reserve,
                     zone.shared,
                     zone.hugepages,
                     zone.hugepage_size,
@@ -829,6 +801,7 @@ impl MemoryManager {
                         GuestAddress(guest_ram_mapping.gpa),
                         guest_ram_mapping.size as usize,
                         prefault.unwrap_or(zone_config.prefault),
+                        zone_config.reserve,
                         zone_config.shared,
                         zone_config.hugepages,
                         zone_config.hugepage_size,
@@ -1137,7 +1110,7 @@ impl MemoryManager {
     /// snapshot file followed by a `UFFDIO_COPY` to resolve the fault and
     /// wake the faulting thread. When no fault is pending, one prefault
     /// page is copied per loop iteration.
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(clippy::needless_pass_by_value)]
     fn uffd_handler_loop(
         uffd_fd: OwnedFd,
         stop_event: EventFd,
@@ -1528,6 +1501,7 @@ impl MemoryManager {
                 hotplug_size: config.hotplug_size,
                 hotplugged_size: config.hotplugged_size,
                 prefault: config.prefault,
+                reserve: config.reserve,
                 mergeable: config.mergeable,
             }];
 
@@ -1639,7 +1613,6 @@ impl MemoryManager {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         vm: Arc<dyn hypervisor::Vm>,
         config: &MemoryConfig,
@@ -1762,6 +1735,7 @@ impl MemoryManager {
                                 start_addr,
                                 hotplug_size as usize,
                                 prefault.unwrap_or(zone.prefault),
+                                zone.reserve,
                                 zone.shared,
                                 zone.hugepages,
                                 zone.hugepage_size,
@@ -1875,6 +1849,7 @@ impl MemoryManager {
             hugepages: config.hugepages,
             hugepage_size: config.hugepage_size,
             prefault: config.prefault,
+            reserve: config.reserve,
             user_provided_zones,
             snapshot_memory_ranges: MemoryRangeTable::default(),
             memory_zones,
@@ -1893,7 +1868,7 @@ impl MemoryManager {
         Ok(Arc::new(Mutex::new(memory_manager)))
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new_from_snapshot(
         snapshot: &Snapshot,
         vm: Arc<dyn hypervisor::Vm>,
@@ -2036,12 +2011,13 @@ impl MemoryManager {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn create_ram_region_raw(
         backing_file: &Option<PathBuf>,
         file_offset: u64,
         size: usize,
         prefault: bool,
+        reserve: bool,
         shared: bool,
         hugepages: bool,
         hugepage_size: Option<u64>,
@@ -2049,7 +2025,7 @@ impl MemoryManager {
         existing_memory_file: Option<File>,
         thp: bool,
     ) -> Result<MmapRegion<AtomicBitmap>, Error> {
-        let mut mmap_flags = libc::MAP_NORESERVE;
+        let mut mmap_flags = if reserve { 0 } else { libc::MAP_NORESERVE };
 
         // The duplication of mmap_flags ORing here is unfortunate but it also makes
         // the complexity of the handling clear.
@@ -2172,13 +2148,14 @@ impl MemoryManager {
         Ok(region)
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn create_ram_region(
         backing_file: &Option<PathBuf>,
         file_offset: u64,
         start_addr: GuestAddress,
         size: usize,
         prefault: bool,
+        reserve: bool,
         shared: bool,
         hugepages: bool,
         hugepage_size: Option<u64>,
@@ -2191,6 +2168,7 @@ impl MemoryManager {
             file_offset,
             size,
             prefault,
+            reserve,
             shared,
             hugepages,
             hugepage_size,
@@ -2306,6 +2284,7 @@ impl MemoryManager {
             start_addr,
             size,
             self.prefault,
+            self.reserve,
             self.shared,
             self.hugepages,
             self.hugepage_size,
@@ -2563,6 +2542,8 @@ impl MemoryManager {
             userspace_addr_ = userspace_addr as u64
         );
 
+        self.memory_slot_allocator().free_memory_slot(slot);
+
         Ok(())
     }
 
@@ -2607,14 +2588,19 @@ impl MemoryManager {
         let mut region: Option<Arc<GuestRegionMmap>> = None;
         match self.hotplug_method {
             HotplugMethod::VirtioMem => {
-                if desired_ram >= self.boot_ram {
-                    if !self.dynamic {
-                        return Ok(region);
-                    }
-
-                    self.virtio_mem_resize(DEFAULT_MEMORY_ZONE, desired_ram - self.boot_ram)?;
-                    self.current_ram = desired_ram;
+                if desired_ram < self.boot_ram {
+                    return Err(Error::InvalidResizeBelowBootSize(
+                        desired_ram,
+                        self.boot_ram,
+                    ));
                 }
+
+                if !self.dynamic {
+                    return Ok(region);
+                }
+
+                self.virtio_mem_resize(DEFAULT_MEMORY_ZONE, desired_ram - self.boot_ram)?;
+                self.current_ram = desired_ram;
             }
             HotplugMethod::Acpi => {
                 if desired_ram > self.current_ram {
@@ -2631,7 +2617,7 @@ impl MemoryManager {
         Ok(region)
     }
 
-    pub fn resize_zone(&mut self, id: &str, virtio_mem_size: u64) -> Result<(), Error> {
+    pub fn resize_zone(&mut self, zone: &MemoryZoneConfig, desired_ram: u64) -> Result<(), Error> {
         if !self.user_provided_zones {
             error!(
                 "Not allowed to resize guest memory zone when no zone is \
@@ -2640,7 +2626,11 @@ impl MemoryManager {
             return Err(Error::ResizeZone);
         }
 
-        self.virtio_mem_resize(id, virtio_mem_size)
+        if desired_ram < zone.size {
+            return Err(Error::InvalidResizeBelowBootSize(desired_ram, zone.size));
+        }
+
+        self.virtio_mem_resize(&zone.id, desired_ram - zone.size)
     }
 
     pub fn is_hardlink(f: &File) -> bool {
@@ -3212,74 +3202,6 @@ impl Snapshottable for MemoryManager {
     }
 }
 
-/// Write a single guest RAM region to the snapshot file at `dst_offset`,
-/// streaming populated extents via `SEEK_DATA` / `SEEK_HOLE` on the
-/// backing fd. `set_len(total)` must have been called on `dst` by the
-/// caller. Returns `Ok(true)` if the region was written sparsely, or
-/// `Ok(false)` if `SEEK_HOLE` is unsupported on the source fd (caller
-/// should fall back to dense write).
-fn write_region_sparse(
-    src: &File,
-    src_offset: u64,
-    dst: &File,
-    dst_offset: u64,
-    len: u64,
-) -> io::Result<bool> {
-    let src_fd = src.as_fd();
-    let end = src_offset
-        .checked_add(len)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "range overflow"))?;
-
-    // First call to next_data_extent doubles as a SEEK_HOLE-support probe:
-    // a non-ENXIO error means the filesystem doesn't support sparse-seek;
-    // tell the caller to use the dense path instead.
-    let mut next = match next_data_extent(src_fd, src_offset, end) {
-        Ok(opt) => opt,
-        Err(_) => return Ok(false),
-    };
-
-    const CHUNK: usize = 1 << 20;
-    let mut buf = vec![0u8; CHUNK];
-
-    while let Some((data_off, ext_len)) = next {
-        debug_assert!(data_off >= src_offset);
-        let in_region = data_off
-            .checked_sub(src_offset)
-            .expect("extent precedes src_offset");
-        let mut written = 0u64;
-        while written < ext_len {
-            let this = ((ext_len - written) as usize).min(CHUNK);
-            let slice = &mut buf[..this];
-            let read = src.read_at(slice, data_off + written)?;
-            if read == 0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "read_at returned 0 inside data extent",
-                ));
-            }
-            let mut wrote_total = 0;
-            while wrote_total < read {
-                let n = dst.write_at(
-                    &slice[wrote_total..read],
-                    dst_offset + in_region + written + wrote_total as u64,
-                )?;
-                if n == 0 {
-                    return Err(io::Error::new(
-                        io::ErrorKind::WriteZero,
-                        "write_at returned 0",
-                    ));
-                }
-                wrote_total += n;
-            }
-            written += read as u64;
-        }
-        // Subsequent next_data_extent failures are real I/O errors, not
-        // unsupported-FS, since the first probe succeeded.
-        next = next_data_extent(src_fd, data_off + ext_len, end)?;
-    }
-    Ok(true)
-}
-
 impl Transportable for MemoryManager {
     fn send(
         &self,
@@ -3443,255 +3365,5 @@ impl Migratable for MemoryManager {
             table.extend(sub_table);
         }
         Ok(table)
-    }
-}
-
-#[cfg(test)]
-mod unit_tests {
-    use std::io::Write;
-    use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd};
-    use std::os::unix::fs::FileExt;
-
-    use super::{next_data_extent, write_region_sparse};
-
-    fn make_memfd(size: u64) -> std::fs::File {
-        // SAFETY: memfd_create is a self-contained syscall; we own the
-        // returned fd.
-        let fd = unsafe { libc::syscall(libc::SYS_memfd_create, c"sparse-test".as_ptr(), 0u32) };
-        assert!(fd >= 0, "memfd_create failed");
-        // SAFETY: memfd_create returned a valid fd that we now own; wrap it
-        // in File so it is closed on drop.
-        let f = unsafe { std::fs::File::from_raw_fd(fd as i32) };
-        f.set_len(size).unwrap();
-        f
-    }
-
-    fn collect_extents(
-        fd: BorrowedFd<'_>,
-        start: u64,
-        end: u64,
-    ) -> std::io::Result<Vec<(u64, u64)>> {
-        let mut out = Vec::new();
-        let mut cursor = start;
-        while let Some((off, len)) = next_data_extent(fd, cursor, end)? {
-            out.push((off, len));
-            cursor = off + len;
-        }
-        Ok(out)
-    }
-
-    /// Punch an explicit hole into `f`. Tests use this instead of relying on
-    /// "didn't write here" to mean "is a hole": modern shmem/tmpfs may
-    /// allocate a multi-page folio on the first write and report the whole
-    /// folio as data, so per-page hole tracking after a partial write is
-    /// not portable. `fallocate(PUNCH_HOLE)` is the explicit "deallocate
-    /// these pages" syscall and is honored on every Linux filesystem we
-    /// run tests on (tmpfs, ext4, xfs, btrfs).
-    fn punch_hole(f: &std::fs::File, off: u64, len: u64) {
-        // SAFETY: FFI call; f is a valid open fd for the duration of the
-        // call.
-        let r = unsafe {
-            libc::fallocate(
-                f.as_raw_fd(),
-                libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE,
-                off as libc::off_t,
-                len as libc::off_t,
-            )
-        };
-        assert_eq!(
-            r,
-            0,
-            "fallocate PUNCH_HOLE off={off} len={len}: {}",
-            std::io::Error::last_os_error(),
-        );
-    }
-
-    /// Build a file with a deterministic sparse layout: write each `(off,
-    /// len, byte)` data extent, then punch every gap into a real hole.
-    /// The resulting `SEEK_DATA`/`SEEK_HOLE` extents match `data` exactly,
-    /// regardless of folio/THP allocation policy on the backing FS.
-    fn sparse_layout(f: &std::fs::File, total: u64, data: &[(u64, u64, u8)]) {
-        f.set_len(total).unwrap();
-        for &(off, len, byte) in data {
-            f.write_all_at(&vec![byte; len as usize], off).unwrap();
-        }
-        let mut sorted: Vec<(u64, u64)> = data.iter().map(|&(o, l, _)| (o, l)).collect();
-        sorted.sort_unstable();
-        let mut cursor = 0u64;
-        for (off, len) in sorted {
-            assert!(off >= cursor, "overlapping data extents");
-            if off > cursor {
-                punch_hole(f, cursor, off - cursor);
-            }
-            cursor = off + len;
-        }
-        if cursor < total {
-            punch_hole(f, cursor, total - cursor);
-        }
-    }
-
-    #[test]
-    fn empty_memfd_has_no_data_extents() {
-        let f = make_memfd(4096 * 16);
-        let extents = collect_extents(f.as_fd(), 0, 4096 * 16).unwrap();
-        assert!(extents.is_empty(), "got {extents:?}");
-    }
-
-    #[test]
-    fn written_pages_show_as_data_extents() {
-        let f = make_memfd(0);
-        sparse_layout(
-            &f,
-            4096 * 16,
-            &[(4096 * 2, 4096, 0xAB), (4096 * 5, 4096 * 2, 0xCD)],
-        );
-        let extents = collect_extents(f.as_fd(), 0, 4096 * 16).unwrap();
-        assert_eq!(extents, vec![(4096 * 2, 4096), (4096 * 5, 4096 * 2)]);
-    }
-
-    #[test]
-    fn enumeration_respects_window() {
-        let f = make_memfd(4096 * 16);
-        // Fully populate the file, then leave it as one big data extent.
-        f.write_all_at(&vec![0xEEu8; 4096 * 16], 0).unwrap();
-        let extents = collect_extents(f.as_fd(), 4096 * 4, 4096 * 8).unwrap();
-        assert_eq!(extents, vec![(4096 * 4, 4096 * 4)]);
-    }
-
-    #[test]
-    fn dense_file_yields_single_extent() {
-        let mut tmp = tempfile::NamedTempFile::new().unwrap();
-        tmp.write_all(&vec![0xEEu8; 4096 * 8]).unwrap();
-        let f = tmp.reopen().unwrap();
-        let extents = collect_extents(f.as_fd(), 0, 4096 * 8).unwrap();
-        assert_eq!(extents, vec![(0, 4096 * 8)]);
-    }
-
-    #[test]
-    fn sparse_file_yields_extents_at_written_positions() {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let f = tmp.reopen().unwrap();
-        sparse_layout(&f, 4096 * 16, &[(4096 * 4, 4096 * 2, 0x55)]);
-        let extents = collect_extents(f.as_fd(), 0, 4096 * 16).unwrap();
-        assert_eq!(extents, vec![(4096 * 4, 4096 * 2)]);
-    }
-
-    #[test]
-    fn single_extent_at_zero_offset() {
-        let src = make_memfd(0);
-        sparse_layout(&src, 4096 * 16, &[(4096 * 3, 4096 * 2, 0x42)]);
-
-        // Pre-fill dst with a sentinel byte so we can verify that
-        // write_region_sparse only wrote where the source had data: any
-        // byte outside the source-data extent must remain the sentinel.
-        // This is FS-independent (does not depend on whether the dst
-        // filesystem reports holes after a partial write).
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let dst = tmp.reopen().unwrap();
-        dst.write_all_at(&vec![0xFE; 4096 * 16], 0).unwrap();
-
-        let used = write_region_sparse(&src, 0, &dst, 0, 4096 * 16).unwrap();
-        assert!(used);
-
-        let buf = std::fs::read(tmp.path()).unwrap();
-        assert!(buf[..4096 * 3].iter().all(|&b| b == 0xFE));
-        assert!(buf[4096 * 3..4096 * 5].iter().all(|&b| b == 0x42));
-        assert!(buf[4096 * 5..].iter().all(|&b| b == 0xFE));
-    }
-
-    #[test]
-    fn two_regions_in_same_destination_file_at_dst_offset() {
-        let src_a = make_memfd(0);
-        sparse_layout(&src_a, 4096 * 16, &[(4096, 4096 * 2, 0xAA)]);
-        let src_b = make_memfd(0);
-        sparse_layout(&src_b, 4096 * 16, &[(4096 * 5, 4096 * 3, 0xBB)]);
-
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let dst = tmp.reopen().unwrap();
-        sparse_layout(&dst, 4096 * 32, &[]);
-
-        let _ = write_region_sparse(&src_a, 0, &dst, 0, 4096 * 16).unwrap();
-        let _ = write_region_sparse(&src_b, 0, &dst, 4096 * 16, 4096 * 16).unwrap();
-
-        let buf = std::fs::read(tmp.path()).unwrap();
-        assert!(buf[..4096].iter().all(|&b| b == 0));
-        assert!(buf[4096..4096 * 3].iter().all(|&b| b == 0xAA));
-        assert!(buf[4096 * 3..4096 * 16].iter().all(|&b| b == 0));
-        assert!(buf[4096 * 16..4096 * 21].iter().all(|&b| b == 0));
-        assert!(buf[4096 * 21..4096 * 24].iter().all(|&b| b == 0xBB));
-        assert!(buf[4096 * 24..].iter().all(|&b| b == 0));
-    }
-
-    #[test]
-    fn extent_at_non_zero_src_offset() {
-        let src = make_memfd(0);
-        sparse_layout(&src, 4096 * 32, &[(4096 * 20, 4096 * 2, 0x77)]);
-
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let dst = tmp.reopen().unwrap();
-        sparse_layout(&dst, 4096 * 16, &[]);
-
-        let used = write_region_sparse(&src, 4096 * 16, &dst, 0, 4096 * 16).unwrap();
-        assert!(used);
-
-        let buf = std::fs::read(tmp.path()).unwrap();
-        assert!(buf[..4096 * 4].iter().all(|&b| b == 0));
-        assert!(buf[4096 * 4..4096 * 6].iter().all(|&b| b == 0x77));
-        assert!(buf[4096 * 6..].iter().all(|&b| b == 0));
-    }
-
-    /// Round-trip: write two regions sparsely into a snapshot file, then
-    /// read them back using the same next_data_extent + read_at pattern
-    /// that fill_saved_regions uses. Verifies the restore path recovers
-    /// the original content including holes.
-    #[test]
-    fn round_trip_sparse_write_then_read() {
-        let src_a = make_memfd(0);
-        sparse_layout(&src_a, 4096 * 16, &[(4096 * 2, 4096 * 3, 0xAA)]);
-
-        let src_b = make_memfd(0);
-        sparse_layout(&src_b, 4096 * 16, &[(4096 * 10, 4096 * 4, 0xBB)]);
-
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let dst = tmp.reopen().unwrap();
-        let total = 4096u64 * 32;
-        sparse_layout(&dst, total, &[]);
-
-        write_region_sparse(&src_a, 0, &dst, 0, 4096 * 16).unwrap();
-        write_region_sparse(&src_b, 0, &dst, 4096 * 16, 4096 * 16).unwrap();
-
-        // Read back using next_data_extent + read_at, mirroring
-        // fill_saved_regions's sparse restore path.
-        let snap = tmp.reopen().unwrap();
-        let regions: Vec<(u64, u64)> = vec![(0, 4096 * 16), (4096 * 16, 4096 * 16)];
-        let mut restored = vec![0u8; total as usize];
-
-        for &(file_cursor, region_len) in &regions {
-            let end = file_cursor + region_len;
-            let mut cursor = file_cursor;
-            while let Some((data_off, ext_len)) =
-                next_data_extent(snap.as_fd(), cursor, end).unwrap()
-            {
-                let in_region = (data_off - file_cursor) as usize;
-                let dst_start = file_cursor as usize + in_region;
-                snap.read_at(
-                    &mut restored[dst_start..dst_start + ext_len as usize],
-                    data_off,
-                )
-                .unwrap();
-                cursor = data_off + ext_len;
-            }
-        }
-
-        // Verify content matches a dense read.
-        let dense = std::fs::read(tmp.path()).unwrap();
-        assert_eq!(restored, dense);
-
-        // Verify the actual data landed in the right places.
-        assert!(restored[..4096 * 2].iter().all(|&b| b == 0));
-        assert!(restored[4096 * 2..4096 * 5].iter().all(|&b| b == 0xAA));
-        assert!(restored[4096 * 5..4096 * 26].iter().all(|&b| b == 0));
-        assert!(restored[4096 * 26..4096 * 30].iter().all(|&b| b == 0xBB));
-        assert!(restored[4096 * 30..].iter().all(|&b| b == 0));
     }
 }

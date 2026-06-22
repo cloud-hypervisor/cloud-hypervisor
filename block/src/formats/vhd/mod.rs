@@ -17,6 +17,7 @@ use std::io;
 use std::os::unix::io::AsRawFd;
 
 pub use internal::footer::is_fixed_vhd;
+use log::warn;
 
 use self::internal::fixed::FixedVhd;
 #[cfg(feature = "io_uring")]
@@ -25,16 +26,17 @@ use self::worker::sync::FixedVhdSync;
 use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError};
 use crate::disk_file::DiskSize;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
-use crate::{BlockBackend, Error, disk_file};
+use crate::{AlignedFile, BlockBackend, DiskTopology, Error, disk_file};
 
 #[derive(Debug)]
 pub struct VhdDisk {
     inner: FixedVhd,
     use_io_uring: bool,
+    direct: bool,
 }
 
 impl VhdDisk {
-    pub fn new(file: File, use_io_uring: bool) -> BlockResult<Self> {
+    pub fn new(file: File, use_io_uring: bool, direct: bool) -> BlockResult<Self> {
         #[cfg(not(feature = "io_uring"))]
         if use_io_uring {
             return Err(BlockError::new(
@@ -48,6 +50,7 @@ impl VhdDisk {
         Ok(Self {
             inner: FixedVhd::new(file).map_err(|e| BlockError::from(e).with_op(ErrorOp::Open))?,
             use_io_uring,
+            direct,
         })
     }
 }
@@ -77,7 +80,14 @@ impl disk_file::DiskFd for VhdDisk {
     }
 }
 
-impl disk_file::Geometry for VhdDisk {}
+impl disk_file::Geometry for VhdDisk {
+    fn topology(&self) -> DiskTopology {
+        DiskTopology::probe(self.inner.file()).unwrap_or_else(|_| {
+            warn!("Unable to get device topology. Using default topology");
+            DiskTopology::default()
+        })
+    }
+}
 
 impl disk_file::SparseCapable for VhdDisk {}
 
@@ -98,20 +108,21 @@ impl disk_file::AsyncDiskFile for VhdDisk {
         Ok(Box::new(VhdDisk {
             inner: self.inner.clone(),
             use_io_uring: self.use_io_uring,
+            direct: self.direct,
         }))
     }
 
     fn create_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
         let size = self.logical_size()?;
+        let file = self.inner.file().try_clone().map_err(|e| {
+            BlockError::new(BlockErrorKind::Io, DiskFileError::NewAsyncIo(e)).with_op(ErrorOp::Open)
+        })?;
+        let raw_file = AlignedFile::new(file, self.direct);
 
         if self.use_io_uring {
             #[cfg(feature = "io_uring")]
             {
-                return Ok(Box::new(FixedVhdAsync::new(
-                    self.inner.as_raw_fd(),
-                    ring_depth,
-                    size,
-                )?));
+                return Ok(Box::new(FixedVhdAsync::new(raw_file, ring_depth, size)?));
             }
 
             #[cfg(not(feature = "io_uring"))]
@@ -119,12 +130,7 @@ impl disk_file::AsyncDiskFile for VhdDisk {
         }
 
         let _ = ring_depth;
-        Ok(Box::new(
-            FixedVhdSync::new(self.inner.as_raw_fd(), size).map_err(|e| {
-                BlockError::new(BlockErrorKind::Io, DiskFileError::NewAsyncIo(e))
-                    .with_op(ErrorOp::Open)
-            })?,
-        ))
+        Ok(Box::new(FixedVhdSync::new(raw_file, size)))
     }
 }
 
@@ -132,15 +138,11 @@ impl disk_file::AsyncDiskFile for VhdDisk {
 mod unit_tests {
     use std::fs::File;
     use std::io::{Seek, SeekFrom, Write};
-    #[cfg(feature = "io_uring")]
-    use std::os::fd::AsRawFd;
 
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
-    use crate::async_io::AsyncIo;
-    #[cfg(feature = "io_uring")]
-    use crate::async_io::{AsyncIoOperation, OwnedIoBuffer};
+    use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoOperation, OwnedIoBuffer};
     use crate::disk_file::{AsyncDiskFile, DiskSize, PhysicalSize, Resizable};
 
     /// Minimal fixed VHD footer (disk type = 2, current_size = 0x11223344).
@@ -176,7 +178,7 @@ mod unit_tests {
     #[test]
     fn new_sync_returns_correct_size() {
         let file = make_vhd_file();
-        let disk = VhdDisk::new(file, false).unwrap();
+        let disk = VhdDisk::new(file, false, false).unwrap();
         assert_eq!(disk.logical_size().unwrap(), 0x1122_3344);
     }
 
@@ -192,7 +194,7 @@ mod unit_tests {
     #[test]
     fn sync_backend_disables_batch_requests() {
         let file = make_vhd_file();
-        let disk = VhdDisk::new(file, false).unwrap();
+        let disk = VhdDisk::new(file, false, false).unwrap();
         assert_async_io(&disk, false);
     }
 
@@ -200,28 +202,103 @@ mod unit_tests {
     #[test]
     fn io_uring_backend_enables_batch_requests() {
         let file = make_vhd_file();
-        let disk = VhdDisk::new(file, true).unwrap();
+        let disk = VhdDisk::new(file, true, false).unwrap();
         assert_async_io(&disk, true);
+    }
+
+    #[test]
+    fn sync_rejects_read_straddling_logical_size() {
+        let file = TempFile::new().unwrap().into_file();
+        file.set_len(0x2000).unwrap();
+        let mut sync_io =
+            FixedVhdSync::new(AlignedFile::new(file.try_clone().unwrap(), false), 0x1000);
+        let op = AsyncIoOperation::read_to_vec(0x800, OwnedIoBuffer::from_vec(vec![0; 0x900]), 1);
+
+        assert!(matches!(
+            sync_io.submit_data_operation(op),
+            Err(AsyncIoError::ReadVectored(_))
+        ));
+    }
+
+    #[test]
+    fn sync_rejects_write_straddling_logical_size() {
+        let file = TempFile::new().unwrap().into_file();
+        file.set_len(0x2000).unwrap();
+        let mut sync_io =
+            FixedVhdSync::new(AlignedFile::new(file.try_clone().unwrap(), false), 0x1000);
+        let op =
+            AsyncIoOperation::write_from_vec(0x800, OwnedIoBuffer::from_vec(vec![0; 0x900]), 1);
+
+        assert!(matches!(
+            sync_io.submit_data_operation(op),
+            Err(AsyncIoError::WriteVectored(_))
+        ));
+    }
+
+    #[test]
+    fn sync_accepts_operation_exactly_filling_logical_size() {
+        let file = TempFile::new().unwrap().into_file();
+        file.set_len(0x2000).unwrap();
+        let mut sync_io =
+            FixedVhdSync::new(AlignedFile::new(file.try_clone().unwrap(), false), 0x1000);
+        // end == size: boundary must be accepted
+        let op = AsyncIoOperation::read_to_vec(0, OwnedIoBuffer::from_vec(vec![0; 0x1000]), 1);
+        sync_io.submit_data_operation(op).unwrap();
+    }
+
+    #[test]
+    fn sync_accepts_operation_at_last_byte() {
+        let file = TempFile::new().unwrap().into_file();
+        file.set_len(0x2000).unwrap();
+        let mut sync_io =
+            FixedVhdSync::new(AlignedFile::new(file.try_clone().unwrap(), false), 0x1000);
+        // end = 0xFFF + 1 = 0x1000 == size: boundary must be accepted
+        let op = AsyncIoOperation::read_to_vec(0xFFF, OwnedIoBuffer::from_vec(vec![0; 1]), 1);
+        sync_io.submit_data_operation(op).unwrap();
     }
 
     #[cfg(feature = "io_uring")]
     #[test]
-    fn io_uring_batch_rejects_request_past_logical_size() {
+    fn io_uring_batch_rejects_request_straddling_logical_size() {
         let file = TempFile::new().unwrap().into_file();
         file.set_len(0x2000).unwrap();
-        let mut async_io = FixedVhdAsync::new(file.as_raw_fd(), 8, 0x1000).unwrap();
+        let mut async_io = FixedVhdAsync::new(
+            AlignedFile::new(file.try_clone().unwrap(), false),
+            8,
+            0x1000,
+        )
+        .unwrap();
         let op = AsyncIoOperation::read_to_vec(0x800, OwnedIoBuffer::from_vec(vec![0; 0x900]), 1);
 
         assert!(matches!(
             async_io.submit_batch_requests(vec![op]),
-            Err(crate::async_io::AsyncIoError::ReadVectored(_))
+            Err(AsyncIoError::ReadVectored(_))
+        ));
+    }
+
+    #[cfg(feature = "io_uring")]
+    #[test]
+    fn io_uring_rejects_single_op_straddling_logical_size() {
+        let file = TempFile::new().unwrap().into_file();
+        file.set_len(0x2000).unwrap();
+        let mut async_io = FixedVhdAsync::new(
+            AlignedFile::new(file.try_clone().unwrap(), false),
+            8,
+            0x1000,
+        )
+        .unwrap();
+        let op = AsyncIoOperation::read_to_vec(0x800, OwnedIoBuffer::from_vec(vec![0; 0x900]), 1);
+
+        assert!(matches!(
+            async_io.submit_data_operation(op),
+            Err(AsyncIoError::ReadVectored(_))
         ));
     }
 
     #[test]
     fn try_clone_preserves_sync_dispatch() {
         let file = make_vhd_file();
-        let disk = VhdDisk::new(file, false).unwrap();
+        let disk = VhdDisk::new(file, false, false).unwrap();
         let cloned = disk.try_clone().unwrap();
         assert_async_io_from_dyn(cloned.as_ref(), false);
     }
@@ -230,7 +307,7 @@ mod unit_tests {
     #[test]
     fn try_clone_preserves_io_uring_dispatch() {
         let file = make_vhd_file();
-        let disk = VhdDisk::new(file, true).unwrap();
+        let disk = VhdDisk::new(file, true, false).unwrap();
         let cloned = disk.try_clone().unwrap();
         assert_async_io_from_dyn(cloned.as_ref(), true);
     }
@@ -238,14 +315,14 @@ mod unit_tests {
     #[test]
     fn resize_returns_error() {
         let file = make_vhd_file();
-        let mut disk = VhdDisk::new(file, false).unwrap();
+        let mut disk = VhdDisk::new(file, false, false).unwrap();
         assert!(disk.resize(0x2000_0000).is_err());
     }
 
     #[test]
     fn physical_size_includes_footer() {
         let file = make_vhd_file();
-        let disk = VhdDisk::new(file, false).unwrap();
+        let disk = VhdDisk::new(file, false, false).unwrap();
         // Data region (0x1122_3344) + VHD footer (0x200).
         assert_eq!(disk.physical_size().unwrap(), 0x1122_3344 + 0x200);
     }

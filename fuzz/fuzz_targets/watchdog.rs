@@ -37,6 +37,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
 
     let mut watchdog = virtio_devices::Watchdog::new(
         "fuzzer_watchdog".to_owned(),
+        false,
         EventFd::new(EFD_NONBLOCK).unwrap(),
         SeccompAction::Allow,
         EventFd::new(EFD_NONBLOCK).unwrap(),

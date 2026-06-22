@@ -499,6 +499,12 @@ pub struct Vcpu {
 }
 
 impl Vcpu {
+    /// Borrow the underlying hypervisor vCPU, for guest-clock capture/restore
+    /// because the aarch64 counter is per-vCPU state
+    pub fn hypervisor_vcpu(&self) -> &dyn hypervisor::Vcpu {
+        self.vcpu.as_ref()
+    }
+
     /// Constructs a new VCPU for `vm`.
     ///
     /// # Arguments
@@ -640,6 +646,11 @@ impl Vcpu {
     /// anything useful.
     pub fn run(&mut self) -> std::result::Result<VmExit, HypervisorCpuError> {
         self.vcpu.run()
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    pub fn get_timebase_frequency(&self) -> result::Result<u64, hypervisor::HypervisorCpuError> {
+        self.vcpu.get_timebase_frequency()
     }
 
     #[cfg(feature = "sev_snp")]
@@ -842,8 +853,8 @@ impl VcpuState {
 }
 
 impl CpuManager {
-    #[allow(unused_variables)]
-    #[allow(clippy::too_many_arguments)]
+    #[expect(unused_variables)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         config: &CpusConfig,
         vm: Arc<dyn hypervisor::Vm>,
@@ -1684,6 +1695,11 @@ impl CpuManager {
             .iter()
             .map(|cpu| cpu.lock().unwrap().get_mpidr())
             .collect()
+    }
+
+    /// The boot vCPU (vCPU 0), or `None` before the vCPUs are created.
+    pub fn boot_vcpu(&self) -> Option<Arc<Mutex<Vcpu>>> {
+        self.vcpus.first().cloned()
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -3221,11 +3237,20 @@ impl BusDevice for AcpiCpuHotplugController {
 
         match offset {
             Self::CPU_SELECTION_OFFSET => {
-                assert!(data.len() >= core::mem::size_of::<u32>());
-                data[0..core::mem::size_of::<u32>()]
-                    .copy_from_slice(&self.selected_cpu.to_le_bytes());
+                if data.len() != size_of::<u32>() {
+                    warn!(
+                        "Invalid sized read of CPU selection register: {}",
+                        data.len()
+                    );
+                    return;
+                }
+                data.copy_from_slice(&self.selected_cpu.to_le_bytes());
             }
             Self::CPU_STATUS_OFFSET => {
+                if data.len() != 1 {
+                    warn!("Invalid sized read of CPU status register: {}", data.len());
+                    return;
+                }
                 if self.selected_cpu < self.max_vcpus {
                     let state = &vcpu_states[usize::try_from(self.selected_cpu).unwrap()];
                     if state.active() {
@@ -3250,11 +3275,20 @@ impl BusDevice for AcpiCpuHotplugController {
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         match offset {
             Self::CPU_SELECTION_OFFSET => {
-                assert!(data.len() >= core::mem::size_of::<u32>());
-                self.selected_cpu =
-                    u32::from_le_bytes(data[0..core::mem::size_of::<u32>()].try_into().unwrap());
+                if data.len() != size_of::<u32>() {
+                    warn!(
+                        "Invalid sized write of CPU selection register: {}",
+                        data.len()
+                    );
+                    return None;
+                }
+                self.selected_cpu = u32::from_le_bytes(data.try_into().unwrap());
             }
             Self::CPU_STATUS_OFFSET => {
+                if data.len() != 1 {
+                    warn!("Invalid sized write of CPU status register: {}", data.len());
+                    return None;
+                }
                 if self.selected_cpu < self.max_vcpus {
                     // This structure is not shared with the vCPU thread, therefore, holding the
                     // lock for the entire function doesn't cause any deadlock.

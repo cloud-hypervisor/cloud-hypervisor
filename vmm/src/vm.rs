@@ -100,17 +100,10 @@ use crate::landlock::LandlockError;
 use crate::memory_manager::{
     Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData,
 };
-#[cfg(target_arch = "x86_64")]
-use crate::migration::get_vm_snapshot;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::migration::url_to_file;
-use crate::migration::{SNAPSHOT_CONFIG_FILE, SNAPSHOT_STATE_FILE, url_to_path};
-#[cfg(all(
-    feature = "kvm",
-    feature = "sev_snp",
-    feature = "fw_cfg",
-    target_arch = "x86_64"
-))]
+use crate::migration::{SNAPSHOT_CONFIG_FILE, SNAPSHOT_STATE_FILE, get_vm_snapshot, url_to_path};
+#[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
 use crate::sev::MeasuredBootInfo;
 #[cfg(feature = "fw_cfg")]
 use crate::vm_config::FwCfgConfig;
@@ -520,6 +513,16 @@ pub fn physical_bits(hypervisor: &dyn hypervisor::Hypervisor, max_phys_bits: u8)
     cmp::min(host_phys_bits, max_phys_bits)
 }
 
+/// Guest clock baseline captured for snapshot/restore, plus how it must be
+/// re-established on the next resume. `mode` is runtime-only (`SnapshotRestore`
+/// after restore/migration-receive, `SameHostResume` for a live same-host capture)
+/// and is not serialized: it is re-derived from "was this VM built from a snapshot".
+#[derive(Clone, Copy)]
+struct SavedClock {
+    mode: hypervisor::ClockRestoreMode,
+    state: hypervisor::ClockState,
+}
+
 pub struct Vm {
     #[cfg(feature = "tdx")]
     kernel: Option<File>,
@@ -533,8 +536,7 @@ pub struct Vm {
     #[cfg_attr(any(not(feature = "kvm"), target_arch = "aarch64"), allow(dead_code))]
     // The hypervisor abstracted virtual machine.
     vm: Arc<dyn hypervisor::Vm>,
-    #[cfg(target_arch = "x86_64")]
-    saved_clock: Option<hypervisor::ClockData>,
+    saved_clock: Option<SavedClock>,
     #[cfg(not(target_arch = "riscv64"))]
     numa_nodes: NumaNodes,
     #[cfg_attr(any(not(feature = "kvm"), target_arch = "aarch64"), allow(dead_code))]
@@ -560,8 +562,8 @@ impl Vm {
             .with_migrate_ma(0)
     }
 
-    #[allow(clippy::needless_pass_by_value)]
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::needless_pass_by_value)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new_from_memory_manager(
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
@@ -687,10 +689,14 @@ impl Vm {
             .transpose()
             .map_err(Error::InitramfsFile)?;
 
-        #[cfg(target_arch = "x86_64")]
         let saved_clock = if let Some(snapshot) = snapshot.as_ref() {
             let vm_snapshot = get_vm_snapshot(snapshot).map_err(Error::Restore)?;
-            vm_snapshot.clock
+            // Restored or migrated in: the guest clock must catch up to wall time
+            // on resume (the counter was reset to the saved value).
+            vm_snapshot.clock.map(|state| SavedClock {
+                mode: hypervisor::ClockRestoreMode::SnapshotRestore,
+                state,
+            })
         } else {
             None
         };
@@ -712,7 +718,6 @@ impl Vm {
             cpu_manager,
             memory_manager,
             vm,
-            #[cfg(target_arch = "x86_64")]
             saved_clock,
             #[cfg(not(target_arch = "riscv64"))]
             numa_nodes,
@@ -751,7 +756,7 @@ impl Vm {
     }
 
     /// Create and configure the CPU manager.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn create_cpu_manager(
         config: &Arc<Mutex<VmConfig>>,
         vm: Arc<dyn hypervisor::Vm>,
@@ -828,7 +833,7 @@ impl Vm {
     }
 
     /// Create and configure the device manager.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn create_device_manager(
         io_bus: Arc<Bus>,
         mmio_bus: Arc<Bus>,
@@ -881,7 +886,7 @@ impl Vm {
     /// - KVM (x86_64, aarch64, riscv64)
     /// - MSHV (x86_64, aarch64)
     /// - SEV-SNP (MSHV with confidential computing)
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn hypervisor_specific_init(
         vm: &Arc<dyn hypervisor::Vm>,
         memory_manager: &Arc<Mutex<MemoryManager>>,
@@ -928,7 +933,6 @@ impl Vm {
                 console_resize_pipe,
                 original_termios,
                 snapshot,
-                #[cfg(feature = "igvm")]
                 igvm_file,
             );
         }
@@ -996,7 +1000,7 @@ impl Vm {
 
     /// Initialize SEV-SNP specific components.
     #[cfg(feature = "sev_snp")]
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn init_sev_snp(
         vm: &Arc<dyn hypervisor::Vm>,
         memory_manager: &Arc<Mutex<MemoryManager>>,
@@ -1007,7 +1011,7 @@ impl Vm {
         console_resize_pipe: Option<&Arc<File>>,
         original_termios: &Arc<Mutex<Option<termios>>>,
         snapshot: Option<&Snapshot>,
-        #[cfg(feature = "igvm")] igvm_file: Option<IgvmFile>,
+        igvm_file: Option<IgvmFile>,
     ) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {
         // Create boot vCPUs before SEV-SNP initialization
         cpu_manager
@@ -1017,27 +1021,17 @@ impl Vm {
             .map_err(Error::CpuManager)?;
 
         // Extract guest policy from IGVM if available, otherwise use default.
-        #[cfg(feature = "igvm")]
         let guest_policy = igvm_file
             .as_ref()
             .and_then(igvm_loader::extract_guest_policy)
             .unwrap_or_else(Self::get_default_sev_snp_guest_policy);
-        #[cfg(not(feature = "igvm"))]
-        let guest_policy = Self::get_default_sev_snp_guest_policy();
 
         vm.sev_snp_init(guest_policy)
             .map_err(Error::InitializeSevSnpVm)?;
 
         // Load payload for SEV-SNP (IGVM parser needs cpu_manager for cpuid)
         let load_payload_handle = if snapshot.is_none() {
-            Self::load_payload_async(
-                memory_manager,
-                config,
-                #[cfg(feature = "igvm")]
-                cpu_manager,
-                #[cfg(feature = "igvm")]
-                igvm_file,
-            )?
+            Self::load_payload_async(memory_manager, config, cpu_manager, igvm_file)?
         } else {
             None
         };
@@ -1336,7 +1330,7 @@ impl Vm {
         Ok(numa_nodes)
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         vm_config: Arc<Mutex<VmConfig>>,
         exit_evt: EventFd,
@@ -1382,7 +1376,7 @@ impl Vm {
             #[allow(unused_mut)]
             let mut hv_config: hypervisor::HypervisorVmConfig =
                 vm_config.as_ref().lock().unwrap().deref().into();
-            #[cfg(all(feature = "igvm", feature = "sev_snp"))]
+            #[cfg(feature = "sev_snp")]
             if let Some(ref igvm) = igvm_file {
                 hv_config.vmsa_features = igvm_loader::extract_sev_features(igvm);
             }
@@ -1507,7 +1501,7 @@ impl Vm {
         Ok(cmdline)
     }
 
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(clippy::needless_pass_by_value)]
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     fn load_firmware(
         mut firmware: &File,
@@ -1572,18 +1566,14 @@ impl Vm {
     }
 
     #[cfg(feature = "igvm")]
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(clippy::needless_pass_by_value)]
     fn load_igvm(
         igvm_file: IgvmFile,
         memory_manager: Arc<Mutex<MemoryManager>>,
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
-        #[cfg(all(
-            feature = "kvm",
-            feature = "sev_snp",
-            feature = "fw_cfg",
-            target_arch = "x86_64"
-        ))]
-        measured_boot: Option<MeasuredBootInfo>,
+        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))] measured_boot: Option<
+            MeasuredBootInfo,
+        >,
         #[cfg(feature = "sev_snp")] host_data: &Option<String>,
     ) -> Result<EntryPoint> {
         // Only reserve bootloader/VMSA regions for KVM + SEV-SNP; other hypervisors
@@ -1600,12 +1590,7 @@ impl Vm {
             memory_manager,
             cpu_manager.clone(),
             "",
-            #[cfg(all(
-                feature = "kvm",
-                feature = "sev_snp",
-                feature = "fw_cfg",
-                target_arch = "x86_64"
-            ))]
+            #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
             measured_boot,
             #[cfg(feature = "sev_snp")]
             host_data,
@@ -1630,7 +1615,7 @@ impl Vm {
     ///
     /// For x86_64, the boot path is the same.
     #[cfg(target_arch = "x86_64")]
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(clippy::needless_pass_by_value)]
     fn load_kernel(
         mut kernel: File,
         cmdline: Option<Cmdline>,
@@ -1701,12 +1686,7 @@ impl Vm {
             if payload.igvm.is_some() {
                 let igvm_file =
                     igvm_file.ok_or(Error::IgvmLoad(igvm_loader::Error::MissingIgvm))?;
-                #[cfg(all(
-                    feature = "kvm",
-                    feature = "sev_snp",
-                    feature = "fw_cfg",
-                    target_arch = "x86_64"
-                ))]
+                #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
                 let measured_boot = if let (true, Some(kernel_path), Some(_cmdline)) = (
                     payload
                         .fw_cfg_config
@@ -1749,12 +1729,7 @@ impl Vm {
                     igvm_file,
                     memory_manager,
                     cpu_manager,
-                    #[cfg(all(
-                        feature = "kvm",
-                        feature = "sev_snp",
-                        feature = "fw_cfg",
-                        target_arch = "x86_64"
-                    ))]
+                    #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
                     measured_boot,
                     #[cfg(feature = "sev_snp")]
                     &payload.host_data,
@@ -2023,6 +1998,16 @@ impl Vm {
 
         // TODO: PMU support for riscv64 is scheduled to next stage.
 
+        let timebase_frequency = self
+            .cpu_manager
+            .lock()
+            .unwrap()
+            .vcpus()
+            .first()
+            .and_then(|vcpu| vcpu.lock().unwrap().get_timebase_frequency().ok())
+            .map(|f| f as u32)
+            .unwrap_or(0x989680);
+
         arch::configure_system(
             &mem,
             cmdline.as_cstring().unwrap().to_str().unwrap(),
@@ -2031,6 +2016,7 @@ impl Vm {
             &initramfs_config,
             &pci_space_info,
             &vaia,
+            timebase_frequency,
         )
         .map_err(Error::ConfigureSystem)?;
 
@@ -2172,27 +2158,18 @@ impl Vm {
         if let Some(zones) = &mut memory_config.zones {
             for zone in zones.iter_mut() {
                 if zone.id == id {
-                    if desired_memory >= zone.size {
-                        let hotplugged_size = desired_memory - zone.size;
-                        self.memory_manager
-                            .lock()
-                            .unwrap()
-                            .resize_zone(id, desired_memory - zone.size)
-                            .map_err(Error::MemoryManager)?;
-                        // We update the memory zone config regardless of the
-                        // actual 'resize-zone' operation result (happened or
-                        // not), so that if the VM reboots it will be running
-                        // with the last configured memory zone size.
-                        zone.hotplugged_size = Some(hotplugged_size);
+                    self.memory_manager
+                        .lock()
+                        .unwrap()
+                        .resize_zone(zone, desired_memory)
+                        .map_err(Error::MemoryManager)?;
+                    // We update the memory zone config regardless of the
+                    // actual 'resize-zone' operation result (happened or
+                    // not), so that if the VM reboots it will be running
+                    // with the last configured memory zone size.
+                    zone.hotplugged_size = Some(desired_memory - zone.size);
 
-                        return Ok(());
-                    }
-                    error!(
-                        "Invalid to ask less ({}) than boot RAM ({}) for \
-                        this memory zone",
-                        desired_memory, zone.size,
-                    );
-                    return Err(Error::ResizeZone);
+                    return Ok(());
                 }
             }
         }
@@ -3228,6 +3205,37 @@ impl Vm {
             .nmi()
             .map_err(Error::ErrorNmi);
     }
+
+    /// Capture the guest clock for a same-host resume (mode `SameHostResume`).
+    /// `None` if the VM is not booted or the backend has no guest clock.
+    fn capture_guest_clock(&self) -> std::result::Result<Option<SavedClock>, MigratableError> {
+        let Some(boot_vcpu) = self.cpu_manager.lock().unwrap().boot_vcpu() else {
+            return Ok(None);
+        };
+        let boot_vcpu = boot_vcpu.lock().unwrap();
+        Ok(self
+            .vm
+            .snapshot_clock(boot_vcpu.hypervisor_vcpu())
+            .map_err(|e| MigratableError::Pause(anyhow!("Could not capture guest clock: {e}")))?
+            .map(|state| SavedClock {
+                mode: hypervisor::ClockRestoreMode::SameHostResume,
+                state,
+            }))
+    }
+
+    /// Re-establish the guest clock before the vCPUs resume. No-op if none captured.
+    fn restore_guest_clock(&self) -> std::result::Result<(), MigratableError> {
+        let Some(saved) = &self.saved_clock else {
+            return Ok(());
+        };
+        let vcpus = self.cpu_manager.lock().unwrap().vcpus();
+        let guards: Vec<_> = vcpus.iter().map(|v| v.lock().unwrap()).collect();
+        let hv_vcpus: Vec<&dyn hypervisor::Vcpu> =
+            guards.iter().map(|g| g.hypervisor_vcpu()).collect();
+        self.vm
+            .restore_clock(&hv_vcpus, &saved.state, saved.mode)
+            .map_err(|e| MigratableError::Resume(anyhow!("Could not restore guest clock: {e}")))
+    }
 }
 
 impl Pausable for Vm {
@@ -3238,18 +3246,6 @@ impl Pausable for Vm {
             .valid_transition(new_state)
             .map_err(|e| MigratableError::Pause(anyhow!("Invalid transition: {e:?}")))?;
 
-        #[cfg(target_arch = "x86_64")]
-        {
-            let mut clock = self
-                .vm
-                .get_clock()
-                .map_err(|e| MigratableError::Pause(anyhow!("Could not get VM clock: {e}")))?;
-            if !clock.has_realtime() {
-                clock.set_realtime(std::time::SystemTime::now());
-            }
-            self.saved_clock = Some(clock);
-        }
-
         // Before pausing the vCPUs activate any pending virtio devices that might
         // need activation between starting the pause (or e.g. a migration it's part of)
         self.activate_virtio_devices().map_err(|e| {
@@ -3257,6 +3253,10 @@ impl Pausable for Vm {
         })?;
 
         self.cpu_manager.lock().unwrap().pause()?;
+
+        // Capture the guest clock now that the vCPUs are quiesced.
+        self.saved_clock = self.capture_guest_clock()?;
+
         self.device_manager.lock().unwrap().pause()?;
 
         self.vm
@@ -3278,16 +3278,8 @@ impl Pausable for Vm {
             .valid_transition(new_state)
             .map_err(|e| MigratableError::Resume(anyhow!("Invalid transition: {e:?}")))?;
 
-        // Restore KVM clock BEFORE vCPUs start running, so they see correct
-        // TSC/kvmclock from the first instruction after resume.
-        #[cfg(target_arch = "x86_64")]
-        {
-            if let Some(clock) = &self.saved_clock {
-                self.vm
-                    .set_clock(clock)
-                    .map_err(|e| MigratableError::Resume(anyhow!("Could not set VM clock: {e}")))?;
-            }
-        }
+        // Restore the guest clock before the vCPUs start running.
+        self.restore_guest_clock()?;
 
         if current_state == VmState::Paused {
             self.vm
@@ -3307,8 +3299,8 @@ impl Pausable for Vm {
 
 #[derive(Serialize, Deserialize)]
 pub struct VmSnapshot {
-    #[cfg(target_arch = "x86_64")]
-    pub clock: Option<hypervisor::ClockData>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clock: Option<hypervisor::ClockState>,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     pub common_cpuid: Vec<hypervisor::arch::x86::CpuIdEntry>,
 }
@@ -3369,8 +3361,7 @@ impl Snapshottable for Vm {
         };
 
         let vm_snapshot_state = VmSnapshot {
-            #[cfg(target_arch = "x86_64")]
-            clock: self.saved_clock,
+            clock: self.saved_clock.map(|saved| saved.state),
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             common_cpuid,
         };

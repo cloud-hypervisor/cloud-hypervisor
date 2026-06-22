@@ -3,7 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 #![cfg(any(devcli_testenv, clippy))]
-#![allow(clippy::undocumented_unsafe_blocks)]
+#![expect(clippy::undocumented_unsafe_blocks)]
+// TODO: Trim qualified paths in this crate, then drop this expectation.
+#![expect(clippy::absolute_paths)]
 // When enabling the `mshv` feature, we skip quite some tests and
 // hence have known dead-code. This annotation silences dead-code
 // related warnings for our quality workflow to pass.
@@ -254,7 +256,6 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))] // See #7456
     fn test_user_defined_memory_regions() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -334,7 +335,6 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))] // See #7456
     fn test_guest_numa_nodes() {
         _test_guest_numa_nodes(false);
     }
@@ -1589,6 +1589,149 @@ mod common_parallel {
         handle_child_output(r, &output);
     }
 
+    // Direct=on data disk on a 4k sector loop FS, aligned O_DIRECT round trip.
+    fn _test_virtio_block_direct_io_data_disk_4k(image_type: ImageType) {
+        let (qemu_fmt, qemu_extra): (&str, &[&str]) = match image_type {
+            ImageType::Raw => ("raw", &[]),
+            ImageType::Qcow2 => ("qcow2", &[]),
+            ImageType::FixedVhd => ("vpc", &["-o", "subformat=fixed"]),
+            ImageType::Vhdx => ("vhdx", &[]),
+            ImageType::Unknown => panic!("unsupported image_type {image_type}"),
+        };
+        let image_type_str = image_type.to_string();
+
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        // The loop backing file needs a real O_DIRECT capable FS, not tmpfs.
+        let mut workloads_path = dirs::home_dir().unwrap();
+        workloads_path.push("workloads");
+        let img_dir = TempDir::new_in(workloads_path.as_path()).unwrap();
+        let fs_img_path = img_dir.as_path().join("fs_4ksec.img");
+
+        assert!(
+            exec_host_command_output(&format!("truncate -s 1G {}", fs_img_path.to_str().unwrap()))
+                .status
+                .success(),
+            "truncate failed"
+        );
+
+        let loop_dev_path = create_loop_device(fs_img_path.to_str().unwrap(), 4096, 5);
+
+        assert!(
+            exec_host_command_output(&format!("mkfs.ext4 -q {loop_dev_path}"))
+                .status
+                .success(),
+            "mkfs.ext4 failed"
+        );
+
+        let mnt_dir = img_dir.as_path().join("mnt");
+        fs::create_dir_all(&mnt_dir).unwrap();
+        assert!(
+            exec_host_command_output(&format!(
+                "mount {} {}",
+                loop_dev_path,
+                mnt_dir.to_str().unwrap()
+            ))
+            .status
+            .success(),
+            "mount failed"
+        );
+
+        let test_disk = mnt_dir.join(format!("data.{image_type_str}"));
+        let mut create_args: Vec<&str> = vec!["create", "-f", qemu_fmt];
+        create_args.extend_from_slice(qemu_extra);
+        let res = run_qemu_img(&test_disk, &create_args, Some(&["64M"]));
+        assert!(res.status.success(), "qemu-img create failed: {res:?}");
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=4"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
+                "--disk",
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={},direct=on,image_type={image_type_str}",
+                    test_disk.to_str().unwrap()
+                )
+                .as_str(),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        // qcow2 and vhdx report 512 LBS from the on disk format. Raw and
+        // fixed VHD pass through the host 4096.
+        let expected_log_sec: u32 = match image_type {
+            ImageType::Qcow2 | ImageType::Vhdx => 512,
+            _ => 4096,
+        };
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            let log_sec: u32 = guest
+                .ssh_command("lsblk -t | grep vdc | awk '{print $6}'")
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap_or_default();
+            assert_eq!(log_sec, expected_log_sec, "unexpected logical sector size");
+
+            guest
+                .ssh_command(
+                    "sudo dd if=/dev/urandom of=/tmp/pattern bs=4096 count=8 && \
+                     sudo dd if=/tmp/pattern of=/dev/vdc bs=4096 count=8 seek=1 \
+                         oflag=direct conv=fsync && \
+                     sudo dd if=/dev/vdc of=/tmp/readback bs=4096 count=8 skip=1 \
+                         iflag=direct && \
+                     cmp /tmp/pattern /tmp/readback",
+                )
+                .expect("aligned 4k direct IO round trip failed");
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        let _ = exec_host_command_output(&format!("umount {}", mnt_dir.to_str().unwrap()));
+        let _ = exec_host_command_output(&format!("losetup -d {loop_dev_path}"));
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_virtio_block_direct_io_data_disk_4k_raw() {
+        _test_virtio_block_direct_io_data_disk_4k(ImageType::Raw);
+    }
+
+    #[test]
+    fn test_virtio_block_direct_io_data_disk_4k_qcow2() {
+        _test_virtio_block_direct_io_data_disk_4k(ImageType::Qcow2);
+    }
+
+    #[test]
+    fn test_virtio_block_direct_io_data_disk_4k_vhd() {
+        _test_virtio_block_direct_io_data_disk_4k(ImageType::FixedVhd);
+    }
+
+    #[test]
+    fn test_virtio_block_direct_io_data_disk_4k_vhdx() {
+        _test_virtio_block_direct_io_data_disk_4k(ImageType::Vhdx);
+    }
+
     #[test]
     fn test_virtio_block_qcow2_dirty_bit_unclean_shutdown() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
@@ -2536,7 +2679,7 @@ mod common_parallel {
 
         let mut socat_command = Command::new("socat");
         let socat_args = [
-            &format!("pty,link={},raw", serial_socket_pty.display()),
+            &format!("pty,link={},raw,echo=0", serial_socket_pty.display()),
             &format!("UNIX-CONNECT:{}", serial_socket.display()),
         ];
         socat_command.args(socat_args);
@@ -3110,7 +3253,6 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))] // See #7456
     fn test_virtio_mem() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -5119,7 +5261,6 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))] // See #7456
     fn test_virtio_balloon_free_page_reporting() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -6740,7 +6881,7 @@ mod common_parallel {
             .args([
                 &format!("--api-socket={dest_api_socket}"),
                 "receive-migration",
-                &format!("tcp:0.0.0.0:{migration_port}"),
+                &format!("receiver_url=tcp:0.0.0.0:{migration_port}"),
             ])
             .stdin(Stdio::null())
             .stderr(Stdio::piped())
@@ -7077,7 +7218,7 @@ mod common_parallel {
                 .args([
                     &format!("--api-socket={dest_api_socket}"),
                     "receive-migration",
-                    &format!("tcp:0.0.0.0:{migration_port}"),
+                    &format!("receiver_url=tcp:0.0.0.0:{migration_port}"),
                 ])
                 .stdin(Stdio::null())
                 .stderr(Stdio::piped())
@@ -7983,19 +8124,103 @@ mod ivshmem {
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_hotplug_virtiomem() {
-        snapshot_restore_common::_test_snapshot_restore(true, false);
+        snapshot_restore_common::_test_snapshot_restore(
+            snapshot_restore_common::SnapshotRestoreTest {
+                use_hotplug: true,
+                ..Default::default()
+            },
+        );
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))] // See issue #7437
     fn test_snapshot_restore_basic() {
-        snapshot_restore_common::_test_snapshot_restore(false, false);
+        snapshot_restore_common::_test_snapshot_restore(
+            snapshot_restore_common::SnapshotRestoreTest::default(),
+        );
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_with_resume() {
-        snapshot_restore_common::_test_snapshot_restore(false, true);
+        snapshot_restore_common::_test_snapshot_restore(
+            snapshot_restore_common::SnapshotRestoreTest {
+                use_resume_option: true,
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_check_guest_time() {
+        snapshot_restore_common::_test_snapshot_restore(
+            snapshot_restore_common::SnapshotRestoreTest {
+                use_resume_option: true,
+                check_clock: true,
+                ..Default::default()
+            },
+        );
+    }
+
+    // aarch64 same-host pause/resume must keep the guest clock correct: the
+    // architected counter free-runs across the pause, so the resume clock path
+    // must not perturb it. The test network is isolated, so the guest cannot
+    // NTP-correct itself -- any drift would be the pause path's doing. x86_64
+    // has its own kvmclock path and is covered separately.
+    #[test]
+    #[cfg(all(not(feature = "mshv"), target_arch = "aarch64"))]
+    fn test_pause_resume_guest_time() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let api_socket = temp_api_path(&guest.tmp_dir);
+        let kernel_path = direct_kernel_boot_path();
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket])
+            .args(["--cpus", "boot=2"])
+            .args(["--memory", "size=1G"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .default_disks()
+            .args(["--net", guest.default_net_string().as_str()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            // Pause for an off-host interval, then resume on the same host.
+            assert!(remote_command(&api_socket, "pause", None));
+            thread::sleep(Duration::from_secs(
+                snapshot_restore_common::CLOCK_DOWNTIME_SECS,
+            ));
+            assert!(remote_command(&api_socket, "resume", None));
+
+            // The counter advanced across the pause, so the guest wall clock must
+            // still match the host.
+            let host_secs = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64;
+            let guest_secs = guest
+                .ssh_command("date -u +%s")
+                .unwrap()
+                .trim()
+                .parse::<i64>()
+                .unwrap();
+            let skew = (host_secs - guest_secs).abs();
+            assert!(
+                skew <= snapshot_restore_common::CLOCK_SKEW_TOLERANCE_SECS,
+                "guest clock is {skew}s from host after pause/resume \
+                 (host={host_secs}, guest={guest_secs})"
+            );
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
     }
 
     #[test]
@@ -8018,6 +8243,18 @@ mod ivshmem {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_restore_offload() {
+        snapshot_restore_common::_test_snapshot_restore_offload(false);
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_restore_offload_virtio_mem() {
+        snapshot_restore_common::_test_snapshot_restore_offload(true);
+    }
+
+    #[test]
     fn test_virtio_pmem_persist_writes() {
         test_virtio_pmem(false, false);
     }
@@ -8029,6 +8266,12 @@ mod snapshot_restore_common {
     use std::process::Command;
 
     use crate::*;
+
+    // Off-host interval simulated between snapshot and restore, and the maximum
+    // guest-vs-host clock skew tolerated afterwards. The interval must exceed the
+    // tolerance so a guest that fails to advance on restore is caught.
+    pub(crate) const CLOCK_DOWNTIME_SECS: u64 = 30;
+    pub(crate) const CLOCK_SKEW_TOLERANCE_SECS: i64 = 15;
 
     pub(crate) fn snapshot_and_check_events(
         api_socket: &str,
@@ -8079,7 +8322,20 @@ mod snapshot_restore_common {
         ));
     }
 
-    pub(crate) fn _test_snapshot_restore(use_hotplug: bool, use_resume_option: bool) {
+    /// Easy disambiguation between snapshot/restore variants.
+    #[derive(Clone, Copy, Default)]
+    pub(crate) struct SnapshotRestoreTest {
+        pub use_hotplug: bool,
+        pub use_resume_option: bool,
+        pub check_clock: bool,
+    }
+
+    pub(crate) fn _test_snapshot_restore(cfg: SnapshotRestoreTest) {
+        let SnapshotRestoreTest {
+            use_hotplug,
+            use_resume_option,
+            check_clock,
+        } = cfg;
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
@@ -8105,6 +8361,15 @@ mod snapshot_restore_common {
         let socket = temp_vsock_path(&guest.tmp_dir);
         let event_path = temp_event_monitor_path(&guest.tmp_dir);
 
+        // x86_64: force kvm-clock — the restore catch-up moves kvmclock (KVM_SET_CLOCK),
+        // not the tsc clocksource, so a tsc guest wouldn't catch up. aarch64 ignores this
+        // (CNTVCT is advanced directly).
+        let boot_cmdline = if check_clock && cfg!(target_arch = "x86_64") {
+            format!("{DIRECT_KERNEL_BOOT_CMDLINE} clocksource=kvm-clock")
+        } else {
+            DIRECT_KERNEL_BOOT_CMDLINE.to_string()
+        };
+
         let mut child = GuestCommand::new(&guest)
             .args(["--api-socket", &api_socket_source])
             .args(["--event-monitor", format!("path={event_path}").as_str()])
@@ -8123,7 +8388,7 @@ mod snapshot_restore_common {
             ])
             .args(["--net", net_params.as_str()])
             .args(["--vsock", format!("cid=3,socket={socket}").as_str()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--cmdline", &boot_cmdline])
             .capture_output()
             .spawn()
             .unwrap();
@@ -8228,6 +8493,12 @@ mod snapshot_restore_common {
             .arg(socket.as_str())
             .output()
             .unwrap();
+
+        // Simulate an off-host interval between snapshot and restore so the guest
+        // clock must visibly catch up on restore (asserted after resume below).
+        if check_clock {
+            thread::sleep(Duration::from_secs(CLOCK_DOWNTIME_SECS));
+        }
 
         let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
         let event_path_restored = format!("{}.2", temp_event_monitor_path(&guest.tmp_dir));
@@ -8363,6 +8634,31 @@ mod snapshot_restore_common {
             }
 
             guest.check_devices_common(Some(&socket), Some(&console_text), None);
+
+            if check_clock {
+                // Across the off-host interval the restored guest's wall clock
+                // must catch up to real time: x86_64 via kvmclock
+                // (KVM_CLOCK_REALTIME), aarch64 via the CNTVCT advance. The test
+                // network is isolated, so the guest cannot NTP-correct itself --
+                // any catch-up is the restore path's doing.
+                let host_secs = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i64;
+                let guest_secs = guest
+                    .ssh_command("date -u +%s")
+                    .unwrap()
+                    .trim()
+                    .parse::<i64>()
+                    .unwrap();
+                let skew = (host_secs - guest_secs).abs();
+                assert!(
+                    skew <= CLOCK_SKEW_TOLERANCE_SECS,
+                    "guest clock is {skew}s from host after restore \
+                     (host={host_secs}, guest={guest_secs}); the \
+                     {CLOCK_DOWNTIME_SECS}s off-host interval was not applied"
+                );
+            }
         });
         // Shutdown the target VM and check console output
         kill_child(&mut child);
@@ -8652,6 +8948,225 @@ mod snapshot_restore_common {
 
         handle_child_output(r, &output);
     }
+
+    // Round-trip via the reference offload daemon over the existing
+    // `vm.send-migration local=on` / `vm.receive-migration` endpoints,
+    // proving parity with `vm.snapshot`/`vm.restore`.
+    pub(crate) fn _test_snapshot_restore_offload(virtio_mem: bool) {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
+        let console_text = String::from("On a branch floating down river a cricket, singing.");
+        let offload_dir = String::from(
+            guest
+                .tmp_dir
+                .as_path()
+                .join("offload-store")
+                .to_str()
+                .unwrap(),
+        );
+        std::fs::create_dir(&offload_dir).unwrap();
+        let snapshot_socket = String::from(
+            guest
+                .tmp_dir
+                .as_path()
+                .join("snapshot-offload.sock")
+                .to_str()
+                .unwrap(),
+        );
+
+        // Shared memory required: offload runs over local live migration.
+        // With virtio_mem, expose a hotpluggable zone so the test can plug
+        // RAM before the snapshot and check it survives the round-trip.
+        let mem_params = if virtio_mem {
+            "size=512M,hotplug_method=virtio-mem,hotplug_size=2G,shared=on"
+        } else {
+            "size=512M,shared=on"
+        };
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_source])
+            .args(["--cpus", "boot=2"])
+            .args(["--memory", mem_params])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let snap_daemon: std::sync::Mutex<Option<Child>> = std::sync::Mutex::new(None);
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
+            assert!(guest.get_total_memory().unwrap_or_default() > 400_000);
+            guest.check_devices_common(None, Some(&console_text), None);
+
+            if virtio_mem {
+                // Plug additional RAM via virtio-mem before snapshotting so the
+                // offload round-trip has plugged blocks to preserve.
+                resize_command(&api_socket_source, None, Some(1 << 30), None, None);
+                thread::sleep(Duration::from_secs(5));
+                assert!(
+                    guest.get_total_memory().unwrap_or_default() > 900_000,
+                    "virtio-mem plug before snapshot did not take effect"
+                );
+            }
+
+            // Daemon binds the socket and listens.
+            let daemon = Command::new(clh_command("offload_daemon"))
+                .args([
+                    "snapshot",
+                    "--socket",
+                    &snapshot_socket,
+                    "--output-dir",
+                    &offload_dir,
+                ])
+                .stderr(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+            *snap_daemon.lock().unwrap() = Some(daemon);
+            // Give the daemon a moment to bind.
+            assert!(wait_until(Duration::from_secs(5), || std::path::Path::new(
+                &snapshot_socket
+            )
+            .exists()));
+
+            // Pause explicitly to mirror typical operator usage.
+            assert!(remote_command(&api_socket_source, "pause", None));
+
+            // Source exits on success, as with any local live migration.
+            assert!(remote_command(
+                &api_socket_source,
+                "send-migration",
+                Some(format!("destination_url=unix:{snapshot_socket},local=on").as_str(),),
+            ));
+
+            // The daemon should exit cleanly after persisting the snapshot.
+            let daemon_output = snap_daemon
+                .lock()
+                .unwrap()
+                .take()
+                .unwrap()
+                .wait_with_output()
+                .unwrap();
+            assert!(
+                daemon_output.status.success(),
+                "offload daemon (snapshot) failed: stderr={}",
+                String::from_utf8_lossy(&daemon_output.stderr)
+            );
+        });
+
+        if let Some(mut daemon) = snap_daemon.into_inner().unwrap() {
+            let _ = daemon.kill();
+            let _ = daemon.wait();
+        }
+        let _ = std::fs::remove_file(&snapshot_socket);
+
+        // Source VM should have exited cleanly on its own.
+        let source_exited_ok = wait_until(Duration::from_secs(30), || {
+            matches!(child.try_wait(), Ok(Some(_)))
+        }) && child.try_wait().unwrap().is_some_and(|s| s.success());
+        if !source_exited_ok {
+            kill_child(&mut child);
+        }
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        // Now bring up a fresh VMM and restore through the offload daemon.
+        let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
+        let restore_socket = String::from(
+            guest
+                .tmp_dir
+                .as_path()
+                .join("restore-offload.sock")
+                .to_str()
+                .unwrap(),
+        );
+
+        let mut dest_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_restored])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            // Wait for the destination VMM to be up and responsive.
+            assert!(wait_until(Duration::from_secs(30), || remote_command(
+                &api_socket_restored,
+                "ping",
+                None
+            )));
+
+            // receive-migration blocks until done; run it in a thread
+            // so we can start the daemon as the sender in parallel.
+            let api_socket_restored_clone = api_socket_restored.clone();
+            let restore_socket_clone = restore_socket.clone();
+            let restore_thread = std::thread::spawn(move || {
+                remote_command(
+                    &api_socket_restored_clone,
+                    "receive-migration",
+                    Some(format!("receiver_url=unix:{restore_socket_clone}").as_str()),
+                )
+            });
+
+            // Wait for CH to bind the socket before starting the daemon.
+            assert!(wait_until(Duration::from_secs(10), || {
+                std::path::Path::new(&restore_socket).exists()
+            }));
+
+            // Daemon in restore (sender) mode with --resume so the
+            // guest is live when we probe it.
+            let daemon = Command::new(clh_command("offload_daemon"))
+                .args([
+                    "restore",
+                    "--socket",
+                    &restore_socket,
+                    "--input-dir",
+                    &offload_dir,
+                    "--resume",
+                ])
+                .stderr(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let daemon_output = daemon.wait_with_output().unwrap();
+            assert!(
+                daemon_output.status.success(),
+                "offload daemon (restore) failed: stderr={}",
+                String::from_utf8_lossy(&daemon_output.stderr)
+            );
+
+            assert!(
+                restore_thread.join().unwrap(),
+                "ch-remote receive-migration command failed"
+            );
+
+            // Restored VM should be functional.
+            guest.wait_for_ssh(Duration::from_secs(30)).unwrap();
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
+            guest.check_devices_common(None, Some(&console_text), None);
+
+            if virtio_mem {
+                // The plugged virtio-mem blocks must survive the offload
+                // snapshot/restore round-trip.
+                assert!(
+                    guest.get_total_memory().unwrap_or_default() > 900_000,
+                    "virtio-mem plugged RAM was lost across offload restore"
+                );
+            }
+        });
+
+        kill_child(&mut dest_child);
+        let output = dest_child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        let _ = remove_dir_all(offload_dir.as_str());
+    }
 }
 
 mod common_sequential {
@@ -8678,9 +9193,16 @@ mod common_sequential {
             return;
         }
 
+        // reserve=on opts the hugepage-backed zone out of MAP_NORESERVE, so
+        // the 2MiB pages are reserved from the pool at mmap time. Hugepages
+        // are the most likely place to want this, and exercising it here keeps
+        // the reserve path covered across both the source boot and the
+        // demand-paged UFFD restore. The skip guard above already requires the
+        // 256 free pages this zone needs, and the source VM is killed before
+        // restore, so the pool only ever has to back one VM at a time.
         snapshot_restore_common::_test_snapshot_restore_uffd(
             "size=0",
-            &["id=mem0,size=512M,hugepages=on,hugepage_size=2M"],
+            &["id=mem0,size=512M,hugepages=on,hugepage_size=2M,reserve=on"],
             480_000,
         );
     }
@@ -11125,6 +11647,8 @@ mod windows {
 
 #[cfg(target_arch = "x86_64")]
 mod vfio {
+    use std::io;
+
     use crate::*;
 
     const NVIDIA_VFIO_DEVICE: &str = "/sys/bus/pci/devices/0002:00:01.0";
@@ -11388,6 +11912,92 @@ mod vfio {
     #[test]
     fn test_iommufd_nvidia_card_reboot() {
         test_nvidia_card_reboot_common(true);
+    }
+
+    // Pass the NVIDIA card to the guest via an externally-opened
+    // /dev/vfio/devices/<n> FD instead of a sysfs path, and verify it
+    // survives a guest reboot. Mirrors `_test_tap_from_fd` for VFIO.
+    #[test]
+    fn test_iommufd_nvidia_card_reboot_from_fd() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_VFIO_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        // Discover the cdev for the NVIDIA card. The directory has a
+        // single entry whose name (e.g. "vfio0") is also the basename
+        // of the corresponding /dev/vfio/devices/<n> node.
+        let vfio_dev_dir = format!("{NVIDIA_VFIO_DEVICE}/vfio-dev");
+        let cdev_name = fs::read_dir(&vfio_dev_dir)
+            .unwrap_or_else(|e| panic!("read_dir({vfio_dev_dir}) failed: {e}"))
+            .next()
+            .expect("no vfio-dev entry")
+            .unwrap()
+            .file_name();
+        let cdev_path = PathBuf::from("/dev/vfio/devices").join(&cdev_name);
+
+        let cdev_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&cdev_path)
+            .unwrap_or_else(|e| panic!("open({cdev_path:?}) failed: {e}"));
+        let iommufd_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/iommu")
+            .unwrap_or_else(|e| panic!("open(/dev/iommu) failed: {e}"));
+        // OpenOptions sets FD_CLOEXEC by default; clear it for both fds
+        // so they're inherited by the VMM child via spawn().
+        for f in [&cdev_file, &iommufd_file] {
+            // SAFETY: FFI call to fcntl on a valid fd we own.
+            let ret = unsafe { libc::fcntl(f.as_raw_fd(), libc::F_SETFD, 0) };
+            assert!(
+                ret >= 0,
+                "fcntl(F_SETFD, 0) failed: {}",
+                io::Error::last_os_error()
+            );
+        }
+
+        let platform = format!(
+            "{},iommufd_fd={}",
+            platform_cfg(true),
+            iommufd_file.as_raw_fd()
+        );
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=4"])
+            .args(["--memory", "size=1G"])
+            .args(["--platform", &platform])
+            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args([
+                "--device",
+                format!("fd={},iommu=on", cdev_file.as_raw_fd()).as_str(),
+            ])
+            .args(["--api-socket", &api_socket])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            // VFIO device works after boot from an externally-opened FD.
+            assert!(guest.check_nvidia_gpu());
+
+            guest.reboot_linux(0);
+
+            // Both FDs survive a VM reboot
+            assert!(guest.check_nvidia_gpu());
+        });
+
+        drop(cdev_file);
+        drop(iommufd_file);
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
     }
 
     fn test_nvidia_card_iommu_address_width_common(iommufd: bool) {
@@ -11997,7 +12607,6 @@ mod fw_cfg {
     use crate::*;
 
     #[test]
-    #[cfg_attr(feature = "mshv", ignore = "See #7434")]
     fn test_fw_cfg() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -12045,7 +12654,6 @@ mod fw_cfg {
     }
 
     #[test]
-    #[cfg_attr(feature = "mshv", ignore = "See #7434")]
     fn test_fw_cfg_string() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));

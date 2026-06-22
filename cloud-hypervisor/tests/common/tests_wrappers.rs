@@ -256,6 +256,11 @@ pub(crate) fn _test_pty_interaction(pty_path: PathBuf) {
         .open(pty_path)
         .unwrap();
 
+    // Read concurrently so we drain the replayed backlog instead of leaving
+    // it stranded behind a non-reading client (which would back-pressure the
+    // sender and never let the login keystrokes through).
+    let ptyc = pty_read(cf.try_clone().unwrap());
+
     // Some dumb sleeps but we don't want to write
     // before the console is up and we don't want
     // to try and write the next line before the
@@ -268,31 +273,28 @@ pub(crate) fn _test_pty_interaction(pty_path: PathBuf) {
     assert_eq!(cf.write(b"echo test_pty_console\n").unwrap(), 22);
     thread::sleep(std::time::Duration::new(2, 0));
 
-    // read pty and ensure they have a login shell
-    // some fairly hacky workarounds to avoid looping
-    // forever in case the channel is blocked getting output
-    let ptyc = pty_read(cf);
-    let mut empty = 0;
     let mut prev = String::new();
-    loop {
+    // The console can stream continuously (e.g. journald forwarded to it), so
+    // bound the wait: a missing marker must not loop until the harness timeout.
+    for _ in 0..20 {
         thread::sleep(std::time::Duration::new(2, 0));
-        match ptyc.try_recv() {
-            Ok(line) => {
-                empty = 0;
-                prev = prev + &line;
-                if prev.contains("test_pty_console") {
-                    break;
+        // Drain everything available this round so a large replayed backlog
+        // does not take one 2s tick per chunk to get through.
+        loop {
+            match ptyc.try_recv() {
+                Ok(line) => {
+                    prev = prev + &line;
+                    if prev.contains("test_pty_console") {
+                        return;
+                    }
                 }
-            }
-            Err(mpsc::TryRecvError::Empty) => {
-                empty += 1;
-                assert!(empty <= 5, "No login on pty");
-            }
-            _ => {
-                panic!("No login on pty")
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(_) => panic!("No login on pty"),
             }
         }
     }
+    // Bounded out without ever seeing the marker: the login never completed.
+    panic!("No login on pty");
 }
 
 pub(crate) fn test_cpu_topology(
@@ -2545,7 +2547,7 @@ pub(crate) fn _test_direct_kernel_boot_noacpi(guest: &Guest) {
         guest.wait_vm_boot().unwrap();
 
         assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
-        assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+        guest.validate_memory(None);
     });
 
     kill_child(&mut child);
@@ -2648,10 +2650,16 @@ pub(crate) fn _test_memory_overhead(guest: &Guest, guest_memory_size_kb: u32) {
 
     guest.wait_vm_boot().unwrap();
 
+    let max_overhead = if on_kvm_sev_snp() {
+        MAXIMUM_VMM_OVERHEAD_KB_SEV_SNP
+    } else {
+        MAXIMUM_VMM_OVERHEAD_KB
+    };
+
     let r = std::panic::catch_unwind(|| {
         let overhead = get_vmm_overhead(child.id(), guest_memory_size_kb);
-        eprintln!("Guest memory overhead: {overhead} vs {MAXIMUM_VMM_OVERHEAD_KB}");
-        assert!(overhead <= MAXIMUM_VMM_OVERHEAD_KB);
+        eprintln!("Guest memory overhead: {overhead} vs {max_overhead}");
+        assert!(overhead <= max_overhead);
     });
 
     kill_child(&mut child);

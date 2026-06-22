@@ -1,12 +1,13 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::io;
+use std::fs::{File, remove_file};
 use std::io::ErrorKind;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
+use std::{io, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
@@ -117,7 +118,7 @@ pub enum Error {
     #[error("Failed to read vhost eventfd")]
     VhostUserMemoryRegion(#[source] MmapError),
     #[error("Failed to create the frontend request handler from backend")]
-    FrontendReqHandlerCreation(#[source] vhost::vhost_user::Error),
+    FrontendReqHandlerCreation(#[source] VhostUserError),
     #[error("Set backend request fd failed")]
     VhostUserSetBackendRequestFd(#[source] vhost::Error),
     #[error("Add memory region failed")]
@@ -179,7 +180,7 @@ pub enum Error {
     #[error("Aborted vhost-user connect: kill event received")]
     ConnectKilled,
 }
-type Result<T> = std::result::Result<T, Error>;
+type Result<T> = result::Result<T, Error>;
 
 fn io_error_is_connection_lost(error: &io::Error) -> bool {
     matches!(
@@ -262,7 +263,7 @@ const BACKEND_REQ_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 #[derive(Default)]
 pub struct Inflight {
     pub info: VhostUserInflight,
-    pub fd: Option<std::fs::File>,
+    pub fd: Option<File>,
 }
 
 pub struct VhostUserEpollHandler<S: VhostUserFrontendReqHandler> {
@@ -287,7 +288,7 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
         &mut self,
         paused: &AtomicBool,
         paused_sync: &Barrier,
-    ) -> std::result::Result<(), EpollHelperError> {
+    ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event_custom(
             self.vu.lock().unwrap().socket_handle().as_raw_fd(),
@@ -304,7 +305,7 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
         Ok(())
     }
 
-    fn reconnect(&mut self, helper: &mut EpollHelper) -> std::result::Result<(), EpollHelperError> {
+    fn reconnect(&mut self, helper: &mut EpollHelper) -> result::Result<(), EpollHelperError> {
         let result = self.reconnect_inner(helper);
         if result.is_err() {
             // If reconnect fails, mark disconnected to avoid repeated failed socket calls.
@@ -316,7 +317,7 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
     fn reconnect_inner(
         &mut self,
         helper: &mut EpollHelper,
-    ) -> std::result::Result<(), EpollHelperError> {
+    ) -> result::Result<(), EpollHelperError> {
         helper.del_event_custom(
             self.vu.lock().unwrap().socket_handle().as_raw_fd(),
             HUP_CONNECTION_EVENT,
@@ -336,7 +337,7 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
             // event and will tear down on its next iteration.
             Err(Error::ConnectKilled) => return Ok(()),
             Err(e) => {
-                return Err(EpollHelperError::IoError(std::io::Error::other(format!(
+                return Err(EpollHelperError::IoError(io::Error::other(format!(
                     "failed connecting vhost-user backend for socket {}: {e:?}",
                     self.socket_path
                 ))));
@@ -360,7 +361,7 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
                 self.inflight.as_mut(),
             )
             .map_err(|e| {
-                EpollHelperError::IoError(std::io::Error::other(format!(
+                EpollHelperError::IoError(io::Error::other(format!(
                     "failed reconnecting vhost-user backend: {e:?}"
                 )))
             })?;
@@ -384,7 +385,7 @@ impl<S: VhostUserFrontendReqHandler> EpollHelperHandler for VhostUserEpollHandle
         &mut self,
         helper: &mut EpollHelper,
         event: &epoll::Event,
-    ) -> std::result::Result<(), EpollHelperError> {
+    ) -> result::Result<(), EpollHelperError> {
         let ev_type = event.data as u16;
         let result = match ev_type {
             HUP_CONNECTION_EVENT => {
@@ -459,6 +460,7 @@ impl<C> VhostUserState<C> {
 pub struct VhostUserCommon {
     pub virtio_common: VirtioCommon,
     pub vu: Option<Arc<Mutex<VhostUserHandle>>>,
+    pub guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     pub acked_protocol_features: u64,
     pub socket_path: String,
     pub vu_num_queues: usize,
@@ -467,10 +469,12 @@ pub struct VhostUserCommon {
     pub vring_bases: Option<Vec<u64>>,
     /// Indicates that the backend is no longer reachable. Shared with EPollHandler.
     pub disconnected: Arc<AtomicBool>,
+    saved_dirty_log: Option<MemoryRangeTable>,
+    dirty_logging: bool,
 }
 
 impl VhostUserCommon {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn activate<T: VhostUserFrontendReqHandler>(
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
@@ -480,7 +484,9 @@ impl VhostUserCommon {
         backend_req_handler: Option<FrontendReqHandler<T>>,
         kill_evt: EventFd,
         pause_evt: EventFd,
-    ) -> std::result::Result<VhostUserEpollHandler<T>, ActivateError> {
+    ) -> result::Result<VhostUserEpollHandler<T>, ActivateError> {
+        self.guest_memory = Some(mem.clone());
+
         if self.disconnected.load(Ordering::Relaxed) {
             warn!(
                 "Not activating disconnected vhost-user device for socket {}",
@@ -546,12 +552,12 @@ impl VhostUserCommon {
         seccomp_action: &SeccompAction,
         thread_type: Thread,
         exit_evt: &EventFd,
-        device_status: Arc<std::sync::atomic::AtomicU8>,
+        device_status: Arc<AtomicU8>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         f: F,
-    ) -> std::result::Result<(), ActivateError>
+    ) -> result::Result<(), ActivateError>
     where
-        F: FnOnce() -> std::result::Result<(), EpollHelperError> + Send + 'static,
+        F: FnOnce() -> result::Result<(), EpollHelperError> + Send + 'static,
     {
         if let Err(e) = self.virtio_common.spawn_worker(
             id,
@@ -619,24 +625,20 @@ impl VhostUserCommon {
 
         // Remove socket path if needed
         if self.server {
-            let _ = std::fs::remove_file(&self.socket_path);
+            let _ = remove_file(&self.socket_path);
         }
 
         // Drop the vhost-user handle
         self.vu = None;
     }
 
-    fn add_memory_region_internal(
-        &self,
-        guest_memory: &Option<GuestMemoryAtomic<GuestMemoryMmap>>,
-        region: &Arc<GuestRegionMmap>,
-    ) -> Result<()> {
+    fn add_memory_region_internal(&self, region: &Arc<GuestRegionMmap>) -> Result<()> {
         if let Some(vu) = &self.vu {
             if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits()
                 != 0
             {
                 return vu.lock().unwrap().add_memory_region(region);
-            } else if let Some(guest_memory) = guest_memory {
+            } else if let Some(guest_memory) = &self.guest_memory {
                 return vu
                     .lock()
                     .unwrap()
@@ -649,9 +651,8 @@ impl VhostUserCommon {
 
     pub fn add_memory_region(
         &mut self,
-        guest_memory: &Option<GuestMemoryAtomic<GuestMemoryMmap>>,
         region: &Arc<GuestRegionMmap>,
-    ) -> std::result::Result<(), crate::Error> {
+    ) -> result::Result<(), crate::Error> {
         if self.disconnected.load(Ordering::Relaxed) {
             warn!(
                 "Skipping add memory region on disconnected dev with socket: {}",
@@ -659,7 +660,7 @@ impl VhostUserCommon {
             );
         }
 
-        if let Err(e) = self.add_memory_region_internal(guest_memory, region) {
+        if let Err(e) = self.add_memory_region_internal(region) {
             if e.is_transport_lost() {
                 warn!(
                     "Failed updating memory on vhost-user backend for socket {}: {e:?}; \
@@ -678,7 +679,7 @@ impl VhostUserCommon {
         Ok(())
     }
 
-    pub fn pause(&mut self) -> std::result::Result<(), MigratableError> {
+    pub fn pause(&mut self) -> result::Result<(), MigratableError> {
         if self.disconnected.load(Ordering::Relaxed) {
             return Err(MigratableError::DeviceDisconnected(
                 self.socket_path.clone(),
@@ -703,7 +704,7 @@ impl VhostUserCommon {
         Ok(())
     }
 
-    fn resume_internal(&mut self) -> std::result::Result<(), MigratableError> {
+    fn resume_internal(&mut self) -> result::Result<(), MigratableError> {
         // Skip the resume_vhost_user call if the backend is disconnected. Process the queue
         // interrupts to kick any paused workers.
         if self.disconnected.load(Ordering::Relaxed) {
@@ -731,7 +732,7 @@ impl VhostUserCommon {
         Ok(())
     }
 
-    pub fn resume(&mut self) -> std::result::Result<(), MigratableError> {
+    pub fn resume(&mut self) -> result::Result<(), MigratableError> {
         let ret = self.resume_internal();
 
         // Always run the interrupt loop so workers don't get stuck.
@@ -747,7 +748,7 @@ impl VhostUserCommon {
     pub fn state<C: Default>(
         &self,
         config: C,
-    ) -> std::result::Result<VhostUserState<C>, MigratableError> {
+    ) -> result::Result<VhostUserState<C>, MigratableError> {
         let mut state = VhostUserState {
             avail_features: self.virtio_common.avail_features,
             acked_features: self.virtio_common.acked_features,
@@ -771,25 +772,26 @@ impl VhostUserCommon {
         Ok(state)
     }
 
-    pub fn snapshot<T>(&mut self, state: &T) -> std::result::Result<Snapshot, MigratableError>
+    pub fn snapshot<T>(&mut self, state: &T) -> result::Result<Snapshot, MigratableError>
     where
         T: Serialize,
     {
         let snapshot = Snapshot::new_from_state(state)?;
 
         if self.migration_started {
+            // Local migration does not enable dirty logging.
+            if self.dirty_logging {
+                self.saved_dirty_log = Some(self.dirty_log()?);
+            }
             self.shutdown();
         }
 
         Ok(snapshot)
     }
 
-    pub fn start_dirty_log(
-        &mut self,
-        guest_memory: &Option<GuestMemoryAtomic<GuestMemoryMmap>>,
-    ) -> std::result::Result<(), MigratableError> {
+    pub fn start_dirty_log(&mut self) -> result::Result<(), MigratableError> {
         if let Some(vu) = &self.vu {
-            if let Some(guest_memory) = guest_memory {
+            if let Some(guest_memory) = &self.guest_memory {
                 let last_ram_addr = guest_memory.memory().last_addr().raw_value();
                 vu.lock()
                     .unwrap()
@@ -798,7 +800,9 @@ impl VhostUserCommon {
                         MigratableError::StartDirtyLog(anyhow!(
                             "Error starting migration for vhost-user backend: {e:?}"
                         ))
-                    })
+                    })?;
+                self.dirty_logging = true;
+                Ok(())
             } else {
                 Err(MigratableError::StartDirtyLog(anyhow!(
                     "Missing guest memory"
@@ -809,24 +813,22 @@ impl VhostUserCommon {
         }
     }
 
-    pub fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
+    pub fn stop_dirty_log(&mut self) -> result::Result<(), MigratableError> {
         if let Some(vu) = &self.vu {
             vu.lock().unwrap().stop_dirty_log().map_err(|e| {
                 MigratableError::StopDirtyLog(anyhow!(
                     "Error stopping migration for vhost-user backend: {e:?}"
                 ))
-            })
-        } else {
-            Ok(())
+            })?;
         }
+
+        self.dirty_logging = false;
+        Ok(())
     }
 
-    pub fn dirty_log(
-        &mut self,
-        guest_memory: &Option<GuestMemoryAtomic<GuestMemoryMmap>>,
-    ) -> std::result::Result<MemoryRangeTable, MigratableError> {
+    pub fn dirty_log(&mut self) -> result::Result<MemoryRangeTable, MigratableError> {
         if let Some(vu) = &self.vu {
-            if let Some(guest_memory) = guest_memory {
+            if let Some(guest_memory) = &self.guest_memory {
                 let last_ram_addr = guest_memory.memory().last_addr().raw_value();
                 vu.lock().unwrap().dirty_log(last_ram_addr).map_err(|e| {
                     MigratableError::DirtyLog(anyhow!(
@@ -837,17 +839,18 @@ impl VhostUserCommon {
                 Err(MigratableError::DirtyLog(anyhow!("Missing guest memory")))
             }
         } else {
-            Ok(MemoryRangeTable::default())
+            Ok(self.saved_dirty_log.take().unwrap_or_default())
         }
     }
 
-    pub fn start_migration(&mut self) -> std::result::Result<(), MigratableError> {
+    pub fn start_migration(&mut self) -> result::Result<(), MigratableError> {
         self.migration_started = true;
         Ok(())
     }
 
-    pub fn complete_migration(&mut self) -> std::result::Result<(), MigratableError> {
+    pub fn complete_migration(&mut self) -> result::Result<(), MigratableError> {
         self.migration_started = false;
+        self.dirty_logging = false;
 
         // Make sure the device thread is killed in order to prevent from
         // reconnections to the socket.

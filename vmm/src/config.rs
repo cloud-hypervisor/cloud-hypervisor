@@ -148,9 +148,6 @@ pub enum Error {
     /// Failed parsing device parameters
     #[error("Error parsing --device")]
     ParseDevice(#[source] OptionParserError),
-    /// Missing path from device,
-    #[error("Error parsing --device: path missing")]
-    ParseDevicePathMissing,
     /// Failed parsing vsock parameters
     #[error("Error parsing --vsock")]
     ParseVsock(#[source] OptionParserError),
@@ -346,6 +343,19 @@ pub enum ValidationError {
     /// Duplicated device path (device added twice)
     #[error("Duplicated device path: {0}")]
     DuplicateDevicePath(String),
+    /// A DeviceConfig specified neither `path` nor `fd`.
+    #[error("VFIO device config must specify `path=` or `fd=`")]
+    VfioDeviceNeitherPathNorFd,
+    /// A DeviceConfig specified both `path` and `fd`.
+    #[error("VFIO device config must specify at most one of `path=` or `fd=`")]
+    VfioDeviceBothPathAndFd,
+    /// FD-based VFIO requires an externally-supplied iommufd FD so the
+    /// cdev's bind state can survive across an in-process VM reboot.
+    #[error("VFIO device `fd=` requires platform `iommufd_fd=<fd>`")]
+    VfioFdRequiresIommufdFd,
+    /// `iommufd_fd` was provided without also enabling the iommufd backend.
+    #[error("Platform `iommufd_fd=<fd>` requires `iommufd=on`")]
+    IommufdFdRequiresIommufd,
     /// Provided MTU is lower than what the VIRTIO specification expects
     #[error("Provided MTU {0} is lower than 1280 (expected by VIRTIO specification)")]
     InvalidMtu(u16),
@@ -368,7 +378,7 @@ pub enum ValidationError {
     #[cfg(feature = "sev_snp")]
     #[error("Invalid host data format")]
     InvalidHostData,
-    #[cfg(all(feature = "sev_snp", feature = "igvm"))]
+    #[cfg(feature = "sev_snp")]
     #[error("SEV-SNP requires an IGVM payload (--payload igvm=<path>)")]
     SevSnpRequiresIgvm,
     /// Restore expects all net ids that have fds
@@ -847,7 +857,8 @@ impl PlatformConfig {
         static SYNTAX: LazyLock<String> = LazyLock::new(|| {
             let mut syntax = "Platform configuration parameters \
             \"num_pci_segments=<num_pci_segments>,iommu_segments=<list_of_segments>,\
-            iommu_address_width=<bits>,iommufd=on|off,vfio_p2p_dma=on|off,system_manufacturer=<dmi_system_manufacturer>,\
+            iommu_address_width=<bits>,iommufd=on|off,iommufd_fd=<fd>,vfio_p2p_dma=on|off,\
+            system_manufacturer=<dmi_system_manufacturer>,\
             system_product_name=<dmi_system_product_name>,system_version=<dmi_system_version>,\
             system_serial_number=<dmi_system_serial_number>,system_uuid=<dmi_system_uuid>,\
             system_sku_number=<dmi_system_sku_number>,system_family=<dmi_system_family>,\
@@ -920,6 +931,7 @@ impl PlatformConfig {
             .add("uuid")
             .add("oem_strings")
             .add("iommufd")
+            .add("iommufd_fd")
             .add("vfio_p2p_dma");
         for field in SMBIOS_STRING_FIELDS {
             parser.add(field.key);
@@ -946,11 +958,14 @@ impl PlatformConfig {
             .convert::<StringList>("oem_strings")
             .map_err(Error::ParsePlatform)?
             .map(|v| v.0.into_boxed_slice());
+        let iommufd_fd = parser
+            .convert::<i32>("iommufd_fd")
+            .map_err(Error::ParsePlatform)?;
+        // `iommufd_fd=<n>` implies `iommufd=on` unless the user explicitly set the value.
         let iommufd = parser
             .convert::<Toggle>("iommufd")
             .map_err(Error::ParsePlatform)?
-            .unwrap_or(Toggle(false))
-            .0;
+            .map_or(iommufd_fd.is_some(), |Toggle(v)| v);
         let vfio_p2p_dma = parser
             .convert::<Toggle>("vfio_p2p_dma")
             .map_err(Error::ParsePlatform)?
@@ -983,6 +998,7 @@ impl PlatformConfig {
             system_sku_number: None,
             chassis_asset_tag: None,
             iommufd,
+            iommufd_fd,
             #[cfg(feature = "tdx")]
             tdx,
             #[cfg(feature = "sev_snp")]
@@ -1041,12 +1057,16 @@ impl PlatformConfig {
             ));
         }
 
+        if self.iommufd_fd.is_some() && !self.iommufd {
+            return Err(ValidationError::IommufdFdRequiresIommufd);
+        }
+
         Ok(())
     }
 }
 
 impl MemoryConfig {
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(clippy::needless_pass_by_value)]
     pub fn parse(memory: &str, memory_zones: Option<Vec<&str>>) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
@@ -1060,6 +1080,7 @@ impl MemoryConfig {
             .add("hugepages")
             .add("hugepage_size")
             .add("prefault")
+            .add("reserve")
             .add("thp");
         parser.parse(memory).map_err(Error::ParseMemory)?;
 
@@ -1104,6 +1125,11 @@ impl MemoryConfig {
             .map_err(Error::ParseMemory)?
             .unwrap_or(Toggle(false))
             .0;
+        let reserve = parser
+            .convert::<Toggle>("reserve")
+            .map_err(Error::ParseMemory)?
+            .unwrap_or(Toggle(false))
+            .0;
         let thp = parser
             .convert::<Toggle>("thp")
             .map_err(Error::ParseMemory)?
@@ -1125,6 +1151,7 @@ impl MemoryConfig {
                     .add("hotplug_size")
                     .add("hotplugged_size")
                     .add("prefault")
+                    .add("reserve")
                     .add("mergeable");
                 parser.parse(memory_zone).map_err(Error::ParseMemoryZone)?;
 
@@ -1166,6 +1193,11 @@ impl MemoryConfig {
                     .map_err(Error::ParseMemoryZone)?
                     .unwrap_or(Toggle(false))
                     .0;
+                let reserve = parser
+                    .convert::<Toggle>("reserve")
+                    .map_err(Error::ParseMemoryZone)?
+                    .unwrap_or(Toggle(false))
+                    .0;
                 let mergeable = parser
                     .convert::<Toggle>("mergeable")
                     .map_err(Error::ParseMemoryZone)?
@@ -1183,6 +1215,7 @@ impl MemoryConfig {
                     hotplug_size,
                     hotplugged_size,
                     prefault,
+                    reserve,
                     mergeable,
                 });
             }
@@ -1201,6 +1234,7 @@ impl MemoryConfig {
             hugepages,
             hugepage_size,
             prefault,
+            reserve,
             zones,
             thp,
         })
@@ -1351,17 +1385,23 @@ impl PciDeviceCommonConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        if let Some(platform_config) = vm_config.platform.as_ref() {
-            if self.pci_segment >= platform_config.num_pci_segments {
-                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
-            }
+        let num_pci_segments = vm_config
+            .platform
+            .as_ref()
+            .map_or(DEFAULT_NUM_PCI_SEGMENTS, |platform_config| {
+                platform_config.num_pci_segments
+            });
 
-            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
-                && iommu_segments.contains(&self.pci_segment)
-                && !self.iommu
-            {
-                return Err(ValidationError::OnIommuSegment(self.pci_segment));
-            }
+        if self.pci_segment >= num_pci_segments {
+            return Err(ValidationError::InvalidPciSegment(self.pci_segment));
+        }
+
+        if let Some(platform_config) = vm_config.platform.as_ref()
+            && let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
+            && iommu_segments.contains(&self.pci_segment)
+            && !self.iommu
+        {
+            return Err(ValidationError::OnIommuSegment(self.pci_segment));
         }
 
         if let Some(device_id) = self.pci_device_id {
@@ -2393,7 +2433,7 @@ impl DebugConsoleConfig {
 
 impl DeviceConfig {
     pub const SYNTAX: &'static str = "Direct device assignment parameters \
-    \"path=<device_path>,iommu=on|off,id=<device_id>,\
+    \"path=<device_path>,fd=<vfio_cdev_fd>,iommu=on|off,id=<device_id>,\
     pci_segment=<segment_id>,pci_device_id=<pci_slot>,\
     x_nv_gpudirect_clique=<clique_id>,\
     x_exclude_mmap_bars=[<bar>...]\"";
@@ -2402,16 +2442,15 @@ impl DeviceConfig {
         let mut parser = OptionParser::new();
         parser
             .add("path")
+            .add("fd")
             .add_all(PciDeviceCommonConfig::OPTIONS_IOMMU)
             .add("x_nv_gpudirect_clique")
             .add("x_exclude_mmap_bars");
         parser.parse(device).map_err(Error::ParseDevice)?;
 
         let pci_common = PciDeviceCommonConfig::parse(device)?;
-        let path = parser
-            .get("path")
-            .map(PathBuf::from)
-            .ok_or(Error::ParseDevicePathMissing)?;
+        let path = parser.get("path").map(PathBuf::from);
+        let fd = parser.convert::<i32>("fd").map_err(Error::ParseDevice)?;
         let x_nv_gpudirect_clique = parser
             .convert::<u8>("x_nv_gpudirect_clique")
             .map_err(Error::ParseDevice)?;
@@ -2423,6 +2462,7 @@ impl DeviceConfig {
         Ok(DeviceConfig {
             pci_common,
             path,
+            fd,
             x_nv_gpudirect_clique,
             x_exclude_mmap_bars,
         })
@@ -2430,6 +2470,21 @@ impl DeviceConfig {
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
         self.pci_common.validate(vm_config)?;
+
+        match (&self.path, self.fd) {
+            (None, None) => return Err(ValidationError::VfioDeviceNeitherPathNorFd),
+            (Some(_), Some(_)) => return Err(ValidationError::VfioDeviceBothPathAndFd),
+            (None, Some(_)) => {
+                let iommufd_fd_set = vm_config
+                    .platform
+                    .as_ref()
+                    .is_some_and(|p| p.iommufd_fd.is_some());
+                if !iommufd_fd_set {
+                    return Err(ValidationError::VfioFdRequiresIommufdFd);
+                }
+            }
+            (Some(_), None) => {}
+        }
 
         if self.x_nv_gpudirect_clique.is_some() {
             let vfio_p2p_dma = vm_config.platform.as_ref().is_none_or(|p| p.vfio_p2p_dma);
@@ -3292,9 +3347,11 @@ impl VmConfig {
         if let Some(devices) = &self.devices {
             let mut device_paths = BTreeSet::new();
             for device in devices {
-                if !device_paths.insert(device.path.to_string_lossy()) {
+                if let Some(path) = device.path.as_deref()
+                    && !device_paths.insert(path.to_string_lossy())
+                {
                     return Err(ValidationError::DuplicateDevicePath(
-                        device.path.to_string_lossy().to_string(),
+                        path.to_string_lossy().to_string(),
                     ));
                 }
 
@@ -3974,6 +4031,20 @@ mod unit_tests {
                 ..Default::default()
             }
         );
+        // reserve=on on a zone
+        assert_eq!(
+            MemoryConfig::parse("size=0", Some(vec!["id=mem0,size=1G,reserve=on"]))?,
+            MemoryConfig {
+                size: 0,
+                zones: Some(vec![MemoryZoneConfig {
+                    id: "mem0".to_string(),
+                    size: 1 << 30,
+                    reserve: true,
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            }
+        );
         Ok(())
     }
 
@@ -4035,6 +4106,16 @@ mod unit_tests {
                 hugepage_size: Some(2 << 20),
                 size: 1 << 30,
                 hugepages: true,
+                ..Default::default()
+            }
+        );
+        // reserve=on opts out of MAP_NORESERVE
+        assert_eq!(
+            MemoryConfig::parse("size=1G,hugepages=on,reserve=on", None)?,
+            MemoryConfig {
+                size: 1 << 30,
+                hugepages: true,
+                reserve: true,
                 ..Default::default()
             }
         );
@@ -4479,7 +4560,6 @@ mod unit_tests {
     }
 
     #[track_caller]
-    #[allow(clippy::too_many_arguments)]
     fn make_vhost_user_config(
         socket: &str,
         virtio_id: u64,
@@ -4676,7 +4756,8 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
     fn device_fixture() -> DeviceConfig {
         DeviceConfig {
             pci_common: PciDeviceCommonConfig::default(),
-            path: PathBuf::from("/path/to/device"),
+            path: Some(PathBuf::from("/path/to/device")),
+            fd: None,
             x_nv_gpudirect_clique: None,
             x_exclude_mmap_bars: Vec::new(),
         }
@@ -4684,8 +4765,15 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
     #[test]
     fn test_device_parsing() -> Result<()> {
-        // Device must have a path provided
-        DeviceConfig::parse("").unwrap_err();
+        // The parser itself is purely syntactic; the "path or fd is
+        // required" rule is enforced by VmConfig::validate instead.
+        assert_eq!(
+            DeviceConfig::parse("")?,
+            DeviceConfig {
+                path: None,
+                ..device_fixture()
+            }
+        );
         assert_eq!(
             DeviceConfig::parse("path=/path/to/device")?,
             device_fixture()
@@ -4737,6 +4825,27 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 ..device_fixture()
             }
         );
+
+        // `fd=` is accepted alongside or in place of `path=`; exclusivity
+        // is enforced by DeviceConfig::validate, not by the parser.
+        assert_eq!(
+            DeviceConfig::parse("fd=7")?,
+            DeviceConfig {
+                path: None,
+                fd: Some(7),
+                ..device_fixture()
+            }
+        );
+        assert_eq!(
+            DeviceConfig::parse("path=/path/to/device,fd=7")?,
+            DeviceConfig {
+                fd: Some(7),
+                ..device_fixture()
+            }
+        );
+        // Non-integer fd fails at parse time.
+        DeviceConfig::parse("fd=notanint").unwrap_err();
+
         Ok(())
     }
 
@@ -4777,6 +4886,26 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 socket: PathBuf::from("/var/run/tpm.sock"),
             }
         );
+        Ok(())
+    }
+
+    #[test]
+    fn test_platform_iommufd_fd_parsing() -> Result<()> {
+        // `iommufd_fd=N` alone implies `iommufd=on`.
+        let p = PlatformConfig::parse("iommufd_fd=42")?;
+        assert!(p.iommufd);
+        assert_eq!(p.iommufd_fd, Some(42));
+
+        // Explicit `iommufd=on,iommufd_fd=N` is the same.
+        let p = PlatformConfig::parse("iommufd=on,iommufd_fd=42")?;
+        assert!(p.iommufd);
+        assert_eq!(p.iommufd_fd, Some(42));
+
+        // No flags → both default to off.
+        let p = PlatformConfig::parse("")?;
+        assert!(!p.iommufd);
+        assert_eq!(p.iommufd_fd, None);
+
         Ok(())
     }
 
@@ -5184,6 +5313,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             system_uuid: None,
             oem_strings: None,
             iommufd: false,
+            iommufd_fd: None,
             vfio_p2p_dma: default_platformconfig_vfio_p2p_dma(),
             system_manufacturer: None,
             system_product_name: None,
@@ -5227,6 +5357,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 hugepages: false,
                 hugepage_size: None,
                 prefault: false,
+                reserve: false,
                 zones: None,
                 thp: true,
             },
@@ -6029,11 +6160,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let mut still_valid_config = valid_config.clone();
         still_valid_config.devices = Some(vec![
             DeviceConfig {
-                path: "/device1".into(),
+                path: Some("/device1".into()),
                 ..device_fixture()
             },
             DeviceConfig {
-                path: "/device2".into(),
+                path: Some("/device2".into()),
                 ..device_fixture()
             },
         ]);
@@ -6042,15 +6173,76 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let mut invalid_config = valid_config.clone();
         invalid_config.devices = Some(vec![
             DeviceConfig {
-                path: "/device1".into(),
+                path: Some("/device1".into()),
                 ..device_fixture()
             },
             DeviceConfig {
-                path: "/device1".into(),
+                path: Some("/device1".into()),
                 ..device_fixture()
             },
         ]);
         invalid_config.validate().unwrap_err();
+
+        // An fd-backed DeviceConfig is only valid with
+        // externally-supplied fd is provided for iommufd too
+        let mut fd_valid_config = valid_config.clone();
+        fd_valid_config.platform = Some(PlatformConfig {
+            iommufd: true,
+            iommufd_fd: Some(8),
+            ..platform_fixture()
+        });
+        fd_valid_config.devices = Some(vec![DeviceConfig {
+            path: None,
+            fd: Some(7),
+            ..device_fixture()
+        }]);
+        fd_valid_config.validate().unwrap();
+
+        let mut fd_without_iommufd_fd = fd_valid_config.clone();
+        fd_without_iommufd_fd.platform = Some(PlatformConfig {
+            iommufd: true,
+            iommufd_fd: None,
+            ..platform_fixture()
+        });
+        assert!(matches!(
+            fd_without_iommufd_fd.validate(),
+            Err(ValidationError::VfioFdRequiresIommufdFd),
+        ));
+
+        // iommufd_fd without iommufd=on is rejected at PlatformConfig::validate.
+        let mut iommufd_fd_without_iommufd = valid_config.clone();
+        iommufd_fd_without_iommufd.platform = Some(PlatformConfig {
+            iommufd: false,
+            iommufd_fd: Some(8),
+            ..platform_fixture()
+        });
+        assert!(matches!(
+            iommufd_fd_without_iommufd.validate(),
+            Err(ValidationError::IommufdFdRequiresIommufd),
+        ));
+
+        // Exactly one of path and fd must be set.
+        let mut both_path_and_fd = fd_valid_config.clone();
+        both_path_and_fd.devices = Some(vec![DeviceConfig {
+            path: Some("/device1".into()),
+            fd: Some(7),
+            ..device_fixture()
+        }]);
+        assert!(matches!(
+            both_path_and_fd.validate(),
+            Err(ValidationError::VfioDeviceBothPathAndFd),
+        ));
+
+        let mut neither_path_nor_fd = fd_valid_config.clone();
+        neither_path_nor_fd.devices = Some(vec![DeviceConfig {
+            path: None,
+            fd: None,
+            ..device_fixture()
+        }]);
+        assert!(matches!(
+            neither_path_nor_fd.validate(),
+            Err(ValidationError::VfioDeviceNeitherPathNorFd),
+        ));
         #[cfg(feature = "sev_snp")]
         {
             // Payload with empty host data

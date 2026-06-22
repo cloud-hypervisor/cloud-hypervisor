@@ -7,6 +7,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
+use std::time::Duration;
 
 use log::{error, info};
 use vm_device::BusDevice;
@@ -53,7 +54,7 @@ impl BusDevice for I8042Device {
             while !self.vcpus_kill_signalled.load(Ordering::SeqCst) {
                 // This is more effective than thread::yield_now() at
                 // avoiding a priority inversion with the VMM thread
-                thread::sleep(std::time::Duration::from_millis(1));
+                thread::sleep(Duration::from_millis(1));
             }
         }
 

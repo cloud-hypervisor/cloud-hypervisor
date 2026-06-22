@@ -19,8 +19,7 @@ use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 use std::time::Instant;
 use std::{convert, io, process, result};
 
-use block::formats::qcow::internal::RawFile;
-use block::{Request, RequestType, VirtioBlockConfig, build_serial};
+use block::{AlignedFile, Request, RequestType, VirtioBlockConfig, build_serial};
 use libc::EFD_NONBLOCK;
 use log::{debug, error, info, warn};
 use option_parser::{OptionParser, OptionParserError, Toggle};
@@ -48,8 +47,8 @@ const BLK_SIZE: u32 = 512;
 // and the overhead of the emulation layer.
 const POLL_QUEUE_US: u128 = 50;
 
-type Result<T> = std::result::Result<T, Error>;
-type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
+type Result<T> = result::Result<T, Error>;
+type VhostUserBackendResult<T> = io::Result<T>;
 
 #[derive(Error, Debug)]
 enum Error {
@@ -85,7 +84,7 @@ impl convert::From<Error> for io::Error {
 }
 
 struct VhostUserBlkThread {
-    disk_image: Arc<Mutex<RawFile>>,
+    disk_image: Arc<Mutex<AlignedFile>>,
     serial: Vec<u8>,
     disk_nsectors: u64,
     event_idx: bool,
@@ -96,7 +95,7 @@ struct VhostUserBlkThread {
 
 impl VhostUserBlkThread {
     fn new(
-        disk_image: Arc<Mutex<RawFile>>,
+        disk_image: Arc<Mutex<AlignedFile>>,
         serial: Vec<u8>,
         disk_nsectors: u64,
         writeback: Arc<AtomicBool>,
@@ -230,7 +229,7 @@ impl VhostUserBlkBackend {
             options.custom_flags(libc::O_DIRECT);
         }
         let image: File = options.open(image_path).unwrap();
-        let raw_img = RawFile::new(image, direct);
+        let raw_img = AlignedFile::new(image, direct);
 
         let serial = build_serial(&PathBuf::from(&image_path));
         let image = Arc::new(Mutex::new(raw_img));

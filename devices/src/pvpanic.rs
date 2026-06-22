@@ -4,8 +4,8 @@
 //
 
 use std::any::Any;
-use std::result;
 use std::sync::{Arc, Barrier};
+use std::{io, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
@@ -178,7 +178,7 @@ impl PciDevice for PvPanicDevice {
         mmio32_allocator: &mut AddressAllocator,
         _mmio64_allocator: &mut AddressAllocator,
         resources: Option<Vec<Resource>>,
-    ) -> std::result::Result<Vec<PciBarConfiguration>, PciDeviceError> {
+    ) -> result::Result<Vec<PciBarConfiguration>, PciDeviceError> {
         let mut bars = Vec::new();
         let region_type = PciBarRegionType::Memory32BitRegion;
         let bar_id = 0;
@@ -213,7 +213,7 @@ impl PciDevice for PvPanicDevice {
         _allocator: &mut SystemAllocator,
         mmio32_allocator: &mut AddressAllocator,
         _mmio64_allocator: &mut AddressAllocator,
-    ) -> std::result::Result<(), PciDeviceError> {
+    ) -> result::Result<(), PciDeviceError> {
         for bar in self.bar_regions.drain(..) {
             mmio32_allocator.free(GuestAddress(bar.addr()), bar.size());
         }
@@ -221,7 +221,7 @@ impl PciDevice for PvPanicDevice {
         Ok(())
     }
 
-    fn move_bar(&mut self, old_base: u64, new_base: u64) -> result::Result<(), std::io::Error> {
+    fn move_bar(&mut self, old_base: u64, new_base: u64) -> io::Result<()> {
         for bar in self.bar_regions.iter_mut() {
             if bar.addr() == old_base {
                 *bar = bar.set_address(new_base);
@@ -255,7 +255,7 @@ impl Snapshottable for PvPanicDevice {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         let mut snapshot = Snapshot::new_from_state(&self.state())?;
 
         // Snapshot PciConfiguration

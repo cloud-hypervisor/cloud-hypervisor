@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 //
 
-use std::io;
 use std::sync::Arc;
+use std::{io, result};
 
 use byteorder::{ByteOrder, LittleEndian};
 use log::error;
@@ -290,7 +290,7 @@ impl Snapshottable for MsiConfig {
         String::from(MSI_CONFIG_ID)
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_state(&self.state())
     }
 }

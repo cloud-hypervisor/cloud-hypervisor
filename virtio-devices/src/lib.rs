@@ -10,8 +10,8 @@
 
 //! Implements virtio devices, queues, and transport mechanisms.
 
-use std::io;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::{fmt, io, result};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -81,7 +81,7 @@ const DEVICE_FAILED: u32 = 0x80;
 pub(crate) fn mark_device_needs_reset(
     device_status: &AtomicU8,
     interrupt_cb: &dyn self::VirtioInterrupt,
-    context: std::fmt::Arguments<'_>,
+    context: fmt::Arguments<'_>,
 ) {
     log::warn!(
         "Corrupted request detected ({context}). Setting device status to 'NEEDS_RESET' and stopping processing queues until reset."
@@ -109,9 +109,9 @@ pub enum ActivateError {
     #[error("Failed to activate virtio device")]
     BadActivate,
     #[error("Failed to clone EventFd")]
-    CloneEventFd(#[source] std::io::Error),
+    CloneEventFd(#[source] io::Error),
     #[error("Failed to spawn thread")]
-    ThreadSpawn(#[source] std::io::Error),
+    ThreadSpawn(#[source] io::Error),
     #[error("Failed to setup vhost-user-fs daemon")]
     VhostUserFsSetup(#[source] vhost_user::Error),
     #[error("Failed to setup vhost-user daemon")]
@@ -119,12 +119,12 @@ pub enum ActivateError {
     #[error("Failed to create seccomp filter")]
     CreateSeccompFilter(#[source] seccompiler::Error),
     #[error("Failed to create rate limiter")]
-    CreateRateLimiter(#[source] std::io::Error),
+    CreateRateLimiter(#[source] io::Error),
     #[error("Failed to activate the vDPA device")]
     ActivateVdpa(#[source] vdpa::Error),
 }
 
-pub type ActivateResult = std::result::Result<(), ActivateError>;
+pub type ActivateResult = result::Result<(), ActivateError>;
 
 pub type DeviceEventT = u16;
 
@@ -161,7 +161,7 @@ pub struct RateLimiterConfig {
 impl TryInto<rate_limiter::RateLimiter> for RateLimiterConfig {
     type Error = io::Error;
 
-    fn try_into(self) -> std::result::Result<rate_limiter::RateLimiter, Self::Error> {
+    fn try_into(self) -> result::Result<rate_limiter::RateLimiter, Self::Error> {
         let bw = self.bandwidth.unwrap_or_default();
         let ops = self.ops.unwrap_or_default();
         rate_limiter::RateLimiter::new(

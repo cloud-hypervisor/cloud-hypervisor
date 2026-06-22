@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::{io, result};
+use std::{io, mem, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
@@ -26,6 +26,7 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::device::ActivationContext;
 use crate::{
     ActivateError, ActivateResult, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK,
     DEVICE_FEATURES_OK, GuestMemoryMmap, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon, VirtioDevice,
@@ -89,10 +90,10 @@ pub enum Error {
     #[error("Failed to set vring size")]
     SetVringNum(#[source] vhost::Error),
     #[error("Failed to translate address")]
-    TranslateAddress(#[source] std::io::Error),
+    TranslateAddress(#[source] io::Error),
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Serialize, Deserialize)]
 pub struct VdpaState {
@@ -252,7 +253,7 @@ impl Vdpa {
                     .desc_table()
                     .translate_gpa(
                         self.common.access_platform().as_deref(),
-                        queue_size as usize * std::mem::size_of::<RawDescriptor>(),
+                        queue_size as usize * mem::size_of::<RawDescriptor>(),
                     )
                     .map_err(Error::TranslateAddress)?,
                 used_ring_addr: queue
@@ -438,8 +439,8 @@ impl VirtioDevice for Vdpa {
         }
     }
 
-    fn activate(&mut self, context: crate::device::ActivationContext) -> ActivateResult {
-        let crate::device::ActivationContext {
+    fn activate(&mut self, context: ActivationContext) -> ActivateResult {
+        let ActivationContext {
             mem,
             interrupt_cb: virtio_interrupt,
             queues,
@@ -477,7 +478,7 @@ impl VirtioDevice for Vdpa {
 }
 
 impl Pausable for Vdpa {
-    fn pause(&mut self) -> std::result::Result<(), MigratableError> {
+    fn pause(&mut self) -> result::Result<(), MigratableError> {
         if self.migrating {
             Ok(())
         } else {
@@ -487,7 +488,7 @@ impl Pausable for Vdpa {
         }
     }
 
-    fn resume(&mut self) -> std::result::Result<(), MigratableError> {
+    fn resume(&mut self) -> result::Result<(), MigratableError> {
         if !self.common.paused.load(Ordering::SeqCst) {
             return Ok(());
         }
@@ -507,7 +508,7 @@ impl Snapshottable for Vdpa {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         if !self.migrating {
             return Err(MigratableError::Snapshot(anyhow!(
                 "Can't snapshot a vDPA device outside live migration"
@@ -530,7 +531,7 @@ impl Snapshottable for Vdpa {
 impl Transportable for Vdpa {}
 
 impl Migratable for Vdpa {
-    fn start_migration(&mut self) -> std::result::Result<(), MigratableError> {
+    fn start_migration(&mut self) -> result::Result<(), MigratableError> {
         self.migrating = true;
         // Given there's no way to track dirty pages, we must suspend the
         // device as soon as the migration process starts.
@@ -546,7 +547,7 @@ impl Migratable for Vdpa {
         }
     }
 
-    fn complete_migration(&mut self) -> std::result::Result<(), MigratableError> {
+    fn complete_migration(&mut self) -> result::Result<(), MigratableError> {
         self.migrating = false;
         Ok(())
     }
@@ -595,7 +596,7 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VdpaDmaMapping<M
         }
     }
 
-    fn unmap(&self, iova: u64, size: u64) -> std::result::Result<(), std::io::Error> {
+    fn unmap(&self, iova: u64, size: u64) -> io::Result<()> {
         debug!("DMA unmap iova 0x{iova:x} size 0x{size:x}");
         self.device
             .lock()

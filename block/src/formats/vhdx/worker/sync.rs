@@ -5,7 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::collections::VecDeque;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::sync::{Arc, Mutex};
 
 use vmm_sys_util::eventfd::EventFd;
@@ -96,13 +96,13 @@ impl AsyncIo for VhdxSync {
     }
 
     fn punch_hole(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
-        Err(AsyncIoError::PunchHole(std::io::Error::other(
+        Err(AsyncIoError::PunchHole(io::Error::other(
             "punch_hole not supported for VHDX",
         )))
     }
 
     fn write_zeroes(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
-        Err(AsyncIoError::WriteZeroes(std::io::Error::other(
+        Err(AsyncIoError::WriteZeroes(io::Error::other(
             "write_zeroes not supported for VHDX",
         )))
     }

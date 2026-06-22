@@ -7,12 +7,12 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::any::Any;
-use std::cmp;
 use std::io::Write;
 use std::mem::size_of;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
+use std::{cmp, io, mem, result};
 
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
@@ -91,7 +91,7 @@ const VIRTIO_PCI_CAP_LEN_OFFSET: u8 = 2;
 impl VirtioPciCap {
     pub fn new(cfg_type: PciCapabilityType, pci_bar: u8, offset: u32, length: u32) -> Self {
         VirtioPciCap {
-            cap_len: (std::mem::size_of::<VirtioPciCap>() as u8) + VIRTIO_PCI_CAP_LEN_OFFSET,
+            cap_len: (mem::size_of::<VirtioPciCap>() as u8) + VIRTIO_PCI_CAP_LEN_OFFSET,
             cfg_type: cfg_type as u8,
             pci_bar,
             id: 0,
@@ -131,8 +131,7 @@ impl VirtioPciNotifyCap {
     ) -> Self {
         VirtioPciNotifyCap {
             cap: VirtioPciCap {
-                cap_len: (std::mem::size_of::<VirtioPciNotifyCap>() as u8)
-                    + VIRTIO_PCI_CAP_LEN_OFFSET,
+                cap_len: (mem::size_of::<VirtioPciNotifyCap>() as u8) + VIRTIO_PCI_CAP_LEN_OFFSET,
                 cfg_type: cfg_type as u8,
                 pci_bar,
                 id: 0,
@@ -169,7 +168,7 @@ impl VirtioPciCap64 {
     pub fn new(cfg_type: PciCapabilityType, pci_bar: u8, id: u8, offset: u64, length: u64) -> Self {
         VirtioPciCap64 {
             cap: VirtioPciCap {
-                cap_len: (std::mem::size_of::<VirtioPciCap64>() as u8) + VIRTIO_PCI_CAP_LEN_OFFSET,
+                cap_len: (mem::size_of::<VirtioPciCap64>() as u8) + VIRTIO_PCI_CAP_LEN_OFFSET,
                 cfg_type: cfg_type as u8,
                 pci_bar,
                 id,
@@ -360,7 +359,7 @@ pub enum VirtioPciDeviceError {
     #[error("Failed creating VirtioPciDevice")]
     CreateVirtioPciDevice(#[source] anyhow::Error),
 }
-pub type Result<T> = std::result::Result<T, VirtioPciDeviceError>;
+pub type Result<T> = result::Result<T, VirtioPciDeviceError>;
 
 pub struct VirtioPciDevice {
     id: String,
@@ -418,7 +417,7 @@ pub struct VirtioPciDevice {
 
 impl VirtioPciDevice {
     /// Constructs a new PCI transport for the given virtio device.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         memory: GuestMemoryAtomic<GuestMemoryMmap>,
@@ -610,7 +609,7 @@ impl VirtioPciDevice {
         // in the context of a restore given the device might require some
         // activation, meaning it will require locking. Dropping the lock
         // prevents from a subtle deadlock.
-        std::mem::drop(locked_device);
+        drop(locked_device);
 
         let virtio_interrupt = Arc::new(VirtioInterruptMsix::new(
             msix_config.clone(),
@@ -702,7 +701,7 @@ impl VirtioPciDevice {
             .get_bar_addr(VIRTIO_COMMON_BAR_INDEX.into())
     }
 
-    fn add_pci_capabilities(&mut self) -> std::result::Result<(), PciDeviceError> {
+    fn add_pci_capabilities(&mut self) -> result::Result<(), PciDeviceError> {
         // Add pointers to the different configuration structures from the PCI capabilities.
         let common_cap = VirtioPciCap::new(
             PciCapabilityType::Common,
@@ -777,7 +776,7 @@ impl VirtioPciDevice {
             return;
         }
 
-        if offset < std::mem::size_of::<VirtioPciCap>() {
+        if offset < mem::size_of::<VirtioPciCap>() {
             if let Some(end) = offset.checked_add(data_len) {
                 // This write can't fail, offset and end are checked against config_len.
                 data.write_all(&cap_slice[offset..cmp::min(end, cap_len)])
@@ -800,7 +799,7 @@ impl VirtioPciDevice {
             return None;
         }
 
-        if offset < std::mem::size_of::<VirtioPciCap>() {
+        if offset < mem::size_of::<VirtioPciCap>() {
             let (_, right) = cap_slice.split_at_mut(offset);
             right[..data_len].copy_from_slice(data);
             None
@@ -907,7 +906,7 @@ impl VirtioInterruptMsix {
 }
 
 impl VirtioInterrupt for VirtioInterruptMsix {
-    fn trigger(&self, int_type: VirtioInterruptType) -> std::result::Result<(), std::io::Error> {
+    fn trigger(&self, int_type: VirtioInterruptType) -> io::Result<()> {
         if matches!(int_type, VirtioInterruptType::Config) {
             self.config_changed.store(true, Ordering::Release);
         }
@@ -970,7 +969,7 @@ impl VirtioInterrupt for VirtioInterruptMsix {
         interrupt: u32,
         eventfd: Option<EventFd>,
         vm: &dyn hypervisor::Vm,
-    ) -> std::io::Result<()> {
+    ) -> io::Result<()> {
         self.interrupt_source_group
             .set_notifier(interrupt, eventfd, vm)
     }
@@ -1025,7 +1024,7 @@ impl PciDevice for VirtioPciDevice {
         mmio32_allocator: &mut AddressAllocator,
         mmio64_allocator: &mut AddressAllocator,
         resources: Option<Vec<Resource>>,
-    ) -> std::result::Result<Vec<PciBarConfiguration>, PciDeviceError> {
+    ) -> result::Result<Vec<PciBarConfiguration>, PciDeviceError> {
         let mut bars = Vec::new();
         let device_clone = self.device.clone();
         let device = device_clone.lock().unwrap();
@@ -1146,7 +1145,7 @@ impl PciDevice for VirtioPciDevice {
         _allocator: &mut SystemAllocator,
         mmio32_allocator: &mut AddressAllocator,
         mmio64_allocator: &mut AddressAllocator,
-    ) -> std::result::Result<(), PciDeviceError> {
+    ) -> result::Result<(), PciDeviceError> {
         for bar in self.bar_regions.drain(..) {
             match bar.region_type() {
                 PciBarRegionType::Memory32BitRegion => {
@@ -1161,11 +1160,7 @@ impl PciDevice for VirtioPciDevice {
         Ok(())
     }
 
-    fn move_bar(
-        &mut self,
-        old_base: u64,
-        new_base: u64,
-    ) -> std::result::Result<(), std::io::Error> {
+    fn move_bar(&mut self, old_base: u64, new_base: u64) -> io::Result<()> {
         // We only update our idea of the bar in order to support free_bars() above.
         // The majority of the reallocation is done inside DeviceManager.
         for bar in self.bar_regions.iter_mut() {
@@ -1318,11 +1313,11 @@ impl BusDevice for VirtioPciDevice {
 }
 
 impl Pausable for VirtioPciDevice {
-    fn pause(&mut self) -> std::result::Result<(), MigratableError> {
+    fn pause(&mut self) -> result::Result<(), MigratableError> {
         Ok(())
     }
 
-    fn resume(&mut self) -> std::result::Result<(), MigratableError> {
+    fn resume(&mut self) -> result::Result<(), MigratableError> {
         Ok(())
     }
 }
@@ -1332,7 +1327,7 @@ impl Snapshottable for VirtioPciDevice {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         let mut virtio_pci_dev_snapshot = Snapshot::new_from_state(&self.state())?;
 
         // Snapshot PciConfiguration
@@ -1357,6 +1352,8 @@ impl Migratable for VirtioPciDevice {}
 
 #[cfg(test)]
 mod unit_tests {
+    use std::thread;
+
     use vm_device::interrupt::InterruptSourceConfig;
 
     use super::*;
@@ -1367,7 +1364,7 @@ mod unit_tests {
     }
 
     impl InterruptSourceGroup for TestInterruptSourceGroup {
-        fn trigger(&self, _index: InterruptIndex) -> std::result::Result<(), std::io::Error> {
+        fn trigger(&self, _index: InterruptIndex) -> io::Result<()> {
             self.event_fd.write(1)
         }
         fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
@@ -1379,10 +1376,10 @@ mod unit_tests {
             _config: InterruptSourceConfig,
             _masked: bool,
             _set_gsi: bool,
-        ) -> std::result::Result<(), std::io::Error> {
+        ) -> io::Result<()> {
             Ok(())
         }
-        fn set_gsi(&self) -> std::result::Result<(), std::io::Error> {
+        fn set_gsi(&self) -> io::Result<()> {
             Ok(())
         }
     }
@@ -1533,7 +1530,7 @@ mod unit_tests {
         fn queue_max_sizes(&self) -> &[u16] {
             &[]
         }
-        fn activate(&mut self, _context: crate::device::ActivationContext) -> ActivateResult {
+        fn activate(&mut self, _context: ActivationContext) -> ActivateResult {
             self.result.lock().unwrap().take().unwrap()
         }
     }
@@ -1543,7 +1540,7 @@ mod unit_tests {
     }
 
     impl VirtioInterrupt for TestVirtioInterrupt {
-        fn trigger(&self, int_type: VirtioInterruptType) -> std::io::Result<()> {
+        fn trigger(&self, int_type: VirtioInterruptType) -> io::Result<()> {
             self.triggers.lock().unwrap().push(int_type);
             Ok(())
         }
@@ -1552,7 +1549,7 @@ mod unit_tests {
             _int_type: u32,
             _notifier: Option<EventFd>,
             _vm: &dyn hypervisor::Vm,
-        ) -> std::io::Result<()> {
+        ) -> io::Result<()> {
             Ok(())
         }
     }
@@ -1598,7 +1595,7 @@ mod unit_tests {
 
         // Simulate the vCPU thread blocked on the activation
         // barrier after writing DRIVER_OK.
-        let waiter = std::thread::spawn(move || barrier.wait());
+        let waiter = thread::spawn(move || barrier.wait());
 
         let result = activator.activate();
 
@@ -1622,7 +1619,7 @@ mod unit_tests {
         let (activator, status, device_activated, interrupt, barrier) = make_activator(Ok(()));
         let initial_status = status.load(Ordering::SeqCst);
 
-        let waiter = std::thread::spawn(move || barrier.wait());
+        let waiter = thread::spawn(move || barrier.wait());
 
         let result = activator.activate();
 

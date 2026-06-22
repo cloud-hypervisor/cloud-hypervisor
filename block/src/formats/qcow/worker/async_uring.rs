@@ -8,24 +8,21 @@
 
 //! QCOW2 async disk backend.
 
-use std::cmp::{max, min};
+use std::cmp::min;
 use std::io;
+use std::os::unix::fs::FileExt;
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
-use super::common::{
-    AlignedBuf, aligned_pread, aligned_pwrite, decompress_cluster, pread_alloc, pread_exact,
-    pwrite_all,
-};
+use super::common::decompress_cluster;
 use super::internal::decoder::Decoder;
 use super::internal::metadata::{
     BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
 };
 use super::internal::qcow_raw_file::QcowRawFile;
-use crate::SECTOR_SIZE;
 use crate::async_io::{
     AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, UringDataIo,
 };
@@ -41,16 +38,13 @@ use crate::async_io::{
 /// before the host offset is known.
 pub struct QcowAsync {
     metadata: Arc<QcowMetadata>,
+    // Drop before data_file so pending SQEs can be submitted while fd is valid.
+    data_io: UringDataIo,
     data_file: QcowRawFile,
     backing_file: Option<Arc<dyn BackingRead>>,
     sparse: bool,
-    /// O_DIRECT alignment requirement (0 = no alignment needed).
-    alignment: usize,
-    /// I/O alignment for the AsyncIo trait (at least SECTOR_SIZE).
-    io_alignment: u64,
     cluster_size: u64,
     decoder: Arc<dyn Decoder>,
-    data_io: UringDataIo,
 }
 
 impl QcowAsync {
@@ -61,19 +55,14 @@ impl QcowAsync {
         sparse: bool,
         ring_depth: u32,
     ) -> io::Result<Self> {
-        let alignment = data_file.file().alignment();
-        let io_alignment = max(alignment as u64, SECTOR_SIZE);
-
         Ok(QcowAsync {
             cluster_size: metadata.cluster_size(),
             decoder: metadata.decoder(),
             metadata,
+            data_io: UringDataIo::new(ring_depth)?,
             data_file,
             backing_file,
             sparse,
-            alignment,
-            io_alignment,
-            data_io: UringDataIo::new(ring_depth)?,
         })
     }
 
@@ -126,7 +115,6 @@ impl QcowAsync {
             op.offset() as u64,
             &mut op,
             total_len,
-            self.alignment,
             self.cluster_size,
             &*self.decoder,
         ) {
@@ -159,7 +147,6 @@ impl QcowAsync {
             &self.metadata,
             &self.data_file,
             &self.backing_file,
-            self.alignment,
             self.cluster_size,
         ) {
             return Err(Box::new((op, e)));
@@ -277,10 +264,6 @@ impl AsyncIo for QcowAsync {
         true
     }
 
-    fn alignment(&self) -> u64 {
-        self.io_alignment
-    }
-
     fn submit_batch_requests(&mut self, batch_request: Vec<AsyncIoOperation>) -> AsyncIoResult<()> {
         let mut async_reads = Vec::new();
 
@@ -322,7 +305,7 @@ impl QcowAsync {
     /// Returns `Some(host_offset)` if the entire read falls within a single
     /// allocated cluster (fast path). Otherwise handles the read
     /// synchronously via `scatter_read_sync` and returns `None`.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn resolve_read(
         metadata: &QcowMetadata,
         data_file: &QcowRawFile,
@@ -330,7 +313,6 @@ impl QcowAsync {
         address: u64,
         op: &mut AsyncIoOperation,
         total_len: usize,
-        alignment: usize,
         cluster_size: u64,
         decoder: &dyn Decoder,
     ) -> AsyncIoResult<Option<u64>> {
@@ -346,7 +328,7 @@ impl QcowAsync {
         // Guest requests can be smaller (e.g. 512 byte UEFI reads on a
         // 4096 byte sector device), so O_DIRECT reads fall through to the
         // alignment aware synchronous path instead.
-        if alignment == 0
+        if !data_file.file().is_direct()
             && mappings.len() == 1
             && let ClusterReadMapping::Allocated {
                 offset: host_offset,
@@ -357,15 +339,7 @@ impl QcowAsync {
             return Ok(Some(*host_offset));
         }
 
-        Self::scatter_read_sync(
-            mappings,
-            op,
-            data_file,
-            backing_file,
-            alignment,
-            cluster_size,
-            decoder,
-        )?;
+        Self::scatter_read_sync(mappings, op, data_file, backing_file, cluster_size, decoder)?;
         Ok(None)
     }
 
@@ -375,7 +349,6 @@ impl QcowAsync {
         op: &mut AsyncIoOperation,
         data_file: &QcowRawFile,
         backing_file: &Option<Arc<dyn BackingRead>>,
-        alignment: usize,
         cluster_size: u64,
         decoder: &dyn Decoder,
     ) -> AsyncIoResult<()> {
@@ -392,25 +365,13 @@ impl QcowAsync {
                     length,
                 } => {
                     let len = length as usize;
-                    if alignment > 0 {
-                        let mut abuf =
-                            AlignedBuf::new(len, alignment).map_err(AsyncIoError::ReadVectored)?;
-                        aligned_pread(
-                            data_file.as_raw_fd(),
-                            abuf.as_mut_slice(len),
-                            host_offset,
-                            alignment,
-                        )
+                    let mut buf = vec![0u8; len];
+                    data_file
+                        .file()
+                        .read_exact_at(&mut buf, host_offset)
                         .map_err(AsyncIoError::ReadVectored)?;
-                        op.write_bytes_at(buf_offset, abuf.as_slice(len))
-                            .map_err(AsyncIoError::ReadVectored)?;
-                    } else {
-                        let mut buf = vec![0u8; len];
-                        pread_exact(data_file.as_raw_fd(), &mut buf, host_offset)
-                            .map_err(AsyncIoError::ReadVectored)?;
-                        op.write_bytes_at(buf_offset, &buf)
-                            .map_err(AsyncIoError::ReadVectored)?;
-                    }
+                    op.write_bytes_at(buf_offset, &buf)
+                        .map_err(AsyncIoError::ReadVectored)?;
                     buf_offset += len;
                 }
                 ClusterReadMapping::Compressed {
@@ -419,9 +380,11 @@ impl QcowAsync {
                     cluster_offset,
                     length,
                 } => {
-                    let compressed =
-                        pread_alloc(data_file.as_raw_fd(), host_offset, compressed_size)
-                            .map_err(AsyncIoError::ReadVectored)?;
+                    let mut compressed = vec![0u8; compressed_size];
+                    data_file
+                        .file()
+                        .read_exact_at(&mut compressed, host_offset)
+                        .map_err(AsyncIoError::ReadVectored)?;
                     let decompressed =
                         decompress_cluster(&compressed, cluster_size as usize, decoder)
                             .map_err(AsyncIoError::ReadVectored)?;
@@ -458,7 +421,6 @@ impl QcowAsync {
         metadata: &QcowMetadata,
         data_file: &QcowRawFile,
         backing_file: &Option<Arc<dyn BackingRead>>,
-        alignment: usize,
         cluster_size: u64,
     ) -> AsyncIoResult<()> {
         let total_len = op.total_len();
@@ -492,27 +454,13 @@ impl QcowAsync {
                 ClusterWriteMapping::Allocated {
                     offset: host_offset,
                 } => {
-                    if alignment > 0 {
-                        // O_DIRECT, gather directly into aligned buffer.
-                        let mut abuf = AlignedBuf::new(count, alignment)
-                            .map_err(AsyncIoError::WriteVectored)?;
-                        op.read_bytes_at(buf_offset, abuf.as_mut_slice(count))
-                            .map_err(AsyncIoError::WriteVectored)?;
-                        aligned_pwrite(
-                            data_file.as_raw_fd(),
-                            abuf.as_slice(count),
-                            host_offset,
-                            alignment,
-                        )
+                    let mut buf = vec![0u8; count];
+                    op.read_bytes_at(buf_offset, &mut buf)
                         .map_err(AsyncIoError::WriteVectored)?;
-                    } else {
-                        // No O_DIRECT, plain buffer is fine.
-                        let mut buf = vec![0u8; count];
-                        op.read_bytes_at(buf_offset, &mut buf)
-                            .map_err(AsyncIoError::WriteVectored)?;
-                        pwrite_all(data_file.as_raw_fd(), &buf, host_offset)
-                            .map_err(AsyncIoError::WriteVectored)?;
-                    }
+                    data_file
+                        .file()
+                        .write_all_at(&buf, host_offset)
+                        .map_err(AsyncIoError::WriteVectored)?;
                 }
             }
             buf_offset += count;
@@ -523,9 +471,9 @@ impl QcowAsync {
 
 #[cfg(test)]
 mod unit_tests {
-    use std::io::{Seek, SeekFrom, Write};
+    use std::io::Write;
     use std::sync::Arc;
-    use std::thread;
+    use std::{mem, thread};
 
     use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
     use vmm_sys_util::tempfile::TempFile;
@@ -534,9 +482,9 @@ mod unit_tests {
     use crate::SECTOR_SIZE;
     use crate::async_io::{AsyncIoCompletion, AsyncIoOperation, GuestMemoryTarget, OwnedIoBuffer};
     use crate::disk_file::AsyncDiskFile;
-    use crate::formats::qcow::QcowDisk;
     use crate::formats::qcow::common::unit_tests::compress_allocated_clusters;
-    use crate::formats::qcow::internal::{BackingFileConfig, ImageType, QcowFile, RawFile};
+    use crate::formats::qcow::internal::{BackingFileConfig, ImageType};
+    use crate::formats::qcow::{QcowDisk, QcowTempDisk};
 
     fn create_disk_with_data(
         file_size: u64,
@@ -544,14 +492,15 @@ mod unit_tests {
         offset: u64,
         sparse: bool,
     ) -> (TempFile, QcowDisk) {
-        let temp_file = TempFile::new().unwrap();
-        {
-            let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
-            let mut qcow_file = QcowFile::new(raw_file, 3, file_size, sparse).unwrap();
-            qcow_file.seek(SeekFrom::Start(offset)).unwrap();
-            qcow_file.write_all(data).unwrap();
-            qcow_file.flush().unwrap();
-        }
+        let temp_file = if data.is_empty() {
+            QcowTempDisk::new(file_size, None, false, sparse, true)
+                .unwrap()
+                .into_tempfile()
+        } else {
+            let tmp_disk = QcowTempDisk::new(file_size, None, false, sparse, true).unwrap();
+            tmp_disk.disk().write_all_at(offset, data);
+            tmp_disk.into_tempfile()
+        };
         let disk = QcowDisk::new(
             temp_file.as_file().try_clone().unwrap(),
             false,
@@ -573,15 +522,13 @@ mod unit_tests {
         backing_temp.as_file().sync_all().unwrap();
         let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
 
-        let overlay_temp = TempFile::new().unwrap();
-        {
-            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
-            let backing_config = BackingFileConfig {
-                path: backing_path,
-                format: Some(ImageType::Raw),
-            };
-            QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
-        }
+        let backing_config = BackingFileConfig {
+            path: backing_path,
+            format: Some(ImageType::Raw),
+        };
+        let overlay_temp = QcowTempDisk::new(file_size, Some(&backing_config), false, true, false)
+            .unwrap()
+            .into_tempfile();
 
         let disk = QcowDisk::new(
             overlay_temp.as_file().try_clone().unwrap(),
@@ -722,11 +669,9 @@ mod unit_tests {
     #[test]
     fn test_qcow_async_write_read_roundtrip() {
         let file_size = 100 * 1024 * 1024;
-        let temp_file = TempFile::new().unwrap();
-        {
-            let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
-            QcowFile::new(raw_file, 3, file_size, true).unwrap();
-        }
+        let temp_file = QcowTempDisk::new(file_size, None, false, true, false)
+            .unwrap()
+            .into_tempfile();
         let disk = QcowDisk::new(
             temp_file.as_file().try_clone().unwrap(),
             false,
@@ -805,11 +750,9 @@ mod unit_tests {
     #[test]
     fn test_qcow_async_sync_write_from_guest_memory() {
         let file_size = 100 * 1024 * 1024;
-        let temp_file = TempFile::new().unwrap();
-        {
-            let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
-            QcowFile::new(raw_file, 3, file_size, true).unwrap();
-        }
+        let temp_file = QcowTempDisk::new(file_size, None, false, true, false)
+            .unwrap()
+            .into_tempfile();
         let disk = QcowDisk::new(
             temp_file.as_file().try_clone().unwrap(),
             false,
@@ -843,11 +786,9 @@ mod unit_tests {
     #[test]
     fn test_qcow_async_batch_mixed_requests() {
         let file_size = 100 * 1024 * 1024;
-        let temp_file = TempFile::new().unwrap();
-        {
-            let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
-            QcowFile::new(raw_file, 3, file_size, true).unwrap();
-        }
+        let temp_file = QcowTempDisk::new(file_size, None, false, true, false)
+            .unwrap()
+            .into_tempfile();
         let disk = QcowDisk::new(
             temp_file.as_file().try_clone().unwrap(),
             false,
@@ -909,7 +850,7 @@ mod unit_tests {
         let mut completion_a = wait_for_completion(async_io.as_mut());
         let mut completion_b = wait_for_completion(async_io.as_mut());
         if completion_a.user_data > completion_b.user_data {
-            std::mem::swap(&mut completion_a, &mut completion_b);
+            mem::swap(&mut completion_a, &mut completion_b);
         }
         assert_eq!(completion_tuple(&completion_a), (30, 4096));
         assert_eq!(completion_tuple(&completion_b), (40, 4096));
@@ -929,11 +870,9 @@ mod unit_tests {
     #[test]
     fn test_qcow_async_read_unallocated() {
         let file_size = 100 * 1024 * 1024;
-        let temp_file = TempFile::new().unwrap();
-        {
-            let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
-            QcowFile::new(raw_file, 3, file_size, true).unwrap();
-        }
+        let temp_file = QcowTempDisk::new(file_size, None, false, true, false)
+            .unwrap()
+            .into_tempfile();
         let disk = QcowDisk::new(
             temp_file.as_file().try_clone().unwrap(),
             false,
@@ -954,11 +893,9 @@ mod unit_tests {
     fn test_qcow_async_sub_cluster_write() {
         let cluster_size = 65536usize;
         let file_size = 100 * 1024 * 1024;
-        let temp_file = TempFile::new().unwrap();
-        {
-            let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
-            QcowFile::new(raw_file, 3, file_size, true).unwrap();
-        }
+        let temp_file = QcowTempDisk::new(file_size, None, false, true, false)
+            .unwrap()
+            .into_tempfile();
         let disk = QcowDisk::new(
             temp_file.as_file().try_clone().unwrap(),
             false,
@@ -1049,11 +986,9 @@ mod unit_tests {
     #[test]
     fn test_qcow_async_alignment_without_direct_io() {
         let file_size = 100 * 1024 * 1024;
-        let temp_file = TempFile::new().unwrap();
-        {
-            let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
-            QcowFile::new(raw_file, 3, file_size, true).unwrap();
-        }
+        let temp_file = QcowTempDisk::new(file_size, None, false, true, false)
+            .unwrap()
+            .into_tempfile();
         let disk = QcowDisk::new(
             temp_file.as_file().try_clone().unwrap(),
             false,
@@ -1066,51 +1001,33 @@ mod unit_tests {
         assert_eq!(async_io.alignment(), SECTOR_SIZE);
     }
 
-    /// Returns None if O_DIRECT is not supported (e.g. tmpfs).
-    fn try_create_direct_io_disk(temp_file: &TempFile, file_size: u64) -> Option<QcowDisk> {
-        {
-            let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
-            QcowFile::new(raw_file, 3, file_size, true).unwrap();
-        }
-        QcowDisk::new(
-            temp_file.as_file().try_clone().unwrap(),
-            true,
-            false,
-            true,
-            true,
-        )
-        .ok()
-    }
-
     #[test]
     fn test_qcow_async_alignment_with_direct_io() {
-        let temp_file = TempFile::new().unwrap();
-        let disk = match try_create_direct_io_disk(&temp_file, 100 * 1024 * 1024) {
-            Some(d) => d,
-            None => {
+        let tmp_disk = match QcowTempDisk::new(100 * 1024 * 1024, None, true, true, true) {
+            Ok(d) => d,
+            Err(_) => {
                 eprintln!("skipping: O_DIRECT not supported on this filesystem");
                 return;
             }
         };
-        let async_io = disk.create_async_io(1).unwrap();
+        let async_io = tmp_disk.disk().create_async_io(1).unwrap();
         assert!(async_io.alignment() >= SECTOR_SIZE);
     }
 
     #[test]
     fn test_qcow_async_sub_sector_read_with_direct_io() {
-        let temp_file = TempFile::new().unwrap();
-        let disk = match try_create_direct_io_disk(&temp_file, 100 * 1024 * 1024) {
-            Some(d) => d,
-            None => {
+        let tmp_disk = match QcowTempDisk::new(100 * 1024 * 1024, None, true, true, true) {
+            Ok(d) => d,
+            Err(_) => {
                 eprintln!("skipping: O_DIRECT not supported on this filesystem");
                 return;
             }
         };
 
         let pattern = vec![0xAB; 65536];
-        async_write(&disk, 0, &pattern);
+        async_write(tmp_disk.disk(), 0, &pattern);
 
-        let buf = async_read(&disk, 0, 512);
+        let buf = async_read(tmp_disk.disk(), 0, 512);
         assert!(
             buf.iter().all(|&b| b == 0xAB),
             "sub-sector O_DIRECT read should return written data"
@@ -1119,19 +1036,18 @@ mod unit_tests {
 
     #[test]
     fn test_qcow_async_direct_io_write_read_roundtrip() {
-        let temp_file = TempFile::new().unwrap();
-        let disk = match try_create_direct_io_disk(&temp_file, 100 * 1024 * 1024) {
-            Some(d) => d,
-            None => {
+        let tmp_disk = match QcowTempDisk::new(100 * 1024 * 1024, None, true, true, true) {
+            Ok(d) => d,
+            Err(_) => {
                 eprintln!("skipping: O_DIRECT not supported on this filesystem");
                 return;
             }
         };
 
         let pattern: Vec<u8> = (0..128 * 1024).map(|i| (i % 251) as u8).collect();
-        async_write(&disk, 0, &pattern);
+        async_write(tmp_disk.disk(), 0, &pattern);
 
-        let buf = async_read(&disk, 0, pattern.len());
+        let buf = async_read(tmp_disk.disk(), 0, pattern.len());
         assert_eq!(buf, pattern, "O_DIRECT roundtrip should match");
     }
 

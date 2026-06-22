@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
-use std::mem;
 use std::str::FromStr;
+use std::{mem, slice};
 
 use log::{debug, info};
 use thiserror::Error;
@@ -163,7 +163,7 @@ pub fn parse_tdvf_sections(file: &mut File) -> Result<(Vec<TdvfSection>, bool), 
     let mut descriptor: TdvfDescriptor = Default::default();
     // SAFETY: we read exactly the size of the descriptor header
     file.read_exact(unsafe {
-        std::slice::from_raw_parts_mut(
+        slice::from_raw_parts_mut(
             (&raw mut descriptor).cast(),
             mem::size_of::<TdvfDescriptor>(),
         )
@@ -190,7 +190,7 @@ pub fn parse_tdvf_sections(file: &mut File) -> Result<(Vec<TdvfSection>, bool), 
 
     // SAFETY: we read exactly the advertised sections
     file.read_exact(unsafe {
-        std::slice::from_raw_parts_mut(
+        slice::from_raw_parts_mut(
             sections.as_mut_ptr().cast(),
             descriptor.num_sections as usize * mem::size_of::<TdvfSection>(),
         )
@@ -527,7 +527,7 @@ mod unit_tests {
     #[test]
     #[ignore]
     fn test_parse_tdvf_sections() {
-        let mut f = std::fs::File::open("tdvf.fd").unwrap();
+        let mut f = File::open("tdvf.fd").unwrap();
         let (sections, _) = parse_tdvf_sections(&mut f).unwrap();
         for section in sections {
             eprintln!("{section:x?}");

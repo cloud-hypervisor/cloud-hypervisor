@@ -5,12 +5,11 @@
 
 use std::any::Any;
 use std::path::PathBuf;
-use std::result;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
+use std::{io, result};
 
 use anyhow::anyhow;
-use byteorder::{ByteOrder, LittleEndian};
 use log::{debug, error, warn};
 use pci::{
     BarReprogrammingParams, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable,
@@ -221,7 +220,7 @@ impl PciDevice for IvshmemDevice {
         mmio32_allocator: &mut AddressAllocator,
         mmio64_allocator: &mut AddressAllocator,
         resources: Option<Vec<Resource>>,
-    ) -> std::result::Result<Vec<PciBarConfiguration>, PciDeviceError> {
+    ) -> result::Result<Vec<PciBarConfiguration>, PciDeviceError> {
         let mut bars = Vec::new();
         let mut bar0_addr = None;
         let mut bar2_addr = None;
@@ -302,7 +301,7 @@ impl PciDevice for IvshmemDevice {
         _allocator: &mut SystemAllocator,
         _mmio32_allocator: &mut AddressAllocator,
         _mmio64_allocator: &mut AddressAllocator,
-    ) -> std::result::Result<(), PciDeviceError> {
+    ) -> result::Result<(), PciDeviceError> {
         unimplemented!("Device hotplug  and remove are not supported for ivshmem");
     }
 
@@ -335,8 +334,8 @@ impl PciDevice for IvshmemDevice {
         match bar_idx {
             // bar 0
             0 => {
-                // ivshmem don't use interrupt, we return zero now.
-                LittleEndian::write_u32(data, 0);
+                // ivshmem doesn't use an interrupt, we return zero now.
+                data.fill(0);
             }
             // bar 2
             1 => warn!("Unexpected read ivshmem memory idx: {offset}"),
@@ -352,14 +351,14 @@ impl PciDevice for IvshmemDevice {
         None
     }
 
-    fn move_bar(&mut self, old_base: u64, new_base: u64) -> result::Result<(), std::io::Error> {
+    fn move_bar(&mut self, old_base: u64, new_base: u64) -> io::Result<()> {
         if new_base == self.data_bar_addr() {
             if let Some(old_mapping) = self.userspace_mapping.take() {
                 self.ivshmem_ops
                     .lock()
                     .unwrap()
                     .unmap_ram_region(old_mapping)
-                    .map_err(std::io::Error::other)?;
+                    .map_err(io::Error::other)?;
             }
             let (region, new_mapping) = self
                 .ivshmem_ops
@@ -370,7 +369,7 @@ impl PciDevice for IvshmemDevice {
                     self.region_size as usize,
                     self.backend_file.clone(),
                 )
-                .map_err(std::io::Error::other)?;
+                .map_err(io::Error::other)?;
             self.set_region(region, new_mapping);
         }
         for bar in self.bar_regions.iter_mut() {
@@ -404,7 +403,7 @@ impl Snapshottable for IvshmemDevice {
 
     // The snapshot/restore (also live migration) support only work for ivshmem-plain mode.
     // Additional work is needed for supporting ivshmem-doorbell.
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         let mut snapshot = Snapshot::new_from_state(&self.state())?;
 
         // Snapshot PciConfiguration

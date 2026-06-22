@@ -12,6 +12,8 @@ use libc::{
     TIOCSPTLCK, TUNGETFEATURES, TUNGETIFF, TUNSETIFF, TUNSETOFFLOAD, TUNSETVNETHDRSZ,
 };
 use seccompiler::SeccompCmpOp::Eq;
+#[cfg(all(feature = "sev_snp", feature = "kvm"))]
+use seccompiler::SeccompCmpOp::MaskedEq;
 use seccompiler::{
     BackendError, BpfProgram, Error, SeccompAction, SeccompCmpArgLen as ArgLen,
     SeccompCondition as Cond, SeccompFilter, SeccompRule,
@@ -121,6 +123,7 @@ mod kvm {
 
 mod iommufd {
     // See include/uapi/linux/iommufd.h in the kernel code.
+    pub const IOMMU_DESTROY: u64 = 0x3b80;
     pub const IOMMU_IOAS_ALLOC: u64 = 0x3b81;
     pub const IOMMU_IOAS_MAP: u64 = 0x3b85;
     pub const IOMMU_IOAS_UNMAP: u64 = 0x3b86;
@@ -282,6 +285,7 @@ fn create_vmm_ioctl_seccomp_rule_common_kvm() -> Result<Vec<SeccompRule>, Backen
 fn create_vmm_ioctl_seccomp_rule_iommufd() -> Result<Vec<SeccompRule>, BackendError> {
     use iommufd::*;
     Ok(or![
+        and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_DESTROY)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_ALLOC)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_MAP)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_UNMAP)?],
@@ -541,6 +545,10 @@ fn create_vmm_ioctl_seccomp_rule(
 }
 
 fn create_api_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
+    Ok(or![and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO as _)?]])
+}
+
+fn create_serial_manager_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
     Ok(or![and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO as _)?]])
 }
 
@@ -832,6 +840,7 @@ fn create_vcpu_ioctl_seccomp_rule_hypervisor(
 fn create_vcpu_ioctl_seccomp_rule_iommufd() -> Result<Vec<SeccompRule>, BackendError> {
     use iommufd::*;
     Ok(or![
+        and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_DESTROY)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_MAP)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_UNMAP)?],
         and![Cond::new(
@@ -893,6 +902,7 @@ fn vcpu_thread_rules(
         ),
         (libc::SYS_fcntl, vec![]),
         (libc::SYS_fstat, vec![]),
+        (libc::SYS_fsync, vec![]),
         (libc::SYS_futex, vec![]),
         (libc::SYS_getcwd, vec![]),
         (libc::SYS_getrandom, vec![]),
@@ -969,7 +979,19 @@ fn http_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
         (libc::SYS_mmap, vec![]),
         (libc::SYS_mprotect, vec![]),
         (libc::SYS_munmap, vec![]),
+        #[cfg(all(feature = "sev_snp", feature = "kvm"))]
+        (
+            libc::SYS_openat,
+            or![and![Cond::new(
+                2, // openat() flags argument
+                ArgLen::Dword,
+                MaskedEq(libc::O_ACCMODE as u64),
+                libc::O_RDONLY as u64,
+            )?]],
+        ),
         (libc::SYS_prctl, vec![]),
+        #[cfg(all(feature = "sev_snp", feature = "kvm"))]
+        (libc::SYS_read, vec![]),
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_recvmsg, vec![]),
         (libc::SYS_rt_sigprocmask, vec![]),
@@ -1046,6 +1068,7 @@ fn serial_manager_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_exit, vec![]),
         (libc::SYS_fcntl, vec![]),
         (libc::SYS_futex, vec![]),
+        (libc::SYS_ioctl, create_serial_manager_ioctl_seccomp_rule()?),
         (libc::SYS_madvise, vec![]),
         (libc::SYS_mmap, vec![]),
         (libc::SYS_munmap, vec![]),
@@ -1054,6 +1077,7 @@ fn serial_manager_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_rt_sigprocmask, vec![]),
         (libc::SYS_rt_sigreturn, vec![]),
+        (libc::SYS_sendto, vec![]),
         (libc::SYS_shutdown, vec![]),
         (libc::SYS_sigaltstack, vec![]),
         (libc::SYS_write, vec![]),

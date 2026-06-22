@@ -34,7 +34,7 @@ pub enum Error {
     #[error("Invalid resource: {0:?}")]
     InvalidResource(Resource),
 }
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct BarReprogrammingParams {

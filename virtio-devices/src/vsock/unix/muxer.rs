@@ -44,6 +44,7 @@ use std::fs::File;
 use std::io::{self, ErrorKind, Read};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::str;
 
 use log::{debug, error, info, warn};
 
@@ -514,7 +515,7 @@ impl VsockMuxer {
         if command.len < connect_prefix.len() {
             return match opt_new_line_position {
                 Some(_) => Err(Error::InvalidPortRequest),
-                None => Err(Error::UnixRead(std::io::ErrorKind::WouldBlock.into())),
+                None => Err(Error::UnixRead(io::ErrorKind::WouldBlock.into())),
             };
         }
 
@@ -530,12 +531,12 @@ impl VsockMuxer {
 
         // we parsed correctly `connect ` but need to wait for `\n`
         let new_line_position =
-            opt_new_line_position.ok_or(Error::UnixRead(std::io::ErrorKind::WouldBlock.into()))?;
+            opt_new_line_position.ok_or(Error::UnixRead(io::ErrorKind::WouldBlock.into()))?;
 
         // we now have the newline, we will treat everything in between as the port
         let port_string_as_bytes = &command.buf[connect_prefix.len()..new_line_position];
 
-        std::str::from_utf8(port_string_as_bytes)
+        str::from_utf8(port_string_as_bytes)
             .map_err(|_| Error::InvalidPortRequest)?
             .trim()
             .parse::<u32>()
@@ -887,9 +888,11 @@ impl VsockMuxer {
 #[cfg(test)]
 mod unit_tests {
     use std::cmp::min;
-    use std::fs;
     use std::io::Write;
+    use std::net::Shutdown;
     use std::path::{Path, PathBuf};
+    use std::time::Duration;
+    use std::{fs, thread};
 
     use virtio_queue::QueueOwnedT;
 
@@ -920,7 +923,7 @@ mod unit_tests {
 
     impl Drop for MuxerTestContext {
         fn drop(&mut self) {
-            std::fs::remove_file(self.muxer.host_sock_path.as_str()).unwrap();
+            fs::remove_file(self.muxer.host_sock_path.as_str()).unwrap();
         }
     }
 
@@ -1093,7 +1096,7 @@ mod unit_tests {
     }
     impl Drop for LocalListener {
         fn drop(&mut self) {
-            std::fs::remove_file(&self.path).unwrap();
+            fs::remove_file(&self.path).unwrap();
         }
     }
 
@@ -1279,6 +1282,37 @@ mod unit_tests {
     }
 
     #[test]
+    fn test_local_send_half_close() {
+        let peer_port = 1025;
+        let mut ctx = MuxerTestContext::new("local_send_half_close");
+        let (mut stream, local_port) = ctx.local_connect(peer_port);
+
+        stream.shutdown(Shutdown::Write).unwrap();
+        ctx.notify_muxer();
+        assert!(ctx.muxer.has_pending_rx());
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_SHUTDOWN);
+        assert_ne!(ctx.pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_SEND, 0);
+        assert_eq!(ctx.pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_RCV, 0);
+        assert_eq!(ctx.pkt.src_port(), local_port);
+        assert_eq!(ctx.pkt.dst_port(), peer_port);
+
+        let data = [1, 2, 3, 4];
+        ctx.init_data_pkt(local_port, peer_port, &data);
+        ctx.send();
+
+        let mut buf = vec![0u8; data.len()];
+        stream.read_exact(buf.as_mut_slice()).unwrap();
+        assert_eq!(buf.as_slice(), &data);
+
+        let key = ConnMapKey {
+            local_port,
+            peer_port,
+        };
+        assert!(ctx.muxer.conn_map.contains_key(&key));
+    }
+
+    #[test]
     fn test_peer_close() {
         let peer_port = 1025;
         let local_port = 1026;
@@ -1321,6 +1355,46 @@ mod unit_tests {
         // The muxer should also drop / close the local Unix socket for this connection.
         let mut buf = vec![0u8; 16];
         assert_eq!(stream.read(buf.as_mut_slice()).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_peer_send_half_close() {
+        // Regression test for the systemd sd_notify (vsock-stream) deadlock: the guest writes its
+        // message, half-closes its send side, then waits for the host to close. The muxer must
+        // surface the guest's half-close as an EOF on the host stream (while keeping the connection
+        // alive), otherwise both ends block forever.
+        let peer_port = 1025;
+        let local_port = 1026;
+        let mut ctx = MuxerTestContext::new("peer_send_half_close");
+
+        let mut sock = ctx.create_local_listener(local_port);
+        ctx.init_pkt(local_port, peer_port, uapi::VSOCK_OP_REQUEST);
+        ctx.send();
+        let mut stream = sock.accept();
+
+        assert!(ctx.muxer.has_pending_rx());
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RESPONSE);
+
+        // The guest sends its message, then half-closes its send side.
+        let data = &[1, 2, 3, 4];
+        ctx.init_data_pkt(local_port, peer_port, data);
+        ctx.send();
+        ctx.init_pkt(local_port, peer_port, uapi::VSOCK_OP_SHUTDOWN)
+            .set_flag(uapi::VSOCK_FLAGS_SHUTDOWN_SEND);
+        ctx.send();
+
+        // The host should read the message followed by an EOF, and the connection should still be
+        // alive (the muxer did not tear it down).
+        let mut buf = vec![0u8; 16];
+        assert_eq!(stream.read(buf.as_mut_slice()).unwrap(), data.len());
+        assert_eq!(&buf[..data.len()], data);
+        assert_eq!(stream.read(buf.as_mut_slice()).unwrap(), 0);
+        let key = ConnMapKey {
+            local_port,
+            peer_port,
+        };
+        assert!(ctx.muxer.conn_map.contains_key(&key));
     }
 
     #[test]
@@ -1427,9 +1501,7 @@ mod unit_tests {
         assert!(!ctx.muxer.has_pending_rx());
 
         // Wait for the kill timers to expire.
-        std::thread::sleep(std::time::Duration::from_millis(
-            csm_defs::CONN_SHUTDOWN_TIMEOUT_MS,
-        ));
+        thread::sleep(Duration::from_millis(csm_defs::CONN_SHUTDOWN_TIMEOUT_MS));
 
         // Trigger a kill queue sweep, by requesting a new connection.
         ctx.init_pkt(

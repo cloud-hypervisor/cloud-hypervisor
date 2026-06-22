@@ -27,6 +27,8 @@ use std::sync::Mutex;
 #[cfg(target_arch = "x86_64")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
+#[cfg(target_arch = "aarch64")]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(target_arch = "x86_64")]
 use anyhow::Context;
@@ -84,6 +86,8 @@ use crate::arch::x86::{
     CpuIdEntry, FpuState, LapicState, MTRR_MSR_INDICES, MsrEntry, NUM_IOAPIC_PINS,
     SpecialRegisters, XsaveState,
 };
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+use crate::{ClockRestoreMode, ClockState};
 use crate::{
     CpuState, HypervisorType, HypervisorVmConfig, InterruptSourceConfig, IoEventAddress,
     IrqRoutingEntry, MpState, StandardRegisters, USER_MEMORY_REGION_GUEST_MEMFD,
@@ -119,12 +123,14 @@ pub use kvm_bindings::{
 #[cfg(target_arch = "aarch64")]
 use kvm_bindings::{
     KVM_GUESTDBG_USE_HW, KVM_NR_SPSR, KVM_REG_ARM_COPROC_MASK, KVM_REG_ARM_CORE, KVM_REG_ARM64,
-    KVM_REG_ARM64_SYSREG, KVM_REG_ARM64_SYSREG_CRM_MASK, KVM_REG_ARM64_SYSREG_CRN_MASK,
-    KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP1_MASK, KVM_REG_ARM64_SYSREG_OP2_MASK,
-    KVM_REG_SIZE_U32, KVM_REG_SIZE_U64, KVM_REG_SIZE_U128, kvm_regs, user_pt_regs,
+    KVM_REG_ARM64_SYSREG, KVM_REG_ARM64_SYSREG_CRM_MASK, KVM_REG_ARM64_SYSREG_CRM_SHIFT,
+    KVM_REG_ARM64_SYSREG_CRN_MASK, KVM_REG_ARM64_SYSREG_CRN_SHIFT, KVM_REG_ARM64_SYSREG_OP0_MASK,
+    KVM_REG_ARM64_SYSREG_OP0_SHIFT, KVM_REG_ARM64_SYSREG_OP1_MASK, KVM_REG_ARM64_SYSREG_OP1_SHIFT,
+    KVM_REG_ARM64_SYSREG_OP2_MASK, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64, KVM_REG_SIZE_U128, kvm_regs,
+    user_pt_regs,
 };
 #[cfg(target_arch = "riscv64")]
-use kvm_bindings::{KVM_REG_RISCV_CORE, kvm_riscv_core};
+use kvm_bindings::{KVM_REG_RISCV_CORE, KVM_REG_RISCV_TIMER, kvm_riscv_core};
 #[cfg(feature = "tdx")]
 use kvm_bindings::{KVM_X86_SW_PROTECTED_VM, KVMIO};
 #[cfg(target_arch = "x86_64")]
@@ -141,9 +147,29 @@ use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_iowr_nr};
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use crate::RegList;
 #[cfg(target_arch = "aarch64")]
-use crate::arch::aarch64::regs;
+use crate::TimerState;
+#[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::{get_cntfrq, regs};
 #[cfg(target_arch = "x86_64")]
 use crate::kvm::x86_64::XsaveStateError;
+
+// `KVM_REG_ARM_TIMER_CNT`, the timer-counter firmware register the kernel defines
+// as `ARM64_SYS_REG(3, 3, 14, 3, 2)`. kvm-bindings exposes no constant for it, so
+// build the id the way the kernel's `ARM64_SYS_REG` macro would. The kernel pins
+// the EL0 virtual-timer reg encodings by value (CVAL/CNT were historically
+// swapped), so CNT must be exactly op0=3, op1=3, crn=14, crm=3, op2=2.
+#[cfg(target_arch = "aarch64")]
+const KVM_REG_ARM_TIMER_CNT: u64 = KVM_REG_ARM64
+    | KVM_REG_SIZE_U64
+    | KVM_REG_ARM64_SYSREG as u64
+    | ((3_u64 << KVM_REG_ARM64_SYSREG_OP0_SHIFT) & KVM_REG_ARM64_SYSREG_OP0_MASK as u64)
+    | ((3_u64 << KVM_REG_ARM64_SYSREG_OP1_SHIFT) & KVM_REG_ARM64_SYSREG_OP1_MASK as u64)
+    | ((14_u64 << KVM_REG_ARM64_SYSREG_CRN_SHIFT) & KVM_REG_ARM64_SYSREG_CRN_MASK as u64)
+    | ((3_u64 << KVM_REG_ARM64_SYSREG_CRM_SHIFT) & KVM_REG_ARM64_SYSREG_CRM_MASK as u64)
+    | (2_u64 & KVM_REG_ARM64_SYSREG_OP2_MASK as u64);
+
+#[cfg(target_arch = "aarch64")]
+const NANOS_PER_SECOND: u128 = 1_000_000_000;
 
 #[cfg(target_arch = "x86_64")]
 ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
@@ -576,9 +602,9 @@ pub struct KvmVm {
     fd: Arc<VmFd>,
     #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
-    #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+    #[cfg(feature = "sev_snp")]
     sev_fd: Option<x86_64::sev::SevFd>,
-    #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+    #[cfg(feature = "sev_snp")]
     snp_guest_policy: std::sync::OnceLock<u64>,
     dirty_log_slots: RwLock<HashMap<u32, KvmDirtyLogSlot>>,
     memory_slots: Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
@@ -700,7 +726,7 @@ impl KvmVm {
 /// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
 /// ```
 impl vm::Vm for KvmVm {
-    #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+    #[cfg(feature = "sev_snp")]
     fn sev_snp_init(&self, guest_policy: igvm_defs::SnpPolicy) -> vm::Result<()> {
         self.sev_fd
             .as_ref()
@@ -713,7 +739,7 @@ impl vm::Vm for KvmVm {
         Ok(())
     }
 
-    #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+    #[cfg(feature = "sev_snp")]
     fn import_isolated_pages(
         &self,
         page_type: u32,
@@ -751,7 +777,7 @@ impl vm::Vm for KvmVm {
         Ok(())
     }
 
-    #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+    #[cfg(feature = "sev_snp")]
     fn complete_isolated_import(
         &self,
         snp_id_block: igvm_defs::IGVM_VHS_SNP_ID_BLOCK,
@@ -876,6 +902,8 @@ impl vm::Vm for KvmVm {
             hyperv_synic: AtomicBool::new(false),
             #[cfg(target_arch = "x86_64")]
             xsave_size,
+            #[cfg(target_arch = "x86_64")]
+            has_xcrs: self.check_extension(Cap::Xcrs),
             #[cfg(feature = "sev_snp")]
             vm_fd: self.fd.clone(),
             #[cfg(feature = "sev_snp")]
@@ -1262,6 +1290,88 @@ impl vm::Vm for KvmVm {
             .map_err(|e| vm::HypervisorVmError::SetClock(e.into()))
     }
 
+    /// Capture kvmclock (filling realtime) for snapshot/migration.
+    #[cfg(target_arch = "x86_64")]
+    fn snapshot_clock(&self, _boot_vcpu: &dyn cpu::Vcpu) -> vm::Result<Option<ClockState>> {
+        Ok(Some(self.get_clock()?.with_realtime_filled()))
+    }
+
+    /// Capture the guest virtual counter and host wall clock for
+    /// snapshot/migration. The vCPUs must be paused.
+    #[cfg(target_arch = "aarch64")]
+    fn snapshot_clock(&self, boot_vcpu: &dyn cpu::Vcpu) -> vm::Result<Option<ClockState>> {
+        // cntvct and the host wall clock must be sampled back-to-back; cntfrq is
+        // static, so read it last.
+        let cntvct = boot_vcpu
+            .get_cntvct()
+            .map_err(|e| vm::HypervisorVmError::CaptureTimerState(e.into()))?;
+        let host_realtime_ns = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| vm::HypervisorVmError::CaptureTimerState(e.into()))?
+            .as_nanos() as u64;
+        Ok(Some(TimerState {
+            cntvct,
+            host_realtime_ns,
+            cntfrq: get_cntfrq(),
+        }))
+    }
+
+    /// Restore kvmclock before the vCPUs resume.
+    #[cfg(target_arch = "x86_64")]
+    fn restore_clock(
+        &self,
+        _vcpus: &[&dyn cpu::Vcpu],
+        state: &ClockState,
+        _mode: ClockRestoreMode,
+    ) -> vm::Result<()> {
+        self.set_clock(state)
+    }
+
+    /// Advance the guest virtual counter to current wall time before the vCPUs
+    /// resume. A no-op for a `SameHostResume` (the counter free-ran across the
+    /// pause); on `SnapshotRestore`/migration-receive it must catch up.
+    #[cfg(target_arch = "aarch64")]
+    fn restore_clock(
+        &self,
+        vcpus: &[&dyn cpu::Vcpu],
+        saved: &ClockState,
+        mode: ClockRestoreMode,
+    ) -> vm::Result<()> {
+        if mode == ClockRestoreMode::SameHostResume {
+            return Ok(());
+        }
+        // KVM does not rescale the counter frequency across hosts (unlike x86
+        // TSC), so a differing destination frequency would scale the elapsed
+        // ticks incorrectly. Reject rather than corrupt the guest clock.
+        let host_cntfrq = get_cntfrq();
+        if host_cntfrq != saved.cntfrq {
+            return Err(vm::HypervisorVmError::CntfrqMismatch {
+                saved: saved.cntfrq,
+                host: host_cntfrq,
+            });
+        }
+        let now_ns = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| vm::HypervisorVmError::RestoreTimerState(e.into()))?
+            .as_nanos() as u64;
+        let elapsed_ns = now_ns.saturating_sub(saved.host_realtime_ns);
+        let elapsed_ticks = (elapsed_ns as u128 * saved.cntfrq as u128 / NANOS_PER_SECOND) as u64;
+        let target = saved.cntvct.wrapping_add(elapsed_ticks);
+        // Linux >= 6.4 (KVM_CAP_COUNTER_OFFSET) tracks the vtimer offset VM-wide, so one
+        // write advances every vCPU; older kernels track it per-vCPU, so program each.
+        // Restore is the snapshot-boot hot path, so skip the redundant writes when we can.
+        let targets = if self.check_extension(Cap::CounterOffset) {
+            &vcpus[..1]
+        } else {
+            vcpus
+        };
+        for vcpu in targets {
+            vcpu.set_cntvct(target)
+                .map_err(|e| vm::HypervisorVmError::RestoreTimerState(e.into()))?;
+        }
+        Ok(())
+    }
+
     /// Create a device that is used for passthrough
     fn create_passthrough_device(&self) -> vm::Result<VfioDeviceFd> {
         let mut vfio_dev = kvm_create_device {
@@ -1510,7 +1620,7 @@ pub type KvmResult<T> = result::Result<T, KvmError>;
 
 impl KvmHypervisor {
     /// Create a hypervisor based on Kvm
-    #[allow(clippy::new_ret_no_self)]
+    #[expect(clippy::new_ret_no_self)]
     pub fn new() -> hypervisor::Result<Arc<dyn hypervisor::Hypervisor>> {
         let kvm_obj = Kvm::new().map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
         let api_version = kvm_obj.get_api_version();
@@ -1758,6 +1868,8 @@ pub struct KvmVcpu {
     hyperv_synic: AtomicBool,
     #[cfg(target_arch = "x86_64")]
     xsave_size: i32,
+    #[cfg(target_arch = "x86_64")]
+    has_xcrs: bool,
     #[cfg(feature = "sev_snp")]
     vm_fd: Arc<VmFd>,
     #[cfg(feature = "sev_snp")]
@@ -2719,11 +2831,46 @@ impl cpu::Vcpu for KvmVcpu {
     }
 
     ///
+    /// Gets the guest virtual counter via `KVM_REG_ARM_TIMER_CNT`.
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn get_cntvct(&self) -> cpu::Result<u64> {
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .get_one_reg(KVM_REG_ARM_TIMER_CNT, &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetSysRegister(e.into()))?;
+        Ok(u64::from_le_bytes(bytes))
+    }
+
+    ///
+    /// Sets the guest virtual counter via `KVM_REG_ARM_TIMER_CNT`.
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn set_cntvct(&self, val: u64) -> cpu::Result<()> {
+        self.fd
+            .set_one_reg(KVM_REG_ARM_TIMER_CNT, &val.to_le_bytes())
+            .map_err(|e| cpu::HypervisorCpuError::SetSysRegister(e.into()))?;
+        Ok(())
+    }
+
+    ///
     /// Gets the value of a non-core register
     ///
     #[cfg(target_arch = "riscv64")]
     fn get_non_core_reg(&self, _non_core_reg: u32) -> cpu::Result<u64> {
         unimplemented!()
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    fn get_timebase_frequency(&self) -> cpu::Result<u64> {
+        use kvm_bindings::kvm_riscv_timer;
+        let freq_offset = offset_of!(kvm_riscv_timer, frequency);
+        let id = riscv64_reg_id!(KVM_REG_RISCV_TIMER, freq_offset);
+        let mut freq_bytes = [0u8; 8];
+        self.fd
+            .get_one_reg(id, &mut freq_bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetNonCoreRegister(e.into()))?;
+        Ok(u64::from_le_bytes(freq_bytes))
     }
 
     ///
@@ -2853,7 +3000,11 @@ impl cpu::Vcpu for KvmVcpu {
         } else {
             self.get_xsave()?
         };
-        let xcrs = self.get_xcrs()?;
+        let xcrs: ExtendedControlRegisters = if self.has_xcrs {
+            self.get_xcrs()?
+        } else {
+            Default::default()
+        };
         let lapic_state = self.get_lapic()?;
         let fpu = self.get_fpu()?;
         let nested_state = self.nested_state()?;
@@ -3116,7 +3267,9 @@ impl cpu::Vcpu for KvmVcpu {
         } else {
             self.set_xsave(&state.xsave)?;
         }
-        self.set_xcrs(&state.xcrs)?;
+        if self.has_xcrs {
+            self.set_xcrs(&state.xcrs)?;
+        }
         self.set_lapic(&state.lapic_state)?;
         self.set_fpu(&state.fpu)?;
         if let Some(nested_state) = state.nested_state {

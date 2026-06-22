@@ -4,6 +4,7 @@
 
 use std::io;
 use std::num::Wrapping;
+use std::ops::{Deref, DerefMut};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -125,10 +126,10 @@ impl TxVirtio {
                 };
 
                 if result < 0 {
-                    let e = std::io::Error::last_os_error();
+                    let e = io::Error::last_os_error();
 
                     /* EAGAIN */
-                    if e.kind() == std::io::ErrorKind::WouldBlock {
+                    if e.kind() == io::ErrorKind::WouldBlock {
                         queue.go_to_previous_position();
                         retry_write = true;
                         break;
@@ -304,10 +305,10 @@ impl RxVirtio {
                     )
                 };
                 if result < 0 {
-                    let e = std::io::Error::last_os_error();
+                    let e = io::Error::last_os_error();
 
                     /* EAGAIN */
-                    if e.kind() == std::io::ErrorKind::WouldBlock {
+                    if e.kind() == io::ErrorKind::WouldBlock {
                         exhausted_descs = false;
                         queue.go_to_previous_position();
                         break;
@@ -405,7 +406,7 @@ impl IovecBuffer {
 
 struct IovecBufferBorrowed<'a>(&'a mut Vec<libc::iovec>);
 
-impl std::ops::Deref for IovecBufferBorrowed<'_> {
+impl Deref for IovecBufferBorrowed<'_> {
     type Target = Vec<libc::iovec>;
 
     fn deref(&self) -> &Self::Target {
@@ -413,7 +414,7 @@ impl std::ops::Deref for IovecBufferBorrowed<'_> {
     }
 }
 
-impl std::ops::DerefMut for IovecBufferBorrowed<'_> {
+impl DerefMut for IovecBufferBorrowed<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.0
     }

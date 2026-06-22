@@ -6,10 +6,11 @@
 
 use core::ffi::c_int;
 use core::ptr::null_mut;
-use std::io::{Error, ErrorKind};
+use std::io::{self, Error, ErrorKind};
 use std::os::fd::{AsRawFd as _, BorrowedFd};
 
 use libc::size_t;
+use log::warn;
 
 /// A region of `mmap()`-allocated memory that calls `munmap()` when dropped.
 /// This guarantees that the buffer is valid and that its address space
@@ -26,7 +27,16 @@ pub struct MmapRegion {
 impl Drop for MmapRegion {
     fn drop(&mut self) {
         // SAFETY: guaranteed by type validity invariant
-        unsafe { assert_eq!(libc::munmap(self.addr.cast(), self.len), 0) }
+        let ret = unsafe { libc::munmap(self.addr.cast(), self.len) };
+
+        if ret != 0 {
+            warn!(
+                "Failed to munmap region address {:p} length 0x{:x}, {}, leaking...",
+                self.addr,
+                self.len,
+                Error::last_os_error()
+            );
+        }
     }
 }
 // SAFETY: the caller is responsible for avoiding data races
@@ -55,7 +65,7 @@ impl MmapRegion {
         fd: BorrowedFd,
         offset1: u64,
         offset2: u64,
-    ) -> std::io::Result<Self> {
+    ) -> io::Result<Self> {
         const BAD_LENGTH: &str = "Offsets must fit in libc::off_t";
         const BAD_OFFSET: &str = "Mapping length must fit \
 in both isize and libc::size_t";

@@ -3,8 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::any::Any;
+use std::cmp;
 
 use kvm_ioctls::DeviceFd;
+use log::{debug, info};
 use serde::{Deserialize, Serialize};
 
 use crate::Vm;
@@ -51,16 +53,10 @@ impl KvmAiaImsics {
             0,
         )?;
 
-        // Setting up the number of wired interrupt sources
-        Self::set_device_attribute(
-            &self.device,
-            kvm_bindings::KVM_DEV_RISCV_AIA_GRP_CONFIG,
-            u64::from(kvm_bindings::KVM_DEV_RISCV_AIA_CONFIG_SRCS),
-            &raw const nr_irqs as u64,
-            0,
-        )?;
-
-        // Getting the number of ids
+        // Query KVM's max interrupt IDs to determine the safe SRCS limit.
+        // Kernel requires: SRCS < kvm_riscv_aia_max_ids, where
+        //   kvm_riscv_aia_max_ids = nr_ids + 1
+        // so safe SRCS = nr_ids.
         let mut aia_nr_ids: u32 = 0;
         Self::get_device_attribute(
             &self.device,
@@ -69,13 +65,26 @@ impl KvmAiaImsics {
             &raw mut aia_nr_ids as u64,
             0,
         )?;
-
-        // Report NR_IDS
         self.imsic_num_ids = aia_nr_ids;
+
+        // Setting up the number of wired interrupt sources, clamped to KVM capacity
+        let safe_nr_irqs = cmp::min(nr_irqs, aia_nr_ids);
+        info!(
+            "Configuring AIA interrupt sources: {} (requested {}, max {})",
+            safe_nr_irqs, nr_irqs, aia_nr_ids
+        );
+        Self::set_device_attribute(
+            &self.device,
+            kvm_bindings::KVM_DEV_RISCV_AIA_GRP_CONFIG,
+            u64::from(kvm_bindings::KVM_DEV_RISCV_AIA_CONFIG_SRCS),
+            &raw const safe_nr_irqs as u64,
+            0,
+        )?;
 
         // Setting up hart_bits
         let max_hart_index = self.vcpu_count as u64 - 1;
         let hart_bits = std::cmp::max(64 - max_hart_index.leading_zeros(), 1);
+        debug!("Configuring AIA hart bits: {}", hart_bits);
         Self::set_device_attribute(
             &self.device,
             kvm_bindings::KVM_DEV_RISCV_AIA_GRP_CONFIG,
@@ -87,6 +96,7 @@ impl KvmAiaImsics {
         // Designate addresses of APLIC and IMSICS
 
         // Setting up RISC-V APLIC
+        debug!("Configuring AIA APLIC address: {:#x}", self.aplic_addr);
         Self::set_device_attribute(
             &self.device,
             kvm_bindings::KVM_DEV_RISCV_AIA_GRP_ADDR,
@@ -104,6 +114,10 @@ impl KvmAiaImsics {
         // Setting up RISC-V IMSICs
         for cpu_index in 0..self.vcpu_count {
             let cpu_imsic_addr = riscv_imsic_addr_of(cpu_index);
+            debug!(
+                "Configuring AIA IMSIC {} address: {:#x}",
+                cpu_index, cpu_imsic_addr
+            );
             Self::set_device_attribute(
                 &self.device,
                 kvm_bindings::KVM_DEV_RISCV_AIA_GRP_ADDR,
@@ -114,6 +128,7 @@ impl KvmAiaImsics {
         }
 
         // Finalizing the AIA device
+        debug!("Initializing AIA device");
         Self::set_device_attribute(
             &self.device,
             kvm_bindings::KVM_DEV_RISCV_AIA_GRP_CTRL,

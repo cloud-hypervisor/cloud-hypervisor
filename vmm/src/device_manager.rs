@@ -10,6 +10,8 @@
 //
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+#[cfg(feature = "kvm")]
+use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{self, IsTerminal, Seek, SeekFrom, stdout};
 use std::num::Wrapping;
@@ -74,8 +76,8 @@ use libc::{
 };
 use log::{debug, error, info, warn};
 use pci::{
-    DeviceRelocation, MmioRegion, PciBarRegionType, PciBdf, PciDevice, VfioDmaMapping,
-    VfioPciDevice, VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError,
+    DeviceRelocation, MmioRegion, PciBarConfiguration, PciBarRegionType, PciBdf, PciDevice,
+    VfioDmaMapping, VfioPciDevice, VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError,
 };
 use rate_limiter::group::RateLimiterGroup;
 use seccompiler::SeccompAction;
@@ -306,6 +308,14 @@ pub enum DeviceManagerError {
     #[error("Cannot add PCI device")]
     AddPciDevice(#[source] pci::PciRootError),
 
+    /// Could not add a device to the port io bus
+    #[error("Could not add a device to the port io bus")]
+    PioInsert(#[source] vm_device::BusError),
+
+    /// Could not add a device to the mmio bus
+    #[error("Could not add a device to the mmio bus")]
+    MmioInsert(#[source] vm_device::BusError),
+
     /// Cannot open persistent memory file
     #[error("Cannot open persistent memory file")]
     PmemFileOpen(#[source] io::Error),
@@ -367,6 +377,10 @@ pub enum DeviceManagerError {
     /// Cannot create a VFIO device
     #[error("Cannot create a VFIO device")]
     VfioCreate(#[source] vfio_ioctls::VfioError),
+
+    /// Failed to duplicate an externally-provided vfio cdev FD
+    #[error("Failed to duplicate VFIO device FD")]
+    VfioDupFd(#[source] io::Error),
 
     /// Cannot create a VFIO PCI device
     #[error("Cannot create a VFIO PCI device")]
@@ -1197,7 +1211,7 @@ fn use_64bit_bar_for_virtio_device(
 }
 
 impl DeviceManager {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         io_bus: Arc<Bus>,
         mmio_bus: Arc<Bus>,
@@ -1465,7 +1479,7 @@ impl DeviceManager {
         self.add_interrupt_controller(snapshot)
     }
 
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(clippy::needless_pass_by_value)]
     pub fn create_devices(
         &mut self,
         console_info: Option<ConsoleInfo>,
@@ -1673,6 +1687,7 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::EventFd)?,
                 self.get_msi_iova_space(),
                 iommu_address_width_bits,
+                self.force_access_platform,
                 state_from_id(snapshot, iommu_id.as_str())
                     .map_err(DeviceManagerError::RestoreGetState)?,
             )
@@ -3644,13 +3659,8 @@ impl DeviceManager {
         let pvmemcontrol_pci_device = Arc::new(Mutex::new(pvmemcontrol_pci_device));
         let pvmemcontrol_bus_device = Arc::new(pvmemcontrol_bus_device);
 
-        let new_resources = self.add_pci_device(
-            pvmemcontrol_bus_device.clone(),
-            pvmemcontrol_pci_device.clone(),
-            pci_segment_id,
-            pci_device_bdf,
-            resources,
-        )?;
+        let (bars, new_resources) =
+            self.allocate_pci_bars(pvmemcontrol_pci_device.clone(), pci_segment_id, resources)?;
 
         let mut node = device_node!(id, pvmemcontrol_pci_device);
 
@@ -3659,6 +3669,14 @@ impl DeviceManager {
         node.pci_device_handle = None;
 
         self.device_tree.lock().unwrap().insert(id, node);
+
+        self.commit_pci_device(
+            pvmemcontrol_bus_device.clone(),
+            pvmemcontrol_pci_device.clone(),
+            pci_segment_id,
+            pci_device_bdf,
+            bars,
+        )?;
 
         Ok((pvmemcontrol_bus_device, pvmemcontrol_pci_device))
     }
@@ -3728,6 +3746,7 @@ impl DeviceManager {
         let virtio_watchdog_device = Arc::new(Mutex::new(
             virtio_devices::Watchdog::new(
                 id.clone(),
+                self.force_access_platform,
                 self.reset_evt.try_clone().unwrap(),
                 self.seccomp_action.clone(),
                 self.exit_evt
@@ -3873,7 +3892,7 @@ impl DeviceManager {
             .try_clone()
             .map_err(DeviceManagerError::VfioCreate)?;
 
-        let iommufd = self
+        let iommufd_on = self
             .config
             .lock()
             .unwrap()
@@ -3881,11 +3900,40 @@ impl DeviceManager {
             .as_ref()
             .is_some_and(|p| p.iommufd);
 
-        if iommufd {
+        if iommufd_on {
             #[cfg(feature = "kvm")]
             {
-                info!("Using vfio cdev mode with iommufd.");
-                let iommufd = IommuFd::new().map_err(DeviceManagerError::IommufdCreate)?;
+                let iommufd_fd = self
+                    .config
+                    .lock()
+                    .unwrap()
+                    .platform
+                    .as_ref()
+                    .and_then(|p| p.iommufd_fd);
+                let iommufd = match iommufd_fd {
+                    Some(fd) => {
+                        info!("Using vfio cdev mode with externally-supplied iommufd fd: {fd}.");
+                        // Dup so the IommuFd owns its own File; the
+                        // caller-supplied fd is kept alive across reboot
+                        // via VmConfig::preserved_fds.
+                        // SAFETY: FFI call to dup. Trivially safe.
+                        let dup_fd = unsafe { libc::dup(fd) };
+                        if dup_fd < 0 {
+                            return Err(DeviceManagerError::VfioDupFd(io::Error::last_os_error()));
+                        }
+                        // SAFETY: dup_fd is valid and can be owned by this File
+                        let file = unsafe { File::from_raw_fd(dup_fd) };
+                        // SAFETY: fd is a valid open iommufd
+                        unsafe {
+                            self.config.lock().unwrap().add_preserved_fds(vec![fd]);
+                        }
+                        IommuFd::new_from_fd(file)
+                    }
+                    None => {
+                        info!("Using vfio cdev mode with iommufd.");
+                        IommuFd::new().map_err(DeviceManagerError::IommufdCreate)?
+                    }
+                };
                 let vfio_iommufd = VfioIommufd::new(Arc::new(iommufd), None, Some(Arc::new(dup)))
                     .map_err(DeviceManagerError::VfioCreate)?;
                 Ok(Arc::new(vfio_iommufd))
@@ -3898,6 +3946,68 @@ impl DeviceManager {
                 VfioContainer::new(Some(Arc::new(dup))).map_err(DeviceManagerError::VfioCreate)?,
             ))
         }
+    }
+
+    // Build a VfioDevice from an externally-opened vfio cdev FD:
+    // The caller's FD is dup'd so the dup can be owned (and closed
+    // on drop) by the VfioDevice, while the original FD is kept alive
+    // for the lifetime of the VM via VmConfig::preserved_fds. This
+    // lets the cdev FD survive a VM reboot.
+    //
+    // Returns the built VfioDevice together with a diagnostic path
+    // resolved from /proc/self/fd/<n>.
+    #[cfg(feature = "kvm")]
+    fn create_vfio_device_from_fd(
+        &self,
+        fd: i32,
+        vfio_ops: Arc<dyn VfioOps>,
+    ) -> DeviceManagerResult<(VfioDevice, PathBuf)> {
+        let already_bound = {
+            let config = self.config.lock().unwrap();
+            assert!(
+                config.platform.as_ref().is_some_and(|p| p.iommufd),
+                "DeviceConfig::validate enforces iommufd when fd is set",
+            );
+            assert!(
+                config
+                    .platform
+                    .as_ref()
+                    .is_some_and(|p| p.iommufd_fd.is_some()),
+                "DeviceConfig::validate enforces iommufd_fd when device fd is set",
+            );
+            // If a cdev fd was preserved on a prior boot, it is already bound
+            // to an iommufd instance
+            config
+                .preserved_fds
+                .as_ref()
+                .is_some_and(|s| s.contains(&fd))
+        };
+
+        // SAFETY: FFI call to dup. Trivially safe.
+        let dup_fd = unsafe { libc::dup(fd) };
+        if dup_fd < 0 {
+            return Err(DeviceManagerError::VfioDupFd(io::Error::last_os_error()));
+        }
+        // SAFETY: dup_fd is a freshly-opened fd owned by this File.
+        let file = unsafe { File::from_raw_fd(dup_fd) };
+        let vfio_device = if already_bound {
+            VfioDevice::new_from_bound_fd(file, vfio_ops).map_err(DeviceManagerError::VfioCreate)?
+        } else {
+            VfioDevice::new_from_fd(file, vfio_ops).map_err(DeviceManagerError::VfioCreate)?
+        };
+
+        // SAFETY: fd is a valid open vfio cdev FD; the VfioDevice only
+        // holds a dup, so VmConfig can safely take ownership of the
+        // original.
+        unsafe {
+            self.config.lock().unwrap().add_preserved_fds(vec![fd]);
+        }
+
+        // Diagnostic-only: resolve the FD back to the path it was opened
+        // from, falling back to /proc/self/fd/<n>.
+        let fd_link = PathBuf::from(format!("/proc/self/fd/{fd}"));
+        let device_path = fs::read_link(&fd_link).unwrap_or(fd_link);
+        Ok((vfio_device, device_path))
     }
 
     fn add_vfio_device(
@@ -3963,9 +4073,25 @@ impl DeviceManager {
             vfio_ops
         };
 
-        let vfio_device =
-            VfioDevice::new(&device_cfg.path, Arc::clone(&vfio_ops) as Arc<dyn VfioOps>)
-                .map_err(DeviceManagerError::VfioCreate)?;
+        let (vfio_device, device_path) = match (&device_cfg.path, device_cfg.fd) {
+            (Some(path), None) => {
+                let vfio_device = VfioDevice::new(path, Arc::clone(&vfio_ops) as Arc<dyn VfioOps>)
+                    .map_err(DeviceManagerError::VfioCreate)?;
+                (vfio_device, path.clone())
+            }
+            (None, Some(fd)) => {
+                #[cfg(feature = "kvm")]
+                {
+                    self.create_vfio_device_from_fd(fd, Arc::clone(&vfio_ops) as Arc<dyn VfioOps>)?
+                }
+                #[cfg(not(feature = "kvm"))]
+                {
+                    let _ = fd;
+                    return Err(DeviceManagerError::IommufdNotSupported);
+                }
+            }
+            _ => unreachable!("DeviceConfig::validate enforces exactly one of path/fd"),
+        };
 
         if needs_dma_mapping {
             // Register DMA mapping in IOMMU.
@@ -4050,19 +4176,14 @@ impl DeviceManager {
                 .iter()
                 .map(|bar| *bar as u8)
                 .collect(),
-            device_cfg.path.clone(),
+            device_path,
         )
         .map_err(DeviceManagerError::VfioPciCreate)?;
 
         let vfio_pci_device = Arc::new(Mutex::new(vfio_pci_device));
 
-        let new_resources = self.add_pci_device(
-            vfio_pci_device.clone(),
-            vfio_pci_device.clone(),
-            pci_segment_id,
-            pci_device_bdf,
-            resources,
-        )?;
+        let (bars, new_resources) =
+            self.allocate_pci_bars(vfio_pci_device.clone(), pci_segment_id, resources)?;
 
         vfio_pci_device
             .lock()
@@ -4079,7 +4200,7 @@ impl DeviceManager {
         // Update the device tree with correct resource information.
         node.resources = new_resources;
         node.pci_bdf = Some(pci_device_bdf);
-        node.pci_device_handle = Some(PciDeviceHandle::Vfio(vfio_pci_device));
+        node.pci_device_handle = Some(PciDeviceHandle::Vfio(vfio_pci_device.clone()));
 
         self.device_tree
             .lock()
@@ -4090,17 +4211,24 @@ impl DeviceManager {
         self.device_id_to_bdf
             .insert(vfio_name.clone(), pci_device_bdf);
 
+        self.commit_pci_device(
+            vfio_pci_device.clone(),
+            vfio_pci_device,
+            pci_segment_id,
+            pci_device_bdf,
+            bars,
+        )?;
+
         Ok((pci_device_bdf, vfio_name))
     }
 
-    fn add_pci_device(
+    #[expect(clippy::needless_pass_by_value)]
+    fn allocate_pci_bars(
         &mut self,
-        bus_device: Arc<dyn BusDeviceSync>,
         pci_device: Arc<Mutex<dyn PciDevice>>,
         segment_id: u16,
-        bdf: PciBdf,
         resources: Option<Vec<Resource>>,
-    ) -> DeviceManagerResult<Vec<Resource>> {
+    ) -> DeviceManagerResult<(Vec<PciBarConfiguration>, Vec<Resource>)> {
         let bars = pci_device
             .lock()
             .unwrap()
@@ -4118,28 +4246,8 @@ impl DeviceManager {
             )
             .map_err(DeviceManagerError::AllocateBars)?;
 
-        let mut pci_bus = self.pci_segments[segment_id as usize]
-            .pci_bus
-            .lock()
-            .unwrap();
-
-        pci_bus
-            .add_device(bdf.device(), pci_device)
-            .map_err(DeviceManagerError::AddPciDevice)?;
-
-        self.bus_devices.push(Arc::clone(&bus_device));
-
-        pci_bus
-            .register_mapping(
-                bus_device,
-                self.address_manager.io_bus.as_ref(),
-                self.address_manager.mmio_bus.as_ref(),
-                bars.clone(),
-            )
-            .map_err(DeviceManagerError::AddPciDevice)?;
-
         let mut new_resources = Vec::new();
-        for bar in bars {
+        for bar in &bars {
             new_resources.push(Resource::PciBar {
                 index: bar.idx(),
                 base: bar.addr(),
@@ -4149,7 +4257,55 @@ impl DeviceManager {
             });
         }
 
-        Ok(new_resources)
+        Ok((bars, new_resources))
+    }
+
+    #[expect(clippy::needless_pass_by_value)]
+    fn commit_pci_device(
+        &mut self,
+        bus_device: Arc<dyn BusDeviceSync>,
+        pci_device: Arc<Mutex<dyn PciDevice>>,
+        segment_id: u16,
+        bdf: PciBdf,
+        bars: Vec<PciBarConfiguration>,
+    ) -> DeviceManagerResult<()> {
+        self.bus_devices.push(Arc::clone(&bus_device));
+
+        self.register_bar_mapping(bus_device, &bars)?;
+
+        self.pci_segments[segment_id as usize]
+            .pci_bus
+            .lock()
+            .unwrap()
+            .add_device(bdf.device(), pci_device)
+            .map_err(DeviceManagerError::AddPciDevice)?;
+
+        Ok(())
+    }
+
+    #[expect(clippy::needless_pass_by_value)]
+    fn register_bar_mapping(
+        &mut self,
+        bus_device: Arc<dyn BusDeviceSync>,
+        bars: &[PciBarConfiguration],
+    ) -> DeviceManagerResult<()> {
+        for bar in bars {
+            match bar.region_type() {
+                PciBarRegionType::IoRegion => {
+                    self.address_manager
+                        .io_bus
+                        .insert(bus_device.clone(), bar.addr(), bar.size())
+                        .map_err(DeviceManagerError::PioInsert)?;
+                }
+                PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
+                    self.address_manager
+                        .mmio_bus
+                        .insert(bus_device.clone(), bar.addr(), bar.size())
+                        .map_err(DeviceManagerError::MmioInsert)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn add_vfio_devices(
@@ -4250,15 +4406,10 @@ impl DeviceManager {
 
         let vfio_user_pci_device = Arc::new(Mutex::new(vfio_user_pci_device));
 
-        let new_resources = self.add_pci_device(
-            vfio_user_pci_device.clone(),
-            vfio_user_pci_device.clone(),
-            pci_segment_id,
-            pci_device_bdf,
-            resources,
-        )?;
+        let (bars, new_resources) =
+            self.allocate_pci_bars(vfio_user_pci_device.clone(), pci_segment_id, resources)?;
 
-        // Note it is required to call 'add_pci_device()' in advance to have the list of
+        // Note it is required to call 'allocate_pci_bars()' in advance to have the list of
         // mmio regions provisioned correctly
         vfio_user_pci_device
             .lock()
@@ -4271,7 +4422,7 @@ impl DeviceManager {
         // Update the device tree with correct resource information.
         node.resources = new_resources;
         node.pci_bdf = Some(pci_device_bdf);
-        node.pci_device_handle = Some(PciDeviceHandle::VfioUser(vfio_user_pci_device));
+        node.pci_device_handle = Some(PciDeviceHandle::VfioUser(vfio_user_pci_device.clone()));
 
         self.device_tree
             .lock()
@@ -4281,6 +4432,14 @@ impl DeviceManager {
         // Track device ID → guest BDF mapping for Generic Initiator resolution
         self.device_id_to_bdf
             .insert(vfio_user_name.clone(), pci_device_bdf);
+
+        self.commit_pci_device(
+            vfio_user_pci_device.clone(),
+            vfio_user_pci_device,
+            pci_segment_id,
+            pci_device_bdf,
+            bars,
+        )?;
 
         Ok((pci_device_bdf, vfio_user_name))
     }
@@ -4303,7 +4462,7 @@ impl DeviceManager {
         Ok(vec![])
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn add_virtio_pci_device(
         &mut self,
         virtio_device: Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
@@ -4416,13 +4575,8 @@ impl DeviceManager {
             .map_err(DeviceManagerError::VirtioDevice)?,
         ));
 
-        let new_resources = self.add_pci_device(
-            virtio_pci_device.clone(),
-            virtio_pci_device.clone(),
-            pci_segment_id,
-            pci_device_bdf,
-            resources,
-        )?;
+        let (bars, new_resources) =
+            self.allocate_pci_bars(virtio_pci_device.clone(), pci_segment_id, resources)?;
 
         let bar_addr = virtio_pci_device.lock().unwrap().config_bar_addr();
         for (event, addr) in virtio_pci_device.lock().unwrap().ioeventfds(bar_addr) {
@@ -4437,8 +4591,16 @@ impl DeviceManager {
         node.resources = new_resources;
         node.migratable = Some(Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn Migratable>>);
         node.pci_bdf = Some(pci_device_bdf);
-        node.pci_device_handle = Some(PciDeviceHandle::Virtio(virtio_pci_device));
+        node.pci_device_handle = Some(PciDeviceHandle::Virtio(virtio_pci_device.clone()));
         self.device_tree.lock().unwrap().insert(id, node);
+
+        self.commit_pci_device(
+            virtio_pci_device.clone(),
+            virtio_pci_device,
+            pci_segment_id,
+            pci_device_bdf,
+            bars,
+        )?;
 
         Ok(pci_device_bdf)
     }
@@ -4462,13 +4624,8 @@ impl DeviceManager {
 
         let pvpanic_device = Arc::new(Mutex::new(pvpanic_device));
 
-        let new_resources = self.add_pci_device(
-            pvpanic_device.clone(),
-            pvpanic_device.clone(),
-            pci_segment_id,
-            pci_device_bdf,
-            resources,
-        )?;
+        let (bars, new_resources) =
+            self.allocate_pci_bars(pvpanic_device.clone(), pci_segment_id, resources)?;
 
         let mut node = device_node!(id, pvpanic_device);
 
@@ -4477,6 +4634,14 @@ impl DeviceManager {
         node.pci_device_handle = None;
 
         self.device_tree.lock().unwrap().insert(id, node);
+
+        self.commit_pci_device(
+            pvpanic_device.clone(),
+            pvpanic_device.clone(),
+            pci_segment_id,
+            pci_device_bdf,
+            bars,
+        )?;
 
         Ok(Some(pvpanic_device))
     }
@@ -4517,13 +4682,8 @@ impl DeviceManager {
             )
             .map_err(DeviceManagerError::IvshmemCreate)?,
         ));
-        let new_resources = self.add_pci_device(
-            ivshmem_device.clone(),
-            ivshmem_device.clone(),
-            pci_segment_id,
-            pci_device_bdf,
-            resources,
-        )?;
+        let (bars, new_resources) =
+            self.allocate_pci_bars(ivshmem_device.clone(), pci_segment_id, resources)?;
 
         let start_addr = ivshmem_device.lock().unwrap().data_bar_addr();
         let (region, mapping) = ivshmem_ops
@@ -4538,6 +4698,14 @@ impl DeviceManager {
         node.pci_bdf = Some(pci_device_bdf);
         node.pci_device_handle = None;
         self.device_tree.lock().unwrap().insert(id, node);
+
+        self.commit_pci_device(
+            ivshmem_device.clone(),
+            ivshmem_device.clone(),
+            pci_segment_id,
+            pci_device_bdf,
+            bars,
+        )?;
 
         Ok(Some(ivshmem_device))
     }
@@ -4840,7 +5008,6 @@ impl DeviceManager {
             .pci_device_handle
             .as_ref()
             .ok_or(DeviceManagerError::MissingPciDevice)?;
-        #[allow(irrefutable_let_patterns)]
         if let PciDeviceHandle::Virtio(virtio_pci_device) = pci_device_handle {
             let device_type = VirtioDeviceType::from(
                 virtio_pci_device
@@ -4884,6 +5051,27 @@ impl DeviceManager {
                 | VirtioDeviceType::Fs
                 | VirtioDeviceType::Vsock => {}
                 _ => return Err(DeviceManagerError::RemovalNotAllowed(device_type)),
+            }
+        } else if matches!(pci_device_handle, PciDeviceHandle::Vfio(_)) {
+            // Cleanup externally-provided VFIO cdev FDs: remove the preserved
+            // original from VmConfig and close it.
+            let mut config = self.config.lock().unwrap();
+            if let Some(devices) = config.devices.as_deref_mut()
+                && let Some(device_cfg) = devices
+                    .iter_mut()
+                    .find(|d| d.pci_common.id.as_deref() == Some(id))
+                && let Some(fd) = device_cfg.fd.take()
+            {
+                debug!("Closing preserved FD from VFIO device: id={id}, fd={fd}");
+                let fd_removed = config.preserved_fds.as_mut().unwrap().remove(&fd);
+                assert!(
+                    fd_removed,
+                    "FD {fd} for device id={id} was not in preserved_fds"
+                );
+                // SAFETY: We are closing the only remaining instance of this FD.
+                unsafe {
+                    libc::close(fd);
+                }
             }
         }
 
@@ -5017,6 +5205,13 @@ impl DeviceManager {
                 )
             }
         };
+
+        if let Some(iommu) = &self.iommu_device {
+            iommu
+                .lock()
+                .unwrap()
+                .remove_external_mapping(pci_device_bdf.into());
+        }
 
         if remove_dma_handler {
             for virtio_mem_device in self.virtio_mem_devices.iter() {
@@ -5385,6 +5580,7 @@ impl IvshmemOps for IvshmemHandler {
             0,
             size,
             false,
+            false,
             true,
             false,
             None,
@@ -5657,7 +5853,7 @@ impl Aml for DeviceManager {
             .to_aml_bytes(sink);
         }
 
-        aml::Name::new("_S5_".into(), &aml::Package::new(vec![&5u8])).to_aml_bytes(sink);
+        create_s5_sleep_state(sink);
 
         aml::Device::new(
             "_SB_.PWRB".into(),
@@ -5681,6 +5877,17 @@ impl Aml for DeviceManager {
             .unwrap()
             .to_aml_bytes(sink);
     }
+}
+
+fn create_s5_sleep_state(sink: &mut dyn acpi_tables::AmlSink) {
+    // More information about the sleep state structure can be found here:
+    // https://uefi.org/htmlspecs/ACPI_Spec_6_4_html/07_Power_and_Performance_Mgmt/oem-supplied-system-level-control-methods.html#sx-system-states
+
+    aml::Name::new(
+        "_S5_".into(),
+        &aml::Package::new(vec![&5u8, &5u8, &0u8, &0u8]),
+    )
+    .to_aml_bytes(sink);
 }
 
 impl Pausable for DeviceManager {
@@ -5810,7 +6017,10 @@ impl BusDevice for DeviceManager {
     fn read(&mut self, base: u64, offset: u64, data: &mut [u8]) {
         match offset {
             PCIU_FIELD_OFFSET => {
-                assert!(data.len() == PCIU_FIELD_SIZE);
+                if data.len() != PCIU_FIELD_SIZE {
+                    warn!("Invalid sized read of PCIU register: {}", data.len());
+                    return;
+                }
                 data.copy_from_slice(
                     &self.pci_segments[self.selected_segment]
                         .pci_devices_up
@@ -5820,7 +6030,10 @@ impl BusDevice for DeviceManager {
                 self.pci_segments[self.selected_segment].pci_devices_up = 0;
             }
             PCID_FIELD_OFFSET => {
-                assert!(data.len() == PCID_FIELD_SIZE);
+                if data.len() != PCID_FIELD_SIZE {
+                    warn!("Invalid sized read of PCID register: {}", data.len());
+                    return;
+                }
                 data.copy_from_slice(
                     &self.pci_segments[self.selected_segment]
                         .pci_devices_down
@@ -5925,6 +6138,20 @@ impl Drop for DeviceManager {
 #[cfg(test)]
 mod unit_tests {
     use super::*;
+
+    #[test]
+    fn test_s5_sleep_state_uses_complete_package() {
+        let mut bytes = Vec::new();
+
+        create_s5_sleep_state(&mut bytes);
+
+        assert_eq!(
+            bytes,
+            vec![
+                0x08, b'_', b'S', b'5', b'_', 0x12, 0x08, 0x04, 0x0a, 0x05, 0x0a, 0x05, 0x00, 0x00,
+            ]
+        );
+    }
 
     #[test]
     fn test_hotplugged_block_devices_use_64bit_bars() {

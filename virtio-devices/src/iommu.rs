@@ -7,7 +7,7 @@ use std::mem::size_of;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, RwLock};
-use std::{io, result};
+use std::{io, mem, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
@@ -27,8 +27,10 @@ use vmm_sys_util::eventfd::EventFd;
 
 use super::{
     ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
-    Error as DeviceError, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice, VirtioDeviceType,
+    Error as DeviceError, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice,
+    VirtioDeviceType,
 };
+use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::{DmaRemapping, GuestMemoryMmap, VirtioInterrupt, VirtioInterruptType};
 
@@ -984,7 +986,7 @@ fn inclusive_end(addr: u64, size: u64) -> Option<u64> {
     addr.checked_add(size - 1)
 }
 
-fn span_end(addr: u64, size: u64) -> std::result::Result<u64, io::Error> {
+fn span_end(addr: u64, size: u64) -> io::Result<u64> {
     inclusive_end(addr, size).ok_or_else(|| {
         io::Error::other(format!(
             "translate span overflow or zero size: addr 0x{addr:x} size 0x{size:x}"
@@ -993,12 +995,7 @@ fn span_end(addr: u64, size: u64) -> std::result::Result<u64, io::Error> {
 }
 
 impl DmaRemapping for IommuMapping {
-    fn translate_gva(
-        &self,
-        id: u32,
-        addr: u64,
-        size: u64,
-    ) -> std::result::Result<u64, std::io::Error> {
+    fn translate_gva(&self, id: u32, addr: u64, size: u64) -> io::Result<u64> {
         debug!("Translate GVA addr 0x{addr:x} size 0x{size:x}");
         let end = span_end(addr, size)?;
         if let Some(domain_id) = self.endpoints.read().unwrap().get(&id) {
@@ -1029,12 +1026,7 @@ impl DmaRemapping for IommuMapping {
         )))
     }
 
-    fn translate_gpa(
-        &self,
-        id: u32,
-        addr: u64,
-        size: u64,
-    ) -> std::result::Result<u64, std::io::Error> {
+    fn translate_gpa(&self, id: u32, addr: u64, size: u64) -> io::Result<u64> {
         debug!("Translate GPA addr 0x{addr:x} size 0x{size:x}");
         let end = span_end(addr, size)?;
         if let Some(domain_id) = self.endpoints.read().unwrap().get(&id) {
@@ -1079,10 +1071,10 @@ impl AccessPlatformMapping {
 }
 
 impl AccessPlatform for AccessPlatformMapping {
-    fn translate_gva(&self, base: u64, size: u64) -> std::result::Result<u64, std::io::Error> {
+    fn translate_gva(&self, base: u64, size: u64) -> io::Result<u64> {
         self.mapping.translate_gva(self.id, base, size)
     }
-    fn translate_gpa(&self, base: u64, size: u64) -> std::result::Result<u64, std::io::Error> {
+    fn translate_gpa(&self, base: u64, size: u64) -> io::Result<u64> {
         self.mapping.translate_gpa(self.id, base, size)
     }
 }
@@ -1117,6 +1109,7 @@ impl Iommu {
         exit_evt: EventFd,
         msi_iova_space: (u64, u64),
         address_width_bits: u8,
+        access_platform_enabled: bool,
         state: Option<IommuState>,
     ) -> io::Result<(Self, Arc<IommuMapping>)> {
         let (mut avail_features, acked_features, endpoints, domains, paused) =
@@ -1164,6 +1157,10 @@ impl Iommu {
         } else {
             None
         };
+
+        if access_platform_enabled {
+            avail_features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
+        }
 
         let mapping = Arc::new(IommuMapping {
             endpoints: Arc::new(RwLock::new(endpoints)),
@@ -1238,6 +1235,14 @@ impl Iommu {
         self.ext_mapping.lock().unwrap().insert(device_id, mapping);
     }
 
+    /// Removes a mapping added with `add_external_mapping`.
+    pub fn remove_external_mapping(
+        &mut self,
+        device_id: u32,
+    ) -> Option<Arc<dyn ExternalDmaMapping>> {
+        self.ext_mapping.lock().unwrap().remove(&device_id)
+    }
+
     #[cfg(fuzzing)]
     pub fn wait_for_epoll_threads(&mut self) {
         self.common.wait_for_epoll_threads();
@@ -1269,7 +1274,7 @@ impl VirtioDevice for Iommu {
         // The "bypass" field is the only mutable field
         let bypass_offset =
             (&raw const self.config.bypass as u64) - (&raw const self.config as u64);
-        if offset != bypass_offset || data.len() != std::mem::size_of_val(&self.config.bypass) {
+        if offset != bypass_offset || data.len() != mem::size_of_val(&self.config.bypass) {
             error!(
                 "Attempt to write to read-only field: offset {:x} length {}",
                 offset,
@@ -1285,8 +1290,8 @@ impl VirtioDevice for Iommu {
         self.update_bypass();
     }
 
-    fn activate(&mut self, context: crate::device::ActivationContext) -> ActivateResult {
-        let crate::device::ActivationContext {
+    fn activate(&mut self, context: ActivationContext) -> ActivateResult {
+        let ActivationContext {
             mem,
             interrupt_cb,
             mut queues,
@@ -1350,9 +1355,79 @@ impl Snapshottable for Iommu {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_state(&self.state())
     }
 }
 impl Transportable for Iommu {}
 impl Migratable for Iommu {}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+    use std::sync::{Arc, Weak};
+
+    use seccompiler::SeccompAction;
+    use vm_device::dma_mapping::ExternalDmaMapping;
+    use vmm_sys_util::eventfd::{EFD_NONBLOCK, EventFd};
+
+    use super::Iommu;
+
+    /// Test stub for VfioDmaMapping.
+    struct MockMapping;
+
+    impl ExternalDmaMapping for MockMapping {
+        fn map(&self, _iova: u64, _gpa: u64, _size: u64) -> Result<(), io::Error> {
+            Ok(())
+        }
+
+        fn unmap(&self, _iova: u64, _size: u64) -> Result<(), io::Error> {
+            Ok(())
+        }
+    }
+
+    fn new_iommu() -> Iommu {
+        let (iommu, _mapping) = Iommu::new(
+            "test-iommu".to_string(),
+            SeccompAction::Allow,
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+            (0, 0),
+            64,
+            false,
+            None,
+        )
+        .unwrap();
+        iommu
+    }
+
+    /// Tests removing a mapping works and releases the ref.
+    #[test]
+    fn remove_external_mapping() {
+        let mut iommu = new_iommu();
+
+        let mapping: Arc<dyn ExternalDmaMapping> = Arc::new(MockMapping);
+        let weak: Weak<dyn ExternalDmaMapping> = Arc::downgrade(&mapping);
+
+        iommu.add_external_mapping(0x100, mapping);
+
+        // Removing the mapping succeeds.
+        let removed = iommu.remove_external_mapping(0x100);
+        assert!(removed.is_some());
+
+        // Dropping the returned Arc drops the last reference.
+        drop(removed);
+        assert!(
+            weak.upgrade().is_none(),
+            "iommu must not retain a reference after removal"
+        );
+
+        // Removing the same id again is a nop.
+        assert!(
+            iommu.remove_external_mapping(0x100).is_none(),
+            "removal is idempotent"
+        );
+
+        // Removing a bogus ID doesn't crash.
+        assert!(iommu.remove_external_mapping(0x999).is_none());
+    }
+}

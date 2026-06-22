@@ -862,6 +862,9 @@ components:
         prefault:
           type: boolean
           default: false
+        reserve:
+          type: boolean
+          default: false
 
     MemoryConfig:
       required:
@@ -893,6 +896,9 @@ components:
           type: integer
           format: int64
         prefault:
+          type: boolean
+          default: false
+        reserve:
           type: boolean
           default: false
         thp:
@@ -1279,12 +1285,15 @@ components:
           type: integer
 
     DeviceConfig:
-      required:
-        - path
       type: object
       properties:
         path:
           type: string
+          description: |
+            Sysfs path of the VFIO device. Exactly one of `path` or an
+            externally-opened cdev FD must be supplied; an FD is passed
+            out of band via SCM_RIGHTS on the UNIX domain socket, never
+            in this body.
         iommu:
           type: boolean
           default: false
@@ -1500,6 +1509,12 @@ components:
       properties:
         receiver_url:
           type: string
+        tls_dir:
+          type: string
+          description: >
+            Directory containing the TLS server certificate (server-cert.pem), the TLS
+            server key (server-key.pem), and the client TLS root CA certificate (ca-cert.pem).
+            TLS is only supported with tcp:<host>:<port> receiver URLs.
 
     TimeoutStrategy:
       type: string
@@ -1547,6 +1562,12 @@ components:
             The number of parallel TCP connections to use for migration.
             Must be between 1 and 128. Multiple connections are not supported
             with local UNIX-socket migration.
+        tls_dir:
+          type: string
+          description: >
+            Directory containing the TLS root CA certificate (ca-cert.pem), the TLS client
+            certificate (client-cert.pem), and TLS client key (client-key.pem).
+            TLS is only supported with tcp:<host>:<port> destination URLs.
 
     VmAddUserDevice:
       required:

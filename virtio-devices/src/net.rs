@@ -10,9 +10,9 @@ use std::net::IpAddr;
 use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Barrier};
+use std::{io, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
@@ -40,6 +40,7 @@ use super::{
     EpollHelperHandler, Error as DeviceError, RateLimiterConfig, VirtioCommon, VirtioDevice,
     VirtioDeviceType, VirtioInterruptType,
 };
+use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::{GuestMemoryMmap, VirtioInterrupt};
 
@@ -76,7 +77,7 @@ impl NetCtrlEpollHandler {
         &mut self,
         paused: &AtomicBool,
         paused_sync: &Barrier,
-    ) -> std::result::Result<(), EpollHelperError> {
+    ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evt.as_raw_fd(), CTRL_QUEUE_EVENT)?;
         helper.run(paused, paused_sync, self)?;
@@ -159,7 +160,7 @@ pub enum Error {
     #[error("Using existing tap")]
     TapError(#[source] TapError),
     #[error("Error calling dup() on tap fd")]
-    DuplicateTapFd(#[source] std::io::Error),
+    DuplicateTapFd(#[source] io::Error),
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -416,7 +417,7 @@ pub struct NetState {
 
 impl Net {
     /// Create a new virtio network device with the given TAP interface.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new_with_tap(
         id: String,
         taps: Vec<Tap>,
@@ -528,7 +529,7 @@ impl Net {
 
     /// Create a new virtio network device with the given IP address and
     /// netmask.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         if_name: Option<&str>,
@@ -576,7 +577,7 @@ impl Net {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn from_tap_fds(
         id: String,
         fds: &[RawFd],
@@ -600,7 +601,7 @@ impl Net {
             // SAFETY: FFI call to dup. Trivially safe.
             let fd = unsafe { libc::dup(*fd) };
             if fd < 0 {
-                return Err(Error::DuplicateTapFd(std::io::Error::last_os_error()));
+                return Err(Error::DuplicateTapFd(io::Error::last_os_error()));
             }
             let tap = Tap::from_tap_fd(fd, num_queue_pairs).map_err(Error::TapError)?;
             taps.push(tap);
@@ -665,8 +666,8 @@ impl VirtioDevice for Net {
         self.read_config_from_slice(self.config.as_slice(), offset, data);
     }
 
-    fn activate(&mut self, context: crate::device::ActivationContext) -> ActivateResult {
-        let crate::device::ActivationContext {
+    fn activate(&mut self, context: ActivationContext) -> ActivateResult {
+        let ActivationContext {
             mem,
             interrupt_cb,
             mut queues,
@@ -850,7 +851,7 @@ impl Snapshottable for Net {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_state(&self.state())
     }
 }
