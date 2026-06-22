@@ -433,15 +433,8 @@ impl VmOps for MarkerVmOps {
 /// hardware-verified end-to-end delivery test.
 #[test]
 fn hvf_guest_takes_injected_spi() {
-    use hypervisor::arch::aarch64::gic::VgicConfig;
-
     let ram = HostRam::new(RAM_SIZE);
-    ram.load(0x0000, &IRQ_BOOT);
-    ram.load(0x1000, &SYNC_VECTOR_0X000);
-    ram.load(0x1200, &SYNC_VECTOR_0X200);
-    ram.load(0x1280, &IRQ_VECTOR);
-    ram.load(0x1700, &SYNC_HANDLER);
-    ram.load(0x1800, &IRQ_HANDLER);
+    load_irq_guest(&ram);
 
     let vm_ops = Arc::new(MarkerVmOps {
         marker: Mutex::new(Vec::new()),
@@ -462,16 +455,7 @@ fn hvf_guest_takes_injected_spi() {
             .expect("map ram");
     }
 
-    let config = VgicConfig {
-        vcpu_count: 1,
-        dist_addr: IRQ_GICD_BASE,
-        dist_size: 0x1_0000,
-        redists_addr: IRQ_REDIST_BASE,
-        redists_size: 0x2_0000,
-        msi_addr: 0,
-        msi_size: 0,
-        nr_irqs: 256,
-    };
+    let config = irq_vgic_config();
     // GIC must be created before the vCPU.
     let gic = vm.create_vgic(&config).expect("create_vgic");
     // Hand the GIC to the VmOps so the guest's "configured" signal can assert
@@ -496,4 +480,160 @@ fn hvf_guest_takes_injected_spi() {
         Some(IRQ_SPI_INTID),
         "guest IRQ handler did not run / acknowledged the wrong INTID"
     );
+}
+
+/// Load the GICv3 interrupt guest into a fresh RAM image.
+fn load_irq_guest(ram: &HostRam) {
+    ram.load(0x0000, &IRQ_BOOT);
+    ram.load(0x1000, &SYNC_VECTOR_0X000);
+    ram.load(0x1200, &SYNC_VECTOR_0X200);
+    ram.load(0x1280, &IRQ_VECTOR);
+    ram.load(0x1700, &SYNC_HANDLER);
+    ram.load(0x1800, &IRQ_HANDLER);
+}
+
+fn irq_vgic_config() -> hypervisor::arch::aarch64::gic::VgicConfig {
+    hypervisor::arch::aarch64::gic::VgicConfig {
+        vcpu_count: 1,
+        dist_addr: IRQ_GICD_BASE,
+        dist_size: 0x1_0000,
+        redists_addr: IRQ_REDIST_BASE,
+        redists_size: 0x2_0000,
+        msi_addr: 0,
+        msi_size: 0,
+        nr_irqs: 256,
+    }
+}
+
+/// Prove a *pending, in-flight* interrupt survives an HVF snapshot/restore.
+///
+/// This is the rehydration property the whole port depends on: a guest captured
+/// mid-flight with an interrupt asserted-but-not-yet-taken must, on restore,
+/// still take that interrupt. Apple's managed GIC exposes its state only as an
+/// opaque blob (`hv_gic_state`), so the open question is whether that blob
+/// actually carries distributor/redistributor *pending* state — not just static
+/// configuration. If it does not, KVM->HVF snapshot translation (M3) is
+/// impossible; this test answers that question on real hardware.
+///
+/// Phase A boots the GICv3 guest just far enough to configure the distributor
+/// and get SPI 32 asserted-pending (the host injects on the `IRQ_READY` signal,
+/// which lands PC exactly on the guest's `DAIFClr` unmask), then snapshots the
+/// vCPU and GIC *before* the guest unmasks — so the IRQ is pending but untaken.
+/// Phase B restores both into a brand-new VM and runs: the guest must resume at
+/// the unmask, take the SPI purely from restored GIC state (the host wires NO
+/// re-injection in Phase B), acknowledge INTID 32, and power off.
+#[test]
+fn hvf_gic_pending_irq_survives_snapshot() {
+    let config = irq_vgic_config();
+
+    // Phase A: capture a vCPU + GIC snapshot with SPI 32 pending but untaken.
+    let vcpu_snap: CpuState;
+    let gic_snap: hypervisor::arch::aarch64::gic::GicState;
+    {
+        let ram = HostRam::new(RAM_SIZE);
+        load_irq_guest(&ram);
+        let vm_ops = Arc::new(MarkerVmOps {
+            marker: Mutex::new(Vec::new()),
+            gic: Mutex::new(None),
+            injected: Mutex::new(false),
+        });
+
+        let hv = hypervisor::new().expect("hypervisor::new() — is the test binary codesigned?");
+        let vm = hv
+            .create_vm(HypervisorVmConfig {
+                nested: false,
+                smt_enabled: false,
+            })
+            .expect("create_vm");
+        // SAFETY: ram outlives the mapping.
+        unsafe {
+            vm.create_user_memory_region(0, RAM_BASE, ram.size, ram.ptr, false, false)
+                .expect("map ram");
+        }
+        let gic = vm.create_vgic(&config).expect("create_vgic");
+        // Wire the GIC so the guest's READY signal injects SPI 32 on the owning
+        // thread (the proven owning-thread injection path).
+        *vm_ops.gic.lock().unwrap() = Some(gic.clone());
+
+        let mut vcpu = vm.create_vcpu(0, Some(vm_ops.clone())).expect("create_vcpu");
+        vcpu.setup_regs(0, RAM_BASE, 0).expect("setup_regs");
+
+        // Run until the guest signals READY (SPI 32 injected). Stop there: PC is
+        // on the DAIFClr, the SPI is pending+enabled, and the guest has NOT yet
+        // unmasked or taken it.
+        loop {
+            let exit = vcpu.run().expect("vcpu run");
+            assert!(
+                matches!(exit, VmExit::Ignore),
+                "unexpected early exit {exit:?}"
+            );
+            if *vm_ops.injected.lock().unwrap() {
+                break;
+            }
+        }
+        assert!(
+            vm_ops.marker.lock().unwrap().is_empty(),
+            "guest took the IRQ before the snapshot point"
+        );
+
+        vcpu_snap = vcpu.state().expect("capture vCPU state");
+        gic_snap = gic.lock().unwrap().state().expect("capture GIC state");
+        // vm, gic, vcpu drop here: full teardown (hv_vcpu_destroy, hv_vm_destroy).
+    }
+
+    // Phase B: brand-new VM. Restore the snapshot and continue. The pending SPI
+    // must come entirely from the restored GIC state — no host re-injection.
+    {
+        let ram = HostRam::new(RAM_SIZE);
+        load_irq_guest(&ram);
+        let vm_ops = Arc::new(MarkerVmOps {
+            marker: Mutex::new(Vec::new()),
+            gic: Mutex::new(None),
+            injected: Mutex::new(false),
+        });
+
+        let hv = hypervisor::new().expect("hypervisor::new() — is the test binary codesigned?");
+        let vm = hv
+            .create_vm(HypervisorVmConfig {
+                nested: false,
+                smt_enabled: false,
+            })
+            .expect("create_vm");
+        // SAFETY: ram outlives the mapping.
+        unsafe {
+            vm.create_user_memory_region(0, RAM_BASE, ram.size, ram.ptr, false, false)
+                .expect("map ram");
+        }
+        let gic = vm.create_vgic(&config).expect("create_vgic");
+        // Deliberately leave vm_ops.gic = None: the restored PC is past the
+        // READY store, so no injection should occur — and if it somehow did, a
+        // None GIC means it cannot, keeping this an honest test of restored
+        // pending state.
+
+        let mut vcpu = vm.create_vcpu(0, Some(vm_ops.clone())).expect("create_vcpu");
+        // Restore the vCPU first: this re-establishes MPIDR affinity (which
+        // hv_gic_set_state asserts on) and then the CPU-interface (ICC)
+        // registers, before loading the GIC distributor/redistributor blob.
+        vcpu.set_state(&vcpu_snap).expect("restore vCPU state");
+        gic.lock()
+            .unwrap()
+            .set_state(&gic_snap)
+            .expect("restore GIC state");
+
+        let exit = run_to_shutdown(vcpu.as_mut());
+        let marker = vm_ops.marker.lock().unwrap().clone();
+        assert!(
+            !*vm_ops.injected.lock().unwrap(),
+            "Phase B must not re-inject; the pending SPI must come from restored state"
+        );
+        assert!(
+            matches!(exit, VmExit::Shutdown),
+            "expected Shutdown after the restored IRQ, got {exit:?}"
+        );
+        assert_eq!(
+            marker.first().copied(),
+            Some(IRQ_SPI_INTID),
+            "restored guest did not take the snapshot's pending SPI (marker={marker:#x?})"
+        );
+    }
 }

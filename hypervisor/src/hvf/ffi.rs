@@ -60,6 +60,34 @@ pub const SYSREG_MPIDR_EL1: u16 = 0xc005;
 /// MPIDR_EL1 bit[31] is RES1 on AArch64; affinity fields occupy Aff0..Aff3.
 pub const MPIDR_RES1: u64 = 1 << 31;
 
+// hv_gic_icc_reg_t — per-vCPU GIC CPU-interface registers (managed by hv_gic).
+pub const GIC_ICC_PMR_EL1: u16 = 0xc230;
+pub const GIC_ICC_BPR0_EL1: u16 = 0xc643;
+pub const GIC_ICC_AP0R0_EL1: u16 = 0xc644;
+pub const GIC_ICC_AP1R0_EL1: u16 = 0xc648;
+/// Running priority — read-only, captured for diagnostics but never restored.
+#[allow(dead_code)]
+pub const GIC_ICC_RPR_EL1: u16 = 0xc65b;
+pub const GIC_ICC_BPR1_EL1: u16 = 0xc663;
+pub const GIC_ICC_CTLR_EL1: u16 = 0xc664;
+pub const GIC_ICC_SRE_EL1: u16 = 0xc665;
+pub const GIC_ICC_IGRPEN0_EL1: u16 = 0xc666;
+pub const GIC_ICC_IGRPEN1_EL1: u16 = 0xc667;
+
+/// Writable CPU-interface registers captured on snapshot, in restore order.
+/// RPR_EL1 (running priority) is read-only and so deliberately excluded.
+pub const GIC_ICC_SNAPSHOT_REGS: &[u16] = &[
+    GIC_ICC_PMR_EL1,
+    GIC_ICC_BPR0_EL1,
+    GIC_ICC_AP0R0_EL1,
+    GIC_ICC_AP1R0_EL1,
+    GIC_ICC_BPR1_EL1,
+    GIC_ICC_CTLR_EL1,
+    GIC_ICC_SRE_EL1,
+    GIC_ICC_IGRPEN0_EL1,
+    GIC_ICC_IGRPEN1_EL1,
+];
+
 // hv_interrupt_type_t
 pub const HV_INTERRUPT_TYPE_IRQ: u32 = 0;
 #[allow(dead_code)]
@@ -127,6 +155,12 @@ unsafe extern "C" {
     pub fn hv_gic_get_distributor_size(size: *mut usize) -> i32;
     #[allow(dead_code)]
     pub fn hv_gic_get_spi_interrupt_range(base: *mut u32, count: *mut u32) -> i32;
+
+    // Per-vCPU GIC CPU-interface (ICC) registers. The managed GIC owns these
+    // (they are not reachable via hv_vcpu_get_sys_reg), so a faithful vCPU
+    // snapshot must read/write them through these accessors.
+    pub fn hv_gic_get_icc_reg(vcpu: u64, reg: u16, value: *mut u64) -> i32;
+    pub fn hv_gic_set_icc_reg(vcpu: u64, reg: u16, value: u64) -> i32;
 
     // GIC state save/restore (os_object state handle).
     pub fn hv_gic_state_create() -> *mut c_void;

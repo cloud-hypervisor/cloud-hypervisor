@@ -86,6 +86,11 @@ pub struct VcpuHvfState {
     pub cpsr: u64,
     pub sp_el1: u64,
     pub sysregs: Vec<(u16, u64)>,
+    /// Per-vCPU GIC CPU-interface (ICC) registers. Empty when the VM has no
+    /// managed GIC. Captured separately from `sysregs` because the managed GIC
+    /// owns these and they are not reachable via `hv_vcpu_get_sys_reg`.
+    #[serde(default)]
+    pub gic_icc: Vec<(u16, u64)>,
     pub mp_state_running: bool,
 }
 
@@ -471,6 +476,33 @@ impl HvfVcpu {
         self.set_sysreg(SYSREG_MPIDR_EL1, MPIDR_RES1 | aff)
     }
 
+    /// Read a managed-GIC CPU-interface (ICC) register for this vCPU.
+    fn get_icc_reg(&self, reg: u16) -> CpuResult<u64> {
+        let mut v = 0u64;
+        // SAFETY: FFI on the owning thread; out-param valid.
+        let ret = unsafe { hv_gic_get_icc_reg(self.id, reg, &mut v) };
+        if ret != HV_SUCCESS {
+            return Err(HypervisorCpuError::GetSysRegister(anyhow!(
+                "hv_gic_get_icc_reg({reg:#06x}) failed: {:#010x}",
+                ret as u32
+            )));
+        }
+        Ok(v)
+    }
+
+    /// Write a managed-GIC CPU-interface (ICC) register for this vCPU.
+    fn set_icc_reg(&self, reg: u16, val: u64) -> CpuResult<()> {
+        // SAFETY: FFI on the owning thread.
+        let ret = unsafe { hv_gic_set_icc_reg(self.id, reg, val) };
+        if ret != HV_SUCCESS {
+            return Err(HypervisorCpuError::SetSysRegister(anyhow!(
+                "hv_gic_set_icc_reg({reg:#06x}) failed: {:#010x}",
+                ret as u32
+            )));
+        }
+        Ok(())
+    }
+
     /// Service a stage-2 data abort (MMIO) by decoding ESR and calling VmOps.
     fn handle_data_abort(&self, esr: u64, ipa: u64) -> CpuResult<()> {
         let iss = esr & 0x01ff_ffff;
@@ -628,12 +660,21 @@ impl Vcpu for HvfVcpu {
         for &id in SNAPSHOT_SYS_REGS {
             sysregs.push((id, self.get_sysreg(id)?));
         }
+        // Capture the managed-GIC CPU-interface registers. These are absent on a
+        // GIC-less VM; in that case the first read fails and we record none.
+        let mut gic_icc = Vec::new();
+        if self.get_icc_reg(GIC_ICC_SNAPSHOT_REGS[0]).is_ok() {
+            for &reg in GIC_ICC_SNAPSHOT_REGS {
+                gic_icc.push((reg, self.get_icc_reg(reg)?));
+            }
+        }
         Ok(CpuState::Hvf(VcpuHvfState {
             gpr,
             pc: self.get_reg(HV_REG_PC)?,
             cpsr: self.get_reg(HV_REG_CPSR)?,
             sp_el1: self.get_sysreg(SYSREG_SP_EL1)?,
             sysregs,
+            gic_icc,
             mp_state_running: true,
         }))
     }
@@ -668,6 +709,13 @@ impl Vcpu for HvfVcpu {
             // Older snapshots predate capturing MPIDR; synthesize it from this
             // vCPU's index so a restored guest can still take interrupts.
             self.set_mpidr_affinity(self.index)?;
+        }
+        // Restore the managed-GIC CPU-interface registers (priority mask, group
+        // enables, active priorities, ...). These are load-bearing for delivery
+        // and live in the GIC, not in the vCPU sysreg file. They are restored
+        // after MPIDR so the vCPU is already associated with its redistributor.
+        for &(reg, v) in &s.gic_icc {
+            self.set_icc_reg(reg, v)?;
         }
         Ok(())
     }
