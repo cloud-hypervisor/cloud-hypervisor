@@ -21,6 +21,7 @@ use std::{io, result};
 
 use libc::{TCSANOW, cfmakeraw, isatty, tcgetattr, tcsetattr, termios};
 use thiserror::Error;
+use vmm_sys_util::errno;
 
 use crate::Vmm;
 use crate::sigwinch_listener::listen_for_sigwinch_on_tty;
@@ -42,15 +43,15 @@ pub enum ConsoleDeviceError {
 
     /// Error setting pty raw mode
     #[error("Error setting pty raw mode")]
-    SetPtyRaw(#[source] vmm_sys_util::errno::Error),
+    SetPtyRaw(#[source] errno::Error),
 
     /// Cannot duplicate file descriptor
     #[error("Cannot duplicate file descriptor")]
-    DupFd(#[source] vmm_sys_util::errno::Error),
+    DupFd(#[source] errno::Error),
 
     /// Error starting sigwinch listener
     #[error("Error starting sigwinch listener")]
-    StartSigwinchListener(#[source] std::io::Error),
+    StartSigwinchListener(#[source] io::Error),
 }
 
 type ConsoleDeviceResult<T> = result::Result<T, ConsoleDeviceError>;
@@ -77,7 +78,7 @@ fn modify_mode<F: FnOnce(&mut termios)>(
     fd: RawFd,
     f: F,
     original_termios_opt: &mut Option<termios>,
-) -> vmm_sys_util::errno::Result<()> {
+) -> errno::Result<()> {
     // SAFETY: safe because we check the return value of isatty.
     if unsafe { isatty(fd) } != 1 {
         return Ok(());
@@ -89,7 +90,7 @@ fn modify_mode<F: FnOnce(&mut termios)>(
     // SAFETY: see above
     let ret = unsafe { tcgetattr(fd, &raw mut termios) };
     if ret < 0 {
-        return vmm_sys_util::errno::errno_result();
+        return errno::errno_result();
     }
     if original_termios_opt.is_none() {
         original_termios_opt.replace(termios);
@@ -100,7 +101,7 @@ fn modify_mode<F: FnOnce(&mut termios)>(
     // the return result.
     let ret = unsafe { tcsetattr(fd, TCSANOW, &raw const termios) };
     if ret < 0 {
-        return vmm_sys_util::errno::errno_result();
+        return errno::errno_result();
     }
 
     Ok(())
@@ -155,7 +156,7 @@ fn create_pty() -> io::Result<(File, File, PathBuf)> {
         )
     };
     if sub_fd == -1 {
-        return vmm_sys_util::errno::errno_result().map_err(|e| e.into());
+        return errno::errno_result().map_err(|e| e.into());
     }
 
     let proc_path = PathBuf::from(format!("/proc/self/fd/{sub_fd}"));
@@ -165,11 +166,11 @@ fn create_pty() -> io::Result<(File, File, PathBuf)> {
     Ok((main, unsafe { File::from_raw_fd(sub_fd) }, path))
 }
 
-fn dup_stdout() -> vmm_sys_util::errno::Result<File> {
+fn dup_stdout() -> errno::Result<File> {
     // SAFETY: FFI call to dup. Trivially safe.
     let stdout = unsafe { libc::dup(libc::STDOUT_FILENO) };
     if stdout == -1 {
-        return vmm_sys_util::errno::errno_result();
+        return errno::errno_result();
     }
     // SAFETY: stdout is valid and owned solely by us.
     Ok(unsafe { File::from_raw_fd(stdout) })

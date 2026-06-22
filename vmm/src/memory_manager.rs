@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom};
+use std::mem::{MaybeUninit, zeroed};
 use std::num::NonZeroUsize;
 use std::ops::{BitAnd, Not, Sub};
 use std::os::fd::{AsFd, OwnedFd};
@@ -16,11 +17,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Barrier, Mutex};
-use std::{ffi, result, thread};
+use std::{cmp, ffi, panic, result, thread, time};
 
 use acpi_tables::{Aml, aml};
 use anyhow::anyhow;
-use arch::RegionType;
+use arch::{RegionType, layout};
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
@@ -31,6 +32,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracer::trace_scoped;
 use virtio_devices::BlocksState;
+use virtio_devices::mem::Error as VirtioMemError;
 #[cfg(target_arch = "x86_64")]
 use vm_allocator::GsiApic;
 use vm_allocator::{AddressAllocator, MemorySlotAllocator, SystemAllocator};
@@ -62,7 +64,7 @@ use crate::uffd::{
     UffdRange,
 };
 use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
-use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID};
+use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID, userfaultfd};
 
 struct UffdHandler {
     stop_event: EventFd,
@@ -297,7 +299,7 @@ pub enum Error {
 
     /// Failed to virtio-mem resize
     #[error("Failed to virtio-mem resize")]
-    VirtioMemResizeFail(#[source] virtio_devices::mem::Error),
+    VirtioMemResizeFail(#[source] VirtioMemError),
 
     /// Cannot restore VM
     #[error("Cannot restore VM")]
@@ -314,7 +316,7 @@ pub enum Error {
     /// Failed creating a new MmapRegion instance.
     #[cfg(target_arch = "x86_64")]
     #[error("Failed creating a new MmapRegion instance")]
-    NewMmapRegion(#[source] vm_memory::mmap::MmapRegionError),
+    NewMmapRegion(#[source] MmapRegionError),
 
     /// No memory zones found.
     #[error("No memory zones found")]
@@ -448,14 +450,12 @@ fn mmio_address_space_size(phys_bits: u8) -> u64 {
 // See: https://github.com/torvalds/linux/blob/v6.3/fs/hugetlbfs/inode.c#L1169
 fn statfs_get_bsize(path: &str) -> Result<u64, Error> {
     let path = ffi::CString::new(path).map_err(Error::InvalidMemoryPath)?;
-    let mut buf = std::mem::MaybeUninit::<libc::statfs>::uninit();
+    let mut buf = MaybeUninit::<libc::statfs>::uninit();
 
     // SAFETY: FFI call with a valid path and buffer
     let ret = unsafe { libc::statfs(path.as_ptr(), buf.as_mut_ptr()) };
     if ret != 0 {
-        return Err(Error::GetFileSystemBlockSize(
-            std::io::Error::last_os_error(),
-        ));
+        return Err(Error::GetFileSystemBlockSize(io::Error::last_os_error()));
     }
 
     // SAFETY: `buf` is valid at this point
@@ -494,7 +494,7 @@ fn memory_zone_get_align_size(zone: &MemoryZoneConfig) -> Result<u64, Error> {
         pathbuf.to_str().ok_or(Error::InvalidMemoryParameters)
     })?;
 
-    let align_size = std::cmp::max(page_size, statfs_get_bsize(path)?);
+    let align_size = cmp::max(page_size, statfs_get_bsize(path)?);
 
     Ok(align_size)
 }
@@ -1009,8 +1009,8 @@ impl MemoryManager {
                 }
             })?;
 
-            if ioctls & crate::userfaultfd::UFFD_API_RANGE_IOCTLS_BASIC
-                != crate::userfaultfd::UFFD_API_RANGE_IOCTLS_BASIC
+            if ioctls & userfaultfd::UFFD_API_RANGE_IOCTLS_BASIC
+                != userfaultfd::UFFD_API_RANGE_IOCTLS_BASIC
             {
                 return Err(UffdError::MissingIoctlSupport {
                     addr: host_addr,
@@ -1059,7 +1059,7 @@ impl MemoryManager {
         let handle = thread::Builder::new()
             .name("uffd-handler".to_string())
             .spawn(move || {
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                panic::catch_unwind(panic::AssertUnwindSafe(move || {
                     let result = Self::uffd_handler_loop(
                         uffd_fd,
                         thread_stop_event,
@@ -1106,10 +1106,10 @@ impl MemoryManager {
     fn required_uffd_features(&self) -> u64 {
         let mut features = 0u64;
         if self.memory_zones.values().any(|z| z.shared || !z.hugepages) {
-            features |= crate::userfaultfd::UFFD_FEATURE_MISSING_SHMEM;
+            features |= userfaultfd::UFFD_FEATURE_MISSING_SHMEM;
         }
         if self.memory_zones.values().any(|z| z.hugepages) {
-            features |= crate::userfaultfd::UFFD_FEATURE_MISSING_HUGETLBFS;
+            features |= userfaultfd::UFFD_FEATURE_MISSING_HUGETLBFS;
         }
         features
     }
@@ -1166,7 +1166,7 @@ impl MemoryManager {
         // means prefault was given up due to an error (natural completion
         // returns from the function instead).
         let mut prefault_cursor: Option<(usize, u64)> = (!ranges.is_empty()).then_some((0, 0));
-        let prefault_start = std::time::Instant::now();
+        let prefault_start = time::Instant::now();
 
         const EVENT_STOP: u64 = 0;
         const EVENT_UFFD: u64 = 1;
@@ -1230,13 +1230,13 @@ impl MemoryManager {
 
             if got_uffd_data {
                 // SAFETY: UffdMsg is a plain repr(C) struct, safe to zero-init.
-                let mut msg: uffd::UffdMsg = unsafe { std::mem::zeroed() };
+                let mut msg: uffd::UffdMsg = unsafe { zeroed() };
                 // SAFETY: reading a uffd_msg-sized struct from the valid uffd fd.
                 let n = unsafe {
                     libc::read(
                         uffd_raw_fd,
                         (&raw mut msg).cast(),
-                        std::mem::size_of::<uffd::UffdMsg>(),
+                        size_of::<uffd::UffdMsg>(),
                     )
                 };
                 if n < 0 {
@@ -1250,14 +1250,14 @@ impl MemoryManager {
                     info!("UFFD handler: EOF on fd, exiting");
                     return Ok(());
                 }
-                if n as usize != std::mem::size_of::<uffd::UffdMsg>() {
+                if n as usize != size_of::<uffd::UffdMsg>() {
                     return Err(io::Error::new(
                         io::ErrorKind::UnexpectedEof,
                         "Short read from userfaultfd",
                     ));
                 }
 
-                if msg.event != crate::userfaultfd::UFFD_EVENT_PAGEFAULT {
+                if msg.event != userfaultfd::UFFD_EVENT_PAGEFAULT {
                     continue;
                 }
 
@@ -1566,11 +1566,11 @@ impl MemoryManager {
         // 4 MiB memory is mapped to simulate the flash.
         let uefi_mem_slot = self.allocate_memory_slot();
         let uefi_region = GuestRegionMmap::new(
-            MmapRegion::new(arch::layout::UEFI_SIZE as usize).unwrap(),
-            arch::layout::UEFI_START,
+            MmapRegion::new(layout::UEFI_SIZE as usize).unwrap(),
+            layout::UEFI_START,
         )
         .unwrap();
-        const _: () = assert!(core::mem::size_of::<usize>() == core::mem::size_of::<u64>());
+        const _: () = assert!(size_of::<usize>() == size_of::<u64>());
 
         // SAFETY: guaranteed by GuestRegionMmap
         unsafe {
@@ -2092,8 +2092,7 @@ impl MemoryManager {
                         // over mmap_sem between thread stack allocation and page faulting.
                         barrier.wait();
                         let pages = pages_per_thread + if i < remainder { 1 } else { 0 };
-                        let offset =
-                            page_size * ((i * pages_per_thread) + std::cmp::min(i, remainder));
+                        let offset = page_size * ((i * pages_per_thread) + cmp::min(i, remainder));
                         // SAFETY: FFI call with correct arguments
                         let ret = unsafe {
                             let addr = r.as_ptr().add(offset);
@@ -2186,7 +2185,7 @@ impl MemoryManager {
                     .map_or(Ok("/dev/hugepages"), |pathbuf| {
                         pathbuf.to_str().ok_or(Error::InvalidMemoryParameters)
                     })?;
-                let align_size = std::cmp::max(page_size, statfs_get_bsize(path)?);
+                let align_size = cmp::max(page_size, statfs_get_bsize(path)?);
                 Ok(align_size)
             }
         }
@@ -2199,17 +2198,14 @@ impl MemoryManager {
         // SAFETY: FFI call. Trivially safe.
         let procs = unsafe { libc::sysconf(_SC_NPROCESSORS_ONLN) };
         if procs > 0 {
-            n = std::cmp::min(procs as usize, MAX_PREFAULT_THREAD_COUNT);
+            n = cmp::min(procs as usize, MAX_PREFAULT_THREAD_COUNT);
         }
 
         // Do not create more threads than pages being allocated.
-        n = std::cmp::min(n, num_pages);
+        n = cmp::min(n, num_pages);
 
         // Do not create threads to allocate less than 64 MiB of memory.
-        n = std::cmp::min(
-            n,
-            std::cmp::max(1, page_size * num_pages / (64 * (1 << 26))),
-        );
+        n = cmp::min(n, cmp::max(1, page_size * num_pages / (64 * (1 << 26))));
 
         n
     }
@@ -2245,8 +2241,8 @@ impl MemoryManager {
             .ok_or(Error::GuestAddressOverFlow)?;
 
         #[cfg(not(target_arch = "riscv64"))]
-        if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
-            return Ok(arch::layout::RAM_64BIT_START);
+        if mem_end < layout::MEM_32BIT_RESERVED_START {
+            return Ok(layout::RAM_64BIT_START);
         }
 
         Ok(start_addr)
@@ -2614,7 +2610,7 @@ impl MemoryManager {
     }
 
     pub fn is_hardlink(f: &File) -> bool {
-        let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+        let mut stat = MaybeUninit::<libc::stat>::uninit();
         // SAFETY: FFI call with correct arguments
         let ret = unsafe { libc::fstat(f.as_raw_fd(), stat.as_mut_ptr()) };
         if ret != 0 {
@@ -2650,7 +2646,7 @@ impl MemoryManager {
     pub fn memory_range_table(
         &self,
         snapshot: bool,
-    ) -> std::result::Result<MemoryRangeTable, MigratableError> {
+    ) -> result::Result<MemoryRangeTable, MigratableError> {
         let mut table = MemoryRangeTable::default();
 
         for memory_zone in self.memory_zones.values() {
@@ -2755,7 +2751,7 @@ impl MemoryManager {
     pub fn coredump_iterate_save_mem(
         &mut self,
         dump_state: &DumpState,
-    ) -> std::result::Result<(), GuestDebuggableError> {
+    ) -> result::Result<(), GuestDebuggableError> {
         let snapshot_memory_ranges = self
             .memory_range_table(false)
             .map_err(|e| GuestDebuggableError::Coredump(e.into()))?;
@@ -3283,7 +3279,7 @@ impl Migratable for MemoryManager {
     // Also, reset the dirty bitmap logged by the vmm.
     // Just before we do a bulk copy we want to start/clear the dirty log so that
     // pages touched during our bulk copy are tracked.
-    fn start_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
+    fn start_dirty_log(&mut self) -> result::Result<(), MigratableError> {
         self.vm.start_dirty_log().map_err(|e| {
             MigratableError::MigrateSend(anyhow!("Error starting VM dirty log {e}"))
         })?;
@@ -3295,7 +3291,7 @@ impl Migratable for MemoryManager {
         Ok(())
     }
 
-    fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
+    fn stop_dirty_log(&mut self) -> result::Result<(), MigratableError> {
         self.vm.stop_dirty_log().map_err(|e| {
             MigratableError::MigrateSend(anyhow!("Error stopping VM dirty log {e}"))
         })?;
@@ -3305,7 +3301,7 @@ impl Migratable for MemoryManager {
 
     // Generate a table for the pages that are dirty. The dirty pages are collapsed
     // together in the table if they are contiguous.
-    fn dirty_log(&mut self) -> std::result::Result<MemoryRangeTable, MigratableError> {
+    fn dirty_log(&mut self) -> result::Result<MemoryRangeTable, MigratableError> {
         let mut table = MemoryRangeTable::default();
         for r in &self.guest_ram_mappings {
             let vm_dirty_bitmap = self.vm.get_dirty_log(r.slot, r.gpa, r.size).map_err(|e| {

@@ -27,6 +27,7 @@
 
 pub mod igvm_loader;
 mod loader;
+use std::fs;
 use std::path::Path;
 
 use igvm::snp_defs::SevVmsa;
@@ -35,7 +36,7 @@ use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
 use zerocopy::FromZeros;
 
 pub fn parse_igvm(igvm_path: &Path) -> Result<IgvmFile, igvm_loader::Error> {
-    let file_contents = std::fs::read(igvm_path).map_err(igvm_loader::Error::Igvm)?;
+    let file_contents = fs::read(igvm_path).map_err(igvm_loader::Error::Igvm)?;
     IgvmFile::new_from_binary(&file_contents, Some(IsolationType::Snp))
         .map_err(igvm_loader::Error::InvalidIgvmFile)
 }

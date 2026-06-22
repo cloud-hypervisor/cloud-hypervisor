@@ -8,6 +8,7 @@ use std::ffi::CString;
 use std::fs::File;
 use std::io::{self, Cursor, Read, Seek, SeekFrom};
 use std::os::unix::fs::FileExt;
+use std::result;
 
 use linux_loader::bootparam::boot_params;
 use sha2::{Digest, Sha256};
@@ -16,7 +17,7 @@ use vm_memory::ByteValued;
 use vmm_sys_util::errno;
 use zerocopy::{Immutable, IntoBytes};
 
-pub(crate) type Result<T> = std::result::Result<T, errno::Error>;
+pub(crate) type Result<T> = result::Result<T, errno::Error>;
 
 // https://github.com/tianocore/edk2/blob/f98662c5e35b6ab60f46ee4350fa0e6eab0497cf/OvmfPkg/Include/Fdf/MemFd.fdf.inc#L89-L93
 pub const SEV_HASH_BLOCK_ADDRESS: u64 = 0x10c00;
@@ -182,6 +183,7 @@ impl MeasuredBootInfo {
 
 #[cfg(test)]
 mod tests {
+    use std::cmp;
     use std::io::Write;
 
     use super::*;
@@ -196,7 +198,7 @@ mod tests {
         let effective_sects = if setup_sects == 0 { 4 } else { setup_sects };
         let setup_len = (usize::from(effective_sects) + 1) * 512;
         let header_size = size_of::<boot_params>();
-        let file_len = std::cmp::max(setup_len, header_size) + kernel_payload.len();
+        let file_len = cmp::max(setup_len, header_size) + kernel_payload.len();
 
         let mut buf = vec![0u8; file_len];
         let bp = boot_params::from_mut_slice(&mut buf[..header_size]).unwrap();
@@ -329,7 +331,7 @@ mod tests {
         let effective_sects = if setup_sects == 0 { 4 } else { setup_sects };
         let setup_len = (usize::from(effective_sects) + 1) * 512;
         let header_size = size_of::<boot_params>();
-        let file_len = std::cmp::max(setup_len, header_size) + kernel_payload.len();
+        let file_len = cmp::max(setup_len, header_size) + kernel_payload.len();
 
         let mut buf = vec![0u8; file_len];
         let bp = boot_params::from_mut_slice(&mut buf[..header_size]).unwrap();

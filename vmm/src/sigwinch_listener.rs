@@ -269,7 +269,7 @@ pub fn start_sigwinch_listener(seccomp_filter: BpfProgramRef, tty_sub: File) -> 
 pub fn listen_for_sigwinch_on_tty(
     pty_sub: File,
     seccomp_action: &SeccompAction,
-) -> std::io::Result<File> {
+) -> io::Result<File> {
     let seccomp_filter = get_seccomp_filter(seccomp_action, Thread::PtyForeground, None).unwrap();
 
     let console_resize_pipe = start_sigwinch_listener(&seccomp_filter, pty_sub)?;

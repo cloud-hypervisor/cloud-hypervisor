@@ -25,7 +25,7 @@ use virtio_bindings::virtio_blk::VIRTIO_BLK_ID_BYTES;
 use virtio_bindings::virtio_ids::*;
 use virtio_devices::block::MINIMUM_BLOCK_QUEUE_SIZE;
 use virtio_devices::vhost_user::VIRTIO_FS_TAG_LEN;
-use virtio_devices::{RateLimiterConfig, TokenBucketConfig};
+use virtio_devices::{RateLimiterConfig, TokenBucketConfig, net, vhost_user};
 
 use crate::landlock::LandlockAccess;
 use crate::vm_config::*;
@@ -432,7 +432,7 @@ pub enum ValidationError {
     InvalidSharedMemoryWithMergeable,
 }
 
-type ValidationResult<T> = std::result::Result<T, ValidationError>;
+type ValidationResult<T> = result::Result<T, ValidationError>;
 
 pub fn add_to_config<T>(items: &mut Option<Vec<T>>, item: T) {
     if let Some(items) = items {
@@ -637,7 +637,7 @@ pub enum ParseHotplugMethodError {
 impl FromStr for HotplugMethod {
     type Err = ParseHotplugMethodError;
 
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "acpi" => Ok(HotplugMethod::Acpi),
             "virtio-mem" => Ok(HotplugMethod::VirtioMem),
@@ -653,7 +653,7 @@ pub enum ParseCoreSchedulingError {
 impl FromStr for CoreScheduling {
     type Err = ParseCoreSchedulingError;
 
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "vm" => Ok(CoreScheduling::Vm),
             "vcpu" => Ok(CoreScheduling::Vcpu),
@@ -670,7 +670,7 @@ pub enum CpuTopologyParseError {
 impl FromStr for CpuTopology {
     type Err = CpuTopologyParseError;
 
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
         let parts: Vec<&str> = s.split(':').collect();
 
         if parts.len() != 4 {
@@ -1655,7 +1655,7 @@ pub enum ParseVhostModeError {
 impl FromStr for VhostMode {
     type Err = ParseVhostModeError;
 
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "client" => Ok(VhostMode::Client),
             "server" => Ok(VhostMode::Server),
@@ -1863,7 +1863,7 @@ impl NetConfig {
         }
 
         if let Some(mtu) = self.mtu
-            && mtu < virtio_devices::net::MIN_MTU
+            && mtu < net::MIN_MTU
         {
             return Err(ValidationError::InvalidMtu(mtu));
         }
@@ -2122,7 +2122,7 @@ impl FsConfig {
         parser.parse(fs).map_err(Error::ParseFileSystem)?;
 
         let tag = parser.get("tag").ok_or(Error::ParseFsTagMissing)?;
-        if tag.len() > virtio_devices::vhost_user::VIRTIO_FS_TAG_LEN {
+        if tag.len() > vhost_user::VIRTIO_FS_TAG_LEN {
             return Err(Error::ParseFsTagTooLong);
         }
         let socket = PathBuf::from(parser.get("socket").ok_or(Error::ParseFsSockMissing)?);
@@ -2223,7 +2223,7 @@ impl FwCfgConfig {
             items,
         })
     }
-    pub fn validate(&self, payload: &PayloadConfig) -> std::result::Result<(), PayloadConfigError> {
+    pub fn validate(&self, payload: &PayloadConfig) -> result::Result<(), PayloadConfigError> {
         if self.kernel && payload.kernel.is_none() {
             return Err(PayloadConfigError::FwCfgMissingKernel);
         } else if self.cmdline && payload.cmdline.is_none() {
@@ -2736,9 +2736,7 @@ pub struct RestoredNetConfig {
     pub fds: Option<Vec<i32>>,
 }
 
-fn deserialize_restorednetconfig_fds<'de, D>(
-    d: D,
-) -> std::result::Result<Option<Vec<i32>>, D::Error>
+fn deserialize_restorednetconfig_fds<'de, D>(d: D) -> result::Result<Option<Vec<i32>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {

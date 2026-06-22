@@ -2,10 +2,15 @@
 //
 // Copyright © 2023, Microsoft Corporation
 //
+#[cfg(all(feature = "kvm", feature = "sev_snp"))]
+use std::cmp;
 use std::collections::HashMap;
 use std::ffi::CString;
+#[cfg(feature = "kvm")]
+use std::iter;
 use std::mem::size_of;
 use std::sync::{Arc, Mutex};
+use std::{ffi, io};
 
 use hypervisor::HypervisorType;
 #[cfg(feature = "sev_snp")]
@@ -31,15 +36,18 @@ use vm_memory::Bytes;
 use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory};
 #[cfg(all(feature = "kvm", feature = "sev_snp"))]
 use vm_migration::Snapshottable;
+#[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+use vmm_sys_util::errno;
 use zerocopy::IntoBytes;
 #[cfg(all(feature = "kvm", feature = "sev_snp"))]
 use zerocopy::{FromBytes, FromZeros};
 
 #[cfg(feature = "sev_snp")]
 use crate::GuestMemoryMmap;
+use crate::cpu;
 use crate::cpu::CpuManager;
 use crate::igvm::loader::Loader;
-use crate::igvm::{BootPageAcceptance, HV_PAGE_SIZE, IgvmLoadedInfo, StartupMemoryType};
+use crate::igvm::{BootPageAcceptance, HV_PAGE_SIZE, IgvmLoadedInfo, StartupMemoryType, loader};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
 use crate::sev::{MeasuredBootInfo, SEV_HASH_BLOCK_ADDRESS, SEV_HASH_BLOCK_SIZE};
@@ -77,9 +85,9 @@ pub struct SnpCpuidInfo {
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("command line is not a valid C string")]
-    InvalidCommandLine(#[source] std::ffi::NulError),
+    InvalidCommandLine(#[source] ffi::NulError),
     #[error("failed to read igvm file")]
-    Igvm(#[source] std::io::Error),
+    Igvm(#[source] io::Error),
     #[error("invalid igvm file")]
     InvalidIgvmFile(#[source] igvm::Error),
     #[error("multiple SNP ID blocks in IGVM file")]
@@ -87,7 +95,7 @@ pub enum Error {
     #[error("invalid guest memory map")]
     InvalidGuestMemmap(#[source] arch::Error),
     #[error("loader error")]
-    Loader(#[source] crate::igvm::loader::Error),
+    Loader(#[source] loader::Error),
     #[error("parameter too large for parameter area")]
     ParameterTooLarge,
     #[error("Error importing isolated pages")]
@@ -101,10 +109,10 @@ pub enum Error {
     #[error("IGVM file not provided")]
     MissingIgvm,
     #[error("Error applying VMSA to vCPU registers: {0}")]
-    SetVmsa(#[source] crate::cpu::Error),
+    SetVmsa(#[source] cpu::Error),
     #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
     #[error("Error building SEV-SNP measured boot hash block")]
-    MeasuredBoot(#[source] vmm_sys_util::errno::Error),
+    MeasuredBoot(#[source] errno::Error),
     #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
     #[error(
         "igvmfile inserts unmeasured parameter area [0x{region_start:x}, 0x{region_end:x}) over SEV-SNP kernel hashes region [0x{hash_start:x}, 0x{hash_end:x})"
@@ -441,7 +449,7 @@ pub fn load_igvm(
                     let mut new_cp = SnpCpuidInfo::new_zeroed();
 
                     let entries = cpu_manager.lock().unwrap().common_cpuid();
-                    let cp_count = std::cmp::min(SNP_CPUID_LIMIT as usize, entries.len());
+                    let cp_count = cmp::min(SNP_CPUID_LIMIT as usize, entries.len());
                     // TODO: Filter cpuid rather than truncate
                     for (i, entry) in entries.iter().enumerate().take(cp_count) {
                         new_cp.entries[i].eax_in = entry.function;
@@ -857,7 +865,7 @@ pub fn load_igvm(
                 // https://elixir.bootlin.com/linux/v6.11/source/arch/x86/kvm/svm/sev.c#L2322
                 let mut updated_cp = SnpCpuidInfo::new_zeroed();
                 let _ = guest_memory.read(updated_cp.as_mut_bytes(), GuestAddress(group[0].gpa));
-                for (set, got) in std::iter::zip(new_cp.entries.iter(), updated_cp.entries.iter()) {
+                for (set, got) in iter::zip(new_cp.entries.iter(), updated_cp.entries.iter()) {
                     if set != got {
                         error!("Set cpuid fn: {set:#x?}, but firmware expects: {got:#x?}");
                     }

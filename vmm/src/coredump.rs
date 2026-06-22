@@ -5,6 +5,7 @@
 
 use std::fs::File;
 use std::io::Write;
+use std::{collections, io, result};
 
 #[cfg(target_arch = "x86_64")]
 use hypervisor::arch::x86::{DescriptorTable, SegmentRegister};
@@ -20,7 +21,7 @@ pub struct CoredumpMemoryRegion {
 
 #[derive(Clone)]
 pub struct CoredumpMemoryRegions {
-    pub ram_maps: std::collections::BTreeMap<u64, CoredumpMemoryRegion>,
+    pub ram_maps: collections::BTreeMap<u64, CoredumpMemoryRegion>,
 }
 
 /// Platform information
@@ -39,7 +40,7 @@ pub enum GuestDebuggableError {
     #[error("coredump")]
     Coredump(#[source] anyhow::Error),
     #[error("coredump file")]
-    CoredumpFile(#[source] std::io::Error),
+    CoredumpFile(#[source] io::Error),
     #[error("Failed to pause")]
     Pause(#[source] vm_migration::MigratableError),
     #[error("Failed to resume")]
@@ -47,10 +48,7 @@ pub enum GuestDebuggableError {
 }
 
 pub trait GuestDebuggable: vm_migration::Pausable {
-    fn coredump(
-        &mut self,
-        _destination_url: &str,
-    ) -> std::result::Result<(), GuestDebuggableError> {
+    fn coredump(&mut self, _destination_url: &str) -> result::Result<(), GuestDebuggableError> {
         Ok(())
     }
 }
@@ -194,10 +192,7 @@ const EV_CURRENT: u8 = 1;
 const EM_X86_64: u16 = 62;
 
 pub trait Elf64Writable {
-    fn write_header(
-        &mut self,
-        dump_state: &DumpState,
-    ) -> std::result::Result<(), GuestDebuggableError> {
+    fn write_header(&mut self, dump_state: &DumpState) -> result::Result<(), GuestDebuggableError> {
         let e_ident = [
             elf::ELFMAG0 as u8, // magic
             elf::ELFMAG1,
@@ -216,8 +211,8 @@ pub trait Elf64Writable {
             0,
             0,
         ];
-        let elf64_ehdr_size = std::mem::size_of::<elf::Elf64_Ehdr>();
-        let elf64_phdr_size = std::mem::size_of::<elf::Elf64_Phdr>();
+        let elf64_ehdr_size = size_of::<elf::Elf64_Ehdr>();
+        let elf64_phdr_size = size_of::<elf::Elf64_Phdr>();
         let mut elf64_ehdr = elf::Elf64_Ehdr {
             e_ident,
             e_type: ET_CORE,
@@ -234,7 +229,7 @@ pub trait Elf64Writable {
             e_shnum: 0,
             e_shstrndx: 0,
         };
-        elf64_ehdr.e_ehsize = std::mem::size_of_val(&elf64_ehdr) as u16;
+        elf64_ehdr.e_ehsize = size_of_val(&elf64_ehdr) as u16;
 
         let mut coredump_file = dump_state.file.as_ref().unwrap();
         let bytes: &[u8] = elf64_ehdr.as_slice();
@@ -245,10 +240,7 @@ pub trait Elf64Writable {
         Ok(())
     }
 
-    fn write_note(
-        &mut self,
-        dump_state: &DumpState,
-    ) -> std::result::Result<(), GuestDebuggableError> {
+    fn write_note(&mut self, dump_state: &DumpState) -> result::Result<(), GuestDebuggableError> {
         let begin = dump_state.mem_offset - dump_state.elf_note_size as u64;
         let elf64_phdr = elf::Elf64_Phdr {
             p_type: elf::PT_NOTE,
@@ -277,7 +269,7 @@ pub trait Elf64Writable {
         length: u64,
         virt_addr: u64,
         dump_state: &DumpState,
-    ) -> std::result::Result<(), GuestDebuggableError> {
+    ) -> result::Result<(), GuestDebuggableError> {
         let elf64_load = elf::Elf64_Phdr {
             p_type: elf::PT_LOAD,
             p_flags: 0,
@@ -298,10 +290,7 @@ pub trait Elf64Writable {
         Ok(())
     }
 
-    fn write_loads(
-        &mut self,
-        dump_state: &DumpState,
-    ) -> std::result::Result<(), GuestDebuggableError> {
+    fn write_loads(&mut self, dump_state: &DumpState) -> result::Result<(), GuestDebuggableError> {
         let mem_info = dump_state.mem_info.as_ref().unwrap();
 
         for (gpa, load) in &mem_info.ram_maps {
@@ -316,9 +305,9 @@ pub trait Elf64Writable {
     }
 
     fn get_note_size(&self, desc_type: NoteDescType, nr_cpus: u32) -> u32 {
-        let note_head_size = std::mem::size_of::<elf::Elf64_Nhdr>() as u32;
-        let elf_desc_size = std::mem::size_of::<X86_64ElfPrStatus>() as u32;
-        let cpu_state_desc_size = std::mem::size_of::<CpuState>() as u32;
+        let note_head_size = size_of::<elf::Elf64_Nhdr>() as u32;
+        let elf_desc_size = size_of::<X86_64ElfPrStatus>() as u32;
+        let cpu_state_desc_size = size_of::<CpuState>() as u32;
 
         let elf_note_size = self.elf_note_size(note_head_size, COREDUMP_NAME_SIZE, elf_desc_size);
         let vmm_note_size =
@@ -336,14 +325,14 @@ pub trait CpuElf64Writable {
     fn cpu_write_elf64_note(
         &mut self,
         _dump_state: &DumpState,
-    ) -> std::result::Result<(), GuestDebuggableError> {
+    ) -> result::Result<(), GuestDebuggableError> {
         Ok(())
     }
 
     fn cpu_write_vmm_note(
         &mut self,
         _dump_state: &DumpState,
-    ) -> std::result::Result<(), GuestDebuggableError> {
+    ) -> result::Result<(), GuestDebuggableError> {
         Ok(())
     }
 }

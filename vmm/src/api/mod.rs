@@ -1925,7 +1925,7 @@ impl ApiAction for VmNmi {
 mod unit_tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
-    use std::{fs, process};
+    use std::{env, fs, process};
 
     use super::*;
 
@@ -1939,7 +1939,7 @@ mod unit_tests {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let path = std::env::temp_dir().join(format!(
+            let path = env::temp_dir().join(format!(
                 "cloud-hypervisor-api-{name}-{}-{unique}",
                 process::id()
             ));

@@ -10,8 +10,12 @@ use std::str::FromStr;
 use std::{fs, result};
 
 use arch::CpuProfile;
+#[cfg(target_arch = "x86_64")]
+use arch::x86_64;
 use block::ImageType;
 pub use block::fcntl::LockGranularityChoice;
+#[cfg(target_arch = "x86_64")]
+use devices::debug_console;
 use log::{debug, warn};
 use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
@@ -170,7 +174,7 @@ pub struct PlatformConfig {
 impl PlatformConfig {
     /// Returns `None` if no SMBIOS-relevant platform fields are set, otherwise
     /// `Some` with a [`SmbiosConfig`] built from the populated fields.
-    pub fn smbios_config(&self) -> Option<arch::x86_64::SmbiosConfig> {
+    pub fn smbios_config(&self) -> Option<x86_64::SmbiosConfig> {
         let has_system = [
             &self.system_serial_number,
             &self.system_uuid,
@@ -183,7 +187,7 @@ impl PlatformConfig {
         .iter()
         .any(|v| v.is_some());
 
-        let system = has_system.then_some(arch::x86_64::SmbiosSystem {
+        let system = has_system.then_some(x86_64::SmbiosSystem {
             manufacturer: self.system_manufacturer.clone(),
             product_name: self.system_product_name.clone(),
             version: self.system_version.clone(),
@@ -193,14 +197,14 @@ impl PlatformConfig {
             family: self.system_family.clone(),
         });
 
-        let chassis =
-            self.chassis_asset_tag
-                .clone()
-                .map(|asset_tag| arch::x86_64::SmbiosChassisConfig {
-                    asset_tag: Some(asset_tag),
-                });
+        let chassis = self
+            .chassis_asset_tag
+            .clone()
+            .map(|asset_tag| x86_64::SmbiosChassisConfig {
+                asset_tag: Some(asset_tag),
+            });
 
-        let smbios = arch::x86_64::SmbiosConfig {
+        let smbios = x86_64::SmbiosConfig {
             system,
             chassis,
             oem_strings: self.oem_strings.clone().unwrap_or_default(),
@@ -753,7 +757,7 @@ impl Default for DebugConsoleConfig {
         Self {
             file: None,
             mode: ConsoleOutputMode::Off,
-            iobase: Some(devices::debug_console::DEFAULT_PORT as u16),
+            iobase: Some(debug_console::DEFAULT_PORT as u16),
         }
     }
 }
@@ -1317,7 +1321,7 @@ impl VmConfig {
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     pub(crate) fn max_apic_id(&self) -> u32 {
         if let Some(topology) = &self.cpus.topology {
-            arch::x86_64::get_max_x2apic_id((
+            x86_64::get_max_x2apic_id((
                 topology.threads_per_core,
                 topology.cores_per_die,
                 topology.dies_per_package,

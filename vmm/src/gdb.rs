@@ -7,6 +7,7 @@
 
 use std::os::unix::net::UnixListener;
 use std::sync::mpsc;
+use std::{cmp, io, path, result};
 
 use gdbstub::arch::Arch;
 use gdbstub::common::{Signal, Tid};
@@ -32,8 +33,9 @@ use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 use log::{error, info};
 use thiserror::Error;
 use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryError};
+use vmm_sys_util::eventfd;
 
-use crate::GuestMemoryMmap;
+use crate::{GuestMemoryMmap, cpu, vm};
 
 type ArchUsize = u64;
 
@@ -46,15 +48,15 @@ pub enum DebuggableError {
     #[error("Resuming failed")]
     Resume(#[source] vm_migration::MigratableError),
     #[error("Reading registers failed")]
-    ReadRegs(#[source] crate::cpu::Error),
+    ReadRegs(#[source] cpu::Error),
     #[error("Writing registers failed")]
-    WriteRegs(#[source] crate::cpu::Error),
+    WriteRegs(#[source] cpu::Error),
     #[error("Reading memory failed")]
     ReadMem(#[source] GuestMemoryError),
     #[error("Writing memory failed")]
     WriteMem(#[source] GuestMemoryError),
     #[error("Translating GVA failed")]
-    TranslateGva(#[source] crate::cpu::Error),
+    TranslateGva(#[source] cpu::Error),
     #[error("The lock is poisened")]
     PoisonedState,
 }
@@ -66,45 +68,41 @@ pub trait Debuggable: vm_migration::Pausable {
         addrs: &[GuestAddress],
         singlestep: bool,
     ) -> Result<(), DebuggableError>;
-    fn debug_pause(&mut self) -> std::result::Result<(), DebuggableError>;
-    fn debug_resume(&mut self) -> std::result::Result<(), DebuggableError>;
-    fn read_regs(&self, cpu_id: usize) -> std::result::Result<CoreRegs, DebuggableError>;
-    fn write_regs(
-        &self,
-        cpu_id: usize,
-        regs: &CoreRegs,
-    ) -> std::result::Result<(), DebuggableError>;
+    fn debug_pause(&mut self) -> result::Result<(), DebuggableError>;
+    fn debug_resume(&mut self) -> result::Result<(), DebuggableError>;
+    fn read_regs(&self, cpu_id: usize) -> result::Result<CoreRegs, DebuggableError>;
+    fn write_regs(&self, cpu_id: usize, regs: &CoreRegs) -> result::Result<(), DebuggableError>;
     fn read_mem(
         &self,
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         cpu_id: usize,
         vaddr: GuestAddress,
         len: usize,
-    ) -> std::result::Result<Vec<u8>, DebuggableError>;
+    ) -> result::Result<Vec<u8>, DebuggableError>;
     fn write_mem(
         &self,
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         cpu_id: usize,
         vaddr: &GuestAddress,
         data: &[u8],
-    ) -> std::result::Result<(), DebuggableError>;
+    ) -> result::Result<(), DebuggableError>;
     fn active_vcpus(&self) -> usize;
 }
 
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("VM failed")]
-    Vm(#[source] crate::vm::Error),
+    Vm(#[source] vm::Error),
     #[error("GDB request failed")]
     GdbRequest,
     #[error("GDB couldn't be notified")]
-    GdbResponseNotify(#[source] std::io::Error),
+    GdbResponseNotify(#[source] io::Error),
     #[error("GDB response failed")]
     GdbResponse(#[source] mpsc::RecvError),
     #[error("GDB response timeout")]
     GdbResponseTimeout(#[source] mpsc::RecvTimeoutError),
 }
-type GdbResult<T> = std::result::Result<T, Error>;
+type GdbResult<T> = result::Result<T, Error>;
 
 #[derive(Debug)]
 pub struct GdbRequest {
@@ -126,7 +124,7 @@ pub enum GdbRequestPayload {
     ActiveVcpus,
 }
 
-pub type GdbResponse = std::result::Result<GdbResponsePayload, Error>;
+pub type GdbResponse = result::Result<GdbResponsePayload, Error>;
 
 #[derive(Debug)]
 pub enum GdbResponsePayload {
@@ -138,8 +136,8 @@ pub enum GdbResponsePayload {
 
 pub struct GdbStub {
     gdb_sender: mpsc::Sender<GdbRequest>,
-    gdb_event: vmm_sys_util::eventfd::EventFd,
-    vm_event: vmm_sys_util::eventfd::EventFd,
+    gdb_event: eventfd::EventFd,
+    vm_event: eventfd::EventFd,
     hw_breakpoints: Vec<GuestAddress>,
     single_step: bool,
 }
@@ -147,8 +145,8 @@ pub struct GdbStub {
 impl GdbStub {
     pub fn new(
         gdb_sender: mpsc::Sender<GdbRequest>,
-        gdb_event: vmm_sys_util::eventfd::EventFd,
-        vm_event: vmm_sys_util::eventfd::EventFd,
+        gdb_event: eventfd::EventFd,
+        vm_event: eventfd::EventFd,
         hw_breakpoints: usize,
     ) -> Self {
         Self {
@@ -165,7 +163,7 @@ impl GdbStub {
         payload: GdbRequestPayload,
         cpu_id: usize,
     ) -> GdbResult<GdbResponsePayload> {
-        let (response_sender, response_receiver) = std::sync::mpsc::channel();
+        let (response_sender, response_receiver) = mpsc::channel();
         let request = GdbRequest {
             sender: response_sender,
             payload,
@@ -265,7 +263,7 @@ impl MultiThreadBase for GdbStub {
                 for (dst, v) in data.iter_mut().zip(r.iter()) {
                     *dst = *v;
                 }
-                Ok(std::cmp::min(data.len(), r.len()))
+                Ok(cmp::min(data.len(), r.len()))
             }
             Ok(s) => {
                 error!("Unexpected response for ReadMem: {s:?}");
@@ -445,7 +443,7 @@ enum GdbEventLoop {}
 
 impl run_blocking::BlockingEventLoop for GdbEventLoop {
     type Target = GdbStub;
-    type Connection = Box<dyn ConnectionExt<Error = std::io::Error>>;
+    type Connection = Box<dyn ConnectionExt<Error = io::Error>>;
     type StopReason = MultiThreadStopReason<ArchUsize>;
 
     fn wait_for_stop_reason(
@@ -478,7 +476,7 @@ impl run_blocking::BlockingEventLoop for GdbEventLoop {
                     return Ok(run_blocking::Event::TargetStopped(stop_reason));
                 }
                 Err(e) => {
-                    if e.kind() != std::io::ErrorKind::WouldBlock {
+                    if e.kind() != io::ErrorKind::WouldBlock {
                         return Err(run_blocking::WaitForStopReasonError::Connection(e));
                     }
                 }
@@ -506,7 +504,7 @@ impl run_blocking::BlockingEventLoop for GdbEventLoop {
     }
 }
 
-pub fn gdb_thread(mut gdbstub: GdbStub, path: &std::path::Path) {
+pub fn gdb_thread(mut gdbstub: GdbStub, path: &path::Path) {
     let listener = match UnixListener::bind(path) {
         Ok(s) => s,
         Err(e) => {
@@ -525,7 +523,7 @@ pub fn gdb_thread(mut gdbstub: GdbStub, path: &std::path::Path) {
     };
     info!("GDB connected from {addr:?}");
 
-    let connection: Box<dyn ConnectionExt<Error = std::io::Error>> = Box::new(stream);
+    let connection: Box<dyn ConnectionExt<Error = io::Error>> = Box::new(stream);
     let gdb = gdbstub::stub::GdbStub::new(connection);
 
     match gdb.run_blocking::<GdbEventLoop>(&mut gdbstub) {

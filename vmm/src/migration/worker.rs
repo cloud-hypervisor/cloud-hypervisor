@@ -12,12 +12,12 @@
 //! (rendezvous-channel). If spawning fails, the VM is returned to the caller in
 //! [`MigrationWorkerSpawnError`].
 
-use std::fmt::{Debug, Formatter};
+use std::fmt::{self, Debug, Formatter};
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use std::sync::Arc;
-use std::sync::mpsc::Receiver;
-use std::thread;
+use std::sync::mpsc::{self, Receiver};
 use std::thread::JoinHandle;
+use std::{io, thread};
 
 use event_monitor::event;
 use log::warn;
@@ -32,12 +32,12 @@ use crate::vm::{Vm, VmState};
 #[derive(thiserror::Error)]
 #[error("Migration worker could not be spawned: {spawn_error}")]
 pub struct MigrationWorkerSpawnError {
-    pub spawn_error: std::io::Error,
+    pub spawn_error: io::Error,
     pub vm: Vm,
 }
 
 impl Debug for MigrationWorkerSpawnError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("MigrationWorkerSpawnError")
             .field("spawn_error", &self.spawn_error)
             .field("vm", &"<VM>")
@@ -121,7 +121,7 @@ impl MigrationWorker {
         initial_vm_state: VmState,
         seccomp_action: SeccompAction,
     ) -> Result<MigrationWorkerHandle, MigrationWorkerSpawnError> {
-        let (vm_sender, vm_receiver) = std::sync::mpsc::sync_channel(0);
+        let (vm_sender, vm_receiver) = mpsc::sync_channel(0);
         let worker = MigrationWorker {
             vm_receiver,
             check_migration_evt,

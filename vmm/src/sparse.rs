@@ -154,26 +154,23 @@ mod unit_tests {
     use std::io::Write;
     use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd};
     use std::os::unix::fs::FileExt;
+    use std::{fs, io};
 
     use super::{next_data_extent, write_region_sparse};
 
-    fn make_memfd(size: u64) -> std::fs::File {
+    fn make_memfd(size: u64) -> fs::File {
         // SAFETY: memfd_create is a self-contained syscall; we own the
         // returned fd.
         let fd = unsafe { libc::syscall(libc::SYS_memfd_create, c"sparse-test".as_ptr(), 0u32) };
         assert!(fd >= 0, "memfd_create failed");
         // SAFETY: memfd_create returned a valid fd that we now own; wrap it
         // in File so it is closed on drop.
-        let f = unsafe { std::fs::File::from_raw_fd(fd as i32) };
+        let f = unsafe { fs::File::from_raw_fd(fd as i32) };
         f.set_len(size).unwrap();
         f
     }
 
-    fn collect_extents(
-        fd: BorrowedFd<'_>,
-        start: u64,
-        end: u64,
-    ) -> std::io::Result<Vec<(u64, u64)>> {
+    fn collect_extents(fd: BorrowedFd<'_>, start: u64, end: u64) -> io::Result<Vec<(u64, u64)>> {
         let mut out = Vec::new();
         let mut cursor = start;
         while let Some((off, len)) = next_data_extent(fd, cursor, end)? {
@@ -190,7 +187,7 @@ mod unit_tests {
     /// not portable. `fallocate(PUNCH_HOLE)` is the explicit "deallocate
     /// these pages" syscall and is honored on every Linux filesystem we
     /// run tests on (tmpfs, ext4, xfs, btrfs).
-    fn punch_hole(f: &std::fs::File, off: u64, len: u64) {
+    fn punch_hole(f: &fs::File, off: u64, len: u64) {
         // SAFETY: FFI call; f is a valid open fd for the duration of the
         // call.
         let r = unsafe {
@@ -205,7 +202,7 @@ mod unit_tests {
             r,
             0,
             "fallocate PUNCH_HOLE off={off} len={len}: {}",
-            std::io::Error::last_os_error(),
+            io::Error::last_os_error(),
         );
     }
 
@@ -213,7 +210,7 @@ mod unit_tests {
     /// len, byte)` data extent, then punch every gap into a real hole.
     /// The resulting `SEEK_DATA`/`SEEK_HOLE` extents match `data` exactly,
     /// regardless of folio/THP allocation policy on the backing FS.
-    fn sparse_layout(f: &std::fs::File, total: u64, data: &[(u64, u64, u8)]) {
+    fn sparse_layout(f: &fs::File, total: u64, data: &[(u64, u64, u8)]) {
         f.set_len(total).unwrap();
         for &(off, len, byte) in data {
             f.write_all_at(&vec![byte; len as usize], off).unwrap();
@@ -296,7 +293,7 @@ mod unit_tests {
         let used = write_region_sparse(&src, 0, &dst, 0, 4096 * 16).unwrap();
         assert!(used);
 
-        let buf = std::fs::read(tmp.path()).unwrap();
+        let buf = fs::read(tmp.path()).unwrap();
         assert!(buf[..4096 * 3].iter().all(|&b| b == 0xFE));
         assert!(buf[4096 * 3..4096 * 5].iter().all(|&b| b == 0x42));
         assert!(buf[4096 * 5..].iter().all(|&b| b == 0xFE));
@@ -316,7 +313,7 @@ mod unit_tests {
         let _ = write_region_sparse(&src_a, 0, &dst, 0, 4096 * 16).unwrap();
         let _ = write_region_sparse(&src_b, 0, &dst, 4096 * 16, 4096 * 16).unwrap();
 
-        let buf = std::fs::read(tmp.path()).unwrap();
+        let buf = fs::read(tmp.path()).unwrap();
         assert!(buf[..4096].iter().all(|&b| b == 0));
         assert!(buf[4096..4096 * 3].iter().all(|&b| b == 0xAA));
         assert!(buf[4096 * 3..4096 * 16].iter().all(|&b| b == 0));
@@ -337,7 +334,7 @@ mod unit_tests {
         let used = write_region_sparse(&src, 4096 * 16, &dst, 0, 4096 * 16).unwrap();
         assert!(used);
 
-        let buf = std::fs::read(tmp.path()).unwrap();
+        let buf = fs::read(tmp.path()).unwrap();
         assert!(buf[..4096 * 4].iter().all(|&b| b == 0));
         assert!(buf[4096 * 4..4096 * 6].iter().all(|&b| b == 0x77));
         assert!(buf[4096 * 6..].iter().all(|&b| b == 0));
@@ -387,7 +384,7 @@ mod unit_tests {
         }
 
         // Verify content matches a dense read.
-        let dense = std::fs::read(tmp.path()).unwrap();
+        let dense = fs::read(tmp.path()).unwrap();
         assert_eq!(restored, dense);
 
         // Verify the actual data landed in the right places.

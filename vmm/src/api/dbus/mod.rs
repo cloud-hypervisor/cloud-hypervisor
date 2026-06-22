@@ -5,17 +5,17 @@
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
-use std::thread;
+use std::{fmt, panic, thread};
 
 use futures::channel::oneshot;
-use futures::{FutureExt, executor};
+use futures::{FutureExt, executor, future, lock};
 use log::{error, warn};
 use seccompiler::{SeccompAction, apply_filter};
 use vmm_sys_util::eventfd::EventFd;
 use zbus::connection::Builder;
 use zbus::fdo::{self, Result};
-use zbus::interface;
 use zbus::zvariant::Optional;
+use zbus::{interface, object_server};
 
 use super::{ApiAction, ApiRequest};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -40,10 +40,10 @@ pub struct DBusApiOptions {
 
 pub struct DBusApi {
     api_notifier: EventFd,
-    api_sender: futures::lock::Mutex<Sender<ApiRequest>>,
+    api_sender: lock::Mutex<Sender<ApiRequest>>,
 }
 
-fn api_error(error: impl std::fmt::Debug + std::fmt::Display) -> fdo::Error {
+fn api_error(error: impl fmt::Debug + fmt::Display) -> fdo::Error {
     fdo::Error::Failed(format!("{error}"))
 }
 
@@ -71,7 +71,7 @@ impl DBusApi {
     pub fn new(api_notifier: EventFd, api_sender: Sender<ApiRequest>) -> Self {
         Self {
             api_notifier,
-            api_sender: futures::lock::Mutex::new(api_sender),
+            api_sender: lock::Mutex::new(api_sender),
         }
     }
 
@@ -313,10 +313,8 @@ impl DBusApi {
 
     // implementation of this function is provided by the `#[zbus(signal)]` macro call
     #[zbus(signal)]
-    async fn event(
-        ctxt: &zbus::object_server::SignalEmitter<'_>,
-        event: Arc<String>,
-    ) -> zbus::Result<()>;
+    async fn event(ctxt: &object_server::SignalEmitter<'_>, event: Arc<String>)
+    -> zbus::Result<()>;
 }
 
 pub fn start_dbus_thread(
@@ -371,10 +369,10 @@ pub fn start_dbus_thread(
                     })?;
             }
 
-            std::panic::catch_unwind(AssertUnwindSafe(move || {
+            panic::catch_unwind(AssertUnwindSafe(move || {
                 executor::block_on(async move {
                     let recv_shutdown = recv_shutdown.fuse();
-                    let executor_tick = futures::future::Fuse::terminated();
+                    let executor_tick = future::Fuse::terminated();
                     futures::pin_mut!(recv_shutdown, executor_tick);
                     executor_tick.set(connection.executor().tick().fuse());
 
