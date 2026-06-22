@@ -4,6 +4,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use std::env::consts;
+
 use hypervisor::HypervisorType;
 use libc::{
     BLKIOMIN, BLKIOOPT, BLKPBSZGET, BLKSSZGET, FIOCLEX, FIONBIO, SIOCGIFFLAGS, SIOCGIFHWADDR,
@@ -1151,7 +1153,7 @@ pub fn get_seccomp_filter(
                 .collect(),
             SeccompAction::Log,
             SeccompAction::Allow,
-            std::env::consts::ARCH.try_into().unwrap(),
+            consts::ARCH.try_into().unwrap(),
         )
         .and_then(|filter| filter.try_into())
         .map_err(Error::Backend),
@@ -1162,7 +1164,7 @@ pub fn get_seccomp_filter(
                 .collect(),
             SeccompAction::Trap,
             SeccompAction::Allow,
-            std::env::consts::ARCH.try_into().unwrap(),
+            consts::ARCH.try_into().unwrap(),
         )
         .and_then(|filter| filter.try_into())
         .map_err(Error::Backend),

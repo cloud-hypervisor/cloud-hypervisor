@@ -13,7 +13,7 @@ use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::{io, result, thread};
+use std::{fs, io, panic, result, thread, time};
 
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
@@ -24,6 +24,7 @@ use log::{error, info, warn};
 use seccompiler::{SeccompAction, apply_filter};
 use serial_buffer::SerialBuffer;
 use thiserror::Error;
+use vmm_sys_util::errno;
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::console_devices::ConsoleTransport;
@@ -45,7 +46,7 @@ pub enum Error {
 
     /// Cannot queue input to the serial device.
     #[error("Error queuing input to the serial device")]
-    QueueInput(#[source] vmm_sys_util::errno::Error),
+    QueueInput(#[source] errno::Error),
 
     /// Cannot flush output on the serial buffer.
     #[error("Error flushing serial device's output buffer")]
@@ -199,7 +200,7 @@ impl SerialManager {
                 // SAFETY: STDIN_FILENO is a valid fd
                 let fd = unsafe { libc::dup(libc::STDIN_FILENO) };
                 if fd == -1 {
-                    return Err(Error::DupFd(std::io::Error::last_os_error()));
+                    return Err(Error::DupFd(io::Error::last_os_error()));
                 }
                 // SAFETY: fd is valid and owned by us
                 let stdin_clone = unsafe { File::from_raw_fd(fd) };
@@ -211,7 +212,7 @@ impl SerialManager {
                 };
 
                 if ret < 0 {
-                    return Err(Error::SetNonBlocking(std::io::Error::last_os_error()));
+                    return Err(Error::SetNonBlocking(io::Error::last_os_error()));
                 }
 
                 transport = ConsoleTransport::Tty(Arc::new(stdin_clone));
@@ -352,7 +353,7 @@ impl SerialManager {
         let thread = thread::Builder::new()
             .name("serial-manager".to_string())
             .spawn(move || {
-                std::panic::catch_unwind(AssertUnwindSafe(move || {
+                panic::catch_unwind(AssertUnwindSafe(move || {
                     // Apply seccomp filter for serial manager thread.
                     if !seccomp_filter.is_empty() {
                         apply_filter(&seccomp_filter).map_err(Error::ApplySeccompFilter)?;
@@ -503,7 +504,7 @@ impl SerialManager {
                                         // It's really important to sleep here as this will prevent
                                         // the current thread from consuming 100% of the CPU cycles
                                         // when waiting for someone to connect to the PTY.
-                                        std::thread::sleep(std::time::Duration::from_millis(500));
+                                        thread::sleep(time::Duration::from_millis(500));
                                     } else {
                                         // If the EPOLLHUP flag is not up on the associated event, we
                                         // can assume the other end of the PTY is connected and therefore
@@ -538,7 +539,7 @@ impl Drop for SerialManager {
             handle.join().ok();
         }
         if let Some(socket_console) = self.socket_console.as_ref() {
-            std::fs::remove_file(&socket_console.path)
+            fs::remove_file(&socket_console.path)
                 .map_err(Error::RemoveUnixSocket)
                 .ok();
         }

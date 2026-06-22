@@ -35,11 +35,13 @@
 //! [special HTTP library]: https://github.com/firecracker-microvm/micro-http
 
 use std::fs::File;
+use std::result;
 use std::sync::mpsc::Sender;
 
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::api;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::api::VmCoredump;
 use crate::api::http::http_endpoint::fds_helper::{attach_fds_to_cfg, attach_fds_to_cfgs};
@@ -327,7 +329,7 @@ impl EndpointHandler for VmCreate {
                             }
                         }
 
-                        match crate::api::VmCreate
+                        match api::VmCreate
                             .send(api_notifier, api_sender, vm_config)
                             .map_err(HttpError::ApiError)
                         {
@@ -350,7 +352,7 @@ pub trait GetHandler {
         &'static self,
         _api_notifier: EventFd,
         _api_sender: Sender<ApiRequest>,
-    ) -> std::result::Result<Option<Body>, HttpError> {
+    ) -> result::Result<Option<Body>, HttpError> {
         Err(HttpError::BadRequest)
     }
 }
@@ -362,7 +364,7 @@ pub trait PutHandler {
         _api_sender: Sender<ApiRequest>,
         _body: &Option<Body>,
         _files: Vec<File>,
-    ) -> std::result::Result<Option<Body>, HttpError> {
+    ) -> result::Result<Option<Body>, HttpError> {
         Err(HttpError::BadRequest)
     }
 }
@@ -503,7 +505,7 @@ impl PutHandler for VmAddNet {
         api_sender: Sender<ApiRequest>,
         body: &Option<Body>,
         files: Vec<File>,
-    ) -> std::result::Result<Option<Body>, HttpError> {
+    ) -> result::Result<Option<Body>, HttpError> {
         if let Some(body) = body {
             let mut net_cfg: NetConfig = serde_json::from_slice(body.raw())?;
             attach_fds_to_cfg(files, &mut net_cfg)?;
@@ -525,7 +527,7 @@ impl PutHandler for VmResize {
         api_sender: Sender<ApiRequest>,
         body: &Option<Body>,
         _files: Vec<File>,
-    ) -> std::result::Result<Option<Body>, HttpError> {
+    ) -> result::Result<Option<Body>, HttpError> {
         if let Some(body) = body {
             self.send(
                 api_notifier,
@@ -555,7 +557,7 @@ impl PutHandler for VmRestore {
         api_sender: Sender<ApiRequest>,
         body: &Option<Body>,
         files: Vec<File>,
-    ) -> std::result::Result<Option<Body>, HttpError> {
+    ) -> result::Result<Option<Body>, HttpError> {
         if let Some(body) = body {
             let mut restore_cfg: RestoreConfig = serde_json::from_slice(body.raw())?;
 
@@ -593,7 +595,7 @@ impl EndpointHandler for VmActionHandler {
         api_sender: Sender<ApiRequest>,
         body: &Option<Body>,
         files: Vec<File>,
-    ) -> std::result::Result<Option<Body>, HttpError> {
+    ) -> result::Result<Option<Body>, HttpError> {
         PutHandler::handle_request(self.action, api_notifier, api_sender, body, files)
     }
 
@@ -602,7 +604,7 @@ impl EndpointHandler for VmActionHandler {
         api_notifier: EventFd,
         api_sender: Sender<ApiRequest>,
         _body: &Option<Body>,
-    ) -> std::result::Result<Option<Body>, HttpError> {
+    ) -> result::Result<Option<Body>, HttpError> {
         GetHandler::handle_request(self.action, api_notifier, api_sender)
     }
 }
@@ -618,7 +620,7 @@ impl EndpointHandler for VmInfo {
         api_sender: Sender<ApiRequest>,
     ) -> Response {
         match req.method() {
-            Method::Get => match crate::api::VmInfo
+            Method::Get => match api::VmInfo
                 .send(api_notifier, api_sender, ())
                 .map_err(HttpError::ApiError)
             {
@@ -647,7 +649,7 @@ impl EndpointHandler for VmmPing {
         api_sender: Sender<ApiRequest>,
     ) -> Response {
         match req.method() {
-            Method::Get => match crate::api::VmmPing
+            Method::Get => match api::VmmPing
                 .send(api_notifier, api_sender, ())
                 .map_err(HttpError::ApiError)
             {
@@ -678,7 +680,7 @@ impl EndpointHandler for VmmShutdown {
     ) -> Response {
         match req.method() {
             Method::Put => {
-                match crate::api::VmmShutdown
+                match api::VmmShutdown
                     .send(api_notifier, api_sender, ())
                     .map_err(HttpError::ApiError)
                 {

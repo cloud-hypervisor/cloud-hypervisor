@@ -5,6 +5,7 @@
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
+use std::result;
 
 use anyhow::anyhow;
 use vm_migration::{MigratableError, Snapshot};
@@ -20,7 +21,7 @@ pub(crate) mod worker;
 pub const SNAPSHOT_STATE_FILE: &str = "state.json";
 pub const SNAPSHOT_CONFIG_FILE: &str = "config.json";
 
-pub fn url_to_path(url: &str) -> std::result::Result<PathBuf, MigratableError> {
+pub fn url_to_path(url: &str) -> result::Result<PathBuf, MigratableError> {
     let path: PathBuf = url
         .strip_prefix("file://")
         .ok_or_else(|| {
@@ -38,7 +39,7 @@ pub fn url_to_path(url: &str) -> std::result::Result<PathBuf, MigratableError> {
 }
 
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-pub fn url_to_file(url: &str) -> std::result::Result<PathBuf, GuestDebuggableError> {
+pub fn url_to_file(url: &str) -> result::Result<PathBuf, GuestDebuggableError> {
     let file: PathBuf = url
         .strip_prefix("file://")
         .ok_or_else(|| {
@@ -49,7 +50,7 @@ pub fn url_to_file(url: &str) -> std::result::Result<PathBuf, GuestDebuggableErr
     Ok(file)
 }
 
-pub fn recv_vm_config(source_url: &str) -> std::result::Result<VmConfig, MigratableError> {
+pub fn recv_vm_config(source_url: &str) -> result::Result<VmConfig, MigratableError> {
     let mut vm_config_path = url_to_path(source_url)?;
 
     vm_config_path.push(SNAPSHOT_CONFIG_FILE);
@@ -65,7 +66,7 @@ pub fn recv_vm_config(source_url: &str) -> std::result::Result<VmConfig, Migrata
     serde_json::from_slice(&bytes).map_err(|e| MigratableError::MigrateReceive(e.into()))
 }
 
-pub fn recv_vm_state(source_url: &str) -> std::result::Result<Snapshot, MigratableError> {
+pub fn recv_vm_state(source_url: &str) -> result::Result<Snapshot, MigratableError> {
     let mut vm_state_path = url_to_path(source_url)?;
 
     vm_state_path.push(SNAPSHOT_STATE_FILE);
@@ -81,7 +82,7 @@ pub fn recv_vm_state(source_url: &str) -> std::result::Result<Snapshot, Migratab
     serde_json::from_slice(&bytes).map_err(|e| MigratableError::MigrateReceive(e.into()))
 }
 
-pub fn get_vm_snapshot(snapshot: &Snapshot) -> std::result::Result<VmSnapshot, MigratableError> {
+pub fn get_vm_snapshot(snapshot: &Snapshot) -> result::Result<VmSnapshot, MigratableError> {
     if let Some(snapshot_data) = snapshot.snapshot_data.as_ref() {
         return snapshot_data.to_state();
     }

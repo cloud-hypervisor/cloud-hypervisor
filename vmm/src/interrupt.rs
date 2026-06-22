@@ -5,11 +5,13 @@
 
 use std::collections::HashMap;
 use std::io;
+use std::mem::replace;
 use std::sync::{Arc, Mutex};
 
 use devices::interrupt_controller::InterruptController;
 use hypervisor::IrqRoutingEntry;
 use vm_allocator::SystemAllocator;
+use vm_device::interrupt;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
     LegacyIrqGroupConfig, MsiIrqGroupConfig,
@@ -17,7 +19,7 @@ use vm_device::interrupt::{
 use vmm_sys_util::eventfd::EventFd;
 
 /// Reuse std::io::Result to simplify interoperability among crates.
-type Result<T> = std::io::Result<T>;
+type Result<T> = io::Result<T>;
 
 /// Per-interrupt routing state for an MSI/MSI-X vector.
 ///
@@ -125,7 +127,7 @@ impl InterruptRoute {
     }
 
     fn set_notifier(&mut self, eventfd: Option<EventFd>, vm: &dyn hypervisor::Vm) -> Result<()> {
-        let old_irqfd = core::mem::replace(&mut self.irq_fd, eventfd);
+        let old_irqfd = replace(&mut self.irq_fd, eventfd);
         if self.registered {
             // A registered route must have a GSI allocated, since enable()
             // only sets registered=true after using a valid GSI.
@@ -434,7 +436,7 @@ impl InterruptManager for MsiInterruptManager {
     fn create_group_mut(
         &self,
         config: Self::GroupConfig,
-    ) -> vm_device::interrupt::Result<Arc<Mutex<dyn InterruptSourceGroup>>> {
+    ) -> interrupt::Result<Arc<Mutex<dyn InterruptSourceGroup>>> {
         let r = self.create_group_raw(config)?;
         Ok(Arc::new(Mutex::new(r)))
     }

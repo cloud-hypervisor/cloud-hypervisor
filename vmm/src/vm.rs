@@ -12,6 +12,8 @@
 //
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+#[cfg(feature = "fw_cfg")]
+use std::ffi;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -22,21 +24,29 @@ use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
 #[cfg(not(target_arch = "riscv64"))]
 use std::time::Instant;
-use std::{cmp, result, str, thread};
+use std::{any, cmp, result, str, thread};
 
 use anyhow::anyhow;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use arch::PciSpaceInfo;
+#[cfg(not(target_arch = "x86_64"))]
+use arch::aarch64;
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{KVM_IDENTITY_MAP_START, KVM_TSS_START};
+#[cfg(not(target_arch = "x86_64"))]
+use arch::uefi;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use arch::x86_64::MAX_SUPPORTED_CPUS_LEGACY;
 #[cfg(feature = "tdx")]
+use arch::x86_64::tdx;
+#[cfg(feature = "tdx")]
 use arch::x86_64::tdx::TdvfSection;
-use arch::{EntryPoint, NumaNode, NumaNodes, get_host_cpu_phys_bits};
+use arch::{EntryPoint, NumaNode, NumaNodes, get_host_cpu_phys_bits, layout};
 use devices::AcpiNotificationFlags;
 #[cfg(target_arch = "aarch64")]
 use devices::interrupt_controller;
+#[cfg(feature = "fw_cfg")]
+use devices::legacy::fw_cfg;
 #[cfg(feature = "fw_cfg")]
 use devices::legacy::fw_cfg::FwCfgItem;
 use event_monitor::event;
@@ -46,6 +56,8 @@ use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::arch::aarch64::regs::AARCH64_PMU_IRQ;
+#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+use hypervisor::arch::x86;
 #[cfg(all(feature = "kvm", feature = "sev_snp"))]
 use hypervisor::kvm::{
     BOOTLOADER_SIZE, BOOTLOADER_START, KVM_VMSA_PAGE_ADDRESS, KVM_VMSA_PAGE_SIZE,
@@ -56,6 +68,8 @@ use igvm::IgvmFile;
 #[cfg(feature = "sev_snp")]
 use igvm_defs::SnpPolicy;
 use libc::{SIGWINCH, termios};
+#[cfg(feature = "tdx")]
+use linux_loader::bootparam;
 use linux_loader::cmdline::Cmdline;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use linux_loader::elf;
@@ -66,6 +80,7 @@ use linux_loader::loader::bzimage::BzImage;
 use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use linux_loader::loader::pe::Error::InvalidImageMagicNumber;
+use linux_loader::{cmdline, loader};
 use log::{error, info, warn};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
@@ -95,8 +110,10 @@ use crate::device_tree::DeviceTree;
 #[cfg(feature = "guest_debug")]
 use crate::gdb::{Debuggable, DebuggableError, GdbRequestPayload, GdbResponsePayload};
 #[cfg(feature = "igvm")]
-use crate::igvm::igvm_loader;
+use crate::igvm::{igvm_loader, parse_igvm};
 use crate::landlock::LandlockError;
+#[cfg(feature = "tdx")]
+use crate::memory_manager;
 use crate::memory_manager::{
     Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData,
 };
@@ -113,7 +130,7 @@ use crate::vm_config::{
 };
 use crate::{
     CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, GuestMemoryMmap,
-    MEMORY_MANAGER_SNAPSHOT_ID, PciDeviceInfo, cpu,
+    MEMORY_MANAGER_SNAPSHOT_ID, PciDeviceInfo, acpi, cpu,
 };
 
 /// Errors associated with VM management
@@ -126,18 +143,18 @@ pub enum Error {
     InitramfsFile(#[source] io::Error),
 
     #[error("Cannot load the kernel into memory")]
-    KernelLoad(#[source] linux_loader::loader::Error),
+    KernelLoad(#[source] loader::Error),
 
     #[cfg(target_arch = "aarch64")]
     #[error("Cannot load the UEFI binary in memory")]
-    UefiLoad(#[source] arch::aarch64::uefi::Error),
+    UefiLoad(#[source] aarch64::uefi::Error),
 
     #[cfg(target_arch = "riscv64")]
     #[error("Cannot load the UEFI binary in memory")]
     UefiLoad(#[source] arch::riscv64::uefi::Error),
 
     #[error("Cannot load the initramfs into memory")]
-    InitramfsLoad(#[source] std::io::Error),
+    InitramfsLoad(#[source] io::Error),
 
     #[error("Cannot determine initramfs load address")]
     InitramfsAddress(#[source] arch::Error),
@@ -146,16 +163,16 @@ pub enum Error {
     InitramfsRead(#[source] vm_memory::GuestMemoryError),
 
     #[error("Cannot load the kernel command line in memory")]
-    LoadCmdLine(#[source] linux_loader::loader::Error),
+    LoadCmdLine(#[source] loader::Error),
 
     #[error("Failed to apply landlock config during vm_create")]
     ApplyLandlock(#[source] LandlockError),
 
     #[error("Cannot modify the kernel command line")]
-    CmdLineInsertStr(#[source] linux_loader::cmdline::Error),
+    CmdLineInsertStr(#[source] cmdline::Error),
 
     #[error("Cannot create the kernel command line")]
-    CmdLineCreate(#[source] linux_loader::cmdline::Error),
+    CmdLineCreate(#[source] cmdline::Error),
 
     #[error("Cannot configure system")]
     ConfigureSystem(#[source] arch::Error),
@@ -177,7 +194,7 @@ pub enum Error {
     SignalHandlerSpawn(#[source] io::Error),
 
     #[error("Failed to join on threads: {0:?}")]
-    ThreadCleanup(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
+    ThreadCleanup(Box<dyn any::Any + Send>),
 
     #[error("VM config is missing")]
     VmMissingConfig,
@@ -225,7 +242,7 @@ pub enum Error {
     MemoryManager(#[source] MemoryManagerError),
 
     #[error("Eventfd write error")]
-    EventfdError(#[source] std::io::Error),
+    EventfdError(#[source] io::Error),
 
     #[error("Cannot snapshot VM")]
     Snapshot(#[source] MigratableError),
@@ -276,7 +293,7 @@ pub enum Error {
     AllocateFirmwareMemory(#[source] MemoryManagerError),
 
     #[error("Error manipulating firmware file")]
-    FirmwareFile(#[source] std::io::Error),
+    FirmwareFile(#[source] io::Error),
 
     #[error("Firmware too big")]
     FirmwareTooLarge,
@@ -290,23 +307,23 @@ pub enum Error {
 
     #[cfg(feature = "tdx")]
     #[error("Error performing I/O on TDX firmware file")]
-    LoadTdvf(#[source] std::io::Error),
+    LoadTdvf(#[source] io::Error),
 
     #[cfg(feature = "tdx")]
     #[error("Error performing I/O on the TDX payload file")]
-    LoadPayload(#[source] std::io::Error),
+    LoadPayload(#[source] io::Error),
 
     #[cfg(feature = "tdx")]
     #[error("Error parsing TDVF")]
-    ParseTdvf(#[source] arch::x86_64::tdx::TdvfError),
+    ParseTdvf(#[source] tdx::TdvfError),
 
     #[cfg(feature = "tdx")]
     #[error("Error populating TDX HOB")]
-    PopulateHob(#[source] arch::x86_64::tdx::TdvfError),
+    PopulateHob(#[source] tdx::TdvfError),
 
     #[cfg(feature = "tdx")]
     #[error("Error allocating TDVF memory")]
-    AllocatingTdvfMemory(#[source] crate::memory_manager::Error),
+    AllocatingTdvfMemory(#[source] memory_manager::Error),
 
     #[cfg(feature = "tdx")]
     #[error("Error enabling TDX VM")]
@@ -333,10 +350,10 @@ pub enum Error {
     Debug(#[source] DebuggableError),
 
     #[error("Error spawning kernel loading thread")]
-    KernelLoadThreadSpawn(#[source] std::io::Error),
+    KernelLoadThreadSpawn(#[source] io::Error),
 
     #[error("Error joining kernel loading thread")]
-    KernelLoadThreadJoin(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
+    KernelLoadThreadJoin(Box<dyn any::Any + Send>),
 
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     #[error("Error coredumping VM")]
@@ -1187,7 +1204,7 @@ impl Vm {
                 .map_err(Error::MissingFwCfgKernelFile)?;
             kernel_option = kernel;
         }
-        let mut cmdline_option: Option<std::ffi::CString> = None;
+        let mut cmdline_option: Option<ffi::CString> = None;
         if fw_cfg_config.cmdline {
             let cmdline = Vm::generate_cmdline(
                 config.lock().unwrap().payload.as_ref().unwrap(),
@@ -1220,9 +1237,9 @@ impl Vm {
             for fw_cfg_item in fw_cfg_items.item_list.clone() {
                 let content = match (fw_cfg_item.string, fw_cfg_item.file) {
                     (Some(string_val), None) => {
-                        devices::legacy::fw_cfg::FwCfgContent::Bytes(string_val.into_bytes())
+                        fw_cfg::FwCfgContent::Bytes(string_val.into_bytes())
                     }
-                    (None, Some(file_path)) => devices::legacy::fw_cfg::FwCfgContent::File(
+                    (None, Some(file_path)) => fw_cfg::FwCfgContent::File(
                         0,
                         File::open(file_path).map_err(Error::AddingFwCfgItem)?,
                     ),
@@ -1370,7 +1387,7 @@ impl Vm {
                 .payload
                 .as_ref()
                 .and_then(|p| p.igvm.as_ref())
-                .map(|igvm_path| crate::igvm::parse_igvm(igvm_path))
+                .map(|igvm_path| parse_igvm(igvm_path))
                 .transpose()
                 .map_err(Error::IgvmLoad)?
         };
@@ -1516,10 +1533,9 @@ impl Vm {
             .map_err(Error::MemoryManager)?;
         let uefi_flash = memory_manager.uefi_flash();
         let mem = uefi_flash.memory();
-        arch::uefi::load_uefi(mem.deref(), arch::layout::UEFI_START, &mut firmware)
-            .map_err(Error::UefiLoad)?;
+        uefi::load_uefi(mem.deref(), layout::UEFI_START, &mut firmware).map_err(Error::UefiLoad)?;
         Ok(EntryPoint {
-            entry_addr: arch::layout::UEFI_START,
+            entry_addr: layout::UEFI_START,
         })
     }
 
@@ -1533,9 +1549,9 @@ impl Vm {
         let mem = guest_memory.memory();
         let alignment = 0x20_0000;
         // round up
-        let aligned_kernel_addr = arch::layout::KERNEL_START.0.div_ceil(alignment) * alignment;
+        let aligned_kernel_addr = layout::KERNEL_START.0.div_ceil(alignment) * alignment;
         let entry_addr = {
-            match linux_loader::loader::pe::PE::load(
+            match loader::pe::PE::load(
                 mem.deref(),
                 Some(GuestAddress(aligned_kernel_addr)),
                 &mut kernel,
@@ -1545,9 +1561,9 @@ impl Vm {
                 // Try to load the binary as kernel PE file at first.
                 // If failed, retry to load it as UEFI binary.
                 // As the UEFI binary is formatless, it must be the last option to try.
-                Err(linux_loader::loader::Error::Pe(InvalidImageMagicNumber)) => {
+                Err(loader::Error::Pe(InvalidImageMagicNumber)) => {
                     Self::load_firmware(&kernel, memory_manager)?;
-                    arch::layout::UEFI_START
+                    layout::UEFI_START
                 }
                 Err(e) => {
                     return Err(Error::KernelLoad(e));
@@ -1632,25 +1648,16 @@ impl Vm {
         };
 
         // Try ELF binary with PVH boot.
-        let entry_addr = linux_loader::loader::elf::Elf::load(
-            mem.deref(),
-            None,
-            &mut kernel,
-            Some(arch::layout::HIGH_RAM_START),
-        )
-        // Try loading kernel as bzImage.
-        .or_else(|_| {
-            BzImage::load(
-                mem.deref(),
-                None,
-                &mut kernel,
-                Some(arch::layout::HIGH_RAM_START),
-            )
-        })
-        .map_err(Error::KernelLoad)?;
+        let entry_addr =
+            loader::elf::Elf::load(mem.deref(), None, &mut kernel, Some(layout::HIGH_RAM_START))
+                // Try loading kernel as bzImage.
+                .or_else(|_| {
+                    BzImage::load(mem.deref(), None, &mut kernel, Some(layout::HIGH_RAM_START))
+                })
+                .map_err(Error::KernelLoad)?;
 
         if let Some(cmdline) = cmdline {
-            linux_loader::loader::load_cmdline(mem.deref(), arch::layout::CMDLINE_START, &cmdline)
+            loader::load_cmdline(mem.deref(), layout::CMDLINE_START, &cmdline)
                 .map_err(Error::LoadCmdLine)?;
         }
 
@@ -1799,7 +1806,7 @@ impl Vm {
                 #[cfg(feature = "igvm")]
                 let cpu_manager = cpu_manager.clone();
 
-                std::thread::Builder::new()
+                thread::Builder::new()
                     .name("payload_loader".into())
                     .spawn(move || {
                         Self::load_payload(
@@ -1845,8 +1852,8 @@ impl Vm {
 
         arch::configure_system(
             &mem,
-            arch::layout::CMDLINE_START,
-            arch::layout::CMDLINE_MAX_SIZE,
+            layout::CMDLINE_START,
+            layout::CMDLINE_MAX_SIZE,
             &initramfs_config,
             boot_vcpus,
             entry_addr.setup_header,
@@ -1914,9 +1921,7 @@ impl Vm {
             .unwrap()
             .get_vgic()
             .map_err(|_| {
-                Error::ConfigureSystem(arch::Error::PlatformSpecific(
-                    arch::aarch64::Error::SetupGic,
-                ))
+                Error::ConfigureSystem(arch::Error::PlatformSpecific(aarch64::Error::SetupGic))
             })?;
 
         // PMU interrupt sticks to PPI, so need to be added by 16 to get real irq number.
@@ -1926,9 +1931,7 @@ impl Vm {
             .unwrap()
             .init_pmu(AARCH64_PMU_IRQ + 16)
             .map_err(|_| {
-                Error::ConfigureSystem(arch::Error::PlatformSpecific(
-                    arch::aarch64::Error::VcpuInitPmu,
-                ))
+                Error::ConfigureSystem(arch::Error::PlatformSpecific(aarch64::Error::VcpuInitPmu))
             })?;
 
         arch::configure_system(
@@ -2467,7 +2470,7 @@ impl Vm {
                     if section.address <= next_start_addr {
                         (section.address, section.size, false)
                     } else {
-                        let last_addr = std::cmp::min(section.address - 1, region_end);
+                        let last_addr = cmp::min(section.address - 1, region_end);
                         (next_start_addr, last_addr - next_start_addr + 1, true)
                     }
                 } else {
@@ -2583,7 +2586,7 @@ impl Vm {
                             .seek(SeekFrom::Start(0x1f1))
                             .map_err(Error::LoadPayload)?;
 
-                        let mut payload_header = linux_loader::bootparam::setup_header::default();
+                        let mut payload_header = bootparam::setup_header::default();
                         payload_file
                             .read_volatile(&mut payload_header.as_bytes())
                             .unwrap();
@@ -2646,9 +2649,8 @@ impl Vm {
         // MMIO regions
         hob.add_mmio_resource(
             &mem,
-            arch::layout::MEM_32BIT_DEVICES_START.raw_value(),
-            arch::layout::APIC_START.raw_value()
-                - arch::layout::MEM_32BIT_DEVICES_START.raw_value(),
+            layout::MEM_32BIT_DEVICES_START.raw_value(),
+            layout::APIC_START.raw_value() - layout::MEM_32BIT_DEVICES_START.raw_value(),
         )
         .map_err(Error::PopulateHob)?;
         let start_of_device_area = self
@@ -2672,7 +2674,7 @@ impl Vm {
 
         // Loop over the ACPI tables and copy them to the HOB.
 
-        for acpi_table in crate::acpi::create_acpi_tables_tdx(
+        for acpi_table in acpi::create_acpi_tables_tdx(
             &self.device_manager.lock().unwrap(),
             &self.cpu_manager.lock().unwrap(),
             &self.memory_manager.lock().unwrap(),
@@ -2733,7 +2735,7 @@ impl Vm {
         }
         let mem = self.memory_manager.lock().unwrap().guest_memory().memory();
         let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
-        let rsdp_addr = crate::acpi::create_acpi_tables(
+        let rsdp_addr = acpi::create_acpi_tables(
             &mem,
             &self.device_manager.lock().unwrap(),
             &self.cpu_manager.lock().unwrap(),
@@ -2820,7 +2822,7 @@ impl Vm {
 
                 if fw_cfg_config.acpi_tables {
                     let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
-                    crate::acpi::create_acpi_tables_for_fw_cfg(
+                    acpi::create_acpi_tables_for_fw_cfg(
                         &self.device_manager.lock().unwrap(),
                         &self.cpu_manager.lock().unwrap(),
                         &self.memory_manager.lock().unwrap(),
@@ -3009,7 +3011,7 @@ impl Vm {
     pub fn send_memory_fds(
         &mut self,
         socket: &mut UnixStream,
-    ) -> std::result::Result<(), MigratableError> {
+    ) -> result::Result<(), MigratableError> {
         for (slot, fd) in self
             .memory_manager
             .lock()
@@ -3017,7 +3019,7 @@ impl Vm {
             .memory_slot_fds()
             .drain()
         {
-            Request::memory_fd(std::mem::size_of_val(&slot) as u64)
+            Request::memory_fd(size_of_val(&slot) as u64)
                 .write_to(socket)
                 .map_err(|e| {
                     MigratableError::MigrateSend(anyhow!("Error sending memory fd request: {e}"))
@@ -3037,7 +3039,7 @@ impl Vm {
         Ok(())
     }
 
-    pub fn memory_range_table(&self) -> std::result::Result<MemoryRangeTable, MigratableError> {
+    pub fn memory_range_table(&self) -> result::Result<MemoryRangeTable, MigratableError> {
         self.memory_manager
             .lock()
             .unwrap()
@@ -3156,7 +3158,7 @@ impl Vm {
     fn get_dump_state(
         &mut self,
         destination_url: &str,
-    ) -> std::result::Result<DumpState, GuestDebuggableError> {
+    ) -> result::Result<DumpState, GuestDebuggableError> {
         let nr_cpus = self.config.lock().unwrap().cpus.boot_vcpus;
         let elf_note_size = self.get_note_size(NoteDescType::ElfAndVmm, nr_cpus) as isize;
         let mut elf_phdr_num = 1;
@@ -3211,7 +3213,7 @@ impl Vm {
 
     /// Capture the guest clock for a same-host resume (mode `SameHostResume`).
     /// `None` if the VM is not booted or the backend has no guest clock.
-    fn capture_guest_clock(&self) -> std::result::Result<Option<SavedClock>, MigratableError> {
+    fn capture_guest_clock(&self) -> result::Result<Option<SavedClock>, MigratableError> {
         let Some(boot_vcpu) = self.cpu_manager.lock().unwrap().boot_vcpu() else {
             return Ok(None);
         };
@@ -3227,7 +3229,7 @@ impl Vm {
     }
 
     /// Re-establish the guest clock before the vCPUs resume. No-op if none captured.
-    fn restore_guest_clock(&self) -> std::result::Result<(), MigratableError> {
+    fn restore_guest_clock(&self) -> result::Result<(), MigratableError> {
         let Some(saved) = &self.saved_clock else {
             return Ok(());
         };
@@ -3242,7 +3244,7 @@ impl Vm {
 }
 
 impl Pausable for Vm {
-    fn pause(&mut self) -> std::result::Result<(), MigratableError> {
+    fn pause(&mut self) -> result::Result<(), MigratableError> {
         event!("vm", "pausing");
         let new_state = VmState::Paused;
         self.state
@@ -3272,7 +3274,7 @@ impl Pausable for Vm {
         Ok(())
     }
 
-    fn resume(&mut self) -> std::result::Result<(), MigratableError> {
+    fn resume(&mut self) -> result::Result<(), MigratableError> {
         event!("vm", "resuming");
         let current_state = self.get_state();
         let new_state = VmState::Running;
@@ -3305,7 +3307,7 @@ pub struct VmSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clock: Option<hypervisor::ClockState>,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-    pub common_cpuid: Vec<hypervisor::arch::x86::CpuIdEntry>,
+    pub common_cpuid: Vec<x86::CpuIdEntry>,
 }
 
 pub const VM_SNAPSHOT_ID: &str = "vm";
@@ -3314,7 +3316,7 @@ impl Snapshottable for Vm {
         VM_SNAPSHOT_ID.to_string()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         event!("vm", "snapshotting");
 
         #[cfg(feature = "tdx")]
@@ -3397,7 +3399,7 @@ impl Transportable for Vm {
         &self,
         snapshot: &Snapshot,
         destination_url: &str,
-    ) -> std::result::Result<(), MigratableError> {
+    ) -> result::Result<(), MigratableError> {
         let mut snapshot_config_path = url_to_path(destination_url)?;
         snapshot_config_path.push(SNAPSHOT_CONFIG_FILE);
 
@@ -3453,29 +3455,29 @@ impl Transportable for Vm {
 }
 
 impl Migratable for Vm {
-    fn start_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
+    fn start_dirty_log(&mut self) -> result::Result<(), MigratableError> {
         self.memory_manager.lock().unwrap().start_dirty_log()?;
         self.device_manager.lock().unwrap().start_dirty_log()
     }
 
-    fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
+    fn stop_dirty_log(&mut self) -> result::Result<(), MigratableError> {
         self.memory_manager.lock().unwrap().stop_dirty_log()?;
         self.device_manager.lock().unwrap().stop_dirty_log()
     }
 
-    fn dirty_log(&mut self) -> std::result::Result<MemoryRangeTable, MigratableError> {
+    fn dirty_log(&mut self) -> result::Result<MemoryRangeTable, MigratableError> {
         Ok(MemoryRangeTable::new_from_tables(vec![
             self.memory_manager.lock().unwrap().dirty_log()?,
             self.device_manager.lock().unwrap().dirty_log()?,
         ]))
     }
 
-    fn start_migration(&mut self) -> std::result::Result<(), MigratableError> {
+    fn start_migration(&mut self) -> result::Result<(), MigratableError> {
         self.memory_manager.lock().unwrap().start_migration()?;
         self.device_manager.lock().unwrap().start_migration()
     }
 
-    fn complete_migration(&mut self) -> std::result::Result<(), MigratableError> {
+    fn complete_migration(&mut self) -> result::Result<(), MigratableError> {
         self.memory_manager.lock().unwrap().complete_migration()?;
         self.device_manager.lock().unwrap().complete_migration()
     }
@@ -3488,14 +3490,14 @@ impl Debuggable for Vm {
         cpu_id: usize,
         addrs: &[GuestAddress],
         singlestep: bool,
-    ) -> std::result::Result<(), DebuggableError> {
+    ) -> result::Result<(), DebuggableError> {
         self.cpu_manager
             .lock()
             .unwrap()
             .set_guest_debug(cpu_id, addrs, singlestep)
     }
 
-    fn debug_pause(&mut self) -> std::result::Result<(), DebuggableError> {
+    fn debug_pause(&mut self) -> result::Result<(), DebuggableError> {
         if self.state == VmState::Running {
             self.pause().map_err(DebuggableError::Pause)?;
         }
@@ -3504,7 +3506,7 @@ impl Debuggable for Vm {
         Ok(())
     }
 
-    fn debug_resume(&mut self) -> std::result::Result<(), DebuggableError> {
+    fn debug_resume(&mut self) -> result::Result<(), DebuggableError> {
         if self.state == VmState::BreakPoint {
             self.resume().map_err(DebuggableError::Pause)?;
         }
@@ -3512,15 +3514,11 @@ impl Debuggable for Vm {
         Ok(())
     }
 
-    fn read_regs(&self, cpu_id: usize) -> std::result::Result<CoreRegs, DebuggableError> {
+    fn read_regs(&self, cpu_id: usize) -> result::Result<CoreRegs, DebuggableError> {
         self.cpu_manager.lock().unwrap().read_regs(cpu_id)
     }
 
-    fn write_regs(
-        &self,
-        cpu_id: usize,
-        regs: &CoreRegs,
-    ) -> std::result::Result<(), DebuggableError> {
+    fn write_regs(&self, cpu_id: usize, regs: &CoreRegs) -> result::Result<(), DebuggableError> {
         self.cpu_manager.lock().unwrap().write_regs(cpu_id, regs)
     }
 
@@ -3530,7 +3528,7 @@ impl Debuggable for Vm {
         cpu_id: usize,
         vaddr: GuestAddress,
         len: usize,
-    ) -> std::result::Result<Vec<u8>, DebuggableError> {
+    ) -> result::Result<Vec<u8>, DebuggableError> {
         self.cpu_manager
             .lock()
             .unwrap()
@@ -3543,7 +3541,7 @@ impl Debuggable for Vm {
         cpu_id: usize,
         vaddr: &GuestAddress,
         data: &[u8],
-    ) -> std::result::Result<(), DebuggableError> {
+    ) -> result::Result<(), DebuggableError> {
         self.cpu_manager
             .lock()
             .unwrap()
@@ -3569,7 +3567,7 @@ impl Elf64Writable for Vm {}
 
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 impl GuestDebuggable for Vm {
-    fn coredump(&mut self, destination_url: &str) -> std::result::Result<(), GuestDebuggableError> {
+    fn coredump(&mut self, destination_url: &str) -> result::Result<(), GuestDebuggableError> {
         event!("vm", "coredumping");
 
         let mut resume = false;
@@ -3986,7 +3984,7 @@ mod unit_tests {
         let regions = vec![(layout::RAM_START, (layout::FDT_MAX_SIZE + 0x1000) as usize)];
         let mem = GuestMemoryMmap::from_ranges(&regions).expect("Cannot initialize memory");
 
-        let dev_info: HashMap<(DeviceType, std::string::String), MmioDeviceInfo> = [
+        let dev_info: HashMap<(DeviceType, String), MmioDeviceInfo> = [
             (
                 (DeviceType::Serial, DeviceType::Serial.to_string()),
                 MmioDeviceInfo {

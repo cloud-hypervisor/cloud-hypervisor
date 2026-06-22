@@ -554,6 +554,7 @@ impl Aml for PciSegment {
 
 #[cfg(test)]
 mod unit_tests {
+    use std::io;
     use std::result::Result;
 
     use vm_memory::GuestAddress;
@@ -570,7 +571,7 @@ mod unit_tests {
             _len: u64,
             _pci_dev: &mut dyn pci::PciDevice,
             _region_type: pci::PciBarRegionType,
-        ) -> Result<(), std::io::Error> {
+        ) -> Result<(), io::Error> {
             Ok(())
         }
     }

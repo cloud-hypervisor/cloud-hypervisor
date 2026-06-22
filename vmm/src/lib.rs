@@ -3,9 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-// TODO: Trim qualified paths in this crate, then drop this expectation.
-#![expect(clippy::absolute_paths)]
-
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Write, stdout};
@@ -13,10 +10,12 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::panic::AssertUnwindSafe;
 #[cfg(feature = "guest_debug")]
 use std::path::PathBuf;
+#[cfg(feature = "guest_debug")]
+use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::{io, mem, result, thread};
+use std::{any, io, mem, panic, path, process, result, thread};
 
 use anyhow::{Context, anyhow};
 #[cfg(feature = "dbus_api")]
@@ -26,6 +25,8 @@ use api::http::HttpApiHandle;
 use arch::x86_64::MAX_SUPPORTED_CPUS_LEGACY;
 use console_devices::{ConsoleInfo, pre_create_console_devices};
 use event_monitor::event;
+#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+use hypervisor::arch::x86;
 use landlock::LandlockError;
 use libc::{EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW, tcsetattr, termios};
 use log::{debug, error, info, trace, warn};
@@ -202,7 +203,7 @@ pub enum Error {
 
     /// The API server socket is already in use by another running instance
     #[error("API socket {0:?} is already in use by another running instance")]
-    ApiSocketInUse(std::path::PathBuf),
+    ApiSocketInUse(path::PathBuf),
 
     #[cfg(feature = "guest_debug")]
     #[error("Failed to start the GDB thread")]
@@ -222,7 +223,7 @@ pub enum Error {
     SignalHandlerSpawn(#[source] io::Error),
 
     #[error("Failed to join on threads: {0:?}")]
-    ThreadCleanup(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
+    ThreadCleanup(Box<dyn any::Any + Send>),
 
     /// Cannot create Landlock object
     #[error("Error creating landlock object")]
@@ -347,7 +348,7 @@ pub struct PciDeviceInfo {
 }
 
 impl Serialize for PciDeviceInfo {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> result::Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -423,7 +424,7 @@ pub fn start_event_monitor_thread(
                     })?;
             }
 
-            std::panic::catch_unwind(AssertUnwindSafe(move || {
+            panic::catch_unwind(AssertUnwindSafe(move || {
                 while let Ok(event) = monitor.rx.recv() {
                     let event = Arc::new(event);
 
@@ -469,7 +470,7 @@ pub fn start_vmm_thread(
     #[cfg(feature = "guest_debug")]
     let gdb_hw_breakpoints = hypervisor.get_guest_debug_hw_bps();
     #[cfg(feature = "guest_debug")]
-    let (gdb_sender, gdb_receiver) = std::sync::mpsc::channel();
+    let (gdb_sender, gdb_receiver) = mpsc::channel();
     #[cfg(feature = "guest_debug")]
     let gdb_debug_event = debug_event.try_clone().map_err(Error::EventFdClone)?;
     #[cfg(feature = "guest_debug")]
@@ -593,7 +594,7 @@ where
 pub struct VmMigrationConfig {
     vm_config: Arc<Mutex<VmConfig>>,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-    common_cpuid: Vec<hypervisor::arch::x86::CpuIdEntry>,
+    common_cpuid: Vec<x86::CpuIdEntry>,
     memory_manager_data: MemoryManagerSnapshotData,
 }
 
@@ -780,7 +781,7 @@ impl Vmm {
                             warn!("Failed to lock original termios");
                         }
 
-                        std::process::exit(1);
+                        process::exit(1);
                     }
                 }
                 _ => (),
@@ -826,7 +827,7 @@ impl Vmm {
                                 }
                             }
 
-                            std::panic::catch_unwind(AssertUnwindSafe(|| {
+                            panic::catch_unwind(AssertUnwindSafe(|| {
                                 Vmm::signal_handler(signals, original_termios_opt.as_ref(), &exit_evt);
                             }))
                             .map_err(|_| {
@@ -918,7 +919,7 @@ impl Vmm {
     /// Try to receive a file descriptor from a socket. Returns the slot number and the file descriptor.
     fn vm_receive_memory_fd(
         socket: &mut SocketStream,
-    ) -> std::result::Result<(u32, File), MigratableError> {
+    ) -> result::Result<(u32, File), MigratableError> {
         if let SocketStream::Unix(unix_socket) = socket {
             let mut buf = [0u8; 4];
             let (_, file) = unix_socket.recv_with_fd(&mut buf).map_err(|e| {
@@ -945,7 +946,7 @@ impl Vmm {
         state: ReceiveMigrationState,
         req: &Request,
         receive_data_migration: &VmReceiveMigrationData,
-    ) -> std::result::Result<ReceiveMigrationState, MigratableError> {
+    ) -> result::Result<ReceiveMigrationState, MigratableError> {
         use ReceiveMigrationState::*;
 
         let invalid_command = |state: &str, cmd: Command| {
@@ -958,7 +959,7 @@ impl Vmm {
         let mut configure_vm =
             |socket: &mut SocketStream,
              memory_files: HashMap<u32, File>|
-             -> std::result::Result<ReceiveMigrationConfiguredData, MigratableError> {
+             -> result::Result<ReceiveMigrationConfiguredData, MigratableError> {
                 let shared_backing = !memory_files.is_empty();
                 let memory_manager = self.vm_receive_config(req, socket, memory_files, mode)?;
                 let guest_memory = memory_manager.lock().unwrap().guest_memory();
@@ -982,7 +983,7 @@ impl Vmm {
 
         let recv_memory_fd = |socket: &mut SocketStream,
                               mut memory_files: Vec<(u32, File)>|
-         -> std::result::Result<Vec<(u32, File)>, MigratableError> {
+         -> result::Result<Vec<(u32, File)>, MigratableError> {
             let (slot, file) = Self::vm_receive_memory_fd(socket)?;
 
             memory_files.push((slot, file));
@@ -1083,7 +1084,7 @@ impl Vmm {
         socket: &mut SocketStream,
         mut config_data: ReceiveMigrationConfiguredData,
         receive_data_migration: &VmReceiveMigrationData,
-    ) -> std::result::Result<ReceiveMigrationState, MigratableError> {
+    ) -> result::Result<ReceiveMigrationState, MigratableError> {
         let state_receive_begin = Instant::now();
 
         // Serve faults before restore so accesses during restore resolve on demand.
@@ -1136,7 +1137,7 @@ impl Vmm {
         socket: &mut T,
         existing_memory_files: HashMap<u32, File>,
         mode: MigrationMode,
-    ) -> std::result::Result<Arc<Mutex<MemoryManager>>, MigratableError>
+    ) -> result::Result<Arc<Mutex<MemoryManager>>, MigratableError>
     where
         T: Read,
     {
@@ -1243,7 +1244,7 @@ impl Vmm {
         req: &Request,
         socket: &mut T,
         mm: Arc<Mutex<MemoryManager>>,
-    ) -> std::result::Result<
+    ) -> result::Result<
         (
             Duration, /* state receive + deserialize */
             Duration, /* restoring */
@@ -1836,7 +1837,7 @@ impl Vmm {
     fn vm_check_cpuid_compatibility(
         &self,
         src_vm_config: &Arc<Mutex<VmConfig>>,
-        src_vm_cpuid: &[hypervisor::arch::x86::CpuIdEntry],
+        src_vm_cpuid: &[x86::CpuIdEntry],
     ) -> result::Result<(), MigratableError> {
         #[cfg(feature = "tdx")]
         if src_vm_config.lock().unwrap().is_tdx_enabled() {
@@ -1889,7 +1890,7 @@ impl Vmm {
         vm_config: Arc<Mutex<VmConfig>>,
         prefault: bool,
         memory_restore_mode: MemoryRestoreMode,
-    ) -> std::result::Result<(), VmError> {
+    ) -> result::Result<(), VmError> {
         match &self.vm {
             VmOwnership::Owned(_) => Err(VmError::VmAlreadyCreated),
             VmOwnership::Migration { .. } => Err(VmError::VmMigrating),
@@ -2509,7 +2510,7 @@ impl RequestHandler for Vmm {
         VmmPingResponse {
             build_version,
             version,
-            pid: std::process::id() as i64,
+            pid: process::id() as i64,
             features: feature_list(),
         }
     }

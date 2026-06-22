@@ -12,7 +12,7 @@ use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use std::sync::mpsc::Sender;
-use std::thread;
+use std::{fs, iter, panic, result, thread};
 
 use block::fcntl::{LockError, LockGranularity, LockType, try_acquire_lock};
 use log::{error, info};
@@ -104,7 +104,7 @@ pub fn error_response(error: HttpError) -> Response {
 
     let error: &dyn Error = &error;
     // Write the Display::display() output all errors (from top to root).
-    let error_messages = std::iter::successors(Some(error), |sub_error| {
+    let error_messages = iter::successors(Some(error), |sub_error| {
         // Dereference necessary to mitigate rustc compiler bug.
         // See <https://github.com/rust-lang/rust/issues/141673>
         (*sub_error).source()
@@ -167,7 +167,7 @@ pub trait EndpointHandler {
         _api_sender: Sender<ApiRequest>,
         _body: &Option<Body>,
         _files: Vec<File>,
-    ) -> std::result::Result<Option<Body>, HttpError> {
+    ) -> result::Result<Option<Body>, HttpError> {
         Err(HttpError::BadRequest)
     }
 
@@ -176,7 +176,7 @@ pub trait EndpointHandler {
         _api_notifier: EventFd,
         _api_sender: Sender<ApiRequest>,
         _body: &Option<Body>,
-    ) -> std::result::Result<Option<Body>, HttpError> {
+    ) -> result::Result<Option<Body>, HttpError> {
         Err(HttpError::BadRequest)
     }
 }
@@ -385,7 +385,7 @@ fn start_http_thread(
                     })?;
             }
 
-            std::panic::catch_unwind(AssertUnwindSafe(move || {
+            panic::catch_unwind(AssertUnwindSafe(move || {
                 server.start_server().unwrap();
                 loop {
                     match server.requests() {
@@ -456,7 +456,7 @@ pub fn start_http_path_thread(
     let lock = acquire_api_socket_lock(&socket_path)?;
     // We hold the lock, so any socket at this path is stale from a crashed
     // run: remove it before bind. Ignore errors (it is usually not present).
-    let _ = std::fs::remove_file(&socket_path);
+    let _ = fs::remove_file(&socket_path);
 
     let socket_fd = UnixListener::bind(socket_path).map_err(VmmError::CreateApiServerSocket)?;
     // SAFETY: Valid FD just opened

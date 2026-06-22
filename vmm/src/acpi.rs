@@ -11,9 +11,11 @@ use acpi_tables::sdt::GenericAddress;
 use acpi_tables::sdt::Sdt;
 #[cfg(target_arch = "aarch64")]
 use arch::DeviceType;
-use arch::NumaNodes;
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::DeviceInfoForFdt;
+#[cfg(target_arch = "x86_64")]
+use arch::x86_64;
+use arch::{NumaNodes, layout};
 use bitflags::bitflags;
 use log::{info, warn};
 use pci::PciBdf;
@@ -25,6 +27,8 @@ use crate::cpu::CpuManager;
 use crate::device_manager::DeviceManager;
 use crate::memory_manager::MemoryManager;
 use crate::pci_segment::PciSegment;
+#[cfg(feature = "fw_cfg")]
+use crate::vm;
 use crate::{GuestMemoryMmap, GuestRegionMmap};
 
 /* Values for Type in APIC sub-headers */
@@ -371,9 +375,9 @@ fn create_srat_table(
 
     // Check the MemoryAffinity structure is the right size as expected by
     // the ACPI specification.
-    assert_eq!(std::mem::size_of::<MemoryAffinity>(), 40);
+    assert_eq!(size_of::<MemoryAffinity>(), 40);
     // Confirm struct size matches ACPI 6.6 spec
-    assert_eq!(std::mem::size_of::<GenericInitiatorAffinity>(), 32);
+    assert_eq!(size_of::<GenericInitiatorAffinity>(), 32);
     for (node_id, node) in numa_nodes.iter() {
         let proximity_domain = *node_id;
 
@@ -395,7 +399,7 @@ fn create_srat_table(
 
         for cpu in &node.cpus {
             #[cfg(target_arch = "x86_64")]
-            let x2apic_id = arch::x86_64::get_x2apic_id(*cpu, topology);
+            let x2apic_id = x86_64::get_x2apic_id(*cpu, topology);
             #[cfg(target_arch = "aarch64")]
             let x2apic_id = *cpu;
 
@@ -698,7 +702,7 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
     // - N x PCI Root Complex Node (N = number of pci segments)
     let num_nodes = (1 + pci_segments.len()) as u32;
     // First node is the ITS Group Node located right after the IORT Body Base
-    let offset_its_node = iort.len() + std::mem::size_of::<IortBodyBase>();
+    let offset_its_node = iort.len() + size_of::<IortBodyBase>();
     assert!(align_to_8_bytes(offset_its_node) == 0); // Ensure the ITS node is 8-byte aligned
     iort.append(IortBodyBase {
         num_nodes,
@@ -714,8 +718,7 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
     //   `translation_id` field of the `GisIts`` structure in the MADT table.
     let its_id_array = [0u32; 1];
     let its_count = its_id_array.len();
-    let its_group_node_size =
-        std::mem::size_of::<IortItsGroupBase>() + its_count * std::mem::size_of::<u32>();
+    let its_group_node_size = size_of::<IortItsGroupBase>() + its_count * size_of::<u32>();
     let padding = align_to_8_bytes(iort.len() + its_group_node_size);
     iort.append(IortItsGroupBase {
         common: IortNodeCommon {
@@ -741,8 +744,8 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
         //   Currently contains a single mapping that maps all device IDs
         //   in the segment to the ITS Group Node.
         let num_id_mappings = 1;
-        let node_size = std::mem::size_of::<IortPciRootComplexBase>()
-            + num_id_mappings * std::mem::size_of::<IortIdMapping>();
+        let node_size =
+            size_of::<IortPciRootComplexBase>() + num_id_mappings * size_of::<IortIdMapping>();
         let padding = align_to_8_bytes(iort.len() + node_size);
         iort.append(IortPciRootComplexBase {
             common: IortNodeCommon {
@@ -752,7 +755,7 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
                 node_id: segment.id as u32, // todo to avoid conflict with ITS node IDs
                 num_id_mappings: num_id_mappings as u32,
                 // ID mapping array starts right after `IortPciRootComplexBase`
-                id_mappings_array_offset: std::mem::size_of::<IortPciRootComplexBase>() as u32,
+                id_mappings_array_offset: size_of::<IortPciRootComplexBase>() as u32,
             },
             mem_access_props: IortMemoryAccessProperties {
                 cca: 1, // Fully coherent device
@@ -915,7 +918,7 @@ fn create_acpi_tables_internal(
             .get_device_info()
             .clone()
             .contains_key(&(DeviceType::Serial, DeviceType::Serial.to_string()));
-        let serial_device_addr = arch::layout::LEGACY_SERIAL_MAPPED_IO_START.raw_value();
+        let serial_device_addr = layout::LEGACY_SERIAL_MAPPED_IO_START.raw_value();
         let serial_device_irq = if is_serial_on {
             device_manager
                 .get_device_info()
@@ -1024,7 +1027,7 @@ pub fn create_acpi_tables_for_fw_cfg(
     memory_manager: &MemoryManager,
     numa_nodes: &NumaNodes,
     tpm_enabled: bool,
-) -> Result<(), crate::vm::Error> {
+) -> Result<(), vm::Error> {
     let dsdt_offset = GuestAddress(0);
     let (rsdp, table_bytes, xsdt_table_pointers) = create_acpi_tables_internal(
         dsdt_offset,
@@ -1071,7 +1074,7 @@ pub fn create_acpi_tables_for_fw_cfg(
         .lock()
         .unwrap()
         .add_acpi(rsdp, table_bytes, checksums, pointer_offsets)
-        .map_err(crate::vm::Error::CreatingAcpiTables)
+        .map_err(vm::Error::CreatingAcpiTables)
 }
 
 pub fn create_acpi_tables(
@@ -1085,7 +1088,7 @@ pub fn create_acpi_tables(
     trace_scoped!("create_acpi_tables");
 
     let start_time = Instant::now();
-    let rsdp_addr = arch::layout::RSDP_POINTER;
+    let rsdp_addr = layout::RSDP_POINTER;
     let dsdt_addr = rsdp_addr.checked_add(Rsdp::len() as u64).unwrap();
 
     let (rsdp, tables_bytes, _xsdt_table_pointers) = create_acpi_tables_internal(
@@ -1165,13 +1168,15 @@ pub fn create_acpi_tables_tdx(
 
 #[cfg(test)]
 mod tests {
+    use std::slice;
+
     use super::*;
 
     #[test]
     fn test_generic_initiator_affinity_size() {
         // ACPI spec requires Generic Initiator Affinity Structure to be exactly 32 bytes
         assert_eq!(
-            std::mem::size_of::<GenericInitiatorAffinity>(),
+            size_of::<GenericInitiatorAffinity>(),
             32,
             "GenericInitiatorAffinity must be exactly 32 bytes per ACPI 6.6 spec"
         );
@@ -1266,9 +1271,9 @@ mod tests {
         // there is no internal padding, making every byte within it
         // safe to read. Casting to `u8` satisfies alignment requirements.
         let bytes = unsafe {
-            std::slice::from_raw_parts(
+            slice::from_raw_parts(
                 (&raw const gi).cast::<u8>(),
-                std::mem::size_of::<GenericInitiatorAffinity>(),
+                size_of::<GenericInitiatorAffinity>(),
             )
         };
 
