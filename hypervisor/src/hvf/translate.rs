@@ -233,6 +233,61 @@ fn sysreg_value(hvf: &VcpuHvfState, enc: u16) -> Option<u64> {
         .map(|(_, v)| *v)
 }
 
+/// Ingest a *real* serialized KVM arm64 vCPU snapshot — cloud-hypervisor's
+/// `kvm-bindings` ABI types — into the architectural `KvmArm64VcpuRegs` this
+/// module translates. This is the front door of the dream: a cloud snapshot is
+/// deserialized into these `kvm-bindings` structs, fed through here, then
+/// `raise_from_kvm` produces a `VcpuHvfState` ready for HVF restore.
+///
+/// Gated behind `kvm-snapshot` so macOS pulls in only the pure-`kvm-bindings`
+/// type definitions (no `kvm-ioctls`, no VFIO).
+#[cfg(feature = "kvm-snapshot")]
+pub mod kvm_ingest {
+    use super::*;
+    use kvm_bindings::{kvm_one_reg, kvm_regs};
+
+    /// Lower a serialized KVM `kvm_regs` core block plus the system-register
+    /// ONE_REG list (each `kvm_one_reg`'s `addr` carries the 64-bit value, as
+    /// cloud-hypervisor's `VcpuKvmState` stores it) into `KvmArm64VcpuRegs`.
+    ///
+    /// `core_regs` is the structured C struct; we re-emit its fields as the
+    /// ONE_REG `(id, value)` pairs `raise_from_kvm` consumes so a single code
+    /// path handles both synthetic and real input. The per-vCPU GIC CPU
+    /// interface (ICC) registers are intentionally NOT sourced here: in a real
+    /// KVM snapshot they live in the VGIC device state, not the vCPU ONE_REG
+    /// list, so they are supplied by the (still-open) GIC-state translation.
+    pub fn from_kvm(core_regs: &kvm_regs, sys_regs: &[kvm_one_reg]) -> KvmArm64VcpuRegs {
+        let mut core = Vec::with_capacity(31 + 6);
+        for (i, &v) in core_regs.regs.regs.iter().enumerate() {
+            core.push((kvm_core_reg_id(OFF_REGS0 + i * 8), v));
+        }
+        core.push((kvm_core_reg_id(OFF_SP_EL0), core_regs.regs.sp));
+        core.push((kvm_core_reg_id(OFF_PC), core_regs.regs.pc));
+        core.push((kvm_core_reg_id(OFF_PSTATE), core_regs.regs.pstate));
+        core.push((kvm_core_reg_id(OFF_SP_EL1), core_regs.sp_el1));
+        core.push((kvm_core_reg_id(OFF_ELR_EL1), core_regs.elr_el1));
+        core.push((kvm_core_reg_id(OFF_SPSR0), core_regs.spsr[0]));
+
+        // Keep only genuine 64-bit system registers; the value is in `addr`.
+        let sys = sys_regs
+            .iter()
+            .filter_map(|r| kvm_sysreg_to_hvf(r.id).map(|_| (r.id, r.addr)))
+            .collect();
+
+        KvmArm64VcpuRegs {
+            core,
+            sys,
+            gic_icc: Vec::new(),
+        }
+    }
+
+    /// Convenience: ingest a serialized KVM vCPU snapshot and translate it the
+    /// rest of the way to an HVF `VcpuHvfState` ready for `Vcpu::set_state`.
+    pub fn kvm_to_hvf(core_regs: &kvm_regs, sys_regs: &[kvm_one_reg]) -> VcpuHvfState {
+        raise_from_kvm(&from_kvm(core_regs, sys_regs))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -338,8 +393,7 @@ mod tests {
     }
 
     #[test]
-    fn lower_routes_core_vs_sysreg_blocks_correctly() {
-        let hvf = VcpuHvfState {
+    fn lower_routes_core_vs_sysreg_blocks_correctly() {        let hvf = VcpuHvfState {
             gpr: [7u64; 31],
             pc: 0xabc,
             cpsr: 0x3c5,
@@ -369,5 +423,69 @@ mod tests {
         assert!(kvm.core.iter().any(|&(id, v)| id == kvm_core_reg_id(OFF_ELR_EL1) && v == 0x3));
         assert!(kvm.core.iter().any(|&(id, v)| id == kvm_core_reg_id(OFF_SPSR0) && v == 0x4));
         assert!(kvm.core.iter().any(|&(id, v)| id == kvm_core_reg_id(OFF_SP_EL1) && v == 0x5000));
+    }
+
+    /// Ingest a real `kvm-bindings` core block + sysreg ONE_REG list and confirm
+    /// every load-bearing register lands where HVF restore expects it.
+    #[cfg(feature = "kvm-snapshot")]
+    #[test]
+    fn ingest_real_kvm_bindings_snapshot() {
+        use super::kvm_ingest::kvm_to_hvf;
+        use kvm_bindings::{kvm_one_reg, kvm_regs, user_pt_regs};
+
+        let mut regs = [0u64; 31];
+        for (i, slot) in regs.iter_mut().enumerate() {
+            *slot = 0x2000 + i as u64;
+        }
+        let mut spsr = [0u64; 5];
+        spsr[0] = 0x3c5;
+        let core_regs = kvm_regs {
+            regs: user_pt_regs {
+                regs,
+                sp: 0xdead_0000,   // -> SP_EL0
+                pc: 0x4000_0000,
+                pstate: 0x3c5,
+            },
+            sp_el1: 0x4000_8000,
+            elr_el1: 0x4000_2000,
+            spsr,
+            ..Default::default()
+        };
+        let sys_regs = vec![
+            kvm_one_reg {
+                id: kvm_sysreg_id(MPIDR_EL1),
+                addr: 0x8000_0000,
+            },
+            kvm_one_reg {
+                id: kvm_sysreg_id(SCTLR_EL1),
+                addr: 0x30d0_0980,
+            },
+            kvm_one_reg {
+                id: kvm_sysreg_id(VBAR_EL1),
+                addr: 0x4000_1000,
+            },
+        ];
+
+        let hvf = kvm_to_hvf(&core_regs, &sys_regs);
+
+        // GPRs and the structured core fields.
+        for (i, &v) in regs.iter().enumerate() {
+            assert_eq!(hvf.gpr[i], v, "GPR x{i} mismatch");
+        }
+        assert_eq!(hvf.pc, 0x4000_0000);
+        assert_eq!(hvf.cpsr, 0x3c5);
+        assert_eq!(hvf.sp_el1, 0x4000_8000);
+
+        // EL1 system registers come across by the shared encoding.
+        let sys = sorted(&hvf.sysregs);
+        assert_eq!(sys.get(&MPIDR_EL1), Some(&0x8000_0000));
+        assert_eq!(sys.get(&SCTLR_EL1), Some(&0x30d0_0980));
+        assert_eq!(sys.get(&VBAR_EL1), Some(&0x4000_1000));
+        // The registers KVM keeps in its core block are reconstructed as HVF
+        // system registers from `kvm_regs`, not from the sysreg list.
+        assert_eq!(sys.get(&SYSREG_SP_EL0), Some(&0xdead_0000));
+        assert_eq!(sys.get(&SYSREG_ELR_EL1), Some(&0x4000_2000));
+        assert_eq!(sys.get(&SYSREG_SPSR_EL1), Some(&0x3c5));
+        assert_eq!(sys.get(&SYSREG_SP_EL1), Some(&0x4000_8000));
     }
 }

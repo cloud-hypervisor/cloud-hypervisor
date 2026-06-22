@@ -11,6 +11,10 @@ version = "0.1.0"
 # Hypervisor.framework via build.rs; pulls in no external crates.
 hvf = []
 kvm = ["kvm-bindings", "kvm-ioctls", "vfio-ioctls/kvm"]
+# Ingest a serialized KVM arm64 vCPU snapshot (the real `kvm-bindings` ABI
+# types) WITHOUT the Linux-only `kvm-ioctls`/VFIO machinery, so the HVF backend
+# on macOS can translate a cloud KVM snapshot. Pairs with `hvf`.
+kvm-snapshot = ["kvm-bindings"]
 mshv = ["mshv-bindings", "mshv-ioctls", "mshv_emulator", "vfio-ioctls/mshv"]
 mshv_emulator = ["iced-x86", "mshv-bindings"]
 sev_snp = ["igvm", "igvm_defs"]
