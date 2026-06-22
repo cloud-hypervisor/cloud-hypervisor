@@ -2,10 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-// TODO: Trim qualified paths in this crate, then drop this expectation.
-#![expect(clippy::absolute_paths)]
-
 use std::error::Error;
+use std::iter;
 
 use log::error;
 
@@ -31,7 +29,7 @@ pub fn cli_print_error_chain<'a>(
         eprintln!("  {top_error}");
     } else {
         eprintln!("chain of errors:");
-        std::iter::successors(Some(top_error), |sub_error| {
+        iter::successors(Some(top_error), |sub_error| {
             // Dereference necessary to mitigate rustc compiler bug.
             // See <https://github.com/rust-lang/rust/issues/141673>
             (*sub_error).source()
