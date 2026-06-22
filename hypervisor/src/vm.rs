@@ -33,6 +33,8 @@ use crate::arch::aarch64::gic::{Vgic, VgicConfig};
 use crate::arch::riscv64::aia::{Vaia, VaiaConfig};
 #[cfg(feature = "tdx")]
 use crate::arch::x86::CpuIdEntry;
+#[cfg(target_arch = "x86_64")]
+use crate::arch::x86::MsrEntry;
 use crate::cpu::Vcpu;
 use crate::{ClockRestoreMode, ClockState, IoEventAddress, IrqRoutingEntry};
 
@@ -365,7 +367,14 @@ pub trait Vm: Send + Sync + Any {
     /// Unregister an event that will, when signaled, trigger the `gsi` IRQ.
     fn unregister_irqfd(&self, fd: &EventFd, gsi: u32) -> Result<()>;
     /// Creates a new KVM vCPU file descriptor and maps the memory corresponding
-    fn create_vcpu(&self, id: u32, vm_ops: Option<Arc<dyn VmOps>>) -> Result<Box<dyn Vcpu>>;
+    ///
+    /// On x86_64 one must provide a buffer that the vCPU may use for storing MSR state.
+    fn create_vcpu(
+        &self,
+        id: u32,
+        vm_ops: Option<Arc<dyn VmOps>>,
+        #[cfg(target_arch = "x86_64")] msr_state_buffer: Vec<MsrEntry>,
+    ) -> Result<Box<dyn Vcpu>>;
     #[cfg(target_arch = "aarch64")]
     fn create_vgic(&self, config: &VgicConfig) -> Result<Arc<Mutex<dyn Vgic>>>;
     #[cfg(target_arch = "riscv64")]

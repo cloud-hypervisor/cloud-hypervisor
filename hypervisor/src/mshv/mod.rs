@@ -15,7 +15,7 @@ use std::{fs, io, result};
 #[cfg(target_arch = "x86_64")]
 use anyhow::Context;
 use anyhow::anyhow;
-#[cfg(target_arch = "x86_64")]
+#[cfg(feature = "sev_snp")]
 use arc_swap::ArcSwap;
 #[cfg(feature = "sev_snp")]
 use log::error;
@@ -360,7 +360,6 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         {
             Ok(Arc::new(MshvVm {
                 fd: vm_fd,
-                msrs: ArcSwap::new(Vec::<MsrEntry>::new().into()),
                 dirty_log_slots: RwLock::new(HashMap::new()),
                 #[cfg(feature = "sev_snp")]
                 sev_snp_enabled: mshv_vm_type == VmType::Snp,
@@ -1797,8 +1796,6 @@ impl MshvVcpu {
 /// Wrapper over Mshv VM ioctls.
 pub struct MshvVm {
     fd: Arc<VmFd>,
-    #[cfg(target_arch = "x86_64")]
-    msrs: ArcSwap<Vec<MsrEntry>>,
     dirty_log_slots: RwLock<HashMap<u64, MshvDirtyLogSlot>>,
     #[cfg(feature = "sev_snp")]
     sev_snp_enabled: bool,
@@ -1900,6 +1897,7 @@ impl vm::Vm for MshvVm {
         &self,
         id: u32,
         vm_ops: Option<Arc<dyn VmOps>>,
+        #[cfg(target_arch = "x86_64")] msrs: Vec<MsrEntry>,
     ) -> vm::Result<Box<dyn cpu::Vcpu>> {
         let id: u8 = id.try_into().unwrap();
         let vcpu_fd = self
@@ -1940,7 +1938,7 @@ impl vm::Vm for MshvVm {
             #[cfg(target_arch = "x86_64")]
             cpuid: Vec::new(),
             #[cfg(target_arch = "x86_64")]
-            msrs: self.msrs.load().as_ref().clone(),
+            msrs,
             vm_ops,
             vm_fd: self.fd.clone(),
             #[cfg(feature = "sev_snp")]
@@ -2568,23 +2566,7 @@ impl vm::Vm for MshvVm {
                 1u64,
             )
             .map_err(|e| vm::HypervisorVmError::InitializeVm(e.into()))?;
-        #[cfg(target_arch = "x86_64")]
-        {
-            let msr_list = self
-                .fd
-                .get_msr_index_list()
-                .map_err(|e| vm::HypervisorVmError::GetMsrList(e.into()))?;
-            let mut msrs: Vec<MsrEntry> = vec![
-                MsrEntry {
-                    ..Default::default()
-                };
-                msr_list.len()
-            ];
-            for (pos, index) in msr_list.iter().enumerate() {
-                msrs[pos].index = *index;
-            }
-            self.msrs.store(Arc::new(msrs));
-        }
+
         Ok(())
     }
 

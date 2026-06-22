@@ -47,7 +47,7 @@ use hypervisor::arch::aarch64::gic::Vgic;
 use hypervisor::arch::aarch64::regs::{ID_AA64MMFR0_EL1, TCR_EL1, TTBR1_EL1};
 #[cfg(target_arch = "x86_64")]
 use hypervisor::arch::x86::CpuIdEntry;
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+#[cfg(target_arch = "x86_64")]
 use hypervisor::arch::x86::MsrEntry;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use hypervisor::arch::x86::SpecialRegisters;
@@ -517,15 +517,22 @@ impl Vcpu {
     /// * `vm` - The virtual machine this vcpu will get attached to.
     /// * `vm_ops` - Optional object for exit handling.
     /// * `cpu_vendor` - CPU vendor as reported by __cpuid(0x0)
+    /// * `msr_state_buffer` a vector of MSRs that the vCPU may use to save MSR state.
     pub fn new(
         id: u32,
         apic_id: u32,
         vm: &dyn hypervisor::Vm,
         vm_ops: Option<Arc<dyn VmOps>>,
         #[cfg(target_arch = "x86_64")] cpu_vendor: CpuVendor,
+        #[cfg(target_arch = "x86_64")] msr_state_buffer: Vec<MsrEntry>,
     ) -> Result<Self> {
         let vcpu = vm
-            .create_vcpu(apic_id, vm_ops)
+            .create_vcpu(
+                apic_id,
+                vm_ops,
+                #[cfg(target_arch = "x86_64")]
+                msr_state_buffer,
+            )
             .map_err(|e| Error::VcpuCreate(e.into()))?;
         // Initially the cpuid per vCPU is the one supported by this VM.
         Ok(Vcpu {
@@ -715,6 +722,8 @@ pub struct CpuManager {
     interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
     #[cfg(target_arch = "x86_64")]
     cpuid: Vec<CpuIdEntry>,
+    #[cfg(target_arch = "x86_64")]
+    msr_state_buffer: Vec<MsrEntry>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     vm: Arc<dyn hypervisor::Vm>,
     vcpus_kill_signalled: Arc<AtomicBool>,
@@ -926,6 +935,13 @@ impl CpuManager {
             interrupt_controller: None,
             #[cfg(target_arch = "x86_64")]
             cpuid: Vec::new(),
+            #[cfg(target_arch = "x86_64")]
+            msr_state_buffer: hypervisor
+                .get_msr_index_list()
+                .map_err(|e| Error::VcpuCreate(e.into()))?
+                .into_iter()
+                .map(|index| MsrEntry { index, data: 0 })
+                .collect(),
             vm,
             vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
             vcpus_pause_signalled: Arc::new(AtomicBool::new(false)),
@@ -999,6 +1015,8 @@ impl CpuManager {
             Some(self.vm_ops.clone()),
             #[cfg(target_arch = "x86_64")]
             self.hypervisor.get_cpu_vendor(),
+            #[cfg(target_arch = "x86_64")]
+            self.msr_state_buffer.clone(),
         )?;
 
         if let Some(snapshot) = snapshot {
@@ -3365,7 +3383,7 @@ mod unit_tests {
         hv.check_required_extensions().unwrap();
         // Calling get_lapic will fail if there is no irqchip before hand.
         vm.create_irq_chip().unwrap();
-        let vcpu = vm.create_vcpu(0, None).unwrap();
+        let vcpu = vm.create_vcpu(0, None, vec![]).unwrap();
         let klapic_before: LapicState = vcpu.get_lapic().unwrap();
 
         // Compute the value that is expected to represent LVT0 and LVT1.
@@ -3390,7 +3408,7 @@ mod unit_tests {
         let vm = hv
             .create_vm(HypervisorVmConfig::default())
             .expect("new VM fd creation failed");
-        let vcpu = vm.create_vcpu(0, None).unwrap();
+        let vcpu = vm.create_vcpu(0, None, vec![]).unwrap();
         setup_fpu(vcpu.as_ref()).unwrap();
 
         let expected_fpu: FpuState = FpuState {
@@ -3416,7 +3434,7 @@ mod unit_tests {
         let vm = hv
             .create_vm(HypervisorVmConfig::default())
             .expect("new VM fd creation failed");
-        let vcpu = vm.create_vcpu(0, None).unwrap();
+        let vcpu = vm.create_vcpu(0, None, vec![]).unwrap();
         setup_msrs(vcpu.as_ref()).unwrap();
 
         // This test will check against the last MSR entry configured (the tenth one).
@@ -3444,7 +3462,7 @@ mod unit_tests {
         let vm = hv
             .create_vm(HypervisorVmConfig::default())
             .expect("new VM fd creation failed");
-        let vcpu = vm.create_vcpu(0, None).unwrap();
+        let vcpu = vm.create_vcpu(0, None, vec![]).unwrap();
 
         let mut expected_regs: StandardRegisters = vcpu.create_standard_regs();
         expected_regs.set_rflags(0x0000000000000002u64);
@@ -3470,7 +3488,7 @@ mod unit_tests {
         let vm = hv
             .create_vm(HypervisorVmConfig::default())
             .expect("new VM fd creation failed");
-        let vcpu = vm.create_vcpu(0, None).unwrap();
+        let vcpu = vm.create_vcpu(0, None, vec![]).unwrap();
 
         let mut expected_regs: StandardRegisters = vcpu.create_standard_regs();
         expected_regs.set_rflags(0x0000000000000002u64);
