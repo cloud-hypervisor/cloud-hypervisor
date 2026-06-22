@@ -251,17 +251,22 @@ impl Vgic for HvfGicV3 {
     }
 }
 
-/// Inject the virtual-timer interrupt after an `HV_EXIT_REASON_VTIMER_ACTIVATED`
-/// exit: assert the vCPU IRQ line and re-unmask the timer (auto-masked on exit).
+/// Re-arm the virtual timer after an `HV_EXIT_REASON_VTIMER_ACTIVATED` exit.
 ///
-/// UNVERIFIED end-to-end: this follows Apple's documented vtimer flow but is not
-/// exercised by any test (no GIC-enabled guest programs CNTV here).
-pub(super) fn inject_vtimer(vcpu_id: u64) -> Result<(), i32> {
-    // SAFETY: FFI on the owning thread.
-    let rc = unsafe { hv_vcpu_set_pending_interrupt(vcpu_id, HV_INTERRUPT_TYPE_IRQ, true) };
-    if rc != 0 {
-        return Err(rc);
-    }
+/// With Apple's managed GIC the CNTV output is wired internally to GIC PPI 27
+/// (`HV_GIC_INT_EL1_VIRTUAL_TIMER`): when the timer fires the GIC pends INTID 27
+/// and the guest takes it directly through the CPU interface. In that
+/// configuration this exit reason does not normally occur at all — verified by
+/// the `hvf_guest_takes_virtual_timer` integration test, where the guest arms
+/// CNTV, takes INTID 27 and powers off without any `VTIMER_ACTIVATED` exit or
+/// host injection.
+///
+/// HVF may still surface the activation and auto-mask the vtimer; the correct
+/// response for a managed GIC is simply to unmask so the GIC re-evaluates and
+/// delivers PPI 27. We deliberately do NOT assert the raw vCPU IRQ line
+/// (`hv_vcpu_set_pending_interrupt`) here: that bypasses the GIC and would
+/// deliver a spurious (INTID 1023) interrupt rather than the timer PPI.
+pub(super) fn rearm_vtimer(vcpu_id: u64) -> Result<(), i32> {
     // SAFETY: FFI on the owning thread.
     let rc = unsafe { hv_vcpu_set_vtimer_mask(vcpu_id, false) };
     if rc != 0 {

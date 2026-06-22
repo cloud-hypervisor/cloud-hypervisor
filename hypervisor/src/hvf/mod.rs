@@ -777,17 +777,16 @@ impl Vcpu for HvfVcpu {
                 }
             }
             HV_EXIT_REASON_VTIMER_ACTIVATED => {
-                // The virtual timer fired and was auto-masked on exit. Follow
-                // Apple's documented pattern: assert the vCPU IRQ line and
-                // unmask the timer so the guest can service and re-arm it.
-                //
-                // UNVERIFIED: no test drives a real GIC-enabled guest that
-                // programs CNTV and takes the timer PPI, so end-to-end timer
-                // interrupt delivery is not yet proven. The code is the correct
-                // first step but must not be claimed as working delivery.
-                if let Err(rc) = gic::inject_vtimer(self.id) {
+                // The virtual timer fired and HVF auto-masked it on exit. With
+                // the managed GIC the timer is normally delivered as GIC PPI 27
+                // without this exit at all (see hvf_guest_takes_virtual_timer);
+                // this branch is the defensive path for when HVF does surface
+                // the activation. Re-arm the timer so the GIC re-evaluates and
+                // delivers PPI 27 — without asserting the raw IRQ line, which
+                // would bypass the GIC and deliver a spurious interrupt.
+                if let Err(rc) = gic::rearm_vtimer(self.id) {
                     return Err(HypervisorCpuError::RunVcpu(anyhow!(
-                        "failed to inject vtimer interrupt: {:#010x}",
+                        "failed to re-arm vtimer: {:#010x}",
                         rc as u32
                     )));
                 }

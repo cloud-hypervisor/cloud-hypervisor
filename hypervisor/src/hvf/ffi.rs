@@ -88,7 +88,11 @@ pub const GIC_ICC_SNAPSHOT_REGS: &[u16] = &[
     GIC_ICC_IGRPEN1_EL1,
 ];
 
-// hv_interrupt_type_t
+// hv_interrupt_type_t. The managed GIC routes interrupts itself (SPIs via
+// hv_gic_set_spi, the vtimer via PPI 27), so the raw per-vCPU interrupt-line
+// primitive below is not used by this backend; it is retained as the documented
+// HVF primitive for a future no-GIC or cross-thread-kick path.
+#[allow(dead_code)]
 pub const HV_INTERRUPT_TYPE_IRQ: u32 = 0;
 #[allow(dead_code)]
 pub const HV_INTERRUPT_TYPE_FIQ: u32 = 1;
@@ -127,6 +131,7 @@ unsafe extern "C" {
     pub fn hv_vcpu_set_sys_reg(vcpu: u64, reg: u16, value: u64) -> i32;
     pub fn hv_vcpu_get_sys_reg(vcpu: u64, reg: u16, value: *mut u64) -> i32;
     pub fn hv_vcpu_run(vcpu: u64) -> i32;
+    #[allow(dead_code)]
     pub fn hv_vcpu_set_pending_interrupt(vcpu: u64, ty: u32, pending: bool) -> i32;
     pub fn hv_vcpu_set_vtimer_mask(vcpu: u64, masked: bool) -> i32;
 

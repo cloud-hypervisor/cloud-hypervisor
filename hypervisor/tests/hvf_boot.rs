@@ -378,6 +378,61 @@ const IRQ_HANDLER: [u8; 32] = [
     0x02, 0x00, 0x00, 0xd4, 0x00, 0x00, 0x00, 0x14, // hvc #0; b .
 ];
 
+// ---- Virtual-timer (CNTV) PPI-27 delivery guest ----
+// Same skeleton as the SPI guest, but instead of waiting for a host-injected
+// SPI it enables PPI 27 (the EL1 virtual timer) in its OWN redistributor SGI
+// frame via MMIO, arms CNTV to fire shortly, unmasks IRQs and spins. On the
+// timer IRQ it acknowledges (ICC_IAR1_EL1 -> expected INTID 27), records it at
+// the marker, masks CNTV (so it cannot re-fire), EOIs and PSCI-offs. On timeout
+// it dumps {ICC_HPPIR1, CNTV_CTL, CNTV_TVAL, ICC_IGRPEN1} (bit30-tagged) so a
+// delivery failure surfaces as data: CNTV_CTL bit2 (ISTATUS) set with HPPIR1=
+// 1023 means the timer fired but never reached the GIC; HPPIR1=27 means the GIC
+// has it pending but the CPU interface never took it. Source kept in the
+// session notes as vtimer_guest.S.
+//
+// VBAR_EL1 = RAM_BASE + 0x1000; redistributor SGI/PPI frame at GICR_BASE+0x10000
+// (0x0802_0000). Loaded at offset 0; shares the SPI guest's vectors + sync
+// handler (byte-identical) and differs only in this boot block and IRQ handler.
+#[rustfmt::skip]
+const VT_BOOT: [u8; 224] = [
+    0x00, 0x00, 0xa8, 0xd2, 0x00, 0x00, 0x42, 0x91, // movz x0,#0x4000<<16; add x0,#0x80000 (SP)
+    0x1f, 0x00, 0x00, 0x91, 0x01, 0x00, 0xa8, 0xd2, // mov sp,x0; movz x1,#0x4000<<16
+    0x21, 0x04, 0x40, 0x91, 0x01, 0xc0, 0x18, 0xd5, // add x1,#0x1000; msr VBAR_EL1,x1
+    0xdf, 0x3f, 0x03, 0xd5, 0x20, 0x00, 0x80, 0xd2, // isb; mov x0,#1
+    0xa0, 0xcc, 0x18, 0xd5, 0xdf, 0x3f, 0x03, 0xd5, // msr ICC_SRE_EL1,x0; isb
+    0x00, 0x1e, 0x80, 0xd2, 0x00, 0x46, 0x18, 0xd5, // mov x0,#0xf0; msr ICC_PMR_EL1,x0
+    0x20, 0x00, 0x80, 0xd2, 0xe0, 0xcc, 0x18, 0xd5, // mov x0,#1; msr ICC_IGRPEN1_EL1,x0
+    0xdf, 0x3f, 0x03, 0xd5, 0x02, 0x00, 0xa1, 0xd2, // isb; movz x2,#0x0800<<16 (GICD)
+    0x60, 0x02, 0x80, 0x52, 0x40, 0x00, 0x00, 0xb9, // mov w0,#0x13; str w0,[x2] (GICD_CTLR)
+    0x9f, 0x3f, 0x03, 0xd5, 0x23, 0x00, 0xa1, 0xd2, // dsb sy; movz x3,#0x0801<<16 (GICR)
+    0x63, 0x40, 0x40, 0x91, 0x00, 0x00, 0xa1, 0x52, // add x3,#0x10<<12 (SGI frame); mov w0,#1<<27
+    0x60, 0x80, 0x00, 0xb9, 0x7f, 0x18, 0x04, 0xb9, // str w0,[x3,#0x80] IGROUPR0; str wzr,[x3,#0x418] PRIO
+    0x00, 0x00, 0xa1, 0x52, 0x60, 0x00, 0x01, 0xb9, // mov w0,#1<<27; str w0,[x3,#0x100] ISENABLER0
+    0x9f, 0x3f, 0x03, 0xd5, 0xdf, 0x3f, 0x03, 0xd5, // dsb sy; isb
+    0x07, 0x40, 0xa1, 0xd2, 0xff, 0x00, 0x00, 0xb9, // movz x7,#0x0a00<<16; str wzr,[x7] (READY)
+    0x80, 0x00, 0xa0, 0xd2, 0x00, 0xe3, 0x1b, 0xd5, // movz x0,#0x4<<16 (0x40000); msr CNTV_TVAL_EL0,x0
+    0x20, 0x00, 0x80, 0xd2, 0x20, 0xe3, 0x1b, 0xd5, // mov x0,#1; msr CNTV_CTL_EL0,x0 (enable)
+    0xdf, 0x3f, 0x03, 0xd5, 0xff, 0x42, 0x03, 0xd5, // isb; msr DAIFClr,#2
+    0x06, 0x00, 0xb0, 0xd2, 0xc6, 0x04, 0x00, 0xf1, // movz x6,#0x8000<<16; subs x6,x6,#1
+    0xe1, 0xff, 0xff, 0x54, 0x01, 0x20, 0xa1, 0xd2, // b.ne spin; mov x1,#0x09000000
+    0x40, 0xcc, 0x38, 0xd5, 0x00, 0x00, 0x62, 0xb2, // mrs x0,ICC_HPPIR1_EL1; orr x0,#0x40000000
+    0x20, 0x00, 0x00, 0xb9, 0x20, 0xe3, 0x3b, 0xd5, // str w0,[x1]; mrs x0,CNTV_CTL_EL0
+    0x00, 0x00, 0x62, 0xb2, 0x20, 0x00, 0x00, 0xb9, // orr x0,#0x40000000; str w0,[x1]
+    0x00, 0xe3, 0x3b, 0xd5, 0x00, 0x00, 0x62, 0xb2, // mrs x0,CNTV_TVAL_EL0; orr x0,#0x40000000
+    0x20, 0x00, 0x00, 0xb9, 0xe0, 0xcc, 0x38, 0xd5, // str w0,[x1]; mrs x0,ICC_IGRPEN1_EL1
+    0x00, 0x00, 0x62, 0xb2, 0x20, 0x00, 0x00, 0xb9, // orr x0,#0x40000000; str w0,[x1]
+    0x00, 0x01, 0x80, 0xd2, 0x00, 0x80, 0xb0, 0xf2, // mov x0,#8; movk x0,#0x8400,lsl#16
+    0x02, 0x00, 0x00, 0xd4, 0x00, 0x00, 0x00, 0x14, // hvc #0 (PSCI off); b .
+];
+// IRQ handler that masks CNTV before EOI so the timer cannot immediately re-fire.
+#[rustfmt::skip]
+const VT_IRQ_HANDLER: [u8; 32] = [
+    0x00, 0xcc, 0x38, 0xd5, 0x01, 0x20, 0xa1, 0xd2, // mrs x0,ICC_IAR1_EL1; mov x1,#0x09000000
+    0x20, 0x00, 0x00, 0xb9, 0x3f, 0xe3, 0x1b, 0xd5, // str w0,[x1]; msr CNTV_CTL_EL0,xzr
+    0x20, 0xcc, 0x18, 0xd5, 0x00, 0x01, 0x80, 0xd2, // msr ICC_EOIR1_EL1,x0; mov x0,#8
+    0x00, 0x80, 0xb0, 0xf2, 0x02, 0x00, 0x00, 0xd4, // movk x0,#0x8400,lsl#16; hvc #0
+];
+
 /// Records the first 32-bit MMIO write to `IRQ_MARKER` — the value the guest's
 /// IRQ handler wrote (the acknowledged INTID) — and, on the guest's "GIC
 /// configured" signal (`IRQ_READY`), asserts SPI 32 from the vCPU's OWNING
@@ -636,4 +691,69 @@ fn hvf_gic_pending_irq_survives_snapshot() {
             "restored guest did not take the snapshot's pending SPI (marker={marker:#x?})"
         );
     }
+}
+
+/// Load the virtual-timer guest into a fresh RAM image. Shares the SPI guest's
+/// exception vectors and synchronous-fault reporter (byte-identical); only the
+/// boot block and IRQ handler differ.
+fn load_vtimer_guest(ram: &HostRam) {
+    ram.load(0x0000, &VT_BOOT);
+    ram.load(0x1000, &SYNC_VECTOR_0X000);
+    ram.load(0x1200, &SYNC_VECTOR_0X200);
+    ram.load(0x1280, &IRQ_VECTOR);
+    ram.load(0x1700, &SYNC_HANDLER);
+    ram.load(0x1800, &VT_IRQ_HANDLER);
+}
+
+/// Prove the EL1 virtual timer is delivered to a guest as GIC PPI 27.
+///
+/// A real kernel arms the arch virtual timer within the first instants of boot
+/// and relies on taking its interrupt to schedule, so timer-PPI delivery is the
+/// gateway to booting anything real. This guest enables PPI 27 in its own
+/// redistributor SGI frame via MMIO (exercising guest redistributor access on
+/// the managed GIC), arms `CNTV_TVAL_EL0`/`CNTV_CTL_EL0`, unmasks IRQs and
+/// spins. The test asserts the guest takes the timer through the GIC —
+/// acknowledging INTID 27 (not the spurious 1023 a raw IRQ line would yield) —
+/// then masks the timer, EOIs and powers off.
+#[test]
+fn hvf_guest_takes_virtual_timer() {
+    let ram = HostRam::new(RAM_SIZE);
+    load_vtimer_guest(&ram);
+
+    let vm_ops = Arc::new(MarkerVmOps {
+        marker: Mutex::new(Vec::new()),
+        gic: Mutex::new(None),
+        injected: Mutex::new(false),
+    });
+
+    let hv = hypervisor::new().expect("hypervisor::new() — is the test binary codesigned?");
+    let vm = hv
+        .create_vm(HypervisorVmConfig {
+            nested: false,
+            smt_enabled: false,
+        })
+        .expect("create_vm");
+    // SAFETY: ram outlives the mapping.
+    unsafe {
+        vm.create_user_memory_region(0, RAM_BASE, ram.size, ram.ptr, false, false)
+            .expect("map ram");
+    }
+
+    let config = irq_vgic_config();
+    let _gic = vm.create_vgic(&config).expect("create_vgic");
+
+    let mut vcpu = vm.create_vcpu(0, Some(vm_ops.clone())).expect("create_vcpu");
+    vcpu.setup_regs(0, RAM_BASE, 0).expect("setup_regs");
+
+    let exit = run_to_shutdown(vcpu.as_mut());
+    let marker = vm_ops.marker.lock().unwrap().clone();
+    assert!(
+        matches!(exit, VmExit::Shutdown),
+        "expected Shutdown after the timer IRQ, got {exit:?} (marker={marker:#x?})"
+    );
+    assert_eq!(
+        marker.first().copied(),
+        Some(27),
+        "guest did not take the virtual timer as GIC INTID 27 (marker={marker:#x?})"
+    );
 }
