@@ -11,6 +11,7 @@
 use log::error;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use vmm_sys_util::fam;
 ///
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
 ///
@@ -349,7 +350,7 @@ impl From<&xsave2> for XsaveState {
 }
 
 impl XsaveState {
-    pub fn to_xsave2(&self) -> Result<xsave2, vmm_sys_util::fam::Error> {
+    pub fn to_xsave2(&self) -> Result<xsave2, fam::Error> {
         let mut xsave = xsave2::new(self.extra.len())?;
         // SAFETY: `xsave` was just created via `Xsave::new()` with valid allocated memory.
         unsafe {

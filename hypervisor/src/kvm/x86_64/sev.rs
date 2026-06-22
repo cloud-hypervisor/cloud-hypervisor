@@ -7,6 +7,7 @@ use std::fs::OpenOptions;
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
+use std::result;
 
 use igvm_defs::{IGVM_VHS_SNP_ID_BLOCK, SnpPolicy};
 use kvm_bindings::kvm_sev_cmd;
@@ -15,7 +16,7 @@ use log::{debug, error, info};
 use vmm_sys_util::errno;
 use zerocopy::{FromZeros, Immutable, IntoBytes};
 
-pub(crate) type Result<T> = std::result::Result<T, errno::Error>;
+pub(crate) type Result<T> = result::Result<T, errno::Error>;
 
 // KVM SEV command IDs — linux/include/uapi/linux/kvm.h
 const KVM_SEV_INIT2: u32 = 22;

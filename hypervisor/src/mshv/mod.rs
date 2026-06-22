@@ -7,7 +7,10 @@ use std::any::Any;
 use std::collections::HashMap;
 #[cfg(feature = "sev_snp")]
 use std::num::NonZeroUsize;
+#[cfg(feature = "sev_snp")]
+use std::ptr;
 use std::sync::{Arc, RwLock};
+use std::{fs, io, result};
 
 #[cfg(target_arch = "x86_64")]
 use anyhow::Context;
@@ -38,6 +41,8 @@ use crate::arch::aarch64::regs::{
 use crate::arch::emulator::PlatformEmulator;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::emulator::Emulator;
+#[cfg(target_arch = "x86_64")]
+use crate::arch::x86::{LapicState, SpecialRegisters};
 #[cfg(target_arch = "aarch64")]
 use crate::mshv::aarch64::emulator;
 use crate::mshv::emulator::MshvEmulatorContext;
@@ -241,9 +246,9 @@ impl MshvHypervisor {
     }
     /// Check if the hypervisor is available
     pub fn is_available() -> hypervisor::Result<bool> {
-        match std::fs::metadata("/dev/mshv") {
+        match fs::metadata("/dev/mshv") {
             Ok(_) => Ok(true),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
             Err(err) => Err(hypervisor::HypervisorError::HypervisorAvailableCheck(
                 err.into(),
             )),
@@ -500,7 +505,7 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Returns the vCPU special registers.
     ///
-    fn get_sregs(&self) -> cpu::Result<crate::arch::x86::SpecialRegisters> {
+    fn get_sregs(&self) -> cpu::Result<SpecialRegisters> {
         Ok(self
             .fd
             .get_sregs()
@@ -512,7 +517,7 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Sets the vCPU special registers.
     ///
-    fn set_sregs(&self, sregs: &crate::arch::x86::SpecialRegisters) -> cpu::Result<()> {
+    fn set_sregs(&self, sregs: &SpecialRegisters) -> cpu::Result<()> {
         let sregs = (*sregs).into();
         self.fd
             .set_sregs(&sregs)
@@ -587,7 +592,7 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[expect(non_upper_case_globals)]
-    fn run(&mut self) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
+    fn run(&mut self) -> result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
         match self.fd.run() {
             Ok(x) => match x.header.message_type {
                 hv_message_type_HVMSG_X64_HALT => {
@@ -1412,7 +1417,7 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Returns the state of the LAPIC (Local Advanced Programmable Interrupt Controller).
     ///
-    fn get_lapic(&self) -> cpu::Result<crate::arch::x86::LapicState> {
+    fn get_lapic(&self) -> cpu::Result<LapicState> {
         Ok(self
             .fd
             .get_lapic()
@@ -1424,7 +1429,7 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Sets the state of the LAPIC (Local Advanced Programmable Interrupt Controller).
     ///
-    fn set_lapic(&self, lapic: &crate::arch::x86::LapicState) -> cpu::Result<()> {
+    fn set_lapic(&self, lapic: &LapicState) -> cpu::Result<()> {
         let lapic: mshv_bindings::LapicState = (*lapic).clone().into();
         self.fd
             .set_lapic(&lapic)
@@ -1696,7 +1701,7 @@ impl MshvVcpu {
     /// Clear SW_EXIT_INFO1 register for SEV-SNP guests.
     ///
     #[cfg(feature = "sev_snp")]
-    fn clear_swexit_info1(&self) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
+    fn clear_swexit_info1(&self) -> result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
         // Clear the SW_EXIT_INFO1 register to indicate no error
         // Safe to use unwrap, for sev_snp guest we already have the
         // GHCB pointer wrapped in the option, otherwise this place is not reached.
@@ -1898,7 +1903,7 @@ impl vm::Vm for MshvVm {
             // SAFETY: Safe to call as VCPU has this map already available upon creation
             let addr = unsafe {
                 libc::mmap(
-                    std::ptr::null_mut(),
+                    ptr::null_mut(),
                     HV_PAGE_SIZE,
                     libc::PROT_READ | libc::PROT_WRITE,
                     libc::MAP_SHARED,
@@ -1906,7 +1911,7 @@ impl vm::Vm for MshvVm {
                     MSHV_VP_MMAP_OFFSET_GHCB as i64 * libc::sysconf(libc::_SC_PAGE_SIZE),
                 )
             };
-            if std::ptr::eq(addr, libc::MAP_FAILED) {
+            if ptr::eq(addr, libc::MAP_FAILED) {
                 // No point of continuing, without this mmap VMGEXIT will fail anyway
                 // Return error
                 return Err(vm::HypervisorVmError::MmapToRoot);

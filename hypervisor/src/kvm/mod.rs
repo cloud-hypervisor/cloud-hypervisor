@@ -15,24 +15,35 @@ use std::collections::HashMap;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use std::mem::offset_of;
 #[cfg(feature = "sev_snp")]
+use std::num;
+#[cfg(feature = "sev_snp")]
 use std::os::fd::FromRawFd;
 use std::os::fd::OwnedFd;
+#[cfg(feature = "tdx")]
+use std::os::raw;
 #[cfg(any(feature = "sev_snp", feature = "tdx"))]
 use std::os::unix::io::AsRawFd;
 #[cfg(feature = "tdx")]
 use std::os::unix::io::RawFd;
+#[cfg(feature = "tdx")]
+use std::ptr;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use std::sync::Mutex;
+#[cfg(feature = "sev_snp")]
+use std::sync::OnceLock;
 #[cfg(target_arch = "x86_64")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 #[cfg(target_arch = "aarch64")]
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::{io, result};
+use std::{fs, io, mem, result};
 
 #[cfg(target_arch = "x86_64")]
 use anyhow::Context;
 use anyhow::anyhow;
+#[cfg(feature = "sev_snp")]
+use igvm::snp_defs::{SevSelector, SevVmsa};
+use kvm_bindings::fam_wrappers::KvmIrqRouting;
 #[cfg(feature = "sev_snp")]
 use kvm_bindings::kvm_create_guest_memfd;
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
@@ -100,8 +111,6 @@ pub mod aarch64;
 // riscv64 dependencies
 #[cfg(target_arch = "riscv64")]
 pub mod riscv64;
-#[cfg(target_arch = "aarch64")]
-use std::mem;
 
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::KVM_X86_DEFAULT_VM;
@@ -237,7 +246,7 @@ pub struct SegAccess {
 }
 
 #[cfg(feature = "sev_snp")]
-fn make_segment(sev_selector: igvm::snp_defs::SevSelector) -> Segment {
+fn make_segment(sev_selector: SevSelector) -> Segment {
     let flags = SegAccess::from_bits(sev_selector.attrib.into());
     Segment {
         base: sev_selector.base,
@@ -268,7 +277,7 @@ const TDG_VP_VMCALL_SUCCESS: u64 = 0;
 const TDG_VP_VMCALL_INVALID_OPERAND: u64 = 0x8000000000000000;
 
 #[cfg(feature = "tdx")]
-ioctl_iowr_nr!(KVM_MEMORY_ENCRYPT_OP, KVMIO, 0xba, std::os::raw::c_ulong);
+ioctl_iowr_nr!(KVM_MEMORY_ENCRYPT_OP, KVMIO, 0xba, raw::c_ulong);
 
 #[cfg(feature = "tdx")]
 #[repr(u32)]
@@ -629,7 +638,7 @@ pub struct KvmVm {
     #[cfg(feature = "sev_snp")]
     sev_fd: Option<x86_64::sev::SevFd>,
     #[cfg(feature = "sev_snp")]
-    snp_guest_policy: std::sync::OnceLock<u64>,
+    snp_guest_policy: OnceLock<u64>,
     dirty_log_slots: RwLock<HashMap<u32, KvmDirtyLogSlot>>,
     memory_slots: Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
 }
@@ -1014,7 +1023,7 @@ impl vm::Vm for KvmVm {
 
                 kvm_route.u.msi.data = cfg.data;
 
-                if self.check_extension(crate::kvm::Cap::MsiDevid) {
+                if self.check_extension(Cap::MsiDevid) {
                     // On AArch64, there is limitation on the range of the 'devid',
                     // it cannot be greater than 65536 (the max of u16).
                     //
@@ -1065,8 +1074,7 @@ impl vm::Vm for KvmVm {
             })
             .collect();
 
-        let irq_routing =
-            kvm_bindings::fam_wrappers::KvmIrqRouting::from_entries(&entries).unwrap();
+        let irq_routing = KvmIrqRouting::from_entries(&entries).unwrap();
 
         self.fd
             .set_gsi_routing(&irq_routing)
@@ -1100,7 +1108,7 @@ impl vm::Vm for KvmVm {
             flags |= KVM_MEM_LOG_DIRTY_PAGES;
         }
 
-        const _: () = assert!(core::mem::size_of::<usize>() <= core::mem::size_of::<u64>());
+        const _: () = assert!(mem::size_of::<usize>() <= mem::size_of::<u64>());
 
         // Create a per-region guest_memfd when supported.
         // Each region gets its own fd sized exactly to memory_size
@@ -1214,7 +1222,7 @@ impl vm::Vm for KvmVm {
             flags |= KVM_MEM_LOG_DIRTY_PAGES;
         }
 
-        const _: () = assert!(core::mem::size_of::<usize>() <= core::mem::size_of::<u64>());
+        const _: () = assert!(mem::size_of::<usize>() <= mem::size_of::<u64>());
 
         let mut region = kvm_userspace_memory_region2 {
             slot,
@@ -1518,13 +1526,8 @@ impl vm::Vm for KvmVm {
     ///
     #[cfg(feature = "tdx")]
     fn tdx_finalize(&self) -> vm::Result<()> {
-        tdx_command(
-            &self.fd.as_raw_fd(),
-            TdxCommand::Finalize,
-            0,
-            std::ptr::null(),
-        )
-        .map_err(vm::HypervisorVmError::FinalizeTdx)
+        tdx_command(&self.fd.as_raw_fd(), TdxCommand::Finalize, 0, ptr::null())
+            .map_err(vm::HypervisorVmError::FinalizeTdx)
     }
 
     /// Initialize memory regions for the TDX VM
@@ -1573,7 +1576,7 @@ fn tdx_command(
     command: TdxCommand,
     flags: u32,
     data: *const libc::c_void,
-) -> result::Result<(), io::Error> {
+) -> io::Result<()> {
     #[repr(C)]
     struct TdxIoctlCmd {
         command: TdxCommand,
@@ -1590,13 +1593,8 @@ fn tdx_command(
         unused: 0,
     };
     // SAFETY: FFI call. All input parameters are valid.
-    let ret = unsafe {
-        ioctl_with_val(
-            fd,
-            KVM_MEMORY_ENCRYPT_OP(),
-            &raw const cmd as std::os::raw::c_ulong,
-        )
-    };
+    let ret =
+        unsafe { ioctl_with_val(fd, KVM_MEMORY_ENCRYPT_OP(), &raw const cmd as raw::c_ulong) };
 
     if ret < 0 {
         return Err(io::Error::last_os_error());
@@ -1658,7 +1656,7 @@ impl KvmHypervisor {
 
     /// Check if the hypervisor is available
     pub fn is_available() -> hypervisor::Result<bool> {
-        match std::fs::metadata("/dev/kvm") {
+        match fs::metadata("/dev/kvm") {
             Ok(_) => Ok(true),
             Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
             Err(err) => Err(hypervisor::HypervisorError::HypervisorAvailableCheck(
@@ -1771,7 +1769,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             let sev_fd = {
                 let sev_snp_enabled = vm_type == KVM_X86_SNP_VM as u64;
                 if sev_snp_enabled {
-                    let mask = self.kvm.check_extension_int(crate::kvm::Cap::ExitHypercall);
+                    let mask = self.kvm.check_extension_int(Cap::ExitHypercall);
                     let cap = kvm_bindings::kvm_enable_cap {
                         cap: kvm_bindings::KVM_CAP_EXIT_HYPERCALL,
                         args: [mask as _, 0, 0, 0],
@@ -1797,7 +1795,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 #[cfg(feature = "sev_snp")]
                 sev_fd,
                 #[cfg(feature = "sev_snp")]
-                snp_guest_policy: std::sync::OnceLock::new(),
+                snp_guest_policy: OnceLock::new(),
                 memory_slots,
             }))
         }
@@ -2024,7 +2022,7 @@ impl cpu::Vcpu for KvmVcpu {
                 .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), &mut bytes)
                 .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
             state.regs.regs[i] = u64::from_le_bytes(bytes);
-            off += std::mem::size_of::<u64>();
+            off += mem::size_of::<u64>();
         }
 
         // We are now entering the "Other register" section of the ARMv8-a architecture.
@@ -2077,7 +2075,7 @@ impl cpu::Vcpu for KvmVcpu {
                 .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), &mut bytes)
                 .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
             state.spsr[i] = u64::from_le_bytes(bytes);
-            off += std::mem::size_of::<u64>();
+            off += mem::size_of::<u64>();
         }
 
         Ok(state.into())
@@ -2179,7 +2177,7 @@ impl cpu::Vcpu for KvmVcpu {
                     &kvm_regs_state.regs.regs[i].to_le_bytes(),
                 )
                 .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
-            off += std::mem::size_of::<u64>();
+            off += mem::size_of::<u64>();
         }
 
         let off = offset_of!(user_pt_regs, sp);
@@ -2230,7 +2228,7 @@ impl cpu::Vcpu for KvmVcpu {
                     &kvm_regs_state.spsr[i].to_le_bytes(),
                 )
                 .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
-            off += std::mem::size_of::<u64>();
+            off += mem::size_of::<u64>();
         }
 
         Ok(())
@@ -2770,7 +2768,7 @@ impl cpu::Vcpu for KvmVcpu {
         kvm_kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PSCI_0_2;
         if vm
             .as_any()
-            .downcast_ref::<crate::kvm::KvmVm>()
+            .downcast_ref::<KvmVm>()
             .unwrap()
             .check_extension(Cap::ArmPmuV3)
         {
@@ -2780,7 +2778,7 @@ impl cpu::Vcpu for KvmVcpu {
         if sve_supported
             && vm
                 .as_any()
-                .downcast_ref::<crate::kvm::KvmVm>()
+                .downcast_ref::<KvmVm>()
                 .unwrap()
                 .check_extension(Cap::ArmSve)
         {
@@ -3643,7 +3641,7 @@ impl cpu::Vcpu for KvmVcpu {
     }
 
     #[cfg(feature = "sev_snp")]
-    fn setup_sev_snp_regs(&self, vmsa: igvm::snp_defs::SevVmsa) -> cpu::Result<()> {
+    fn setup_sev_snp_regs(&self, vmsa: SevVmsa) -> cpu::Result<()> {
         let mut sregs = self
             .fd
             .get_sregs()
@@ -3667,7 +3665,7 @@ impl cpu::Vcpu for KvmVcpu {
             .idtr
             .limit
             .try_into()
-            .map_err(|e: std::num::TryFromIntError| {
+            .map_err(|e: num::TryFromIntError| {
                 cpu::HypervisorCpuError::SetSpecialRegs(anyhow!(e))
             })?;
         sregs.gdt.base = vmsa.gdtr.base;
@@ -3675,7 +3673,7 @@ impl cpu::Vcpu for KvmVcpu {
             .gdtr
             .limit
             .try_into()
-            .map_err(|e: std::num::TryFromIntError| {
+            .map_err(|e: num::TryFromIntError| {
                 cpu::HypervisorCpuError::SetSpecialRegs(anyhow!(e))
             })?;
         self.fd

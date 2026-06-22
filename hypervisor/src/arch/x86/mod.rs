@@ -12,6 +12,8 @@
 //
 
 use core::fmt;
+use std::mem;
+use std::os::raw;
 
 use thiserror::Error;
 
@@ -246,7 +248,7 @@ pub struct CpuIdEntry {
 }
 
 impl fmt::Display for CpuIdEntry {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "function = 0x{:08x} \
@@ -280,13 +282,13 @@ pub struct FpuState {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LapicState {
     #[serde_as(as = "[_; 1024usize]")]
-    pub(crate) regs: [::std::os::raw::c_char; 1024usize],
+    pub(crate) regs: [raw::c_char; 1024usize],
 }
 
 impl Default for LapicState {
     fn default() -> Self {
         // SAFETY: this is plain old data structure
-        unsafe { ::std::mem::zeroed() }
+        unsafe { mem::zeroed() }
     }
 }
 
@@ -353,7 +355,7 @@ impl Default for XsaveState {
     fn default() -> Self {
         Self {
             // SAFETY: this is plain old data structure
-            region: unsafe { std::mem::zeroed() },
+            region: unsafe { mem::zeroed() },
             extra: Vec::new(),
         }
     }

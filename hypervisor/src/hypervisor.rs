@@ -9,12 +9,15 @@
 //
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64;
+use std::result;
 use std::sync::Arc;
 
 use thiserror::Error;
 
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86::CpuIdEntry;
+use crate::arch::x86::{
+    AmxGuestSupportError, CpuIdEntry, amx_supported, request_guest_amx_support,
+};
 #[cfg(target_arch = "x86_64")]
 use crate::cpu::CpuVendor;
 #[cfg(feature = "tdx")]
@@ -95,7 +98,7 @@ pub enum HypervisorError {
     ///
     #[cfg(target_arch = "x86_64")]
     #[error("Failed to enable AMX tile state components")]
-    CouldNotEnableAmxStateComponents(#[source] crate::arch::x86::AmxGuestSupportError),
+    CouldNotEnableAmxStateComponents(#[source] AmxGuestSupportError),
     ///
     /// Failed to retrieve SEV-SNP capabilities
     ///
@@ -106,7 +109,7 @@ pub enum HypervisorError {
 ///
 /// Result type for returning from a function
 ///
-pub type Result<T> = std::result::Result<T, HypervisorError>;
+pub type Result<T> = result::Result<T, HypervisorError>;
 
 ///
 /// Trait to represent a Hypervisor
@@ -189,9 +192,7 @@ pub trait Hypervisor: Send + Sync {
     #[cfg(target_arch = "x86_64")]
     fn enable_amx_state_components(&self) -> Result<()> {
         let cpu_vendor = self.get_cpu_vendor();
-        crate::arch::x86::amx_supported(cpu_vendor)
-            .map_err(HypervisorError::CouldNotEnableAmxStateComponents)?;
-        crate::arch::x86::request_guest_amx_support()
-            .map_err(HypervisorError::CouldNotEnableAmxStateComponents)
+        amx_supported(cpu_vendor).map_err(HypervisorError::CouldNotEnableAmxStateComponents)?;
+        request_guest_amx_support().map_err(HypervisorError::CouldNotEnableAmxStateComponents)
     }
 }

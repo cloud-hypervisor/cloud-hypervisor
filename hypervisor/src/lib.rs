@@ -21,9 +21,6 @@
 //! - riscv64 (experimental)
 //!
 
-// TODO: Trim qualified paths in this crate, then drop this expectation.
-#![expect(clippy::absolute_paths)]
-
 /// Architecture specific definitions
 #[macro_use]
 pub mod arch;
@@ -48,9 +45,12 @@ mod cpu;
 /// Device related module
 mod device;
 
+use std::result;
 use std::sync::Arc;
 #[cfg(target_arch = "x86_64")]
 use std::time::SystemTime;
+#[cfg(all(target_arch = "x86_64", feature = "kvm"))]
+use std::time::UNIX_EPOCH;
 
 use anyhow::anyhow;
 use concat_idents::concat_idents;
@@ -77,7 +77,7 @@ pub enum HypervisorType {
     Mshv,
 }
 
-pub fn new() -> std::result::Result<Arc<dyn Hypervisor>, HypervisorError> {
+pub fn new() -> result::Result<Arc<dyn Hypervisor>, HypervisorError> {
     #[cfg(feature = "kvm")]
     if kvm::KvmHypervisor::is_available()? {
         return kvm::KvmHypervisor::new();
@@ -202,7 +202,7 @@ impl ClockData {
         match self {
             #[cfg(feature = "kvm")]
             ClockData::Kvm(s) => {
-                if let Ok(time_since_epoch) = realtime.duration_since(std::time::UNIX_EPOCH) {
+                if let Ok(time_since_epoch) = realtime.duration_since(UNIX_EPOCH) {
                     s.realtime = time_since_epoch.as_nanos() as u64;
                     s.flags |= kvm_bindings::KVM_CLOCK_REALTIME;
                 }
