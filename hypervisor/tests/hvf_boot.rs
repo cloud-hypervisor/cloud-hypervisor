@@ -13,6 +13,8 @@
 use std::ffi::c_void;
 use std::ptr;
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 use hypervisor::{CpuState, HypervisorVmConfig, HypervisorVmError, Vcpu, Vm, VmExit, VmOps};
 
@@ -537,9 +539,119 @@ fn hvf_guest_takes_injected_spi() {
     );
 }
 
+/// Boot the same GICv3 guest but deliver SPI 32 from a SEPARATE host thread
+/// while the vCPU thread is blocked inside `hv_vcpu_run` executing the guest's
+/// idle spin — the realistic device-model path (a device/IRQ thread asserting
+/// an interrupt asynchronously, NOT the vCPU's owning thread inside an exit
+/// handler). The injector sleeps briefly so the guest has reached its post-
+/// unmask spin, then asserts SPI 32 via the shared `Arc<Mutex<dyn Vgic>>`.
+///
+/// This closes the M2 open question of whether `hv_gic_set_spi` reaches a
+/// RUNNING vCPU's CPU interface cross-thread. A pass proves the managed GIC
+/// forwards an asynchronously-asserted SPI into a vCPU that is live in the
+/// kernel, which is the property every real device backend depends on.
+#[test]
+fn hvf_guest_takes_cross_thread_spi() {
+    let ram = HostRam::new(RAM_SIZE);
+    load_irq_guest(&ram);
+
+    // gic = None: no owning-thread injection in the MMIO exit handler. The only
+    // path to the interrupt is the cross-thread injector below.
+    let vm_ops = Arc::new(MarkerVmOps {
+        marker: Mutex::new(Vec::new()),
+        gic: Mutex::new(None),
+        injected: Mutex::new(false),
+    });
+
+    let hv = hypervisor::new().expect("hypervisor::new() — is the test binary codesigned?");
+    let vm = hv
+        .create_vm(HypervisorVmConfig {
+            nested: false,
+            smt_enabled: false,
+        })
+        .expect("create_vm");
+    // SAFETY: ram outlives the mapping.
+    unsafe {
+        vm.create_user_memory_region(0, RAM_BASE, ram.size, ram.ptr, false, false)
+            .expect("map ram");
+    }
+
+    let config = irq_vgic_config();
+    let gic = vm.create_vgic(&config).expect("create_vgic");
+
+    let mut vcpu = vm.create_vcpu(0, Some(vm_ops.clone())).expect("create_vcpu");
+    vcpu.setup_regs(0, RAM_BASE, 0).expect("setup_regs");
+
+    // Device-style injector: a different thread asserts the SPI while the vCPU
+    // is live in hv_vcpu_run. `hv_gic_set_spi` is VM-global and thread-safe, so
+    // no vCPU handle is needed. The shared GIC is Send+Sync.
+    let injector_gic = gic.clone();
+    let injector = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(150));
+        let mut guard = injector_gic.lock().unwrap();
+        let concrete = guard
+            .as_any_concrete_mut()
+            .downcast_mut::<hypervisor::hvf::gic::HvfGicV3>()
+            .expect("HVF GIC concrete type");
+        concrete
+            .set_spi(IRQ_SPI_INTID, true)
+            .expect("assert SPI 32 cross-thread");
+    });
+
+    let exit = run_to_shutdown(vcpu.as_mut());
+    injector.join().expect("injector thread");
+    let marker = vm_ops.marker.lock().unwrap().clone();
+    assert!(
+        matches!(exit, VmExit::Shutdown),
+        "expected Shutdown after the cross-thread IRQ, got {exit:?} (marker={marker:#x?})"
+    );
+    assert_eq!(
+        marker.first().copied(),
+        Some(IRQ_SPI_INTID),
+        "guest did not take the cross-thread SPI as INTID 32 (marker={marker:#x?})"
+    );
+}
+
 /// Load the GICv3 interrupt guest into a fresh RAM image.
 fn load_irq_guest(ram: &HostRam) {
     ram.load(0x0000, &IRQ_BOOT);
+    ram.load(0x1000, &SYNC_VECTOR_0X000);
+    ram.load(0x1200, &SYNC_VECTOR_0X200);
+    ram.load(0x1280, &IRQ_VECTOR);
+    ram.load(0x1700, &SYNC_HANDLER);
+    ram.load(0x1800, &IRQ_HANDLER);
+}
+
+// Boot block of the WFI-idle variant (source: session notes wfi_guest.S). It is
+// byte-identical to IRQ_BOOT through GIC setup + the IRQ unmask, then replaces
+// the bounded spin with a real `wfi; b idle` loop so the vCPU genuinely parks
+// in the kernel idle path. It shares the IRQ guest's vectors and handlers.
+#[rustfmt::skip]
+const WFI_BOOT: [u8; 152] = [
+    0x00, 0x00, 0xa8, 0xd2, 0x00, 0x00, 0x42, 0x91,
+    0x1f, 0x00, 0x00, 0x91, 0x01, 0x00, 0xa8, 0xd2,
+    0x21, 0x04, 0x40, 0x91, 0x01, 0xc0, 0x18, 0xd5,
+    0xdf, 0x3f, 0x03, 0xd5, 0x20, 0x00, 0x80, 0xd2,
+    0xa0, 0xcc, 0x18, 0xd5, 0xdf, 0x3f, 0x03, 0xd5,
+    0x00, 0x1e, 0x80, 0xd2, 0x00, 0x46, 0x18, 0xd5,
+    0x20, 0x00, 0x80, 0xd2, 0xe0, 0xcc, 0x18, 0xd5,
+    0xdf, 0x3f, 0x03, 0xd5, 0x02, 0x00, 0xa1, 0xd2,
+    0x60, 0x02, 0x80, 0x52, 0x40, 0x00, 0x00, 0xb9,
+    0x20, 0x00, 0x80, 0x52, 0x40, 0x84, 0x00, 0xb9,
+    0x5f, 0x20, 0x04, 0xb9, 0x03, 0x20, 0x8c, 0xd2,
+    0x43, 0x00, 0x03, 0x8b, 0xa4, 0x00, 0x38, 0xd5,
+    0xe5, 0xff, 0x9f, 0xd2, 0xe5, 0x1f, 0xa0, 0xf2,
+    0xe5, 0x1f, 0xc0, 0xf2, 0x84, 0x00, 0x05, 0x8a,
+    0x64, 0x00, 0x00, 0xf9, 0x20, 0x00, 0x80, 0x52,
+    0x40, 0x04, 0x01, 0xb9, 0x9f, 0x3f, 0x03, 0xd5,
+    0xdf, 0x3f, 0x03, 0xd5, 0x07, 0x40, 0xa1, 0xd2,
+    0xff, 0x00, 0x00, 0xb9, 0xff, 0x42, 0x03, 0xd5,
+    0x7f, 0x20, 0x03, 0xd5, 0xff, 0xff, 0xff, 0x17, // wfi; b idle
+];
+
+/// Load the WFI-idle GICv3 guest (WFI boot block + the shared IRQ vectors).
+fn load_wfi_guest(ram: &HostRam) {
+    ram.load(0x0000, &WFI_BOOT);
     ram.load(0x1000, &SYNC_VECTOR_0X000);
     ram.load(0x1200, &SYNC_VECTOR_0X200);
     ram.load(0x1280, &IRQ_VECTOR);
@@ -755,5 +867,107 @@ fn hvf_guest_takes_virtual_timer() {
         marker.first().copied(),
         Some(27),
         "guest did not take the virtual timer as GIC INTID 27 (marker={marker:#x?})"
+    );
+}
+
+/// Run until the guest powers off or `deadline` elapses. Unlike
+/// `run_to_shutdown` (a fixed step budget), this bounds by wall-clock so a
+/// vCPU parked in the WFI idle path cannot turn a failure into a multi-minute
+/// hang: each `run()` may block up to the backend's WFI poll interval.
+fn run_to_shutdown_deadline(vcpu: &mut dyn Vcpu, deadline: Duration) -> VmExit {
+    let start = std::time::Instant::now();
+    loop {
+        match vcpu.run().expect("vcpu run") {
+            VmExit::Ignore => {
+                if start.elapsed() > deadline {
+                    panic!("guest did not power off within {deadline:?}");
+                }
+            }
+            other => return other,
+        }
+    }
+}
+
+/// Prove the WFI idle + cross-thread wakeup path end to end on this Mac.
+///
+/// The guest configures the GIC, unmasks IRQs and parks in a real `wfi` loop —
+/// so the vCPU thread genuinely blocks in the HVF backend's idle path (EC_WFX
+/// -> wait on the wake fd), NOT a busy spin. A separate injector thread then
+/// asserts SPI 32 cross-thread via the shared GIC and `write()`s the vCPU's
+/// wake handle. The parked vCPU wakes, re-enters the guest, takes INTID 32,
+/// records it and powers off.
+///
+/// This closes the last M2 device-model gap: an asynchronously-asserted
+/// interrupt waking a vCPU that is idle in WFI — the property every real
+/// device backend (and the eventual irqfd/vmm event loop) depends on.
+#[test]
+fn hvf_guest_wfi_woken_by_cross_thread_irq() {
+    let ram = HostRam::new(RAM_SIZE);
+    load_wfi_guest(&ram);
+
+    // gic = None: no owning-thread injection. The only path to the interrupt is
+    // the cross-thread injector, which must also wake the parked vCPU.
+    let vm_ops = Arc::new(MarkerVmOps {
+        marker: Mutex::new(Vec::new()),
+        gic: Mutex::new(None),
+        injected: Mutex::new(false),
+    });
+
+    let hv = hypervisor::new().expect("hypervisor::new() — is the test binary codesigned?");
+    let vm = hv
+        .create_vm(HypervisorVmConfig {
+            nested: false,
+            smt_enabled: false,
+        })
+        .expect("create_vm");
+    // SAFETY: ram outlives the mapping.
+    unsafe {
+        vm.create_user_memory_region(0, RAM_BASE, ram.size, ram.ptr, false, false)
+            .expect("map ram");
+    }
+
+    let config = irq_vgic_config();
+    let gic = vm.create_vgic(&config).expect("create_vgic");
+
+    let mut vcpu = vm.create_vcpu(0, Some(vm_ops.clone())).expect("create_vcpu");
+    vcpu.setup_regs(0, RAM_BASE, 0).expect("setup_regs");
+
+    // Obtain the vCPU's wake handle before running. A device/IRQ thread holds it
+    // alongside the GIC and signals it right after asserting an interrupt.
+    let wake = vcpu
+        .as_any_concrete_mut()
+        .downcast_mut::<hypervisor::hvf::HvfVcpu>()
+        .expect("HVF vCPU concrete type")
+        .wake_handle();
+
+    let injector_gic = gic.clone();
+    let injector = thread::spawn(move || {
+        // Let the guest reach its WFI park first.
+        thread::sleep(Duration::from_millis(150));
+        {
+            let mut guard = injector_gic.lock().unwrap();
+            let concrete = guard
+                .as_any_concrete_mut()
+                .downcast_mut::<hypervisor::hvf::gic::HvfGicV3>()
+                .expect("HVF GIC concrete type");
+            concrete
+                .set_spi(IRQ_SPI_INTID, true)
+                .expect("assert SPI 32 cross-thread");
+        }
+        // Wake the parked vCPU thread.
+        wake.write(1).expect("kick vCPU wake fd");
+    });
+
+    let exit = run_to_shutdown_deadline(vcpu.as_mut(), Duration::from_secs(5));
+    injector.join().expect("injector thread");
+    let marker = vm_ops.marker.lock().unwrap().clone();
+    assert!(
+        matches!(exit, VmExit::Shutdown),
+        "expected Shutdown after the WFI wakeup IRQ, got {exit:?} (marker={marker:#x?})"
+    );
+    assert_eq!(
+        marker.first().copied(),
+        Some(IRQ_SPI_INTID),
+        "guest did not take the cross-thread SPI as INTID 32 after WFI (marker={marker:#x?})"
     );
 }

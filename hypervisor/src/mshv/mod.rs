@@ -1667,6 +1667,10 @@ impl cpu::Vcpu for MshvVcpu {
 
         Ok(())
     }
+
+    fn as_any_concrete_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 impl MshvVcpu {

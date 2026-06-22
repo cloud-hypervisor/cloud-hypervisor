@@ -28,12 +28,22 @@ mod macos {
 
     pub const EFD_NONBLOCK: i32 = O_NONBLOCK;
 
+    const POLLIN: i16 = 0x0001;
+
+    #[repr(C)]
+    struct PollFd {
+        fd: RawFd,
+        events: i16,
+        revents: i16,
+    }
+
     unsafe extern "C" {
         fn pipe(fds: *mut i32) -> i32;
         fn read(fd: i32, buf: *mut core::ffi::c_void, n: usize) -> isize;
         fn write(fd: i32, buf: *const core::ffi::c_void, n: usize) -> isize;
         fn close(fd: i32) -> i32;
         fn fcntl(fd: i32, cmd: i32, arg: i32) -> i32;
+        fn poll(fds: *mut PollFd, nfds: u32, timeout: i32) -> i32;
     }
 
     struct Inner {
@@ -103,6 +113,18 @@ mod macos {
         }
 
         pub fn read(&self) -> io::Result<u64> {
+            self.drain_pipe();
+            let v = self.inner.count.swap(0, Ordering::SeqCst);
+            if v == 0 {
+                Err(io::Error::from(io::ErrorKind::WouldBlock))
+            } else {
+                Ok(v)
+            }
+        }
+
+        /// Drain any readable bytes from the self-pipe. `rd` is non-blocking, so
+        /// `read(2)` returns `-1`/`WouldBlock` (n <= 0) once the pipe is empty.
+        fn drain_pipe(&self) {
             let mut buf = [0u8; 64];
             loop {
                 // SAFETY: reading into a valid local buffer from our pipe.
@@ -111,12 +133,40 @@ mod macos {
                     break;
                 }
             }
+        }
+
+        /// Block until the counter is non-zero (a `write` happened) or
+        /// `timeout_ms` elapses, then atomically take and return the counter
+        /// (0 on timeout). A negative `timeout_ms` blocks indefinitely.
+        ///
+        /// This is the wakeup primitive the HVF backend parks a WFI-idling vCPU
+        /// on: a device/IRQ thread asserts an interrupt and `write()`s here to
+        /// wake the vCPU thread. The non-semaphore counter semantics make the
+        /// wakeup race-free — a `write` that lands before this call leaves the
+        /// counter non-zero, so the fast path returns immediately and no wakeup
+        /// is lost.
+        pub fn wait_timeout(&self, timeout_ms: i32) -> io::Result<u64> {
+            // Fast path: already signaled (write landed before we parked).
             let v = self.inner.count.swap(0, Ordering::SeqCst);
-            if v == 0 {
-                Err(io::Error::from(io::ErrorKind::WouldBlock))
-            } else {
-                Ok(v)
+            if v != 0 {
+                self.drain_pipe();
+                return Ok(v);
             }
+            let mut pfd = PollFd {
+                fd: self.inner.rd,
+                events: POLLIN,
+                revents: 0,
+            };
+            // SAFETY: single valid pollfd for the lifetime of the call.
+            let r = unsafe { poll(&mut pfd as *mut PollFd, 1, timeout_ms) };
+            if r < 0 {
+                let e = io::Error::last_os_error();
+                if e.kind() != io::ErrorKind::Interrupted {
+                    return Err(e);
+                }
+            }
+            self.drain_pipe();
+            Ok(self.inner.count.swap(0, Ordering::SeqCst))
         }
 
         pub fn try_clone(&self) -> io::Result<EventFd> {

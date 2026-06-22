@@ -29,6 +29,7 @@ use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
+use crate::compat::{EFD_NONBLOCK, EventFd};
 use crate::cpu::{HypervisorCpuError, Vcpu, VmExit};
 use crate::vm::{DataMatch, HypervisorVmError, InterruptSourceConfig, Vm, VmOps};
 use crate::{
@@ -43,6 +44,12 @@ use gic::HvfGicV3;
 
 type CpuResult<T> = std::result::Result<T, HypervisorCpuError>;
 type VmResult<T> = std::result::Result<T, HypervisorVmError>;
+
+/// Re-evaluation cadence (milliseconds) for a vCPU parked on WFI with no kick.
+/// A cross-thread interrupt wakes the vCPU immediately via its wake fd; this
+/// bound only caps how long a kick-less wakeup source (e.g. a virtual-timer
+/// deadline) can wait, and guarantees a parked vCPU can never wedge.
+const WFI_IDLE_POLL_MS: i32 = 100;
 
 // ---------------------------------------------------------------------------
 // Neutral state payloads carried by the `hypervisor` crate enums.
@@ -224,11 +231,15 @@ impl Vm for HvfVm {
             )));
         }
         self.vcpu_created.store(true, Ordering::SeqCst);
+        let kick = EventFd::new(EFD_NONBLOCK).map_err(|e| {
+            HypervisorVmError::CreateVcpu(anyhow!("failed to create vCPU wake fd: {e}"))
+        })?;
         Ok(Box::new(HvfVcpu {
             id: vcpu_id,
             index: id,
             exit,
             vm_ops,
+            kick,
         }))
     }
 
@@ -388,6 +399,11 @@ pub struct HvfVcpu {
     index: u32,
     exit: *mut HvVcpuExit,
     vm_ops: Option<Arc<dyn VmOps>>,
+    /// Wakeup primitive for the WFI idle path. When the guest executes WFI and
+    /// no interrupt is yet deliverable, the vCPU thread parks on this fd; a
+    /// device/IRQ thread that asserts an interrupt cross-thread calls
+    /// `write()` (via a clone from `wake_handle()`) to wake it promptly.
+    kick: EventFd,
 }
 
 // SAFETY: HVF requires a vCPU to be created and run on the same thread; the VMM
@@ -407,6 +423,16 @@ impl Drop for HvfVcpu {
 }
 
 impl HvfVcpu {
+    /// Return a clonable handle to this vCPU's WFI wakeup fd. A device/IRQ
+    /// thread holds it (alongside the shared GIC) and `write()`s it right after
+    /// asserting an interrupt to wake the vCPU from a blocked WFI promptly. Safe
+    /// to call cross-thread; the underlying fd/counter is `Arc`-shared.
+    pub fn wake_handle(&self) -> EventFd {
+        self.kick
+            .try_clone()
+            .expect("clone of the vCPU wake fd cannot fail")
+    }
+
     fn set_reg(&self, reg: u32, val: u64) -> CpuResult<()> {
         // SAFETY: FFI on the owning thread.
         let ret = unsafe { hv_vcpu_set_reg(self.id, reg, val) };
@@ -747,12 +773,22 @@ impl Vcpu for HvfVcpu {
                         // interrupt the GIC has since made pending (an asserted
                         // SPI or the virtual timer) is taken. ESR bit0 (TI)
                         // distinguishes WFE from WFI; both are treated the same.
-                        // NOTE: this only handles the trapped-WFx exit. The
-                        // blocked-in-kernel WFI wakeup path (which would need an
-                        // explicit hv_vcpus_exit kick after a cross-thread
-                        // injection) is not yet exercised or verified.
+                        //
+                        // Apple HVF returns WFx to the host rather than blocking
+                        // in-kernel, so we implement the idle here: park the vCPU
+                        // thread on its wake fd instead of busy-spinning. A
+                        // device/IRQ thread that asserts an interrupt
+                        // cross-thread wakes us via `wake_handle().write()`; the
+                        // bounded timeout also re-evaluates the GIC periodically
+                        // (e.g. for a virtual-timer deadline) so a missing kick
+                        // can never wedge the vCPU. On wake we return Ignore and
+                        // re-enter the guest, which takes any now-pending IRQ or
+                        // re-executes WFI and parks again.
                         let pc = self.get_reg(HV_REG_PC)?;
                         self.set_reg(HV_REG_PC, pc.wrapping_add(4))?;
+                        // Park until kicked or the poll interval elapses; a
+                        // failed wait just falls through to a guest re-entry.
+                        let _ = self.kick.wait_timeout(WFI_IDLE_POLL_MS);
                         Ok(VmExit::Ignore)
                     }
                     EC_HVC64 => {
@@ -797,5 +833,9 @@ impl Vcpu for HvfVcpu {
                 "unexpected HVF exit reason: {other}"
             ))),
         }
+    }
+
+    fn as_any_concrete_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }

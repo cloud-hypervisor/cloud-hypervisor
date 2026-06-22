@@ -3244,6 +3244,10 @@ impl cpu::Vcpu for KvmVcpu {
         self.fd.set_kvm_immediate_exit(exit.into());
     }
 
+    fn as_any_concrete_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     ///
     /// Returns the details about TDX exit reason
     ///

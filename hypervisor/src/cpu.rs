@@ -628,4 +628,12 @@ pub trait Vcpu: Send + Sync {
     /// Trigger NMI interrupt
     ///
     fn nmi(&self) -> Result<()>;
+
+    ///
+    /// Downcast to the concrete backend vCPU type.
+    ///
+    /// Mirrors `Vgic::as_any_concrete_mut`; lets backend-specific extensions
+    /// (e.g. the HVF idle wake handle) be reached through a `dyn Vcpu`.
+    ///
+    fn as_any_concrete_mut(&mut self) -> &mut dyn std::any::Any;
 }
