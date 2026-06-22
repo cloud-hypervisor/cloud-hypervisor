@@ -3,17 +3,14 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-// TODO: Trim qualified paths in this crate, then drop this expectation.
-#![expect(clippy::absolute_paths)]
-
 #[cfg(test)]
 #[path = "../test_util.rs"]
 mod test_util;
 
-use std::io::Read;
+use std::io::{self, Read};
 use std::marker::PhantomData;
 use std::os::unix::net::UnixStream;
-use std::process;
+use std::{error, fs, iter, num, process};
 
 use api_client::{
     Error as ApiClientError, simple_api_command, simple_api_command_with_fds,
@@ -25,13 +22,14 @@ use clap::{Arg, ArgMatches, Command};
 use log::error;
 use option_parser::{ByteSized, ByteSizedParseError};
 use thiserror::Error;
-use vmm::config::RestoreConfig;
+use vmm::api;
+use vmm::config::{self, RestoreConfig};
 use vmm::vm_config::{
     DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
     UserDeviceConfig, VdpaConfig, VsockConfig,
 };
 #[cfg(feature = "dbus_api")]
-use zbus::{proxy, zvariant::Optional};
+use zbus::{blocking::Connection, proxy, zvariant::Optional};
 
 type ApiResult = Result<(), Error>;
 
@@ -43,41 +41,41 @@ enum Error {
     #[error("dbus api client error")]
     DBusApiClient(#[source] zbus::Error),
     #[error("Error parsing CPU count")]
-    InvalidCpuCount(#[source] std::num::ParseIntError),
+    InvalidCpuCount(#[source] num::ParseIntError),
     #[error("Error parsing memory size")]
     InvalidMemorySize(#[source] ByteSizedParseError),
     #[error("Error parsing balloon size")]
     InvalidBalloonSize(#[source] ByteSizedParseError),
     #[error("Error parsing device syntax")]
-    AddDeviceConfig(#[source] vmm::config::Error),
+    AddDeviceConfig(#[source] config::Error),
     #[error("Error parsing disk syntax")]
-    AddDiskConfig(#[source] vmm::config::Error),
+    AddDiskConfig(#[source] config::Error),
     #[error("Error parsing filesystem syntax")]
-    AddFsConfig(#[source] vmm::config::Error),
+    AddFsConfig(#[source] config::Error),
     #[error("Error parsing generic vhost-user syntax")]
-    AddGenericVhostUserConfig(#[source] vmm::config::Error),
+    AddGenericVhostUserConfig(#[source] config::Error),
     #[error("Error parsing persistent memory syntax")]
-    AddPmemConfig(#[source] vmm::config::Error),
+    AddPmemConfig(#[source] config::Error),
     #[error("Error parsing network syntax")]
-    AddNetConfig(#[source] vmm::config::Error),
+    AddNetConfig(#[source] config::Error),
     #[error("Error parsing user device syntax")]
-    AddUserDeviceConfig(#[source] vmm::config::Error),
+    AddUserDeviceConfig(#[source] config::Error),
     #[error("Error parsing vDPA device syntax")]
-    AddVdpaConfig(#[source] vmm::config::Error),
+    AddVdpaConfig(#[source] config::Error),
     #[error("Error parsing vsock syntax")]
-    AddVsockConfig(#[source] vmm::config::Error),
+    AddVsockConfig(#[source] config::Error),
     #[error("Error parsing restore syntax")]
-    Restore(#[source] vmm::config::Error),
+    Restore(#[source] config::Error),
     #[error("Error reading from stdin")]
-    ReadingStdin(#[source] std::io::Error),
+    ReadingStdin(#[source] io::Error),
     #[error("Error reading from file")]
-    ReadingFile(#[source] std::io::Error),
+    ReadingFile(#[source] io::Error),
     #[error("Invalid disk size")]
     InvalidDiskSize(#[source] ByteSizedParseError),
     #[error("Error parsing receive migration configuration")]
-    ReceiveMigrationConfig(#[from] vmm::api::VmReceiveMigrationConfigError),
+    ReceiveMigrationConfig(#[from] api::VmReceiveMigrationConfigError),
     #[error("Error parsing send migration configuration")]
-    SendMigrationConfig(#[from] vmm::api::VmSendMigrationConfigError),
+    SendMigrationConfig(#[from] api::VmSendMigrationConfigError),
 }
 
 enum TargetApi<'a> {
@@ -127,9 +125,9 @@ trait DBusApi1 {
 impl<'a> DBusApi1ProxyBlocking<'a> {
     fn new_connection(name: &'a str, path: &'a str, system_bus: bool) -> Result<Self, zbus::Error> {
         let connection = if system_bus {
-            zbus::blocking::Connection::system()?
+            Connection::system()?
         } else {
-            zbus::blocking::Connection::session()?
+            Connection::session()?
         };
 
         Self::builder(&connection)
@@ -808,7 +806,7 @@ fn resize_config(
         None
     };
 
-    let resize = vmm::api::VmResizeData {
+    let resize = api::VmResizeData {
         desired_vcpus,
         desired_ram,
         desired_balloon,
@@ -818,7 +816,7 @@ fn resize_config(
 }
 
 fn resize_disk_config(id: &str, size: &str) -> Result<String, Error> {
-    let resize_disk = vmm::api::VmResizeDiskData {
+    let resize_disk = api::VmResizeDiskData {
         id: id.to_owned(),
         desired_size: size.parse::<ByteSized>().map_err(Error::InvalidDiskSize)?.0,
     };
@@ -827,7 +825,7 @@ fn resize_disk_config(id: &str, size: &str) -> Result<String, Error> {
 }
 
 fn resize_zone_config(id: &str, size: &str) -> Result<String, Error> {
-    let resize_zone = vmm::api::VmResizeZoneData {
+    let resize_zone = api::VmResizeZoneData {
         id: id.to_owned(),
         desired_ram: size
             .parse::<ByteSized>()
@@ -863,7 +861,7 @@ fn add_user_device_config(config: &str) -> Result<String, Error> {
 }
 
 fn remove_device_config(id: &str) -> String {
-    let remove_device_data = vmm::api::VmRemoveDeviceData { id: id.to_owned() };
+    let remove_device_data = api::VmRemoveDeviceData { id: id.to_owned() };
 
     serde_json::to_string(&remove_device_data).unwrap()
 }
@@ -925,7 +923,7 @@ fn add_vsock_config(config: &str) -> Result<String, Error> {
 }
 
 fn snapshot_config(url: &str) -> String {
-    let snapshot_config = vmm::api::VmSnapshotConfig {
+    let snapshot_config = api::VmSnapshotConfig {
         destination_url: String::from(url),
     };
 
@@ -949,7 +947,7 @@ fn restore_config(config: &str) -> Result<(String, Vec<i32>), Error> {
 }
 
 fn coredump_config(destination_url: &str) -> String {
-    let coredump_config = vmm::api::VmCoredumpData {
+    let coredump_config = api::VmCoredumpData {
         destination_url: String::from(destination_url),
     };
 
@@ -958,13 +956,13 @@ fn coredump_config(destination_url: &str) -> String {
 
 fn receive_migration_data(config: &str) -> Result<String, Error> {
     let receive_migration_data =
-        vmm::api::VmReceiveMigrationData::parse(config).map_err(Error::ReceiveMigrationConfig)?;
+        api::VmReceiveMigrationData::parse(config).map_err(Error::ReceiveMigrationConfig)?;
     Ok(serde_json::to_string(&receive_migration_data).unwrap())
 }
 
 fn send_migration_data(config: &str) -> Result<String, Error> {
     let send_migration_data =
-        vmm::api::VmSendMigrationData::parse(config).map_err(Error::SendMigrationConfig)?;
+        api::VmSendMigrationData::parse(config).map_err(Error::SendMigrationConfig)?;
     let send_migration_config = serde_json::to_string(&send_migration_data).unwrap();
     Ok(send_migration_config)
 }
@@ -972,11 +970,11 @@ fn send_migration_data(config: &str) -> Result<String, Error> {
 fn create_data(path: &str) -> Result<String, Error> {
     let mut data = String::default();
     if path == "-" {
-        std::io::stdin()
+        io::stdin()
             .read_to_string(&mut data)
             .map_err(Error::ReadingStdin)?;
     } else {
-        data = std::fs::read_to_string(path).map_err(Error::ReadingFile)?;
+        data = fs::read_to_string(path).map_err(Error::ReadingFile)?;
     }
 
     Ok(data)
@@ -1027,28 +1025,20 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
             .arg(Arg::new("disk_config").index(1).help(DiskConfig::SYNTAX)),
         Command::new("add-fs")
             .about("Add virtio-fs backed fs device")
-            .arg(
-                Arg::new("fs_config")
-                    .index(1)
-                    .help(vmm::vm_config::FsConfig::SYNTAX),
-            ),
+            .arg(Arg::new("fs_config").index(1).help(FsConfig::SYNTAX)),
         Command::new("add-generic-vhost-user")
             .about("Add generic vhost-user device")
             .arg(
                 Arg::new("generic_vhost_user_config")
                     .index(1)
-                    .help(vmm::vm_config::GenericVhostUserConfig::SYNTAX),
+                    .help(GenericVhostUserConfig::SYNTAX),
             ),
         Command::new("add-net")
             .about("Add network device")
             .arg(Arg::new("net_config").index(1).help(NetConfig::SYNTAX)),
         Command::new("add-pmem")
             .about("Add persistent memory device")
-            .arg(
-                Arg::new("pmem_config")
-                    .index(1)
-                    .help(vmm::vm_config::PmemConfig::SYNTAX),
-            ),
+            .arg(Arg::new("pmem_config").index(1).help(PmemConfig::SYNTAX)),
         Command::new("add-user-device")
             .about("Add userspace device")
             .arg(
@@ -1082,7 +1072,7 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
             .arg(
                 Arg::new("receive_migration_config")
                     .index(1)
-                    .help(vmm::api::VmReceiveMigrationData::SYNTAX),
+                    .help(api::VmReceiveMigrationData::SYNTAX),
             ),
         Command::new("remove-device")
             .about("Remove VFIO and PCI device")
@@ -1149,7 +1139,7 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
             .arg(
                 Arg::new("send_migration_config")
                     .index(1)
-                    .help(vmm::api::VmSendMigrationData::SYNTAX),
+                    .help(api::VmSendMigrationData::SYNTAX),
             ),
         Command::new("shutdown").about("Shutdown the VM"),
         Command::new("shutdown-vmm").about("Shutdown the VMM"),
@@ -1252,7 +1242,7 @@ fn main() {
         fn server_api_error_display_modifier(
             level: usize,
             indention: usize,
-            error: &(dyn std::error::Error + 'static),
+            error: &(dyn error::Error + 'static),
         ) -> Option<String> {
             if let Some(api_client::Error::ServerResponse(status_code, body)) =
                 error.downcast_ref::<api_client::Error>()
@@ -1273,7 +1263,7 @@ fn main() {
                 let error_status = format!("Server responded with {status_code:?}");
                 // Prepend the error status line to the lines iter.
                 let lines =
-                    std::iter::once(error_status.as_str()).chain(lines.iter().map(|s| s.as_str()));
+                    iter::once(error_status.as_str()).chain(lines.iter().map(|s| s.as_str()));
                 let error_msg_multiline = lines
                     .enumerate()
                     .map(|(index, error_msg)| (index + level, error_msg))
@@ -1291,7 +1281,7 @@ fn main() {
             None
         }
 
-        let top_error: &dyn std::error::Error = &top_error;
+        let top_error: &dyn error::Error = &top_error;
         cloud_hypervisor::cli_print_error_chain(
             top_error,
             "ch-remote",
