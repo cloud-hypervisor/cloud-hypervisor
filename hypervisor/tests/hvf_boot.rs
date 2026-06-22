@@ -805,6 +805,136 @@ fn hvf_gic_pending_irq_survives_snapshot() {
     }
 }
 
+/// Prove the KVM⇄HVF register translation (M3) preserves a *real, executable*
+/// vCPU state on this Mac — the foundation of rehydrating a cloud arm64 KVM
+/// snapshot locally.
+///
+/// Same shape as `hvf_gic_pending_irq_survives_snapshot`, but in Phase B the
+/// captured HVF vCPU state is lowered to its KVM ONE_REG representation
+/// (`lower_to_kvm`) and raised back (`raise_from_kvm`) before restore. If the
+/// translation drops or corrupts any load-bearing register — a GPR, PC, PSTATE,
+/// SP, an EL1 system register, or a per-vCPU GIC CPU-interface (ICC) register —
+/// the restored guest would fault or fail to take the pending SPI. It instead
+/// resumes at the unmask, takes INTID 32 purely from translated+restored state,
+/// and powers off. (The GIC distributor/redistributor blob is restored
+/// unchanged; its KVM-format translation is the remaining M3 work.)
+#[test]
+fn hvf_kvm_register_translation_roundtrip() {
+    use hypervisor::hvf::translate::{lower_to_kvm, raise_from_kvm};
+
+    let config = irq_vgic_config();
+
+    // Phase A: capture a vCPU + GIC snapshot with SPI 32 pending but untaken.
+    let vcpu_snap: CpuState;
+    let gic_snap: hypervisor::arch::aarch64::gic::GicState;
+    {
+        let ram = HostRam::new(RAM_SIZE);
+        load_irq_guest(&ram);
+        let vm_ops = Arc::new(MarkerVmOps {
+            marker: Mutex::new(Vec::new()),
+            gic: Mutex::new(None),
+            injected: Mutex::new(false),
+        });
+
+        let hv = hypervisor::new().expect("hypervisor::new() — is the test binary codesigned?");
+        let vm = hv
+            .create_vm(HypervisorVmConfig {
+                nested: false,
+                smt_enabled: false,
+            })
+            .expect("create_vm");
+        // SAFETY: ram outlives the mapping.
+        unsafe {
+            vm.create_user_memory_region(0, RAM_BASE, ram.size, ram.ptr, false, false)
+                .expect("map ram");
+        }
+        let gic = vm.create_vgic(&config).expect("create_vgic");
+        *vm_ops.gic.lock().unwrap() = Some(gic.clone());
+
+        let mut vcpu = vm.create_vcpu(0, Some(vm_ops.clone())).expect("create_vcpu");
+        vcpu.setup_regs(0, RAM_BASE, 0).expect("setup_regs");
+
+        loop {
+            let exit = vcpu.run().expect("vcpu run");
+            assert!(matches!(exit, VmExit::Ignore), "unexpected early exit {exit:?}");
+            if *vm_ops.injected.lock().unwrap() {
+                break;
+            }
+        }
+        assert!(
+            vm_ops.marker.lock().unwrap().is_empty(),
+            "guest took the IRQ before the snapshot point"
+        );
+
+        vcpu_snap = vcpu.state().expect("capture vCPU state");
+        gic_snap = gic.lock().unwrap().state().expect("capture GIC state");
+    }
+
+    // Translate the captured HVF vCPU state through the KVM representation.
+    #[allow(irrefutable_let_patterns)]
+    let CpuState::Hvf(hvf_state) = vcpu_snap
+    else {
+        panic!("expected an HVF CpuState");
+    };
+    let kvm = lower_to_kvm(&hvf_state);
+    // Sanity: the translation actually carried the GIC CPU-interface state that
+    // makes the pending SPI deliverable (PMR/IGRPEN1 live in the ICC block).
+    assert!(
+        !kvm.gic_icc.is_empty(),
+        "translation lost the per-vCPU GIC ICC registers"
+    );
+    let translated = CpuState::Hvf(raise_from_kvm(&kvm));
+
+    // Phase B: brand-new VM. Restore the TRANSLATED vCPU state + the GIC blob.
+    {
+        let ram = HostRam::new(RAM_SIZE);
+        load_irq_guest(&ram);
+        let vm_ops = Arc::new(MarkerVmOps {
+            marker: Mutex::new(Vec::new()),
+            gic: Mutex::new(None),
+            injected: Mutex::new(false),
+        });
+
+        let hv = hypervisor::new().expect("hypervisor::new() — is the test binary codesigned?");
+        let vm = hv
+            .create_vm(HypervisorVmConfig {
+                nested: false,
+                smt_enabled: false,
+            })
+            .expect("create_vm");
+        // SAFETY: ram outlives the mapping.
+        unsafe {
+            vm.create_user_memory_region(0, RAM_BASE, ram.size, ram.ptr, false, false)
+                .expect("map ram");
+        }
+        let gic = vm.create_vgic(&config).expect("create_vgic");
+
+        let mut vcpu = vm.create_vcpu(0, Some(vm_ops.clone())).expect("create_vcpu");
+        vcpu.set_state(&translated)
+            .expect("restore translated vCPU state");
+        gic.lock()
+            .unwrap()
+            .set_state(&gic_snap)
+            .expect("restore GIC state");
+
+        let exit = run_to_shutdown(vcpu.as_mut());
+        let marker = vm_ops.marker.lock().unwrap().clone();
+        assert!(
+            !*vm_ops.injected.lock().unwrap(),
+            "Phase B must not re-inject; delivery must come from translated state"
+        );
+        assert!(
+            matches!(exit, VmExit::Shutdown),
+            "expected Shutdown after the translated+restored IRQ, got {exit:?}"
+        );
+        assert_eq!(
+            marker.first().copied(),
+            Some(IRQ_SPI_INTID),
+            "translated guest did not take the pending SPI (marker={marker:#x?})"
+        );
+    }
+}
+
 /// Load the virtual-timer guest into a fresh RAM image. Shares the SPI guest's
 /// exception vectors and synchronous-fault reporter (byte-identical); only the
 /// boot block and IRQ handler differ.

@@ -41,6 +41,7 @@ mod ffi;
 use ffi::*;
 pub mod gic;
 use gic::HvfGicV3;
+pub mod translate;
 
 type CpuResult<T> = std::result::Result<T, HypervisorCpuError>;
 type VmResult<T> = std::result::Result<T, HypervisorVmError>;
