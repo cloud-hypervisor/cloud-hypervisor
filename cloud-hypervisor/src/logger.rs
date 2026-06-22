@@ -3,10 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::io::Write;
+use std::io::{self, Write};
 use std::str::FromStr;
 use std::sync::Mutex;
 use std::time::Instant;
+use std::{mem, process, thread};
 
 use jiff::tz::TimeZone;
 use thiserror::Error;
@@ -119,7 +120,7 @@ fn write_time_field<W: Write + ?Sized>(
     out: &mut W,
     field: TimeField,
     zoned: &jiff::Zoned,
-) -> std::io::Result<()> {
+) -> io::Result<()> {
     match field {
         TimeField::Year => write!(out, "{:04}", zoned.year()),
         TimeField::Month => write!(out, "{:02}", zoned.month()),
@@ -147,7 +148,7 @@ fn parse_format(fmt: &str) -> Result<Vec<Token>, Error> {
                 }
 
                 if !literal.is_empty() {
-                    tokens.push(Token::Literal(std::mem::take(&mut literal)));
+                    tokens.push(Token::Literal(mem::take(&mut literal)));
                 }
 
                 let mut name = String::new();
@@ -196,7 +197,7 @@ impl Logger {
         Ok(Self {
             output: Mutex::new(output),
             start: Instant::now(),
-            pid: std::process::id(),
+            pid: process::id(),
             tokens: parse_format(format)?,
             local_tz: TimeZone::try_system().unwrap_or(TimeZone::UTC),
         })
@@ -225,15 +226,13 @@ impl log::Log for Logger {
                 // 10: 6 decimal places + sep => whole seconds in range `0..=999` properly aligned
                 Token::BootTime => write!(&mut *out, "{duration_s:>10.6?}"),
                 Token::WallClock => {
-                    let zoned = zoned_utc.get_or_insert_with(|| {
-                        jiff::Timestamp::now().to_zoned(jiff::tz::TimeZone::UTC)
-                    });
+                    let zoned = zoned_utc
+                        .get_or_insert_with(|| jiff::Timestamp::now().to_zoned(TimeZone::UTC));
                     write!(&mut *out, "{:.6}", zoned.timestamp())
                 }
                 Token::Glog => {
-                    let zoned = zoned_utc.get_or_insert_with(|| {
-                        jiff::Timestamp::now().to_zoned(jiff::tz::TimeZone::UTC)
-                    });
+                    let zoned = zoned_utc
+                        .get_or_insert_with(|| jiff::Timestamp::now().to_zoned(TimeZone::UTC));
                     write!(&mut *out, "{}", zoned.strftime("%m%d %H:%M:%S%.6f"))
                 }
                 Token::LocalGlog => {
@@ -248,7 +247,7 @@ impl log::Log for Logger {
                 Token::Thread => write!(
                     &mut *out,
                     "{}",
-                    std::thread::current().name().unwrap_or("anonymous")
+                    thread::current().name().unwrap_or("anonymous")
                 ),
                 Token::Level => write!(&mut *out, "{}", record.level()),
                 Token::LevelChar => write!(&mut *out, "{}", level_char(record.level())),
@@ -259,9 +258,8 @@ impl log::Log for Logger {
                 Token::Msg => write!(&mut *out, "{}", record.args()),
                 Token::Time(field, zone) => {
                     let zoned = match zone {
-                        Zone::Utc => zoned_utc.get_or_insert_with(|| {
-                            jiff::Timestamp::now().to_zoned(jiff::tz::TimeZone::UTC)
-                        }),
+                        Zone::Utc => zoned_utc
+                            .get_or_insert_with(|| jiff::Timestamp::now().to_zoned(TimeZone::UTC)),
                         Zone::Local => zoned_local.get_or_insert_with(|| {
                             jiff::Timestamp::now().to_zoned(self.local_tz.clone())
                         }),
@@ -656,7 +654,7 @@ mod tests {
 
         let out = buf.contents();
         let out = out.trim();
-        assert_eq!(out, std::process::id().to_string(), "got: {out}");
+        assert_eq!(out, process::id().to_string(), "got: {out}");
     }
 
     #[test]

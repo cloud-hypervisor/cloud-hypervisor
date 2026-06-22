@@ -3,17 +3,17 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-// TODO: Trim qualified paths in this crate, then drop this expectation.
-#![expect(clippy::absolute_paths)]
-
 mod logger;
 #[cfg(test)]
 mod test_util;
 
-use std::fs::File;
+use std::fs::{self, File};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::path::Path;
+#[cfg(feature = "guest_debug")]
+use std::path::PathBuf;
 use std::sync::mpsc::channel;
-use std::{env, io};
+use std::{any, cmp, env, io, num, process};
 
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use event_monitor::event;
@@ -22,13 +22,16 @@ use log::{LevelFilter, error, info, warn};
 use option_parser::OptionParser;
 use seccompiler::SeccompAction;
 use signal_hook::consts::SIGSYS;
+use signal_hook::low_level;
 use thiserror::Error;
-use vmm::api::ApiAction;
+use vm_migration::protocol;
 #[cfg(feature = "dbus_api")]
 use vmm::api::dbus::{DBusApiOptions, dbus_api_graceful_shutdown};
 use vmm::api::http::http_api_graceful_shutdown;
-use vmm::config::{RestoreConfig, VmParams};
+use vmm::api::{self, ApiAction};
+use vmm::config::{self, RestoreConfig, VmParams};
 use vmm::landlock::{Landlock, LandlockError};
+use vmm::vm::Vm;
 use vmm::vm_config;
 #[cfg(feature = "fw_cfg")]
 use vmm::vm_config::FwCfgConfig;
@@ -52,32 +55,32 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 #[derive(Error, Debug)]
 enum Error {
     #[error("Failed to create API EventFd")]
-    CreateApiEventFd(#[source] std::io::Error),
+    CreateApiEventFd(#[source] io::Error),
     #[cfg(feature = "guest_debug")]
     #[error("Failed to create Debug EventFd")]
-    CreateDebugEventFd(#[source] std::io::Error),
+    CreateDebugEventFd(#[source] io::Error),
     #[error("Failed to create exit EventFd")]
-    CreateExitEventFd(#[source] std::io::Error),
+    CreateExitEventFd(#[source] io::Error),
     #[error("Failed to open hypervisor interface (is hypervisor interface available?)")]
     CreateHypervisor(#[source] hypervisor::HypervisorError),
     #[error("Failed to start the VMM thread")]
     StartVmmThread(#[source] vmm::Error),
     #[error("Error parsing config")]
-    ParsingConfig(#[source] vmm::config::Error),
+    ParsingConfig(#[source] config::Error),
     #[error("Error creating VM")]
-    VmCreate(#[source] vmm::api::ApiError),
+    VmCreate(#[source] api::ApiError),
     #[error("Error booting VM")]
-    VmBoot(#[source] vmm::api::ApiError),
+    VmBoot(#[source] api::ApiError),
     #[error("Error restoring VM")]
-    VmRestore(#[source] vmm::api::ApiError),
+    VmRestore(#[source] api::ApiError),
     #[error("Error parsing restore")]
-    ParsingRestore(#[source] vmm::config::Error),
+    ParsingRestore(#[source] config::Error),
     #[error("Failed to join on VMM thread: {0:?}")]
-    ThreadJoin(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
+    ThreadJoin(Box<dyn any::Any + Send>),
     #[error("VMM thread exited with error")]
     VmmThread(#[source] vmm::Error),
     #[error("Error parsing --api-socket")]
-    ParsingApiSocket(#[source] std::num::ParseIntError),
+    ParsingApiSocket(#[source] num::ParseIntError),
     #[error("Error parsing --event-monitor")]
     ParsingEventMonitor(#[source] option_parser::OptionParserError),
     #[cfg(feature = "dbus_api")]
@@ -89,7 +92,7 @@ enum Error {
     #[error("Error parsing --event-monitor: path or fd required")]
     BareEventMonitor,
     #[error("Error doing event monitor I/O")]
-    EventMonitorIo(#[source] std::io::Error),
+    EventMonitorIo(#[source] io::Error),
     #[error("Event monitor thread failed")]
     EventMonitorThread(#[source] vmm::Error),
     #[cfg(feature = "guest_debug")]
@@ -99,7 +102,7 @@ enum Error {
     #[error("Error parsing --gdb: path required")]
     BareGdb,
     #[error("Error creating log file")]
-    LogFileCreation(#[source] std::io::Error),
+    LogFileCreation(#[source] io::Error),
     #[error("Error parsing logger format")]
     LoggerFormat(#[source] logger::Error),
     #[error("Error setting up logger")]
@@ -115,13 +118,13 @@ enum Error {
 #[derive(Error, Debug)]
 enum FdTableError {
     #[error("Failed to create event fd")]
-    CreateEventFd(#[source] std::io::Error),
+    CreateEventFd(#[source] io::Error),
     #[error("Failed to obtain file limit")]
-    GetRLimit(#[source] std::io::Error),
+    GetRLimit(#[source] io::Error),
     #[error("Error calling fcntl with F_GETFD")]
-    GetFd(#[source] std::io::Error),
+    GetFd(#[source] io::Error),
     #[error("Failed to duplicate file handle")]
-    Dup2(#[source] std::io::Error),
+    Dup2(#[source] io::Error),
 }
 
 fn prepare_default_values() -> (String, String, String) {
@@ -528,13 +531,12 @@ fn start_vmm(
         _ => LevelFilter::Trace,
     };
 
-    let log_file: Box<dyn std::io::Write + Send> = if let Some(ref file) =
-        cmd_arguments.get_one::<String>("log-file")
-    {
-        Box::new(std::fs::File::create(std::path::Path::new(file)).map_err(Error::LogFileCreation)?)
-    } else {
-        Box::new(std::io::stderr())
-    };
+    let log_file: Box<dyn io::Write + Send> =
+        if let Some(ref file) = cmd_arguments.get_one::<String>("log-file") {
+            Box::new(File::create(Path::new(file)).map_err(Error::LogFileCreation)?)
+        } else {
+            Box::new(io::stderr())
+        };
 
     let format = cmd_arguments.get_one::<String>("log-format").unwrap();
     let logger = Logger::new(log_file, format).map_err(Error::LoggerFormat)?;
@@ -564,13 +566,13 @@ fn start_vmm(
         // SAFETY: We only using signal_hook for managing signals and only execute signal
         // handler safe functions (writing to stderr) and manipulating signals.
         unsafe {
-            signal_hook::low_level::register(signal_hook::consts::SIGSYS, || {
+            low_level::register(SIGSYS, || {
                 eprintln!(
                     "\n==== Possible seccomp violation ====\n\
                 Try running with `strace -ff` to identify the cause and open an issue: \
                 https://github.com/cloud-hypervisor/cloud-hypervisor/issues/new"
                 );
-                signal_hook::low_level::emulate_default_handler(SIGSYS).unwrap();
+                low_level::emulate_default_handler(SIGSYS).unwrap();
             })
         }
         .map_err(|e| error!("Error adding SIGSYS signal handler: {e}"))
@@ -585,7 +587,7 @@ fn start_vmm(
     // Before we start any threads, mask the signals we'll be
     // installing handlers for, to make sure they only ever run on the
     // dedicated signal handling thread we'll start in a bit.
-    for sig in &vmm::vm::Vm::HANDLED_SIGNALS {
+    for sig in &Vm::HANDLED_SIGNALS {
         if let Err(e) = block_signal(*sig) {
             error!("Error blocking signals: {e}");
         }
@@ -608,7 +610,7 @@ fn start_vmm(
         parser.parse(gdb_config).map_err(Error::ParsingGdb)?;
 
         if parser.is_set("path") {
-            Some(std::path::PathBuf::from(parser.get("path").unwrap()))
+            Some(PathBuf::from(parser.get("path").unwrap()))
         } else {
             return Err(Error::BareGdb);
         }
@@ -644,7 +646,7 @@ fn start_vmm(
                 Ok(Some(unsafe { File::from_raw_fd(fd) }))
             } else if parser.is_set("path") {
                 Ok(Some(
-                    std::fs::OpenOptions::new()
+                    fs::OpenOptions::new()
                         .write(true)
                         .create(true)
                         .truncate(true)
@@ -738,18 +740,18 @@ fn start_vmm(
 
             // Create and boot the VM based off the VM config we just built.
             let sender = api_request_sender.clone();
-            vmm::api::VmCreate
+            api::VmCreate
                 .send(
                     api_evt.try_clone().unwrap(),
                     api_request_sender,
                     Box::new(vm_config),
                 )
                 .map_err(Error::VmCreate)?;
-            vmm::api::VmBoot
+            api::VmBoot
                 .send(api_evt.try_clone().unwrap(), sender, ())
                 .map_err(Error::VmBoot)?;
         } else if let Some(restore_params) = cmd_arguments.get_one::<String>("restore") {
-            vmm::api::VmRestore
+            api::VmRestore
                 .send(
                     api_evt.try_clone().unwrap(),
                     api_request_sender,
@@ -830,7 +832,7 @@ fn expand_fdtable() -> Result<(), FdTableError> {
     let table_size = if limits.rlim_cur == libc::RLIM_INFINITY {
         4096
     } else {
-        std::cmp::min(limits.rlim_cur, 4096) as libc::c_int
+        cmp::min(limits.rlim_cur, 4096) as libc::c_int
     };
 
     // The first 3 handles are stdin, stdout, stderr. We don't want to touch
@@ -883,7 +885,7 @@ fn main() {
 
     if cmd_arguments.get_flag("version") {
         println!("{} {}", env!("CARGO_BIN_NAME"), env!("BUILD_VERSION"));
-        let migration_protocol_versions = vm_migration::protocol::supported_protocol_versions()
+        let migration_protocol_versions = protocol::supported_protocol_versions()
             .map(|version| version.to_string())
             .collect::<Vec<_>>()
             .join(", ");
@@ -904,7 +906,7 @@ fn main() {
         Ok(p) => p,
         Err(top_error) => {
             cloud_hypervisor::cli_print_error_chain(&top_error, "Cloud Hypervisor", |_, _, _| None);
-            std::process::exit(1);
+            process::exit(1);
         }
     };
 
@@ -917,7 +919,7 @@ fn main() {
     if vmm_result.is_ok()
         && let Some(ref api_socket_path) = api_socket_path
     {
-        let _ = std::fs::remove_file(api_socket_path);
+        let _ = fs::remove_file(api_socket_path);
     }
 
     let exit_code = match vmm_result {
@@ -934,7 +936,7 @@ fn main() {
     #[cfg(feature = "dhat-heap")]
     drop(_profiler);
 
-    std::process::exit(exit_code);
+    process::exit(exit_code);
 }
 
 #[cfg(test)]
