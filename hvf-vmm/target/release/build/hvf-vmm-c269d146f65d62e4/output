@@ -1,0 +1,3 @@
+cargo:rerun-if-changed=/Users/nebuk89/StudioProjects/copilot-worktrees/cloud-hypervisor-mac/nebuk89-cuddly-robot/hvf-vmm/guest.s
+cargo:rerun-if-changed=build.rs
+cargo:warning=guest blob: 188 bytes

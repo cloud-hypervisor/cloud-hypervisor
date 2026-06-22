@@ -1,0 +1,1 @@
+{"rustc":12983045474342760211,"features":"","declared_features":"","target":0,"profile":0,"path":0,"deps":[[362382317022833025,"build_script_build",false,997257655666901198]],"local":[{"RerunIfChanged":{"output":"release/build/hvf-vmm-c269d146f65d62e4/output","paths":["guest.s","build.rs"]}}],"rustflags":[],"config":0,"compile_kind":0}

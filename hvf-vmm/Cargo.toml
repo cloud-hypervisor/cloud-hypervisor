@@ -1,0 +1,17 @@
+# Standalone workspace so this macOS-only crate never perturbs the Linux
+# cloud-hypervisor workspace build/CI. It is intentionally NOT a member of the
+# root workspace.
+[workspace]
+
+[package]
+name = "hvf-vmm"
+version = "0.1.0"
+edition = "2021"
+description = "Apple Hypervisor.framework (HVF) arm64 VMM engine — the portable core for porting Cloud Hypervisor to macOS (Phases 2-4)."
+
+[[bin]]
+name = "hvf-vmm"
+path = "src/main.rs"
+
+[profile.release]
+debug = true
