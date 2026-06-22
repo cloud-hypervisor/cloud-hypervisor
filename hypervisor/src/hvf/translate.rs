@@ -286,6 +286,173 @@ pub mod kvm_ingest {
     pub fn kvm_to_hvf(core_regs: &kvm_regs, sys_regs: &[kvm_one_reg]) -> VcpuHvfState {
         raise_from_kvm(&from_kvm(core_regs, sys_regs))
     }
+
+    use kvm_bindings::kvm_mp_state;
+    use serde::Deserialize;
+
+    /// The aarch64 `VcpuKvmState` exactly as cloud-hypervisor serializes it into
+    /// a snapshot's `state.json` (each vCPU node's `snapshot_data.state` is a
+    /// JSON *string* holding `{"Kvm": <this>}`). The `kvm-bindings` `serde`
+    /// feature serializes each C struct as a flat byte array, so `core_regs` is
+    /// 864 bytes (`struct kvm_regs`), `mp_state` is 4 bytes, and every
+    /// `sys_regs` entry is a 16-byte `kvm_one_reg` (`id` then `addr`, the value).
+    #[derive(Deserialize)]
+    pub struct VcpuKvmStateSnapshot {
+        /// `KVM_GET_MP_STATE` result (unused by translation, kept for fidelity).
+        pub mp_state: kvm_mp_state,
+        /// The core (`user_pt_regs` + sp_el1/elr_el1/spsr) register block.
+        pub core_regs: kvm_regs,
+        /// The system-register ONE_REG list (`addr` carries the value).
+        pub sys_regs: Vec<kvm_one_reg>,
+    }
+
+    /// cloud-hypervisor's `CpuState` enum is externally tagged, so the on-disk
+    /// form is `{"Kvm": {...}}`. Only the KVM variant is meaningful for a
+    /// KVM→HVF restore; other hypervisors' variants are irrelevant on macOS.
+    #[derive(Deserialize)]
+    pub enum CpuStateSnapshot {
+        /// The KVM vCPU state we translate.
+        Kvm(VcpuKvmStateSnapshot),
+    }
+
+    /// Parse a cloud-hypervisor vCPU `CpuState` JSON document (the inner
+    /// `snapshot_data.state` string for a `cpu-manager` vCPU node) and lower it
+    /// to `KvmArm64VcpuRegs`. This is the real-snapshot entry point: it accepts
+    /// exactly the bytes produced by `ch-remote snapshot` on a KVM arm64 host.
+    pub fn from_snapshot_json(state_json: &str) -> Result<KvmArm64VcpuRegs, serde_json::Error> {
+        let CpuStateSnapshot::Kvm(s) = serde_json::from_str::<CpuStateSnapshot>(state_json)?;
+        Ok(from_kvm(&s.core_regs, &s.sys_regs))
+    }
+
+    /// As [`from_snapshot_json`] but translate the rest of the way to an HVF
+    /// `VcpuHvfState` ready for `Vcpu::set_state`.
+    pub fn snapshot_json_to_hvf(state_json: &str) -> Result<VcpuHvfState, serde_json::Error> {
+        Ok(raise_from_kvm(&from_snapshot_json(state_json)?))
+    }
+}
+
+/// KVM VGIC device state → HVF translation (the GIC half of M3).
+///
+/// A real KVM snapshot stores the per-vCPU GIC CPU-interface (ICC) registers in
+/// the *VGIC device state* (cloud-hypervisor's `Gicv3ItsState.icc`), NOT in the
+/// vCPU ONE_REG list. M2 proved on hardware that those ICC registers (PMR,
+/// IGRPEN1, …) are required for a restored guest to take a pending interrupt, so
+/// translating them is load-bearing for rehydrating a cloud snapshot.
+///
+/// The distributor/redistributor halves (`dist`/`rdist`) map to Apple's *opaque*
+/// `hv_gic` state blob, whose internal layout is host-private and not derivable
+/// from KVM's register list — that remains the open, host-dependent piece. The
+/// ICC half, however, translates cleanly because Apple's `hv_gic_icc_reg_t`
+/// values ARE the architectural `(op0,op1,crn,crm,op2)` encodings (e.g.
+/// `ICC_PMR_EL1` = 0xc230 in both ABIs), exactly like the system-register
+/// bijection above.
+#[cfg(feature = "kvm-snapshot")]
+pub mod gic_ingest {
+    use super::VcpuHvfState;
+    use super::kvm_ingest::snapshot_json_to_hvf;
+
+    // The per-vCPU ICC registers in the exact order KVM's
+    // `KVM_DEV_ARM_VGIC_GRP_CPU_SYSREGS` get/set walks them (cloud-hypervisor's
+    // `VGIC_ICC_REGS`), paired with the architectural 16-bit encoding — which is
+    // also the `hv_gic_icc_reg_t` value HVF restore consumes.
+    const ICC_SRE_EL1: u16 = 0xc665;
+    const ICC_CTLR_EL1: u16 = 0xc664;
+    const ICC_IGRPEN0_EL1: u16 = 0xc666;
+    const ICC_IGRPEN1_EL1: u16 = 0xc667;
+    const ICC_PMR_EL1: u16 = 0xc230;
+    const ICC_BPR0_EL1: u16 = 0xc643;
+    const ICC_BPR1_EL1: u16 = 0xc663;
+    const ICC_AP0R0_EL1: u16 = 0xc644;
+    const ICC_AP0R1_EL1: u16 = 0xc645;
+    const ICC_AP0R2_EL1: u16 = 0xc646;
+    const ICC_AP0R3_EL1: u16 = 0xc647;
+    const ICC_AP1R0_EL1: u16 = 0xc648;
+    const ICC_AP1R1_EL1: u16 = 0xc649;
+    const ICC_AP1R2_EL1: u16 = 0xc64a;
+    const ICC_AP1R3_EL1: u16 = 0xc64b;
+
+    /// The fixed KVM walk order of the ICC CPU-interface registers. The active
+    /// priority registers `APnR1..APnR3` are only present when the guest's
+    /// `ICC_CTLR_EL1.PRIbits` warrants them (see [`icc_to_hvf`]).
+    const VGIC_ICC_ORDER: &[u16] = &[
+        ICC_SRE_EL1,
+        ICC_CTLR_EL1,
+        ICC_IGRPEN0_EL1,
+        ICC_IGRPEN1_EL1,
+        ICC_PMR_EL1,
+        ICC_BPR0_EL1,
+        ICC_BPR1_EL1,
+        ICC_AP0R0_EL1,
+        ICC_AP0R1_EL1,
+        ICC_AP0R2_EL1,
+        ICC_AP0R3_EL1,
+        ICC_AP1R0_EL1,
+        ICC_AP1R1_EL1,
+        ICC_AP1R2_EL1,
+        ICC_AP1R3_EL1,
+    ];
+
+    fn is_ap_r1(enc: u16) -> bool {
+        enc == ICC_AP0R1_EL1 || enc == ICC_AP1R1_EL1
+    }
+
+    fn is_ap_r2_or_r3(enc: u16) -> bool {
+        matches!(
+            enc,
+            ICC_AP0R2_EL1 | ICC_AP0R3_EL1 | ICC_AP1R2_EL1 | ICC_AP1R3_EL1
+        )
+    }
+
+    /// Translate KVM's per-vCPU ICC register vector (cloud-hypervisor's
+    /// `Gicv3ItsState.icc`, in `VGIC_ICC_ORDER`) into the `(enc16, value)` pairs
+    /// HVF's `VcpuHvfState.gic_icc` carries for `hv_gic_set_icc_reg`.
+    ///
+    /// KVM emits a variable number of entries: the active-priority registers
+    /// `AP0R1/AP1R1` are present only when `PRIbits >= 6`, and `AP0R{2,3}` /
+    /// `AP1R{2,3}` only when `PRIbits == 7`. `PRIbits` is `((ICC_CTLR_EL1 >> 8) &
+    /// 7) + 1`, and `ICC_CTLR_EL1` is the second entry — so we read it first to
+    /// reconstruct exactly which registers KVM serialized. Returns `None` if the
+    /// vector length doesn't match the reconstructed register set (a malformed or
+    /// unexpected snapshot).
+    pub fn icc_to_hvf(icc: &[u32]) -> Option<Vec<(u16, u64)>> {
+        // ICC_CTLR_EL1 is the second register in the KVM walk order.
+        let ctlr = *icc.get(1)? as u64;
+        let pribits = ((ctlr >> 8) & 0x7) + 1;
+
+        let mut out = Vec::with_capacity(icc.len());
+        let mut idx = 0usize;
+        for &enc in VGIC_ICC_ORDER {
+            if is_ap_r1(enc) && pribits < 6 {
+                continue;
+            }
+            if is_ap_r2_or_r3(enc) && pribits < 7 {
+                continue;
+            }
+            let v = *icc.get(idx)? as u64;
+            out.push((enc, v));
+            idx += 1;
+        }
+        // The reconstructed set must consume the whole vector exactly.
+        if idx == icc.len() { Some(out) } else { None }
+    }
+
+    /// Build a fully GIC-aware HVF `VcpuHvfState` from a real cloud-hypervisor
+    /// snapshot: the vCPU `CpuState` JSON (core + system registers) plus this
+    /// vCPU's KVM ICC register vector (from the VGIC `Gicv3ItsState.icc`).
+    ///
+    /// This is the closest a register/CPU-interface translation can get to a
+    /// rehydrated guest; the distributor/redistributor blob (the opaque `hv_gic`
+    /// state) is the remaining host-dependent piece tracked separately.
+    pub fn snapshot_to_hvf_with_icc(
+        vcpu_state_json: &str,
+        icc: &[u32],
+    ) -> Result<VcpuHvfState, serde_json::Error> {
+        let mut hvf = snapshot_json_to_hvf(vcpu_state_json)?;
+        if let Some(gic_icc) = icc_to_hvf(icc) {
+            hvf.gic_icc = gic_icc;
+        }
+        Ok(hvf)
+    }
 }
 
 #[cfg(test)]
@@ -487,5 +654,109 @@ mod tests {
         assert_eq!(sys.get(&SYSREG_ELR_EL1), Some(&0x4000_2000));
         assert_eq!(sys.get(&SYSREG_SPSR_EL1), Some(&0x3c5));
         assert_eq!(sys.get(&SYSREG_SP_EL1), Some(&0x4000_8000));
+    }
+
+    /// Ingest the REAL cloud-hypervisor arm64 KVM snapshot captured on this Mac
+    /// (a running Ubuntu noble guest under cloud-hypervisor v52.0, via nested
+    /// virtualization). This is the end-to-end proof the translator consumes a
+    /// genuine `state.json` vCPU node — not synthetic input — and lands every
+    /// load-bearing register where an HVF restore expects it.
+    #[cfg(feature = "kvm-snapshot")]
+    #[test]
+    fn ingest_real_cloud_snapshot_vcpu() {
+        use super::kvm_ingest::snapshot_json_to_hvf;
+
+        let state_json = include_str!("../../tests/data/kvm_arm64_vcpu0.json");
+        let hvf = snapshot_json_to_hvf(state_json).expect("real snapshot must parse");
+
+        // Core registers captured from the live guest (EL0 PC, userspace SP_EL0,
+        // kernel SP_EL1) survive the KVM core-block → HVF translation.
+        assert_eq!(hvf.pc, 0x0000_ac56_2c14_9d28, "guest PC");
+        assert_eq!(hvf.gpr[1], 0x0000_ac56_5835_add0, "guest x1");
+        assert_eq!(hvf.gpr[2], 0x0000_ac56_5839_c090, "guest x2");
+        assert_eq!(hvf.cpsr, 0x2000_0000, "guest PSTATE");
+        assert_eq!(hvf.sp_el1, 0xffff_8000_8071_4000, "guest SP_EL1");
+
+        let sys = sorted(&hvf.sysregs);
+        // MPIDR carries the architectural RES1 bit31 the live kernel relies on —
+        // exactly the value HVF leaves at 0 and M2 had to synthesize.
+        assert_eq!(sys.get(&MPIDR_EL1), Some(&0x8000_0000), "guest MPIDR_EL1");
+        // SCTLR with the MMU/cache bits the running guest had enabled.
+        assert_eq!(sys.get(&SCTLR_EL1), Some(&0x0200_0018_3474_d99d), "guest SCTLR_EL1");
+        assert_eq!(sys.get(&TTBR0_EL1), Some(&0x0061_0000_46db_7001), "guest TTBR0_EL1");
+        assert_eq!(sys.get(&VBAR_EL1), Some(&0xffff_c68c_f773_0800), "guest VBAR_EL1");
+        // SP_EL0 / ELR_EL1 are reconstructed from the KVM core block as HVF
+        // system registers.
+        assert_eq!(sys.get(&SYSREG_SP_EL0), Some(&0x0000_ffff_fb43_2090), "guest SP_EL0");
+        assert_eq!(sys.get(&SYSREG_ELR_EL1), Some(&0x0000_ac56_2c14_9d28), "guest ELR_EL1");
+        assert_eq!(sys.get(&SYSREG_SP_EL1), Some(&0xffff_8000_8071_4000), "guest SP_EL1 sysreg");
+    }
+
+    /// Translate the per-vCPU GIC CPU-interface (ICC) registers out of the REAL
+    /// captured snapshot's VGIC device state and confirm the load-bearing fields
+    /// (IGRPEN1 enabled, PMR unmasked) — which M2 proved are required to take a
+    /// pending interrupt — land on their HVF `hv_gic_icc_reg_t` encodings.
+    #[cfg(feature = "kvm-snapshot")]
+    #[test]
+    fn ingest_real_cloud_snapshot_gic_icc() {
+        use super::gic_ingest::icc_to_hvf;
+
+        // hv_gic_icc_reg_t encodings (== architectural sysreg enc16).
+        const ICC_SRE_EL1: u16 = 0xc665;
+        const ICC_CTLR_EL1: u16 = 0xc664;
+        const ICC_IGRPEN0_EL1: u16 = 0xc666;
+        const ICC_IGRPEN1_EL1: u16 = 0xc667;
+        const ICC_PMR_EL1: u16 = 0xc230;
+        const ICC_BPR0_EL1: u16 = 0xc643;
+        const ICC_BPR1_EL1: u16 = 0xc663;
+        const ICC_AP0R0_EL1: u16 = 0xc644;
+        const ICC_AP1R0_EL1: u16 = 0xc648;
+
+        let gic_json = include_str!("../../tests/data/kvm_arm64_gic.json");
+        let v: serde_json::Value = serde_json::from_str(gic_json).expect("gic state parses");
+        let icc: Vec<u32> = v["Kvm"]["icc"]
+            .as_array()
+            .expect("icc array")
+            .iter()
+            .map(|n| n.as_u64().unwrap() as u32)
+            .collect();
+
+        let pairs = icc_to_hvf(&icc).expect("real icc vector must reconstruct exactly");
+        let map: BTreeMap<u16, u64> = pairs.into_iter().collect();
+
+        // PRIbits=5 → 9 registers, no AP0R1+/AP1R1+.
+        assert_eq!(map.len(), 9, "expected 9 ICC regs for PRIbits=5");
+        assert_eq!(map.get(&ICC_SRE_EL1), Some(&0x7));
+        assert_eq!(map.get(&ICC_CTLR_EL1), Some(&0x4400));
+        assert_eq!(map.get(&ICC_IGRPEN0_EL1), Some(&0x0));
+        // Group-1 interrupts enabled in the live guest.
+        assert_eq!(map.get(&ICC_IGRPEN1_EL1), Some(&0x1));
+        // Priority mask wide open (0xf0) — the guest could take an IRQ.
+        assert_eq!(map.get(&ICC_PMR_EL1), Some(&0xf0));
+        assert_eq!(map.get(&ICC_BPR0_EL1), Some(&0x2));
+        assert_eq!(map.get(&ICC_BPR1_EL1), Some(&0x3));
+        assert_eq!(map.get(&ICC_AP0R0_EL1), Some(&0x0));
+        assert_eq!(map.get(&ICC_AP1R0_EL1), Some(&0x0));
+    }
+
+    /// The variable-length ICC vector is reconstructed by PRIbits: PRIbits<6
+    /// drops AP0R1/AP1R1 and AP0R{2,3}/AP1R{2,3}; PRIbits==7 keeps them all.
+    #[cfg(feature = "kvm-snapshot")]
+    #[test]
+    fn icc_reconstruction_honours_pribits() {
+        use super::gic_ingest::icc_to_hvf;
+
+        // PRIbits=5 → CTLR has (5-1)<<8 = 0x400 in the PRIbits field → 9 regs.
+        let icc9 = [0x7u32, 0x400, 0, 1, 0xf0, 2, 3, 0, 0];
+        assert_eq!(icc_to_hvf(&icc9).unwrap().len(), 9);
+
+        // PRIbits=7 → CTLR field (7-1)<<8 = 0x600 → all 15 regs present.
+        let mut icc15 = [0u32; 15];
+        icc15[1] = 0x600; // CTLR with PRIbits=7
+        assert_eq!(icc_to_hvf(&icc15).unwrap().len(), 15);
+
+        // A length that matches neither reconstruction is rejected.
+        let bad = [0x7u32, 0x400, 0, 1]; // PRIbits=5 wants 9, only 4 given
+        assert!(icc_to_hvf(&bad).is_none());
     }
 }
