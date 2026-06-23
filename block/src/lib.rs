@@ -21,7 +21,7 @@ mod sparse;
 use std::alloc::{Layout, alloc_zeroed};
 use std::fmt::{self, Debug};
 use std::fs::{File, OpenOptions};
-use std::io::{self, Read, Seek, Write};
+use std::io::{self, Read};
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::fs::FileTypeExt;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -75,8 +75,6 @@ pub enum Error {
     InvalidOffset,
     #[error("Failure in qcow")]
     QcowError(#[source] qcow::Error),
-    #[error("Failure in raw file")]
-    RawFileError(#[source] io::Error),
     #[error("The requested operation does not support multiple descriptors")]
     TooManyDescriptors,
     #[error("Request contains too many segments ({0}, max {MAX_DISCARD_WRITE_ZEROES_SEG})")]
@@ -576,17 +574,6 @@ pub fn detect_image_type(f: &mut File) -> BlockResult<ImageType> {
     };
 
     Ok(image_type)
-}
-
-pub trait BlockBackend: Read + Write + Seek + Send + Debug {
-    /// Returns the logical disk size a guest will see.
-    ///
-    /// For raw formats, this is equal to [`Self::physical_size`]. For file formats
-    /// that wrap disk images in a container (e.g. QCOW2), this refers to the
-    /// effective size that the guest will see.
-    fn logical_size(&self) -> Result<u64, Error>;
-    /// Returns the physical size of the underlying file.
-    fn physical_size(&self) -> Result<u64, Error>;
 }
 
 #[derive(Debug)]

@@ -7,14 +7,13 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::fs::FileExt;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::result;
 
 use vmm_sys_util::file_traits::FileSync;
 use vmm_sys_util::seek_hole::SeekHole;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
 use crate::aligned_buffer::AlignedBuffer;
-use crate::{BlockBackend, SECTOR_SIZE, probe_direct_alignment, query_device_size};
+use crate::{SECTOR_SIZE, probe_direct_alignment, query_device_size};
 
 /// True when `buf_ptr`/`len`/`offset` already satisfy `alignment`
 /// (`alignment == 0` means no O_DIRECT, so everything is "aligned").
@@ -222,20 +221,6 @@ impl SeekHole for AlignedFile {
             }
             Err(e) => Err(e),
         }
-    }
-}
-
-impl BlockBackend for AlignedFile {
-    fn logical_size(&self) -> result::Result<u64, crate::Error> {
-        Ok(query_device_size(&self.file)
-            .map_err(crate::Error::RawFileError)?
-            .0)
-    }
-
-    fn physical_size(&self) -> result::Result<u64, crate::Error> {
-        Ok(query_device_size(&self.file)
-            .map_err(crate::Error::RawFileError)?
-            .1)
     }
 }
 
