@@ -278,15 +278,12 @@ impl UffdMemorySource for FileUffdMemorySource {
 }
 
 /// Memory source that provides pages content over a socket.
-// Wired into the receive-migration path in the next commit.
-#[allow(dead_code)]
 pub(crate) struct SocketUffdMemorySource {
     stream: SocketStream,
     shared_backing: bool,
     buf: Vec<u8>,
 }
 
-#[allow(dead_code)]
 impl SocketUffdMemorySource {
     pub fn new(stream: SocketStream, shared_backing: bool) -> Self {
         Self {

@@ -54,9 +54,13 @@ use crate::config::MemoryRestoreMode;
 use crate::coredump::{
     CoredumpMemoryRegion, CoredumpMemoryRegions, DumpState, GuestDebuggableError,
 };
+use crate::migration::transport::SocketStream;
 use crate::migration::url_to_path;
 use crate::sparse::{next_data_extent, write_region_sparse};
-use crate::uffd::{self, FaultResolution, FileUffdMemorySource, UffdMemorySource, UffdRange};
+use crate::uffd::{
+    self, FaultResolution, FileUffdMemorySource, SocketUffdMemorySource, UffdMemorySource,
+    UffdRange,
+};
 use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
 use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID};
 
@@ -64,6 +68,7 @@ struct UffdHandler {
     stop_event: EventFd,
     result_rx: Receiver<Result<(), io::Error>>,
     handle: thread::JoinHandle<()>,
+    fault_socket_fd: Option<OwnedFd>,
 }
 
 pub const MEMORY_MANAGER_ACPI_SIZE: usize = 0x18;
@@ -912,23 +917,59 @@ impl MemoryManager {
         saved_regions: &MemoryRangeTable,
         exit_evt: &EventFd,
     ) -> Result<(), Error> {
-        if saved_regions.is_empty() {
+        let mut file_offset: u64 = 0;
+        let Some((uffd_fd, ranges)) = self.prepare_uffd(saved_regions, |r| {
+            let o = file_offset;
+            file_offset += r.length;
+            o
+        })?
+        else {
             return Ok(());
-        }
-
+        };
         let snapshot_file = File::open(file_path).map_err(Error::SnapshotOpen)?;
         let source: Box<dyn UffdMemorySource> = Box::new(FileUffdMemorySource::new(snapshot_file));
-        self.register_uffd_handler(saved_regions, exit_evt, source)
+        self.spawn_uffd_handler(uffd_fd, None, ranges, source, exit_evt)?;
+        info!("UFFD restore: demand-paged restore enabled");
+        Ok(())
     }
 
-    /// Register every range against userfaultfd, then spawn the
-    /// handler thread that resolves faults through the memory source.
-    fn register_uffd_handler(
+    /// Register UFFD and spawn the handler that serves faults over `socket`.
+    /// No-op when there are no regions.
+    pub(crate) fn start_postcopy_serving(
         &mut self,
         saved_regions: &MemoryRangeTable,
+        shared_backing: bool,
+        socket: SocketStream,
         exit_evt: &EventFd,
-        source: Box<dyn UffdMemorySource>,
     ) -> Result<(), Error> {
+        // PageFault uses the GPA as the page identifier on the wire.
+        let Some((uffd_fd, ranges)) = self.prepare_uffd(saved_regions, |r| r.gpa)? else {
+            return Ok(());
+        };
+        // Make every fault a small request/response round-trip.
+        socket.set_nodelay(true).map_err(UffdError::SetSocket)?;
+        let socket_fd = socket
+            .as_fd()
+            .try_clone_to_owned()
+            .map_err(UffdError::SetSocket)?;
+        let source: Box<dyn UffdMemorySource> =
+            Box::new(SocketUffdMemorySource::new(socket, shared_backing));
+        self.spawn_uffd_handler(uffd_fd, Some(socket_fd), ranges, source, exit_evt)
+    }
+
+    /// Create a UFFD fd and register every range.
+    fn prepare_uffd<F>(
+        &mut self,
+        saved_regions: &MemoryRangeTable,
+        mut source_offset_for: F,
+    ) -> Result<Option<(OwnedFd, Vec<UffdRange>)>, Error>
+    where
+        F: FnMut(&MemoryRange) -> u64,
+    {
+        if saved_regions.is_empty() {
+            return Ok(None);
+        }
+
         let guest_memory = self.guest_memory.memory();
         let required_uffd_features = self.required_uffd_features();
 
@@ -936,7 +977,7 @@ impl MemoryManager {
         let base_page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u64;
 
         info!(
-            "UFFD restore: attempting demand-paged restore for {} region(s)",
+            "UFFD: registering {} region(s) for demand paging",
             saved_regions.regions().len()
         );
 
@@ -951,7 +992,6 @@ impl MemoryManager {
         let uffd_fd = uffd::create(required_uffd_features).map_err(UffdError::Create)?;
 
         let mut handler_ranges: Vec<UffdRange> = Vec::new();
-        let mut file_offset: u64 = 0;
 
         for range in saved_regions.regions() {
             let host_addr = guest_memory
@@ -988,22 +1028,32 @@ impl MemoryManager {
             handler_ranges.push(UffdRange {
                 host_addr,
                 length: range.length,
-                source_offset: file_offset,
+                source_offset: source_offset_for(range),
                 page_size: range_page_size,
             });
-
-            file_offset += range.length;
         }
 
+        Ok(Some((uffd_fd, handler_ranges)))
+    }
+
+    /// Spawn the UFFD handler thread that resolves faults through `source`.
+    fn spawn_uffd_handler(
+        &mut self,
+        uffd_fd: OwnedFd,
+        fault_socket_fd: Option<OwnedFd>,
+        handler_ranges: Vec<UffdRange>,
+        source: Box<dyn UffdMemorySource>,
+        exit_evt: &EventFd,
+    ) -> Result<(), Error> {
         info!(
-            "UFFD restore: registered {} region(s), {} total bytes, spawning handler",
-            handler_ranges.len(),
-            file_offset
+            "UFFD: spawning handler for {} region(s)",
+            handler_ranges.len()
         );
 
         let stop_event = EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?;
         let thread_stop_event = stop_event.try_clone().map_err(Error::EventFdFail)?;
         let thread_exit_evt = exit_evt.try_clone().map_err(Error::EventFdFail)?;
+        let panic_exit_evt = exit_evt.try_clone().map_err(Error::EventFdFail)?;
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let (result_tx, result_rx) = mpsc::sync_channel(1);
         let handle = thread::Builder::new()
@@ -1020,13 +1070,14 @@ impl MemoryManager {
 
                     if let Err(e) = &result {
                         error!("UFFD handler exited with error: {e}");
+                        thread_exit_evt.write(1).ok();
                     }
 
                     result_tx.send(result).ok();
                 }))
                 .map_err(|_| {
                     error!("uffd-handler thread panicked");
-                    thread_exit_evt.write(1).ok();
+                    panic_exit_evt.write(1).ok();
                 })
                 .ok();
             })
@@ -1046,16 +1097,15 @@ impl MemoryManager {
             stop_event,
             result_rx,
             handle,
+            fault_socket_fd,
         });
-
-        info!("UFFD restore: demand-paged restore enabled");
 
         Ok(())
     }
 
     fn required_uffd_features(&self) -> u64 {
         let mut features = 0u64;
-        if self.memory_zones.values().any(|z| z.shared && !z.hugepages) {
+        if self.memory_zones.values().any(|z| z.shared || !z.hugepages) {
             features |= crate::userfaultfd::UFFD_FEATURE_MISSING_SHMEM;
         }
         if self.memory_zones.values().any(|z| z.hugepages) {
@@ -1067,6 +1117,10 @@ impl MemoryManager {
     fn stop_uffd_handler(&mut self) {
         if let Some(uffd_handler) = self.uffd_handler.take() {
             uffd_handler.stop_event.write(1).ok();
+            if let Some(fd) = &uffd_handler.fault_socket_fd {
+                // SAFETY: fd is a valid owned fd for the duration of this call.
+                unsafe { libc::shutdown(fd.as_raw_fd(), libc::SHUT_RDWR) };
+            }
             uffd_handler.handle.join().ok();
 
             match uffd_handler.result_rx.try_recv() {
