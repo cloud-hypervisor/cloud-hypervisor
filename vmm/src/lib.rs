@@ -31,7 +31,7 @@ use libc::{EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW, tcsetattr, termios};
 use log::{debug, error, info, trace, warn};
 use memory_manager::MemoryManagerSnapshotData;
 use pci::PciBdf;
-use seccompiler::{SeccompAction, apply_filter};
+use seccompiler::{BpfProgram, SeccompAction, apply_filter};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::{Deserialize, Serialize};
 use signal_hook::iterator::{Handle, Signals};
@@ -1531,6 +1531,7 @@ impl Vmm {
         hypervisor: &dyn hypervisor::Hypervisor,
         send_data_migration: &VmSendMigrationData,
         initial_vm_state: VmState,
+        seccomp_action: &SeccompAction,
     ) -> result::Result<(), MigratableError> {
         // State machine that is updated with more context as we progress.
         let mut ctx = OngoingMigrationContext::new();
@@ -1667,9 +1668,19 @@ impl Vmm {
                 send_data_migration.tls_dir.as_deref(),
             )?;
             let guest_memory = vm.guest_memory();
+            // Build the seccomp filter on the parent thread so any failure aborts
+            // the migration before the serve thread is spawned.
+            let seccomp_filter = get_seccomp_filter(
+                seccomp_action,
+                Thread::MigrateSendPostcopy,
+                None,
+            )
+            .map_err(|e| {
+                MigratableError::MigrateSend(anyhow!("creating postcopy serve seccomp filter: {e}"))
+            })?;
             let handle = thread::Builder::new()
                 .name("migrate-send-postcopy".to_owned())
-                .spawn(move || Self::serve_postcopy(fault_stream, guest_memory))
+                .spawn(move || Self::serve_postcopy(seccomp_filter, fault_stream, guest_memory))
                 .map_err(|e| {
                     MigratableError::MigrateSend(anyhow!("spawning postcopy serve thread: {e}"))
                 })?;
@@ -1751,9 +1762,19 @@ impl Vmm {
         reason = "runs on a dedicated thread and must own its arguments"
     )]
     fn serve_postcopy(
+        seccomp_filter: BpfProgram,
         mut socket: SocketStream,
         guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
     ) -> result::Result<(), MigratableError> {
+        // Apply the dedicated seccomp filter for this thread. It is empty when
+        // seccomp is disabled (SeccompAction::Allow), in which case there is
+        // nothing to apply.
+        if !seccomp_filter.is_empty() {
+            apply_filter(&seccomp_filter).map_err(|e| {
+                MigratableError::MigrateSend(anyhow!("applying postcopy serve seccomp filter: {e}"))
+            })?;
+        }
+
         let mut buf: Vec<u8> = Vec::new();
         info!("Postcopy: source entering PageFault serve loop");
 
@@ -3099,6 +3120,7 @@ impl RequestHandler for Vmm {
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             self.hypervisor.clone(),
             initial_vm_state,
+            self.seccomp_action.clone(),
         ) {
             Ok(handle) => {
                 self.vm = VmOwnership::Migration {
