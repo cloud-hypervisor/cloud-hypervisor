@@ -21,6 +21,7 @@ use std::thread::JoinHandle;
 
 use event_monitor::event;
 use log::warn;
+use seccompiler::SeccompAction;
 use vm_migration::MigratableError;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -75,6 +76,7 @@ pub struct MigrationWorker {
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     initial_vm_state: VmState,
+    seccomp_action: SeccompAction,
 }
 
 impl MigrationWorker {
@@ -90,6 +92,7 @@ impl MigrationWorker {
             self.hypervisor.as_ref(),
             &self.config,
             self.initial_vm_state,
+            &self.seccomp_action,
         )
         .inspect(|_| event!("vm", "migration-finished"))
         .inspect_err(|_| event!("vm", "migration-failed"));
@@ -116,6 +119,7 @@ impl MigrationWorker {
             dyn hypervisor::Hypervisor,
         >,
         initial_vm_state: VmState,
+        seccomp_action: SeccompAction,
     ) -> Result<MigrationWorkerHandle, MigrationWorkerSpawnError> {
         let (vm_sender, vm_receiver) = std::sync::mpsc::sync_channel(0);
         let worker = MigrationWorker {
@@ -125,6 +129,7 @@ impl MigrationWorker {
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             hypervisor,
             initial_vm_state,
+            seccomp_action,
         };
 
         let inner_handle = match thread::Builder::new()

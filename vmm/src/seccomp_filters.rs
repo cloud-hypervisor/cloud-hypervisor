@@ -42,6 +42,7 @@ pub enum Thread {
     Vmm,
     PtyForeground,
     SerialManager,
+    MigrateSendPostcopy,
 }
 
 /// Shorthand for chaining `SeccompCondition`s with the `and` operator  in a `SeccompRule`.
@@ -1084,6 +1085,35 @@ fn serial_manager_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
     ])
 }
 
+// The filter containing the white listed syscall rules required by the
+// migration postcopy thread.
+fn migrate_send_postcopy_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
+    Ok(vec![
+        (libc::SYS_brk, vec![]),
+        (libc::SYS_clock_gettime, vec![]),
+        (libc::SYS_close, vec![]),
+        (libc::SYS_exit, vec![]),
+        (libc::SYS_futex, vec![]),
+        (libc::SYS_getrandom, vec![]),
+        (libc::SYS_gettid, vec![]),
+        (libc::SYS_madvise, vec![]),
+        (libc::SYS_mmap, vec![]),
+        (libc::SYS_mprotect, vec![]),
+        (libc::SYS_munmap, vec![]),
+        (libc::SYS_read, vec![]),
+        (libc::SYS_recvfrom, vec![]),
+        (libc::SYS_recvmsg, vec![]),
+        (libc::SYS_rt_sigprocmask, vec![]),
+        (libc::SYS_rt_sigreturn, vec![]),
+        (libc::SYS_sched_yield, vec![]),
+        (libc::SYS_sendmsg, vec![]),
+        (libc::SYS_sendto, vec![]),
+        (libc::SYS_sigaltstack, vec![]),
+        (libc::SYS_write, vec![]),
+        (libc::SYS_writev, vec![]),
+    ])
+}
+
 fn get_seccomp_rules(
     thread_type: Thread,
     hypervisor_type: Option<HypervisorType>,
@@ -1102,6 +1132,7 @@ fn get_seccomp_rules(
             hypervisor_type.expect("hypervisor_type is required for Vmm threads"),
         )?),
         Thread::PtyForeground => Ok(pty_foreground_thread_rules()?),
+        Thread::MigrateSendPostcopy => Ok(migrate_send_postcopy_thread_rules()?),
     }
 }
 
