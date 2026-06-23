@@ -69,6 +69,8 @@ pub enum VhdxHeaderError {
     ReadRegionTableHeader(#[source] io::Error),
     #[error("Failed to read region entries")]
     RegionEntryCollectionFailed,
+    #[error("Region entry file offset and length overflow")]
+    RegionEntryOverflow,
     #[error("Overlapping regions found")]
     RegionOverlap,
     #[error("Reserved region has non-zero value")]
@@ -261,15 +263,17 @@ impl RegionInfo {
 
             offset += size_of::<RegionTableEntry>();
             let start = entry.file_offset;
-            let end = start + entry.length as u64;
+            let end = start
+                .checked_add(entry.length as u64)
+                .ok_or(VhdxHeaderError::RegionEntryOverflow)?;
 
             for (region_ent_start, region_ent_end) in region_entries.iter() {
-                if !((start >= *region_ent_start) || (end <= *region_ent_end)) {
+                if start < *region_ent_end && end > *region_ent_start {
                     return Err(VhdxHeaderError::RegionOverlap);
                 }
             }
 
-            region_entries.insert(entry.file_offset, entry.file_offset + entry.length as u64);
+            region_entries.insert(start, end);
 
             if entry.guid == Uuid::parse_str(BAT_GUID).map_err(VhdxHeaderError::InvalidUuid)? {
                 if bat_entry.is_none() {
@@ -431,6 +435,51 @@ impl VhdxHeader {
 
     pub fn region_entry_count(&self) -> u32 {
         self.region_table_1.entry_count
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use std::mem::size_of;
+    use std::os::unix::fs::FileExt;
+
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::{RegionInfo, RegionTableEntry, VhdxHeaderError};
+    use crate::aligned_file::AlignedFile;
+
+    // Build one 32-byte region table entry. The guid is left as arbitrary
+    // bytes (neither BAT nor MDR) and `required` is zero so the entry is
+    // neither claimed nor rejected before the overlap check runs.
+    fn region_entry(file_offset: u64, length: u32) -> [u8; size_of::<RegionTableEntry>()] {
+        let mut buf = [0u8; size_of::<RegionTableEntry>()];
+        buf[0..16].copy_from_slice(&[0xAA; 16]); // guid
+        buf[16..24].copy_from_slice(&file_offset.to_le_bytes());
+        buf[24..28].copy_from_slice(&length.to_le_bytes());
+        buf[28..32].copy_from_slice(&0u32.to_le_bytes()); // required
+        buf
+    }
+
+    // Two region entries whose [offset, offset + length) ranges overlap must
+    // be rejected. The previous condition only fired when a new region fully
+    // contained an existing one, so partial overlaps slipped through.
+    #[test]
+    fn overlapping_regions_are_rejected() {
+        let tf = TempFile::new().unwrap();
+        let file = tf.as_file().try_clone().unwrap();
+        // Region table header is 16 bytes; entries follow it.
+        let entries_start = size_of::<super::RegionTableHeader>() as u64;
+        file.set_len(entries_start + super::REGION_SIZE).unwrap();
+
+        let first = region_entry(0x10_0000, 0x10_0000); // [0x100000, 0x200000)
+        let second = region_entry(0x18_0000, 0x10_0000); // [0x180000, 0x280000)
+        file.write_all_at(&first, entries_start).unwrap();
+        file.write_all_at(&second, entries_start + first.len() as u64)
+            .unwrap();
+
+        let aligned = AlignedFile::new(file, false);
+        let res = RegionInfo::new(&aligned, 0, 2);
+        assert!(matches!(res, Err(VhdxHeaderError::RegionOverlap)));
     }
 }
 
