@@ -19,7 +19,6 @@ use self::bat::{BatEntry, VhdxBatError};
 use self::header::{RegionInfo, RegionTableEntry, VhdxHeader, VhdxHeaderError};
 use self::io::VhdxIoError;
 use self::metadata::{DiskSpec, VhdxMetadataError};
-use crate::BlockBackend;
 use crate::aligned_file::AlignedFile;
 
 mod bat;
@@ -207,12 +206,8 @@ impl Seek for Vhdx {
     }
 }
 
-impl BlockBackend for Vhdx {
-    fn logical_size(&self) -> result::Result<u64, crate::Error> {
-        Ok(self.virtual_disk_size())
-    }
-
-    fn physical_size(&self) -> result::Result<u64, crate::Error> {
+impl Vhdx {
+    pub(crate) fn physical_size(&self) -> result::Result<u64, crate::Error> {
         self.aligned
             .file()
             .metadata()

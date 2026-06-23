@@ -22,7 +22,7 @@ pub use internal::{Vhdx, VhdxError};
 use self::worker::sync::VhdxSync;
 use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError};
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
-use crate::{BlockBackend, Error, disk_file};
+use crate::{Error, disk_file};
 
 #[derive(Debug)]
 pub struct VhdxDisk {

@@ -26,7 +26,7 @@ use self::worker::sync::FixedVhdSync;
 use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError};
 use crate::disk_file::DiskSize;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
-use crate::{AlignedFile, BlockBackend, DiskTopology, Error, disk_file};
+use crate::{AlignedFile, DiskTopology, Error, disk_file};
 
 #[derive(Debug)]
 pub struct VhdDisk {
