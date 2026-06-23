@@ -1092,6 +1092,7 @@ dependencies = [
  "mshv-bindings",
  "mshv-ioctls",
  "open-enum",
+ "proptest",
  "serde",
  "serde_json",
  "serde_with",
