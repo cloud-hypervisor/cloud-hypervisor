@@ -4,12 +4,14 @@
 use std::ffi::{CStr, CString};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::net::{IpAddr, Ipv4Addr};
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command};
 use std::string::String;
 use std::sync::mpsc;
-use std::thread;
 use std::time::Duration;
+use std::{panic, thread};
 
 use block::ImageType;
 use net_util::MacAddr;
@@ -37,7 +39,7 @@ pub(crate) fn _test_api_create_boot(target_api: &TargetApi, guest: &Guest) {
     let request_body = guest.api_create_body();
 
     let temp_config_path = guest.tmp_dir.as_path().join("config");
-    std::fs::write(&temp_config_path, request_body).unwrap();
+    fs::write(&temp_config_path, request_body).unwrap();
     let create_config = temp_config_path.as_os_str().to_str().unwrap();
 
     assert!(target_api.remote_command("create", Some(create_config),));
@@ -45,7 +47,7 @@ pub(crate) fn _test_api_create_boot(target_api: &TargetApi, guest: &Guest) {
     // Then boot it
     assert!(target_api.remote_command("boot", None));
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
         // Check that the VM booted as expected
         guest.validate_cpu_count(None);
@@ -76,10 +78,10 @@ pub(crate) fn _test_api_shutdown(target_api: &TargetApi, guest: &Guest) {
     let request_body = guest.api_create_body();
 
     let temp_config_path = guest.tmp_dir.as_path().join("config");
-    std::fs::write(&temp_config_path, request_body).unwrap();
+    fs::write(&temp_config_path, request_body).unwrap();
     let create_config = temp_config_path.as_os_str().to_str().unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         assert!(target_api.remote_command("create", Some(create_config)));
 
         // Then boot it
@@ -136,10 +138,10 @@ pub(crate) fn _test_api_delete(target_api: &TargetApi, guest: &Guest) {
     let request_body = guest.api_create_body();
 
     let temp_config_path = guest.tmp_dir.as_path().join("config");
-    std::fs::write(&temp_config_path, request_body).unwrap();
+    fs::write(&temp_config_path, request_body).unwrap();
     let create_config = temp_config_path.as_os_str().to_str().unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         assert!(target_api.remote_command("create", Some(create_config)));
 
         // Then boot it
@@ -199,7 +201,7 @@ pub(crate) fn _test_api_pause_resume(target_api: &TargetApi, guest: &Guest) {
     let request_body = guest.api_create_body();
 
     let temp_config_path = guest.tmp_dir.as_path().join("config");
-    std::fs::write(&temp_config_path, request_body).unwrap();
+    fs::write(&temp_config_path, request_body).unwrap();
     let create_config = temp_config_path.as_os_str().to_str().unwrap();
 
     assert!(target_api.remote_command("create", Some(create_config)));
@@ -207,7 +209,7 @@ pub(crate) fn _test_api_pause_resume(target_api: &TargetApi, guest: &Guest) {
     // Then boot it
     assert!(target_api.remote_command("boot", None));
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         // Check that the VM booted as expected
@@ -220,7 +222,7 @@ pub(crate) fn _test_api_pause_resume(target_api: &TargetApi, guest: &Guest) {
         // Check pausing again fails
         assert!(!target_api.remote_command("pause", None));
 
-        thread::sleep(std::time::Duration::new(2, 0));
+        thread::sleep(Duration::new(2, 0));
 
         // SSH into the VM should fail
         ssh_command_ip(
@@ -237,7 +239,7 @@ pub(crate) fn _test_api_pause_resume(target_api: &TargetApi, guest: &Guest) {
         // Check resuming again fails
         assert!(!target_api.remote_command("resume", None));
 
-        thread::sleep(std::time::Duration::new(2, 0));
+        thread::sleep(Duration::new(2, 0));
 
         // Now we should be able to SSH back in and get the right number of CPUs
         guest.validate_cpu_count(None);
@@ -250,7 +252,7 @@ pub(crate) fn _test_api_pause_resume(target_api: &TargetApi, guest: &Guest) {
 }
 
 pub(crate) fn _test_pty_interaction(pty_path: PathBuf) {
-    let mut cf = std::fs::OpenOptions::new()
+    let mut cf = fs::OpenOptions::new()
         .write(true)
         .read(true)
         .open(pty_path)
@@ -265,19 +267,19 @@ pub(crate) fn _test_pty_interaction(pty_path: PathBuf) {
     // before the console is up and we don't want
     // to try and write the next line before the
     // login process is ready.
-    thread::sleep(std::time::Duration::new(5, 0));
+    thread::sleep(Duration::new(5, 0));
     assert_eq!(cf.write(b"cloud\n").unwrap(), 6);
-    thread::sleep(std::time::Duration::new(2, 0));
+    thread::sleep(Duration::new(2, 0));
     assert_eq!(cf.write(b"cloud123\n").unwrap(), 9);
-    thread::sleep(std::time::Duration::new(2, 0));
+    thread::sleep(Duration::new(2, 0));
     assert_eq!(cf.write(b"echo test_pty_console\n").unwrap(), 22);
-    thread::sleep(std::time::Duration::new(2, 0));
+    thread::sleep(Duration::new(2, 0));
 
     let mut prev = String::new();
     // The console can stream continuously (e.g. journald forwarded to it), so
     // bound the wait: a missing marker must not loop until the harness timeout.
     for _ in 0..20 {
-        thread::sleep(std::time::Duration::new(2, 0));
+        thread::sleep(Duration::new(2, 0));
         // Drain everything available this round so a large replayed backlog
         // does not take one 2s tick per chunk to get through.
         loop {
@@ -329,7 +331,7 @@ pub(crate) fn test_cpu_topology(
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
         assert_eq!(
             guest.get_cpu_count().unwrap_or_default(),
@@ -458,7 +460,7 @@ pub(crate) fn _test_guest_numa_nodes(acpi: bool) {
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         guest.check_numa_common(
@@ -481,7 +483,7 @@ pub(crate) fn _test_guest_numa_nodes(acpi: bool) {
             // Resize to the maximum amount of CPUs and check each NUMA
             // node has been assigned the right CPUs set.
             resize_command(&api_socket, Some(12), None, None, None);
-            thread::sleep(std::time::Duration::new(5, 0));
+            thread::sleep(Duration::new(5, 0));
 
             guest.check_numa_common(
                 Some(&[3_840_000, 3_840_000, 3_840_000]),
@@ -512,7 +514,7 @@ pub(crate) fn _test_power_button(guest: &Guest) {
 
     let child = cmd.spawn().unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
         assert!(remote_command(&api_socket, "power-button", None));
     });
@@ -580,8 +582,8 @@ pub(crate) fn test_vhost_user_net(
         .args(["--api-socket", &api_socket])
         .capture_output();
 
-    let mut daemon_child: std::process::Child;
-    let mut child: std::process::Child;
+    let mut daemon_child: Child;
+    let mut child: Child;
 
     if client_mode_daemon {
         child = ch_command.spawn().unwrap();
@@ -601,7 +603,7 @@ pub(crate) fn test_vhost_user_net(
         child = ch_command.spawn().unwrap();
     }
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         if let Some(tap_name) = tap {
@@ -692,7 +694,7 @@ pub(crate) fn test_vhost_user_net(
     handle_child_output(r, &output);
 }
 
-type PrepareBlkDaemon = dyn Fn(&TempDir, &str, usize, bool, bool) -> (std::process::Child, String);
+type PrepareBlkDaemon = dyn Fn(&TempDir, &str, usize, bool, bool) -> (Child, String);
 
 pub(crate) fn test_vhost_user_blk(
     num_queues: usize,
@@ -745,7 +747,7 @@ pub(crate) fn test_vhost_user_blk(
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         // Check both if /dev/vdc exists and if the block size is 16M.
@@ -887,7 +889,7 @@ pub(crate) fn test_boot_from_vhost_user_blk(
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         // Just check the VM booted correctly.
@@ -906,7 +908,7 @@ pub(crate) fn test_boot_from_vhost_user_blk(
 }
 
 pub(crate) fn _test_virtio_fs(
-    prepare_daemon: &dyn Fn(&TempDir, &str) -> (std::process::Child, String),
+    prepare_daemon: &dyn Fn(&TempDir, &str) -> (Child, String),
     hotplug: bool,
     use_generic_vhost_user: bool,
     pci_segment: Option<u16>,
@@ -984,7 +986,7 @@ pub(crate) fn _test_virtio_fs(
         "add-fs"
     };
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         if hotplug {
@@ -1073,12 +1075,12 @@ pub(crate) fn _test_virtio_fs(
         let _ = daemon_child.kill();
         let _ = daemon_child.wait();
         // Remove the stale socket so wait_for_virtiofsd_socket actually waits
-        let _ = std::fs::remove_file(&virtiofsd_socket_path);
+        let _ = fs::remove_file(&virtiofsd_socket_path);
 
         let (daemon_child, virtiofsd_socket_path) =
             prepare_daemon(&guest.tmp_dir, shared_dir.to_str().unwrap());
 
-        let r = std::panic::catch_unwind(|| {
+        let r = panic::catch_unwind(|| {
             // Wait for the daemon socket to be ready
             assert!(wait_until(Duration::from_secs(10), || Path::new(
                 &virtiofsd_socket_path
@@ -1158,7 +1160,7 @@ pub(crate) fn test_virtio_pmem(discard_writes: bool, specify_size: bool) {
     let pmem_temp_file = TempFile::new().unwrap();
     pmem_temp_file.as_file().set_len(128 << 20).unwrap();
 
-    std::process::Command::new("mkfs.ext4")
+    Command::new("mkfs.ext4")
         .arg(pmem_temp_file.as_path())
         .output()
         .expect("Expect creating disk image to succeed");
@@ -1188,7 +1190,7 @@ pub(crate) fn test_virtio_pmem(discard_writes: bool, specify_size: bool) {
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         // Check for the presence of /dev/pmem0
@@ -1241,7 +1243,7 @@ pub(crate) fn _test_virtio_vsock(guest: &Guest, hotplug: bool) {
 
     let mut child = cmd.capture_output().spawn().unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         if hotplug {
@@ -1255,7 +1257,7 @@ pub(crate) fn _test_virtio_vsock(guest: &Guest, hotplug: bool) {
                 String::from_utf8_lossy(&cmd_output)
                     .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}")
             );
-            thread::sleep(std::time::Duration::new(10, 0));
+            thread::sleep(Duration::new(10, 0));
             // Check adding a second one fails
             assert!(!remote_command(
                 &api_socket,
@@ -1305,7 +1307,7 @@ pub(crate) fn test_memory_mergeable(mergeable: bool) {
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest1.wait_vm_boot().unwrap();
     });
     if r.is_err() {
@@ -1331,7 +1333,7 @@ pub(crate) fn test_memory_mergeable(mergeable: bool) {
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest2.wait_vm_boot().unwrap();
         let ksm_ps_guest2 = get_ksm_pages_shared();
 
@@ -1398,7 +1400,7 @@ pub(crate) fn _test_virtio_iommu(_acpi: bool /* not needed on x86_64 */) {
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         // Verify the virtio-iommu device is present.
@@ -1602,7 +1604,7 @@ pub(crate) fn _test_simple_launch(guest: &Guest) {
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         guest.validate_cpu_count(None);
@@ -1663,7 +1665,7 @@ pub(crate) fn _test_multi_cpu(guest: &Guest) {
 
     let mut child = cmd.spawn().unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
@@ -1705,7 +1707,7 @@ pub(crate) fn _test_cpu_affinity(guest: &Guest) {
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
         let pid = child.id();
         let taskset_vcpu0 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep vcpu0 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
@@ -1753,7 +1755,7 @@ pub(crate) fn _test_virtio_queue_affinity(guest: &Guest) {
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
         let pid = child.id();
         let taskset_q0 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep disk1_q0 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
@@ -1786,7 +1788,7 @@ pub(crate) fn _test_pci_msi(guest: &Guest) {
 
     let grep_cmd = format!("grep -c {} /proc/interrupts", get_msi_interrupt_pattern());
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         assert_eq!(
             guest
                 .ssh_command(&grep_cmd)
@@ -1822,7 +1824,7 @@ pub(crate) fn _test_virtio_net_ctrl_queue(guest: &Guest) {
     #[cfg(target_arch = "x86_64")]
     let iface = "ens4";
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         assert_eq!(
             guest
                 .ssh_command(
@@ -1896,7 +1898,7 @@ pub(crate) fn _test_pci_multiple_segments(
 
     let grep_cmd = "lspci | grep \"Host bridge\" | wc -l";
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         // There should be MAX_NUM_PCI_SEGMENTS PCI host bridges in the guest.
         assert_eq!(
             guest
@@ -1960,7 +1962,7 @@ pub(crate) fn _test_direct_kernel_boot(guest: &Guest) {
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         guest.validate_cpu_count(None);
@@ -2037,7 +2039,7 @@ pub(crate) fn _test_virtio_block(
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         // Check both if /dev/vdc exists and if the block size is 16M.
@@ -2103,7 +2105,7 @@ pub fn _test_virtio_block_dynamic_vhdx_expand(guest: &Guest) {
     let vhdx_path = vhdx_pathbuf.to_str().unwrap();
 
     // Generate a 100 MiB dynamic VHDX file
-    std::process::Command::new("qemu-img")
+    Command::new("qemu-img")
         .arg("create")
         .args(["-f", "vhdx"])
         .arg(vhdx_path)
@@ -2137,7 +2139,7 @@ pub fn _test_virtio_block_dynamic_vhdx_expand(guest: &Guest) {
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         // Check both if /dev/vdc exists and if the block size is 100 MiB.
@@ -2169,7 +2171,7 @@ pub fn _test_virtio_block_dynamic_vhdx_expand(guest: &Guest) {
 }
 
 fn vhdx_image_size(disk_name: &str) -> u64 {
-    std::fs::File::open(disk_name)
+    fs::File::open(disk_name)
         .unwrap()
         .seek(SeekFrom::End(0))
         .unwrap()
@@ -2187,7 +2189,7 @@ pub fn _test_split_irqchip(guest: &Guest) {
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         assert_eq!(
@@ -2228,7 +2230,7 @@ pub(crate) fn _test_dmi_serial_number(guest: &Guest) {
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         assert_eq!(
@@ -2259,7 +2261,7 @@ pub(crate) fn _test_dmi_uuid(guest: &Guest) {
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         assert_eq!(
@@ -2293,7 +2295,7 @@ pub(crate) fn _test_dmi_oem_strings(guest: &Guest) {
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         assert_eq!(
@@ -2354,7 +2356,7 @@ pub(crate) fn _test_dmi_system_and_chassis(guest: &Guest) {
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         for (_, dmidecode_field, expected) in fields {
@@ -2387,7 +2389,7 @@ pub(crate) fn _test_serial_off(guest: &Guest) {
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         // Test that there is no ttyS0
@@ -2424,7 +2426,7 @@ pub(crate) fn _test_multiple_network_interfaces(guest: &Guest) {
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         let tap_count = exec_host_command_output("ip link | grep -c mytap1");
@@ -2464,7 +2466,7 @@ pub(crate) fn _test_virtio_console(guest: &Guest) {
     let text = String::from("On a branch floating down river a cricket, singing.");
     let cmd = format!("echo {text} | sudo tee /dev/hvc0");
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         assert!(
@@ -2480,7 +2482,7 @@ pub(crate) fn _test_virtio_console(guest: &Guest) {
     let output = child.wait_with_output().unwrap();
     handle_child_output(r, &output);
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         assert!(String::from_utf8_lossy(&output.stdout).contains(&text));
     });
 
@@ -2507,17 +2509,17 @@ pub(crate) fn _test_console_file(guest: &Guest) {
 
     guest.ssh_command("sudo shutdown -h now").unwrap();
 
-    let _ = child.wait_timeout(std::time::Duration::from_secs(20));
+    let _ = child.wait_timeout(Duration::from_secs(20));
     kill_child(&mut child);
     let output = child.wait_with_output().unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         // Check that the cloud-hypervisor binary actually terminated
         assert!(output.status.success());
 
         // Do this check after shutdown of the VM as an easy way to ensure
         // all writes are flushed to disk
-        let mut f = std::fs::File::open(console_path).unwrap();
+        let mut f = fs::File::open(console_path).unwrap();
         let mut buf = String::new();
         f.read_to_string(&mut buf).unwrap();
 
@@ -2543,7 +2545,7 @@ pub(crate) fn _test_direct_kernel_boot_noacpi(guest: &Guest) {
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
@@ -2571,7 +2573,7 @@ pub(crate) fn _test_pci_bar_reprogramming(guest: &Guest) {
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         // 2 network interfaces + default localhost ==> 3 interfaces
@@ -2656,7 +2658,7 @@ pub(crate) fn _test_memory_overhead(guest: &Guest, guest_memory_size_kb: u32) {
         MAXIMUM_VMM_OVERHEAD_KB
     };
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         let overhead = get_vmm_overhead(child.id(), guest_memory_size_kb);
         eprintln!("Guest memory overhead: {overhead} vs {max_overhead}");
         assert!(overhead <= max_overhead);
@@ -2683,7 +2685,7 @@ pub(crate) fn _test_landlock(guest: &Guest) {
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         // Check /dev/vdc is not there
@@ -2747,7 +2749,7 @@ pub(crate) fn _test_disk_hotplug(guest: &Guest, landlock_enabled: bool) {
 
     let mut child = cmd.spawn().unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         // Check /dev/vdc is not there
@@ -2891,7 +2893,7 @@ pub(crate) fn _test_virtio_block_topology(guest: &Guest, loop_dev: &str) {
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         // MIN-IO column
@@ -2961,7 +2963,7 @@ pub(crate) fn _test_net_hotplug(
 
     guest.wait_vm_boot().unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         // Add network
         let (cmd_success, cmd_output, _) = remote_command_w_output(
             &api_socket,
@@ -3110,7 +3112,7 @@ pub(crate) fn _test_counters(guest: &Guest) {
 
     let mut child = cmd.spawn().unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         let orig_counters = get_counters(&api_socket);
@@ -3147,7 +3149,7 @@ pub(crate) fn _test_watchdog(guest: &Guest) {
 
     let mut child = cmd.spawn().unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         let mut expected_reboot_count = 1;
@@ -3167,7 +3169,7 @@ pub(crate) fn _test_watchdog(guest: &Guest) {
         );
 
         // Allow some normal time to elapse to check we don't get spurious reboots
-        thread::sleep(std::time::Duration::new(40, 0));
+        thread::sleep(Duration::new(40, 0));
         // Check no reboot
         assert_eq!(get_reboot_count(guest), expected_reboot_count);
 
@@ -3224,7 +3226,7 @@ pub(crate) fn _test_pvpanic(guest: &Guest) {
 
     let mut child = cmd.spawn().unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         // Trigger guest a panic
@@ -3255,8 +3257,8 @@ pub(crate) fn _test_tap_from_fd(guest: &Guest) {
     use std::str::FromStr;
     let taps = net_util::open_tap(
         Some("chtap0"),
-        Some(std::net::IpAddr::V4(
-            std::net::Ipv4Addr::from_str(&guest.network.host_ip0).unwrap(),
+        Some(IpAddr::V4(
+            Ipv4Addr::from_str(&guest.network.host_ip0).unwrap(),
         )),
         None,
         &mut None,
@@ -3285,7 +3287,7 @@ pub(crate) fn _test_tap_from_fd(guest: &Guest) {
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         assert_eq!(
@@ -3432,7 +3434,7 @@ pub(crate) fn _test_macvtap(
     // The functional connectivity provided by the virtio-net device
     // gets tested through wait_vm_boot() as it expects to receive a
     // HTTP request, and through the SSH command as well.
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         assert_eq!(
@@ -3483,7 +3485,7 @@ pub(crate) fn _test_vdpa_block(guest: &Guest) {
         .spawn()
         .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
         // Check both if /dev/vdc exists and if the block size is 128M.

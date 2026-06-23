@@ -7,12 +7,12 @@ use std::io::{BufRead, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 #[cfg(not(feature = "mshv"))]
 use std::process::Stdio;
-use std::process::{Child, Command};
+use std::process::{Child, Command, Output};
 use std::string::String;
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
-use std::{cmp, fs, io, thread};
+use std::{cmp, fs, io, panic, thread};
 
 use block::formats::qcow::internal::ImageType as QcowImageType;
 use test_infra::*;
@@ -112,10 +112,7 @@ pub(crate) fn wait_for_virtiofsd_socket(socket: &str) {
     }
 }
 
-pub(crate) fn prepare_virtiofsd(
-    tmp_dir: &TempDir,
-    shared_dir: &str,
-) -> (std::process::Child, String) {
+pub(crate) fn prepare_virtiofsd(tmp_dir: &TempDir, shared_dir: &str) -> (Child, String) {
     let mut workload_path = dirs::home_dir().unwrap();
     workload_path.push("workloads");
 
@@ -146,7 +143,7 @@ pub(crate) fn prepare_vubd(
     num_queues: usize,
     rdonly: bool,
     direct: bool,
-) -> (std::process::Child, String) {
+) -> (Child, String) {
     let mut workload_path = dirs::home_dir().unwrap();
     workload_path.push("workloads");
 
@@ -168,7 +165,7 @@ pub(crate) fn prepare_vubd(
         .spawn()
         .unwrap();
 
-    thread::sleep(std::time::Duration::new(10, 0));
+    thread::sleep(Duration::new(10, 0));
 
     (child, vubd_socket_path)
 }
@@ -184,7 +181,7 @@ pub(crate) fn temp_event_monitor_path(tmp_dir: &TempDir) -> String {
 // Creates the directory and returns the path.
 pub(crate) fn temp_snapshot_dir_path(tmp_dir: &TempDir) -> String {
     let snapshot_dir = String::from(tmp_dir.as_path().join("snapshot").to_str().unwrap());
-    std::fs::create_dir(&snapshot_dir).unwrap();
+    fs::create_dir(&snapshot_dir).unwrap();
     snapshot_dir
 }
 
@@ -212,7 +209,7 @@ pub(crate) fn prepare_vhost_user_net_daemon(
     mtu: Option<u16>,
     num_queues: usize,
     client_mode: bool,
-) -> (std::process::Command, String) {
+) -> (Command, String) {
     let vunet_socket_path = String::from(tmp_dir.as_path().join("vunet.sock").to_str().unwrap());
 
     // Start the daemon
@@ -234,7 +231,7 @@ pub(crate) fn prepare_vhost_user_net_daemon(
     (command, vunet_socket_path)
 }
 
-pub(crate) fn prepare_swtpm_daemon(tmp_dir: &TempDir) -> (std::process::Command, String) {
+pub(crate) fn prepare_swtpm_daemon(tmp_dir: &TempDir) -> (Command, String) {
     let swtpm_tpm_dir = String::from(tmp_dir.as_path().join("swtpm").to_str().unwrap());
     let swtpm_socket_path = String::from(
         tmp_dir
@@ -244,7 +241,7 @@ pub(crate) fn prepare_swtpm_daemon(tmp_dir: &TempDir) -> (std::process::Command,
             .to_str()
             .unwrap(),
     );
-    std::fs::create_dir(&swtpm_tpm_dir).unwrap();
+    fs::create_dir(&swtpm_tpm_dir).unwrap();
 
     let mut swtpm_command = Command::new("swtpm");
     let swtpm_args = [
@@ -298,7 +295,7 @@ pub(crate) fn resize_command(
             },
         ];
         // See: #5938
-        thread::sleep(std::time::Duration::new(1, 0));
+        thread::sleep(Duration::new(1, 0));
         assert!(check_latest_events_exact(&latest_events, event_path));
     }
 
@@ -393,7 +390,7 @@ pub(crate) fn setup_ovs_dpdk_guests(
     #[cfg(target_arch = "aarch64")]
     let guest_net_iface = "enp0s5";
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest1.wait_vm_boot().unwrap();
 
         guest1
@@ -438,7 +435,7 @@ pub(crate) fn setup_ovs_dpdk_guests(
                     .spawn()
                     .unwrap();
 
-    let r = std::panic::catch_unwind(|| {
+    let r = panic::catch_unwind(|| {
         guest2.wait_vm_boot().unwrap();
 
         guest2
@@ -660,14 +657,8 @@ pub(super) fn get_msi_interrupt_pattern() -> String {
     }
 }
 
-pub(super) type PrepareNetDaemon = dyn Fn(
-    &TempDir,
-    &str,
-    Option<&str>,
-    Option<u16>,
-    usize,
-    bool,
-) -> (std::process::Command, String);
+pub(super) type PrepareNetDaemon =
+    dyn Fn(&TempDir, &str, Option<&str>, Option<u16>, usize, bool) -> (Command, String);
 
 pub(super) fn get_ksm_pages_shared() -> u32 {
     fs::read_to_string("/sys/kernel/mm/ksm/pages_shared")
@@ -778,7 +769,7 @@ pub(crate) fn get_counters(api_socket: &str) -> Counters {
     }
 }
 
-pub(super) fn pty_read(mut pty: std::fs::File) -> Receiver<String> {
+pub(super) fn pty_read(mut pty: fs::File) -> Receiver<String> {
     let (tx, rx) = mpsc::channel::<String>();
     thread::spawn(move || {
         loop {
@@ -881,8 +872,8 @@ pub(crate) fn make_virtio_block_guest(factory: &GuestFactory, image_name: &str) 
 }
 
 pub(crate) fn compute_backing_checksum(
-    path_or_image_name: impl AsRef<std::path::Path>,
-) -> Option<(std::path::PathBuf, String, u32)> {
+    path_or_image_name: impl AsRef<Path>,
+) -> Option<(PathBuf, String, u32)> {
     let path = resolve_disk_path(path_or_image_name);
 
     let mut file = File::open(&path).ok()?;
@@ -896,11 +887,11 @@ pub(crate) fn compute_backing_checksum(
     let info = get_image_info(&path)?;
 
     let backing_file = info["backing-filename"].as_str()?;
-    let backing_path = if std::path::Path::new(backing_file).is_absolute() {
-        std::path::PathBuf::from(backing_file)
+    let backing_path = if Path::new(backing_file).is_absolute() {
+        PathBuf::from(backing_file)
     } else {
         path.parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
+            .unwrap_or_else(|| Path::new("."))
             .join(backing_file)
     };
 
@@ -928,8 +919,8 @@ pub(crate) fn compute_backing_checksum(
 ///
 /// For QCOW2 v3 images, also verifies the dirty bit is cleared.
 pub(crate) fn disk_check_consistency(
-    path_or_image_name: impl AsRef<std::path::Path>,
-    initial_backing_checksum: Option<(std::path::PathBuf, String, u32)>,
+    path_or_image_name: impl AsRef<Path>,
+    initial_backing_checksum: Option<(PathBuf, String, u32)>,
 ) {
     let path = resolve_disk_path(path_or_image_name);
     let output = run_qemu_img(&path, &["check"], None);
@@ -968,12 +959,8 @@ pub(crate) fn disk_check_consistency(
     }
 }
 
-pub(crate) fn run_qemu_img(
-    path: &std::path::Path,
-    args: &[&str],
-    trailing_args: Option<&[&str]>,
-) -> std::process::Output {
-    let mut cmd = std::process::Command::new("qemu-img");
+pub(crate) fn run_qemu_img(path: &Path, args: &[&str], trailing_args: Option<&[&str]>) -> Output {
+    let mut cmd = Command::new("qemu-img");
     cmd.arg(args[0])
         .args(&args[1..])
         .arg(path.to_str().unwrap());
@@ -983,7 +970,7 @@ pub(crate) fn run_qemu_img(
     cmd.output().unwrap()
 }
 
-fn get_image_info(path: &std::path::Path) -> Option<serde_json::Value> {
+fn get_image_info(path: &Path) -> Option<serde_json::Value> {
     let output = run_qemu_img(path, &["info", "-U", "--output=json"], None);
 
     output.status.success().then_some(())?;
@@ -1032,7 +1019,7 @@ pub(crate) fn set_corrupt_flag(path: &Path, corrupt: bool) -> io::Result<()> {
     Ok(())
 }
 
-fn resolve_disk_path(path_or_image_name: impl AsRef<std::path::Path>) -> std::path::PathBuf {
+fn resolve_disk_path(path_or_image_name: impl AsRef<Path>) -> PathBuf {
     if path_or_image_name.as_ref().exists() {
         // A full path is provided
         path_or_image_name.as_ref().to_path_buf()
@@ -1044,7 +1031,7 @@ fn resolve_disk_path(path_or_image_name: impl AsRef<std::path::Path>) -> std::pa
     }
 }
 
-pub(crate) fn compute_file_checksum(reader: &mut dyn std::io::Read, size: u64) -> u32 {
+pub(crate) fn compute_file_checksum(reader: &mut dyn io::Read, size: u64) -> u32 {
     // Read first 16MB or entire data if smaller
     let read_size = cmp::min(size, 16 * 1024 * 1024) as usize;
 
@@ -1143,7 +1130,7 @@ pub(crate) fn start_live_migration(
         .spawn()
         .unwrap();
     // Give it '1s' to make sure the 'migration_socket' file is properly created
-    thread::sleep(std::time::Duration::new(1, 0));
+    thread::sleep(Duration::new(1, 0));
 
     if paused {
         // Test the migration of a paused VM.
@@ -1174,7 +1161,7 @@ pub(crate) fn start_live_migration(
 
     // The 'send-migration' command should be executed successfully within the given timeout
     let send_success = if let Some(status) = send_migration
-        .wait_timeout(std::time::Duration::from_secs(30))
+        .wait_timeout(Duration::from_secs(30))
         .unwrap()
     {
         status.success()
@@ -1196,7 +1183,7 @@ pub(crate) fn start_live_migration(
 
     // The 'receive-migration' command should be executed successfully within the given timeout
     let receive_success = if let Some(status) = receive_migration
-        .wait_timeout(std::time::Duration::from_secs(30))
+        .wait_timeout(Duration::from_secs(30))
         .unwrap()
     {
         status.success()

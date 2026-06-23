@@ -4,8 +4,6 @@
 //
 #![cfg(any(devcli_testenv, clippy))]
 #![expect(clippy::undocumented_unsafe_blocks)]
-// TODO: Trim qualified paths in this crate, then drop this expectation.
-#![expect(clippy::absolute_paths)]
 // When enabling the `mshv` feature, we skip quite some tests and
 // hence have known dead-code. This annotation silences dead-code
 // related warnings for our quality workflow to pass.
