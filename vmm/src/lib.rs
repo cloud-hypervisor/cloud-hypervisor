@@ -13,7 +13,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::panic::AssertUnwindSafe;
 #[cfg(feature = "guest_debug")]
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
+use std::sync::mpsc::{Receiver, RecvError, SendError, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{io, mem, result, thread};
@@ -49,7 +49,7 @@ use vmm_sys_util::signal::unblock_signal;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
 use crate::api::{
-    ApiRequest, ApiResponse, RequestHandler, TimeoutStrategy, VmInfoResponse,
+    ApiRequest, ApiResponse, MigrationMode, RequestHandler, TimeoutStrategy, VmInfoResponse,
     VmReceiveMigrationData, VmSendMigrationData, VmmPingResponse,
 };
 use crate::config::{MemoryRestoreMode, RestoreConfig, add_to_config};
@@ -685,13 +685,19 @@ pub struct Vmm {
     check_migration_evt: EventFd,
 }
 
+/// Time before aborting on the page fault connection.
+const FAULT_CONNECTION_ACCEPT_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Just a wrapper for the data that goes into
 /// [`ReceiveMigrationState::Configured`]
 struct ReceiveMigrationConfiguredData {
     memory_manager: Arc<Mutex<MemoryManager>>,
     guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
     connections: ReceiveAdditionalConnections,
+    shared_backing: bool,
+    fault_rx: Receiver<SocketStream>,
 }
+
 /// The receiver's state machine behind the migration protocol.
 enum ReceiveMigrationState {
     /// The connection is established and we haven't received any commands yet.
@@ -938,7 +944,7 @@ impl Vmm {
         listener: &ReceiveListener,
         state: ReceiveMigrationState,
         req: &Request,
-        _receive_data_migration: &VmReceiveMigrationData,
+        receive_data_migration: &VmReceiveMigrationData,
     ) -> std::result::Result<ReceiveMigrationState, MigratableError> {
         use ReceiveMigrationState::*;
 
@@ -948,23 +954,29 @@ impl Vmm {
             )))
         };
 
+        let mode = receive_data_migration.memory_mode;
         let mut configure_vm =
             |socket: &mut SocketStream,
              memory_files: HashMap<u32, File>|
              -> std::result::Result<ReceiveMigrationConfiguredData, MigratableError> {
-                let memory_manager = self.vm_receive_config(req, socket, memory_files)?;
+                let shared_backing = !memory_files.is_empty();
+                let memory_manager = self.vm_receive_config(req, socket, memory_files, mode)?;
                 let guest_memory = memory_manager.lock().unwrap().guest_memory();
                 // Create the additional-connection receiver even in the single-connection case.
                 // At this point the receiver does not know whether the sender will use extra TCP
                 // connections. If it does not, no worker connections are accepted and memory
                 // requests continue to arrive on the main connection.
-                let connections = listener
-                    .try_clone()
-                    .and_then(|l| ReceiveAdditionalConnections::new(l, guest_memory.clone()))?;
+                // The accept thread hands the page fault connection back via this channel.
+                let (fault_tx, fault_rx) = channel();
+                let connections = listener.try_clone().and_then(|l| {
+                    ReceiveAdditionalConnections::new(l, guest_memory.clone(), fault_tx)
+                })?;
                 Ok(ReceiveMigrationConfiguredData {
                     memory_manager,
                     guest_memory,
                     connections,
+                    shared_backing,
+                    fault_rx,
                 })
             };
 
@@ -1024,18 +1036,7 @@ impl Vmm {
                     Ok(Configured(config_data))
                 }
                 Command::State => {
-                    let state_receive_begin = Instant::now();
-                    config_data.connections.cleanup()?;
-                    let (recv_state_dur, restore_vm_dur) =
-                        self.vm_receive_state(req, socket, config_data.memory_manager)?;
-                    debug!(
-                        "Migration (incoming): recv_snapshot:{}ms restore:{}ms",
-                        recv_state_dur.as_millis(),
-                        restore_vm_dur.as_millis(),
-                    );
-                    Ok(StateReceived {
-                        state_receive_begin,
-                    })
+                    self.vm_receive_state_command(req, socket, config_data, receive_data_migration)
                 }
                 c => invalid_command(state_name, c),
             },
@@ -1076,11 +1077,65 @@ impl Vmm {
         }
     }
 
+    fn vm_receive_state_command(
+        &mut self,
+        req: &Request,
+        socket: &mut SocketStream,
+        mut config_data: ReceiveMigrationConfiguredData,
+        receive_data_migration: &VmReceiveMigrationData,
+    ) -> std::result::Result<ReceiveMigrationState, MigratableError> {
+        let state_receive_begin = Instant::now();
+
+        // Serve faults before restore so accesses during restore resolve on demand.
+        if matches!(receive_data_migration.memory_mode, MigrationMode::Postcopy) {
+            let shared_backing = config_data.shared_backing;
+            let fault_stream = config_data
+                .fault_rx
+                .recv_timeout(FAULT_CONNECTION_ACCEPT_TIMEOUT)
+                .map_err(|e| {
+                    config_data.connections.cleanup().ok();
+                    MigratableError::MigrateReceive(anyhow!(
+                        "Timed out waiting for postcopy fault connection: {e}"
+                    ))
+                })?;
+            let mm = config_data.memory_manager.clone();
+            let saved_regions = mm.lock().unwrap().memory_range_table(false)?;
+            mm.lock()
+                .unwrap()
+                .start_postcopy_serving(
+                    &saved_regions,
+                    shared_backing,
+                    fault_stream,
+                    &self.exit_evt,
+                )
+                .map_err(|e| {
+                    config_data.connections.cleanup().ok();
+                    MigratableError::MigrateReceive(anyhow!("start_postcopy_serving: {e:?}"))
+                })?;
+        }
+
+        // The fault connection is in hand, so stop the accept thread.
+        config_data.connections.cleanup()?;
+
+        let (recv_state_dur, restore_vm_dur) =
+            self.vm_receive_state(req, socket, config_data.memory_manager)?;
+        debug!(
+            "Migration (incoming): recv_snapshot:{}ms restore:{}ms",
+            recv_state_dur.as_millis(),
+            restore_vm_dur.as_millis(),
+        );
+
+        Ok(ReceiveMigrationState::StateReceived {
+            state_receive_begin,
+        })
+    }
+
     fn vm_receive_config<T>(
         &mut self,
         req: &Request,
         socket: &mut T,
         existing_memory_files: HashMap<u32, File>,
+        mode: MigrationMode,
     ) -> std::result::Result<Arc<Mutex<MemoryManager>>, MigratableError>
     where
         T: Read,
@@ -1096,6 +1151,24 @@ impl Vmm {
             serde_json::from_slice(&data).map_err(|e| {
                 MigratableError::MigrateReceive(anyhow!("Error deserialising config: {e}"))
             })?;
+
+        // Eager prefault populates memory before UFFD is registered, so those
+        // pages never fault and are never served. Reject postcopy+prefault
+        // rather than serve stale data.
+        if matches!(mode, MigrationMode::Postcopy) {
+            let memory = &vm_migration_config.vm_config.lock().unwrap().memory;
+            let prefault_enabled = memory.prefault
+                || memory
+                    .zones
+                    .as_ref()
+                    .is_some_and(|zones| zones.iter().any(|zone| zone.prefault));
+            if prefault_enabled {
+                return Err(MigratableError::MigrateReceive(anyhow!(
+                    "postcopy migration is incompatible with memory prefault; \
+                     the source VM must not be configured with prefault=on"
+                )));
+            }
+        }
 
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         self.vm_check_cpuid_compatibility(
@@ -1551,7 +1624,7 @@ impl Vmm {
                 // No memory was transferred
                 MemoryMigrationContext::empty_finalized(),
             )
-            .expect("migration context should transition to VmPaused for local migration");
+            .expect("migration context should transition to VmPaused for local/postcopy migration");
         } else {
             let mut mem_send = transport::SendAdditionalConnections::new(
                 &send_data_migration.destination_url,
@@ -2822,12 +2895,17 @@ impl RequestHandler for Vmm {
             response.write_to(&mut socket)?;
         }
 
-        if let ReceiveMigrationState::Aborted = state {
-            event!("vm", "migration-receive-failed");
-            self.vm = VmOwnership::None;
-            self.vm_config = None;
-        } else {
-            event!("vm", "migration-receive-finished");
+        match state {
+            ReceiveMigrationState::Aborted => {
+                event!("vm", "migration-receive-failed");
+                self.vm = VmOwnership::None;
+                self.vm_config = None;
+            }
+            ReceiveMigrationState::Completed => {
+                // Serving and resume already happened in the protocol loop.
+                event!("vm", "migration-receive-finished");
+            }
+            _ => unreachable!("loop only exits in Completed or Aborted"),
         }
 
         Ok(())
