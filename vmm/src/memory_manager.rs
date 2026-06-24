@@ -263,6 +263,12 @@ const UFFD_HANDOFF_TIMEOUT: Duration = Duration::from_secs(2);
 ///   The VMM's pid is included so the manager can construct
 ///   `/proc/<vmm_pid>/map_files/...` paths if it needs direct
 ///   backing-store access.
+/// - `AddRegion` is sent on memory hot-add (ACPI hotplug) after the
+///   initial handoff and carries no SCM_RIGHTS ancillary data — the
+///   uffd was already handed off, and any backing-store fd the manager
+///   needs is obtained via the same /proc/<pid>/map_files mechanism.
+///   The session `mode`/`version` are those of the preceding `Handoff`,
+///   so they are not repeated here.
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum UffdHandoffMessage<'a> {
@@ -271,6 +277,9 @@ enum UffdHandoffMessage<'a> {
         vmm_pid: u32,
         mode: String,
         regions: &'a [UffdRegionInfo],
+    },
+    AddRegion {
+        region: &'a UffdRegionInfo,
     },
 }
 
@@ -337,12 +346,23 @@ pub struct MemoryManager {
     /// second registration on the same VMA.
     uffd_attached: bool,
 
+    /// Connection back to the uffd manager, kept alive after the
+    /// initial handoff so the VMM can push add-region notifications on
+    /// memory hot-add. `None` if no manager is attached or the
+    /// connection has been dropped after an I/O failure.
+    uffd_handoff_sock: Option<UnixStream>,
+
     /// CH's own copy of the userfaultfd handed off to the manager,
     /// held for the VM's lifetime. The kernel refcounts the fd, so
     /// keeping our dup keeps the registrations alive even if the
     /// manager exits — faulting threads then block until a manager
     /// returns rather than losing data (CH never resolves faults).
     uffd_handoff_fd: Option<OwnedFd>,
+
+    /// Register-mode bits the active uffd was configured with — used
+    /// when issuing `UFFDIO_REGISTER` against newly hot-added VMAs so
+    /// they match the rest of the registered set.
+    uffd_register_mode: Option<u64>,
 }
 
 #[derive(Error, Debug)]
@@ -541,14 +561,6 @@ pub enum Error {
     /// uffd already handed off to this VM
     #[error("uffd already handed off to this VM")]
     UffdAlreadyAttached,
-
-    /// Failed to notify uffd manager of a hot-added region
-    #[error("Failed to notify uffd manager of hot-added region")]
-    UffdNotify(#[source] io::Error),
-
-    /// Failed to encode the uffd add-region notification
-    #[error("Failed to encode uffd add-region notification")]
-    UffdNotifyEncode(#[source] serde_json::Error),
 }
 
 impl From<UffdError> for Error {
@@ -1370,13 +1382,17 @@ impl MemoryManager {
                 .map_err(Error::UffdHandoffRegister)?;
         }
 
-        Self::send_uffd_handoff(socket_path, mode, &regions, uffd.as_fd())?;
+        let sock = Self::send_uffd_handoff(socket_path, mode, &regions, uffd.as_fd())?;
 
-        // Keep CH's dup of the uffd for the VM's lifetime: it keeps the
-        // kernel registrations alive, so if the manager dies faulting
-        // vCPUs block (CH never resolves faults itself — no zero-fill)
-        // instead of losing data.
+        // Keep the uffd fd, the register mode, and the manager socket
+        // so a later ACPI hot-add can register the new VMA against this
+        // uffd and notify the manager (see `notify_uffd_add_region`).
+        // Holding CH's dup of the uffd for the VM's lifetime also keeps
+        // the registrations alive if the manager dies: faulting vCPUs
+        // block (CH never resolves faults itself) instead of losing data.
         self.uffd_attached = true;
+        self.uffd_register_mode = Some(register_mode);
+        self.uffd_handoff_sock = Some(sock);
         self.uffd_handoff_fd = Some(uffd);
 
         info!(
@@ -1461,6 +1477,92 @@ impl MemoryManager {
         let mut ack = [0u8; 1];
         sock.read_exact(&mut ack).map_err(Error::UffdHandoff)?;
         Ok(sock)
+    }
+
+    /// Register a hot-added VMA against the active uffd, matching the
+    /// register modes negotiated for the initial handoff. No-op when no
+    /// manager is attached.
+    ///
+    /// Called on the hot-add path *before* the region is committed to
+    /// `memory_zones` / the allocator: a registration failure means the
+    /// region could not be covered by the manager (guest faults there
+    /// would bypass it), so it must fail the hot-add — and failing here,
+    /// pre-commit, leaves no half-added region behind.
+    fn register_hotadd_region_with_uffd(&self, region: &Arc<GuestRegionMmap>) -> Result<(), Error> {
+        use std::os::fd::AsFd;
+
+        let (Some(uffd_fd), Some(register_mode)) =
+            (self.uffd_handoff_fd.as_ref(), self.uffd_register_mode)
+        else {
+            return Ok(()); // no manager attached
+        };
+        uffd::register(
+            uffd_fd.as_fd(),
+            region.as_ptr() as u64,
+            region.len(),
+            register_mode,
+        )
+        .map_err(Error::UffdHandoffRegister)?;
+        Ok(())
+    }
+
+    /// Best-effort `add_region` notification to the uffd manager for a
+    /// newly hot-added region that is *already* uffd-registered (see
+    /// `register_hotadd_region_with_uffd`) and committed. No-op when no
+    /// manager is attached.
+    ///
+    /// Not fatal to the hot-add: on any I/O failure the manager
+    /// connection is dropped and a warning logged, but the region stays
+    /// added and registered. A reconnecting manager re-syncs the full
+    /// region set when it reconnects (see `collect_uffd_regions`), so the
+    /// missed notification is not lost.
+    ///
+    /// AddRegion carries no SCM_RIGHTS ancillary data: the manager
+    /// already holds the uffd. The 5s SO_RCVTIMEO / SO_SNDTIMEO set at
+    /// handoff time persist on the socket, so this send/recv is bounded.
+    fn notify_uffd_add_region(&mut self, region: &Arc<GuestRegionMmap>) {
+        use std::io::Read as _;
+
+        use vmm_sys_util::sock_ctrl_msg::ScmSocket;
+
+        let Some(sock) = self.uffd_handoff_sock.as_mut() else {
+            return; // no manager attached, or connection already dropped
+        };
+        let info = UffdRegionInfo {
+            guest_phys_addr: region.start_addr().raw_value(),
+            host_virt_addr: region.as_ptr() as u64,
+            size: region.len(),
+            backing_file_offset: region.file_offset().map_or(0, |fo| fo.start()),
+        };
+        let body = match serde_json::to_vec(&UffdHandoffMessage::AddRegion { region: &info }) {
+            Ok(body) => body,
+            Err(e) => {
+                warn!("uffd: failed to encode add-region notification: {e}");
+                return;
+            }
+        };
+        let header = (body.len() as u32).to_le_bytes();
+
+        let mut send_and_ack = || -> io::Result<()> {
+            sock.send_with_fds(&[&header[..], &body[..]], &[])
+                .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
+            let mut ack = [0u8; 1];
+            sock.read_exact(&mut ack)
+        };
+        if let Err(e) = send_and_ack() {
+            warn!(
+                "uffd: failed to notify manager of hot-added region \
+                 gpa={:#x}: {e}; dropping manager connection (a reconnecting \
+                 manager re-syncs the region set on resume)",
+                info.guest_phys_addr
+            );
+            self.uffd_handoff_sock = None;
+            return;
+        }
+        info!(
+            "uffd: notified manager of hot-added region gpa={:#x} size={:#x}",
+            info.guest_phys_addr, info.size
+        );
     }
 
     /// Serve UFFD faults via `source`, prefaulting one page per idle
@@ -2176,7 +2278,9 @@ impl MemoryManager {
             uefi_flash: None,
             thp: config.thp,
             uffd_attached: false,
+            uffd_handoff_sock: None,
             uffd_handoff_fd: None,
+            uffd_register_mode: None,
         };
 
         if let Some(handoff) = &config.uffd_handoff {
@@ -2672,16 +2776,27 @@ impl MemoryManager {
 
         let region = self.add_ram_region(start_addr, size)?;
 
-        // Add region to the list of regions associated with the default
-        // memory zone.
-        if let Some(memory_zone) = self.memory_zones.get_mut(DEFAULT_MEMORY_ZONE) {
-            memory_zone.regions.push(Arc::clone(&region));
-        }
+        // If a uffd manager is attached, register the new VMA against the
+        // existing uffd *before* committing the region. A registration
+        // failure means the region cannot be covered by the manager
+        // (guest faults there would bypass it), so fail the hot-add here
+        // — before it lands in memory_zones or the allocator — rather
+        // than leaving a committed-but-uncovered region. Notifying the
+        // manager happens after commit, below.
+        self.register_hotadd_region_with_uffd(&region)?;
 
         // Tell the allocator
         self.ram_allocator
             .allocate(Some(start_addr), size as GuestUsize, None)
             .ok_or(Error::MemoryRangeAllocation)?;
+
+        // Add region to the list of regions associated with the default
+        // memory zone. Done after the fallible steps above so a failure
+        // doesn't leave the region committed here (and re-advertised to a
+        // resuming manager via collect_uffd_regions).
+        if let Some(memory_zone) = self.memory_zones.get_mut(DEFAULT_MEMORY_ZONE) {
+            memory_zone.regions.push(Arc::clone(&region));
+        }
 
         // Update the slot so that it can be queried via the I/O port
         let slot = &mut self.hotplug_slots[self.next_hotplug_slot];
@@ -2691,6 +2806,12 @@ impl MemoryManager {
         slot.length = region.len();
 
         self.next_hotplug_slot += 1;
+
+        // The region is now fully added and uffd-registered; tell the
+        // manager. Best-effort — a failure drops the manager connection
+        // but does not fail the hot-add (a reconnecting manager re-syncs
+        // the region set on resume).
+        self.notify_uffd_add_region(&region);
 
         Ok(region)
     }
