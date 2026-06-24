@@ -14,7 +14,7 @@ use std::sync::Barrier;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{io, result, thread};
 
-use log::info;
+use log::debug;
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -212,11 +212,11 @@ impl EpollHelper {
 
                 match ev_type {
                     EPOLL_HELPER_EVENT_KILL => {
-                        info!("KILL_EVENT received, stopping epoll loop");
+                        debug!("KILL_EVENT received, stopping epoll loop");
                         return Ok(());
                     }
                     EPOLL_HELPER_EVENT_PAUSE => {
-                        info!("PAUSE_EVENT received, pausing epoll loop");
+                        debug!("PAUSE_EVENT received, pausing epoll loop");
 
                         // Acknowledge the pause is effective by using the
                         // paused_sync barrier.
@@ -284,11 +284,11 @@ impl EpollHelper {
 
                 match ev_type {
                     EPOLL_HELPER_EVENT_KILL => {
-                        info!("KILL_EVENT received, stopping epoll loop");
+                        debug!("KILL_EVENT received, stopping epoll loop");
                         return Ok(());
                     }
                     EPOLL_HELPER_EVENT_PAUSE => {
-                        info!("PAUSE_EVENT received, pausing epoll loop");
+                        debug!("PAUSE_EVENT received, pausing epoll loop");
 
                         // Acknowledge the pause is effective by using the
                         // paused_sync barrier.
