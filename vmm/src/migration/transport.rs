@@ -585,7 +585,6 @@ impl SendAdditionalConnections {
         worker_error: &AtomicBool,
         notify_tx: &Sender<SendMemoryThreadNotify>,
     ) -> Result<(), MigratableError> {
-        info!("Spawned thread to send VM memory.");
         loop {
             // Every memory sending thread receives messages from the main thread through this
             // channel. The lock is necessary to synchronize the multiple consumers. If the
