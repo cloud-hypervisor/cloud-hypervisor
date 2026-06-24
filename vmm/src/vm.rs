@@ -3237,6 +3237,10 @@ impl Vm {
             .restore_clock(&hv_vcpus, &saved.state, saved.mode)
             .map_err(|e| MigratableError::Resume(anyhow!("Could not restore guest clock: {e}")))
     }
+
+    pub fn device_manager(&self) -> &Arc<Mutex<DeviceManager>> {
+        &self.device_manager
+    }
 }
 
 impl Pausable for Vm {
