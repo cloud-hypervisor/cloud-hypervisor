@@ -19,9 +19,10 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread::JoinHandle;
 use std::{io, thread};
 
+use anyhow::anyhow;
 use event_monitor::event;
 use log::warn;
-use seccompiler::BpfProgram;
+use seccompiler::{BpfProgram, apply_filter};
 use vm_migration::MigratableError;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -70,6 +71,7 @@ impl Drop for MigrationWorkerHandle {
 
 #[derive(Clone, Debug)]
 pub struct MigrationSeccompFilters {
+    pub worker: BpfProgram,
     pub postcopy_server: BpfProgram,
 }
 
@@ -88,26 +90,41 @@ impl MigrationWorker {
     /// Drives the migration from its start to its end (success, cancellation,
     /// failure)
     fn run(self) -> MigrationWorkerResult {
+        let seccomp_res = if self.seccomp_filters.worker.is_empty() {
+            Ok(())
+        } else {
+            apply_filter(&self.seccomp_filters.worker).map_err(|e| {
+                MigratableError::MigrateSend(anyhow!(
+                    "Error applying migration seccomp filter: {e}"
+                ))
+            })
+        };
+
         let mut vm = self.vm_receiver.recv().expect("VMM should send VM");
 
-        event!("vm", "migration-started");
-        let res = Vmm::send_migration(
-            &mut vm,
-            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-            self.hypervisor.as_ref(),
-            &self.config,
-            self.initial_vm_state,
-            &self.seccomp_filters,
-        )
-        .inspect(|_| event!("vm", "migration-finished"))
-        .inspect_err(|_| event!("vm", "migration-failed"));
+        // We can't propagate errors early because of the complex return type,
+        // therefore we chain the results together.
+        let migration_result = seccomp_res
+            .and_then(|()| {
+                event!("vm", "migration-started");
+                Vmm::send_migration(
+                    &mut vm,
+                    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+                    self.hypervisor.as_ref(),
+                    &self.config,
+                    self.initial_vm_state,
+                    &self.seccomp_filters,
+                )
+            })
+            .inspect(|_| event!("vm", "migration-finished"))
+            .inspect_err(|_| event!("vm", "migration-failed"));
 
         // Notify VMM thread to check migration result.
         self.check_migration_evt.write(1).unwrap();
 
         MigrationWorkerResult {
             vm,
-            migration_result: res,
+            migration_result,
             initial_vm_state: self.initial_vm_state,
         }
     }
