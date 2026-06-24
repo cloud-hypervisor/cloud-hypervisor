@@ -18,6 +18,7 @@ use std::{mem, thread};
 
 use anyhow::{Context, anyhow};
 use log::{debug, error, info, warn};
+use seccompiler::{BpfProgram, SeccompAction, apply_filter};
 use serde_json;
 use thiserror::Error;
 use vm_memory::bitmap::BitmapSlice;
@@ -30,6 +31,7 @@ use vm_migration::tls::{TlsServerConfig, TlsStream};
 use vm_migration::{MigratableError, Snapshot};
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::sync_utils::Gate;
 use crate::{GuestMemoryMmap, VmMigrationConfig};
 
@@ -308,6 +310,7 @@ impl ReceiveAdditionalConnections {
         listener: ReceiveListener,
         guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
         fault_tx: Sender<SocketStream>,
+        seccomp_action: &SeccompAction,
     ) -> Result<Self, MigratableError> {
         let event_fd = EventFd::new(0)
             .context("Error creating terminate fd")
@@ -318,10 +321,26 @@ impl ReceiveAdditionalConnections {
             .context("Error cloning terminate fd")
             .map_err(MigratableError::MigrateReceive)?;
 
+        let seccomp_filter = get_seccomp_filter(seccomp_action, Thread::MigrationTcpWorker, None)
+            .context("Error creating migration TCP worker seccomp filter")
+            .map_err(MigratableError::MigrateReceive)?;
+
         let accept_thread = thread::Builder::new()
             .name("migrate-receive-accept-connections".to_owned())
             .spawn(move || {
-                Self::accept_connections(listener, &terminate_fd, &guest_memory, &fault_tx)
+                if !seccomp_filter.is_empty() {
+                    apply_filter(&seccomp_filter)
+                        .context("Error applying migration TCP worker seccomp filter")
+                        .map_err(MigratableError::MigrateReceive)?;
+                }
+
+                Self::accept_connections(
+                    listener,
+                    &terminate_fd,
+                    &guest_memory,
+                    &fault_tx,
+                    &seccomp_filter,
+                )
             })
             .context("Error creating connection accept thread")
             .map_err(MigratableError::MigrateReceive)?;
@@ -348,6 +367,7 @@ impl ReceiveAdditionalConnections {
         terminate_fd: &EventFd,
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         fault_tx: &Sender<SocketStream>,
+        seccomp_filter: &BpfProgram,
     ) -> Result<(), MigratableError> {
         let mut threads = Vec::new();
         let first_err = Self::accept_connections_loop(
@@ -356,6 +376,7 @@ impl ReceiveAdditionalConnections {
             guest_memory,
             fault_tx,
             &mut threads,
+            seccomp_filter,
         );
 
         if first_err.is_err() {
@@ -380,6 +401,7 @@ impl ReceiveAdditionalConnections {
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         fault_tx: &Sender<SocketStream>,
         threads: &mut Vec<thread::JoinHandle<Result<(), MigratableError>>>,
+        seccomp_filter: &BpfProgram,
     ) -> Result<(), MigratableError> {
         loop {
             let socket = listener.abortable_accept(terminate_fd)?;
@@ -402,6 +424,7 @@ impl ReceiveAdditionalConnections {
                 threads.len(),
                 terminate_fd,
                 guest_memory.clone(),
+                seccomp_filter,
             )?;
             threads.push(thread);
         }
@@ -456,15 +479,24 @@ impl ReceiveAdditionalConnections {
         index: usize,
         terminate_fd: &EventFd,
         guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
+        seccomp_filter: &BpfProgram,
     ) -> Result<thread::JoinHandle<Result<(), MigratableError>>, MigratableError> {
         let terminate_fd = terminate_fd
             .try_clone()
             .context("Error cloning terminate fd")
             .map_err(MigratableError::MigrateReceive)?;
 
+        let seccomp_filter_t = seccomp_filter.clone();
         thread::Builder::new()
             .name(format!("migrate-receive-memory-{index}"))
-            .spawn(move || Self::worker_receive_memory(&mut socket, &terminate_fd, &guest_memory))
+            .spawn(move || {
+                if !seccomp_filter_t.is_empty() {
+                    apply_filter(&seccomp_filter_t)
+                        .context("Error applying migration TCP worker seccomp filter")
+                        .map_err(MigratableError::MigrateReceive)?;
+                }
+                Self::worker_receive_memory(&mut socket, &terminate_fd, &guest_memory)
+            })
             .map_err(|e| {
                 error!("Error spawning receive-memory thread: {e}");
                 MigratableError::MigrateReceive(
@@ -652,6 +684,7 @@ impl SendAdditionalConnections {
         connections: NonZeroU32,
         tls_dir: Option<&Path>,
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+        seccomp_filter: &BpfProgram,
     ) -> Result<Self, MigratableError> {
         let mut threads = Vec::new();
         let configured_connections = connections.get();
@@ -683,10 +716,17 @@ impl SendAdditionalConnections {
             let message_rx = message_rx.clone();
             let worker_error = worker_error.clone();
             let notify_tx = notify_tx.clone();
+            let seccomp_filter = seccomp_filter.clone();
 
             let thread = thread::Builder::new()
                 .name(format!("migrate-send-memory-{n}"))
                 .spawn(move || {
+                    if !seccomp_filter.is_empty() {
+                        apply_filter(&seccomp_filter)
+                            .context("Error applying migration TCP worker seccomp filter")
+                            .map_err(MigratableError::MigrateReceive)?;
+                    }
+
                     Self::worker_send_memory(
                         &mut socket,
                         &guest_memory,
