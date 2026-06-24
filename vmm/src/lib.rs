@@ -3152,6 +3152,13 @@ impl RequestHandler for Vmm {
         // - this simplifies the code (especially error propagation)
         // - the overhead is negligible
         let seccomp_filters = {
+            let worker = get_seccomp_filter(&self.seccomp_action, Thread::MigrationWorker, None)
+                .map_err(|e| {
+                    MigratableError::MigrateSend(anyhow!(
+                        "Error creating migration seccomp filter: {e}"
+                    ))
+                })?;
+
             let postcopy_server =
                 get_seccomp_filter(&self.seccomp_action, Thread::MigrateSendPostcopy, None)
                     .map_err(|e| {
@@ -3160,7 +3167,10 @@ impl RequestHandler for Vmm {
                         ))
                     })?;
 
-            MigrationSeccompFilters { postcopy_server }
+            MigrationSeccompFilters {
+                worker,
+                postcopy_server,
+            }
         };
 
         // Take VM ownership. This also means that API events can no longer
