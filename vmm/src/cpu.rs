@@ -58,12 +58,7 @@ use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
 use libc::{c_void, siginfo_t};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use linux_loader::elf::Elf64_Nhdr;
-#[cfg(any(
-    target_arch = "aarch64",
-    all(target_arch = "x86_64", feature = "guest_debug")
-))]
-use log::debug;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use seccompiler::{SeccompAction, apply_filter};
 use thiserror::Error;
 use tracer::trace_scoped;
@@ -979,7 +974,7 @@ impl CpuManager {
         cpu_id: u32,
         snapshot: Option<&Snapshot>,
     ) -> Result<Arc<Mutex<Vcpu>>> {
-        info!("Creating vCPU: cpu_id = {cpu_id}");
+        debug!("Creating vCPU: cpu_id = {cpu_id}");
 
         #[cfg(target_arch = "x86_64")]
         let topology = self.get_vcpu_topology();
@@ -1229,7 +1224,7 @@ impl CpuManager {
         #[cfg(target_arch = "x86_64")]
         let interrupt_controller_clone = self.interrupt_controller.as_ref().cloned();
 
-        info!("Starting vCPU: cpu_id = {vcpu_id}");
+        debug!("Starting vCPU: cpu_id = {vcpu_id}");
 
         let handle = Some(
             thread::Builder::new()
