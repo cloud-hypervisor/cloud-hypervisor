@@ -36,7 +36,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 #[cfg(target_arch = "aarch64")]
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::{fs, io, mem, result};
+use std::{fs, io, result};
 
 #[cfg(target_arch = "x86_64")]
 use anyhow::Context;
@@ -1108,7 +1108,7 @@ impl vm::Vm for KvmVm {
             flags |= KVM_MEM_LOG_DIRTY_PAGES;
         }
 
-        const _: () = assert!(mem::size_of::<usize>() <= mem::size_of::<u64>());
+        const _: () = assert!(size_of::<usize>() <= size_of::<u64>());
 
         // Create a per-region guest_memfd when supported.
         // Each region gets its own fd sized exactly to memory_size
@@ -1222,7 +1222,7 @@ impl vm::Vm for KvmVm {
             flags |= KVM_MEM_LOG_DIRTY_PAGES;
         }
 
-        const _: () = assert!(mem::size_of::<usize>() <= mem::size_of::<u64>());
+        const _: () = assert!(size_of::<usize>() <= size_of::<u64>());
 
         let mut region = kvm_userspace_memory_region2 {
             slot,
@@ -2022,7 +2022,7 @@ impl cpu::Vcpu for KvmVcpu {
                 .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), &mut bytes)
                 .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
             state.regs.regs[i] = u64::from_le_bytes(bytes);
-            off += mem::size_of::<u64>();
+            off += size_of::<u64>();
         }
 
         // We are now entering the "Other register" section of the ARMv8-a architecture.
@@ -2075,7 +2075,7 @@ impl cpu::Vcpu for KvmVcpu {
                 .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), &mut bytes)
                 .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
             state.spsr[i] = u64::from_le_bytes(bytes);
-            off += mem::size_of::<u64>();
+            off += size_of::<u64>();
         }
 
         Ok(state.into())
@@ -2177,7 +2177,7 @@ impl cpu::Vcpu for KvmVcpu {
                     &kvm_regs_state.regs.regs[i].to_le_bytes(),
                 )
                 .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
-            off += mem::size_of::<u64>();
+            off += size_of::<u64>();
         }
 
         let off = offset_of!(user_pt_regs, sp);
@@ -2228,7 +2228,7 @@ impl cpu::Vcpu for KvmVcpu {
                     &kvm_regs_state.spsr[i].to_le_bytes(),
                 )
                 .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
-            off += mem::size_of::<u64>();
+            off += size_of::<u64>();
         }
 
         Ok(())
@@ -3723,7 +3723,7 @@ impl KvmVcpu {
                 .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U128, off), &mut bytes)
                 .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
             regs.fp_regs.vregs[i] = u128::from_le_bytes(bytes);
-            off += mem::size_of::<u128>();
+            off += size_of::<u128>();
         }
 
         // Floating-point Status Register
@@ -3756,7 +3756,7 @@ impl KvmVcpu {
                     &regs.fp_regs.vregs[i].to_le_bytes(),
                 )
                 .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
-            off += mem::size_of::<u128>();
+            off += size_of::<u128>();
         }
 
         // Floating-point Status Register

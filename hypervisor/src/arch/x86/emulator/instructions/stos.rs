@@ -40,7 +40,7 @@ macro_rules! stos {
                 .map_err(|e| EmulationError::InvalidOperand(anyhow!(e)))?;
 
             let backwards = string_op_backwards(state.flags());
-            let len = std::mem::size_of::<$bound>();
+            let len = size_of::<$bound>();
             let rax_bytes = rax.to_le_bytes();
 
             while count > 0 {

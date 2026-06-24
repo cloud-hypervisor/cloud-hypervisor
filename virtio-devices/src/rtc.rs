@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 //
 
-use std::mem::size_of;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::AtomicBool;

@@ -39,7 +39,7 @@ macro_rules! movs {
                 .map_err(|e| EmulationError::InvalidOperand(anyhow!(e)))?;
 
             let backwards = string_op_backwards(state.flags());
-            let len = std::mem::size_of::<$bound>();
+            let len = size_of::<$bound>();
 
             while count > 0 {
                 let mut memory: [u8; 8] = [0; 8];

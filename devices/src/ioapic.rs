@@ -9,8 +9,8 @@
 // Implementation of an intel 82093AA Input/Output Advanced Programmable Interrupt Controller
 // See https://pdos.csail.mit.edu/6.828/2016/readings/ia32/ioapic.pdf for a specification.
 
+use std::result;
 use std::sync::{Arc, Barrier};
-use std::{mem, result};
 
 use byteorder::{ByteOrder, LittleEndian};
 use log::{debug, error, trace, warn};
@@ -147,7 +147,7 @@ pub struct IoapicState {
 
 impl BusDevice for Ioapic {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
-        if data.len() != mem::size_of::<u32>() {
+        if data.len() != size_of::<u32>() {
             warn!("Invalid read size on IOAPIC: {}", data.len());
             return;
         }
@@ -167,7 +167,7 @@ impl BusDevice for Ioapic {
     }
 
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
-        if data.len() != mem::size_of::<u32>() {
+        if data.len() != size_of::<u32>() {
             warn!("Invalid write size on IOAPIC: {}", data.len());
             return None;
         }

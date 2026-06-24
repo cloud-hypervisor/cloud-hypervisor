@@ -108,8 +108,8 @@ struct PvmemcontrolTransport {
     command: PvmemcontrolTransportCommand,
 }
 
-const PVMEMCONTROL_DEVICE_MMIO_SIZE: u64 = mem::size_of::<PvmemcontrolTransport>() as u64;
-const PVMEMCONTROL_DEVICE_MMIO_ALIGN: u64 = mem::align_of::<PvmemcontrolTransport>() as u64;
+const PVMEMCONTROL_DEVICE_MMIO_SIZE: u64 = size_of::<PvmemcontrolTransport>() as u64;
+const PVMEMCONTROL_DEVICE_MMIO_ALIGN: u64 = align_of::<PvmemcontrolTransport>() as u64;
 
 impl PvmemcontrolTransport {
     fn ack() -> Self {
@@ -293,7 +293,7 @@ impl PvmemcontrolDevice {
         let buf_phys_addr = GuestAddress(buf_phys_addr.into());
         if !guest_memory.memory().check_range(
             buf_phys_addr,
-            mem::size_of::<PvmemcontrolResp>().max(mem::size_of::<PvmemcontrolReq>()),
+            size_of::<PvmemcontrolResp>().max(size_of::<PvmemcontrolReq>()),
         ) {
             warn!("guest sent invalid phys addr {:#x}", buf_phys_addr.0);
             return PvmemcontrolDevice::new(

@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use core::mem::size_of;
 use std::ffi::CString;
 use std::fs::File;
 use std::io::{self, Cursor, Read, Seek, SeekFrom};

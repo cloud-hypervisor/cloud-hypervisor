@@ -20,23 +20,16 @@ macro_rules! or_rm_r {
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
         ) -> Result<(), EmulationError<Exception>> {
-            let src_reg_value = get_op(&insn, 1, std::mem::size_of::<$bound>(), state, platform)
+            let src_reg_value = get_op(&insn, 1, size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
 
-            let dst_value = get_op(&insn, 0, std::mem::size_of::<$bound>(), state, platform)
+            let dst_value = get_op(&insn, 0, size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
 
             let result = src_reg_value | dst_value;
 
-            set_op(
-                &insn,
-                0,
-                std::mem::size_of::<$bound>(),
-                state,
-                platform,
-                result,
-            )
-            .map_err(EmulationError::PlatformEmulationError)?;
+            set_op(&insn, 0, size_of::<$bound>(), state, platform, result)
+                .map_err(EmulationError::PlatformEmulationError)?;
 
             Ok(())
         }

@@ -74,7 +74,7 @@ macro_rules! riscv64_reg_id {
         kvm_bindings::KVM_REG_RISCV as u64
             | u64::from($reg_type)
             | u64::from(kvm_bindings::KVM_REG_SIZE_U64)
-            | (($offset / std::mem::size_of::<u64>()) as u64)
+            | (($offset / size_of::<u64>()) as u64)
     };
 }
 

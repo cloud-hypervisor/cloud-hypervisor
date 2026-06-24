@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::mem::size_of;
 use std::os::unix::fs::FileExt;
 use std::{io, result};
 

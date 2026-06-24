@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::any::Any;
-use std::{mem, result};
+use std::result;
 
 use serde::de::Error as SerdeError;
 use serde::{Deserialize, Serialize};
@@ -67,7 +67,7 @@ impl<'de> Deserialize<'de> for GicState {
         }
 
         const {
-            assert!(mem::size_of::<GicStateDefaultDeserialize>() == mem::size_of::<GicState>());
+            assert!(size_of::<GicStateDefaultDeserialize>() == size_of::<GicState>());
         };
 
         let value: serde_json::Value = Deserialize::deserialize(deserializer)?;

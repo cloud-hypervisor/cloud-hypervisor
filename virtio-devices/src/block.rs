@@ -666,8 +666,7 @@ impl BlockEpollHandler {
         if let Some(cpuset) = cpuset.as_ref() {
             let cpuset: *const libc::cpu_set_t = cpuset;
             // SAFETY: FFI call with correct arguments
-            let ret =
-                unsafe { libc::sched_setaffinity(0, mem::size_of::<libc::cpu_set_t>(), cpuset) };
+            let ret = unsafe { libc::sched_setaffinity(0, size_of::<libc::cpu_set_t>(), cpuset) };
 
             if ret != 0 {
                 error!(
@@ -1148,7 +1147,7 @@ impl VirtioDevice for Block {
         // The "writeback" field is the only mutable field
         let writeback_offset =
             (&raw const self.config.writeback as u64) - (&raw const self.config as u64);
-        if offset != writeback_offset || data.len() != mem::size_of_val(&self.config.writeback) {
+        if offset != writeback_offset || data.len() != size_of_val(&self.config.writeback) {
             error!(
                 "Attempt to write to read-only field: offset {:x} length {}",
                 offset,

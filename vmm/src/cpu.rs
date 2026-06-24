@@ -3498,7 +3498,7 @@ mod unit_tests {
 #[cfg(test)]
 mod unit_tests {
     #[cfg(feature = "kvm")]
-    use std::{mem, mem::offset_of};
+    use std::mem::offset_of;
 
     use arch::layout;
     use hypervisor::arch::aarch64::regs::MPIDR_EL1;

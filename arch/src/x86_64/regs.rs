@@ -6,7 +6,7 @@
 // Portions Copyright 2017 The Chromium OS Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
-use std::{mem, result};
+use std::result;
 
 use hypervisor::arch::x86::gdt::{gdt_entry, segment_from_gdt};
 use hypervisor::arch::x86::regs::CR0_PE;
@@ -134,7 +134,7 @@ fn write_gdt_table(table: &[u64], guest_mem: &GuestMemoryMmap) -> Result<()> {
     let boot_gdt_addr = BOOT_GDT_START;
     for (index, entry) in table.iter().enumerate() {
         let addr = guest_mem
-            .checked_offset(boot_gdt_addr, index * mem::size_of::<u64>())
+            .checked_offset(boot_gdt_addr, index * size_of::<u64>())
             .ok_or(Error::CheckGdtAddr)?;
         guest_mem.write_obj(*entry, addr).map_err(Error::WriteGdt)?;
     }
@@ -170,11 +170,11 @@ pub fn configure_segments_and_sregs(
     // Write segments
     write_gdt_table(&gdt_table[..], mem)?;
     sregs.gdt.base = BOOT_GDT_START.raw_value();
-    sregs.gdt.limit = mem::size_of_val(&gdt_table) as u16 - 1;
+    sregs.gdt.limit = size_of_val(&gdt_table) as u16 - 1;
 
     write_idt_value(0, mem)?;
     sregs.idt.base = BOOT_IDT_START.raw_value();
-    sregs.idt.limit = mem::size_of::<u64>() as u16 - 1;
+    sregs.idt.limit = size_of::<u64>() as u16 - 1;
 
     sregs.cs = code_seg;
     sregs.ds = data_seg;

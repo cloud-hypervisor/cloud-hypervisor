@@ -15,7 +15,6 @@
 // limitations under the License.
 
 use std::io::{self, Write};
-use std::mem::size_of;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};

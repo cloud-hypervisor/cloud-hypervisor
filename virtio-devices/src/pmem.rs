@@ -7,7 +7,6 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::fs::File;
-use std::mem::size_of;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};

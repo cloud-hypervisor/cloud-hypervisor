@@ -10,7 +10,6 @@
 
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::mem::size_of;
 use std::str::FromStr;
 
 use bitflags::bitflags;

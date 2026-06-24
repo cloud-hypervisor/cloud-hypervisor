@@ -8,7 +8,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
-use std::{ffi, fs, io, mem, slice};
+use std::{ffi, fs, io, slice};
 
 use log::{error, info};
 use vhost::vhost_kern::vhost_binding::VHOST_VRING_F_LOG;
@@ -228,7 +228,7 @@ impl VhostUserHandle {
                 desc_table_addr: get_host_address_range(
                     mem,
                     GuestAddress(queue.desc_table()),
-                    actual_size * mem::size_of::<RawDescriptor>(),
+                    actual_size * size_of::<RawDescriptor>(),
                 )
                 .ok_or(Error::DescriptorTableAddress)? as u64,
                 // The used ring is {flags: u16; idx: u16; virtq_used_elem [{id: u16, len: u16}; actual_size]},
