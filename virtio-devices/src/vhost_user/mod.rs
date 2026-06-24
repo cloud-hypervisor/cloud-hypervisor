@@ -179,6 +179,10 @@ pub enum Error {
     EpollWait(#[source] io::Error),
     #[error("Aborted vhost-user connect: kill event received")]
     ConnectKilled,
+    #[error("Failed setting socket to non-blocking mode")]
+    SetNonBlocking(#[source] io::Error),
+    #[error("Timed out waiting for vhost-user connection")]
+    VhostUserConnectTimeout,
 }
 type Result<T> = result::Result<T, Error>;
 
