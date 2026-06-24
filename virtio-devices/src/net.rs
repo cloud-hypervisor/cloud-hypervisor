@@ -290,7 +290,7 @@ impl NetEpollHandler {
         {
             helper.add_event(self.net.tap.as_raw_fd(), RX_TAP_EVENT)?;
             self.net.rx_tap_listening = true;
-            info!("Listener registered at start");
+            debug!("Listener registered at start");
         }
 
         // The NetQueuePair needs the epoll fd.
