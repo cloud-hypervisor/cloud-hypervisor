@@ -21,7 +21,7 @@ use std::{io, thread};
 
 use event_monitor::event;
 use log::warn;
-use seccompiler::SeccompAction;
+use seccompiler::BpfProgram;
 use vm_migration::MigratableError;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -68,6 +68,11 @@ impl Drop for MigrationWorkerHandle {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct MigrationSeccompFilters {
+    pub postcopy_server: BpfProgram,
+}
+
 pub struct MigrationWorker {
     // Keep the VM out of the thread closure until spawning succeeds.
     vm_receiver: Receiver<Vm>,
@@ -76,7 +81,7 @@ pub struct MigrationWorker {
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     initial_vm_state: VmState,
-    seccomp_action: SeccompAction,
+    seccomp_filters: MigrationSeccompFilters,
 }
 
 impl MigrationWorker {
@@ -92,7 +97,7 @@ impl MigrationWorker {
             self.hypervisor.as_ref(),
             &self.config,
             self.initial_vm_state,
-            &self.seccomp_action,
+            &self.seccomp_filters,
         )
         .inspect(|_| event!("vm", "migration-finished"))
         .inspect_err(|_| event!("vm", "migration-failed"));
@@ -119,7 +124,7 @@ impl MigrationWorker {
             dyn hypervisor::Hypervisor,
         >,
         initial_vm_state: VmState,
-        seccomp_action: SeccompAction,
+        seccomp_filters: MigrationSeccompFilters,
     ) -> Result<MigrationWorkerHandle, MigrationWorkerSpawnError> {
         let (vm_sender, vm_receiver) = mpsc::sync_channel(0);
         let worker = MigrationWorker {
@@ -129,7 +134,7 @@ impl MigrationWorker {
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             hypervisor,
             initial_vm_state,
-            seccomp_action,
+            seccomp_filters,
         };
 
         let inner_handle = match thread::Builder::new()

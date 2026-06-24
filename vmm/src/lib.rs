@@ -65,7 +65,9 @@ use crate::migration::get_vm_snapshot;
 use crate::migration::transport::{
     self, ReceiveAdditionalConnections, ReceiveListener, SendAdditionalConnections, SocketStream,
 };
-use crate::migration::worker::{MigrationWorker, MigrationWorkerHandle, MigrationWorkerResult};
+use crate::migration::worker::{
+    MigrationSeccompFilters, MigrationWorker, MigrationWorkerHandle, MigrationWorkerResult,
+};
 use crate::migration::{recv_vm_config, recv_vm_state};
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::vm::{Error as VmError, Vm, VmState};
@@ -1548,7 +1550,7 @@ impl Vmm {
         hypervisor: &dyn hypervisor::Hypervisor,
         send_data_migration: &VmSendMigrationData,
         initial_vm_state: VmState,
-        seccomp_action: &SeccompAction,
+        seccomp_filters: &MigrationSeccompFilters,
     ) -> result::Result<(), MigratableError> {
         // State machine that is updated with more context as we progress.
         let mut ctx = OngoingMigrationContext::new();
@@ -1684,15 +1686,17 @@ impl Vmm {
                 send_data_migration.tls_dir.as_deref(),
             )?;
             let guest_memory = vm.guest_memory();
-            // Build the seccomp filter on the parent thread so any failure aborts
-            // the migration before the serve thread is spawned.
-            let seccomp_filter =
-                get_seccomp_filter(seccomp_action, Thread::MigrateSendPostcopy, None)
-                    .context("creating postcopy serve seccomp filter")
-                    .map_err(MigratableError::MigrateSend)?;
+
+            let seccomp_filters_clone = seccomp_filters.clone();
             let handle = thread::Builder::new()
                 .name("migrate-send-postcopy".to_owned())
-                .spawn(move || Self::serve_postcopy(seccomp_filter, fault_stream, guest_memory))
+                .spawn(move || {
+                    Self::serve_postcopy(
+                        &seccomp_filters_clone.postcopy_server,
+                        fault_stream,
+                        guest_memory,
+                    )
+                })
                 .context("spawning postcopy serve thread")
                 .map_err(MigratableError::MigrateSend)?;
             Some(handle)
@@ -1773,7 +1777,7 @@ impl Vmm {
         reason = "runs on a dedicated thread and must own its arguments"
     )]
     fn serve_postcopy(
-        seccomp_filter: BpfProgram,
+        seccomp_filter: &BpfProgram,
         mut socket: SocketStream,
         guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
     ) -> result::Result<(), MigratableError> {
@@ -1781,7 +1785,7 @@ impl Vmm {
         // seccomp is disabled (SeccompAction::Allow), in which case there is
         // nothing to apply.
         if !seccomp_filter.is_empty() {
-            apply_filter(&seccomp_filter)
+            apply_filter(seccomp_filter)
                 .context("applying postcopy serve seccomp filter")
                 .map_err(MigratableError::MigrateSend)?;
         }
@@ -3144,6 +3148,21 @@ impl RequestHandler for Vmm {
             .with_context(|| "Failed to clone check_migration_evt FD")
             .map_err(MigratableError::MigrateSend)?;
 
+        // We are creating all seccomp filters beforehand, as:
+        // - this simplifies the code (especially error propagation)
+        // - the overhead is negligible
+        let seccomp_filters = {
+            let postcopy_server =
+                get_seccomp_filter(&self.seccomp_action, Thread::MigrateSendPostcopy, None)
+                    .map_err(|e| {
+                        MigratableError::MigrateSend(anyhow!(
+                            "creating postcopy serve seccomp filter: {e}"
+                        ))
+                    })?;
+
+            MigrationSeccompFilters { postcopy_server }
+        };
+
         // Take VM ownership. This also means that API events can no longer
         // change the VM (e.g. net device hotplug).
         let vm = self
@@ -3160,7 +3179,7 @@ impl RequestHandler for Vmm {
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             self.hypervisor.clone(),
             initial_vm_state,
-            self.seccomp_action.clone(),
+            seccomp_filters,
         ) {
             Ok(handle) => {
                 self.vm = VmOwnership::Migration {
