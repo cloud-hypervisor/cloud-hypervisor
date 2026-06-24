@@ -980,7 +980,12 @@ impl Vmm {
                 // The accept thread hands the page fault connection back via this channel.
                 let (fault_tx, fault_rx) = channel();
                 let connections = listener.try_clone().and_then(|l| {
-                    ReceiveAdditionalConnections::new(l, guest_memory.clone(), fault_tx)
+                    ReceiveAdditionalConnections::new(
+                        l,
+                        guest_memory.clone(),
+                        fault_tx,
+                        &self.seccomp_action,
+                    )
                 })?;
                 Ok(ReceiveMigrationConfiguredData {
                     memory_manager,
@@ -1652,6 +1657,7 @@ impl Vmm {
                 send_data_migration.connections,
                 send_data_migration.tls_dir.as_deref(),
                 &vm.guest_memory(),
+                &seccomp_filters.tcp_worker,
             )?;
 
             Self::do_memory_migration(
@@ -3159,6 +3165,16 @@ impl RequestHandler for Vmm {
                     ))
                 })?;
 
+            let tcp_worker =
+                get_seccomp_filter(&self.seccomp_action, Thread::MigrationTcpWorker, None)
+                    .map_err(|e| {
+                        MigratableError::MigrateSend(anyhow!(
+                            "Error creating migration TCP worker seccomp filter: {e}"
+                        ))
+                    })?;
+
+            // Build the seccomp filter on the parent thread so any failure aborts
+            // the migration before the serve thread is spawned.
             let postcopy_server =
                 get_seccomp_filter(&self.seccomp_action, Thread::MigrateSendPostcopy, None)
                     .map_err(|e| {
@@ -3169,6 +3185,7 @@ impl RequestHandler for Vmm {
 
             MigrationSeccompFilters {
                 worker,
+                tcp_worker,
                 postcopy_server,
             }
         };

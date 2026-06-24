@@ -39,7 +39,11 @@ pub enum Thread {
     #[cfg(feature = "dbus_api")]
     DBusApi,
     EventMonitor,
+    /// Thread handling the migration on the sending side.
     MigrationWorker,
+    /// Key used for the TCP workers for send and receive, as well as the accept
+    /// thread on the receiver side.
+    MigrationTcpWorker,
     SignalHandler,
     Vcpu,
     Vmm,
@@ -1124,6 +1128,52 @@ fn migration_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError
     ])
 }
 
+fn migration_tcp_worker_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
+    Ok(vec![
+        (libc::SYS_accept4, vec![]),
+        (libc::SYS_brk, vec![]),
+        (libc::SYS_clock_gettime, vec![]),
+        (libc::SYS_clone, vec![]),
+        (libc::SYS_clone3, vec![]),
+        (libc::SYS_close, vec![]),
+        (libc::SYS_exit, vec![]),
+        (libc::SYS_exit_group, vec![]),
+        (libc::SYS_fcntl, vec![]),
+        (libc::SYS_futex, vec![]),
+        (libc::SYS_getrandom, vec![]),
+        (libc::SYS_gettid, vec![]),
+        (libc::SYS_madvise, vec![]),
+        (libc::SYS_mmap, vec![]),
+        (libc::SYS_mprotect, vec![]),
+        (libc::SYS_munmap, vec![]),
+        (libc::SYS_openat, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_poll, vec![]),
+        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+        (libc::SYS_ppoll, vec![]),
+        (libc::SYS_prctl, vec![]),
+        (libc::SYS_pwrite64, vec![]),
+        (libc::SYS_read, vec![]),
+        (libc::SYS_readv, vec![]),
+        (libc::SYS_recvfrom, vec![]),
+        (libc::SYS_recvmsg, vec![]),
+        (libc::SYS_rseq, vec![]),
+        (libc::SYS_rt_sigprocmask, vec![]),
+        (libc::SYS_rt_sigreturn, vec![]),
+        (libc::SYS_sched_getaffinity, vec![]),
+        (libc::SYS_sched_yield, vec![]),
+        // We are already inheriting seccomp from the parent thread.
+        (libc::SYS_seccomp, vec![]),
+        (libc::SYS_sendmsg, vec![]),
+        (libc::SYS_sendto, vec![]),
+        (libc::SYS_set_robust_list, vec![]),
+        (libc::SYS_setsockopt, vec![]),
+        (libc::SYS_sigaltstack, vec![]),
+        (libc::SYS_write, vec![]),
+        (libc::SYS_writev, vec![]),
+    ])
+}
+
 fn serial_manager_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
     Ok(vec![
         (libc::SYS_accept4, vec![]),
@@ -1193,6 +1243,7 @@ fn get_seccomp_rules(
         Thread::DBusApi => dbus_api_thread_rules()?,
         Thread::EventMonitor => event_monitor_thread_rules()?,
         Thread::MigrationWorker => migration_thread_rules()?,
+        Thread::MigrationTcpWorker => migration_tcp_worker_thread_rules()?,
         Thread::SerialManager => serial_manager_thread_rules()?,
         Thread::SignalHandler => signal_handler_thread_rules()?,
         Thread::Vcpu => vcpu_thread_rules(

@@ -72,6 +72,7 @@ impl Drop for MigrationWorkerHandle {
 #[derive(Clone, Debug)]
 pub struct MigrationSeccompFilters {
     pub worker: BpfProgram,
+    pub tcp_worker: BpfProgram,
     pub postcopy_server: BpfProgram,
 }
 
