@@ -53,7 +53,7 @@ macro_rules! arm64_core_reg_id {
         KVM_REG_ARM64 as u64
             | u64::from(KVM_REG_ARM_CORE)
             | $size
-            | (($offset / mem::size_of::<u32>()) as u64)
+            | (($offset / size_of::<u32>()) as u64)
     };
 }
 

@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use std::ffi::CString;
 #[cfg(feature = "kvm")]
 use std::iter;
-use std::mem::size_of;
 use std::sync::{Arc, Mutex};
 use std::{ffi, io};
 

@@ -1,9 +1,9 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
-use std::{mem, result};
 
 use block::VirtioBlockConfig;
 use log::{error, info};
@@ -138,7 +138,7 @@ impl Blk {
                 return Err(Error::BadQueueNum);
             }
 
-            let config_len = mem::size_of::<VirtioBlockConfig>();
+            let config_len = size_of::<VirtioBlockConfig>();
             let config_space: Vec<u8> = vec![0u8; config_len];
             let (_, config_space) = vu
                 .socket_handle()
@@ -237,7 +237,7 @@ impl VirtioDevice for Blk {
         // The "writeback" field is the only mutable field
         let writeback_offset =
             (&raw const self.config.writeback as u64) - (&raw const self.config as u64);
-        if offset != writeback_offset || data.len() != mem::size_of_val(&self.config.writeback) {
+        if offset != writeback_offset || data.len() != size_of_val(&self.config.writeback) {
             error!(
                 "Attempt to write to read-only field: offset {:x} length {}",
                 offset,

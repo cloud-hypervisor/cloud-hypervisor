@@ -15,7 +15,6 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::mem::size_of;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};

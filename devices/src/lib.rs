@@ -48,7 +48,7 @@ bitflags! {
 macro_rules! generate_read_fn {
     ($fn_name: ident, $data_type: ty, $byte_type: ty, $type_size: expr, $endian_type: ident) => {
         pub fn $fn_name(input: &[$byte_type]) -> $data_type {
-            assert!($type_size == std::mem::size_of::<$data_type>());
+            assert!($type_size == size_of::<$data_type>());
             let mut array = [0u8; $type_size];
             for (byte, read) in array.iter_mut().zip(input.iter().cloned()) {
                 *byte = read as u8;

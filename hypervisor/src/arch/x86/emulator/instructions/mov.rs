@@ -22,13 +22,13 @@ macro_rules! mov_rm_r {
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
         ) -> Result<(), EmulationError<Exception>> {
-            let src_reg_value = get_op(&insn, 1, std::mem::size_of::<$bound>(), state, platform)
+            let src_reg_value = get_op(&insn, 1, size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
 
             set_op(
                 &insn,
                 0,
-                std::mem::size_of::<$bound>(),
+                size_of::<$bound>(),
                 state,
                 platform,
                 src_reg_value,
@@ -48,18 +48,11 @@ macro_rules! mov_rm_imm {
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
         ) -> Result<(), EmulationError<Exception>> {
-            let imm = get_op(&insn, 1, std::mem::size_of::<$bound>(), state, platform)
+            let imm = get_op(&insn, 1, size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
 
-            set_op(
-                &insn,
-                0,
-                std::mem::size_of::<$bound>(),
-                state,
-                platform,
-                imm,
-            )
-            .map_err(EmulationError::PlatformEmulationError)?;
+            set_op(&insn, 0, size_of::<$bound>(), state, platform, imm)
+                .map_err(EmulationError::PlatformEmulationError)?;
 
             Ok(())
         }
@@ -74,19 +67,13 @@ macro_rules! movzx {
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
         ) -> Result<(), EmulationError<Exception>> {
-            let src_value = get_op(
-                &insn,
-                1,
-                std::mem::size_of::<$src_op_size>(),
-                state,
-                platform,
-            )
-            .map_err(EmulationError::PlatformEmulationError)?;
+            let src_value = get_op(&insn, 1, size_of::<$src_op_size>(), state, platform)
+                .map_err(EmulationError::PlatformEmulationError)?;
 
             set_op(
                 &insn,
                 0,
-                std::mem::size_of::<$dest_op_size>(),
+                size_of::<$dest_op_size>(),
                 state,
                 platform,
                 src_value,
@@ -113,18 +100,11 @@ macro_rules! mov_r_imm {
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
         ) -> Result<(), EmulationError<Exception>> {
-            let imm = get_op(&insn, 1, std::mem::size_of::<$bound>(), state, platform)
+            let imm = get_op(&insn, 1, size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
 
-            set_op(
-                &insn,
-                0,
-                std::mem::size_of::<$bound>(),
-                state,
-                platform,
-                imm,
-            )
-            .map_err(EmulationError::PlatformEmulationError)?;
+            set_op(&insn, 0, size_of::<$bound>(), state, platform, imm)
+                .map_err(EmulationError::PlatformEmulationError)?;
 
             Ok(())
         }

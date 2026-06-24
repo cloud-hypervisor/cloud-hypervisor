@@ -8,11 +8,10 @@
 
 use std::any::Any;
 use std::io::Write;
-use std::mem::size_of;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
-use std::{cmp, io, mem, result};
+use std::{cmp, io, result};
 
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
@@ -91,7 +90,7 @@ const VIRTIO_PCI_CAP_LEN_OFFSET: u8 = 2;
 impl VirtioPciCap {
     pub fn new(cfg_type: PciCapabilityType, pci_bar: u8, offset: u32, length: u32) -> Self {
         VirtioPciCap {
-            cap_len: (mem::size_of::<VirtioPciCap>() as u8) + VIRTIO_PCI_CAP_LEN_OFFSET,
+            cap_len: (size_of::<VirtioPciCap>() as u8) + VIRTIO_PCI_CAP_LEN_OFFSET,
             cfg_type: cfg_type as u8,
             pci_bar,
             id: 0,
@@ -131,7 +130,7 @@ impl VirtioPciNotifyCap {
     ) -> Self {
         VirtioPciNotifyCap {
             cap: VirtioPciCap {
-                cap_len: (mem::size_of::<VirtioPciNotifyCap>() as u8) + VIRTIO_PCI_CAP_LEN_OFFSET,
+                cap_len: (size_of::<VirtioPciNotifyCap>() as u8) + VIRTIO_PCI_CAP_LEN_OFFSET,
                 cfg_type: cfg_type as u8,
                 pci_bar,
                 id: 0,
@@ -168,7 +167,7 @@ impl VirtioPciCap64 {
     pub fn new(cfg_type: PciCapabilityType, pci_bar: u8, id: u8, offset: u64, length: u64) -> Self {
         VirtioPciCap64 {
             cap: VirtioPciCap {
-                cap_len: (mem::size_of::<VirtioPciCap64>() as u8) + VIRTIO_PCI_CAP_LEN_OFFSET,
+                cap_len: (size_of::<VirtioPciCap64>() as u8) + VIRTIO_PCI_CAP_LEN_OFFSET,
                 cfg_type: cfg_type as u8,
                 pci_bar,
                 id,
@@ -776,7 +775,7 @@ impl VirtioPciDevice {
             return;
         }
 
-        if offset < mem::size_of::<VirtioPciCap>() {
+        if offset < size_of::<VirtioPciCap>() {
             if let Some(end) = offset.checked_add(data_len) {
                 // This write can't fail, offset and end are checked against config_len.
                 data.write_all(&cap_slice[offset..cmp::min(end, cap_len)])
@@ -799,7 +798,7 @@ impl VirtioPciDevice {
             return None;
         }
 
-        if offset < mem::size_of::<VirtioPciCap>() {
+        if offset < size_of::<VirtioPciCap>() {
             let (_, right) = cap_slice.split_at_mut(offset);
             right[..data_len].copy_from_slice(data);
             None

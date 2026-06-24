@@ -10,7 +10,6 @@
 
 pub mod testing {
     use std::marker::PhantomData;
-    use std::mem;
 
     use virtio_queue::desc::split::VirtqUsedElem;
     use virtio_queue::{Queue, QueueT};
@@ -62,13 +61,11 @@ pub mod testing {
         // This function returns a place in memory which holds a value of type U, and starts
         // immediately after the end of self (which is location + sizeof(T)).
         fn next_place<U>(&self) -> SomeplaceInMemory<'a, U> {
-            self.map_offset::<U>(mem::size_of::<T>() as u64)
+            self.map_offset::<U>(size_of::<T>() as u64)
         }
 
         fn end(&self) -> GuestAddress {
-            self.location
-                .checked_add(mem::size_of::<T>() as u64)
-                .unwrap()
+            self.location.checked_add(size_of::<T>() as u64).unwrap()
         }
     }
 

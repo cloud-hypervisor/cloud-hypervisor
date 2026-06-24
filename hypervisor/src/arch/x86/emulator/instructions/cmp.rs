@@ -54,12 +54,12 @@ macro_rules! cmp_rm_r {
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
         ) -> Result<(), EmulationError<Exception>> {
-            let op0_value = get_op(&insn, 0, std::mem::size_of::<$bound>(), state, platform)
+            let op0_value = get_op(&insn, 0, size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
-            let op1_value = get_op(&insn, 1, std::mem::size_of::<$bound>(), state, platform)
+            let op1_value = get_op(&insn, 1, size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
 
-            let cpazso = calc_rflags_cpazso(op0_value, op1_value, std::mem::size_of::<$bound>());
+            let cpazso = calc_rflags_cpazso(op0_value, op1_value, size_of::<$bound>());
 
             state.set_flags((state.flags() & !FLAGS_MASK) | cpazso);
 
@@ -76,12 +76,12 @@ macro_rules! cmp_r_rm {
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
         ) -> Result<(), EmulationError<Exception>> {
-            let op0_value = get_op(&insn, 0, std::mem::size_of::<$bound>(), state, platform)
+            let op0_value = get_op(&insn, 0, size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
-            let op1_value = get_op(&insn, 1, std::mem::size_of::<$bound>(), state, platform)
+            let op1_value = get_op(&insn, 1, size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
 
-            let cpazso = calc_rflags_cpazso(op0_value, op1_value, std::mem::size_of::<$bound>());
+            let cpazso = calc_rflags_cpazso(op0_value, op1_value, size_of::<$bound>());
 
             state.set_flags((state.flags() & !FLAGS_MASK) | cpazso);
 
@@ -98,12 +98,12 @@ macro_rules! cmp_rm_imm {
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
         ) -> Result<(), EmulationError<Exception>> {
-            let op0_value = get_op(&insn, 0, std::mem::size_of::<$bound>(), state, platform)
+            let op0_value = get_op(&insn, 0, size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
-            let op1_value = get_op(&insn, 1, std::mem::size_of::<$imm>(), state, platform)
+            let op1_value = get_op(&insn, 1, size_of::<$imm>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
 
-            let cpazso = calc_rflags_cpazso(op0_value, op1_value, std::mem::size_of::<$bound>());
+            let cpazso = calc_rflags_cpazso(op0_value, op1_value, size_of::<$bound>());
 
             state.set_flags((state.flags() & !FLAGS_MASK) | cpazso);
 

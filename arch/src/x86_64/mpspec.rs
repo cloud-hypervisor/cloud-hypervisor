@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
-use std::mem;
 use std::os::raw;
 
 use vm_memory::ByteValued;
@@ -33,7 +32,7 @@ pub struct mpf_intel {
     pub feature5: raw::c_uchar,
 }
 
-const _: () = assert!(mem::size_of::<mpf_intel>() == 16);
+const _: () = assert!(size_of::<mpf_intel>() == 16);
 // SAFETY: all members of this struct are plain integers
 // and the sum of their sizes is the size of the struct, so
 // padding and reserved values are not possible as there
@@ -57,10 +56,10 @@ pub struct mpc_table {
 }
 
 const _: () = {
-    assert!(mem::size_of::<mpc_table>() == 4 + 2 + 1 + 1 + 8 + 12 + 4 + 2 + 2 + 4 + 4);
-    assert!(mem::size_of::<raw::c_uint>() == 4);
-    assert!(mem::size_of::<raw::c_ushort>() == 2);
-    assert!(mem::size_of::<raw::c_uchar>() == 1);
+    assert!(size_of::<mpc_table>() == 4 + 2 + 1 + 1 + 8 + 12 + 4 + 2 + 2 + 4 + 4);
+    assert!(size_of::<raw::c_uint>() == 4);
+    assert!(size_of::<raw::c_ushort>() == 2);
+    assert!(size_of::<raw::c_uchar>() == 1);
 };
 
 // SAFETY: all members of this struct are plain integers
@@ -81,7 +80,7 @@ pub struct mpc_cpu {
     pub reserved: [raw::c_uint; 2usize],
 }
 
-const _: () = assert!(mem::size_of::<mpc_cpu>() == 20);
+const _: () = assert!(size_of::<mpc_cpu>() == 20);
 // SAFETY: all members of this struct are plain integers
 // and the sum of their sizes is the size of the struct, so
 // padding and reserved values are not possible as there
@@ -96,7 +95,7 @@ pub struct mpc_bus {
     pub bustype: [raw::c_uchar; 6usize],
 }
 
-const _: () = assert!(mem::size_of::<mpc_bus>() == 8);
+const _: () = assert!(size_of::<mpc_bus>() == 8);
 // SAFETY: all members of this struct are plain integers
 // and the sum of their sizes is the size of the struct, so
 // padding and reserved values are not possible as there
@@ -113,7 +112,7 @@ pub struct mpc_ioapic {
     pub apicaddr: raw::c_uint,
 }
 
-const _: () = assert!(mem::size_of::<mpc_ioapic>() == 8);
+const _: () = assert!(size_of::<mpc_ioapic>() == 8);
 // SAFETY: all members of this struct are plain integers
 // and the sum of their sizes is the size of the struct, so
 // padding and reserved values are not possible as there
@@ -132,7 +131,7 @@ pub struct mpc_intsrc {
     pub dstirq: raw::c_uchar,
 }
 
-const _: () = assert!(mem::size_of::<mpc_intsrc>() == 8);
+const _: () = assert!(size_of::<mpc_intsrc>() == 8);
 // SAFETY: all members of this struct are plain integers
 // and the sum of their sizes is the size of the struct, so
 // padding and reserved values are not possible as there
@@ -155,7 +154,7 @@ pub struct mpc_lintsrc {
     pub destapiclint: raw::c_uchar,
 }
 
-const _: () = assert!(mem::size_of::<mpc_lintsrc>() == 8);
+const _: () = assert!(size_of::<mpc_lintsrc>() == 8);
 // SAFETY: all members of this struct are plain integers
 // and the sum of their sizes is the size of the struct, so
 // padding and reserved values are not possible as there
@@ -172,7 +171,7 @@ pub struct mpc_oemtable {
     pub mpc: [raw::c_uchar; 8usize],
 }
 
-const _: () = assert!(mem::size_of::<mpc_oemtable>() == 16);
+const _: () = assert!(size_of::<mpc_oemtable>() == 16);
 // SAFETY: all members of this struct are plain integers
 // and the sum of their sizes is the size of the struct, so
 // padding and reserved values are not possible as there

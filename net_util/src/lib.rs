@@ -102,7 +102,7 @@ fn create_unix_socket() -> Result<net::UdpSocket> {
 }
 
 fn vnet_hdr_len() -> usize {
-    mem::size_of::<virtio_net_hdr_v1>()
+    size_of::<virtio_net_hdr_v1>()
 }
 
 pub fn register_listener(

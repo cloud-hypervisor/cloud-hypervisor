@@ -17,7 +17,6 @@ use std::cmp::{max, min};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::fs::{OpenOptions, read_link};
 use std::io::{self, Seek, SeekFrom};
-use std::mem::size_of;
 use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::{result, str};

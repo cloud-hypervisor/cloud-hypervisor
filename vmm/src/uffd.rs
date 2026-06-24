@@ -13,11 +13,11 @@
 //! original memory mapping, so it remains compatible with VFIO device
 //! passthrough and shared-memory-backed guest RAM.
 
+use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Error, Read};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::fs::FileExt;
-use std::{fmt, mem};
 
 use vm_migration::protocol::{MemoryRange, Request, Response, Status};
 
@@ -65,7 +65,7 @@ pub(crate) struct UffdMsg {
     _pad: [u8; 8],
 }
 
-const _: () = assert!(mem::size_of::<UffdMsg>() == 32);
+const _: () = assert!(size_of::<UffdMsg>() == 32);
 
 /// Try to obtain a userfaultfd via /dev/userfaultfd (Linux 6.1+).
 ///

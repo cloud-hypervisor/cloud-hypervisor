@@ -6,7 +6,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::{mem, result, slice};
+use std::{result, slice};
 
 use thiserror::Error;
 use uuid::Uuid;
@@ -90,7 +90,7 @@ impl SmbiosConfig {
 fn compute_checksum<T: Copy>(v: &T) -> u8 {
     let v: *const T = v;
     // SAFETY: we are only reading the bytes within the size of the `T` reference `v`.
-    let v_slice = unsafe { slice::from_raw_parts(v.cast(), mem::size_of::<T>()) };
+    let v_slice = unsafe { slice::from_raw_parts(v.cast(), size_of::<T>()) };
     let mut checksum: u8 = 0;
     for i in v_slice.iter() {
         checksum = checksum.wrapping_add(*i);
@@ -209,7 +209,7 @@ fn write_and_incr<T: ByteValued>(
 ) -> Result<GuestAddress> {
     mem.write_obj(val, curptr).map_err(Error::WriteData)?;
     curptr = curptr
-        .checked_add(mem::size_of::<T>() as u64)
+        .checked_add(size_of::<T>() as u64)
         .ok_or(Error::NotEnoughMemory)?;
     Ok(curptr)
 }
@@ -310,7 +310,7 @@ fn write_type1_system(
 
     let sys = SmbiosSysInfo {
         r#type: SYSTEM_INFORMATION,
-        length: mem::size_of::<SmbiosSysInfo>() as u8,
+        length: size_of::<SmbiosSysInfo>() as u8,
         handle: *handle,
         manufacturer: manufacturer_idx,
         product_name: product_idx,
@@ -347,7 +347,7 @@ fn write_type3_chassis(
 
     let ch = SmbiosChassis {
         r#type: SYSTEM_ENCLOSURE,
-        length: mem::size_of::<SmbiosChassis>() as u8,
+        length: size_of::<SmbiosChassis>() as u8,
         handle: *handle,
         manufacturer: 0,
         chassis_type: CHASSIS_TYPE_UNKNOWN,
@@ -374,7 +374,7 @@ pub fn setup_smbios(mem: &GuestMemoryMmap, smbios: Option<&SmbiosConfig>) -> Res
     let chassis = smbios.and_then(|cfg| cfg.chassis.as_ref());
     let oem_strings: &[String] = smbios.map_or(&[], |cfg| &cfg.oem_strings);
     let physptr = GuestAddress(SMBIOS_START)
-        .checked_add(mem::size_of::<Smbios30Entrypoint>() as u64)
+        .checked_add(size_of::<Smbios30Entrypoint>() as u64)
         .ok_or(Error::NotEnoughMemory)?;
     let mut curptr = physptr;
     let mut handle = 0;
@@ -383,7 +383,7 @@ pub fn setup_smbios(mem: &GuestMemoryMmap, smbios: Option<&SmbiosConfig>) -> Res
         handle += 1;
         let smbios_biosinfo = SmbiosBiosInfo {
             r#type: BIOS_INFORMATION,
-            length: mem::size_of::<SmbiosBiosInfo>() as u8,
+            length: size_of::<SmbiosBiosInfo>() as u8,
             handle,
             vendor: 1,  // First string written in this section
             version: 2, // Second string written in this section
@@ -408,7 +408,7 @@ pub fn setup_smbios(mem: &GuestMemoryMmap, smbios: Option<&SmbiosConfig>) -> Res
 
         let smbios_oemstrings = SmbiosOemStrings {
             r#type: OEM_STRINGS,
-            length: mem::size_of::<SmbiosOemStrings>() as u8,
+            length: size_of::<SmbiosOemStrings>() as u8,
             handle,
             count: oem_strings.len() as u8,
         };
@@ -426,7 +426,7 @@ pub fn setup_smbios(mem: &GuestMemoryMmap, smbios: Option<&SmbiosConfig>) -> Res
         handle += 1;
         let smbios_end = SmbiosEndOfTable {
             r#type: END_OF_TABLE,
-            length: mem::size_of::<SmbiosEndOfTable>() as u8,
+            length: size_of::<SmbiosEndOfTable>() as u8,
             handle,
         };
         curptr = write_and_incr(mem, smbios_end, curptr)?;
@@ -437,7 +437,7 @@ pub fn setup_smbios(mem: &GuestMemoryMmap, smbios: Option<&SmbiosConfig>) -> Res
     {
         let mut smbios_ep = Smbios30Entrypoint {
             signature: *SM3_MAGIC_IDENT,
-            length: mem::size_of::<Smbios30Entrypoint>() as u8,
+            length: size_of::<Smbios30Entrypoint>() as u8,
             // SMBIOS rev 3.2.0
             majorver: 0x03,
             minorver: 0x02,
@@ -452,7 +452,7 @@ pub fn setup_smbios(mem: &GuestMemoryMmap, smbios: Option<&SmbiosConfig>) -> Res
             .map_err(Error::WriteSmbiosEp)?;
     }
 
-    Ok(curptr.unchecked_offset_from(physptr) + mem::size_of::<Smbios30Entrypoint>() as u64)
+    Ok(curptr.unchecked_offset_from(physptr) + size_of::<Smbios30Entrypoint>() as u64)
 }
 
 #[cfg(test)]
@@ -509,17 +509,17 @@ mod unit_tests {
     #[test]
     fn entrypoint_struct_size() {
         assert_eq!(
-            mem::size_of::<Smbios30Entrypoint>(),
+            size_of::<Smbios30Entrypoint>(),
             0x18usize,
             concat!("Size of: ", stringify!(Smbios30Entrypoint))
         );
         assert_eq!(
-            mem::size_of::<SmbiosBiosInfo>(),
+            size_of::<SmbiosBiosInfo>(),
             0x14usize,
             concat!("Size of: ", stringify!(SmbiosBiosInfo))
         );
         assert_eq!(
-            mem::size_of::<SmbiosSysInfo>(),
+            size_of::<SmbiosSysInfo>(),
             0x1busize,
             concat!("Size of: ", stringify!(SmbiosSysInfo))
         );
@@ -699,7 +699,7 @@ mod unit_tests {
     fn smbios_write_fails_with_too_small_memory() {
         let mem = GuestMemoryMmap::from_ranges(&[(
             GuestAddress(SMBIOS_START),
-            mem::size_of::<Smbios30Entrypoint>(),
+            size_of::<Smbios30Entrypoint>(),
         )])
         .unwrap();
 

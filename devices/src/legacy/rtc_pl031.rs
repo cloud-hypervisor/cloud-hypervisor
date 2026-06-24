@@ -452,7 +452,7 @@ mod unit_tests {
                     ),
                 ];
 
-                let type_size = std::mem::size_of::<$data_type>();
+                let type_size = size_of::<$data_type>();
                 for (test_val, v_arr) in &test_cases {
                     let v = *test_val as $data_type;
                     let cmp_iter: Box<dyn Iterator<Item = _>> = if $is_be {

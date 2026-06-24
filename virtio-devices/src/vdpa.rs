@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::{io, mem, result};
+use std::{io, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
@@ -253,7 +253,7 @@ impl Vdpa {
                     .desc_table()
                     .translate_gpa(
                         self.common.access_platform().as_deref(),
-                        queue_size as usize * mem::size_of::<RawDescriptor>(),
+                        queue_size as usize * size_of::<RawDescriptor>(),
                     )
                     .map_err(Error::TranslateAddress)?,
                 used_ring_addr: queue

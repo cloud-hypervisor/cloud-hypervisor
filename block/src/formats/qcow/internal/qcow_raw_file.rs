@@ -6,7 +6,6 @@
 
 use std::fmt::Debug;
 use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
-use std::mem::size_of;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
@@ -364,14 +363,13 @@ impl AsFd for QcowRawFile {
 #[cfg(test)]
 mod unit_tests {
     use std::io::{Read, Seek, SeekFrom};
-    use std::mem;
 
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
 
     fn be_bytes(entries: &[u64]) -> Vec<u8> {
-        let mut v = Vec::with_capacity(mem::size_of_val(entries));
+        let mut v = Vec::with_capacity(size_of_val(entries));
         for e in entries {
             v.extend_from_slice(&e.to_be_bytes());
         }

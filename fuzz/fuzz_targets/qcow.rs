@@ -8,7 +8,6 @@
 use std::ffi;
 use std::fs::File;
 use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
-use std::mem::size_of;
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::sync::Arc;
 

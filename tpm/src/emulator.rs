@@ -156,8 +156,7 @@ impl Emulator {
         }
         self.control_socket.set_msgfd(fds[1]);
         debug!("data fd to be configured in swtpm = {:?}", fds[1]);
-        if let Err(e) =
-            self.run_control_cmd(Commands::CmdSetDatafd, &mut res, 0, mem::size_of::<u32>())
+        if let Err(e) = self.run_control_cmd(Commands::CmdSetDatafd, &mut res, 0, size_of::<u32>())
         {
             // SAFETY: FFI calls and return values of the unsafe calls are checked
             unsafe {
@@ -199,7 +198,7 @@ impl Emulator {
                 libc::SOL_SOCKET,
                 libc::SO_RCVTIMEO,
                 (&raw const tv).cast(),
-                mem::size_of::<libc::timeval>() as u32,
+                size_of::<libc::timeval>() as u32,
             );
             if ret == -1 {
                 return Err(Error::PrepareDataFd(anyhow!(
@@ -216,12 +215,7 @@ impl Emulator {
     ///
     fn probe_caps(&mut self) -> Result<()> {
         let mut caps: u64 = 0;
-        self.run_control_cmd(
-            Commands::CmdGetCapability,
-            &mut caps,
-            0,
-            mem::size_of::<u64>(),
-        )?;
+        self.run_control_cmd(Commands::CmdGetCapability, &mut caps, 0, size_of::<u64>())?;
         self.caps = caps;
         Ok(())
     }
@@ -262,7 +256,7 @@ impl Emulator {
         debug!("Control Cmd to send : {cmd:02X?}");
 
         let cmd_no = (cmd as u32).to_be_bytes();
-        let n = mem::size_of::<u32>() + msg_len_in;
+        let n = size_of::<u32>() + msg_len_in;
 
         let converted_req = msg.ptm_to_request();
         debug!("converted request: {converted_req:02X?}");
@@ -305,7 +299,7 @@ impl Emulator {
         // 0x0A). In that case we must not block waiting for more bytes, so we
         // first read the 4-byte result code, and only read the remainder of
         // `msg_len_out` if the command succeeded.
-        let result_len = mem::size_of::<u32>();
+        let result_len = size_of::<u32>();
         self.control_socket
             .read_exact(&mut output, result_len)
             .map_err(|e| {
@@ -378,7 +372,7 @@ impl Emulator {
             Commands::CmdGetTpmEstablished,
             &mut est,
             0,
-            2 * mem::size_of::<u32>(),
+            2 * size_of::<u32>(),
         ) {
             error!("Failed to run CmdGetTpmEstablished Control Cmd. Error: {e:?}");
             return false;
@@ -394,7 +388,7 @@ impl Emulator {
     pub fn deliver_request(&mut self, cmd: &mut BackendCmd) -> Result<()> {
         // SAFETY: type "sockaddr_storage" is valid with an all-zero byte-pattern value
         let mut addr: sockaddr_storage = unsafe { mem::zeroed() };
-        let mut len = mem::size_of::<sockaddr_storage>() as socklen_t;
+        let mut len = size_of::<sockaddr_storage>() as socklen_t;
         let isselftest = is_selftest(&cmd.buffer[0..cmd.input_len]);
 
         debug!(
@@ -469,12 +463,7 @@ impl Emulator {
                 "Emulator does not implement 'Cancel Command' Capability"
             )));
         }
-        self.run_control_cmd(
-            Commands::CmdCancelTpmCmd,
-            &mut res,
-            0,
-            mem::size_of::<u32>(),
-        )?;
+        self.run_control_cmd(Commands::CmdCancelTpmCmd, &mut res, 0, size_of::<u32>())?;
         Ok(())
     }
 
@@ -487,8 +476,8 @@ impl Emulator {
         self.run_control_cmd(
             Commands::CmdSetBufferSize,
             &mut psbs,
-            mem::size_of::<u32>(),
-            4 * mem::size_of::<u32>(),
+            size_of::<u32>(),
+            4 * size_of::<u32>(),
         )?;
 
         Ok(psbs.get_bufsize() as usize)
@@ -505,8 +494,8 @@ impl Emulator {
         self.run_control_cmd(
             Commands::CmdInit,
             &mut init,
-            mem::size_of::<u32>(),
-            mem::size_of::<u32>(),
+            size_of::<u32>(),
+            size_of::<u32>(),
         )?;
 
         self.tpm2_startup_clear()?;
@@ -536,7 +525,7 @@ impl Emulator {
     fn stop_tpm(&mut self) -> Result<()> {
         let mut res: PtmResult = 0;
 
-        self.run_control_cmd(Commands::CmdStop, &mut res, 0, mem::size_of::<u32>())?;
+        self.run_control_cmd(Commands::CmdStop, &mut res, 0, size_of::<u32>())?;
 
         Ok(())
     }

@@ -41,7 +41,7 @@ pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
 /// Maximum number of segments per DISCARD or WRITE_ZEROES request.
 pub const MAX_DISCARD_WRITE_ZEROES_SEG: u32 = 1;
 /// Size and field offsets within `struct virtio_blk_discard_write_zeroes`.
-const DISCARD_WZ_SEG_SIZE: u32 = mem::size_of::<virtio_blk_discard_write_zeroes>() as u32;
+const DISCARD_WZ_SEG_SIZE: u32 = size_of::<virtio_blk_discard_write_zeroes>() as u32;
 const DISCARD_WZ_MAX_PAYLOAD: u32 = DISCARD_WZ_SEG_SIZE * MAX_DISCARD_WRITE_ZEROES_SEG;
 const DISCARD_WZ_SECTOR_OFFSET: u64 =
     mem::offset_of!(virtio_blk_discard_write_zeroes, sector) as u64;
@@ -504,7 +504,7 @@ impl Request {
         for &(data_addr, data_len) in &self.data_descriptors {
             let _: u32 = data_len;
             const _: () = assert!(
-                mem::size_of::<u32>() <= mem::size_of::<usize>(),
+                size_of::<u32>() <= size_of::<usize>(),
                 "unsupported platform"
             );
             if data_len == 0 {

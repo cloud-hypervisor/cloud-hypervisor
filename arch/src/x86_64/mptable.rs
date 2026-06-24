@@ -5,7 +5,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-use std::{mem, result, slice};
+use std::{result, slice};
 
 use libc::c_uchar;
 use log::{info, warn};
@@ -103,7 +103,7 @@ const CPU_FEATURE_FPU: u32 = 0x001;
 fn compute_checksum<T: Copy + ByteValued>(v: &T) -> u8 {
     let v: *const T = v;
     // SAFETY: we are only reading the bytes within the size of the `T` reference `v`.
-    let v_slice = unsafe { slice::from_raw_parts(v.cast(), mem::size_of::<T>()) };
+    let v_slice = unsafe { slice::from_raw_parts(v.cast(), size_of::<T>()) };
     let mut checksum: u8 = 0;
     for i in v_slice.iter() {
         checksum = checksum.wrapping_add(*i);
@@ -117,13 +117,13 @@ fn mpf_intel_compute_checksum(v: &mpspec::mpf_intel) -> u8 {
 }
 
 fn compute_mp_size(num_cpus: u32) -> usize {
-    mem::size_of::<MpfIntelWrapper>()
-        + mem::size_of::<MpcTableWrapper>()
-        + mem::size_of::<MpcCpuWrapper>() * (num_cpus as usize)
-        + mem::size_of::<MpcIoapicWrapper>()
-        + mem::size_of::<MpcBusWrapper>()
-        + mem::size_of::<MpcIntsrcWrapper>() * 16
-        + mem::size_of::<MpcLintsrcWrapper>() * 2
+    size_of::<MpfIntelWrapper>()
+        + size_of::<MpcTableWrapper>()
+        + size_of::<MpcCpuWrapper>() * (num_cpus as usize)
+        + size_of::<MpcIoapicWrapper>()
+        + size_of::<MpcBusWrapper>()
+        + size_of::<MpcIntsrcWrapper>() * 16
+        + size_of::<MpcLintsrcWrapper>() * 2
 }
 
 /// Performs setup of the MP table for the given `num_cpus`.
@@ -170,7 +170,7 @@ pub fn setup_mptable(
 
     {
         let mut mpf_intel = MpfIntelWrapper(mpspec::mpf_intel::default());
-        let size = mem::size_of::<MpfIntelWrapper>() as u64;
+        let size = size_of::<MpfIntelWrapper>() as u64;
         mpf_intel.0.signature = *SMP_MAGIC_IDENT;
         mpf_intel.0.length = 1;
         mpf_intel.0.specification = 4;
@@ -184,10 +184,10 @@ pub fn setup_mptable(
     // We set the location of the mpc_table here but we can't fill it out until we have the length
     // of the entire table later.
     let table_base = base_mp;
-    base_mp = base_mp.unchecked_add(mem::size_of::<MpcTableWrapper>() as u64);
+    base_mp = base_mp.unchecked_add(size_of::<MpcTableWrapper>() as u64);
 
     {
-        let size = mem::size_of::<MpcCpuWrapper>();
+        let size = size_of::<MpcCpuWrapper>();
         for cpu_id in 0..num_cpus {
             let mut mpc_cpu = MpcCpuWrapper(mpspec::mpc_cpu::default());
             mpc_cpu.0.type_ = mpspec::MP_PROCESSOR as u8;
@@ -208,7 +208,7 @@ pub fn setup_mptable(
         }
     }
     {
-        let size = mem::size_of::<MpcBusWrapper>();
+        let size = size_of::<MpcBusWrapper>();
         let mut mpc_bus = MpcBusWrapper(mpspec::mpc_bus::default());
         mpc_bus.0.type_ = mpspec::MP_BUS as u8;
         mpc_bus.0.busid = 0;
@@ -219,7 +219,7 @@ pub fn setup_mptable(
         checksum = checksum.wrapping_add(compute_checksum(&mpc_bus.0));
     }
     {
-        let size = mem::size_of::<MpcIoapicWrapper>();
+        let size = size_of::<MpcIoapicWrapper>();
         let mut mpc_ioapic = MpcIoapicWrapper(mpspec::mpc_ioapic::default());
         mpc_ioapic.0.type_ = mpspec::MP_IOAPIC as u8;
         mpc_ioapic.0.apicid = ioapicid;
@@ -233,7 +233,7 @@ pub fn setup_mptable(
     }
     // Per kvm_setup_default_irq_routing() in kernel
     for i in 0..16 {
-        let size = mem::size_of::<MpcIntsrcWrapper>();
+        let size = size_of::<MpcIntsrcWrapper>();
         let mut mpc_intsrc = MpcIntsrcWrapper(mpspec::mpc_intsrc::default());
         mpc_intsrc.0.type_ = mpspec::MP_INTSRC as u8;
         mpc_intsrc.0.irqtype = mpspec::MP_IRQ_SOURCE_TYPES_MP_INT as u8;
@@ -248,7 +248,7 @@ pub fn setup_mptable(
         checksum = checksum.wrapping_add(compute_checksum(&mpc_intsrc.0));
     }
     {
-        let size = mem::size_of::<MpcLintsrcWrapper>();
+        let size = size_of::<MpcLintsrcWrapper>();
         let mut mpc_lintsrc = MpcLintsrcWrapper(mpspec::mpc_lintsrc::default());
         mpc_lintsrc.0.type_ = mpspec::MP_LINTSRC as u8;
         mpc_lintsrc.0.irqtype = mpspec::MP_IRQ_SOURCE_TYPES_MP_EXT_INT as u8;
@@ -263,7 +263,7 @@ pub fn setup_mptable(
         checksum = checksum.wrapping_add(compute_checksum(&mpc_lintsrc.0));
     }
     {
-        let size = mem::size_of::<MpcLintsrcWrapper>();
+        let size = size_of::<MpcLintsrcWrapper>();
         let mut mpc_lintsrc = MpcLintsrcWrapper(mpspec::mpc_lintsrc::default());
         mpc_lintsrc.0.type_ = mpspec::MP_LINTSRC as u8;
         mpc_lintsrc.0.irqtype = mpspec::MP_IRQ_SOURCE_TYPES_MP_NMI as u8;
@@ -308,11 +308,11 @@ mod unit_tests {
 
     fn table_entry_size(type_: u8) -> usize {
         match type_ as u32 {
-            mpspec::MP_PROCESSOR => mem::size_of::<MpcCpuWrapper>(),
-            mpspec::MP_BUS => mem::size_of::<MpcBusWrapper>(),
-            mpspec::MP_IOAPIC => mem::size_of::<MpcIoapicWrapper>(),
-            mpspec::MP_INTSRC => mem::size_of::<MpcIntsrcWrapper>(),
-            mpspec::MP_LINTSRC => mem::size_of::<MpcLintsrcWrapper>(),
+            mpspec::MP_PROCESSOR => size_of::<MpcCpuWrapper>(),
+            mpspec::MP_BUS => size_of::<MpcBusWrapper>(),
+            mpspec::MP_IOAPIC => size_of::<MpcIoapicWrapper>(),
+            mpspec::MP_INTSRC => size_of::<MpcIntsrcWrapper>(),
+            mpspec::MP_LINTSRC => size_of::<MpcLintsrcWrapper>(),
             _ => panic!("unrecognized mpc table entry type: {type_}"),
         }
     }
@@ -405,7 +405,7 @@ mod unit_tests {
                 .unwrap();
 
             let mut entry_offset = mpc_offset
-                .checked_add(mem::size_of::<MpcTableWrapper>() as GuestUsize)
+                .checked_add(size_of::<MpcTableWrapper>() as GuestUsize)
                 .unwrap();
             let mut cpu_count = 0;
             while entry_offset < mpc_end {

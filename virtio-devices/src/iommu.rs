@@ -3,11 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::collections::BTreeMap;
-use std::mem::size_of;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, RwLock};
-use std::{io, mem, result};
+use std::{io, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
@@ -1274,7 +1273,7 @@ impl VirtioDevice for Iommu {
         // The "bypass" field is the only mutable field
         let bypass_offset =
             (&raw const self.config.bypass as u64) - (&raw const self.config as u64);
-        if offset != bypass_offset || data.len() != mem::size_of_val(&self.config.bypass) {
+        if offset != bypass_offset || data.len() != size_of_val(&self.config.bypass) {
             error!(
                 "Attempt to write to read-only field: offset {:x} length {}",
                 offset,

@@ -21,7 +21,6 @@ mod mptable;
 mod smbios;
 
 use std::arch::x86_64;
-use std::mem;
 
 use helpers::{deserialize_u32_hex, serialize_u32_hex};
 use hypervisor::arch::x86::{CPUID_FLAG_VALID_INDEX, CpuIdEntry};
@@ -1259,7 +1258,7 @@ fn configure_pvh(
     guest_mem
         .checked_offset(
             memmap_start_addr,
-            mem::size_of::<hvm_memmap_table_entry>() * start_info.memmap_entries as usize,
+            size_of::<hvm_memmap_table_entry>() * start_info.memmap_entries as usize,
         )
         .ok_or(super::Error::MemmapTablePastRamEnd)?;
 
@@ -1269,7 +1268,7 @@ fn configure_pvh(
             .write_obj(memmap_entry, memmap_start_addr)
             .map_err(super::Error::MemmapTableSetup)?;
         memmap_start_addr =
-            memmap_start_addr.unchecked_add(mem::size_of::<hvm_memmap_table_entry>() as u64);
+            memmap_start_addr.unchecked_add(size_of::<hvm_memmap_table_entry>() as u64);
     }
 
     // The hvm_start_info struct itself must be stored at PVH_START_INFO
@@ -1278,7 +1277,7 @@ fn configure_pvh(
     let start_info_addr = layout::PVH_INFO_START;
 
     guest_mem
-        .checked_offset(start_info_addr, mem::size_of::<hvm_start_info>())
+        .checked_offset(start_info_addr, size_of::<hvm_start_info>())
         .ok_or(super::Error::StartInfoPastRamEnd)?;
 
     // Write the start_info struct to guest memory.
@@ -1357,7 +1356,7 @@ fn configure_32bit_entry(
 
     let zero_page_addr = layout::ZERO_PAGE_START;
     guest_mem
-        .checked_offset(zero_page_addr, mem::size_of::<boot_params>())
+        .checked_offset(zero_page_addr, size_of::<boot_params>())
         .ok_or(super::Error::ZeroPagePastRamEnd)?;
     guest_mem
         .write_obj(params, zero_page_addr)

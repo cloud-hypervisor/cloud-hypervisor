@@ -16,8 +16,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ffi;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use std::mem::size_of;
 use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::net::UnixStream;

@@ -6,7 +6,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
-use std::{io, mem, thread};
+use std::{io, thread};
 
 use acpi_tables::{Aml, AmlSink, aml};
 use log::{error, info, warn};
@@ -250,7 +250,7 @@ impl Default for AcpiPmTimerDevice {
 
 impl BusDevice for AcpiPmTimerDevice {
     fn read(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {
-        if data.len() != mem::size_of::<u32>() {
+        if data.len() != size_of::<u32>() {
             warn!("Invalid sized read of PM timer: {}", data.len());
             return;
         }

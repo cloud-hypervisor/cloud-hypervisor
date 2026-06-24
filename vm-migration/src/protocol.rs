@@ -87,9 +87,8 @@
 //! to newer ones.
 
 use std::io::{Read, Write};
-use std::mem::size_of;
 use std::ops::RangeInclusive;
-use std::{mem, slice};
+use std::slice;
 
 use anyhow::anyhow;
 use itertools::Itertools;
@@ -577,7 +576,7 @@ impl MemoryRangeTable {
     }
 
     pub fn length(&self) -> u64 {
-        (mem::size_of::<MemoryRange>() * self.data.len()) as u64
+        (size_of::<MemoryRange>() * self.data.len()) as u64
     }
 
     pub fn write_to(&self, fd: &mut dyn Write) -> Result<(), MigratableError> {
