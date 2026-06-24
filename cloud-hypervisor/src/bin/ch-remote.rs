@@ -35,10 +35,10 @@ type ApiResult = Result<(), Error>;
 
 #[derive(Error, Debug)]
 enum Error {
-    #[error("http client error")]
+    #[error("Http Client Error")]
     HttpApiClient(#[source] ApiClientError),
     #[cfg(feature = "dbus_api")]
-    #[error("dbus api client error")]
+    #[error("D-Bus API Client Error")]
     DBusApiClient(#[source] zbus::Error),
     #[error("Error parsing CPU count")]
     InvalidCpuCount(#[source] num::ParseIntError),
