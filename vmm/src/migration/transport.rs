@@ -70,6 +70,7 @@ impl ReceiveListener {
                     .map(SocketStream::Tls)
                     .context("Failed to accept TLS migration connection")
                     .map_err(MigratableError::MigrateReceive)
+                    .inspect(|_| info!("TLS handshake (server-side/receiver) successful"))
             }
         }
     }
@@ -942,6 +943,7 @@ pub(crate) fn send_migration_socket(
                 .map(SocketStream::Tls)
                 .context("Error creating TLS migration stream")
                 .map_err(MigratableError::MigrateSend)
+                .inspect(|_| info!("TLS handshake (client-side/sender) successful"))
         } else {
             Ok(SocketStream::Tcp(socket))
         }
