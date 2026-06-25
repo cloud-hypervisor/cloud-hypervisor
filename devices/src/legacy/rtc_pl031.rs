@@ -21,7 +21,7 @@ use vm_device::BusDevice;
 
 use crate::{read_le_u32, write_le_u32};
 
-// As you can see in https://static.docs.arm.com/ddi0224/c/real_time_clock_pl031_r1p3_technical_reference_manual_DDI0224C.pdf
+// As you can see in https://developer.arm.com/documentation/ddi0224/c/
 // at section 3.2 Summary of RTC registers, the total size occupied by this device is 0x000 -> 0xFFC + 4 = 0x1000.
 // From 0x0 to 0x1C we have following registers:
 const RTCDR: u64 = 0x0; // Data Register.
