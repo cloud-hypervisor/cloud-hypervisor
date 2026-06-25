@@ -41,7 +41,7 @@ pub enum VhdxHeaderError {
     DuplicateBATEntry,
     #[error("Metadata region entry is not unique")]
     DuplicateMDREntry,
-    #[error("Checksum doesn't match for")]
+    #[error("Checksum doesn't match for {0}")]
     InvalidChecksum(String),
     #[error("Invalid entry count")]
     InvalidEntryCount,

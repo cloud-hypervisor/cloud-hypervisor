@@ -55,7 +55,7 @@ use crate::request::SECTOR_SIZE;
 pub enum Error {
     #[error("Guest gave us bad memory addresses")]
     GuestMemory(#[source] GuestMemoryError),
-    #[error("Guest gave us offsets that would have overflowed a usize")]
+    #[error("Guest address {0:?} with sector offset {1} would overflow a usize")]
     CheckedOffset(GuestAddress, usize /* sector offset */),
     #[error("Guest gave us a write only descriptor that protocol says to read from")]
     UnexpectedWriteOnlyDescriptor,
