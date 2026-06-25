@@ -4,6 +4,7 @@
 //
 
 use std::collections::HashMap;
+use std::error::Error as StdError;
 use std::fs::File;
 use std::io::{Read, Write, stdout};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
@@ -15,7 +16,7 @@ use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::{any, io, mem, panic, path, process, result, thread};
+use std::{any, io, iter, mem, panic, path, process, result, thread};
 
 use anyhow::{Context, anyhow};
 #[cfg(feature = "dbus_api")]
@@ -2018,7 +2019,22 @@ impl Vmm {
                 }
             }
             Err(e) => {
-                error!("Migration failed: {e}");
+                // Mimic the error chain that CH prints on error in the log.
+                // Required to get useful error messages in the log.
+                let top_error: &dyn StdError = &e;
+                let error_chain_str = {
+                    iter::successors(Some(top_error), |sub_error| {
+                        // Dereference necessary to mitigate rustc compiler bug.
+                        // See <https://github.com/rust-lang/rust/issues/141673>
+                        (*sub_error).source()
+                    })
+                    // Important to use the plain Display impl to not interfere
+                    // with anyhow's "smart" printing
+                    .map(|e| format!("{e}"))
+                    .collect::<Vec<_>>()
+                    .join(" => ")
+                };
+                error!("Migration failed: {error_chain_str}");
                 try_resume_vm_after_failed_migration(vm);
             }
         }
