@@ -7,8 +7,6 @@
 //! Each backend implements the [`AsyncIo`](crate::async_io::AsyncIo)
 //! trait.
 
-use std::os::unix::fs::FileExt;
-
 use crate::AlignedFile;
 use crate::async_io::{AsyncIoError, AsyncIoOperation, AsyncIoResult};
 
@@ -40,20 +38,15 @@ pub(crate) fn run_unaligned_operation(
 ) -> AsyncIoResult<i32> {
     let offset = op.offset() as u64;
     let total_len = op.total_len();
-    let mut buf = vec![0u8; total_len];
 
     if op.is_read() {
         let n = aligned_file
-            .read_at(&mut buf, offset)
-            .map_err(AsyncIoError::ReadVectored)?;
-        op.write_bytes_at(0, &buf[..n])
+            .read_unaligned(offset, total_len, |data| op.write_bytes_at(0, data))
             .map_err(AsyncIoError::ReadVectored)?;
         Ok(n as i32)
     } else {
-        op.read_bytes_at(0, &mut buf)
-            .map_err(AsyncIoError::WriteVectored)?;
         let n = aligned_file
-            .write_at(&buf, offset)
+            .write_unaligned(offset, total_len, |data| op.read_bytes_at(0, data))
             .map_err(AsyncIoError::WriteVectored)?;
         Ok(n as i32)
     }
