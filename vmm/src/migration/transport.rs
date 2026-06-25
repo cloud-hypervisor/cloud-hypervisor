@@ -349,79 +349,14 @@ impl ReceiveAdditionalConnections {
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         fault_tx: &Sender<SocketStream>,
     ) -> Result<(), MigratableError> {
-        let mut threads: Vec<thread::JoinHandle<Result<(), MigratableError>>> = Vec::new();
-        let mut first_err = loop {
-            let socket = match listener.abortable_accept(terminate_fd) {
-                Ok(socket) => socket,
-                Err(e) => break Err(e),
-            };
-            let Some(mut socket) = socket else {
-                break Ok(());
-            };
-
-            if threads.len() >= MAX_MIGRATION_CONNECTIONS as usize {
-                break Err(MigratableError::MigrateReceive(anyhow!(
-                    "Received more than {MAX_MIGRATION_CONNECTIONS} additional migration connections."
-                )));
-            }
-
-            // Read the role header with a timeout so a stalled peer can't block
-            // acceptance of other connections.
-            socket
-                .set_read_timeout(Some(Duration::from_secs(10)))
-                .map_err(MigratableError::MigrateSocket)?;
-            let role = match ConnectionRole::read_from(&mut socket) {
-                Ok(role) => role,
-                Err(e) => {
-                    warn!("Dropping connection: failed to read connection role: {e}");
-                    continue;
-                }
-            };
-            socket
-                .set_read_timeout(None)
-                .map_err(MigratableError::MigrateSocket)?;
-
-            match role {
-                ConnectionRole::Invalid => {
-                    warn!("Dropping connection: invalid connection role");
-                    continue;
-                }
-                ConnectionRole::Fault => {
-                    // Hand the fault connection to the main thread. No memory worker for it.
-                    if let Err(e) = fault_tx.send(socket) {
-                        break Err(MigratableError::MigrateReceive(anyhow!(
-                            "Failed to hand off fault connection: {e}"
-                        )));
-                    }
-                    continue;
-                }
-                ConnectionRole::PrecopyMemory => {}
-            }
-
-            let guest_memory = guest_memory.clone();
-            let terminate_fd = match terminate_fd
-                .try_clone()
-                .context("Error cloning terminate fd")
-                .map_err(MigratableError::MigrateReceive)
-            {
-                Ok(terminate_fd) => terminate_fd,
-                Err(e) => break Err(e),
-            };
-
-            match thread::Builder::new()
-                .name(format!("migrate-receive-memory-{}", threads.len()).to_owned())
-                .spawn(move || {
-                    Self::worker_receive_memory(&mut socket, &terminate_fd, &guest_memory)
-                }) {
-                Ok(t) => threads.push(t),
-                Err(e) => {
-                    error!("Error spawning receive-memory thread: {e}");
-                    break Err(MigratableError::MigrateReceive(
-                        anyhow!(e).context("Error spawning receive-memory thread"),
-                    ));
-                }
-            }
-        };
+        let mut threads = Vec::new();
+        let first_err = Self::accept_connections_loop(
+            &mut listener,
+            terminate_fd,
+            guest_memory,
+            fault_tx,
+            &mut threads,
+        );
 
         if first_err.is_err() {
             warn!("Signaling termination due to an error while accepting connections.");
@@ -430,7 +365,118 @@ impl ReceiveAdditionalConnections {
 
         info!("Stopped accepting additional connections. Cleaning up threads.");
 
-        // We only return the first error we encounter here.
+        Self::join_memory_threads(threads, first_err)
+    }
+
+    /// Runs the accept loop and spawns workers for memory connections.
+    ///
+    /// This accepts at most [`MAX_MIGRATION_CONNECTIONS`] precopy memory
+    /// connections, depending on how many additional connections the migration
+    /// sender opens. Fault connections (postcopy) are handed off to the main
+    /// migration thread and do not spawn workers.
+    fn accept_connections_loop(
+        listener: &mut ReceiveListener,
+        terminate_fd: &EventFd,
+        guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+        fault_tx: &Sender<SocketStream>,
+        threads: &mut Vec<thread::JoinHandle<Result<(), MigratableError>>>,
+    ) -> Result<(), MigratableError> {
+        loop {
+            let socket = listener.abortable_accept(terminate_fd)?;
+            let Some(socket) = socket else {
+                return Ok(());
+            };
+
+            if threads.len() >= MAX_MIGRATION_CONNECTIONS as usize {
+                return Err(MigratableError::MigrateReceive(anyhow!(
+                    "Received more than {MAX_MIGRATION_CONNECTIONS} additional migration connections."
+                )));
+            }
+
+            let Some(socket) = Self::handle_accepted_connection(socket, fault_tx)? else {
+                continue;
+            };
+
+            let thread = Self::spawn_memory_worker(
+                socket,
+                threads.len(),
+                terminate_fd,
+                guest_memory.clone(),
+            )?;
+            threads.push(thread);
+        }
+    }
+
+    /// Classifies a newly accepted auxiliary socket.
+    ///
+    /// Returns `Some(socket)` for precopy memory connections. Invalid sockets
+    /// are dropped, and fault sockets (postcopy) are handed to the main
+    /// migration thread.
+    fn handle_accepted_connection(
+        mut socket: SocketStream,
+        fault_tx: &Sender<SocketStream>,
+    ) -> Result<Option<SocketStream>, MigratableError> {
+        // Timeout the role header so one stalled peer cannot block the accept
+        // thread from handling other connections.
+        socket
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .map_err(MigratableError::MigrateSocket)?;
+
+        let role = match ConnectionRole::read_from(&mut socket) {
+            Ok(role) => role,
+            Err(e) => {
+                warn!("Dropping connection: failed to read connection role: {e}");
+                return Ok(None);
+            }
+        };
+
+        socket
+            .set_read_timeout(None)
+            .map_err(MigratableError::MigrateSocket)?;
+
+        match role {
+            ConnectionRole::Invalid => {
+                warn!("Dropping connection: invalid connection role");
+                Ok(None)
+            }
+            ConnectionRole::Fault => {
+                fault_tx.send(socket).map_err(|e| {
+                    MigratableError::MigrateReceive(anyhow!(
+                        "Failed to hand off fault connection: {e}"
+                    ))
+                })?;
+                Ok(None)
+            }
+            ConnectionRole::PrecopyMemory => Ok(Some(socket)),
+        }
+    }
+
+    fn spawn_memory_worker(
+        mut socket: SocketStream,
+        index: usize,
+        terminate_fd: &EventFd,
+        guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
+    ) -> Result<thread::JoinHandle<Result<(), MigratableError>>, MigratableError> {
+        let terminate_fd = terminate_fd
+            .try_clone()
+            .context("Error cloning terminate fd")
+            .map_err(MigratableError::MigrateReceive)?;
+
+        thread::Builder::new()
+            .name(format!("migrate-receive-memory-{index}"))
+            .spawn(move || Self::worker_receive_memory(&mut socket, &terminate_fd, &guest_memory))
+            .map_err(|e| {
+                error!("Error spawning receive-memory thread: {e}");
+                MigratableError::MigrateReceive(
+                    anyhow!(e).context("Error spawning receive-memory thread"),
+                )
+            })
+    }
+
+    fn join_memory_threads(
+        threads: Vec<thread::JoinHandle<Result<(), MigratableError>>>,
+        mut first_err: Result<(), MigratableError>,
+    ) -> Result<(), MigratableError> {
         for thread in threads {
             let err = match thread.join() {
                 Ok(Ok(())) => None,
@@ -452,7 +498,8 @@ impl ReceiveAdditionalConnections {
         first_err
     }
 
-    // Handles a `Memory` request by writing its payload to the VM memory.
+    /// Handles a [`Command::Memory`] request by writing its payload to the VM
+    /// memory.
     fn worker_receive_memory(
         mut socket: &mut SocketStream,
         terminate_fd: &EventFd,
