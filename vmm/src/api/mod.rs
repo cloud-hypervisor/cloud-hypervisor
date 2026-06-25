@@ -300,7 +300,11 @@ impl FromStr for MigrationMode {
 pub struct VmReceiveMigrationData {
     /// URL for the reception of migration state
     pub receiver_url: String,
-    /// Directory containing the TLS server certificate (server-cert.pem), the TLS server key (server-key.pem), and the client TLS root CA certificate (ca-cert.pem).
+    /// Directory containing the TLS server certificate (`server-cert.pem`),
+    /// the TLS server key (`server-key.pem`), and the server's TLS root CA
+    /// certificate (`ca-cert.pem`).
+    ///
+    /// If this is `Some`, the migration is instructed to use mTLS.
     #[serde(default)]
     pub tls_dir: Option<PathBuf>,
     /// Memory transfer mode.
@@ -452,7 +456,11 @@ pub struct VmSendMigrationData {
     /// Must be between 1 and `MAX_MIGRATION_CONNECTIONS` inclusive.
     #[serde(default = "VmSendMigrationData::default_connections")]
     pub connections: NonZeroU32,
-    /// Path to the directory containing the TLS root CA certificate (ca-cert.pem), the TLS client certificate (client-cert.pem), and TLS client key (client-key.pem).
+    /// Directory containing the TLS client certificate (`client-cert.pem`),
+    /// the TLS client key (`client-key.pem`), and the client's TLS root CA
+    /// certificate (`ca-cert.pem`).
+    ///
+    /// If this is `Some`, the migration is instructed to use mTLS.
     #[serde(default)]
     pub tls_dir: Option<PathBuf>,
     /// Memory transfer mode.
