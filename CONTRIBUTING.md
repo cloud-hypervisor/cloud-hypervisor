@@ -44,6 +44,12 @@ state changes that matter in production; use `warn!` or `error!` only for
 abnormal conditions. Keep `debug!` for focused diagnostics. Please find more
 information in [`docs/logging.md`](docs/logging.md).
 
+Error messages should be sentence-style: start with a capital letter and stay
+concise. For `thiserror`-style errors, put all non-`#[source]` attributes
+(if they provide clear value) in the outer `Display` text to improve helpfulness,
+but do not repeat a `#[source]` value there because Cloud Hypervisor prints the
+full chain elsewhere.
+
 [Rust Style]: https://github.com/rust-lang/rust/tree/HEAD/src/doc/style-guide/src
 
 ## Basic Checks

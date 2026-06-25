@@ -31,6 +31,11 @@ reviewable, and compatible with the project's normal engineering constraints.
   migration implications.
 - Do not invent APIs, behavior, or requirements. If something is uncertain,
   state the uncertainty and proceed only with minimal, explicit assumptions.
+- For `thiserror`-style errors, start messages with a capital letter and keep
+  the outer `Display` text short. Put all non-`#[source]` attributes in the
+  message to improve helpfulness, but do not repeat a `#[source]` value
+  inline: Cloud Hypervisor prints the full error chain, so only include the
+  concrete failure text directly when there is no source to report.
 
 ### Safety and Domain Notes
 
