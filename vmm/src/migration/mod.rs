@@ -7,7 +7,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::result;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use vm_migration::{MigratableError, Snapshot};
 
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -56,14 +56,18 @@ pub fn recv_vm_config(source_url: &str) -> result::Result<VmConfig, MigratableEr
     vm_config_path.push(SNAPSHOT_CONFIG_FILE);
 
     // Try opening the snapshot file
-    let mut vm_config_file =
-        File::open(vm_config_path).map_err(|e| MigratableError::MigrateReceive(e.into()))?;
+    let mut vm_config_file = File::open(&vm_config_path)
+        .with_context(|| format!("Error opening VM config snapshot file {vm_config_path:?}"))
+        .map_err(MigratableError::MigrateReceive)?;
     let mut bytes = Vec::new();
     vm_config_file
         .read_to_end(&mut bytes)
-        .map_err(|e| MigratableError::MigrateReceive(e.into()))?;
+        .with_context(|| format!("Error reading VM config snapshot file {vm_config_path:?}"))
+        .map_err(MigratableError::MigrateReceive)?;
 
-    serde_json::from_slice(&bytes).map_err(|e| MigratableError::MigrateReceive(e.into()))
+    serde_json::from_slice(&bytes)
+        .context("Error deserialising VM config snapshot")
+        .map_err(MigratableError::MigrateReceive)
 }
 
 pub fn recv_vm_state(source_url: &str) -> result::Result<Snapshot, MigratableError> {
@@ -72,14 +76,18 @@ pub fn recv_vm_state(source_url: &str) -> result::Result<Snapshot, MigratableErr
     vm_state_path.push(SNAPSHOT_STATE_FILE);
 
     // Try opening the snapshot file
-    let mut vm_state_file =
-        File::open(vm_state_path).map_err(|e| MigratableError::MigrateReceive(e.into()))?;
+    let mut vm_state_file = File::open(&vm_state_path)
+        .with_context(|| format!("Error opening VM state snapshot file {vm_state_path:?}"))
+        .map_err(MigratableError::MigrateReceive)?;
     let mut bytes = Vec::new();
     vm_state_file
         .read_to_end(&mut bytes)
-        .map_err(|e| MigratableError::MigrateReceive(e.into()))?;
+        .with_context(|| format!("Error reading VM state snapshot file {vm_state_path:?}"))
+        .map_err(MigratableError::MigrateReceive)?;
 
-    serde_json::from_slice(&bytes).map_err(|e| MigratableError::MigrateReceive(e.into()))
+    serde_json::from_slice(&bytes)
+        .context("Error deserialising VM state snapshot")
+        .map_err(MigratableError::MigrateReceive)
 }
 
 pub fn get_vm_snapshot(snapshot: &Snapshot) -> result::Result<VmSnapshot, MigratableError> {
