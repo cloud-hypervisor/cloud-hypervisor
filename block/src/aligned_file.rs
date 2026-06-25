@@ -419,4 +419,69 @@ mod tests {
         assert_eq!(af.write(&[]).unwrap(), 0);
         assert_eq!(af.position, 1);
     }
+
+    #[test]
+    fn read_unaligned_scatters_in_a_single_copy() {
+        let file = pattern_file(8192);
+        let aligned_file = forced(file.as_file().try_clone().unwrap(), 512);
+        let mut out = vec![0u8; 200];
+        let n = aligned_file
+            .read_unaligned(100, 200, |data| {
+                out.copy_from_slice(data);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(n, 200);
+        let want: Vec<u8> = (100..300).map(|i| (i % 251) as u8).collect();
+        assert_eq!(out, want);
+    }
+
+    #[test]
+    fn read_unaligned_closure_short_at_eof() {
+        let file = pattern_file(100);
+        let aligned_file = forced(file.as_file().try_clone().unwrap(), 512);
+        let mut seen = 0usize;
+        let n = aligned_file
+            .read_unaligned(10, 200, |data| {
+                seen = data.len();
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(n, 90);
+        assert_eq!(seen, 90);
+    }
+
+    #[test]
+    fn write_unaligned_gather_is_rmw() {
+        let file = pattern_file(8192);
+        let aligned_file = forced(file.as_file().try_clone().unwrap(), 512);
+        let data: Vec<u8> = (0..200).map(|i| ((i + 1) % 239) as u8).collect();
+        let n = aligned_file
+            .write_unaligned(100, 200, |buf| {
+                buf.copy_from_slice(&data);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(n, 200);
+
+        let mut whole = vec![0u8; 8192];
+        file.as_file().read_exact_at(&mut whole, 0).unwrap();
+        let before: Vec<u8> = (0..100).map(|i| (i % 251) as u8).collect();
+        assert_eq!(&whole[..100], &before[..]);
+        assert_eq!(&whole[100..300], &data[..]);
+        let after: Vec<u8> = (300..8192).map(|i| (i % 251) as u8).collect();
+        assert_eq!(&whole[300..], &after[..]);
+    }
+
+    #[test]
+    fn read_unaligned_propagates_closure_error() {
+        let file = pattern_file(8192);
+        let aligned_file = forced(file.as_file().try_clone().unwrap(), 512);
+        let err = aligned_file
+            .read_unaligned(100, 200, |_| {
+                Err(io::Error::new(io::ErrorKind::InvalidInput, "boom"))
+            })
+            .unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
 }
