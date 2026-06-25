@@ -128,7 +128,7 @@ use crate::vm_config::{
 };
 use crate::{
     CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, GuestMemoryMmap,
-    MEMORY_MANAGER_SNAPSHOT_ID, PciDeviceInfo, acpi, cpu,
+    MEMORY_MANAGER_SNAPSHOT_ID, MemoryZoneRemapError, PciDeviceInfo, acpi, cpu,
 };
 
 /// Errors associated with VM management
@@ -404,6 +404,10 @@ pub enum Error {
     #[cfg(feature = "fw_cfg")]
     #[error("Error using fw_cfg while disabled")]
     FwCfgDisabled,
+
+    /// Cannot apply NUMA memory zone remapping
+    #[error("Error applying memory zone remapping")]
+    ApplyMemoryZoneRemapping(#[source] MemoryZoneRemapError),
 }
 pub type Result<T> = result::Result<T, Error>;
 

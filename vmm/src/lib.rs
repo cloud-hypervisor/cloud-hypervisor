@@ -978,7 +978,13 @@ impl Vmm {
              memory_files: HashMap<u32, File>|
              -> result::Result<ReceiveMigrationConfiguredData, MigratableError> {
                 let shared_backing = !memory_files.is_empty();
-                let memory_manager = self.vm_receive_config(req, socket, memory_files, mode)?;
+                let memory_manager = self.vm_receive_config(
+                    req,
+                    socket,
+                    memory_files,
+                    mode,
+                    &receive_data_migration.zones_updates,
+                )?;
                 let guest_memory = memory_manager.lock().unwrap().guest_memory();
                 // Create the additional-connection receiver even in the single-connection case.
                 // At this point the receiver does not know whether the sender will use extra TCP
@@ -1154,6 +1160,7 @@ impl Vmm {
         socket: &mut T,
         existing_memory_files: HashMap<u32, File>,
         mode: MigrationMode,
+        zones_updates: &[VmMemoryZoneUpdateData],
     ) -> result::Result<Arc<Mutex<MemoryManager>>, MigratableError>
     where
         T: Read,
@@ -1192,6 +1199,10 @@ impl Vmm {
             &vm_migration_config.vm_config,
             &vm_migration_config.common_cpuid,
         )?;
+
+        remap_memory_zones(zones_updates, &vm_migration_config.vm_config).map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!("Error remapping memory zones: {e:?}"))
+        })?;
 
         let config = vm_migration_config.vm_config.clone();
         self.vm_config = Some(vm_migration_config.vm_config);
@@ -2192,7 +2203,6 @@ fn apply_landlock(vm_config: &mut VmConfig) -> result::Result<(), LandlockError>
     Ok(())
 }
 
-#[allow(unused)]
 fn remap_memory_zones(
     zones_updates: &[VmMemoryZoneUpdateData],
     vm_config: &Arc<Mutex<VmConfig>>,
@@ -2416,6 +2426,15 @@ impl RequestHandler for Vmm {
                         }
                     }
                 }
+
+                // Update MemoryZone mapping
+                remap_memory_zones(&restore_cfg.zones_updates, &vm_config).map_err(|e| {
+                    error!("VM Restore failed: {e:?}");
+                    if let Err(e) = self.vm_delete() {
+                        return e;
+                    }
+                    VmError::ApplyMemoryZoneRemapping(e)
+                })?;
 
                 self.vm_restore(
                     source_url,
