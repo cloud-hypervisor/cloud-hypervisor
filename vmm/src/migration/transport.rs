@@ -928,9 +928,9 @@ pub(crate) fn send_migration_socket(
     if let Some(address) = destination_url.strip_prefix("tcp:") {
         info!("Connecting to TCP socket at {address}");
 
-        let socket = TcpStream::connect(address).map_err(|e| {
-            MigratableError::MigrateSend(anyhow!("Error connecting to TCP socket: {e}"))
-        })?;
+        let socket = TcpStream::connect(address)
+            .context("Error connecting to TCP socket")
+            .map_err(MigratableError::MigrateSend)?;
 
         if let Some(tls_dir) = tls_dir {
             // The address should have been validated by the API using this exact function.
@@ -949,9 +949,9 @@ pub(crate) fn send_migration_socket(
         let path = socket_url_to_path(destination_url).map_err(MigratableError::MigrateSend)?;
         info!("Connecting to UNIX socket at {path:?}");
 
-        let socket = UnixStream::connect(&path).map_err(|e| {
-            MigratableError::MigrateSend(anyhow!("Error connecting to UNIX socket: {e}"))
-        })?;
+        let socket = UnixStream::connect(&path)
+            .context("Error connecting to UNIX socket")
+            .map_err(MigratableError::MigrateSend)?;
 
         Ok(SocketStream::Unix(socket))
     }
@@ -1091,11 +1091,8 @@ pub(crate) fn send_memory_ranges(
                     socket,
                     (range.length - offset) as usize,
                 )
-                .map_err(|e| {
-                    MigratableError::MigrateSend(anyhow!(
-                        "Error transferring memory to socket: {e}"
-                    ))
-                })?;
+                .context("Error transferring memory to socket")
+                .map_err(MigratableError::MigrateSend)?;
             offset += bytes_written as u64;
 
             if offset == range.length {
@@ -1136,11 +1133,8 @@ pub(crate) fn receive_memory_ranges(
                     socket,
                     (range.length - offset) as usize,
                 )
-                .map_err(|e| {
-                    MigratableError::MigrateReceive(anyhow!(
-                        "Error receiving memory from socket: {e}"
-                    ))
-                })?;
+                .context("Error receiving memory from socket")
+                .map_err(MigratableError::MigrateReceive)?;
             offset += bytes_read as u64;
 
             if offset == range.length {

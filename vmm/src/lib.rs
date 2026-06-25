@@ -922,9 +922,10 @@ impl Vmm {
     ) -> result::Result<(u32, File), MigratableError> {
         if let SocketStream::Unix(unix_socket) = socket {
             let mut buf = [0u8; 4];
-            let (_, file) = unix_socket.recv_with_fd(&mut buf).map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error receiving slot from socket: {e}"))
-            })?;
+            let (_, file) = unix_socket
+                .recv_with_fd(&mut buf)
+                .context("Error receiving slot from socket")
+                .map_err(MigratableError::MigrateReceive)?;
 
             file.ok_or_else(|| MigratableError::MigrateReceive(anyhow!("Failed to receive socket")))
                 .map(|file| (u32::from_le_bytes(buf), file))
@@ -1148,10 +1149,9 @@ impl Vmm {
             .read_exact(&mut data)
             .map_err(MigratableError::MigrateSocket)?;
 
-        let vm_migration_config: VmMigrationConfig =
-            serde_json::from_slice(&data).map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error deserialising config: {e}"))
-            })?;
+        let vm_migration_config: VmMigrationConfig = serde_json::from_slice(&data)
+            .context("Error deserialising config")
+            .map_err(MigratableError::MigrateReceive)?;
 
         // Eager prefault populates memory before UFFD is registered, so those
         // pages never fault and are never served. Reject postcopy+prefault
@@ -1179,9 +1179,11 @@ impl Vmm {
 
         let config = vm_migration_config.vm_config.clone();
         self.vm_config = Some(vm_migration_config.vm_config);
-        self.console_info = Some(pre_create_console_devices(self).map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error creating console devices: {e:?}"))
-        })?);
+        self.console_info = Some(
+            pre_create_console_devices(self)
+                .context("Error creating console devices")
+                .map_err(MigratableError::MigrateReceive)?,
+        );
 
         if self
             .vm_config
@@ -1192,9 +1194,9 @@ impl Vmm {
             .landlock_enable
         {
             let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
-            apply_landlock(&mut config).map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error applying landlock: {e:?}"))
-            })?;
+            apply_landlock(&mut config)
+                .context("Error applying landlock")
+                .map_err(MigratableError::MigrateReceive)?;
         }
 
         let vm = Vm::create_hypervisor_vm(
@@ -1227,11 +1229,8 @@ impl Vmm {
             Some(&vm_migration_config.memory_manager_data),
             existing_memory_files,
         )
-        .map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!(
-                "Error creating MemoryManager from snapshot: {e:?}"
-            ))
-        })?;
+        .context("Error creating MemoryManager from snapshot")
+        .map_err(MigratableError::MigrateReceive)?;
 
         Ok(memory_manager)
     }
@@ -1260,27 +1259,37 @@ impl Vmm {
             socket
                 .read_exact(&mut data)
                 .map_err(MigratableError::MigrateSocket)?;
-            serde_json::from_slice(&data).map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error deserialising snapshot: {e}"))
-            })
+            serde_json::from_slice(&data)
+                .context("Error deserialising snapshot")
+                .map_err(MigratableError::MigrateReceive)
         })?;
 
-        let exit_evt = self.exit_evt.try_clone().map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error cloning exit EventFd: {e}"))
-        })?;
-        let reset_evt = self.reset_evt.try_clone().map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error cloning reset EventFd: {e}"))
-        })?;
-        let guest_exit_evt = self.guest_exit_evt.try_clone().map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error cloning guest exit EventFd: {e}"))
-        })?;
+        let exit_evt = self
+            .exit_evt
+            .try_clone()
+            .context("Error cloning exit EventFd")
+            .map_err(MigratableError::MigrateReceive)?;
+        let reset_evt = self
+            .reset_evt
+            .try_clone()
+            .context("Error cloning reset EventFd")
+            .map_err(MigratableError::MigrateReceive)?;
+        let guest_exit_evt = self
+            .guest_exit_evt
+            .try_clone()
+            .context("Error cloning guest exit EventFd")
+            .map_err(MigratableError::MigrateReceive)?;
         #[cfg(feature = "guest_debug")]
-        let debug_evt = self.vm_debug_evt.try_clone().map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error cloning debug EventFd: {e}"))
-        })?;
-        let activate_evt = self.activate_evt.try_clone().map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error cloning activate EventFd: {e}"))
-        })?;
+        let debug_evt = self
+            .vm_debug_evt
+            .try_clone()
+            .context("Error cloning debug EventFd")
+            .map_err(MigratableError::MigrateReceive)?;
+        let activate_evt = self
+            .activate_evt
+            .try_clone()
+            .context("Error cloning activate EventFd")
+            .map_err(MigratableError::MigrateReceive)?;
 
         let (vm, restore_duration) = measure_ok(|| {
             #[cfg(not(target_arch = "riscv64"))]
@@ -1585,9 +1594,8 @@ impl Vmm {
                     profile,
                 },
             )
-            .map_err(|e| {
-                MigratableError::MigrateSend(anyhow!("Error generating common cpuid': {e:?}"))
-            })?
+            .context("Error generating common cpuid")
+            .map_err(MigratableError::MigrateSend)?
         };
 
         if send_data_migration.local {
@@ -1671,20 +1679,15 @@ impl Vmm {
             let guest_memory = vm.guest_memory();
             // Build the seccomp filter on the parent thread so any failure aborts
             // the migration before the serve thread is spawned.
-            let seccomp_filter = get_seccomp_filter(
-                seccomp_action,
-                Thread::MigrateSendPostcopy,
-                None,
-            )
-            .map_err(|e| {
-                MigratableError::MigrateSend(anyhow!("creating postcopy serve seccomp filter: {e}"))
-            })?;
+            let seccomp_filter =
+                get_seccomp_filter(seccomp_action, Thread::MigrateSendPostcopy, None)
+                    .context("creating postcopy serve seccomp filter")
+                    .map_err(MigratableError::MigrateSend)?;
             let handle = thread::Builder::new()
                 .name("migrate-send-postcopy".to_owned())
                 .spawn(move || Self::serve_postcopy(seccomp_filter, fault_stream, guest_memory))
-                .map_err(|e| {
-                    MigratableError::MigrateSend(anyhow!("spawning postcopy serve thread: {e}"))
-                })?;
+                .context("spawning postcopy serve thread")
+                .map_err(MigratableError::MigrateSend)?;
             Some(handle)
         } else {
             None
@@ -1771,9 +1774,9 @@ impl Vmm {
         // seccomp is disabled (SeccompAction::Allow), in which case there is
         // nothing to apply.
         if !seccomp_filter.is_empty() {
-            apply_filter(&seccomp_filter).map_err(|e| {
-                MigratableError::MigrateSend(anyhow!("applying postcopy serve seccomp filter: {e}"))
-            })?;
+            apply_filter(&seccomp_filter)
+                .context("applying postcopy serve seccomp filter")
+                .map_err(MigratableError::MigrateSend)?;
         }
 
         let mut buf: Vec<u8> = Vec::new();
@@ -1873,15 +1876,12 @@ impl Vmm {
                     profile: vm_config.cpus.profile,
                 },
             )
-            .map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error generating common cpuid: {e:?}"))
-            })?
+            .context("Error generating common cpuid")
+            .map_err(MigratableError::MigrateReceive)?
         };
-        arch::CpuidFeatureEntry::check_cpuid_compatibility(src_vm_cpuid, dest_cpuid).map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!(
-                "Error checking cpu feature compatibility': {e:?}"
-            ))
-        })
+        arch::CpuidFeatureEntry::check_cpuid_compatibility(src_vm_cpuid, dest_cpuid)
+            .context("Error checking cpu feature compatibility")
+            .map_err(MigratableError::MigrateReceive)
     }
 
     fn vm_restore(
