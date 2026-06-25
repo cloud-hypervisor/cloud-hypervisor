@@ -363,7 +363,7 @@ impl ReceiveAdditionalConnections {
             let _ = terminate_fd.write(1);
         }
 
-        info!("Stopped accepting additional connections. Cleaning up threads.");
+        debug!("Stopped accepting additional connections. Cleaning up threads.");
 
         Self::join_memory_threads(threads, first_err)
     }
@@ -512,7 +512,7 @@ impl ReceiveAdditionalConnections {
                 .context("Failed to poll fds")
                 .map_err(MigratableError::MigrateReceive)?
             {
-                info!("Got signal to tear down connection.");
+                debug!("Got signal to tear down connection.");
                 return Ok(());
             }
 
