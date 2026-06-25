@@ -22,10 +22,10 @@ pub enum Error {
     #[error("Setup of the device capabilities failed")]
     CapabilitiesSetup(#[source] configuration::Error),
     /// Allocating space for an IO BAR failed.
-    #[error("Allocating space for an IO BAR failed")]
+    #[error("Allocating space for an IO BAR of size {0} failed")]
     IoAllocationFailed(u64),
     /// Registering an IO BAR failed.
-    #[error("Registering an IO BAR failed")]
+    #[error("Registering an IO BAR at address {0:#x} failed")]
     IoRegistrationFailed(u64, #[source] configuration::Error),
     /// Expected resource not found.
     #[error("Expected resource not found")]
