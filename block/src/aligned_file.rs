@@ -111,6 +111,33 @@ impl AlignedFile {
             position: 0,
         }
     }
+
+    /// Read `len` bytes at `offset` through an aligned bounce buffer.
+    pub(crate) fn read_unaligned(
+        &self,
+        offset: u64,
+        len: usize,
+        scatter: impl FnOnce(&[u8]) -> io::Result<()>,
+    ) -> io::Result<usize> {
+        let mut abuf = AlignedBuffer::new(offset, len, self.alignment)?;
+        let n = abuf.read_from(&self.file)?;
+        scatter(&abuf.as_slice()[..n])?;
+        Ok(n)
+    }
+
+    /// Write `len` bytes at `offset` through an aligned bounce buffer.
+    pub(crate) fn write_unaligned(
+        &self,
+        offset: u64,
+        len: usize,
+        gather: impl FnOnce(&mut [u8]) -> io::Result<()>,
+    ) -> io::Result<usize> {
+        let mut abuf = AlignedBuffer::new(offset, len, self.alignment)?;
+        abuf.read_from(&self.file)?; // RMW: preserve head/tail padding
+        gather(abuf.as_mut_slice())?;
+        abuf.write_to(&self.file)?;
+        Ok(len)
+    }
 }
 
 impl FileExt for AlignedFile {
@@ -121,10 +148,10 @@ impl FileExt for AlignedFile {
         if is_aligned(self.alignment, buf.as_ptr() as usize, buf.len(), offset) {
             return self.file.read_at(buf, offset);
         }
-        let mut abuf = AlignedBuffer::new(offset, buf.len(), self.alignment)?;
-        let n = abuf.read_from(&self.file)?;
-        buf[..n].copy_from_slice(&abuf.as_slice()[..n]);
-        Ok(n)
+        self.read_unaligned(offset, buf.len(), |data| {
+            buf[..data.len()].copy_from_slice(data);
+            Ok(())
+        })
     }
 
     fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
@@ -134,11 +161,10 @@ impl FileExt for AlignedFile {
         if is_aligned(self.alignment, buf.as_ptr() as usize, buf.len(), offset) {
             return self.file.write_at(buf, offset);
         }
-        let mut abuf = AlignedBuffer::new(offset, buf.len(), self.alignment)?;
-        abuf.read_from(&self.file)?; // RMW: preserve head/tail padding
-        abuf.as_mut_slice().copy_from_slice(buf);
-        abuf.write_to(&self.file)?;
-        Ok(buf.len())
+        self.write_unaligned(offset, buf.len(), |dst| {
+            dst.copy_from_slice(buf);
+            Ok(())
+        })
     }
 }
 
