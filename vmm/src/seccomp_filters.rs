@@ -743,6 +743,9 @@ fn vmm_thread_rules(
         (libc::SYS_sched_getaffinity, vec![]),
         (libc::SYS_sched_setaffinity, vec![]),
         (libc::SYS_sched_yield, vec![]),
+        // Needed because child threads install their own seccomp filters.
+        // This is acceptable because seccomp filters are monotonic: threads can
+        // only add restrictions, not relax or remove existing ones.
         (libc::SYS_seccomp, vec![]),
         (libc::SYS_sendmsg, vec![]),
         (libc::SYS_sendto, vec![]),
@@ -1112,6 +1115,9 @@ fn migration_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError
         (libc::SYS_rt_sigreturn, vec![]),
         (libc::SYS_sched_getaffinity, vec![]),
         (libc::SYS_sched_yield, vec![]),
+        // Needed because child threads install their own seccomp filters.
+        // This is acceptable because seccomp filters are monotonic: threads can
+        // only add restrictions, not relax or remove existing ones.
         (libc::SYS_seccomp, vec![]),
         (libc::SYS_sendmsg, vec![]),
         (libc::SYS_setsockopt, vec![]),
@@ -1162,7 +1168,9 @@ fn migration_tcp_worker_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, B
         (libc::SYS_rt_sigreturn, vec![]),
         (libc::SYS_sched_getaffinity, vec![]),
         (libc::SYS_sched_yield, vec![]),
-        // We are already inheriting seccomp from the parent thread.
+        // Needed because child threads install their own seccomp filters.
+        // This is acceptable because seccomp filters are monotonic: threads can
+        // only add restrictions, not relax or remove existing ones.
         (libc::SYS_seccomp, vec![]),
         (libc::SYS_sendmsg, vec![]),
         (libc::SYS_sendto, vec![]),
