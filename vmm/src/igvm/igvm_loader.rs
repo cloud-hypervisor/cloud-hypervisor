@@ -105,7 +105,7 @@ pub enum Error {
     #[error("Error decoding host data")]
     FailedToDecodeHostData(#[source] hex::FromHexError),
     #[error("Error allocating address space")]
-    MemoryManager(MemoryManagerError),
+    MemoryManager(#[source] MemoryManagerError),
     #[error("IGVM file not provided")]
     MissingIgvm,
     #[error("Error applying VMSA to vCPU registers: {0}")]

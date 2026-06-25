@@ -37,8 +37,6 @@ pub enum Error {
     MemoryUnavailable,
     #[error("failed to import pages")]
     ImportPagesFailed,
-    #[error("invalid vp context memory")]
-    InvalidVpContextMemory(&'static str),
     #[error("data larger than imported region")]
     DataTooLarge,
 }
