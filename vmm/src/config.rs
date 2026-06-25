@@ -394,18 +394,18 @@ pub enum ValidationError {
     #[error("Path {0:?} provided in landlock-rules does not exist")]
     LandlockPathDoesNotExist(PathBuf),
     /// Access provided in landlock-rules in invalid
-    #[error("access provided in landlock-rules in invalid")]
+    #[error("Invalid landlock access: {0}")]
     InvalidLandlockAccess(String),
     /// Invalid block device serial length
     #[error("Block device serial length ({0}) exceeds maximum allowed length ({1})")]
     InvalidSerialLength(usize, usize),
     #[cfg(feature = "ivshmem")]
     /// Invalid Ivshmem input size
-    #[error("Invalid ivshmem input size")]
+    #[error("Invalid ivshmem input size: {0}")]
     InvalidIvshmemInputSize(u64),
     #[cfg(feature = "ivshmem")]
     /// Invalid Ivshmem backend file size
-    #[error("Invalid ivshmem backend file size")]
+    #[error("Invalid ivshmem backend file size: {0}")]
     InvalidIvshmemSize(u64),
     #[cfg(feature = "ivshmem")]
     /// Invalid Ivshmem backend file path
@@ -418,7 +418,7 @@ pub enum ValidationError {
     #[error("IP provided without a mask")]
     IpProvidedWithoutMask,
     /// Invalid NUMA Configuration
-    #[error("NUMA Configuration is invalid")]
+    #[error("Invalid NUMA configuration: {0}")]
     InvalidNumaConfig(String),
     /// The supplied PCI ID was greater then the max. supported number
     /// of devices per Bus

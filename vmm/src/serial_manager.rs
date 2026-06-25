@@ -90,11 +90,11 @@ pub enum Error {
 
     /// Cannot create seccomp filter.
     #[error("Error creating seccomp filter")]
-    CreateSeccompFilter(seccompiler::Error),
+    CreateSeccompFilter(#[source] seccompiler::Error),
 
     /// Cannot apply seccomp filter.
     #[error("Error applying seccomp filter")]
-    ApplySeccompFilter(seccompiler::Error),
+    ApplySeccompFilter(#[source] seccompiler::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 

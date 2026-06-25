@@ -493,7 +493,7 @@ pub enum DeviceManagerError {
     RemoveDeviceFromMmioBus(#[source] vm_device::BusError),
 
     /// Failed to find the device corresponding to a specific PCI b/d/f.
-    #[error("Failed to find the device corresponding to a specific PCI b/d/f")]
+    #[error("Failed to find the device corresponding to a specific PCI b/d/f: {0:#x}")]
     UnknownPciBdf(u32),
 
     /// Not allowed to remove this type of device from the VM.
@@ -501,7 +501,7 @@ pub enum DeviceManagerError {
     RemovalNotAllowed(vm_virtio::VirtioDeviceType),
 
     /// Failed to find device corresponding to the given identifier.
-    #[error("Failed to find device corresponding to the given identifier")]
+    #[error("Failed to find device corresponding to the given identifier: {0}")]
     UnknownDeviceId(String),
 
     /// Failed to find an available PCI device ID.
@@ -649,7 +649,7 @@ pub enum DeviceManagerError {
     InvalidIdentifier(String),
 
     /// vfio-user socket path already in use by another user device.
-    #[error("vfio-user socket path already in use: {0:?}")]
+    #[error("VFIO-user socket path already in use: {0:?}")]
     UserDeviceSocketInUse(path::PathBuf),
 
     /// Failed retrieving device state from snapshot
