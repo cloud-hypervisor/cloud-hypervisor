@@ -317,7 +317,7 @@ pub enum VmReceiveMigrationConfigError {
     #[error("Error parsing receive migration parameters")]
     ParseError(#[source] OptionParserError),
 
-    #[error("Error validating receive migration parameters")]
+    #[error("Error validating receive migration parameters: {0}")]
     ValidationError(String),
 }
 
