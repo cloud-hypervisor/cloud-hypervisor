@@ -278,22 +278,32 @@ fn wait_for_readable(fd: &impl AsFd, abort_event: &impl AsRawFd) -> Result<bool,
     ))
 }
 
-/// Struct to keep track of additional connections for receiving VM migration data.
+/// Coordinates the variable number of receive side TCP connections for
+/// memory transfer and fault handling.
+///
+/// VM migration uses one main connection plus a bounded number of additional
+/// connections. A dedicated accept thread classifies each auxiliary socket by
+/// its [`ConnectionRole`]:
+///
+/// - fault sockets are handed to the main migration thread through `fault_tx`
+/// - precopy memory sockets get a worker thread that receives
+///   [`Command::Memory`] requests and writes them into guest memory.
+///
+/// The accept thread joins all memory workers before exiting when
+/// [`Self::cleanup`] is called.
 #[derive(Debug)]
 pub(crate) struct ReceiveAdditionalConnections {
-    /// This thread accepts incoming connections and spawns a new worker for
-    /// each connection that handles receiving memory.
     accept_thread: Option<thread::JoinHandle<Result<(), MigratableError>>>,
 
-    /// This fd gets signaled when the migration stops, and will then stop
-    /// the [`Self::accept_thread`].
+    /// Shared termination event for the accept thread and memory workers.
     terminate_fd: EventFd,
 }
 
 impl ReceiveAdditionalConnections {
-    /// Starts a thread to accept incoming connections and handle them. These
-    /// additional connections are used to receive additional memory regions
-    /// during VM migration.
+    /// Starts the auxiliary migration receive path.
+    ///
+    /// The caller must call [`Self::cleanup`] once migration finishes so the
+    /// accept thread and its memory workers are signaled and joined.
     pub(crate) fn new(
         listener: ReceiveListener,
         guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
@@ -322,6 +332,17 @@ impl ReceiveAdditionalConnections {
         })
     }
 
+    /// Accepts any incoming migration connections and dispatches them by
+    /// role.
+    ///
+    /// Runs on the accept thread created by [`Self::new`]. It accepts sockets
+    /// until termination is signaled, accepting/classifying a socket fails, or
+    /// the memory connection limit is exceeded.
+    ///
+    /// Each socket must send a [`ConnectionRole`] header soon after connecting.
+    /// Invalid sockets are dropped. Fault sockets are sent through `fault_tx`.
+    /// Precopy memory sockets get a worker thread that receives memory ranges
+    /// until EOF, error, or termination.
     fn accept_connections(
         mut listener: ReceiveListener,
         terminate_fd: &EventFd,
