@@ -33,7 +33,7 @@ pub enum Error {
     GetFeatures(#[source] IoError),
     #[error("Missing multiqueue support in the kernel")]
     MultiQueueKernelSupport,
-    #[error("ioctl ({0}) failed: {1}")]
+    #[error("Ioctl failed ({0})")]
     IoctlError(c_ulong, #[source] IoError),
     #[error("Failed to create a socket")]
     NetUtil(#[source] NetUtilError),
