@@ -2986,9 +2986,10 @@ impl RequestHandler for Vmm {
             .map_err(MigratableError::MigrateReceive)?;
 
         info!(
-            "Receiving migration: receiver_url={},tls={}",
+            "Receiving migration: receiver_url={},tls={},zones_updates={:?}",
             receive_data_migration.receiver_url,
-            receive_data_migration.tls_dir.is_some()
+            receive_data_migration.tls_dir.is_some(),
+            receive_data_migration.zones_updates,
         );
 
         let mut listener = transport::receive_migration_listener(

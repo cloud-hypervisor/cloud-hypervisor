@@ -53,7 +53,7 @@ use vmm_sys_util::eventfd::EventFd;
 pub use self::dbus::start_dbus_thread;
 pub use self::http::{start_http_fd_thread, start_http_path_thread};
 use crate::Error as VmmError;
-use crate::config::RestoreConfig;
+use crate::config::{RestoreConfig, VmMemoryZoneUpdateData};
 use crate::device_tree::DeviceTree;
 use crate::migration::transport::{
     MAX_MIGRATION_CONNECTIONS, TcpAddressParseError, tcp_address_to_server_name,
@@ -310,6 +310,9 @@ pub struct VmReceiveMigrationData {
     /// Memory transfer mode.
     #[serde(default)]
     pub memory_mode: MigrationMode,
+    /// Optional memory zone reconfiguration data
+    #[serde(default)]
+    pub zones_updates: Vec<VmMemoryZoneUpdateData>,
 }
 
 #[derive(Debug, Error)]
@@ -350,6 +353,7 @@ impl VmReceiveMigrationData {
             receiver_url,
             tls_dir,
             memory_mode,
+            zones_updates: vec![],
         };
 
         data.validate()?;
@@ -1987,6 +1991,7 @@ mod unit_tests {
                 receiver_url: "tcp:192.168.1.1:8080".to_string(),
                 tls_dir: None,
                 memory_mode: MigrationMode::Precopy,
+                zones_updates: vec![],
             }
         );
 
@@ -2014,6 +2019,7 @@ mod unit_tests {
                 receiver_url: "tcp:192.168.1.1:8080".to_string(),
                 tls_dir: Some(tls_dir_path),
                 memory_mode: MigrationMode::Precopy,
+                zones_updates: vec![],
             }
         );
 
@@ -2037,6 +2043,7 @@ mod unit_tests {
                 receiver_url: "tcp:127.0.0.1:1234".to_string(),
                 tls_dir: None,
                 memory_mode: MigrationMode::Precopy,
+                ..Default::default()
             }
         );
 
@@ -2050,6 +2057,7 @@ mod unit_tests {
                 receiver_url: "unix:/tmp/sock".to_string(),
                 tls_dir: None,
                 memory_mode: MigrationMode::Postcopy,
+                ..Default::default()
             }
         );
 

@@ -2781,6 +2781,15 @@ impl FromStr for MemoryRestoreMode {
     }
 }
 
+#[derive(Clone, Deserialize, Serialize, Debug, Eq, PartialEq)]
+/// Helper for updating MemoryZone
+pub struct VmMemoryZoneUpdateData {
+    /// Id of the MemoryZone to update
+    pub id: String,
+    /// Host NUMA node to relocate the MemoryZone to
+    pub host_numa_node: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct RestoreConfig {
     pub source_url: PathBuf,
@@ -2792,6 +2801,8 @@ pub struct RestoreConfig {
     pub net_fds: Option<Vec<RestoredNetConfig>>,
     #[serde(default)]
     pub resume: bool,
+    #[serde(default)]
+    pub zones_updates: Vec<VmMemoryZoneUpdateData>,
 }
 
 impl RestoreConfig {
@@ -2852,6 +2863,7 @@ impl RestoreConfig {
             memory_restore_mode,
             net_fds,
             resume,
+            zones_updates: vec![],
         })
     }
 
@@ -5058,6 +5070,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 memory_restore_mode: MemoryRestoreMode::Copy,
                 net_fds: None,
                 resume: false,
+                zones_updates: vec![],
             }
         );
         assert_eq!(
@@ -5081,6 +5094,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                     }
                 ]),
                 resume: false,
+                zones_updates: vec![],
             }
         );
         assert_eq!(
@@ -5091,6 +5105,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 memory_restore_mode: MemoryRestoreMode::OnDemand,
                 net_fds: None,
                 resume: false,
+                zones_updates: vec![],
             }
         );
         assert_eq!(
@@ -5101,6 +5116,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 memory_restore_mode: MemoryRestoreMode::Copy,
                 net_fds: None,
                 resume: true,
+                zones_updates: vec![],
             }
         );
         // Parsing should fail as source_url is a required field
@@ -5213,6 +5229,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 },
             ]),
             resume: false,
+            zones_updates: vec![],
         };
         valid_config.validate(&snapshot_vm_config).unwrap();
 
@@ -5278,6 +5295,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             memory_restore_mode: MemoryRestoreMode::Copy,
             net_fds: None,
             resume: false,
+            zones_updates: vec![],
         };
         snapshot_vm_config.net = Some(vec![NetConfig {
             pci_common: PciDeviceCommonConfig {
@@ -5295,6 +5313,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             memory_restore_mode: MemoryRestoreMode::OnDemand,
             net_fds: None,
             resume: false,
+            zones_updates: vec![],
         };
         assert_eq!(
             invalid_restore_mode.validate(&snapshot_vm_config),
