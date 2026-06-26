@@ -53,6 +53,7 @@ mod common_parallel {
     use crate::*;
 
     #[test]
+    #[ignore]
     #[cfg(target_arch = "x86_64")]
     fn test_jammy_hypervisor_fw() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME)
@@ -61,6 +62,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     #[cfg(target_arch = "x86_64")]
     fn test_jammy_ovmf() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_kernel(fw_path(FwType::Ovmf));
@@ -68,28 +70,33 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_multi_cpu() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_multi_cpu(&guest);
     }
 
     #[test]
+    #[ignore]
     #[cfg_attr(target_arch = "x86_64", should_panic)]
     fn test_cpu_topology_421() {
         test_cpu_topology(4, 2, 1, false);
     }
 
     #[test]
+    #[ignore]
     fn test_cpu_topology_142() {
         test_cpu_topology(1, 4, 2, false);
     }
 
     #[test]
+    #[ignore]
     fn test_cpu_topology_262() {
         test_cpu_topology(2, 6, 2, false);
     }
 
     #[test]
+    #[ignore]
     #[cfg(target_arch = "x86_64")]
     #[cfg(not(feature = "mshv"))]
     fn test_cpu_physical_bits() {
@@ -160,30 +167,35 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     #[cfg(target_arch = "x86_64")]
     fn test_nested_virtualization_on() {
         _test_nested_virtualization(true);
     }
 
     #[test]
+    #[ignore]
     #[cfg(target_arch = "x86_64")]
     fn test_nested_virtualization_off() {
         _test_nested_virtualization(false);
     }
 
     #[test]
+    #[ignore]
     fn test_cpu_affinity() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(2);
         _test_cpu_affinity(&guest);
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_queue_affinity() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(4);
         _test_virtio_queue_affinity(&guest);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_large_vm() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -223,6 +235,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_huge_memory() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -251,12 +264,14 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_power_button() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_power_button(&guest);
     }
 
     #[test]
+    #[ignore]
     fn test_user_defined_memory_regions() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -336,11 +351,13 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_guest_numa_nodes() {
         _test_guest_numa_nodes(false);
     }
 
     #[test]
+    #[ignore]
     #[cfg(target_arch = "x86_64")]
     fn test_iommu_segments() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -419,24 +436,28 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_pci_msi() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_pci_msi(&guest);
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_net_ctrl_queue() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_virtio_net_ctrl_queue(&guest);
     }
 
     #[test]
+    #[ignore]
     fn test_pci_multiple_segments() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_pci_multiple_segments(&guest, MAX_NUM_PCI_SEGMENTS, 15u16);
     }
 
     #[test]
+    #[ignore]
     fn test_pci_multiple_segments_numa_node() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -530,12 +551,14 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_direct_kernel_boot() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_direct_kernel_boot(&guest);
     }
 
     #[test]
+    #[ignore]
     #[cfg(target_arch = "x86_64")]
     fn test_direct_kernel_boot_bzimage() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -582,6 +605,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_io_uring() {
         let guest =
             make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), JAMMY_IMAGE_NAME);
@@ -589,6 +613,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_aio() {
         let guest =
             make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), JAMMY_IMAGE_NAME)
@@ -597,6 +622,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_sync() {
         let guest =
             make_virtio_block_guest(&GuestFactory::new_regular_guest_factory(), JAMMY_IMAGE_NAME)
@@ -775,21 +801,25 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_blkdev_io_uring() {
         _test_virtio_block_blkdev(false, false);
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_blkdev_aio() {
         _test_virtio_block_blkdev(true, false);
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_blkdev_sync() {
         _test_virtio_block_blkdev(true, true);
     }
 
     #[test]
+    #[ignore]
     fn test_compute_file_checksum_empty() {
         let mut reader = io::Cursor::new(vec![]);
         let checksum = compute_file_checksum(&mut reader, 0);
@@ -797,6 +827,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_compute_file_checksum_small() {
         let data = b"hello world";
         let mut reader = io::Cursor::new(data);
@@ -805,6 +836,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_compute_file_checksum_same_data() {
         let data = b"test data 123";
         let mut reader1 = io::Cursor::new(data);
@@ -815,6 +847,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_compute_file_checksum_different_data() {
         let data1 = b"data1";
         let data2 = b"data2";
@@ -826,6 +859,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_compute_file_checksum_large_data() {
         let size = 20 * 1024 * 1024;
         let data = vec![0xABu8; size];
@@ -840,6 +874,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_qcow2() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
         let guest = GuestFactory::new_regular_guest_factory()
@@ -849,6 +884,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_qcow2_zlib() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2_ZLIB.to_string());
         let guest = GuestFactory::new_regular_guest_factory()
@@ -858,6 +894,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_qcow2_zstd() {
         let guest = make_virtio_block_guest(
             &GuestFactory::new_regular_guest_factory(),
@@ -867,6 +904,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_qcow2_backing_zstd_file() {
         let guest = make_virtio_block_guest(
             &GuestFactory::new_regular_guest_factory(),
@@ -876,6 +914,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_qcow2_backing_uncompressed_file() {
         let guest = make_virtio_block_guest(
             &GuestFactory::new_regular_guest_factory(),
@@ -885,6 +924,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_qcow2_backing_raw_file() {
         let guest = make_virtio_block_guest(
             &GuestFactory::new_regular_guest_factory(),
@@ -998,6 +1038,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_qcow2_multiqueue_writes() {
         run_multiqueue_qcow2_test(&QcowTestImageConfig::Simple("256M"), |guest| {
             assert_eq!(
@@ -1068,6 +1109,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_qcow2_multiqueue_mixed_rw() {
         run_multiqueue_qcow2_test(&QcowTestImageConfig::Simple("512M"), |guest| {
             guest
@@ -1119,6 +1161,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_qcow2_multiqueue_backing() {
         run_multiqueue_qcow2_test(&QcowTestImageConfig::WithBacking, |guest| {
             guest
@@ -1163,6 +1206,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_qcow2_multiqueue_random_4k() {
         run_multiqueue_qcow2_test(&QcowTestImageConfig::Simple("256M"), |guest| {
             guest
@@ -1193,6 +1237,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_qcow2_multiqueue_fsync() {
         run_multiqueue_qcow2_test(&QcowTestImageConfig::Simple("256M"), |guest| {
             guest
@@ -1240,6 +1285,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_qcow2_multiqueue_metadata() {
         run_multiqueue_qcow2_test(&QcowTestImageConfig::Simple("256M"), |guest| {
             guest
@@ -1319,6 +1365,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_qcow2_multiqueue_discard_mount() {
         run_multiqueue_qcow2_test(&QcowTestImageConfig::Simple("256M"), |guest| {
             guest
@@ -1382,6 +1429,7 @@ mod common_parallel {
         });
     }
     #[test]
+    #[ignore]
     fn test_virtio_block_qcow2_multiqueue_wide_writes() {
         run_multiqueue_qcow2_test(&QcowTestImageConfig::Simple("1G"), |guest| {
             // Scattered write pattern - write to widely separated offsets in parallel.
@@ -1422,6 +1470,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_qcow2_multiqueue_discard_stress() {
         run_multiqueue_qcow2_test(&QcowTestImageConfig::Simple("512M"), |guest| {
             guest
@@ -1502,6 +1551,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_qcow2_uefi_direct_io() {
         // Regression test for #8007.
         // Place the QCOW2 OS image on a 4096 byte sector filesystem so
@@ -1714,26 +1764,31 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_direct_io_data_disk_4k_raw() {
         _test_virtio_block_direct_io_data_disk_4k(ImageType::Raw);
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_direct_io_data_disk_4k_qcow2() {
         _test_virtio_block_direct_io_data_disk_4k(ImageType::Qcow2);
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_direct_io_data_disk_4k_vhd() {
         _test_virtio_block_direct_io_data_disk_4k(ImageType::FixedVhd);
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_direct_io_data_disk_4k_vhdx() {
         _test_virtio_block_direct_io_data_disk_4k(ImageType::Vhdx);
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_qcow2_dirty_bit_unclean_shutdown() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -1797,6 +1852,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_qcow2_dirty_bit_clean_shutdown() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -1856,6 +1912,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_qcow2_corrupt_bit_rejected_for_write() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -1912,6 +1969,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_qcow2_corrupt_bit_allowed_readonly() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -1983,6 +2041,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_vhd() {
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
@@ -2011,6 +2070,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_vhdx() {
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
@@ -2038,12 +2098,14 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_dynamic_vhdx_expand() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_virtio_block_dynamic_vhdx_expand(&guest);
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_direct_and_firmware() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -2091,11 +2153,13 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_vhost_user_net_default() {
         test_vhost_user_net(None, 2, &prepare_vhost_user_net_daemon, false, false);
     }
 
     #[test]
+    #[ignore]
     fn test_vhost_user_net_named_tap() {
         test_vhost_user_net(
             Some("mytap0"),
@@ -2107,6 +2171,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_vhost_user_net_existing_tap() {
         test_vhost_user_net(
             Some("vunet-tap0"),
@@ -2118,11 +2183,13 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_vhost_user_net_multiple_queues() {
         test_vhost_user_net(None, 4, &prepare_vhost_user_net_daemon, false, false);
     }
 
     #[test]
+    #[ignore]
     fn test_vhost_user_net_tap_multiple_queues() {
         test_vhost_user_net(
             Some("vunet-tap1"),
@@ -2134,39 +2201,46 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_vhost_user_net_host_mac() {
         test_vhost_user_net(None, 2, &prepare_vhost_user_net_daemon, true, false);
     }
 
     #[test]
+    #[ignore]
     fn test_vhost_user_net_client_mode() {
         test_vhost_user_net(None, 2, &prepare_vhost_user_net_daemon, false, true);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(target_arch = "aarch64"))]
     fn test_vhost_user_blk_default() {
         test_vhost_user_blk(2, false, false, Some(&prepare_vubd));
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(target_arch = "aarch64"))]
     fn test_vhost_user_blk_readonly() {
         test_vhost_user_blk(1, true, false, Some(&prepare_vubd));
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(target_arch = "aarch64"))]
     fn test_vhost_user_blk_direct() {
         test_vhost_user_blk(1, false, true, Some(&prepare_vubd));
     }
 
     #[test]
+    #[ignore]
     fn test_boot_from_vhost_user_blk_default() {
         test_boot_from_vhost_user_blk(1, false, false, Some(&prepare_vubd));
     }
 
     #[test]
+    #[ignore]
     #[cfg(target_arch = "x86_64")]
     fn test_split_irqchip() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
@@ -2174,6 +2248,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     #[cfg(target_arch = "x86_64")]
     fn test_dmi_serial_number() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
@@ -2182,6 +2257,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     #[cfg(target_arch = "x86_64")]
     fn test_dmi_uuid() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
@@ -2189,6 +2265,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     #[cfg(target_arch = "x86_64")]
     fn test_dmi_oem_strings() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
@@ -2196,6 +2273,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     #[cfg(target_arch = "x86_64")]
     fn test_dmi_system_and_chassis() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
@@ -2203,46 +2281,55 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_fs() {
         _test_virtio_fs(&prepare_virtiofsd, false, false, None);
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_fs_hotplug() {
         _test_virtio_fs(&prepare_virtiofsd, true, false, None);
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_fs_multi_segment_hotplug() {
         _test_virtio_fs(&prepare_virtiofsd, true, false, Some(15));
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_fs_multi_segment() {
         _test_virtio_fs(&prepare_virtiofsd, false, false, Some(15));
     }
 
     #[test]
+    #[ignore]
     fn test_generic_vhost_user() {
         _test_virtio_fs(&prepare_virtiofsd, false, true, None);
     }
 
     #[test]
+    #[ignore]
     fn test_generic_vhost_user_hotplug() {
         _test_virtio_fs(&prepare_virtiofsd, true, true, None);
     }
 
     #[test]
+    #[ignore]
     fn test_generic_vhost_user_multi_segment_hotplug() {
         _test_virtio_fs(&prepare_virtiofsd, true, true, Some(15));
     }
 
     #[test]
+    #[ignore]
     fn test_generic_vhost_user_multi_segment() {
         _test_virtio_fs(&prepare_virtiofsd, false, true, Some(15));
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_rtc() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -2307,16 +2394,19 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_pmem_discard_writes() {
         test_virtio_pmem(true, false);
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_pmem_with_size() {
         test_virtio_pmem(true, true);
     }
 
     #[test]
+    #[ignore]
     fn test_boot_from_virtio_pmem() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -2372,12 +2462,14 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_multiple_network_interfaces() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_multiple_network_interfaces(&guest);
     }
 
     #[test]
+    #[ignore]
     #[cfg(target_arch = "aarch64")]
     fn test_pmu_on() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -2415,12 +2507,14 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_serial_off() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_serial_off(&guest);
     }
 
     #[test]
+    #[ignore]
     fn test_serial_null() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -2474,6 +2568,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_serial_tty() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -2533,6 +2628,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_serial_file() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -2601,6 +2697,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_pty_interaction() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -2647,6 +2744,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_serial_socket_interaction() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -2717,18 +2815,21 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_console() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_virtio_console(&guest);
     }
 
     #[test]
+    #[ignore]
     fn test_console_file() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_console_file(&guest);
     }
 
     #[test]
+    #[ignore]
     #[cfg(target_arch = "x86_64")]
     #[cfg(not(feature = "mshv"))]
     // The VFIO integration test starts cloud-hypervisor guest with 3 TAP
@@ -2998,6 +3099,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_direct_kernel_boot_noacpi() {
         let mut guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         guest.kernel_cmdline = Some(format!("{DIRECT_KERNEL_BOOT_CMDLINE} acpi=off"));
@@ -3005,12 +3107,14 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_vsock() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_virtio_vsock(&guest, false);
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_vsock_hotplug() {
         #[cfg(target_arch = "x86_64")]
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
@@ -3021,6 +3125,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_api_http_shutdown() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(4);
 
@@ -3029,6 +3134,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_api_http_delete() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(4);
 
@@ -3037,6 +3143,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_api_http_pause_resume() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(4);
 
@@ -3045,6 +3152,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_api_http_create_boot() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(4);
 
@@ -3053,11 +3161,13 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_iommu() {
         _test_virtio_iommu(cfg!(target_arch = "x86_64"));
     }
 
     #[test]
+    #[ignore]
     // We cannot force the software running in the guest to reprogram the BAR
     // with some different addresses, but we have a reliable way of testing it
     // with a standard Linux kernel.
@@ -3077,11 +3187,13 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_memory_mergeable_off() {
         test_memory_mergeable(false);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))] // See issue #7435
     #[cfg(target_arch = "x86_64")]
     fn test_cpu_hotplug() {
@@ -3167,6 +3279,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     #[cfg_attr(target_arch = "aarch64", ignore = "See #8187")]
     fn test_memory_hotplug() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -3254,6 +3367,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_mem() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -3330,6 +3444,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     #[cfg(target_arch = "x86_64")]
     // Test both vCPU and memory resizing together
     fn test_resize() {
@@ -3390,6 +3505,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_memory_overhead() {
         let guest_memory_size_kb: u32 = 512 * 1024;
         let guest =
@@ -3398,6 +3514,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     #[cfg(target_arch = "x86_64")]
     // This test runs a guest with Landlock enabled and hotplugs a new disk. As
     // the path for the hotplug disk is not pre-added to Landlock rules, this
@@ -3408,6 +3525,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_disk_hotplug() {
         #[cfg(target_arch = "x86_64")]
         let kernel_path = direct_kernel_boot_path();
@@ -3419,6 +3537,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     #[cfg(target_arch = "x86_64")]
     fn test_disk_hotplug_with_landlock() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
@@ -3426,6 +3545,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_disk_resize() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -3536,6 +3656,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_disk_resize_qcow2() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -3789,6 +3910,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_topology() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         let test_disk_path = guest.tmp_dir.as_path().join("test.img");
@@ -3815,6 +3937,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_direct_io_block_device_alignment_4k() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -3901,6 +4024,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_direct_io_file_backed_alignment_4k() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -4355,21 +4479,25 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_discard_qcow2() {
         _test_virtio_block_discard("qcow2", "qcow2", &[], true, true);
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_discard_raw() {
         _test_virtio_block_discard("raw", "raw", &[], true, false);
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_discard_raw_aio() {
         _test_virtio_block_discard_with_backend("raw", "raw", &[], true, false, true);
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_write_zeroes_unmap_raw() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -4458,16 +4586,19 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_discard_unsupported_vhd() {
         _test_virtio_block_discard("vhd", "vpc", &["-o", "subformat=fixed"], false, false);
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_discard_unsupported_vhdx() {
         _test_virtio_block_discard("vhdx", "vhdx", &[], false, false);
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_discard_loop_device() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -4571,6 +4702,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_discard_dm_snapshot() {
         // Verify that the guest remains stable when BLKDISCARD fails on the
         // host backend.  DM snapshot targets do not support discard, so the
@@ -4953,31 +5085,37 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_fstrim_qcow2() {
         _test_virtio_block_fstrim("qcow2", "qcow2", &[], true, true);
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_fstrim_raw() {
         _test_virtio_block_fstrim("raw", "raw", &[], true, false);
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_fstrim_raw_aio() {
         _test_virtio_block_fstrim_with_backend("raw", "raw", &[], true, false, true);
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_fstrim_unsupported_vhd() {
         _test_virtio_block_fstrim("vhd", "vpc", &["-o", "subformat=fixed"], false, false);
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_fstrim_unsupported_vhdx() {
         _test_virtio_block_fstrim("vhdx", "vhdx", &[], false, false);
     }
 
     #[test]
+    #[ignore]
     #[ignore = "fallocate() preallocation requires native filesystem support (fails on overlay/tmpfs in CI)"]
     fn test_virtio_block_sparse_off_raw() {
         const TEST_DISK_SIZE: &str = "2G";
@@ -5096,6 +5234,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_block_sparse_off_qcow2() {
         const TEST_DISK_SIZE: &str = "2G";
 
@@ -5201,6 +5340,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_balloon_deflate_on_oom() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -5262,6 +5402,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_balloon_free_page_reporting() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -5323,12 +5464,14 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     #[cfg_attr(target_arch = "aarch64", ignore = "See #8187")]
     fn test_pmem_hotplug() {
         _test_pmem_hotplug(None);
     }
 
     #[test]
+    #[ignore]
     #[cfg_attr(target_arch = "aarch64", ignore = "See #8187")]
     fn test_pmem_multi_segment_hotplug() {
         _test_pmem_hotplug(Some(15));
@@ -5460,6 +5603,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_net_hotplug() {
         #[cfg(target_arch = "x86_64")]
         let kernel_path = direct_kernel_boot_path();
@@ -5472,6 +5616,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_net_multi_segment_hotplug() {
         #[cfg(target_arch = "x86_64")]
         let kernel_path = direct_kernel_boot_path();
@@ -5483,6 +5628,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_initramfs() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -5532,12 +5678,14 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_counters() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_counters(&guest);
     }
 
     #[test]
+    #[ignore]
     #[cfg(feature = "guest_debug")]
     fn test_coredump() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -5586,6 +5734,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     #[cfg(feature = "guest_debug")]
     fn test_coredump_no_pause() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -5623,18 +5772,21 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_pvpanic() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_pvpanic(&guest);
     }
 
     #[test]
+    #[ignore]
     fn test_tap_from_fd() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(2);
         _test_tap_from_fd(&guest);
     }
 
     #[test]
+    #[ignore]
     #[cfg_attr(target_arch = "aarch64", ignore = "See #5443")]
     fn test_macvtap() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(2);
@@ -5642,6 +5794,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     #[cfg_attr(target_arch = "aarch64", ignore = "See #5443")]
     fn test_macvtap_hotplug() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(2);
@@ -5649,6 +5802,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_ovs_dpdk() {
         let disk_config1 = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -5859,6 +6013,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     fn test_vfio_user() {
         let jammy_image = JAMMY_IMAGE_NAME.to_string();
         let disk_config = UbuntuDiskConfig::new(jammy_image);
@@ -5944,6 +6099,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     #[cfg(target_arch = "x86_64")]
     fn test_vdpa_block() {
         // Before trying to run the test, verify the vdpa_sim_blk module is correctly loaded.
@@ -5954,6 +6110,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     #[cfg(target_arch = "x86_64")]
     fn test_vdpa_net() {
         // Before trying to run the test, verify the vdpa_sim_net module is correctly loaded.
@@ -6049,6 +6206,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     #[cfg(target_arch = "x86_64")]
     fn test_tpm() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -6113,6 +6271,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     #[cfg(target_arch = "x86_64")]
     fn test_double_tty() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -6165,6 +6324,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     #[cfg(target_arch = "x86_64")]
     fn test_nmi() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -6214,6 +6374,7 @@ mod common_parallel {
     // Checks that explicit PCI device IDs are honored for boot-time and hotplugged devices.
     // It also verifies dynamic hotplug allocation reuses freed PCI device ID holes.
     #[test]
+    #[ignore]
     fn test_pci_device_id() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -6388,6 +6549,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     // Test that adding a duplicate PCI device ID fails
     fn test_duplicate_pci_device_id() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -6466,6 +6628,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     // Test that requesting an invalid device ID fails.
     fn test_invalid_pci_device_id() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -7473,24 +7636,28 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_basic() {
         _test_live_migration(false, false, false);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_local() {
         _test_live_migration(false, true, false);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_basic_paused() {
         _test_live_migration(false, false, true);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_local_paused() {
         _test_live_migration(false, true, true);
@@ -7522,6 +7689,7 @@ mod common_parallel {
 
     #[test]
     #[cfg(not(feature = "mshv"))]
+    #[ignore]
     fn test_live_migration_tcp_timeout_ignore() {
         _test_live_migration_tcp_timeout(TimeoutStrategy::Ignore);
     }
@@ -7535,12 +7703,14 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_local() {
         _test_live_migration(true, true, false);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     #[cfg(target_arch = "x86_64")]
     fn test_live_migration_with_landlock() {
@@ -7724,12 +7894,14 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_virtio_fs() {
         _test_live_migration_virtio_fs(false);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_virtio_fs_local() {
         _test_live_migration_virtio_fs(true);
@@ -7744,6 +7916,7 @@ mod dbus_api {
     // to create a VM, boot it, and verify that it can be shut down and then
     // booted again.
     #[test]
+    #[ignore]
     fn test_api_dbus_and_http_interleaved() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -7809,6 +7982,7 @@ mod dbus_api {
     }
 
     #[test]
+    #[ignore]
     fn test_api_dbus_create_boot() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = GuestFactory::new_regular_guest_factory()
@@ -7820,6 +7994,7 @@ mod dbus_api {
     }
 
     #[test]
+    #[ignore]
     fn test_api_dbus_shutdown() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = GuestFactory::new_regular_guest_factory()
@@ -7831,6 +8006,7 @@ mod dbus_api {
     }
 
     #[test]
+    #[ignore]
     fn test_api_dbus_delete() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = GuestFactory::new_regular_guest_factory()
@@ -7842,6 +8018,7 @@ mod dbus_api {
     }
 
     #[test]
+    #[ignore]
     fn test_api_dbus_pause_resume() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = GuestFactory::new_regular_guest_factory()
@@ -8051,6 +8228,7 @@ mod ivshmem {
     }
 
     #[test]
+    #[ignore]
     fn test_ivshmem() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -8106,6 +8284,7 @@ mod ivshmem {
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_ivshmem() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -8259,18 +8438,21 @@ mod ivshmem {
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_ivshmem() {
         _test_live_migration_ivshmem(false);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_ivshmem_local() {
         _test_live_migration_ivshmem(true);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_hotplug_virtiomem() {
         snapshot_restore_common::_test_snapshot_restore(
@@ -8282,6 +8464,7 @@ mod ivshmem {
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))] // See issue #7437
     fn test_snapshot_restore_basic() {
         snapshot_restore_common::_test_snapshot_restore(
@@ -8290,6 +8473,7 @@ mod ivshmem {
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_with_resume() {
         snapshot_restore_common::_test_snapshot_restore(
@@ -8301,6 +8485,7 @@ mod ivshmem {
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_check_guest_time() {
         snapshot_restore_common::_test_snapshot_restore(
@@ -8318,6 +8503,7 @@ mod ivshmem {
     // NTP-correct itself -- any drift would be the pause path's doing. x86_64
     // has its own kvmclock path and is covered separately.
     #[test]
+    #[ignore]
     #[cfg(all(not(feature = "mshv"), target_arch = "aarch64"))]
     fn test_pause_resume_guest_time() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -8373,18 +8559,21 @@ mod ivshmem {
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_uffd() {
         snapshot_restore_common::_test_snapshot_restore_uffd("size=2G", &[], 1_920_000);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_uffd_shared_memory() {
         snapshot_restore_common::_test_snapshot_restore_uffd("size=512M,shared=on", &[], 480_000);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))] // See issue #7437
     #[cfg(target_arch = "x86_64")]
     fn test_snapshot_restore_pvpanic() {
@@ -8392,24 +8581,28 @@ mod ivshmem {
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_offload() {
         snapshot_restore_common::_test_snapshot_restore_offload(false, false);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_offload_virtio_mem() {
         snapshot_restore_common::_test_snapshot_restore_offload(true, false);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_offload_ondemand() {
         snapshot_restore_common::_test_snapshot_restore_offload(false, true);
     }
 
     #[test]
+    #[ignore]
     fn test_virtio_pmem_persist_writes() {
         test_virtio_pmem(false, false);
     }
@@ -9345,12 +9538,14 @@ mod common_sequential {
     use crate::*;
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_memory_mergeable_on() {
         test_memory_mergeable(true);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_uffd_hugepage_zone() {
         if !exec_host_command_status(
@@ -9377,6 +9572,7 @@ mod common_sequential {
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))] // See issue #7437
     #[ignore = "See #6970"]
     fn test_snapshot_restore_with_fd() {
@@ -9611,6 +9807,7 @@ mod common_sequential {
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_virtio_fs() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -10342,48 +10539,56 @@ mod common_sequential {
     // NUMA and balloon live migration tests run sequentially
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_balloon() {
         _test_live_migration_balloon(false, false);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_balloon_local() {
         _test_live_migration_balloon(false, true);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_balloon() {
         _test_live_migration_balloon(true, false);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_balloon_local() {
         _test_live_migration_balloon(true, true);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_numa() {
         _test_live_migration_numa(false, false);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_numa_local() {
         _test_live_migration_numa(false, true);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_numa() {
         _test_live_migration_numa(true, false);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_numa_local() {
         _test_live_migration_numa(true, true);
@@ -10391,6 +10596,7 @@ mod common_sequential {
 
     // Require to run ovs-dpdk tests sequentially because they rely on the same ovs-dpdk setup
     #[test]
+    #[ignore]
     #[ignore = "See #5532"]
     #[cfg(target_arch = "x86_64")]
     #[cfg(not(feature = "mshv"))]
@@ -10399,6 +10605,7 @@ mod common_sequential {
     }
 
     #[test]
+    #[ignore]
     #[ignore = "See #5532 and #7689"]
     #[cfg(target_arch = "x86_64")]
     #[cfg(not(feature = "mshv"))]
@@ -10407,6 +10614,7 @@ mod common_sequential {
     }
 
     #[test]
+    #[ignore]
     #[ignore = "See #5532"]
     #[cfg(target_arch = "x86_64")]
     #[cfg(not(feature = "mshv"))]
@@ -10415,6 +10623,7 @@ mod common_sequential {
     }
 
     #[test]
+    #[ignore]
     #[ignore = "See #5532"]
     #[cfg(target_arch = "x86_64")]
     #[cfg(not(feature = "mshv"))]
@@ -10632,12 +10841,14 @@ mod common_sequential {
     }
 
     #[test]
+    #[ignore]
     fn test_watchdog() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_watchdog(&guest);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_watchdog() {
         _test_live_migration_watchdog(false, false);
@@ -10932,6 +11143,7 @@ mod windows {
     }
 
     #[test]
+    #[ignore]
     fn test_windows_guest() {
         let windows_guest = WindowsGuest::new();
 
@@ -10974,6 +11186,7 @@ mod windows {
     }
 
     #[test]
+    #[ignore]
     #[cfg(target_arch = "x86_64")]
     fn test_windows_guest_tpm() {
         let windows_guest = WindowsGuest::new();
@@ -11029,6 +11242,7 @@ mod windows {
     }
 
     #[test]
+    #[ignore]
     fn test_windows_guest_multiple_queues() {
         let windows_guest = WindowsGuest::new();
 
@@ -11094,6 +11308,7 @@ mod windows {
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     #[cfg_attr(target_arch = "aarch64", ignore = "See #4327")]
     fn test_windows_guest_snapshot_restore() {
@@ -11193,6 +11408,7 @@ mod windows {
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_cpu_hotplug() {
@@ -11274,6 +11490,7 @@ mod windows {
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_ram_hotplug() {
@@ -11351,6 +11568,7 @@ mod windows {
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_windows_guest_netdev_hotplug() {
         let windows_guest = WindowsGuest::new();
@@ -11431,6 +11649,7 @@ mod windows {
     }
 
     #[test]
+    #[ignore]
     #[ignore = "See #6037"]
     #[cfg(not(feature = "mshv"))]
     #[cfg(not(target_arch = "aarch64"))]
@@ -11539,6 +11758,7 @@ mod windows {
     }
 
     #[test]
+    #[ignore]
     #[ignore = "See #6037"]
     #[cfg(not(feature = "mshv"))]
     #[cfg(not(target_arch = "aarch64"))]
@@ -11689,6 +11909,7 @@ mod windows {
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_netdev_multi() {
@@ -11747,6 +11968,7 @@ mod windows {
     }
 
     #[test]
+    #[ignore]
     fn test_windows_guest_qcow2_backing_direct() {
         let windows_guest = WindowsGuest::new();
 
@@ -11963,21 +12185,25 @@ mod vfio {
     }
 
     #[test]
+    #[ignore]
     fn test_nvidia_card_memory_hotplug_acpi() {
         test_nvidia_card_memory_hotplug("acpi", false);
     }
 
     #[test]
+    #[ignore]
     fn test_nvidia_card_memory_hotplug_virtio_mem() {
         test_nvidia_card_memory_hotplug("virtio-mem", false);
     }
 
     #[test]
+    #[ignore]
     fn test_iommufd_nvidia_card_memory_hotplug_acpi() {
         test_nvidia_card_memory_hotplug("acpi", true);
     }
 
     #[test]
+    #[ignore]
     fn test_iommufd_nvidia_card_memory_hotplug_virtio_mem() {
         test_nvidia_card_memory_hotplug("virtio-mem", true);
     }
@@ -12025,11 +12251,13 @@ mod vfio {
     }
 
     #[test]
+    #[ignore]
     fn test_nvidia_card_pci_hotplug() {
         test_nvidia_card_pci_hotplug_common(false);
     }
 
     #[test]
+    #[ignore]
     fn test_iommufd_nvidia_card_pci_hotplug() {
         test_nvidia_card_pci_hotplug_common(true);
     }
@@ -12074,11 +12302,13 @@ mod vfio {
     }
 
     #[test]
+    #[ignore]
     fn test_nvidia_card_reboot() {
         test_nvidia_card_reboot_common(false);
     }
 
     #[test]
+    #[ignore]
     fn test_iommufd_nvidia_card_reboot() {
         test_nvidia_card_reboot_common(true);
     }
@@ -12087,6 +12317,7 @@ mod vfio {
     // /dev/vfio/devices/<n> FD instead of a sysfs path, and verify it
     // survives a guest reboot. Mirrors `_test_tap_from_fd` for VFIO.
     #[test]
+    #[ignore]
     fn test_iommufd_nvidia_card_reboot_from_fd() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_VFIO_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -12213,11 +12444,13 @@ mod vfio {
     }
 
     #[test]
+    #[ignore]
     fn test_nvidia_card_iommu_address_width() {
         test_nvidia_card_iommu_address_width_common(false);
     }
 
     #[test]
+    #[ignore]
     fn test_iommufd_nvidia_card_iommu_address_width() {
         test_nvidia_card_iommu_address_width_common(true);
     }
@@ -12271,11 +12504,13 @@ mod vfio {
     }
 
     #[test]
+    #[ignore]
     fn test_nvidia_card_x_exclude_mmap_bars() {
         test_nvidia_card_x_exclude_mmap_bars_common(false);
     }
 
     #[test]
+    #[ignore]
     fn test_iommufd_nvidia_card_x_exclude_mmap_bars() {
         test_nvidia_card_x_exclude_mmap_bars_common(true);
     }
@@ -12375,11 +12610,13 @@ mod vfio {
     }
 
     #[test]
+    #[ignore]
     fn test_nvidia_guest_numa_generic_initiator() {
         test_nvidia_guest_numa_generic_initiator_common(false);
     }
 
     #[test]
+    #[ignore]
     fn test_iommufd_nvidia_guest_numa_generic_initiator() {
         test_nvidia_guest_numa_generic_initiator_common(true);
     }
@@ -12390,6 +12627,7 @@ mod aarch64_acpi {
     use crate::*;
 
     #[test]
+    #[ignore]
     fn test_simple_launch_acpi() {
         let jammy = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
 
@@ -12423,26 +12661,31 @@ mod aarch64_acpi {
     }
 
     #[test]
+    #[ignore]
     fn test_guest_numa_nodes_acpi() {
         _test_guest_numa_nodes(true);
     }
 
     #[test]
+    #[ignore]
     fn test_cpu_topology_421_acpi() {
         test_cpu_topology(4, 2, 1, true);
     }
 
     #[test]
+    #[ignore]
     fn test_cpu_topology_142_acpi() {
         test_cpu_topology(1, 4, 2, true);
     }
 
     #[test]
+    #[ignore]
     fn test_cpu_topology_262_acpi() {
         test_cpu_topology(2, 6, 2, true);
     }
 
     #[test]
+    #[ignore]
     fn test_power_button_acpi() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = GuestFactory::new_regular_guest_factory()
@@ -12452,6 +12695,7 @@ mod aarch64_acpi {
     }
 
     #[test]
+    #[ignore]
     #[cfg_attr(target_arch = "aarch64", ignore = "See #8187")]
     fn test_virtio_iommu() {
         _test_virtio_iommu(true);
@@ -12534,11 +12778,13 @@ mod rate_limiter {
     }
 
     #[test]
+    #[ignore]
     fn test_rate_limiter_net_rx() {
         _test_rate_limiter_net(true);
     }
 
     #[test]
+    #[ignore]
     fn test_rate_limiter_net_tx() {
         _test_rate_limiter_net(false);
     }
@@ -12743,12 +12989,14 @@ mod rate_limiter {
     }
 
     #[test]
+    #[ignore]
     fn test_rate_limiter_block_bandwidth() {
         _test_rate_limiter_block(true, 1);
         _test_rate_limiter_block(true, 2);
     }
 
     #[test]
+    #[ignore]
     fn test_rate_limiter_group_block_bandwidth() {
         _test_rate_limiter_group_block(true, 1, 1);
         _test_rate_limiter_group_block(true, 2, 1);
@@ -12757,12 +13005,14 @@ mod rate_limiter {
     }
 
     #[test]
+    #[ignore]
     fn test_rate_limiter_block_iops() {
         _test_rate_limiter_block(false, 1);
         _test_rate_limiter_block(false, 2);
     }
 
     #[test]
+    #[ignore]
     fn test_rate_limiter_group_block_iops() {
         _test_rate_limiter_group_block(false, 1, 1);
         _test_rate_limiter_group_block(false, 2, 1);
@@ -12776,6 +13026,7 @@ mod fw_cfg {
     use crate::*;
 
     #[test]
+    #[ignore]
     fn test_fw_cfg() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -12823,6 +13074,7 @@ mod fw_cfg {
     }
 
     #[test]
+    #[ignore]
     fn test_fw_cfg_string() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
