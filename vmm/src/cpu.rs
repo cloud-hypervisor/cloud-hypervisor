@@ -23,10 +23,6 @@ use std::{any, cmp, hint, io, panic, result, thread, time};
 use acpi_tables::sdt::Sdt;
 use acpi_tables::{Aml, aml};
 use anyhow::anyhow;
-#[cfg(target_arch = "x86_64")]
-use arch::x86_64;
-#[cfg(target_arch = "x86_64")]
-use arch::x86_64::get_x2apic_id;
 use arch::{EntryPoint, NumaNodes, layout};
 #[cfg(target_arch = "aarch64")]
 use devices::gic::Gic;
@@ -988,7 +984,7 @@ impl CpuManager {
         #[cfg(target_arch = "x86_64")]
         let topology = self.get_vcpu_topology();
         #[cfg(target_arch = "x86_64")]
-        let x2apic_id = x86_64::get_x2apic_id(cpu_id, topology);
+        let x2apic_id = arch::x86_64::get_x2apic_id(cpu_id, topology);
         #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
         let x2apic_id = cpu_id;
 
@@ -1762,7 +1758,7 @@ impl CpuManager {
             madt.write(36, layout::APIC_START.0);
 
             for cpu in 0..self.config.max_vcpus {
-                let x2apic_id = get_x2apic_id(cpu, self.get_vcpu_topology());
+                let x2apic_id = arch::x86_64::get_x2apic_id(cpu, self.get_vcpu_topology());
 
                 let lapic = LocalX2Apic {
                     r#type: acpi::ACPI_X2APIC_PROCESSOR,
@@ -2327,7 +2323,7 @@ const MADT_CPU_ONLINE_CAPABLE_FLAG: usize = 1;
 impl Cpu {
     #[cfg(target_arch = "x86_64")]
     fn generate_mat(&self) -> Vec<u8> {
-        let x2apic_id = x86_64::get_x2apic_id(self.cpu_id, self.topology);
+        let x2apic_id = arch::x86_64::get_x2apic_id(self.cpu_id, self.topology);
 
         LocalX2Apic {
             r#type: acpi::ACPI_X2APIC_PROCESSOR,
