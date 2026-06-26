@@ -711,6 +711,28 @@ jobs:
       - name: Run Windows guest integration tests for musl
         timeout-minutes: 15
         run: scripts/dev_cli.sh tests --integration-windows --libc musl
+  integration-mshv-x86-64:
+    name: integration-mshv-x86-64
+    needs: [preflight, dco, quality, build]
+    if: >-
+      needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
+    timeout-minutes: 35
+    runs-on: mshv
+    steps:
+      # mshv runner user is "lsgunner"
+      - name: Fix workspace and Docker socket permissions
+        run: |
+          sudo chown -R lsgrunner:lsgrunner ${GITHUB_WORKSPACE}
+          sudo chmod 666 /var/run/docker.sock
+      - name: Code checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Prepare for VDPA
+        run: scripts/prepare_vdpa.sh
+      - name: Run integration tests
+        timeout-minutes: 30
+        run: scripts/dev_cli.sh tests --integration
   # Rate-limiter host is not available
   # integration-rate-limiter:
   #   name: integration-rate-limiter
@@ -789,6 +811,7 @@ jobs:
       - integration-sev-snp
       # VFIO worker is failing #8160
       # - integration-vfio
+      - integration-mshv-x86-64
       - integration-windows
       - integration-x86-64-mq
       - integration-x86-64-pr
