@@ -7062,6 +7062,40 @@ mod common_parallel {
         connections: NonZeroU32,
         postcopy: bool,
     ) -> bool {
+        dispatch_live_migration_tcp_with_flags(
+            src_api_socket,
+            dest_api_socket,
+            dest_event_path,
+            connections,
+            postcopy,
+        )
+        .is_some_and(|receive_migration| {
+            wait_for_migration_command(receive_migration, "receive_migration")
+        })
+    }
+
+    fn dispatch_live_migration_tcp(
+        src_api_socket: &str,
+        dest_api_socket: &str,
+        dest_event_path: &str,
+        connections: NonZeroU32,
+    ) -> Option<Child> {
+        dispatch_live_migration_tcp_with_flags(
+            src_api_socket,
+            dest_api_socket,
+            dest_event_path,
+            connections,
+            false,
+        )
+    }
+
+    fn dispatch_live_migration_tcp_with_flags(
+        src_api_socket: &str,
+        dest_api_socket: &str,
+        dest_event_path: &str,
+        connections: NonZeroU32,
+        postcopy: bool,
+    ) -> Option<Child> {
         // Get an available TCP port
         let migration_port = get_available_port();
         let host_ip = "127.0.0.1";
@@ -7073,7 +7107,7 @@ mod common_parallel {
         };
 
         // Start the 'receive-migration' command on the destination
-        let receive_migration = Command::new(clh_command("ch-remote"))
+        let mut receive_migration = Command::new(clh_command("ch-remote"))
             .args([
                 &format!("--api-socket={dest_api_socket}"),
                 "receive-migration",
@@ -7117,9 +7151,14 @@ mod common_parallel {
             .unwrap();
 
         let send_success = wait_for_migration_command(send_migration, "send_migration");
-        let receive_success = wait_for_migration_command(receive_migration, "receive_migration");
 
-        send_success && receive_success
+        if send_success {
+            Some(receive_migration)
+        } else {
+            let _ = receive_migration.kill();
+            let _ = receive_migration.wait();
+            None
+        }
     }
 
     /// Helper to wait for `{send,receive}-migration` to exit.
