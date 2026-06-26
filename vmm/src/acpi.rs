@@ -13,8 +13,6 @@ use acpi_tables::sdt::Sdt;
 use arch::DeviceType;
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::DeviceInfoForFdt;
-#[cfg(target_arch = "x86_64")]
-use arch::x86_64;
 use arch::{NumaNodes, layout};
 use bitflags::bitflags;
 use log::{info, warn};
@@ -399,7 +397,7 @@ fn create_srat_table(
 
         for cpu in &node.cpus {
             #[cfg(target_arch = "x86_64")]
-            let x2apic_id = x86_64::get_x2apic_id(*cpu, topology);
+            let x2apic_id = arch::x86_64::get_x2apic_id(*cpu, topology);
             #[cfg(target_arch = "aarch64")]
             let x2apic_id = *cpu;
 

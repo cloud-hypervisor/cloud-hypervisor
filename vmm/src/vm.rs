@@ -27,18 +27,10 @@ use std::{any, cmp, result, str, thread};
 use anyhow::{Context, anyhow};
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use arch::PciSpaceInfo;
-#[cfg(not(target_arch = "x86_64"))]
-use arch::aarch64;
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{KVM_IDENTITY_MAP_START, KVM_TSS_START};
 #[cfg(not(target_arch = "x86_64"))]
 use arch::uefi;
-#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-use arch::x86_64::MAX_SUPPORTED_CPUS_LEGACY;
-#[cfg(feature = "tdx")]
-use arch::x86_64::tdx;
-#[cfg(feature = "tdx")]
-use arch::x86_64::tdx::TdvfSection;
 use arch::{EntryPoint, NumaNode, NumaNodes, get_host_cpu_phys_bits, layout};
 use devices::AcpiNotificationFlags;
 #[cfg(target_arch = "aarch64")]
@@ -145,7 +137,7 @@ pub enum Error {
 
     #[cfg(target_arch = "aarch64")]
     #[error("Cannot load the UEFI binary in memory")]
-    UefiLoad(#[source] aarch64::uefi::Error),
+    UefiLoad(#[source] arch::aarch64::uefi::Error),
 
     #[cfg(target_arch = "riscv64")]
     #[error("Cannot load the UEFI binary in memory")]
@@ -313,11 +305,11 @@ pub enum Error {
 
     #[cfg(feature = "tdx")]
     #[error("Error parsing TDVF")]
-    ParseTdvf(#[source] tdx::TdvfError),
+    ParseTdvf(#[source] arch::x86_64::tdx::TdvfError),
 
     #[cfg(feature = "tdx")]
     #[error("Error populating TDX HOB")]
-    PopulateHob(#[source] tdx::TdvfError),
+    PopulateHob(#[source] arch::x86_64::tdx::TdvfError),
 
     #[cfg(feature = "tdx")]
     #[error("Error allocating TDVF memory")]
@@ -1402,7 +1394,7 @@ impl Vm {
         };
 
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-        if vm_config.lock().unwrap().max_apic_id() > MAX_SUPPORTED_CPUS_LEGACY {
+        if vm_config.lock().unwrap().max_apic_id() > arch::x86_64::MAX_SUPPORTED_CPUS_LEGACY {
             vm.enable_x2apic_api().unwrap();
         }
 
@@ -1919,7 +1911,9 @@ impl Vm {
             .unwrap()
             .get_vgic()
             .map_err(|_| {
-                Error::ConfigureSystem(arch::Error::PlatformSpecific(aarch64::Error::SetupGic))
+                Error::ConfigureSystem(arch::Error::PlatformSpecific(
+                    arch::aarch64::Error::SetupGic,
+                ))
             })?;
 
         // PMU interrupt sticks to PPI, so need to be added by 16 to get real irq number.
@@ -1929,7 +1923,9 @@ impl Vm {
             .unwrap()
             .init_pmu(AARCH64_PMU_IRQ + 16)
             .map_err(|_| {
-                Error::ConfigureSystem(arch::Error::PlatformSpecific(aarch64::Error::VcpuInitPmu))
+                Error::ConfigureSystem(arch::Error::PlatformSpecific(
+                    arch::aarch64::Error::VcpuInitPmu,
+                ))
             })?;
 
         arch::configure_system(
@@ -2425,7 +2421,7 @@ impl Vm {
     }
 
     #[cfg(feature = "tdx")]
-    fn extract_tdvf_sections(&mut self) -> Result<(Vec<TdvfSection>, bool)> {
+    fn extract_tdvf_sections(&mut self) -> Result<(Vec<arch::x86_64::tdx::TdvfSection>, bool)> {
         use arch::x86_64::tdx::*;
 
         let firmware_path = self
@@ -2447,7 +2443,7 @@ impl Vm {
 
     #[cfg(feature = "tdx")]
     fn hob_memory_resources(
-        mut sorted_sections: Vec<TdvfSection>,
+        mut sorted_sections: Vec<arch::x86_64::tdx::TdvfSection>,
         guest_memory: &GuestMemoryMmap,
     ) -> Vec<(u64, u64, bool)> {
         let mut list = Vec::new();
@@ -2508,7 +2504,7 @@ impl Vm {
     #[cfg(feature = "tdx")]
     fn populate_tdx_sections(
         &mut self,
-        sections: &[TdvfSection],
+        sections: &[arch::x86_64::tdx::TdvfSection],
         guid_found: bool,
     ) -> Result<Option<u64>> {
         use arch::x86_64::tdx::*;
@@ -2694,7 +2690,7 @@ impl Vm {
     }
 
     #[cfg(feature = "tdx")]
-    fn init_tdx_memory(&mut self, sections: &[TdvfSection]) -> Result<()> {
+    fn init_tdx_memory(&mut self, sections: &[arch::x86_64::tdx::TdvfSection]) -> Result<()> {
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
 
@@ -3703,12 +3699,12 @@ mod unit_tests {
     fn test_hob_memory_resources() {
         // Case 1: Two TDVF sections in the middle of the RAM
         let sections = vec![
-            TdvfSection {
+            arch::x86_64::tdx::TdvfSection {
                 address: 0xc000,
                 size: 0x1000,
                 ..Default::default()
             },
-            TdvfSection {
+            arch::x86_64::tdx::TdvfSection {
                 address: 0x1000,
                 size: 0x4000,
                 ..Default::default()
@@ -3732,12 +3728,12 @@ mod unit_tests {
 
         // Case 2: Two TDVF sections with no conflict with the RAM
         let sections = vec![
-            TdvfSection {
+            arch::x86_64::tdx::TdvfSection {
                 address: 0x1000_1000,
                 size: 0x1000,
                 ..Default::default()
             },
-            TdvfSection {
+            arch::x86_64::tdx::TdvfSection {
                 address: 0,
                 size: 0x1000,
                 ..Default::default()
@@ -3759,12 +3755,12 @@ mod unit_tests {
 
         // Case 3: Two TDVF sections with partial conflicts with the RAM
         let sections = vec![
-            TdvfSection {
+            arch::x86_64::tdx::TdvfSection {
                 address: 0x1000_0000,
                 size: 0x2000,
                 ..Default::default()
             },
-            TdvfSection {
+            arch::x86_64::tdx::TdvfSection {
                 address: 0,
                 size: 0x2000,
                 ..Default::default()
@@ -3787,22 +3783,22 @@ mod unit_tests {
         // Case 4: Two TDVF sections with no conflict before the RAM and two
         // more additional sections with no conflict after the RAM.
         let sections = vec![
-            TdvfSection {
+            arch::x86_64::tdx::TdvfSection {
                 address: 0x2000_1000,
                 size: 0x1000,
                 ..Default::default()
             },
-            TdvfSection {
+            arch::x86_64::tdx::TdvfSection {
                 address: 0x2000_0000,
                 size: 0x1000,
                 ..Default::default()
             },
-            TdvfSection {
+            arch::x86_64::tdx::TdvfSection {
                 address: 0x1000,
                 size: 0x1000,
                 ..Default::default()
             },
-            TdvfSection {
+            arch::x86_64::tdx::TdvfSection {
                 address: 0,
                 size: 0x1000,
                 ..Default::default()
@@ -3825,7 +3821,7 @@ mod unit_tests {
         );
 
         // Case 5: One TDVF section overriding the entire RAM
-        let sections = vec![TdvfSection {
+        let sections = vec![arch::x86_64::tdx::TdvfSection {
             address: 0,
             size: 0x2000_0000,
             ..Default::default()
@@ -3842,12 +3838,12 @@ mod unit_tests {
 
         // Case 6: Two TDVF sections with no conflict with 2 RAM regions
         let sections = vec![
-            TdvfSection {
+            arch::x86_64::tdx::TdvfSection {
                 address: 0x1000_2000,
                 size: 0x2000,
                 ..Default::default()
             },
-            TdvfSection {
+            arch::x86_64::tdx::TdvfSection {
                 address: 0,
                 size: 0x2000,
                 ..Default::default()
@@ -3873,12 +3869,12 @@ mod unit_tests {
 
         // Case 7: Two TDVF sections with partial conflicts with 2 RAM regions
         let sections = vec![
-            TdvfSection {
+            arch::x86_64::tdx::TdvfSection {
                 address: 0x1000_0000,
                 size: 0x4000,
                 ..Default::default()
             },
-            TdvfSection {
+            arch::x86_64::tdx::TdvfSection {
                 address: 0,
                 size: 0x4000,
                 ..Default::default()
@@ -3974,8 +3970,6 @@ mod unit_tests {
 #[cfg(target_arch = "aarch64")]
 #[cfg(test)]
 mod unit_tests {
-    use arch::aarch64::fdt::create_fdt;
-    use arch::aarch64::layout;
     use arch::{DeviceType, MmioDeviceInfo};
     use devices::gic::Gic;
 
@@ -3985,7 +3979,10 @@ mod unit_tests {
 
     #[test]
     fn test_create_fdt_with_devices() {
-        let regions = vec![(layout::RAM_START, (layout::FDT_MAX_SIZE + 0x1000) as usize)];
+        let regions = vec![(
+            arch::aarch64::layout::RAM_START,
+            (arch::aarch64::layout::FDT_MAX_SIZE + 0x1000) as usize,
+        )];
         let mem = GuestMemoryMmap::from_ranges(&regions).expect("Cannot initialize memory");
 
         let dev_info: HashMap<(DeviceType, String), MmioDeviceInfo> = [
@@ -4022,7 +4019,7 @@ mod unit_tests {
         let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
         let vgic_config = Gic::create_default_config(1);
         let gic = vm.create_vgic(&vgic_config).expect("Cannot create gic");
-        create_fdt(
+        arch::aarch64::fdt::create_fdt(
             &mem,
             "console=tty0",
             &[0],

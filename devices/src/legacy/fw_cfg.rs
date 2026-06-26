@@ -24,8 +24,6 @@ use std::{
 use acpi_tables::rsdp::Rsdp;
 use arch::RegionType;
 #[cfg(target_arch = "aarch64")]
-use arch::aarch64::arch_memory_regions;
-#[cfg(target_arch = "aarch64")]
 use arch::aarch64::layout::{
     MEM_32BIT_DEVICES_START, MEM_32BIT_RESERVED_START, RAM_64BIT_START, RAM_START as HIGH_RAM_START,
 };
@@ -487,7 +485,7 @@ impl FwCfg {
             (STAGE0_START_ADDRESS, STAGE0_SIZE, RegionType::Reserved),
         ];
         #[cfg(target_arch = "aarch64")]
-        let mut mem_regions = arch_memory_regions();
+        let mut mem_regions = arch::aarch64::arch_memory_regions();
         if mem_size < MEM_32BIT_DEVICES_START.0 as usize {
             mem_regions.push((
                 HIGH_RAM_START,

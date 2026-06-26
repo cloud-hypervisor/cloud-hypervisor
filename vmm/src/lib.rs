@@ -22,8 +22,6 @@ use anyhow::{Context, anyhow};
 #[cfg(feature = "dbus_api")]
 use api::dbus::{DBusApiOptions, DBusApiShutdownChannels};
 use api::http::HttpApiHandle;
-#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-use arch::x86_64::MAX_SUPPORTED_CPUS_LEGACY;
 use console_devices::{ConsoleInfo, pre_create_console_devices};
 use event_monitor::event;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -1224,7 +1222,7 @@ impl Vmm {
         })?;
 
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-        if config.lock().unwrap().max_apic_id() > MAX_SUPPORTED_CPUS_LEGACY {
+        if config.lock().unwrap().max_apic_id() > arch::x86_64::MAX_SUPPORTED_CPUS_LEGACY {
             vm.enable_x2apic_api().unwrap();
         }
 
