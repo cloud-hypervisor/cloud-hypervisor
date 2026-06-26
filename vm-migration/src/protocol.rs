@@ -88,12 +88,11 @@
 
 use std::io::{Read, Write};
 use std::ops::RangeInclusive;
-use std::slice;
 
 use anyhow::anyhow;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use vm_memory::ByteValued;
+use zerocopy::{FromBytes, Immutable, IntoBytes, TryFromBytes};
 
 use crate::MigratableError;
 use crate::bitpos_iterator::BitposIteratorExt;
@@ -124,7 +123,7 @@ use crate::bitpos_iterator::BitposIteratorExt;
 ///
 /// [live-migration protocol]: super::protocol
 #[repr(u16)]
-#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, TryFromBytes, IntoBytes, Immutable)]
 pub enum Command {
     #[default]
     Invalid = 0,
@@ -197,16 +196,13 @@ pub fn supported_protocol_versions() -> RangeInclusive<u16> {
 }
 
 #[repr(C)]
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Copy, Clone, TryFromBytes, IntoBytes, Immutable)]
 pub struct Request {
     command: Command,
     command_headers: [u8; 6],
     /// Length of payload for command excluding the Request struct
     length: u64,
 }
-
-// SAFETY: Request contains a series of integers with no implicit padding
-unsafe impl ByteValued for Request {}
 
 impl Request {
     fn encode_sender_version(version: u16) -> [u8; 6] {
@@ -299,21 +295,23 @@ impl Request {
     }
 
     pub fn read_from(fd: &mut dyn Read) -> Result<Request, MigratableError> {
-        let mut request = Request::default();
-        fd.read_exact(Self::as_mut_slice(&mut request))
+        let mut buf = [0u8; size_of::<Request>()];
+        fd.read_exact(&mut buf)
             .map_err(MigratableError::MigrateSocket)?;
 
-        Ok(request)
+        Request::try_read_from_bytes(&buf).map_err(|_| {
+            MigratableError::MigrateReceive(anyhow!("received request with unknown command"))
+        })
     }
 
     pub fn write_to(&self, fd: &mut dyn Write) -> Result<(), MigratableError> {
-        fd.write_all(Self::as_slice(self))
+        fd.write_all(self.as_bytes())
             .map_err(MigratableError::MigrateSocket)
     }
 }
 
 #[repr(u16)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default, TryFromBytes, IntoBytes, Immutable)]
 pub enum Status {
     #[default]
     Invalid,
@@ -322,15 +320,12 @@ pub enum Status {
 }
 
 #[repr(C)]
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Copy, Clone, TryFromBytes, IntoBytes, Immutable)]
 pub struct Response {
     status: Status,
     padding: [u8; 6],
     length: u64, // Length of payload for command excluding the Response struct
 }
-
-// SAFETY: Response contains a series of integers with no implicit padding
-unsafe impl ByteValued for Response {}
 
 impl Response {
     pub fn new(status: Status, length: u64) -> Self {
@@ -358,11 +353,13 @@ impl Response {
     }
 
     pub fn read_from(fd: &mut dyn Read) -> Result<Response, MigratableError> {
-        let mut response = Response::default();
-        fd.read_exact(Self::as_mut_slice(&mut response))
+        let mut buf = [0u8; size_of::<Response>()];
+        fd.read_exact(&mut buf)
             .map_err(MigratableError::MigrateSocket)?;
 
-        Ok(response)
+        Response::try_read_from_bytes(&buf).map_err(|_| {
+            MigratableError::MigrateReceive(anyhow!("received response with unknown status"))
+        })
     }
 
     pub fn ok_or_abandon<T>(
@@ -382,31 +379,40 @@ impl Response {
     }
 
     pub fn write_to(&self, fd: &mut dyn Write) -> Result<(), MigratableError> {
-        fd.write_all(Self::as_slice(self))
+        fd.write_all(self.as_bytes())
             .map_err(MigratableError::MigrateSocket)
     }
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Copy,
+    Clone,
+    Default,
+    Debug,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    FromBytes,
+    IntoBytes,
+    Immutable,
+)]
 pub struct MemoryRange {
     pub gpa: u64,
     pub length: u64,
 }
 
-// SAFETY: MemoryRange is two u64 fields with no padding.
-unsafe impl ByteValued for MemoryRange {}
-
 impl MemoryRange {
     pub fn read_from(fd: &mut dyn Read) -> Result<MemoryRange, MigratableError> {
         let mut range = MemoryRange::default();
-        fd.read_exact(Self::as_mut_slice(&mut range))
+        fd.read_exact(range.as_mut_bytes())
             .map_err(MigratableError::MigrateSocket)?;
         Ok(range)
     }
 
     pub fn write_to(&self, fd: &mut dyn Write) -> Result<(), MigratableError> {
-        fd.write_all(Self::as_slice(self))
+        fd.write_all(self.as_bytes())
             .map_err(MigratableError::MigrateSocket)
     }
 }
@@ -561,15 +567,7 @@ impl MemoryRangeTable {
         let mut data: Vec<MemoryRange> =
             vec![MemoryRange::default(); length as usize / size_of::<MemoryRange>()];
 
-        // SAFETY: The pointer points to the just created vector data.
-        // `MemoryRange` can be read from and written to bytes since it's `[repr(C)]`.
-        // The vector data was initialized with `length as usize / size_of::<MemoryRange>()` valid
-        // `MemoryRange`s so the memory is valid for `length` bytes.
-        // During the lifetime of the slice, neither the backing vector nor the pointed to memory are accessed.
-        let data_slice_bytes =
-            unsafe { slice::from_raw_parts_mut(data.as_mut_ptr().cast(), length as usize) };
-
-        fd.read_exact(data_slice_bytes)
+        fd.read_exact(data.as_mut_bytes())
             .map_err(MigratableError::MigrateSocket)?;
 
         Ok(Self { data })
@@ -580,11 +578,8 @@ impl MemoryRangeTable {
     }
 
     pub fn write_to(&self, fd: &mut dyn Write) -> Result<(), MigratableError> {
-        // SAFETY: the slice is constructed with the correct arguments
-        fd.write_all(unsafe {
-            slice::from_raw_parts(self.data.as_ptr().cast(), self.length() as usize)
-        })
-        .map_err(MigratableError::MigrateSocket)
+        fd.write_all(self.data.as_bytes())
+            .map_err(MigratableError::MigrateSocket)
     }
 
     pub fn is_empty(&self) -> bool {
