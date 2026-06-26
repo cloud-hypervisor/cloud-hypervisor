@@ -10,6 +10,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::panic::AssertUnwindSafe;
 #[cfg(feature = "guest_debug")]
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(feature = "guest_debug")]
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender, channel};
@@ -1675,6 +1676,7 @@ impl Vmm {
         initial_vm_state: VmState,
         seccomp_filters: &MigrationSeccompFilters,
         vm_moved_to_destination: &mut bool,
+        cancel_migration: &Arc<AtomicBool>,
     ) -> result::Result<(), MigratableError> {
         // State machine that is updated with more context as we progress.
         let mut ctx = OngoingMigrationContext::new();
@@ -1814,6 +1816,11 @@ impl Vmm {
                     "Unexpected memory transfer configuration: socket:{socket:?}, mode:{mode:?}",
                 )));
             }
+        }
+
+        // Final cancellation check before releasing disk locks
+        if cancel_migration.load(Ordering::Acquire) {
+            return Err(MigratableError::Cancelled);
         }
 
         // We release the locks early to enable locking them on the destination host.
@@ -2187,6 +2194,10 @@ impl Vmm {
                 if let Err(e) = self.exit_evt.write(1) {
                     error!("Failed exiting the VMM after migration: {e}");
                 }
+            }
+            Err(MigratableError::Cancelled) => {
+                warn!("Migration cancelled");
+                try_resume_vm_after_failed_migration(vm);
             }
             Err(e) => {
                 error!("Migration failed: {}", flatten_error_chain_to_string(&e));
@@ -3483,13 +3494,19 @@ impl RequestHandler for Vmm {
     ///
     /// Determining the outcome requires external observation.
     fn vm_cancel_migration(&mut self) -> result::Result<(), MigratableError> {
-        let VmOwnership::Migration { .. } = &self.vm else {
+        let VmOwnership::Migration {
+            migration_worker_handle,
+            ..
+        } = &self.vm
+        else {
             return Err(MigratableError::Conflict(anyhow!(
                 "There is no ongoing migration"
             )));
         };
 
-        todo!()
+        migration_worker_handle.try_cancel_migration();
+
+        Ok(())
     }
 }
 
