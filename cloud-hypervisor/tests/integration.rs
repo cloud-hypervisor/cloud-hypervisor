@@ -7300,7 +7300,7 @@ mod common_parallel {
         let src_api_socket = temp_api_path(&guest.tmp_dir);
         let event_path = temp_event_monitor_path(&guest.tmp_dir);
         let src_event_path = format!("{event_path}.src");
-        let dest_event_path = temp_event_monitor_path(&guest.tmp_dir);
+        let dest_event_path = format!("{event_path}.dst");
         let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
         src_vm_cmd
             .args(["--cpus", format!("boot={boot_vcpus}").as_str()])
