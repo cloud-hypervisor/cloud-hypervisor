@@ -6901,7 +6901,7 @@ mod common_parallel {
         };
 
         // Start the 'receive-migration' command on the destination
-        let mut receive_migration = Command::new(clh_command("ch-remote"))
+        let receive_migration = Command::new(clh_command("ch-remote"))
             .args([
                 &format!("--api-socket={dest_api_socket}"),
                 "receive-migration",
@@ -6930,7 +6930,7 @@ mod common_parallel {
         } else {
             ""
         };
-        let mut send_migration = Command::new(clh_command("ch-remote"))
+        let send_migration = Command::new(clh_command("ch-remote"))
             .args([
                 &format!("--api-socket={src_api_socket}"),
                 "send-migration",
@@ -6945,46 +6945,34 @@ mod common_parallel {
             .unwrap();
 
         // Check if the 'send-migration' command executed successfully
-        let send_success = if let Some(status) = send_migration
-            .wait_timeout(Duration::from_secs(60))
-            .unwrap()
-        {
-            status.success()
-        } else {
-            false
-        };
-
-        if !send_success {
-            let _ = send_migration.kill();
-            let output = send_migration.wait_with_output().unwrap();
-            eprintln!(
-                "\n\n==== Start 'send_migration' output ====\n\n---stdout---\n{}\n\n---stderr---\n{}\n\n==== End 'send_migration' output ====\n\n",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
+        let send_success = wait_for_migration_command(send_migration, "send_migration");
 
         // Check if the 'receive-migration' command executed successfully
-        let receive_success = if let Some(status) = receive_migration
-            .wait_timeout(Duration::from_secs(60))
-            .unwrap()
-        {
-            status.success()
-        } else {
-            false
-        };
+        let receive_success = wait_for_migration_command(receive_migration, "receive_migration");
 
-        if !receive_success {
-            let _ = receive_migration.kill();
-            let output = receive_migration.wait_with_output().unwrap();
+        send_success && receive_success
+    }
+
+    #[cfg(not(feature = "mshv"))]
+    fn wait_for_migration_command(mut command: Child, command_name: &str) -> bool {
+        let command_success =
+            if let Some(status) = command.wait_timeout(Duration::from_secs(60)).unwrap() {
+                status.success()
+            } else {
+                false
+            };
+
+        if !command_success {
+            let _ = command.kill();
+            let output = command.wait_with_output().unwrap();
             eprintln!(
-                "\n\n==== Start 'receive_migration' output ====\n\n---stdout---\n{}\n\n---stderr---\n{}\n\n==== End 'receive_migration' output ====\n\n",
+                "\n\n==== Start '{command_name}' output ====\n\n---stdout---\n{}\n\n---stderr---\n{}\n\n==== End '{command_name}' output ====\n\n",
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
             );
         }
 
-        send_success && receive_success
+        command_success
     }
 
     #[cfg(not(feature = "mshv"))]
