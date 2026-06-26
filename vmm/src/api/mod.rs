@@ -33,6 +33,7 @@
 pub mod dbus;
 pub mod http;
 
+use std::collections::HashSet;
 use std::io;
 use std::num::{NonZeroU32, NonZeroU64};
 use std::path::PathBuf;
@@ -53,7 +54,7 @@ use vmm_sys_util::eventfd::EventFd;
 pub use self::dbus::start_dbus_thread;
 pub use self::http::{start_http_fd_thread, start_http_path_thread};
 use crate::Error as VmmError;
-use crate::config::{RestoreConfig, VmMemoryZoneUpdateData};
+use crate::config::{RestoreConfig, VmMemoryZoneUpdateData, ZoneUpdateDataList};
 use crate::device_tree::DeviceTree;
 use crate::migration::transport::{
     MAX_MIGRATION_CONNECTIONS, TcpAddressParseError, tcp_address_to_server_name,
@@ -326,11 +327,16 @@ pub enum VmReceiveMigrationConfigError {
 
 impl VmReceiveMigrationData {
     pub const SYNTAX: &'static str = "VM receive migration parameters \
-        \"<receiver_url>\" or \"receiver_url=<url>[,tls_dir=<path>][,memory_mode=precopy|postcopy]\"";
+        \"<receiver_url>\" or \"receiver_url=<url>[,tls_dir=<path>][,memory_mode=precopy|postcopy]\"\
+        \"[,zones_updates=[<id@host_numa_node>]]\"";
 
     pub fn parse(migration: &str) -> Result<Self, VmReceiveMigrationConfigError> {
         let mut parser = OptionParser::new();
-        parser.add("receiver_url").add("tls_dir").add("memory_mode");
+        parser
+            .add("receiver_url")
+            .add("tls_dir")
+            .add("memory_mode")
+            .add("zones_updates");
         parser
             .parse(migration)
             .map_err(VmReceiveMigrationConfigError::ParseError)?;
@@ -349,11 +355,16 @@ impl VmReceiveMigrationData {
             .map_err(VmReceiveMigrationConfigError::ParseError)?
             .unwrap_or_default();
 
+        let zones_updates = parser
+            .convert::<ZoneUpdateDataList>("zones_updates")
+            .map_err(VmReceiveMigrationConfigError::ParseError)?
+            .map_or_else(Vec::new, |x| x.0);
+
         let data = Self {
             receiver_url,
             tls_dir,
             memory_mode,
-            zones_updates: vec![],
+            zones_updates,
         };
 
         data.validate()?;
@@ -390,6 +401,18 @@ impl VmReceiveMigrationData {
                     "invalid TLS configuration for receive-migration: {e}"
                 ))
             })?;
+        }
+
+        let len = self
+            .zones_updates
+            .iter()
+            .map(|update| update.id.clone())
+            .collect::<HashSet<_>>()
+            .len();
+        if self.zones_updates.len() != len {
+            return Err(VmReceiveMigrationConfigError::ValidationError(
+                "more than one update was defined for at least one memory zone".to_string(),
+            ));
         }
 
         Ok(())
@@ -2063,6 +2086,20 @@ mod unit_tests {
 
         // Missing receiver_url in keyed form must fail.
         VmReceiveMigrationData::parse("memory_mode=postcopy").unwrap_err();
+        VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,zones_updates=[]").unwrap_err();
+        VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,zones_updates=[zone1 3]")
+            .unwrap_err();
+        VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,zones_updates=[zone1@invalid]")
+            .unwrap_err();
+        VmReceiveMigrationData::parse(
+            "receiver_url=unix:/tmp/sock,zones_updates=[zone1@1,zone1@2]",
+        )
+        .unwrap_err();
+        //Mind the space before the second zone. If the whitespace isn't trimmed, we end up with two different ID
+        VmReceiveMigrationData::parse(
+            "receiver_url=unix:/tmp/sock,zones_updates=[zone1@1, zone1@2]",
+        )
+        .unwrap_err();
     }
 
     #[test]
