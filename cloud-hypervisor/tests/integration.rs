@@ -7553,6 +7553,175 @@ mod common_parallel {
         _test_live_migration_tcp_timeout(TimeoutStrategy::Ignore);
     }
 
+    #[cfg(not(feature = "mshv"))]
+    fn _test_live_migration_tcp_cancellation(connections: NonZeroU32) {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+        let net_id = "net123";
+        let net_params = format!(
+            "id={},tap=,mac={},ip={},mask=255.255.255.128",
+            net_id, guest.network.guest_mac0, guest.network.host_ip0
+        );
+        let memory_param: &[&str] = &["--memory", "size=1500M,shared=on"];
+        let boot_vcpus = 2;
+        let max_vcpus = 4;
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
+        let src_event_path = format!("{event_path}.src");
+        let dest_event_path = format!("{event_path}.dst");
+
+        // Start the source VM.
+        let src_vm_path = clh_command("cloud-hypervisor");
+        let src_api_socket = temp_api_path(&guest.tmp_dir);
+        let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
+
+        src_vm_cmd
+            .args([
+                "--cpus",
+                format!("boot={boot_vcpus},max={max_vcpus}").as_str(),
+            ])
+            .args(memory_param)
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .args(["--net", net_params.as_str()])
+            .args(["--api-socket", &src_api_socket])
+            .args(["--event-monitor", format!("path={src_event_path}").as_str()])
+            .capture_output();
+
+        let mut src_child = src_vm_cmd.spawn().unwrap();
+
+        // Start the destination VM.
+        let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
+        dest_api_socket.push_str(".dest");
+
+        let mut dest_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &dest_api_socket])
+            .args([
+                "--event-monitor",
+                format!("path={dest_event_path}").as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let mut receive_migration = None;
+        let r = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            guest.wait_vm_boot().unwrap();
+
+            // Ensure the source VM is running normally before migration.
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
+
+            // Start a memory stressor in the background to prevent quick
+            // migrations, giving us time to cancel.
+            guest
+                .ssh_command("nohup stress --vm 2 --vm-bytes 220M --vm-keep &>/dev/null &")
+                .unwrap();
+
+            // Give stress a moment to actually start dirtying memory.
+            thread::sleep(Duration::from_secs(3));
+
+            // Start TCP live migration.
+            receive_migration = Some(
+                dispatch_live_migration_tcp(
+                    &src_api_socket,
+                    &dest_api_socket,
+                    &dest_event_path,
+                    connections,
+                )
+                .expect("Unsuccessful command: 'send-migration'."),
+            );
+        }));
+
+        if r.is_err() {
+            if let Some(mut receive_migration) = receive_migration.take() {
+                let _ = receive_migration.kill();
+                let _ = receive_migration.wait();
+            }
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Error occurred during live-migration",
+            );
+        }
+
+        // We cancel when the first iteration is done.
+        let r = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            let latest_events = [&MetaEvent {
+                event: "migration-memory-iteration".to_string(),
+                device_id: None,
+            }];
+
+            // Wait until the source reports the first memory iteration.
+            assert!(wait_for_sequential_events(
+                Duration::from_secs(30),
+                &latest_events,
+                &src_event_path,
+            ));
+
+            // Cancel the migration on the source side.
+            assert!(remote_command(&src_api_socket, "cancel-migration", None));
+
+            let latest_events = [&MetaEvent {
+                event: "migration-cancelled".to_string(),
+                device_id: None,
+            }];
+            assert!(wait_for_sequential_events(
+                Duration::from_secs(30),
+                &latest_events,
+                &src_event_path,
+            ));
+
+            let _ = guest.ssh_command("pkill -f 'stress --vm'");
+
+            // The source VMM must still be alive.
+            assert!(
+                src_child.try_wait().unwrap().is_none(),
+                "Source VMM exited after migration cancellation"
+            );
+
+            // The guest must still be reachable and healthy on the source side.
+            guest.wait_for_ssh(Duration::from_secs(10)).unwrap();
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
+        }));
+
+        if let Some(mut receive_migration) = receive_migration.take() {
+            let _ = receive_migration.kill();
+            let _ = receive_migration.wait();
+        }
+
+        if r.is_err() {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Error occurred while cancelling live-migration",
+            );
+        }
+
+        let _ = src_child.kill();
+        let src_output = src_child.wait_with_output().unwrap();
+        let _ = dest_child.kill();
+        let _dest_output = dest_child.wait_with_output().unwrap();
+
+        handle_child_output(r, &src_output);
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_live_migration_tcp_cancellation() {
+        _test_live_migration_tcp_cancellation(NonZeroU32::new(1).unwrap());
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_live_migration_tcp_parallel_connections_cancellation() {
+        _test_live_migration_tcp_cancellation(NonZeroU32::new(2).unwrap());
+    }
+
     // TODO: Add test of live upgrade paused vm after cloud-hypervisor-static
     // version is updated.
     #[test]
