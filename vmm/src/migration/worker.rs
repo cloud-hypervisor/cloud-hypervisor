@@ -13,8 +13,8 @@
 //! [`MigrationWorkerSpawnError`].
 
 use std::fmt::{self, Debug, Formatter};
-#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::thread::JoinHandle;
 use std::{io, thread};
@@ -48,6 +48,7 @@ impl Debug for MigrationWorkerSpawnError {
 
 pub(crate) struct MigrationWorkerHandle {
     handle: Option<JoinHandle<MigrationWorkerResult>>,
+    cancel_migration: Arc<AtomicBool>,
 }
 
 impl MigrationWorkerHandle {
@@ -57,6 +58,10 @@ impl MigrationWorkerHandle {
             .expect("should have thread")
             .join()
             .expect("should join migration worker gracefully")
+    }
+
+    pub(crate) fn try_cancel_migration(&self) {
+        self.cancel_migration.store(true, Ordering::Release);
     }
 }
 
@@ -86,6 +91,7 @@ pub(crate) struct MigrationWorker {
     initial_vm_state: VmState,
     seccomp_filters: MigrationSeccompFilters,
     vm_moved_to_destination: bool,
+    cancel_migration: Arc<AtomicBool>,
 }
 
 impl MigrationWorker {
@@ -117,10 +123,20 @@ impl MigrationWorker {
                     self.initial_vm_state,
                     &self.seccomp_filters,
                     &mut self.vm_moved_to_destination,
+                    &self.cancel_migration,
                 )
             })
-            .inspect(|_| event!("vm", "migration-finished"))
-            .inspect_err(|_| event!("vm", "migration-failed"));
+            .inspect(|_| {
+                event!("vm", "migration-finished");
+            })
+            .inspect_err(|e| match e {
+                MigratableError::Cancelled => {
+                    event!("vm", "migration-cancelled");
+                }
+                _ => {
+                    event!("vm", "migration-failed");
+                }
+            });
 
         // Notify VMM thread to check migration result.
         self.check_migration_evt.write(1).unwrap();
@@ -148,6 +164,8 @@ impl MigrationWorker {
         initial_vm_state: VmState,
         seccomp_filters: MigrationSeccompFilters,
     ) -> Result<MigrationWorkerHandle, MigrationWorkerSpawnError> {
+        let cancel_migration = Arc::new(AtomicBool::new(false));
+
         let (vm_sender, vm_receiver) = mpsc::sync_channel(0);
         let worker = MigrationWorker {
             vm_receiver,
@@ -158,6 +176,7 @@ impl MigrationWorker {
             initial_vm_state,
             seccomp_filters,
             vm_moved_to_destination: false,
+            cancel_migration: Arc::clone(&cancel_migration),
         };
 
         let inner_handle = match thread::Builder::new()
@@ -177,6 +196,7 @@ impl MigrationWorker {
 
         Ok(MigrationWorkerHandle {
             handle: Some(inner_handle),
+            cancel_migration,
         })
     }
 }
