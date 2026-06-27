@@ -328,6 +328,32 @@ fn create_facp_table(dsdt_offset: GuestAddress, device_manager: &DeviceManager) 
     // Hypervisor Vendor Identity
     facp.write_bytes(268, b"CLOUDHYP");
 
+    // PM1a event/control blocks for Windows nested Hyper-V. hvloader's hypervisor
+    // launch registers the legacy ACPI PM register blocks and rejects any whose
+    // GAS Address is 0 with STATUS_INVALID_DEVICE_REQUEST, so hvix64 never launches
+    // and HypervisorPresent stays False. HW-reduced ACPI leaves these zero. Provide
+    // PM1a_EVT/CNT blocks + X_GAS; the HW-reduced guest OS ignores them, only the
+    // hypervisor-launch ACPI validation reads them.
+    {
+        const PM1A_EVT_PORT: u16 = 0x60c;
+        facp.write(56usize, PM1A_EVT_PORT as u32); // PM1a_EVT_BLK (0x38)
+        facp.write(88usize, 4u8); // PM1_EVT_LEN (0x58)
+        facp.write(148usize, 1u8); // X_PM1a_EVT_BLK GAS (0x94): AddressSpaceId=SystemIO
+        facp.write(149usize, 32u8); // RegisterBitWidth
+        facp.write(150usize, 0u8); // RegisterBitOffset
+        facp.write(151usize, 2u8); // AccessSize = word (16-bit)
+        facp.write(152usize, PM1A_EVT_PORT as u64); // Address
+
+        const PM1A_CNT_PORT: u16 = 0x610;
+        facp.write(64usize, PM1A_CNT_PORT as u32); // PM1a_CNT_BLK (0x40)
+        facp.write(89usize, 2u8); // PM1_CNT_LEN (0x59)
+        facp.write(172usize, 1u8); // X_PM1a_CNT_BLK GAS (0xac): AddressSpaceId=SystemIO
+        facp.write(173usize, 16u8); // RegisterBitWidth
+        facp.write(174usize, 0u8); // RegisterBitOffset
+        facp.write(175usize, 2u8); // AccessSize = word (16-bit)
+        facp.write(176usize, PM1A_CNT_PORT as u64); // Address
+    }
+
     facp.update_checksum();
 
     facp
