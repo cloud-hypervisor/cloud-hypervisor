@@ -443,4 +443,62 @@ mod unit_tests {
             "write_pointer_table_direct did not land at {TARGET_OFFSET:#x}"
         );
     }
+
+    #[test]
+    fn read_pointer_table_round_trips() {
+        let (_temp_file, mut qcow) = make_qcow_raw();
+        let entries: Vec<u64> = vec![
+            0x0000_0000_0000_0000,
+            0x0011_2233_4455_6677,
+            0x8899_aabb_ccdd_eeff,
+            0xffff_ffff_ffff_ffff,
+        ];
+
+        qcow.write_pointer_table_direct(TARGET_OFFSET, entries.iter())
+            .expect("write_pointer_table_direct");
+
+        let read_back = qcow
+            .read_pointer_table(TARGET_OFFSET, entries.len() as u64, None)
+            .expect("read_pointer_table");
+
+        assert_eq!(read_back, entries);
+    }
+
+    #[test]
+    fn read_pointer_table_applies_mask() {
+        let (_temp_file, mut qcow) = make_qcow_raw();
+        let entries: Vec<u64> = vec![0xffff_ffff_ffff_ffffu64; 4];
+        let mask = 0x00ff_ffff_ffff_fe00u64;
+
+        qcow.write_pointer_table_direct(TARGET_OFFSET, entries.iter())
+            .expect("write_pointer_table_direct");
+
+        let read_back = qcow
+            .read_pointer_table(TARGET_OFFSET, entries.len() as u64, Some(mask))
+            .expect("read_pointer_table");
+
+        assert!(read_back.iter().all(|&e| e == mask));
+    }
+
+    #[test]
+    fn write_cluster_then_zero_cluster_round_trips() {
+        let (temp_file, mut qcow) = make_qcow_raw();
+        let cluster_size = CLUSTER_SIZE as usize;
+        let data: Vec<u8> = (0..cluster_size).map(|i| (i % 251) as u8).collect();
+
+        qcow.write_cluster(CLUSTER_SIZE, &data)
+            .expect("write_cluster");
+
+        let mut verify = temp_file.as_file().try_clone().unwrap();
+        let mut buf = vec![0u8; cluster_size];
+        verify.seek(SeekFrom::Start(CLUSTER_SIZE)).unwrap();
+        verify.read_exact(&mut buf).unwrap();
+        assert_eq!(buf, data);
+
+        qcow.zero_cluster(CLUSTER_SIZE).expect("zero_cluster");
+
+        verify.seek(SeekFrom::Start(CLUSTER_SIZE)).unwrap();
+        verify.read_exact(&mut buf).unwrap();
+        assert!(buf.iter().all(|&b| b == 0));
+    }
 }
