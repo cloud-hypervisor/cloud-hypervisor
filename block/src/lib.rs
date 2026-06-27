@@ -827,27 +827,32 @@ mod unit_tests {
     #[test]
     fn test_query_device_size_sparse_file_punch_hole() {
         let temp_file = TempFile::new().unwrap();
-        let f = temp_file.as_file();
-        // Allocate 1 MiB
+        let mut f = temp_file.into_file();
         let size: i64 = 1 << 20;
-        f.set_len(size as u64).unwrap();
-        // SAFETY: fd is valid, range is within file size.
-        let ret = unsafe {
-            libc::fallocate(
-                f.as_raw_fd(),
-                0, // allocate
-                0,
-                size,
-            )
-        };
-        assert_eq!(ret, 0, "fallocate failed: {}", io::Error::last_os_error());
+
+        // Allocate 1 MiB by writing real, incompressible data. fallocate()
+        // preallocation is unreliable across filesystems (a no-op on
+        // copy-on-write filesystems such as zfs, and not reflected through
+        // virtiofs), whereas an actual write always allocates blocks that
+        // st_blocks accounts for. The data must be incompressible so that
+        // filesystems with transparent compression (e.g. zfs with the default
+        // lz4) still allocate the full extent. See issue #8296.
+        let mut data = vec![0u8; size as usize];
+        File::open("/dev/urandom")
+            .unwrap()
+            .read_exact(&mut data)
+            .unwrap();
+        f.write_all(&data).unwrap();
         f.sync_all().unwrap();
 
-        let (log_before, phys_before) = query_device_size(f).unwrap();
+        let (log_before, phys_before) = query_device_size(&f).unwrap();
         assert_eq!(log_before, size as u64);
-        assert_eq!(phys_before, size as u64);
+        assert!(
+            phys_before > 0,
+            "written data should allocate blocks (phys_before={phys_before})"
+        );
 
-        // Punch a hole in the middle 512 KiB
+        // Punch a hole in the middle 512 KiB.
         // SAFETY: fd is valid, range is within file size.
         let ret = unsafe {
             libc::fallocate(
@@ -857,14 +862,24 @@ mod unit_tests {
                 size / 2,
             )
         };
-        assert_eq!(ret, 0, "punch hole failed: {}", io::Error::last_os_error());
+        if ret != 0 {
+            let err = io::Error::last_os_error();
+            // Not every filesystem supports hole punching; the physical-size
+            // reduction can only be exercised where it does.
+            if err.raw_os_error() == Some(libc::EOPNOTSUPP) {
+                eprintln!("skipping hole-punch check: FALLOC_FL_PUNCH_HOLE unsupported: {err}");
+                return;
+            }
+            panic!("punch hole failed: {err}");
+        }
         f.sync_all().unwrap();
 
-        let (logical, physical) = query_device_size(f).unwrap();
+        let (logical, physical) = query_device_size(&f).unwrap();
         assert_eq!(logical, size as u64, "logical size must not change");
         assert!(
-            physical < logical,
-            "physical ({physical}) should be less than logical ({logical}) after punch hole"
+            physical < phys_before,
+            "physical ({physical}) should drop below the pre-punch size \
+             ({phys_before}) after punching a hole"
         );
     }
 
