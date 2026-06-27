@@ -7,9 +7,10 @@
 use std::fmt::Debug;
 use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
+use std::os::unix::fs::FileExt;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use vmm_sys_util::write_zeroes::WriteZeroes;
+use vmm_sys_util::write_zeroes::WriteZeroesAt;
 
 use crate::aligned_file::AlignedFile;
 
@@ -205,14 +206,13 @@ impl QcowRawFile {
         count: u64,
         mask: Option<u64>,
     ) -> io::Result<Vec<u64>> {
-        let mut table = vec![0; count as usize];
-        self.file.seek(SeekFrom::Start(offset))?;
-        self.file.read_u64_into::<BigEndian>(&mut table)?;
-        if let Some(m) = mask {
-            for ptr in &mut table {
-                *ptr &= m;
-            }
-        }
+        let mut bytes = vec![0u8; count as usize * size_of::<u64>()];
+        self.file.read_exact_at(&mut bytes, offset)?;
+        let m = mask.unwrap_or(u64::MAX);
+        let table = bytes
+            .chunks_exact(size_of::<u64>())
+            .map(|c| u64::from_be_bytes(c.try_into().unwrap()) & m)
+            .collect();
         Ok(table)
     }
 
@@ -227,7 +227,7 @@ impl QcowRawFile {
     /// Entries are computed on-the-fly by the callback.
     ///
     /// The callback may perform metadata I/O on this `QcowRawFile`, so all
-    /// entries are materialized before seeking to the final write offset.
+    /// entries are materialized before the final positional write.
     pub fn write_pointer_table<'a, T: Copy + 'a>(
         &mut self,
         offset: u64,
@@ -239,8 +239,7 @@ impl QcowRawFile {
             let entry = f(self, *addr)?;
             buffer.extend_from_slice(&entry.to_be_bytes());
         }
-        self.file.seek(SeekFrom::Start(offset))?;
-        self.file.write_all(&buffer)
+        self.file.write_all_at(&buffer, offset)
     }
 
     /// Writes a pointer table directly without transforming values.
@@ -255,8 +254,7 @@ impl QcowRawFile {
         for &entry in entries {
             buffer.extend_from_slice(&entry.to_be_bytes());
         }
-        self.file.seek(SeekFrom::Start(offset))?;
-        self.file.write_all(&buffer)
+        self.file.write_all_at(&buffer, offset)
     }
 
     /// Read a refcount block from the file and returns a Vec containing the block.
@@ -318,16 +316,14 @@ impl QcowRawFile {
     /// Zeros out a cluster in the file.
     pub fn zero_cluster(&mut self, address: u64) -> io::Result<()> {
         let cluster_size = self.cluster_size as usize;
-        self.file.seek(SeekFrom::Start(address))?;
-        self.file.write_zeroes(cluster_size)?;
+        self.file.write_all_zeroes_at(address, cluster_size)?;
         Ok(())
     }
 
     /// Writes
     pub fn write_cluster(&mut self, address: u64, data: &[u8]) -> io::Result<()> {
         let cluster_size = self.cluster_size as usize;
-        self.file.seek(SeekFrom::Start(address))?;
-        self.file.write_all(&data[0..cluster_size])
+        self.file.write_all_at(&data[0..cluster_size], address)
     }
 
     pub fn physical_size(&self) -> io::Result<u64> {
