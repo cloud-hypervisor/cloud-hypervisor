@@ -230,6 +230,12 @@ impl RegionTableHeader {
     }
 }
 
+/// Returns `true` if the half-open byte ranges `[a_start, a_end)` and
+/// `[b_start, b_end)` overlap.
+fn ranges_overlap(a_start: u64, a_end: u64, b_start: u64, b_end: u64) -> bool {
+    a_start < b_end && b_start < a_end
+}
+
 pub struct RegionInfo {
     pub bat_entry: RegionTableEntry,
     pub mdr_entry: RegionTableEntry,
@@ -263,7 +269,7 @@ impl RegionInfo {
             let end = start + entry.length as u64;
 
             for (region_ent_start, region_ent_end) in region_entries.iter() {
-                if !((start >= *region_ent_start) || (end <= *region_ent_end)) {
+                if ranges_overlap(start, end, *region_ent_start, *region_ent_end) {
                     return Err(VhdxHeaderError::RegionOverlap);
                 }
             }
@@ -451,4 +457,94 @@ fn calculate_checksum(buffer: &mut [u8], csum_offset: usize) -> u32 {
     LittleEndian::write_u32(&mut buffer[csum_offset..csum_offset + 4], orig_csum);
 
     new_csum
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::fs::FileExt;
+
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::{
+        BAT_GUID, MDR_GUID, REGION_TABLE_1_START, RegionInfo, RegionTableHeader, VhdxHeaderError,
+        ranges_overlap,
+    };
+    use crate::aligned_file::AlignedFile;
+
+    #[test]
+    fn test_ranges_overlap() {
+        // (new [start,end), existing [s,e), expected overlap)
+        let cases: &[(u64, u64, u64, u64, bool)] = &[
+            // Genuine overlaps — all of these must be detected.
+            (0, 10, 0, 10, true), // identical
+            (2, 8, 0, 10, true),  // new fully inside existing
+            (0, 20, 5, 10, true), // new fully contains existing
+            (5, 15, 0, 10, true), // partial, new starts inside existing
+            (0, 8, 5, 15, true),  // partial, new starts before existing
+            // Non-overlapping — must not be flagged.
+            (0, 5, 10, 20, false),   // disjoint, new before existing
+            (30, 40, 10, 20, false), // disjoint, new after existing
+            (0, 10, 10, 20, false),  // touching at the boundary (half-open)
+        ];
+
+        for &(a_start, a_end, b_start, b_end, expected) in cases {
+            assert_eq!(
+                ranges_overlap(a_start, a_end, b_start, b_end),
+                expected,
+                "[{a_start},{a_end}) vs [{b_start},{b_end})"
+            );
+            // Overlap is symmetric.
+            assert_eq!(
+                ranges_overlap(b_start, b_end, a_start, a_end),
+                expected,
+                "symmetry: [{b_start},{b_end}) vs [{a_start},{a_end})"
+            );
+        }
+    }
+
+    /// Builds the 32-byte on-disk region table entry for `guid_str` describing
+    /// the region `[file_offset, file_offset + length)`. The GUID encoding is
+    /// the inverse of `uuid_from_guid` (first three fields big-endian, last
+    /// eight bytes verbatim).
+    fn region_entry(guid_str: &str, file_offset: u64, length: u32) -> [u8; 32] {
+        let mut e = [0u8; 32];
+        let uuid = uuid::Uuid::parse_str(guid_str).unwrap();
+        let (d1, d2, d3, d4) = uuid.to_fields_le();
+        e[0..4].copy_from_slice(&d1.to_be_bytes());
+        e[4..6].copy_from_slice(&d2.to_be_bytes());
+        e[6..8].copy_from_slice(&d3.to_be_bytes());
+        e[8..16].copy_from_slice(d4);
+        e[16..24].copy_from_slice(&file_offset.to_le_bytes());
+        e[24..28].copy_from_slice(&length.to_le_bytes());
+        // `required` (e[28..32]) left zero.
+        e
+    }
+
+    #[test]
+    fn test_region_info_rejects_overlapping_regions() {
+        // BAT region [1 MiB, 3 MiB) and metadata region [2 MiB, 4 MiB) overlap
+        // on [2 MiB, 3 MiB); per [MS-VHDX] all region objects must be
+        // non-overlapping, so this image must be rejected.
+        const MIB: u64 = 1024 * 1024;
+        let region_start = REGION_TABLE_1_START;
+        let entries_at = region_start + size_of::<RegionTableHeader>() as u64;
+
+        let temp = TempFile::new().unwrap();
+        let f = temp.into_file();
+        f.set_len(entries_at + 64 * 1024).unwrap();
+        f.write_all_at(&region_entry(BAT_GUID, MIB, (2 * MIB) as u32), entries_at)
+            .unwrap();
+        f.write_all_at(
+            &region_entry(MDR_GUID, 2 * MIB, (2 * MIB) as u32),
+            entries_at + 32,
+        )
+        .unwrap();
+
+        let af = AlignedFile::new(f, false);
+        let res = RegionInfo::new(&af, region_start, 2);
+        assert!(
+            matches!(res, Err(VhdxHeaderError::RegionOverlap)),
+            "expected RegionOverlap for an overlapping region table"
+        );
+    }
 }
