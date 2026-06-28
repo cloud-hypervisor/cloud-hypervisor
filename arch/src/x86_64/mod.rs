@@ -877,7 +877,15 @@ fn required_common_cpuid_updates(
         });
         cpuid.push(CpuIdEntry {
             function: 0x4000_0004,
-            eax: 1 << 5, // Recommend relaxed timing
+            // Recommendation hints to Hyper-V-aware guests. Bit semantics per
+            // Microsoft Hypervisor Top-Level Functional Specification 7.4.5.
+            eax: (1 << 1) // LocalTlbFlushRecommended
+                   | (1 << 2) // RemoteTlbFlushRecommended
+                   | (1 << 3) // ApicAccessRecommended (VP Assist page MSR EOI/ICR/TPR)
+                   | (1 << 5) // RelaxedTimingRecommended
+                   | (1 << 9) // DeprecatingAeoiRecommended (keeps APICv on with SynIC)
+                   | (1 << 10), // ClusterIpiRecommended (HvCallSendSyntheticClusterIpi)
+            ebx: 0xfff, // Suggested spinlock retry attempts before trapping to host
             ..Default::default()
         });
         for i in 0x4000_0005..=0x4000_000a {
