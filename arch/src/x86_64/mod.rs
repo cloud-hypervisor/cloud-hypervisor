@@ -861,13 +861,18 @@ fn required_common_cpuid_updates(
         });
         cpuid.push(CpuIdEntry {
             function: 0x4000_0003,
-            eax: (1 << 1) // AccessPartitionReferenceCounter
+            eax: (1 << 0) // AccessVpRunTimeReg
+                   | (1 << 1) // AccessPartitionReferenceCounter
                    | (1 << 2) // AccessSynicRegs
                    | (1 << 3) // AccessSyntheticTimerRegs
+                   | (1 << 4) // AccessIntrCtrlRegs (APIC access MSRs / VP Assist EOI)
                    | (1 << 5) // AccessHypercallMsrs
                    | (1 << 6) // AccessVpIndex
-                   | (1 << 9), // AccessPartitionReferenceTsc
-            edx: 1 << 3, // CPU dynamic partitioning
+                   | (1 << 9) // AccessPartitionReferenceTsc
+                   | (1 << 11), // AccessFrequencyMsrs (TSC/APIC frequency MSRs)
+            edx: (1 << 3) // CPU dynamic partitioning
+                   | (1 << 4) // FastHypercall (XMM register hypercall input)
+                   | (1 << 8), // ExtendedGvaRangesForFlushVirtualAddressList
             ..Default::default()
         });
         cpuid.push(CpuIdEntry {
