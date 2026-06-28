@@ -1093,6 +1093,16 @@ impl CpuManager {
         Ok(())
     }
 
+    #[cfg(target_arch = "x86_64")]
+    pub fn nested(&self) -> bool {
+        self.config.nested
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn kvm_hyperv(&self) -> bool {
+        self.config.kvm_hyperv
+    }
+
     /// Only create new vCPUs if there aren't any inactive ones to reuse
     fn create_vcpus(
         &mut self,
