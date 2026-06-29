@@ -557,10 +557,9 @@ impl ReceiveAdditionalConnections {
                     // header. Each memory chunk is fully received and acked
                     // before the worker loops back to Request::read_from(), so
                     // EOF at this point means the sender finished sending
-                    // memory rather than dropping a chunk mid-transfer.
-                    debug!(
-                        "Connection closed by peer as expected (sender finished sending memory)"
-                    );
+                    // memory rather than dropping a chunk mid-transfer (happy
+                    // path) or the sender failed (error path).
+                    debug!("Connection closed by peer");
                     return Ok(());
                 }
                 Err(e) => return Err(e),
@@ -1115,7 +1114,9 @@ pub(crate) fn expect_ok_response(
     socket: &mut SocketStream,
     error: MigratableError,
 ) -> Result<(), MigratableError> {
-    Response::read_from(socket)?.ok_or_error(error).map(|_| ())
+    Response::read_from(socket)?
+        .ok_or_fatal_error(error)
+        .map(|_| ())
 }
 
 /// Send a request and validate that the peer responds with OK.

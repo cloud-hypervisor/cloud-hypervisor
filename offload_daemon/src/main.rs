@@ -283,7 +283,7 @@ fn run_snapshot(socket_path: &Path, output_dir: &Path) -> Result<()> {
                 break;
             }
             Command::Abandon => {
-                // ACK before bailing so CH's ok_or_abandon read returns
+                // ACK before bailing so CH's ok_or_fatal_error() read returns
                 // cleanly instead of hitting EOF.
                 Response::ok().write_to(&mut stream).ok();
                 return Err(Error::Abandoned);

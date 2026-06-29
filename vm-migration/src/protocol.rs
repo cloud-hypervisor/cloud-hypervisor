@@ -363,10 +363,19 @@ impl Response {
         })
     }
 
-    /// Return the response if its status is `Ok`; return the caller-provided error for any other status.
-    pub fn ok_or_error(self, sender_error: MigratableError) -> Result<Response, MigratableError> {
+    /// Return the response if its status is `Ok`.
+    ///
+    /// Otherwise, returns an error and logs that the receiving VMM responded
+    /// with an error, which aborts the migration.
+    pub fn ok_or_fatal_error(
+        self,
+        sender_error: MigratableError,
+    ) -> Result<Response, MigratableError> {
         if self.status != Status::Ok {
             error!("Receiver reported error: aborting migration");
+            // `sender_error` identifies the sender-side operation that was in
+            // progress when the receiver reported failure; the receiver's
+            // actual error is unknown to the sender VMM.
             return Err(sender_error);
         }
         Ok(self)
