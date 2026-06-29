@@ -4,6 +4,10 @@
 
 use std::io;
 
+mod tracker;
+
+pub use tracker::DmaMappingTracker;
+
 /// Trait to trigger DMA mapping updates for devices managed by virtio-iommu
 ///
 /// Trait meant for triggering the DMA mapping update related to an external
