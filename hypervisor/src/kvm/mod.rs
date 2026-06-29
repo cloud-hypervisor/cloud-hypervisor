@@ -16,12 +16,9 @@ use std::collections::HashMap;
 use std::mem::offset_of;
 #[cfg(feature = "sev_snp")]
 use std::num;
-#[cfg(feature = "sev_snp")]
-use std::os::fd::FromRawFd;
-use std::os::fd::OwnedFd;
+use std::os::fd::{FromRawFd, OwnedFd};
 #[cfg(feature = "tdx")]
 use std::os::raw;
-#[cfg(any(feature = "sev_snp", feature = "tdx"))]
 use std::os::unix::io::AsRawFd;
 #[cfg(feature = "tdx")]
 use std::os::unix::io::RawFd;
@@ -44,7 +41,6 @@ use anyhow::anyhow;
 #[cfg(feature = "sev_snp")]
 use igvm::snp_defs::{SevSelector, SevVmsa};
 use kvm_bindings::fam_wrappers::KvmIrqRouting;
-#[cfg(feature = "sev_snp")]
 use kvm_bindings::kvm_create_guest_memfd;
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 #[cfg(feature = "sev_snp")]
@@ -616,6 +612,7 @@ struct KvmDirtyLogSlot {
     guest_phys_addr: u64,
     memory_size: u64,
     userspace_addr: u64,
+    flags: u32,
     // Following fields are used by kvm_userspace_memory_region2.
     guest_memfd_offset: u64,
     guest_memfd: u32,
@@ -733,15 +730,6 @@ impl KvmVm {
                     memory_size: region.memory_size,
                 })
             }
-        }
-    }
-
-    /// Get flag for kvm_userspace_memory_region based on memfd support.
-    fn get_kvm_userspace_memory_region_flag(&self, flag: u32) -> u32 {
-        flag | if self.memory_slots.is_some() {
-            KVM_MEM_GUEST_MEMFD
-        } else {
-            0
         }
     }
 }
@@ -1112,6 +1100,7 @@ impl vm::Vm for KvmVm {
         userspace_addr: *mut u8,
         readonly: bool,
         log_dirty_pages: bool,
+        visibility: vm::MemoryVisibility,
     ) -> vm::Result<()> {
         let mut flags = 0;
         if readonly {
@@ -1121,8 +1110,12 @@ impl vm::Vm for KvmVm {
 
         // Create a per-region guest_memfd when supported.
         // Each region gets its own fd sized exactly to memory_size
-        #[cfg(feature = "sev_snp")]
-        let guest_memfd = if let Some(slots) = &self.memory_slots {
+        let guest_memfd = if let Some(slots) = self
+            .memory_slots
+            .as_ref()
+            .filter(|_| visibility == vm::MemoryVisibility::Private)
+        {
+            flags |= KVM_MEM_GUEST_MEMFD;
             // SAFETY: Safe because guest regions are guaranteed not to overlap.
             let fd = unsafe {
                 OwnedFd::from_raw_fd(
@@ -1147,16 +1140,13 @@ impl vm::Vm for KvmVm {
         } else {
             0
         };
-        #[cfg(not(feature = "sev_snp"))]
-        let guest_memfd = 0;
 
         let region = kvm_userspace_memory_region2 {
             slot,
-            flags: self.get_kvm_userspace_memory_region_flag(flags),
+            flags,
             guest_phys_addr,
             memory_size: memory_size as u64,
             userspace_addr: userspace_addr as usize as u64,
-            #[cfg(not(target_arch = "riscv64"))]
             guest_memfd,
             // Each guest_memfd is per-region and sized to memory_size,
             // so the region's data always starts at offset 0.
@@ -1178,6 +1168,7 @@ impl vm::Vm for KvmVm {
                     guest_phys_addr: region.guest_phys_addr,
                     memory_size: region.memory_size,
                     userspace_addr: region.userspace_addr,
+                    flags: region.flags,
                     guest_memfd_offset: region.guest_memfd_offset,
                     guest_memfd: region.guest_memfd,
                 },
@@ -1191,7 +1182,7 @@ impl vm::Vm for KvmVm {
         }
 
         #[cfg(feature = "sev_snp")]
-        if self.memory_slots.is_some() {
+        if visibility == vm::MemoryVisibility::Private && self.memory_slots.is_some() {
             self.fd
                 .set_memory_attributes(kvm_memory_attributes {
                     address: region.guest_phys_addr,
@@ -1423,7 +1414,7 @@ impl vm::Vm for KvmVm {
                 guest_phys_addr: s.guest_phys_addr,
                 memory_size: s.memory_size,
                 userspace_addr: s.userspace_addr,
-                flags: self.get_kvm_userspace_memory_region_flag(KVM_MEM_LOG_DIRTY_PAGES),
+                flags: s.flags | KVM_MEM_LOG_DIRTY_PAGES,
                 guest_memfd: s.guest_memfd,
                 guest_memfd_offset: s.guest_memfd_offset,
                 ..Default::default()
@@ -1449,7 +1440,7 @@ impl vm::Vm for KvmVm {
                 guest_phys_addr: s.guest_phys_addr,
                 memory_size: s.memory_size,
                 userspace_addr: s.userspace_addr,
-                flags: self.get_kvm_userspace_memory_region_flag(0),
+                flags: s.flags & !KVM_MEM_LOG_DIRTY_PAGES,
                 guest_memfd: s.guest_memfd,
                 guest_memfd_offset: s.guest_memfd_offset,
                 ..Default::default()
