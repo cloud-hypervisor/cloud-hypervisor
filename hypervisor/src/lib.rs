@@ -63,7 +63,7 @@ pub use kvm::aarch64;
 #[cfg(all(feature = "kvm", target_arch = "riscv64"))]
 pub use kvm::{AiaState, riscv64};
 pub use vm::{
-    DataMatch, HypervisorVmError, InterruptSourceConfig, LegacyIrqSourceConfig,
+    DataMatch, HypervisorVmError, InterruptSourceConfig, LegacyIrqSourceConfig, MemoryBacking,
     MemoryConversionHandler, MsiIrqSourceConfig, Vm, VmOps,
 };
 

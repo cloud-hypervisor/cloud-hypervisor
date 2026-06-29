@@ -337,6 +337,14 @@ pub trait MemoryConversionHandler: Send + Sync {
         false
     }
 }
+/// Whether guest memry is shared or private from the host
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MemoryBacking {
+    /// Plain shared memslot.
+    Shared,
+    /// Confidential guest RAM (guest_memfd).
+    Private,
+}
 
 ///
 /// Trait to represent a Vm
@@ -383,6 +391,7 @@ pub trait Vm: Send + Sync + Any {
     ///
     /// `[userspace_addr, userspace_addr + memory_size)` must be valid memory,
     /// and that address range must remain valid until [`Vm::remove_user_memory_region`] is called.
+    #[allow(clippy::too_many_arguments)]
     unsafe fn create_user_memory_region(
         &self,
         slot: u32,
@@ -391,6 +400,7 @@ pub trait Vm: Send + Sync + Any {
         userspace_addr: *mut u8,
         readonly: bool,
         log_dirty_pages: bool,
+        backing: MemoryBacking,
     ) -> Result<()>;
     /// Removes a guest physical memory slot.
     ///
