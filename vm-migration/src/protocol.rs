@@ -91,6 +91,7 @@ use std::ops::RangeInclusive;
 
 use anyhow::anyhow;
 use itertools::Itertools;
+use log::error;
 use serde::{Deserialize, Serialize};
 use zerocopy::{FromBytes, Immutable, IntoBytes, TryFromBytes};
 
@@ -363,9 +364,10 @@ impl Response {
     }
 
     /// Return the response if its status is `Ok`; return the caller-provided error for any other status.
-    pub fn ok_or_error(self, error: MigratableError) -> Result<Response, MigratableError> {
+    pub fn ok_or_error(self, sender_error: MigratableError) -> Result<Response, MigratableError> {
         if self.status != Status::Ok {
-            return Err(error);
+            error!("Receiver reported error: aborting migration");
+            return Err(sender_error);
         }
         Ok(self)
     }
