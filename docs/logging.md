@@ -13,33 +13,51 @@ The number of `-v` parameters passed to the `cloud-hypervisor` binary will deter
 
 ### `error!()`
 
-For immediate, unrecoverable errors where it does not make sense for the execution to continue as the behaviour of the VM is considerably impacted.
+For any user-initiated action that cannot be carried out as expected, as
+well as serious or fatal conditions within the VMM itself. This covers two
+cases:
 
-Cloud Hypervisor should exit shortly after reporting this error (with a non-zero exit code). Generally this should be used during initial construction of the VM state before the virtual CPUs have begun running code.
+- A requested operation fails with material impact, even if Cloud
+  Hypervisor can continue running (e.g. a failed device hotplug, live
+  migration, snapshot/restore, or resize). From the user's perspective the
+  action they asked for did not happen, so it is an error to them.
+- An unrecoverable condition where Cloud Hypervisor cannot continue and
+  exits with a non-zero code (e.g. conflicting command line options, or a
+  required file that is not present).
 
-A typical situation where this might occur is when the user is using command line options that conflict with each other or is trying to use a file that is not present on the filesystem.
-
-Users should react to this error by checking their initial VM configuration.
+Users should react by checking their configuration or the requested
+operation.
 
 ### `warn!()`
 
-A serious problem has occurred but the execution of the VM can continue although some functionality might be impacted.
-
-A typical example of where this level of message should be generated is during an API call request that cannot be fulfilled.
-
-The user should investigate the meaning of this warning and take steps to ensure the correct functionality.
+For abnormal conditions that neither prevent a user-initiated action nor
+seriously impact the VM. These are user-facing and developer-facing
+warnings. A typical example is an ineffectual out-of-bounds access that the
+VMM safely ignores.
 
 ### `info!()`
 
 Use `-v` to enable.
 
-This level is for the benefit of developers. It should be used for sporadic and infrequent messages. The same message should not "spam" the logs. The VM should be usable when this level of debugging is enabled and trying to use `stdin/stdout` and the logs are going to `stderr`.
+Primarily targeted at operators and users. For important but infrequent
+normal conditions, events, and state changes that are meaningful in production. The same message
+should not "spam" the logs, and the VM should remain usable when this level
+is enabled (e.g. using stdin/stdout while the logs go to stderr).
 
 ### `debug!()`
 
 Use `-vv` to enable.
 
-For the most verbose of logging messages. It is acceptable to "spam" the log with repeated invocations of the same message. This level of logging would be combined with `--log-file`.
+Developer-facing diagnostic information. It is acceptable to repeat the same
+message here.
+
+### `trace!()`
+
+Use `-vvv` to enable.
+
+The most verbose level, for very detailed developer-facing information. As
+with `debug!()`, repeated messages are acceptable. This level is typically
+combined with `--log-file`.
 
 ## Format
 
