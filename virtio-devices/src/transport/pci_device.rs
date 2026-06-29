@@ -700,7 +700,10 @@ impl VirtioPciDevice {
             .get_bar_addr(VIRTIO_COMMON_BAR_INDEX.into())
     }
 
-    fn add_pci_capabilities(&mut self) -> result::Result<(), PciDeviceError> {
+    fn add_pci_capabilities(
+        &mut self,
+        device_config_size: u64,
+    ) -> result::Result<(), PciDeviceError> {
         // Add pointers to the different configuration structures from the PCI capabilities.
         let common_cap = VirtioPciCap::new(
             PciCapabilityType::Common,
@@ -722,16 +725,17 @@ impl VirtioPciDevice {
             .add_capability(&isr_cap)
             .map_err(PciDeviceError::CapabilitiesSetup)?;
 
-        // TODO(dgreid) - set based on device's configuration size?
-        let device_cap = VirtioPciCap::new(
-            PciCapabilityType::Device,
-            VIRTIO_COMMON_BAR_INDEX,
-            DEVICE_CONFIG_BAR_OFFSET as u32,
-            DEVICE_CONFIG_SIZE as u32,
-        );
-        self.configuration
-            .add_capability(&device_cap)
-            .map_err(PciDeviceError::CapabilitiesSetup)?;
+        if device_config_size > 0 {
+            let device_cap = VirtioPciCap::new(
+                PciCapabilityType::Device,
+                VIRTIO_COMMON_BAR_INDEX,
+                DEVICE_CONFIG_BAR_OFFSET as u32,
+                device_config_size as u32,
+            );
+            self.configuration
+                .add_capability(&device_cap)
+                .map_err(PciDeviceError::CapabilitiesSetup)?;
+        }
 
         let notify_cap = VirtioPciNotifyCap::new(
             PciCapabilityType::Notify,
@@ -1096,7 +1100,8 @@ impl PciDevice for VirtioPciDevice {
             })?;
 
             // Once the BARs are allocated, the capabilities can be added to the PCI configuration.
-            self.add_pci_capabilities()?;
+            let device_config_size = device.config_size().unwrap_or(DEVICE_CONFIG_SIZE);
+            self.add_pci_capabilities(device_config_size)?;
         }
 
         bars.push(bar);

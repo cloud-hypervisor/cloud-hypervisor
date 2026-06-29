@@ -108,6 +108,10 @@ pub trait VirtioDevice: Send {
         let _ = value;
     }
 
+    fn config_size(&self) -> Option<u64> {
+        None
+    }
+
     /// Reads this device configuration space at `offset`.
     fn read_config(&self, _offset: u64, _data: &mut [u8]) {
         warn!(
