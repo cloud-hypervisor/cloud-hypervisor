@@ -199,12 +199,13 @@ pub enum ApiError {
     #[error("The vsock device could not be added to the VM")]
     VmAddVsock(#[source] VmError),
 
-    /// Error starting migration receiver
-    #[error("Error starting migration receiver")]
+    /// Error while receiving a migration, either because the receiver could not
+    /// be started or because the migration failed mid-operation.
+    #[error("Error receiving migration")]
     VmReceiveMigration(#[source] MigratableError),
 
-    /// Error starting migration sender
-    #[error("Error starting migration sender")]
+    /// Error while dispatching the migration worker (thread).
+    #[error("Error dispatching the migration worker")]
     VmSendMigration(#[source] MigratableError),
 
     /// Error triggering power button
