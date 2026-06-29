@@ -230,6 +230,10 @@ impl Rng {
 }
 
 impl VirtioDevice for Rng {
+    fn config_size(&self) -> Option<u64> {
+        Some(0)
+    }
+
     fn device_type(&self) -> u32 {
         self.common.device_type
     }

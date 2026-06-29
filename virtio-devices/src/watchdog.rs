@@ -310,6 +310,10 @@ fn timerfd_setup(timer: &File, secs: i64) -> Result<(), io::Error> {
 }
 
 impl VirtioDevice for Watchdog {
+    fn config_size(&self) -> Option<u64> {
+        Some(0)
+    }
+
     fn device_type(&self) -> u32 {
         self.common.device_type
     }
