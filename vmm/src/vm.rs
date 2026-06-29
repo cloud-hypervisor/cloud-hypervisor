@@ -3932,6 +3932,7 @@ mod unit_tests {
                     region.as_ptr(),
                     false,
                     false,
+                    hypervisor::MemoryVisibility::Shared,
                 )
                 .expect("Cannot configure guest memory");
             }
@@ -4072,6 +4073,7 @@ pub fn test_vm() {
                 region.as_ptr().cast(),
                 false,
                 false,
+                hypervisor::MemoryVisibility::Shared,
             )
             .expect("Cannot configure guest memory");
         }

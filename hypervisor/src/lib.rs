@@ -64,7 +64,7 @@ pub use kvm::aarch64;
 pub use kvm::{AiaState, riscv64};
 pub use vm::{
     DataMatch, HypervisorVmError, InterruptSourceConfig, LegacyIrqSourceConfig,
-    MemoryConversionHandler, MsiIrqSourceConfig, Vm, VmOps,
+    MemoryConversionHandler, MemoryVisibility, MsiIrqSourceConfig, Vm, VmOps,
 };
 
 pub use crate::hypervisor::{Hypervisor, HypervisorError};
