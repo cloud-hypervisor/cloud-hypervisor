@@ -8,10 +8,12 @@ use std::fs::File;
 use std::io::{self, Cursor, Read, Seek, SeekFrom};
 use std::os::unix::fs::FileExt;
 use std::result;
+use std::sync::{Arc, Mutex};
 
 use linux_loader::bootparam::boot_params;
 use sha2::{Digest, Sha256};
 use uuid::{Uuid, uuid};
+use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_memory::ByteValued;
 use vmm_sys_util::errno;
 use zerocopy::{Immutable, IntoBytes};
@@ -177,6 +179,165 @@ impl MeasuredBootInfo {
         // The remainder of the page is zeroed to ensure measurements are reliably calculated
         hash_block[..size_of::<PaddedSevHashTable>()].copy_from_slice(table.as_bytes());
         Ok(hash_block)
+    }
+}
+
+/// SEV-SNP RMP/PSC minimum conversion granule.
+const PAGE_SIZE_4K: u64 = 4096;
+
+struct TrackedRegion {
+    base: u64,
+    shared: Vec<bool>, // one bool per 4KiB page
+}
+
+impl TrackedRegion {
+    fn new(base: u64, size: u64) -> Self {
+        Self {
+            base,
+            shared: vec![false; size.div_ceil(PAGE_SIZE_4K) as usize],
+        }
+    }
+
+    fn end(&self) -> u64 {
+        self.base + self.shared.len() as u64 * PAGE_SIZE_4K
+    }
+}
+
+#[derive(Default)]
+struct Inner {
+    regions: Vec<TrackedRegion>,
+    handler: Option<Arc<dyn ExternalDmaMapping>>,
+}
+
+/// Tracks which confidential guest pages are shared and keeps the device
+/// IOMMU mapping exactly those pages.
+#[derive(Default)]
+pub struct SevSnpSharedPageTracker {
+    inner: Mutex<Inner>,
+}
+
+#[expect(dead_code)]
+impl SevSnpSharedPageTracker {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register a confidential RAM region `[base, base + size)`.
+    pub fn register_region(&self, base: u64, size: u64) {
+        self.inner
+            .lock()
+            .unwrap()
+            .regions
+            .push(TrackedRegion::new(base, size));
+    }
+
+    /// Register a VFIO DMA handler, replaying the currently shared pages into it.
+    pub fn add_dma_mapping_handler(
+        &self,
+        handler: Arc<dyn ExternalDmaMapping>,
+    ) -> anyhow::Result<()> {
+        let mut inner = self.inner.lock().unwrap();
+        for region in inner.regions.iter() {
+            for (i, &shared) in region.shared.iter().enumerate() {
+                if shared {
+                    let gpa = region.base + i as u64 * PAGE_SIZE_4K; // iova == gpa
+                    handler
+                        .map(gpa, gpa, PAGE_SIZE_4K)
+                        .map_err(|e| anyhow::anyhow!("VFIO replay map failed gpa={gpa:#x}: {e}"))?;
+                }
+            }
+        }
+        inner.handler = Some(handler);
+        Ok(())
+    }
+
+    /// Drop the registered DMA handler.
+    pub fn clear_dma_mapping_handler(&self) {
+        self.inner.lock().unwrap().handler = None;
+    }
+
+    fn has_dma_handler(&self) -> bool {
+        self.inner.lock().unwrap().handler.is_some()
+    }
+
+    /// Flip `[gpa, gpa + size)` shared/private in the tracker, driving the
+    /// handler so the device IOMMU maps the shared pages only.
+    fn set_shared(&self, gpa: u64, size: u64, shared: bool) -> io::Result<()> {
+        let mut inner = self.inner.lock().unwrap();
+        let Inner { regions, handler } = &mut *inner;
+        let req_end = gpa.saturating_add(size);
+
+        for region in regions.iter_mut() {
+            let start = gpa.max(region.base);
+            let end = req_end.min(region.end());
+            if start >= end {
+                continue;
+            }
+            let first = ((start - region.base) / PAGE_SIZE_4K) as usize;
+            let last = (end - region.base).div_ceil(PAGE_SIZE_4K) as usize;
+
+            if shared {
+                Self::map_pages(handler.as_deref(), region, first, last)?;
+            } else {
+                Self::unmap_pages(handler.as_deref(), region, first, last)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Map each newly shared page one at a time. We map one page per call,
+    /// not one big mapping for the whole range. A  mapping can only be removed
+    /// as a whole, never split, so the size we map here is the smallest unit we
+    /// can later unmap. This lets `unmap_pages()` remove any single page.
+    fn map_pages(
+        handler: Option<&dyn ExternalDmaMapping>,
+        region: &mut TrackedRegion,
+        first: usize,
+        last: usize,
+    ) -> io::Result<()> {
+        for i in first..last {
+            if region.shared[i] {
+                continue;
+            }
+            region.shared[i] = true;
+            let gpa = region.base + i as u64 * PAGE_SIZE_4K;
+            if let Some(handler) = handler {
+                handler
+                    .map(gpa, gpa, PAGE_SIZE_4K)
+                    .map_err(|e| io::Error::other(format!("DMA map failed gpa={gpa:#x}: {e}")))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Clear each shared page in `[first, last)`, coalescing contiguous runs
+    /// into a single unmap.
+    fn unmap_pages(
+        handler: Option<&dyn ExternalDmaMapping>,
+        region: &mut TrackedRegion,
+        first: usize,
+        last: usize,
+    ) -> io::Result<()> {
+        let mut i = first;
+        while i < last {
+            if !region.shared[i] {
+                i += 1;
+                continue;
+            }
+            let run = i;
+            while i < last && region.shared[i] {
+                region.shared[i] = false;
+                i += 1;
+            }
+            let gpa = region.base + run as u64 * PAGE_SIZE_4K;
+            let len = (i - run) as u64 * PAGE_SIZE_4K;
+            if let Some(handler) = handler {
+                handler.unmap(gpa, len).map_err(|e| {
+                    io::Error::other(format!("DMA unmap failed gpa={gpa:#x} len={len:#x}: {e}"))
+                })?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -388,5 +549,101 @@ mod tests {
         let expected = expected_kernel_digest(8, payload);
         let offset = kernel_hash_offset();
         assert_eq!(&block[offset..offset + 32], &expected);
+    }
+
+    #[derive(Default)]
+    struct Recorder {
+        maps: Mutex<Vec<(u64, u64)>>,
+        unmaps: Mutex<Vec<(u64, u64)>>,
+    }
+
+    impl ExternalDmaMapping for Recorder {
+        fn map(&self, iova: u64, gpa: u64, size: u64) -> io::Result<()> {
+            assert_eq!(iova, gpa, "tracker must identity-map (iova == gpa)");
+            self.maps.lock().unwrap().push((gpa, size));
+            Ok(())
+        }
+        fn unmap(&self, iova: u64, size: u64) -> io::Result<()> {
+            self.unmaps.lock().unwrap().push((iova, size));
+            Ok(())
+        }
+    }
+
+    fn page(n: u64) -> u64 {
+        n * PAGE_SIZE_4K
+    }
+
+    fn tracker_with_region(base: u64, size: u64) -> (SevSnpSharedPageTracker, Arc<Recorder>) {
+        let t = SevSnpSharedPageTracker::new();
+        t.register_region(base, size);
+        let rec = Arc::new(Recorder::default());
+        t.add_dma_mapping_handler(rec.clone()).unwrap();
+        (t, rec)
+    }
+
+    #[test]
+    fn shared_maps_each_page_individually() {
+        let (t, rec) = tracker_with_region(page(0), 4 * PAGE_SIZE_4K);
+        t.set_shared(page(0), 3 * PAGE_SIZE_4K, true).unwrap();
+        assert_eq!(
+            *rec.maps.lock().unwrap(),
+            vec![
+                (page(0), PAGE_SIZE_4K),
+                (page(1), PAGE_SIZE_4K),
+                (page(2), PAGE_SIZE_4K),
+            ]
+        );
+    }
+
+    #[test]
+    fn shared_is_idempotent() {
+        let (t, rec) = tracker_with_region(page(0), 4 * PAGE_SIZE_4K);
+        t.set_shared(page(0), 2 * PAGE_SIZE_4K, true).unwrap();
+        t.set_shared(page(0), 2 * PAGE_SIZE_4K, true).unwrap();
+        assert_eq!(rec.maps.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn private_coalesces_contiguous_runs() {
+        let (t, rec) = tracker_with_region(page(0), 4 * PAGE_SIZE_4K);
+        t.set_shared(page(0), 4 * PAGE_SIZE_4K, true).unwrap();
+        rec.unmaps.lock().unwrap().clear();
+        t.set_shared(page(0), 4 * PAGE_SIZE_4K, false).unwrap();
+        assert_eq!(
+            *rec.unmaps.lock().unwrap(),
+            vec![(page(0), 4 * PAGE_SIZE_4K)]
+        );
+    }
+
+    #[test]
+    fn private_splits_runs_around_holes() {
+        let (t, rec) = tracker_with_region(page(0), 4 * PAGE_SIZE_4K);
+        t.set_shared(page(0), 2 * PAGE_SIZE_4K, true).unwrap();
+        t.set_shared(page(3), PAGE_SIZE_4K, true).unwrap();
+        rec.unmaps.lock().unwrap().clear();
+        t.set_shared(page(0), 4 * PAGE_SIZE_4K, false).unwrap();
+        assert_eq!(
+            *rec.unmaps.lock().unwrap(),
+            vec![(page(0), 2 * PAGE_SIZE_4K), (page(3), PAGE_SIZE_4K)]
+        );
+    }
+
+    #[test]
+    fn add_handler_replays_shared_set() {
+        let (t, _first) = tracker_with_region(page(0), 4 * PAGE_SIZE_4K);
+        t.set_shared(page(1), 2 * PAGE_SIZE_4K, true).unwrap();
+        let late = Arc::new(Recorder::default());
+        t.add_dma_mapping_handler(late.clone()).unwrap();
+        assert_eq!(
+            *late.maps.lock().unwrap(),
+            vec![(page(1), PAGE_SIZE_4K), (page(2), PAGE_SIZE_4K)]
+        );
+    }
+
+    #[test]
+    fn conversion_outside_any_region_is_ignored() {
+        let (t, rec) = tracker_with_region(page(0), 2 * PAGE_SIZE_4K);
+        t.set_shared(page(100), 4 * PAGE_SIZE_4K, true).unwrap();
+        assert!(rec.maps.lock().unwrap().is_empty());
     }
 }
