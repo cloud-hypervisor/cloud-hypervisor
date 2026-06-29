@@ -601,6 +601,10 @@ impl Rtc {
 }
 
 impl VirtioDevice for Rtc {
+    fn config_size(&self) -> Option<u64> {
+        Some(0)
+    }
+
     fn device_type(&self) -> u32 {
         self.common.device_type
     }
