@@ -30,7 +30,7 @@ use event_monitor::event;
 use hypervisor::arch::x86;
 use landlock::LandlockError;
 use libc::{EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW, tcsetattr, termios};
-use log::{debug, error, info, trace, warn};
+use log::{debug, error, info, warn};
 use memory_manager::MemoryManagerSnapshotData;
 use pci::PciBdf;
 use seccompiler::{BpfProgram, SeccompAction, apply_filter};
@@ -3040,9 +3040,20 @@ impl RequestHandler for Vmm {
         let mut state = ReceiveMigrationState::Established;
 
         while !state.finished() {
-            let req = Request::read_from(&mut socket)?;
-            trace!("Command {:?} received", req.command());
+            let req = Request::read_from(&mut socket).inspect_err(|error| {
+                if matches!(
+                    error,
+                    MigratableError::MigrateSocket(io_error)
+                        if io_error.kind() == io::ErrorKind::UnexpectedEof
+                ) {
+                    error!("Failed to read migration request: sender likely failed, aborting");
+                }
+            })?;
+            debug!("Command '{:?}' received", req.command());
 
+            // If sender-side migration causes any error propagated here, the
+            // next loop iteration logs a helpful error when reading the next
+            // request (which will fail as the sender closed the socket).
             let (response, new_state) = match self.vm_receive_migration_step(
                 &mut socket,
                 &listener,

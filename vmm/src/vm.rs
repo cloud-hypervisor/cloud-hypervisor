@@ -3026,9 +3026,9 @@ impl Vm {
                 .context("Error sending memory fd")
                 .map_err(MigratableError::MigrateSend)?;
 
-            Response::read_from(socket)?.ok_or_error(MigratableError::MigrateSend(anyhow!(
-                "Error during memory fd migration"
-            )))?;
+            Response::read_from(socket)?.ok_or_fatal_error(MigratableError::MigrateSend(
+                anyhow!("Error during memory fd migration"),
+            ))?;
         }
 
         Ok(())
