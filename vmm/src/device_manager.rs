@@ -919,6 +919,7 @@ impl DeviceRelocation for AddressManager {
                                 shm_regions.mapping.as_ptr(),
                                 false,
                                 false,
+                                hypervisor::MemoryVisibility::Shared,
                             )
                             .map_err(|e| {
                                 io::Error::other(format!(
@@ -3475,7 +3476,15 @@ impl DeviceManager {
             self.memory_manager
                 .lock()
                 .unwrap()
-                .create_userspace_mapping(region_base, region_size, host_addr, false, false, false)
+                .create_userspace_mapping(
+                    region_base,
+                    region_size,
+                    host_addr,
+                    false,
+                    false,
+                    false,
+                    hypervisor::MemoryVisibility::Shared,
+                )
                 .map_err(DeviceManagerError::MemoryManager)
         }?;
 
@@ -5752,6 +5761,7 @@ impl IvshmemOps for IvshmemHandler {
                     false,
                     false,
                     false,
+                    hypervisor::MemoryVisibility::Shared,
                 )
             }
         }
