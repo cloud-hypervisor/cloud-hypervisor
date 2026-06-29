@@ -18,7 +18,6 @@ pub(crate) mod aligned_buffer;
 pub mod aligned_file;
 pub mod formats;
 mod sparse;
-use std::alloc::{Layout, alloc_zeroed};
 use std::fmt::{self, Debug};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read};
@@ -528,23 +527,6 @@ impl FromStr for ImageType {
 const QCOW_MAGIC: u32 = 0x5146_49fb;
 const VHDX_SIGN: u64 = 0x656C_6966_7864_6876;
 
-/// Read a block into memory aligned by the source block size (needed for O_DIRECT)
-pub fn read_aligned_block_size(f: &mut File) -> io::Result<Vec<u8>> {
-    let blocksize = DiskTopology::probe(f)?.logical_block_size as usize;
-    // SAFETY: We are allocating memory that is naturally aligned (size = alignment) and we meet
-    // requirements for safety from Vec::from_raw_parts() as we are using the global allocator
-    // and transferring ownership of the memory.
-    let mut data = unsafe {
-        Vec::from_raw_parts(
-            alloc_zeroed(Layout::from_size_align_unchecked(blocksize, blocksize)),
-            blocksize,
-            blocksize,
-        )
-    };
-    f.read_exact(&mut data)?;
-    Ok(data)
-}
-
 /// Open a disk image file, returning a [`BlockError`] with path context
 /// on failure.
 pub fn open_disk_image(path: &Path, options: &OpenOptions) -> BlockResult<File> {
@@ -557,7 +539,10 @@ pub fn open_disk_image(path: &Path, options: &OpenOptions) -> BlockResult<File> 
 
 /// Determine image type through file parsing.
 pub fn detect_image_type(f: &mut File) -> BlockResult<ImageType> {
-    let block = read_aligned_block_size(f)
+    let mut aligned = AlignedFile::new(f.try_clone()?, true);
+    let mut block = vec![0u8; aligned.alignment()];
+    aligned
+        .read_exact(&mut block)
         .map_err(|e| BlockError::new(BlockErrorKind::Io, e).with_op(ErrorOp::DetectImageType))?;
 
     // Check 4 first bytes to get the header value and determine the image type
