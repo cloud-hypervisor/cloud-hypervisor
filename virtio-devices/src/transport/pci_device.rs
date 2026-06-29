@@ -1638,4 +1638,72 @@ mod unit_tests {
 
         waiter.join().expect("barrier waiter deadlocked");
     }
+
+    struct TestInterruptManager;
+
+    impl InterruptManager for TestInterruptManager {
+        type GroupConfig = MsiIrqGroupConfig;
+
+        fn create_group(
+            &self,
+            _config: Self::GroupConfig,
+        ) -> io::Result<Arc<dyn InterruptSourceGroup>> {
+            Ok(Arc::new(TestInterruptSourceGroup {
+                event_fd: EventFd::new(0).unwrap(),
+            }))
+        }
+
+        fn destroy_group(&self, _group: Arc<dyn InterruptSourceGroup>) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn make_virtio_pci_device() -> VirtioPciDevice {
+        let memory = GuestMemoryAtomic::new(
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+        let device = Arc::new(Mutex::new(TestVirtioDevice {
+            result: Mutex::new(None),
+        }));
+        VirtioPciDevice::new(
+            "test-dev".to_string(),
+            memory,
+            device,
+            None,
+            &TestInterruptManager,
+            0,
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+            false,
+            None,
+            Arc::new(Mutex::new(Vec::new())),
+            None,
+        )
+        .unwrap()
+    }
+
+    fn has_device_config_cap(cfg: &PciConfiguration) -> bool {
+        let mut ptr = (cfg.read_reg(0x34 / 4) & 0xFF) as usize;
+        while ptr != 0 {
+            let dword = cfg.read_reg(ptr / 4);
+            if dword & 0xFF == 0x09 && (dword >> 24) & 0xFF == PciCapabilityType::Device as u32 {
+                return true;
+            }
+            ptr = ((dword >> 8) & 0xFF) as usize;
+        }
+        false
+    }
+
+    #[test]
+    fn add_pci_capabilities_includes_device_config_when_sized() {
+        let mut dev = make_virtio_pci_device();
+        dev.add_pci_capabilities(DEVICE_CONFIG_SIZE).unwrap();
+        assert!(has_device_config_cap(&dev.configuration));
+    }
+
+    #[test]
+    fn add_pci_capabilities_omits_device_config_when_zero() {
+        let mut dev = make_virtio_pci_device();
+        dev.add_pci_capabilities(0).unwrap();
+        assert!(!has_device_config_cap(&dev.configuration));
+    }
 }
