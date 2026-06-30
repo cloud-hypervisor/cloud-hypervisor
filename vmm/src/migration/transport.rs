@@ -1215,6 +1215,8 @@ pub(crate) fn send_memory_ranges(
     // And then the memory itself
     let mem = guest_memory.memory();
     for range in ranges.regions() {
+        //cancel_ctx.ok_or_cancelled(socket)?;
+
         let mut offset: u64 = 0;
         // Here we are manually handling the retry in case we can't read the
         // whole region at once because we can't use the implementation
