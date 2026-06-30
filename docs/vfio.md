@@ -85,7 +85,7 @@ takes the device's sysfs path as an argument. In our example it is
     --console off \
     --serial tty \
     --cmdline "console=ttyS0 root=/dev/vda1 rw" \
-    --cpus 4 \
+    --cpus boot=4 \
     --memory size=512M \
     --device path=/sys/bus/pci/devices/0000:01:00.0/
 ```
