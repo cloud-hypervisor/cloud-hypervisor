@@ -62,6 +62,8 @@ pub use device::HypervisorDeviceError;
 pub use kvm::aarch64;
 #[cfg(all(feature = "kvm", target_arch = "riscv64"))]
 pub use kvm::{AiaState, riscv64};
+#[cfg(any(feature = "tdx", feature = "sev_snp"))]
+pub use vm::MemoryConversionHandler;
 pub use vm::{
     DataMatch, HypervisorVmError, InterruptSourceConfig, LegacyIrqSourceConfig, MsiIrqSourceConfig,
     Vm, VmOps,

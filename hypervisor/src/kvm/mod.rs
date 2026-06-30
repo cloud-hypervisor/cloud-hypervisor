@@ -639,6 +639,8 @@ pub struct KvmVm {
     snp_guest_policy: OnceLock<u64>,
     dirty_log_slots: RwLock<HashMap<u32, KvmDirtyLogSlot>>,
     memory_slots: Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
+    #[cfg(any(feature = "tdx", feature = "sev_snp"))]
+    mem_conversion_handler: Arc<RwLock<Option<Arc<dyn vm::MemoryConversionHandler>>>>,
 }
 
 impl KvmVm {
@@ -952,8 +954,15 @@ impl vm::Vm for KvmVm {
             vm_fd: self.fd.clone(),
             #[cfg(feature = "sev_snp")]
             memory_slots: self.memory_slots.clone(),
+            #[cfg(any(feature = "tdx", feature = "sev_snp"))]
+            mem_conversion_handler: self.mem_conversion_handler.clone(),
         };
         Ok(Box::new(vcpu))
+    }
+
+    #[cfg(any(feature = "tdx", feature = "sev_snp"))]
+    fn set_memory_conversion_handler(&self, handler: Arc<dyn vm::MemoryConversionHandler>) {
+        *self.mem_conversion_handler.write().unwrap() = Some(handler);
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -1864,6 +1873,8 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 #[cfg(feature = "sev_snp")]
                 snp_guest_policy: OnceLock::new(),
                 memory_slots,
+                #[cfg(any(feature = "tdx", feature = "sev_snp"))]
+                mem_conversion_handler: Arc::new(RwLock::new(None)),
             }))
         }
 
@@ -2014,6 +2025,20 @@ pub struct KvmVcpu {
     vm_fd: Arc<VmFd>,
     #[cfg(feature = "sev_snp")]
     memory_slots: Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
+    #[cfg(any(feature = "tdx", feature = "sev_snp"))]
+    mem_conversion_handler: Arc<RwLock<Option<Arc<dyn vm::MemoryConversionHandler>>>>,
+}
+
+#[cfg(any(feature = "tdx", feature = "sev_snp"))]
+impl KvmVcpu {
+    /// Notify the registered handler (if any) that the guest converted
+    /// `[gpa, gpa + size)` between shared and private, so the VMM can refresh
+    /// host IOMMU (VFIO) mappings.
+    fn notify_memory_conversion(&self, gpa: u64, size: u64, to_private: bool) {
+        if let Some(handler) = self.mem_conversion_handler.read().unwrap().as_ref() {
+            handler.convert(gpa, size, to_private);
+        }
+    }
 }
 
 #[cfg(feature = "sev_snp")]
@@ -2738,6 +2763,11 @@ impl cpu::Vcpu for KvmVcpu {
                                 Self::punch_holes_in_guest_memfd(&self.memory_slots, address, size);
                             }
 
+                            // Refresh host IOMMU (VFIO) mappings for the
+                            // converted range: map when shared, unmap when
+                            // private.
+                            self.notify_memory_conversion(address, size, set_private_attr != 0);
+
                             Ok(cpu::VmExit::Ignore)
                         }
                         _ => Ok(cpu::VmExit::Ignore),
@@ -2765,6 +2795,8 @@ impl cpu::Vcpu for KvmVcpu {
                         0u64
                     };
 
+                    let to_private = flags & KVM_MEMORY_EXIT_FLAG_PRIVATE != 0;
+
                     self.vm_fd
                         .set_memory_attributes(kvm_memory_attributes {
                             address: gpa,
@@ -2772,8 +2804,13 @@ impl cpu::Vcpu for KvmVcpu {
                             attributes,
                             flags: 0,
                         })
-                        .map(|_| cpu::VmExit::Ignore)
-                        .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))
+                        .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
+
+                    // Refresh host IOMMU (VFIO) mappings for the converted
+                    // range: map when shared, unmap when private.
+                    self.notify_memory_conversion(gpa, size, to_private);
+
+                    Ok(cpu::VmExit::Ignore)
                 }
 
                 r => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(

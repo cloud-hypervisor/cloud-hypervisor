@@ -329,6 +329,23 @@ pub enum InterruptSourceConfig {
     MsiIrq(MsiIrqSourceConfig),
 }
 
+/// Notifies the VMM when confidential-VM guest memory is converted between
+/// shared and private, so it can keep host IOMMU (VFIO) mappings consistent.
+///
+/// For confidential guests (TDX, SEV-SNP) backed by `guest_memfd`, a
+/// passthrough device may only DMA to *shared* memory. The host IOMMU must
+/// therefore map a range when the guest makes it shared and unmap it when the
+/// guest makes it private, so that the IOMMU only ever holds shared GPA to HPA
+/// translations. This mirrors QEMU's `RamDiscardManager`-on-`guest_memfd`
+/// mechanism, where shared is "populated" and private is "discarded".
+#[cfg(any(feature = "tdx", feature = "sev_snp"))]
+pub trait MemoryConversionHandler: Send + Sync {
+    /// Called after the guest converted `[gpa, gpa + size)`. `to_private` is
+    /// `true` for shared to private (unmap) and `false` for private to shared
+    /// (map). `gpa` and `size` are host-page aligned.
+    fn convert(&self, gpa: u64, size: u64, to_private: bool);
+}
+
 ///
 /// Trait to represent a Vm
 ///
@@ -517,6 +534,12 @@ pub trait Vm: Send + Sync + Any {
     fn enable_x2apic_api(&self) -> Result<()> {
         unimplemented!("x2Apic is only supported on KVM/Linux hosts")
     }
+
+    /// Register a handler notified on shared/private memory conversions so the
+    /// VMM can keep host IOMMU (VFIO) mappings in sync. No-op by default and on
+    /// backends that do not support confidential VMs.
+    #[cfg(any(feature = "tdx", feature = "sev_snp"))]
+    fn set_memory_conversion_handler(&self, _handler: Arc<dyn MemoryConversionHandler>) {}
 }
 
 pub trait VmOps: Send + Sync {
