@@ -33,13 +33,13 @@ Get ready for receiving migration for the destination VM (on the host
 machine):
 
 ```console
-$ target/release/ch-remote --api-socket=/tmp/api2 receive-migration unix:/tmp/sock
+$ target/release/ch-remote --api-socket=/tmp/api2 receive-migration receiver_url=unix:/tmp/sock
 ```
 
 Start to send migration for the source VM (on the host machine):
 
 ```console
-$ target/release/ch-remote --api-socket=/tmp/api1 send-migration destination_url=unix:/tmp/sock,local=true
+$ target/release/ch-remote --api-socket=/tmp/api1 send-migration destination_url=unix:/tmp/sock,local=on
 ```
 
 When the above commands completed, the source VM should be successfully
@@ -91,7 +91,7 @@ dst $ cloud-hypervisor --api-socket /tmp/api
 In a different terminal, configure the VM as a migration target:
 
 ```console
-dst $ ch-remote --api-socket=/tmp/api receive-migration unix:/tmp/sock
+dst $ ch-remote --api-socket=/tmp/api receive-migration receiver_url=unix:/tmp/sock
 ```
 
 In yet another terminal, forward TCP connections to the Unix domain socket:
@@ -129,7 +129,7 @@ src $ socat UNIX-LISTEN:/tmp/sock,reuseaddr TCP:{dst}:{port}
 Then we kick-off the migration itself:
 
 ```console
-src $ ch-remote --api-socket=/tmp/api send-migration unix:/tmp/sock
+src $ ch-remote --api-socket=/tmp/api send-migration destination_url=unix:/tmp/sock
 ```
 
 When the above commands completed, the VM should be successfully
@@ -151,7 +151,7 @@ dst $ cloud-hypervisor --api-socket /tmp/api
 In a different terminal, prepare to receive the migration:
 
 ```console
-dst $ ch-remote --api-socket=/tmp/api receive-migration tcp:0.0.0.0:{port}
+dst $ ch-remote --api-socket=/tmp/api receive-migration receiver_url=tcp:0.0.0.0:{port}
 ```
 
 #### Starting the Sender VM
