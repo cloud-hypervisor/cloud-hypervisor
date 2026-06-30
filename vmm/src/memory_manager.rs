@@ -159,6 +159,9 @@ impl MemoryZone {
     pub fn regions(&self) -> &Vec<Arc<GuestRegionMmap>> {
         &self.regions
     }
+    pub fn backing_page_size(&self) -> u64 {
+        self.backing_page_size
+    }
     pub fn virtio_mem_zone(&self) -> &Option<VirtioMemZone> {
         &self.virtio_mem_zone
     }
