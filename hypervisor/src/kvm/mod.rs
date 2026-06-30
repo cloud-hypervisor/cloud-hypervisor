@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::mem::offset_of;
 #[cfg(feature = "sev_snp")]
 use std::num;
-#[cfg(feature = "sev_snp")]
+#[cfg(any(feature = "sev_snp", feature = "tdx"))]
 use std::os::fd::FromRawFd;
 use std::os::fd::OwnedFd;
 #[cfg(feature = "tdx")]
@@ -44,10 +44,10 @@ use anyhow::anyhow;
 #[cfg(feature = "sev_snp")]
 use igvm::snp_defs::{SevSelector, SevVmsa};
 use kvm_bindings::fam_wrappers::KvmIrqRouting;
-#[cfg(feature = "sev_snp")]
+#[cfg(any(feature = "sev_snp", feature = "tdx"))]
 use kvm_bindings::kvm_create_guest_memfd;
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
-#[cfg(feature = "sev_snp")]
+#[cfg(any(feature = "sev_snp", feature = "tdx"))]
 use log::debug;
 #[cfg(target_arch = "x86_64")]
 use log::warn;
@@ -141,7 +141,7 @@ use kvm_bindings::{
 #[cfg(target_arch = "riscv64")]
 use kvm_bindings::{KVM_REG_RISCV_CORE, KVM_REG_RISCV_TIMER, kvm_riscv_core};
 #[cfg(feature = "tdx")]
-use kvm_bindings::{KVM_X86_SW_PROTECTED_VM, KVMIO};
+use kvm_bindings::{KVM_X86_TDX_VM, KVMIO};
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{Xsave as xsave2, kvm_xsave2};
 pub use kvm_ioctls::{self, Cap, Kvm, VcpuExit};
@@ -209,10 +209,10 @@ ioctl_iow_nr!(
 
 #[cfg(feature = "sev_snp")]
 use igvm_defs::PAGE_SIZE_4K;
+#[cfg(any(feature = "sev_snp", feature = "tdx"))]
+use kvm_bindings::{KVM_MEMORY_ATTRIBUTE_PRIVATE, kvm_memory_attributes};
 #[cfg(feature = "sev_snp")]
-use kvm_bindings::{
-    KVM_MEMORY_ATTRIBUTE_PRIVATE, KVM_X86_SNP_VM, kvm_memory_attributes, kvm_segment as Segment,
-};
+use kvm_bindings::{KVM_X86_SNP_VM, kvm_segment as Segment};
 use vm_memory::GuestAddress;
 #[cfg(feature = "sev_snp")]
 use x86_64::sev;
@@ -618,6 +618,8 @@ struct KvmDirtyLogSlot {
 }
 
 struct KvmMemorySlot {
+    // These fields are currently only read by the SEV-SNP isolated-import
+    // path; the TDX path populates them for future shared/private bookkeeping.
     #[cfg_attr(not(feature = "sev_snp"), expect(dead_code))]
     guest_memfd: OwnedFd,
     #[cfg_attr(not(feature = "sev_snp"), expect(dead_code))]
@@ -946,7 +948,7 @@ impl vm::Vm for KvmVm {
             xsave_size,
             #[cfg(target_arch = "x86_64")]
             has_xcrs: self.check_extension(Cap::Xcrs),
-            #[cfg(feature = "sev_snp")]
+            #[cfg(any(feature = "sev_snp", feature = "tdx"))]
             vm_fd: self.fd.clone(),
             #[cfg(feature = "sev_snp")]
             memory_slots: self.memory_slots.clone(),
@@ -1121,7 +1123,7 @@ impl vm::Vm for KvmVm {
 
         // Create a per-region guest_memfd when supported.
         // Each region gets its own fd sized exactly to memory_size
-        #[cfg(feature = "sev_snp")]
+        #[cfg(any(feature = "sev_snp", feature = "tdx"))]
         let guest_memfd = if let Some(slots) = &self.memory_slots {
             // SAFETY: Safe because guest regions are guaranteed not to overlap.
             let fd = unsafe {
@@ -1147,7 +1149,7 @@ impl vm::Vm for KvmVm {
         } else {
             0
         };
-        #[cfg(not(feature = "sev_snp"))]
+        #[cfg(not(any(feature = "sev_snp", feature = "tdx")))]
         let guest_memfd = 0;
 
         let mut region = kvm_userspace_memory_region2 {
@@ -1194,7 +1196,7 @@ impl vm::Vm for KvmVm {
                 .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))?;
         }
 
-        #[cfg(feature = "sev_snp")]
+        #[cfg(any(feature = "sev_snp", feature = "tdx"))]
         if self.memory_slots.is_some() {
             self.fd
                 .set_memory_attributes(kvm_memory_attributes {
@@ -1495,13 +1497,31 @@ impl vm::Vm for KvmVm {
 
         let mut cpuid: Vec<kvm_bindings::kvm_cpuid_entry2> =
             cpuid.iter().map(|e| (*e).into()).collect();
+
+        // Derive XFAM (the TD's extended feature mask) from the guest CPUID
+        // before padding the table. CPUID.0xD reports the XSAVE state the TD
+        // is allowed to manage: sub-leaf 0 carries the XCR0-managed bits
+        // (EAX:low, EDX:high) and sub-leaf 1 carries the IA32_XSS-managed bits
+        // (ECX:low, EDX:high). The CPUID has already been masked by the TDX
+        // capabilities' supported_xfam, so this value is within the allowed
+        // set.
+        let xfam = tdx_xfam_from_cpuid(&cpuid);
+
         cpuid.resize(256, kvm_bindings::kvm_cpuid_entry2::default());
 
         // The upstream Linux 6.16 `struct kvm_tdx_init_vm` no longer carries
-        // `max_vcpus`; it must be configured via KVM_CAP_MAX_VCPUS before vCPU
-        // creation. Wiring that up belongs with the guest_memfd memory-model
-        // rework, so the argument is intentionally unused here for now.
-        let _ = max_vcpus;
+        // `max_vcpus`; the limit must be configured via KVM_CAP_MAX_VCPUS
+        // before KVM_TDX_INIT_VM and before any vCPU is created. tdx_init()
+        // runs after the VM fd is created but before create_boot_vcpus(), so
+        // this is the correct point to enable the capability.
+        let cap = kvm_bindings::kvm_enable_cap {
+            cap: kvm_bindings::KVM_CAP_MAX_VCPUS,
+            args: [max_vcpus as u64, 0, 0, 0],
+            ..Default::default()
+        };
+        self.fd.enable_cap(&cap).map_err(|e| {
+            vm::HypervisorVmError::InitializeTdx(io::Error::from_raw_os_error(e.errno()))
+        })?;
 
         // `struct kvm_tdx_init_vm`: the space before the trailing CPUIDs is a
         // fixed 256 bytes (attributes + xfam + 3 sha384 digests + reserved).
@@ -1520,8 +1540,7 @@ impl vm::Vm for KvmVm {
         }
         let data = TdxInitVm {
             attributes: 1 << TDX_ATTR_SEPT_VE_DISABLE,
-            // TODO: derive XFAM from the guest's enabled XCR0/XSS state.
-            xfam: 0,
+            xfam,
             mrconfigid: [0; 6],
             mrowner: [0; 6],
             mrownerconfig: [0; 6],
@@ -1587,6 +1606,30 @@ impl vm::Vm for KvmVm {
     fn as_any(&self) -> &dyn Any {
         self
     }
+}
+
+/// Compute the TD's XFAM (extended features available mask) from the guest
+/// CPUID view of the XSAVE state components.
+///
+/// CPUID.(EAX=0xD,ECX=0) reports the state managed via XCR0 (EAX = low 32
+/// bits, EDX = high 32 bits) and CPUID.(EAX=0xD,ECX=1) reports the state
+/// managed via IA32_XSS (ECX = low 32 bits, EDX = high 32 bits). XFAM is the
+/// union of both.
+#[cfg(feature = "tdx")]
+fn tdx_xfam_from_cpuid(cpuid: &[kvm_bindings::kvm_cpuid_entry2]) -> u64 {
+    let mut xcr0: u64 = 0;
+    let mut xss: u64 = 0;
+    for entry in cpuid {
+        if entry.function != 0xD {
+            continue;
+        }
+        match entry.index {
+            0 => xcr0 = u64::from(entry.eax) | (u64::from(entry.edx) << 32),
+            1 => xss = u64::from(entry.ecx) | (u64::from(entry.edx) << 32),
+            _ => {}
+        }
+    }
+    xcr0 | xss
 }
 
 #[cfg(feature = "tdx")]
@@ -1741,11 +1784,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
 
             #[cfg(feature = "tdx")]
             if _config.tdx_enabled {
-                // TODO: Align with upstream Linux 6.16 by switching to
-                // KVM_X86_TDX_VM (type 5). That requires guest_memfd-backed
-                // private memory plus KVM_SET_MEMORY_ATTRIBUTES, so it is
-                // deferred together with the TDX memory-model rework.
-                vm_type = KVM_X86_SW_PROTECTED_VM.into();
+                vm_type = KVM_X86_TDX_VM.into();
             }
         }
 
@@ -1784,6 +1823,12 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             let mut memory_slots = None;
             #[cfg(feature = "sev_snp")]
             if _config.sev_snp_enabled && fd.check_extension(Cap::GuestMemfd) {
+                memory_slots = Some(Arc::new(RwLock::new(HashMap::new())));
+            }
+            // TDX requires guest_memfd-backed private memory as well, so enable
+            // the per-region tracking that drives KVM_SET_USER_MEMORY_REGION2.
+            #[cfg(feature = "tdx")]
+            if _config.tdx_enabled && fd.check_extension(Cap::GuestMemfd) {
                 memory_slots = Some(Arc::new(RwLock::new(HashMap::new())));
             }
 
@@ -1965,7 +2010,7 @@ pub struct KvmVcpu {
     xsave_size: i32,
     #[cfg(target_arch = "x86_64")]
     has_xcrs: bool,
-    #[cfg(feature = "sev_snp")]
+    #[cfg(any(feature = "sev_snp", feature = "tdx"))]
     vm_fd: Arc<VmFd>,
     #[cfg(feature = "sev_snp")]
     memory_slots: Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
@@ -2699,7 +2744,7 @@ impl cpu::Vcpu for KvmVcpu {
                     }
                 }
 
-                #[cfg(feature = "sev_snp")]
+                #[cfg(any(feature = "sev_snp", feature = "tdx"))]
                 VcpuExit::MemoryFault { flags, gpa, size } => {
                     debug!("VcpuExit::MemoryFault: flags={flags:#x}, gpa={gpa:#x}, size={size:#x}");
 
