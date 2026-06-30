@@ -16,7 +16,7 @@ mod vec_cache;
 use std::cmp::{max, min};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::fs::{OpenOptions, read_link};
-use std::io::{self, Seek, SeekFrom};
+use std::io::{self, Seek};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::FileExt;
 use std::path::Path;
@@ -42,6 +42,7 @@ use vec_cache::{CacheMap, VecCache};
 
 use crate::aligned_file::AlignedFile;
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
+use crate::query_device_size;
 
 #[sorted]
 #[derive(Debug, Error)]
@@ -215,18 +216,14 @@ impl BackingFile {
 
         let (kind, virtual_size) = match backing_format {
             ImageType::Raw => {
-                let size = raw_file.seek(SeekFrom::End(0)).map_err(|e| {
-                    BlockError::new(
-                        BlockErrorKind::Io,
-                        Error::BackingFileIo(config.path.clone(), e),
-                    )
-                })?;
-                raw_file.rewind().map_err(|e| {
-                    BlockError::new(
-                        BlockErrorKind::Io,
-                        Error::BackingFileIo(config.path.clone(), e),
-                    )
-                })?;
+                let size = query_device_size(raw_file.file())
+                    .map_err(|e| {
+                        BlockError::new(
+                            BlockErrorKind::Io,
+                            Error::BackingFileIo(config.path.clone(), e),
+                        )
+                    })?
+                    .0;
                 (BackingKind::Raw(raw_file), size)
             }
             ImageType::Qcow2 => {
