@@ -27,11 +27,16 @@ The IGVM file format is designed to encapsulate all information required to laun
 
 At a conceptual level, this file format is a set of commands created by the tool that generated the file, used by the loader to construct the initial guest state. The file format also contains measurement information that the underlying platform will use to confirm that the file was loaded correctly and signed by the appropriate authorities.
 
-Cloud Hypervisor can be built using igvm feature flag along with mshv and/or sev-snp. IGVM only works with MSHV.
+Cloud Hypervisor can be built using the `igvm` feature flag along with `mshv`
+and/or `sev_snp`. IGVM is used for MSHV guests and for KVM SEV-SNP guests that
+boot through an IGVM stage0 image.
 
 ## SEV-SNP
 
-AMD's [Secure Encrypted Virtualization (SEV)](https://www.amd.com/en/developer/sev.html) and extensions such as Secure Nested Paging (SEV-SNP) encrypt memory and restrict access to a guest VM's memory and registers, securing it against a compromised hypervisor or VMM. They utilize the Platform Security Processor (PSP) to store keys and encrypt/decrypt the data. Microsoft has been continuously adding/improving support for SEV-SNP on Microsoft Hyper-V. Cloud-Hypervisor can be built with the sev_snp feature including mshv and igvm feature.
+AMD's [Secure Encrypted Virtualization (SEV)](https://www.amd.com/en/developer/sev.html) and extensions such as Secure Nested Paging (SEV-SNP) encrypt memory and restrict access to a guest VM's memory and registers, securing it against a compromised hypervisor or VMM. They utilize the Platform Security Processor (PSP) to store keys and encrypt/decrypt the data. Microsoft has been continuously adding/improving support for SEV-SNP on Microsoft Hyper-V.
+
+Cloud Hypervisor's default `sev_snp` feature enables the `mshv` and `igvm`
+features needed for the MSHV SEV-SNP path.
 
 ## Use Cases
 
