@@ -22,10 +22,10 @@
 
 ## Overview
 
-All Cloud Hypervisor builds and tests run inside a Docker container to
-provide a reproducible environment. The main entry point is
-`scripts/dev_cli.sh`, which manages the container lifecycle and
-forwards arguments to the appropriate test scripts.
+Cloud Hypervisor's development script runs builds and tests inside a
+Docker container to provide a reproducible environment. The main entry
+point is `scripts/dev_cli.sh`, which manages the container lifecycle
+and forwards arguments to the appropriate test scripts.
 
 The container image is published at
 `ghcr.io/cloud-hypervisor/cloud-hypervisor` and is automatically
