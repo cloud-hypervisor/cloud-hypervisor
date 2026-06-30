@@ -1008,6 +1008,18 @@ mod unit_tests {
     }
 
     #[test]
+    fn detect_image_type_recognizes_qcow2_magic() {
+        let mut file = basic_file(&valid_header_v3());
+        assert_eq!(detect_image_type(&mut file).unwrap(), ImageType::Qcow2);
+    }
+
+    #[test]
+    fn detect_image_type_treats_other_magic_as_raw() {
+        let mut file = basic_file(&[0u8; 16]);
+        assert_eq!(detect_image_type(&mut file).unwrap(), ImageType::Raw);
+    }
+
+    #[test]
     fn default_header_v2() {
         let header = QcowHeader::create_for_size_and_path(2, 0x10_0000, None)
             .expect("Failed to create header.");
