@@ -641,6 +641,8 @@ pub struct KvmVm {
     snp_guest_policy: OnceLock<u64>,
     dirty_log_slots: RwLock<HashMap<u32, KvmDirtyLogSlot>>,
     memory_slots: Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
+    #[cfg(feature = "sev_snp")]
+    memory_conversion_handler: Arc<OnceLock<Arc<dyn vm::MemoryConversionHandler>>>,
 }
 
 impl KvmVm {
@@ -759,6 +761,14 @@ impl KvmVm {
 /// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
 /// ```
 impl vm::Vm for KvmVm {
+    #[cfg(feature = "sev_snp")]
+    fn register_memory_conversion_handler(
+        &self,
+        handler: Arc<dyn vm::MemoryConversionHandler>,
+    ) -> bool {
+        self.memory_conversion_handler.set(handler).is_ok()
+    }
+
     #[cfg(feature = "sev_snp")]
     fn sev_snp_init(&self, guest_policy: igvm_defs::SnpPolicy) -> vm::Result<()> {
         self.sev_fd
@@ -941,6 +951,8 @@ impl vm::Vm for KvmVm {
             vm_fd: self.fd.clone(),
             #[cfg(feature = "sev_snp")]
             memory_slots: self.memory_slots.clone(),
+            #[cfg(feature = "sev_snp")]
+            memory_conversion_handler: self.memory_conversion_handler.clone(),
         };
         Ok(Box::new(vcpu))
     }
@@ -1797,6 +1809,8 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 #[cfg(feature = "sev_snp")]
                 snp_guest_policy: OnceLock::new(),
                 memory_slots,
+                #[cfg(feature = "sev_snp")]
+                memory_conversion_handler: Arc::new(OnceLock::new()),
             }))
         }
 
@@ -1896,10 +1910,26 @@ pub struct KvmVcpu {
     vm_fd: Arc<VmFd>,
     #[cfg(feature = "sev_snp")]
     memory_slots: Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
+    #[cfg(feature = "sev_snp")]
+    memory_conversion_handler: Arc<OnceLock<Arc<dyn vm::MemoryConversionHandler>>>,
 }
 
 #[cfg(feature = "sev_snp")]
 impl KvmVcpu {
+    fn notify_memory_conversion_handler(
+        &self,
+        gpa: u64,
+        size: u64,
+        to_shared: bool,
+    ) -> cpu::Result<()> {
+        if let Some(handler) = self.memory_conversion_handler.get() {
+            handler
+                .handle_conversion(gpa, size, to_shared)
+                .map_err(cpu::HypervisorCpuError::RunVcpu)?;
+        }
+        Ok(())
+    }
+
     fn punch_holes_in_guest_memfd(
         memory_slots: &Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
         gpa: u64,
@@ -2620,6 +2650,12 @@ impl cpu::Vcpu for KvmVcpu {
                                 Self::punch_holes_in_guest_memfd(&self.memory_slots, address, size);
                             }
 
+                            self.notify_memory_conversion_handler(
+                                address,
+                                size,
+                                set_private_attr == 0,
+                            )?;
+
                             Ok(cpu::VmExit::Ignore)
                         }
                         _ => Ok(cpu::VmExit::Ignore),
@@ -2654,8 +2690,11 @@ impl cpu::Vcpu for KvmVcpu {
                             attributes,
                             flags: 0,
                         })
-                        .map(|_| cpu::VmExit::Ignore)
-                        .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))
+                        .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
+
+                    self.notify_memory_conversion_handler(gpa, size, attributes == 0)?;
+
+                    Ok(cpu::VmExit::Ignore)
                 }
 
                 r => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(

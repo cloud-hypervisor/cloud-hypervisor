@@ -327,6 +327,17 @@ pub enum InterruptSourceConfig {
     MsiIrq(MsiIrqSourceConfig),
 }
 
+/// Handler invoked when a confidential VM converts guest memory between shared
+/// and private states.
+pub trait MemoryConversionHandler: Send + Sync {
+    fn handle_conversion(&self, gpa: u64, size: u64, to_shared: bool) -> anyhow::Result<()>;
+
+    /// Whether this strategy keeps guest RAM statically pinned into a device IOMMU.
+    fn pins_shared_backing(&self) -> bool {
+        false
+    }
+}
+
 ///
 /// Trait to represent a Vm
 ///
@@ -487,6 +498,15 @@ pub trait Vm: Send + Sync + Any {
     ) -> Result<()> {
         unimplemented!()
     }
+    /// Register a handler invoked on guest-memory shared/private conversions.
+    /// Returns whether registration was successful.
+    fn register_memory_conversion_handler(
+        &self,
+        _handler: Arc<dyn MemoryConversionHandler>,
+    ) -> bool {
+        false
+    }
+
     /// Initialize the VM
     fn init(&self) -> Result<()> {
         Ok(())
