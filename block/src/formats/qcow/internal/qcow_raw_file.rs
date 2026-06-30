@@ -5,7 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::fmt::Debug;
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io::{self, Read, Write};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::os::unix::fs::FileExt;
 
@@ -284,7 +284,7 @@ impl QcowRawFile {
     pub fn add_cluster_end(&mut self, max_valid_cluster_offset: u64) -> io::Result<Option<u64>> {
         // Determine where the new end of the file should be and set_len, which
         // translates to truncate(2).
-        let file_end: u64 = self.file.seek(SeekFrom::End(0))?;
+        let file_end: u64 = self.physical_size()?;
         let new_cluster_address: u64 = (file_end + self.cluster_size - 1) & !self.cluster_mask;
 
         if new_cluster_address > max_valid_cluster_offset {
