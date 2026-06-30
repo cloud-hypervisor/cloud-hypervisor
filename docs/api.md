@@ -227,8 +227,9 @@ $ ./cloud-hypervisor --dbus-service-name "org.cloudhypervisor.DBusApi" \
                      --dbus-object-path "/org/cloudhypervisor/DBusApi"
 ```
 
-This will start serving a service with the name `org.cloudhypervisor.DBusApi1`
-which in turn can be used to control and manage Cloud Hypervisor.
+This will start serving a service with the name `org.cloudhypervisor.DBusApi`
+and the interface `org.cloudhypervisor.DBusApi1`, which in turn can be used to
+control and manage Cloud Hypervisor.
 
 #### D-Bus API Interface
 
