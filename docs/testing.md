@@ -19,7 +19,6 @@
     - [Confidential VMs](#confidential-vms)
   - [Performance metrics](#performance-metrics)
   - [Code coverage](#code-coverage)
-  - [CI workflows](#ci-workflows)
 
 ## Overview
 
