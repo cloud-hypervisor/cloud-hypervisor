@@ -411,114 +411,22 @@ impl VhostUserHandle {
         kill_evt: Option<&EventFd>,
     ) -> Result<Self> {
         const ACCEPT_TIMEOUT: Duration = Duration::from_secs(60);
-
         if server {
             if unlink_socket {
-                let _ = fs::remove_file(socket_path);
+                // Remove any stale socket left by a previous backend. A
+                // missing path is the normal first-boot case, so only a
+                // genuine failure (e.g. permission denied) is an error.
+                match fs::remove_file(socket_path) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(Error::RemoveSocketPath(e)),
+                }
             }
 
             info!("Binding vhost-user listener...");
             let listener = UnixListener::bind(socket_path).map_err(Error::BindSocket)?;
-
-            #[repr(u64)]
-            enum AcceptEvent {
-                Timer = 0,
-                Kill = 1,
-                Listener = 2,
-            }
-
-            // Set the listener non-blocking so accept() never blocks the epoll loop.
-            listener
-                .set_nonblocking(true)
-                .map_err(Error::SetNonBlocking)?;
-
-            let mut accept_timer = TimerFd::new().map_err(|e| Error::TimerFdCreate(e.into()))?;
-            accept_timer
-                .reset(ACCEPT_TIMEOUT, None)
-                .map_err(|e| Error::TimerFdArm(e.into()))?;
-
-            let epoll = Epoll::new().map_err(Error::EpollCreate)?;
-            epoll
-                .ctl(
-                    ControlOperation::Add,
-                    listener.as_raw_fd(),
-                    EpollEvent::new(EventSet::IN, AcceptEvent::Listener as u64),
-                )
-                .map_err(Error::EpollCtl)?;
-            epoll
-                .ctl(
-                    ControlOperation::Add,
-                    accept_timer.as_raw_fd(),
-                    EpollEvent::new(EventSet::IN, AcceptEvent::Timer as u64),
-                )
-                .map_err(Error::EpollCtl)?;
-
-            if let Some(kill_evt) = kill_evt {
-                epoll
-                    .ctl(
-                        ControlOperation::Add,
-                        kill_evt.as_raw_fd(),
-                        EpollEvent::new(EventSet::IN, AcceptEvent::Kill as u64),
-                    )
-                    .map_err(Error::EpollCtl)?;
-            }
-
             info!("Waiting for incoming vhost-user connection...");
-            let mut events = [EpollEvent::default(); 1];
-            let stream = loop {
-                let event_count = match epoll.wait(-1, &mut events) {
-                    Ok(count) => count,
-                    Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                    Err(e) => return Err(Error::EpollWait(e)),
-                };
-                if event_count == 0 {
-                    continue;
-                }
-
-                match events[0].data() {
-                    x if x == AcceptEvent::Timer as u64 => {
-                        error!(
-                            "Timed out waiting for vhost-user connection on socket {socket_path}"
-                        );
-                        return Err(Error::VhostUserConnectTimeout);
-                    }
-                    x if x == AcceptEvent::Kill as u64 => {
-                        info!(
-                            "Aborting vhost-user accept for socket {socket_path}: kill event received"
-                        );
-                        return Err(Error::ConnectKilled);
-                    }
-                    x if x == AcceptEvent::Listener as u64 => match listener.accept() {
-                        Ok((stream, _)) => {
-                            // The listener is non-blocking for the epoll loop, but the
-                            // accepted socket must be blocking for the vhost-user protocol.
-                            stream
-                                .set_nonblocking(false)
-                                .map_err(Error::SetNonBlocking)?;
-                            break stream;
-                        }
-                        Err(e)
-                            if matches!(
-                                e.kind(),
-                                io::ErrorKind::WouldBlock
-                                    | io::ErrorKind::Interrupted
-                                    | io::ErrorKind::ConnectionAborted
-                            ) =>
-                        {
-                            continue;
-                        }
-                        Err(e) => return Err(Error::AcceptConnection(e)),
-                    },
-                    x => {
-                        error!(
-                            "Unexpected epoll event data {x} on vhost-user accept for {socket_path}"
-                        );
-                        return Err(Error::EpollWait(io::Error::other(format!(
-                            "unexpected epoll event data: {x}"
-                        ))));
-                    }
-                }
-            };
+            let (stream, _) = listener.accept().map_err(Error::AcceptConnection)?;
 
             Ok(VhostUserHandle {
                 vu: Frontend::from_stream(stream, num_queues),
