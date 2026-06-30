@@ -337,6 +337,12 @@ pub enum InterruptSourceConfig {
 pub trait MemoryConversionHandler: Send + Sync {
     /// Handles conversion of `[gpa, gpa + size)` to shared or private memory.
     fn handle_conversion(&self, gpa: u64, size: u64, to_shared: bool) -> anyhow::Result<()>;
+
+    /// Whether this strategy allows reclaiming host RAM after a page is
+    /// converted to private.
+    fn reclaims_shared_mapping(&self) -> bool {
+        false
+    }
 }
 
 ///

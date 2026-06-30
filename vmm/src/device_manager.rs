@@ -131,6 +131,8 @@ use crate::interrupt::{LegacyUserspaceInterruptManager, MsiInterruptManager};
 use crate::memory_manager::{Error as MemoryManagerError, MEMORY_MANAGER_ACPI_SIZE, MemoryManager};
 use crate::pci_segment::PciSegment;
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
+#[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+use crate::sev::SevSnpSharedPageTracker;
 #[cfg(feature = "ivshmem")]
 use crate::vm_config::IvshmemConfig;
 use crate::vm_config::{
@@ -601,6 +603,16 @@ pub enum DeviceManagerError {
     /// Failed to remove DMA mapping handler from virtio-mem device.
     #[error("Failed to remove DMA mapping handler from virtio-mem device")]
     RemoveDmaMappingHandlerVirtioMem(#[source] mem::Error),
+
+    /// Failed to add a DMA mapping handler to the SEV-SNP shared-page tracker.
+    #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+    #[error("Failed to add DMA mapping handler to SEV-SNP shared-page tracker: {0}")]
+    AddDmaMappingHandlerSevSnp(anyhow::Error),
+
+    /// virtio-mem is unsupported alongside confidential SEV-SNP VFIO over iommufd.
+    #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+    #[error("virtio-mem is unsupported with confidential SEV-SNP VFIO over iommufd")]
+    VirtioMemUnsupportedWithConfidentialVfio,
 
     /// Failed to create vfio-user client
     #[error("Failed to create vfio-user client")]
@@ -1090,6 +1102,10 @@ pub struct DeviceManager {
     // DeviceManager to be reused.
     vfio_ops: Option<Arc<dyn VfioOps>>,
 
+    // Number of active VFIO devices sharing `vfio_ops`.
+    #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+    shared_vfio_devices: usize,
+
     // Paravirtualized IOMMU
     iommu_device: Option<Arc<Mutex<virtio_devices::Iommu>>>,
     iommu_mapping: Option<Arc<IommuMapping>>,
@@ -1167,6 +1183,10 @@ pub struct DeviceManager {
     rate_limit_groups: HashMap<String, Arc<RateLimiterGroup>>,
 
     mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
+
+    // Track shared pages for SEV-SNP VFIO
+    #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+    sev_snp_shared_page_tracker: Option<Arc<SevSnpSharedPageTracker>>,
 
     #[cfg(feature = "fw_cfg")]
     fw_cfg: Option<Arc<Mutex<FwCfg>>>,
@@ -1421,6 +1441,8 @@ impl DeviceManager {
             legacy_interrupt_manager: None,
             passthrough_device: None,
             vfio_ops: None,
+            #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+            shared_vfio_devices: 0,
             iommu_device: None,
             iommu_mapping: None,
             iommu_attached_devices: None,
@@ -1457,11 +1479,21 @@ impl DeviceManager {
             acpi_platform_addresses: AcpiPlatformAddresses::default(),
             rate_limit_groups,
             mmio_regions: Arc::new(Mutex::new(Vec::new())),
+            #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+            sev_snp_shared_page_tracker: None,
             #[cfg(feature = "fw_cfg")]
             fw_cfg: None,
             #[cfg(feature = "ivshmem")]
             ivshmem_device: None,
             _acpi_cpu_hotplug_controller: acpi_cpu_hotplug_controller,
+        };
+
+        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        let device_manager = {
+            let mut device_manager = device_manager;
+            // Set up the SEV-SNP shared-page tracker
+            device_manager.create_sev_snp_shared_page_tracker_if_enabled();
+            device_manager
         };
 
         let device_manager = Arc::new(Mutex::new(device_manager));
@@ -3862,6 +3894,14 @@ impl DeviceManager {
         device_cfg: &mut DeviceConfig,
         snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<(PciBdf, String)> {
+        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        if !device_cfg.pci_common.iommu
+            && self.sev_snp_shared_page_tracker.is_some()
+            && !self.virtio_mem_devices.is_empty()
+        {
+            return Err(DeviceManagerError::VirtioMemUnsupportedWithConfidentialVfio);
+        }
+
         // If the passthrough device has not been created yet, it is created
         // here and stored in the DeviceManager structure for future needs.
         if self.passthrough_device.is_none() {
@@ -4088,32 +4128,55 @@ impl DeviceManager {
         };
 
         if needs_dma_mapping {
-            // Register DMA mapping in IOMMU.
-            // Do not register virtio-mem regions, as they are handled directly by
-            // virtio-mem device itself.
-            for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
-                for region in zone.regions() {
-                    // vfio_dma_map is unsound and ought to be marked as unsafe
-                    #[allow(unused_unsafe)]
-                    // SAFETY: GuestMemoryMmap guarantees that region points
-                    // to len bytes of valid memory starting at as_ptr()
-                    // that will only be freed with munmap().
-                    unsafe {
-                        vfio_ops.vfio_dma_map(
-                            region.start_addr().raw_value(),
-                            region.len() as usize,
-                            region.as_ptr(),
-                        )
-                    }
-                    .map_err(DeviceManagerError::VfioDmaMap)?;
-                }
-            }
-
             let vfio_mapping = Arc::new(VfioDmaMapping::new(
                 Arc::clone(&vfio_ops),
                 Arc::new(self.memory_manager.lock().unwrap().guest_memory()),
                 Arc::clone(&self.mmio_regions),
             ));
+
+            #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+            let static_map_all_ram = match self.sev_snp_shared_page_tracker.as_ref() {
+                // Confidential VM over iommufd supports shared/private tracking.
+                Some(tracker) => {
+                    tracker
+                        .add_dma_mapping_handler(vfio_mapping.clone())
+                        .map_err(DeviceManagerError::AddDmaMappingHandlerSevSnp)?;
+                    false
+                }
+                None => {
+                    if self.config.lock().unwrap().is_sev_snp_enabled() {
+                        warn!(
+                            "Statically pinning all guest RAM (no reclaim) over a non-iommufd VFIO backend."
+                        );
+                    }
+                    true
+                }
+            };
+            #[cfg(not(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg")))]
+            let static_map_all_ram = true;
+
+            if static_map_all_ram {
+                // Statically map all guest RAM into the IOMMU. Do not register
+                // virtio-mem regions, as they are handled directly by the
+                // virtio-mem device itself.
+                for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
+                    for region in zone.regions() {
+                        // vfio_dma_map is unsound and ought to be marked as unsafe
+                        #[allow(unused_unsafe)]
+                        // SAFETY: GuestMemoryMmap guarantees that region points
+                        // to len bytes of valid memory starting at as_ptr()
+                        // that will only be freed with munmap().
+                        unsafe {
+                            vfio_ops.vfio_dma_map(
+                                region.start_addr().raw_value(),
+                                region.len() as usize,
+                                region.as_ptr(),
+                            )
+                        }
+                        .map_err(DeviceManagerError::VfioDmaMap)?;
+                    }
+                }
+            }
 
             for virtio_mem_device in self.virtio_mem_devices.iter() {
                 virtio_mem_device
@@ -4218,6 +4281,11 @@ impl DeviceManager {
             pci_device_bdf,
             bars,
         )?;
+
+        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        if !device_cfg.pci_common.iommu {
+            self.shared_vfio_devices += 1;
+        }
 
         Ok((pci_device_bdf, vfio_name))
     }
@@ -5143,10 +5211,20 @@ impl DeviceManager {
             iommu_attached = true;
         }
 
+        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        let mut removed_shared_vfio_device = false;
+
         let (pci_device, bus_device, virtio_device, remove_dma_handler) = match pci_device_handle {
-            // VirtioMemMappingSource::Container cleanup is handled by
-            // cleanup_vfio_ops when the last VFIO device is removed.
+            // The container-wide VirtioMemMappingSource::Container mapping is
+            // shared across VFIO devices, so it is not removed per-device here.
+            // It goes away when cleanup_vfio_ops drops the container after the
+            // last shared VFIO device is removed.
             PciDeviceHandle::Vfio(vfio_pci_device) => {
+                #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+                {
+                    removed_shared_vfio_device = !vfio_pci_device.lock().unwrap().iommu_attached();
+                }
+
                 // Remove this device's MMIO regions from the DeviceManager's
                 // mmio_regions list. We match on UserMemoryRegion slot numbers
                 // rather than MmioRegion start addresses because move_bar()
@@ -5330,6 +5408,15 @@ impl DeviceManager {
         // buses where it was stored. At the end of this function, after
         // any_device, bus_device and pci_device are released, the actual
         // device will be dropped.
+
+        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        if removed_shared_vfio_device {
+            if self.shared_vfio_devices == 0 {
+                error!("shared VFIO device count underflow on eject, falling to 0");
+            }
+            self.shared_vfio_devices = self.shared_vfio_devices.saturating_sub(1);
+        }
+
         Ok(())
     }
 
@@ -5564,11 +5651,64 @@ impl DeviceManager {
     }
 
     fn cleanup_vfio_ops(&mut self) {
-        // Drop the VfioOps instance when "Self" is the only reference
+        // We need to release every other container reference before dropping
+        // `self.vfio_ops`, so its drop closes the container fd and unpins
+        // the shared pages.
+        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        if self.sev_snp_shared_page_tracker.is_some() {
+            if self.vfio_ops.is_some() && self.shared_vfio_devices == 0 {
+                // Drop the tracker's handler. The tracker itself persists so a
+                // later VFIO attach replays the current shared set.
+                if let Some(tracker) = &self.sev_snp_shared_page_tracker {
+                    tracker.clear_dma_mapping_handler();
+                }
+                self.vfio_ops = None;
+            }
+            return;
+        }
+
+        // Drop the VfioOps instance when "Self" is the only reference.
         if let Some(1) = self.vfio_ops.as_ref().map(Arc::strong_count) {
             debug!("Drop VfioOps given no active VFIO devices.");
             self.vfio_ops = None;
         }
+    }
+
+    #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+    fn create_sev_snp_shared_page_tracker_if_enabled(&mut self) {
+        if self.sev_snp_shared_page_tracker.is_some() {
+            return;
+        }
+        if !self.config.lock().unwrap().is_sev_snp_enabled() {
+            return;
+        }
+        // The per-page tracker is only supported over an iommufd backend.
+        // Without it, confidential VFIO falls back to static-mapping all pages.
+        let iommufd = self
+            .config
+            .lock()
+            .unwrap()
+            .platform
+            .as_ref()
+            .is_some_and(|p| p.iommufd);
+        if !iommufd {
+            return;
+        }
+        let tracker = Arc::new(SevSnpSharedPageTracker::new());
+        if let Err(e) = self
+            .address_manager
+            .vm
+            .register_memory_conversion_handler(tracker.clone())
+        {
+            warn!("SEV-SNP VM: failed to register the shared-page tracker: {e:?}");
+            return;
+        }
+        for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
+            for region in zone.regions() {
+                tracker.register_region(region.start_addr().raw_value(), region.len());
+            }
+        }
+        self.sev_snp_shared_page_tracker = Some(tracker);
     }
 }
 

@@ -10,6 +10,7 @@ use std::os::unix::fs::FileExt;
 use std::result;
 use std::sync::{Arc, Mutex};
 
+use hypervisor::MemoryConversionHandler;
 use linux_loader::bootparam::boot_params;
 use sha2::{Digest, Sha256};
 use uuid::{Uuid, uuid};
@@ -216,7 +217,6 @@ pub struct SevSnpSharedPageTracker {
     inner: Mutex<Inner>,
 }
 
-#[expect(dead_code)]
 impl SevSnpSharedPageTracker {
     pub fn new() -> Self {
         Self::default()
@@ -338,6 +338,19 @@ impl SevSnpSharedPageTracker {
             }
         }
         Ok(())
+    }
+}
+
+impl MemoryConversionHandler for SevSnpSharedPageTracker {
+    fn handle_conversion(&self, gpa: u64, size: u64, to_shared: bool) -> anyhow::Result<()> {
+        self.set_shared(gpa, size, to_shared)
+            .map_err(|e| anyhow::anyhow!("confidential VFIO conversion failed: {e}"))
+    }
+
+    /// Only reclaim once a VFIO device is attached as `handle_conversion` would
+    /// have unmapped the page, so freeing its stale mapping is safe.
+    fn reclaims_shared_mapping(&self) -> bool {
+        self.has_dma_handler()
     }
 }
 

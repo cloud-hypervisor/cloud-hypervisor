@@ -628,6 +628,8 @@ struct KvmMemorySlot {
     guest_phys_addr: u64,
     #[cfg_attr(not(feature = "sev_snp"), expect(dead_code))]
     memory_size: u64,
+    #[cfg_attr(not(feature = "sev_snp"), expect(dead_code))]
+    userspace_addr: u64,
 }
 
 /// Wrapper over KVM VM ioctls.
@@ -1143,6 +1145,7 @@ impl vm::Vm for KvmVm {
                     guest_memfd: fd,
                     guest_phys_addr,
                     memory_size: memory_size as u64,
+                    userspace_addr: userspace_addr as usize as u64,
                 },
             );
             raw_fd
@@ -1929,6 +1932,13 @@ impl KvmVcpu {
         Ok(())
     }
 
+    /// Whether to discard the stale shared mapping on conversion to private.
+    fn should_discard_shared_mapping(&self) -> bool {
+        self.memory_conversion_handler
+            .get()
+            .is_some_and(|h| h.reclaims_shared_mapping())
+    }
+
     fn punch_holes_in_guest_memfd(
         memory_slots: &Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
         gpa: u64,
@@ -1963,6 +1973,50 @@ impl KvmVcpu {
             if ret != 0 {
                 error!(
                     "Error punching hole in the guest_memfd: gpa={gpa:#x} offset={offset:#x} len={len:#x}: {}",
+                    io::Error::last_os_error()
+                );
+            }
+        }
+    }
+
+    /// Discard the stale *shared* mapping for `[gpa, gpa + size)`.
+    fn discard_shared_mapping(
+        memory_slots: &Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
+        gpa: u64,
+        size: u64,
+    ) {
+        let Some(slots) = memory_slots else {
+            return;
+        };
+        let slots = slots.read().unwrap();
+        let req_end = gpa.saturating_add(size);
+
+        for slot in slots.values() {
+            let slot_end = slot.guest_phys_addr.saturating_add(slot.memory_size);
+            if gpa >= slot_end || req_end <= slot.guest_phys_addr {
+                continue;
+            }
+
+            let overlap_start = gpa.max(slot.guest_phys_addr);
+            let overlap_end = req_end.min(slot_end);
+            let offset = overlap_start - slot.guest_phys_addr;
+            let len = overlap_end - overlap_start;
+
+            let addr = (slot.userspace_addr as usize + offset as usize) as *mut libc::c_void;
+
+            // MADV_REMOVE frees the backing store for shmem/memfd/hugetlb (shared=on,
+            // hugepages). So fall back to MADV_DONTNEED if MADV_REMOVE is rejected for
+            // default anonymous backing.
+            //
+            // SAFETY: [userspace_addr + offset, + len) lies within the slot's range.
+            let mut ret = unsafe { libc::madvise(addr, len as usize, libc::MADV_REMOVE) };
+            if ret != 0 {
+                // SAFETY: [userspace_addr + offset, + len) lies within the slot's range.
+                ret = unsafe { libc::madvise(addr, len as usize, libc::MADV_DONTNEED) };
+            }
+            if ret != 0 {
+                error!(
+                    "Error discarding shared backing: gpa={gpa:#x} offset={offset:#x} len={len:#x}: {}",
                     io::Error::last_os_error()
                 );
             }
@@ -2655,6 +2709,10 @@ impl cpu::Vcpu for KvmVcpu {
                                 set_private_attr == 0,
                             )?;
 
+                            if set_private_attr != 0 && self.should_discard_shared_mapping() {
+                                Self::discard_shared_mapping(&self.memory_slots, address, size);
+                            }
+
                             Ok(cpu::VmExit::Ignore)
                         }
                         _ => Ok(cpu::VmExit::Ignore),
@@ -2692,6 +2750,10 @@ impl cpu::Vcpu for KvmVcpu {
                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
 
                     self.notify_memory_conversion_handler(gpa, size, attributes == 0)?;
+
+                    if attributes != 0 && self.should_discard_shared_mapping() {
+                        Self::discard_shared_mapping(&self.memory_slots, gpa, size);
+                    }
 
                     Ok(cpu::VmExit::Ignore)
                 }
