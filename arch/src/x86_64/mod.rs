@@ -1009,16 +1009,16 @@ fn common_cpuid_tdx_configuration(
     for entry in cpuid.iter_mut().filter(|entry| entry.function == 0xd) {
         let xcr0_mask: u64 = 0x82ff;
         let xss_mask: u64 = !xcr0_mask;
+        // Upstream Linux 6.16 reports a single `supported_xfam` mask of the
+        // XSAVE state components the TDX module can virtualize, replacing the
+        // old fixed0/fixed1 pair. Mask the guest CPUID.0xD leaf down to the
+        // supported components.
         if entry.index == 0 {
-            entry.eax &= (caps.xfam_fixed0 as u32) & (xcr0_mask as u32);
-            entry.eax |= (caps.xfam_fixed1 as u32) & (xcr0_mask as u32);
-            entry.edx &= ((caps.xfam_fixed0 & xcr0_mask) >> 32) as u32;
-            entry.edx |= ((caps.xfam_fixed1 & xcr0_mask) >> 32) as u32;
+            entry.eax &= (caps.supported_xfam as u32) & (xcr0_mask as u32);
+            entry.edx &= ((caps.supported_xfam & xcr0_mask) >> 32) as u32;
         } else if entry.index == 1 {
-            entry.ecx &= (caps.xfam_fixed0 as u32) & (xss_mask as u32);
-            entry.ecx |= (caps.xfam_fixed1 as u32) & (xss_mask as u32);
-            entry.edx &= ((caps.xfam_fixed0 & xss_mask) >> 32) as u32;
-            entry.edx |= ((caps.xfam_fixed1 & xss_mask) >> 32) as u32;
+            entry.ecx &= (caps.supported_xfam as u32) & (xss_mask as u32);
+            entry.edx &= ((caps.supported_xfam & xss_mask) >> 32) as u32;
         }
     }
 

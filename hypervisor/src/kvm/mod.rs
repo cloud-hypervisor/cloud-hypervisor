@@ -279,6 +279,8 @@ const TDG_VP_VMCALL_INVALID_OPERAND: u64 = 0x8000000000000000;
 #[cfg(feature = "tdx")]
 ioctl_iowr_nr!(KVM_MEMORY_ENCRYPT_OP, KVMIO, 0xba, raw::c_ulong);
 
+// Trust Domain eXtension sub-ioctl() commands, matching `enum kvm_tdx_cmd_id`
+// in the upstream Linux 6.16 UAPI (arch/x86/include/uapi/asm/kvm.h).
 #[cfg(feature = "tdx")]
 #[repr(u32)]
 enum TdxCommand {
@@ -287,6 +289,8 @@ enum TdxCommand {
     InitVcpu,
     InitMemRegion,
     Finalize,
+    #[allow(dead_code)] // Used once KVM_TDX_GET_CPUID support is added
+    GetCpuid,
 }
 
 #[cfg(feature = "tdx")]
@@ -301,32 +305,24 @@ pub enum TdxExitStatus {
     InvalidOperand,
 }
 
-#[cfg(feature = "tdx")]
-const TDX_MAX_NR_CPUID_CONFIGS: usize = 6;
-
-#[cfg(feature = "tdx")]
-#[repr(C)]
-#[derive(Debug, Default)]
-pub struct TdxCpuidConfig {
-    pub leaf: u32,
-    pub sub_leaf: u32,
-    pub eax: u32,
-    pub ebx: u32,
-    pub ecx: u32,
-    pub edx: u32,
-}
-
+// `struct kvm_tdx_capabilities` as defined by the upstream Linux 6.16 UAPI.
+// `Default` cannot be derived because of the 256-entry CPUID array, so the
+// struct is built explicitly in `tdx_capabilities()`.
 #[cfg(feature = "tdx")]
 #[repr(C)]
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct TdxCapabilities {
-    pub attrs_fixed0: u64,
-    pub attrs_fixed1: u64,
-    pub xfam_fixed0: u64,
-    pub xfam_fixed1: u64,
-    pub nr_cpuid_configs: u32,
-    pub padding: u32,
-    pub cpuid_configs: [TdxCpuidConfig; TDX_MAX_NR_CPUID_CONFIGS],
+    pub supported_attrs: u64,
+    pub supported_xfam: u64,
+    pub kernel_tdvmcallinfo_1_r11: u64,
+    pub user_tdvmcallinfo_1_r11: u64,
+    pub kernel_tdvmcallinfo_1_r12: u64,
+    pub user_tdvmcallinfo_1_r12: u64,
+    pub reserved: [u64; 250],
+    // Trailing `struct kvm_cpuid2`: nent + padding + flexible entries[].
+    pub cpuid_nent: u32,
+    pub cpuid_padding: u32,
+    pub cpuid_entries: [kvm_bindings::kvm_cpuid_entry2; 256],
 }
 
 #[cfg(feature = "tdx")]
@@ -1501,25 +1497,35 @@ impl vm::Vm for KvmVm {
             cpuid.iter().map(|e| (*e).into()).collect();
         cpuid.resize(256, kvm_bindings::kvm_cpuid_entry2::default());
 
+        // The upstream Linux 6.16 `struct kvm_tdx_init_vm` no longer carries
+        // `max_vcpus`; it must be configured via KVM_CAP_MAX_VCPUS before vCPU
+        // creation. Wiring that up belongs with the guest_memfd memory-model
+        // rework, so the argument is intentionally unused here for now.
+        let _ = max_vcpus;
+
+        // `struct kvm_tdx_init_vm`: the space before the trailing CPUIDs is a
+        // fixed 256 bytes (attributes + xfam + 3 sha384 digests + reserved).
         #[repr(C)]
         struct TdxInitVm {
             attributes: u64,
-            max_vcpus: u32,
-            padding: u32,
+            xfam: u64,
             mrconfigid: [u64; 6],
             mrowner: [u64; 6],
             mrownerconfig: [u64; 6],
+            reserved: [u64; 12],
+            // Trailing `struct kvm_cpuid2`: nent + padding + entries[].
             cpuid_nent: u32,
             cpuid_padding: u32,
             cpuid_entries: [kvm_bindings::kvm_cpuid_entry2; 256],
         }
         let data = TdxInitVm {
             attributes: 1 << TDX_ATTR_SEPT_VE_DISABLE,
-            max_vcpus,
-            padding: 0,
+            // TODO: derive XFAM from the guest's enabled XCR0/XSS state.
+            xfam: 0,
             mrconfigid: [0; 6],
             mrowner: [0; 6],
             mrownerconfig: [0; 6],
+            reserved: [0; 12],
             cpuid_nent: cpuid.len() as u32,
             cpuid_padding: 0,
             cpuid_entries: cpuid.as_slice().try_into().unwrap(),
@@ -1590,20 +1596,19 @@ fn tdx_command(
     flags: u32,
     data: *const libc::c_void,
 ) -> io::Result<()> {
+    // `struct kvm_tdx_cmd` from the upstream Linux 6.16 UAPI.
     #[repr(C)]
     struct TdxIoctlCmd {
         command: TdxCommand,
         flags: u32,
         data: u64,
-        error: u64,
-        unused: u64,
+        hw_error: u64,
     }
     let cmd = TdxIoctlCmd {
         command,
         flags,
         data: data as _,
-        error: 0,
-        unused: 0,
+        hw_error: 0,
     };
     // SAFETY: FFI call. All input parameters are valid.
     let ret =
@@ -1736,6 +1741,10 @@ impl hypervisor::Hypervisor for KvmHypervisor {
 
             #[cfg(feature = "tdx")]
             if _config.tdx_enabled {
+                // TODO: Align with upstream Linux 6.16 by switching to
+                // KVM_X86_TDX_VM (type 5). That requires guest_memfd-backed
+                // private memory plus KVM_SET_MEMORY_ATTRIBUTES, so it is
+                // deferred together with the TDX memory-model rework.
                 vm_type = KVM_X86_SW_PROTECTED_VM.into();
             }
         }
@@ -1898,8 +1907,16 @@ impl hypervisor::Hypervisor for KvmHypervisor {
     #[cfg(feature = "tdx")]
     fn tdx_capabilities(&self) -> hypervisor::Result<TdxCapabilities> {
         let data = TdxCapabilities {
-            nr_cpuid_configs: TDX_MAX_NR_CPUID_CONFIGS as u32,
-            ..Default::default()
+            supported_attrs: 0,
+            supported_xfam: 0,
+            kernel_tdvmcallinfo_1_r11: 0,
+            user_tdvmcallinfo_1_r11: 0,
+            kernel_tdvmcallinfo_1_r12: 0,
+            user_tdvmcallinfo_1_r12: 0,
+            reserved: [0; 250],
+            cpuid_nent: 256,
+            cpuid_padding: 0,
+            cpuid_entries: [kvm_bindings::kvm_cpuid_entry2::default(); 256],
         };
 
         tdx_command(
