@@ -395,12 +395,17 @@ mod unit_tests {
     const FILE_LEN: u64 = 0x40000; // 256 KiB filler so all offsets are valid
 
     fn make_qcow_raw() -> (TempFile, QcowRawFile) {
+        make_qcow_raw_bits(16)
+    }
+
+    fn make_qcow_raw_bits(refcount_bits: u64) -> (TempFile, QcowRawFile) {
         let temp_file = TempFile::new().unwrap();
         temp_file.as_file().set_len(FILE_LEN).unwrap();
 
         let file = temp_file.as_file().try_clone().unwrap();
         let raw = AlignedFile::new(file, false);
-        let qcow_raw = QcowRawFile::from(raw, CLUSTER_SIZE, 16).expect("QcowRawFile::from");
+        let qcow_raw =
+            QcowRawFile::from(raw, CLUSTER_SIZE, refcount_bits).expect("QcowRawFile::from");
         (temp_file, qcow_raw)
     }
 
@@ -508,5 +513,56 @@ mod unit_tests {
         verify.seek(SeekFrom::Start(CLUSTER_SIZE)).unwrap();
         verify.read_exact(&mut buf).unwrap();
         assert!(buf.iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn refcount_block_round_trips() {
+        let (_temp_file, mut qcow) = make_qcow_raw_bits(16);
+        let count = qcow.refcount_block_entries as usize;
+        let table: Vec<u64> = (0..count).map(|i| (i % 251) as u64).collect();
+
+        qcow.write_refcount_block(TARGET_OFFSET, &table)
+            .expect("write_refcount_block");
+        let read_back = qcow
+            .read_refcount_block(TARGET_OFFSET)
+            .expect("read_refcount_block");
+
+        assert_eq!(read_back, table);
+    }
+
+    #[test]
+    fn refcount_block_subbyte_round_trips() {
+        let (_temp_file, mut qcow) = make_qcow_raw_bits(4);
+        let count = qcow.refcount_block_entries as usize;
+        let table: Vec<u64> = (0..count).map(|i| (i % 16) as u64).collect();
+
+        qcow.write_refcount_block(TARGET_OFFSET, &table)
+            .expect("write_refcount_block");
+        let read_back = qcow
+            .read_refcount_block(TARGET_OFFSET)
+            .expect("read_refcount_block");
+
+        assert_eq!(read_back, table);
+    }
+
+    #[test]
+    fn add_cluster_end_appends_aligned_cluster() {
+        let (_temp_file, mut qcow) = make_qcow_raw();
+        let before = qcow.physical_size().unwrap();
+
+        let addr = qcow
+            .add_cluster_end(u64::MAX)
+            .expect("add_cluster_end")
+            .expect("a cluster was allocated");
+
+        assert_eq!(addr % CLUSTER_SIZE, 0);
+        assert!(addr >= before);
+        assert_eq!(qcow.physical_size().unwrap(), addr + CLUSTER_SIZE);
+    }
+
+    #[test]
+    fn add_cluster_end_respects_max_offset() {
+        let (_temp_file, mut qcow) = make_qcow_raw();
+        assert!(qcow.add_cluster_end(0).unwrap().is_none());
     }
 }
