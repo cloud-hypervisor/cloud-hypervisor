@@ -18,6 +18,7 @@ use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::fs::{OpenOptions, read_link};
 use std::io::{self, Seek, SeekFrom};
 use std::os::fd::AsRawFd;
+use std::os::unix::fs::FileExt;
 use std::path::Path;
 use std::{result, str};
 
@@ -387,15 +388,15 @@ pub(crate) fn parse_qcow(
     // The first cluster should always have a non-zero refcount, so if it is 0,
     // this is an old file with broken refcounts, which requires a rebuild.
     let mut refcount_rebuild_required = true;
-    file.seek(SeekFrom::Start(header.refcount_table_offset))
-        .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SeekingFile(e)))?;
-    let first_refblock_addr = u64::read_be(&mut file)
+    let mut first_refblock_bytes = [0u8; 8];
+    file.read_exact_at(&mut first_refblock_bytes, header.refcount_table_offset)
         .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ReadingHeader(e)))?;
+    let first_refblock_addr = u64::from_be_bytes(first_refblock_bytes);
     if first_refblock_addr != 0 {
-        file.seek(SeekFrom::Start(first_refblock_addr))
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SeekingFile(e)))?;
-        let first_cluster_refcount = u16::read_be(&mut file)
+        let mut refcount_bytes = [0u8; 2];
+        file.read_exact_at(&mut refcount_bytes, first_refblock_addr)
             .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ReadingHeader(e)))?;
+        let first_cluster_refcount = u16::from_be_bytes(refcount_bytes);
         if first_cluster_refcount != 0 {
             refcount_rebuild_required = false;
         }
