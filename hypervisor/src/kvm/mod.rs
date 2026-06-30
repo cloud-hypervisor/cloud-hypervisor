@@ -2060,6 +2060,75 @@ impl KvmVcpu {
     }
 }
 
+#[cfg(feature = "tdx")]
+impl KvmVcpu {
+    /// Parse and log a `TDG.VP.VMCALL<ReportFatalError>` request delivered as a
+    /// `KVM_SYSTEM_EVENT_TDX_FATAL` system event.
+    ///
+    /// `data` is the `kvm_run.system_event.data[]` array, which KVM populates
+    /// with the guest's general-purpose registers indexed by their x86 GPR
+    /// number. The decoding mirrors QEMU's `tdx_handle_report_fatal_error()`.
+    fn handle_tdx_fatal_error(data: &[u64]) {
+        // x86 GPR indices within `kvm_run.system_event.data[]`.
+        const R_RCX: usize = 1;
+        const R_RDX: usize = 2;
+        const R_RBX: usize = 3;
+        const R_RSI: usize = 6;
+        const R_RDI: usize = 7;
+        const R_R8: usize = 8;
+        const R_R9: usize = 9;
+        const R_R12: usize = 12;
+        const R_R13: usize = 13;
+        const R_R14: usize = 14;
+        const R_R15: usize = 15;
+        // Bit 63 of the error code signals that R13 carries a valid GPA.
+        const TDX_REPORT_FATAL_ERROR_GPA_VALID: u64 = 1 << 63;
+
+        let reg = |i: usize| data.get(i).copied().unwrap_or(0);
+
+        let error_code = reg(R_R12);
+        let reg_mask = reg(R_RCX);
+
+        // Optional 64-byte ASCII message. Per the TDX GHCI spec only these 8
+        // registers may carry it, in this fixed order: R14, R15, RBX, RDI,
+        // RSI, R8, R9, RDX. `reg_mask` flags which of them are valid.
+        let mut bytes = Vec::new();
+        if reg_mask != 0 {
+            for r in [R_R14, R_R15, R_RBX, R_RDI, R_RSI, R_R8, R_R9, R_RDX] {
+                if reg_mask & (1u64 << r) != 0 {
+                    bytes.extend_from_slice(&reg(r).to_le_bytes());
+                }
+            }
+        }
+        let message: String = bytes
+            .iter()
+            .take_while(|&&b| b != 0)
+            .map(|&b| {
+                if b.is_ascii_graphic() || b == b' ' {
+                    b as char
+                } else {
+                    '.'
+                }
+            })
+            .collect();
+
+        let gpa = (error_code & TDX_REPORT_FATAL_ERROR_GPA_VALID != 0).then(|| reg(R_R13));
+
+        error!(
+            "TD guest reported a fatal error: error_code={error_code:#x}{}{}",
+            if message.is_empty() {
+                String::new()
+            } else {
+                format!(", message: {message:?}")
+            },
+            match gpa {
+                Some(gpa) => format!(", gpa={gpa:#x}"),
+                None => String::new(),
+            },
+        );
+    }
+}
+
 #[cfg(any(feature = "sev_snp", feature = "tdx"))]
 impl KvmVcpu {
     fn punch_holes_in_guest_memfd(
@@ -2697,6 +2766,26 @@ impl cpu::Vcpu for KvmVcpu {
                 VcpuExit::Hlt => {
                     error!("Received a HLT exit but KVM should handle this in kernel space");
                     Ok(cpu::VmExit::Reset)
+                }
+
+                #[cfg(all(target_arch = "x86_64", feature = "tdx"))]
+                VcpuExit::SystemEvent(event_type, flags) => {
+                    // A TD guest requests termination via
+                    // TDG.VP.VMCALL<ReportFatalError>, which KVM surfaces as a
+                    // KVM_SYSTEM_EVENT_TDX_FATAL system event. Log the reported
+                    // error and shut the guest down.
+                    //
+                    // Not yet exposed by kvm-bindings 0.14; value from the
+                    // Linux 6.16 UAPI (`enum` in <linux/kvm.h>).
+                    const KVM_SYSTEM_EVENT_TDX_FATAL: u32 = 7;
+                    if event_type == KVM_SYSTEM_EVENT_TDX_FATAL {
+                        Self::handle_tdx_fatal_error(flags);
+                        Ok(cpu::VmExit::Shutdown)
+                    } else {
+                        Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
+                            "Unexpected system event with type 0x{event_type:x}, flags 0x{flags:x?}",
+                        )))
+                    }
                 }
 
                 #[cfg(target_arch = "aarch64")]
