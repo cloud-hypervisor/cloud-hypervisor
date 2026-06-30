@@ -32,7 +32,7 @@ use header::{
     offset_is_cluster_boundary,
 };
 use log::warn;
-use qcow_raw_file::{BeUint, QcowRawFile};
+use qcow_raw_file::QcowRawFile;
 use refcount::RefCount;
 use remain::sorted;
 use thiserror::Error;
@@ -874,20 +874,15 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
 
 /// Detect the type of an image file by checking for a valid qcow2 header.
 pub fn detect_image_type(file: &mut AlignedFile) -> BlockResult<ImageType> {
-    let orig_seek = file
-        .stream_position()
-        .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SeekingFile(e)))?;
-    file.rewind()
-        .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SeekingFile(e)))?;
-    let magic = u32::read_be(file)
+    let mut magic_bytes = [0u8; 4];
+    file.read_exact_at(&mut magic_bytes, 0)
         .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ReadingHeader(e)))?;
+    let magic = u32::from_be_bytes(magic_bytes);
     let image_type = if magic == QCOW_MAGIC {
         ImageType::Qcow2
     } else {
         ImageType::Raw
     };
-    file.seek(SeekFrom::Start(orig_seek))
-        .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SeekingFile(e)))?;
     Ok(image_type)
 }
 #[cfg(test)]
@@ -905,6 +900,7 @@ mod unit_tests {
         AUTOCLEAR_FEATURES_OFFSET, DEFAULT_CLUSTER_BITS, DEFAULT_REFCOUNT_ORDER,
         HEADER_EXT_BACKING_FORMAT, HEADER_EXT_END, V2_BARE_HEADER_SIZE, V3_BARE_HEADER_SIZE,
     };
+    use super::qcow_raw_file::BeUint;
     use super::util::ZERO_FLAG;
     use super::*;
     use crate::formats::qcow::{QcowDisk, QcowTempDisk};
