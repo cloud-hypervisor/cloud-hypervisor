@@ -125,6 +125,8 @@ use vm_virtio::{AccessPlatform, VirtioDeviceType};
 use vmm_sys_util::errno;
 use vmm_sys_util::eventfd::EventFd;
 
+#[cfg(any(feature = "tdx", feature = "sev_snp"))]
+use crate::coco_dma::SharedMemoryConverter;
 use crate::console_devices::{ConsoleDeviceError, ConsoleInfo, ConsoleTransport};
 use crate::cpu::{AcpiCpuHotplugController, CPU_MANAGER_ACPI_SIZE, CpuManager};
 use crate::device_tree::{DeviceNode, DeviceTree};
@@ -4095,24 +4097,45 @@ impl DeviceManager {
         };
 
         if needs_dma_mapping {
-            // Register DMA mapping in IOMMU.
-            // Do not register virtio-mem regions, as they are handled directly by
-            // virtio-mem device itself.
-            for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
-                for region in zone.regions() {
-                    // vfio_dma_map is unsound and ought to be marked as unsafe
-                    #[allow(unused_unsafe)]
-                    // SAFETY: GuestMemoryMmap guarantees that region points
-                    // to len bytes of valid memory starting at as_ptr()
-                    // that will only be freed with munmap().
-                    unsafe {
-                        vfio_ops.vfio_dma_map(
-                            region.start_addr().raw_value(),
-                            region.len() as usize,
-                            region.as_ptr(),
-                        )
+            // For confidential VMs (TDX, SEV-SNP), guest RAM starts private and
+            // must not be statically mapped into the host IOMMU: the host
+            // cannot access private (encrypted) pages. Instead, a conversion
+            // handler maps pages as they become shared and unmaps them when
+            // they become private. See QEMU upstream commit 5d6483edaa9.
+            let is_confidential_vm = {
+                #[allow(unused_mut)]
+                let mut confidential = false;
+                #[cfg(feature = "tdx")]
+                {
+                    confidential |= self.config.lock().unwrap().is_tdx_enabled();
+                }
+                #[cfg(feature = "sev_snp")]
+                {
+                    confidential |= self.config.lock().unwrap().is_sev_snp_enabled();
+                }
+                confidential
+            };
+
+            if !is_confidential_vm {
+                // Register DMA mapping in IOMMU.
+                // Do not register virtio-mem regions, as they are handled directly by
+                // virtio-mem device itself.
+                for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
+                    for region in zone.regions() {
+                        // vfio_dma_map is unsound and ought to be marked as unsafe
+                        #[allow(unused_unsafe)]
+                        // SAFETY: GuestMemoryMmap guarantees that region points
+                        // to len bytes of valid memory starting at as_ptr()
+                        // that will only be freed with munmap().
+                        unsafe {
+                            vfio_ops.vfio_dma_map(
+                                region.start_addr().raw_value(),
+                                region.len() as usize,
+                                region.as_ptr(),
+                            )
+                        }
+                        .map_err(DeviceManagerError::VfioDmaMap)?;
                     }
-                    .map_err(DeviceManagerError::VfioDmaMap)?;
                 }
             }
 
@@ -4121,6 +4144,30 @@ impl DeviceManager {
                 Arc::new(self.memory_manager.lock().unwrap().guest_memory()),
                 Arc::clone(&self.mmio_regions),
             ));
+
+            #[cfg(any(feature = "tdx", feature = "sev_snp"))]
+            if is_confidential_vm {
+                // Collect the guest RAM regions (excluding virtio-mem, which is
+                // handled by the device itself) so the converter only ever
+                // maps real RAM into the host IOMMU.
+                let regions: Vec<(u64, u64)> = self
+                    .memory_manager
+                    .lock()
+                    .unwrap()
+                    .memory_zones()
+                    .values()
+                    .flat_map(|zone| zone.regions())
+                    .map(|region| (region.start_addr().raw_value(), region.len()))
+                    .collect();
+
+                let converter = SharedMemoryConverter::new(
+                    vfio_mapping.clone() as Arc<dyn ExternalDmaMapping>,
+                    regions,
+                );
+                self.address_manager
+                    .vm
+                    .set_memory_conversion_handler(Arc::new(converter));
+            }
 
             for virtio_mem_device in self.virtio_mem_devices.iter() {
                 virtio_mem_device

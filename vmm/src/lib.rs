@@ -76,6 +76,8 @@ use crate::vm_config::{
 mod acpi;
 pub mod api;
 mod clone3;
+#[cfg(any(feature = "tdx", feature = "sev_snp"))]
+mod coco_dma;
 pub mod config;
 pub mod console_devices;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
