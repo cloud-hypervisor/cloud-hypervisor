@@ -157,11 +157,13 @@ _Example_
 
 ### `prefault`
 
-Specifies if the memory must be `mmap(2)` with `MAP_POPULATE` flag.
+Specifies whether guest memory should be prefaulted with `madvise(2)` using
+`MADV_POPULATE_WRITE` after it is `mmap(2)`-ed.
 
-By triggering prefault, one can allocate all required physical memory and create
-its page tables while calling `mmap`. With physical memory allocated, the number
-of page faults will decrease during running, and performance will also improve.
+With prefault enabled, Cloud Hypervisor allocates the required physical memory
+and creates its page tables before the VM starts. This reduces page faults at
+runtime and can surface insufficient backing memory during VM creation. If
+prefaulting fails, VM creation fails with an error.
 
 Note that boot of VM will be slower with `prefault` enabled because of allocating
 physical memory and creating page tables in advance, and physical memory of the
@@ -170,7 +172,7 @@ specified size will be consumed quickly.
 This option only takes effect at boot of VM. There is also a `prefault` option in
 restore and its choice will overwrite `prefault` in memory.
 
-By default this option is turned off.
+By default, this option is turned off.
 
 _Example_
 
@@ -429,11 +431,13 @@ _Example_
 
 ### `prefault`
 
-Specifies if the memory must be `mmap(2)` with `MAP_POPULATE` flag.
+Specifies whether this memory zone should be prefaulted with `madvise(2)` using
+`MADV_POPULATE_WRITE` after it is `mmap(2)`-ed.
 
-By triggering prefault, one can allocate all required physical memory and create
-its page tables while calling `mmap`. With physical memory allocated, the number
-of page faults will decrease during running, and performance will also improve.
+With prefault enabled, Cloud Hypervisor allocates the required physical memory
+and creates its page tables before the VM starts. This reduces page faults at
+runtime and can surface insufficient backing memory during VM creation. If
+prefaulting fails, VM creation fails with an error.
 
 Note that boot of VM will be slower with `prefault` enabled because of allocating
 physical memory and creating page tables in advance, and physical memory of the
@@ -442,7 +446,7 @@ specified size will be consumed quickly.
 This option only takes effect at boot of VM. There is also a `prefault` option in
 restore and its choice will overwrite `prefault` in memory.
 
-By default this option is turned off.
+By default, this option is turned off.
 
 _Example_
 
