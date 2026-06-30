@@ -5,7 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::fmt::Debug;
-use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::os::unix::fs::FileExt;
 
@@ -15,8 +15,8 @@ use vmm_sys_util::write_zeroes::WriteZeroesAt;
 use crate::aligned_file::AlignedFile;
 
 // Type aliases for the refcount read/write function pointers
-type RefcountReader = fn(&mut AlignedFile, usize) -> io::Result<Vec<u64>>;
-type RefcountWriter = fn(&mut AlignedFile, &[u64]) -> io::Result<()>;
+type RefcountReader = fn(&mut AlignedFile, u64, usize) -> io::Result<Vec<u64>>;
+type RefcountWriter = fn(&mut AlignedFile, u64, &[u64]) -> io::Result<()>;
 
 /// Big-endian file access trait.
 pub(super) trait BeUint: Sized + Copy {
@@ -88,10 +88,14 @@ impl BeUint for u64 {
 }
 
 /// Read byte-aligned refcounts.
-fn read_refcount<T: BeUint>(file: &mut AlignedFile, count: usize) -> io::Result<Vec<u64>> {
+fn read_refcount<T: BeUint>(
+    file: &mut AlignedFile,
+    offset: u64,
+    count: usize,
+) -> io::Result<Vec<u64>> {
     let bytes_per_entry = size_of::<T>();
     let mut data = vec![0u8; count * bytes_per_entry];
-    file.read_exact(&mut data)?;
+    file.read_exact_at(&mut data, offset)?;
     Ok(data
         .chunks_exact(bytes_per_entry)
         .map(T::from_be_slice)
@@ -99,22 +103,27 @@ fn read_refcount<T: BeUint>(file: &mut AlignedFile, count: usize) -> io::Result<
 }
 
 /// Write byte-aligned refcounts.
-fn write_refcount<T: BeUint + TryFrom<u64>>(file: &mut AlignedFile, table: &[u64]) -> io::Result<()>
+fn write_refcount<T: BeUint + TryFrom<u64>>(
+    file: &mut AlignedFile,
+    offset: u64,
+    table: &[u64],
+) -> io::Result<()>
 where
     <T as TryFrom<u64>>::Error: Debug,
 {
     let bytes_per_entry = size_of::<T>();
-    let mut buffer = BufWriter::with_capacity(table.len() * bytes_per_entry, file);
+    let mut buffer = Vec::with_capacity(table.len() * bytes_per_entry);
     for &val in table {
         let converted = T::try_from(val).expect("refcount values are validated on increment");
         T::write_be(&mut buffer, converted)?;
     }
-    buffer.flush()
+    file.write_all_at(&buffer, offset)
 }
 
 /// Read sub-byte refcounts. Bit 0 is the least significant bit.
 fn read_refcount_subbyte<const BITS: usize>(
     file: &mut AlignedFile,
+    offset: u64,
     count: usize,
 ) -> io::Result<Vec<u64>> {
     const { assert!(BITS == 1 || BITS == 2 || BITS == 4) };
@@ -122,7 +131,7 @@ fn read_refcount_subbyte<const BITS: usize>(
     let mask = (1u64 << BITS) - 1;
     let bytes_needed = count.div_ceil(entries_per_byte);
     let mut bytes = vec![0u8; bytes_needed];
-    file.read_exact(&mut bytes)?;
+    file.read_exact_at(&mut bytes, offset)?;
 
     let mut table = vec![0u64; count];
     for (i, val) in table.iter_mut().enumerate() {
@@ -136,12 +145,13 @@ fn read_refcount_subbyte<const BITS: usize>(
 /// Write sub-byte refcounts. Bit 0 is the least significant bit.
 fn write_refcount_subbyte<const BITS: usize>(
     file: &mut AlignedFile,
+    offset: u64,
     table: &[u64],
 ) -> io::Result<()> {
     const { assert!(BITS == 1 || BITS == 2 || BITS == 4) };
     let entries_per_byte = 8 / BITS;
     let mask = (1u64 << BITS) - 1;
-    let mut buffer = BufWriter::with_capacity(table.len().div_ceil(entries_per_byte), file);
+    let mut buffer = Vec::with_capacity(table.len().div_ceil(entries_per_byte));
 
     for chunk in table.chunks(entries_per_byte) {
         let mut byte = 0u8;
@@ -149,9 +159,9 @@ fn write_refcount_subbyte<const BITS: usize>(
             let bit_offset = i * BITS;
             byte |= ((val & mask) << bit_offset) as u8;
         }
-        buffer.write_u8(byte)?;
+        buffer.push(byte);
     }
-    buffer.flush()
+    file.write_all_at(&buffer, offset)
 }
 
 /// A qcow file. Allows reading/writing clusters and appending clusters.
@@ -261,15 +271,13 @@ impl QcowRawFile {
     /// Always returns a cluster's worth of data.
     #[inline]
     pub fn read_refcount_block(&mut self, offset: u64) -> io::Result<Vec<u64>> {
-        self.file.seek(SeekFrom::Start(offset))?;
-        (self.read_refcount_fn)(&mut self.file, self.refcount_block_entries as usize)
+        (self.read_refcount_fn)(&mut self.file, offset, self.refcount_block_entries as usize)
     }
 
     /// Writes a refcount block to the file.
     #[inline]
     pub fn write_refcount_block(&mut self, offset: u64, table: &[u64]) -> io::Result<()> {
-        self.file.seek(SeekFrom::Start(offset))?;
-        (self.write_refcount_fn)(&mut self.file, table)
+        (self.write_refcount_fn)(&mut self.file, offset, table)
     }
 
     /// Allocates a new cluster at the end of the current file, return the address.
