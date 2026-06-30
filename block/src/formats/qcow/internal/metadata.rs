@@ -19,6 +19,7 @@
 use std::cmp::min;
 use std::io::{self, Seek};
 use std::mem;
+use std::os::unix::fs::FileExt;
 use std::sync::{Arc, RwLock};
 
 use libc::{EINVAL, EIO};
@@ -548,10 +549,10 @@ impl QcowState {
             let decompressed_cluster = self.decompress_l2_cluster(l2_entry)?;
             let cluster_addr = self.append_data_cluster(None)?;
             self.update_cluster_addr(l1_index, l2_index, cluster_addr, &mut set_refcounts)?;
-            self.raw_file
+            let nwritten = self
+                .raw_file
                 .file_mut()
-                .seek(io::SeekFrom::Start(cluster_addr))?;
-            let nwritten = io::Write::write(self.raw_file.file_mut(), &decompressed_cluster)?;
+                .write_at(&decompressed_cluster, cluster_addr)?;
             if nwritten != decompressed_cluster.len() {
                 self.set_corrupt_bit_best_effort();
                 return Err(io::Error::from_raw_os_error(EIO));
@@ -775,7 +776,7 @@ impl QcowState {
         let new_l1_clusters = div_round_up_u64(new_l1_bytes, cluster_size);
 
         // Allocate contiguous clusters at file end for new L1 table
-        let file_size = self.raw_file.file_mut().seek(io::SeekFrom::End(0))?;
+        let file_size = self.raw_file.physical_size()?;
         let new_l1_offset = self.raw_file.cluster_address(file_size + cluster_size - 1);
 
         let new_file_end = new_l1_offset + new_l1_clusters * cluster_size;
@@ -1052,11 +1053,10 @@ impl QcowState {
     fn decompress_l2_cluster(&mut self, l2_entry: u64) -> io::Result<Vec<u8>> {
         let (compressed_addr, compressed_size) =
             l2_entry_compressed_cluster_layout(l2_entry, self.header.cluster_bits);
+        let mut compressed = vec![0u8; compressed_size];
         self.raw_file
             .file_mut()
-            .seek(io::SeekFrom::Start(compressed_addr))?;
-        let mut compressed = vec![0u8; compressed_size];
-        io::Read::read_exact(self.raw_file.file_mut(), &mut compressed)?;
+            .read_exact_at(&mut compressed, compressed_addr)?;
         let decoder = self.header.get_decoder();
         let cluster_size = self.raw_file.cluster_size() as usize;
         let mut decompressed = vec![0u8; cluster_size];
