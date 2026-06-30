@@ -63,8 +63,8 @@ pub use kvm::aarch64;
 #[cfg(all(feature = "kvm", target_arch = "riscv64"))]
 pub use kvm::{AiaState, riscv64};
 pub use vm::{
-    DataMatch, HypervisorVmError, InterruptSourceConfig, LegacyIrqSourceConfig, MsiIrqSourceConfig,
-    Vm, VmOps,
+    DataMatch, HypervisorVmError, InterruptSourceConfig, LegacyIrqSourceConfig,
+    MemoryConversionHandler, MsiIrqSourceConfig, Vm, VmOps,
 };
 
 pub use crate::hypervisor::{Hypervisor, HypervisorError};

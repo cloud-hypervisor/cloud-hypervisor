@@ -261,6 +261,11 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to complete isolated import")]
     CompleteIsolatedImport(#[source] anyhow::Error),
+    ///
+    /// Failed to register the memory conversion handler
+    ///
+    #[error("Failed to register the memory conversion handler")]
+    RegisterMemoryConversionHandler(#[source] anyhow::Error),
     /// Failed to set VM property
     ///
     #[error("Failed to set VM property")]
@@ -325,6 +330,13 @@ pub enum InterruptSourceConfig {
     LegacyIrq(LegacyIrqSourceConfig),
     /// Configuration data for PciMsi, PciMsix and generic MSI interrupts.
     MsiIrq(MsiIrqSourceConfig),
+}
+
+/// Handler invoked when a confidential VM converts guest memory between shared
+/// and private states.
+pub trait MemoryConversionHandler: Send + Sync {
+    /// Handles conversion of `[gpa, gpa + size)` to shared or private memory.
+    fn handle_conversion(&self, gpa: u64, size: u64, to_shared: bool) -> anyhow::Result<()>;
 }
 
 ///
@@ -487,6 +499,17 @@ pub trait Vm: Send + Sync + Any {
     ) -> Result<()> {
         unimplemented!()
     }
+
+    /// Register a handler invoked on guest-memory shared/private conversions.
+    fn register_memory_conversion_handler(
+        &self,
+        _handler: Arc<dyn MemoryConversionHandler>,
+    ) -> Result<()> {
+        Err(HypervisorVmError::RegisterMemoryConversionHandler(
+            anyhow::anyhow!("memory conversion handler not supported"),
+        ))
+    }
+
     /// Initialize the VM
     fn init(&self) -> Result<()> {
         Ok(())
