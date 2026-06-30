@@ -276,6 +276,8 @@ const TDG_VP_VMCALL_SETUP_EVENT_NOTIFY_INTERRUPT: u64 = 0x10004;
 const TDG_VP_VMCALL_SUCCESS: u64 = 0;
 #[cfg(feature = "tdx")]
 const TDG_VP_VMCALL_INVALID_OPERAND: u64 = 0x8000000000000000;
+#[cfg(feature = "tdx")]
+const TDG_VP_VMCALL_ALIGN_ERROR: u64 = 0x8000000000000002;
 
 #[cfg(feature = "tdx")]
 ioctl_iowr_nr!(KVM_MEMORY_ENCRYPT_OP, KVMIO, 0xba, raw::c_ulong);
@@ -296,7 +298,13 @@ enum TdxCommand {
 
 #[cfg(feature = "tdx")]
 pub enum TdxExitDetails {
-    GetQuote,
+    /// `TDG.VP.VMCALL<GetQuote>`. `shared_gpa` points to the shared-memory
+    /// GetQuote buffer (GHCI header followed by the TD report) and `buf_len`
+    /// is its total length in bytes.
+    GetQuote {
+        shared_gpa: u64,
+        buf_len: u64,
+    },
     SetupEventNotifyInterrupt,
 }
 
@@ -304,6 +312,7 @@ pub enum TdxExitDetails {
 pub enum TdxExitStatus {
     Success,
     InvalidOperand,
+    AlignError,
 }
 
 // `struct kvm_tdx_capabilities` as defined by the upstream Linux 6.16 UAPI.
@@ -3889,7 +3898,10 @@ impl cpu::Vcpu for KvmVcpu {
         }
 
         match tdx_vmcall.subfunction {
-            TDG_VP_VMCALL_GET_QUOTE => Ok(TdxExitDetails::GetQuote),
+            TDG_VP_VMCALL_GET_QUOTE => Ok(TdxExitDetails::GetQuote {
+                shared_gpa: tdx_vmcall.in_r12,
+                buf_len: tdx_vmcall.in_r13,
+            }),
             TDG_VP_VMCALL_SETUP_EVENT_NOTIFY_INTERRUPT => {
                 Ok(TdxExitDetails::SetupEventNotifyInterrupt)
             }
@@ -3913,6 +3925,7 @@ impl cpu::Vcpu for KvmVcpu {
         tdx_vmcall.status_code = match status {
             TdxExitStatus::Success => TDG_VP_VMCALL_SUCCESS,
             TdxExitStatus::InvalidOperand => TDG_VP_VMCALL_INVALID_OPERAND,
+            TdxExitStatus::AlignError => TDG_VP_VMCALL_ALIGN_ERROR,
         };
     }
 

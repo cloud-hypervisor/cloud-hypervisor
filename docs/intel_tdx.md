@@ -175,6 +175,32 @@ Express Bus and Generic Event Device) will not be allowed, therefore the
 corresponding drivers will not be loaded and the PCI hotplug feature will not
 be supported.
 
+### Remote attestation (GetQuote)
+
+When a TD guest asks for a quote it issues the
+`TDG.VP.VMCALL<GetQuote>` GHCI call, which traps out to Cloud Hypervisor. The
+VMM forwards the embedded TD report to a Quote Generation Service (QGS) and
+writes the returned quote back into the guest's shared buffer.
+
+The QGS endpoint is a host Unix socket configured through the
+`quote_generation_socket` platform option:
+
+```bash
+./cloud-hypervisor \
+    --platform tdx=on,quote_generation_socket=/var/run/tdx-qgs/qgs.socket \
+    --firmware td-shim/target/release/final.bin \
+    --kernel bzImage \
+    --cmdline "root=/dev/vda3 console=hvc0 rw" \
+    --cpus boot=1 \
+    --memory size=1G \
+    --disk path=tdx_guest_img
+```
+
+If `quote_generation_socket` is not set, GetQuote requests complete with the
+GHCI `QGS_UNAVAILABLE` status. The transaction is handled synchronously on the
+vCPU thread; TDs that rely on the asynchronous `SetupEventNotifyInterrupt`
+completion interrupt are not yet supported.
+
 ## Measurement configuration registers
 
 A TD carries three owner/configuration measurement registers that are baked

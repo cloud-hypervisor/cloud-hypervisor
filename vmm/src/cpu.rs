@@ -16,6 +16,8 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::mem::zeroed;
 use std::os::unix::thread::JoinHandleExt;
+#[cfg(feature = "tdx")]
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{any, cmp, hint, io, panic, result, thread, time};
@@ -94,6 +96,8 @@ use crate::gdb::{Debuggable, DebuggableError, get_raw_tid};
 #[cfg(all(feature = "sev_snp", feature = "mshv"))]
 use crate::igvm::HV_PAGE_SIZE;
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
+#[cfg(feature = "tdx")]
+use crate::tdx_quote;
 #[cfg(target_arch = "x86_64")]
 use crate::vm::physical_bits;
 use crate::vm_config::{CoreScheduling, CpusConfig};
@@ -758,6 +762,9 @@ pub struct CpuManager {
     // be skipped for TDs.
     #[cfg(feature = "tdx")]
     tdx_enabled: bool,
+    // QGS Unix socket used to answer TDX `GetQuote` requests, if configured.
+    #[cfg(feature = "tdx")]
+    tdx_quote_generation_socket: Option<PathBuf>,
     // State of the core scheduling group leader election (VM mode).
     core_scheduling_group_leader: Arc<AtomicI32>,
     #[cfg(feature = "igvm")]
@@ -890,6 +897,7 @@ impl CpuManager {
         seccomp_action: SeccompAction,
         vm_ops: Arc<dyn VmOps>,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
+        #[cfg(feature = "tdx")] tdx_quote_generation_socket: Option<PathBuf>,
         numa_nodes: &NumaNodes,
         #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
         #[cfg(feature = "igvm")] igvm_enabled: bool,
@@ -999,6 +1007,8 @@ impl CpuManager {
             sev_snp_enabled,
             #[cfg(feature = "tdx")]
             tdx_enabled,
+            #[cfg(feature = "tdx")]
+            tdx_quote_generation_socket,
             core_scheduling_group_leader: Arc::new(AtomicI32::new(
                 CoreSchedulingLeader::Initial as i32,
             )),
@@ -1279,6 +1289,11 @@ impl CpuManager {
         #[cfg(target_arch = "x86_64")]
         let interrupt_controller_clone = self.interrupt_controller.as_ref().cloned();
 
+        #[cfg(feature = "tdx")]
+        let tdx_vm_ops = panic::AssertUnwindSafe(self.vm_ops.clone());
+        #[cfg(feature = "tdx")]
+        let tdx_quote_generation_socket = self.tdx_quote_generation_socket.clone();
+
         debug!("Starting vCPU: cpu_id = {vcpu_id}");
 
         let handle = Some(
@@ -1496,14 +1511,28 @@ impl CpuManager {
                                     VmExit::Tdx => {
                                             match vcpu.vcpu.get_tdx_exit_details() {
                                                 Ok(details) => match details {
-                                                    TdxExitDetails::GetQuote => warn!("TDG_VP_VMCALL_GET_QUOTE not supported"),
+                                                    TdxExitDetails::GetQuote {
+                                                        shared_gpa,
+                                                        buf_len,
+                                                    } => {
+                                                        let status = tdx_quote::handle_get_quote(
+                                                            tdx_vm_ops.as_ref(),
+                                                            shared_gpa,
+                                                            buf_len,
+                                                            tdx_quote_generation_socket.as_deref(),
+                                                        );
+                                                        vcpu.vcpu.set_tdx_status(status);
+                                                    }
                                                     TdxExitDetails::SetupEventNotifyInterrupt => {
                                                         warn!("TDG_VP_VMCALL_SETUP_EVENT_NOTIFY_INTERRUPT not supported");
+                                                        vcpu.vcpu.set_tdx_status(TdxExitStatus::InvalidOperand);
                                                     }
                                                 },
-                                                Err(e) => error!("Unexpected TDX VMCALL: {e}"),
+                                                Err(e) => {
+                                                    error!("Unexpected TDX VMCALL: {e}");
+                                                    vcpu.vcpu.set_tdx_status(TdxExitStatus::InvalidOperand);
+                                                }
                                             }
-                                            vcpu.vcpu.set_tdx_status(TdxExitStatus::InvalidOperand);
                                     }
                                 },
 

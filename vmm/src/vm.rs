@@ -784,6 +784,13 @@ impl Vm {
     ) -> Result<Arc<Mutex<cpu::CpuManager>>> {
         #[cfg(feature = "tdx")]
         let tdx_enabled = config.lock().unwrap().is_tdx_enabled();
+        #[cfg(feature = "tdx")]
+        let tdx_quote_generation_socket = config
+            .lock()
+            .unwrap()
+            .platform
+            .as_ref()
+            .and_then(|p| p.tdx_quote_generation_socket.clone());
         #[cfg(feature = "sev_snp")]
         let sev_snp_enabled = config.lock().unwrap().is_sev_snp_enabled();
         #[cfg(feature = "igvm")]
@@ -809,6 +816,8 @@ impl Vm {
             vm_ops,
             #[cfg(feature = "tdx")]
             tdx_enabled,
+            #[cfg(feature = "tdx")]
+            tdx_quote_generation_socket,
             numa_nodes,
             #[cfg(feature = "sev_snp")]
             sev_snp_enabled,

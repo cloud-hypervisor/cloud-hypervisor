@@ -895,7 +895,7 @@ impl PlatformConfig {
                 .to_string();
 
             if cfg!(feature = "tdx") {
-                syntax.push_str(",tdx=on|off");
+                syntax.push_str(",tdx=on|off,quote_generation_socket=<qgs_unix_socket_path>");
                 syntax.push_str(",mrconfigid=<hex_sha384>,mrowner=<hex_sha384>");
                 syntax.push_str(",mrownerconfig=<hex_sha384>");
             }
@@ -970,6 +970,8 @@ impl PlatformConfig {
         #[cfg(feature = "tdx")]
         parser.add("tdx");
         #[cfg(feature = "tdx")]
+        parser.add("quote_generation_socket");
+        #[cfg(feature = "tdx")]
         parser.add("mrconfigid");
         #[cfg(feature = "tdx")]
         parser.add("mrowner");
@@ -1015,6 +1017,10 @@ impl PlatformConfig {
             .unwrap_or(Toggle(false))
             .0;
         #[cfg(feature = "tdx")]
+        let tdx_quote_generation_socket = parser
+            .convert::<PathBuf>("quote_generation_socket")
+            .map_err(Error::ParsePlatform)?;
+        #[cfg(feature = "tdx")]
         let tdx_mrconfigid = parser
             .convert::<String>("mrconfigid")
             .map_err(Error::ParsePlatform)?;
@@ -1050,6 +1056,8 @@ impl PlatformConfig {
             iommufd_fd,
             #[cfg(feature = "tdx")]
             tdx,
+            #[cfg(feature = "tdx")]
+            tdx_quote_generation_socket,
             #[cfg(feature = "tdx")]
             tdx_mrconfigid,
             #[cfg(feature = "tdx")]
@@ -5852,6 +5860,8 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             chassis_asset_tag: None,
             #[cfg(feature = "tdx")]
             tdx: false,
+            #[cfg(feature = "tdx")]
+            tdx_quote_generation_socket: None,
             #[cfg(feature = "tdx")]
             tdx_mrconfigid: None,
             #[cfg(feature = "tdx")]

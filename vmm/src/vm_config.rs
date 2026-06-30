@@ -156,6 +156,12 @@ pub struct PlatformConfig {
     #[cfg(feature = "tdx")]
     #[serde(default)]
     pub tdx: bool,
+    // Unix socket path of the Quote Generation Service (QGS) used to answer
+    // `TDG.VP.VMCALL<GetQuote>` requests. When unset, GetQuote requests are
+    // completed with the GHCI `QGS_UNAVAILABLE` status.
+    #[cfg(feature = "tdx")]
+    #[serde(default)]
+    pub tdx_quote_generation_socket: Option<PathBuf>,
     // Optional SHA384 measurement-configuration digests, hex encoded (96 hex
     // characters = 48 bytes each), forwarded verbatim to `KVM_TDX_INIT_VM` as
     // the TD's `mrconfigid`, `mrowner` and `mrownerconfig` registers. When
