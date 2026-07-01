@@ -628,6 +628,8 @@ struct KvmMemorySlot {
     guest_phys_addr: u64,
     #[cfg_attr(not(feature = "sev_snp"), expect(dead_code))]
     memory_size: u64,
+    #[cfg_attr(not(feature = "sev_snp"), expect(dead_code))]
+    userspace_addr: u64,
 }
 
 /// Wrapper over KVM VM ioctls.
@@ -641,6 +643,8 @@ pub struct KvmVm {
     snp_guest_policy: OnceLock<u64>,
     dirty_log_slots: RwLock<HashMap<u32, KvmDirtyLogSlot>>,
     memory_slots: Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
+    #[cfg(feature = "sev_snp")]
+    memory_conversion_handler: Arc<OnceLock<Arc<dyn vm::MemoryConversionHandler>>>,
 }
 
 impl KvmVm {
@@ -737,8 +741,8 @@ impl KvmVm {
     }
 
     /// Get flag for kvm_userspace_memory_region based on memfd support.
-    fn get_kvm_userspace_memory_region_flag(&self, flag: u32) -> u32 {
-        flag | if self.memory_slots.is_some() {
+    fn get_kvm_userspace_memory_region_flag(&self, flag: u32, private: bool) -> u32 {
+        flag | if private && self.memory_slots.is_some() {
             KVM_MEM_GUEST_MEMFD
         } else {
             0
@@ -759,6 +763,14 @@ impl KvmVm {
 /// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
 /// ```
 impl vm::Vm for KvmVm {
+    #[cfg(feature = "sev_snp")]
+    fn register_memory_conversion_handler(
+        &self,
+        handler: Arc<dyn vm::MemoryConversionHandler>,
+    ) -> bool {
+        self.memory_conversion_handler.set(handler).is_ok()
+    }
+
     #[cfg(feature = "sev_snp")]
     fn sev_snp_init(&self, guest_policy: igvm_defs::SnpPolicy) -> vm::Result<()> {
         self.sev_fd
@@ -941,6 +953,8 @@ impl vm::Vm for KvmVm {
             vm_fd: self.fd.clone(),
             #[cfg(feature = "sev_snp")]
             memory_slots: self.memory_slots.clone(),
+            #[cfg(feature = "sev_snp")]
+            memory_conversion_handler: self.memory_conversion_handler.clone(),
         };
         Ok(Box::new(vcpu))
     }
@@ -1091,6 +1105,7 @@ impl vm::Vm for KvmVm {
     /// before then will cause undefined guest behavior but at least
     /// should not cause undefined behavior in the host.  In theory,
     /// at least.
+    #[allow(clippy::too_many_arguments)]
     unsafe fn create_user_memory_region(
         &self,
         slot: u32,
@@ -1099,7 +1114,9 @@ impl vm::Vm for KvmVm {
         userspace_addr: *mut u8,
         readonly: bool,
         log_dirty_pages: bool,
+        backing: vm::MemoryBacking,
     ) -> vm::Result<()> {
+        let private = matches!(backing, vm::MemoryBacking::Private);
         let mut flags = 0;
         if readonly {
             flags |= KVM_MEM_READONLY;
@@ -1113,7 +1130,7 @@ impl vm::Vm for KvmVm {
         // Create a per-region guest_memfd when supported.
         // Each region gets its own fd sized exactly to memory_size
         #[cfg(feature = "sev_snp")]
-        let guest_memfd = if let Some(slots) = &self.memory_slots {
+        let guest_memfd = if let Some(slots) = self.memory_slots.as_ref().filter(|_| private) {
             // SAFETY: Safe because guest regions are guaranteed not to overlap.
             let fd = unsafe {
                 OwnedFd::from_raw_fd(
@@ -1132,6 +1149,7 @@ impl vm::Vm for KvmVm {
                     guest_memfd: fd,
                     guest_phys_addr,
                     memory_size: memory_size as u64,
+                    userspace_addr: userspace_addr as usize as u64,
                 },
             );
             raw_fd
@@ -1143,7 +1161,7 @@ impl vm::Vm for KvmVm {
 
         let mut region = kvm_userspace_memory_region2 {
             slot,
-            flags: self.get_kvm_userspace_memory_region_flag(flags),
+            flags: self.get_kvm_userspace_memory_region_flag(flags, private),
             guest_phys_addr,
             memory_size: memory_size as u64,
             userspace_addr: userspace_addr as usize as u64,
@@ -1176,7 +1194,7 @@ impl vm::Vm for KvmVm {
 
             // Always create guest physical memory region without `KVM_MEM_LOG_DIRTY_PAGES`.
             // For regions that need this flag, dirty pages log will be turned on in `start_dirty_log`.
-            region.flags = self.get_kvm_userspace_memory_region_flag(0);
+            region.flags = self.get_kvm_userspace_memory_region_flag(0, private);
         }
 
         // SAFETY: Safe because caller promised this is safe.
@@ -1186,7 +1204,7 @@ impl vm::Vm for KvmVm {
         }
 
         #[cfg(feature = "sev_snp")]
-        if self.memory_slots.is_some() {
+        if private && self.memory_slots.is_some() {
             self.fd
                 .set_memory_attributes(kvm_memory_attributes {
                     address: region.guest_phys_addr,
@@ -1427,7 +1445,10 @@ impl vm::Vm for KvmVm {
                 guest_phys_addr: s.guest_phys_addr,
                 memory_size: s.memory_size,
                 userspace_addr: s.userspace_addr,
-                flags: self.get_kvm_userspace_memory_region_flag(KVM_MEM_LOG_DIRTY_PAGES),
+                flags: self.get_kvm_userspace_memory_region_flag(
+                    KVM_MEM_LOG_DIRTY_PAGES,
+                    s.guest_memfd != 0,
+                ),
                 guest_memfd: s.guest_memfd,
                 guest_memfd_offset: s.guest_memfd_offset,
                 ..Default::default()
@@ -1453,7 +1474,7 @@ impl vm::Vm for KvmVm {
                 guest_phys_addr: s.guest_phys_addr,
                 memory_size: s.memory_size,
                 userspace_addr: s.userspace_addr,
-                flags: self.get_kvm_userspace_memory_region_flag(0),
+                flags: self.get_kvm_userspace_memory_region_flag(0, s.guest_memfd != 0),
                 guest_memfd: s.guest_memfd,
                 guest_memfd_offset: s.guest_memfd_offset,
                 ..Default::default()
@@ -1797,6 +1818,8 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 #[cfg(feature = "sev_snp")]
                 snp_guest_policy: OnceLock::new(),
                 memory_slots,
+                #[cfg(feature = "sev_snp")]
+                memory_conversion_handler: Arc::new(OnceLock::new()),
             }))
         }
 
@@ -1896,10 +1919,33 @@ pub struct KvmVcpu {
     vm_fd: Arc<VmFd>,
     #[cfg(feature = "sev_snp")]
     memory_slots: Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
+    #[cfg(feature = "sev_snp")]
+    memory_conversion_handler: Arc<OnceLock<Arc<dyn vm::MemoryConversionHandler>>>,
 }
 
 #[cfg(feature = "sev_snp")]
 impl KvmVcpu {
+    fn notify_memory_conversion_handler(
+        &self,
+        gpa: u64,
+        size: u64,
+        to_shared: bool,
+    ) -> cpu::Result<()> {
+        if let Some(handler) = self.memory_conversion_handler.get() {
+            handler
+                .handle_conversion(gpa, size, to_shared)
+                .map_err(cpu::HypervisorCpuError::RunVcpu)?;
+        }
+        Ok(())
+    }
+
+    /// Whether the registered conversion strategy keeps the shared mmap backing pinned.
+    fn shared_backing_pinned(&self) -> bool {
+        self.memory_conversion_handler
+            .get()
+            .is_some_and(|h| h.pins_shared_backing())
+    }
+
     fn punch_holes_in_guest_memfd(
         memory_slots: &Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
         gpa: u64,
@@ -1934,6 +1980,48 @@ impl KvmVcpu {
             if ret != 0 {
                 error!(
                     "Error punching hole in the guest_memfd: gpa={gpa:#x} offset={offset:#x} len={len:#x}: {}",
+                    io::Error::last_os_error()
+                );
+            }
+        }
+    }
+
+    /// Discard a stale *shared* mmap backing for `[gpa, gpa + size)`.
+    fn discard_shared_backing(
+        memory_slots: &Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
+        gpa: u64,
+        size: u64,
+    ) {
+        let Some(slots) = memory_slots else {
+            return;
+        };
+        let slots = slots.read().unwrap();
+        let req_end = gpa.saturating_add(size);
+
+        for slot in slots.values() {
+            let slot_end = slot.guest_phys_addr.saturating_add(slot.memory_size);
+            if gpa >= slot_end || req_end <= slot.guest_phys_addr {
+                continue;
+            }
+
+            let overlap_start = gpa.max(slot.guest_phys_addr);
+            let overlap_end = req_end.min(slot_end);
+            let offset = overlap_start - slot.guest_phys_addr;
+            let len = overlap_end - overlap_start;
+
+            let addr = (slot.userspace_addr as usize + offset as usize) as *mut libc::c_void;
+
+            // MADV_REMOVE frees the backing store for shmem/memfd/hugetlb (shared=on,
+            // hugepages); fall back to MADV_DONTNEED for default anonymous RAM, which REMOVE rejects
+            // SAFETY: [userspace_addr + offset, + len) lies within the slot's range.
+            let mut ret = unsafe { libc::madvise(addr, len as usize, libc::MADV_REMOVE) };
+            if ret != 0 {
+                // SAFETY: [userspace_addr + offset, + len) lies within the slot's range.
+                ret = unsafe { libc::madvise(addr, len as usize, libc::MADV_DONTNEED) };
+            }
+            if ret != 0 {
+                error!(
+                    "Error discarding shared backing: gpa={gpa:#x} offset={offset:#x} len={len:#x}: {}",
                     io::Error::last_os_error()
                 );
             }
@@ -2620,6 +2708,16 @@ impl cpu::Vcpu for KvmVcpu {
                                 Self::punch_holes_in_guest_memfd(&self.memory_slots, address, size);
                             }
 
+                            self.notify_memory_conversion_handler(
+                                address,
+                                size,
+                                set_private_attr == 0,
+                            )?;
+
+                            if set_private_attr != 0 && !self.shared_backing_pinned() {
+                                Self::discard_shared_backing(&self.memory_slots, address, size);
+                            }
+
                             Ok(cpu::VmExit::Ignore)
                         }
                         _ => Ok(cpu::VmExit::Ignore),
@@ -2654,8 +2752,15 @@ impl cpu::Vcpu for KvmVcpu {
                             attributes,
                             flags: 0,
                         })
-                        .map(|_| cpu::VmExit::Ignore)
-                        .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))
+                        .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
+
+                    self.notify_memory_conversion_handler(gpa, size, attributes == 0)?;
+
+                    if attributes != 0 && !self.shared_backing_pinned() {
+                        Self::discard_shared_backing(&self.memory_slots, gpa, size);
+                    }
+
+                    Ok(cpu::VmExit::Ignore)
                 }
 
                 r => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(

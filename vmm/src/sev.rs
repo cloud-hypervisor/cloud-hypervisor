@@ -8,10 +8,13 @@ use std::fs::File;
 use std::io::{self, Cursor, Read, Seek, SeekFrom};
 use std::os::unix::fs::FileExt;
 use std::result;
+use std::sync::Arc;
 
+use hypervisor::MemoryConversionHandler;
 use linux_loader::bootparam::boot_params;
 use sha2::{Digest, Sha256};
 use uuid::{Uuid, uuid};
+use vm_device::dma_mapping::{DmaMappingTracker, ExternalDmaMapping};
 use vm_memory::ByteValued;
 use vmm_sys_util::errno;
 use zerocopy::{Immutable, IntoBytes};
@@ -177,6 +180,71 @@ impl MeasuredBootInfo {
         // The remainder of the page is zeroed to ensure measurements are reliably calculated
         hash_block[..size_of::<PaddedSevHashTable>()].copy_from_slice(table.as_bytes());
         Ok(hash_block)
+    }
+}
+
+// SEV-SNP RMP/PSC minimum conversion granule (4KiB).
+const PAGE_SIZE_4K: u64 = 4096;
+
+/// Tracks the shared/private state of confidential guest RAM and keeps the
+/// device IOMMU in sync across VFIO map/unmap conversions.
+#[derive(Default)]
+pub struct SevSnpSharedPageTracker {
+    tracker: DmaMappingTracker,
+}
+
+impl SevSnpSharedPageTracker {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register a confidential RAM region `[base, base + size)`. All private.
+    pub fn register_region(&self, base: u64, size: u64) {
+        self.tracker.register_region(base, size, PAGE_SIZE_4K);
+    }
+
+    /// Register a VFIO DMA handler.
+    pub fn add_dma_mapping_handler(
+        &self,
+        handler: Arc<dyn ExternalDmaMapping>,
+    ) -> anyhow::Result<()> {
+        self.tracker
+            .register_handler(handler)
+            .map_err(|e| anyhow::anyhow!("confidential VFIO replay map failed: {e}"))
+    }
+
+    /// Number of registered DMA handlers.
+    pub fn dma_handler_count(&self) -> usize {
+        self.tracker.handler_count()
+    }
+
+    /// Drop all registered DMA handlers.
+    pub fn clear_dma_mapping_handlers(&self) {
+        self.tracker.clear_handlers();
+    }
+}
+
+impl MemoryConversionHandler for SevSnpSharedPageTracker {
+    /// Flip `[gpa, gpa + size)` to shared/private, driving the registered VFIO
+    /// DMA handlers so the device IOMMU maps exactly the currently-shared pages.
+    fn handle_conversion(&self, gpa: u64, size: u64, to_shared: bool) -> anyhow::Result<()> {
+        // shared == populated (mapped into every device IOMMU).
+        self.tracker
+            .set_populated(gpa, size, to_shared)
+            .map_err(|e| anyhow::anyhow!("confidential VFIO conversion failed: {e}"))
+    }
+}
+
+/// Conversion handler static-map path for SEV-SNP VFIO.
+pub struct StaticPinnedBacking;
+
+impl MemoryConversionHandler for StaticPinnedBacking {
+    fn handle_conversion(&self, _gpa: u64, _size: u64, _to_shared: bool) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn pins_shared_backing(&self) -> bool {
+        true
     }
 }
 

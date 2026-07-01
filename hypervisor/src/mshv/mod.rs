@@ -2003,6 +2003,7 @@ impl vm::Vm for MshvVm {
     /// before then will cause undefined guest behavior but at least
     /// should not cause undefined behavior in the host.  In theory,
     /// at least.
+    #[allow(clippy::too_many_arguments)]
     unsafe fn create_user_memory_region(
         &self,
         _slot: u32,
@@ -2011,6 +2012,7 @@ impl vm::Vm for MshvVm {
         userspace_addr: *mut u8,
         readonly: bool,
         _log_dirty_pages: bool,
+        _backing: vm::MemoryBacking,
     ) -> vm::Result<()> {
         let mut flags = 1 << MSHV_SET_MEM_BIT_EXECUTABLE;
         if !readonly {
