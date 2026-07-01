@@ -32,6 +32,7 @@ vm-memory = { workspace = true, features = [
 ] }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { workspace = true }
+zerocopy = { workspace = true, features = ["derive"] }
 zstd = "0.13"
 
 [dev-dependencies]

@@ -4,12 +4,13 @@
 
 use std::collections::btree_map::BTreeMap;
 use std::os::unix::fs::FileExt;
-use std::{io, result, slice};
+use std::{io, result};
 
 use byteorder::{ByteOrder, LittleEndian};
 use remain::sorted;
 use thiserror::Error;
 use uuid::Uuid;
+use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 use crate::aligned_file::AlignedFile;
 
@@ -28,8 +29,13 @@ const REGION_SIZE: u64 = 64 * 1024; // Each region size is 64 KiB
 
 const REGION_ENTRY_REQUIRED: u32 = 1;
 
-const BAT_GUID: &str = "2DC27766-F623-4200-9D64-115E9BFD4A08"; // BAT GUID
-const MDR_GUID: &str = "8B7CA206-4790-4B9A-B8FE-575F050F886E"; // Metadata GUID
+// VHDX stores GUIDs using little-endian GUID byte order.
+const BAT_GUID: [u8; 16] = [
+    0x66, 0x77, 0xc2, 0x2d, 0x23, 0xf6, 0x00, 0x42, 0x9d, 0x64, 0x11, 0x5e, 0x9b, 0xfd, 0x4a, 0x08,
+];
+const MDR_GUID: [u8; 16] = [
+    0x06, 0xa2, 0x7c, 0x8b, 0x90, 0x47, 0x9a, 0x4b, 0xb8, 0xfe, 0x57, 0x5f, 0x05, 0x0f, 0x88, 0x6e,
+];
 
 #[sorted]
 #[derive(Error, Debug)]
@@ -48,8 +54,6 @@ pub enum VhdxHeaderError {
     InvalidHeaderSign,
     #[error("Not a valid VHDx region")]
     InvalidRegionSign,
-    #[error("Couldn't parse Uuid for region entry {0}")]
-    InvalidUuid(#[source] uuid::Error),
     #[error("Not a VHDx file")]
     InvalidVHDXSign,
     #[error("No valid header found")]
@@ -101,7 +105,7 @@ impl FileTypeIdentifier {
 }
 
 #[repr(C, packed)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, FromBytes, Immutable, IntoBytes)]
 pub struct Header {
     pub signature: u32,
     pub checksum: u32,
@@ -124,8 +128,7 @@ impl Header {
         f.read_exact_at(&mut buffer, start)
             .map_err(VhdxHeaderError::ReadHeader)?;
 
-        // SAFETY: buffer is of correct size and has been successfully filled.
-        let header: Header = unsafe { *(buffer.as_ptr().cast()) };
+        let header = Header::read_from_prefix(&buffer).unwrap().0;
         if header.signature != HEADER_SIGN {
             return Err(VhdxHeaderError::InvalidHeaderSign);
         }
@@ -138,32 +141,26 @@ impl Header {
         Ok(header)
     }
 
-    /// Converts the header structure into a buffer
-    fn write_to_buffer(&self, buffer: &mut [u8; HEADER_SIZE as usize]) {
-        // SAFETY: self is a valid header.
-        let reference =
-            unsafe { slice::from_raw_parts((&raw const *self).cast(), HEADER_SIZE as usize) };
-        *buffer = reference.try_into().unwrap();
-    }
-
     /// Creates and returns new updated header from the provided current header
     fn update_header(
         f: &AlignedFile,
         current_header: &Header,
         change_data_guid: bool,
-        mut file_write_guid: u128,
+        file_write_guid: u128,
         start: u64,
     ) -> Result<Header> {
         let mut buffer = [0u8; HEADER_SIZE as usize];
-        let mut data_write_guid = current_header.data_write_guid;
+        let data_write_guid = if change_data_guid {
+            Uuid::new_v4().as_u128()
+        } else {
+            current_header.data_write_guid
+        };
 
-        if change_data_guid {
-            data_write_guid = Uuid::new_v4().as_u128();
-        }
-
-        if file_write_guid == 0 {
-            file_write_guid = current_header.file_write_guid;
-        }
+        let file_write_guid = if file_write_guid == 0 {
+            current_header.file_write_guid
+        } else {
+            file_write_guid
+        };
 
         let mut new_header = Header {
             signature: current_header.signature,
@@ -178,9 +175,9 @@ impl Header {
             log_offset: current_header.log_offset,
         };
 
-        new_header.write_to_buffer(&mut buffer);
+        new_header.write_to_prefix(&mut buffer).unwrap();
         new_header.checksum = calculate_checksum(&mut buffer, size_of::<u32>());
-        new_header.write_to_buffer(&mut buffer);
+        new_header.write_to_prefix(&mut buffer).unwrap();
 
         f.write_all_at(&buffer, start)
             .map_err(VhdxHeaderError::WriteHeader)?;
@@ -190,7 +187,7 @@ impl Header {
 }
 
 #[repr(C, packed)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, FromBytes)]
 struct RegionTableHeader {
     pub signature: u32,
     pub checksum: u32,
@@ -207,8 +204,7 @@ impl RegionTableHeader {
         f.read_exact_at(&mut buffer, start)
             .map_err(VhdxHeaderError::ReadRegionTableHeader)?;
 
-        // SAFETY: buffer is of correct size and has been successfully filled.
-        let region_table_header: RegionTableHeader = unsafe { *(buffer.as_ptr().cast()) };
+        let region_table_header = RegionTableHeader::read_from_prefix(&buffer).unwrap().0;
         if region_table_header.signature != REGION_SIGN {
             return Err(VhdxHeaderError::InvalidRegionSign);
         }
@@ -261,8 +257,10 @@ impl RegionInfo {
         .map_err(VhdxHeaderError::ReadRegionTableEntries)?;
 
         for _ in 0..entry_count {
-            let entry =
-                RegionTableEntry::new(&buffer[offset..offset + size_of::<RegionTableEntry>()])?;
+            let entry = RegionTableEntry::read_from_bytes(
+                &buffer[offset..offset + size_of::<RegionTableEntry>()],
+            )
+            .unwrap();
 
             offset += size_of::<RegionTableEntry>();
             let start = entry.file_offset;
@@ -276,7 +274,7 @@ impl RegionInfo {
 
             region_entries.insert(entry.file_offset, entry.file_offset + entry.length as u64);
 
-            if entry.guid == Uuid::parse_str(BAT_GUID).map_err(VhdxHeaderError::InvalidUuid)? {
+            if entry.guid == BAT_GUID {
                 if bat_entry.is_none() {
                     bat_entry = Some(entry);
                     continue;
@@ -284,7 +282,7 @@ impl RegionInfo {
                 return Err(VhdxHeaderError::DuplicateBATEntry);
             }
 
-            if entry.guid == Uuid::parse_str(MDR_GUID).map_err(VhdxHeaderError::InvalidUuid)? {
+            if entry.guid == MDR_GUID {
                 if mdr_entry.is_none() {
                     mdr_entry = Some(entry);
                     continue;
@@ -318,26 +316,12 @@ impl RegionInfo {
 }
 
 #[repr(C, packed)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, FromBytes)]
 pub struct RegionTableEntry {
-    pub guid: Uuid,
+    guid: [u8; 16],
     pub file_offset: u64,
     pub length: u32,
     pub required: u32,
-}
-
-impl RegionTableEntry {
-    /// Reads one Region Entry from a Region Table index that starts from 0
-    pub fn new(buffer: &[u8]) -> Result<RegionTableEntry> {
-        assert!(buffer.len() == size_of::<RegionTableEntry>());
-        // SAFETY: the assertion above makes sure the buffer size is correct.
-        let mut region_table_entry: RegionTableEntry = unsafe { *(buffer.as_ptr().cast()) };
-
-        let uuid = super::uuid_from_guid(buffer);
-        region_table_entry.guid = uuid;
-
-        Ok(region_table_entry)
-    }
 }
 
 enum HeaderNo {
@@ -464,12 +448,48 @@ mod tests {
     use std::os::unix::fs::FileExt;
 
     use vmm_sys_util::tempfile::TempFile;
+    use zerocopy::{FromBytes, IntoBytes};
 
     use super::{
-        BAT_GUID, MDR_GUID, REGION_TABLE_1_START, RegionInfo, RegionTableHeader, VhdxHeaderError,
-        ranges_overlap,
+        BAT_GUID, HEADER_SIGN, Header, MDR_GUID, REGION_TABLE_1_START, RegionInfo,
+        RegionTableHeader, VhdxHeaderError, ranges_overlap,
     };
     use crate::aligned_file::AlignedFile;
+
+    #[test]
+    fn test_header_bytes_round_trip() {
+        let header = Header {
+            signature: HEADER_SIGN,
+            checksum: 0x1122_3344,
+            sequence_number: 0x0102_0304_0506_0708,
+            file_write_guid: 0x0f0e_0d0c_0b0a_0908_0706_0504_0302_0100,
+            data_write_guid: 0x1f1e_1d1c_1b1a_1918_1716_1514_1312_1110,
+            log_guid: 0x2f2e_2d2c_2b2a_2928_2726_2524_2322_2120,
+            log_version: 0xabcd,
+            version: 0x0001,
+            log_length: 0x0010_0000,
+            log_offset: 0x0000_0100_0000_0000,
+        };
+
+        let bytes = header.as_bytes();
+        assert_eq!(&bytes[0..4], &header.signature.to_le_bytes()[..]);
+        assert_eq!(&bytes[8..16], &header.sequence_number.to_le_bytes()[..]);
+        assert_eq!(&bytes[16..32], &header.file_write_guid.to_le_bytes()[..]);
+        assert_eq!(&bytes[64..66], &header.log_version.to_le_bytes()[..]);
+        assert_eq!(&bytes[72..80], &header.log_offset.to_le_bytes()[..]);
+
+        let parsed = Header::read_from_bytes(bytes).unwrap();
+        assert_eq!({ parsed.signature }, { header.signature });
+        assert_eq!({ parsed.checksum }, { header.checksum });
+        assert_eq!({ parsed.sequence_number }, { header.sequence_number });
+        assert_eq!({ parsed.file_write_guid }, { header.file_write_guid });
+        assert_eq!({ parsed.data_write_guid }, { header.data_write_guid });
+        assert_eq!({ parsed.log_guid }, { header.log_guid });
+        assert_eq!({ parsed.log_version }, { header.log_version });
+        assert_eq!({ parsed.version }, { header.version });
+        assert_eq!({ parsed.log_length }, { header.log_length });
+        assert_eq!({ parsed.log_offset }, { header.log_offset });
+    }
 
     #[test]
     fn test_ranges_overlap() {
@@ -502,18 +522,11 @@ mod tests {
         }
     }
 
-    /// Builds the 32-byte on-disk region table entry for `guid_str` describing
-    /// the region `[file_offset, file_offset + length)`. The GUID encoding is
-    /// the inverse of `uuid_from_guid` (first three fields big-endian, last
-    /// eight bytes verbatim).
-    fn region_entry(guid_str: &str, file_offset: u64, length: u32) -> [u8; 32] {
+    /// Builds the 32-byte on-disk region table entry for `guid` describing
+    /// the region `[file_offset, file_offset + length)`.
+    fn region_entry(guid: [u8; 16], file_offset: u64, length: u32) -> [u8; 32] {
         let mut e = [0u8; 32];
-        let uuid = uuid::Uuid::parse_str(guid_str).unwrap();
-        let (d1, d2, d3, d4) = uuid.to_fields_le();
-        e[0..4].copy_from_slice(&d1.to_be_bytes());
-        e[4..6].copy_from_slice(&d2.to_be_bytes());
-        e[6..8].copy_from_slice(&d3.to_be_bytes());
-        e[8..16].copy_from_slice(d4);
+        e[0..16].copy_from_slice(&guid);
         e[16..24].copy_from_slice(&file_offset.to_le_bytes());
         e[24..28].copy_from_slice(&length.to_le_bytes());
         // `required` (e[28..32]) left zero.
