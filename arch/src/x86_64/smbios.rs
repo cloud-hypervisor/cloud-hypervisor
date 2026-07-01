@@ -6,7 +6,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::{result, slice};
+use std::result;
 
 use thiserror::Error;
 use uuid::Uuid;
@@ -87,12 +87,9 @@ impl SmbiosConfig {
     }
 }
 
-fn compute_checksum<T: Copy>(v: &T) -> u8 {
-    let v: *const T = v;
-    // SAFETY: we are only reading the bytes within the size of the `T` reference `v`.
-    let v_slice = unsafe { slice::from_raw_parts(v.cast(), size_of::<T>()) };
+fn compute_checksum<T: Copy + ByteValued>(v: &T) -> u8 {
     let mut checksum: u8 = 0;
-    for i in v_slice.iter() {
+    for i in v.as_slice().iter() {
         checksum = checksum.wrapping_add(*i);
     }
     (!checksum).wrapping_add(1)
