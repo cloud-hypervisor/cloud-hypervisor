@@ -598,6 +598,16 @@ pub trait Vcpu: Send + Sync {
         unimplemented!()
     }
     ///
+    /// Retrieve the CPUID the TDX module virtualizes for this TD vCPU
+    /// (KVM_TDX_GET_CPUID). This reflects the final values the guest observes,
+    /// with the module's fixed bits applied, and is used to cross-check the
+    /// CPUID programmed via `set_cpuid2`.
+    ///
+    #[cfg(feature = "tdx")]
+    fn tdx_get_cpuid(&self) -> Result<Vec<CpuIdEntry>> {
+        unimplemented!()
+    }
+    ///
     /// Set the "immediate_exit" state
     ///
     fn set_immediate_exit(&mut self, _exit: bool) {}

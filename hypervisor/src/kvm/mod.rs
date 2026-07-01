@@ -290,7 +290,6 @@ enum TdxCommand {
     InitVcpu,
     InitMemRegion,
     Finalize,
-    #[allow(dead_code)] // Used once KVM_TDX_GET_CPUID support is added
     GetCpuid,
 }
 
@@ -3792,6 +3791,41 @@ impl cpu::Vcpu for KvmVcpu {
 
         tdx_command(&self.fd.as_raw_fd(), TdxCommand::InitVcpu, 0, hob_address)
             .map_err(cpu::HypervisorCpuError::InitializeTdx)
+    }
+
+    ///
+    /// Retrieve the CPUID the TDX module virtualizes for this TD vCPU.
+    ///
+    #[cfg(feature = "tdx")]
+    fn tdx_get_cpuid(&self) -> cpu::Result<Vec<CpuIdEntry>> {
+        // `struct kvm_cpuid2`: `nent`, `padding`, then `nent` entries. Size the
+        // buffer to KVM_MAX_CPUID_ENTRIES, which is also the kernel's own upper
+        // bound when filling the TD CPUID, so KVM never returns -E2BIG here.
+        const MAX: usize = kvm_bindings::KVM_MAX_CPUID_ENTRIES;
+        #[repr(C)]
+        struct TdxCpuid2 {
+            nent: u32,
+            padding: u32,
+            entries: [kvm_bindings::kvm_cpuid_entry2; MAX],
+        }
+        let mut data = TdxCpuid2 {
+            nent: MAX as u32,
+            padding: 0,
+            entries: [kvm_bindings::kvm_cpuid_entry2::default(); MAX],
+        };
+
+        // KVM_TDX_GET_CPUID is a vCPU ioctl that writes the TD CPUID (and the
+        // actual entry count) back into `data`.
+        tdx_command(
+            &self.fd.as_raw_fd(),
+            TdxCommand::GetCpuid,
+            0,
+            (&raw mut data).cast(),
+        )
+        .map_err(|e| cpu::HypervisorCpuError::GetCpuid(e.into()))?;
+
+        let nent = (data.nent as usize).min(MAX);
+        Ok(data.entries[..nent].iter().map(|e| (*e).into()).collect())
     }
 
     ///

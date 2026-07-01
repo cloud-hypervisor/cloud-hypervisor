@@ -1709,13 +1709,74 @@ impl CpuManager {
     #[cfg(feature = "tdx")]
     pub fn initialize_tdx(&self, hob_address: u64) -> Result<()> {
         for vcpu in &self.vcpus {
-            vcpu.lock()
-                .unwrap()
-                .vcpu
+            let vcpu = vcpu.lock().unwrap();
+            vcpu.vcpu
                 .tdx_init(hob_address)
                 .map_err(Error::InitializeTdx)?;
+            Self::compare_tdx_cpuid(vcpu.id, vcpu.vcpu.as_ref());
         }
         Ok(())
+    }
+
+    /// Cross-check the CPUID the TDX module virtualizes for a TD vCPU
+    /// (KVM_TDX_GET_CPUID) against the CPUID programmed via KVM_SET_CPUID2 and
+    /// log any per-register differences. Comparing the same vCPU keeps the
+    /// per-vCPU topology leaves aligned, so a difference is a genuine feature
+    /// discrepancy: bits advertised to the guest that the TD does not
+    /// virtualize ("unavailable"), or bits the TD forces on regardless
+    /// ("forced-on", e.g. fixed1). This mirrors QEMU's `tdx_check_features()`.
+    /// It is purely diagnostic and best-effort.
+    #[cfg(feature = "tdx")]
+    fn compare_tdx_cpuid(id: u32, vcpu: &dyn hypervisor::Vcpu) {
+        let programmed = match vcpu.get_cpuid2(256) {
+            Ok(c) => c,
+            Err(e) => {
+                info!("TDX vCPU {id}: could not read programmed CPUID for cross-check: {e}");
+                return;
+            }
+        };
+        let td = match vcpu.tdx_get_cpuid() {
+            Ok(c) => c,
+            Err(e) => {
+                info!("TDX vCPU {id}: could not read TDX-virtualized CPUID for cross-check: {e}");
+                return;
+            }
+        };
+
+        for p in &programmed {
+            let Some(t) = td
+                .iter()
+                .find(|t| t.function == p.function && t.index == p.index)
+            else {
+                info!(
+                    "TDX vCPU {id}: CPUID leaf {:#x}/{:#x} advertised to guest is not virtualized by the TDX module",
+                    p.function, p.index
+                );
+                continue;
+            };
+
+            for (reg, prog, tdval) in [
+                ("eax", p.eax, t.eax),
+                ("ebx", p.ebx, t.ebx),
+                ("ecx", p.ecx, t.ecx),
+                ("edx", p.edx, t.edx),
+            ] {
+                let unavailable = prog & !tdval;
+                if unavailable != 0 {
+                    info!(
+                        "TDX vCPU {id}: CPUID {:#x}/{:#x} {reg}: bits {unavailable:#x} advertised to guest but not virtualized by the TDX module",
+                        p.function, p.index
+                    );
+                }
+                let forced_on = tdval & !prog;
+                if forced_on != 0 {
+                    info!(
+                        "TDX vCPU {id}: CPUID {:#x}/{:#x} {reg}: bits {forced_on:#x} forced on by the TDX module",
+                        p.function, p.index
+                    );
+                }
+            }
+        }
     }
 
     pub fn boot_vcpus(&self) -> u32 {
