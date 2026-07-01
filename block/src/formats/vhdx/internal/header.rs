@@ -68,6 +68,8 @@ pub enum VhdxHeaderError {
     ReadRegionTableHeader(#[source] io::Error),
     #[error("Failed to read region entries")]
     RegionEntryCollectionFailed,
+    #[error("Region entry file offset and length overflow u64")]
+    RegionEntryOverflow,
     #[error("Overlapping regions found")]
     RegionOverlap,
     #[error("Reserved region has non-zero value")]
@@ -266,7 +268,12 @@ impl RegionInfo {
 
             offset += size_of::<RegionTableEntry>();
             let start = entry.file_offset;
-            let end = start + entry.length as u64;
+            // The offset and length come straight from the image, so a hostile
+            // entry can wrap the address space. A wrapped end would compare as
+            // a small value and hide a real overlap, so treat it as invalid.
+            let end = start
+                .checked_add(entry.length as u64)
+                .ok_or(VhdxHeaderError::RegionEntryOverflow)?;
 
             for (region_ent_start, region_ent_end) in region_entries.iter() {
                 if ranges_overlap(start, end, *region_ent_start, *region_ent_end) {
@@ -274,7 +281,7 @@ impl RegionInfo {
                 }
             }
 
-            region_entries.insert(entry.file_offset, entry.file_offset + entry.length as u64);
+            region_entries.insert(start, end);
 
             if entry.guid == Uuid::parse_str(BAT_GUID).map_err(VhdxHeaderError::InvalidUuid)? {
                 if bat_entry.is_none() {
@@ -545,6 +552,28 @@ mod tests {
         assert!(
             matches!(res, Err(VhdxHeaderError::RegionOverlap)),
             "expected RegionOverlap for an overlapping region table"
+        );
+    }
+
+    #[test]
+    fn test_region_info_rejects_overflowing_region() {
+        // A region whose file offset plus length wraps past u64::MAX must be
+        // rejected rather than silently producing a small end offset that
+        // could mask a genuine overlap.
+        let region_start = REGION_TABLE_1_START;
+        let entries_at = region_start + size_of::<RegionTableHeader>() as u64;
+
+        let temp = TempFile::new().unwrap();
+        let f = temp.into_file();
+        f.set_len(entries_at + 64 * 1024).unwrap();
+        f.write_all_at(&region_entry(BAT_GUID, u64::MAX, 0x1000), entries_at)
+            .unwrap();
+
+        let af = AlignedFile::new(f, false);
+        let res = RegionInfo::new(&af, region_start, 1);
+        assert!(
+            matches!(res, Err(VhdxHeaderError::RegionEntryOverflow)),
+            "expected RegionEntryOverflow for a wrapping region entry"
         );
     }
 }
