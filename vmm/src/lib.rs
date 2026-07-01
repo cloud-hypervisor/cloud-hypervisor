@@ -2,8 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error as StdError;
 use std::fs::File;
 use std::io::{Read, Write, stdout};
@@ -52,7 +51,7 @@ use crate::api::{
     ApiRequest, ApiResponse, MigrationMode, RequestHandler, TimeoutStrategy, VmInfoResponse,
     VmReceiveMigrationData, VmSendMigrationData, VmmPingResponse,
 };
-use crate::config::{MemoryRestoreMode, RestoreConfig, add_to_config};
+use crate::config::{MemoryRestoreMode, RestoreConfig, VmMemoryZoneUpdateData, add_to_config};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::GuestDebuggable;
 use crate::device_manager::DeviceManager;
@@ -234,6 +233,22 @@ pub enum Error {
     /// Cannot apply landlock based sandboxing
     #[error("Error applying landlock")]
     ApplyLandlock(#[source] LandlockError),
+}
+
+/// Errors associated with remapping memory zones
+#[derive(Debug, Error)]
+pub enum MemoryZoneRemapError {
+    /// Cannot apply remapping as the original configuration didn't specify any memory zones
+    #[error("No zones specified in original config")]
+    NoZones,
+    #[error(
+        "Zone with ID \"{0}\" is a shared zone backed by a regular file and thus cannot be bound to a node"
+    )]
+    SharedZoneBackedByFile(String),
+    #[error("Zone ID \"{0}\" wasn't in original config")]
+    ZoneNotFound(String),
+    #[error("Multiple remappings were specified for memory zone with ID \"{0}\"")]
+    MultipleRemappings(String),
 }
 
 impl From<&VmConfig> for hypervisor::HypervisorVmConfig {
@@ -969,7 +984,13 @@ impl Vmm {
              memory_files: HashMap<u32, File>|
              -> result::Result<ReceiveMigrationConfiguredData, MigratableError> {
                 let shared_backing = !memory_files.is_empty();
-                let memory_manager = self.vm_receive_config(req, socket, memory_files, mode)?;
+                let memory_manager = self.vm_receive_config(
+                    req,
+                    socket,
+                    memory_files,
+                    mode,
+                    &receive_data_migration.zones_updates,
+                )?;
                 let guest_memory = memory_manager.lock().unwrap().guest_memory();
                 // Create the additional-connection receiver even in the single-connection case.
                 // At this point the receiver does not know whether the sender will use extra TCP
@@ -1150,6 +1171,7 @@ impl Vmm {
         socket: &mut T,
         existing_memory_files: HashMap<u32, File>,
         mode: MigrationMode,
+        zones_updates: &[VmMemoryZoneUpdateData],
     ) -> result::Result<Arc<Mutex<MemoryManager>>, MigratableError>
     where
         T: Read,
@@ -1188,6 +1210,10 @@ impl Vmm {
             &vm_migration_config.vm_config,
             &vm_migration_config.common_cpuid,
         )?;
+
+        remap_memory_zones(zones_updates, &vm_migration_config.vm_config).map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!("Error remapping memory zones: {e:?}"))
+        })?;
 
         let config = vm_migration_config.vm_config.clone();
         self.vm_config = Some(vm_migration_config.vm_config);
@@ -2206,6 +2232,52 @@ fn apply_landlock(vm_config: &mut VmConfig) -> result::Result<(), LandlockError>
     Ok(())
 }
 
+fn remap_memory_zones(
+    zones_updates: &[VmMemoryZoneUpdateData],
+    vm_config: &Arc<Mutex<VmConfig>>,
+) -> result::Result<(), MemoryZoneRemapError> {
+    if !zones_updates.is_empty() {
+        let mut vm_config = vm_config.lock().unwrap();
+        // Clone zones so we can abort if we encounter an error without
+        // leaving the VMConfig in a inconsistent state.
+        let mut config_zones = vm_config
+            .memory
+            .zones
+            .as_mut()
+            .ok_or(MemoryZoneRemapError::NoZones)?
+            .clone();
+
+        let mut seen_zone_ids = HashSet::new();
+        for zone_update in zones_updates {
+            // We currently only support to move MemoryZones to different host nodes.
+            if !seen_zone_ids.insert(zone_update.id.clone()) {
+                return Err(MemoryZoneRemapError::MultipleRemappings(
+                    zone_update.id.clone(),
+                ));
+            }
+            let matched_zone = config_zones
+                .iter_mut()
+                .find(|z| z.id == zone_update.id)
+                .ok_or_else(|| MemoryZoneRemapError::ZoneNotFound(zone_update.id.clone()))?;
+
+            if matched_zone.shared && matched_zone.file.is_some() {
+                error!(
+                    "Invalid to set host NUMA policy for a memory zone \
+                        backed by a regular file and mapped as 'shared' "
+                );
+                return Err(MemoryZoneRemapError::SharedZoneBackedByFile(
+                    zone_update.id.clone(),
+                ));
+            }
+
+            matched_zone.host_numa_node = Some(zone_update.host_numa_node);
+        }
+        // Write back updated zones after all updates were successful
+        *(vm_config.memory.zones.as_mut().unwrap()) = config_zones;
+    }
+    Ok(())
+}
+
 impl RequestHandler for Vmm {
     fn vm_create(&mut self, config: Box<VmConfig>) -> result::Result<(), VmError> {
         match &self.vm {
@@ -2383,6 +2455,15 @@ impl RequestHandler for Vmm {
                         }
                     }
                 }
+
+                // Update MemoryZone mapping
+                remap_memory_zones(&restore_cfg.zones_updates, &vm_config).map_err(|e| {
+                    error!("VM Restore failed: {e:?}");
+                    if let Err(e) = self.vm_delete() {
+                        return e;
+                    }
+                    VmError::ApplyMemoryZoneRemapping(e)
+                })?;
 
                 self.vm_restore(
                     source_url,
@@ -3015,9 +3096,10 @@ impl RequestHandler for Vmm {
             .map_err(MigratableError::MigrateReceive)?;
 
         info!(
-            "Receiving migration: receiver_url={},tls={}",
+            "Receiving migration: receiver_url={},tls={},zones_updates={:?}",
             receive_data_migration.receiver_url,
-            receive_data_migration.tls_dir.is_some()
+            receive_data_migration.tls_dir.is_some(),
+            receive_data_migration.zones_updates,
         );
 
         let mut listener = transport::receive_migration_listener(
@@ -3251,8 +3333,8 @@ mod unit_tests {
     use crate::vm_config::DebugConsoleConfig;
     use crate::vm_config::{
         CommonConsoleConfig, ConsoleConfig, ConsoleOutputMode, CoreScheduling, CpuFeatures,
-        CpusConfig, HotplugMethod, MemoryConfig, PayloadConfig, PciDeviceCommonConfig, RngConfig,
-        SerialConfig,
+        CpusConfig, HotplugMethod, MemoryConfig, MemoryZoneConfig, PayloadConfig,
+        PciDeviceCommonConfig, RngConfig, SerialConfig,
     };
 
     fn create_dummy_vmm() -> Vmm {
@@ -3789,6 +3871,156 @@ mod unit_tests {
                 .clone()
                 .unwrap(),
             vsock_config
+        );
+    }
+
+    #[test]
+    fn test_remap_memory_zones() {
+        const NEW_ID_ZONE1: u32 = 3;
+        const NEW_ID_ZONE2: u32 = 2;
+
+        let mut dummy_config = create_dummy_vm_config();
+        let memzones_updates = vec![
+            VmMemoryZoneUpdateData {
+                id: "zone1".to_string(),
+                host_numa_node: NEW_ID_ZONE1,
+            },
+            VmMemoryZoneUpdateData {
+                id: "zone2".to_string(),
+                host_numa_node: NEW_ID_ZONE2,
+            },
+        ];
+
+        // No zones configured in the original config -> Error
+        dummy_config.memory.zones = None;
+        let result = remap_memory_zones(
+            &memzones_updates,
+            &Arc::new(Mutex::new(*dummy_config.clone())),
+        );
+        assert!(
+            matches!(result, Err(MemoryZoneRemapError::NoZones)),
+            "Expected `Err(MemZoneRemapError::NoZones)` but got {result:?}"
+        );
+
+        // More zone updates than originally specified zones -> Error
+        dummy_config.memory.zones = Some(vec![MemoryZoneConfig {
+            host_numa_node: Some(0),
+            id: "zone1".to_string(),
+            ..Default::default()
+        }]);
+        let result = remap_memory_zones(
+            &memzones_updates,
+            &Arc::new(Mutex::new(*dummy_config.clone())),
+        );
+        assert!(
+            matches!(
+                result,
+                Err(MemoryZoneRemapError::ZoneNotFound(ref id)) if id=="zone2"
+            ),
+            "Expected `Err(MemZoneRemapError::ZoneNotFound(\"zone2\"))` but got {result:?}"
+        );
+
+        // The second zone update does not match -> Error
+        dummy_config.memory.zones = Some(vec![
+            MemoryZoneConfig {
+                host_numa_node: Some(0),
+                id: "zone1".to_string(),
+                ..Default::default()
+            },
+            MemoryZoneConfig {
+                host_numa_node: Some(1),
+                id: "zone3".to_string(),
+                ..Default::default()
+            },
+        ]);
+        let result = remap_memory_zones(
+            &memzones_updates,
+            &Arc::new(Mutex::new(*dummy_config.clone())),
+        );
+        assert!(
+            matches!(
+                result,
+                Err(MemoryZoneRemapError::ZoneNotFound(ref id)) if id=="zone2"
+            ),
+            "Expected `Err(MemZoneRemapError::ZoneNotFound(\"zone2\"))` but got {result:?}"
+        );
+
+        // List contains two updates for the same memory Zone -> Error
+        dummy_config.memory.zones = Some(vec![
+            MemoryZoneConfig {
+                host_numa_node: Some(0),
+                id: "zone1".to_string(),
+                ..Default::default()
+            },
+            MemoryZoneConfig {
+                host_numa_node: Some(1),
+                id: "zone3".to_string(),
+                ..Default::default()
+            },
+        ]);
+
+        let memzones_updates = vec![
+            VmMemoryZoneUpdateData {
+                id: "zone1".to_string(),
+                host_numa_node: NEW_ID_ZONE1,
+            },
+            VmMemoryZoneUpdateData {
+                id: "zone1".to_string(),
+                host_numa_node: NEW_ID_ZONE2,
+            },
+        ];
+        let result = remap_memory_zones(
+            &memzones_updates,
+            &Arc::new(Mutex::new(*dummy_config.clone())),
+        );
+        assert!(
+            matches!(
+                result,
+                Err(MemoryZoneRemapError::MultipleRemappings(ref id)) if id=="zone1"
+            ),
+            "Expected `Err(MemoryZoneRemapError::MultipleRemappings(\"zone1\"))` but got {result:?}"
+        );
+
+        // The update works. Result is okay and the update is written to the config
+        dummy_config.memory.zones = Some(vec![
+            MemoryZoneConfig {
+                host_numa_node: Some(0),
+                id: "zone1".to_string(),
+                ..Default::default()
+            },
+            MemoryZoneConfig {
+                host_numa_node: Some(1),
+                id: "zone2".to_string(),
+                ..Default::default()
+            },
+        ]);
+
+        let memzones_updates = vec![
+            VmMemoryZoneUpdateData {
+                id: "zone1".to_string(),
+                host_numa_node: NEW_ID_ZONE1,
+            },
+            VmMemoryZoneUpdateData {
+                id: "zone2".to_string(),
+                host_numa_node: NEW_ID_ZONE2,
+            },
+        ];
+        let dummy_config = Arc::new(Mutex::new(*dummy_config));
+        let result = remap_memory_zones(&memzones_updates, &dummy_config.clone());
+        assert!(
+            matches!(result, Ok(()),),
+            "Result should have been Ok(()) but got {result:?}"
+        );
+        let result_zones = dummy_config.lock().unwrap().memory.zones.clone().unwrap();
+        assert_eq!(
+            result_zones[0].host_numa_node,
+            Some(NEW_ID_ZONE1),
+            "Expected \"zone1\" to be remapped to {NEW_ID_ZONE1:?}"
+        );
+        assert_eq!(
+            result_zones[1].host_numa_node,
+            Some(NEW_ID_ZONE2),
+            "Expected \"zone2\" to be remapped to {NEW_ID_ZONE2:?}"
         );
     }
 }
