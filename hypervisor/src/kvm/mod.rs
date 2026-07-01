@@ -1511,26 +1511,32 @@ impl vm::Vm for KvmVm {
         // CPUID.0xD reports the XSAVE state the TD is allowed to manage:
         // sub-leaf 0 carries the XCR0-managed bits (EAX:low, EDX:high) and
         // sub-leaf 1 carries the IA32_XSS-managed bits (ECX:low, EDX:high).
+        // This is masked to the configurable set below.
         let xfam = tdx_xfam_from_cpuid(&guest_cpuid);
 
-        // Derive the TD ATTRIBUTES from the guest CPUID. SEPT_VE_DISABLE is
-        // always requested; PKS and PERFMON must match the features exposed to
-        // the guest, otherwise the TDX module rejects KVM_TDX_INIT_VM.
+        // Derive the TD ATTRIBUTES from the guest CPUID (SEPT_VE_DISABLE plus
+        // any PKS/PERFMON hints). This is masked to the configurable set below.
         let attributes = tdx_attributes_from_cpuid(&guest_cpuid);
 
         // The upstream Linux 6.16 `struct kvm_tdx_init_vm` no longer carries
-        // `max_vcpus`; the limit must be configured via KVM_CAP_MAX_VCPUS
-        // before KVM_TDX_INIT_VM and before any vCPU is created. tdx_init()
-        // runs after the VM fd is created but before create_boot_vcpus(), so
-        // this is the correct point to enable the capability.
+        // `max_vcpus`; the TDX module derives the TD's `TD_PARAMS.max_vcpus`
+        // from the VM's `kvm->max_vcpus`. Some kernels let userspace lower that
+        // bound via KVM_CAP_MAX_VCPUS before KVM_TDX_INIT_VM (and before any
+        // vCPU is created); others do not implement setting that capability and
+        // simply rely on the default (capped at the number of present CPUs).
+        // Attempt it best-effort so we honor an explicit limit where supported,
+        // but never fail TDX init when the capability is query-only.
         let cap = kvm_bindings::kvm_enable_cap {
             cap: kvm_bindings::KVM_CAP_MAX_VCPUS,
             args: [max_vcpus as u64, 0, 0, 0],
             ..Default::default()
         };
-        self.fd.enable_cap(&cap).map_err(|e| {
-            vm::HypervisorVmError::InitializeTdx(io::Error::from_raw_os_error(e.errno()))
-        })?;
+        if let Err(e) = self.fd.enable_cap(&cap) {
+            warn!(
+                "KVM_CAP_MAX_VCPUS not settable ({e}); TD max_vcpus will use the \
+                 kernel default derived from kvm->max_vcpus"
+            );
+        }
 
         // Query the TDX capabilities (a VM-scoped ioctl) to learn both the
         // supported attribute/XFAM masks and the set of CPUID leaves the TDX
@@ -1541,25 +1547,16 @@ impl vm::Vm for KvmVm {
             )))
         })?;
 
-        // Validate the requested attributes and XFAM against what the TDX
-        // module and KVM actually support before KVM_TDX_INIT_VM, mirroring
-        // the kernel's own checks in setup_tdparams().
-        if attributes & !caps.supported_attrs != 0 {
-            return Err(vm::HypervisorVmError::InitializeTdx(io::Error::other(
-                format!(
-                    "requested TD attributes {attributes:#x} not supported (supported {:#x})",
-                    caps.supported_attrs
-                ),
-            )));
-        }
-        if xfam & !caps.supported_xfam != 0 {
-            return Err(vm::HypervisorVmError::InitializeTdx(io::Error::other(
-                format!(
-                    "requested TD XFAM {xfam:#x} not supported (supported {:#x})",
-                    caps.supported_xfam
-                ),
-            )));
-        }
+        // Restrict the requested ATTRIBUTES and XFAM to the bits the TDX
+        // module lets userspace configure. KVM's setup_tdparams() requires
+        // `init_vm->attributes` (and xfam) to be a subset of the configurable
+        // mask (fixed0) and then ORs in the module's fixed1 bits itself, so
+        // any feature that is forced on (e.g. PERFMON) must NOT be requested
+        // here or KVM_TDX_INIT_VM fails with EINVAL. Masking rather than
+        // erroring keeps us forward-compatible: the module supplies the fixed
+        // bits and virtualizes CPUID to match.
+        let attributes = attributes & caps.supported_attrs;
+        let xfam = xfam & caps.supported_xfam;
 
         // Build the TD CPUID table. KVM (setup_tdparams_cpuids) only accepts
         // entries whose (function, index) is in the TDX module's configurable
@@ -1578,12 +1575,32 @@ impl vm::Vm for KvmVm {
                 continue;
             };
             let mut entry = *entry;
+            // Each `cfg` entry from KVM_TDX_CAPABILITIES carries, in its
+            // eax/ebx/ecx/edx, the mask of bits the TDX module lets userspace
+            // *configure* for that leaf. Bits outside the mask are fixed by the
+            // module; TDH.MNG.INIT returns TDX_OPERAND_INVALID if we leave any
+            // of them set. So restrict the guest's values to the configurable
+            // bits and let the module supply the rest.
+            entry.eax &= cfg.eax;
+            entry.ebx &= cfg.ebx;
+            entry.ecx &= cfg.ecx;
+            entry.edx &= cfg.edx;
             if entry.function == 7 && entry.index == 0 {
                 // The TDX module rejects TSX (HLE bit 4, RTM bit 11 in EBX) and
                 // WAITPKG (bit 5 in ECX); clear them like the kernel's
                 // tdx_clear_unsupported_cpuid().
                 entry.ebx &= !((1 << 4) | (1 << 11));
                 entry.ecx &= !(1 << 5);
+            }
+            if entry.function == 0x8000_0008 {
+                // KVM repurposes CPUID.0x80000008.EAX[23:16] (normally reserved)
+                // as the interface to select the TD's GPAW / EPT depth in
+                // setup_tdparams_eptp_controls(): only 48 (GPAW-48, 4-level EPT)
+                // and 52 (GPAW-52, 5-level EPT) are accepted, and any other
+                // value fails KVM_TDX_INIT_VM with EINVAL. The guest CPUID
+                // leaves those bits zero, so encode GPAW-48, the standard width
+                // for TDs that do not require 5-level guest-physical addressing.
+                entry.eax = (entry.eax & !(0xff << 16)) | (48 << 16);
             }
             cpuid_entries[count] = entry;
             count += 1;
@@ -1617,6 +1634,7 @@ impl vm::Vm for KvmVm {
             cpuid_entries,
         };
 
+        debug!("KVM_TDX_INIT_VM: attributes={attributes:#x} xfam={xfam:#x} cpuid_nent={count}");
         tdx_command(
             &self.fd.as_raw_fd(),
             TdxCommand::InitVm,
