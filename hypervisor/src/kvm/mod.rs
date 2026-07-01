@@ -1504,8 +1504,6 @@ impl vm::Vm for KvmVm {
     ///
     #[cfg(feature = "tdx")]
     fn tdx_init(&self, cpuid: &[CpuIdEntry], max_vcpus: u32) -> vm::Result<()> {
-        const TDX_ATTR_SEPT_VE_DISABLE: usize = 28;
-
         let mut cpuid: Vec<kvm_bindings::kvm_cpuid_entry2> =
             cpuid.iter().map(|e| (*e).into()).collect();
 
@@ -1550,8 +1548,10 @@ impl vm::Vm for KvmVm {
             cpuid_entries: [kvm_bindings::kvm_cpuid_entry2; 256],
         }
 
-        let attributes: u64 = 1 << TDX_ATTR_SEPT_VE_DISABLE;
-
+        // Derive the TD ATTRIBUTES from the guest CPUID. SEPT_VE_DISABLE is
+        // always requested; PKS and PERFMON must match the features exposed to
+        // the guest, otherwise the TDX module rejects KVM_TDX_INIT_VM.
+        let attributes = tdx_attributes_from_cpuid(&cpuid);
         // Validate the requested attributes and XFAM against what the TDX
         // module and KVM actually support before KVM_TDX_INIT_VM, mirroring
         // the kernel's own checks in setup_tdparams(). The supported masks
@@ -1674,6 +1674,36 @@ impl vm::Vm for KvmVm {
     fn as_any(&self) -> &dyn Any {
         self
     }
+}
+
+/// Inject #VE on unexpected Secure-EPT violations instead of exiting the TD.
+#[cfg(feature = "tdx")]
+const TDX_TD_ATTR_SEPT_VE_DISABLE: u64 = 1 << 28;
+/// Protection Keys for Supervisor-mode pages (PKS) are available to the TD.
+#[cfg(feature = "tdx")]
+const TDX_TD_ATTR_PKS: u64 = 1 << 30;
+/// Performance Monitoring (PMU) is available to the TD.
+#[cfg(feature = "tdx")]
+const TDX_TD_ATTR_PERFMON: u64 = 1 << 63;
+
+/// Derive the TD's ATTRIBUTES from the guest CPUID view.
+///
+/// SEPT_VE_DISABLE is always requested. PKS and PERFMON must match the
+/// features exposed to the guest via CPUID, otherwise the TDX module rejects
+/// KVM_TDX_INIT_VM:
+///   - PKS (bit 30)     <- CPUID.(EAX=7,ECX=0).ECX[31]
+///   - PERFMON (bit 63) <- CPUID.(EAX=0xA,ECX=0).EAX[7:0] (PMU version) != 0
+#[cfg(feature = "tdx")]
+fn tdx_attributes_from_cpuid(cpuid: &[kvm_bindings::kvm_cpuid_entry2]) -> u64 {
+    let mut attributes = TDX_TD_ATTR_SEPT_VE_DISABLE;
+    for entry in cpuid {
+        match (entry.function, entry.index) {
+            (0x7, 0) if entry.ecx & (1 << 31) != 0 => attributes |= TDX_TD_ATTR_PKS,
+            (0xA, 0) if entry.eax & 0xff != 0 => attributes |= TDX_TD_ATTR_PERFMON,
+            _ => {}
+        }
+    }
+    attributes
 }
 
 /// Compute the TD's XFAM (extended features available mask) from the guest
