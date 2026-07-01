@@ -484,4 +484,16 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
     }
+
+    #[test]
+    fn write_unaligned_propagates_closure_error() {
+        let file = pattern_file(8192);
+        let aligned_file = forced(file.as_file().try_clone().unwrap(), 512);
+        let err = aligned_file
+            .write_unaligned(100, 200, |_| {
+                Err(io::Error::new(io::ErrorKind::InvalidInput, "boom"))
+            })
+            .unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
 }
