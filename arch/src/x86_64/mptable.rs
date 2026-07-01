@@ -5,7 +5,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-use std::{result, slice};
+use std::result;
 
 use libc::c_uchar;
 use log::{info, warn};
@@ -101,11 +101,8 @@ const CPU_FEATURE_APIC: u32 = 0x200;
 const CPU_FEATURE_FPU: u32 = 0x001;
 
 fn compute_checksum<T: Copy + ByteValued>(v: &T) -> u8 {
-    let v: *const T = v;
-    // SAFETY: we are only reading the bytes within the size of the `T` reference `v`.
-    let v_slice = unsafe { slice::from_raw_parts(v.cast(), size_of::<T>()) };
     let mut checksum: u8 = 0;
-    for i in v_slice.iter() {
+    for i in v.as_slice().iter() {
         checksum = checksum.wrapping_add(*i);
     }
     checksum
