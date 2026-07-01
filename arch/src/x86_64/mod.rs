@@ -1055,6 +1055,7 @@ pub fn configure_vcpu(
     topology: (u16, u16, u16, u16),
     nested: bool,
     setup_registers: bool,
+    tdx_enabled: bool,
 ) -> super::Result<()> {
     let x2apic_id = get_x2apic_id(id, Some(topology));
 
@@ -1124,7 +1125,12 @@ pub fn configure_vcpu(
         vcpu.enable_hyperv_synic().unwrap();
     }
 
-    regs::setup_msrs(vcpu).map_err(Error::MsrsConfiguration)?;
+    // For TDX, the vCPU's MSR state is owned by the TDX module and cannot be
+    // programmed through KVM_SET_MSRS (the vCPU is guest-state protected), so
+    // skip the boot MSR setup for TDs.
+    if !tdx_enabled {
+        regs::setup_msrs(vcpu).map_err(Error::MsrsConfiguration)?;
+    }
     if let Some((kernel_entry_point, guest_memory)) = boot_setup {
         if setup_registers {
             regs::setup_regs(vcpu, kernel_entry_point).map_err(Error::RegsConfiguration)?;
@@ -1140,7 +1146,12 @@ pub fn configure_vcpu(
         }
         regs::setup_fpu(vcpu).map_err(Error::FpuConfiguration)?;
     }
-    interrupts::set_lint(vcpu).map_err(|e| Error::LocalIntConfiguration(e.into()))?;
+    // For TDX, the vCPU's local APIC state is owned by the TDX module and is not
+    // accessible via KVM_GET_LAPIC/KVM_SET_LAPIC (the vCPU is guest-state
+    // protected), so skip the LINT setup that those ioctls back.
+    if !tdx_enabled {
+        interrupts::set_lint(vcpu).map_err(|e| Error::LocalIntConfiguration(e.into()))?;
+    }
     Ok(())
 }
 

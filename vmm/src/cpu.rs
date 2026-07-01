@@ -554,6 +554,7 @@ impl Vcpu {
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
         #[cfg(target_arch = "x86_64")] topology: (u16, u16, u16, u16),
         #[cfg(target_arch = "x86_64")] nested: bool,
+        #[cfg(feature = "tdx")] tdx_enabled: bool,
         #[cfg(feature = "igvm")] igvm_enabled: bool,
     ) -> Result<()> {
         #[cfg(target_arch = "aarch64")]
@@ -581,6 +582,8 @@ impl Vcpu {
                     let setup_registers = true;
                 }
             }
+            #[cfg(not(feature = "tdx"))]
+            let tdx_enabled = false;
             arch::configure_vcpu(
                 self.vcpu.as_ref(),
                 self.id,
@@ -591,6 +594,7 @@ impl Vcpu {
                 topology,
                 nested,
                 setup_registers,
+                tdx_enabled,
             )
             .map_err(Error::VcpuConfiguration)?;
         }
@@ -741,6 +745,11 @@ pub struct CpuManager {
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     #[cfg(feature = "sev_snp")]
     sev_snp_enabled: bool,
+    // Whether this VM is a TDX Trust Domain. TD vCPU register/APIC/FPU state is
+    // owned by the TDX module, so the standard KVM vCPU state configuration must
+    // be skipped for TDs.
+    #[cfg(feature = "tdx")]
+    tdx_enabled: bool,
     // State of the core scheduling group leader election (VM mode).
     core_scheduling_group_leader: Arc<AtomicI32>,
     #[cfg(feature = "igvm")]
@@ -980,6 +989,8 @@ impl CpuManager {
             hypervisor,
             #[cfg(feature = "sev_snp")]
             sev_snp_enabled,
+            #[cfg(feature = "tdx")]
+            tdx_enabled,
             core_scheduling_group_leader: Arc::new(AtomicI32::new(
                 CoreSchedulingLeader::Initial as i32,
             )),
@@ -1092,6 +1103,8 @@ impl CpuManager {
             self.config.kvm_hyperv,
             topology,
             self.config.nested,
+            #[cfg(feature = "tdx")]
+            self.tdx_enabled,
             #[cfg(feature = "igvm")]
             self.igvm_enabled,
         )?;
