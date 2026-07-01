@@ -1637,6 +1637,8 @@ impl Vmm {
 
             arch::generate_common_cpuid(
                 hypervisor,
+                #[cfg(feature = "tdx")]
+                None,
                 &arch::CpuidConfig {
                     phys_bits,
                     kvm_hyperv,
@@ -1933,6 +1935,8 @@ impl Vmm {
 
             arch::generate_common_cpuid(
                 self.hypervisor.as_ref(),
+                #[cfg(feature = "tdx")]
+                None,
                 &arch::CpuidConfig {
                     phys_bits,
                     kvm_hyperv: vm_config.cpus.kvm_hyperv,

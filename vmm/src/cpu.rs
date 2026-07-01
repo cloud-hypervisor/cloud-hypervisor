@@ -930,6 +930,8 @@ impl CpuManager {
             let phys_bits = physical_bits(hypervisor.as_ref(), config.max_phys_bits);
             arch::generate_common_cpuid(
                 hypervisor.as_ref(),
+                #[cfg(feature = "tdx")]
+                Some(vm.as_ref()),
                 &arch::CpuidConfig {
                     phys_bits,
                     kvm_hyperv: config.kvm_hyperv,

@@ -27,6 +27,8 @@ use vmm_sys_util::eventfd::EventFd;
 
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
+#[cfg(feature = "tdx")]
+use crate::HypervisorError;
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
 #[cfg(target_arch = "riscv64")]
@@ -36,6 +38,8 @@ use crate::arch::x86::CpuIdEntry;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::VcpuMsrConfigUpdate;
 use crate::cpu::Vcpu;
+#[cfg(feature = "tdx")]
+use crate::kvm::TdxCapabilities;
 use crate::{ClockRestoreMode, ClockState, IoEventAddress, IrqRoutingEntry};
 
 ///
@@ -470,6 +474,11 @@ pub trait Vm: Send + Sync + Any {
     #[cfg(feature = "tdx")]
     /// Finalize the configuration of TDX on this VM
     fn tdx_finalize(&self) -> Result<()> {
+        unimplemented!()
+    }
+    #[cfg(feature = "tdx")]
+    /// Retrieve the TDX capabilities supported for this VM
+    fn tdx_capabilities(&self) -> result::Result<TdxCapabilities, HypervisorError> {
         unimplemented!()
     }
     #[cfg(feature = "tdx")]

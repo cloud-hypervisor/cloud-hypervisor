@@ -1549,8 +1549,37 @@ impl vm::Vm for KvmVm {
             cpuid_padding: u32,
             cpuid_entries: [kvm_bindings::kvm_cpuid_entry2; 256],
         }
+
+        let attributes: u64 = 1 << TDX_ATTR_SEPT_VE_DISABLE;
+
+        // Validate the requested attributes and XFAM against what the TDX
+        // module and KVM actually support before KVM_TDX_INIT_VM, mirroring
+        // the kernel's own checks in setup_tdparams(). The supported masks
+        // come from KVM_TDX_CAPABILITIES (a VM-scoped ioctl).
+        let caps = self.tdx_capabilities().map_err(|e| {
+            vm::HypervisorVmError::InitializeTdx(io::Error::other(format!(
+                "failed to query TDX capabilities: {e}"
+            )))
+        })?;
+        if attributes & !caps.supported_attrs != 0 {
+            return Err(vm::HypervisorVmError::InitializeTdx(io::Error::other(
+                format!(
+                    "requested TD attributes {attributes:#x} not supported (supported {:#x})",
+                    caps.supported_attrs
+                ),
+            )));
+        }
+        if xfam & !caps.supported_xfam != 0 {
+            return Err(vm::HypervisorVmError::InitializeTdx(io::Error::other(
+                format!(
+                    "requested TD XFAM {xfam:#x} not supported (supported {:#x})",
+                    caps.supported_xfam
+                ),
+            )));
+        }
+
         let data = TdxInitVm {
-            attributes: 1 << TDX_ATTR_SEPT_VE_DISABLE,
+            attributes,
             xfam,
             mrconfigid: [0; 6],
             mrowner: [0; 6],
@@ -1577,6 +1606,34 @@ impl vm::Vm for KvmVm {
     fn tdx_finalize(&self) -> vm::Result<()> {
         tdx_command(&self.fd.as_raw_fd(), TdxCommand::Finalize, 0, ptr::null())
             .map_err(vm::HypervisorVmError::FinalizeTdx)
+    }
+
+    #[cfg(feature = "tdx")]
+    fn tdx_capabilities(&self) -> hypervisor::Result<TdxCapabilities> {
+        let data = TdxCapabilities {
+            supported_attrs: 0,
+            supported_xfam: 0,
+            kernel_tdvmcallinfo_1_r11: 0,
+            user_tdvmcallinfo_1_r11: 0,
+            kernel_tdvmcallinfo_1_r12: 0,
+            user_tdvmcallinfo_1_r12: 0,
+            reserved: [0; 250],
+            cpuid_nent: 256,
+            cpuid_padding: 0,
+            cpuid_entries: [kvm_bindings::kvm_cpuid_entry2::default(); 256],
+        };
+
+        // KVM_TDX_CAPABILITIES is a VM-scoped ioctl in Linux 6.16: it must be
+        // issued on the TD VM fd, not on the /dev/kvm system fd.
+        tdx_command(
+            &self.fd.as_raw_fd(),
+            TdxCommand::Capabilities,
+            0,
+            (&raw const data).cast(),
+        )
+        .map_err(|e| hypervisor::HypervisorError::TdxCapabilities(e.into()))?;
+
+        Ok(data)
     }
 
     /// Initialize memory regions for the TDX VM
@@ -1974,35 +2031,6 @@ impl hypervisor::Hypervisor for KvmHypervisor {
     ///
     fn get_host_ipa_limit(&self) -> i32 {
         self.kvm.get_host_ipa_limit()
-    }
-
-    ///
-    /// Retrieve TDX capabilities
-    ///
-    #[cfg(feature = "tdx")]
-    fn tdx_capabilities(&self) -> hypervisor::Result<TdxCapabilities> {
-        let data = TdxCapabilities {
-            supported_attrs: 0,
-            supported_xfam: 0,
-            kernel_tdvmcallinfo_1_r11: 0,
-            user_tdvmcallinfo_1_r11: 0,
-            kernel_tdvmcallinfo_1_r12: 0,
-            user_tdvmcallinfo_1_r12: 0,
-            reserved: [0; 250],
-            cpuid_nent: 256,
-            cpuid_padding: 0,
-            cpuid_entries: [kvm_bindings::kvm_cpuid_entry2::default(); 256],
-        };
-
-        tdx_command(
-            &self.kvm.as_raw_fd(),
-            TdxCommand::Capabilities,
-            0,
-            (&raw const data).cast(),
-        )
-        .map_err(|e| hypervisor::HypervisorError::TdxCapabilities(e.into()))?;
-
-        Ok(data)
     }
 
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]

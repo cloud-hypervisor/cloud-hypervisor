@@ -207,6 +207,11 @@ pub enum Error {
     #[error("Error retrieving TDX capabilities through the hypervisor API")]
     TdxCapabilities(#[source] HypervisorError),
 
+    /// No VM handle was available to query TDX capabilities
+    #[cfg(feature = "tdx")]
+    #[error("No VM handle available to query TDX capabilities")]
+    TdxCapabilitiesNoVm,
+
     /// Failed to configure E820 map for bzImage
     #[error("Failed to configure E820 map for bzImage")]
     E820Configuration,
@@ -649,6 +654,7 @@ impl CpuidFeatureEntry {
 /// to apply the selected CPU profile.
 pub fn generate_common_cpuid(
     hypervisor: &dyn hypervisor::Hypervisor,
+    #[cfg(feature = "tdx")] vm: Option<&dyn hypervisor::Vm>,
     config: &CpuidConfig,
 ) -> super::Result<Vec<CpuIdEntry>> {
     #[allow(unused_unsafe)]
@@ -685,7 +691,8 @@ pub fn generate_common_cpuid(
             // TDX is not supported by CPU profiles other than host for the time being.
             return Err(Error::CpuProfileTdxIncompatibility.into());
         }
-        common_cpuid_tdx_configuration(&mut cpuid, hypervisor)?;
+        let vm = vm.ok_or(Error::TdxCapabilitiesNoVm)?;
+        common_cpuid_tdx_configuration(&mut cpuid, vm)?;
     }
 
     // Copy CPU identification string
@@ -1013,11 +1020,9 @@ fn required_common_cpuid_updates(
 #[cfg(feature = "tdx")]
 fn common_cpuid_tdx_configuration(
     cpuid: &mut [CpuIdEntry],
-    hypervisor: &dyn hypervisor::Hypervisor,
+    vm: &dyn hypervisor::Vm,
 ) -> super::Result<()> {
-    let caps = hypervisor
-        .tdx_capabilities()
-        .map_err(Error::TdxCapabilities)?;
+    let caps = vm.tdx_capabilities().map_err(Error::TdxCapabilities)?;
     info!("TDX capabilities {caps:#?}");
 
     for entry in cpuid.iter_mut().filter(|entry| entry.function == 0xd) {

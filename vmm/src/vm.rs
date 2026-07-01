@@ -3345,6 +3345,8 @@ impl Snapshottable for Vm {
 
             arch::generate_common_cpuid(
                 self.hypervisor.as_ref(),
+                #[cfg(feature = "tdx")]
+                None,
                 &arch::CpuidConfig {
                     phys_bits,
                     kvm_hyperv,
