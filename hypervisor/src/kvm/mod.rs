@@ -284,6 +284,7 @@ ioctl_iowr_nr!(KVM_MEMORY_ENCRYPT_OP, KVMIO, 0xba, raw::c_ulong);
 // in the upstream Linux 6.16 UAPI (arch/x86/include/uapi/asm/kvm.h).
 #[cfg(feature = "tdx")]
 #[repr(u32)]
+#[derive(Debug, Clone, Copy)]
 enum TdxCommand {
     Capabilities = 0,
     InitVm,
@@ -1739,20 +1740,36 @@ fn tdx_command(
         data: u64,
         hw_error: u64,
     }
-    let cmd = TdxIoctlCmd {
+    let mut cmd = TdxIoctlCmd {
         command,
         flags,
         data: data as _,
         hw_error: 0,
     };
-    // SAFETY: FFI call. All input parameters are valid.
-    let ret =
-        unsafe { ioctl_with_val(fd, KVM_MEMORY_ENCRYPT_OP(), &raw const cmd as raw::c_ulong) };
+    // KVM_TDX_INIT_MEM_REGION processes the region one page at a time and
+    // returns -EINTR when a signal is pending, after writing the advanced
+    // region (source address, GPA and remaining page count) back into `data`.
+    // Re-issuing the ioctl then resumes where it left off, so retry on EINTR
+    // to make forward progress instead of failing the whole operation.
+    loop {
+        // SAFETY: FFI call. All input parameters are valid.
+        let ret =
+            unsafe { ioctl_with_val(fd, KVM_MEMORY_ENCRYPT_OP(), &raw mut cmd as raw::c_ulong) };
 
-    if ret < 0 {
-        return Err(io::Error::last_os_error());
+        if ret >= 0 {
+            return Ok(());
+        }
+
+        let err = io::Error::last_os_error();
+        if err.raw_os_error() == Some(libc::EINTR) {
+            continue;
+        }
+        error!(
+            "TDX ioctl command {:?} failed: {err} (hw_error={:#x})",
+            cmd.command, cmd.hw_error
+        );
+        return Err(err);
     }
-    Ok(())
 }
 
 /// Wrapper over KVM system ioctls.
