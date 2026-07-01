@@ -26,7 +26,7 @@ vm-memory = { workspace = true, features = ["backend-bitmap", "backend-mmap"] }
 vmm-sys-util = { workspace = true, features = ["with-serde"] }
 
 [dev-dependencies]
-proptest = "1.0.0"
+proptest = { workspace = true }
 serde_json = { workspace = true }
 
 [target.'cfg(any(target_arch = "aarch64", target_arch = "riscv64"))'.dependencies]

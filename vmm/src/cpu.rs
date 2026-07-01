@@ -26,6 +26,8 @@ use anyhow::anyhow;
 #[cfg(target_arch = "x86_64")]
 use arch::x86_64;
 #[cfg(target_arch = "x86_64")]
+use arch::x86_64::cpu_profile::msr_adjustments::RequiredMsrUpdates;
+#[cfg(target_arch = "x86_64")]
 use arch::x86_64::get_x2apic_id;
 use arch::{EntryPoint, NumaNodes, layout};
 #[cfg(target_arch = "aarch64")]
@@ -47,7 +49,7 @@ use hypervisor::arch::aarch64::gic::Vgic;
 use hypervisor::arch::aarch64::regs::{ID_AA64MMFR0_EL1, TCR_EL1, TTBR1_EL1};
 #[cfg(target_arch = "x86_64")]
 use hypervisor::arch::x86::CpuIdEntry;
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+#[cfg(target_arch = "x86_64")]
 use hypervisor::arch::x86::MsrEntry;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use hypervisor::arch::x86::SpecialRegisters;
@@ -234,6 +236,14 @@ pub enum Error {
 
     #[error("Error enabling core scheduling")]
     CoreScheduling(#[source] io::Error),
+
+    #[error(
+        "Failed to prepare MSR updates required by the chosen CPU profile: one or more MSR compatibility checks failed"
+    )]
+    MsrUpdateCompatibilityCheck(#[source] arch::Error),
+
+    #[error("Failed to set MSR filter according to the chosen CPU profile")]
+    CpuProfileMsrFilter(#[source] hypervisor::HypervisorVmError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -517,15 +527,22 @@ impl Vcpu {
     /// * `vm` - The virtual machine this vcpu will get attached to.
     /// * `vm_ops` - Optional object for exit handling.
     /// * `cpu_vendor` - CPU vendor as reported by __cpuid(0x0)
+    /// * `msr_state_buffer` a vector of MSRs that the vCPU may use to save MSR state.
     pub fn new(
         id: u32,
         apic_id: u32,
         vm: &dyn hypervisor::Vm,
         vm_ops: Option<Arc<dyn VmOps>>,
         #[cfg(target_arch = "x86_64")] cpu_vendor: CpuVendor,
+        #[cfg(target_arch = "x86_64")] msr_state_buffer: Vec<MsrEntry>,
     ) -> Result<Self> {
         let vcpu = vm
-            .create_vcpu(apic_id, vm_ops)
+            .create_vcpu(
+                apic_id,
+                vm_ops,
+                #[cfg(target_arch = "x86_64")]
+                msr_state_buffer,
+            )
             .map_err(|e| Error::VcpuCreate(e.into()))?;
         // Initially the cpuid per vCPU is the one supported by this VM.
         Ok(Vcpu {
@@ -546,11 +563,16 @@ impl Vcpu {
     /// * `kernel_entry_point` - Kernel entry point address in guest memory and boot protocol used.
     /// * `guest_memory` - Guest memory.
     /// * `cpuid` - (x86_64) CpuId, wrapper over the `kvm_cpuid2` structure.
+    #[cfg_attr(
+        all(target_arch = "x86_64", feature = "igvm"),
+        expect(clippy::too_many_arguments)
+    )]
     pub fn configure(
         &mut self,
         #[cfg(target_arch = "aarch64")] vm: &dyn hypervisor::Vm,
         boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
         #[cfg(target_arch = "x86_64")] cpuid: Vec<CpuIdEntry>,
+        #[cfg(target_arch = "x86_64")] feature_msrs: &[MsrEntry],
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
         #[cfg(target_arch = "x86_64")] topology: (u16, u16, u16, u16),
         #[cfg(target_arch = "x86_64")] nested: bool,
@@ -586,6 +608,7 @@ impl Vcpu {
                 self.id,
                 boot_setup,
                 cpuid,
+                feature_msrs,
                 kvm_hyperv,
                 self.vendor,
                 topology,
@@ -715,6 +738,10 @@ pub struct CpuManager {
     interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
     #[cfg(target_arch = "x86_64")]
     cpuid: Vec<CpuIdEntry>,
+    #[cfg(target_arch = "x86_64")]
+    msr_state_buffer: Vec<MsrEntry>,
+    #[cfg(target_arch = "x86_64")]
+    feature_msrs: Vec<MsrEntry>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     vm: Arc<dyn hypervisor::Vm>,
     vcpus_kill_signalled: Arc<AtomicBool>,
@@ -926,6 +953,15 @@ impl CpuManager {
             interrupt_controller: None,
             #[cfg(target_arch = "x86_64")]
             cpuid: Vec::new(),
+            #[cfg(target_arch = "x86_64")]
+            msr_state_buffer: hypervisor
+                .get_msr_index_list()
+                .map_err(|e| Error::VcpuCreate(e.into()))?
+                .into_iter()
+                .map(|index| MsrEntry { index, data: 0 })
+                .collect(),
+            #[cfg(target_arch = "x86_64")]
+            feature_msrs: Vec::new(),
             vm,
             vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
             vcpus_pause_signalled: Arc::new(AtomicBool::new(false)),
@@ -978,6 +1014,35 @@ impl CpuManager {
         Ok(())
     }
 
+    #[cfg(target_arch = "x86_64")]
+    /// Prepares the CpuManager for MSR related updates associated with the chosen CPU profile (if any).
+    ///
+    /// This includes:
+    /// - Storing feature MSRs to be set upon vCPU configuration.
+    /// - Setting up a filter to deny the guest from accessing MSRs deemed incompatible with the selected CPU profile.
+    ///
+    /// This method is effectively a no-op if the selected CPU profile is "Host".
+    pub fn prepare_msr_updates(&mut self) -> Result<()> {
+        let cpu_profile = self.config.profile;
+        let kvm_hyperv = self.config.kvm_hyperv;
+        if let Some(RequiredMsrUpdates {
+            feature_msrs,
+            denied_msrs,
+        }) =
+            x86_64::generate_required_msr_updates(self.hypervisor.as_ref(), cpu_profile, kvm_hyperv)
+                .map_err(Error::MsrUpdateCompatibilityCheck)?
+        {
+            self.feature_msrs = feature_msrs;
+            // Remove denied MSRs from the internal MSR state buffer
+            self.msr_state_buffer
+                .retain(|msr_entry| !denied_msrs.contains(&msr_entry.index));
+            self.vm
+                .deny_msrs(denied_msrs.into_iter().collect())
+                .map_err(Error::CpuProfileMsrFilter)?;
+        }
+        Ok(())
+    }
+
     fn create_vcpu(
         &mut self,
         cpu_id: u32,
@@ -999,6 +1064,8 @@ impl CpuManager {
             Some(self.vm_ops.clone()),
             #[cfg(target_arch = "x86_64")]
             self.hypervisor.get_cpu_vendor(),
+            #[cfg(target_arch = "x86_64")]
+            self.msr_state_buffer.clone(),
         )?;
 
         if let Some(snapshot) = snapshot {
@@ -1018,8 +1085,19 @@ impl CpuManager {
                 vcpu.finalize_sve()?;
             }
 
+            // Note that in the case of CPU profiles we can only trust
+            // compatibility with the profile if `set_state` manages to set all
+            // feature MSRs.
             vcpu.vcpu
-                .set_state(&state)
+                .set_state(
+                    &state,
+                    #[cfg(target_arch = "x86_64")]
+                    &self
+                        .feature_msrs
+                        .iter()
+                        .map(|msr| msr.index)
+                        .collect::<Vec<u32>>(),
+                )
                 .map_err(|e| Error::VcpuCreate(anyhow!("Could not set the vCPU state {e:?}")))?;
 
             vcpu.saved_state = Some(state);
@@ -1077,6 +1155,7 @@ impl CpuManager {
         vcpu.configure(
             boot_setup,
             self.cpuid.clone(),
+            &self.feature_msrs,
             self.config.kvm_hyperv,
             topology,
             self.config.nested,
@@ -3365,7 +3444,7 @@ mod unit_tests {
         hv.check_required_extensions().unwrap();
         // Calling get_lapic will fail if there is no irqchip before hand.
         vm.create_irq_chip().unwrap();
-        let vcpu = vm.create_vcpu(0, None).unwrap();
+        let vcpu = vm.create_vcpu(0, None, vec![]).unwrap();
         let klapic_before: LapicState = vcpu.get_lapic().unwrap();
 
         // Compute the value that is expected to represent LVT0 and LVT1.
@@ -3390,7 +3469,7 @@ mod unit_tests {
         let vm = hv
             .create_vm(HypervisorVmConfig::default())
             .expect("new VM fd creation failed");
-        let vcpu = vm.create_vcpu(0, None).unwrap();
+        let vcpu = vm.create_vcpu(0, None, vec![]).unwrap();
         setup_fpu(vcpu.as_ref()).unwrap();
 
         let expected_fpu: FpuState = FpuState {
@@ -3416,8 +3495,8 @@ mod unit_tests {
         let vm = hv
             .create_vm(HypervisorVmConfig::default())
             .expect("new VM fd creation failed");
-        let vcpu = vm.create_vcpu(0, None).unwrap();
-        setup_msrs(vcpu.as_ref()).unwrap();
+        let vcpu = vm.create_vcpu(0, None, vec![]).unwrap();
+        setup_msrs(vcpu.as_ref(), &[]).unwrap();
 
         // This test will check against the last MSR entry configured (the tenth one).
         // See create_msr_entries for details.
@@ -3444,7 +3523,7 @@ mod unit_tests {
         let vm = hv
             .create_vm(HypervisorVmConfig::default())
             .expect("new VM fd creation failed");
-        let vcpu = vm.create_vcpu(0, None).unwrap();
+        let vcpu = vm.create_vcpu(0, None, vec![]).unwrap();
 
         let mut expected_regs: StandardRegisters = vcpu.create_standard_regs();
         expected_regs.set_rflags(0x0000000000000002u64);
@@ -3470,7 +3549,7 @@ mod unit_tests {
         let vm = hv
             .create_vm(HypervisorVmConfig::default())
             .expect("new VM fd creation failed");
-        let vcpu = vm.create_vcpu(0, None).unwrap();
+        let vcpu = vm.create_vcpu(0, None, vec![]).unwrap();
 
         let mut expected_regs: StandardRegisters = vcpu.create_standard_regs();
         expected_regs.set_rflags(0x0000000000000002u64);

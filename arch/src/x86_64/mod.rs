@@ -7,6 +7,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
+pub mod arch_capabilities_checks;
 pub mod cpu_profile;
 pub mod interrupts;
 pub mod layout;
@@ -16,6 +17,7 @@ pub mod regs;
 pub mod tdx;
 
 mod helpers;
+mod hyperv_msrs;
 mod mpspec;
 mod mptable;
 mod smbios;
@@ -23,7 +25,7 @@ mod smbios;
 use std::arch::x86_64;
 
 use helpers::{deserialize_u32_hex, serialize_u32_hex};
-use hypervisor::arch::x86::{CPUID_FLAG_VALID_INDEX, CpuIdEntry};
+use hypervisor::arch::x86::{CPUID_FLAG_VALID_INDEX, CpuIdEntry, MsrEntry};
 use hypervisor::{CpuVendor, HypervisorCpuError, HypervisorError};
 use linux_loader::loader::bootparam::{boot_params, setup_header};
 use linux_loader::loader::elf::start_info::{
@@ -39,6 +41,7 @@ use vm_memory::{
 use vmm_sys_util::fam;
 
 use crate::x86_64::cpu_profile::cpuid_adjustments::MissingCpuidEntriesError;
+use crate::x86_64::cpu_profile::msr_adjustments::RequiredMsrUpdates;
 use crate::{CpuProfile, GuestMemoryMmap, InitramfsConfig, RegionType};
 
 // While modern architectures support more than 255 CPUs via x2APIC,
@@ -169,6 +172,28 @@ pub enum Error {
         "The selected CPU profile cannot be utilized because a necessary CPUID entry was not found"
     )]
     MissingExpectedCpuidEntry(#[source] MissingCpuidEntriesError),
+
+    /// Error when trying to apply a CPU profile because a necessary MSR was not found.
+    ///
+    /// We encourage functions returning this variant to log all missing MSRs for debugging
+    /// purposes.
+    #[error("The selected CPU profile cannot be utilized because a necessary MSR was not found")]
+    CpuProfileMissingMsr,
+
+    /// Error checking if the host's feature MSRs are compatible with the CPU Profile
+    #[error(
+        "The selected CPU profile cannot be utilized because the host's MSR entries are not compatible with the profile"
+    )]
+    CpuProfileMsrIncompatibility,
+
+    /// Error when trying to apply a CPU profile because the MSR index list could not be obtained
+    #[error("The selected CPU profile could not be utilized: failed to obtain MSR index list")]
+    CpuProfileMsrIndexList(#[source] HypervisorError),
+
+    /// Error when trying to apply a CPU profile because the feature MSRs could not be obtained
+    /// from the hypervisor.
+    #[error("The selected CPU profile could not be utilized: failed to obtain feature MSRs")]
+    CpuProfileFeatureMsrs(#[source] HypervisorError),
 
     // Error writing EBDA address
     #[error("Error writing EBDA address")]
@@ -700,6 +725,53 @@ pub fn generate_common_cpuid(
     }
 }
 
+/// Generates the MSR related updates that are required in order to be compatible with the given CPU profile (if any).
+///
+/// An error is returned if any MSR required by the given CPU profile is not reported by the hypervisor. If
+/// the `kvm_hyperv` parameter is `false` then Hyper-V related MSRs are exempt from this check.
+///
+/// ## Feature MSRs compatibility
+///
+/// The hypervisor is expected to reject setting feature MSRs that are incompatible with the host. This is why this
+/// function does **NOT perform such compatibility checks** itself.
+///
+/// The one and only exception to this rule is the IA32_ARCH_CAPABILITIES MSR. This function will check that the
+/// host is compatible with the CPU profile's value for that  MSR when present as KVM permits setting it regardless
+/// of what the host actually supports.
+pub fn generate_required_msr_updates(
+    hypervisor: &dyn hypervisor::Hypervisor,
+    cpu_profile: CpuProfile,
+    kvm_hyperv: bool,
+) -> super::Result<Option<RequiredMsrUpdates>> {
+    if matches!(cpu_profile, CpuProfile::Host) {
+        return Ok(None);
+    }
+
+    let host_supported_msrs = hypervisor
+        .get_msr_index_list()
+        .map_err(Error::CpuProfileMsrIndexList)?;
+
+    let host_feature_msrs = hypervisor
+        .get_feature_msrs()
+        .map_err(Error::CpuProfileFeatureMsrs)?;
+
+    let required_updates =
+        cpu_profile.required_msr_updates(&host_feature_msrs, &host_supported_msrs, kvm_hyperv)?;
+
+    if let Some(required_updates) = &required_updates {
+        // If IA32_ARCH_CAPABILITIES is present then we need to check for compatibility.
+        // This MSR is only available on Intel CPUs as of now, but we do not check for vendor equality here.
+        //
+        // TODO: Consider adding a CPU vendor equality requirement to `check_cpuid_compatibility` even though
+        // it is extremely unlikely that CPUs from different vendors will pass the existing checks.
+        arch_capabilities_checks::valid_required_arch_capabilities_update(
+            required_updates,
+            &host_feature_msrs,
+        )?;
+    }
+    Ok(required_updates)
+}
+
 /// Apply updates to common CPUID (not vCPU specific) that are necessary regardless of
 /// the chosen CPU profile.
 fn required_common_cpuid_updates(
@@ -934,6 +1006,7 @@ pub fn configure_vcpu(
     id: u32,
     boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
     cpuid: Vec<CpuIdEntry>,
+    feature_msrs: &[MsrEntry],
     kvm_hyperv: bool,
     cpu_vendor: CpuVendor,
     topology: (u16, u16, u16, u16),
@@ -1008,7 +1081,7 @@ pub fn configure_vcpu(
         vcpu.enable_hyperv_synic().unwrap();
     }
 
-    regs::setup_msrs(vcpu).map_err(Error::MsrsConfiguration)?;
+    regs::setup_msrs(vcpu, feature_msrs).map_err(Error::MsrsConfiguration)?;
     if let Some((kernel_entry_point, guest_memory)) = boot_setup {
         if setup_registers {
             regs::setup_regs(vcpu, kernel_entry_point).map_err(Error::RegsConfiguration)?;

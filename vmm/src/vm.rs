@@ -821,15 +821,17 @@ impl Vm {
         .map_err(Error::CpuManager)?;
 
         #[cfg(target_arch = "x86_64")]
-        cpu_manager
-            .lock()
-            .unwrap()
-            .populate_cpuid(
-                hypervisor.as_ref(),
-                #[cfg(feature = "tdx")]
-                tdx_enabled,
-            )
-            .map_err(Error::CpuManager)?;
+        {
+            let mut guard = cpu_manager.lock().unwrap();
+            guard
+                .populate_cpuid(
+                    hypervisor.as_ref(),
+                    #[cfg(feature = "tdx")]
+                    tdx_enabled,
+                )
+                .map_err(Error::CpuManager)?;
+            guard.prepare_msr_updates().map_err(Error::CpuManager)?;
+        }
 
         Ok(cpu_manager)
     }
@@ -3944,7 +3946,7 @@ mod unit_tests {
         mem.write_slice(&code, load_addr)
             .expect("Writing code to memory failed");
 
-        let mut vcpu = vm.create_vcpu(0, None).expect("new Vcpu failed");
+        let mut vcpu = vm.create_vcpu(0, None, vec![]).expect("new Vcpu failed");
 
         let mut vcpu_sregs = vcpu.get_sregs().expect("get sregs failed");
         vcpu_sregs.cs.base = 0;
@@ -4081,7 +4083,7 @@ pub fn test_vm() {
     mem.write_slice(&code, load_addr)
         .expect("Writing code to memory failed");
 
-    let mut vcpu = vm.create_vcpu(0, None).expect("new Vcpu failed");
+    let mut vcpu = vm.create_vcpu(0, None, vec![]).expect("new Vcpu failed");
 
     let mut vcpu_sregs = vcpu.get_sregs().expect("get sregs failed");
     vcpu_sregs.cs.base = 0;

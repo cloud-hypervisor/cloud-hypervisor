@@ -65,5 +65,9 @@ version = "1.21.0"
 [dev-dependencies]
 env_logger = { workspace = true }
 
+
+[target.'cfg(target_arch = "x86_64")'.dev-dependencies]
+proptest = { workspace = true }
+
 [lints]
 workspace = true

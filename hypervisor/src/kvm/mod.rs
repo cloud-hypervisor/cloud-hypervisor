@@ -275,6 +275,8 @@ const TDG_VP_VMCALL_SETUP_EVENT_NOTIFY_INTERRUPT: u64 = 0x10004;
 const TDG_VP_VMCALL_SUCCESS: u64 = 0;
 #[cfg(feature = "tdx")]
 const TDG_VP_VMCALL_INVALID_OPERAND: u64 = 0x8000000000000000;
+/// Maximum number of MSR ranges that KVM can filter
+pub const KVM_MSR_FILTER_MAX_RANGES: usize = 16;
 
 #[cfg(feature = "tdx")]
 ioctl_iowr_nr!(KVM_MEMORY_ENCRYPT_OP, KVMIO, 0xba, raw::c_ulong);
@@ -633,9 +635,7 @@ struct KvmMemorySlot {
 /// Wrapper over KVM VM ioctls.
 pub struct KvmVm {
     fd: Arc<VmFd>,
-    #[cfg(target_arch = "x86_64")]
-    msrs: Vec<MsrEntry>,
-    #[cfg(feature = "sev_snp")]
+    #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
     sev_fd: Option<x86_64::sev::SevFd>,
     #[cfg(feature = "sev_snp")]
     snp_guest_policy: OnceLock<u64>,
@@ -891,6 +891,7 @@ impl vm::Vm for KvmVm {
         &self,
         id: u32,
         vm_ops: Option<Arc<dyn VmOps>>,
+        #[cfg(target_arch = "x86_64")] msrs: Vec<MsrEntry>,
     ) -> vm::Result<Box<dyn cpu::Vcpu>> {
         let fd = self
             .fd
@@ -929,7 +930,7 @@ impl vm::Vm for KvmVm {
         let vcpu = KvmVcpu {
             fd,
             #[cfg(target_arch = "x86_64")]
-            msrs: self.msrs.clone(),
+            msrs,
             vm_ops,
             #[cfg(target_arch = "x86_64")]
             hyperv_synic: AtomicBool::new(false),
@@ -1568,6 +1569,21 @@ impl vm::Vm for KvmVm {
     fn as_any(&self) -> &dyn Any {
         self
     }
+
+    #[cfg(target_arch = "x86_64")]
+    fn deny_msrs(&self, denied_msrs: Vec<u32>) -> vm::Result<()> {
+        if !self.check_extension(Cap::X86MsrFilter) {
+            return Err(vm::HypervisorVmError::MsrFilterCapability);
+        }
+
+        let mut bitmap_arena = Vec::new();
+        let filter_ranges = x86_64::denied_msrs_to_filter(denied_msrs, &mut bitmap_arena)?;
+
+        // We use MsrFilterDefaultAction::ALLOW to permit MSRs that are not contained in `denied_msrs`.
+        self.fd
+            .set_msr_filter(kvm_ioctls::MsrFilterDefaultAction::ALLOW, &filter_ranges)
+            .map_err(|e| vm::HypervisorVmError::MsrFilter { err_no: e.errno() })
+    }
 }
 
 #[cfg(feature = "tdx")]
@@ -1745,19 +1761,6 @@ impl hypervisor::Hypervisor for KvmHypervisor {
 
         #[cfg(target_arch = "x86_64")]
         {
-            let msr_list = self.get_msr_list()?;
-            let num_msrs = msr_list.as_fam_struct_ref().nmsrs as usize;
-            let mut msrs = vec![
-                MsrEntry {
-                    ..Default::default()
-                };
-                num_msrs
-            ];
-            let indices = msr_list.as_slice();
-            for (pos, index) in indices.iter().enumerate() {
-                msrs[pos].index = *index;
-            }
-
             #[allow(unused_mut)]
             let mut memory_slots = None;
             #[cfg(feature = "sev_snp")]
@@ -1790,7 +1793,6 @@ impl hypervisor::Hypervisor for KvmHypervisor {
 
             Ok(Arc::new(KvmVm {
                 fd: Arc::new(fd),
-                msrs,
                 dirty_log_slots: RwLock::new(HashMap::new()),
                 #[cfg(feature = "sev_snp")]
                 sev_fd,
@@ -1828,6 +1830,51 @@ impl hypervisor::Hypervisor for KvmHypervisor {
         let v = kvm_cpuid.as_slice().iter().map(|e| (*e).into()).collect();
 
         Ok(v)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn get_feature_msrs(&self) -> hypervisor::Result<Vec<MsrEntry>> {
+        let list = self
+            .kvm
+            .get_msr_feature_index_list()
+            .map_err(|e| hypervisor::HypervisorError::GetMsrList(e.into()))?;
+
+        let kvm_msrs: Vec<kvm_msr_entry> = list
+            .as_slice()
+            .iter()
+            .copied()
+            .map(|index| kvm_msr_entry {
+                index,
+                ..Default::default()
+            })
+            .collect();
+
+        let mut kvm_msrs = MsrEntries::from_entries(&kvm_msrs).expect("Kvm::get_msr_feature_index_list should not return more entries than what MsrEntries can handle");
+
+        let _ = self
+            .kvm
+            .get_msrs(&mut kvm_msrs)
+            .map_err(|_| hypervisor::HypervisorError::GetMsrs)?;
+
+        Ok(kvm_msrs
+            .as_slice()
+            .iter()
+            .copied()
+            .map(MsrEntry::from)
+            .collect())
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn get_msr_index_list(&self) -> hypervisor::Result<Vec<u32>> {
+        let list = self.get_msr_list()?;
+        let num_msrs = list.as_fam_struct_ref().nmsrs;
+        let actual_num_msrs = list.as_slice().len();
+        assert_eq!(
+            actual_num_msrs, num_msrs as usize,
+            "BUG: the length of the MSR Index LIST FAM wrapper does not coincide with
+            the nmrs field value "
+        );
+        Ok(list.as_slice().to_vec())
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -1975,7 +2022,7 @@ impl KvmVcpu {
 /// let kvm = KvmHypervisor::new().unwrap();
 /// let hypervisor = Arc::new(kvm);
 /// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
-/// let vcpu = vm.create_vcpu(0, None).unwrap();
+/// let vcpu = vm.create_vcpu(0, None, vec![]).unwrap();
 /// ```
 impl cpu::Vcpu for KvmVcpu {
     ///
@@ -3032,7 +3079,7 @@ impl cpu::Vcpu for KvmVcpu {
     /// let hv = Arc::new(kvm);
     /// let vm = hv.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
     /// vm.enable_split_irq().unwrap();
-    /// let vcpu = vm.create_vcpu(0, None).unwrap();
+    /// let vcpu = vm.create_vcpu(0, None, vec![]).unwrap();
     /// let state = vcpu.state().unwrap();
     /// ```
     fn state(&self) -> cpu::Result<CpuState> {
@@ -3297,11 +3344,16 @@ impl cpu::Vcpu for KvmVcpu {
     /// let hv = Arc::new(kvm);
     /// let vm = hv.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
     /// vm.enable_split_irq().unwrap();
-    /// let vcpu = vm.create_vcpu(0, None).unwrap();
+    /// let vcpu = vm.create_vcpu(0, None, vec![]).unwrap();
     /// let state = vcpu.state().unwrap();
-    /// vcpu.set_state(&state).unwrap();
+    /// let crucial_msrs = &[];
+    /// vcpu.set_state(&state, crucial_msrs).unwrap();
     /// ```
-    fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
+    fn set_state(
+        &self,
+        state: &CpuState,
+        #[cfg(target_arch = "x86_64")] crucial_msrs: &[u32],
+    ) -> cpu::Result<()> {
         let state: VcpuKvmState = state.clone().into();
         self.set_cpuid2(&state.cpuid)?;
         self.set_mp_state(state.mp_state.into())?;
@@ -3338,7 +3390,10 @@ impl cpu::Vcpu for KvmVcpu {
         let num_msrs = self.set_msrs(&state.msrs)?;
         if num_msrs != expected_num_msrs {
             let mut faulty_msr_index = num_msrs;
-
+            let msr_address = state.msrs[faulty_msr_index].index;
+            if crucial_msrs.contains(&msr_address) {
+                return Err(cpu::HypervisorCpuError::SetCrucialMsr { msr_address });
+            }
             loop {
                 warn!(
                     "Detected faulty MSR 0x{:x} while setting MSRs",

@@ -456,6 +456,7 @@ fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError>
     const KVM_GET_FPU: u64 = 0x81a0_ae8c;
     const KVM_GET_LAPIC: u64 = 0x8400_ae8e;
     const KVM_GET_MSR_INDEX_LIST: u64 = 0xc004_ae02;
+    const KVM_GET_MSR_FEATURE_INDEX_LIST: u64 = 0xc004ae0a;
     const KVM_GET_MSRS: u64 = 0xc008_ae88;
     const KVM_GET_SREGS: u64 = 0x8138_ae83;
     const KVM_GET_TSC_KHZ: u64 = 0xaea3;
@@ -468,6 +469,7 @@ fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError>
     const KVM_SET_FPU: u64 = 0x41a0_ae8d;
     const KVM_SET_IDENTITY_MAP_ADDR: u64 = 0x4008_ae48;
     const KVM_SET_LAPIC: u64 = 0x4400_ae8f;
+    const KVM_X86_SET_MSR_FILTER: u64 = 0x4188aec6;
     const KVM_SET_MSRS: u64 = 0x4008_ae89;
     const KVM_SET_SREGS: u64 = 0x4138_ae84;
     const KVM_SET_TSC_KHZ: u64 = 0xaea2;
@@ -485,6 +487,12 @@ fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError>
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_GET_FPU)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_GET_LAPIC)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_GET_MSR_INDEX_LIST)?],
+        and![Cond::new(
+            1,
+            ArgLen::Dword,
+            Eq,
+            KVM_GET_MSR_FEATURE_INDEX_LIST
+        )?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_GET_MSRS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_GET_SREGS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_GET_TSC_KHZ)?],
@@ -500,6 +508,7 @@ fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError>
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_SREGS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_TSC_KHZ)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_TSS_ADDR,)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, KVM_X86_SET_MSR_FILTER)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_MSRS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_XCRS,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_XSAVE,)?],

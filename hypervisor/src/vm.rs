@@ -33,6 +33,8 @@ use crate::arch::aarch64::gic::{Vgic, VgicConfig};
 use crate::arch::riscv64::aia::{Vaia, VaiaConfig};
 #[cfg(feature = "tdx")]
 use crate::arch::x86::CpuIdEntry;
+#[cfg(target_arch = "x86_64")]
+use crate::arch::x86::MsrEntry;
 use crate::cpu::Vcpu;
 use crate::{ClockRestoreMode, ClockState, IoEventAddress, IrqRoutingEntry};
 
@@ -288,6 +290,24 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to get the list of supported MSRs")]
     GetMsrList(#[source] anyhow::Error),
+    ///
+    /// Failed to construct MSR filter because the required size exceeded the
+    /// permitted maximum.
+    ///
+    #[error("Unable to filter permitted MSRs: the necessary MSR filter is too large")]
+    MsrFilterSize,
+
+    ///
+    /// Failed to verify the existence of the MSR Filter extension
+    ///
+    #[error("Failed to check support for the MSR filter capability")]
+    MsrFilterCapability,
+
+    ///
+    /// Failed to set an MSR filter
+    ///
+    #[error("Failed to set MSR filter: err_no={err_no}")]
+    MsrFilter { err_no: i32 },
 }
 ///
 /// Result type for returning from a function
@@ -347,7 +367,14 @@ pub trait Vm: Send + Sync + Any {
     /// Unregister an event that will, when signaled, trigger the `gsi` IRQ.
     fn unregister_irqfd(&self, fd: &EventFd, gsi: u32) -> Result<()>;
     /// Creates a new KVM vCPU file descriptor and maps the memory corresponding
-    fn create_vcpu(&self, id: u32, vm_ops: Option<Arc<dyn VmOps>>) -> Result<Box<dyn Vcpu>>;
+    ///
+    /// On x86_64 one must provide a buffer that the vCPU may use for storing MSR state.
+    fn create_vcpu(
+        &self,
+        id: u32,
+        vm_ops: Option<Arc<dyn VmOps>>,
+        #[cfg(target_arch = "x86_64")] msr_state_buffer: Vec<MsrEntry>,
+    ) -> Result<Box<dyn Vcpu>>;
     #[cfg(target_arch = "aarch64")]
     fn create_vgic(&self, config: &VgicConfig) -> Result<Arc<Mutex<dyn Vgic>>>;
     #[cfg(target_arch = "riscv64")]
@@ -510,6 +537,15 @@ pub trait Vm: Send + Sync + Any {
     fn enable_x2apic_api(&self) -> Result<()> {
         unimplemented!("x2Apic is only supported on KVM/Linux hosts")
     }
+
+    #[cfg(target_arch = "x86_64")]
+    /// Instruct the VM to deny the guest from accessing any MSR that is
+    /// contained in `denied_msrs`.
+    ///
+    /// # Important
+    ///
+    /// This method should be called once before creating any vCPUs and never again.
+    fn deny_msrs(&self, denied_msrs: Vec<u32>) -> Result<()>;
 }
 
 pub trait VmOps: Send + Sync {

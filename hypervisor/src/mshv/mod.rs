@@ -15,7 +15,7 @@ use std::{fs, io, result};
 #[cfg(target_arch = "x86_64")]
 use anyhow::Context;
 use anyhow::anyhow;
-#[cfg(target_arch = "x86_64")]
+#[cfg(feature = "sev_snp")]
 use arc_swap::ArcSwap;
 #[cfg(feature = "sev_snp")]
 use log::error;
@@ -360,7 +360,6 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         {
             Ok(Arc::new(MshvVm {
                 fd: vm_fd,
-                msrs: ArcSwap::new(Vec::<MsrEntry>::new().into()),
                 dirty_log_slots: RwLock::new(HashMap::new()),
                 #[cfg(feature = "sev_snp")]
                 sev_snp_enabled: mshv_vm_type == VmType::Snp,
@@ -398,6 +397,20 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             });
         }
         Ok(cpuid)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn get_msr_index_list(&self) -> hypervisor::Result<Vec<u32>> {
+        self.mshv
+            .get_msr_index_list()
+            .map_err(|e| crate::HypervisorError::GetMsrList(e.into()))
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn get_feature_msrs(&self) -> hypervisor::Result<Vec<MsrEntry>> {
+        // TODO: This is relevant for CPU profiles which will initially only be available
+        // for the KVM hypervisor.
+        unimplemented!()
     }
 
     /// Get maximum number of vCPUs
@@ -1454,7 +1467,8 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Set CPU state for x86_64 guest.
     ///
-    fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
+    fn set_state(&self, state: &CpuState, _crucial_msrs: &[u32]) -> cpu::Result<()> {
+        // TODO: Take crucial_msrs into account if/when incorporating CPU profile support for MSHV.
         let mut state: VcpuMshvState = state.clone().into();
         self.set_msrs(&state.msrs)?;
         self.set_vcpu_events(&state.vcpu_events)?;
@@ -1783,8 +1797,6 @@ impl MshvVcpu {
 /// Wrapper over Mshv VM ioctls.
 pub struct MshvVm {
     fd: Arc<VmFd>,
-    #[cfg(target_arch = "x86_64")]
-    msrs: ArcSwap<Vec<MsrEntry>>,
     dirty_log_slots: RwLock<HashMap<u64, MshvDirtyLogSlot>>,
     #[cfg(feature = "sev_snp")]
     sev_snp_enabled: bool,
@@ -1886,6 +1898,7 @@ impl vm::Vm for MshvVm {
         &self,
         id: u32,
         vm_ops: Option<Arc<dyn VmOps>>,
+        #[cfg(target_arch = "x86_64")] msrs: Vec<MsrEntry>,
     ) -> vm::Result<Box<dyn cpu::Vcpu>> {
         let id: u8 = id.try_into().unwrap();
         let vcpu_fd = self
@@ -1926,7 +1939,7 @@ impl vm::Vm for MshvVm {
             #[cfg(target_arch = "x86_64")]
             cpuid: Vec::new(),
             #[cfg(target_arch = "x86_64")]
-            msrs: self.msrs.load().as_ref().clone(),
+            msrs,
             vm_ops,
             vm_fd: self.fd.clone(),
             #[cfg(feature = "sev_snp")]
@@ -2554,23 +2567,14 @@ impl vm::Vm for MshvVm {
                 1u64,
             )
             .map_err(|e| vm::HypervisorVmError::InitializeVm(e.into()))?;
-        #[cfg(target_arch = "x86_64")]
-        {
-            let msr_list = self
-                .fd
-                .get_msr_index_list()
-                .map_err(|e| vm::HypervisorVmError::GetMsrList(e.into()))?;
-            let mut msrs: Vec<MsrEntry> = vec![
-                MsrEntry {
-                    ..Default::default()
-                };
-                msr_list.len()
-            ];
-            for (pos, index) in msr_list.iter().enumerate() {
-                msrs[pos].index = *index;
-            }
-            self.msrs.store(Arc::new(msrs));
-        }
+
         Ok(())
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn deny_msrs(&self, _denied_msrs: Vec<u32>) -> vm::Result<()> {
+        // TODO: This is only used for CPU profiles. Provide a proper impl
+        // when we want CPU profiles to work with MSHV.
+        unimplemented!()
     }
 }
