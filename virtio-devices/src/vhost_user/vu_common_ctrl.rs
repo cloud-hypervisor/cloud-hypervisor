@@ -3,6 +3,7 @@
 
 use std::fs::File;
 use std::io::{Read, Write};
+use std::os::unix::fs::FileTypeExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::Arc;
@@ -376,6 +377,32 @@ impl VhostUserHandle {
         )
     }
 
+    /// Check if a `Frontend::connect()` error is retryable (transient) or permanent.
+    /// `NotFound` means the backend may not have created the socket yet, while
+    /// `ConnectionRefused` on an existing path indicates a stale socket.
+    fn is_connect_retryable(err: &vhost::Error, socket_path: &str) -> bool {
+        use vhost::Error::VhostUserProtocol;
+        use vhost::vhost_user::Error::SocketConnect;
+
+        match err {
+            VhostUserProtocol(SocketConnect(io_err)) => match io_err.kind() {
+                io::ErrorKind::NotFound | io::ErrorKind::Interrupted => true,
+                io::ErrorKind::ConnectionRefused => {
+                    // Only retry if the path is known to be a Unix socket
+                    // (stale file left by a previous backend).  If the path
+                    // is a regular file or does not exist at all, fail fast.
+                    if let Ok(metadata) = fs::metadata(socket_path) {
+                        metadata.file_type().is_socket()
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
     pub fn connect_vhost_user(
         server: bool,
         socket_path: &str,
@@ -383,9 +410,17 @@ impl VhostUserHandle {
         unlink_socket: bool,
         kill_evt: Option<&EventFd>,
     ) -> Result<Self> {
+        const ACCEPT_TIMEOUT: Duration = Duration::from_secs(60);
         if server {
             if unlink_socket {
-                fs::remove_file(socket_path).map_err(Error::RemoveSocketPath)?;
+                // Remove any stale socket left by a previous backend. A
+                // missing path is the normal first-boot case, so only a
+                // genuine failure (e.g. permission denied) is an error.
+                match fs::remove_file(socket_path) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(Error::RemoveSocketPath(e)),
+                }
             }
 
             info!("Binding vhost-user listener...");
@@ -405,7 +440,7 @@ impl VhostUserHandle {
             })
         } else {
             const RETRY_INTERVAL: Duration = Duration::from_millis(100);
-            const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
+            const CONNECT_TIMEOUT: Duration = ACCEPT_TIMEOUT;
 
             #[repr(u64)]
             enum ConnectEvent {
@@ -457,18 +492,28 @@ impl VhostUserHandle {
                     Err(e) => e,
                 };
 
-                if start.elapsed() >= CONNECT_TIMEOUT {
+                // Fail immediately on non-retryable errors (e.g. PermissionDenied,
+                // AddrInUse) instead of looping for the full CONNECT_TIMEOUT.
+                if !Self::is_connect_retryable(&err, socket_path) {
                     error!(
-                        "Failed connecting the backend after trying for 1 minute for socket {socket_path}: {err:?}"
+                        "Failed connecting to vhost-user backend for socket {socket_path}: {err:?}"
                     );
                     return Err(Error::VhostUserConnect(err));
                 }
 
+                if start.elapsed() >= CONNECT_TIMEOUT {
+                    error!("Timed out waiting for vhost-user connection on socket {socket_path}");
+                    return Err(Error::VhostUserConnectTimeout);
+                }
+
                 loop {
-                    match epoll.wait(-1, &mut events) {
-                        Ok(_) => break,
+                    let event_count = match epoll.wait(-1, &mut events) {
+                        Ok(count) => count,
                         Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                         Err(e) => return Err(Error::EpollWait(e)),
+                    };
+                    if event_count > 0 {
+                        break;
                     }
                 }
 
@@ -485,7 +530,14 @@ impl VhostUserHandle {
                             .wait()
                             .map_err(|e| Error::TimerFdWait(e.into()))?;
                     }
-                    _ => unreachable!(),
+                    x => {
+                        error!(
+                            "Unexpected epoll event data {x} on vhost-user connect for {socket_path}"
+                        );
+                        return Err(Error::EpollWait(io::Error::other(format!(
+                            "unexpected epoll event data: {x}"
+                        ))));
+                    }
                 }
             }
         }
@@ -765,5 +817,90 @@ fn memfd_create(name: &ffi::CStr, flags: u32) -> io::Result<RawFd> {
         Err(io::Error::last_os_error())
     } else {
         Ok(res as RawFd)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::env::temp_dir;
+    use std::os::unix::net::UnixListener;
+    use std::process;
+
+    use vhost::vhost_user::Error as VhostUserError;
+
+    use super::*;
+
+    fn socket_connect_err(kind: io::ErrorKind) -> vhost::Error {
+        vhost::Error::VhostUserProtocol(VhostUserError::SocketConnect(io::Error::new(kind, "test")))
+    }
+
+    #[test]
+    fn connect_retryable_errors() {
+        assert!(
+            VhostUserHandle::is_connect_retryable(
+                &socket_connect_err(io::ErrorKind::NotFound),
+                "/tmp/cloud-hypervisor-vhost-user-missing.sock"
+            ),
+            "NotFound should be retryable"
+        );
+    }
+
+    #[test]
+    fn connect_refused_existing_path_is_not_retryable() {
+        let path = temp_dir().join(format!(
+            "cloud-hypervisor-vhost-user-test-{}",
+            process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        File::create(&path).unwrap();
+
+        assert!(
+            !VhostUserHandle::is_connect_retryable(
+                &socket_connect_err(io::ErrorKind::ConnectionRefused),
+                path.to_str().unwrap()
+            ),
+            "ConnectionRefused on an existing path should not be retryable"
+        );
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn connect_refused_existing_socket_path_is_retryable() {
+        let path = temp_dir().join(format!(
+            "cloud-hypervisor-vhost-user-test-socket-{}",
+            process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let _listener = UnixListener::bind(&path).unwrap();
+        // Drop the listener to leave a stale socket file
+        drop(_listener);
+
+        assert!(
+            VhostUserHandle::is_connect_retryable(
+                &socket_connect_err(io::ErrorKind::ConnectionRefused),
+                path.to_str().unwrap()
+            ),
+            "ConnectionRefused on a stale socket path should be retryable"
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn connect_non_retryable_errors() {
+        for kind in [
+            io::ErrorKind::PermissionDenied,
+            io::ErrorKind::AlreadyExists,
+            io::ErrorKind::AddrInUse,
+        ] {
+            assert!(
+                !VhostUserHandle::is_connect_retryable(
+                    &socket_connect_err(kind),
+                    "/tmp/cloud-hypervisor-vhost-user-test.sock"
+                ),
+                "{kind:?} should not be retryable"
+            );
+        }
     }
 }
