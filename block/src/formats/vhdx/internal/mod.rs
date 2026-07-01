@@ -10,10 +10,8 @@ use std::io::{
 use std::os::fd::{AsRawFd, RawFd};
 use std::result;
 
-use byteorder::{BigEndian, ByteOrder};
 use remain::sorted;
 use thiserror::Error;
-use uuid::Uuid;
 
 use self::bat::{BatEntry, VhdxBatError};
 use self::header::{RegionInfo, RegionTableEntry, VhdxHeader, VhdxHeaderError};
@@ -238,18 +236,6 @@ impl AsRawFd for Vhdx {
     }
 }
 
-pub(crate) fn uuid_from_guid(buf: &[u8]) -> Uuid {
-    // The first 3 fields of UUID are stored in Big Endian format, and
-    // the last 8 bytes are stored as byte array. Therefore, we read the
-    // first 3 fields in Big Endian format instead of Little Endian.
-    Uuid::from_fields_le(
-        BigEndian::read_u32(&buf[0..4]),
-        BigEndian::read_u16(&buf[4..6]),
-        BigEndian::read_u16(&buf[6..8]),
-        buf[8..16].try_into().unwrap(),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -306,6 +292,38 @@ mod tests {
 
         // Read it back through a fresh, forced-alignment handle.
         let mut readback = vec![0u8; sector];
+        vhdx.seek(SeekFrom::Start(0)).unwrap();
+        assert_eq!(vhdx.read(&mut readback).unwrap(), readback.len());
+        assert_eq!(readback, data);
+    }
+
+    #[test]
+    fn header_update_survives_reopen() {
+        let Some(tf) = dynamic_vhdx(16) else {
+            eprintln!("skipping header_update_survives_reopen: qemu-img unavailable");
+            return;
+        };
+
+        let data = [0xa5u8; 512];
+        {
+            let file = fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(tf.as_path())
+                .unwrap();
+            let mut vhdx = Vhdx::new(file, false).unwrap();
+            vhdx.seek(SeekFrom::Start(0)).unwrap();
+            assert_eq!(vhdx.write(&data).unwrap(), data.len());
+            vhdx.flush().unwrap();
+        }
+
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(tf.as_path())
+            .unwrap();
+        let mut vhdx = Vhdx::new(file, false).unwrap();
+        let mut readback = [0u8; 512];
         vhdx.seek(SeekFrom::Start(0)).unwrap();
         assert_eq!(vhdx.read(&mut readback).unwrap(), readback.len());
         assert_eq!(readback, data);
