@@ -14,7 +14,7 @@ use vm_device::interrupt::{
     LegacyIrqSourceConfig, MsiIrqGroupConfig,
 };
 use vm_memory::address::Address;
-use vm_migration::{Migratable, Pausable, Snapshottable, Transportable};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 use super::interrupt_controller::{Error, InterruptController};
@@ -24,8 +24,7 @@ type Result<T> = result::Result<T, Error>;
 // Reserve 32 IRQs for legacy devices.
 pub const IRQ_LEGACY_BASE: usize = layout::IRQ_BASE as usize;
 pub const IRQ_LEGACY_COUNT: usize = 32;
-// TODO: AIA snapshotting is not yet completed.
-pub const _AIA_SNAPSHOT_ID: &str = "";
+pub const _AIA_SNAPSHOT_ID: &str = "aia";
 
 // Aia (Advance Interrupt Architecture) struct provides all the functionality of a
 // AIA device. It wraps a hypervisor-emulated AIA device (Vaia) provided by the
@@ -138,7 +137,17 @@ impl InterruptController for Aia {
     }
 }
 
-impl Snapshottable for Aia {}
+impl Snapshottable for Aia {
+    fn id(&self) -> String {
+        _AIA_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
+        let vaia = self.vaia.clone();
+        let state = vaia.lock().unwrap().state().unwrap();
+        Snapshot::new_from_state(&state)
+    }
+}
 impl Pausable for Aia {}
 impl Transportable for Aia {}
 impl Migratable for Aia {}

@@ -1871,11 +1871,15 @@ impl DeviceManager {
 
         // Restore the vAia if this is in the process of restoration
         let id = String::from(aia::_AIA_SNAPSHOT_ID);
-        if let Some(_vaia_snapshot) = snapshot_from_id(snapshot, &id) {
-            // TODO: vAia snapshotting and restoration is scheduled to next stage of riscv64 support.
-            // TODO: PMU support is scheduled to next stage of riscv64 support.
-            // PMU support is optional. Nothing should be impacted if the PMU initialization failed.
-            unimplemented!()
+        if let Some(vaia_snapshot) = snapshot_from_id(snapshot, &id) {
+            let vaia_state: hypervisor::AiaState = vaia_snapshot
+                .to_state()
+                .map_err(DeviceManagerError::RestoreGetState)?;
+            interrupt_controller
+                .lock()
+                .unwrap()
+                .restore_vaia(Some(vaia_state), &[])
+                .map_err(DeviceManagerError::CreateInterruptController)?;
         }
 
         self.device_tree

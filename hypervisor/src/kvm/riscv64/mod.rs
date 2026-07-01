@@ -89,11 +89,10 @@ pub fn is_non_core_register(regid: u64) -> bool {
     }
 
     let size = regid & KVM_REG_SIZE_MASK;
-
-    assert!(
-        size == KVM_REG_SIZE_U64,
-        "Unexpected register size for system register {size}"
-    );
+    if size != KVM_REG_SIZE_U64 {
+        // Skip non-U64 registers (U32 timer regs, etc.)
+        return false;
+    }
 
     true
 }

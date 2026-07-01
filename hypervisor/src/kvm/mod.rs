@@ -3148,11 +3148,21 @@ impl cpu::Vcpu for KvmVcpu {
         state.core_regs = self.get_regs()?.into();
 
         // Call KVM_GET_REG_LIST to get all registers available to the guest.
-        // ARM64_REGS_MAX in kvm-bindings caps this at 500.
-        let mut reg_list = kvm_bindings::RegList::new(500).unwrap();
-        self.fd
-            .get_reg_list(&mut reg_list)
-            .map_err(|e| cpu::HypervisorCpuError::GetRegList(e.into()))?;
+        // Start with 500 (ARM64_REGS_MAX) and retry with actual count on E2BIG.
+        let mut n = 500;
+        let reg_list = loop {
+            let mut rl = kvm_bindings::RegList::new(n)
+                .map_err(|e| cpu::HypervisorCpuError::GetRegList(e.into()))?;
+            match self.fd.get_reg_list(&mut rl) {
+                Ok(()) => break rl,
+                Err(e) if e.errno() == libc::E2BIG => {
+                    n = rl.as_fam_struct_ref().n as usize;
+                }
+                Err(e) => {
+                    return Err(cpu::HypervisorCpuError::GetRegList(e.into()));
+                }
+            }
+        };
 
         let mut sys_regs: Vec<kvm_bindings::kvm_one_reg> = Vec::new();
         let mut pre_finalize_regs: Vec<ExtendedReg> = Vec::new();
@@ -3219,12 +3229,23 @@ impl cpu::Vcpu for KvmVcpu {
 
         // Get non-core register
         // Call KVM_GET_REG_LIST to get all registers available to the guest.
-        // For RISC-V 64-bit there are around 200 registers.
+        // For RISC-V 64-bit with AIA there are around 237 registers.
+        let mut n = 300;
+        let mut reg_list = loop {
+            let mut rl = kvm_bindings::RegList::new(n)
+                .map_err(|e| cpu::HypervisorCpuError::GetRegList(e.into()))?;
+            match self.fd.get_reg_list(&mut rl) {
+                Ok(()) => break rl,
+                Err(e) if e.errno() == libc::E2BIG => {
+                    n = rl.as_fam_struct_ref().n as usize;
+                }
+                Err(e) => {
+                    return Err(cpu::HypervisorCpuError::GetRegList(e.into()));
+                }
+            }
+        };
+
         let mut sys_regs: Vec<kvm_bindings::kvm_one_reg> = Vec::new();
-        let mut reg_list = kvm_bindings::RegList::new(200).unwrap();
-        self.fd
-            .get_reg_list(&mut reg_list)
-            .map_err(|e| cpu::HypervisorCpuError::GetRegList(e.into()))?;
 
         // At this point reg_list should contain:
         // - core registers
