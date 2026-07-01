@@ -1503,7 +1503,13 @@ impl vm::Vm for KvmVm {
     /// Initialize TDX for this VM
     ///
     #[cfg(feature = "tdx")]
-    fn tdx_init(&self, cpuid: &[CpuIdEntry]) -> vm::Result<()> {
+    fn tdx_init(
+        &self,
+        cpuid: &[CpuIdEntry],
+        mrconfigid: &[u8; 48],
+        mrowner: &[u8; 48],
+        mrownerconfig: &[u8; 48],
+    ) -> vm::Result<()> {
         let guest_cpuid: Vec<kvm_bindings::kvm_cpuid_entry2> =
             cpuid.iter().map(|e| (*e).into()).collect();
 
@@ -1595,13 +1601,17 @@ impl vm::Vm for KvmVm {
 
         // `struct kvm_tdx_init_vm`: the space before the trailing CPUIDs is a
         // fixed 256 bytes (attributes + xfam + 3 sha384 digests + reserved).
+        // The kernel treats mrconfigid/mrowner/mrownerconfig as raw 48-byte
+        // SHA384 digests (declared `__u64[6]`, populated by a byte copy), so
+        // store them as byte arrays to forward the caller's values verbatim
+        // without any endianness conversion.
         #[repr(C)]
         struct TdxInitVm {
             attributes: u64,
             xfam: u64,
-            mrconfigid: [u64; 6],
-            mrowner: [u64; 6],
-            mrownerconfig: [u64; 6],
+            mrconfigid: [u8; 48],
+            mrowner: [u8; 48],
+            mrownerconfig: [u8; 48],
             reserved: [u64; 12],
             // Trailing `struct kvm_cpuid2`: nent + padding + entries[].
             cpuid_nent: u32,
@@ -1612,9 +1622,9 @@ impl vm::Vm for KvmVm {
         let data = TdxInitVm {
             attributes,
             xfam,
-            mrconfigid: [0; 6],
-            mrowner: [0; 6],
-            mrownerconfig: [0; 6],
+            mrconfigid: *mrconfigid,
+            mrowner: *mrowner,
+            mrownerconfig: *mrownerconfig,
             reserved: [0; 12],
             cpuid_nent: count as u32,
             cpuid_padding: 0,

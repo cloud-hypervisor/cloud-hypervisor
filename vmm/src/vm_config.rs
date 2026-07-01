@@ -156,6 +156,19 @@ pub struct PlatformConfig {
     #[cfg(feature = "tdx")]
     #[serde(default)]
     pub tdx: bool,
+    // Optional SHA384 measurement-configuration digests, hex encoded (96 hex
+    // characters = 48 bytes each), forwarded verbatim to `KVM_TDX_INIT_VM` as
+    // the TD's `mrconfigid`, `mrowner` and `mrownerconfig` registers. When
+    // unset each register is left as all zeros.
+    #[cfg(feature = "tdx")]
+    #[serde(default)]
+    pub tdx_mrconfigid: Option<String>,
+    #[cfg(feature = "tdx")]
+    #[serde(default)]
+    pub tdx_mrowner: Option<String>,
+    #[cfg(feature = "tdx")]
+    #[serde(default)]
+    pub tdx_mrownerconfig: Option<String>,
     #[cfg(feature = "sev_snp")]
     #[serde(default)]
     pub sev_snp: bool,

@@ -174,3 +174,27 @@ devices responsible for handling PCI hotplug (PCI hotplug controller, PCI
 Express Bus and Generic Event Device) will not be allowed, therefore the
 corresponding drivers will not be loaded and the PCI hotplug feature will not
 be supported.
+
+## Measurement configuration registers
+
+A TD carries three owner/configuration measurement registers that are baked
+into its attestation report: `MRCONFIGID`, `MROWNER` and `MROWNERCONFIG`. Each
+is a 384-bit (48-byte) SHA384 digest chosen by the tenant or platform owner.
+
+They can be supplied through the matching `--platform` options as hex strings
+of exactly 96 characters (48 bytes):
+
+```bash
+./cloud-hypervisor \
+    --platform tdx=on,mrconfigid=<96-hex-chars>,mrowner=<96-hex-chars>,mrownerconfig=<96-hex-chars> \
+    --firmware td-shim/target/release/final.bin \
+    --kernel bzImage \
+    --cmdline "root=/dev/vda3 console=hvc0 rw" \
+    --cpus boot=1 \
+    --memory size=1G \
+    --disk path=tdx_guest_img
+```
+
+Any register left unset defaults to all zeros, preserving the previous
+behavior.
+

@@ -828,7 +828,15 @@ impl Vm {
     ) -> Result<()> {
         if config.lock().unwrap().is_tdx_enabled() {
             let cpuid = cpu_manager.lock().unwrap().common_cpuid();
-            vm.tdx_init(&cpuid)
+            let (mrconfigid, mrowner, mrownerconfig) = config
+                .lock()
+                .unwrap()
+                .platform
+                .as_ref()
+                .expect("TDX requires a platform configuration")
+                .tdx_measurements()
+                .map_err(Error::ConfigValidation)?;
+            vm.tdx_init(&cpuid, &mrconfigid, &mrowner, &mrownerconfig)
                 .map_err(Error::InitializeTdxVm)?;
         }
         Ok(())

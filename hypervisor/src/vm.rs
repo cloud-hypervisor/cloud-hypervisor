@@ -462,7 +462,13 @@ pub trait Vm: Send + Sync + Any {
     fn sev_snp_init(&self, guest_policy: SnpPolicy) -> Result<()>;
     #[cfg(feature = "tdx")]
     /// Initialize TDX on this VM
-    fn tdx_init(&self, _cpuid: &[CpuIdEntry]) -> Result<()> {
+    fn tdx_init(
+        &self,
+        _cpuid: &[CpuIdEntry],
+        _mrconfigid: &[u8; 48],
+        _mrowner: &[u8; 48],
+        _mrownerconfig: &[u8; 48],
+    ) -> Result<()> {
         unimplemented!()
     }
     #[cfg(feature = "tdx")]
