@@ -323,10 +323,6 @@ pub enum Error {
     InitializeTdxVm(#[source] hypervisor::HypervisorVmError),
 
     #[cfg(feature = "tdx")]
-    #[error("Error enabling TDX memory region")]
-    InitializeTdxMemoryRegion(#[source] hypervisor::HypervisorVmError),
-
-    #[cfg(feature = "tdx")]
     #[error("Error finalizing TDX VM")]
     FinalizeTdx(#[source] hypervisor::HypervisorVmError),
 
@@ -2687,11 +2683,12 @@ impl Vm {
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
 
+        let cpu_manager = self.cpu_manager.lock().unwrap();
         for section in sections {
             let size = section.size.try_into().unwrap();
             // SAFETY: get_host_address_range does proper bounds checking
             unsafe {
-                self.vm.tdx_init_memory_region(
+                cpu_manager.init_tdx_memory_region(
                     virtio_devices::get_host_address_range(
                         &*mem,
                         GuestAddress(section.address),
@@ -2704,7 +2701,7 @@ impl Vm {
                     section.attributes == 1,
                 )
             }
-            .map_err(Error::InitializeTdxMemoryRegion)?;
+            .map_err(Error::CpuManager)?;
         }
 
         Ok(())

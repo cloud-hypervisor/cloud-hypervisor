@@ -198,6 +198,14 @@ pub enum Error {
     #[error("Error initializing TDX")]
     InitializeTdx(#[source] hypervisor::HypervisorCpuError),
 
+    #[cfg(feature = "tdx")]
+    #[error("Error initializing TDX memory region")]
+    InitializeTdxMemoryRegion(#[source] hypervisor::HypervisorCpuError),
+
+    #[cfg(feature = "tdx")]
+    #[error("No vCPU available to initialize TDX memory region")]
+    InitializeTdxNoVcpu,
+
     #[cfg(target_arch = "aarch64")]
     #[error("Error initializing PMU")]
     InitPmu(#[source] hypervisor::HypervisorCpuError),
@@ -1729,6 +1737,32 @@ impl CpuManager {
             Self::compare_tdx_cpuid(vcpu.id, vcpu.vcpu.as_ref());
         }
         Ok(())
+    }
+
+    /// Add a TDX memory region to the TD's initial image.
+    ///
+    /// `KVM_TDX_INIT_MEM_REGION` is a vCPU-scoped ioctl, so route it through
+    /// the boot vCPU.
+    ///
+    /// # Safety
+    ///
+    /// `host_address` must be valid for `size` bytes.
+    #[cfg(feature = "tdx")]
+    pub unsafe fn init_tdx_memory_region(
+        &self,
+        host_address: *const u8,
+        guest_address: u64,
+        size: usize,
+        measure: bool,
+    ) -> Result<()> {
+        let vcpu = self.vcpus.first().ok_or(Error::InitializeTdxNoVcpu)?;
+        let vcpu = vcpu.lock().unwrap();
+        // SAFETY: caller guarantees `host_address` is valid for `size` bytes.
+        unsafe {
+            vcpu.vcpu
+                .tdx_init_memory_region(host_address, guest_address, size, measure)
+                .map_err(Error::InitializeTdxMemoryRegion)
+        }
     }
 
     /// Cross-check the CPUID the TDX module virtualizes for a TD vCPU

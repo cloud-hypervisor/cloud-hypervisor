@@ -1664,40 +1664,6 @@ impl vm::Vm for KvmVm {
         Ok(data)
     }
 
-    /// Initialize memory regions for the TDX VM
-    ///
-    /// # Safety
-    ///
-    /// `host_address` must be valid for `size` bytes
-    #[cfg(feature = "tdx")]
-    unsafe fn tdx_init_memory_region(
-        &self,
-        host_address: *mut u8,
-        guest_address: u64,
-        size: usize,
-        measure: bool,
-    ) -> vm::Result<()> {
-        #[repr(C)]
-        struct TdxInitMemRegion {
-            host_address: u64,
-            guest_address: u64,
-            pages: u64,
-        }
-        let data = TdxInitMemRegion {
-            host_address: host_address as _,
-            guest_address,
-            pages: (size / 4096).try_into().unwrap(),
-        };
-
-        tdx_command(
-            &self.fd.as_raw_fd(),
-            TdxCommand::InitMemRegion,
-            u32::from(measure),
-            (&raw const data).cast(),
-        )
-        .map_err(vm::HypervisorVmError::InitMemRegionTdx)
-    }
-
     /// Downcast to the underlying KvmVm type
     fn as_any(&self) -> &dyn Any {
         self
@@ -3791,6 +3757,42 @@ impl cpu::Vcpu for KvmVcpu {
 
         tdx_command(&self.fd.as_raw_fd(), TdxCommand::InitVcpu, 0, hob_address)
             .map_err(cpu::HypervisorCpuError::InitializeTdx)
+    }
+
+    ///
+    /// Add a TDX memory region to the TD's initial image via this vCPU.
+    ///
+    #[cfg(feature = "tdx")]
+    unsafe fn tdx_init_memory_region(
+        &self,
+        host_address: *const u8,
+        guest_address: u64,
+        size: usize,
+        measure: bool,
+    ) -> cpu::Result<()> {
+        #[repr(C)]
+        struct TdxInitMemRegion {
+            host_address: u64,
+            guest_address: u64,
+            pages: u64,
+        }
+        let mut data = TdxInitMemRegion {
+            host_address: host_address as u64,
+            guest_address,
+            pages: (size / 4096).try_into().unwrap(),
+        };
+
+        // KVM_TDX_INIT_MEM_REGION is a vCPU ioctl: the module maps the private
+        // page through this vCPU's Secure-EPT and copies from `host_address`.
+        // The kernel may write the advanced region back into `data` and return
+        // -EINTR; tdx_command retries in that case, resuming from `data`.
+        tdx_command(
+            &self.fd.as_raw_fd(),
+            TdxCommand::InitMemRegion,
+            u32::from(measure),
+            (&raw mut data).cast(),
+        )
+        .map_err(cpu::HypervisorCpuError::InitializeTdxMemoryRegion)
     }
 
     ///

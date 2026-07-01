@@ -300,6 +300,12 @@ pub enum HypervisorCpuError {
     #[error("Failed to initialize TDX")]
     InitializeTdx(#[source] io::Error),
     ///
+    /// Failed to initialize a TDX memory region
+    ///
+    #[cfg(feature = "tdx")]
+    #[error("Failed to initialize TDX memory region")]
+    InitializeTdxMemoryRegion(#[source] io::Error),
+    ///
     /// Unknown TDX VM call
     ///
     #[cfg(feature = "tdx")]
@@ -605,6 +611,26 @@ pub trait Vcpu: Send + Sync {
     ///
     #[cfg(feature = "tdx")]
     fn tdx_get_cpuid(&self) -> Result<Vec<CpuIdEntry>> {
+        unimplemented!()
+    }
+    ///
+    /// Add a TDX memory region to the TD's initial (measured) image.
+    ///
+    /// With the KVM TDX ABI, `KVM_TDX_INIT_MEM_REGION` is a vCPU-scoped ioctl:
+    /// the TDX module maps the private page through this vCPU's Secure-EPT and
+    /// copies the contents from `_host_address`.
+    ///
+    /// # Safety
+    ///
+    /// `_host_address` must be valid for `_size` bytes.
+    #[cfg(feature = "tdx")]
+    unsafe fn tdx_init_memory_region(
+        &self,
+        _host_address: *const u8,
+        _guest_address: u64,
+        _size: usize,
+        _measure: bool,
+    ) -> Result<()> {
         unimplemented!()
     }
     ///

@@ -242,12 +242,6 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to finalize TDX")]
     FinalizeTdx(#[source] io::Error),
-    #[cfg(feature = "tdx")]
-    ///
-    /// Error initializing the TDX memory region
-    ///
-    #[error("Failed to initialize memory region TDX")]
-    InitMemRegionTdx(#[source] io::Error),
     ///
     /// Create Vgic error
     ///
@@ -479,21 +473,6 @@ pub trait Vm: Send + Sync + Any {
     #[cfg(feature = "tdx")]
     /// Retrieve the TDX capabilities supported for this VM
     fn tdx_capabilities(&self) -> result::Result<TdxCapabilities, HypervisorError> {
-        unimplemented!()
-    }
-    #[cfg(feature = "tdx")]
-    /// Initialize a TDX memory region for this VM
-    ///
-    /// # Safety
-    ///
-    /// `_host_address` must be valid for `_size` bytes
-    unsafe fn tdx_init_memory_region(
-        &self,
-        _host_address: *mut u8,
-        _guest_address: u64,
-        _size: usize,
-        _measure: bool,
-    ) -> Result<()> {
         unimplemented!()
     }
     /// Downcast to the underlying hypervisor VM type
