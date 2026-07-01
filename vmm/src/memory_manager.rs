@@ -523,6 +523,17 @@ impl BusDevice for MemoryManager {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
         if self.selected_slot < self.hotplug_slots.len() {
             let state = &self.hotplug_slots[self.selected_slot];
+            if matches!(
+                offset,
+                BASE_OFFSET_LOW | BASE_OFFSET_HIGH | LENGTH_OFFSET_LOW | LENGTH_OFFSET_HIGH
+            ) && data.len() != 4
+            {
+                warn!(
+                    "Invalid sized read ({}) of memory manager register {offset:#x}",
+                    data.len()
+                );
+                return;
+            }
             match offset {
                 BASE_OFFSET_LOW => {
                     data.copy_from_slice(&state.base.to_le_bytes()[..4]);
