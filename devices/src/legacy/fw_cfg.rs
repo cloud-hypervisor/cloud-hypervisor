@@ -722,16 +722,18 @@ impl FwCfg {
     }
 
     fn read_content(content: &FwCfgContent, offset: u32, data: &mut [u8], size: u32) -> Option<u8> {
+        // Zero fill rather than the usual 0xff fill for QEMU compatibility
+        data.fill(0);
         let start = offset as usize;
         let end = start + size as usize;
         match content {
             FwCfgContent::Bytes(b) => {
-                if b.len() >= size as usize {
+                if end <= b.len() {
                     data.copy_from_slice(&b[start..end]);
                 }
             }
             FwCfgContent::Slice(s) => {
-                if s.len() >= size as usize {
+                if end <= s.len() {
                     data.copy_from_slice(&s[start..end]);
                 }
             }
@@ -740,7 +742,9 @@ impl FwCfg {
             }
             FwCfgContent::U32(n) => {
                 let bytes = n.to_le_bytes();
-                data.copy_from_slice(&bytes[start..end]);
+                if end <= bytes.len() {
+                    data.copy_from_slice(&bytes[start..end]);
+                }
             }
         }
         Some(size as u8)
