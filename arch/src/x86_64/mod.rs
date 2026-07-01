@@ -907,9 +907,23 @@ fn required_common_cpuid_updates(
             }
             // Set CPU physical bits and guest physical bits
             0x8000_0008 => {
-                entry.eax = (entry.eax & 0xff00_ff00)
-                    | (config.phys_bits as u32 & 0xff)
-                    | ((config.phys_bits as u32 & 0xff) << 16);
+                // For TDX the guest physical address width (GPAW) is fixed at 48
+                // (GPAW-48, 4-level EPT), and the shared/private bit lives at bit
+                // GPAW-1 (bit 47). KVM derives the vCPU's reserved GPA bits from the
+                // CPUID maxphyaddr (EAX[7:0]); it must be at least the GPAW so that a
+                // guest MapGPA carrying the shared bit is not rejected as an illegal
+                // GPA. Report both the maxphyaddr and the guest physical bits as 48,
+                // independent of the (host-derived) memory-layout phys_bits.
+                #[cfg(feature = "tdx")]
+                let phys_bits = if config.tdx {
+                    48u32
+                } else {
+                    config.phys_bits as u32
+                };
+                #[cfg(not(feature = "tdx"))]
+                let phys_bits = config.phys_bits as u32;
+                entry.eax =
+                    (entry.eax & 0xff00_ff00) | (phys_bits & 0xff) | ((phys_bits & 0xff) << 16);
             }
             0x4000_0001 => {
                 // Enable KVM_FEATURE_MSI_EXT_DEST_ID. This allows the guest to target

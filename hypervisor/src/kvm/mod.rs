@@ -207,8 +207,9 @@ ioctl_iow_nr!(
     kvm_bindings::kvm_device_attr
 );
 
-#[cfg(feature = "sev_snp")]
-use igvm_defs::PAGE_SIZE_4K;
+#[cfg(any(feature = "sev_snp", feature = "tdx"))]
+/// 4 KiB, the granularity of guest private/shared memory conversions.
+const PAGE_SIZE_4K: u64 = 4096;
 #[cfg(any(feature = "sev_snp", feature = "tdx"))]
 use kvm_bindings::{KVM_MEMORY_ATTRIBUTE_PRIVATE, kvm_memory_attributes};
 #[cfg(feature = "sev_snp")]
@@ -618,13 +619,14 @@ struct KvmDirtyLogSlot {
 }
 
 struct KvmMemorySlot {
-    // These fields are currently only read by the SEV-SNP isolated-import
-    // path; the TDX path populates them for future shared/private bookkeeping.
-    #[cfg_attr(not(feature = "sev_snp"), expect(dead_code))]
+    // These fields are read by the SEV-SNP isolated-import path and by the TDX
+    // private<->shared conversion path (punch_holes_in_guest_memfd); they are
+    // unused only when neither confidential-VM backend is compiled in.
+    #[cfg_attr(not(any(feature = "sev_snp", feature = "tdx")), expect(dead_code))]
     guest_memfd: OwnedFd,
-    #[cfg_attr(not(feature = "sev_snp"), expect(dead_code))]
+    #[cfg_attr(not(any(feature = "sev_snp", feature = "tdx")), expect(dead_code))]
     guest_phys_addr: u64,
-    #[cfg_attr(not(feature = "sev_snp"), expect(dead_code))]
+    #[cfg_attr(not(any(feature = "sev_snp", feature = "tdx")), expect(dead_code))]
     memory_size: u64,
 }
 
@@ -952,7 +954,7 @@ impl vm::Vm for KvmVm {
             has_xcrs: self.check_extension(Cap::Xcrs),
             #[cfg(any(feature = "sev_snp", feature = "tdx"))]
             vm_fd: self.fd.clone(),
-            #[cfg(feature = "sev_snp")]
+            #[cfg(any(feature = "sev_snp", feature = "tdx"))]
             memory_slots: self.memory_slots.clone(),
             #[cfg(any(feature = "tdx", feature = "sev_snp"))]
             mem_conversion_handler: self.mem_conversion_handler.clone(),
@@ -1841,6 +1843,23 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 memory_slots = Some(Arc::new(RwLock::new(HashMap::new())));
             }
 
+            // A TD converts TDG.VP.VMCALL<MapGPA> into KVM_HC_MAP_GPA_RANGE,
+            // which KVM only forwards to userspace when the hypercall exit is
+            // opted into. Enable every hypercall exit KVM advertises (the mask
+            // includes KVM_HC_MAP_GPA_RANGE) so private<->shared conversions
+            // reach the run loop instead of being rejected as unsupported.
+            #[cfg(feature = "tdx")]
+            if _config.tdx_enabled {
+                let mask = self.kvm.check_extension_int(Cap::ExitHypercall);
+                let cap = kvm_bindings::kvm_enable_cap {
+                    cap: kvm_bindings::KVM_CAP_EXIT_HYPERCALL,
+                    args: [mask as _, 0, 0, 0],
+                    ..Default::default()
+                };
+                fd.enable_cap(&cap)
+                    .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
+            }
+
             #[cfg(feature = "sev_snp")]
             let sev_fd = {
                 let sev_snp_enabled = vm_type == KVM_X86_SNP_VM as u64;
@@ -2023,7 +2042,7 @@ pub struct KvmVcpu {
     has_xcrs: bool,
     #[cfg(any(feature = "sev_snp", feature = "tdx"))]
     vm_fd: Arc<VmFd>,
-    #[cfg(feature = "sev_snp")]
+    #[cfg(any(feature = "sev_snp", feature = "tdx"))]
     memory_slots: Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
     #[cfg(any(feature = "tdx", feature = "sev_snp"))]
     mem_conversion_handler: Arc<RwLock<Option<Arc<dyn vm::MemoryConversionHandler>>>>,
@@ -2041,7 +2060,7 @@ impl KvmVcpu {
     }
 }
 
-#[cfg(feature = "sev_snp")]
+#[cfg(any(feature = "sev_snp", feature = "tdx"))]
 impl KvmVcpu {
     fn punch_holes_in_guest_memfd(
         memory_slots: &Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
@@ -2720,7 +2739,7 @@ impl cpu::Vcpu for KvmVcpu {
                 #[cfg(feature = "tdx")]
                 VcpuExit::Unsupported(KVM_EXIT_TDX) => Ok(cpu::VmExit::Tdx),
                 VcpuExit::Debug(_) => Ok(cpu::VmExit::Debug),
-                #[cfg(feature = "sev_snp")]
+                #[cfg(any(feature = "sev_snp", feature = "tdx"))]
                 VcpuExit::Hypercall(hypercall) => {
                     // https://docs.kernel.org/virt/kvm/x86/hypercalls.html#kvm-hc-map-gpa-range
                     const KVM_HC_MAP_GPA_RANGE: u64 = 12;
