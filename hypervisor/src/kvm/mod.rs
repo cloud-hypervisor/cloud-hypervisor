@@ -1504,19 +1504,19 @@ impl vm::Vm for KvmVm {
     ///
     #[cfg(feature = "tdx")]
     fn tdx_init(&self, cpuid: &[CpuIdEntry], max_vcpus: u32) -> vm::Result<()> {
-        let mut cpuid: Vec<kvm_bindings::kvm_cpuid_entry2> =
+        let guest_cpuid: Vec<kvm_bindings::kvm_cpuid_entry2> =
             cpuid.iter().map(|e| (*e).into()).collect();
 
-        // Derive XFAM (the TD's extended feature mask) from the guest CPUID
-        // before padding the table. CPUID.0xD reports the XSAVE state the TD
-        // is allowed to manage: sub-leaf 0 carries the XCR0-managed bits
-        // (EAX:low, EDX:high) and sub-leaf 1 carries the IA32_XSS-managed bits
-        // (ECX:low, EDX:high). The CPUID has already been masked by the TDX
-        // capabilities' supported_xfam, so this value is within the allowed
-        // set.
-        let xfam = tdx_xfam_from_cpuid(&cpuid);
+        // Derive XFAM (the TD's extended feature mask) from the guest CPUID.
+        // CPUID.0xD reports the XSAVE state the TD is allowed to manage:
+        // sub-leaf 0 carries the XCR0-managed bits (EAX:low, EDX:high) and
+        // sub-leaf 1 carries the IA32_XSS-managed bits (ECX:low, EDX:high).
+        let xfam = tdx_xfam_from_cpuid(&guest_cpuid);
 
-        cpuid.resize(256, kvm_bindings::kvm_cpuid_entry2::default());
+        // Derive the TD ATTRIBUTES from the guest CPUID. SEPT_VE_DISABLE is
+        // always requested; PKS and PERFMON must match the features exposed to
+        // the guest, otherwise the TDX module rejects KVM_TDX_INIT_VM.
+        let attributes = tdx_attributes_from_cpuid(&guest_cpuid);
 
         // The upstream Linux 6.16 `struct kvm_tdx_init_vm` no longer carries
         // `max_vcpus`; the limit must be configured via KVM_CAP_MAX_VCPUS
@@ -1532,35 +1532,18 @@ impl vm::Vm for KvmVm {
             vm::HypervisorVmError::InitializeTdx(io::Error::from_raw_os_error(e.errno()))
         })?;
 
-        // `struct kvm_tdx_init_vm`: the space before the trailing CPUIDs is a
-        // fixed 256 bytes (attributes + xfam + 3 sha384 digests + reserved).
-        #[repr(C)]
-        struct TdxInitVm {
-            attributes: u64,
-            xfam: u64,
-            mrconfigid: [u64; 6],
-            mrowner: [u64; 6],
-            mrownerconfig: [u64; 6],
-            reserved: [u64; 12],
-            // Trailing `struct kvm_cpuid2`: nent + padding + entries[].
-            cpuid_nent: u32,
-            cpuid_padding: u32,
-            cpuid_entries: [kvm_bindings::kvm_cpuid_entry2; 256],
-        }
-
-        // Derive the TD ATTRIBUTES from the guest CPUID. SEPT_VE_DISABLE is
-        // always requested; PKS and PERFMON must match the features exposed to
-        // the guest, otherwise the TDX module rejects KVM_TDX_INIT_VM.
-        let attributes = tdx_attributes_from_cpuid(&cpuid);
-        // Validate the requested attributes and XFAM against what the TDX
-        // module and KVM actually support before KVM_TDX_INIT_VM, mirroring
-        // the kernel's own checks in setup_tdparams(). The supported masks
-        // come from KVM_TDX_CAPABILITIES (a VM-scoped ioctl).
+        // Query the TDX capabilities (a VM-scoped ioctl) to learn both the
+        // supported attribute/XFAM masks and the set of CPUID leaves the TDX
+        // module allows userspace to configure.
         let caps = self.tdx_capabilities().map_err(|e| {
             vm::HypervisorVmError::InitializeTdx(io::Error::other(format!(
                 "failed to query TDX capabilities: {e}"
             )))
         })?;
+
+        // Validate the requested attributes and XFAM against what the TDX
+        // module and KVM actually support before KVM_TDX_INIT_VM, mirroring
+        // the kernel's own checks in setup_tdparams().
         if attributes & !caps.supported_attrs != 0 {
             return Err(vm::HypervisorVmError::InitializeTdx(io::Error::other(
                 format!(
@@ -1578,6 +1561,50 @@ impl vm::Vm for KvmVm {
             )));
         }
 
+        // Build the TD CPUID table. KVM (setup_tdparams_cpuids) only accepts
+        // entries whose (function, index) is in the TDX module's configurable
+        // set reported by KVM_TDX_CAPABILITIES, and rejects the whole request
+        // unless *every* entry passed corresponds to such a leaf. So walk the
+        // configurable leaves and, for each one the guest provides, forward the
+        // guest's chosen values. Leaves the guest does not expose are skipped.
+        let nent = (caps.cpuid_nent as usize).min(caps.cpuid_entries.len());
+        let mut cpuid_entries = [kvm_bindings::kvm_cpuid_entry2::default(); 256];
+        let mut count = 0usize;
+        for cfg in &caps.cpuid_entries[..nent] {
+            let Some(entry) = guest_cpuid
+                .iter()
+                .find(|e| e.function == cfg.function && e.index == cfg.index)
+            else {
+                continue;
+            };
+            let mut entry = *entry;
+            if entry.function == 7 && entry.index == 0 {
+                // The TDX module rejects TSX (HLE bit 4, RTM bit 11 in EBX) and
+                // WAITPKG (bit 5 in ECX); clear them like the kernel's
+                // tdx_clear_unsupported_cpuid().
+                entry.ebx &= !((1 << 4) | (1 << 11));
+                entry.ecx &= !(1 << 5);
+            }
+            cpuid_entries[count] = entry;
+            count += 1;
+        }
+
+        // `struct kvm_tdx_init_vm`: the space before the trailing CPUIDs is a
+        // fixed 256 bytes (attributes + xfam + 3 sha384 digests + reserved).
+        #[repr(C)]
+        struct TdxInitVm {
+            attributes: u64,
+            xfam: u64,
+            mrconfigid: [u64; 6],
+            mrowner: [u64; 6],
+            mrownerconfig: [u64; 6],
+            reserved: [u64; 12],
+            // Trailing `struct kvm_cpuid2`: nent + padding + entries[].
+            cpuid_nent: u32,
+            cpuid_padding: u32,
+            cpuid_entries: [kvm_bindings::kvm_cpuid_entry2; 256],
+        }
+
         let data = TdxInitVm {
             attributes,
             xfam,
@@ -1585,9 +1612,9 @@ impl vm::Vm for KvmVm {
             mrowner: [0; 6],
             mrownerconfig: [0; 6],
             reserved: [0; 12],
-            cpuid_nent: cpuid.len() as u32,
+            cpuid_nent: count as u32,
             cpuid_padding: 0,
-            cpuid_entries: cpuid.as_slice().try_into().unwrap(),
+            cpuid_entries,
         };
 
         tdx_command(
@@ -1610,7 +1637,7 @@ impl vm::Vm for KvmVm {
 
     #[cfg(feature = "tdx")]
     fn tdx_capabilities(&self) -> hypervisor::Result<TdxCapabilities> {
-        let data = TdxCapabilities {
+        let mut data = TdxCapabilities {
             supported_attrs: 0,
             supported_xfam: 0,
             kernel_tdvmcallinfo_1_r11: 0,
@@ -1624,12 +1651,14 @@ impl vm::Vm for KvmVm {
         };
 
         // KVM_TDX_CAPABILITIES is a VM-scoped ioctl in Linux 6.16: it must be
-        // issued on the TD VM fd, not on the /dev/kvm system fd.
+        // issued on the TD VM fd, not on the /dev/kvm system fd. KVM writes the
+        // supported masks and the configurable CPUID leaves back into `data`,
+        // so pass a mutable pointer.
         tdx_command(
             &self.fd.as_raw_fd(),
             TdxCommand::Capabilities,
             0,
-            (&raw const data).cast(),
+            (&raw mut data).cast(),
         )
         .map_err(|e| hypervisor::HypervisorError::TdxCapabilities(e.into()))?;
 
