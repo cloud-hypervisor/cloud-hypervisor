@@ -239,7 +239,7 @@ impl RxVirtio {
                     .memory()
                     .checked_offset(
                         desc.addr()
-                            .translate_gva(access_platform, desc.len() as usize)
+                            .translate_gva(access_platform, vnet_hdr_len())
                             .map_err(|e| {
                                 NetQueuePairError::GuestMemory(
                                     vm_memory::GuestMemoryError::IOError(e),
