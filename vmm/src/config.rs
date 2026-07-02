@@ -3206,6 +3206,9 @@ impl VmConfig {
                 if net.vhost_user && !self.backed_by_shared_memory() {
                     return Err(ValidationError::VhostUserRequiresSharedMemory);
                 }
+                if net.vhost_user && net.vhost_socket.is_none() {
+                    return Err(ValidationError::VhostUserMissingSocket);
+                }
                 if net.vhost_user && net.rate_limiter_config.is_some() {
                     return Err(ValidationError::VhostUserRateLimiterNotSupported);
                 }
@@ -5637,6 +5640,17 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             invalid_config.validate(),
             Err(ValidationError::VhostUserRequiresSharedMemory)
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.memory.shared = true;
+        invalid_config.net = Some(vec![NetConfig {
+            vhost_user: true,
+            ..net_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::VhostUserMissingSocket)
         );
 
         let mut still_valid_config = valid_config.clone();
