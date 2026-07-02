@@ -4,7 +4,6 @@
 //
 
 use std::collections::HashMap;
-use std::error::Error as StdError;
 use std::fs::File;
 use std::io::{Read, Write, stdout};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
@@ -16,7 +15,7 @@ use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender, channel};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
-use std::{any, io, iter, mem, panic, path, process, result, thread};
+use std::{any, io, mem, panic, path, process, result, thread};
 
 use anyhow::{Context, anyhow};
 #[cfg(feature = "dbus_api")]
@@ -2033,22 +2032,10 @@ impl Vmm {
                 }
             }
             Err(e) => {
-                // Mimic the error chain that CH prints on error in the log.
-                // Required to get useful error messages in the log.
-                let top_error: &dyn StdError = &e;
-                let error_chain_str = {
-                    iter::successors(Some(top_error), |sub_error| {
-                        // Dereference necessary to mitigate rustc compiler bug.
-                        // See <https://github.com/rust-lang/rust/issues/141673>
-                        (*sub_error).source()
-                    })
-                    // Important to use the plain Display impl to not interfere
-                    // with anyhow's "smart" printing
-                    .map(|e| format!("{e}"))
-                    .collect::<Vec<_>>()
-                    .join(" => ")
-                };
-                error!("Migration failed: {error_chain_str}");
+                error!(
+                    "Migration failed: {}",
+                    util::flatten_error_chain_to_string(&e)
+                );
                 try_resume_vm_after_failed_migration(vm);
             }
         }
@@ -3240,6 +3227,36 @@ const CPU_MANAGER_SNAPSHOT_ID: &str = "cpu-manager";
 const MEMORY_MANAGER_SNAPSHOT_ID: &str = "memory-manager";
 const DEVICE_MANAGER_SNAPSHOT_ID: &str = "device-manager";
 
+mod util {
+    use std::error::Error as StdError;
+    use std::iter;
+
+    /// Creates in iterator over the [`Display`]-formatted representations of
+    /// the chain of errors of a [`StdError`].
+    ///
+    /// The first index is the top error, the last index is the root cause.
+    ///
+    /// This mimics the error chain that we print on exit in CH or ch-remote for
+    /// situations where we do not exit the program.
+    pub fn error_chain_messages(top_error: &dyn StdError) -> Vec<String> {
+        iter::successors(Some(top_error), |sub_error| {
+            // Dereference necessary to mitigate rustc compiler bug.
+            // See <https://github.com/rust-lang/rust/issues/141673>
+            (*sub_error).source()
+        })
+        // Important to use the plain Display impl to not interfere
+        // with anyhow's "smart" printing
+        .map(|e| format!("{e}"))
+        .collect()
+    }
+
+    /// Flattens the chain of errors of a [`StdError`] into a single printable
+    /// line.
+    pub fn flatten_error_chain_to_string(top_error: &dyn StdError) -> String {
+        // Separator discussed here: https://github.com/cloud-hypervisor/cloud-hypervisor/issues/8510
+        error_chain_messages(top_error).join(": ")
+    }
+}
 #[cfg(test)]
 mod unit_tests {
     use std::path::PathBuf;

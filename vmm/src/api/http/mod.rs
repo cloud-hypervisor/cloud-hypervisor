@@ -12,7 +12,7 @@ use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use std::sync::mpsc::Sender;
-use std::{fs, iter, panic, result, thread};
+use std::{fs, panic, result, thread};
 
 use block::fcntl::{LockError, LockGranularity, LockType, try_acquire_lock};
 use log::{error, info};
@@ -35,6 +35,7 @@ use crate::api::{
 };
 use crate::landlock::Landlock;
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
+use crate::util::{error_chain_messages, flatten_error_chain_to_string};
 use crate::vm::Error as VmError;
 use crate::{Error as VmmError, Result};
 
@@ -102,20 +103,13 @@ const HTTP_ROOT: &str = "/api/v1";
 pub fn error_response(error: HttpError) -> Response {
     let mut response = Response::new(Version::Http11, error.status_code());
 
-    let error: &dyn Error = &error;
-    // Write the Display::display() output all errors (from top to root).
-    let error_messages = iter::successors(Some(error), |sub_error| {
-        // Dereference necessary to mitigate rustc compiler bug.
-        // See <https://github.com/rust-lang/rust/issues/141673>
-        (*sub_error).source()
-    })
-    .map(|error| format!("{error}"))
-    .collect::<Vec<_>>();
-
-    info!("HTTP API error response: {}", error_messages.join(": "));
+    info!(
+        "HTTP API error response: {}",
+        flatten_error_chain_to_string(&error)
+    );
 
     // TODO: Move `api` module from `vmm` to dedicated crate and use a common type definition
-    let json = serde_json::to_string(&error_messages).unwrap();
+    let json = serde_json::to_string(&error_chain_messages(&error)).unwrap();
 
     let body = Body::new(json);
     response.set_body(body);
