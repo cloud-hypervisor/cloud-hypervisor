@@ -373,9 +373,8 @@ mod unit_tests {
     }
 
     fn qcow_header_is_corrupt(file: &File) -> bool {
-        let mut raw = AlignedFile::new(file.try_clone().unwrap(), false);
-        raw.seek(SeekFrom::Start(0)).unwrap();
-        QcowHeader::new(&mut raw).unwrap().is_corrupt()
+        let raw = AlignedFile::new(file.try_clone().unwrap(), false);
+        QcowHeader::new(&raw).unwrap().is_corrupt()
     }
 
     fn create_disk_with_data(
@@ -866,7 +865,7 @@ mod unit_tests {
     }
 
     fn create_qcow2_overlay_header(overlay_path: &Path, backing_path: &str, file_size: u64) {
-        let mut file = OpenOptions::new()
+        let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
@@ -875,8 +874,9 @@ mod unit_tests {
             .unwrap();
         let header =
             QcowHeader::create_for_size_and_path(3, file_size, Some(backing_path)).unwrap();
-        header.write_to(&mut file).unwrap();
-        file.sync_all().unwrap();
+        let raw = AlignedFile::new(file, false);
+        header.write_to(&raw).unwrap();
+        raw.sync_all().unwrap();
     }
 
     #[test]
@@ -989,11 +989,12 @@ mod unit_tests {
         let file_size = cluster_size * 2;
 
         {
-            let mut file = overlay_temp.as_file().try_clone().unwrap();
+            let file = overlay_temp.as_file().try_clone().unwrap();
             let header =
                 QcowHeader::create_for_size_and_path(3, file_size, Some("missing.raw")).unwrap();
-            header.write_to(&mut file).unwrap();
-            file.sync_all().unwrap();
+            let raw = AlignedFile::new(file, false);
+            header.write_to(&raw).unwrap();
+            raw.sync_all().unwrap();
         }
 
         let mut overlay_file = overlay_temp.into_file();

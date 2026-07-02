@@ -9,7 +9,8 @@
 //! QCOW2 header parsing, validation, and creation.
 
 use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Seek, SeekFrom, Write};
+use std::os::unix::fs::FileExt;
 use std::str::FromStr;
 
 use bitflags::bitflags;
@@ -209,27 +210,34 @@ pub struct QcowHeader {
 impl QcowHeader {
     /// Read header extensions, optionally collecting feature names for error reporting.
     pub(super) fn read_header_extensions(
-        f: &mut AlignedFile,
+        f: &AlignedFile,
         header: &mut QcowHeader,
         mut feature_table: Option<&mut Vec<(u8, String)>>,
     ) -> Result<()> {
-        // Extensions start directly after the header
-        f.seek(SeekFrom::Start(header.header_size as u64))
-            .map_err(Error::ReadingHeader)?;
+        // Extensions start directly after the header.
+        let mut offset = header.header_size as u64;
 
         loop {
-            let ext_type = u32::read_be(f).map_err(Error::ReadingHeader)?;
+            let mut field = [0u8; size_of::<u32>()];
+            f.read_exact_at(&mut field, offset)
+                .map_err(Error::ReadingHeader)?;
+            offset += field.len() as u64;
+            let ext_type = u32::from_be_slice(&field) as u32;
             if ext_type == HEADER_EXT_END {
                 break;
             }
 
-            let ext_length = u32::read_be(f).map_err(Error::ReadingHeader)?;
+            f.read_exact_at(&mut field, offset)
+                .map_err(Error::ReadingHeader)?;
+            offset += field.len() as u64;
+            let ext_length = u32::from_be_slice(&field) as u32;
 
             match ext_type {
                 HEADER_EXT_BACKING_FORMAT => {
                     let mut format_bytes = vec![0u8; ext_length as usize];
-                    f.read_exact(&mut format_bytes)
+                    f.read_exact_at(&mut format_bytes, offset)
                         .map_err(Error::ReadingHeader)?;
+                    offset += format_bytes.len() as u64;
                     let format_str = String::from_utf8(format_bytes)
                         .map_err(|err| Error::InvalidBackingFileName(err.utf8_error()))?;
                     if let Some(backing_file) = &mut header.backing_file {
@@ -239,7 +247,9 @@ impl QcowHeader {
                 HEADER_EXT_FEATURE_NAME_TABLE if feature_table.is_some() => {
                     const FEATURE_NAME_ENTRY_SIZE: usize = 1 + 1 + 46; // type + bit + name
                     let mut data = vec![0u8; ext_length as usize];
-                    f.read_exact(&mut data).map_err(Error::ReadingHeader)?;
+                    f.read_exact_at(&mut data, offset)
+                        .map_err(Error::ReadingHeader)?;
+                    offset += data.len() as u64;
                     let table = feature_table.as_mut().unwrap();
                     for entry in data.chunks_exact(FEATURE_NAME_ENTRY_SIZE) {
                         if entry[0] == FEAT_TYPE_INCOMPATIBLE {
@@ -253,72 +263,92 @@ impl QcowHeader {
                 }
                 _ => {
                     // Skip unknown extension
-                    f.seek(SeekFrom::Current(ext_length as i64))
-                        .map_err(Error::ReadingHeader)?;
+                    offset += ext_length as u64;
                 }
             }
 
             // Skip to the next 8 byte boundary
             let padding = (8 - (ext_length % 8)) % 8;
-            f.seek(SeekFrom::Current(padding as i64))
-                .map_err(Error::ReadingHeader)?;
+            offset += padding as u64;
         }
 
         Ok(())
     }
 
     /// Creates a QcowHeader from a reference to a file.
-    pub fn new(f: &mut AlignedFile) -> Result<QcowHeader> {
-        f.rewind().map_err(Error::ReadingHeader)?;
-        let magic = u32::read_be(f).map_err(Error::ReadingHeader)?;
+    pub fn new(f: &AlignedFile) -> Result<QcowHeader> {
+        // Decode the next big endian u32 from the buffer and advance `pos`.
+        fn next_u32(buf: &[u8], pos: &mut usize) -> u32 {
+            let value = u32::from_be_slice(&buf[*pos..]) as u32;
+            *pos += size_of::<u32>();
+            value
+        }
+
+        // Decode the next big endian u64 from the buffer and advance `pos`.
+        fn next_u64(buf: &[u8], pos: &mut usize) -> u64 {
+            let value = u64::from_be_slice(&buf[*pos..]);
+            *pos += size_of::<u64>();
+            value
+        }
+
+        // The bare header fits in V3_BARE_HEADER_SIZE plus the optional
+        // compression field. Read it once, then decode each field from the
+        // buffer at its running offset.
+        let mut buf = [0u8; V3_BARE_HEADER_SIZE as usize + size_of::<u64>()];
+        f.read_exact_at(&mut buf, 0).map_err(Error::ReadingHeader)?;
+
+        let mut pos = 0;
+        let magic = next_u32(&buf, &mut pos);
         if magic != QCOW_MAGIC {
             return Err(Error::InvalidMagic);
         }
 
-        // Reads the next u32 from the file.
-        fn read_u32_be(f: &mut AlignedFile) -> Result<u32> {
-            u32::read_be(f).map_err(Error::ReadingHeader)
-        }
-
-        // Reads the next u64 from the file.
-        fn read_u64_be(f: &mut AlignedFile) -> Result<u64> {
-            u64::read_be(f).map_err(Error::ReadingHeader)
-        }
-
-        let version = read_u32_be(f)?;
+        let version = next_u32(&buf, &mut pos);
 
         let mut header = QcowHeader {
             magic,
             version,
-            backing_file_offset: read_u64_be(f)?,
-            backing_file_size: read_u32_be(f)?,
-            cluster_bits: read_u32_be(f)?,
-            size: read_u64_be(f)?,
-            crypt_method: read_u32_be(f)?,
-            l1_size: read_u32_be(f)?,
-            l1_table_offset: read_u64_be(f)?,
-            refcount_table_offset: read_u64_be(f)?,
-            refcount_table_clusters: read_u32_be(f)?,
-            nb_snapshots: read_u32_be(f)?,
-            snapshots_offset: read_u64_be(f)?,
-            incompatible_features: if version == 2 { 0 } else { read_u64_be(f)? },
-            compatible_features: if version == 2 { 0 } else { read_u64_be(f)? },
-            autoclear_features: if version == 2 { 0 } else { read_u64_be(f)? },
+            backing_file_offset: next_u64(&buf, &mut pos),
+            backing_file_size: next_u32(&buf, &mut pos),
+            cluster_bits: next_u32(&buf, &mut pos),
+            size: next_u64(&buf, &mut pos),
+            crypt_method: next_u32(&buf, &mut pos),
+            l1_size: next_u32(&buf, &mut pos),
+            l1_table_offset: next_u64(&buf, &mut pos),
+            refcount_table_offset: next_u64(&buf, &mut pos),
+            refcount_table_clusters: next_u32(&buf, &mut pos),
+            nb_snapshots: next_u32(&buf, &mut pos),
+            snapshots_offset: next_u64(&buf, &mut pos),
+            incompatible_features: if version == 2 {
+                0
+            } else {
+                next_u64(&buf, &mut pos)
+            },
+            compatible_features: if version == 2 {
+                0
+            } else {
+                next_u64(&buf, &mut pos)
+            },
+            autoclear_features: if version == 2 {
+                0
+            } else {
+                next_u64(&buf, &mut pos)
+            },
             refcount_order: if version == 2 {
                 DEFAULT_REFCOUNT_ORDER
             } else {
-                read_u32_be(f)?
+                next_u32(&buf, &mut pos)
             },
             header_size: if version == 2 {
                 V2_BARE_HEADER_SIZE
             } else {
-                read_u32_be(f)?
+                next_u32(&buf, &mut pos)
             },
             compression_type: CompressionType::Zlib,
             backing_file: None,
         };
         if version == 3 && header.header_size > V3_BARE_HEADER_SIZE {
-            let raw_compression_type = read_u64_be(f)? >> (64 - 8);
+            let raw_compression_type = next_u64(&buf, &mut pos) >> (64 - 8);
             header.compression_type = if raw_compression_type == COMPRESSION_TYPE_ZLIB {
                 Ok(CompressionType::Zlib)
             } else if raw_compression_type == COMPRESSION_TYPE_ZSTD {
@@ -360,10 +390,8 @@ impl QcowHeader {
                     cluster_size,
                 ));
             }
-            f.seek(SeekFrom::Start(header.backing_file_offset))
-                .map_err(Error::ReadingHeader)?;
             let mut backing_file_name_bytes = vec![0u8; header.backing_file_size as usize];
-            f.read_exact(&mut backing_file_name_bytes)
+            f.read_exact_at(&mut backing_file_name_bytes, header.backing_file_offset)
                 .map_err(Error::ReadingHeader)?;
             let path = String::from_utf8(backing_file_name_bytes)
                 .map_err(|err| Error::InvalidBackingFileName(err.utf8_error()))?;
@@ -476,65 +504,63 @@ impl QcowHeader {
         })
     }
 
-    /// Write the header to `file`.
-    pub fn write_to<F: Write + Seek>(&self, file: &mut F) -> Result<()> {
-        // Writes the next u32 to the file.
-        fn write_u32_be<F: Write>(f: &mut F, value: u32) -> Result<()> {
-            u32::write_be(f, value).map_err(Error::WritingHeader)
-        }
-
-        // Writes the next u64 to the file.
-        fn write_u64_be<F: Write>(f: &mut F, value: u64) -> Result<()> {
-            u64::write_be(f, value).map_err(Error::WritingHeader)
-        }
-
-        write_u32_be(file, self.magic)?;
-        write_u32_be(file, self.version)?;
-        write_u64_be(file, self.backing_file_offset)?;
-        write_u32_be(file, self.backing_file_size)?;
-        write_u32_be(file, self.cluster_bits)?;
-        write_u64_be(file, self.size)?;
-        write_u32_be(file, self.crypt_method)?;
-        write_u32_be(file, self.l1_size)?;
-        write_u64_be(file, self.l1_table_offset)?;
-        write_u64_be(file, self.refcount_table_offset)?;
-        write_u32_be(file, self.refcount_table_clusters)?;
-        write_u32_be(file, self.nb_snapshots)?;
-        write_u64_be(file, self.snapshots_offset)?;
+    /// Write the header to `f`.
+    pub fn write_to(&self, f: &AlignedFile) -> Result<()> {
+        // Build the header in memory, then write it in one positional write.
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&self.magic.to_be_bytes());
+        buf.extend_from_slice(&self.version.to_be_bytes());
+        buf.extend_from_slice(&self.backing_file_offset.to_be_bytes());
+        buf.extend_from_slice(&self.backing_file_size.to_be_bytes());
+        buf.extend_from_slice(&self.cluster_bits.to_be_bytes());
+        buf.extend_from_slice(&self.size.to_be_bytes());
+        buf.extend_from_slice(&self.crypt_method.to_be_bytes());
+        buf.extend_from_slice(&self.l1_size.to_be_bytes());
+        buf.extend_from_slice(&self.l1_table_offset.to_be_bytes());
+        buf.extend_from_slice(&self.refcount_table_offset.to_be_bytes());
+        buf.extend_from_slice(&self.refcount_table_clusters.to_be_bytes());
+        buf.extend_from_slice(&self.nb_snapshots.to_be_bytes());
+        buf.extend_from_slice(&self.snapshots_offset.to_be_bytes());
 
         if self.version == 3 {
-            write_u64_be(file, self.incompatible_features)?;
-            write_u64_be(file, self.compatible_features)?;
-            write_u64_be(file, self.autoclear_features)?;
-            write_u32_be(file, self.refcount_order)?;
-            write_u32_be(file, self.header_size)?;
+            buf.extend_from_slice(&self.incompatible_features.to_be_bytes());
+            buf.extend_from_slice(&self.compatible_features.to_be_bytes());
+            buf.extend_from_slice(&self.autoclear_features.to_be_bytes());
+            buf.extend_from_slice(&self.refcount_order.to_be_bytes());
+            buf.extend_from_slice(&self.header_size.to_be_bytes());
 
             if self.header_size > V3_BARE_HEADER_SIZE {
-                write_u64_be(file, 0)?; // no compression
+                // no compression
+                buf.extend_from_slice(&0u64.to_be_bytes());
             }
 
-            write_u32_be(file, 0)?; // header extension type: end of header extension area
-            write_u32_be(file, 0)?; // length of header extension data: 0
+            // header extension type: end of header extension area
+            buf.extend_from_slice(&0u32.to_be_bytes());
+            // length of header extension data: 0
+            buf.extend_from_slice(&0u32.to_be_bytes());
         }
+
+        f.write_all_at(&buf, 0).map_err(Error::WritingHeader)?;
 
         if let Some(backing_file_path) = self.backing_file.as_ref().map(|bf| &bf.path) {
-            if self.backing_file_offset > 0 {
-                file.seek(SeekFrom::Start(self.backing_file_offset))
-                    .map_err(Error::WritingHeader)?;
-            }
-            write!(file, "{backing_file_path}").map_err(Error::WritingHeader)?;
+            let offset = if self.backing_file_offset > 0 {
+                self.backing_file_offset
+            } else {
+                buf.len() as u64
+            };
+            f.write_all_at(backing_file_path.as_bytes(), offset)
+                .map_err(Error::WritingHeader)?;
         }
 
-        // Set the file length by seeking and writing a zero to the last byte. This avoids needing
-        // a `File` instead of anything that implements seek as the `file` argument.
-        // Zeros out the l1 and refcount table clusters.
+        // Set the file length by writing a zero to the last byte. This also
+        // zeros the l1 and refcount table clusters.
         let cluster_size = 0x01u64 << self.cluster_bits;
         let refcount_blocks_size = u64::from(self.refcount_table_clusters) * cluster_size;
-        file.seek(SeekFrom::Start(
+        f.write_all_at(
+            &[0u8],
             self.refcount_table_offset + refcount_blocks_size - 2,
-        ))
+        )
         .map_err(Error::WritingHeader)?;
-        file.write(&[0u8]).map_err(Error::WritingHeader)?;
 
         Ok(())
     }

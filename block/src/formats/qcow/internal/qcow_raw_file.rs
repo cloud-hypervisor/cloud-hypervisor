@@ -5,11 +5,11 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::fmt::Debug;
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::os::unix::fs::FileExt;
 
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{BigEndian, WriteBytesExt};
 use vmm_sys_util::write_zeroes::WriteZeroesAt;
 
 use crate::aligned_file::AlignedFile;
@@ -21,7 +21,6 @@ type RefcountWriter = fn(&mut AlignedFile, u64, &[u64]) -> io::Result<()>;
 /// Big-endian file access trait.
 pub(super) trait BeUint: Sized + Copy {
     fn from_be_slice(bytes: &[u8]) -> u64;
-    fn read_be<R: Read>(r: &mut R) -> io::Result<Self>;
     fn write_be<W: Write>(w: &mut W, val: Self) -> io::Result<()>;
 }
 
@@ -29,10 +28,6 @@ impl BeUint for u8 {
     #[inline(always)]
     fn from_be_slice(bytes: &[u8]) -> u64 {
         bytes[0] as u64
-    }
-    #[inline(always)]
-    fn read_be<R: Read>(r: &mut R) -> io::Result<Self> {
-        r.read_u8()
     }
     #[inline(always)]
     fn write_be<W: Write>(w: &mut W, val: Self) -> io::Result<()> {
@@ -46,10 +41,6 @@ impl BeUint for u16 {
         u16::from_be_bytes([bytes[0], bytes[1]]) as u64
     }
     #[inline(always)]
-    fn read_be<R: Read>(r: &mut R) -> io::Result<Self> {
-        r.read_u16::<BigEndian>()
-    }
-    #[inline(always)]
     fn write_be<W: Write>(w: &mut W, val: Self) -> io::Result<()> {
         w.write_u16::<BigEndian>(val)
     }
@@ -59,10 +50,6 @@ impl BeUint for u32 {
     #[inline(always)]
     fn from_be_slice(bytes: &[u8]) -> u64 {
         u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as u64
-    }
-    #[inline(always)]
-    fn read_be<R: Read>(r: &mut R) -> io::Result<Self> {
-        r.read_u32::<BigEndian>()
     }
     #[inline(always)]
     fn write_be<W: Write>(w: &mut W, val: Self) -> io::Result<()> {
@@ -76,10 +63,6 @@ impl BeUint for u64 {
         u64::from_be_bytes([
             bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
         ])
-    }
-    #[inline(always)]
-    fn read_be<R: Read>(r: &mut R) -> io::Result<Self> {
-        r.read_u64::<BigEndian>()
     }
     #[inline(always)]
     fn write_be<W: Write>(w: &mut W, val: Self) -> io::Result<()> {
