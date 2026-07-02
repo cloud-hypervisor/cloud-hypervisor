@@ -354,9 +354,11 @@ impl FromStr for ByteSized {
 /// A list of integers parsed from a bracket-enclosed, comma-separated string.
 ///
 /// Ranges are supported with `-`: `"[0,2-4,6]"` produces `[0, 2, 3, 4, 6]`.
-pub struct IntegerList(pub Vec<u64>);
+/// The element type defaults to `u64`. Use e.g `IntegerList<u16>` to parse
+/// into a narrower type, which rejects values that do not fit.
+pub struct IntegerList<T = u64>(pub Vec<T>);
 
-impl Display for IntegerList {
+impl<T: Display> Display for IntegerList<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_char('[')?;
         let mut iter = self.0.iter();
@@ -377,7 +379,7 @@ pub enum IntegerListParseError {
     InvalidValue(String),
 }
 
-impl Parseable for IntegerList {
+impl<T: TryFrom<u64>> Parseable for IntegerList<T> {
     type Err = IntegerListParseError;
 
     fn from_str(s: &str) -> result::Result<Self, Self::Err> {
@@ -399,19 +401,22 @@ impl Parseable for IntegerList {
                 .parse::<u64>()
                 .map_err(|_| IntegerListParseError::InvalidValue(items[0].to_owned()))?;
 
-            integer_list.push(start_range);
-
-            if items.len() == 2 {
+            let end_range = if items.len() == 2 {
                 let end_range = items[1]
                     .parse::<u64>()
                     .map_err(|_| IntegerListParseError::InvalidValue(items[1].to_owned()))?;
                 if start_range >= end_range {
                     return Err(IntegerListParseError::InvalidValue((*range).to_string()));
                 }
+                end_range
+            } else {
+                start_range
+            };
 
-                for i in start_range..end_range {
-                    integer_list.push(i + 1);
-                }
+            for value in start_range..=end_range {
+                let value = T::try_from(value)
+                    .map_err(|_| IntegerListParseError::InvalidValue(value.to_string()))?;
+                integer_list.push(value);
             }
         }
 
@@ -437,18 +442,15 @@ impl TupleValue for u64 {
 
 impl TupleValue for Vec<u8> {
     fn parse_value(input: &str) -> Result<Self, TupleError> {
-        Ok(IntegerList::from_str(input)
+        Ok(IntegerList::<u8>::from_str(input)
             .map_err(TupleError::InvalidIntegerList)?
-            .0
-            .iter()
-            .map(|v| *v as u8)
-            .collect())
+            .0)
     }
 }
 
 impl TupleValue for Vec<u64> {
     fn parse_value(input: &str) -> Result<Self, TupleError> {
-        Ok(IntegerList::from_str(input)
+        Ok(IntegerList::<u64>::from_str(input)
             .map_err(TupleError::InvalidIntegerList)?
             .0)
     }
@@ -456,12 +458,9 @@ impl TupleValue for Vec<u64> {
 
 impl TupleValue for Vec<usize> {
     fn parse_value(input: &str) -> Result<Self, TupleError> {
-        Ok(IntegerList::from_str(input)
+        Ok(IntegerList::<usize>::from_str(input)
             .map_err(TupleError::InvalidIntegerList)?
-            .0
-            .iter()
-            .map(|v| *v as usize)
-            .collect())
+            .0)
     }
 }
 
@@ -779,36 +778,47 @@ mod unit_tests {
 
     #[test]
     fn test_integer_list_single_values() {
-        let list = IntegerList::from_str("[1,3,5]").unwrap();
+        let list = IntegerList::<u64>::from_str("[1,3,5]").unwrap();
         assert_eq!(list.0, vec![1, 3, 5]);
     }
 
     #[test]
     fn test_integer_list_ranges() {
-        let list = IntegerList::from_str("[0,2-4,7]").unwrap();
+        let list = IntegerList::<u64>::from_str("[0,2-4,7]").unwrap();
         assert_eq!(list.0, vec![0, 2, 3, 4, 7]);
     }
 
     #[test]
     fn test_integer_list_invalid_range() {
-        assert!(IntegerList::from_str("[5-3]").is_err());
-        assert!(IntegerList::from_str("[5-5]").is_err());
+        assert!(IntegerList::<u64>::from_str("[5-3]").is_err());
+        assert!(IntegerList::<u64>::from_str("[5-5]").is_err());
     }
 
     #[test]
     fn test_integer_list_too_many_dashes() {
-        assert!(IntegerList::from_str("[1-2-3]").is_err());
+        assert!(IntegerList::<u64>::from_str("[1-2-3]").is_err());
+    }
+
+    #[test]
+    fn test_integer_list_narrow_type() {
+        // A narrower element type parses ranges the same way ...
+        let list = IntegerList::<u16>::from_str("[1,3-5]").unwrap();
+        assert_eq!(list.0, vec![1u16, 3, 4, 5]);
+
+        // ... but rejects values that do not fit, rather than truncating.
+        assert!(IntegerList::<u16>::from_str("[65536]").is_err());
+        assert!(IntegerList::<u8>::from_str("[256]").is_err());
     }
 
     #[test]
     fn test_integer_list_display() {
-        let list = IntegerList(vec![1, 2, 3]);
+        let list = IntegerList(vec![1u64, 2, 3]);
         assert_eq!(format!("{list}"), "[1,2,3]");
 
-        let empty = IntegerList(vec![]);
+        let empty = IntegerList::<u64>(vec![]);
         assert_eq!(format!("{empty}"), "[]");
 
-        let single = IntegerList(vec![42]);
+        let single = IntegerList(vec![42u64]);
         assert_eq!(format!("{single}"), "[42]");
     }
 
