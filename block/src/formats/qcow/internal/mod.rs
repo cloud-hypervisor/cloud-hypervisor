@@ -16,11 +16,10 @@ mod vec_cache;
 use std::cmp::{max, min};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::fs::{OpenOptions, read_link};
-use std::io::{self, Seek};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::FileExt;
 use std::path::Path;
-use std::{result, str};
+use std::{io, result, str};
 
 pub use header::{
     BackingFileConfig, CompressionType, ImageType, IncompatFeatures, MissingFeatureError,
@@ -127,8 +126,6 @@ pub enum Error {
     ResizeIo(#[source] io::Error),
     #[error("Resize not supported with backing file")]
     ResizeWithBackingFile,
-    #[error("Failed to seek file")]
-    SeekingFile(#[source] io::Error),
     #[error("Failed to set file size")]
     SettingFileSize(#[source] io::Error),
     #[error("Failed to set refcount refcount")]
@@ -270,11 +267,11 @@ impl Debug for BackingFile {
 ///
 /// Used by [`crate::formats::qcow::QcowDisk`] when opening an image.
 pub(crate) fn parse_qcow(
-    mut file: AlignedFile,
+    file: AlignedFile,
     max_nesting_depth: u32,
     sparse: bool,
 ) -> BlockResult<(metadata::QcowState, Option<BackingFile>, bool)> {
-    let mut header = QcowHeader::new(&mut file).map_err(|e| {
+    let mut header = QcowHeader::new(&file).map_err(|e| {
         let kind = match &e {
             Error::InvalidMagic
             | Error::BackingFileTooLong(_)
@@ -730,7 +727,6 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
     ) -> Result<()> {
         // Rewrite the header with lazy refcounts enabled while we are rebuilding the tables.
         header.compatible_features |= COMPATIBLE_FEATURES_LAZY_REFCOUNTS;
-        raw_file.file_mut().rewind().map_err(Error::SeekingFile)?;
         header.write_to(raw_file.file_mut())?;
 
         for (i, refblock_addr) in ref_table.iter().enumerate() {
@@ -763,7 +759,6 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
 
         // Rewrite the header again, now with lazy refcounts disabled.
         header.compatible_features &= !COMPATIBLE_FEATURES_LAZY_REFCOUNTS;
-        raw_file.file_mut().rewind().map_err(Error::SeekingFile)?;
         header.write_to(raw_file.file_mut())?;
 
         Ok(())
@@ -1000,8 +995,8 @@ mod unit_tests {
 
     fn try_open_qcow_header(header: &QcowHeader, backing_files: bool) -> BlockResult<QcowDisk> {
         let temp = TempFile::new().unwrap();
-        let mut raw = AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
-        header.write_to(&mut raw).expect("write header");
+        let raw = AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+        header.write_to(&raw).expect("write header");
         drop(raw);
         let file = temp.into_file();
         QcowDisk::new(file, false, backing_files, true, false)
@@ -1037,14 +1032,14 @@ mod unit_tests {
 
     #[test]
     fn header_read() {
-        with_basic_file(&valid_header_v2(), |mut disk_file: AlignedFile| {
-            let header = QcowHeader::new(&mut disk_file).expect("Failed to create Header.");
+        with_basic_file(&valid_header_v2(), |disk_file: AlignedFile| {
+            let header = QcowHeader::new(&disk_file).expect("Failed to create Header.");
             assert_eq!(header.version, 2);
             assert_eq!(header.refcount_order, DEFAULT_REFCOUNT_ORDER);
             assert_eq!(header.header_size, V2_BARE_HEADER_SIZE);
         });
-        with_basic_file(&valid_header_v3(), |mut disk_file: AlignedFile| {
-            let header = QcowHeader::new(&mut disk_file).expect("Failed to create Header.");
+        with_basic_file(&valid_header_v3(), |disk_file: AlignedFile| {
+            let header = QcowHeader::new(&disk_file).expect("Failed to create Header.");
             assert_eq!(header.version, 3);
             assert_eq!(header.refcount_order, DEFAULT_REFCOUNT_ORDER);
             assert_eq!(header.header_size, V3_BARE_HEADER_SIZE);
@@ -1055,13 +1050,11 @@ mod unit_tests {
     fn header_v2_with_backing() {
         let header = QcowHeader::create_for_size_and_path(2, 0x10_0000, Some("/my/path/to/a/file"))
             .expect("Failed to create header.");
-        let mut disk_file: AlignedFile =
-            AlignedFile::new(TempFile::new().unwrap().into_file(), false);
+        let disk_file: AlignedFile = AlignedFile::new(TempFile::new().unwrap().into_file(), false);
         header
-            .write_to(&mut disk_file)
+            .write_to(&disk_file)
             .expect("Failed to write header to shm.");
-        disk_file.rewind().unwrap();
-        let read_header = QcowHeader::new(&mut disk_file).expect("Failed to create header.");
+        let read_header = QcowHeader::new(&disk_file).expect("Failed to create header.");
         assert_eq!(
             header.backing_file.as_ref().map(|bf| bf.path.clone()),
             Some(String::from("/my/path/to/a/file"))
@@ -1076,13 +1069,11 @@ mod unit_tests {
     fn header_v3_with_backing() {
         let header = QcowHeader::create_for_size_and_path(3, 0x10_0000, Some("/my/path/to/a/file"))
             .expect("Failed to create header.");
-        let mut disk_file: AlignedFile =
-            AlignedFile::new(TempFile::new().unwrap().into_file(), false);
+        let disk_file: AlignedFile = AlignedFile::new(TempFile::new().unwrap().into_file(), false);
         header
-            .write_to(&mut disk_file)
+            .write_to(&disk_file)
             .expect("Failed to write header to shm.");
-        disk_file.rewind().unwrap();
-        let read_header = QcowHeader::new(&mut disk_file).expect("Failed to create header.");
+        let read_header = QcowHeader::new(&disk_file).expect("Failed to create header.");
         assert_eq!(
             header.backing_file.as_ref().map(|bf| bf.path.clone()),
             Some(String::from("/my/path/to/a/file"))
@@ -1101,17 +1092,16 @@ mod unit_tests {
             .expect("Failed to create header.");
         header.backing_file_offset = offset;
         header.backing_file_size = size;
-        let mut disk_file: AlignedFile = AlignedFile::new(
+        let disk_file: AlignedFile = AlignedFile::new(
             TempFile::new()
                 .expect("Failed to create temp file.")
                 .into_file(),
             false,
         );
         header
-            .write_to(&mut disk_file)
+            .write_to(&disk_file)
             .expect("Failed to write header.");
-        disk_file.rewind().expect("Failed to rewind disk file.");
-        QcowHeader::new(&mut disk_file)
+        QcowHeader::new(&disk_file)
     }
 
     #[test]
@@ -1178,7 +1168,7 @@ mod unit_tests {
 
         let mut disk_file: AlignedFile =
             AlignedFile::new(TempFile::new().unwrap().into_file(), false);
-        header.write_to(&mut disk_file).unwrap();
+        header.write_to(&disk_file).unwrap();
 
         // Write extension
         disk_file
@@ -1203,7 +1193,7 @@ mod unit_tests {
 
     #[test]
     fn read_header_extensions_unknown_extension() {
-        let (mut disk_file, mut header) = create_header_with_extension(
+        let (disk_file, mut header) = create_header_with_extension(
             0x12345678, // unknown type
             "test".as_bytes(),
         );
@@ -1214,13 +1204,13 @@ mod unit_tests {
             format: None,
         });
 
-        QcowHeader::read_header_extensions(&mut disk_file, &mut header, None).unwrap();
+        QcowHeader::read_header_extensions(&disk_file, &mut header, None).unwrap();
         assert_eq!(header.backing_file.as_ref().and_then(|bf| bf.format), None);
     }
 
     #[test]
     fn read_header_extensions_raw_format() {
-        let (mut disk_file, mut header) =
+        let (disk_file, mut header) =
             create_header_with_extension(HEADER_EXT_BACKING_FORMAT, "raw".as_bytes());
 
         header.backing_file = Some(BackingFileConfig {
@@ -1228,7 +1218,7 @@ mod unit_tests {
             format: None,
         });
 
-        QcowHeader::read_header_extensions(&mut disk_file, &mut header, None).unwrap();
+        QcowHeader::read_header_extensions(&disk_file, &mut header, None).unwrap();
         assert_eq!(
             header.backing_file.as_ref().and_then(|bf| bf.format),
             Some(ImageType::Raw)
@@ -1237,7 +1227,7 @@ mod unit_tests {
 
     #[test]
     fn read_header_extensions_qcow2_format() {
-        let (mut disk_file, mut header) =
+        let (disk_file, mut header) =
             create_header_with_extension(HEADER_EXT_BACKING_FORMAT, "qcow2".as_bytes());
 
         header.backing_file = Some(BackingFileConfig {
@@ -1245,7 +1235,7 @@ mod unit_tests {
             format: None,
         });
 
-        QcowHeader::read_header_extensions(&mut disk_file, &mut header, None).unwrap();
+        QcowHeader::read_header_extensions(&disk_file, &mut header, None).unwrap();
         assert_eq!(
             header.backing_file.as_ref().and_then(|bf| bf.format),
             Some(ImageType::Qcow2)
@@ -1254,7 +1244,7 @@ mod unit_tests {
 
     #[test]
     fn read_header_extensions_invalid_format() {
-        let (mut disk_file, mut header) =
+        let (disk_file, mut header) =
             create_header_with_extension(HEADER_EXT_BACKING_FORMAT, "vmdk".as_bytes());
 
         header.backing_file = Some(BackingFileConfig {
@@ -1262,7 +1252,7 @@ mod unit_tests {
             format: None,
         });
 
-        let result = QcowHeader::read_header_extensions(&mut disk_file, &mut header, None);
+        let result = QcowHeader::read_header_extensions(&disk_file, &mut header, None);
         assert!(matches!(
             result.unwrap_err(),
             Error::UnsupportedBackingFileFormat(_)
@@ -1271,12 +1261,12 @@ mod unit_tests {
 
     #[test]
     fn read_header_extensions_invalid_utf8() {
-        let (mut disk_file, mut header) = create_header_with_extension(
+        let (disk_file, mut header) = create_header_with_extension(
             HEADER_EXT_BACKING_FORMAT,
             &[0xFF, 0xFE, 0xFD], // invalid UTF-8
         );
 
-        let result = QcowHeader::read_header_extensions(&mut disk_file, &mut header, None);
+        let result = QcowHeader::read_header_extensions(&disk_file, &mut header, None);
         // Should fail with InvalidBackingFileName error
         assert!(matches!(
             result.unwrap_err(),
@@ -1312,11 +1302,11 @@ mod unit_tests {
     /// the file until stack overflow.
     fn new_self_referential_qcow(path: &Path) -> Result<()> {
         let header = QcowHeader::create_for_size_and_path(3, 0x10_0000, path.to_str())?;
-        let mut disk_file = AlignedFile::new(
+        let disk_file = AlignedFile::new(
             File::create(path).expect("Failed to create image file."),
             false,
         );
-        header.write_to(&mut disk_file)?;
+        header.write_to(&disk_file)?;
         Ok(())
     }
 

@@ -17,10 +17,9 @@
 //! operations upgrade to a write lock.
 
 use std::cmp::min;
-use std::io::{self, Seek};
-use std::mem;
 use std::os::unix::fs::FileExt;
 use std::sync::{Arc, RwLock};
+use std::{io, mem};
 
 use libc::{EINVAL, EIO};
 use vmm_sys_util::write_zeroes::WriteZeroesAt;
@@ -756,7 +755,6 @@ impl QcowState {
 
         self.header.size = new_size;
 
-        self.raw_file.file_mut().rewind()?;
         self.header
             .write_to(self.raw_file.file_mut())
             .map_err(|e| io::Error::other(format!("failed to write header during resize: {e}")))?;
@@ -812,7 +810,6 @@ impl QcowState {
         self.header.l1_size = new_l1_size;
         self.header.l1_table_offset = new_l1_offset;
 
-        self.raw_file.file_mut().rewind()?;
         self.header
             .write_to(self.raw_file.file_mut())
             .map_err(|e| io::Error::other(format!("failed to write header during resize: {e}")))?;
