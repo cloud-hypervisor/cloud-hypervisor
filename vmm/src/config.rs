@@ -33,6 +33,9 @@ use crate::vm_config::*;
 const MAX_NUM_PCI_SEGMENTS: u16 = 96;
 const MAX_IOMMU_ADDRESS_WIDTH_BITS: u8 = 64;
 
+// Maximum queue size is largest power of 2 that fits into a u16
+const VIRTIO_MAX_QUEUE_SIZE: u16 = 32768;
+
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 const MAX_SUPPORTED_CPUS: u32 = 8192;
 #[cfg(not(all(feature = "kvm", target_arch = "x86_64")))]
@@ -72,9 +75,6 @@ pub enum Error {
     /// Generic vhost-user available features is missing
     #[error("Error parsing --generic-vhost-user: available features missing")]
     ParseGenericVhostUserAvailFeaturesMissing,
-    /// Generic vhost-user queue size is too large
-    #[error("Error parsing --generic-vhost-user: queue size {0} is {1}, but limit is 65535")]
-    ParseGenericVhostUserQueueSizeTooLarge(usize, u64),
     /// Generic vhost-user queue size missing
     #[error("Error parsing --generic-vhost-user: queue size missing")]
     ParseGenericVhostUserQueueSizeMissing,
@@ -293,9 +293,12 @@ pub enum ValidationError {
     /// Insufficient vCPUs for queues
     #[error("Queue count ({0}) must not exceed boot vCPUs ({1})")]
     TooManyQueues(usize /* queues */, usize /* vCPUs */),
-    /// Invalid queue size
-    #[error("Queue size is smaller than {MINIMUM_BLOCK_QUEUE_SIZE}: {0}")]
+    /// Queue size is not a power of 2 within the spec-permitted range
+    #[error("Queue size must be a power of 2 no greater than {VIRTIO_MAX_QUEUE_SIZE}: {0}")]
     InvalidQueueSize(u16),
+    /// Block queue size too small to advertise a usable seg_max
+    #[error("Block queue size must be greater than {MINIMUM_BLOCK_QUEUE_SIZE}: {0}")]
+    BlockQueueSizeTooSmall(u16),
     /// Need shared memory for vfio-user
     #[error("Using user devices requires using shared memory or huge pages")]
     UserDevicesRequireSharedMemory,
@@ -452,6 +455,16 @@ fn validate_pci_device_id(device_id: u8) -> ValidationResult<()> {
         // Check the ID isn't any reserved one. Currently, only the device ID
         // for the root device is reserved.
         return Err(ValidationError::ReservedPciDeviceId(device_id));
+    }
+
+    Ok(())
+}
+
+/// Reject a virtio queue size that is not a power of 2 as required by the
+/// spec. The `u16` type already handles the maximum queue size.
+fn validate_queue_size(queue_size: u16) -> ValidationResult<()> {
+    if !queue_size.is_power_of_two() {
+        return Err(ValidationError::InvalidQueueSize(queue_size));
     }
 
     Ok(())
@@ -1613,8 +1626,10 @@ impl DiskConfig {
             ));
         }
 
+        validate_queue_size(self.queue_size)?;
+
         if self.queue_size <= MINIMUM_BLOCK_QUEUE_SIZE {
-            return Err(ValidationError::InvalidQueueSize(self.queue_size));
+            return Err(ValidationError::BlockQueueSizeTooSmall(self.queue_size));
         }
 
         if self.vhost_user && self.pci_common.iommu {
@@ -1854,6 +1869,8 @@ impl NetConfig {
             ));
         }
 
+        validate_queue_size(self.queue_size)?;
+
         if self.vhost_user && self.pci_common.iommu {
             return Err(ValidationError::IommuNotSupported);
         }
@@ -2002,7 +2019,7 @@ impl GenericVhostUserConfig {
             .ok_or(Error::ParseGenericVhostUserSockMissing)?;
 
         let IntegerList(queue_sizes) = parser
-            .convert("queue_sizes")
+            .convert::<IntegerList<u16>>("queue_sizes")
             .map_err(Error::ParseGenericVhostUser)?
             .ok_or(Error::ParseGenericVhostUserQueueSizeMissing)?;
         let device_type_str = parser
@@ -2076,29 +2093,22 @@ impl GenericVhostUserConfig {
             _ => {}
         }
         let pci_common = PciDeviceCommonConfig::parse(vhost_user)?;
-        let mut converted_queue_sizes: Vec<u16> = Vec::new();
-        for (offset, &queue_size) in queue_sizes.iter().enumerate() {
-            match queue_size.try_into() {
-                Err(_) => {
-                    return Err(Error::ParseGenericVhostUserQueueSizeTooLarge(
-                        offset, queue_size,
-                    ));
-                }
-                Ok(queue_size) => converted_queue_sizes.push(queue_size),
-            }
-        }
 
         Ok(GenericVhostUserConfig {
             pci_common,
             socket: socket.into(),
             device_type,
-            queue_sizes: converted_queue_sizes,
+            queue_sizes,
         })
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
         if self.pci_common.iommu {
             return Err(ValidationError::IommuNotSupported);
+        }
+
+        for &queue_size in &self.queue_sizes {
+            validate_queue_size(queue_size)?;
         }
 
         self.pci_common.validate(vm_config)
@@ -2154,6 +2164,8 @@ impl FsConfig {
                 vm_config.cpus.boot_vcpus as usize,
             ));
         }
+
+        validate_queue_size(self.queue_size)?;
 
         if self.pci_common.iommu {
             return Err(ValidationError::IommuNotSupported);
@@ -3193,6 +3205,9 @@ impl VmConfig {
             for net in nets {
                 if net.vhost_user && !self.backed_by_shared_memory() {
                     return Err(ValidationError::VhostUserRequiresSharedMemory);
+                }
+                if net.vhost_user && net.vhost_socket.is_none() {
+                    return Err(ValidationError::VhostUserMissingSocket);
                 }
                 if net.vhost_user && net.rate_limiter_config.is_some() {
                     return Err(ValidationError::VhostUserRateLimiterNotSupported);
@@ -5581,6 +5596,42 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         still_valid_config.memory.shared = true;
         still_valid_config.validate().unwrap();
 
+        // A block queue size that is not a power of 2 is rejected.
+        let mut invalid_config = valid_config.clone();
+        invalid_config.disks = Some(vec![DiskConfig {
+            queue_size: 100,
+            ..disk_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::InvalidQueueSize(100))
+        );
+
+        // A power-of-2 block queue size too small for a usable seg_max is
+        // rejected with the block-specific error.
+        let mut invalid_config = valid_config.clone();
+        invalid_config.disks = Some(vec![DiskConfig {
+            queue_size: MINIMUM_BLOCK_QUEUE_SIZE,
+            ..disk_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::BlockQueueSizeTooSmall(
+                MINIMUM_BLOCK_QUEUE_SIZE
+            ))
+        );
+
+        // A net queue size that is not a power of 2 is rejected.
+        let mut invalid_config = valid_config.clone();
+        invalid_config.net = Some(vec![NetConfig {
+            queue_size: 100,
+            ..net_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::InvalidQueueSize(100))
+        );
+
         let mut invalid_config = valid_config.clone();
         invalid_config.net = Some(vec![NetConfig {
             vhost_user: true,
@@ -5589,6 +5640,17 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             invalid_config.validate(),
             Err(ValidationError::VhostUserRequiresSharedMemory)
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.memory.shared = true;
+        invalid_config.net = Some(vec![NetConfig {
+            vhost_user: true,
+            ..net_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::VhostUserMissingSocket)
         );
 
         let mut still_valid_config = valid_config.clone();
