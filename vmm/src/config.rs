@@ -72,9 +72,6 @@ pub enum Error {
     /// Generic vhost-user available features is missing
     #[error("Error parsing --generic-vhost-user: available features missing")]
     ParseGenericVhostUserAvailFeaturesMissing,
-    /// Generic vhost-user queue size is too large
-    #[error("Error parsing --generic-vhost-user: queue size {0} is {1}, but limit is 65535")]
-    ParseGenericVhostUserQueueSizeTooLarge(usize, u64),
     /// Generic vhost-user queue size missing
     #[error("Error parsing --generic-vhost-user: queue size missing")]
     ParseGenericVhostUserQueueSizeMissing,
@@ -2002,7 +1999,7 @@ impl GenericVhostUserConfig {
             .ok_or(Error::ParseGenericVhostUserSockMissing)?;
 
         let IntegerList(queue_sizes) = parser
-            .convert::<IntegerList>("queue_sizes")
+            .convert::<IntegerList<u16>>("queue_sizes")
             .map_err(Error::ParseGenericVhostUser)?
             .ok_or(Error::ParseGenericVhostUserQueueSizeMissing)?;
         let device_type_str = parser
@@ -2076,23 +2073,12 @@ impl GenericVhostUserConfig {
             _ => {}
         }
         let pci_common = PciDeviceCommonConfig::parse(vhost_user)?;
-        let mut converted_queue_sizes: Vec<u16> = Vec::new();
-        for (offset, &queue_size) in queue_sizes.iter().enumerate() {
-            match queue_size.try_into() {
-                Err(_) => {
-                    return Err(Error::ParseGenericVhostUserQueueSizeTooLarge(
-                        offset, queue_size,
-                    ));
-                }
-                Ok(queue_size) => converted_queue_sizes.push(queue_size),
-            }
-        }
 
         Ok(GenericVhostUserConfig {
             pci_common,
             socket: socket.into(),
             device_type,
-            queue_sizes: converted_queue_sizes,
+            queue_sizes,
         })
     }
 
