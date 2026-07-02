@@ -1062,7 +1062,10 @@ impl PayloadConfig {
     ///
     /// Succeeds if Cloud Hypervisor will be able to boot the configuration.
     /// Further, warns for some odd configurations.
-    pub fn validate(&mut self) -> Result<(), PayloadConfigError> {
+    pub fn validate(
+        &mut self,
+        #[cfg(feature = "tdx")] tdx_enabled: bool,
+    ) -> Result<(), PayloadConfigError> {
         #[cfg(feature = "igvm")]
         {
             if self.igvm.is_some() {
@@ -1073,7 +1076,22 @@ impl PayloadConfig {
             }
         }
         match (&self.firmware, &self.kernel) {
-            (Some(_firmware), Some(_kernel)) => Err(PayloadConfigError::FirmwarePlusOtherPayloads),
+            (Some(_firmware), Some(_kernel)) => {
+                // With TDX, a firmware such as td-shim boots a kernel supplied
+                // as its payload: the kernel is loaded into the firmware's
+                // Payload metadata region and the cmdline into PayloadParam.
+                // Hence firmware + kernel is a valid combination under TDX.
+                #[cfg(feature = "tdx")]
+                let firmware_with_kernel_allowed = tdx_enabled;
+                #[cfg(not(feature = "tdx"))]
+                let firmware_with_kernel_allowed = false;
+
+                if firmware_with_kernel_allowed {
+                    Ok(())
+                } else {
+                    Err(PayloadConfigError::FirmwarePlusOtherPayloads)
+                }
+            }
             (Some(_firmware), None) => {
                 if self.cmdline.is_some() {
                     warn!("Ignoring cmdline parameter as firmware is provided as the payload");

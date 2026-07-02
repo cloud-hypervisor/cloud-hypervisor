@@ -3218,17 +3218,22 @@ impl VmConfig {
     pub fn validate(&mut self) -> ValidationResult<BTreeSet<String>> {
         let mut id_list = BTreeSet::new();
 
+        #[cfg(feature = "tdx")]
+        let tdx_enabled = self.platform.as_ref().is_some_and(|p| p.tdx);
+
         // Is the payload configuration bootable?
         self.payload
             .as_mut()
             .ok_or(ValidationError::PayloadError(
                 PayloadConfigError::MissingBootitem,
             ))?
-            .validate()?;
+            .validate(
+                #[cfg(feature = "tdx")]
+                tdx_enabled,
+            )?;
 
         #[cfg(feature = "tdx")]
         {
-            let tdx_enabled = self.platform.as_ref().is_some_and(|p| p.tdx);
             // At this point we know payload isn't None.
             if tdx_enabled && self.payload.as_ref().unwrap().firmware.is_none() {
                 return Err(ValidationError::TdxFirmwareMissing);
