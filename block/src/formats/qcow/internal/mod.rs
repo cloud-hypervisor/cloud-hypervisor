@@ -881,7 +881,7 @@ pub fn detect_image_type(file: &mut AlignedFile) -> BlockResult<ImageType> {
 mod unit_tests {
     use std::error::Error as StdError;
     use std::fs::{File, OpenOptions};
-    use std::io::{Seek, SeekFrom, Write};
+    use std::io::Write;
     use std::os::unix::fs::FileExt;
     use std::path::Path;
 
@@ -892,7 +892,6 @@ mod unit_tests {
         AUTOCLEAR_FEATURES_OFFSET, DEFAULT_CLUSTER_BITS, DEFAULT_REFCOUNT_ORDER,
         HEADER_EXT_BACKING_FORMAT, HEADER_EXT_END, V2_BARE_HEADER_SIZE, V3_BARE_HEADER_SIZE,
     };
-    use super::qcow_raw_file::BeUint;
     use super::util::ZERO_FLAG;
     use super::*;
     use crate::formats::qcow::{QcowDisk, QcowTempDisk};
@@ -963,11 +962,9 @@ mod unit_tests {
     }
 
     fn basic_file(header: &[u8]) -> AlignedFile {
-        let mut disk_file: AlignedFile =
-            AlignedFile::new(TempFile::new().unwrap().into_file(), false);
-        disk_file.write_all(header).unwrap();
+        let disk_file: AlignedFile = AlignedFile::new(TempFile::new().unwrap().into_file(), false);
+        disk_file.write_all_at(header, 0).unwrap();
         disk_file.set_len(0x1_0000_0000).unwrap();
-        disk_file.rewind().unwrap();
         disk_file
     }
 
@@ -1166,27 +1163,21 @@ mod unit_tests {
         let header = QcowHeader::create_for_size_and_path(3, 0x10_0000, None)
             .expect("Failed to create header.");
 
-        let mut disk_file: AlignedFile =
-            AlignedFile::new(TempFile::new().unwrap().into_file(), false);
+        let disk_file: AlignedFile = AlignedFile::new(TempFile::new().unwrap().into_file(), false);
         header.write_to(&disk_file).unwrap();
 
-        // Write extension
-        disk_file
-            .seek(SeekFrom::Start(header.header_size as u64))
-            .unwrap();
-        u32::write_be(&mut disk_file, ext_type).unwrap();
-        u32::write_be(&mut disk_file, ext_data.len() as u32).unwrap();
-        disk_file.write_all(ext_data).unwrap();
-
-        // Add padding to 8-byte boundary
+        // Build the extension area and write it positionally after the header.
+        let mut ext = Vec::new();
+        ext.extend_from_slice(&ext_type.to_be_bytes());
+        ext.extend_from_slice(&(ext_data.len() as u32).to_be_bytes());
+        ext.extend_from_slice(ext_data);
+        // Pad to the next 8 byte boundary.
         let padding = (8 - (ext_data.len() % 8)) % 8;
-        if padding > 0 {
-            disk_file.write_all(&vec![0u8; padding]).unwrap();
-        }
-
-        u32::write_be(&mut disk_file, HEADER_EXT_END).unwrap();
-
-        disk_file.rewind().unwrap();
+        ext.resize(ext.len() + padding, 0);
+        ext.extend_from_slice(&HEADER_EXT_END.to_be_bytes());
+        disk_file
+            .write_all_at(&ext, header.header_size as u64)
+            .unwrap();
 
         (disk_file, header)
     }
@@ -1602,11 +1593,7 @@ mod unit_tests {
             let refcount_table_offset = cluster_size;
             qcow_raw
                 .file_mut()
-                .seek(SeekFrom::Start(refcount_table_offset))
-                .unwrap();
-            qcow_raw
-                .file_mut()
-                .write_all(&(cluster_size * 2).to_be_bytes())
+                .write_all_at(&(cluster_size * 2).to_be_bytes(), refcount_table_offset)
                 .unwrap();
 
             let zeros = vec![0u64; refcount_block_entries as usize];
