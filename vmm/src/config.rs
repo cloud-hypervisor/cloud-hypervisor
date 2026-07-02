@@ -2002,7 +2002,7 @@ impl GenericVhostUserConfig {
             .ok_or(Error::ParseGenericVhostUserSockMissing)?;
 
         let IntegerList(queue_sizes) = parser
-            .convert("queue_sizes")
+            .convert::<IntegerList>("queue_sizes")
             .map_err(Error::ParseGenericVhostUser)?
             .ok_or(Error::ParseGenericVhostUserQueueSizeMissing)?;
         let device_type_str = parser
