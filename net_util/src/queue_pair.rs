@@ -14,10 +14,79 @@ use rate_limiter::{RateLimiter, TokenType};
 use thiserror::Error;
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
 use vm_memory::bitmap::Bitmap;
-use vm_memory::{Bytes, GuestAddress, GuestMemory};
+use vm_memory::{Bytes, GuestAddress, GuestMemory, GuestMemoryError};
 use vm_virtio::{AccessPlatform, Translatable};
 
 use super::{Tap, register_listener, unregister_listener, vnet_hdr_len};
+
+// virtio-iommu's minimum page granule.
+const IOVA_TRANSLATION_GRANULE: u64 = 4096;
+
+// Translate `[gva, gva+len)` and append host segments to `iovecs`,
+// falling back to per granule chunks when the whole range does not
+// translate in one call.
+fn push_translated_iovecs<B: Bitmap + 'static>(
+    mem: &vm_memory::GuestMemoryMmap<B>,
+    iovecs: &mut Vec<libc::iovec>,
+    gva: GuestAddress,
+    len: usize,
+    access_platform: Option<&dyn AccessPlatform>,
+) -> Result<(), NetQueuePairError> {
+    if let Ok(gpa) = gva.translate_gva(access_platform, len) {
+        return push_iovec(mem, iovecs, gpa, len);
+    }
+
+    let base = gva.0;
+    let total = len as u64;
+    let mut off: u64 = 0;
+    while off < total {
+        let cur = base
+            .checked_add(off)
+            .ok_or(NetQueuePairError::DescriptorChainInvalid)?;
+        let to_boundary = IOVA_TRANSLATION_GRANULE - (cur & (IOVA_TRANSLATION_GRANULE - 1));
+        let chunk = to_boundary.min(total - off);
+        let gpa = GuestAddress(cur)
+            .translate_gva(access_platform, chunk as usize)
+            .map_err(|e| NetQueuePairError::GuestMemory(GuestMemoryError::IOError(e)))?;
+        push_iovec(mem, iovecs, gpa, chunk as usize)?;
+        off += chunk;
+    }
+    Ok(())
+}
+
+// Append one host segment, coalescing host contiguous neighbours.
+fn push_iovec<B: Bitmap + 'static>(
+    mem: &vm_memory::GuestMemoryMmap<B>,
+    iovecs: &mut Vec<libc::iovec>,
+    gpa: GuestAddress,
+    len: usize,
+) -> Result<(), NetQueuePairError> {
+    let buf = mem
+        .get_slice(gpa, len)
+        .map_err(NetQueuePairError::GuestMemory)?;
+    if buf.len() < len {
+        return Err(NetQueuePairError::GuestMemory(
+            GuestMemoryError::PartialBuffer {
+                expected: len,
+                completed: buf.len(),
+            },
+        ));
+    }
+    let addr = buf.ptr_guard_mut().as_ptr();
+    if let Some(last) = iovecs.last_mut() {
+        // SAFETY: pointer comparison only, no deref.
+        let last_end = (last.iov_base as *const u8).wrapping_add(last.iov_len);
+        if last_end == addr.cast_const() {
+            last.iov_len += len;
+            return Ok(());
+        }
+    }
+    iovecs.push(libc::iovec {
+        iov_base: addr.cast(),
+        iov_len: len,
+    });
+    Ok(())
+}
 
 #[derive(Clone)]
 pub struct TxVirtio {
@@ -72,33 +141,22 @@ impl TxVirtio {
             // len 0 below, so the guest does not see a descriptor leak.
             let parse_result: Result<(), NetQueuePairError> = (|| {
                 while let Some(desc) = next_desc {
-                    let desc_addr = desc
-                        .addr()
-                        .translate_gva(access_platform, desc.len() as usize)
-                        .map_err(|e| {
-                            NetQueuePairError::GuestMemory(vm_memory::GuestMemoryError::IOError(e))
-                        })?;
-                    if !desc.is_write_only() && desc.len() > 0 {
-                        let buf = desc_chain
-                            .memory()
-                            .get_slice(desc_addr, desc.len() as usize)
-                            .map_err(NetQueuePairError::GuestMemory)?;
-                        assert!(buf.len() >= desc.len() as usize);
-                        let buf = buf.ptr_guard_mut();
-                        let iovec = libc::iovec {
-                            iov_base: buf.as_ptr().cast(),
-                            iov_len: desc.len() as libc::size_t,
-                        };
-                        iovecs.push(iovec);
-                    } else {
+                    if desc.is_write_only() || desc.len() == 0 {
                         error!(
                             "Invalid descriptor chain: address = 0x{:x} length = {} write_only = {}",
-                            desc_addr.0,
+                            desc.addr().0,
                             desc.len(),
                             desc.is_write_only()
                         );
                         return Err(NetQueuePairError::DescriptorChainInvalid);
                     }
+                    push_translated_iovecs(
+                        mem,
+                        &mut iovecs,
+                        desc.addr(),
+                        desc.len() as usize,
+                        access_platform,
+                    )?;
                     next_desc = desc_chain.next();
                 }
                 Ok(())
@@ -239,7 +297,7 @@ impl RxVirtio {
                     .memory()
                     .checked_offset(
                         desc.addr()
-                            .translate_gva(access_platform, desc.len() as usize)
+                            .translate_gva(access_platform, vnet_hdr_len())
                             .map_err(|e| {
                                 NetQueuePairError::GuestMemory(
                                     vm_memory::GuestMemoryError::IOError(e),
@@ -251,33 +309,22 @@ impl RxVirtio {
                 let mut next_desc = Some(desc);
 
                 while let Some(desc) = next_desc {
-                    let desc_addr = desc
-                        .addr()
-                        .translate_gva(access_platform, desc.len() as usize)
-                        .map_err(|e| {
-                            NetQueuePairError::GuestMemory(vm_memory::GuestMemoryError::IOError(e))
-                        })?;
-                    if desc.is_write_only() && desc.len() > 0 {
-                        let buf = desc_chain
-                            .memory()
-                            .get_slice(desc_addr, desc.len() as usize)
-                            .map_err(NetQueuePairError::GuestMemory)?;
-                        assert!(buf.len() >= desc.len() as usize);
-                        let buf = buf.ptr_guard_mut();
-                        let iovec = libc::iovec {
-                            iov_base: buf.as_ptr().cast(),
-                            iov_len: desc.len() as libc::size_t,
-                        };
-                        iovecs.push(iovec);
-                    } else {
+                    if !desc.is_write_only() || desc.len() == 0 {
                         error!(
                             "Invalid descriptor chain: address = 0x{:x} length = {} write_only = {}",
-                            desc_addr.0,
+                            desc.addr().0,
                             desc.len(),
                             desc.is_write_only()
                         );
                         return Err(NetQueuePairError::DescriptorChainInvalid);
                     }
+                    push_translated_iovecs(
+                        mem,
+                        &mut iovecs,
+                        desc.addr(),
+                        desc.len() as usize,
+                        access_platform,
+                    )?;
                     next_desc = desc_chain.next();
                 }
                 Ok(num_buffers_addr)
@@ -580,5 +627,105 @@ impl NetQueuePair {
         queue
             .needs_notification(mem)
             .map_err(NetQueuePairError::QueueNeedsNotification)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+
+    use vm_memory::GuestMemoryMmap;
+    use vm_memory::bitmap::AtomicBitmap;
+
+    use super::*;
+
+    type TestMmap = GuestMemoryMmap<AtomicBitmap>;
+
+    fn mmap(size: usize) -> TestMmap {
+        TestMmap::from_ranges(&[(GuestAddress(0), size)]).unwrap()
+    }
+
+    fn total_len(iovecs: &[libc::iovec]) -> usize {
+        iovecs.iter().map(|iv| iv.iov_len).sum()
+    }
+
+    /// Mapping table stub. Entries are `(gva, size, gpa)`.
+    #[derive(Debug)]
+    struct TableAp {
+        mappings: Vec<(u64, u64, u64)>,
+    }
+
+    impl AccessPlatform for TableAp {
+        fn translate_gva(&self, base: u64, size: u64) -> io::Result<u64> {
+            let last = base + size - 1;
+            for &(gva, sz, gpa) in &self.mappings {
+                if base >= gva && last < gva + sz {
+                    return Ok(gpa + (base - gva));
+                }
+            }
+            Err(io::Error::other("not mapped"))
+        }
+        fn translate_gpa(&self, base: u64, _size: u64) -> io::Result<u64> {
+            Ok(base)
+        }
+    }
+
+    #[test]
+    fn no_iommu_produces_single_iovec() {
+        let mem = mmap(64 * 1024);
+        let mut iovecs = Vec::new();
+        push_translated_iovecs(&mem, &mut iovecs, GuestAddress(0x1000), 2000, None).unwrap();
+        assert_eq!(iovecs.len(), 1);
+        assert_eq!(iovecs[0].iov_len, 2000);
+    }
+
+    #[test]
+    fn iommu_single_mapping_produces_single_iovec() {
+        let mem = mmap(64 * 1024);
+        let ap = TableAp {
+            mappings: vec![(0x1000, 16 * 1024, 0x1000)],
+        };
+        let mut iovecs = Vec::new();
+        push_translated_iovecs(&mem, &mut iovecs, GuestAddress(0x1000), 8 * 1024, Some(&ap))
+            .unwrap();
+        assert_eq!(iovecs.len(), 1);
+        assert_eq!(iovecs[0].iov_len, 8 * 1024);
+    }
+
+    #[test]
+    fn iommu_boundary_span_delivers_full_length() {
+        let mem = mmap(128 * 1024);
+        let ap = TableAp {
+            mappings: vec![(0x1000, 0x1000, 0x1000), (0x2000, 0x1000, 0x10000)],
+        };
+        let mut iovecs = Vec::new();
+        push_translated_iovecs(&mem, &mut iovecs, GuestAddress(0x1F00), 0x200, Some(&ap)).unwrap();
+        assert_eq!(total_len(&iovecs), 0x200);
+        assert!(iovecs.len() >= 2);
+    }
+
+    #[test]
+    fn host_contiguous_chunks_are_coalesced() {
+        let mem = mmap(64 * 1024);
+        let ap = TableAp {
+            mappings: vec![(0x1000, 0x1000, 0x1000), (0x2000, 0x1000, 0x2000)],
+        };
+        let mut iovecs = Vec::new();
+        push_translated_iovecs(&mem, &mut iovecs, GuestAddress(0x1000), 0x2000, Some(&ap)).unwrap();
+        assert_eq!(total_len(&iovecs), 0x2000);
+        assert_eq!(iovecs.len(), 1);
+    }
+
+    #[test]
+    fn unmapped_page_inside_buffer_returns_error() {
+        let mem = mmap(64 * 1024);
+        let ap = TableAp {
+            mappings: vec![(0x1000, 0x1000, 0x1000), (0x3000, 0x1000, 0x3000)],
+        };
+        let mut iovecs = Vec::new();
+        let err =
+            push_translated_iovecs(&mem, &mut iovecs, GuestAddress(0x1000), 0x3000, Some(&ap))
+                .expect_err("unmapped range must fail");
+        assert!(matches!(err, NetQueuePairError::GuestMemory(_)));
     }
 }
