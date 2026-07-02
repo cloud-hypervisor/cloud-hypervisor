@@ -306,7 +306,8 @@ impl AsyncIo for QcowSync {
 #[cfg(test)]
 mod unit_tests {
     use std::fs::{File, OpenOptions, create_dir};
-    use std::io::{Read, Seek, SeekFrom, Write};
+    use std::io::Write;
+    use std::os::unix::fs::FileExt;
     use std::path::Path;
     use std::sync::Arc;
     use std::{env, thread};
@@ -335,14 +336,12 @@ mod unit_tests {
 
     fn read_be_u64_at(file: &mut File, offset: u64) -> u64 {
         let mut bytes = [0u8; 8];
-        file.seek(SeekFrom::Start(offset)).unwrap();
-        file.read_exact(&mut bytes).unwrap();
+        file.read_exact_at(&mut bytes, offset).unwrap();
         u64::from_be_bytes(bytes)
     }
 
     fn write_be_u64_at(file: &mut File, offset: u64, value: u64) {
-        file.seek(SeekFrom::Start(offset)).unwrap();
-        file.write_all(&value.to_be_bytes()).unwrap();
+        file.write_all_at(&value.to_be_bytes(), offset).unwrap();
     }
 
     fn first_l2_entry_offset(file: &mut File) -> u64 {
@@ -997,8 +996,7 @@ mod unit_tests {
             raw.sync_all().unwrap();
         }
 
-        let mut overlay_file = overlay_temp.into_file();
-        overlay_file.rewind().unwrap();
+        let overlay_file = overlay_temp.into_file();
         let err = QcowDisk::new(overlay_file, false, true, true, false).unwrap_err();
         assert!(matches!(err.kind(), BlockErrorKind::Io));
 
