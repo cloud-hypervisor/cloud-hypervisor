@@ -2596,6 +2596,7 @@ impl Vm {
                         // the HOB.
                         payload_info = Some(PayloadInfo {
                             image_type: PayloadImageType::BzImage,
+                            reserved: 0,
                             entry_point: section.address,
                         });
                     }

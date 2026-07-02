@@ -264,10 +264,16 @@ pub enum PayloadImageType {
     RawVmLinux,
 }
 
+// Layout of the HOB_PAYLOAD_INFO_TABLE as defined by the TD-Shim
+// specification (doc/tdshim_spec.md, "TD Payload Info GUID Extension HOB").
+// The `reserved` field between `image_type` and `entry_point` is mandated by
+// the spec to 8-byte align the entry point; omitting it makes the HOB one
+// UINT32 too short and TD-Shim fails to parse it.
 #[repr(C, packed)]
 #[derive(Copy, Clone, Default, Debug)]
 pub struct PayloadInfo {
     pub image_type: PayloadImageType,
+    pub reserved: u32,
     pub entry_point: u64,
 }
 
