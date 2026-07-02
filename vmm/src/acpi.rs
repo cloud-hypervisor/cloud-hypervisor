@@ -5,6 +5,7 @@
 use std::time::Instant;
 
 use acpi_tables::Aml;
+use acpi_tables::gas::{AccessSize, AddressSpace, GAS};
 use acpi_tables::rsdp::Rsdp;
 #[cfg(target_arch = "aarch64")]
 use acpi_tables::sdt::GenericAddress;
@@ -274,7 +275,11 @@ pub fn create_dsdt_table(
 
 const FACP_DSDT_OFFSET: usize = 140;
 
-fn create_facp_table(dsdt_offset: GuestAddress, device_manager: &DeviceManager) -> Sdt {
+fn create_facp_table(
+    dsdt_offset: GuestAddress,
+    device_manager: &DeviceManager,
+    legacy_acpi_pm1a: bool,
+) -> Sdt {
     trace_scoped!("create_facp_table");
 
     // Revision 6 of the ACPI FADT table is 276 bytes long
@@ -325,6 +330,40 @@ fn create_facp_table(dsdt_offset: GuestAddress, device_manager: &DeviceManager) 
     facp.write(FACP_DSDT_OFFSET, dsdt_offset.0);
     // Hypervisor Vendor Identity
     facp.write_bytes(268, b"CLOUDHYP");
+
+    // Windows' nested-Hyper-V hvloader rejects a HW-reduced FADT whose PM1a GAS is
+    // zero; point the blocks at unused ACPI I/O ports (conforming guests ignore them).
+    if legacy_acpi_pm1a {
+        const PM1A_EVT_PORT: u16 = 0x60c;
+        facp.write(56usize, PM1A_EVT_PORT as u32); // PM1a_EVT_BLK (0x38)
+        facp.write(88usize, 4u8); // PM1_EVT_LEN (0x58)
+        facp.write_bytes(
+            148usize, // X_PM1a_EVT_BLK (0x94)
+            GAS::new(
+                AddressSpace::SystemIo,
+                32,
+                0,
+                AccessSize::WordAccess,
+                PM1A_EVT_PORT.into(),
+            )
+            .as_bytes(),
+        );
+
+        const PM1A_CNT_PORT: u16 = 0x610;
+        facp.write(64usize, PM1A_CNT_PORT as u32); // PM1a_CNT_BLK (0x40)
+        facp.write(89usize, 2u8); // PM1_CNT_LEN (0x59)
+        facp.write_bytes(
+            172usize, // X_PM1a_CNT_BLK (0xac)
+            GAS::new(
+                AddressSpace::SystemIo,
+                16,
+                0,
+                AccessSize::WordAccess,
+                PM1A_CNT_PORT.into(),
+            )
+            .as_bytes(),
+        );
+    }
 
     facp.update_checksum();
 
@@ -855,7 +894,12 @@ fn create_acpi_tables_internal(
     tables_bytes.extend_from_slice(dsdt.as_slice());
 
     // FACP aka FADT
-    let facp = create_facp_table(dsdt_addr, device_manager);
+    // The legacy PM1a blocks are x86-only; there is nothing to emit on other arches.
+    #[cfg(target_arch = "x86_64")]
+    let legacy_acpi_pm1a = cpu_manager.nested() && cpu_manager.kvm_hyperv();
+    #[cfg(not(target_arch = "x86_64"))]
+    let legacy_acpi_pm1a = false;
+    let facp = create_facp_table(dsdt_addr, device_manager, legacy_acpi_pm1a);
     let facp_addr = dsdt_addr.checked_add(dsdt.len() as u64).unwrap();
     tables_bytes.extend_from_slice(facp.as_slice());
     xsdt_table_pointers.push(facp_addr.0);
@@ -1130,7 +1174,12 @@ pub fn create_acpi_tables_tdx(
     )];
 
     // FACP aka FADT
-    tables.push(create_facp_table(GuestAddress(0), device_manager));
+    let legacy_acpi_pm1a = cpu_manager.nested() && cpu_manager.kvm_hyperv();
+    tables.push(create_facp_table(
+        GuestAddress(0),
+        device_manager,
+        legacy_acpi_pm1a,
+    ));
 
     // MADT
     tables.push(cpu_manager.create_madt());
