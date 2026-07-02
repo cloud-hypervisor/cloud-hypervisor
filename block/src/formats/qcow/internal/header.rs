@@ -9,7 +9,6 @@
 //! QCOW2 header parsing, validation, and creation.
 
 use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::io::{Seek, SeekFrom, Write};
 use std::os::unix::fs::FileExt;
 use std::str::FromStr;
 
@@ -566,14 +565,15 @@ impl QcowHeader {
     }
 
     /// Write only the incompatible_features field to the file at its fixed offset.
-    fn write_incompatible_features<F: Seek + Write>(&self, file: &mut F) -> BlockResult<()> {
+    fn write_incompatible_features(&self, file: &AlignedFile) -> BlockResult<()> {
         if self.version != 3 {
             return Ok(());
         }
-        file.seek(SeekFrom::Start(V2_BARE_HEADER_SIZE as u64))
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::WritingHeader(e)))?;
-        u64::write_be(file, self.incompatible_features)
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::WritingHeader(e)))?;
+        file.write_all_at(
+            &self.incompatible_features.to_be_bytes(),
+            V2_BARE_HEADER_SIZE as u64,
+        )
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::WritingHeader(e)))?;
         Ok(())
     }
 
@@ -581,11 +581,7 @@ impl QcowHeader {
     ///
     /// When `dirty` is true, sets the bit to indicate the image is in use.
     /// When `dirty` is false, clears the bit to indicate a clean shutdown.
-    pub fn set_dirty_bit<F: Seek + Write + FileSync>(
-        &mut self,
-        file: &mut F,
-        dirty: bool,
-    ) -> BlockResult<()> {
+    pub fn set_dirty_bit(&mut self, file: &mut AlignedFile, dirty: bool) -> BlockResult<()> {
         if self.version == 3 {
             if dirty {
                 self.incompatible_features |= IncompatFeatures::DIRTY.bits();
@@ -603,7 +599,7 @@ impl QcowHeader {
     ///
     /// This marks the image as corrupted. Once set, the image can only be
     /// opened read-only until repaired.
-    pub fn set_corrupt_bit<F: Seek + Write + FileSync>(&mut self, file: &mut F) -> BlockResult<()> {
+    pub fn set_corrupt_bit(&mut self, file: &mut AlignedFile) -> BlockResult<()> {
         if self.version == 3 {
             self.incompatible_features |= IncompatFeatures::CORRUPT.bits();
             self.write_incompatible_features(file)?;
@@ -622,15 +618,11 @@ impl QcowHeader {
     ///
     /// These bits indicate features that can be safely disabled when modified
     /// by software that doesn't understand them.
-    pub fn clear_autoclear_features<F: Seek + Write + FileSync>(
-        &mut self,
-        file: &mut F,
-    ) -> Result<()> {
+    pub fn clear_autoclear_features(&mut self, file: &mut AlignedFile) -> Result<()> {
         if self.version == 3 && self.autoclear_features != 0 {
             self.autoclear_features = 0;
-            file.seek(SeekFrom::Start(AUTOCLEAR_FEATURES_OFFSET))
+            file.write_all_at(&0u64.to_be_bytes(), AUTOCLEAR_FEATURES_OFFSET)
                 .map_err(Error::WritingHeader)?;
-            u64::write_be(file, 0).map_err(Error::WritingHeader)?;
             file.fsync().map_err(Error::SyncingHeader)?;
         }
         Ok(())
