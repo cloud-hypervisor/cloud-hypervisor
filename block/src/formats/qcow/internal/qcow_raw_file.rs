@@ -349,7 +349,8 @@ impl AsFd for QcowRawFile {
 
 #[cfg(test)]
 mod unit_tests {
-    use std::io::{Read, Seek, SeekFrom};
+    use std::io::Read;
+    use std::os::unix::fs::FileExt;
 
     use vmm_sys_util::tempfile::TempFile;
 
@@ -410,8 +411,7 @@ mod unit_tests {
         let found_at = find_all(&whole, &expected);
 
         let mut at_target = vec![0u8; expected.len()];
-        verify.seek(SeekFrom::Start(TARGET_OFFSET)).unwrap();
-        verify.read_exact(&mut at_target).unwrap();
+        verify.read_exact_at(&mut at_target, TARGET_OFFSET).unwrap();
 
         assert_eq!(
             at_target, expected,
@@ -429,10 +429,9 @@ mod unit_tests {
             .expect("write_pointer_table_direct");
 
         let expected = be_bytes(&entries);
-        let mut verify = temp_file.as_file().try_clone().unwrap();
+        let verify = temp_file.as_file().try_clone().unwrap();
         let mut at_target = vec![0u8; expected.len()];
-        verify.seek(SeekFrom::Start(TARGET_OFFSET)).unwrap();
-        verify.read_exact(&mut at_target).unwrap();
+        verify.read_exact_at(&mut at_target, TARGET_OFFSET).unwrap();
 
         assert_eq!(
             at_target, expected,
@@ -485,16 +484,14 @@ mod unit_tests {
         qcow.write_cluster(CLUSTER_SIZE, &data)
             .expect("write_cluster");
 
-        let mut verify = temp_file.as_file().try_clone().unwrap();
+        let verify = temp_file.as_file().try_clone().unwrap();
         let mut buf = vec![0u8; cluster_size];
-        verify.seek(SeekFrom::Start(CLUSTER_SIZE)).unwrap();
-        verify.read_exact(&mut buf).unwrap();
+        verify.read_exact_at(&mut buf, CLUSTER_SIZE).unwrap();
         assert_eq!(buf, data);
 
         qcow.zero_cluster(CLUSTER_SIZE).expect("zero_cluster");
 
-        verify.seek(SeekFrom::Start(CLUSTER_SIZE)).unwrap();
-        verify.read_exact(&mut buf).unwrap();
+        verify.read_exact_at(&mut buf, CLUSTER_SIZE).unwrap();
         assert!(buf.iter().all(|&b| b == 0));
     }
 
