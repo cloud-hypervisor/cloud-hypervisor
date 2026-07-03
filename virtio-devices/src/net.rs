@@ -599,6 +599,7 @@ impl Net {
 
                 avail_features |= 1 << VIRTIO_NET_F_CTRL_VQ;
                 avail_features |= 1 << VIRTIO_NET_F_STATUS;
+                avail_features |= 1 << VIRTIO_NET_F_GUEST_ANNOUNCE;
                 let queue_num = num_queues + 1;
 
                 let mut config = VirtioNetConfig::default();
