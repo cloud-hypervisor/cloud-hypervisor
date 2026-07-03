@@ -715,7 +715,7 @@ jobs:
     name: integration-mshv-x86-64
     needs: [preflight, dco, quality, build]
     if: >-
-      needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
+      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
     timeout-minutes: 35
     runs-on: mshv
     steps:
