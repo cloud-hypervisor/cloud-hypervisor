@@ -635,7 +635,7 @@ jobs:
           IMG_BASENAME=windows-11-iot-enterprise-aarch64.raw
           IMG_PATH=$HOME/workloads/$IMG_BASENAME
           IMG_GZ_PATH=$HOME/workloads/$IMG_BASENAME.gz
-          IMG_GZ_BLOB_NAME=windows-11-iot-enterprise-aarch64-9-min.raw.gz
+          IMG_GZ_BLOB_NAME=windows-11-iot-enterprise-aarch64-25h2-6.raw.gz
           cp "scripts/$IMG_BASENAME.sha1" "$HOME/workloads/"
           pushd "$HOME/workloads"
           if sha1sum "$IMG_BASENAME.sha1" --check; then
@@ -643,6 +643,7 @@ jobs:
           fi
           popd
           mkdir -p "$HOME/workloads"
+          rm -f "$IMG_PATH" "$IMG_GZ_PATH"
           az storage blob download --container-name private-images --file "$IMG_GZ_PATH" --name "$IMG_GZ_BLOB_NAME" --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
           gzip -d "$IMG_GZ_PATH"
       - name: Run Windows guest integration tests
