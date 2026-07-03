@@ -272,7 +272,12 @@ impl Net {
         {
             status |= VIRTIO_NET_S_LINK_UP as u16;
 
-            if self.announce.pending.load(Ordering::Acquire) {
+            if self
+                .vu_common
+                .virtio_common
+                .feature_acked(VIRTIO_NET_F_GUEST_ANNOUNCE.into())
+                && self.announce.pending.load(Ordering::Acquire)
+            {
                 status |= VIRTIO_NET_S_ANNOUNCE as u16;
             }
         }
