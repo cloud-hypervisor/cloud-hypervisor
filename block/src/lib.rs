@@ -678,7 +678,7 @@ mod unit_tests {
     use std::fs::OpenOptions;
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
-    use std::{ptr, slice};
+    use std::{mem, ptr, slice};
 
     use vmm_sys_util::tempfile::TempFile;
 
@@ -809,6 +809,25 @@ mod unit_tests {
         assert!(physical > 0);
     }
 
+    // A mode-0 fallocate() is not eagerly accounted in st_blocks on every
+    // filesystem: zfs reserves the range but accounts blocks lazily at
+    // transaction-group commit, and FUSE-based filesystems such as virtiofs
+    // report preallocated files as sparse. Identify those by filesystem type
+    // so a skipped physical-size check always names a proven platform
+    // limitation instead of being inferred from the value under test.
+    fn fs_defers_fallocate_block_accounting(f: &File) -> bool {
+        // SAFETY: a zeroed statfs is a valid output buffer for fstatfs and it
+        // is only read after the call succeeds.
+        let mut sfs: libc::statfs = unsafe { mem::zeroed() };
+        // SAFETY: the fd is valid and sfs outlives the call.
+        let ret = unsafe { libc::fstatfs(f.as_raw_fd(), &mut sfs) };
+        assert_eq!(ret, 0, "fstatfs failed: {}", io::Error::last_os_error());
+        // ZFS_SUPER_MAGIC and FUSE_SUPER_MAGIC (statfs(2)), as untyped
+        // literals because the width and signedness of f_type differ
+        // between libc targets.
+        matches!(sfs.f_type, 0x2fc1_2fc1 | 0x6573_5546)
+    }
+
     #[test]
     fn test_query_device_size_sparse_file_punch_hole() {
         let temp_file = TempFile::new().unwrap();
@@ -825,11 +844,25 @@ mod unit_tests {
                 size,
             )
         };
-        assert_eq!(ret, 0, "fallocate failed: {}", io::Error::last_os_error());
+        if ret != 0 {
+            let err = io::Error::last_os_error();
+            if err.raw_os_error() == Some(libc::EOPNOTSUPP) {
+                eprintln!("Skipping test: fallocate() is not supported: {err}");
+                return;
+            }
+            panic!("fallocate failed: {err}");
+        }
         f.sync_all().unwrap();
 
         let (log_before, phys_before) = query_device_size(f).unwrap();
         assert_eq!(log_before, size as u64);
+        if fs_defers_fallocate_block_accounting(f) {
+            eprintln!(
+                "Skipping physical size checks: the filesystem defers \
+                 fallocate() block accounting"
+            );
+            return;
+        }
         assert_eq!(phys_before, size as u64);
 
         // Punch a hole in the middle 512 KiB
@@ -842,7 +875,16 @@ mod unit_tests {
                 size / 2,
             )
         };
-        assert_eq!(ret, 0, "punch hole failed: {}", io::Error::last_os_error());
+        if ret != 0 {
+            let err = io::Error::last_os_error();
+            if err.raw_os_error() == Some(libc::EOPNOTSUPP) {
+                eprintln!(
+                    "Skipping punch-hole checks: FALLOC_FL_PUNCH_HOLE is not supported: {err}"
+                );
+                return;
+            }
+            panic!("punch hole failed: {err}");
+        }
         f.sync_all().unwrap();
 
         let (logical, physical) = query_device_size(f).unwrap();
