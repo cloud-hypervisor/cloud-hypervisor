@@ -17,9 +17,13 @@ use vhost::vhost_user::message::{
     VhostUserProtocolFeatures, VhostUserVirtioFeatures,
 };
 use vhost::vhost_user::{
-    Frontend, FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler,
+    Error as VhostUserError, Frontend, FrontendReqHandler, VhostUserFrontend,
+    VhostUserFrontendReqHandler,
 };
-use vhost::{VhostBackend, VhostUserDirtyLogRegion, VhostUserMemoryRegionInfo, VringConfigData};
+use vhost::{
+    Error as VhostError, VhostBackend, VhostUserDirtyLogRegion, VhostUserMemoryRegionInfo,
+    VringConfigData,
+};
 use virtio_queue::desc::RawDescriptor;
 use virtio_queue::{Queue, QueueT};
 use vm_memory::guest_memory::Error as MmapError;
@@ -381,7 +385,7 @@ impl VhostUserHandle {
         socket_path: &str,
         num_queues: u64,
         unlink_socket: bool,
-        kill_evt: Option<&EventFd>,
+        kill_evt: &EventFd,
     ) -> Result<Self> {
         if server {
             if unlink_socket {
@@ -427,15 +431,13 @@ impl VhostUserHandle {
                 )
                 .map_err(Error::EpollCtl)?;
 
-            if let Some(kill_evt) = kill_evt {
-                epoll
-                    .ctl(
-                        ControlOperation::Add,
-                        kill_evt.as_raw_fd(),
-                        EpollEvent::new(EventSet::IN, ConnectEvent::Kill as u64),
-                    )
-                    .map_err(Error::EpollCtl)?;
-            }
+            epoll
+                .ctl(
+                    ControlOperation::Add,
+                    kill_evt.as_raw_fd(),
+                    EpollEvent::new(EventSet::IN, ConnectEvent::Kill as u64),
+                )
+                .map_err(Error::EpollCtl)?;
 
             let start = Instant::now();
             let mut events = [EpollEvent::default(); 1];
@@ -457,11 +459,28 @@ impl VhostUserHandle {
                     Err(e) => e,
                 };
 
-                if start.elapsed() >= CONNECT_TIMEOUT {
+                let retryable = match &err {
+                    VhostError::VhostUserProtocol(VhostUserError::SocketConnect(io_err)) => {
+                        matches!(
+                            io_err.kind(),
+                            io::ErrorKind::NotFound
+                                | io::ErrorKind::Interrupted
+                                | io::ErrorKind::ConnectionRefused
+                        )
+                    }
+                    _ => false,
+                };
+
+                if !retryable {
                     error!(
-                        "Failed connecting the backend after trying for 1 minute for socket {socket_path}: {err:?}"
+                        "Failed connecting to vhost-user backend for socket {socket_path}: {err:?}"
                     );
                     return Err(Error::VhostUserConnect(err));
+                }
+
+                if start.elapsed() >= CONNECT_TIMEOUT {
+                    error!("Timed out waiting for vhost-user connection on socket {socket_path}");
+                    return Err(Error::VhostUserConnectTimeout);
                 }
 
                 loop {

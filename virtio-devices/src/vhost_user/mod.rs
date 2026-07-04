@@ -179,6 +179,8 @@ pub enum Error {
     EpollWait(#[source] io::Error),
     #[error("Aborted vhost-user connect: kill event received")]
     ConnectKilled,
+    #[error("Timed out waiting for vhost-user connection")]
+    VhostUserConnectTimeout,
 }
 type Result<T> = result::Result<T, Error>;
 
@@ -329,7 +331,7 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
             &self.socket_path,
             self.queues.len() as u64,
             true,
-            Some(&self.kill_evt),
+            &self.kill_evt,
         ) {
             Ok(vu) => vu,
             // Kill event fired during the connect retry loop; abandon the

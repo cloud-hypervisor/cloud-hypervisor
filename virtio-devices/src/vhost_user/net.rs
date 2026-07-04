@@ -72,7 +72,7 @@ impl Net {
             &vu_cfg.socket,
             num_queues as u64,
             false,
-            None,
+            &exit_evt,
         )?;
 
         let (
