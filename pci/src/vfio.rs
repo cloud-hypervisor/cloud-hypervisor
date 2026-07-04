@@ -30,7 +30,9 @@ use vfio_bindings::bindings::vfio::{
     vfio_device_mig_state_VFIO_DEVICE_STATE_STOP as VFIO_DEV_STATE_STOP,
     vfio_device_mig_state_VFIO_DEVICE_STATE_STOP_COPY as VFIO_DEV_STATE_STOP_COPY, *,
 };
-use vfio_ioctls::{VfioDevice, VfioIrq, VfioOps, VfioRegionInfoCap, VfioRegionSparseMmapArea};
+use vfio_ioctls::{
+    DmaLoggingRange, VfioDevice, VfioIrq, VfioOps, VfioRegionInfoCap, VfioRegionSparseMmapArea,
+};
 use vm_allocator::page_size::{
     align_page_size_down, align_page_size_up, get_page_size, is_4k_aligned, is_4k_multiple,
     is_page_size_aligned,
@@ -41,7 +43,14 @@ use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
 use vm_device::{BusDevice, Resource};
-use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestUsize};
+use vm_memory::bitmap::AtomicBitmap;
+use vm_memory::{
+    Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, GuestMemoryRegion,
+    GuestUsize,
+};
+
+type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
+use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -518,6 +527,26 @@ pub(crate) trait Vfio: Send + Sync {
     }
 
     fn reset(&self) {}
+
+    fn start_dma_logging(
+        &self,
+        _page_size: u64,
+        _ranges: &[DmaLoggingRange],
+    ) -> Result<u64, VfioError> {
+        Err(VfioError::NoMigrationSupport)
+    }
+
+    fn stop_dma_logging(&self) -> Result<(), VfioError> {
+        Err(VfioError::NoMigrationSupport)
+    }
+
+    fn report_dma_logging(
+        &self,
+        _range: DmaLoggingRange,
+        _page_size: u64,
+    ) -> Result<MemoryRangeTable, VfioError> {
+        Err(VfioError::NoMigrationSupport)
+    }
 }
 
 struct VfioDeviceWrapper {
@@ -588,6 +617,38 @@ impl Vfio for VfioDeviceWrapper {
     fn reset(&self) {
         self.device.reset();
     }
+
+    fn start_dma_logging(
+        &self,
+        page_size: u64,
+        ranges: &[DmaLoggingRange],
+    ) -> Result<u64, VfioError> {
+        self.device
+            .start_dma_logging(page_size, ranges)
+            .map_err(VfioError::KernelVfio)
+    }
+
+    fn stop_dma_logging(&self) -> Result<(), VfioError> {
+        self.device
+            .stop_dma_logging()
+            .map_err(VfioError::KernelVfio)
+    }
+
+    // Wrap the kernel dirty bitmap into a MemoryRangeTable at the trait
+    // boundary so callers work with guest memory ranges directly.
+    fn report_dma_logging(
+        &self,
+        range: DmaLoggingRange,
+        page_size: u64,
+    ) -> Result<MemoryRangeTable, VfioError> {
+        let bitmap = self
+            .device
+            .report_dma_logging(range, page_size)
+            .map_err(VfioError::KernelVfio)?;
+        Ok(MemoryRangeTable::from_dirty_bitmap(
+            bitmap, range.iova, page_size,
+        ))
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -618,6 +679,8 @@ pub(crate) struct VfioCommon {
     x_nv_gpudirect_clique: Option<u8>,
     x_exclude_mmap_bars: Vec<u8>,
     pub(crate) migration_flags: Option<u64>,
+    // Negotiated dirty bitmap granularity while DMA logging is active.
+    dma_logging_page_size: Option<u64>,
 }
 
 #[derive(Default)]
@@ -693,6 +756,7 @@ impl VfioCommon {
             x_nv_gpudirect_clique: config.x_nv_gpudirect_clique,
             x_exclude_mmap_bars: config.x_exclude_mmap_bars,
             migration_flags,
+            dma_logging_page_size: None,
         };
 
         let state: Option<VfioCommonState> = snapshot
@@ -1735,6 +1799,58 @@ impl VfioCommon {
         }
         Ok(())
     }
+
+    // No op without ranges to track. page_size is a hint, the device reports
+    // back the granularity it actually applied, kept for the report calls.
+    pub(crate) fn start_dirty_log(
+        &mut self,
+        ranges: &[DmaLoggingRange],
+        page_size: u64,
+    ) -> Result<(), MigratableError> {
+        if ranges.is_empty() {
+            return Ok(());
+        }
+        let negotiated = self
+            .vfio_wrapper
+            .start_dma_logging(page_size, ranges)
+            .map_err(|e| MigratableError::StartDirtyLog(anyhow!("VFIO start_dma_logging: {e}")))?;
+        debug!(
+            "VFIO DMA logging started over {} range(s), requested page size {page_size:#x}, device granularity {negotiated:#x}",
+            ranges.len()
+        );
+        self.dma_logging_page_size = Some(negotiated);
+        Ok(())
+    }
+
+    pub(crate) fn stop_dirty_log(&mut self) -> Result<(), MigratableError> {
+        if self.dma_logging_page_size.take().is_none() {
+            return Ok(());
+        }
+        self.vfio_wrapper
+            .stop_dma_logging()
+            .map_err(|e| MigratableError::StopDirtyLog(anyhow!("VFIO stop_dma_logging: {e}")))
+    }
+
+    // Reports per range dirty bitmaps from the kernel, merged into a single
+    // MemoryRangeTable. Returns an empty table when logging is not active so
+    // the caller can splice it into the union without a special case.
+    pub(crate) fn dirty_log(
+        &self,
+        ranges: &[DmaLoggingRange],
+    ) -> Result<MemoryRangeTable, MigratableError> {
+        let Some(page_size) = self.dma_logging_page_size else {
+            return Ok(MemoryRangeTable::default());
+        };
+        let mut tables = Vec::with_capacity(ranges.len());
+        for range in ranges {
+            let table = self
+                .vfio_wrapper
+                .report_dma_logging(*range, page_size)
+                .map_err(|e| MigratableError::DirtyLog(anyhow!("VFIO report_dma_logging: {e}")))?;
+            tables.push(table);
+        }
+        Ok(MemoryRangeTable::new_from_tables(tables))
+    }
 }
 
 impl Pausable for VfioCommon {}
@@ -1792,6 +1908,9 @@ pub struct VfioPciDevice {
     // Required for peer-to-peer DMA between VFIO devices.
     p2p_dma: bool,
     memory_slot_allocator: MemorySlotAllocator,
+    // Guest memory layout, used to enumerate the IOVA ranges to track when
+    // programming VFIO DMA logging.
+    memory: GuestMemoryAtomic<GuestMemoryMmap>,
     bdf: PciBdf,
     device_path: PathBuf,
 }
@@ -1810,6 +1929,7 @@ impl VfioPciDevice {
         p2p_dma: bool,
         bdf: PciBdf,
         memory_slot_allocator: MemorySlotAllocator,
+        memory: GuestMemoryAtomic<GuestMemoryMmap>,
         snapshot: Option<&Snapshot>,
         x_nv_gpudirect_clique: Option<u8>,
         x_exclude_mmap_bars: Vec<u8>,
@@ -1842,6 +1962,7 @@ impl VfioPciDevice {
             iommu_attached,
             p2p_dma,
             memory_slot_allocator,
+            memory,
             bdf,
             device_path,
         };
@@ -2163,6 +2284,20 @@ impl VfioPciDevice {
     pub fn mmio_regions(&self) -> Vec<MmioRegion> {
         self.common.mmio_regions.clone()
     }
+
+    // IOVA ranges for DMA logging. Without a virtual IOMMU the device sees an
+    // identity mapping of guest memory (iova == gpa), so these are the guest
+    // memory regions. A virtual IOMMU is refused in start_migration, see
+    // issue #8567.
+    fn dirty_log_iova_ranges(&self) -> Vec<DmaLoggingRange> {
+        let mem = self.memory.memory();
+        mem.iter()
+            .map(|region| DmaLoggingRange {
+                iova: region.start_addr().raw_value(),
+                length: region.len(),
+            })
+            .collect()
+    }
 }
 
 impl Drop for VfioPciDevice {
@@ -2413,7 +2548,41 @@ impl Snapshottable for VfioPciDevice {
 }
 
 impl Transportable for VfioPciDevice {}
-impl Migratable for VfioPciDevice {}
+
+impl Migratable for VfioPciDevice {
+    fn start_migration(&mut self) -> result::Result<(), MigratableError> {
+        // Reject a device that does not implement migration v2 up front,
+        // rather than silently skipping its state and dirty tracking.
+        if self.common.migration_flags.is_none() {
+            return Err(MigratableError::MigrateSend(anyhow!(
+                "VFIO device does not support migration"
+            )));
+        }
+        // Dirty tracking behind a virtual IOMMU needs IOVA to GPA translation
+        // and would have to follow mappings the guest changes mid migration,
+        // neither of which is implemented, see issue #8567.
+        if self.iommu_attached {
+            return Err(MigratableError::MigrateSend(anyhow!(
+                "VFIO device live migration is not supported behind a virtual IOMMU"
+            )));
+        }
+        Ok(())
+    }
+
+    fn start_dirty_log(&mut self) -> result::Result<(), MigratableError> {
+        let ranges = self.dirty_log_iova_ranges();
+        self.common.start_dirty_log(&ranges, get_page_size())
+    }
+
+    fn stop_dirty_log(&mut self) -> result::Result<(), MigratableError> {
+        self.common.stop_dirty_log()
+    }
+
+    fn dirty_log(&mut self) -> result::Result<MemoryRangeTable, MigratableError> {
+        let ranges = self.dirty_log_iova_ranges();
+        self.common.dirty_log(&ranges)
+    }
+}
 
 /// This structure implements the ExternalDmaMapping trait. It is meant to
 /// be used when the caller tries to provide a way to update the mappings
@@ -2551,6 +2720,26 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn default_dma_logging_methods_error() {
+        let range = DmaLoggingRange {
+            iova: 0,
+            length: 0x1000,
+        };
+        assert!(matches!(
+            DefaultVfio.start_dma_logging(0x1000, &[range]),
+            Err(VfioError::NoMigrationSupport)
+        ));
+        assert!(matches!(
+            DefaultVfio.stop_dma_logging(),
+            Err(VfioError::NoMigrationSupport)
+        ));
+        assert!(matches!(
+            DefaultVfio.report_dma_logging(range, 0x1000),
+            Err(VfioError::NoMigrationSupport)
+        ));
+    }
+
     // Save and load state machine flows, driven through a mock Vfio wrapper
     // that records state transitions and stores the migration data in memory.
 
@@ -2563,6 +2752,11 @@ mod tests {
         fail_read: bool,
         fail_write: bool,
         resets: u32,
+        dma_logging_started: bool,
+        dma_logging_page_size: u64,
+        dma_logging_ranges: Vec<DmaLoggingRange>,
+        dma_logging_bitmap: Vec<u64>,
+        dma_logging_negotiated: Option<u64>,
     }
 
     struct MockVfio {
@@ -2601,6 +2795,13 @@ mod tests {
             })
         }
 
+        fn for_dma_logging(bitmap: Vec<u64>) -> Arc<Self> {
+            Self::with_state(MockVfioState {
+                dma_logging_bitmap: bitmap,
+                ..Default::default()
+            })
+        }
+
         fn transitions(&self) -> Vec<VfioMigrationState> {
             self.state.lock().unwrap().transitions.clone()
         }
@@ -2611,6 +2812,15 @@ mod tests {
 
         fn resets(&self) -> u32 {
             self.state.lock().unwrap().resets
+        }
+
+        fn dma_logging_started(&self) -> bool {
+            self.state.lock().unwrap().dma_logging_started
+        }
+
+        fn dma_logging_recorded(&self) -> (u64, Vec<DmaLoggingRange>) {
+            let s = self.state.lock().unwrap();
+            (s.dma_logging_page_size, s.dma_logging_ranges.clone())
         }
     }
 
@@ -2643,6 +2853,34 @@ mod tests {
 
         fn reset(&self) {
             self.state.lock().unwrap().resets += 1;
+        }
+
+        fn start_dma_logging(
+            &self,
+            page_size: u64,
+            ranges: &[DmaLoggingRange],
+        ) -> Result<u64, VfioError> {
+            let mut s = self.state.lock().unwrap();
+            s.dma_logging_started = true;
+            s.dma_logging_page_size = page_size;
+            s.dma_logging_ranges = ranges.to_vec();
+            Ok(s.dma_logging_negotiated.unwrap_or(page_size))
+        }
+
+        fn stop_dma_logging(&self) -> Result<(), VfioError> {
+            self.state.lock().unwrap().dma_logging_started = false;
+            Ok(())
+        }
+
+        fn report_dma_logging(
+            &self,
+            range: DmaLoggingRange,
+            page_size: u64,
+        ) -> Result<MemoryRangeTable, VfioError> {
+            let bitmap = self.state.lock().unwrap().dma_logging_bitmap.clone();
+            Ok(MemoryRangeTable::from_dirty_bitmap(
+                bitmap, range.iova, page_size,
+            ))
         }
 
         fn region_write(&self, _index: u32, _offset: u64, _data: &[u8]) {}
@@ -2688,6 +2926,7 @@ mod tests {
             x_nv_gpudirect_clique: None,
             x_exclude_mmap_bars: Vec::new(),
             migration_flags,
+            dma_logging_page_size: None,
         }
     }
 
@@ -2815,6 +3054,148 @@ mod tests {
         // resets directly rather than attempting STOP.
         assert_eq!(mock.transitions(), vec![VfioMigrationState::Resuming]);
         assert_eq!(mock.resets(), 1);
+    }
+
+    #[test]
+    fn mock_dma_logging_start_records_and_negotiates() {
+        let mock = MockVfio::with_state(MockVfioState {
+            dma_logging_negotiated: Some(0x2000),
+            ..Default::default()
+        });
+        let ranges = [
+            DmaLoggingRange {
+                iova: 0,
+                length: 0x1000,
+            },
+            DmaLoggingRange {
+                iova: 0x4000,
+                length: 0x2000,
+            },
+        ];
+        // The device may apply a different granularity than requested, so
+        // the negotiated page size flows back through the trait.
+        let negotiated = mock.start_dma_logging(0x1000, &ranges).unwrap();
+        assert_eq!(negotiated, 0x2000);
+        assert!(mock.dma_logging_started());
+        let (page_size, recorded) = mock.dma_logging_recorded();
+        assert_eq!(page_size, 0x1000);
+        assert_eq!(recorded, ranges);
+    }
+
+    #[test]
+    fn mock_dma_logging_stop_clears_started_flag() {
+        let mock = MockVfio::for_dma_logging(Vec::new());
+        let range = DmaLoggingRange {
+            iova: 0,
+            length: 0x1000,
+        };
+        mock.start_dma_logging(0x1000, &[range]).unwrap();
+        assert!(mock.dma_logging_started());
+        mock.stop_dma_logging().unwrap();
+        assert!(!mock.dma_logging_started());
+    }
+
+    #[test]
+    fn mock_dma_logging_report_converts_bitmap_to_ranges() {
+        // Bits 0, 1, 4 set means three dirty pages with a one page gap.
+        // Expect two ranges, [iova .. iova+2*ps) and [iova+4*ps .. iova+5*ps).
+        let bitmap = vec![0b10011_u64];
+        let mock = MockVfio::for_dma_logging(bitmap);
+        let page_size: u64 = 0x1000;
+        let range = DmaLoggingRange {
+            iova: 0x1_0000_0000,
+            length: page_size * 64,
+        };
+        let table = mock.report_dma_logging(range, page_size).unwrap();
+        let ranges = table.regions();
+        assert_eq!(ranges.len(), 2);
+        assert_eq!(ranges[0].gpa, 0x1_0000_0000);
+        assert_eq!(ranges[0].length, page_size * 2);
+        assert_eq!(ranges[1].gpa, 0x1_0000_0000 + 4 * page_size);
+        assert_eq!(ranges[1].length, page_size);
+    }
+
+    #[test]
+    fn start_dirty_log_skips_empty_ranges() {
+        let mock = MockVfio::for_dma_logging(Vec::new());
+        let mut common = test_vfio_common(mock.clone(), Some(1));
+
+        // No ranges to track, so no logging session is opened and the
+        // stop is a no op rather than an unbalanced kernel call.
+        common.start_dirty_log(&[], 0x1000).unwrap();
+        assert!(!mock.dma_logging_started());
+        common.stop_dirty_log().unwrap();
+    }
+
+    #[test]
+    fn start_stop_dirty_log_drives_mock_when_migration_enabled() {
+        let mock = MockVfio::for_dma_logging(Vec::new());
+        let mut common = test_vfio_common(mock.clone(), Some(1));
+        let ranges = [DmaLoggingRange {
+            iova: 0x4000,
+            length: 0x2000,
+        }];
+
+        common.start_dirty_log(&ranges, 0x1000).unwrap();
+        assert!(mock.dma_logging_started());
+        let (page_size, recorded) = mock.dma_logging_recorded();
+        assert_eq!(page_size, 0x1000);
+        assert_eq!(recorded, ranges);
+
+        common.stop_dirty_log().unwrap();
+        assert!(!mock.dma_logging_started());
+    }
+
+    #[test]
+    fn dirty_log_uses_negotiated_page_size() {
+        // The mock negotiates 0x2000 against a requested 0x1000. With bit 0
+        // set the reported range length equals the negotiated granularity.
+        let mock = MockVfio::with_state(MockVfioState {
+            dma_logging_bitmap: vec![0b1_u64],
+            dma_logging_negotiated: Some(0x2000),
+            ..Default::default()
+        });
+        let mut common = test_vfio_common(mock, Some(1));
+        let ranges = [DmaLoggingRange {
+            iova: 0x1_0000_0000,
+            length: 0x2000 * 64,
+        }];
+
+        common.start_dirty_log(&ranges, 0x1000).unwrap();
+        let table = common.dirty_log(&ranges).unwrap();
+        let merged = table.ranges();
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].gpa, 0x1_0000_0000);
+        assert_eq!(merged[0].length, 0x2000);
+    }
+
+    #[test]
+    fn dirty_log_merges_ranges_into_one_table() {
+        // Mock returns the same canned bitmap for each report call. With
+        // bit 0 set, each range contributes its first page.
+        let bitmap = vec![0b1_u64];
+        let mock = MockVfio::for_dma_logging(bitmap);
+        let mut common = test_vfio_common(mock, Some(1));
+        let page_size: u64 = 0x1000;
+        let ranges = [
+            DmaLoggingRange {
+                iova: 0x1_0000_0000,
+                length: page_size * 64,
+            },
+            DmaLoggingRange {
+                iova: 0x2_0000_0000,
+                length: page_size * 64,
+            },
+        ];
+
+        common.start_dirty_log(&ranges, page_size).unwrap();
+        let table = common.dirty_log(&ranges).unwrap();
+        let merged = table.ranges();
+        assert_eq!(merged.len(), 2);
+        let mut starts: Vec<u64> = merged.iter().map(|r| r.gpa).collect();
+        starts.sort();
+        assert_eq!(starts, vec![0x1_0000_0000, 0x2_0000_0000]);
+        assert!(merged.iter().all(|r| r.length == page_size));
     }
 
     // pause() and resume() name no recovery state, so a failed transition
