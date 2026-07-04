@@ -125,8 +125,6 @@ pub enum ExecuteError {
     ReadExact(#[source] io::Error),
     #[error("Can't execute an operation other than `read` or `get_id` on a read-only device")]
     ReadOnly,
-    #[error("Failed to seek")]
-    Seek(#[source] io::Error),
     #[error("Failed to write")]
     Write(#[source] GuestMemoryError),
     #[error("Failed to write_all")]
@@ -161,7 +159,6 @@ impl ExecuteError {
             ExecuteError::Read(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::ReadExact(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::ReadOnly => VIRTIO_BLK_S_IOERR,
-            ExecuteError::Seek(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::Write(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::WriteAll(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::Unsupported(_) => VIRTIO_BLK_S_UNSUPP,

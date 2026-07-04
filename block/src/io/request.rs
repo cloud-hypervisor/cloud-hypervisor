@@ -10,8 +10,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::io::{Read, Seek, SeekFrom, Write};
 use std::mem;
+use std::os::unix::fs::FileExt;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -29,6 +29,7 @@ use vm_memory::{
 };
 use vm_virtio::AccessPlatform;
 use vm_virtio::checked_descriptor::DescriptorChainExt;
+use vmm_sys_util::file_traits::FileSync;
 
 use crate::async_io::{
     AsyncIo, AsyncIoCompletion, AsyncIoOperation, GuestMemoryTarget, OwnedIoBuffer,
@@ -171,7 +172,7 @@ impl Request {
         Ok(req)
     }
 
-    pub fn execute<T: Seek + Read + Write, B: Bitmap + 'static>(
+    pub fn execute<T: FileExt + FileSync, B: Bitmap + 'static>(
         &self,
         disk: &mut T,
         disk_nsectors: u64,
@@ -180,32 +181,35 @@ impl Request {
     ) -> Result<u32, ExecuteError> {
         self.check_data_bounds(disk_nsectors)?;
 
-        disk.seek(SeekFrom::Start(self.sector << SECTOR_SHIFT))
-            .map_err(ExecuteError::Seek)?;
+        let mut offset = self.sector << SECTOR_SHIFT;
         let mut len = 0;
         for (data_addr, data_len) in &self.data_descriptors {
             match self.request_type {
                 RequestType::In => {
                     let mut buf = vec![0u8; *data_len as usize];
-                    disk.read_exact(&mut buf).map_err(ExecuteError::ReadExact)?;
+                    disk.read_exact_at(&mut buf, offset)
+                        .map_err(ExecuteError::ReadExact)?;
                     mem.read_exact_volatile_from(
                         *data_addr,
                         &mut buf.as_slice(),
                         *data_len as usize,
                     )
                     .map_err(ExecuteError::Read)?;
+                    offset += u64::from(*data_len);
                     len += data_len;
                 }
                 RequestType::Out => {
                     let mut buf: Vec<u8> = Vec::new();
                     mem.write_all_volatile_to(*data_addr, &mut buf, *data_len as usize)
                         .map_err(ExecuteError::Write)?;
-                    disk.write_all(&buf).map_err(ExecuteError::WriteAll)?;
+                    disk.write_all_at(&buf, offset)
+                        .map_err(ExecuteError::WriteAll)?;
                     if !self.writeback {
-                        disk.flush().map_err(ExecuteError::Flush)?;
+                        disk.fsync().map_err(ExecuteError::Flush)?;
                     }
+                    offset += u64::from(*data_len);
                 }
-                RequestType::Flush => disk.flush().map_err(ExecuteError::Flush)?,
+                RequestType::Flush => disk.fsync().map_err(ExecuteError::Flush)?,
                 RequestType::GetDeviceId => {
                     if (*data_len as usize) < serial.len() {
                         return Err(ExecuteError::BadRequest(Error::InvalidOffset));
