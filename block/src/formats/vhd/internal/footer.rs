@@ -3,9 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io;
+use std::os::unix::fs::FileExt;
 
-use crate::AlignedFile;
+use crate::{AlignedFile, query_device_size};
 
 // Production code uses: cookie, file_format_version, data_offset,
 // current_size, disk_type. The remaining fields are parsed for VHD
@@ -32,10 +33,13 @@ pub struct VhdFooter {
 
 impl VhdFooter {
     pub fn new(file: &mut File) -> io::Result<VhdFooter> {
-        let mut aligned = AlignedFile::new(file.try_clone()?, true);
-        aligned.seek(SeekFrom::End(-512))?;
+        let aligned = AlignedFile::new(file.try_clone()?, true);
+        let size = query_device_size(file)?.0;
+        let footer_offset = size.checked_sub(512).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "file too small for VHD footer")
+        })?;
         let mut sector = [0u8; 512];
-        aligned.read_exact(&mut sector)?;
+        aligned.read_exact_at(&mut sector, footer_offset)?;
 
         Ok(VhdFooter {
             cookie: u64::from_be_bytes(sector[0..8].try_into().unwrap()),
