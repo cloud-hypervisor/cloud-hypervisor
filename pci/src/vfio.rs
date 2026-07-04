@@ -17,7 +17,7 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use byteorder::{ByteOrder, LittleEndian};
 use hypervisor::HypervisorVmError;
 use libc::{_SC_PAGESIZE, sysconf};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vfio_bindings::bindings::vfio::{
@@ -516,6 +516,8 @@ pub(crate) trait Vfio: Send + Sync {
     fn write_migration_data(&self, _data: &[u8]) -> Result<(), VfioError> {
         Err(VfioError::NoMigrationSupport)
     }
+
+    fn reset(&self) {}
 }
 
 struct VfioDeviceWrapper {
@@ -581,6 +583,10 @@ impl Vfio for VfioDeviceWrapper {
         self.device
             .write_migration_data(data)
             .map_err(VfioError::KernelVfio)
+    }
+
+    fn reset(&self) {
+        self.device.reset();
     }
 }
 
@@ -1618,6 +1624,12 @@ impl VfioCommon {
                 .map_err(|e| VfioPciError::RestoreMigration(anyhow!("{e}")))?;
         }
 
+        self.sync_command_and_interrupts()?;
+
+        Ok(())
+    }
+
+    fn sync_command_and_interrupts(&self) -> Result<(), VfioPciError> {
         // Push PCI_COMMAND to the device. State replay updates the shadow config
         // space but not the device, so memory decode and bus mastering would
         // otherwise stay disabled after restore.
@@ -1642,28 +1654,60 @@ impl VfioCommon {
         Ok(())
     }
 
-    pub(crate) fn transition_migration_state(
-        &self,
-        target: VfioMigrationState,
-    ) -> anyhow::Result<()> {
+    fn transition_migration_state(&self, target: VfioMigrationState) -> anyhow::Result<()> {
         debug!("VFIO migration transition -> {target:?}");
         self.vfio_wrapper
             .set_migration_state(target)
             .map_err(|e| anyhow!("VFIO set_migration_state({target:?}) failed: {e}"))
     }
 
+    fn reset_and_rearm(&self) {
+        self.vfio_wrapper.reset();
+        // The reset returns the device to RUNNING. Reapply PCI_COMMAND and the
+        // interrupt eventfds the same way the restore path does.
+        if let Err(e) = self.sync_command_and_interrupts() {
+            error!("VFIO device rearm after reset failed: {e}");
+        }
+    }
+
+    // A failed set can leave the device anywhere along the transition path
+    // including ERROR, where only a reset recovers. Attempt the recovery
+    // state first when the caller names one, otherwise reset directly.
+    // The original error is propagated either way.
+    pub(crate) fn transition_migration_state_with_recovery(
+        &self,
+        target: VfioMigrationState,
+        recover: Option<VfioMigrationState>,
+    ) -> anyhow::Result<()> {
+        let Err(err) = self.transition_migration_state(target) else {
+            return Ok(());
+        };
+
+        if let Some(state) = recover
+            && self.transition_migration_state(state).is_ok()
+        {
+            return Err(err);
+        }
+
+        warn!("VFIO device in indeterminate migration state, resetting");
+        self.reset_and_rearm();
+        Err(err)
+    }
+
     pub(crate) fn save_migration_data(&self) -> Result<Vec<u8>, MigratableError> {
-        self.transition_migration_state(VfioMigrationState::StopCopy)
-            .map_err(MigratableError::Snapshot)?;
+        self.transition_migration_state_with_recovery(
+            VfioMigrationState::StopCopy,
+            Some(VfioMigrationState::Stop),
+        )
+        .map_err(MigratableError::Snapshot)?;
 
         let data = self.vfio_wrapper.read_migration_data();
 
         // We entered STOP_COPY successfully, so the STOP_COPY to STOP arc is
         // valid whether or not the read succeeded. Return the device to STOP
-        // either way, since a failed transition into STOP_COPY would have
-        // returned above and a STOP from ERROR cannot help.
+        // either way and reset it if even that fails.
         let stop = self
-            .transition_migration_state(VfioMigrationState::Stop)
+            .transition_migration_state_with_recovery(VfioMigrationState::Stop, None)
             .map_err(MigratableError::Snapshot);
 
         let data = data.map_err(|e| {
@@ -1675,20 +1719,21 @@ impl VfioCommon {
 
     pub(crate) fn load_migration_data(&self, data: &[u8]) -> Result<(), MigratableError> {
         // Leave the device in RESUMING and resume() drives it back to RUNNING.
-        let result = (|| -> Result<(), MigratableError> {
-            self.transition_migration_state(VfioMigrationState::Resuming)
-                .map_err(MigratableError::Restore)?;
+        self.transition_migration_state_with_recovery(
+            VfioMigrationState::Resuming,
+            Some(VfioMigrationState::Stop),
+        )
+        .map_err(MigratableError::Restore)?;
 
-            self.vfio_wrapper.write_migration_data(data).map_err(|e| {
-                MigratableError::Restore(anyhow!("VFIO migration data write failed: {e}"))
-            })?;
-            Ok(())
-        })();
-
-        if result.is_err() {
-            let _ = self.transition_migration_state(VfioMigrationState::Stop);
+        // A failed write leaves an incomplete RESUMING session, which the uAPI
+        // only allows aborting with a reset, so reset directly.
+        if let Err(e) = self.vfio_wrapper.write_migration_data(data) {
+            self.reset_and_rearm();
+            return Err(MigratableError::Restore(anyhow!(
+                "VFIO migration data write failed: {e}"
+            )));
         }
-        result
+        Ok(())
     }
 }
 
@@ -2336,7 +2381,7 @@ impl Pausable for VfioPciDevice {
     fn pause(&mut self) -> result::Result<(), MigratableError> {
         if self.common.migration_flags.is_some() {
             self.common
-                .transition_migration_state(VfioMigrationState::Stop)
+                .transition_migration_state_with_recovery(VfioMigrationState::Stop, None)
                 .map_err(MigratableError::Pause)?;
         }
         Ok(())
@@ -2345,7 +2390,7 @@ impl Pausable for VfioPciDevice {
     fn resume(&mut self) -> result::Result<(), MigratableError> {
         if self.common.migration_flags.is_some() {
             self.common
-                .transition_migration_state(VfioMigrationState::Running)
+                .transition_migration_state_with_recovery(VfioMigrationState::Running, None)
                 .map_err(MigratableError::Resume)?;
         }
         Ok(())
@@ -2514,8 +2559,10 @@ mod tests {
         transitions: Vec<VfioMigrationState>,
         save_blob: Vec<u8>,
         loaded: Vec<u8>,
-        fail_at: Option<VfioMigrationState>,
+        fail_at: Vec<VfioMigrationState>,
         fail_read: bool,
+        fail_write: bool,
+        resets: u32,
     }
 
     struct MockVfio {
@@ -2523,36 +2570,34 @@ mod tests {
     }
 
     impl MockVfio {
-        fn for_save(blob: Vec<u8>) -> Arc<Self> {
+        fn with_state(state: MockVfioState) -> Arc<Self> {
             Arc::new(Self {
-                state: Mutex::new(MockVfioState {
-                    save_blob: blob,
-                    ..Default::default()
-                }),
+                state: Mutex::new(state),
+            })
+        }
+
+        fn for_save(blob: Vec<u8>) -> Arc<Self> {
+            Self::with_state(MockVfioState {
+                save_blob: blob,
+                ..Default::default()
             })
         }
 
         fn for_load() -> Arc<Self> {
-            Arc::new(Self {
-                state: Mutex::new(MockVfioState::default()),
-            })
+            Self::with_state(MockVfioState::default())
         }
 
-        fn failing_at(target: VfioMigrationState) -> Arc<Self> {
-            Arc::new(Self {
-                state: Mutex::new(MockVfioState {
-                    fail_at: Some(target),
-                    ..Default::default()
-                }),
+        fn failing_at(targets: &[VfioMigrationState]) -> Arc<Self> {
+            Self::with_state(MockVfioState {
+                fail_at: targets.to_vec(),
+                ..Default::default()
             })
         }
 
         fn failing_read() -> Arc<Self> {
-            Arc::new(Self {
-                state: Mutex::new(MockVfioState {
-                    fail_read: true,
-                    ..Default::default()
-                }),
+            Self::with_state(MockVfioState {
+                fail_read: true,
+                ..Default::default()
             })
         }
 
@@ -2563,13 +2608,17 @@ mod tests {
         fn loaded(&self) -> Vec<u8> {
             self.state.lock().unwrap().loaded.clone()
         }
+
+        fn resets(&self) -> u32 {
+            self.state.lock().unwrap().resets
+        }
     }
 
     impl Vfio for MockVfio {
         fn set_migration_state(&self, state: VfioMigrationState) -> Result<(), VfioError> {
             let mut s = self.state.lock().unwrap();
             s.transitions.push(state);
-            if s.fail_at == Some(state) {
+            if s.fail_at.contains(&state) {
                 return Err(VfioError::NoMigrationSupport);
             }
             Ok(())
@@ -2584,8 +2633,16 @@ mod tests {
         }
 
         fn write_migration_data(&self, data: &[u8]) -> Result<(), VfioError> {
-            self.state.lock().unwrap().loaded.extend_from_slice(data);
+            let mut s = self.state.lock().unwrap();
+            if s.fail_write {
+                return Err(VfioError::NoMigrationSupport);
+            }
+            s.loaded.extend_from_slice(data);
             Ok(())
+        }
+
+        fn reset(&self) {
+            self.state.lock().unwrap().resets += 1;
         }
 
         fn region_write(&self, _index: u32, _offset: u64, _data: &[u8]) {}
@@ -2648,13 +2705,31 @@ mod tests {
     }
 
     #[test]
-    fn save_migration_data_stop_copy_failure_does_not_attempt_stop() {
-        let mock = MockVfio::failing_at(VfioMigrationState::StopCopy);
+    fn save_migration_data_stop_copy_failure_recovers_to_stop() {
+        let mock = MockVfio::failing_at(&[VfioMigrationState::StopCopy]);
         let common = test_vfio_common(mock.clone(), Some(1));
         let err = common.save_migration_data().unwrap_err();
         assert!(matches!(err, MigratableError::Snapshot(_)));
-        // Entering STOP_COPY failed, so no STOP is attempted afterwards.
-        assert_eq!(mock.transitions(), vec![VfioMigrationState::StopCopy]);
+        // Entering STOP_COPY failed, so STOP is attempted as recovery.
+        assert_eq!(
+            mock.transitions(),
+            vec![VfioMigrationState::StopCopy, VfioMigrationState::Stop]
+        );
+        assert_eq!(mock.resets(), 0);
+    }
+
+    #[test]
+    fn save_migration_data_stop_copy_and_stop_failure_resets() {
+        let mock = MockVfio::failing_at(&[VfioMigrationState::StopCopy, VfioMigrationState::Stop]);
+        let common = test_vfio_common(mock.clone(), Some(1));
+        let err = common.save_migration_data().unwrap_err();
+        assert!(matches!(err, MigratableError::Snapshot(_)));
+        // The recovery STOP failed too, so the device is reset.
+        assert_eq!(
+            mock.transitions(),
+            vec![VfioMigrationState::StopCopy, VfioMigrationState::Stop]
+        );
+        assert_eq!(mock.resets(), 1);
     }
 
     #[test]
@@ -2668,6 +2743,26 @@ mod tests {
             mock.transitions(),
             vec![VfioMigrationState::StopCopy, VfioMigrationState::Stop]
         );
+        assert_eq!(mock.resets(), 0);
+    }
+
+    #[test]
+    fn save_migration_data_read_and_stop_failure_resets() {
+        let mock = MockVfio::with_state(MockVfioState {
+            fail_read: true,
+            fail_at: vec![VfioMigrationState::Stop],
+            ..Default::default()
+        });
+        let common = test_vfio_common(mock.clone(), Some(1));
+        let err = common.save_migration_data().unwrap_err();
+        assert!(matches!(err, MigratableError::Snapshot(_)));
+        // The return to STOP after the failed read has no recovery state,
+        // so its failure resets the device directly.
+        assert_eq!(
+            mock.transitions(),
+            vec![VfioMigrationState::StopCopy, VfioMigrationState::Stop]
+        );
+        assert_eq!(mock.resets(), 1);
     }
 
     #[test]
@@ -2683,7 +2778,7 @@ mod tests {
 
     #[test]
     fn load_migration_data_recovers_on_failure() {
-        let mock = MockVfio::failing_at(VfioMigrationState::Resuming);
+        let mock = MockVfio::failing_at(&[VfioMigrationState::Resuming]);
         let common = test_vfio_common(mock.clone(), Some(1));
         let err = common.load_migration_data(b"ignored").unwrap_err();
         assert!(matches!(err, MigratableError::Restore(_)));
@@ -2691,6 +2786,49 @@ mod tests {
             mock.transitions(),
             vec![VfioMigrationState::Resuming, VfioMigrationState::Stop]
         );
+        assert_eq!(mock.resets(), 0);
+    }
+
+    #[test]
+    fn load_migration_data_resuming_and_stop_failure_resets() {
+        let mock = MockVfio::failing_at(&[VfioMigrationState::Resuming, VfioMigrationState::Stop]);
+        let common = test_vfio_common(mock.clone(), Some(1));
+        let err = common.load_migration_data(b"ignored").unwrap_err();
+        assert!(matches!(err, MigratableError::Restore(_)));
+        assert_eq!(
+            mock.transitions(),
+            vec![VfioMigrationState::Resuming, VfioMigrationState::Stop]
+        );
+        assert_eq!(mock.resets(), 1);
+    }
+
+    #[test]
+    fn load_migration_data_write_failure_resets() {
+        let mock = MockVfio::with_state(MockVfioState {
+            fail_write: true,
+            ..Default::default()
+        });
+        let common = test_vfio_common(mock.clone(), Some(1));
+        let err = common.load_migration_data(b"ignored").unwrap_err();
+        assert!(matches!(err, MigratableError::Restore(_)));
+        // A RESUMING session can only be aborted by a reset, so a failed write
+        // resets directly rather than attempting STOP.
+        assert_eq!(mock.transitions(), vec![VfioMigrationState::Resuming]);
+        assert_eq!(mock.resets(), 1);
+    }
+
+    // pause() and resume() name no recovery state, so a failed transition
+    // resets the device directly.
+    #[test]
+    fn transition_without_recovery_state_resets() {
+        let mock = MockVfio::failing_at(&[VfioMigrationState::Running]);
+        let common = test_vfio_common(mock.clone(), Some(1));
+        let err = common
+            .transition_migration_state_with_recovery(VfioMigrationState::Running, None)
+            .unwrap_err();
+        assert!(err.to_string().contains("Running"));
+        assert_eq!(mock.transitions(), vec![VfioMigrationState::Running]);
+        assert_eq!(mock.resets(), 1);
     }
 
     // A snapshot with migration state restored onto a device without migration
