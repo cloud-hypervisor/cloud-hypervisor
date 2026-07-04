@@ -77,7 +77,7 @@ impl GenericVhostUser {
 
         // Connect to the vhost-user socket.
         let mut vu =
-            VhostUserHandle::connect_vhost_user(false, path, num_queues as u64, false, None)?;
+            VhostUserHandle::connect_vhost_user(false, path, num_queues as u64, false, &exit_evt)?;
 
         let (
             avail_features,
