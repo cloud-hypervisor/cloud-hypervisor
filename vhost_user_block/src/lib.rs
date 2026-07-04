@@ -9,7 +9,6 @@
 // SPDX-License-Identifier: (Apache-2.0 AND BSD-3-Clause)
 
 use std::fs::{File, OpenOptions};
-use std::io::{Seek, SeekFrom};
 use std::ops::Deref;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{FromRawFd, IntoRawFd};
@@ -19,7 +18,9 @@ use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 use std::time::Instant;
 use std::{convert, io, process, result};
 
-use block::{AlignedFile, Request, RequestType, VirtioBlockConfig, build_serial};
+use block::{
+    AlignedFile, Request, RequestType, VirtioBlockConfig, build_serial, query_device_size,
+};
 use libc::EFD_NONBLOCK;
 use log::{debug, error, info, warn};
 use option_parser::{OptionParser, OptionParserError, Toggle};
@@ -234,7 +235,7 @@ impl VhostUserBlkBackend {
         let serial = build_serial(&PathBuf::from(&image_path));
         let image = Arc::new(Mutex::new(raw_img));
 
-        let nsectors = (image.lock().unwrap().seek(SeekFrom::End(0)).unwrap()) / SECTOR_SIZE;
+        let nsectors = query_device_size(image.lock().unwrap().file()).unwrap().0 / SECTOR_SIZE;
         let config = VirtioBlockConfig {
             capacity: nsectors,
             blk_size: BLK_SIZE,
