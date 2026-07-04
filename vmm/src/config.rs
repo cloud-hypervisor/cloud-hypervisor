@@ -2816,7 +2816,7 @@ pub struct RestoredVfioConfig {
     pub fd: Option<i32>,
 }
 
-fn deserialize_restored_fd<'de, D>(d: D) -> result::Result<Option<i32>, D::Error>
+pub(crate) fn deserialize_restored_fd<'de, D>(d: D) -> result::Result<Option<i32>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {

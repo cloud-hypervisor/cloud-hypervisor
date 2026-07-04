@@ -52,8 +52,8 @@ use crate::api::{
     AddDisk, ApiAction, ApiError, ApiRequest, DeviceConfig, NetConfig, VmAddDevice, VmAddFs,
     VmAddGenericVhostUser, VmAddNet, VmAddPmem, VmAddUserDevice, VmAddVdpa, VmAddVsock, VmBoot,
     VmConfig, VmCounters, VmDelete, VmNmi, VmPause, VmPowerButton, VmReboot, VmReceiveMigration,
-    VmRemoveDevice, VmResize, VmResizeDisk, VmResizeZone, VmRestore, VmResume, VmSendMigration,
-    VmShutdown, VmSnapshot,
+    VmReceiveMigrationData, VmRemoveDevice, VmResize, VmResizeDisk, VmResizeZone, VmRestore,
+    VmResume, VmSendMigration, VmShutdown, VmSnapshot,
 };
 use crate::config::RestoreConfig;
 use crate::cpu::Error as CpuError;
@@ -484,7 +484,6 @@ vm_action_put_handler_body!(VmRemoveDevice);
 vm_action_put_handler_body!(VmResizeDisk);
 vm_action_put_handler_body!(VmResizeZone);
 vm_action_put_handler_body!(VmSnapshot);
-vm_action_put_handler_body!(VmReceiveMigration);
 vm_action_put_handler_body!(VmSendMigration);
 
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -625,6 +624,54 @@ impl PutHandler for VmRestore {
 }
 
 impl GetHandler for VmRestore {}
+
+// Custom handler so the SCM_RIGHTS file pool can be split the same way
+// VmRestore does, cdev FDs for the vfio_fds entries then the iommufd FD.
+impl PutHandler for VmReceiveMigration {
+    fn handle_request(
+        &'static self,
+        api_notifier: EventFd,
+        api_sender: Sender<ApiRequest>,
+        body: &Option<Body>,
+        files: Vec<File>,
+    ) -> result::Result<Option<Body>, HttpError> {
+        if let Some(body) = body {
+            let mut data: VmReceiveMigrationData = serde_json::from_slice(body.raw())?;
+
+            let vfio_total = data.vfio_fds.as_ref().map_or(0, |c| c.len());
+            let expected = if data.vfio_fds.is_some() {
+                vfio_total + 1
+            } else {
+                0
+            };
+            if files.len() != expected {
+                error!(
+                    "Expected {expected} FDs in VmReceiveMigration request, received {}",
+                    files.len()
+                );
+                return Err(HttpError::BadRequest);
+            }
+
+            // Split in the order vfio_fds, then the iommufd FD.
+            let mut files = files;
+            if let Some(cfgs) = data.vfio_fds.as_mut() {
+                let vfio_files: Vec<File> = files.drain(..vfio_total).collect();
+                let mut cfgs = cfgs.iter_mut().collect::<Vec<&mut _>>();
+                attach_fds_to_cfgs(vfio_files, cfgs.as_mut_slice())?;
+            }
+            if data.vfio_fds.is_some() {
+                data.iommufd_fd = Some(files.remove(0).into_raw_fd());
+            }
+
+            self.send(api_notifier, api_sender, data)
+                .map_err(HttpError::ApiError)
+        } else {
+            Err(HttpError::BadRequest)
+        }
+    }
+}
+
+impl GetHandler for VmReceiveMigration {}
 
 // Common handler for boot, shutdown and reboot
 pub struct VmActionHandler {
