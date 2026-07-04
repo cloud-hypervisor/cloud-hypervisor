@@ -531,18 +531,19 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
                 .map_err(Error::HttpApiClient)
         }
         Some("receive-migration") => {
-            let receive_migration_data = receive_migration_data(
+            let (receive_migration_data, fds) = receive_migration_data(
                 matches
                     .subcommand_matches("receive-migration")
                     .unwrap()
                     .get_one::<String>("receive_migration_config")
                     .unwrap(),
             )?;
-            simple_api_command(
+            simple_api_command_with_fds(
                 socket,
                 "PUT",
                 "receive-migration",
                 Some(&receive_migration_data),
+                &fds,
             )
             .map_err(Error::HttpApiClient)
         }
@@ -750,7 +751,7 @@ fn dbus_api_do_command(matches: &ArgMatches, proxy: &DBusApi1ProxyBlocking<'_>) 
             proxy.api_vm_send_migration(&send_migration_data)
         }
         Some("receive-migration") => {
-            let receive_migration_data = receive_migration_data(
+            let (receive_migration_data, _fds) = receive_migration_data(
                 matches
                     .subcommand_matches("receive-migration")
                     .unwrap()
@@ -962,10 +963,21 @@ fn coredump_config(destination_url: &str) -> String {
     serde_json::to_string(&coredump_config).unwrap()
 }
 
-fn receive_migration_data(config: &str) -> Result<String, Error> {
-    let receive_migration_data =
+fn receive_migration_data(config: &str) -> Result<(String, Vec<i32>), Error> {
+    let mut data =
         api::VmReceiveMigrationData::parse(config).map_err(Error::ReceiveMigrationConfig)?;
-    Ok(serde_json::to_string(&receive_migration_data).unwrap())
+
+    // The FDs are passed to the server side process via SCM_RIGHTS, in the
+    // order vfio_fds then the iommufd FD, matching the server's split.
+    let mut fds: Vec<i32> = match data.vfio_fds.as_mut() {
+        Some(vfio_fds) => vfio_fds.iter_mut().filter_map(|v| v.fd.take()).collect(),
+        None => Vec::new(),
+    };
+    if let Some(iommufd_fd) = data.iommufd_fd.take() {
+        fds.push(iommufd_fd);
+    }
+
+    Ok((serde_json::to_string(&data).unwrap(), fds))
 }
 
 fn send_migration_data(config: &str) -> Result<String, Error> {

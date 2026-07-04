@@ -33,6 +33,7 @@
 pub mod dbus;
 pub mod http;
 
+use std::collections::HashSet;
 use std::io;
 use std::num::{NonZeroU32, NonZeroU64};
 use std::path::PathBuf;
@@ -42,7 +43,7 @@ use std::time::Duration;
 
 use log::info;
 use micro_http::Body;
-use option_parser::{OptionParser, OptionParserError, Toggle};
+use option_parser::{OptionParser, OptionParserError, Toggle, Tuple, TupleList};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_migration::MigratableError;
@@ -53,7 +54,7 @@ use vmm_sys_util::eventfd::EventFd;
 pub use self::dbus::start_dbus_thread;
 pub use self::http::{start_http_fd_thread, start_http_path_thread};
 use crate::Error as VmmError;
-use crate::config::RestoreConfig;
+use crate::config::{RestoreConfig, RestoredVfioConfig, deserialize_restored_fd};
 use crate::device_tree::DeviceTree;
 use crate::migration::transport::{
     MAX_MIGRATION_CONNECTIONS, TcpAddressParseError, tcp_address_to_server_name,
@@ -311,6 +312,13 @@ pub struct VmReceiveMigrationData {
     /// Memory transfer mode.
     #[serde(default)]
     pub memory_mode: MigrationMode,
+    /// Optional VFIO device id to cdev FD pairs, used to substitute each
+    /// device's saved path or stale FD in the received VmConfig.
+    #[serde(default)]
+    pub vfio_fds: Option<Vec<RestoredVfioConfig>>,
+    // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
+    #[serde(default, deserialize_with = "deserialize_restored_fd")]
+    pub iommufd_fd: Option<i32>,
 }
 
 #[derive(Debug, Error)]
@@ -324,11 +332,17 @@ pub enum VmReceiveMigrationConfigError {
 
 impl VmReceiveMigrationData {
     pub const SYNTAX: &'static str = "VM receive migration parameters \
-        \"<receiver_url>\" or \"receiver_url=<url>[,tls_dir=<path>][,memory_mode=precopy|postcopy]\"";
+        \"<receiver_url>\" or \"receiver_url=<url>[,tls_dir=<path>][,memory_mode=precopy|postcopy]\
+        [,vfio_fds=<list_of_vfio_ids_with_their_associated_fd>][,iommufd_fd=<fd>]\"";
 
     pub fn parse(migration: &str) -> Result<Self, VmReceiveMigrationConfigError> {
         let mut parser = OptionParser::new();
-        parser.add("receiver_url").add("tls_dir").add("memory_mode");
+        parser
+            .add("receiver_url")
+            .add("tls_dir")
+            .add("memory_mode")
+            .add("vfio_fds")
+            .add("iommufd_fd");
         parser
             .parse(migration)
             .map_err(VmReceiveMigrationConfigError::ParseError)?;
@@ -346,11 +360,27 @@ impl VmReceiveMigrationData {
             .convert::<MigrationMode>("memory_mode")
             .map_err(VmReceiveMigrationConfigError::ParseError)?
             .unwrap_or_default();
+        let vfio_fds = parser
+            .convert::<TupleList<String, u64>>("vfio_fds")
+            .map_err(VmReceiveMigrationConfigError::ParseError)?
+            .map(|v| {
+                v.0.iter()
+                    .map(|Tuple(id, fd)| RestoredVfioConfig {
+                        id: id.clone(),
+                        fd: Some(*fd as i32),
+                    })
+                    .collect()
+            });
+        let iommufd_fd = parser
+            .convert::<i32>("iommufd_fd")
+            .map_err(VmReceiveMigrationConfigError::ParseError)?;
 
         let data = Self {
             receiver_url,
             tls_dir,
             memory_mode,
+            vfio_fds,
+            iommufd_fd,
         };
 
         data.validate()?;
@@ -387,6 +417,75 @@ impl VmReceiveMigrationData {
                     "invalid TLS configuration for receive-migration: {e}"
                 ))
             })?;
+        }
+
+        Ok(())
+    }
+
+    pub fn validate_vfio_fds(
+        &self,
+        vm_config: &VmConfig,
+    ) -> Result<(), VmReceiveMigrationConfigError> {
+        let vfio_fds = self.vfio_fds.as_deref().unwrap_or_default();
+
+        // A migrated VFIO device cannot reuse its source handle. Its fd is
+        // invalid across the migration and its path names the source host's
+        // topology, so every device needs a replacement in vfio_fds. This
+        // holds even when no vfio_fds are supplied at all.
+        let substituted: HashSet<&str> = vfio_fds.iter().map(|v| v.id.as_str()).collect();
+        for d in vm_config.devices.iter().flatten() {
+            if !d
+                .pci_common
+                .id
+                .as_deref()
+                .is_some_and(|id| substituted.contains(id))
+            {
+                return Err(VmReceiveMigrationConfigError::ValidationError(format!(
+                    "VFIO device '{}' has no replacement in vfio_fds, its source path or fd is not usable on the destination",
+                    d.pci_common.id.as_deref().unwrap_or_default()
+                )));
+            }
+        }
+
+        if vfio_fds.is_empty() {
+            return Ok(());
+        }
+
+        // The supplied vfio_fds must be usable against the received VmConfig.
+        if self.iommufd_fd.is_none() {
+            return Err(VmReceiveMigrationConfigError::ValidationError(
+                "vfio_fds requires iommufd_fd".to_string(),
+            ));
+        }
+        if !vm_config.platform.as_ref().is_some_and(|p| p.iommufd) {
+            return Err(VmReceiveMigrationConfigError::ValidationError(
+                "vfio_fds requires platform iommufd=on in the received VmConfig".to_string(),
+            ));
+        }
+
+        let mut seen = HashSet::new();
+        for v in vfio_fds {
+            if !seen.insert(v.id.as_str()) {
+                return Err(VmReceiveMigrationConfigError::ValidationError(format!(
+                    "duplicate vfio_fds id '{}'",
+                    v.id
+                )));
+            }
+        }
+
+        let known_ids: HashSet<&str> = vm_config
+            .devices
+            .iter()
+            .flatten()
+            .filter_map(|d| d.pci_common.id.as_deref())
+            .collect();
+        for v in vfio_fds {
+            if !known_ids.contains(v.id.as_str()) {
+                return Err(VmReceiveMigrationConfigError::ValidationError(format!(
+                    "vfio_fds id '{}' does not match any device in the received VmConfig",
+                    v.id
+                )));
+            }
         }
 
         Ok(())
@@ -1988,6 +2087,8 @@ mod unit_tests {
                 receiver_url: "tcp:192.168.1.1:8080".to_string(),
                 tls_dir: None,
                 memory_mode: MigrationMode::Precopy,
+                vfio_fds: None,
+                iommufd_fd: None,
             }
         );
 
@@ -2015,6 +2116,8 @@ mod unit_tests {
                 receiver_url: "tcp:192.168.1.1:8080".to_string(),
                 tls_dir: Some(tls_dir_path),
                 memory_mode: MigrationMode::Precopy,
+                vfio_fds: None,
+                iommufd_fd: None,
             }
         );
 
@@ -2038,6 +2141,8 @@ mod unit_tests {
                 receiver_url: "tcp:127.0.0.1:1234".to_string(),
                 tls_dir: None,
                 memory_mode: MigrationMode::Precopy,
+                vfio_fds: None,
+                iommufd_fd: None,
             }
         );
 
@@ -2051,11 +2156,33 @@ mod unit_tests {
                 receiver_url: "unix:/tmp/sock".to_string(),
                 tls_dir: None,
                 memory_mode: MigrationMode::Postcopy,
+                vfio_fds: None,
+                iommufd_fd: None,
             }
         );
 
         // Missing receiver_url in keyed form must fail.
         VmReceiveMigrationData::parse("memory_mode=postcopy").unwrap_err();
+
+        // vfio_fds without iommufd_fd parses fine now, the pairing is checked
+        // later against the received VmConfig by validate_vfio_fds.
+        let data =
+            VmReceiveMigrationData::parse("receiver_url=tcp:127.0.0.1:1234,vfio_fds=[vfio0@5]")
+                .unwrap();
+        assert!(data.iommufd_fd.is_none());
+
+        // vfio_fds entries with the iommufd FD.
+        let data = VmReceiveMigrationData::parse(
+            "receiver_url=tcp:127.0.0.1:1234,vfio_fds=[vfio0@5,vfio1@7],iommufd_fd=9",
+        )
+        .unwrap();
+        let fds = data.vfio_fds.expect("vfio_fds populated");
+        assert_eq!(fds.len(), 2);
+        assert_eq!(fds[0].id, "vfio0");
+        assert_eq!(fds[0].fd, Some(5));
+        assert_eq!(fds[1].id, "vfio1");
+        assert_eq!(fds[1].fd, Some(7));
+        assert_eq!(data.iommufd_fd, Some(9));
     }
 
     #[test]
