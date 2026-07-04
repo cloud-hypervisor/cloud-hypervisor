@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fs::{File, Metadata};
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io;
 use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::fs::FileExt;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -13,7 +13,7 @@ use vmm_sys_util::seek_hole::SeekHole;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
 use crate::aligned_buffer::AlignedBuffer;
-use crate::{SECTOR_SIZE, probe_direct_alignment, query_device_size};
+use crate::{SECTOR_SIZE, probe_direct_alignment};
 
 /// True when `buf_ptr`/`len`/`offset` already satisfy `alignment`
 /// (`alignment == 0` means no O_DIRECT, so everything is "aligned").
@@ -33,7 +33,6 @@ fn is_aligned(alignment: usize, buf_ptr: usize, len: usize, offset: u64) -> bool
 pub struct AlignedFile {
     file: File,
     alignment: usize,
-    position: u64,
 }
 
 impl AlignedFile {
@@ -44,11 +43,7 @@ impl AlignedFile {
         } else {
             0
         };
-        AlignedFile {
-            file,
-            alignment,
-            position: 0,
-        }
+        AlignedFile { file, alignment }
     }
 
     pub fn alignment(&self) -> usize {
@@ -67,7 +62,6 @@ impl AlignedFile {
         Ok(AlignedFile {
             file: self.file.try_clone()?,
             alignment: self.alignment,
-            position: self.position,
         })
     }
 
@@ -105,11 +99,7 @@ impl AlignedFile {
     /// tests to force the bounce/RMW path without a real O_DIRECT fd.
     #[cfg(test)]
     pub fn with_alignment(file: File, alignment: usize) -> Self {
-        AlignedFile {
-            file,
-            alignment,
-            position: 0,
-        }
+        AlignedFile { file, alignment }
     }
 
     /// Read `len` bytes at `offset` through an aligned bounce buffer.
@@ -168,44 +158,6 @@ impl FileExt for AlignedFile {
     }
 }
 
-impl Read for AlignedFile {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let n = self.read_at(buf, self.position)?;
-        self.position += n as u64;
-        Ok(n)
-    }
-}
-
-impl Write for AlignedFile {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let n = self.write_at(buf, self.position)?;
-        self.position += n as u64;
-        Ok(n)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.file.sync_all()
-    }
-}
-
-impl Seek for AlignedFile {
-    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
-        let newpos = match pos {
-            SeekFrom::Start(o) => o,
-            SeekFrom::Current(d) => self
-                .position
-                .checked_add_signed(d)
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid seek"))?,
-            SeekFrom::End(d) => query_device_size(&self.file)?
-                .0
-                .checked_add_signed(d)
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid seek"))?,
-        };
-        self.position = newpos;
-        Ok(newpos)
-    }
-}
-
 impl WriteZeroesAt for AlignedFile {
     fn write_zeroes_at(&mut self, offset: u64, length: usize) -> io::Result<usize> {
         self.file.write_zeroes_at(offset, length)
@@ -226,27 +178,11 @@ impl FileSync for AlignedFile {
 
 impl SeekHole for AlignedFile {
     fn seek_hole(&mut self, offset: u64) -> io::Result<Option<u64>> {
-        match self.file.seek_hole(offset) {
-            Ok(pos) => {
-                if let Some(p) = pos {
-                    self.position = p;
-                }
-                Ok(pos)
-            }
-            Err(e) => Err(e),
-        }
+        self.file.seek_hole(offset)
     }
 
     fn seek_data(&mut self, offset: u64) -> io::Result<Option<u64>> {
-        match self.file.seek_data(offset) {
-            Ok(pos) => {
-                if let Some(p) = pos {
-                    self.position = p;
-                }
-                Ok(pos)
-            }
-            Err(e) => Err(e),
-        }
+        self.file.seek_data(offset)
     }
 }
 
@@ -270,7 +206,7 @@ impl AsFd for AlignedFile {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Read, Seek, SeekFrom, Write};
+    use std::io::Write;
     use std::os::unix::fs::FileExt;
 
     use vmm_sys_util::tempfile::TempFile;
@@ -286,11 +222,7 @@ mod tests {
     }
 
     fn forced(file: File, alignment: usize) -> AlignedFile {
-        AlignedFile {
-            file,
-            alignment,
-            position: 0,
-        }
+        AlignedFile { file, alignment }
     }
 
     #[test]
@@ -360,46 +292,20 @@ mod tests {
     }
 
     #[test]
-    fn test_unaligned_read_returns_short_read_at_eof() {
-        let file_size = 100usize;
-        let tf = pattern_file(file_size);
-        let mut af = forced(tf.as_file().try_clone().unwrap(), 512);
-        af.seek(SeekFrom::Start(10)).unwrap();
-
-        let mut buf = vec![0u8; 200];
-        let bytes_read = af.read(&mut buf).unwrap();
-
-        let expected: Vec<u8> = (10..file_size).map(|i| (i % 251) as u8).collect();
-        assert_eq!(bytes_read, expected.len());
-        assert_eq!(&buf[..bytes_read], &expected[..]);
-        assert_eq!(af.position, file_size as u64);
-    }
-
-    #[test]
     fn test_unaligned_read_beyond_eof_returns_zero() {
         let tf = pattern_file(100);
-        let mut af = forced(tf.as_file().try_clone().unwrap(), 512);
-        af.seek(SeekFrom::Start(200)).unwrap();
-
+        let af = forced(tf.as_file().try_clone().unwrap(), 512);
         let mut buf = vec![0u8; 16];
-        let bytes_read = af.read(&mut buf).unwrap();
-
-        assert_eq!(bytes_read, 0);
-        assert_eq!(af.position, 200);
+        assert_eq!(af.read_at(&mut buf, 200).unwrap(), 0);
     }
 
     #[test]
     fn test_unaligned_write_extends_at_eof() {
         let file_size = 100usize;
         let tf = pattern_file(file_size);
-        let mut af = forced(tf.as_file().try_clone().unwrap(), 512);
-        af.seek(SeekFrom::Start(file_size as u64)).unwrap();
-
+        let af = forced(tf.as_file().try_clone().unwrap(), 512);
         let data = b"xyz";
-        let bytes_written = af.write(data).unwrap();
-
-        assert_eq!(bytes_written, data.len());
-        assert_eq!(af.position, (file_size + data.len()) as u64);
+        assert_eq!(af.write_at(data, file_size as u64).unwrap(), data.len());
 
         let mut readback = vec![0u8; file_size + data.len()];
         tf.as_file().read_exact_at(&mut readback, 0).unwrap();
@@ -411,13 +317,10 @@ mod tests {
     #[test]
     fn test_empty_unaligned_io_is_noop() {
         let tf = pattern_file(100);
-        let mut af = forced(tf.as_file().try_clone().unwrap(), 512);
-        af.seek(SeekFrom::Start(1)).unwrap();
-
+        let af = forced(tf.as_file().try_clone().unwrap(), 512);
         let mut read_buf = [];
-        assert_eq!(af.read(&mut read_buf).unwrap(), 0);
-        assert_eq!(af.write(&[]).unwrap(), 0);
-        assert_eq!(af.position, 1);
+        assert_eq!(af.read_at(&mut read_buf, 1).unwrap(), 0);
+        assert_eq!(af.write_at(&[], 1).unwrap(), 0);
     }
 
     #[test]
