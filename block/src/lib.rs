@@ -20,13 +20,12 @@ pub mod formats;
 mod sparse;
 use std::fmt::{self, Debug};
 use std::fs::{File, OpenOptions};
-use std::io::{self, Read};
 use std::os::linux::fs::MetadataExt;
-use std::os::unix::fs::FileTypeExt;
+use std::os::unix::fs::{FileExt, FileTypeExt};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::Path;
 use std::str::FromStr;
-use std::{cmp, mem, result};
+use std::{cmp, io, mem, result};
 
 pub use aligned_file::AlignedFile;
 use formats::qcow::internal as qcow;
@@ -539,10 +538,10 @@ pub fn open_disk_image(path: &Path, options: &OpenOptions) -> BlockResult<File> 
 
 /// Determine image type through file parsing.
 pub fn detect_image_type(f: &mut File) -> BlockResult<ImageType> {
-    let mut aligned = AlignedFile::new(f.try_clone()?, true);
+    let aligned = AlignedFile::new(f.try_clone()?, true);
     let mut block = vec![0u8; aligned.alignment()];
     aligned
-        .read_exact(&mut block)
+        .read_exact_at(&mut block, 0)
         .map_err(|e| BlockError::new(BlockErrorKind::Io, e).with_op(ErrorOp::DetectImageType))?;
 
     // Check 4 first bytes to get the header value and determine the image type
