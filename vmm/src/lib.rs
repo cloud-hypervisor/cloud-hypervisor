@@ -2374,6 +2374,32 @@ impl RequestHandler for Vmm {
                     }
                 }
 
+                // Swap each VFIO device's saved path or stale FD for the cdev
+                // FD received with the restore request, and install the fresh
+                // iommufd FD backing them. The one saved in the snapshot is
+                // stale, and validate() has confirmed both accompany vfio_fds.
+                if let Some(restored_vfios) = restore_cfg.vfio_fds {
+                    let mut config = vm_config.lock().unwrap();
+                    if let Some(vm_device_configs) = config.devices.as_mut() {
+                        for v in restored_vfios.iter() {
+                            for device_config in vm_device_configs.iter_mut() {
+                                if device_config.pci_common.id.as_ref() == Some(&v.id) {
+                                    device_config.path = None;
+                                    device_config.fd = v.fd;
+                                }
+                            }
+                        }
+                    }
+                    let iommufd_fd = restore_cfg
+                        .iommufd_fd
+                        .expect("restore validated an iommufd FD accompanies vfio_fds");
+                    config
+                        .platform
+                        .as_mut()
+                        .expect("restore validated iommufd=on, so a platform exists")
+                        .iommufd_fd = Some(iommufd_fd);
+                }
+
                 self.vm_restore(
                     source_url,
                     vm_config,

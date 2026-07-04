@@ -933,14 +933,22 @@ fn snapshot_config(url: &str) -> String {
 fn restore_config(config: &str) -> Result<(String, Vec<i32>), Error> {
     let mut restore_config = RestoreConfig::parse(config).map_err(Error::Restore)?;
     // RestoreConfig is modified on purpose to take out the file descriptors.
-    // These fds are passed to the server side process via SCM_RIGHTS
-    let fds = match &mut restore_config.net_fds {
+    // These fds are passed to the server side process via SCM_RIGHTS, in the
+    // order net_fds, then vfio_fds, then the iommufd FD, matching the
+    // server's split.
+    let mut fds: Vec<i32> = match &mut restore_config.net_fds {
         Some(net_fds) => net_fds
             .iter_mut()
             .flat_map(|net| net.fds.take().unwrap_or_default())
             .collect(),
         None => Vec::new(),
     };
+    if let Some(vfio_fds) = restore_config.vfio_fds.as_mut() {
+        fds.extend(vfio_fds.iter_mut().filter_map(|v| v.fd.take()));
+    }
+    if let Some(iommufd_fd) = restore_config.iommufd_fd.take() {
+        fds.push(iommufd_fd);
+    }
     let restore_config = serde_json::to_string(&restore_config).unwrap();
 
     Ok((restore_config, fds))
