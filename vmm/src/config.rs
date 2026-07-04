@@ -390,6 +390,12 @@ pub enum ValidationError {
     /// Number of FDs passed during Restore are incorrect to the NetConfig
     #[error("Number of Net FDs passed for '{0}' during Restore: {1}. Expected: {2}")]
     RestoreNetFdCountMismatch(String, usize, usize),
+    /// vfio_fds entry does not match any DeviceConfig.id in the snapshot
+    #[error("VFIO device id '{0}' in 'vfio_fds' does not match any device in the snapshot")]
+    RestoreUnknownVfioId(String),
+    /// A device saved with an FD has no replacement FD for the restore
+    #[error("VFIO device '{0}' was FD backed and needs a new fd in 'vfio_fds'")]
+    RestoreMissingVfioFd(String),
     /// Prefault cannot be combined with on-demand restore
     #[error("'prefault' cannot be combined with 'memory_restore_mode=ondemand'")]
     InvalidRestorePrefaultWithOnDemand,
@@ -2803,6 +2809,26 @@ impl FromStr for MemoryRestoreMode {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub struct RestoredVfioConfig {
+    pub id: String,
+    // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
+    #[serde(default, deserialize_with = "deserialize_restored_fd")]
+    pub fd: Option<i32>,
+}
+
+fn deserialize_restored_fd<'de, D>(d: D) -> result::Result<Option<i32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let invalid_fd: Option<i32> = Option::deserialize(d)?;
+    if invalid_fd.is_some() {
+        Ok(Some(-1))
+    } else {
+        Ok(None)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct RestoreConfig {
     pub source_url: PathBuf,
     #[serde(default)]
@@ -2812,18 +2838,29 @@ pub struct RestoreConfig {
     #[serde(default)]
     pub net_fds: Option<Vec<RestoredNetConfig>>,
     #[serde(default)]
+    pub vfio_fds: Option<Vec<RestoredVfioConfig>>,
+    // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
+    #[serde(default, deserialize_with = "deserialize_restored_fd")]
+    pub iommufd_fd: Option<i32>,
+    #[serde(default)]
     pub resume: bool,
 }
 
 impl RestoreConfig {
     pub const SYNTAX: &'static str = "Restore from a VM snapshot. \
         \nRestore parameters \"source_url=<source_url>,prefault=on|off,memory_restore_mode=copy|ondemand,\
-        net_fds=<list_of_net_ids_with_their_associated_fds>,resume=true|false\" \
+        net_fds=<list_of_net_ids_with_their_associated_fds>,\
+        vfio_fds=<list_of_vfio_ids_with_their_associated_fd>,iommufd_fd=<fd>,resume=true|false\" \
         \n`source_url` should be a valid URL (e.g file:///foo/bar or tcp://192.168.1.10/foo) \
         \n`prefault` controls eager prefaulting for the copy-based restore path (disabled by default) \
         \n`memory_restore_mode=copy` preserves the existing eager read-copy restore behavior, while `memory_restore_mode=ondemand` enables lazy demand paging and fails restore if userfaultfd support is unavailable \
         \n`net_fds` is a list of net ids with new file descriptors. \
         Only net devices backed by FDs directly are needed as input.\
+        \n`vfio_fds` is a list of VFIO device ids each paired with a new cdev file descriptor, \
+        e.g. vfio_fds=[vfio0@5,vfio1@6]. Use this to restore a VFIO device onto a different \
+        sysfs path or host. Requires `iommufd_fd`.\
+        \n`iommufd_fd` is a new iommufd file descriptor for the restored VM. \
+        The one saved in the snapshot does not survive serialization.\
         \n `resume` controls whether the VM will be directly resumed after restore ";
 
     pub fn parse(restore: &str) -> Result<Self> {
@@ -2833,6 +2870,8 @@ impl RestoreConfig {
             .add("prefault")
             .add("memory_restore_mode")
             .add("net_fds")
+            .add("vfio_fds")
+            .add("iommufd_fd")
             .add("resume");
         parser.parse(restore).map_err(Error::ParseRestore)?;
 
@@ -2861,6 +2900,20 @@ impl RestoreConfig {
                     })
                     .collect()
             });
+        let vfio_fds = parser
+            .convert::<TupleList<String, u64>>("vfio_fds")
+            .map_err(Error::ParseRestore)?
+            .map(|v| {
+                v.0.iter()
+                    .map(|Tuple(id, fd)| RestoredVfioConfig {
+                        id: id.clone(),
+                        fd: Some(*fd as i32),
+                    })
+                    .collect()
+            });
+        let iommufd_fd = parser
+            .convert::<i32>("iommufd_fd")
+            .map_err(Error::ParseRestore)?;
         let resume = parser
             .convert::<Toggle>("resume")
             .map_err(Error::ParseRestore)?
@@ -2872,6 +2925,8 @@ impl RestoreConfig {
             prefault,
             memory_restore_mode,
             net_fds,
+            vfio_fds,
+            iommufd_fd,
             resume,
         })
     }
@@ -2921,6 +2976,54 @@ impl RestoreConfig {
 
         if !restored_net_with_fds.is_empty() {
             warn!("Ignoring unused 'net_fds' for VM restore.");
+        }
+
+        let vfio_fds = self.vfio_fds.as_deref().unwrap_or_default();
+        if !vfio_fds.is_empty() {
+            // Substituted devices become FD backed, which requires an
+            // externally supplied iommufd FD and the iommufd backend.
+            if self.iommufd_fd.is_none() {
+                return Err(ValidationError::VfioFdRequiresIommufdFd);
+            }
+            if !vm_config.platform.as_ref().is_some_and(|p| p.iommufd) {
+                return Err(ValidationError::IommufdFdRequiresIommufd);
+            }
+
+            let mut seen = HashSet::new();
+            for v in vfio_fds {
+                if !seen.insert(v.id.as_str()) {
+                    return Err(ValidationError::IdentifierNotUnique(v.id.clone()));
+                }
+            }
+
+            let known_ids: HashSet<&str> = vm_config
+                .devices
+                .iter()
+                .flatten()
+                .filter_map(|d| d.pci_common.id.as_deref())
+                .collect();
+            for v in vfio_fds {
+                if !known_ids.contains(v.id.as_str()) {
+                    return Err(ValidationError::RestoreUnknownVfioId(v.id.clone()));
+                }
+            }
+        }
+
+        // A device saved with an FD cannot reuse it, the snapshot carries no
+        // live descriptor. Each one needs a replacement in vfio_fds.
+        let substituted: HashSet<&str> = vfio_fds.iter().map(|v| v.id.as_str()).collect();
+        for d in vm_config.devices.iter().flatten() {
+            if d.fd.is_some()
+                && !d
+                    .pci_common
+                    .id
+                    .as_deref()
+                    .is_some_and(|id| substituted.contains(id))
+            {
+                return Err(ValidationError::RestoreMissingVfioFd(
+                    d.pci_common.id.clone().unwrap_or_default(),
+                ));
+            }
         }
 
         Ok(())
@@ -5090,6 +5193,8 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 prefault: false,
                 memory_restore_mode: MemoryRestoreMode::Copy,
                 net_fds: None,
+                vfio_fds: None,
+                iommufd_fd: None,
                 resume: false,
             }
         );
@@ -5113,6 +5218,8 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                         fds: Some(vec![5, 6, 7, 8]),
                     }
                 ]),
+                vfio_fds: None,
+                iommufd_fd: None,
                 resume: false,
             }
         );
@@ -5123,6 +5230,8 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 prefault: false,
                 memory_restore_mode: MemoryRestoreMode::OnDemand,
                 net_fds: None,
+                vfio_fds: None,
+                iommufd_fd: None,
                 resume: false,
             }
         );
@@ -5133,7 +5242,32 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 prefault: false,
                 memory_restore_mode: MemoryRestoreMode::Copy,
                 net_fds: None,
+                vfio_fds: None,
+                iommufd_fd: None,
                 resume: true,
+            }
+        );
+        assert_eq!(
+            RestoreConfig::parse(
+                "source_url=/path/to/snapshot,vfio_fds=[vfio0@5,vfio1@6],iommufd_fd=7"
+            )?,
+            RestoreConfig {
+                source_url: PathBuf::from("/path/to/snapshot"),
+                prefault: false,
+                memory_restore_mode: MemoryRestoreMode::Copy,
+                net_fds: None,
+                vfio_fds: Some(vec![
+                    RestoredVfioConfig {
+                        id: "vfio0".to_string(),
+                        fd: Some(5),
+                    },
+                    RestoredVfioConfig {
+                        id: "vfio1".to_string(),
+                        fd: Some(6),
+                    },
+                ]),
+                iommufd_fd: Some(7),
+                resume: false,
             }
         );
         // Parsing should fail as source_url is a required field
@@ -5245,6 +5379,8 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                     fds: Some(vec![7, 8]),
                 },
             ]),
+            vfio_fds: None,
+            iommufd_fd: None,
             resume: false,
         };
         valid_config.validate(&snapshot_vm_config).unwrap();
@@ -5310,6 +5446,8 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             prefault: false,
             memory_restore_mode: MemoryRestoreMode::Copy,
             net_fds: None,
+            vfio_fds: None,
+            iommufd_fd: None,
             resume: false,
         };
         snapshot_vm_config.net = Some(vec![NetConfig {
@@ -5327,11 +5465,142 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             prefault: true,
             memory_restore_mode: MemoryRestoreMode::OnDemand,
             net_fds: None,
+            vfio_fds: None,
+            iommufd_fd: None,
             resume: false,
         };
         assert_eq!(
             invalid_restore_mode.validate(&snapshot_vm_config),
             Err(ValidationError::InvalidRestorePrefaultWithOnDemand)
+        );
+    }
+
+    #[test]
+    fn test_restore_config_vfio_fds_validation() {
+        // interested in only VmConfig.devices and platform, so set rest to
+        // default values
+        let mut snapshot_vm_config = VmConfig {
+            cpus: CpusConfig::default(),
+            memory: MemoryConfig::default(),
+            payload: None,
+            rate_limit_groups: None,
+            disks: None,
+            rng: RngConfig::default(),
+            generic_vhost_user: None,
+            balloon: None,
+            fs: None,
+            pmem: None,
+            serial: SerialConfig::default(),
+            console: ConsoleConfig::default(),
+            #[cfg(target_arch = "x86_64")]
+            debug_console: DebugConsoleConfig::default(),
+            devices: Some(vec![DeviceConfig {
+                pci_common: PciDeviceCommonConfig {
+                    id: Some("vfio0".to_owned()),
+                    ..Default::default()
+                },
+                path: Some(PathBuf::from("/sys/bus/pci/devices/0000:01:00.0")),
+                fd: None,
+                x_nv_gpudirect_clique: None,
+                x_exclude_mmap_bars: Vec::new(),
+            }]),
+            user_devices: None,
+            vdpa: None,
+            vsock: None,
+            #[cfg(feature = "pvmemcontrol")]
+            pvmemcontrol: None,
+            pvpanic: false,
+            iommu: false,
+            numa: None,
+            watchdog: false,
+            rtc: None,
+            #[cfg(feature = "guest_debug")]
+            gdb: false,
+            pci_segments: None,
+            platform: Some(PlatformConfig {
+                iommufd: true,
+                ..platform_fixture()
+            }),
+            tpm: None,
+            preserved_fds: None,
+            net: None,
+            landlock_enable: false,
+            landlock_rules: None,
+            #[cfg(feature = "ivshmem")]
+            ivshmem: None,
+        };
+
+        let valid_config = RestoreConfig {
+            source_url: PathBuf::from("/path/to/snapshot"),
+            prefault: false,
+            memory_restore_mode: MemoryRestoreMode::Copy,
+            net_fds: None,
+            vfio_fds: Some(vec![RestoredVfioConfig {
+                id: "vfio0".to_string(),
+                fd: Some(5),
+            }]),
+            iommufd_fd: Some(6),
+            resume: false,
+        };
+        valid_config.validate(&snapshot_vm_config).unwrap();
+
+        let missing_iommufd = RestoreConfig {
+            iommufd_fd: None,
+            ..valid_config.clone()
+        };
+        assert_eq!(
+            missing_iommufd.validate(&snapshot_vm_config),
+            Err(ValidationError::VfioFdRequiresIommufdFd)
+        );
+
+        let unknown_id = RestoreConfig {
+            vfio_fds: Some(vec![RestoredVfioConfig {
+                id: "missing".to_string(),
+                fd: Some(5),
+            }]),
+            ..valid_config.clone()
+        };
+        assert_eq!(
+            unknown_id.validate(&snapshot_vm_config),
+            Err(ValidationError::RestoreUnknownVfioId("missing".to_string()))
+        );
+
+        let duplicate_id = RestoreConfig {
+            vfio_fds: Some(vec![
+                RestoredVfioConfig {
+                    id: "vfio0".to_string(),
+                    fd: Some(5),
+                },
+                RestoredVfioConfig {
+                    id: "vfio0".to_string(),
+                    fd: Some(6),
+                },
+            ]),
+            ..valid_config.clone()
+        };
+        assert_eq!(
+            duplicate_id.validate(&snapshot_vm_config),
+            Err(ValidationError::IdentifierNotUnique("vfio0".to_string()))
+        );
+
+        // A device saved with an FD must get a replacement FD.
+        snapshot_vm_config.devices.as_mut().unwrap()[0].path = None;
+        snapshot_vm_config.devices.as_mut().unwrap()[0].fd = Some(-1);
+        let no_substitution = RestoreConfig {
+            vfio_fds: None,
+            iommufd_fd: None,
+            ..valid_config.clone()
+        };
+        assert_eq!(
+            no_substitution.validate(&snapshot_vm_config),
+            Err(ValidationError::RestoreMissingVfioFd("vfio0".to_string()))
+        );
+
+        // The iommufd backend must be enabled in the snapshot config.
+        snapshot_vm_config.platform = Some(platform_fixture());
+        assert_eq!(
+            valid_config.validate(&snapshot_vm_config),
+            Err(ValidationError::IommufdFdRequiresIommufd)
         );
     }
 

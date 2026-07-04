@@ -35,9 +35,11 @@
 //! [special HTTP library]: https://github.com/firecracker-microvm/micro-http
 
 use std::fs::File;
+use std::os::fd::IntoRawFd;
 use std::result;
 use std::sync::mpsc::Sender;
 
+use log::error;
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -120,7 +122,7 @@ mod fds_helper {
         use std::slice::from_ref;
 
         use super::{ConfigWithFDs, ConfigWithVariableFDs};
-        use crate::config::RestoredNetConfig;
+        use crate::config::{RestoredNetConfig, RestoredVfioConfig};
         use crate::vm_config::{DeviceConfig, NetConfig};
 
         impl ConfigWithFDs for NetConfig {
@@ -172,6 +174,26 @@ mod fds_helper {
         impl ConfigWithVariableFDs for RestoredNetConfig {
             fn expected_num_fds(&self) -> usize {
                 self.num_fds
+            }
+        }
+
+        impl ConfigWithFDs for RestoredVfioConfig {
+            fn id(&self) -> Option<&str> {
+                Some(self.id.as_str())
+            }
+
+            fn fds_from_http_body(&self) -> Option<&[RawFd]> {
+                self.fd.as_ref().map(from_ref)
+            }
+
+            fn set_fds(&mut self, fds: Option<Vec<RawFd>>) {
+                self.fd = fds.and_then(|mut v| v.pop());
+            }
+        }
+
+        impl ConfigWithVariableFDs for RestoredVfioConfig {
+            fn expected_num_fds(&self) -> usize {
+                1
             }
         }
     }
@@ -561,10 +583,37 @@ impl PutHandler for VmRestore {
         if let Some(body) = body {
             let mut restore_cfg: RestoreConfig = serde_json::from_slice(body.raw())?;
 
+            let net_total: usize = restore_cfg
+                .net_fds
+                .iter()
+                .flatten()
+                .map(|c| c.num_fds)
+                .sum();
+            let vfio_total = restore_cfg.vfio_fds.as_ref().map_or(0, |c| c.len());
+            let iommufd_total = usize::from(restore_cfg.vfio_fds.is_some());
+            let expected = net_total + vfio_total + iommufd_total;
+            if files.len() != expected {
+                error!(
+                    "Expected {expected} FDs in VmRestore request, received {}",
+                    files.len()
+                );
+                return Err(HttpError::BadRequest);
+            }
+
+            // Split in the order net_fds, then vfio_fds, then the iommufd FD.
+            let mut files = files;
             if let Some(cfgs) = restore_cfg.net_fds.as_mut() {
+                let net_files: Vec<File> = files.drain(..net_total).collect();
                 let mut cfgs = cfgs.iter_mut().collect::<Vec<&mut _>>();
-                let cfgs = cfgs.as_mut_slice();
-                attach_fds_to_cfgs(files, cfgs)?;
+                attach_fds_to_cfgs(net_files, cfgs.as_mut_slice())?;
+            }
+            if let Some(cfgs) = restore_cfg.vfio_fds.as_mut() {
+                let vfio_files: Vec<File> = files.drain(..vfio_total).collect();
+                let mut cfgs = cfgs.iter_mut().collect::<Vec<&mut _>>();
+                attach_fds_to_cfgs(vfio_files, cfgs.as_mut_slice())?;
+            }
+            if restore_cfg.vfio_fds.is_some() {
+                restore_cfg.iommufd_fd = Some(files.remove(0).into_raw_fd());
             }
 
             self.send(api_notifier, api_sender, restore_cfg)
