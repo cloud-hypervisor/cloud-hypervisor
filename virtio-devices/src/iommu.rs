@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::collections::BTreeMap;
+use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, RwLock};
@@ -867,7 +868,7 @@ struct IommuEpollHandler {
 
 impl IommuEpollHandler {
     fn request_queue(&mut self) -> Result<bool, Error> {
-        let mut used_descs = false;
+        let mut completed = Vec::new();
         while let Some(mut desc_chain) = self.request_queue.pop_descriptor_chain(self.mem.memory())
         {
             // If the request fails to parse, that's the guest's error. Notify
@@ -887,11 +888,18 @@ impl IommuEpollHandler {
                 }
             };
 
-            self.request_queue
-                .add_used(desc_chain.memory(), head_index, len)
-                .map_err(Error::QueueAddUsed)?;
+            completed.push((head_index, len));
+        }
 
-            used_descs = true;
+        // Publish used descriptors only once the whole batch has been
+        // processed so every mapping in the batch is committed before
+        // any completion becomes visible to the guest.
+        let used_descs = !completed.is_empty();
+        let mem = self.mem.memory();
+        for (head_index, len) in completed {
+            self.request_queue
+                .add_used(mem.deref(), head_index, len)
+                .map_err(Error::QueueAddUsed)?;
         }
 
         Ok(used_descs)
