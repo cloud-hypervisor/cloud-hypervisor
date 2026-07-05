@@ -6020,7 +6020,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=2"])
-            .args(["--memory", "size=512M,hugepages=on"])
+            .args(["--memory", "size=1G,hugepages=on"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
