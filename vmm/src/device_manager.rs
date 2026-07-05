@@ -67,7 +67,9 @@ use devices::legacy::{
 };
 #[cfg(feature = "pvmemcontrol")]
 use devices::pvmemcontrol::{self, PvmemcontrolBusDevice, PvmemcontrolPciDevice};
-use devices::{AcpiNotificationFlags, acpi, interrupt_controller, legacy, pvpanic, tpm};
+#[cfg(not(target_arch = "riscv64"))]
+use devices::tpm;
+use devices::{AcpiNotificationFlags, acpi, interrupt_controller, legacy, pvpanic};
 use event_monitor::event;
 use hypervisor::IoEventAddress;
 #[cfg(target_arch = "aarch64")]
