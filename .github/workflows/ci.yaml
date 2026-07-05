@@ -510,6 +510,35 @@ jobs:
         run: cargo build --locked --all --release --target=${{ matrix.target }}
       - name: Check build did not modify any files
         run: test -z "$(git status --porcelain)"
+  build-riscv64:
+    name: build-riscv64
+    needs: [preflight]
+    if: needs.preflight.outputs.full == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust:
+          - stable
+          - "1.89.0" # MSRV — keep quoted.
+    env:
+      CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Install riscv64 cross linker
+        run: sudo apt-get update && sudo apt-get install -y gcc-riscv64-linux-gnu
+      - name: Install Rust toolchain (${{ matrix.rust }})
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.rust }}
+          target: riscv64gc-unknown-linux-gnu
+      - name: Build (kvm)
+        run: cargo build --locked --package cloud-hypervisor --no-default-features --features "kvm" --target riscv64gc-unknown-linux-gnu
+      - name: Check build did not modify any files
+        run: test -z "$(git status --porcelain)"
   # garm-jammy + gnu: runs on PR and MQ. Other 3 matrix entries are in
   # integration-x86-64-mq (sibling, MQ-only, runs in parallel).
   integration-x86-64-pr:
@@ -803,6 +832,7 @@ jobs:
     needs:
       - audit
       - build
+      - build-riscv64
       - dco
       - formatting
       - fuzz-build
