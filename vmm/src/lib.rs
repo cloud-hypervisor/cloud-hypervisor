@@ -3157,12 +3157,16 @@ impl RequestHandler for Vmm {
         // - this simplifies the code (especially error propagation)
         // - the overhead is negligible
         let seccomp_filters = {
-            let worker = get_seccomp_filter(&self.seccomp_action, Thread::MigrationWorker, None)
-                .map_err(|e| {
-                    MigratableError::MigrateSend(anyhow!(
-                        "Error creating migration seccomp filter: {e}"
-                    ))
-                })?;
+            let worker = get_seccomp_filter(
+                &self.seccomp_action,
+                Thread::MigrationWorker,
+                Some(self.hypervisor.hypervisor_type()),
+            )
+            .map_err(|e| {
+                MigratableError::MigrateSend(anyhow!(
+                    "Error creating migration seccomp filter: {e}"
+                ))
+            })?;
 
             let tcp_worker =
                 get_seccomp_filter(&self.seccomp_action, Thread::MigrationTcpWorker, None)

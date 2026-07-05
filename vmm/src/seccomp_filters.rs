@@ -554,6 +554,14 @@ fn create_vmm_ioctl_seccomp_rule(
     }
 }
 
+fn create_socket_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
+    Ok(or![
+        and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_UNIX as u64)?],
+        and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_INET as u64)?],
+        and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_INET6 as u64)?],
+    ])
+}
+
 fn create_api_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
     Ok(or![and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO as _)?]])
 }
@@ -753,14 +761,7 @@ fn vmm_thread_rules(
         (libc::SYS_setsockopt, vec![]),
         (libc::SYS_shutdown, vec![]),
         (libc::SYS_sigaltstack, vec![]),
-        (
-            libc::SYS_socket,
-            or![
-                and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_UNIX as u64)?],
-                and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_INET as u64)?],
-                and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_INET6 as u64)?],
-            ],
-        ),
+        (libc::SYS_socket, create_socket_seccomp_rule()?),
         (libc::SYS_socketpair, vec![]),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_stat, vec![]),
@@ -1070,7 +1071,9 @@ fn event_monitor_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendE
     ])
 }
 
-fn migration_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
+fn migration_thread_rules(
+    hypervisor_type: HypervisorType,
+) -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
     Ok(vec![
         (libc::SYS_accept4, vec![]),
         (libc::SYS_brk, vec![]),
@@ -1089,7 +1092,10 @@ fn migration_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError
         (libc::SYS_getpid, vec![]),
         (libc::SYS_getrandom, vec![]),
         (libc::SYS_gettid, vec![]),
-        (libc::SYS_ioctl, vec![]),
+        (
+            libc::SYS_ioctl,
+            create_vmm_ioctl_seccomp_rule(hypervisor_type)?,
+        ),
         (libc::SYS_lseek, vec![]),
         (libc::SYS_madvise, vec![]),
         (libc::SYS_memfd_create, vec![]),
@@ -1120,7 +1126,7 @@ fn migration_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError
         (libc::SYS_sendto, vec![]),
         (libc::SYS_set_robust_list, vec![]),
         (libc::SYS_sigaltstack, vec![]),
-        (libc::SYS_socket, vec![]),
+        (libc::SYS_socket, create_socket_seccomp_rule()?),
         (libc::SYS_socketpair, vec![]),
         (libc::SYS_statx, vec![]),
         (libc::SYS_tgkill, vec![]),
@@ -1244,7 +1250,9 @@ fn get_seccomp_rules(
         #[cfg(feature = "dbus_api")]
         Thread::DBusApi => dbus_api_thread_rules()?,
         Thread::EventMonitor => event_monitor_thread_rules()?,
-        Thread::MigrationWorker => migration_thread_rules()?,
+        Thread::MigrationWorker => migration_thread_rules(
+            hypervisor_type.expect("hypervisor_type is required for MigrationWorker threads"),
+        )?,
         Thread::MigrationTcpWorker => migration_tcp_worker_thread_rules()?,
         Thread::SerialManager => serial_manager_thread_rules()?,
         Thread::SignalHandler => signal_handler_thread_rules()?,
