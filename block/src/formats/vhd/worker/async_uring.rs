@@ -12,7 +12,6 @@ use crate::AlignedFile;
 use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
 use crate::error::BlockResult;
 use crate::formats::raw::worker::async_uring::RawAsync;
-use crate::formats::vhd::worker::common::validate_operation_bounds;
 
 pub struct FixedVhdAsync {
     raw_file_async: RawAsync,
@@ -36,7 +35,7 @@ impl AsyncIo for FixedVhdAsync {
     }
 
     fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
-        validate_operation_bounds(&op, self.size)?;
+        op.validate_bounds(self.size)?;
         self.raw_file_async.submit_data_operation(op)
     }
 
@@ -66,7 +65,7 @@ impl AsyncIo for FixedVhdAsync {
 
     fn submit_batch_requests(&mut self, batch_request: Vec<AsyncIoOperation>) -> AsyncIoResult<()> {
         for op in &batch_request {
-            validate_operation_bounds(op, self.size)?;
+            op.validate_bounds(self.size)?;
         }
 
         self.raw_file_async.submit_batch_requests(batch_request)
