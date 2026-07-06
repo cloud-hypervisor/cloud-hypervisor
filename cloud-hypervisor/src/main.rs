@@ -900,6 +900,10 @@ fn main() {
     compile_error!("Feature 'sev_snp' needs target 'x86_64'");
     #[cfg(all(feature = "fw_cfg", target_arch = "riscv64"))]
     compile_error!("Feature 'fw_cfg' needs targets 'x86_64' or 'aarch64'");
+    #[cfg(all(feature = "igvm", not(any(feature = "kvm", feature = "mshv"))))]
+    compile_error!("Feature 'igvm' needs feature 'kvm' or 'mshv'");
+    #[cfg(all(feature = "sev_snp", not(any(feature = "kvm", feature = "mshv"))))]
+    compile_error!("Feature 'sev_snp' needs feature 'kvm' or 'mshv'");
 
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::new_heap();
