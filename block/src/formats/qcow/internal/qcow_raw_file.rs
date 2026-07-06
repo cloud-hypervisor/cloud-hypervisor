@@ -203,8 +203,10 @@ impl QcowRawFile {
         self.file.read_exact_at(&mut bytes, offset)?;
         let m = mask.unwrap_or(u64::MAX);
         let table = bytes
-            .chunks_exact(size_of::<u64>())
-            .map(|c| u64::from_be_bytes(c.try_into().unwrap()) & m)
+            .as_chunks::<{ size_of::<u64>() }>()
+            .0
+            .iter()
+            .map(|c| u64::from_be_bytes(*c) & m)
             .collect();
         Ok(table)
     }

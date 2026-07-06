@@ -250,7 +250,7 @@ impl QcowHeader {
                         .map_err(Error::ReadingHeader)?;
                     offset += data.len() as u64;
                     let table = feature_table.as_mut().unwrap();
-                    for entry in data.chunks_exact(FEATURE_NAME_ENTRY_SIZE) {
+                    for entry in data.as_chunks::<FEATURE_NAME_ENTRY_SIZE>().0 {
                         if entry[0] == FEAT_TYPE_INCOMPATIBLE {
                             let bit_number = entry[1];
                             let name_bytes = &entry[2..];
