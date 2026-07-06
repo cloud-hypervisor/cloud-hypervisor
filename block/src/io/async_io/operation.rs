@@ -5,7 +5,7 @@
 use std::io;
 use std::ops::Range;
 
-use super::{GuestMemoryTarget, OwnedIoBuffer};
+use super::{AsyncIoError, AsyncIoResult, GuestMemoryTarget, OwnedIoBuffer};
 
 /// A single async IO operation.
 ///
@@ -128,6 +128,41 @@ impl AsyncIoOperation {
         matches!(self, Self::ReadToMemory { .. } | Self::ReadToVec { .. })
     }
 
+    /// Rejects an operation whose byte range falls outside a disk of `size` bytes.
+    ///
+    /// Returns the read/write-specific `AsyncIoError` variant, carrying an
+    /// `InvalidData` error, when the offset overflows or `offset + len`
+    /// exceeds `size`.
+    #[allow(dead_code)] // used starting with the commit that switches vhd over
+    pub(crate) fn validate_bounds(&self, size: u64) -> AsyncIoResult<()> {
+        let bounds_error = || {
+            let error = io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "Invalid request offset {} and length {}, can't exceed file size {}",
+                    self.offset(),
+                    self.total_len(),
+                    size
+                ),
+            );
+            if self.is_read() {
+                AsyncIoError::ReadVectored(error)
+            } else {
+                AsyncIoError::WriteVectored(error)
+            }
+        };
+
+        let offset = u64::try_from(self.offset()).map_err(|_| bounds_error())?;
+        let len = u64::try_from(self.total_len()).map_err(|_| bounds_error())?;
+        let end = offset.checked_add(len).ok_or_else(bounds_error)?;
+
+        if end > size {
+            return Err(bounds_error());
+        }
+
+        Ok(())
+    }
+
     /// Returns the retained iovec array for kernel submission.
     ///
     /// The iovec pointers are valid while this operation is alive.
@@ -231,5 +266,44 @@ impl AsyncIoOperation {
             | Self::WriteFromMemory { .. }
             | Self::WriteFromVec { .. } => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn read_op(offset: libc::off_t, len: usize) -> AsyncIoOperation {
+        AsyncIoOperation::read_to_vec(offset, OwnedIoBuffer::from_vec(vec![0u8; len]), 0)
+    }
+
+    fn write_op(offset: libc::off_t, len: usize) -> AsyncIoOperation {
+        AsyncIoOperation::write_from_vec(offset, OwnedIoBuffer::from_vec(vec![0u8; len]), 0)
+    }
+
+    #[test]
+    fn accepts_operation_exactly_filling_size() {
+        read_op(0, 512).validate_bounds(512).unwrap();
+    }
+
+    #[test]
+    fn rejects_read_straddling_size() {
+        assert!(matches!(
+            read_op(256, 512).validate_bounds(512),
+            Err(AsyncIoError::ReadVectored(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_write_straddling_size() {
+        assert!(matches!(
+            write_op(256, 512).validate_bounds(512),
+            Err(AsyncIoError::WriteVectored(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_offset_at_size() {
+        assert!(read_op(512, 1).validate_bounds(512).is_err());
     }
 }
