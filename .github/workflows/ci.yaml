@@ -408,22 +408,46 @@ jobs:
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --tests --examples --features "ivshmem" -- -D warnings
-      - name: Clippy (sev_snp)
+      - name: Clippy (kvm + sev_snp)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
-          args: --locked --all --all-targets --no-default-features --tests --examples --features "sev_snp" -- -D warnings
-      - name: Clippy (igvm)
+          args: --locked --all --all-targets --no-default-features --tests --examples --features "kvm,sev_snp" -- -D warnings
+      - name: Clippy (mshv + sev_snp)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
-          args: --locked --all --all-targets --no-default-features --tests --examples --features "igvm" -- -D warnings
+          args: --locked --all --all-targets --no-default-features --tests --examples --features "mshv,sev_snp" -- -D warnings
+      - name: Clippy (mshv + igvm + sev_snp)
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: clippy
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --no-default-features --tests --examples --features "mshv,igvm,sev_snp" -- -D warnings
+      - name: Clippy (kvm + igvm)
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: clippy
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --no-default-features --tests --examples --features "kvm,igvm" -- -D warnings
+      - name: Clippy (mshv + igvm)
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: clippy
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --no-default-features --tests --examples --features "mshv,igvm" -- -D warnings
       - name: Clippy (kvm + tdx)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: houseabsolute/actions-rust-cross@v1
@@ -498,12 +522,18 @@ jobs:
         run: cargo build --locked --bin cloud-hypervisor --features "ivshmem"
       - name: Build (mshv)
         run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "mshv"
-      - name: Build (sev_snp)
-        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "sev_snp"
+      - name: Build (mshv + igvm)
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "mshv,igvm"
+      - name: Build (mshv + sev_snp)
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "mshv,sev_snp"
+      - name: Build (mshv + igvm + sev_snp)
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "mshv,igvm,sev_snp"
+      - name: Build (kvm + sev_snp)
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "kvm,sev_snp"
       - name: Build (kvm + igvm + sev_snp + fw_cfg)
         run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "kvm,igvm,sev_snp,fw_cfg"
-      - name: Build (igvm)
-        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "igvm"
+      - name: Build (kvm + igvm)
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "kvm,igvm"
       - name: Build (mshv + kvm)
         run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "mshv,kvm"
       - name: Release Build (default features)
