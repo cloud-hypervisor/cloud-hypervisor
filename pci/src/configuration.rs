@@ -4,8 +4,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::result;
 use std::sync::{Arc, Mutex};
+use std::{mem, result};
 
 use byteorder::{ByteOrder, LittleEndian};
 use log::{info, warn};
@@ -948,7 +948,7 @@ impl PciConfiguration {
                     "BAR reprogramming parameter is returned: {:x?}",
                     self.pending_bar_reprogram
                 );
-                return self.pending_bar_reprogram.drain(..).collect();
+                return mem::take(&mut self.pending_bar_reprogram);
             }
             info!(
                 "MSE bit is disabled. No BAR reprogramming parameter is returned: {:x?}",
