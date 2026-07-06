@@ -290,6 +290,10 @@ pub enum ValidationError {
     #[cfg(feature = "tdx")]
     #[error("No TDX firmware specified")]
     TdxFirmwareMissing,
+    /// TDX and SEV-SNP cannot be enabled on the same VM
+    #[cfg(all(feature = "tdx", feature = "sev_snp"))]
+    #[error("TDX and SEV-SNP cannot be enabled on the same VM")]
+    TdxSevSnpIncompatible,
     /// Insufficient vCPUs for queues
     #[error("Queue count ({0}) must not exceed boot vCPUs ({1})")]
     TooManyQueues(usize /* queues */, usize /* vCPUs */),
@@ -3072,6 +3076,15 @@ impl VmConfig {
             ))?
             .validate()?;
 
+        #[cfg(all(feature = "tdx", feature = "sev_snp"))]
+        {
+            let tdx_enabled = self.platform.as_ref().is_some_and(|p| p.tdx);
+            let sev_snp_enabled = self.platform.as_ref().is_some_and(|p| p.sev_snp);
+            if tdx_enabled && sev_snp_enabled {
+                return Err(ValidationError::TdxSevSnpIncompatible);
+            }
+        }
+
         #[cfg(feature = "tdx")]
         {
             let tdx_enabled = self.platform.as_ref().is_some_and(|p| p.tdx);
@@ -5533,6 +5546,19 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             packages: 1,
         });
         still_valid_config.validate().unwrap();
+
+        #[cfg(all(feature = "tdx", feature = "sev_snp"))]
+        {
+            let mut invalid_config = valid_config.clone();
+            let mut platform = platform_fixture();
+            platform.tdx = true;
+            platform.sev_snp = true;
+            invalid_config.platform = Some(platform);
+            assert_eq!(
+                invalid_config.validate(),
+                Err(ValidationError::TdxSevSnpIncompatible)
+            );
+        }
 
         #[cfg(target_arch = "x86_64")]
         {

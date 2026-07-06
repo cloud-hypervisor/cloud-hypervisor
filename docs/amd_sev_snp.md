@@ -24,7 +24,9 @@ Change `mshv` to `kvm` for the KVM backend. You can enable both at the same
 time.
 
 **Note**
-Please note that `sev_snp` cannot be enabled in conjunction with the `tdx` feature flag.
+The `sev_snp` and `tdx` feature flags can be enabled together in the same
+build. A single VM cannot enable both at once; the confidential-computing mode
+is selected per VM at runtime.
 
 SEV-SNP is also supported on KVM with an IGVM stage0 image and a guest kernel
 provided through `fw_cfg`. Build that configuration with:
