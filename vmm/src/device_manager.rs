@@ -4155,6 +4155,14 @@ impl DeviceManager {
             .as_ref()
             .is_none_or(|p| p.vfio_p2p_dma);
 
+        let iommufd = self
+            .config
+            .lock()
+            .unwrap()
+            .platform
+            .as_ref()
+            .is_some_and(|p| p.iommufd);
+
         let vfio_pci_device = VfioPciDevice::new(
             vfio_name.clone(),
             self.address_manager.vm.clone(),
@@ -4163,6 +4171,7 @@ impl DeviceManager {
             self.msi_interrupt_manager.clone(),
             legacy_interrupt_group,
             device_cfg.pci_common.iommu,
+            iommufd,
             vfio_p2p_dma,
             pci_device_bdf,
             memory_manager.lock().unwrap().memory_slot_allocator(),

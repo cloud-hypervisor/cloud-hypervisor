@@ -5,6 +5,7 @@
 
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
+use std::mem::size_of;
 use std::os::fd::BorrowedFd;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
@@ -17,7 +18,7 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use byteorder::{ByteOrder, LittleEndian};
 use hypervisor::HypervisorVmError;
 use libc::{_SC_PAGESIZE, sysconf};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vfio_bindings::bindings::vfio::{
@@ -44,6 +45,14 @@ use vm_device::{BusDevice, Resource};
 use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestUsize};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
+use vmm_sys_util::ioctl::ioctl_with_ref;
+
+// Not yet exposed by the vfio-ioctls crate.
+mod ioctls {
+    #![allow(non_snake_case)]
+    use vfio_bindings::bindings::vfio::{VFIO_BASE, VFIO_TYPE};
+    vmm_sys_util::ioctl_io_nr!(VFIO_DEVICE_PCI_HOT_RESET, VFIO_TYPE.into(), VFIO_BASE + 13);
+}
 
 use crate::configuration::{COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK};
 use crate::mmap::MmapRegion;
@@ -1743,6 +1752,8 @@ pub struct VfioPciDevice {
     vfio_ops: Arc<dyn VfioOps>,
     common: VfioCommon,
     iommu_attached: bool,
+    // Attached via iommufd (cdev) rather than the legacy container/group.
+    iommufd: bool,
     // Whether to map VFIO device MMIO BARs into the host IOMMU address space.
     // Required for peer-to-peer DMA between VFIO devices.
     p2p_dma: bool,
@@ -1762,6 +1773,7 @@ impl VfioPciDevice {
         msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
         iommu_attached: bool,
+        iommufd: bool,
         p2p_dma: bool,
         bdf: PciBdf,
         memory_slot_allocator: MemorySlotAllocator,
@@ -1771,7 +1783,8 @@ impl VfioPciDevice {
         device_path: PathBuf,
     ) -> Result<Self, VfioPciError> {
         let device = Arc::new(device);
-        device.reset();
+
+        Self::reset(&device, iommufd);
 
         let vfio_wrapper = VfioDeviceWrapper::new(Arc::clone(&device));
 
@@ -1795,6 +1808,7 @@ impl VfioPciDevice {
             vfio_ops,
             common,
             iommu_attached,
+            iommufd,
             p2p_dma,
             memory_slot_allocator,
             bdf,
@@ -1802,6 +1816,34 @@ impl VfioPciDevice {
         };
 
         Ok(vfio_pci_device)
+    }
+
+    /// Reset the device. Additionally performs a PCI hot reset when attached
+    /// via iommufd as this is not handled by the kernel.
+    fn reset(device: &VfioDevice, iommufd: bool) {
+        device.reset();
+        if iommufd {
+            Self::pci_hot_reset(device);
+        }
+    }
+
+    /// PCI bus/slot reset only needed for iommufd attached device as it is
+    /// performed by the kernel on legacy VFIO devices.
+    fn pci_hot_reset(device: &VfioDevice) {
+        let hot_reset = vfio_pci_hot_reset {
+            argsz: size_of::<vfio_pci_hot_reset>() as u32,
+            ..Default::default()
+        };
+        // SAFETY: `device` is a valid open VFIO device fd and `hot_reset` is a
+        // correctly sized vfio_pci_hot_reset with no trailing group_fds entries.
+        let ret =
+            unsafe { ioctl_with_ref(device, ioctls::VFIO_DEVICE_PCI_HOT_RESET(), &hot_reset) };
+        if ret < 0 {
+            warn!(
+                "Failed to PCI hot reset VFIO device: {}",
+                io::Error::last_os_error()
+            );
+        }
     }
 
     pub fn iommu_attached(&self) -> bool {
@@ -2139,6 +2181,8 @@ impl Drop for VfioPciDevice {
         if self.common.interrupt.intx_in_use() {
             self.common.disable_intx();
         }
+
+        Self::reset(&self.device, self.iommufd);
     }
 }
 
