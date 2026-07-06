@@ -6,7 +6,7 @@
 use std::cmp;
 use std::collections::HashMap;
 use std::ffi::CString;
-#[cfg(feature = "kvm")]
+#[cfg(all(feature = "kvm", feature = "sev_snp"))]
 use std::iter;
 use std::sync::{Arc, Mutex};
 use std::{ffi, io};
@@ -723,24 +723,23 @@ pub fn load_igvm(
                     ParameterAreaState::Inserted => panic!("igvmfile is invalid, multiple insert"),
                 }
                 *area = ParameterAreaState::Inserted;
-                match hypervisor_type {
-                    #[cfg(feature = "kvm")]
-                    HypervisorType::Kvm => {
-                        for page_index in 0..page_count {
-                            gpas.push(GpaPages {
-                                gpa: *gpa + page_index * HV_PAGE_SIZE,
-                                page_type: page_types.unmeasured,
-                                page_size: page_types.isolated_page_size_4kb,
-                            });
-                        }
-                    }
-                    _ => {
+                #[cfg(feature = "kvm")]
+                if hypervisor_type == HypervisorType::Kvm {
+                    for page_index in 0..page_count {
                         gpas.push(GpaPages {
-                            gpa: *gpa,
+                            gpa: *gpa + page_index * HV_PAGE_SIZE,
                             page_type: page_types.unmeasured,
                             page_size: page_types.isolated_page_size_4kb,
                         });
                     }
+                }
+                #[cfg(feature = "mshv")]
+                if hypervisor_type == HypervisorType::Mshv {
+                    gpas.push(GpaPages {
+                        gpa: *gpa,
+                        page_type: page_types.unmeasured,
+                        page_size: page_types.isolated_page_size_4kb,
+                    });
                 }
             }
             IgvmDirectiveHeader::ErrorRange { .. } => {
@@ -786,24 +785,28 @@ pub fn load_igvm(
 
         let mut now = Instant::now();
 
-        // KVM: preserve original IGVM ordering — the SNP launch digest is order-sensitive.
-        // MSHV: sort by GPA to group pages by type for fewer hypercalls.
-        match hypervisor_type {
-            #[cfg(feature = "kvm")]
-            HypervisorType::Kvm => {}
-            _ => gpas.sort_by_key(|a| a.gpa),
+        #[cfg(feature = "mshv")]
+        {
+            // KVM preserves original IGVM ordering because the SNP launch digest
+            // is order-sensitive. MSHV sorts by GPA for fewer hypercalls.
+            if hypervisor_type == HypervisorType::Mshv {
+                gpas.sort_by_key(|a| a.gpa);
+            }
         }
 
         let gpas_grouped = gpas
             .iter()
             .fold(Vec::<Vec<GpaPages>>::new(), |mut acc, gpa| {
+                #[cfg(feature = "kvm")]
+                let same_page_size = hypervisor_type != HypervisorType::Kvm
+                    || acc
+                        .last()
+                        .is_some_and(|last_vec| last_vec[0].page_size == gpa.page_size);
+                #[cfg(not(feature = "kvm"))]
+                let same_page_size = true;
                 if let Some(last_vec) = acc.last_mut()
                     && last_vec[0].page_type == gpa.page_type
-                    && match hypervisor_type {
-                        #[cfg(feature = "kvm")]
-                        HypervisorType::Kvm => last_vec[0].page_size == gpa.page_size,
-                        _ => true,
-                    }
+                    && same_page_size
                 {
                     last_vec.push(*gpa);
                     return acc;
@@ -891,16 +894,23 @@ pub fn load_igvm(
             gpas.len()
         );
 
+        #[cfg(feature = "mshv")]
         let id_block_enabled = if hypervisor_type == HypervisorType::Mshv {
             1
         } else {
             u8::from(loaded_info.has_snp_id_block)
         };
+        #[cfg(not(feature = "mshv"))]
+        let id_block_enabled = u8::from(loaded_info.has_snp_id_block);
+
+        #[cfg(feature = "mshv")]
         let auth_key_enabled = if hypervisor_type == HypervisorType::Mshv {
             0
         } else {
             loaded_info.snp_id_block.author_key_enabled
         };
+        #[cfg(not(feature = "mshv"))]
+        let auth_key_enabled = loaded_info.snp_id_block.author_key_enabled;
 
         now = Instant::now();
         // Call Complete Isolated Import since we are done importing isolated pages
