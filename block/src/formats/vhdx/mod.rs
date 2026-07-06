@@ -108,6 +108,7 @@ impl disk_file::AsyncDiskFile for VhdxDisk {
     }
 
     fn create_async_io(&self, _ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
-        Ok(Box::new(VhdxSync::new(Arc::clone(&self.vhdx_file))))
+        let size = self.vhdx_file.lock().unwrap().virtual_disk_size();
+        Ok(Box::new(VhdxSync::new(Arc::clone(&self.vhdx_file), size)))
     }
 }
