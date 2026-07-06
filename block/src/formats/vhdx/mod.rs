@@ -10,6 +10,8 @@
 //! images.
 
 pub mod internal;
+#[cfg(test)]
+pub(crate) mod test_util;
 pub(crate) mod worker;
 
 use std::fs::File;
