@@ -133,7 +133,6 @@ impl AsyncIoOperation {
     /// Returns the read/write-specific `AsyncIoError` variant, carrying an
     /// `InvalidData` error, when the offset overflows or `offset + len`
     /// exceeds `size`.
-    #[allow(dead_code)] // used starting with the commit that switches vhd over
     pub(crate) fn validate_bounds(&self, size: u64) -> AsyncIoResult<()> {
         let bounds_error = || {
             let error = io::Error::new(
