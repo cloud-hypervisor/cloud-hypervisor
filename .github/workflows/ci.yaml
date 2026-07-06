@@ -652,8 +652,6 @@ jobs:
   integration-vfio:
     name: integration-vfio
     needs: [preflight, dco, quality, build]
-    if: >-
-      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
     runs-on: vfio-nvidia
     env:
       AUTH_DOWNLOAD_TOKEN: ${{ secrets.AUTH_DOWNLOAD_TOKEN }}
