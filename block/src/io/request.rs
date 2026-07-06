@@ -660,7 +660,7 @@ impl Request {
 mod unit_tests {
     use std::sync::Arc;
 
-    use vm_memory::{Bytes as _, GuestMemoryMmap};
+    use vm_memory::GuestMemoryMmap;
     use vmm_sys_util::eventfd::EventFd;
 
     use super::*;
