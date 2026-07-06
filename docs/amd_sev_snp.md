@@ -13,13 +13,15 @@ links:
 
 A machine with AMD SEV-SNP support which is enabled in the BIOS is required.
 
-On the Cloud Hypervisor side, all you need is to build the project with the
-`sev_snp` feature enabled. This enables the MSHV and IGVM support that is
-needed by the default SEV-SNP build:
+On the Cloud Hypervisor side, build the project with the `sev_snp` and `igvm`
+and the hypervisor backend you want to use. For the MSHV SEV-SNP build:
 
 ```bash
-cargo build --no-default-features --features "sev_snp"
+cargo build --no-default-features --features "mshv,sev_snp,igvm"
 ```
+
+Change `mshv` to `kvm` for the KVM backend. You can enable both at the same
+time.
 
 **Note**
 Please note that `sev_snp` cannot be enabled in conjunction with the `tdx` feature flag.
