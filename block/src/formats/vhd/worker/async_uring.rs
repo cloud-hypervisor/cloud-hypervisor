@@ -11,7 +11,7 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::AlignedFile;
 use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
 use crate::error::BlockResult;
-use crate::formats::raw::worker::async_uring::RawAsync;
+use crate::formats::raw::engine_uring::RawAsync;
 
 pub struct FixedVhdAsync {
     raw_file_async: RawAsync,

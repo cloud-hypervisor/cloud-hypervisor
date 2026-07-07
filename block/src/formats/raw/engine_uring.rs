@@ -17,7 +17,7 @@ use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::sparse::{blkdiscard, blkzeroout};
 use crate::{AlignedFile, is_block_device};
 
-pub struct RawAsync {
+pub(crate) struct RawAsync {
     raw_file: AlignedFile,
     data_io: UringDataIo,
     alignment: u64,
@@ -25,7 +25,7 @@ pub struct RawAsync {
 }
 
 impl RawAsync {
-    pub fn new(raw_file: AlignedFile, ring_depth: u32) -> BlockResult<Self> {
+    pub(crate) fn new(raw_file: AlignedFile, ring_depth: u32) -> BlockResult<Self> {
         let data_io =
             UringDataIo::new(ring_depth).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
         let is_block_device = is_block_device(raw_file.as_raw_fd());
