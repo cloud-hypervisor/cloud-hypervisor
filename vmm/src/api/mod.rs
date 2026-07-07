@@ -734,7 +734,7 @@ pub trait RequestHandler {
 
     fn vm_add_generic_vhost_user(
         &mut self,
-        fs_cfg: GenericVhostUserConfig,
+        generic_vhost_user_cfg: GenericVhostUserConfig,
     ) -> Result<Option<Vec<u8>>, VmError>;
 
     fn vm_add_pmem(&mut self, pmem_cfg: PmemConfig) -> Result<Option<Vec<u8>>, VmError>;
