@@ -26,7 +26,6 @@ use arch::{RegionType, layout};
 use devices::ioapic;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use hypervisor::HypervisorVmError;
-use libc::_SC_NPROCESSORS_ONLN;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -2223,14 +2222,10 @@ impl MemoryManager {
     }
 
     fn get_prefault_num_threads(page_size: usize, num_pages: usize) -> usize {
-        let mut n: usize = 1;
-
         // Do not create more threads than processors available.
-        // SAFETY: FFI call. Trivially safe.
-        let procs = unsafe { libc::sysconf(_SC_NPROCESSORS_ONLN) };
-        if procs > 0 {
-            n = cmp::min(procs as usize, MAX_PREFAULT_THREAD_COUNT);
-        }
+        let mut n = thread::available_parallelism()
+            .map_or(1, |val| val.get())
+            .min(MAX_PREFAULT_THREAD_COUNT);
 
         // Do not create more threads than pages being allocated.
         n = cmp::min(n, num_pages);
