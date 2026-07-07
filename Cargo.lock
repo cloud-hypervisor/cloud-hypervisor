@@ -2707,6 +2707,7 @@ dependencies = [
  "serde",
  "serde_with",
  "serial_buffer",
+ "smallvec",
  "thiserror",
  "vhost",
  "virtio-bindings",

@@ -105,6 +105,7 @@ rustls = { version = "0.23.40", default-features = false, features = [
 sha2 = "0.11.0"
 signal-hook = "0.4.4"
 signal-hook-registry = "1.4.8"
+smallvec = "1.15.1"
 thiserror = "2.0.18"
 uuid = { version = "1.23.2" }
 wait-timeout = "0.2.1"

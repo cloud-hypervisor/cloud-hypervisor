@@ -16,6 +16,7 @@ use log::{error, info, warn};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use serial_buffer::SerialBuffer;
+use smallvec::SmallVec;
 use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic};
@@ -205,7 +206,7 @@ impl ConsoleEpollHandler {
 
             // Validate all descriptors upfront so we never partially fill
             // buffers for a chain that turns out to be invalid.
-            let descs: Vec<_> = desc_chain
+            let descs: SmallVec<[_; 4]> = desc_chain
                 .checked_iter(self.access_platform.as_deref())
                 .collect::<Result<_, _>>()
                 .unwrap_or_default();
@@ -253,7 +254,7 @@ impl ConsoleEpollHandler {
         let mut used_descs = false;
 
         while let Some(mut desc_chain) = trans_queue.pop_descriptor_chain(self.mem.memory()) {
-            let results: Vec<_> = desc_chain
+            let results: SmallVec<[_; 4]> = desc_chain
                 .checked_iter(self.access_platform.as_deref())
                 .collect();
             for result in results {

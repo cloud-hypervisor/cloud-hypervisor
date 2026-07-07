@@ -25,6 +25,7 @@ use event_monitor::event;
 use log::{error, info, warn};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
 use vm_allocator::page_size::{align_page_size_down, get_page_size};
@@ -276,7 +277,7 @@ impl BalloonEpollHandler {
         {
             let data_chunk_size = size_of::<u32>();
 
-            let results: Vec<_> = desc_chain
+            let results: SmallVec<[_; 4]> = desc_chain
                 .checked_iter(self.access_platform.as_deref())
                 .collect();
             for result in results {
@@ -366,7 +367,7 @@ impl BalloonEpollHandler {
             self.queues[queue_index].pop_descriptor_chain(self.mem.memory())
         {
             let mut descs_len = 0;
-            let results: Vec<_> = desc_chain
+            let results: SmallVec<[_; 4]> = desc_chain
                 .checked_iter(self.access_platform.as_deref())
                 .collect();
             for result in results {
