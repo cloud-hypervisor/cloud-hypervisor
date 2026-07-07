@@ -1187,13 +1187,12 @@ components:
       required:
         - queue_sizes
         - socket
-        - tag
-        - virtio_id
+        - device_type
       type: object
       properties:
         socket:
           type: string
-        queue_size:
+        queue_sizes:
           type: array
           items:
             type: integer
@@ -1204,7 +1203,7 @@ components:
         pci_device_id:
           type: integer
           format: uint8
-        virtio_id:
+        device_type:
           type: integer
           format: uint32
 
