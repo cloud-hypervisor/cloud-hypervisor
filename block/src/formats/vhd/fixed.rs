@@ -9,13 +9,13 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use super::footer::VhdFooter;
 
 #[derive(Debug)]
-pub struct FixedVhd {
+pub(super) struct FixedVhd {
     file: File,
     size: u64,
 }
 
 impl FixedVhd {
-    pub fn new(mut file: File) -> io::Result<Self> {
+    pub(super) fn new(mut file: File) -> io::Result<Self> {
         let footer = VhdFooter::new(&mut file)?;
 
         Ok(Self {

@@ -13,13 +13,13 @@ use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation
 use crate::error::BlockResult;
 use crate::formats::raw::engine_uring::RawAsync;
 
-pub struct FixedVhdAsync {
+pub(super) struct FixedVhdAsync {
     raw_file_async: RawAsync,
     size: u64,
 }
 
 impl FixedVhdAsync {
-    pub fn new(raw_file: AlignedFile, ring_depth: u32, size: u64) -> BlockResult<Self> {
+    pub(super) fn new(raw_file: AlignedFile, ring_depth: u32, size: u64) -> BlockResult<Self> {
         let raw_file_async = RawAsync::new(raw_file, ring_depth)?;
 
         Ok(FixedVhdAsync {

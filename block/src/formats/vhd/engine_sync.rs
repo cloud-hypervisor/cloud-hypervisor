@@ -12,13 +12,13 @@ use crate::AlignedFile;
 use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
 use crate::formats::raw::engine_sync::RawSync;
 
-pub struct FixedVhdSync {
+pub(super) struct FixedVhdSync {
     raw_file_sync: RawSync,
     size: u64,
 }
 
 impl FixedVhdSync {
-    pub fn new(raw_file: AlignedFile, size: u64) -> Self {
+    pub(super) fn new(raw_file: AlignedFile, size: u64) -> Self {
         FixedVhdSync {
             raw_file_sync: RawSync::new(raw_file),
             size,

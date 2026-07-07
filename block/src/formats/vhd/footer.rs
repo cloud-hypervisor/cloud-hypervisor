@@ -13,7 +13,7 @@ use crate::{AlignedFile, query_device_size};
 // spec completeness and exercised only by unit tests.
 #[derive(Clone, Copy)]
 #[cfg_attr(not(test), expect(dead_code))]
-pub struct VhdFooter {
+pub(super) struct VhdFooter {
     cookie: u64,
     features: u32,
     file_format_version: u32,
@@ -32,7 +32,7 @@ pub struct VhdFooter {
 }
 
 impl VhdFooter {
-    pub fn new(file: &mut File) -> io::Result<VhdFooter> {
+    pub(super) fn new(file: &mut File) -> io::Result<VhdFooter> {
         let aligned = AlignedFile::new(file.try_clone()?, true);
         let size = query_device_size(file)?.0;
         let footer_offset = size.checked_sub(512).ok_or_else(|| {
@@ -60,17 +60,17 @@ impl VhdFooter {
         })
     }
 
-    pub fn cookie(&self) -> u64 {
+    pub(super) fn cookie(&self) -> u64 {
         self.cookie
     }
     #[cfg(test)]
     pub fn features(&self) -> u32 {
         self.features
     }
-    pub fn file_format_version(&self) -> u32 {
+    pub(super) fn file_format_version(&self) -> u32 {
         self.file_format_version
     }
-    pub fn data_offset(&self) -> u64 {
+    pub(super) fn data_offset(&self) -> u64 {
         self.data_offset
     }
     #[cfg(test)]
@@ -93,14 +93,14 @@ impl VhdFooter {
     pub fn original_size(&self) -> u64 {
         self.original_size
     }
-    pub fn current_size(&self) -> u64 {
+    pub(super) fn current_size(&self) -> u64 {
         self.current_size
     }
     #[cfg(test)]
     pub fn disk_geometry(&self) -> u32 {
         self.disk_geometry
     }
-    pub fn disk_type(&self) -> u32 {
+    pub(super) fn disk_type(&self) -> u32 {
         self.disk_type
     }
     #[cfg(test)]
