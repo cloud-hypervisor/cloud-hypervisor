@@ -19,7 +19,7 @@ use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::sparse::{punch_hole, write_zeroes};
 use crate::{AlignedFile, is_block_device};
 
-pub struct RawAio {
+pub(super) struct RawAio {
     raw_file: AlignedFile,
     data_io: AioDataIo,
     alignment: u64,
@@ -27,7 +27,7 @@ pub struct RawAio {
 }
 
 impl RawAio {
-    pub fn new(raw_file: AlignedFile, queue_depth: u32) -> BlockResult<Self> {
+    pub(super) fn new(raw_file: AlignedFile, queue_depth: u32) -> BlockResult<Self> {
         let data_io =
             AioDataIo::new(queue_depth).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
         let is_block_device = is_block_device(raw_file.as_raw_fd());
@@ -128,7 +128,7 @@ mod unit_tests {
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
-    use crate::formats::raw::worker::tests;
+    use crate::formats::raw::tests;
 
     #[test]
     fn test_punch_hole() {

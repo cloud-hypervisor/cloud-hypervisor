@@ -14,15 +14,22 @@ use std::os::unix::io::AsRawFd;
 
 use log::warn;
 
-use self::worker::async_aio::RawAio;
+use self::engine_aio::RawAio;
+use self::engine_sync::RawSync;
 #[cfg(feature = "io_uring")]
-use self::worker::async_uring::RawAsync;
-use self::worker::sync::RawSync;
-use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError};
+use self::engine_uring::RawAsync;
+use crate::async_io::{
+    AsyncIo, AsyncIoError, AsyncIoOperation, AsyncIoResult, BorrowedDiskFd, DiskFileError,
+};
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::{AlignedFile, DiskTopology, disk_file, probe_sparse_support, query_device_size};
 
-pub(crate) mod worker;
+mod engine_aio;
+pub(crate) mod engine_sync;
+#[cfg(feature = "io_uring")]
+pub(crate) mod engine_uring;
+#[cfg(test)]
+mod tests;
 
 /// Selects which async I/O backend a `RawDisk` uses.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -152,6 +159,41 @@ impl disk_file::AsyncDiskFile for RawDisk {
             RawBackend::IoUring => Ok(Box::new(RawAsync::new(raw_file, ring_depth)?)),
             RawBackend::Aio => Ok(Box::new(RawAio::new(raw_file, ring_depth)?)),
         }
+    }
+}
+
+/// True when `op` satisfies `alignment` and can go straight to the kernel.
+fn operation_is_aligned(op: &AsyncIoOperation, alignment: u64) -> bool {
+    if alignment == 0 {
+        return true;
+    }
+    if !(op.offset() as u64).is_multiple_of(alignment) {
+        return false;
+    }
+    op.iovecs().iter().all(|iov| {
+        (iov.iov_base as u64).is_multiple_of(alignment)
+            && (iov.iov_len as u64).is_multiple_of(alignment)
+    })
+}
+
+/// Runs an unaligned O_DIRECT operation synchronously through `aligned_file`.
+fn run_unaligned_operation(
+    aligned_file: &AlignedFile,
+    op: &mut AsyncIoOperation,
+) -> AsyncIoResult<i32> {
+    let offset = op.offset() as u64;
+    let total_len = op.total_len();
+
+    if op.is_read() {
+        let n = aligned_file
+            .read_unaligned(offset, total_len, |data| op.write_bytes_at(0, data))
+            .map_err(AsyncIoError::ReadVectored)?;
+        Ok(n as i32)
+    } else {
+        let n = aligned_file
+            .write_unaligned(offset, total_len, |data| op.read_bytes_at(0, data))
+            .map_err(AsyncIoError::WriteVectored)?;
+        Ok(n as i32)
     }
 }
 

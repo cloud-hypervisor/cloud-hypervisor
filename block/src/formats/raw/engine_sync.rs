@@ -15,7 +15,7 @@ use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation
 use crate::sparse::{punch_hole, write_zeroes};
 use crate::{AlignedFile, is_block_device};
 
-pub struct RawSync {
+pub(crate) struct RawSync {
     raw_file: AlignedFile,
     eventfd: EventFd,
     completion_list: VecDeque<AsyncIoCompletion>,
@@ -24,7 +24,7 @@ pub struct RawSync {
 }
 
 impl RawSync {
-    pub fn new(raw_file: AlignedFile) -> Self {
+    pub(crate) fn new(raw_file: AlignedFile) -> Self {
         let is_block_device = is_block_device(raw_file.as_raw_fd());
         let alignment = raw_file.alignment() as u64;
         RawSync {
@@ -153,7 +153,7 @@ mod unit_tests {
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
-    use crate::formats::raw::worker::tests;
+    use crate::formats::raw::tests;
 
     #[test]
     fn test_punch_hole() {

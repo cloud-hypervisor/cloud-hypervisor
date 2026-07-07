@@ -10,7 +10,7 @@ use vmm_sys_util::eventfd::EventFd;
 
 use crate::AlignedFile;
 use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
-use crate::formats::raw::worker::sync::RawSync;
+use crate::formats::raw::engine_sync::RawSync;
 
 pub struct FixedVhdSync {
     raw_file_sync: RawSync,
