@@ -9,20 +9,23 @@
 //! Provides [`VhdDisk`], the `DiskFile` wrapper for fixed size VHD
 //! images.
 
-pub(crate) mod internal;
-pub(crate) mod worker;
+mod engine_sync;
+#[cfg(feature = "io_uring")]
+mod engine_uring;
+mod fixed;
+mod footer;
 
 use std::fs::File;
 use std::io;
 use std::os::unix::io::AsRawFd;
 
-pub use internal::footer::is_fixed_vhd;
+pub use footer::is_fixed_vhd;
 use log::warn;
 
-use self::internal::fixed::FixedVhd;
+use self::engine_sync::FixedVhdSync;
 #[cfg(feature = "io_uring")]
-use self::worker::async_uring::FixedVhdAsync;
-use self::worker::sync::FixedVhdSync;
+use self::engine_uring::FixedVhdAsync;
+use self::fixed::FixedVhd;
 use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError};
 use crate::disk_file::DiskSize;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
