@@ -21,7 +21,7 @@ const REGION_SIGN: u32 = 0x6967_6572; // "regi"
 const FILE_START: u64 = 0; // The first element
 const HEADER_1_START: u64 = 64 * 1024; // Header 1 start in Bytes
 const HEADER_2_START: u64 = 128 * 1024; // Header 2 start in Bytes
-pub const REGION_TABLE_1_START: u64 = 192 * 1024; // Region 1 start in Bytes
+pub(super) const REGION_TABLE_1_START: u64 = 192 * 1024; // Region 1 start in Bytes
 const REGION_TABLE_2_START: u64 = 256 * 1024; // Region 2 start in Bytes
 
 const HEADER_SIZE: u64 = 4 * 1024; // Each header is 64 KiB, but only first 4 kiB contains info
@@ -84,16 +84,16 @@ pub enum VhdxHeaderError {
     WriteHeader(#[source] io::Error),
 }
 
-pub type Result<T> = result::Result<T, VhdxHeaderError>;
+pub(super) type Result<T> = result::Result<T, VhdxHeaderError>;
 
 #[derive(Clone, Debug)]
-pub struct FileTypeIdentifier {
+pub(super) struct FileTypeIdentifier {
     pub _signature: u64,
 }
 
 impl FileTypeIdentifier {
     /// Reads the File Type Identifier structure from a reference VHDx file
-    pub fn new(f: &AlignedFile) -> Result<FileTypeIdentifier> {
+    pub(super) fn new(f: &AlignedFile) -> Result<FileTypeIdentifier> {
         let mut buf = [0u8; size_of::<u64>()];
         f.read_exact_at(&mut buf, FILE_START)
             .map_err(VhdxHeaderError::ReadFileTypeIdentifier)?;
@@ -108,7 +108,7 @@ impl FileTypeIdentifier {
 
 #[repr(C, packed)]
 #[derive(Clone, Copy, Debug, FromBytes, Immutable, IntoBytes)]
-pub struct Header {
+pub(super) struct Header {
     pub signature: u32,
     pub checksum: u32,
     pub sequence_number: u64,
@@ -123,7 +123,7 @@ pub struct Header {
 
 impl Header {
     /// Reads the Header structure from a reference VHDx file
-    pub fn new(f: &AlignedFile, start: u64) -> Result<Header> {
+    pub(super) fn new(f: &AlignedFile, start: u64) -> Result<Header> {
         // Read the whole header into a buffer. We will need it for
         // calculating checksum.
         let mut buffer = [0; HEADER_SIZE as usize];
@@ -199,7 +199,7 @@ struct RegionTableHeader {
 
 impl RegionTableHeader {
     /// Reads the Region Table Header structure from a reference VHDx file
-    pub fn new(f: &AlignedFile, start: u64) -> Result<RegionTableHeader> {
+    pub(crate) fn new(f: &AlignedFile, start: u64) -> Result<RegionTableHeader> {
         // Read the whole header into a buffer. We will need it for calculating
         // checksum.
         let mut buffer = [0u8; REGION_SIZE as usize];
@@ -234,7 +234,7 @@ fn ranges_overlap(a_start: u64, a_end: u64, b_start: u64, b_end: u64) -> bool {
     a_start < b_end && b_start < a_end
 }
 
-pub struct RegionInfo {
+pub(super) struct RegionInfo {
     pub bat_entry: RegionTableEntry,
     pub mdr_entry: RegionTableEntry,
     pub region_entries: BTreeMap<u64, u64>,
@@ -243,7 +243,7 @@ pub struct RegionInfo {
 impl RegionInfo {
     /// Collect all entries in a BTreeMap from the Region Table and identifies
     /// BAT and metadata regions
-    pub fn new(f: &AlignedFile, region_start: u64, entry_count: u32) -> Result<RegionInfo> {
+    pub(super) fn new(f: &AlignedFile, region_start: u64, entry_count: u32) -> Result<RegionInfo> {
         let mut bat_entry: Option<RegionTableEntry> = None;
         let mut mdr_entry: Option<RegionTableEntry> = None;
 
@@ -321,7 +321,7 @@ impl RegionInfo {
 
 #[repr(C, packed)]
 #[derive(Clone, Copy, Debug, FromBytes)]
-pub struct RegionTableEntry {
+pub(super) struct RegionTableEntry {
     guid: [u8; 16],
     pub file_offset: u64,
     pub length: u32,
@@ -335,7 +335,7 @@ enum HeaderNo {
 
 /// Contains the information from the header of a VHDx file
 #[derive(Clone, Debug)]
-pub struct VhdxHeader {
+pub(super) struct VhdxHeader {
     _file_type_identifier: FileTypeIdentifier,
     header_1: Header,
     header_2: Header,
@@ -345,7 +345,7 @@ pub struct VhdxHeader {
 
 impl VhdxHeader {
     /// Creates a VhdxHeader from a reference to a file
-    pub fn new(f: &AlignedFile) -> Result<VhdxHeader> {
+    pub(super) fn new(f: &AlignedFile) -> Result<VhdxHeader> {
         Ok(VhdxHeader {
             _file_type_identifier: FileTypeIdentifier::new(f)?,
             header_1: Header::new(f, HEADER_1_START)?,
@@ -415,14 +415,14 @@ impl VhdxHeader {
         VhdxHeader::update_header(f, Ok(header_1), Ok(header_2), guid)
     }
 
-    pub fn update(&mut self, f: &AlignedFile) -> Result<()> {
+    pub(super) fn update(&mut self, f: &AlignedFile) -> Result<()> {
         let headers = VhdxHeader::update_headers(f, Ok(self.header_1), Ok(self.header_2), 0)?;
         self.header_1 = headers.0;
         self.header_2 = headers.1;
         Ok(())
     }
 
-    pub fn region_entry_count(&self) -> u32 {
+    pub(super) fn region_entry_count(&self) -> u32 {
         self.region_table_1.entry_count
     }
 }

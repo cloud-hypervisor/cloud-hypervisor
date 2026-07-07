@@ -13,16 +13,11 @@ use std::result;
 use remain::sorted;
 use thiserror::Error;
 
-use self::bat::{BatEntry, VhdxBatError};
-use self::header::{RegionInfo, RegionTableEntry, VhdxHeader, VhdxHeaderError};
-use self::io::VhdxIoError;
-use self::metadata::{DiskSpec, VhdxMetadataError};
+use super::bat::{BatEntry, VhdxBatError};
+use super::header::{self, RegionInfo, RegionTableEntry, VhdxHeader, VhdxHeaderError};
+use super::io::{self, VhdxIoError};
+use super::metadata::{DiskSpec, VhdxMetadataError};
 use crate::aligned_file::AlignedFile;
-
-mod bat;
-mod header;
-mod io;
-mod metadata;
 
 #[sorted]
 #[derive(Error, Debug)]
@@ -43,7 +38,7 @@ pub enum VhdxError {
     WriteFailed(#[source] VhdxIoError),
 }
 
-pub type Result<T> = result::Result<T, VhdxError>;
+pub(super) type Result<T> = result::Result<T, VhdxError>;
 
 #[derive(Debug)]
 pub struct Vhdx {

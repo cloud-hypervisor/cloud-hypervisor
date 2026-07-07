@@ -33,7 +33,7 @@ pub enum VhdxIoError {
     WriteBat(#[source] VhdxBatError),
 }
 
-pub type Result<T> = result::Result<T, VhdxIoError>;
+pub(super) type Result<T> = result::Result<T, VhdxIoError>;
 
 macro_rules! align {
     ($n:expr, $align:expr) => {{ $n.div_ceil($align) * $align }};
@@ -51,7 +51,7 @@ struct Sector {
 impl Sector {
     /// Translate sector index and count of data in file to actual offsets and
     /// BAT index.
-    pub fn new(
+    pub(crate) fn new(
         disk_spec: &DiskSpec,
         bat: &[BatEntry],
         sector_index: u64,
@@ -86,7 +86,7 @@ impl Sector {
 
 /// VHDx IO read routine: requires relative sector index and count for the
 /// requested data.
-pub fn read(
+pub(super) fn read(
     f: &AlignedFile,
     buf: &mut [u8],
     disk_spec: &DiskSpec,
@@ -138,7 +138,7 @@ pub fn read(
 
 /// VHDx IO write routine: requires relative sector index and count for the
 /// requested data.
-pub fn write(
+pub(super) fn write(
     f: &AlignedFile,
     buf: &[u8],
     disk_spec: &mut DiskSpec,
