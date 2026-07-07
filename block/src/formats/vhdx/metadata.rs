@@ -21,7 +21,7 @@ const METADATA_TABLE_MAX_SIZE: usize = METADATA_ENTRY_SIZE * (METADATA_MAX_ENTRI
 
 const METADATA_FLAGS_IS_REQUIRED: u32 = 0x04;
 
-pub const BLOCK_SIZE_MIN: u32 = 1 << 20; // 1 MiB
+pub(super) const BLOCK_SIZE_MIN: u32 = 1 << 20; // 1 MiB
 const BLOCK_SIZE_MAX: u32 = 256 << 20; // 256 MiB
 const MAX_SECTORS_PER_BLOCK: u64 = 1 << 23;
 
@@ -93,10 +93,10 @@ pub enum VhdxMetadataError {
     UnsupportedFlag,
 }
 
-pub type Result<T> = result::Result<T, VhdxMetadataError>;
+pub(super) type Result<T> = result::Result<T, VhdxMetadataError>;
 
 #[derive(Default, Clone, Debug)]
-pub struct DiskSpec {
+pub(super) struct DiskSpec {
     pub disk_id: u128,
     pub image_size: u64,
     pub block_size: u32,
@@ -112,7 +112,7 @@ pub struct DiskSpec {
 impl DiskSpec {
     /// Parse all metadata from the provided file and store info in DiskSpec
     /// structure.
-    pub fn new(f: &AlignedFile, metadata_region: &RegionTableEntry) -> Result<DiskSpec> {
+    pub(super) fn new(f: &AlignedFile, metadata_region: &RegionTableEntry) -> Result<DiskSpec> {
         let mut disk_spec = DiskSpec::default();
         let mut metadata_presence: u16 = 0;
         let mut offset = 0;
@@ -270,7 +270,7 @@ struct MetadataTableHeader {
 }
 
 impl MetadataTableHeader {
-    pub fn new(buffer: &[u8]) -> Result<MetadataTableHeader> {
+    pub(crate) fn new(buffer: &[u8]) -> Result<MetadataTableHeader> {
         let metadata_table_header = MetadataTableHeader::read_from_bytes(buffer).unwrap();
 
         if metadata_table_header.signature != METADATA_SIGN {
@@ -291,7 +291,7 @@ impl MetadataTableHeader {
 
 #[repr(C, packed)]
 #[derive(Default, Debug, Clone, Copy, FromBytes)]
-pub struct MetadataTableEntry {
+pub(super) struct MetadataTableEntry {
     item_id: [u8; 16],
     offset: u32,
     length: u32,

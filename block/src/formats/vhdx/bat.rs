@@ -14,17 +14,17 @@ use super::metadata::DiskSpec;
 use crate::aligned_file::AlignedFile;
 
 // Payload BAT Entry States
-pub const PAYLOAD_BLOCK_NOT_PRESENT: u64 = 0;
-pub const PAYLOAD_BLOCK_UNDEFINED: u64 = 1;
-pub const PAYLOAD_BLOCK_ZERO: u64 = 2;
-pub const PAYLOAD_BLOCK_UNMAPPED: u64 = 3;
-pub const PAYLOAD_BLOCK_FULLY_PRESENT: u64 = 6;
-pub const PAYLOAD_BLOCK_PARTIALLY_PRESENT: u64 = 7;
+pub(super) const PAYLOAD_BLOCK_NOT_PRESENT: u64 = 0;
+pub(super) const PAYLOAD_BLOCK_UNDEFINED: u64 = 1;
+pub(super) const PAYLOAD_BLOCK_ZERO: u64 = 2;
+pub(super) const PAYLOAD_BLOCK_UNMAPPED: u64 = 3;
+pub(super) const PAYLOAD_BLOCK_FULLY_PRESENT: u64 = 6;
+pub(super) const PAYLOAD_BLOCK_PARTIALLY_PRESENT: u64 = 7;
 
 // Mask for the BAT state
-pub const BAT_STATE_BIT_MASK: u64 = 0x07;
+pub(super) const BAT_STATE_BIT_MASK: u64 = 0x07;
 // Mask for the offset within the file in units of 1 MB
-pub const BAT_FILE_OFF_MASK: u64 = 0xFFFFFFFFFFF00000;
+pub(super) const BAT_FILE_OFF_MASK: u64 = 0xFFFFFFFFFFF00000;
 
 #[sorted]
 #[derive(Error, Debug)]
@@ -39,14 +39,14 @@ pub enum VhdxBatError {
     WriteBat(#[source] io::Error),
 }
 
-pub type Result<T> = result::Result<T, VhdxBatError>;
+pub(super) type Result<T> = result::Result<T, VhdxBatError>;
 
 #[derive(Default, Clone, Debug)]
-pub struct BatEntry(pub u64);
+pub(super) struct BatEntry(pub u64);
 
 impl BatEntry {
     // Read all BAT entries presented on the disk and insert them to a vector
-    pub fn collect_bat_entries(
+    pub(super) fn collect_bat_entries(
         f: &AlignedFile,
         disk_spec: &DiskSpec,
         bat_entry: &RegionTableEntry,
@@ -79,7 +79,7 @@ impl BatEntry {
     }
 
     // Routine for writing BAT entries to the disk
-    pub fn write_bat_entries(
+    pub(super) fn write_bat_entries(
         f: &AlignedFile,
         bat_offset: u64,
         bat_entries: &[BatEntry],

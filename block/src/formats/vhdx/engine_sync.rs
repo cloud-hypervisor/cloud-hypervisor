@@ -11,9 +11,9 @@ use std::sync::{Arc, Mutex};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
-use crate::formats::vhdx::internal::Vhdx;
+use crate::formats::vhdx::Vhdx;
 
-pub struct VhdxSync {
+pub(super) struct VhdxSync {
     vhdx_file: Arc<Mutex<Vhdx>>,
     eventfd: EventFd,
     completion_list: VecDeque<AsyncIoCompletion>,
@@ -21,7 +21,7 @@ pub struct VhdxSync {
 }
 
 impl VhdxSync {
-    pub fn new(vhdx_file: Arc<Mutex<Vhdx>>, size: u64) -> Self {
+    pub(super) fn new(vhdx_file: Arc<Mutex<Vhdx>>, size: u64) -> Self {
         VhdxSync {
             vhdx_file,
             eventfd: EventFd::new(libc::EFD_NONBLOCK)
@@ -120,7 +120,7 @@ mod tests {
 
     use super::*;
     use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoOperation, OwnedIoBuffer};
-    use crate::formats::vhdx::internal::Vhdx;
+    use crate::formats::vhdx::Vhdx;
     use crate::formats::vhdx::test_util::create_dynamic_vhdx;
 
     fn make_vhdx_sync(tf: &TempFile) -> (VhdxSync, u64) {
