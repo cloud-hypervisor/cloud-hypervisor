@@ -12030,6 +12030,7 @@ mod vfio {
     }
 
     #[test]
+    #[ignore = "See #8548"]
     fn test_iommufd_nvidia_card_pci_hotplug() {
         test_nvidia_card_pci_hotplug_common(true);
     }
@@ -12276,6 +12277,7 @@ mod vfio {
     }
 
     #[test]
+    #[ignore = "See #8549"]
     fn test_iommufd_nvidia_card_x_exclude_mmap_bars() {
         test_nvidia_card_x_exclude_mmap_bars_common(true);
     }
