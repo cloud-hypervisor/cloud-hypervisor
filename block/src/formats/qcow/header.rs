@@ -16,8 +16,9 @@ use bitflags::bitflags;
 use vmm_sys_util::file_traits::FileSync;
 
 use super::decoder::{Decoder, ZlibDecoder, ZstdDecoder};
+use super::parser::{Error, Result};
 use super::qcow_raw_file::BeUint;
-use super::{Error, Result, div_round_up_u32, div_round_up_u64};
+use super::util::{div_round_up_u32, div_round_up_u64};
 use crate::aligned_file::AlignedFile;
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 

@@ -149,7 +149,7 @@ fn write_refcount_subbyte<const BITS: usize>(
 
 /// A qcow file. Allows reading/writing clusters and appending clusters.
 #[derive(Debug)]
-pub struct QcowRawFile {
+pub(super) struct QcowRawFile {
     file: AlignedFile,
     cluster_size: u64,
     cluster_mask: u64,
@@ -161,7 +161,7 @@ pub struct QcowRawFile {
 impl QcowRawFile {
     /// Creates a `QcowRawFile` from the given `File`, `None` is returned if `cluster_size` is not
     /// a power of two or refcount_bits is invalid.
-    pub fn from(file: AlignedFile, cluster_size: u64, refcount_bits: u64) -> Option<Self> {
+    pub(super) fn from(file: AlignedFile, cluster_size: u64, refcount_bits: u64) -> Option<Self> {
         if !cluster_size.is_power_of_two() {
             return None;
         }
@@ -193,7 +193,7 @@ impl QcowRawFile {
 
     /// Reads `count` 64 bit offsets and returns them as a vector.
     /// `mask` optionally `&`s out some of the bits on the file.
-    pub fn read_pointer_table(
+    pub(super) fn read_pointer_table(
         &mut self,
         offset: u64,
         count: u64,
@@ -213,7 +213,11 @@ impl QcowRawFile {
 
     /// Reads a cluster's worth of 64 bit offsets and returns them as a vector.
     /// `mask` optionally `&`s out some of the bits on the file.
-    pub fn read_pointer_cluster(&mut self, offset: u64, mask: Option<u64>) -> io::Result<Vec<u64>> {
+    pub(super) fn read_pointer_cluster(
+        &mut self,
+        offset: u64,
+        mask: Option<u64>,
+    ) -> io::Result<Vec<u64>> {
         let count = self.cluster_size / size_of::<u64>() as u64;
         self.read_pointer_table(offset, count, mask)
     }
@@ -223,7 +227,7 @@ impl QcowRawFile {
     ///
     /// The callback may perform metadata I/O on this `QcowRawFile`, so all
     /// entries are materialized before the final positional write.
-    pub fn write_pointer_table<'a, T: Copy + 'a>(
+    pub(super) fn write_pointer_table<'a, T: Copy + 'a>(
         &mut self,
         offset: u64,
         entries: impl Iterator<Item = &'a T>,
@@ -240,7 +244,7 @@ impl QcowRawFile {
     /// Writes a pointer table directly without transforming values.
     ///
     /// Uses the same materialize-then-write path as `write_pointer_table`.
-    pub fn write_pointer_table_direct<'a>(
+    pub(super) fn write_pointer_table_direct<'a>(
         &mut self,
         offset: u64,
         entries: impl Iterator<Item = &'a u64>,
@@ -255,18 +259,21 @@ impl QcowRawFile {
     /// Read a refcount block from the file and returns a Vec containing the block.
     /// Always returns a cluster's worth of data.
     #[inline]
-    pub fn read_refcount_block(&mut self, offset: u64) -> io::Result<Vec<u64>> {
+    pub(super) fn read_refcount_block(&mut self, offset: u64) -> io::Result<Vec<u64>> {
         (self.read_refcount_fn)(&mut self.file, offset, self.refcount_block_entries as usize)
     }
 
     /// Writes a refcount block to the file.
     #[inline]
-    pub fn write_refcount_block(&mut self, offset: u64, table: &[u64]) -> io::Result<()> {
+    pub(super) fn write_refcount_block(&mut self, offset: u64, table: &[u64]) -> io::Result<()> {
         (self.write_refcount_fn)(&mut self.file, offset, table)
     }
 
     /// Allocates a new cluster at the end of the current file, return the address.
-    pub fn add_cluster_end(&mut self, max_valid_cluster_offset: u64) -> io::Result<Option<u64>> {
+    pub(super) fn add_cluster_end(
+        &mut self,
+        max_valid_cluster_offset: u64,
+    ) -> io::Result<Option<u64>> {
         // Determine where the new end of the file should be and set_len, which
         // translates to truncate(2).
         let file_end: u64 = self.physical_size()?;
@@ -282,44 +289,44 @@ impl QcowRawFile {
     }
 
     /// Returns a reference to the underlying file.
-    pub fn file(&self) -> &AlignedFile {
+    pub(super) fn file(&self) -> &AlignedFile {
         &self.file
     }
 
     /// Returns a mutable reference to the underlying file.
-    pub fn file_mut(&mut self) -> &mut AlignedFile {
+    pub(super) fn file_mut(&mut self) -> &mut AlignedFile {
         &mut self.file
     }
 
     /// Returns the size of the file's clusters.
-    pub fn cluster_size(&self) -> u64 {
+    pub(super) fn cluster_size(&self) -> u64 {
         self.cluster_size
     }
 
     /// Returns the offset of `address` within a cluster.
-    pub fn cluster_offset(&self, address: u64) -> u64 {
+    pub(super) fn cluster_offset(&self, address: u64) -> u64 {
         address & self.cluster_mask
     }
 
     /// Returns the base address of the cluster containing `address`.
-    pub fn cluster_address(&self, address: u64) -> u64 {
+    pub(super) fn cluster_address(&self, address: u64) -> u64 {
         address & !self.cluster_mask
     }
 
     /// Zeros out a cluster in the file.
-    pub fn zero_cluster(&mut self, address: u64) -> io::Result<()> {
+    pub(super) fn zero_cluster(&mut self, address: u64) -> io::Result<()> {
         let cluster_size = self.cluster_size as usize;
         self.file.write_all_zeroes_at(address, cluster_size)?;
         Ok(())
     }
 
     /// Writes
-    pub fn write_cluster(&mut self, address: u64, data: &[u8]) -> io::Result<()> {
+    pub(super) fn write_cluster(&mut self, address: u64, data: &[u8]) -> io::Result<()> {
         let cluster_size = self.cluster_size as usize;
         self.file.write_all_at(&data[0..cluster_size], address)
     }
 
-    pub fn physical_size(&self) -> io::Result<u64> {
+    pub(super) fn physical_size(&self) -> io::Result<u64> {
         self.file.metadata().map(|m| m.len())
     }
 }

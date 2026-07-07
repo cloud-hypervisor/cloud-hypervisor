@@ -13,14 +13,14 @@ use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
 use super::common::decompress_cluster;
-use super::internal::decoder::Decoder;
-use super::internal::metadata::{
+use super::decoder::Decoder;
+use super::metadata::{
     BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
 };
-use super::internal::qcow_raw_file::QcowRawFile;
+use super::qcow_raw_file::QcowRawFile;
 use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
 
-pub struct QcowSync {
+pub(super) struct QcowSync {
     metadata: Arc<QcowMetadata>,
     data_file: QcowRawFile,
     /// See the backing_file field on QcowDisk.
@@ -322,10 +322,9 @@ mod unit_tests {
     use crate::error::BlockErrorKind;
     use crate::formats::qcow;
     use crate::formats::qcow::common::unit_tests::compress_allocated_clusters;
-    use crate::formats::qcow::internal::{
-        BackingFileConfig, Error as QcowError, ImageType, QcowHeader,
+    use crate::formats::qcow::{
+        BackingFileConfig, Error as QcowError, ImageType, QcowDisk, QcowHeader, QcowTempDisk,
     };
-    use crate::formats::qcow::{QcowDisk, QcowTempDisk};
 
     const TEST_L1_L2_ADDR_MASK: u64 = 0x00ff_ffff_ffff_fe00;
     const TEST_HEADER_L1_TABLE_OFFSET: u64 = 40;

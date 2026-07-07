@@ -28,7 +28,7 @@ use std::str::FromStr;
 use std::{cmp, io, mem, result};
 
 pub use aligned_file::AlignedFile;
-use formats::qcow::internal as qcow;
+use formats::qcow;
 #[cfg(feature = "io_uring")]
 use io_uring::{IoUring, Probe, opcode};
 use libc::{

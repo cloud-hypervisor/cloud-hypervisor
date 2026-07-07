@@ -14,7 +14,7 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 use std::{cmp, fs, io, panic, thread};
 
-use block::formats::qcow::internal::ImageType as QcowImageType;
+use block::formats::qcow::ImageType as QcowImageType;
 use test_infra::*;
 use vmm_sys_util::tempdir::TempDir;
 #[cfg(not(feature = "mshv"))]

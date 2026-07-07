@@ -18,11 +18,11 @@ use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
 use super::common::decompress_cluster;
-use super::internal::decoder::Decoder;
-use super::internal::metadata::{
+use super::decoder::Decoder;
+use super::metadata::{
     BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
 };
-use super::internal::qcow_raw_file::QcowRawFile;
+use super::qcow_raw_file::QcowRawFile;
 use crate::async_io::{
     AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, UringDataIo,
 };
@@ -36,7 +36,7 @@ use crate::async_io::{
 ///
 /// Writes are synchronous because metadata allocation must complete
 /// before the host offset is known.
-pub struct QcowAsync {
+pub(super) struct QcowAsync {
     metadata: Arc<QcowMetadata>,
     // Drop before data_file so pending SQEs can be submitted while fd is valid.
     data_io: UringDataIo,
@@ -483,8 +483,7 @@ mod unit_tests {
     use crate::async_io::{AsyncIoCompletion, AsyncIoOperation, GuestMemoryTarget, OwnedIoBuffer};
     use crate::disk_file::AsyncDiskFile;
     use crate::formats::qcow::common::unit_tests::compress_allocated_clusters;
-    use crate::formats::qcow::internal::{BackingFileConfig, ImageType};
-    use crate::formats::qcow::{QcowDisk, QcowTempDisk};
+    use crate::formats::qcow::{BackingFileConfig, ImageType, QcowDisk, QcowTempDisk};
 
     fn create_disk_with_data(
         file_size: u64,
