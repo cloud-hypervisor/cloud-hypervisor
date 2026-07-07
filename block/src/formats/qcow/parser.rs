@@ -1036,6 +1036,40 @@ mod unit_tests {
     }
 
     #[test]
+    fn header_write_matches_qcow2_layout() {
+        for expected in [valid_header_v2(), valid_header_v3()] {
+            let header = QcowHeader::new(&basic_file(&expected)).expect("Failed to read header.");
+            let disk_file: AlignedFile =
+                AlignedFile::new(TempFile::new().unwrap().into_file(), false);
+
+            header
+                .write_to(&disk_file)
+                .expect("Failed to write header.");
+
+            let mut actual = vec![0; expected.len()];
+            disk_file.read_exact_at(&mut actual, 0).unwrap();
+            assert_eq!(actual, expected);
+        }
+
+        let mut expected = valid_header_v3();
+        expected[72..80].copy_from_slice(&IncompatFeatures::COMPRESSION.bits().to_be_bytes());
+        expected[100..104].copy_from_slice(&(V3_BARE_HEADER_SIZE + 8).to_be_bytes());
+        expected.extend_from_slice(&(1u64 << (64 - 8)).to_be_bytes());
+        expected.extend_from_slice(&HEADER_EXT_END.to_be_bytes());
+        expected.extend_from_slice(&0u32.to_be_bytes());
+
+        let header = QcowHeader::new(&basic_file(&expected)).expect("Failed to read zstd header.");
+        let disk_file: AlignedFile = AlignedFile::new(TempFile::new().unwrap().into_file(), false);
+        header
+            .write_to(&disk_file)
+            .expect("Failed to write header.");
+
+        let mut actual = vec![0; expected.len()];
+        disk_file.read_exact_at(&mut actual, 0).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn header_v2_with_backing() {
         let header = QcowHeader::create_for_size_and_path(2, 0x10_0000, Some("/my/path/to/a/file"))
             .expect("Failed to create header.");

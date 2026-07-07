@@ -14,10 +14,11 @@ use std::str::FromStr;
 
 use bitflags::bitflags;
 use vmm_sys_util::file_traits::FileSync;
+use zerocopy::big_endian::{U32 as BeU32, U64 as BeU64};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 use super::decoder::{Decoder, ZlibDecoder, ZstdDecoder};
 use super::parser::{Error, Result};
-use super::qcow_raw_file::BeUint;
 use super::util::{div_round_up_u32, div_round_up_u64};
 use crate::aligned_file::AlignedFile;
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
@@ -207,6 +208,84 @@ pub struct QcowHeader {
     pub backing_file: Option<BackingFileConfig>,
 }
 
+/// On-disk layout of the bare qcow2 header shared by v2 and v3 (72 bytes).
+#[repr(C)]
+#[derive(FromBytes, IntoBytes, KnownLayout, Immutable)]
+struct RawHeaderV2 {
+    magic: BeU32,
+    version: BeU32,
+    backing_file_offset: BeU64,
+    backing_file_size: BeU32,
+    cluster_bits: BeU32,
+    size: BeU64,
+    crypt_method: BeU32,
+    l1_size: BeU32,
+    l1_table_offset: BeU64,
+    refcount_table_offset: BeU64,
+    refcount_table_clusters: BeU32,
+    nb_snapshots: BeU32,
+    snapshots_offset: BeU64,
+}
+
+impl RawHeaderV2 {
+    fn from_header(header: &QcowHeader) -> Self {
+        Self {
+            magic: BeU32::new(header.magic),
+            version: BeU32::new(header.version),
+            backing_file_offset: BeU64::new(header.backing_file_offset),
+            backing_file_size: BeU32::new(header.backing_file_size),
+            cluster_bits: BeU32::new(header.cluster_bits),
+            size: BeU64::new(header.size),
+            crypt_method: BeU32::new(header.crypt_method),
+            l1_size: BeU32::new(header.l1_size),
+            l1_table_offset: BeU64::new(header.l1_table_offset),
+            refcount_table_offset: BeU64::new(header.refcount_table_offset),
+            refcount_table_clusters: BeU32::new(header.refcount_table_clusters),
+            nb_snapshots: BeU32::new(header.nb_snapshots),
+            snapshots_offset: BeU64::new(header.snapshots_offset),
+        }
+    }
+}
+
+/// On-disk layout of the fields v3 adds after the bare header (32 bytes).
+#[repr(C)]
+#[derive(FromBytes, IntoBytes, KnownLayout, Immutable)]
+struct RawHeaderV3Tail {
+    incompatible_features: BeU64,
+    compatible_features: BeU64,
+    autoclear_features: BeU64,
+    refcount_order: BeU32,
+    header_size: BeU32,
+}
+
+impl RawHeaderV3Tail {
+    fn from_header(header: &QcowHeader) -> Self {
+        Self {
+            incompatible_features: BeU64::new(header.incompatible_features),
+            compatible_features: BeU64::new(header.compatible_features),
+            autoclear_features: BeU64::new(header.autoclear_features),
+            refcount_order: BeU32::new(header.refcount_order),
+            header_size: BeU32::new(header.header_size),
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(FromBytes, IntoBytes, KnownLayout, Immutable)]
+struct ExtensionHeader {
+    extension_type: BeU32,
+    length: BeU32,
+}
+
+impl ExtensionHeader {
+    fn end() -> Self {
+        Self {
+            extension_type: BeU32::new(HEADER_EXT_END),
+            length: BeU32::ZERO,
+        }
+    }
+}
+
 impl QcowHeader {
     /// Read header extensions, optionally collecting feature names for error reporting.
     pub(super) fn read_header_extensions(
@@ -218,19 +297,19 @@ impl QcowHeader {
         let mut offset = header.header_size as u64;
 
         loop {
-            let mut field = [0u8; size_of::<u32>()];
+            let mut field = [0u8; size_of::<ExtensionHeader>()];
             f.read_exact_at(&mut field, offset)
                 .map_err(Error::ReadingHeader)?;
             offset += field.len() as u64;
-            let ext_type = u32::from_be_slice(&field) as u32;
+
+            let extension =
+                ExtensionHeader::read_from_bytes(&field).expect("buffer covers extension header");
+            let ext_type = extension.extension_type.get();
             if ext_type == HEADER_EXT_END {
                 break;
             }
 
-            f.read_exact_at(&mut field, offset)
-                .map_err(Error::ReadingHeader)?;
-            offset += field.len() as u64;
-            let ext_length = u32::from_be_slice(&field) as u32;
+            let ext_length = extension.length.get();
 
             match ext_type {
                 HEADER_EXT_BACKING_FORMAT => {
@@ -277,85 +356,66 @@ impl QcowHeader {
 
     /// Creates a QcowHeader from a reference to a file.
     pub fn new(f: &AlignedFile) -> Result<QcowHeader> {
-        // Decode the next big endian u32 from the buffer and advance `pos`.
-        fn next_u32(buf: &[u8], pos: &mut usize) -> u32 {
-            let value = u32::from_be_slice(&buf[*pos..]) as u32;
-            *pos += size_of::<u32>();
-            value
-        }
-
-        // Decode the next big endian u64 from the buffer and advance `pos`.
-        fn next_u64(buf: &[u8], pos: &mut usize) -> u64 {
-            let value = u64::from_be_slice(&buf[*pos..]);
-            *pos += size_of::<u64>();
-            value
-        }
-
         // The bare header fits in V3_BARE_HEADER_SIZE plus the optional
-        // compression field. Read it once, then decode each field from the
-        // buffer at its running offset.
+        // compression field. Read it once, then decode each region as a typed
+        // view whose layout matches the on-disk header.
         let mut buf = [0u8; V3_BARE_HEADER_SIZE as usize + size_of::<u64>()];
         f.read_exact_at(&mut buf, 0).map_err(Error::ReadingHeader)?;
 
-        let mut pos = 0;
-        let magic = next_u32(&buf, &mut pos);
+        // `buf` is always larger than the views, and the views are unaligned,
+        // so the casts cannot fail.
+        let (v2, tail) = RawHeaderV2::ref_from_prefix(&buf).expect("buffer covers the v2 header");
+
+        let magic = v2.magic.get();
         if magic != QCOW_MAGIC {
             return Err(Error::InvalidMagic);
         }
-
-        let version = next_u32(&buf, &mut pos);
+        let version = v2.version.get();
 
         let mut header = QcowHeader {
             magic,
             version,
-            backing_file_offset: next_u64(&buf, &mut pos),
-            backing_file_size: next_u32(&buf, &mut pos),
-            cluster_bits: next_u32(&buf, &mut pos),
-            size: next_u64(&buf, &mut pos),
-            crypt_method: next_u32(&buf, &mut pos),
-            l1_size: next_u32(&buf, &mut pos),
-            l1_table_offset: next_u64(&buf, &mut pos),
-            refcount_table_offset: next_u64(&buf, &mut pos),
-            refcount_table_clusters: next_u32(&buf, &mut pos),
-            nb_snapshots: next_u32(&buf, &mut pos),
-            snapshots_offset: next_u64(&buf, &mut pos),
-            incompatible_features: if version == 2 {
-                0
-            } else {
-                next_u64(&buf, &mut pos)
-            },
-            compatible_features: if version == 2 {
-                0
-            } else {
-                next_u64(&buf, &mut pos)
-            },
-            autoclear_features: if version == 2 {
-                0
-            } else {
-                next_u64(&buf, &mut pos)
-            },
-            refcount_order: if version == 2 {
-                DEFAULT_REFCOUNT_ORDER
-            } else {
-                next_u32(&buf, &mut pos)
-            },
-            header_size: if version == 2 {
-                V2_BARE_HEADER_SIZE
-            } else {
-                next_u32(&buf, &mut pos)
-            },
+            backing_file_offset: v2.backing_file_offset.get(),
+            backing_file_size: v2.backing_file_size.get(),
+            cluster_bits: v2.cluster_bits.get(),
+            size: v2.size.get(),
+            crypt_method: v2.crypt_method.get(),
+            l1_size: v2.l1_size.get(),
+            l1_table_offset: v2.l1_table_offset.get(),
+            refcount_table_offset: v2.refcount_table_offset.get(),
+            refcount_table_clusters: v2.refcount_table_clusters.get(),
+            nb_snapshots: v2.nb_snapshots.get(),
+            snapshots_offset: v2.snapshots_offset.get(),
+            incompatible_features: 0,
+            compatible_features: 0,
+            autoclear_features: 0,
+            refcount_order: DEFAULT_REFCOUNT_ORDER,
+            header_size: V2_BARE_HEADER_SIZE,
             compression_type: CompressionType::Zlib,
             backing_file: None,
         };
-        if version == 3 && header.header_size > V3_BARE_HEADER_SIZE {
-            let raw_compression_type = next_u64(&buf, &mut pos) >> (64 - 8);
-            header.compression_type = if raw_compression_type == COMPRESSION_TYPE_ZLIB {
-                Ok(CompressionType::Zlib)
-            } else if raw_compression_type == COMPRESSION_TYPE_ZSTD {
-                Ok(CompressionType::Zstd)
-            } else {
-                Err(Error::UnsupportedCompressionType)
-            }?;
+
+        if version != 2 {
+            let (v3, rest) =
+                RawHeaderV3Tail::ref_from_prefix(tail).expect("buffer covers the v3 header");
+            header.incompatible_features = v3.incompatible_features.get();
+            header.compatible_features = v3.compatible_features.get();
+            header.autoclear_features = v3.autoclear_features.get();
+            header.refcount_order = v3.refcount_order.get();
+            header.header_size = v3.header_size.get();
+
+            if version == 3 && header.header_size > V3_BARE_HEADER_SIZE {
+                let (compression, _) =
+                    BeU64::ref_from_prefix(rest).expect("buffer covers the compression field");
+                let raw_compression_type = compression.get() >> (64 - 8);
+                header.compression_type = if raw_compression_type == COMPRESSION_TYPE_ZLIB {
+                    Ok(CompressionType::Zlib)
+                } else if raw_compression_type == COMPRESSION_TYPE_ZSTD {
+                    Ok(CompressionType::Zstd)
+                } else {
+                    Err(Error::UnsupportedCompressionType)
+                }?;
+            }
         }
         if header.backing_file_size > MAX_BACKING_FILE_SIZE {
             return Err(Error::BackingFileTooLong(header.backing_file_size as usize));
@@ -508,36 +568,20 @@ impl QcowHeader {
     pub fn write_to(&self, f: &AlignedFile) -> Result<()> {
         // Build the header in memory, then write it in one positional write.
         let mut buf = Vec::new();
-        buf.extend_from_slice(&self.magic.to_be_bytes());
-        buf.extend_from_slice(&self.version.to_be_bytes());
-        buf.extend_from_slice(&self.backing_file_offset.to_be_bytes());
-        buf.extend_from_slice(&self.backing_file_size.to_be_bytes());
-        buf.extend_from_slice(&self.cluster_bits.to_be_bytes());
-        buf.extend_from_slice(&self.size.to_be_bytes());
-        buf.extend_from_slice(&self.crypt_method.to_be_bytes());
-        buf.extend_from_slice(&self.l1_size.to_be_bytes());
-        buf.extend_from_slice(&self.l1_table_offset.to_be_bytes());
-        buf.extend_from_slice(&self.refcount_table_offset.to_be_bytes());
-        buf.extend_from_slice(&self.refcount_table_clusters.to_be_bytes());
-        buf.extend_from_slice(&self.nb_snapshots.to_be_bytes());
-        buf.extend_from_slice(&self.snapshots_offset.to_be_bytes());
+        let v2 = RawHeaderV2::from_header(self);
+        buf.extend_from_slice(v2.as_bytes());
 
         if self.version == 3 {
-            buf.extend_from_slice(&self.incompatible_features.to_be_bytes());
-            buf.extend_from_slice(&self.compatible_features.to_be_bytes());
-            buf.extend_from_slice(&self.autoclear_features.to_be_bytes());
-            buf.extend_from_slice(&self.refcount_order.to_be_bytes());
-            buf.extend_from_slice(&self.header_size.to_be_bytes());
+            let v3 = RawHeaderV3Tail::from_header(self);
+            buf.extend_from_slice(v3.as_bytes());
 
             if self.header_size > V3_BARE_HEADER_SIZE {
                 // no compression
-                buf.extend_from_slice(&0u64.to_be_bytes());
+                buf.extend_from_slice(BeU64::new(0).as_bytes());
             }
 
-            // header extension type: end of header extension area
-            buf.extend_from_slice(&0u32.to_be_bytes());
-            // length of header extension data: 0
-            buf.extend_from_slice(&0u32.to_be_bytes());
+            let end_extension = ExtensionHeader::end();
+            buf.extend_from_slice(end_extension.as_bytes());
         }
 
         f.write_all_at(&buf, 0).map_err(Error::WritingHeader)?;
