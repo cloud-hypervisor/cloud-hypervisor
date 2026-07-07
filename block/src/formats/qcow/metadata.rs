@@ -41,7 +41,7 @@ use super::{QcowHeader, refcount};
 /// the actual data I/O using its own per queue file descriptor without
 /// holding the metadata lock.
 #[derive(Debug)]
-pub enum ClusterReadMapping {
+pub(super) enum ClusterReadMapping {
     /// The cluster is not allocated and the guest should see zeros.
     /// This covers both truly unallocated clusters where the L1 or L2
     /// entry is zero and clusters with the ZERO flag set.
@@ -76,7 +76,7 @@ pub enum ClusterReadMapping {
 /// the actual data I/O using its own per queue file descriptor without
 /// holding the metadata lock.
 #[derive(Debug)]
-pub enum ClusterWriteMapping {
+pub(super) enum ClusterWriteMapping {
     /// The write target is at the given host file offset.
     /// This covers both already allocated clusters and freshly allocated ones.
     /// The offset is the exact byte position combining cluster base and
@@ -94,7 +94,7 @@ pub(crate) trait BackingRead: Send + Sync {
 
 /// Action that the caller must perform after deallocate_bytes.
 #[derive(Debug)]
-pub enum DeallocAction {
+pub(super) enum DeallocAction {
     /// Punch a hole at the given host file offset for a full cluster.
     PunchHole { host_offset: u64, length: u64 },
     /// Write zeros at the given host file offset for a partial cluster.
@@ -115,7 +115,7 @@ pub enum DeallocAction {
 /// L1 to L2 lookup, which completes under a shared read lock. Only
 /// cluster allocation, L2 cache eviction and resize take the exclusive
 /// write lock, so contention stays low and queues scale.
-pub struct QcowMetadata {
+pub(super) struct QcowMetadata {
     inner: RwLock<QcowState>,
     decoder: Arc<dyn Decoder>,
 }
@@ -160,7 +160,7 @@ impl QcowMetadata {
     ///
     /// The has_backing_file flag indicates whether a backing file exists,
     /// needed to distinguish zero versus backing for unallocated clusters.
-    pub fn map_clusters_for_read(
+    pub(super) fn map_clusters_for_read(
         &self,
         address: u64,
         total_length: usize,
@@ -228,7 +228,7 @@ impl QcowMetadata {
     /// unallocated and a backing file exists, the caller should have already
     /// read the backing cluster data and pass it here. If None, the new
     /// cluster is zeroed.
-    pub fn map_cluster_for_write(
+    pub(super) fn map_cluster_for_write(
         &self,
         address: u64,
         backing_data: Option<Vec<u8>>,
@@ -237,7 +237,7 @@ impl QcowMetadata {
         inner.map_write(address, backing_data)
     }
 
-    pub fn flush(&self) -> io::Result<()> {
+    pub(super) fn flush(&self) -> io::Result<()> {
         let mut inner = self.inner.write().unwrap();
         inner.sync_caches()?;
         let mut unref = mem::take(&mut inner.unref_clusters);
@@ -247,7 +247,7 @@ impl QcowMetadata {
 
     /// Flushes dirty metadata caches and clears the dirty bit for
     /// clean shutdown.
-    pub fn shutdown(&self) {
+    pub(super) fn shutdown(&self) {
         let mut inner = self.inner.write().unwrap();
         let _ = inner.sync_caches();
         let QcowState {
@@ -265,7 +265,7 @@ impl QcowMetadata {
     /// clusters beyond the new size and risks data loss.
     ///
     /// Returns an error if the new size is smaller than the current size.
-    pub fn resize(&self, new_size: u64) -> io::Result<()> {
+    pub(super) fn resize(&self, new_size: u64) -> io::Result<()> {
         let mut inner = self.inner.write().unwrap();
         inner.resize(new_size)
     }
@@ -339,16 +339,16 @@ impl QcowMetadata {
         Ok(actions)
     }
 
-    pub fn virtual_size(&self) -> u64 {
+    pub(super) fn virtual_size(&self) -> u64 {
         self.inner.read().unwrap().header.size
     }
 
-    pub fn cluster_size(&self) -> u64 {
+    pub(super) fn cluster_size(&self) -> u64 {
         self.inner.read().unwrap().raw_file.cluster_size()
     }
 
     /// Returns the shared decoder matching the image compression type.
-    pub fn decoder(&self) -> Arc<dyn Decoder> {
+    pub(super) fn decoder(&self) -> Arc<dyn Decoder> {
         Arc::clone(&self.decoder)
     }
 

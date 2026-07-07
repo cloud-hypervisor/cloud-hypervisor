@@ -18,7 +18,7 @@ pub enum Error {
     ZstdFillBuffer(#[source] io::Error),
 }
 
-pub type Result<T> = result::Result<T, Error>;
+pub(super) type Result<T> = result::Result<T, Error>;
 
 /// Generic trait for decoding zlib/zstd formats
 pub trait Decoder: Send + Sync {
@@ -26,7 +26,7 @@ pub trait Decoder: Send + Sync {
 }
 
 #[derive(Default)]
-pub struct ZlibDecoder {}
+pub(super) struct ZlibDecoder {}
 
 impl Decoder for ZlibDecoder {
     fn decode(&self, input: &[u8], output: &mut [u8]) -> Result<usize> {
@@ -45,7 +45,7 @@ impl Decoder for ZlibDecoder {
 }
 
 #[derive(Default)]
-pub struct ZstdDecoder {}
+pub(super) struct ZstdDecoder {}
 
 impl Decoder for ZstdDecoder {
     fn decode(&self, input: &[u8], output: &mut [u8]) -> Result<usize> {

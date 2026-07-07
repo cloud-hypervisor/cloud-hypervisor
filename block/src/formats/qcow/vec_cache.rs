@@ -12,21 +12,21 @@ use std::slice::SliceIndex;
 
 /// Trait that allows for checking if an implementor is dirty. Useful for types that are cached so
 /// it can be checked if they need to be committed to disk.
-pub trait Cacheable {
+pub(super) trait Cacheable {
     /// Used to check if the item needs to be written out or if it can be discarded.
     fn dirty(&self) -> bool;
 }
 
 #[derive(Clone, Debug)]
 /// Represents a vector that implements the `Cacheable` trait so it can be held in a cache.
-pub struct VecCache<T: 'static + Copy + Default> {
+pub(super) struct VecCache<T: 'static + Copy + Default> {
     vec: Box<[T]>,
     dirty: bool,
 }
 
 impl<T: 'static + Copy + Default> VecCache<T> {
     /// Creates a `VecCache` that can hold `count` elements.
-    pub fn new(count: usize) -> VecCache<T> {
+    pub(super) fn new(count: usize) -> VecCache<T> {
         VecCache {
             vec: vec![Default::default(); count].into_boxed_slice(),
             dirty: true,
@@ -34,14 +34,14 @@ impl<T: 'static + Copy + Default> VecCache<T> {
     }
 
     /// Creates a `VecCache` from the passed in `vec`.
-    pub fn from_vec(vec: Vec<T>) -> VecCache<T> {
+    pub(super) fn from_vec(vec: Vec<T>) -> VecCache<T> {
         VecCache {
             vec: vec.into_boxed_slice(),
             dirty: false,
         }
     }
 
-    pub fn get<I>(&self, index: I) -> Option<&<I as SliceIndex<[T]>>::Output>
+    pub(super) fn get<I>(&self, index: I) -> Option<&<I as SliceIndex<[T]>>::Output>
     where
         I: SliceIndex<[T]>,
     {
@@ -49,17 +49,17 @@ impl<T: 'static + Copy + Default> VecCache<T> {
     }
 
     /// Gets a reference to the underlying vector.
-    pub fn get_values(&self) -> &[T] {
+    pub(super) fn get_values(&self) -> &[T] {
         &self.vec
     }
 
     /// Mark this cache element as clean.
-    pub fn mark_clean(&mut self) {
+    pub(super) fn mark_clean(&mut self) {
         self.dirty = false;
     }
 
     /// Returns the number of elements in the vector.
-    pub fn len(&self) -> usize {
+    pub(super) fn len(&self) -> usize {
         self.vec.len()
     }
 
@@ -68,7 +68,7 @@ impl<T: 'static + Copy + Default> VecCache<T> {
     /// No-op if `new_len <= self.len()`. Allocates a new buffer, copies
     /// existing data, and fills new elements with default values.
     /// Marks the cache as dirty.
-    pub fn extend(&mut self, new_len: usize) {
+    pub(super) fn extend(&mut self, new_len: usize) {
         if new_len <= self.vec.len() {
             return;
         }
@@ -109,37 +109,37 @@ impl<T: 'static + Copy + Default> Deref for VecCache<T> {
 }
 
 #[derive(Clone, Debug)]
-pub struct CacheMap<T: Cacheable> {
+pub(super) struct CacheMap<T: Cacheable> {
     capacity: usize,
     map: HashMap<usize, T>,
 }
 
 impl<T: Cacheable> CacheMap<T> {
-    pub fn new(capacity: usize) -> Self {
+    pub(super) fn new(capacity: usize) -> Self {
         CacheMap {
             capacity,
             map: HashMap::with_capacity(capacity),
         }
     }
 
-    pub fn contains_key(&self, key: usize) -> bool {
+    pub(super) fn contains_key(&self, key: usize) -> bool {
         self.map.contains_key(&key)
     }
 
-    pub fn get(&self, index: usize) -> Option<&T> {
+    pub(super) fn get(&self, index: usize) -> Option<&T> {
         self.map.get(&index)
     }
 
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+    pub(super) fn get_mut(&mut self, index: usize) -> Option<&mut T> {
         self.map.get_mut(&index)
     }
 
-    pub fn iter_mut(&mut self) -> IterMut<'_, usize, T> {
+    pub(super) fn iter_mut(&mut self) -> IterMut<'_, usize, T> {
         self.map.iter_mut()
     }
 
     // Check if the refblock cache is full and we need to evict.
-    pub fn insert<F>(&mut self, index: usize, block: T, write_callback: F) -> io::Result<()>
+    pub(super) fn insert<F>(&mut self, index: usize, block: T, write_callback: F) -> io::Result<()>
     where
         F: FnOnce(usize, T) -> io::Result<()>,
     {

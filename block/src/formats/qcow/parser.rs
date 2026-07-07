@@ -4,15 +4,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-pub(crate) mod backing;
-pub(crate) mod decoder;
-mod header;
-pub(crate) mod metadata;
-pub(crate) mod qcow_raw_file;
-mod refcount;
-mod util;
-mod vec_cache;
-
 use std::cmp::{max, min};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::fs::{OpenOptions, read_link};
@@ -21,24 +12,25 @@ use std::os::unix::fs::FileExt;
 use std::path::Path;
 use std::{io, result, str};
 
-pub use header::{
+use log::warn;
+use remain::sorted;
+use thiserror::Error;
+
+pub use super::header::{
     BackingFileConfig, CompressionType, ImageType, IncompatFeatures, MissingFeatureError,
     QcowHeader,
 };
-use header::{
+use super::header::{
     COMPATIBLE_FEATURES_LAZY_REFCOUNTS, MAX_CLUSTER_BITS, MAX_QCOW_FILE_SIZE,
     MAX_RAM_POINTER_TABLE_SIZE, MIN_CLUSTER_BITS, QCOW_MAGIC, max_refcount_clusters,
     offset_is_cluster_boundary,
 };
-use log::warn;
-use qcow_raw_file::QcowRawFile;
-use refcount::RefCount;
-use remain::sorted;
-use thiserror::Error;
-pub(crate) use util::MAX_NESTING_DEPTH;
-use util::{L1_TABLE_OFFSET_MASK, L2_TABLE_OFFSET_MASK, div_round_up_u32, div_round_up_u64};
-use vec_cache::{CacheMap, VecCache};
-
+use super::qcow_raw_file::QcowRawFile;
+use super::refcount::RefCount;
+pub(crate) use super::util::MAX_NESTING_DEPTH;
+use super::util::{L1_TABLE_OFFSET_MASK, L2_TABLE_OFFSET_MASK, div_round_up_u64};
+use super::vec_cache::{CacheMap, VecCache};
+use super::{metadata, refcount};
 use crate::aligned_file::AlignedFile;
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::query_device_size;
@@ -156,7 +148,7 @@ pub enum Error {
     WritingHeader(#[source] io::Error),
 }
 
-pub type Result<T> = result::Result<T, Error>;
+pub(super) type Result<T> = result::Result<T, Error>;
 
 /// Concrete backing file variants.
 pub(crate) enum BackingKind {
@@ -865,7 +857,7 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
 }
 
 /// Detect the type of an image file by checking for a valid qcow2 header.
-pub fn detect_image_type(file: &mut AlignedFile) -> BlockResult<ImageType> {
+pub(super) fn detect_image_type(file: &mut AlignedFile) -> BlockResult<ImageType> {
     let mut magic_bytes = [0u8; 4];
     file.read_exact_at(&mut magic_bytes, 0)
         .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ReadingHeader(e)))?;
@@ -888,11 +880,11 @@ mod unit_tests {
     use vmm_sys_util::tempdir::TempDir;
     use vmm_sys_util::tempfile::TempFile;
 
-    use super::header::{
+    use super::super::header::{
         AUTOCLEAR_FEATURES_OFFSET, DEFAULT_CLUSTER_BITS, DEFAULT_REFCOUNT_ORDER,
         HEADER_EXT_BACKING_FORMAT, HEADER_EXT_END, V2_BARE_HEADER_SIZE, V3_BARE_HEADER_SIZE,
     };
-    use super::util::ZERO_FLAG;
+    use super::super::util::{self, ZERO_FLAG};
     use super::*;
     use crate::formats::qcow::{QcowDisk, QcowTempDisk};
 

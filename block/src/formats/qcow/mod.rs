@@ -7,9 +7,19 @@
 //! Provides [`QcowDisk`], the `DiskFile` wrapper for QCOW2 images
 //! with backing file and compression support.
 
-pub(crate) mod common;
-pub mod internal;
-pub mod worker;
+mod backing;
+mod common;
+mod decoder;
+mod engine_sync;
+#[cfg(feature = "io_uring")]
+mod engine_uring;
+mod header;
+mod metadata;
+mod parser;
+mod qcow_raw_file;
+mod refcount;
+mod util;
+mod vec_cache;
 
 use std::fs::File;
 use std::os::unix::io::AsRawFd;
@@ -18,20 +28,22 @@ use std::path::Path;
 use std::sync::Arc;
 use std::{fmt, io};
 
+pub use parser::{
+    BackingFileConfig, CompressionType, Error, ImageType, IncompatFeatures, MissingFeatureError,
+    QcowHeader,
+};
 #[cfg(any(test, feature = "test-utils"))]
 use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
 #[cfg(any(test, feature = "test-utils"))]
 use vmm_sys_util::tempfile::TempFile;
 
-use self::internal::backing::shared_backing_from;
-use self::internal::metadata::{BackingRead, QcowMetadata};
-use self::internal::qcow_raw_file::QcowRawFile;
-#[cfg(any(test, feature = "test-utils"))]
-use self::internal::{BackingFileConfig, QcowHeader};
-use self::internal::{MAX_NESTING_DEPTH, parse_qcow};
+use self::backing::shared_backing_from;
+use self::engine_sync::QcowSync;
 #[cfg(feature = "io_uring")]
-use self::worker::async_uring::QcowAsync;
-use self::worker::sync::QcowSync;
+use self::engine_uring::QcowAsync;
+use self::metadata::{BackingRead, QcowMetadata};
+use self::parser::{MAX_NESTING_DEPTH, parse_qcow};
+use self::qcow_raw_file::QcowRawFile;
 use crate::aligned_file::AlignedFile;
 #[cfg(any(test, feature = "test-utils"))]
 use crate::async_io::GuestMemoryTarget;
@@ -142,7 +154,7 @@ impl QcowDisk {
     }
 
     #[cfg(test)]
-    pub(crate) fn metadata(&self) -> &QcowMetadata {
+    fn metadata(&self) -> &QcowMetadata {
         &self.metadata
     }
 }

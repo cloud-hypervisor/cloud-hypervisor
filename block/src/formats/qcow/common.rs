@@ -10,16 +10,14 @@
 
 use std::io;
 
-#[cfg(test)]
-use super::internal;
-use super::internal::decoder::Decoder;
+use super::decoder::Decoder;
 
 /// Decompress a full QCOW2 cluster from compressed data.
 ///
 /// Returns a `cluster_size` byte buffer with the decompressed cluster
 /// content. Fails if the decoder does not produce exactly `cluster_size`
 /// bytes.
-pub fn decompress_cluster(
+pub(super) fn decompress_cluster(
     compressed: &[u8],
     cluster_size: usize,
     decoder: &dyn Decoder,
@@ -43,8 +41,8 @@ pub(crate) mod unit_tests {
     use flate2::Compression;
     use flate2::write::DeflateEncoder;
 
+    use super::super::decoder::ZlibDecoder;
     use super::decompress_cluster;
-    use super::internal::decoder::ZlibDecoder;
 
     const COMPRESSED_FLAG: u64 = 1 << 62;
     const CLUSTER_USED_FLAG: u64 = 1 << 63;

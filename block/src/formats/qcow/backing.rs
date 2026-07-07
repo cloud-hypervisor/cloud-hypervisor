@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use super::decoder::Decoder;
 use super::metadata::{BackingRead, ClusterReadMapping, QcowMetadata};
-use super::{BackingFile, BackingKind, Error as QcowError};
+use super::parser::{BackingFile, BackingKind, Error as QcowError};
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::formats::qcow::common::decompress_cluster;
 
@@ -146,7 +146,7 @@ impl Drop for Qcow2Backing {
 }
 
 /// Construct a thread safe backing file reader.
-pub fn shared_backing_from(bf: BackingFile) -> BlockResult<Arc<dyn BackingRead>> {
+pub(super) fn shared_backing_from(bf: BackingFile) -> BlockResult<Arc<dyn BackingRead>> {
     let (kind, virtual_size) = bf.into_kind();
 
     let dup_fd = |fd: BorrowedFd<'_>| -> BlockResult<OwnedFd> {

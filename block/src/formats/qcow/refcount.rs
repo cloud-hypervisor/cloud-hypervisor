@@ -41,11 +41,11 @@ pub enum Error {
     },
 }
 
-pub type Result<T> = result::Result<T, Error>;
+pub(super) type Result<T> = result::Result<T, Error>;
 
 /// Represents the refcount entries for an open qcow file.
 #[derive(Clone, Debug)]
-pub struct RefCount {
+pub(super) struct RefCount {
     ref_table: VecCache<u64>,
     refcount_table_offset: u64,
     refblock_cache: CacheMap<VecCache<u64>>,
@@ -62,7 +62,7 @@ impl RefCount {
     /// `refcount_block_entries` indicates the number of refcounts in each refcount block.
     /// `refcount_bits` is the number of bits per refcount (1, 2, 4, 8, 16, 32, or 64).
     /// Each refcount table entry points to a refcount block.
-    pub fn new(
+    pub(super) fn new(
         raw_file: &mut QcowRawFile,
         refcount_table_offset: u64,
         refcount_table_entries: u64,
@@ -95,12 +95,12 @@ impl RefCount {
     }
 
     /// Returns the number of refcounts per block.
-    pub fn refcounts_per_block(&self) -> u64 {
+    pub(super) fn refcounts_per_block(&self) -> u64 {
         self.refcount_block_entries
     }
 
     /// Returns the maximum valid cluster offset in the raw file for this refcount table.
-    pub fn max_valid_cluster_offset(&self) -> u64 {
+    pub(super) fn max_valid_cluster_offset(&self) -> u64 {
         self.max_valid_cluster_offset
     }
 
@@ -109,7 +109,7 @@ impl RefCount {
     /// allocate a cluster or read the required one and call this function again with the cluster.
     /// On success, an optional address of a dropped cluster is returned. The dropped cluster can
     /// be reused for other purposes.
-    pub fn set_cluster_refcount(
+    pub(super) fn set_cluster_refcount(
         &mut self,
         raw_file: &mut QcowRawFile,
         cluster_address: u64,
@@ -167,7 +167,7 @@ impl RefCount {
 
     /// Flush the dirty refcount blocks. This must be done before flushing the table that points to
     /// the blocks.
-    pub fn flush_blocks(&mut self, raw_file: &mut QcowRawFile) -> io::Result<()> {
+    pub(super) fn flush_blocks(&mut self, raw_file: &mut QcowRawFile) -> io::Result<()> {
         // Write out all dirty L2 tables.
         for (table_index, block) in self.refblock_cache.iter_mut().filter(|(_k, v)| v.dirty()) {
             let addr = self.ref_table[*table_index];
@@ -183,7 +183,7 @@ impl RefCount {
 
     /// Flush the refcount table that keeps the address of the refcounts blocks.
     /// Returns true if the table changed since the previous `flush_table()` call.
-    pub fn flush_table(&mut self, raw_file: &mut QcowRawFile) -> io::Result<bool> {
+    pub(super) fn flush_table(&mut self, raw_file: &mut QcowRawFile) -> io::Result<bool> {
         if self.ref_table.dirty() {
             raw_file
                 .write_pointer_table_direct(self.refcount_table_offset, self.ref_table.iter())?;
@@ -195,7 +195,7 @@ impl RefCount {
     }
 
     /// Gets the refcount for a cluster with the given address.
-    pub fn get_cluster_refcount(
+    pub(super) fn get_cluster_refcount(
         &mut self,
         raw_file: &mut QcowRawFile,
         address: u64,
