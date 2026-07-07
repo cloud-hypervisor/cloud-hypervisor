@@ -15,6 +15,7 @@ use event_monitor::event;
 use log::{error, info, warn};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic};
@@ -66,7 +67,7 @@ impl RngEpollHandler {
             // Validate the entire descriptor chain upfront so we never
             // partially fill buffers for a chain that turns out to be
             // invalid.
-            let descs: Vec<_> = desc_chain
+            let descs: SmallVec<[_; 4]> = desc_chain
                 .checked_iter(self.access_platform.as_deref())
                 .collect::<Result<_, _>>()
                 .unwrap_or_default();
