@@ -224,7 +224,7 @@ fn virtio_vhost_fs_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_recvmsg, vec![]),
         (libc::SYS_sendmsg, vec![]),
         (libc::SYS_sendto, vec![]),
-        (libc::SYS_socket, vec![]),
+        (libc::SYS_socket, create_socket_seccomp_rule()),
         (libc::SYS_timerfd_create, vec![]),
         (libc::SYS_timerfd_settime, vec![]),
     ]
@@ -240,7 +240,7 @@ fn virtio_generic_vhost_user_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_recvmsg, vec![]),
         (libc::SYS_sendmsg, vec![]),
         (libc::SYS_sendto, vec![]),
-        (libc::SYS_socket, vec![]),
+        (libc::SYS_socket, create_socket_seccomp_rule()),
         (libc::SYS_timerfd_create, vec![]),
         (libc::SYS_timerfd_settime, vec![]),
     ]
@@ -262,7 +262,7 @@ fn virtio_vhost_net_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_recvmsg, vec![]),
         (libc::SYS_sendmsg, vec![]),
         (libc::SYS_sendto, vec![]),
-        (libc::SYS_socket, vec![]),
+        (libc::SYS_socket, create_socket_seccomp_rule()),
         (libc::SYS_timerfd_create, vec![]),
         (libc::SYS_timerfd_settime, vec![]),
         #[cfg(target_arch = "x86_64")]
@@ -279,10 +279,16 @@ fn virtio_vhost_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_nanosleep, vec![]),
         (libc::SYS_recvmsg, vec![]),
         (libc::SYS_sendmsg, vec![]),
-        (libc::SYS_socket, vec![]),
+        (libc::SYS_socket, create_socket_seccomp_rule()),
         (libc::SYS_timerfd_create, vec![]),
         (libc::SYS_timerfd_settime, vec![]),
     ]
+}
+
+fn create_socket_seccomp_rule() -> Vec<SeccompRule> {
+    or![and![
+        Cond::new(0, ArgLen::Dword, Eq, libc::AF_UNIX as u64).unwrap()
+    ]]
 }
 
 fn create_vsock_ioctl_seccomp_rule() -> Vec<SeccompRule> {
@@ -302,7 +308,7 @@ fn virtio_vsock_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_sendto, vec![]),
         (libc::SYS_shutdown, vec![]),
-        (libc::SYS_socket, vec![]),
+        (libc::SYS_socket, create_socket_seccomp_rule()),
     ]
 }
 
