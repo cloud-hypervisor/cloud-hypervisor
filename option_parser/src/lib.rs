@@ -530,7 +530,7 @@ impl<S: Parseable, T: TupleValue> Parseable for TupleList<S, T> {
             .ok_or_else(|| TupleError::UnbalancedOutsideBrackets(s.to_string()))?;
         let tuples_raw = split_commas(body).map_err(TupleError::SplitInsideBrackets)?;
         for tuple_raw in tuples_raw.iter() {
-            list.push(Tuple::from_str(tuple_raw)?);
+            list.push(Tuple::from_str(tuple_raw.trim())?);
         }
 
         Ok(TupleList(list))
@@ -864,6 +864,21 @@ mod unit_tests {
             TupleList(vec![
                 Tuple("a".to_owned(), vec![1, 2]),
                 Tuple("b".to_owned(), vec![3, 4]),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_tuple_list_trim_whitespace() {
+        let t = TupleList::<String, Vec<u64>>::from_str("[a@[1,2], b@[3,4] ,\tc@[5,6],\nd@[7,8]]")
+            .unwrap();
+        assert_eq!(
+            t,
+            TupleList(vec![
+                Tuple("a".to_owned(), vec![1, 2]),
+                Tuple("b".to_owned(), vec![3, 4]),
+                Tuple("c".to_owned(), vec![5, 6]),
+                Tuple("d".to_owned(), vec![7, 8]),
             ])
         );
     }
