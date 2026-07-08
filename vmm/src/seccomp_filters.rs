@@ -565,7 +565,7 @@ fn create_serial_manager_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Backen
 // Syscalls needed by all threads, because they are used in the seccomp signal
 // handler.
 fn common_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
-    Ok(vec![(libc::SYS_gettid, vec![])])
+    Ok(vec![(libc::SYS_gettid, vec![]), (libc::SYS_write, vec![])])
 }
 
 fn create_signal_handler_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
@@ -599,7 +599,6 @@ fn signal_handler_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_sched_yield, vec![]),
         (libc::SYS_sendto, vec![]),
         (libc::SYS_sigaltstack, vec![]),
-        (libc::SYS_write, vec![]),
     ])
 }
 
@@ -618,7 +617,6 @@ fn pty_foreground_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_fcntl, vec![]),
         (libc::SYS_getcwd, vec![]),
         (libc::SYS_getpgid, vec![]),
-        (libc::SYS_gettid, vec![]),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_getpgrp, vec![]),
         (libc::SYS_ioctl, create_pty_foreground_ioctl_seccomp_rule()?),
@@ -634,7 +632,6 @@ fn pty_foreground_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_sched_yield, vec![]),
         (libc::SYS_setsid, vec![]),
         (libc::SYS_sigaltstack, vec![]),
-        (libc::SYS_write, vec![]),
     ])
 }
 
@@ -685,7 +682,6 @@ fn vmm_thread_rules(
         (libc::SYS_getpgrp, vec![]),
         (libc::SYS_getpid, vec![]),
         (libc::SYS_getrandom, vec![]),
-        (libc::SYS_gettid, vec![]),
         (libc::SYS_gettimeofday, vec![]),
         (libc::SYS_getuid, vec![]),
         (
@@ -780,7 +776,6 @@ fn vmm_thread_rules(
         (libc::SYS_unlinkat, vec![]),
         (libc::SYS_userfaultfd, vec![]),
         (libc::SYS_wait4, vec![]),
-        (libc::SYS_write, vec![]),
         (libc::SYS_writev, vec![]),
     ])
 }
@@ -922,7 +917,6 @@ fn vcpu_thread_rules(
         (libc::SYS_getcwd, vec![]),
         (libc::SYS_getrandom, vec![]),
         (libc::SYS_getpid, vec![]),
-        (libc::SYS_gettid, vec![]),
         (
             libc::SYS_ioctl,
             create_vcpu_ioctl_seccomp_rule(hypervisor_type)?,
@@ -962,7 +956,6 @@ fn vcpu_thread_rules(
         (libc::SYS_unlink, vec![]),
         #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
         (libc::SYS_unlinkat, vec![]),
-        (libc::SYS_write, vec![]),
         (libc::SYS_writev, vec![]),
     ])
 }
@@ -984,7 +977,6 @@ fn http_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
         (libc::SYS_exit, vec![]),
         (libc::SYS_fcntl, vec![]),
         (libc::SYS_getcwd, vec![]),
-        (libc::SYS_gettid, vec![]),
         (libc::SYS_futex, vec![]),
         (libc::SYS_getrandom, vec![]),
         (libc::SYS_ioctl, create_api_ioctl_seccomp_rule()?),
@@ -1013,7 +1005,6 @@ fn http_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
         (libc::SYS_sched_yield, vec![]),
         (libc::SYS_sendto, vec![]),
         (libc::SYS_sigaltstack, vec![]),
-        (libc::SYS_write, vec![]),
     ])
 }
 
@@ -1030,7 +1021,6 @@ fn dbus_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
         (libc::SYS_dup, vec![]),
         (libc::SYS_epoll_ctl, vec![]),
         (libc::SYS_exit, vec![]),
-        (libc::SYS_gettid, vec![]),
         (libc::SYS_fcntl, vec![]),
         (libc::SYS_futex, vec![]),
         (libc::SYS_getcwd, vec![]),
@@ -1048,7 +1038,6 @@ fn dbus_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
         (libc::SYS_sendmsg, vec![]),
         (libc::SYS_set_robust_list, vec![]),
         (libc::SYS_sigaltstack, vec![]),
-        (libc::SYS_write, vec![]),
     ])
 }
 
@@ -1057,7 +1046,6 @@ fn event_monitor_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendE
         (libc::SYS_brk, vec![]),
         (libc::SYS_close, vec![]),
         (libc::SYS_getcwd, vec![]),
-        (libc::SYS_gettid, vec![]),
         (libc::SYS_futex, vec![]),
         (libc::SYS_landlock_create_ruleset, vec![]),
         (libc::SYS_landlock_restrict_self, vec![]),
@@ -1066,7 +1054,6 @@ fn event_monitor_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendE
         (libc::SYS_munmap, vec![]),
         (libc::SYS_prctl, vec![]),
         (libc::SYS_sched_yield, vec![]),
-        (libc::SYS_write, vec![]),
     ])
 }
 
@@ -1088,7 +1075,6 @@ fn migration_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError
         (libc::SYS_futex, vec![]),
         (libc::SYS_getpid, vec![]),
         (libc::SYS_getrandom, vec![]),
-        (libc::SYS_gettid, vec![]),
         (libc::SYS_ioctl, vec![]),
         (libc::SYS_lseek, vec![]),
         (libc::SYS_madvise, vec![]),
@@ -1125,7 +1111,6 @@ fn migration_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError
         (libc::SYS_statx, vec![]),
         (libc::SYS_tgkill, vec![]),
         (libc::SYS_timerfd_settime, vec![]),
-        (libc::SYS_write, vec![]),
         (libc::SYS_writev, vec![]),
     ])
 }
@@ -1143,7 +1128,6 @@ fn migration_tcp_worker_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, B
         (libc::SYS_fcntl, vec![]),
         (libc::SYS_futex, vec![]),
         (libc::SYS_getrandom, vec![]),
-        (libc::SYS_gettid, vec![]),
         (libc::SYS_madvise, vec![]),
         (libc::SYS_mmap, vec![]),
         (libc::SYS_mprotect, vec![]),
@@ -1171,7 +1155,6 @@ fn migration_tcp_worker_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, B
         (libc::SYS_set_robust_list, vec![]),
         (libc::SYS_setsockopt, vec![]),
         (libc::SYS_sigaltstack, vec![]),
-        (libc::SYS_write, vec![]),
         (libc::SYS_writev, vec![]),
     ])
 }
@@ -1201,7 +1184,6 @@ fn serial_manager_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_sendto, vec![]),
         (libc::SYS_shutdown, vec![]),
         (libc::SYS_sigaltstack, vec![]),
-        (libc::SYS_write, vec![]),
     ])
 }
 
@@ -1215,7 +1197,6 @@ fn migrate_send_postcopy_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, 
         (libc::SYS_exit, vec![]),
         (libc::SYS_futex, vec![]),
         (libc::SYS_getrandom, vec![]),
-        (libc::SYS_gettid, vec![]),
         (libc::SYS_madvise, vec![]),
         (libc::SYS_mmap, vec![]),
         (libc::SYS_mprotect, vec![]),
@@ -1229,7 +1210,6 @@ fn migrate_send_postcopy_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, 
         (libc::SYS_sendmsg, vec![]),
         (libc::SYS_sendto, vec![]),
         (libc::SYS_sigaltstack, vec![]),
-        (libc::SYS_write, vec![]),
         (libc::SYS_writev, vec![]),
     ])
 }
