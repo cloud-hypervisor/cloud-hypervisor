@@ -12,8 +12,6 @@ cargo_args=("")
 # shellcheck disable=SC2154
 if [[ $hypervisor = "mshv" ]]; then
     cargo_args+=("--features $hypervisor")
-elif [[ $(uname -m) = "x86_64" ]]; then
-    cargo_args+=("--features tdx")
 fi
 
 export RUST_BACKTRACE=1
