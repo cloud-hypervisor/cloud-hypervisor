@@ -644,7 +644,10 @@ impl Request {
         if total_bytes == 0 {
             return Ok(());
         }
-        let total_sectors = total_bytes.div_ceil(SECTOR_SIZE);
+        if !total_bytes.is_multiple_of(SECTOR_SIZE) {
+            return Err(ExecuteError::BadRequest(Error::InvalidDataLength));
+        }
+        let total_sectors = total_bytes / SECTOR_SIZE;
         let end_sector = self
             .sector
             .checked_add(total_sectors)
