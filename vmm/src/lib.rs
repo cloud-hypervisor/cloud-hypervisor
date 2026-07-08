@@ -3590,7 +3590,7 @@ mod unit_tests {
     fn test_vmm_vm_cold_add_generic_vhost_user() {
         let mut vmm = create_dummy_vmm();
         let generic_vhost_user_config =
-            GenericVhostUserConfig::parse("virtio_id=26,socket=/tmp/sock,queue_sizes=[1024]")
+            GenericVhostUserConfig::parse("device_type=26,socket=/tmp/sock,queue_sizes=[1024]")
                 .unwrap();
 
         assert!(matches!(
