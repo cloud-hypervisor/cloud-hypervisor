@@ -8892,6 +8892,9 @@ mod snapshot_restore_common {
 
         let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
         let event_path_restored = format!("{}.2", temp_event_monitor_path(&guest.tmp_dir));
+        let snapshot_dir2 =
+            String::from(guest.tmp_dir.as_path().join("snapshot2").to_str().unwrap());
+        fs::create_dir(&snapshot_dir2).unwrap();
 
         let mut child = GuestCommand::new(&guest)
             .args(["--api-socket", &api_socket_restored])
@@ -8924,6 +8927,14 @@ mod snapshot_restore_common {
                 "info",
                 None
             )));
+
+            // Snapshot the still-restoring VM: refused until prefault completes.
+            assert!(wait_until(Duration::from_secs(120), || remote_command(
+                &api_socket_restored,
+                "snapshot",
+                Some(format!("file://{snapshot_dir2}").as_str()),
+            )));
+
             assert!(remote_command(&api_socket_restored, "resume", None));
 
             let latest_events = [
@@ -8967,7 +8978,60 @@ mod snapshot_restore_common {
         });
         handle_child_output(r, &output);
 
+        // Restore the 2nd snapshot into a fresh VM to prove no guest RAM was dropped.
+        Command::new("rm")
+            .arg("-f")
+            .arg(socket.as_str())
+            .output()
+            .unwrap();
+
+        let api_socket_restored2 = format!("{}.3", temp_api_path(&guest.tmp_dir));
+        let event_path_restored2 = format!("{}.3", temp_event_monitor_path(&guest.tmp_dir));
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_restored2])
+            .args([
+                "--event-monitor",
+                format!("path={event_path_restored2}").as_str(),
+            ])
+            .args([
+                "--restore",
+                format!("source_url=file://{snapshot_dir2}").as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let latest_events = [&MetaEvent {
+            event: "restored".to_string(),
+            device_id: None,
+        }];
+        assert!(wait_for_latest_events_exact(
+            Duration::from_secs(30),
+            &latest_events,
+            &event_path_restored2
+        ));
+
+        let r = panic::catch_unwind(|| {
+            assert!(wait_until(Duration::from_secs(30), || remote_command(
+                &api_socket_restored2,
+                "info",
+                None
+            )));
+            assert!(remote_command(&api_socket_restored2, "resume", None));
+
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
+            assert!(guest.get_total_memory().unwrap_or_default() > min_total_memory_kib);
+
+            guest.check_devices_common(Some(&socket), Some(&console_text), None);
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
         let _ = remove_dir_all(snapshot_dir.as_str());
+        let _ = remove_dir_all(snapshot_dir2.as_str());
     }
 
     pub(crate) fn _test_snapshot_restore_devices(pvpanic: bool) {
