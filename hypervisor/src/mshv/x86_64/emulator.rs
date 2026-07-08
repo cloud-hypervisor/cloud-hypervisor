@@ -25,10 +25,16 @@ impl MshvEmulatorContext<'_> {
     // Do the actual gva -> gpa translation
     #[expect(non_upper_case_globals)]
     fn translate(&self, gva: u64, flags: u32) -> Result<u64, PlatformError> {
+        // MSHV can return a page-aligned GPA; splice gva's page offset
+        // in so byte-sized MMIO (e.g. virtio device_status) is precise.
+        let page_offset_mask = (HV_HYP_PAGE_SIZE as u64) - 1;
+        let page_offset = gva & page_offset_mask;
+        let page_base = !page_offset_mask;
+
         if let Some((cached_gva, cached_gpa)) = self.mapping
-            && cached_gva == gva
+            && (cached_gva & page_base) == (gva & page_base)
         {
-            return Ok(cached_gpa);
+            return Ok((cached_gpa & page_base) | page_offset);
         }
 
         let (gpa, result_code) = self
@@ -37,7 +43,9 @@ impl MshvEmulatorContext<'_> {
             .map_err(|e| PlatformError::TranslateVirtualAddress(anyhow!(e)))?;
 
         match result_code {
-            hv_translate_gva_result_code_HV_TRANSLATE_GVA_SUCCESS => Ok(gpa),
+            hv_translate_gva_result_code_HV_TRANSLATE_GVA_SUCCESS => {
+                Ok((gpa & page_base) | page_offset)
+            }
             _ => Err(PlatformError::TranslateVirtualAddress(anyhow!(result_code))),
         }
     }
