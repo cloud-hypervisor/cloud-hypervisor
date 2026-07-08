@@ -14,7 +14,7 @@ use std::ops::{BitAnd, Not, Sub};
 use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, ffi, panic, result, thread, time};
@@ -71,6 +71,7 @@ struct UffdHandler {
     result_rx: Receiver<Result<(), io::Error>>,
     handle: thread::JoinHandle<()>,
     fault_socket_fd: Option<OwnedFd>,
+    prefault_complete: Arc<AtomicBool>,
 }
 
 pub const MEMORY_MANAGER_ACPI_SIZE: usize = 0x18;
@@ -1071,6 +1072,8 @@ impl MemoryManager {
         let panic_exit_evt = exit_evt.try_clone().map_err(Error::EventFdFail)?;
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let (result_tx, result_rx) = mpsc::sync_channel(1);
+        let prefault_complete = Arc::new(AtomicBool::new(false));
+        let thread_prefault_complete = Arc::clone(&prefault_complete);
         let handle = thread::Builder::new()
             .name("uffd-handler".to_string())
             .spawn(move || {
@@ -1081,6 +1084,7 @@ impl MemoryManager {
                         source,
                         &handler_ranges,
                         &ready_tx,
+                        &thread_prefault_complete,
                     );
 
                     if let Err(e) = &result {
@@ -1113,6 +1117,7 @@ impl MemoryManager {
             result_rx,
             handle,
             fault_socket_fd,
+            prefault_complete,
         });
 
         Ok(())
@@ -1148,6 +1153,13 @@ impl MemoryManager {
         }
     }
 
+    /// True while an on-demand (UFFD) restore is still faulting in guest RAM.
+    pub fn restoring(&self) -> bool {
+        self.uffd_handler
+            .as_ref()
+            .is_some_and(|h| !h.prefault_complete.load(Ordering::Acquire))
+    }
+
     /// Serve UFFD faults via `source`, prefaulting one page per idle
     /// iteration.
     #[expect(clippy::needless_pass_by_value)]
@@ -1157,6 +1169,7 @@ impl MemoryManager {
         mut source: Box<dyn UffdMemorySource>,
         ranges: &[UffdRange],
         ready_tx: &SyncSender<()>,
+        prefault_complete: &AtomicBool,
     ) -> Result<(), io::Error> {
         let uffd_raw_fd = uffd_fd.as_raw_fd();
 
@@ -1330,6 +1343,7 @@ impl MemoryManager {
                          prefaulted={pages_prefaulted} served={pages_served} \
                          total={total_pages}"
                     );
+                    prefault_complete.store(true, Ordering::Release);
                     return Ok(());
                 }
                 if served_bitmap[range_idx].is_bit_set(page_idx as usize) {
