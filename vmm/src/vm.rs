@@ -201,6 +201,9 @@ pub enum Error {
     #[error("VM is currently migrating and can't be modified")]
     VmMigrating,
 
+    #[error("VM on-demand memory restore is still in progress")]
+    VmRestoring,
+
     #[error("Cannot clone EventFd")]
     EventFdClone(#[source] io::Error),
 
@@ -3039,6 +3042,10 @@ impl Vm {
 
     pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemoryMmap> {
         self.memory_manager.lock().unwrap().guest_memory()
+    }
+
+    pub fn restoring(&self) -> bool {
+        self.memory_manager.lock().unwrap().restoring()
     }
 
     pub fn device_tree(&self) -> Arc<Mutex<DeviceTree>> {

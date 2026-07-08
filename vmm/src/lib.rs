@@ -2318,6 +2318,9 @@ impl RequestHandler for Vmm {
     fn vm_snapshot(&mut self, destination_url: &str) -> result::Result<(), VmError> {
         match self.vm {
             VmOwnership::Owned(ref mut vm) => {
+                if vm.restoring() {
+                    return Err(VmError::VmRestoring);
+                }
                 // Drain console_info so that FDs are not reused
                 let _ = self.console_info.take();
                 vm.snapshot()
@@ -3091,7 +3094,13 @@ impl RequestHandler for Vmm {
         send_data_migration: VmSendMigrationData,
     ) -> result::Result<(), MigratableError> {
         match self.vm {
-            VmOwnership::Owned(_) => (),
+            VmOwnership::Owned(ref vm) => {
+                if vm.restoring() {
+                    return Err(MigratableError::MigrateSend(anyhow!(
+                        "Cannot migrate while on-demand memory restore is in progress"
+                    )));
+                }
+            }
             VmOwnership::Migration { .. } => {
                 return Err(MigratableError::MigrateSend(anyhow!(
                     "There is already an ongoing migration"
