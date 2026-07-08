@@ -957,7 +957,7 @@ pub(crate) fn _test_virtio_fs(
         "socket={},id=myfs0,{}{}",
         virtiofsd_socket_path,
         if use_generic_vhost_user {
-            "queue_sizes=[1024,1024],virtio_id=26"
+            "queue_sizes=[1024,1024],device_type=26"
         } else {
             "tag=myfs,num_queues=1,queue_size=1024"
         },
@@ -1090,7 +1090,7 @@ pub(crate) fn _test_virtio_fs(
                 "id=myfs0,socket={},{}{}",
                 virtiofsd_socket_path,
                 if use_generic_vhost_user {
-                    "queue_sizes=[1024,1024],virtio_id=26"
+                    "queue_sizes=[1024,1024],device_type=26"
                 } else {
                     "tag=myfs,num_queues=1,queue_size=1024"
                 },

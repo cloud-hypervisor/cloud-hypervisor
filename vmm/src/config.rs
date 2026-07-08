@@ -53,14 +53,14 @@ pub enum Error {
     /// Filesystem socket is missing
     #[error("Error parsing --fs: socket missing")]
     ParseFsSockMissing,
-    /// Generic vhost-user virtio ID is invalid
+    /// Generic vhost-user device type is invalid
     #[error(
-        "Error parsing --generic-vhost-user: virtio ID {0:?} invalid (leading zeros or unknown string)"
+        "Error parsing --generic-vhost-user: device_type {0:?} invalid (leading zeros or unknown string)"
     )]
     ParseGenericVhostUserVirtioIdInvalid(String),
-    /// Generic vhost-user virtio ID is unsupported
+    /// Generic vhost-user device type is unsupported
     #[error(
-        "Error parsing --generic-vhost-user: device with virtio ID {0:?} cannot be implemented via vhost-user"
+        "Error parsing --generic-vhost-user: device with device_type {0:?} cannot be implemented via vhost-user"
     )]
     ParseGenericVhostUserVirtioIdUnsupported(String),
     /// Generic vhost-user socket is missing
@@ -69,8 +69,8 @@ pub enum Error {
     /// Generic vhost-user number of queues is missing
     #[error("Error parsing --generic-vhost-user: number of queues missing")]
     ParseGenericVhostUserNumResponseQueuesMissing,
-    /// Generic vhost-user virtio ID is missing
-    #[error("Error parsing --generic-vhost-user: virtio ID missing")]
+    /// Generic vhost-user device type is missing
+    #[error("Error parsing --generic-vhost-user: device_type missing")]
     ParseGenericVhostUserVirtioIdMissing,
     /// Generic vhost-user available features is missing
     #[error("Error parsing --generic-vhost-user: available features missing")]
@@ -1998,7 +1998,7 @@ impl BalloonConfig {
 
 impl GenericVhostUserConfig {
     pub const SYNTAX: &'static str = "generic vhost-user parameters \
-    \"virtio_id=<ID number for virtio device type (FS, block, net, etc) or symbolic name>,\
+    \"device_type=<ID number for virtio device type (FS, block, net, etc) or symbolic name>,\
     socket=<socket_path>,\
     queue_sizes=<list of queue sizes>,\
     id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
@@ -2006,6 +2006,8 @@ impl GenericVhostUserConfig {
     pub fn parse(vhost_user: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
+            .add("device_type")
+            // TODO: Remove 'virtio_id' as a deprecated alias for 'device_type'
             .add("virtio_id")
             .add("queue_sizes")
             .add("socket")
@@ -2022,9 +2024,16 @@ impl GenericVhostUserConfig {
             .convert::<IntegerList<u16>>("queue_sizes")
             .map_err(Error::ParseGenericVhostUser)?
             .ok_or(Error::ParseGenericVhostUserQueueSizeMissing)?;
-        let device_type_str = parser
+        let legacy_virtio_id = parser
             .convert::<String>("virtio_id")
+            .map_err(Error::ParseGenericVhostUser)?;
+        if legacy_virtio_id.is_some() {
+            warn!("'virtio_id' in --generic-vhost-user is deprecated; use 'device_type'.");
+        }
+        let device_type_str = parser
+            .convert::<String>("device_type")
             .map_err(Error::ParseGenericVhostUser)?
+            .or(legacy_virtio_id)
             .ok_or(Error::ParseGenericVhostUserVirtioIdMissing)?;
         let device_type = match device_type_str.as_bytes() {
             b"net" => VIRTIO_ID_NET,
@@ -4583,7 +4592,7 @@ mod unit_tests {
         assert!(!socket.contains(",[]\n\r\0\""));
         assert!(!id.contains(",[]\n\r\0\""));
         let config = GenericVhostUserConfig::parse(&format!(
-            "virtio_id={virtio_id},socket=\"{socket}\",\
+            "device_type={virtio_id},socket=\"{socket}\",\
 id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         ));
         if pci_segment <= u16::MAX.into()
@@ -4657,6 +4666,15 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             "Something",
             10,
             &IntegerList(vec![20u64]),
+        );
+
+        // The deprecated 'virtio_id' key is an alias for 'device_type' and must
+        // parse to an identical configuration.
+        assert_eq!(
+            GenericVhostUserConfig::parse("virtio_id=26,socket=/tmp/sock,queue_sizes=[1024]")
+                .unwrap(),
+            GenericVhostUserConfig::parse("device_type=26,socket=/tmp/sock,queue_sizes=[1024]")
+                .unwrap(),
         );
         Ok(())
     }

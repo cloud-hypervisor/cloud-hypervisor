@@ -43,14 +43,14 @@ similar to this:
     --disk path=your-linux-image.iso \
     --kernel vmlinux \
     --cmdline "console=hvc0 root=/dev/vda1 rw" \
-    --generic-vhost-user "socket=\"${path_to_virtiofsd_socket//\"/\"\"}\",virtio_id=26,queue_sizes=[512,512]" \
+    --generic-vhost-user "socket=\"${path_to_virtiofsd_socket//\"/\"\"}\",device_type=26,queue_sizes=[512,512]" \
    "${other_cloud_hypervisor_options[@]}"
 ```
 
 26 is the ID for a virtio-fs device. The IDs for other devices are defined
 by the VIRTIO specification. The odd-looking variable expansion escapes
 any double quotes in the socket path.  It is also possible to provide
-the name that is defined by the virtio specification, so `virtio_id=fs`
+the name that is defined by the virtio specification, so `device_type=fs`
 will also work.
 
 Inside the guest, you can mount the virtio-fs device with
