@@ -10826,6 +10826,52 @@ mod windows {
                 .unwrap()
         }
 
+        // A second dnsmasq for the dedicated KDNET debug NIC so the KDNET
+        // target can obtain an address and reach the debugger host address.
+        fn run_dnsmasq_debug(&self) -> Child {
+            let listen_address = format!("--listen-address={}", self.guest.network.host_ip1);
+            let dhcp_host = format!(
+                "--dhcp-host={},{}",
+                self.guest.network.guest_mac1, self.guest.network.guest_ip1
+            );
+            let dhcp_range = format!(
+                "--dhcp-range=eth,{},{}",
+                self.guest.network.guest_ip1, self.guest.network.guest_ip1
+            );
+
+            Command::new("dnsmasq")
+                .arg("--no-daemon")
+                .arg("--log-queries")
+                .arg(listen_address.as_str())
+                .arg("--except-interface=lo")
+                .arg("--bind-dynamic")
+                .arg("--conf-file=/dev/null")
+                .arg(dhcp_host.as_str())
+                .arg(dhcp_range.as_str())
+                .spawn()
+                .unwrap()
+        }
+
+        // Return the "bus.device.function" of the NIC with the given MAC. KDNET
+        // selects the debug adapter with this value (bcdedit busparams). Windows
+        // reports the MAC uppercased with dashes and the PCI location as e.g.
+        // "PCI bus 0, device 3, function 0".
+        fn nic_busparams(&self, mac: &str) -> String {
+            let win_mac = mac.to_uppercase().replace(':', "-");
+            let location = self.ssh_cmd(&format!(
+                "powershell -Command \"Get-NetAdapter | Where-Object {{ $_.MacAddress -eq '{win_mac}' }} | ForEach-Object {{ (Get-PnpDeviceProperty -InstanceId $_.PnpDeviceID -KeyName DEVPKEY_Device_LocationInfo).Data }}\""
+            ));
+            let nums: Vec<&str> = location
+                .split(|c: char| !c.is_ascii_digit())
+                .filter(|s| !s.is_empty())
+                .collect();
+            assert!(
+                nums.len() >= 3,
+                "unexpected NIC location '{location}' for mac {mac}"
+            );
+            format!("{}.{}.{}", nums[0], nums[1], nums[2])
+        }
+
         // TODO Cleanup image file explicitly after test, if there's some space issues.
         fn disk_new(&self, fs: u8, sz: usize) -> String {
             let mut guard = NEXT_DISK_ID.lock().unwrap();
@@ -11033,6 +11079,124 @@ mod windows {
 
         let _ = child_dnsmasq.kill();
         let _ = child_dnsmasq.wait();
+
+        handle_child_output(r, &output);
+    }
+
+    // Verify Windows kernel network debugging (KDNET) works over a Cloud
+    // Hypervisor virtio-net device. Configure KDNET on a dedicated virtio-net
+    // NIC and confirm the debuggee actually transmits KDNET packets to the
+    // debugger host address. Receiving such a packet exercises the whole device
+    // data path: discovery, feature negotiation, virtqueue setup and the TX
+    // doorbell. A real debugger is not needed because KDNET connections are
+    // initiated by the target, which polls the debugger host address on boot.
+    #[test]
+    #[cfg(not(target_arch = "aarch64"))]
+    fn test_windows_guest_kdnet_virtio_net() {
+        use std::net::UdpSocket;
+        use std::time::Instant;
+
+        let windows_guest = WindowsGuest::new();
+
+        let mut ovmf_path = dirs::home_dir().unwrap();
+        ovmf_path.push("workloads");
+        ovmf_path.push(OVMF_NAME);
+
+        let port = 50000u16;
+        // Dedicated debug NIC. KDNET takes exclusive ownership of the NIC it
+        // uses, so keep it separate from the management NIC used for SSH. Its
+        // host tap address doubles as the KDNET debugger host address.
+        let debug_net = format!(
+            "tap=,mac={},ip={},mask=255.255.255.128",
+            windows_guest.guest().network.guest_mac1,
+            windows_guest.guest().network.host_ip1
+        );
+
+        let mut child = GuestCommand::new(windows_guest.guest())
+            .args(["--cpus", "boot=2,kvm_hyperv=on"])
+            .args(["--memory", "size=4G"])
+            .args(["--kernel", ovmf_path.to_str().unwrap()])
+            .args(["--serial", "tty"])
+            .args(["--console", "off"])
+            .default_disks()
+            .default_net()
+            .args(["--net", debug_net.as_str()])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let fd = child.stdout.as_ref().unwrap().as_raw_fd();
+        let pipesize = unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, PIPE_SIZE) };
+        let fd = child.stderr.as_ref().unwrap().as_raw_fd();
+        let pipesize1 = unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, PIPE_SIZE) };
+
+        assert!(pipesize >= PIPE_SIZE && pipesize1 >= PIPE_SIZE);
+
+        let mut child_dnsmasq = windows_guest.run_dnsmasq();
+        let mut child_dnsmasq_debug = windows_guest.run_dnsmasq_debug();
+
+        let r = panic::catch_unwind(|| {
+            // Wait to make sure Windows boots up.
+            windows_guest.wait_for_boot().unwrap();
+
+            // Enable KDNET on the dedicated virtio-net NIC, selected by its PCI
+            // bus params, pointing at the host tap address as the debugger.
+            let busparams = windows_guest.nic_busparams(&windows_guest.guest().network.guest_mac1);
+            windows_guest.ssh_cmd(&format!(
+                "bcdedit /dbgsettings net hostip:{} port:{} key:1.2.3.4",
+                windows_guest.guest().network.host_ip1,
+                port
+            ));
+            windows_guest.ssh_cmd(&format!(
+                "bcdedit /set \"{{dbgsettings}}\" busparams {busparams}"
+            ));
+            windows_guest.ssh_cmd("bcdedit /debug on");
+
+            // Reboot so the KDNET transport takes over the debug NIC, then wait
+            // for Windows to come back (over the unaffected management NIC).
+            windows_guest.reboot();
+            windows_guest.wait_for_boot().unwrap();
+
+            // Listen on the debugger host address and wait for the KDNET target
+            // to poll it. Any datagram from the debuggee proves the virtio-net
+            // TX path works end to end.
+            let socket =
+                UdpSocket::bind((windows_guest.guest().network.host_ip1.as_str(), port)).unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+
+            let mut buf = [0u8; 1500];
+            let deadline = Instant::now() + Duration::from_secs(120);
+            let mut received = false;
+            while Instant::now() < deadline {
+                match socket.recv_from(&mut buf) {
+                    Ok((n, src))
+                        if n > 0
+                            && src.ip().to_string() == windows_guest.guest().network.guest_ip1 =>
+                    {
+                        received = true;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            assert!(
+                received,
+                "no KDNET packet received from the debuggee over virtio-net"
+            );
+
+            windows_guest.shutdown();
+        });
+
+        let _ = child.wait_timeout(Duration::from_secs(60));
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        let _ = child_dnsmasq.kill();
+        let _ = child_dnsmasq.wait();
+        let _ = child_dnsmasq_debug.kill();
+        let _ = child_dnsmasq_debug.wait();
 
         handle_child_output(r, &output);
     }
