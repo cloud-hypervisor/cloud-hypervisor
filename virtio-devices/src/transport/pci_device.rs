@@ -1220,7 +1220,7 @@ impl PciDevice for VirtioPciDevice {
         }
     }
 
-    fn write_bar(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
+    fn write_bar(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         let initial_ready = self.is_driver_ready();
         match offset {
             o if o < COMMON_CONFIG_BAR_OFFSET + COMMON_CONFIG_SIZE => {
@@ -1242,15 +1242,28 @@ impl PciDevice for VirtioPciDevice {
             o if (NOTIFICATION_BAR_OFFSET..NOTIFICATION_BAR_OFFSET + NOTIFICATION_SIZE)
                 .contains(&o) =>
             {
-                #[cfg(feature = "sev_snp")]
-                for (event, addr) in self.ioeventfds(_base) {
-                    if addr == _base + offset {
-                        event.write(1).unwrap();
+                // A queue notification (doorbell) is normally delivered to the device through an
+                // ioeventfd registered on the notify address, so a plain MMIO write to the notify
+                // register never reaches this function.
+                //
+                // It *does* reach here when the driver rings the doorbell through the
+                // VIRTIO_PCI_CAP_PCI_CFG window (write_cap_pci_cfg -> write_bar) instead of
+                // through a mapped BAR, or on backends that deliver the write to the VMM (e.g.
+                // SEV-SNP).
+                //
+                // In those cases we must signal the matching queue eventfd ourselves. The virtio
+                // spec explicitly allows driving the device purely through the PCI_CFG window, so
+                // honour a doorbell that arrives this way.
+                let mut signalled = false;
+                for (event, addr) in self.ioeventfds(base) {
+                    if addr == base + offset {
+                        event.write(1).ok();
+                        signalled = true;
                     }
                 }
-                // Handled with ioeventfds.
-                #[cfg(not(feature = "sev_snp"))]
-                error!("Unexpected write to notification BAR: offset = 0x{o:x}");
+                if !signalled {
+                    warn!("Notification BAR write matched no queue: offset = 0x{o:x}");
+                }
             }
             o if (MSIX_TABLE_BAR_OFFSET..MSIX_TABLE_BAR_OFFSET + MSIX_TABLE_SIZE).contains(&o) => {
                 self.msix_config
@@ -1705,5 +1718,74 @@ mod unit_tests {
         let mut dev = make_virtio_pci_device();
         dev.add_pci_capabilities(0).unwrap();
         assert!(!has_device_config_cap(&dev.configuration));
+    }
+
+    struct QueuedTestDevice {
+        queue_sizes: Vec<u16>,
+    }
+
+    impl VirtioDevice for QueuedTestDevice {
+        fn device_type(&self) -> u32 {
+            0
+        }
+        fn queue_max_sizes(&self) -> &[u16] {
+            &self.queue_sizes
+        }
+        fn activate(&mut self, _context: ActivationContext) -> ActivateResult {
+            Ok(())
+        }
+    }
+
+    fn make_virtio_pci_device_with_queues(num_queues: usize) -> VirtioPciDevice {
+        let memory = GuestMemoryAtomic::new(
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+        let device = Arc::new(Mutex::new(QueuedTestDevice {
+            queue_sizes: vec![256; num_queues],
+        }));
+        VirtioPciDevice::new(
+            "test-dev".to_string(),
+            memory,
+            device,
+            None,
+            &TestInterruptManager,
+            0,
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+            false,
+            None,
+            Arc::new(Mutex::new(Vec::new())),
+            None,
+        )
+        .unwrap()
+    }
+
+    // A doorbell that reaches write_bar (e.g. delivered through the
+    // VIRTIO_PCI_CAP_PCI_CFG window rather than a mapped BAR) must signal the
+    // matching queue eventfd, not be dropped.
+    #[test]
+    fn notification_write_bar_signals_matching_queue_eventfd() {
+        let mut dev = make_virtio_pci_device_with_queues(2);
+
+        // Ring queue 1's doorbell the way write_cap_pci_cfg() would:
+        // write_bar(0, notify_offset, ..).
+        let offset = NOTIFICATION_BAR_OFFSET + u64::from(NOTIFY_OFF_MULTIPLIER);
+        dev.write_bar(0, offset, &[0u8, 0u8]);
+
+        // Queue 1 got exactly one notification; queue 0 was untouched (its
+        // non-blocking eventfd read returns an error).
+        assert_eq!(dev.queue_evts()[1].read().unwrap(), 1);
+        dev.queue_evts()[0].read().unwrap_err();
+    }
+
+    // Each notify offset must map to its own queue, so a doorbell for queue 0
+    // never wakes queue 1 and vice versa.
+    #[test]
+    fn notification_write_bar_targets_only_the_addressed_queue() {
+        let mut dev = make_virtio_pci_device_with_queues(2);
+
+        dev.write_bar(0, NOTIFICATION_BAR_OFFSET, &[0u8, 0u8]);
+
+        assert_eq!(dev.queue_evts()[0].read().unwrap(), 1);
+        dev.queue_evts()[1].read().unwrap_err();
     }
 }
