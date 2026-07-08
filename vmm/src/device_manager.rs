@@ -5026,20 +5026,24 @@ impl DeviceManager {
             match device_type {
                 VirtioDeviceType::Net => {
                     let mut config = self.config.lock().unwrap();
-                    let nets = config.net.as_deref_mut().unwrap();
-                    let net_dev_cfg = nets
-                        .iter_mut()
-                        .find(|net| net.pci_common.id.as_deref() == Some(id))
-                        // unwrap: the device could not have been removed without an ID
-                        .unwrap();
-                    let fds = net_dev_cfg.fds.take().unwrap_or(Vec::new());
-
-                    debug!("Closing preserved FDs from virtio-net device: id={id}, fds={fds:?}");
-                    for fd in fds {
-                        config.preserved_fds.as_mut().unwrap().remove(&fd);
-                        // SAFETY: We are closing the only remaining instance of this FD.
-                        unsafe {
-                            libc::close(fd);
+                    if let Some(fds) = config
+                        .net
+                        .as_deref_mut()
+                        .and_then(|nets| {
+                            nets.iter_mut()
+                                .find(|net| net.pci_common.id.as_deref() == Some(id))
+                        })
+                        .map(|net_dev_cfg| net_dev_cfg.fds.take().unwrap_or_default())
+                    {
+                        debug!(
+                            "Closing preserved FDs from virtio-net device: id={id}, fds={fds:?}"
+                        );
+                        for fd in fds {
+                            config.preserved_fds.as_mut().unwrap().remove(&fd);
+                            // SAFETY: We are closing the only remaining instance of this FD.
+                            unsafe {
+                                libc::close(fd);
+                            }
                         }
                     }
                 }
@@ -5053,11 +5057,15 @@ impl DeviceManager {
             // Cleanup externally-provided VFIO cdev FDs: remove the preserved
             // original from VmConfig and close it.
             let mut config = self.config.lock().unwrap();
-            if let Some(devices) = config.devices.as_deref_mut()
-                && let Some(device_cfg) = devices
-                    .iter_mut()
-                    .find(|d| d.pci_common.id.as_deref() == Some(id))
-                && let Some(fd) = device_cfg.fd.take()
+            if let Some(fd) = config
+                .devices
+                .as_deref_mut()
+                .and_then(|devices| {
+                    devices
+                        .iter_mut()
+                        .find(|d| d.pci_common.id.as_deref() == Some(id))
+                })
+                .and_then(|device_cfg| device_cfg.fd.take())
             {
                 debug!("Closing preserved FD from VFIO device: id={id}, fd={fd}");
                 let fd_removed = config.preserved_fds.as_mut().unwrap().remove(&fd);
@@ -5070,6 +5078,10 @@ impl DeviceManager {
                     libc::close(fd);
                 }
             }
+        }
+
+        if !self.config.lock().unwrap().remove_device(id) {
+            return Err(DeviceManagerError::UnknownDeviceId(id.to_string()));
         }
 
         // Update the PCID bitmap

@@ -2233,10 +2233,6 @@ impl Vm {
             .remove_device(id)
             .map_err(Error::DeviceManager)?;
 
-        // Update VmConfig by removing the device. This is important to
-        // ensure the device would not be created in case of a reboot.
-        self.config.lock().unwrap().remove_device(id);
-
         self.device_manager
             .lock()
             .unwrap()
