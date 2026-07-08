@@ -576,8 +576,12 @@ impl QcowHeader {
             buf.extend_from_slice(v3.as_bytes());
 
             if self.header_size > V3_BARE_HEADER_SIZE {
-                // no compression
-                buf.extend_from_slice(BeU64::new(0).as_bytes());
+                let compression_type = match &self.compression_type {
+                    CompressionType::Zlib => COMPRESSION_TYPE_ZLIB,
+                    CompressionType::Zstd => COMPRESSION_TYPE_ZSTD,
+                };
+                let compression_type = BeU64::new(compression_type << (64 - 8));
+                buf.extend_from_slice(compression_type.as_bytes());
             }
 
             let end_extension = ExtensionHeader::end();
