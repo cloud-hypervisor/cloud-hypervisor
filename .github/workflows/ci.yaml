@@ -448,14 +448,6 @@ jobs:
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --no-default-features --tests --examples --features "mshv,igvm" -- -D warnings
-      - name: Clippy (kvm + tdx)
-        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
-        uses: houseabsolute/actions-rust-cross@v1
-        with:
-          command: clippy
-          toolchain: ${{ matrix.rust }}
-          target: ${{ matrix.target }}
-          args: --locked --all --all-targets --no-default-features --tests --examples --features "tdx,kvm" -- -D warnings
       - name: Clippy (kvm + igvm + sev_snp + fw_cfg)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: houseabsolute/actions-rust-cross@v1
@@ -508,8 +500,6 @@ jobs:
         run: cargo build --locked --bin cloud-hypervisor
       - name: Build (kvm)
         run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "kvm"
-      - name: Build (default features + tdx)
-        run: cargo build --locked --bin cloud-hypervisor --features "tdx"
       - name: Build (default features + dbus_api)
         run: cargo build --locked --bin cloud-hypervisor --features "dbus_api"
       - name: Build (default features + guest_debug)

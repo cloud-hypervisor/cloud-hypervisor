@@ -894,6 +894,8 @@ fn expand_fdtable() -> Result<(), FdTableError> {
 }
 
 fn main() {
+    #[cfg(feature = "tdx")]
+    compile_error!("Feature 'tdx' is broken.");
     #[cfg(all(feature = "tdx", feature = "sev_snp"))]
     compile_error!("Feature 'tdx' and 'sev_snp' are mutually exclusive.");
     #[cfg(all(feature = "sev_snp", not(target_arch = "x86_64")))]
