@@ -2528,12 +2528,9 @@ impl DeviceManager {
         snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<Arc<Console>> {
         let serial_config = self.config.lock().unwrap().serial.clone();
-        if console_info.is_none() {
+        let Some(console_info) = console_info else {
             return Err(DeviceManagerError::InvalidConsoleInfo);
-        }
-
-        // SAFETY: console_info is Some, so it's safe to unwrap.
-        let console_info = console_info.unwrap();
+        };
 
         let serial_writer: Option<Box<dyn io::Write + Send>> = match console_info.serial {
             ConsoleTransport::File(ref file) | ConsoleTransport::Tty(ref file) => {
