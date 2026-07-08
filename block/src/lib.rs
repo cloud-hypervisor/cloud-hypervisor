@@ -71,6 +71,8 @@ pub enum Error {
     GetFileMetadata(#[source] io::Error),
     #[error("The requested operation would cause a seek beyond disk end")]
     InvalidOffset,
+    #[error("Request data length is not a multiple of the 512-byte sector size")]
+    InvalidDataLength,
     #[error("Failure in qcow")]
     QcowError(#[source] qcow::Error),
     #[error("The requested operation does not support multiple descriptors")]
