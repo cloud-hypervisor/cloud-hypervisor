@@ -271,8 +271,10 @@ Disk hotplug and hot-remove are supported. After the device has been hotplugged,
 
 ## Debugging
 
-For serial (COM/KDCOM) based kernel debugging, see
-[Windows Kernel Debugging over serial (KDCOM)](windows-kdcom-debugging.md).
+Two methods of kernel debugging a Windows guest are documented separately:
+
+- [Windows Kernel Debugging over virtio-net (KDNET)](windows-kdnet-debugging.md)
+- [Windows Kernel Debugging over serial (KDCOM)](windows-kdcom-debugging.md)
 
 ## Links
 
