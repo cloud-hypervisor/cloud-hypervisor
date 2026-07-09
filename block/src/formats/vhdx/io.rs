@@ -12,8 +12,6 @@ use super::bat::{self, BatEntry, VhdxBatError};
 use super::metadata::{self, DiskSpec};
 use crate::aligned_file::AlignedFile;
 
-const SECTOR_SIZE: u64 = 512;
-
 #[sorted]
 #[derive(Error, Debug)]
 pub enum VhdxIoError {
@@ -116,8 +114,7 @@ pub(super) fn read(
             | bat::PAYLOAD_BLOCK_ZERO => {}
             bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
                 f.read_exact_at(
-                    &mut buf
-                        [read_count..(read_count + (sector.free_sectors * SECTOR_SIZE) as usize)],
+                    &mut buf[read_count..(read_count + sector.free_bytes as usize)],
                     sector.file_offset,
                 )
                 .map_err(VhdxIoError::ReadSectorBlock)?;
@@ -187,7 +184,7 @@ pub(super) fn write(
                 }
 
                 f.write_all_at(
-                    &buf[write_count..(write_count + (sector.free_sectors * SECTOR_SIZE) as usize)],
+                    &buf[write_count..(write_count + sector.free_bytes as usize)],
                     file_offset,
                 )
                 .map_err(VhdxIoError::ReadSectorBlock)?;
@@ -198,7 +195,7 @@ pub(super) fn write(
                 }
 
                 f.write_all_at(
-                    &buf[write_count..(write_count + (sector.free_sectors * SECTOR_SIZE) as usize)],
+                    &buf[write_count..(write_count + sector.free_bytes as usize)],
                     sector.file_offset,
                 )
                 .map_err(VhdxIoError::ReadSectorBlock)?;
@@ -215,4 +212,45 @@ pub(super) fn write(
         write_count += sector.free_bytes as usize;
     }
     Ok(write_count)
+}
+
+#[cfg(test)]
+mod tests {
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::*;
+
+    // A VHDX with a 4 KiB logical sector must transfer a full logical sector
+    // per sector, not a hard-coded 512 bytes. Build a disk_spec with a 4096
+    // byte logical sector and one fully-present block, read a single sector,
+    // and confirm every byte comes from the file rather than being left zero.
+    #[test]
+    fn read_transfers_full_logical_sector_4k() {
+        const LSS: u32 = 4096;
+        const SECTORS_PER_BLOCK: u32 = 256; // 1 MiB block
+        const BLOCK_FILE_OFFSET: u64 = 1 << 20; // 1 MiB, BAT-aligned
+
+        let temp = TempFile::new().unwrap();
+        let f = temp.into_file();
+        f.set_len(BLOCK_FILE_OFFSET + LSS as u64).unwrap();
+        f.write_all_at(&[0xab_u8; LSS as usize], BLOCK_FILE_OFFSET)
+            .unwrap();
+        let aligned = AlignedFile::new(f, false);
+
+        let disk_spec = DiskSpec {
+            logical_sector_size: LSS,
+            sectors_per_block: SECTORS_PER_BLOCK,
+            ..Default::default()
+        };
+
+        let bat = vec![BatEntry(
+            BLOCK_FILE_OFFSET | bat::PAYLOAD_BLOCK_FULLY_PRESENT,
+        )];
+
+        let mut buf = vec![0u8; LSS as usize];
+        let read_len = read(&aligned, &mut buf, &disk_spec, &bat, 0, 1).unwrap();
+
+        assert_eq!(read_len, LSS as usize);
+        assert_eq!(buf, vec![0xab_u8; LSS as usize]);
+    }
 }
