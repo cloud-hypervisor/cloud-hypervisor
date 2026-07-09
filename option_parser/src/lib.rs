@@ -71,16 +71,16 @@ struct OptionParserValue {
 #[derive(Debug, Error)]
 pub enum OptionParserError {
     /// An option name was not previously registered with [`OptionParser::add`].
-    #[error("unknown option: {0}")]
+    #[error("Unknown option: {0}")]
     UnknownOption(String),
     /// The input string has invalid syntax (unbalanced quotes/brackets, missing `=`).
-    #[error("invalid syntax: {0}")]
+    #[error("Invalid syntax: {0}")]
     InvalidSyntax(String),
     /// A value could not be converted to the requested type.
-    #[error("unable to convert {1} for {0}")]
+    #[error("Unable to convert {1} for {0}")]
     Conversion(String /* field */, String /* value */),
     /// A value was syntactically valid but semantically wrong.
-    #[error("invalid value: {0}")]
+    #[error("Invalid value: {0}")]
     InvalidValue(String),
 }
 type OptionParserResult<T> = result::Result<T, OptionParserError>;
@@ -296,7 +296,7 @@ pub struct Toggle(pub bool);
 
 #[derive(Error, Debug)]
 pub enum ToggleParseError {
-    #[error("invalid value: {0}")]
+    #[error("Invalid value: {0}")]
     InvalidValue(String),
 }
 
@@ -323,7 +323,7 @@ pub struct ByteSized(pub u64);
 
 #[derive(Error, Debug)]
 pub enum ByteSizedParseError {
-    #[error("invalid value: {0}")]
+    #[error("Invalid value: {0}")]
     InvalidValue(String),
 }
 
@@ -375,7 +375,7 @@ impl<T: Display> Display for IntegerList<T> {
 
 #[derive(Error, Debug)]
 pub enum IntegerListParseError {
-    #[error("invalid value: {0}")]
+    #[error("Invalid value: {0}")]
     InvalidValue(String),
 }
 
@@ -466,15 +466,15 @@ impl TupleValue for Vec<usize> {
 
 #[derive(Error, Debug)]
 pub enum TupleError {
-    #[error("invalid value: {0}")]
+    #[error("Invalid value: {0}")]
     InvalidValue(String),
     #[error("Unbalanced brackets in one of the values")]
     SplitInsideBrackets(#[source] OptionParserError),
     #[error("Expected a single pair of enclosing brackets in input: {0}")]
     UnbalancedOutsideBrackets(String),
-    #[error("invalid integer list")]
+    #[error("Invalid integer list")]
     InvalidIntegerList(#[source] IntegerListParseError),
-    #[error("invalid integer")]
+    #[error("Invalid integer")]
     InvalidInteger(#[source] ParseIntError),
 }
 
@@ -545,7 +545,7 @@ pub struct StringList(pub Vec<String>);
 
 #[derive(Error, Debug)]
 pub enum StringListParseError {
-    #[error("invalid value: {0}")]
+    #[error("Invalid value: {0}")]
     InvalidValue(String),
 }
 
