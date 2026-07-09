@@ -936,6 +936,30 @@ mod unit_tests {
     }
 
     #[test]
+    fn test_tuple_list_unbalanced_brackets_in_element() {
+        let expected_value = "a@[1,2]],b@[3,4]";
+        let e = TupleList::<String, Vec<u64>>::from_str("[a@[1,2]],b@[3,4]]").unwrap_err();
+        assert!(
+            matches!(e, TupleError::SplitInsideBrackets(OptionParserError::InvalidSyntax(ref s)) if s == expected_value),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            TupleError::SplitInsideBrackets(OptionParserError::InvalidSyntax(
+                expected_value.to_string()
+            )),
+        );
+    }
+
+    #[test]
+    fn test_tuple_list_missing_brackets() {
+        let expected_value = "foo@42";
+        let e = TupleList::<String, u64>::from_str("foo@42").unwrap_err();
+        assert!(
+            matches!(e, TupleError::UnbalancedOutsideBrackets(ref s) if s == expected_value),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            TupleError::UnbalancedOutsideBrackets(expected_value.to_string()),
+        );
+    }
+
+    #[test]
     fn test_tuple_list_trim_whitespace() {
         let t = TupleList::<String, Vec<u64>>::from_str("[a@[1,2], b@[3,4] ,\tc@[5,6],\nd@[7,8]]")
             .unwrap();
@@ -947,6 +971,22 @@ mod unit_tests {
                 Tuple("c".to_owned(), vec![5, 6]),
                 Tuple("d".to_owned(), vec![7, 8]),
             ])
+        );
+    }
+
+    #[test]
+    fn test_tuple_successful_parse_quoted_at() {
+        assert_eq!(
+            Tuple::<String, u64>::from_str("\"foo@\"@42").unwrap(),
+            Tuple("foo@".to_string(), 42)
+        );
+    }
+
+    #[test]
+    fn test_tuple_successful_parse_quoted_whitespace() {
+        assert_eq!(
+            Tuple::<String, u64>::from_str("\" \"@42").unwrap(),
+            Tuple(" ".to_string(), 42)
         );
     }
 
@@ -967,6 +1007,15 @@ mod unit_tests {
     }
 
     #[test]
+    fn test_tuple_missing_value() {
+        let e = Tuple::<String, u64>::from_str("foo@").unwrap_err();
+        assert!(
+            matches!(e, TupleError::InvalidInteger(_)),
+            "Expected \"TupleError::InvalidInteger\"; got \"{e:?}\"",
+        );
+    }
+
+    #[test]
     fn test_tuple_reject_whitespace_as_empty_key() {
         let expected_value = "@42";
         let e = Tuple::<String, u64>::from_str(" @42").unwrap_err();
@@ -981,6 +1030,8 @@ mod unit_tests {
     fn test_split_commas_unbalanced_bracket() {
         split_commas("[a,b").unwrap_err();
         split_commas("a]").unwrap_err();
+        split_commas("[a]]").unwrap_err();
+        split_commas("[[[a]]").unwrap_err();
     }
 
     #[test]
