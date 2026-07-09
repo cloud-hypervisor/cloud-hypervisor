@@ -445,7 +445,7 @@ paths:
         405:
           description: The VM instance could not be coredumped because it is not booted.
 
-  /vmm.nmi:
+  /vm.nmi:
     put:
       summary: Inject an NMI.
       responses:
