@@ -272,7 +272,7 @@ impl OptionParser {
     ///
     /// `T` can be any type that implements `FromStr` (e.g. `u32`, `String`),
     /// or one of this crate's types such as [`Toggle`], [`IntegerList`],
-    /// [`Tuple`], or [`StringList`].
+    /// [`Tuple`], [`TupleList`] or [`StringList`].
     pub fn convert<T: Parseable>(&self, option: &str) -> OptionParserResult<Option<T>> {
         match self.options.get(option).and_then(|v| v.value.as_ref()) {
             None => Ok(None),
@@ -464,62 +464,76 @@ impl TupleValue for Vec<usize> {
     }
 }
 
-/// A list of `key@value` pairs parsed from a bracket-enclosed string.
-///
-/// The format is `[key1@value1,key2@value2,...]` where `@` separates each
-/// pair's elements. `S` is the key type and `T` is the value type.
-#[derive(PartialEq, Eq, Debug)]
-pub struct Tuple<S, T>(pub Vec<(S, T)>);
-
 #[derive(Error, Debug)]
 pub enum TupleError {
     #[error("invalid value: {0}")]
     InvalidValue(String),
-    #[error("split outside brackets")]
-    SplitOutsideBrackets(#[source] OptionParserError),
+    #[error("Unbalanced brackets in one of the values")]
+    SplitInsideBrackets(#[source] OptionParserError),
+    #[error("Expected a single pair of enclosing brackets in input: {0}")]
+    UnbalancedOutsideBrackets(String),
     #[error("invalid integer list")]
     InvalidIntegerList(#[source] IntegerListParseError),
     #[error("invalid integer")]
     InvalidInteger(#[source] ParseIntError),
 }
 
+/// A tuple consisting of a `key@value` pair parsed from a string.
+#[derive(PartialEq, Eq, Debug)]
+pub struct Tuple<S, T>(pub S, pub T);
+
+/// A list of `key@value` pairs parsed from a bracket-enclosed string.
+///
+/// The format is `[key1@value1,key2@value2,...]` where `@` separates each
+/// pair's elements. `S` is the key type and `T` is the value type.
+#[derive(PartialEq, Eq, Debug)]
+pub struct TupleList<S, T>(pub Vec<Tuple<S, T>>);
+
 impl<S: Parseable, T: TupleValue> Parseable for Tuple<S, T> {
     type Err = TupleError;
 
+    fn from_str(tuple: &str) -> result::Result<Self, Self::Err> {
+        let mut in_quotes = false;
+        let mut last_idx = 0;
+        let mut first_val = None;
+        for (idx, c) in tuple.as_bytes().iter().enumerate() {
+            match c {
+                b'"' => in_quotes = !in_quotes,
+                b'@' if !in_quotes => {
+                    if last_idx != 0 {
+                        return Err(TupleError::InvalidValue((*tuple).to_string()));
+                    }
+                    first_val = Some(&tuple[last_idx..idx]);
+                    last_idx = idx + 1;
+                }
+                _ => {}
+            }
+        }
+        let item1 = <S as Parseable>::from_str(
+            first_val.ok_or(TupleError::InvalidValue((*tuple).to_string()))?,
+        )
+        .map_err(|_| TupleError::InvalidValue(first_val.unwrap().to_owned()))?;
+        let item2: T = TupleValue::parse_value(&tuple[last_idx..])?;
+        Ok(Tuple(item1, item2))
+    }
+}
+
+impl<S: Parseable, T: TupleValue> Parseable for TupleList<S, T> {
+    type Err = TupleError;
+
     fn from_str(s: &str) -> result::Result<Self, Self::Err> {
-        let mut list: Vec<(S, T)> = Vec::new();
+        let mut list: Vec<Tuple<S, T>> = Vec::new();
         let body = s
             .trim()
             .strip_prefix('[')
             .and_then(|s| s.strip_suffix(']'))
-            .ok_or_else(|| TupleError::InvalidValue(s.to_string()))?;
-        let tuples_list = split_commas(body).map_err(TupleError::SplitOutsideBrackets)?;
-        for tuple in tuples_list.iter() {
-            let mut in_quotes = false;
-            let mut last_idx = 0;
-            let mut first_val = None;
-            for (idx, c) in tuple.as_bytes().iter().enumerate() {
-                match c {
-                    b'"' => in_quotes = !in_quotes,
-                    b'@' if !in_quotes => {
-                        if last_idx != 0 {
-                            return Err(TupleError::InvalidValue((*tuple).to_string()));
-                        }
-                        first_val = Some(&tuple[last_idx..idx]);
-                        last_idx = idx + 1;
-                    }
-                    _ => {}
-                }
-            }
-            let item1 = <S as Parseable>::from_str(
-                first_val.ok_or(TupleError::InvalidValue((*tuple).to_string()))?,
-            )
-            .map_err(|_| TupleError::InvalidValue(first_val.unwrap().to_owned()))?;
-            let item2 = TupleValue::parse_value(&tuple[last_idx..])?;
-            list.push((item1, item2));
+            .ok_or_else(|| TupleError::UnbalancedOutsideBrackets(s.to_string()))?;
+        let tuples_raw = split_commas(body).map_err(TupleError::SplitInsideBrackets)?;
+        for tuple_raw in tuples_raw.iter() {
+            list.push(Tuple::from_str(tuple_raw)?);
         }
 
-        Ok(Tuple(list))
+        Ok(TupleList(list))
     }
 }
 
@@ -636,10 +650,10 @@ mod unit_tests {
         parser.parse("topology=[\"@\"\"b\"@[1,2]]").unwrap();
         assert_eq!(
             parser
-                .convert::<Tuple<String, Vec<u8>>>("topology")
+                .convert::<TupleList<String, Vec<u8>>>("topology")
                 .unwrap()
                 .unwrap(),
-            Tuple(vec![("@\"b".to_owned(), vec![1, 2])])
+            TupleList(vec![Tuple("@\"b".to_owned(), vec![1, 2])])
         );
 
         parser.parse("cmdline=\"console=ttyS0,9600n8\"").unwrap();
@@ -836,30 +850,27 @@ mod unit_tests {
 
     #[test]
     fn test_tuple_single_pair() {
-        let t = Tuple::<String, u64>::from_str("[foo@42]").unwrap();
-        assert_eq!(t, Tuple(vec![("foo".to_owned(), 42)]));
+        let t = Tuple::<String, u64>::from_str("foo@42").unwrap();
+        assert_eq!(t, Tuple("foo".to_owned(), 42));
+        let t = Tuple::<String, Vec<u64>>::from_str("foo@[42]").unwrap();
+        assert_eq!(t, Tuple("foo".to_owned(), vec![42]));
     }
 
     #[test]
-    fn test_tuple_multiple_pairs() {
-        let t = Tuple::<String, Vec<u64>>::from_str("[a@[1,2],b@[3,4]]").unwrap();
+    fn test_tuple_list_multiple_pairs() {
+        let t = TupleList::<String, Vec<u64>>::from_str("[a@[1,2],b@[3,4]]").unwrap();
         assert_eq!(
             t,
-            Tuple(vec![
-                ("a".to_owned(), vec![1, 2]),
-                ("b".to_owned(), vec![3, 4]),
+            TupleList(vec![
+                Tuple("a".to_owned(), vec![1, 2]),
+                Tuple("b".to_owned(), vec![3, 4]),
             ])
         );
     }
 
     #[test]
     fn test_tuple_missing_at_separator() {
-        Tuple::<String, u64>::from_str("[foo42]").unwrap_err();
-    }
-
-    #[test]
-    fn test_tuple_missing_brackets() {
-        Tuple::<String, u64>::from_str("foo@42").unwrap_err();
+        Tuple::<String, u64>::from_str("foo42").unwrap_err();
     }
 
     #[test]

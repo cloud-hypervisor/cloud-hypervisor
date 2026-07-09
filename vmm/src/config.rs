@@ -16,7 +16,7 @@ use block::ImageType;
 use clap::ArgMatches;
 use log::{debug, warn};
 use option_parser::{
-    ByteSized, IntegerList, OptionParser, OptionParserError, StringList, Toggle, Tuple,
+    ByteSized, IntegerList, OptionParser, OptionParserError, StringList, Toggle, Tuple, TupleList,
 };
 use pci::NUM_DEVICE_IDS;
 use serde::{Deserialize, Serialize};
@@ -744,11 +744,11 @@ impl CpusConfig {
             .map_err(Error::ParseCpus)?
             .unwrap_or(DEFAULT_MAX_PHYS_BITS);
         let affinity = parser
-            .convert::<Tuple<u32, Vec<usize>>>("affinity")
+            .convert::<TupleList<u32, Vec<usize>>>("affinity")
             .map_err(Error::ParseCpus)?
             .map(|v| {
                 v.0.iter()
-                    .map(|(e1, e2)| CpuAffinity {
+                    .map(|Tuple(e1, e2)| CpuAffinity {
                         vcpu: *e1,
                         host_cpus: e2.clone().into_boxed_slice(),
                     })
@@ -1529,11 +1529,11 @@ impl DiskConfig {
             .unwrap_or_default();
         let serial = parser.get("serial");
         let queue_affinity = parser
-            .convert::<Tuple<u16, Vec<usize>>>("queue_affinity")
+            .convert::<TupleList<u16, Vec<usize>>>("queue_affinity")
             .map_err(Error::ParseDisk)?
             .map(|v| {
                 v.0.iter()
-                    .map(|(e1, e2)| VirtQueueAffinity {
+                    .map(|Tuple(e1, e2)| VirtQueueAffinity {
                         queue_index: *e1,
                         host_cpus: e2.clone().into_boxed_slice(),
                     })
@@ -2654,11 +2654,11 @@ impl NumaConfig {
             .map_err(Error::ParseNuma)?
             .map(|v| v.0.iter().map(|e| *e as u32).collect());
         let distances = parser
-            .convert::<Tuple<u64, u64>>("distances")
+            .convert::<TupleList<u64, u64>>("distances")
             .map_err(Error::ParseNuma)?
             .map(|v| {
                 v.0.iter()
-                    .map(|(e1, e2)| NumaDistance {
+                    .map(|Tuple(e1, e2)| NumaDistance {
                         destination: *e1 as u32,
                         distance: *e2 as u8,
                     })
@@ -2850,11 +2850,11 @@ impl RestoreConfig {
             .map_err(Error::ParseRestore)?
             .unwrap_or_default();
         let net_fds = parser
-            .convert::<Tuple<String, Vec<u64>>>("net_fds")
+            .convert::<TupleList<String, Vec<u64>>>("net_fds")
             .map_err(Error::ParseRestore)?
             .map(|v| {
                 v.0.iter()
-                    .map(|(id, fds)| RestoredNetConfig {
+                    .map(|Tuple(id, fds)| RestoredNetConfig {
                         id: id.clone(),
                         num_fds: fds.len(),
                         fds: Some(fds.iter().map(|e| *e as i32).collect()),
