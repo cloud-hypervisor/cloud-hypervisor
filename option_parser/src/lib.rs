@@ -476,6 +476,8 @@ pub enum TupleError {
     InvalidIntegerList(#[source] IntegerListParseError),
     #[error("Invalid integer")]
     InvalidInteger(#[source] ParseIntError),
+    #[error("Empty key in tuple: {0}")]
+    EmptyKey(String),
 }
 
 /// A tuple consisting of a `key@value` pair parsed from a string.
@@ -503,7 +505,11 @@ impl<S: Parseable, T: TupleValue> Parseable for Tuple<S, T> {
                     if last_idx != 0 {
                         return Err(TupleError::InvalidValue((*tuple).to_string()));
                     }
-                    first_val = Some(&tuple[last_idx..idx]);
+                    first_val = if tuple[last_idx..idx].is_empty() {
+                        return Err(TupleError::EmptyKey((*tuple).to_string()));
+                    } else {
+                        Some(&tuple[last_idx..idx])
+                    };
                     last_idx = idx + 1;
                 }
                 _ => {}
@@ -886,6 +892,17 @@ mod unit_tests {
     #[test]
     fn test_tuple_missing_at_separator() {
         Tuple::<String, u64>::from_str("foo42").unwrap_err();
+    }
+
+    #[test]
+    fn test_tuple_missing_key() {
+        let expected_value = "@42";
+        let e = Tuple::<String, u64>::from_str("@42").unwrap_err();
+        assert!(
+            matches!(e, TupleError::EmptyKey(ref s) if s == expected_value),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            TupleError::EmptyKey(expected_value.to_string()),
+        );
     }
 
     #[test]
