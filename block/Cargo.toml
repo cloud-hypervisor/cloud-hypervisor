@@ -13,7 +13,7 @@ test-utils = []
 [dependencies]
 bitflags = { workspace = true }
 byteorder = { workspace = true }
-crc-any = "2.5.0"
+crc-any = "3.0.0"
 flate2 = "1.1"
 io-uring = { version = "0.7.12", optional = true }
 libc = { workspace = true }
