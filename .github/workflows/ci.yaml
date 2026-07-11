@@ -846,6 +846,107 @@ jobs:
   #     - name: Run rate-limiter integration tests
   #       timeout-minutes: 20
   #       run: scripts/dev_cli.sh tests --integration-rate-limiter
+  virtio-villain:
+    name: virtio-villain
+    needs: [preflight, build]
+    if: >-
+      needs.preflight.outputs.full == 'true' && needs.build.result == 'success'
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    env:
+      VILLAIN_REPO: https://github.com/weltling/virtio-villain.git
+      VILLAIN_REF: v0.4.0
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Verify KVM is available
+        run: |
+          set -eufo pipefail
+          test -e /dev/kvm || { echo "::error::/dev/kvm missing on runner"; exit 1; }
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install dependencies
+        run: |
+          set -eufo pipefail
+          sudo apt-get update
+          sudo apt-get install -y musl-tools cpio gzip python3
+          sudo apt-get install -y virtiofsd || true
+      - name: Build cloud-hypervisor (kvm)
+        run: cargo build --locked --release --bin cloud-hypervisor --no-default-features --features kvm
+      - name: Clone virtio-villain
+        id: villain-src
+        run: |
+          set -eufo pipefail
+          git clone "$VILLAIN_REPO" virtio-villain
+          git -C virtio-villain checkout "$VILLAIN_REF"
+          echo "sha=$(git -C virtio-villain rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Cache virtio-villain build
+        id: villain-cache
+        uses: actions/cache@v4
+        with:
+          path: virtio-villain/target
+          key: virtio-villain-${{ runner.os }}-${{ runner.arch }}-${{ steps.villain-src.outputs.sha }}
+      - name: Build virtio-villain initramfs
+        if: steps.villain-cache.outputs.cache-hit != 'true'
+        run: make -C virtio-villain -j"$(nproc)" initramfs
+      - name: Run virtio-villain suite
+        id: villain
+        continue-on-error: true
+        working-directory: virtio-villain
+        run: |
+          set -eufo pipefail
+          mkdir -p villain-logs
+          sudo ./run \
+            -m "${GITHUB_WORKSPACE}/target/release/cloud-hypervisor" \
+            --blk-queues 1 --net-queues 2 \
+            -j 2 -t 45 -l villain-logs \
+            --format junit --output villain-logs/results.xml \
+            | tee villain-logs/run.out
+      - name: Publish results to run summary
+        if: always()
+        working-directory: virtio-villain
+        run: |
+          set -eufo pipefail
+          {
+            echo '## virtio-villain'
+            echo '```'
+            if [ -f villain-logs/run.out ]; then
+              sed -n '/tests passed/,$p' villain-logs/run.out
+            else
+              echo 'no results (suite did not produce output)'
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Annotate failing tests
+        if: always()
+        working-directory: virtio-villain
+        run: |
+          set -eufo pipefail
+          [ -f villain-logs/results.xml ] || exit 0
+          python3 - villain-logs/results.xml <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          try:
+              root = ET.parse(sys.argv[1]).getroot()
+          except ET.ParseError:
+              sys.exit(0)
+          for case in root.iter("testcase"):
+              fail = case.find("failure")
+              if fail is None:
+                  continue
+              status = fail.get("type", "FAIL")
+              msg = (fail.get("message") or status).replace("\n", " ")
+              cmd = "error" if status == "FAIL" else "warning"
+              print(f"::{cmd} title=virtio-villain {status} {case.get('name', '?')}::{msg}")
+          PY
+      - name: Upload virtio-villain logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: virtio-villain-logs
+          path: virtio-villain/villain-logs
+          if-no-files-found: ignore
   # The single required-status check. Branch protection requires this one job.
   all-green:
     name: all-green
