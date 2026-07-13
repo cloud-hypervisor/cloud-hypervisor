@@ -128,8 +128,6 @@ pub enum Error {
 #[cfg(feature = "kvm")]
 const KVM_SNP_PAGE_TYPE_NORMAL: u32 = 1;
 #[cfg(feature = "kvm")]
-const KVM_SNP_PAGE_TYPE_VMSA: u32 = 2;
-#[cfg(feature = "kvm")]
 const KVM_SNP_PAGE_TYPE_ZERO: u32 = 3;
 #[cfg(feature = "kvm")]
 const KVM_SNP_PAGE_TYPE_UNMEASURED: u32 = 4;
@@ -147,7 +145,7 @@ struct PageTypeConfig {
     unmeasured: u32,
     cpuid: u32,
     secrets: u32,
-    vmsa: u32,
+    vmsa: Option<u32>,
 }
 
 #[derive(Copy, Clone)]
@@ -277,7 +275,7 @@ pub fn load_igvm(
     #[cfg(feature = "sev_snp")] host_data: &Option<String>,
 ) -> Result<Box<IgvmLoadedInfo>, Error> {
     let hypervisor_type = cpu_manager.lock().unwrap().hypervisor_type();
-    let page_types = match hypervisor_type {
+    let page_types: PageTypeConfig = match hypervisor_type {
         #[cfg(feature = "mshv")]
         HypervisorType::Mshv => PageTypeConfig {
             isolated_page_size_4kb: mshv_bindings::hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
@@ -286,7 +284,7 @@ pub fn load_igvm(
             unmeasured: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_UNMEASURED,
             cpuid: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_CPUID,
             secrets: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_SECRETS,
-            vmsa: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_VMSA,
+            vmsa: Some(mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_VMSA),
         },
         #[cfg(feature = "kvm")]
         HypervisorType::Kvm => PageTypeConfig {
@@ -296,7 +294,8 @@ pub fn load_igvm(
             unmeasured: KVM_SNP_PAGE_TYPE_UNMEASURED,
             cpuid: KVM_SNP_PAGE_TYPE_CPUID,
             secrets: KVM_SNP_PAGE_TYPE_SECRETS,
-            vmsa: KVM_SNP_PAGE_TYPE_VMSA,
+            // KVM doesn't import a VMSA page, it instead constructs it internally
+            vmsa: None,
         },
     };
 
@@ -627,11 +626,13 @@ pub fn load_igvm(
                     }
                 }
 
-                gpas.push(GpaPages {
-                    gpa: *gpa,
-                    page_type: page_types.vmsa,
-                    page_size: page_types.isolated_page_size_4kb,
-                });
+                if let Some(vmsa_page_type) = page_types.vmsa {
+                    gpas.push(GpaPages {
+                        gpa: *gpa,
+                        page_type: vmsa_page_type,
+                        page_size: page_types.isolated_page_size_4kb,
+                    });
+                }
             }
             IgvmDirectiveHeader::SnpIdBlock {
                 compatibility_mask,
