@@ -967,6 +967,17 @@ mod unit_tests {
     }
 
     #[test]
+    fn test_tuple_reject_whitespace_as_empty_key() {
+        let expected_value = "@42";
+        let e = Tuple::<String, u64>::from_str(" @42").unwrap_err();
+        assert!(
+            matches!(e, TupleError::EmptyKey(ref s) if s == expected_value),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            TupleError::EmptyKey(expected_value.to_string()),
+        );
+    }
+
+    #[test]
     fn test_split_commas_unbalanced_bracket() {
         split_commas("[a,b").unwrap_err();
         split_commas("a]").unwrap_err();
