@@ -5,10 +5,6 @@
 //! Flat VMDK extent layout: opens the data extents referenced by the
 //! descriptor and maps the virtual disk onto them.
 
-// The extent layout is wired into the `VmdkDisk` backend in the next commit;
-// until then its types have no live users.
-#![allow(dead_code)]
-
 use std::ffi::{CString, OsStr};
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -21,7 +17,7 @@ use std::sync::Arc;
 use log::warn;
 
 use crate::formats::vmdk::descriptor::VmdkDescriptor;
-use crate::{AlignedFile, DiskTopology};
+use crate::{AlignedFile, DiskTopology, query_device_size};
 
 const VMDK_SECTOR_SIZE: u64 = 512;
 
@@ -348,18 +344,16 @@ impl FlatVmdk {
         Arc::clone(&self.extents)
     }
 
-    /// Host allocation size: the sum of every opened extent file's size.
-    /// `NoAccess` extents contribute 0 to the total.
+    /// Host allocation size: the sum of every opened extent's actually
+    /// allocated storage (`st_blocks * 512` for regular files, device size for
+    /// block devices), so sparse extents are reported correctly. `NoAccess`
+    /// extents (no open file) contribute 0, as does any extent whose size
+    /// cannot be queried.
     pub fn physical_block_size(&self) -> u64 {
         self.extents
             .iter()
-            .map(|extent| {
-                extent
-                    .file
-                    .as_ref()
-                    .and_then(|f| f.metadata().ok())
-                    .map_or(0, |m| m.len())
-            })
+            .filter_map(|extent| extent.file.as_ref())
+            .map(|f| query_device_size(f.file()).map_or(0, |(_, physical)| physical))
             .sum()
     }
 
