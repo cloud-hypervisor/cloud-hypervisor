@@ -11,3 +11,4 @@ pub mod qcow;
 pub mod raw;
 pub mod vhd;
 pub mod vhdx;
+pub mod vmdk;
