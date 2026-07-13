@@ -1597,6 +1597,7 @@ mod common_parallel {
             ImageType::Qcow2 => ("qcow2", &[]),
             ImageType::FixedVhd => ("vpc", &["-o", "subformat=fixed"]),
             ImageType::Vhdx => ("vhdx", &[]),
+            ImageType::FlatVmdk => panic!("unsupported image_type {image_type}"),
             ImageType::Unknown => panic!("unsupported image_type {image_type}"),
         };
         let image_type_str = image_type.to_string();
