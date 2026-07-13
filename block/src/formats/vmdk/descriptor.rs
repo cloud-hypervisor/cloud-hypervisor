@@ -8,10 +8,10 @@
 //! of `FLAT` extent lines, and a disk database (DDB). Only the `monolithicFlat`
 //! and `twoGbMaxExtentFlat` create types are recognized.
 
-use std::collections::HashMap;
 use std::fs::File;
 use std::io;
 use std::os::unix::fs::FileExt;
+use std::path::Path;
 use std::str::Lines;
 
 use crate::AlignedFile;
@@ -33,7 +33,6 @@ pub enum VMDKDiskType {
 /// Flat VMDK extent line fields.
 /// Format of each extent line:
 /// `<access> <sectors> <type> "<file>" [offset]`.
-#[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct VmdkExtentHeader {
     pub access: String,
@@ -44,14 +43,9 @@ pub struct VmdkExtentHeader {
 }
 
 /// Descriptor header fields.
-#[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct VmdkDescriptorHeader {
-    pub version: u32,
-    pub cid: u32,
-    pub parent_cid: u32,
     pub create_type: VMDKDiskType,
-    pub parent_filename_hint: String,
 }
 
 /// Ordered list of extents.
@@ -59,11 +53,49 @@ pub struct VmdkDescriptorHeader {
 pub struct VmdkDescriptorExtents {
     pub extents: Vec<VmdkExtentHeader>,
 }
-/// Disk database.
-#[allow(dead_code)]
+
+/// Parsed flat VMDK descriptor
+///
+/// extents_list: ordered extent list
+/// base_path: descriptor file's parent directory
 #[derive(Debug, Default)]
-pub struct VmdkDescriptorDdb {
-    pub entries: HashMap<String, String>,
+pub struct VmdkDescriptor {
+    pub base_path: String,
+    pub extents_list: VmdkDescriptorExtents,
+}
+
+impl VmdkDescriptor {
+    pub fn new(file: &File, path: &Path) -> io::Result<Self> {
+        // The descriptor's directory anchors the relative extent filenames.
+        let base_path = path
+            .parent()
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Cannot retrieve parent directory of the file",
+                )
+            })?
+            .to_string_lossy()
+            .to_string();
+
+        // A valid descriptor is at least a few bytes of text.
+        if file.metadata()?.len() < 4 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Invalid VMDK descriptor file: file is empty or too small",
+            ));
+        }
+
+        let content = read_descriptor(file)?;
+        let mut lines = content.lines();
+        let (_header, last_line) = parse_header(&mut lines)?;
+        let extents_list = parse_extents(&mut lines, last_line)?;
+
+        Ok(Self {
+            base_path,
+            extents_list,
+        })
+    }
 }
 
 // Read the whole descriptor into memory through an `AlignedFile` and return it
@@ -115,35 +147,24 @@ pub(crate) fn parse_header<'a>(
             break;
         }
         let parts: Vec<&str> = line.split('=').map(|s| s.trim()).collect();
-        if parts.len() == 2 {
-            match parts[0] {
-                "version" => header.version = parts[1].parse().unwrap_or(0),
-                "CID" => header.cid = u32::from_str_radix(parts[1], 16).unwrap_or(0),
-                "parentCID" => header.parent_cid = u32::from_str_radix(parts[1], 16).unwrap_or(0),
-                "createType" => {
-                    // Tools such as qemu-img quote the value, e.g.
-                    // createType="monolithicFlat"; strip the quotes.
-                    header.create_type = match parts[1].trim_matches('"') {
-                        "monolithicFlat" => VMDKDiskType::MonolithicFlat,
-                        "twoGbMaxExtentFlat" => VMDKDiskType::TwoGbMaxExtentFlat,
-                        _ => VMDKDiskType::CreateTypeUnsupported,
-                    }
-                }
-                "parentFileNameHint" => header.parent_filename_hint = parts[1].to_string(),
-                _ => {}
-            }
+        if parts.len() == 2 && parts[0] == "createType" {
+            // Tools such as qemu-img quote the value, strip quotes for comparison.
+            header.create_type = match parts[1].trim_matches('"') {
+                "monolithicFlat" => VMDKDiskType::MonolithicFlat,
+                "twoGbMaxExtentFlat" => VMDKDiskType::TwoGbMaxExtentFlat,
+                _ => VMDKDiskType::CreateTypeUnsupported,
+            };
         }
     }
 
     Ok((header, last_comment_line))
 }
 
-pub(crate) fn parse_extents_and_ddb(
+pub(crate) fn parse_extents(
     lines: &mut Lines<'_>,
     last_comment_line: &str,
-) -> io::Result<(VmdkDescriptorExtents, VmdkDescriptorDdb)> {
+) -> io::Result<VmdkDescriptorExtents> {
     let mut extents = VmdkDescriptorExtents::default();
-    let mut ddb = VmdkDescriptorDdb::default();
 
     if last_comment_line != VMDK_DESCRIPTOR_EXTENTS {
         return Err(io::Error::new(
@@ -152,67 +173,56 @@ pub(crate) fn parse_extents_and_ddb(
         ));
     }
 
-    let mut in_extents_section = true;
     for line in lines.by_ref() {
-        // Tools such as qemu-img separate sections with blank lines; skip them.
+        // Tools such as qemu-img separate sections with blank lines, skip them.
         if line.trim().is_empty() {
             continue;
         }
         if line.starts_with('#') {
             if line == VMDK_DESCRIPTOR_DDB || line == VMDK_DESCRIPTOR_DDB_2 {
-                in_extents_section = false;
-                continue;
+                break;
             }
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "Expected the DDB section comment line",
             ));
         }
-        if in_extents_section {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() == 4 || parts.len() == 5 {
-                let size_in_sectors = parts[1].parse::<u64>().map_err(|_| {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() == 4 || parts.len() == 5 {
+            let size_in_sectors = parts[1].parse::<u64>().map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "VMDK extent size '{}' is not a valid sector count",
+                        parts[1]
+                    ),
+                )
+            })?;
+            let offset_in_sectors = match parts.get(4) {
+                Some(offset) => offset.parse::<u64>().map_err(|_| {
                     io::Error::new(
                         io::ErrorKind::InvalidData,
-                        format!(
-                            "VMDK extent size '{}' is not a valid sector count",
-                            parts[1]
-                        ),
+                        format!("VMDK extent offset '{offset}' is not a valid sector count"),
                     )
-                })?;
-                let offset_in_sectors = match parts.get(4) {
-                    Some(offset) => offset.parse::<u64>().map_err(|_| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            format!("VMDK extent offset '{offset}' is not a valid sector count"),
-                        )
-                    })?,
-                    None => 0,
-                };
-                let extent = VmdkExtentHeader {
-                    access: parts[0].to_string(),
-                    size_in_sectors,
-                    extent_type: parts[2].to_string(),
-                    filename: parts[3].trim_matches('"').to_string(),
-                    offset_in_sectors,
-                };
-                extents.extents.push(extent);
-            } else {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Malformed VMDK extent line",
-                ));
-            }
+                })?,
+                None => 0,
+            };
+            extents.extents.push(VmdkExtentHeader {
+                access: parts[0].to_string(),
+                size_in_sectors,
+                extent_type: parts[2].to_string(),
+                filename: parts[3].trim_matches('"').to_string(),
+                offset_in_sectors,
+            });
         } else {
-            let parts: Vec<&str> = line.split('=').map(|s| s.trim()).collect();
-            if parts.len() == 2 {
-                ddb.entries
-                    .insert(parts[0].to_string(), parts[1].to_string());
-            }
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Malformed VMDK extent line",
+            ));
         }
     }
 
-    Ok((extents, ddb))
+    Ok(extents)
 }
 
 /// Returns true when `prefix` begins with the `# Disk DescriptorFile` header.
@@ -241,8 +251,8 @@ pub fn is_flat_vmdk(f: &mut File) -> io::Result<bool> {
         _ => return Ok(false),
     }
 
-    let extents = match parse_extents_and_ddb(&mut lines, last_line) {
-        Ok((extents, _ddb)) => extents,
+    let extents = match parse_extents(&mut lines, last_line) {
+        Ok(extents) => extents,
         Err(e) if e.kind() == io::ErrorKind::InvalidData => return Ok(false),
         Err(e) => return Err(e),
     };
@@ -266,26 +276,54 @@ mod tests {
         Ok((header, last.to_string()))
     }
 
-    fn parse_body(
-        last_comment: &str,
-        body: &str,
-    ) -> io::Result<(VmdkDescriptorExtents, VmdkDescriptorDdb)> {
+    fn parse_body(last_comment: &str, body: &str) -> io::Result<VmdkDescriptorExtents> {
         let mut lines = body.lines();
-        parse_extents_and_ddb(&mut lines, last_comment)
+        parse_extents(&mut lines, last_comment)
     }
 
     // Two-stage parse, as `VmdkDescriptor::new` chains it.
-    fn parse_full(
-        input: &str,
-    ) -> io::Result<(
-        VmdkDescriptorHeader,
-        VmdkDescriptorExtents,
-        VmdkDescriptorDdb,
-    )> {
+    fn parse_full(input: &str) -> io::Result<(VmdkDescriptorHeader, VmdkDescriptorExtents)> {
         let mut lines = input.lines();
         let (header, last) = parse_header(&mut lines)?;
-        let (extents, ddb) = parse_extents_and_ddb(&mut lines, last)?;
-        Ok((header, extents, ddb))
+        let extents = parse_extents(&mut lines, last)?;
+        Ok((header, extents))
+    }
+
+    #[test]
+    fn new_is_unaffected_by_shared_file_offset() {
+        use std::io::{Read, Seek, SeekFrom, Write};
+
+        use vmm_sys_util::tempfile::TempFile;
+
+        // A minimal but complete monolithicFlat descriptor.
+        let descriptor_text = "# Disk DescriptorFile\n\
+                               version=1\n\
+                               createType=monolithicFlat\n\
+                               # Extent description\n\
+                               RW 2097152 FLAT \"disk-flat.vmdk\"\n\
+                               # The Disk Data Base\n\
+                               ddb.adapterType = \"ide\"\n";
+
+        let tmp = TempFile::new().unwrap();
+        let mut file: &File = tmp.as_file();
+        file.write_all(descriptor_text.as_bytes()).unwrap();
+
+        // Advance the shared OS file offset off zero, mimicking an earlier
+        // image-type probe. `&File` is `Copy`, so this moves the same fd's
+        // offset that `VmdkDescriptor::new` will see.
+        file.seek(SeekFrom::Start(0)).unwrap();
+        let mut scratch = [0u8; 8];
+        file.read_exact(&mut scratch).unwrap();
+        assert_ne!(file.stream_position().unwrap(), 0);
+
+        // `read_descriptor` reads positionally (anchored at offset 0), so the
+        // advanced offset must not affect the parse.
+        let descriptor = VmdkDescriptor::new(file, tmp.as_path()).unwrap();
+        assert_eq!(descriptor.extents_list.extents.len(), 1);
+        assert_eq!(
+            descriptor.extents_list.extents[0].filename,
+            "disk-flat.vmdk"
+        );
     }
 
     #[test]
@@ -295,7 +333,7 @@ mod tests {
                           ddb.adapterType = \"ide\"\n\
                           ddb.geometry.sectors = \"63\"\n";
 
-        let (extents, ddb) = parse_body("# Extent description", body).unwrap();
+        let extents = parse_body("# Extent description", body).unwrap();
 
         assert_eq!(extents.extents.len(), 1);
         let e = &extents.extents[0];
@@ -303,15 +341,6 @@ mod tests {
         assert_eq!(e.size_in_sectors, 2_097_152);
         assert_eq!(e.extent_type, "FLAT");
         assert_eq!(e.filename, "disk-flat.vmdk");
-
-        assert_eq!(
-            ddb.entries.get("ddb.adapterType").map(String::as_str),
-            Some("\"ide\"")
-        );
-        assert_eq!(
-            ddb.entries.get("ddb.geometry.sectors").map(String::as_str),
-            Some("\"63\"")
-        );
     }
 
     #[test]
@@ -322,7 +351,7 @@ mod tests {
                           # The Disk Data Base\n\
                           ddb.adapterType = \"lsilogic\"\n";
 
-        let (extents, _ddb) = parse_body("# Extent description", body).unwrap();
+        let extents = parse_body("# Extent description", body).unwrap();
 
         assert_eq!(extents.extents.len(), 3);
         assert_eq!(extents.extents[0].filename, "disk-s001.vmdk");
@@ -335,7 +364,7 @@ mod tests {
         // 5-field form: <access> <sectors> <type> <file> <offset>
         let body: &str = "RW 2097152 FLAT \"disk-flat.vmdk\" 0\n";
 
-        let (extents, _ddb) = parse_body("# Extent description", body).unwrap();
+        let extents = parse_body("# Extent description", body).unwrap();
 
         assert_eq!(extents.extents.len(), 1);
         assert_eq!(extents.extents[0].filename, "disk-flat.vmdk");
@@ -346,7 +375,7 @@ mod tests {
         let body: &str = "RDONLY 2097152 FLAT \"ro.vmdk\"\n\
                           NOACCESS 1048576 FLAT \"noaccess.vmdk\"\n";
 
-        let (extents, _ddb) = parse_body("# Extent description", body).unwrap();
+        let extents = parse_body("# Extent description", body).unwrap();
 
         assert_eq!(extents.extents.len(), 2);
         assert_eq!(extents.extents[0].access, "RDONLY");
@@ -391,11 +420,11 @@ mod tests {
     #[test]
     fn skips_blank_line_inside_extent_section() {
         // qemu-img emits a blank line between the last extent and the
-        // "# The Disk Data Base" marker; it must be skipped, not rejected.
+        // "# The Disk Data Base" marker, it must be skipped, not rejected.
         let body: &str = "RW 2097152 FLAT \"disk-flat.vmdk\"\n\
                           \n\
                           # The Disk Data Base\n";
-        let (extents, _ddb) = parse_body("# Extent description", body).unwrap();
+        let extents = parse_body("# Extent description", body).unwrap();
         assert_eq!(extents.extents.len(), 1);
         assert_eq!(extents.extents[0].filename, "disk-flat.vmdk");
     }
@@ -417,9 +446,6 @@ mod tests {
 
         let (header, last) = parse_hdr(input).unwrap();
 
-        assert_eq!(header.version, 1);
-        assert_eq!(header.cid, 0xffff_fffe);
-        assert_eq!(header.parent_cid, 0xffff_ffff);
         assert!(matches!(header.create_type, VMDKDiskType::MonolithicFlat));
         assert_eq!(last, "# Extent description");
     }
@@ -449,15 +475,11 @@ mod tests {
                            # The Disk Data Base\n\
                            ddb.adapterType = \"ide\"\n";
 
-        let (header, extents, ddb) = parse_full(input).unwrap();
+        let (header, extents) = parse_full(input).unwrap();
 
         assert!(matches!(header.create_type, VMDKDiskType::MonolithicFlat));
         assert_eq!(extents.extents.len(), 1);
         assert_eq!(extents.extents[0].access, "RW");
-        assert_eq!(
-            ddb.entries.get("ddb.adapterType").map(String::as_str),
-            Some("\"ide\"")
-        );
     }
 
     #[test]
@@ -470,7 +492,7 @@ mod tests {
                            RW 4192256 FLAT \"disk-s002.vmdk\"\n\
                            # The Disk Data Base\n";
 
-        let (header, extents, _ddb) = parse_full(input).unwrap();
+        let (header, extents) = parse_full(input).unwrap();
 
         assert!(matches!(
             header.create_type,
@@ -499,7 +521,7 @@ mod tests {
                            ddb.virtualHWVersion = \"4\"\n\
                            ddb.adapterType = \"ide\"\n";
 
-        let (header, extents, ddb) = parse_full(input).unwrap();
+        let (header, extents) = parse_full(input).unwrap();
 
         assert!(matches!(header.create_type, VMDKDiskType::MonolithicFlat));
         assert_eq!(extents.extents.len(), 1);
@@ -507,9 +529,5 @@ mod tests {
         assert_eq!(extents.extents[0].size_in_sectors, 6_291_456);
         assert_eq!(extents.extents[0].extent_type, "FLAT");
         assert_eq!(extents.extents[0].filename, "t-flat.vmdk");
-        assert_eq!(
-            ddb.entries.get("ddb.adapterType").map(String::as_str),
-            Some("\"ide\"")
-        );
     }
 }
