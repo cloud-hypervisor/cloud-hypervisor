@@ -498,17 +498,19 @@ impl<S: Parseable, T: TupleValue> Parseable for Tuple<S, T> {
         let mut in_quotes = false;
         let mut last_idx = 0;
         let mut first_val = None;
-        for (idx, c) in tuple.as_bytes().iter().enumerate() {
+        let trimmed = tuple.trim();
+        for (idx, c) in trimmed.as_bytes().iter().enumerate() {
             match c {
                 b'"' => in_quotes = !in_quotes,
                 b'@' if !in_quotes => {
                     if last_idx != 0 {
-                        return Err(TupleError::InvalidValue((*tuple).to_string()));
+                        return Err(TupleError::InvalidValue((*trimmed).to_string()));
                     }
-                    first_val = if tuple[last_idx..idx].is_empty() {
-                        return Err(TupleError::EmptyKey((*tuple).to_string()));
+                    let key = &trimmed[last_idx..idx];
+                    first_val = if key.is_empty() {
+                        return Err(TupleError::EmptyKey((*trimmed).to_string()));
                     } else {
-                        Some(&tuple[last_idx..idx])
+                        Some(key)
                     };
                     last_idx = idx + 1;
                 }
@@ -516,10 +518,10 @@ impl<S: Parseable, T: TupleValue> Parseable for Tuple<S, T> {
             }
         }
         let item1 = <S as Parseable>::from_str(
-            first_val.ok_or(TupleError::InvalidValue((*tuple).to_string()))?,
+            first_val.ok_or(TupleError::InvalidValue((*trimmed).to_string()))?,
         )
         .map_err(|_| TupleError::InvalidValue(first_val.unwrap().to_owned()))?;
-        let item2: T = TupleValue::parse_value(&tuple[last_idx..])?;
+        let item2: T = TupleValue::parse_value(&trimmed[last_idx..])?;
         Ok(Tuple(item1, item2))
     }
 }
@@ -860,6 +862,65 @@ mod unit_tests {
         assert_eq!(t, Tuple("foo".to_owned(), 42));
         let t = Tuple::<String, Vec<u64>>::from_str("foo@[42]").unwrap();
         assert_eq!(t, Tuple("foo".to_owned(), vec![42]));
+    }
+
+    #[test]
+    fn test_tuple_allowed_whitespace() {
+        let t = Tuple::<String, u64>::from_str(" foo@42").unwrap();
+        assert_eq!(t, Tuple("foo".to_owned(), 42));
+        let t = Tuple::<String, u64>::from_str("foo@42 ").unwrap();
+        assert_eq!(t, Tuple("foo".to_owned(), 42));
+        let t = Tuple::<String, u64>::from_str(" foo@42 ").unwrap();
+        assert_eq!(t, Tuple("foo".to_owned(), 42));
+        let t = Tuple::<u64, u64>::from_str(" 5@42 ").unwrap();
+        assert_eq!(t, Tuple(5, 42));
+        // Still a valid string as key, even with trailing whitespace
+        let t = Tuple::<String, u64>::from_str(" foo @42 ").unwrap();
+        assert_eq!(t, Tuple("foo ".to_owned(), 42));
+    }
+
+    #[test]
+    fn test_tuple_whitespace_surrounding_delimiter_fails() {
+        let e = Tuple::<String, u64>::from_str("foo@ 42").unwrap_err();
+        assert!(
+            matches!(e, TupleError::InvalidInteger(_)),
+            "Expected \"ParseInt\"; got \"{e:?}\"",
+        );
+        let expected_value = "42 ";
+        let e = Tuple::<u64, Vec<u64>>::from_str("42 @[]").unwrap_err();
+        assert!(
+            matches!(e, TupleError::InvalidValue(ref s) if s == expected_value),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            TupleError::InvalidValue(expected_value.to_string()),
+        );
+        // We abuse of the fact that space can be converted to a valid string as long as the
+        // string isn't empty. We use this to check the correct error for tuple value parsing.
+        let e = Tuple::<String, u64>::from_str(" foo @ 42 ").unwrap_err();
+        assert!(
+            matches!(e, TupleError::InvalidInteger(_)),
+            "Expected \"ParseInt\"; got \"{e:?}\"",
+        );
+        // Cannot parse the space into a list
+        let expected_value = "";
+        let e = Tuple::<u64, Vec<u64>>::from_str("42@ []").unwrap_err();
+        assert!(
+            matches!(
+                e,
+                TupleError::InvalidIntegerList(
+                    IntegerListParseError::InvalidValue(ref s),
+                ) if s == expected_value
+            ),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            TupleError::InvalidIntegerList(IntegerListParseError::InvalidValue(
+                expected_value.to_string()
+            ),)
+        );
+    }
+
+    #[test]
+    fn test_tuple_list_single_pair() {
+        let t = TupleList::<String, u64>::from_str("[foo@42]").unwrap();
+        assert_eq!(t, TupleList(vec![Tuple("foo".to_owned(), 42)]));
     }
 
     #[test]
