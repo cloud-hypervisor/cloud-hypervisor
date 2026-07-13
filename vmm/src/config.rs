@@ -396,8 +396,8 @@ pub enum ValidationError {
     /// A device saved with an FD has no replacement FD for the restore
     #[error("VFIO device '{0}' was FD backed and needs a new fd in 'vfio_fds'")]
     RestoreMissingVfioFd(String),
-    /// Prefault cannot be combined with on-demand restore
-    #[error("'prefault' cannot be combined with 'memory_restore_mode=ondemand'")]
+    /// Prefault requires the eager-copy restore mode
+    #[error("'prefault' requires 'memory_restore_mode=copy'")]
     InvalidRestorePrefaultWithOnDemand,
     /// Path provided in landlock-rules doesn't exist
     #[error("Path {0:?} provided in landlock-rules does not exist")]
@@ -2794,6 +2794,9 @@ pub enum MemoryRestoreMode {
     Copy,
     /// Restore lazily by faulting snapshot pages into guest RAM on demand.
     OnDemand,
+    /// Restore by mapping the snapshot memory file copy-on-write, sharing the
+    /// page cache across VMs restored from the same snapshot.
+    CopyOnWrite,
 }
 
 #[derive(Debug, Error)]
@@ -2809,6 +2812,7 @@ impl FromStr for MemoryRestoreMode {
         match s.to_lowercase().as_str() {
             "copy" => Ok(Self::Copy),
             "ondemand" => Ok(Self::OnDemand),
+            "copyonwrite" => Ok(Self::CopyOnWrite),
             _ => Err(MemoryRestoreModeParseError::InvalidValue(s.to_owned())),
         }
     }
@@ -2865,13 +2869,13 @@ pub struct RestoreConfig {
 
 impl RestoreConfig {
     pub const SYNTAX: &'static str = "Restore from a VM snapshot. \
-        \nRestore parameters \"source_url=<source_url>,prefault=on|off,memory_restore_mode=copy|ondemand,\
+        \nRestore parameters \"source_url=<source_url>,prefault=on|off,memory_restore_mode=copy|ondemand|copyonwrite,\
         net_fds=<list_of_net_ids_with_their_associated_fds>,\
         vfio_fds=<list_of_vfio_ids_with_their_associated_fd>,iommufd_fd=<fd>,resume=true|false,\
         zone_updates=<list_of_updates>\"
         \n`source_url` should be a valid URL (e.g file:///foo/bar or tcp://192.168.1.10/foo) \
         \n`prefault` controls eager prefaulting for the copy-based restore path (disabled by default) \
-        \n`memory_restore_mode=copy` preserves the existing eager read-copy restore behavior, while `memory_restore_mode=ondemand` enables lazy demand paging and fails restore if userfaultfd support is unavailable \
+        \n`memory_restore_mode=copy` preserves the existing eager read-copy restore behavior, `memory_restore_mode=ondemand` enables lazy demand paging and fails restore if userfaultfd support is unavailable, and `memory_restore_mode=copyonwrite` maps the snapshot file copy-on-write (plain private RAM only; falls back to copy otherwise) \
         \n`net_fds` is a list of net ids with new file descriptors. \
         Only net devices backed by FDs directly are needed as input.\
         \n`vfio_fds` is a list of VFIO device ids each paired with a new cdev file descriptor, \
@@ -2968,7 +2972,7 @@ impl RestoreConfig {
     // corresponding 'RestoreNetConfig' with a matched 'id' and expected
     // number of FDs.
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        if self.memory_restore_mode == MemoryRestoreMode::OnDemand && self.prefault {
+        if self.memory_restore_mode != MemoryRestoreMode::Copy && self.prefault {
             return Err(ValidationError::InvalidRestorePrefaultWithOnDemand);
         }
 
@@ -5603,6 +5607,21 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             invalid_config_zone_updates.validate(&snapshot_vm_config),
             Err(ValidationError::MemoryZoneUpdatesEmptyId)
+        );
+
+        let invalid_cow_prefault = RestoreConfig {
+            source_url: PathBuf::from("/path/to/snapshot"),
+            prefault: true,
+            memory_restore_mode: MemoryRestoreMode::CopyOnWrite,
+            net_fds: None,
+            vfio_fds: None,
+            iommufd_fd: None,
+            resume: false,
+            zone_updates: vec![],
+        };
+        assert_eq!(
+            invalid_cow_prefault.validate(&snapshot_vm_config),
+            Err(ValidationError::InvalidRestorePrefaultWithOnDemand)
         );
     }
 
