@@ -12,6 +12,11 @@ use std::sync::{Arc, Mutex};
 use std::{ffi, io};
 
 use hypervisor::HypervisorType;
+#[cfg(feature = "kvm")]
+use hypervisor::kvm::kvm_bindings::{
+    KVM_SEV_SNP_PAGE_TYPE_CPUID, KVM_SEV_SNP_PAGE_TYPE_NORMAL, KVM_SEV_SNP_PAGE_TYPE_SECRETS,
+    KVM_SEV_SNP_PAGE_TYPE_UNMEASURED, KVM_SEV_SNP_PAGE_TYPE_ZERO,
+};
 #[cfg(feature = "sev_snp")]
 use igvm::IgvmInitializationHeader;
 use igvm::snp_defs::SevVmsa;
@@ -123,18 +128,6 @@ pub enum Error {
         hash_end: u64,
     },
 }
-
-// KVM SNP page types — linux/arch/x86/include/uapi/asm/sev-guest.h
-#[cfg(feature = "kvm")]
-const KVM_SNP_PAGE_TYPE_NORMAL: u32 = 1;
-#[cfg(feature = "kvm")]
-const KVM_SNP_PAGE_TYPE_ZERO: u32 = 3;
-#[cfg(feature = "kvm")]
-const KVM_SNP_PAGE_TYPE_UNMEASURED: u32 = 4;
-#[cfg(feature = "kvm")]
-const KVM_SNP_PAGE_TYPE_SECRETS: u32 = 5;
-#[cfg(feature = "kvm")]
-const KVM_SNP_PAGE_TYPE_CPUID: u32 = 6;
 
 // Consolidated page type/size configuration per hypervisor.
 struct PageTypeConfig {
@@ -289,11 +282,11 @@ pub fn load_igvm(
         #[cfg(feature = "kvm")]
         HypervisorType::Kvm => PageTypeConfig {
             isolated_page_size_4kb: HV_PAGE_SIZE as u32,
-            normal: KVM_SNP_PAGE_TYPE_NORMAL,
-            zero: KVM_SNP_PAGE_TYPE_ZERO,
-            unmeasured: KVM_SNP_PAGE_TYPE_UNMEASURED,
-            cpuid: KVM_SNP_PAGE_TYPE_CPUID,
-            secrets: KVM_SNP_PAGE_TYPE_SECRETS,
+            normal: KVM_SEV_SNP_PAGE_TYPE_NORMAL,
+            zero: KVM_SEV_SNP_PAGE_TYPE_ZERO,
+            unmeasured: KVM_SEV_SNP_PAGE_TYPE_UNMEASURED,
+            cpuid: KVM_SEV_SNP_PAGE_TYPE_CPUID,
+            secrets: KVM_SEV_SNP_PAGE_TYPE_SECRETS,
             // KVM doesn't import a VMSA page, it instead constructs it internally
             vmsa: None,
         },
