@@ -8,5 +8,6 @@
 //! synchronous, extent-aware I/O.
 
 mod descriptor;
+mod flat;
 
 pub use descriptor::{has_descriptor_header, is_flat_vmdk};
