@@ -26,6 +26,8 @@ enum Error {
     TestTimeout,
     #[error("Error: test failed")]
     TestFailed,
+    #[error("Error: guest process group survived cleanup")]
+    OrphanedGuest,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1757,9 +1759,17 @@ fn run_test_with_timeout(
         })
         .and_then(|r| r);
 
-    ProcessRegistry::cleanup(test.name);
+    let cleanup = ProcessRegistry::cleanup(test.name);
 
-    result
+    // Keep the test own error, else abort on a group that survived cleanup.
+    match (result, cleanup) {
+        (Err(e), _) => Err(e),
+        (Ok(_), Err(e)) => {
+            eprintln!("[Error] {e}");
+            Err(Error::OrphanedGuest)
+        }
+        (Ok(r), Ok(())) => Ok(r),
+    }
 }
 
 fn settle_host() {
