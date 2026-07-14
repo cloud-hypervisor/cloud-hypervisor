@@ -883,7 +883,7 @@ jobs:
           echo "sha=$(git -C virtio-villain rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Cache virtio-villain build
         id: villain-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: virtio-villain/target
           key: virtio-villain-${{ runner.os }}-${{ runner.arch }}-${{ steps.villain-src.outputs.sha }}
