@@ -47,6 +47,14 @@ use wait_timeout::ChildExt;
 static PROCESS_REGISTRY: LazyLock<Mutex<HashMap<String, u32>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+const GROUP_REAP_TIMEOUT_SECS: u64 = 5;
+
+#[derive(Error, Debug)]
+pub enum CleanupError {
+    #[error("Process group {pgid} for test '{test}' survived cleanup")]
+    Lingered { pgid: u32, test: String },
+}
+
 pub struct ProcessRegistry;
 
 impl ProcessRegistry {
@@ -97,30 +105,61 @@ impl ProcessRegistry {
         Ok(child)
     }
 
-    /// Kill all processes in the group for `test_name` and remove
-    /// the entry.
-    pub fn cleanup(test_name: &str) -> bool {
-        let pgid = PROCESS_REGISTRY.lock().unwrap().remove(test_name);
+    /// Kill all processes in the group for `test_name`, remove the entry,
+    /// and wait for the group to exit. Errors if the group survives.
+    pub fn cleanup(test_name: &str) -> Result<(), CleanupError> {
+        let Some(pgid) = PROCESS_REGISTRY.lock().unwrap().remove(test_name) else {
+            return Ok(());
+        };
 
-        if let Some(pgid) = pgid {
-            let ret = unsafe { libc::killpg(pgid as i32, libc::SIGKILL) };
-            if ret == 0 {
-                eprintln!(
-                    "[cleanup] Sent SIGKILL to process group {pgid} \
-                     (test '{test_name}')"
-                );
-                return true;
-            }
-            let err = io::Error::last_os_error();
+        let ret = unsafe { libc::killpg(pgid as i32, libc::SIGKILL) };
+        if ret != 0 {
             // ESRCH: all processes already exited.
-            if err.raw_os_error() != Some(libc::ESRCH) {
-                eprintln!(
-                    "[cleanup] Failed to kill process group {pgid} \
-                     (test '{test_name}'): {err}"
-                );
+            let err = io::Error::last_os_error();
+            if err.raw_os_error() == Some(libc::ESRCH) {
+                return Ok(());
             }
+            eprintln!(
+                "[cleanup] Failed to kill process group {pgid} \
+                 (test '{test_name}'): {err}"
+            );
+            return Err(CleanupError::Lingered {
+                pgid,
+                test: test_name.to_string(),
+            });
         }
-        false
+
+        eprintln!("[cleanup] Sent SIGKILL to process group {pgid} (test '{test_name}')");
+        // SIGKILL is async, so wait for the group to actually exit.
+        if Self::reap_group(pgid) {
+            Ok(())
+        } else {
+            Err(CleanupError::Lingered {
+                pgid,
+                test: test_name.to_string(),
+            })
+        }
+    }
+
+    /// Wait for the process group `pgid` to exit, up to a short timeout.
+    /// Returns true if it drained.
+    fn reap_group(pgid: u32) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(GROUP_REAP_TIMEOUT_SECS);
+        loop {
+            let mut status = 0;
+            let r = unsafe { libc::waitpid(-(pgid as i32), &mut status, libc::WNOHANG) };
+            if r > 0 {
+                continue;
+            }
+            if r == -1 {
+                // ECHILD: nothing left in the group to reap.
+                return io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD);
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
     }
 }
 
@@ -2687,32 +2726,33 @@ mod unit_tests {
         unsafe { libc::kill(pid as i32, 0) == 0 }
     }
 
+    #[expect(clippy::zombie_processes)]
     #[test]
     fn process_registry_spawn_and_cleanup() {
         let name = "test_spawn_and_cleanup";
         let mut cmd = Command::new("sleep");
         cmd.arg("60");
-        let mut child = ProcessRegistry::spawn(name, &mut cmd).unwrap();
+        let child = ProcessRegistry::spawn(name, &mut cmd).unwrap();
         let pid = child.id();
 
         assert!(is_alive(pid));
-        assert!(ProcessRegistry::cleanup(name));
-        let _ = child.wait();
+        ProcessRegistry::cleanup(name).unwrap();
         assert!(!is_alive(pid));
     }
 
+    #[expect(clippy::zombie_processes)]
     #[test]
     fn process_registry_shared_group() {
         let name = "test_shared_group";
 
         let mut cmd1 = Command::new("sleep");
         cmd1.arg("60");
-        let mut child1 = ProcessRegistry::spawn(name, &mut cmd1).unwrap();
+        let child1 = ProcessRegistry::spawn(name, &mut cmd1).unwrap();
         let pid1 = child1.id();
 
         let mut cmd2 = Command::new("sleep");
         cmd2.arg("60");
-        let mut child2 = ProcessRegistry::spawn(name, &mut cmd2).unwrap();
+        let child2 = ProcessRegistry::spawn(name, &mut cmd2).unwrap();
         let pid2 = child2.id();
 
         let pgid1 = unsafe { libc::getpgid(pid1 as i32) };
@@ -2720,18 +2760,17 @@ mod unit_tests {
         assert_eq!(pgid1, pgid2);
         assert_eq!(pgid1, pid1 as i32);
 
-        assert!(ProcessRegistry::cleanup(name));
-        let _ = child1.wait();
-        let _ = child2.wait();
+        ProcessRegistry::cleanup(name).unwrap();
         assert!(!is_alive(pid1));
         assert!(!is_alive(pid2));
     }
 
     #[test]
     fn process_registry_cleanup_unknown() {
-        assert!(!ProcessRegistry::cleanup("nonexistent"));
+        ProcessRegistry::cleanup("nonexistent").unwrap();
     }
 
+    #[expect(clippy::zombie_processes)]
     #[test]
     fn process_registry_stale_group_replaced() {
         let name = "test_stale_group";
@@ -2745,15 +2784,14 @@ mod unit_tests {
         // Group is now stale. Next spawn should create a fresh group.
         let mut cmd2 = Command::new("sleep");
         cmd2.arg("60");
-        let mut child2 = ProcessRegistry::spawn(name, &mut cmd2).unwrap();
+        let child2 = ProcessRegistry::spawn(name, &mut cmd2).unwrap();
         let pid2 = child2.id();
 
         assert_ne!(pid1, pid2);
         let pgid2 = unsafe { libc::getpgid(pid2 as i32) };
         assert_eq!(pgid2, pid2 as i32);
 
-        assert!(ProcessRegistry::cleanup(name));
-        let _ = child2.wait();
+        ProcessRegistry::cleanup(name).unwrap();
         assert!(!is_alive(pid2));
     }
 }
