@@ -381,6 +381,10 @@ migration process. Via the API or `ch-remote`, you may specify:
 - `memory_mode <precopy|postcopy>`: \
   Memory transfer mode. `postcopy` resumes the destination first and faults
   guest pages in on demand over a dedicated connection. Defaults to `precopy`.
+- `zone_updates <list of zone updates>`: \
+  A list of updates to apply to memory zones on the receiver side. For example,
+  this can be used to remap memory zones to another NUMA node. Each zone update
+  has the form `zone_id@host_numa_node`.
 
 ## Migrating VMs with VFIO Devices
 
