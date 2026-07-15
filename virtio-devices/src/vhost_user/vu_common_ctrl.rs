@@ -36,8 +36,8 @@ use vmm_sys_util::timerfd::TimerFd;
 use super::{Error, Result, VhostUserState};
 use crate::vhost_user::Inflight;
 use crate::{
-    GuestMemoryMmap, GuestRegionMmap, MmapRegion, VirtioInterrupt, VirtioInterruptType,
-    get_host_address_range,
+    GuestMemoryMmap, GuestRegionMmap, MmapRegion, VIRTIO_F_IN_ORDER, VirtioInterrupt,
+    VirtioInterruptType, get_host_address_range,
 };
 
 // Size of a dirty page for vhost-user.
@@ -369,6 +369,30 @@ impl VhostUserHandle {
     ) -> Result<()> {
         self.set_protocol_features_vhost_user(acked_features, acked_protocol_features)?;
 
+        let (vring_bases, notification_needed) =
+            if inflight.is_none() && acked_features & (1u64 << VIRTIO_F_IN_ORDER) != 0 {
+                // With in-order processing, used_idx is a contiguous completion
+                // boundary. Replay descriptors after it when inflight tracking is
+                // not available to recover them more precisely.
+                let mut vring_bases = Vec::with_capacity(queues.len());
+                let mut notification_needed = Vec::with_capacity(queues.len());
+                for (_, queue, _) in queues {
+                    let used_idx = queue
+                        .used_idx(mem, Ordering::Acquire)
+                        .map_err(Error::GetUsedIndex)?
+                        .0;
+                    let avail_idx = queue
+                        .avail_idx(mem, Ordering::Acquire)
+                        .map_err(Error::GetAvailableIndex)?
+                        .0;
+                    vring_bases.push(u64::from(used_idx));
+                    notification_needed.push(used_idx != avail_idx);
+                }
+                (Some(vring_bases), notification_needed)
+            } else {
+                (None, vec![false; queues.len()])
+            };
+
         self.setup_vhost_user(
             mem,
             queues,
@@ -376,8 +400,16 @@ impl VhostUserHandle {
             acked_features,
             backend_req_handler,
             inflight,
-            None,
-        )
+            vring_bases.as_deref(),
+        )?;
+
+        for ((_, _, queue_evt), notification_needed) in queues.iter().zip(notification_needed) {
+            if notification_needed {
+                queue_evt.write(1).map_err(Error::VhostUserKickVring)?;
+            }
+        }
+
+        Ok(())
     }
 
     pub fn connect_vhost_user(
