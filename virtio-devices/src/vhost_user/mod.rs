@@ -143,6 +143,10 @@ pub enum Error {
     MissingIrqFd,
     #[error("Failed getting the available index")]
     GetAvailableIndex(#[source] QueueError),
+    #[error("Failed getting the used index")]
+    GetUsedIndex(#[source] QueueError),
+    #[error("Failed to kick vhost-user vring")]
+    VhostUserKickVring(#[source] io::Error),
     #[error("Migration is not supported by this vhost-user device")]
     MigrationNotSupported,
     #[error("Failed creating memfd")]
