@@ -15,7 +15,7 @@ use std::ops::Deref;
 use log::warn;
 use virtio_queue::DescriptorChain;
 use virtio_queue::desc::split::Descriptor;
-use vm_memory::{GuestAddress, GuestMemory};
+use vm_memory::{GuestAddress, GuestMemoryBackend};
 
 use crate::{AccessPlatform, Translatable};
 
@@ -65,7 +65,7 @@ pub struct CheckedDescriptorIter<'a, M> {
 impl<'a, M> CheckedDescriptorIter<'a, M>
 where
     M: Deref,
-    M::Target: GuestMemory,
+    M::Target: GuestMemoryBackend,
 {
     pub fn new(
         chain: &'a mut DescriptorChain<M>,
@@ -82,7 +82,7 @@ where
 impl<M> Iterator for CheckedDescriptorIter<'_, M>
 where
     M: Deref,
-    M::Target: GuestMemory,
+    M::Target: GuestMemoryBackend,
 {
     type Item = Result<CheckedDescriptor, GuestAddress>;
 
@@ -156,7 +156,7 @@ pub trait DescriptorChainExt<M> {
 impl<M> DescriptorChainExt<M> for DescriptorChain<M>
 where
     M: Deref,
-    M::Target: GuestMemory,
+    M::Target: GuestMemoryBackend,
 {
     fn checked_iter<'a>(
         &'a mut self,

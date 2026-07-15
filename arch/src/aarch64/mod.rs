@@ -20,7 +20,7 @@ use hypervisor::arch::aarch64::gic::Vgic;
 use hypervisor::arch::aarch64::regs::MPIDR_EL1;
 use log::{Level, log_enabled};
 use thiserror::Error;
-use vm_memory::{Address, GuestAddress, GuestMemory, GuestMemoryAtomic};
+use vm_memory::{Address, GuestAddress, GuestMemoryAtomic, GuestMemoryBackend};
 
 pub use self::fdt::DeviceInfoForFdt;
 use crate::{DeviceType, GuestMemoryMmap, NumaNodes, PciSpaceInfo, RegionType};

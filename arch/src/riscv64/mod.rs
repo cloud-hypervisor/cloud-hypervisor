@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use hypervisor::arch::riscv64::aia::Vaia;
 use log::{Level, log_enabled};
 use thiserror::Error;
-use vm_memory::{Address, GuestAddress, GuestMemory, GuestMemoryAtomic};
+use vm_memory::{Address, GuestAddress, GuestMemoryAtomic, GuestMemoryBackend};
 
 pub use self::fdt::DeviceInfoForFdt;
 use crate::{DeviceType, GuestMemoryMmap, PciSpaceInfo, RegionType};

@@ -27,7 +27,7 @@ use vhost::{
 use virtio_queue::desc::RawDescriptor;
 use virtio_queue::{Queue, QueueT};
 use vm_memory::guest_memory::Error as MmapError;
-use vm_memory::{Address, FileOffset, GuestAddress, GuestMemory, GuestMemoryRegion};
+use vm_memory::{Address, FileOffset, GuestAddress, GuestMemoryBackend, GuestMemoryRegion};
 use vm_migration::protocol::MemoryRangeTable;
 use vmm_sys_util::epoll::{ControlOperation, Epoll, EpollEvent, EventSet};
 use vmm_sys_util::eventfd::EventFd;

@@ -40,7 +40,7 @@ use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::guest_memory::{Error as MmapError, FileOffset};
 use vm_memory::mmap::MmapRegionError;
 use vm_memory::{
-    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
+    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend,
     GuestMemoryError, GuestMemoryRegion, GuestUsize, MmapRegion,
 };
 use vm_migration::protocol::{MemoryRange, MemoryRangeTable};
@@ -768,7 +768,7 @@ impl MemoryManager {
         Ok((mem_regions, memory_zones))
     }
 
-    // Restore both GuestMemory regions along with MemoryZone zones.
+    // Restore both GuestMemoryBackend regions along with MemoryZone zones.
     fn restore_memory_regions_and_zones(
         guest_ram_mappings: &[GuestRamMapping],
         zones_config: &[MemoryZoneConfig],
@@ -1585,7 +1585,7 @@ impl MemoryManager {
         for region in self.arch_mem_regions.iter() {
             if region.r_type == RegionType::Ram {
                 // Ignore the RAM type since ranges have already been allocated
-                // based on the GuestMemory regions.
+                // based on the GuestMemoryBackend regions.
                 continue;
             }
             self.ram_allocator

@@ -45,8 +45,8 @@ use vm_device::interrupt::{
 use vm_device::{BusDevice, Resource};
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{
-    Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, GuestMemoryRegion,
-    GuestUsize,
+    Address, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend,
+    GuestMemoryRegion, GuestUsize,
 };
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
@@ -2612,7 +2612,10 @@ impl<M: GuestAddressSpace> VfioDmaMapping<M> {
     }
 }
 
-impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M> {
+impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M>
+where
+    M::M: GuestMemoryBackend,
+{
     fn map(&self, iova: u64, gpa: u64, size: u64) -> result::Result<(), io::Error> {
         let Ok(usize_size): Result<usize, _> = size.try_into() else {
             return Err(io::Error::other(format!("size {size} overflows usize")));
@@ -2648,7 +2651,7 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M
         };
 
         // vfio_dma_map is unsound and ought to be marked as unsafe
-        // SAFETY: find_user_address and GuestMemory::get_slice() guarantee that
+        // SAFETY: find_user_address and GuestMemoryBackend::get_slice() guarantee that
         // the returned pointer is valid for up to `usize_size` bytes.
         // `usize_size` is always equal to `size` due to the above `try_into()` call.
         unsafe { self.vfio_ops.vfio_dma_map(iova, size as usize, user_addr) }.map_err(|e| {
