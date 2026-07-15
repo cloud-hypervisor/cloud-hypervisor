@@ -854,7 +854,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VILLAIN_REPO: https://github.com/weltling/virtio-villain.git
-      VILLAIN_REF: v0.5.0
+      VILLAIN_REF: v0.5.2
     steps:
       - name: Code checkout
         uses: actions/checkout@v7
