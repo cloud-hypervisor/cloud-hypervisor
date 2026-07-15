@@ -474,6 +474,48 @@ mod unit_tests {
         assert_eq!(result as usize, data.len());
     }
 
+    fn async_fsync(disk: &QcowDisk) {
+        let mut async_io = disk.create_async_io(1).unwrap();
+        async_io.fsync(Some(7)).unwrap();
+        let (user_data, _result) = next_completion(async_io.as_mut());
+        assert_eq!(user_data, 7);
+    }
+
+    // Freed relocation clusters must be reused so committed blocks track
+    // live data.
+    #[test]
+    fn relocated_metadata_clusters_are_reused() {
+        use std::os::unix::fs::MetadataExt;
+        const CL: u64 = 65536;
+        let virtual_size = 512 * 1024 * 1024; // one L2 table
+        let (temp, disk) = create_disk_with_data(virtual_size, &[], 0, false, false);
+        let n: u64 = 400;
+
+        for i in 0..n {
+            let pattern = vec![(i as u8).wrapping_add(1); CL as usize];
+            async_write(&disk, i * CL, &pattern);
+            async_fsync(&disk);
+        }
+
+        temp.as_file().sync_all().unwrap();
+        let committed = (temp.as_file().metadata().unwrap().blocks() * 512) / CL;
+        // Before the fix committed grew to ~2 * n.
+        assert!(
+            committed <= n + 64,
+            "committed {committed} clusters far exceeds {n} live data clusters; \
+             relocated metadata clusters are being stranded instead of reused",
+        );
+
+        for i in 0..n {
+            let got = async_read(&disk, i * CL, CL as usize);
+            assert_eq!(
+                got,
+                vec![(i as u8).wrapping_add(1); CL as usize],
+                "cluster {i} data mismatch",
+            );
+        }
+    }
+
     #[test]
     fn test_qcow_sync_rejects_out_of_bounds_allocated_l2_entry_on_read() {
         let data = vec![0x5a; 4096];
