@@ -547,6 +547,41 @@ mod unit_tests {
         );
     }
 
+    // Reopening rebuilds the free list from the on-disk refcounts. With the
+    // clusters tracked at runtime, a reopen must not discover a pile of them.
+    #[test]
+    fn reopen_discovers_no_stranded_clusters() {
+        const CL: u64 = 65536;
+        let virtual_size = 512 * 1024 * 1024;
+        let (temp, disk) = create_disk_with_data(virtual_size, &[], 0, false, false);
+        let n: u64 = 400;
+
+        for i in 0..n {
+            let pattern = vec![(i as u8).wrapping_add(1); CL as usize];
+            async_write(&disk, i * CL, &pattern);
+            async_fsync(&disk);
+        }
+        let tracked_before = disk.metadata().free_list_len();
+
+        drop(disk);
+        temp.as_file().sync_all().unwrap();
+        let disk = QcowDisk::new(
+            temp.as_file().try_clone().unwrap(),
+            false,
+            false,
+            false,
+            false,
+        )
+        .unwrap();
+        let tracked_after = disk.metadata().free_list_len();
+
+        assert!(
+            tracked_after <= tracked_before + 8,
+            "reopen recovered {} clusters the allocator had stranded",
+            tracked_after.saturating_sub(tracked_before),
+        );
+    }
+
     #[test]
     fn test_qcow_sync_rejects_out_of_bounds_allocated_l2_entry_on_read() {
         let data = vec![0x5a; 4096];
