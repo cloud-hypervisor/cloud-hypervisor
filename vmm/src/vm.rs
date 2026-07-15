@@ -78,7 +78,7 @@ use thiserror::Error;
 use tracer::trace_scoped;
 use vm_device::Bus;
 #[cfg(feature = "tdx")]
-use vm_memory::GuestMemory;
+use vm_memory::GuestMemoryBackend;
 #[cfg(feature = "tdx")]
 use vm_memory::{Address, ByteValued, GuestMemoryRegion, ReadVolatile};
 use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
@@ -3909,7 +3909,7 @@ mod unit_tests {
     #[test]
     pub fn test_vm() {
         use hypervisor::VmExit;
-        use vm_memory::{Address, GuestMemory, GuestMemoryRegion};
+        use vm_memory::{Address, GuestMemoryBackend, GuestMemoryRegion};
         // This example based on https://lwn.net/Articles/658511/
         let code = [
             0xba, 0xf8, 0x03, /* mov $0x3f8, %dx */
@@ -4047,7 +4047,7 @@ mod unit_tests {
 #[test]
 pub fn test_vm() {
     use hypervisor::VmExit;
-    use vm_memory::{Address, GuestMemory, GuestMemoryRegion};
+    use vm_memory::{Address, GuestMemoryBackend, GuestMemoryRegion};
     // This example based on https://lwn.net/Articles/658511/
     let code = [
         0xba, 0xf8, 0x03, /* mov $0x3f8, %dx */

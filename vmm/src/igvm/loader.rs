@@ -7,7 +7,7 @@ use range_map_vec::{Entry, RangeMap};
 use thiserror::Error;
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{
-    Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, GuestMemoryMmap,
+    Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend, GuestMemoryMmap,
     GuestMemoryRegion,
 };
 

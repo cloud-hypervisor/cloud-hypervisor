@@ -37,7 +37,7 @@ use thiserror::Error;
 #[cfg(all(feature = "kvm", feature = "sev_snp"))]
 use vm_memory::Bytes;
 #[cfg(feature = "sev_snp")]
-use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory};
+use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryBackend};
 #[cfg(all(feature = "kvm", feature = "sev_snp"))]
 use vm_migration::Snapshottable;
 #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]

@@ -114,7 +114,7 @@ use vm_memory::{
     Address, GuestAddress, GuestMemoryRegion, GuestUsize, MmapRegion, VolatileMemory, mmap,
 };
 #[cfg(target_arch = "x86_64")]
-use vm_memory::{GuestAddressSpace, GuestMemory};
+use vm_memory::{GuestAddressSpace, GuestMemoryBackend};
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotData, Snapshottable, Transportable,

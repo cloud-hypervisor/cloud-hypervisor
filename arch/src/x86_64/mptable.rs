@@ -10,7 +10,7 @@ use std::result;
 use libc::c_uchar;
 use log::{info, warn};
 use thiserror::Error;
-use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError};
+use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryBackend, GuestMemoryError};
 
 use super::MAX_SUPPORTED_CPUS_LEGACY;
 use crate::GuestMemoryMmap;

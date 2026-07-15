@@ -38,7 +38,7 @@ pub mod vsock;
 pub mod watchdog;
 
 use vm_memory::bitmap::AtomicBitmap;
-use vm_memory::{GuestAddress, GuestMemory};
+use vm_memory::{GuestAddress, GuestMemoryBackend};
 use vm_virtio::VirtioDeviceType;
 
 pub use self::balloon::Balloon;
@@ -180,12 +180,12 @@ impl TryInto<rate_limiter::RateLimiter> for RateLimiterConfig {
 
 /// Return the host virtual address corresponding to the given guest address range
 ///
-/// Convert an absolute address into an address space (GuestMemory)
+/// Convert an absolute address into an address space (GuestMemoryBackend)
 /// to a host pointer and verify that the provided size defines a valid
 /// range within a single memory region.
 /// Return None if it is out of bounds, spans multiple regions, or has
 /// zero size at an unmapped GPA.
-pub fn get_host_address_range<M: GuestMemory + ?Sized>(
+pub fn get_host_address_range<M: GuestMemoryBackend + ?Sized>(
     mem: &M,
     addr: GuestAddress,
     size: usize,

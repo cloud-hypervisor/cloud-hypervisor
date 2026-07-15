@@ -23,7 +23,7 @@ use vhost::vhost_user::{Error as VhostUserError, FrontendReqHandler, VhostUserFr
 use virtio_queue::{Error as QueueError, Queue};
 use vm_memory::guest_memory::Error as MmapError;
 use vm_memory::mmap::MmapRegionError;
-use vm_memory::{Address, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
+use vm_memory::{Address, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend};
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{MigratableError, Pausable, Snapshot};
 use vmm_sys_util::eventfd::EventFd;

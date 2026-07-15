@@ -23,7 +23,7 @@ use hypervisor::arch::aarch64::regs::{
 use log::{debug, info};
 use thiserror::Error;
 use vm_fdt::{FdtWriter, FdtWriterResult};
-use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryRegion};
+use vm_memory::{Address, Bytes, GuestMemoryBackend, GuestMemoryError, GuestMemoryRegion};
 
 use super::super::{DeviceType, GuestMemoryMmap, InitramfsConfig};
 use super::cache::{CacheTopologyInfo, read_cache_topology};
@@ -397,14 +397,14 @@ fn create_memory_node(
             }
         }
     } else {
-        // Note: memory regions from "GuestMemory" are sorted and non-zero sized.
+        // Note: memory regions from "GuestMemoryBackend" are sorted and non-zero sized.
         let ram_regions = {
             let mut ram_regions = Vec::new();
             let mut current_start = guest_mem
                 .iter()
                 .next()
                 .map(GuestMemoryRegion::start_addr)
-                .expect("GuestMemory must have one memory region at least")
+                .expect("GuestMemoryBackend must have one memory region at least")
                 .raw_value();
             let mut current_end = current_start;
 
