@@ -516,6 +516,37 @@ mod unit_tests {
         }
     }
 
+    // Every refcount==0 cluster in the file must be on the runtime free list.
+    // The bug left relocated refcount-block clusters free on disk yet absent
+    // from the list, so the allocator never reused them.
+    #[test]
+    fn freed_clusters_are_tracked_in_free_list() {
+        const CL: u64 = 65536;
+        let virtual_size = 512 * 1024 * 1024;
+        let (temp, disk) = create_disk_with_data(virtual_size, &[], 0, false, false);
+        let n: u64 = 400;
+
+        for i in 0..n {
+            let pattern = vec![(i as u8).wrapping_add(1); CL as usize];
+            async_write(&disk, i * CL, &pattern);
+            async_fsync(&disk);
+        }
+
+        let file_clusters = temp.as_file().metadata().unwrap().len() / CL;
+        let mut free_on_disk = 0u64;
+        for c in 0..file_clusters {
+            if disk.metadata().cluster_refcount(c * CL).unwrap() == 0 {
+                free_on_disk += 1;
+            }
+        }
+        let tracked = disk.metadata().free_list_len() as u64;
+        assert_eq!(
+            free_on_disk, tracked,
+            "{free_on_disk} free clusters on disk but {tracked} tracked; \
+             relocated clusters are stranded off the free list",
+        );
+    }
+
     #[test]
     fn test_qcow_sync_rejects_out_of_bounds_allocated_l2_entry_on_read() {
         let data = vec![0x5a; 4096];
