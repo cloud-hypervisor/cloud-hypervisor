@@ -11,12 +11,11 @@ use std::result;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use api_types::{RestoredVfioConfig, VmMemoryZoneUpdateData};
-use api_types::MemoryRestoreMode;
+use api_types::{MemoryRestoreMode, RestoredNetConfig, RestoredVfioConfig, VmMemoryZoneUpdateData};
 use arch::CpuProfile;
 use block::ImageType;
 use clap::ArgMatches;
-use log::{debug, warn};
+use log::warn;
 use option_parser::{
     ByteSized, IntegerList, OptionParser, OptionParserError, StringList, Toggle, Tuple, TupleList,
 };
@@ -2752,40 +2751,6 @@ impl NumaConfig {
                 }
             }
         }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
-pub struct RestoredNetConfig {
-    pub id: String,
-    #[serde(default)]
-    pub num_fds: usize,
-    // Special deserialize handling:
-    // A serialize-deserialize cycle typically happens across processes.
-    // Therefore, we don't serialize FDs, and whatever value is here after
-    // deserialization is invalid.
-    //
-    // Valid FDs are transmitted via a different channel (SCM_RIGHTS message)
-    // and will be populated into this struct on the destination VMM eventually.
-    #[serde(default, deserialize_with = "deserialize_restorednetconfig_fds")]
-    pub fds: Option<Vec<i32>>,
-}
-
-fn deserialize_restorednetconfig_fds<'de, D>(d: D) -> result::Result<Option<Vec<i32>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let invalid_fds: Option<Vec<i32>> = Option::deserialize(d)?;
-    if let Some(invalid_fds) = invalid_fds {
-        // If the live-migration path is used properly, new FDs are passed as
-        // SCM_RIGHTS message. So, we don't get them from the serialized JSON
-        // anyway.
-        debug!(
-            "FDs in 'RestoredNetConfig' won't be deserialized as they are most likely invalid now. Deserializing them as -1."
-        );
-        Ok(Some(vec![-1; invalid_fds.len()]))
-    } else {
-        Ok(None)
     }
 }
 

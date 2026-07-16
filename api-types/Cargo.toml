@@ -7,9 +7,10 @@ rust-version.workspace = true
 version = "0.1.0"
 
 [dependencies]
+log = { workspace = true }
+option_parser = { path = "../option_parser" }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
-option_parser = { path = "../option_parser" }
 
 [lints]
 workspace = true

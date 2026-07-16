@@ -121,10 +121,9 @@ mod fds_helper {
         use std::os::fd::RawFd;
         use std::slice::from_ref;
 
-        use api_types::RestoredVfioConfig;
+        use api_types::{RestoredNetConfig, RestoredVfioConfig};
 
         use super::{ConfigWithFDs, ConfigWithVariableFDs};
-        use crate::config::RestoredNetConfig;
         use crate::vm_config::{DeviceConfig, NetConfig};
 
         impl ConfigWithFDs for NetConfig {

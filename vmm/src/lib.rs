@@ -21,7 +21,9 @@ use anyhow::{Context, anyhow};
 #[cfg(feature = "dbus_api")]
 use api::dbus::{DBusApiOptions, DBusApiShutdownChannels};
 use api::http::HttpApiHandle;
-use api_types::{MemoryRestoreMode, MigrationMode, TimeoutStrategy, VmMemoryZoneUpdateData, VmmPingResponse};
+use api_types::{
+    MemoryRestoreMode, MigrationMode, TimeoutStrategy, VmMemoryZoneUpdateData, VmmPingResponse,
+};
 use console_devices::{ConsoleInfo, pre_create_console_devices};
 use event_monitor::event;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
