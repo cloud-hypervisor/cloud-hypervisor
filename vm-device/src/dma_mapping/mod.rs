@@ -4,6 +4,15 @@
 
 use std::io;
 
+/// Result of a successful external DMA unmap operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExternalDmaMappingUnmap {
+    /// The entire requested range was mapped and has been unmapped.
+    Full,
+    /// The request covered unmapped holes, but all mappings in the range were removed.
+    Sparse,
+}
+
 /// Trait to trigger DMA mapping updates for devices managed by virtio-iommu
 ///
 /// Trait meant for triggering the DMA mapping update related to an external
@@ -15,5 +24,5 @@ pub trait ExternalDmaMapping: Send + Sync {
     fn map(&self, iova: u64, gpa: u64, size: u64) -> io::Result<()>;
 
     /// Unmap a memory range
-    fn unmap(&self, iova: u64, size: u64) -> io::Result<()>;
+    fn unmap(&self, iova: u64, size: u64) -> io::Result<ExternalDmaMappingUnmap>;
 }

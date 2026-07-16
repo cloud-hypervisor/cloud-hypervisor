@@ -15,7 +15,7 @@ use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
-use vm_device::dma_mapping::ExternalDmaMapping;
+use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingUnmap};
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryLoadGuard,
@@ -323,8 +323,14 @@ enum Error {
     InvalidProbeRequest,
     #[error("Failed to performing external mapping")]
     ExternalMapping(#[source] io::Error),
-    #[error("Failed to performing external unmapping")]
+    #[error("Failed to perform external unmapping")]
     ExternalUnmapping(#[source] io::Error),
+    #[error("Failed to roll back external unmapping after {unmap_error}")]
+    ExternalUnmappingRollback {
+        unmap_error: io::Error,
+        #[source]
+        rollback_error: io::Error,
+    },
     #[error("Failed adding used index")]
     QueueAddUsed(#[source] virtio_queue::Error),
 }
@@ -670,14 +676,15 @@ impl Request {
                         return Err(Error::InvalidUnmapRequestMissingDomain);
                     }
 
-                    let Some(size) = req
+                    if req
                         .virt_end
                         .checked_sub(virt_start)
                         .and_then(|d| d.checked_add(1))
-                    else {
+                        .is_none()
+                    {
                         status = VIRTIO_IOMMU_S_RANGE;
                         return Err(Error::InvalidUnmapRequest);
-                    };
+                    }
 
                     // An UNMAP that would split an existing mapping must be
                     // rejected with VIRTIO_IOMMU_S_RANGE without removing
@@ -702,33 +709,13 @@ impl Request {
                         }
                     }
 
-                    // Find the list of endpoints attached to the given domain.
-                    let endpoints: Vec<u32> = mapping
-                        .endpoints
-                        .write()
-                        .unwrap()
-                        .iter()
-                        .filter(|&(_, &d)| d == domain_id)
-                        .map(|(&e, _)| e)
-                        .collect();
-
-                    // Trigger external unmapping if necessary.
-                    for endpoint in endpoints {
-                        if let Some(ext_map) = ext_mapping.get(&endpoint) {
-                            ext_map
-                                .unmap(virt_start, size)
-                                .map_err(Error::ExternalUnmapping)?;
+                    match unmap_range(mapping, domain_id, virt_start, req.virt_end, ext_mapping) {
+                        Ok(outcome) => debug!("External unmap completed: {outcome:?}"),
+                        Err(e) => {
+                            status = VIRTIO_IOMMU_S_DEVERR;
+                            return Err(e);
                         }
                     }
-
-                    let mut domains = mapping.domains.write().unwrap();
-                    let Some(domain) = domains.get_mut(&domain_id) else {
-                        status = VIRTIO_IOMMU_S_NOENT;
-                        return Err(Error::InvalidUnmapRequestMissingDomain);
-                    };
-                    domain
-                        .mappings
-                        .retain(|&x, _| x < req.virt_start || x > req.virt_end);
                 }
                 VIRTIO_IOMMU_T_PROBE => {
                     if desc_size_left != size_of::<VirtioIommuReqProbe>() {
@@ -813,6 +800,97 @@ impl Request {
 
         Ok(reply_len)
     }
+}
+
+fn rollback_external_unmap(
+    mappings: &[(u64, Mapping)],
+    completed: &[Arc<dyn ExternalDmaMapping>],
+) -> io::Result<()> {
+    let mut first_error = None;
+    for ext_map in completed.iter().rev() {
+        for (iova, mapping) in mappings {
+            if let Err(e) = ext_map.map(*iova, mapping.gpa, mapping.size) {
+                first_error.get_or_insert(e);
+            }
+        }
+    }
+
+    match first_error {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
+}
+
+fn unmap_range(
+    mapping: &IommuMapping,
+    domain_id: u32,
+    virt_start: u64,
+    virt_end: u64,
+    ext_mapping: &BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
+) -> result::Result<ExternalDmaMappingUnmap, Error> {
+    let size = virt_end
+        .checked_sub(virt_start)
+        .and_then(|delta| delta.checked_add(1))
+        .ok_or(Error::InvalidUnmapRequest)?;
+
+    let mappings: Vec<(u64, Mapping)> = {
+        let domains = mapping.domains.read().unwrap();
+        let domain = domains
+            .get(&domain_id)
+            .ok_or(Error::InvalidUnmapRequestMissingDomain)?;
+        domain
+            .mappings
+            .range(virt_start..=virt_end)
+            .map(|(&iova, &mapping)| (iova, mapping))
+            .collect()
+    };
+    let endpoints: Vec<Arc<dyn ExternalDmaMapping>> = mapping
+        .endpoints
+        .read()
+        .unwrap()
+        .iter()
+        .filter(|&(_, &domain)| domain == domain_id)
+        .filter_map(|(endpoint, _)| ext_mapping.get(endpoint).cloned())
+        .collect();
+
+    let mut outcome = ExternalDmaMappingUnmap::Full;
+    let mut completed = Vec::new();
+    for ext_map in endpoints {
+        match ext_map.unmap(virt_start, size) {
+            Ok(ExternalDmaMappingUnmap::Full) => {}
+            Ok(ExternalDmaMappingUnmap::Sparse) => {
+                outcome = ExternalDmaMappingUnmap::Sparse;
+            }
+            Err(unmap_error) => {
+                if let Err(rollback_error) = rollback_external_unmap(&mappings, &completed) {
+                    return Err(Error::ExternalUnmappingRollback {
+                        unmap_error,
+                        rollback_error,
+                    });
+                }
+                return Err(Error::ExternalUnmapping(unmap_error));
+            }
+        }
+        completed.push(ext_map);
+    }
+
+    let mut domains = mapping.domains.write().unwrap();
+    let Some(domain) = domains.get_mut(&domain_id) else {
+        drop(domains);
+        let missing_domain = io::Error::other("IOMMU domain disappeared during external unmap");
+        if let Err(rollback_error) = rollback_external_unmap(&mappings, &completed) {
+            return Err(Error::ExternalUnmappingRollback {
+                unmap_error: missing_domain,
+                rollback_error,
+            });
+        }
+        return Err(Error::InvalidUnmapRequestMissingDomain);
+    };
+    for (iova, _) in mappings {
+        domain.mappings.remove(&iova);
+    }
+
+    Ok(outcome)
 }
 
 fn detach_endpoint_from_domain(
@@ -1396,13 +1474,13 @@ mod tests {
     use std::collections::BTreeMap;
     use std::io;
     use std::sync::atomic::AtomicBool;
-    use std::sync::{Arc, RwLock, Weak};
+    use std::sync::{Arc, Mutex, RwLock, Weak};
 
     use seccompiler::SeccompAction;
-    use vm_device::dma_mapping::ExternalDmaMapping;
+    use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingUnmap};
     use vmm_sys_util::eventfd::{EFD_NONBLOCK, EventFd};
 
-    use super::{Domain, Iommu, IommuMapping, Mapping};
+    use super::{Domain, Error, Iommu, IommuMapping, Mapping, unmap_range};
     use crate::DmaRemapping;
 
     /// Test stub for VfioDmaMapping.
@@ -1413,8 +1491,57 @@ mod tests {
             Ok(())
         }
 
-        fn unmap(&self, _iova: u64, _size: u64) -> Result<(), io::Error> {
+        fn unmap(&self, _iova: u64, _size: u64) -> Result<ExternalDmaMappingUnmap, io::Error> {
+            Ok(ExternalDmaMappingUnmap::Full)
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum UnmapBehavior {
+        Full,
+        Sparse,
+        Fail,
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum MappingCall {
+        Map { iova: u64, gpa: u64, size: u64 },
+        Unmap { iova: u64, size: u64 },
+    }
+
+    struct RecordingMapping {
+        behavior: UnmapBehavior,
+        calls: Mutex<Vec<MappingCall>>,
+    }
+
+    impl RecordingMapping {
+        fn new(behavior: UnmapBehavior) -> Self {
+            Self {
+                behavior,
+                calls: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl ExternalDmaMapping for RecordingMapping {
+        fn map(&self, iova: u64, gpa: u64, size: u64) -> Result<(), io::Error> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(MappingCall::Map { iova, gpa, size });
             Ok(())
+        }
+
+        fn unmap(&self, iova: u64, size: u64) -> Result<ExternalDmaMappingUnmap, io::Error> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(MappingCall::Unmap { iova, size });
+            match self.behavior {
+                UnmapBehavior::Full => Ok(ExternalDmaMappingUnmap::Full),
+                UnmapBehavior::Sparse => Ok(ExternalDmaMappingUnmap::Sparse),
+                UnmapBehavior::Fail => Err(io::Error::other("unmap failed")),
+            }
         }
     }
 
@@ -1465,7 +1592,10 @@ mod tests {
 
     /// Build an IommuMapping with endpoint 0 attached to a single domain whose
     /// mappings are the given `(iova, gpa, size)` tuples.
-    fn iommu_mapping(entries: &[(u64, u64, u64)]) -> IommuMapping {
+    fn iommu_mapping_with_endpoints(
+        entries: &[(u64, u64, u64)],
+        endpoint_ids: &[u32],
+    ) -> IommuMapping {
         let mut mappings = BTreeMap::new();
         for &(iova, gpa, size) in entries {
             mappings.insert(iova, Mapping { gpa, size });
@@ -1478,13 +1608,128 @@ mod tests {
                 bypass: false,
             },
         );
-        let mut endpoints = BTreeMap::new();
-        endpoints.insert(0, 0);
+        let endpoints = endpoint_ids
+            .iter()
+            .copied()
+            .map(|endpoint| (endpoint, 0))
+            .collect();
         IommuMapping {
             endpoints: Arc::new(RwLock::new(endpoints)),
             domains: Arc::new(RwLock::new(domains)),
             bypass: AtomicBool::new(false),
         }
+    }
+
+    fn iommu_mapping(entries: &[(u64, u64, u64)]) -> IommuMapping {
+        iommu_mapping_with_endpoints(entries, &[0])
+    }
+
+    fn domain_mappings(mapping: &IommuMapping) -> BTreeMap<u64, Mapping> {
+        mapping.domains.read().unwrap()[&0].mappings.clone()
+    }
+
+    #[test]
+    fn unmap_removes_bookkeeping_after_full_external_unmap() {
+        let mapping = iommu_mapping(&[(0x1000, 0x4000, 0x1000)]);
+        let external = Arc::new(RecordingMapping::new(UnmapBehavior::Full));
+        let ext_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>> =
+            BTreeMap::from([(0, external.clone() as Arc<dyn ExternalDmaMapping>)]);
+
+        let outcome = unmap_range(&mapping, 0, 0x1000, 0x1fff, &ext_mapping).unwrap();
+
+        assert_eq!(outcome, ExternalDmaMappingUnmap::Full);
+        assert!(domain_mappings(&mapping).is_empty());
+        assert_eq!(
+            *external.calls.lock().unwrap(),
+            [MappingCall::Unmap {
+                iova: 0x1000,
+                size: 0x1000,
+            }]
+        );
+    }
+
+    #[test]
+    fn unmap_reconciles_hole_spanning_external_unmap() {
+        let mapping = iommu_mapping(&[(0x1000, 0x4000, 0x1000), (0x3000, 0x6000, 0x1000)]);
+        let external = Arc::new(RecordingMapping::new(UnmapBehavior::Sparse));
+        let ext_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>> =
+            BTreeMap::from([(0, external.clone() as Arc<dyn ExternalDmaMapping>)]);
+
+        let outcome = unmap_range(&mapping, 0, 0x1000, 0x3fff, &ext_mapping).unwrap();
+
+        assert_eq!(outcome, ExternalDmaMappingUnmap::Sparse);
+        assert!(domain_mappings(&mapping).is_empty());
+        assert_eq!(
+            *external.calls.lock().unwrap(),
+            [MappingCall::Unmap {
+                iova: 0x1000,
+                size: 0x3000,
+            }]
+        );
+    }
+
+    #[test]
+    fn unmap_total_failure_keeps_bookkeeping() {
+        let entries = [(0x1000, 0x4000, 0x1000)];
+        let mapping = iommu_mapping(&entries);
+        let external = Arc::new(RecordingMapping::new(UnmapBehavior::Fail));
+        let ext_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>> =
+            BTreeMap::from([(0, external.clone() as Arc<dyn ExternalDmaMapping>)]);
+
+        let error = unmap_range(&mapping, 0, 0x1000, 0x1fff, &ext_mapping).unwrap_err();
+
+        assert!(matches!(error, Error::ExternalUnmapping(_)));
+        assert_eq!(domain_mappings(&mapping).len(), 1);
+        assert_eq!(
+            *external.calls.lock().unwrap(),
+            [MappingCall::Unmap {
+                iova: 0x1000,
+                size: 0x1000,
+            }]
+        );
+    }
+
+    #[test]
+    fn unmap_mixed_endpoint_failure_rolls_back_completed_endpoint() {
+        let entries = [(0x1000, 0x4000, 0x1000), (0x2000, 0x5000, 0x1000)];
+        let mapping = iommu_mapping_with_endpoints(&entries, &[0, 1]);
+        let completed = Arc::new(RecordingMapping::new(UnmapBehavior::Full));
+        let failed = Arc::new(RecordingMapping::new(UnmapBehavior::Fail));
+        let ext_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>> = BTreeMap::from([
+            (0, completed.clone() as Arc<dyn ExternalDmaMapping>),
+            (1, failed.clone() as Arc<dyn ExternalDmaMapping>),
+        ]);
+
+        let error = unmap_range(&mapping, 0, 0x1000, 0x2fff, &ext_mapping).unwrap_err();
+
+        assert!(matches!(error, Error::ExternalUnmapping(_)));
+        assert_eq!(domain_mappings(&mapping).len(), entries.len());
+        assert_eq!(
+            *completed.calls.lock().unwrap(),
+            [
+                MappingCall::Unmap {
+                    iova: 0x1000,
+                    size: 0x2000,
+                },
+                MappingCall::Map {
+                    iova: 0x1000,
+                    gpa: 0x4000,
+                    size: 0x1000,
+                },
+                MappingCall::Map {
+                    iova: 0x2000,
+                    gpa: 0x5000,
+                    size: 0x1000,
+                },
+            ]
+        );
+        assert_eq!(
+            *failed.calls.lock().unwrap(),
+            [MappingCall::Unmap {
+                iova: 0x1000,
+                size: 0x2000,
+            }]
+        );
     }
 
     #[test]

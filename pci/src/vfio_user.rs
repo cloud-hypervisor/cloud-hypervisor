@@ -16,7 +16,7 @@ use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::VfioIrq;
 use vfio_user::{Client, Error as VfioUserError};
 use vm_allocator::{AddressAllocator, MemorySlotAllocator, SystemAllocator};
-use vm_device::dma_mapping::ExternalDmaMapping;
+use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingUnmap};
 use vm_device::interrupt::{InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig};
 use vm_device::{BusDevice, Resource};
 use vm_memory::bitmap::AtomicBitmap;
@@ -575,11 +575,12 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioUserDmaMappi
             .map_err(|e| io::Error::other(format!("Error mapping region: {e}")))
     }
 
-    fn unmap(&self, iova: u64, size: u64) -> result::Result<(), io::Error> {
+    fn unmap(&self, iova: u64, size: u64) -> result::Result<ExternalDmaMappingUnmap, io::Error> {
         self.client
             .lock()
             .unwrap()
             .dma_unmap(iova, size)
-            .map_err(|e| io::Error::other(format!("Error unmapping region: {e}")))
+            .map_err(|e| io::Error::other(format!("Error unmapping region: {e}")))?;
+        Ok(ExternalDmaMappingUnmap::Full)
     }
 }

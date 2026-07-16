@@ -31,14 +31,15 @@ use vfio_bindings::bindings::vfio::{
     vfio_device_mig_state_VFIO_DEVICE_STATE_STOP_COPY as VFIO_DEV_STATE_STOP_COPY, *,
 };
 use vfio_ioctls::{
-    DmaLoggingRange, VfioDevice, VfioIrq, VfioOps, VfioRegionInfoCap, VfioRegionSparseMmapArea,
+    DmaLoggingRange, VfioDevice, VfioError as VfioIoctlError, VfioIrq, VfioOps, VfioRegionInfoCap,
+    VfioRegionSparseMmapArea,
 };
 use vm_allocator::page_size::{
     align_page_size_down, align_page_size_up, get_page_size, is_4k_aligned, is_4k_multiple,
     is_page_size_aligned,
 };
 use vm_allocator::{AddressAllocator, MemorySlotAllocator, SystemAllocator};
-use vm_device::dma_mapping::ExternalDmaMapping;
+use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingUnmap};
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
@@ -2612,6 +2613,24 @@ impl<M: GuestAddressSpace> VfioDmaMapping<M> {
     }
 }
 
+fn external_unmap_outcome(
+    result: result::Result<(), VfioIoctlError>,
+    iova: u64,
+    size: u64,
+) -> io::Result<ExternalDmaMappingUnmap> {
+    match result {
+        Ok(()) => Ok(ExternalDmaMappingUnmap::Full),
+        // VFIO type1 v2 and iommufd report the number of mapped bytes removed.
+        // A short result means the request contained holes; the successful ioctl
+        // still removed every mapping in the requested range.
+        Err(VfioIoctlError::InvalidDmaUnmapSize) => Ok(ExternalDmaMappingUnmap::Sparse),
+        Err(e) => Err(io::Error::other(format!(
+            "failed to unmap memory from the host IOMMU address space, \
+             iova 0x{iova:x}, size 0x{size:x}: {e:?}"
+        ))),
+    }
+}
+
 impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M> {
     fn map(&self, iova: u64, gpa: u64, size: u64) -> result::Result<(), io::Error> {
         let Ok(usize_size): Result<usize, _> = size.try_into() else {
@@ -2659,15 +2678,12 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M
         })
     }
 
-    fn unmap(&self, iova: u64, size: u64) -> result::Result<(), io::Error> {
-        self.vfio_ops
-            .vfio_dma_unmap(iova, size as usize)
-            .map_err(|e| {
-                io::Error::other(format!(
-                    "failed to unmap memory from the host IOMMU address space, \
-                     iova 0x{iova:x}, size 0x{size:x}: {e:?}"
-                ))
-            })
+    fn unmap(&self, iova: u64, size: u64) -> result::Result<ExternalDmaMappingUnmap, io::Error> {
+        external_unmap_outcome(
+            self.vfio_ops.vfio_dma_unmap(iova, size as usize),
+            iova,
+            size,
+        )
     }
 }
 
@@ -2676,6 +2692,20 @@ mod tests {
     use std::sync::Mutex;
 
     use super::*;
+
+    #[test]
+    fn classify_vfio_unmap_outcomes() {
+        assert_eq!(
+            external_unmap_outcome(Ok(()), 0x1000, 0x2000).unwrap(),
+            ExternalDmaMappingUnmap::Full
+        );
+        assert_eq!(
+            external_unmap_outcome(Err(VfioIoctlError::InvalidDmaUnmapSize), 0x1000, 0x2000,)
+                .unwrap(),
+            ExternalDmaMappingUnmap::Sparse
+        );
+        external_unmap_outcome(Err(VfioIoctlError::VfioInvalidType), 0x1000, 0x2000).unwrap_err();
+    }
 
     // Trait default behavior and state enum round trip.
 

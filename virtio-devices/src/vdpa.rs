@@ -20,7 +20,7 @@ use vhost::vhost_kern::vhost_binding::VHOST_BACKEND_F_SUSPEND;
 use vhost::{VhostBackend, VringConfigData};
 use virtio_queue::desc::RawDescriptor;
 use virtio_queue::{Queue, QueueT};
-use vm_device::dma_mapping::ExternalDmaMapping;
+use vm_device::dma_mapping::{ExternalDmaMapping, ExternalDmaMappingUnmap};
 use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{AccessPlatform, Translatable};
@@ -596,7 +596,7 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VdpaDmaMapping<M
         }
     }
 
-    fn unmap(&self, iova: u64, size: u64) -> io::Result<()> {
+    fn unmap(&self, iova: u64, size: u64) -> io::Result<ExternalDmaMappingUnmap> {
         debug!("DMA unmap iova 0x{iova:x} size 0x{size:x}");
         self.device
             .lock()
@@ -607,6 +607,7 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VdpaDmaMapping<M
                     "failed to unmap memory for vDPA device, \
                      iova 0x{iova:x}, size 0x{size:x}: {e:?}"
                 ))
-            })
+            })?;
+        Ok(ExternalDmaMappingUnmap::Full)
     }
 }
