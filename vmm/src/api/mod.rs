@@ -37,15 +37,14 @@ use std::collections::HashSet;
 use std::io;
 use std::num::{NonZeroU32, NonZeroU64};
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::mpsc::{RecvError, SendError, Sender, channel};
 use std::time::Duration;
 
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use api_types::VmCoredumpData;
 use api_types::{
-    MigrationMode, VmRemoveDeviceData, VmResizeData, VmResizeDiskData, VmResizeZoneData,
-    VmSnapshotConfig, VmmPingResponse,
+    MigrationMode, TimeoutStrategy, VmRemoveDeviceData, VmResizeData, VmResizeDiskData,
+    VmResizeZoneData, VmSnapshotConfig, VmmPingResponse,
 };
 use log::info;
 use micro_http::Body;
@@ -477,30 +476,6 @@ impl VmReceiveMigrationData {
         }
 
         Ok(())
-    }
-}
-
-#[derive(Copy, Clone, Default, Deserialize, Serialize, Debug, PartialEq, Eq)]
-/// The migration timeout strategy.
-///
-/// This strategy describes the behavior of the migration when the target
-/// downtime can't be reached in the given timeout.
-pub enum TimeoutStrategy {
-    #[default]
-    /// Cancel the migration and keep the VM running on the source.
-    Cancel,
-    /// Ignore the timeout and migrate anyway.
-    Ignore,
-}
-
-impl FromStr for TimeoutStrategy {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "cancel" => Ok(TimeoutStrategy::Cancel),
-            "ignore" => Ok(TimeoutStrategy::Ignore),
-            _ => Err(format!("Invalid timeout strategy: {s}")),
-        }
     }
 }
 

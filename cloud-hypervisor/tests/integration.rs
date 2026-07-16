@@ -46,9 +46,9 @@ mod common_parallel {
     #[cfg(not(feature = "mshv"))]
     use std::sync::mpsc;
 
-    use test_infra::GuestFactory;
     #[cfg(not(feature = "mshv"))]
-    use vmm::api::TimeoutStrategy;
+    use api_types::TimeoutStrategy;
+    use test_infra::GuestFactory;
 
     use crate::*;
 

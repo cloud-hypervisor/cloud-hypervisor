@@ -31,3 +31,27 @@ impl FromStr for MigrationMode {
         }
     }
 }
+
+#[derive(Copy, Clone, Default, Deserialize, Serialize, Debug, PartialEq, Eq)]
+/// The migration timeout strategy.
+///
+/// This strategy describes the behavior of the migration when the target
+/// downtime can't be reached in the given timeout.
+pub enum TimeoutStrategy {
+    #[default]
+    /// Cancel the migration and keep the VM running on the source.
+    Cancel,
+    /// Ignore the timeout and migrate anyway.
+    Ignore,
+}
+
+impl FromStr for TimeoutStrategy {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "cancel" => Ok(TimeoutStrategy::Cancel),
+            "ignore" => Ok(TimeoutStrategy::Ignore),
+            _ => Err(format!("Invalid timeout strategy: {s}")),
+        }
+    }
+}

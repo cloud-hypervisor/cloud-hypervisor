@@ -12,7 +12,7 @@ mod vm_resize_zone;
 mod vm_snapshot;
 mod vmm_ping_response;
 
-pub use migration::MigrationMode;
+pub use migration::{MigrationMode, TimeoutStrategy};
 pub use vm_coredump::VmCoredumpData;
 pub use vm_remove_device::VmRemoveDeviceData;
 pub use vm_resize::VmResizeData;
