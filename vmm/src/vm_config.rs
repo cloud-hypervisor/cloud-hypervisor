@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{fs, result};
 
+use api_types::CpuAffinity;
 use arch::CpuProfile;
 use block::ImageType;
 pub use block::fcntl::LockGranularityChoice;
@@ -29,12 +30,6 @@ pub type LandlockResult<T> = result::Result<T, LandlockError>;
 pub(crate) trait ApplyLandlock {
     /// Apply Landlock rules to file paths
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()>;
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct CpuAffinity {
-    pub vcpu: u32,
-    pub host_cpus: Box<[usize]>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
