@@ -9,13 +9,13 @@ use std::sync::mpsc::{channel, Receiver};
 use std::sync::LazyLock;
 use std::thread;
 
+use api_types::VmmPingResponse;
 use libfuzzer_sys::{fuzz_target, Corpus};
 use micro_http::Request;
 use vm_migration::MigratableError;
 use vmm::api::http::*;
 use vmm::api::{
     ApiRequest, RequestHandler, VmInfoResponse, VmReceiveMigrationData, VmSendMigrationData,
-    VmmPingResponse,
 };
 use vmm::config::RestoreConfig;
 use vmm::vm::{Error as VmError, VmState};

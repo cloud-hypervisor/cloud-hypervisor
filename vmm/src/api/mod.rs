@@ -45,6 +45,7 @@ use std::time::Duration;
 use api_types::VmCoredumpData;
 use api_types::{
     VmRemoveDeviceData, VmResizeData, VmResizeDiskData, VmResizeZoneData, VmSnapshotConfig,
+    VmmPingResponse,
 };
 use log::info;
 use micro_http::Body;
@@ -233,14 +234,6 @@ pub struct VmInfoResponse {
     pub state: VmState,
     pub memory_actual_size: u64,
     pub device_tree: Option<DeviceTree>,
-}
-
-#[derive(Clone, Deserialize, Serialize)]
-pub struct VmmPingResponse {
-    pub build_version: String,
-    pub version: String,
-    pub pid: i64,
-    pub features: Vec<String>,
 }
 
 /// Memory transfer mode for a migration.
