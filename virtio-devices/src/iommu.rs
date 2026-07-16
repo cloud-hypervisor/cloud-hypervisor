@@ -702,33 +702,24 @@ impl Request {
                         }
                     }
 
-                    // Find the list of endpoints attached to the given domain.
-                    let endpoints: Vec<u32> = mapping
-                        .endpoints
-                        .write()
-                        .unwrap()
-                        .iter()
-                        .filter(|&(_, &d)| d == domain_id)
-                        .map(|(&e, _)| e)
-                        .collect();
-
-                    // Trigger external unmapping if necessary.
-                    for endpoint in endpoints {
-                        if let Some(ext_map) = ext_mapping.get(&endpoint) {
-                            ext_map
-                                .unmap(virt_start, size)
-                                .map_err(Error::ExternalUnmapping)?;
-                        }
+                    // Perform the external unmap and reconcile the domain's
+                    // mapping bookkeeping together. The external unmap is
+                    // attempted on every endpoint and the bookkeeping is
+                    // reconciled even when it fails, so a failed or partial
+                    // external unmap cannot leave a stale mapping behind that a
+                    // later MAP of the same IOVA would then reject as an
+                    // overlap.
+                    if let Err(e) = unmap_range(
+                        mapping,
+                        domain_id,
+                        virt_start,
+                        req.virt_end,
+                        size,
+                        ext_mapping,
+                    ) {
+                        status = VIRTIO_IOMMU_S_DEVERR;
+                        return Err(e);
                     }
-
-                    let mut domains = mapping.domains.write().unwrap();
-                    let Some(domain) = domains.get_mut(&domain_id) else {
-                        status = VIRTIO_IOMMU_S_NOENT;
-                        return Err(Error::InvalidUnmapRequestMissingDomain);
-                    };
-                    domain
-                        .mappings
-                        .retain(|&x, _| x < req.virt_start || x > req.virt_end);
                 }
                 VIRTIO_IOMMU_T_PROBE => {
                     if desc_size_left != size_of::<VirtioIommuReqProbe>() {
@@ -848,6 +839,61 @@ fn detach_endpoint_from_domain(
     }
 
     Ok(())
+}
+
+// Unmap `[virt_start, virt_end]` (size = virt_end - virt_start + 1) from every
+// endpoint attached to `domain_id`, then reconcile the domain's mapping
+// bookkeeping.
+//
+// The external unmap is attempted on every endpoint even if one fails, and the
+// bookkeeping is reconciled regardless of any failure. This keeps the device's
+// mapping table from diverging from the hardware state: a failed or partial
+// external unmap (for example when a VFIO container runs out of DMA mapping
+// entries) must not leave a stale mapping behind, otherwise a later MAP of the
+// same IOVA would be rejected as overlapping that phantom entry. The first
+// external error, if any, is returned once the bookkeeping is consistent.
+fn unmap_range(
+    mapping: &IommuMapping,
+    domain_id: u32,
+    virt_start: u64,
+    virt_end: u64,
+    size: u64,
+    ext_mapping: &BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
+) -> result::Result<(), Error> {
+    // Find the list of endpoints attached to the given domain.
+    let endpoints: Vec<u32> = mapping
+        .endpoints
+        .read()
+        .unwrap()
+        .iter()
+        .filter(|&(_, &d)| d == domain_id)
+        .map(|(&e, _)| e)
+        .collect();
+
+    // Attempt external unmapping on every endpoint, keeping the first error
+    // instead of returning early, so a failing endpoint does not prevent the
+    // others from being unmapped.
+    let mut unmap_err = None;
+    for endpoint in endpoints {
+        if let Some(ext_map) = ext_mapping.get(&endpoint)
+            && let Err(e) = ext_map.unmap(virt_start, size)
+        {
+            unmap_err.get_or_insert(Error::ExternalUnmapping(e));
+        }
+    }
+
+    // Reconcile bookkeeping unconditionally so it never diverges from the
+    // hardware state, even when an external unmap failed above.
+    if let Some(domain) = mapping.domains.write().unwrap().get_mut(&domain_id) {
+        domain
+            .mappings
+            .retain(|&x, _| x < virt_start || x > virt_end);
+    }
+
+    match unmap_err {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
 }
 
 struct IommuEpollHandler {
@@ -1402,7 +1448,7 @@ mod tests {
     use vm_device::dma_mapping::ExternalDmaMapping;
     use vmm_sys_util::eventfd::{EFD_NONBLOCK, EventFd};
 
-    use super::{Domain, Iommu, IommuMapping, Mapping};
+    use super::{Domain, Iommu, IommuMapping, Mapping, unmap_range};
     use crate::DmaRemapping;
 
     /// Test stub for VfioDmaMapping.
@@ -1415,6 +1461,20 @@ mod tests {
 
         fn unmap(&self, _iova: u64, _size: u64) -> Result<(), io::Error> {
             Ok(())
+        }
+    }
+
+    /// Test stub whose `unmap` always fails, to exercise the external-unmap
+    /// failure path.
+    struct FailingUnmapMapping;
+
+    impl ExternalDmaMapping for FailingUnmapMapping {
+        fn map(&self, _iova: u64, _gpa: u64, _size: u64) -> Result<(), io::Error> {
+            Ok(())
+        }
+
+        fn unmap(&self, _iova: u64, _size: u64) -> Result<(), io::Error> {
+            Err(io::Error::other("external unmap failed"))
         }
     }
 
@@ -1521,5 +1581,48 @@ mod tests {
     fn reject_unmapped_base() {
         let m = iommu_mapping(&[(0x1000, 0x4000, 0x1000)]);
         m.translate_gva(0, 0x2500, 0x10).unwrap_err();
+    }
+
+    #[test]
+    fn unmap_removes_mapping_on_success() {
+        let m = iommu_mapping(&[(0x1000, 0x4000, 0x1000)]);
+        let mut ext_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>> = BTreeMap::new();
+        ext_mapping.insert(0, Arc::new(MockMapping));
+
+        unmap_range(&m, 0, 0x1000, 0x1fff, 0x1000, &ext_mapping).unwrap();
+
+        assert!(
+            m.domains
+                .read()
+                .unwrap()
+                .get(&0)
+                .unwrap()
+                .mappings
+                .is_empty(),
+            "a successful unmap must remove the mapping"
+        );
+    }
+
+    #[test]
+    fn unmap_reconciles_bookkeeping_on_external_failure() {
+        let m = iommu_mapping(&[(0x1000, 0x4000, 0x1000)]);
+        let mut ext_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>> = BTreeMap::new();
+        ext_mapping.insert(0, Arc::new(FailingUnmapMapping));
+
+        // The external unmap fails, but the bookkeeping must still be
+        // reconciled so a later MAP of the same IOVA is not rejected as an
+        // overlap against a stale mapping.
+        unmap_range(&m, 0, 0x1000, 0x1fff, 0x1000, &ext_mapping).unwrap_err();
+
+        assert!(
+            m.domains
+                .read()
+                .unwrap()
+                .get(&0)
+                .unwrap()
+                .mappings
+                .is_empty(),
+            "bookkeeping must be reconciled even when the external unmap fails"
+        );
     }
 }
