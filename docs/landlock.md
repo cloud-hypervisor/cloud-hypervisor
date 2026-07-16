@@ -62,6 +62,31 @@ Landlock can also be enabled during `vm.create` request by passing a config like
 }
 ```
 
+### Multi-file disk formats (VMDK)
+
+For most block backends (raw, qcow2, VHD) including existing VMDK, landlock
+grants access to the `--disk path=` path value.
+
+For a Flat VMDK, its `path=` points at a small text *descriptor* whose
+data lives in one or more separate *extent* files. Granting only the descriptor
+currently leaves those extents unreachable under landlock.
+
+The process launching Cloud-Hypervisor must grant these extent paths explicitly
+via `--landlock-rules` (or the `landlock_rules` API field). The descriptor file's
+extent section mentions the extent file path which can be either:
+
+- relative (the `qemu-img` default) in which case the full path includes the descriptor
+file's parent directory
+- absolute, which can live inside the descriptor file's parent directory or in another
+directory
+
+For example, a containerd/Kata deployment where the read-only image
+layer resides under `/var/lib/containerd` should add that path:
+
+```
+--landlock-rules path="/var/lib/containerd",access="rw"
+```
+
 
 ## Usage Examples
 
