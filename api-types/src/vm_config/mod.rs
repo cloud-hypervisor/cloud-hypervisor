@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+pub(crate) mod console_config;
 pub(crate) mod cpus_config;
 pub(crate) mod memory_config;
 pub(crate) mod net_config;

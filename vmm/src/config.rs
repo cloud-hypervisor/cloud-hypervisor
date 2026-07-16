@@ -11,7 +11,8 @@ use std::result;
 use std::sync::LazyLock;
 
 use api_types::{
-    CpusConfig, CpusConfigParseError, MemoryRestoreMode, NumaDistance, RestoredNetConfig,
+    ConsoleOutputMode, CpusConfig, CpusConfigParseError, MemoryRestoreMode, NumaDistance,
+    RestoredNetConfig,
     RestoredVfioConfig, VmMemoryZoneUpdateData,
 };
 use block::ImageType;

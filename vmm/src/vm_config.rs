@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{fs, result};
 
-use api_types::{CpusConfig, HotplugMethod, NumaDistance, VhostMode};
+use api_types::{ConsoleOutputMode, CpusConfig, HotplugMethod, NumaDistance, VhostMode};
 use block::ImageType;
 pub use block::fcntl::LockGranularityChoice;
 #[cfg(target_arch = "x86_64")]
@@ -544,16 +544,6 @@ impl ApplyLandlock for PmemConfig {
         landlock.add_rule_with_access(&self.file, access)?;
         Ok(())
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub enum ConsoleOutputMode {
-    Off,
-    Pty,
-    Tty,
-    File,
-    Socket,
-    Null,
 }
 
 /// Common configuration for plain console configs.

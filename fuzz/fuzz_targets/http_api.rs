@@ -9,7 +9,9 @@ use std::sync::mpsc::{channel, Receiver};
 use std::sync::LazyLock;
 use std::thread;
 
-use api_types::{CoreScheduling, CpuFeatures, CpusConfig, HotplugMethod, VmmPingResponse};
+use api_types::{
+    ConsoleOutputMode, CoreScheduling, CpuFeatures, CpusConfig, HotplugMethod, VmmPingResponse,
+};
 use libfuzzer_sys::{fuzz_target, Corpus};
 use micro_http::Request;
 use vm_migration::MigratableError;

@@ -3427,16 +3427,18 @@ mod util {
 mod unit_tests {
     use std::path::PathBuf;
 
-    use api_types::{CoreScheduling, CpuFeatures, CpusConfig, HotplugMethod, RestoredVfioConfig};
+    use api_types::{
+        ConsoleOutputMode, CoreScheduling, CpuFeatures, CpusConfig, HotplugMethod,
+        RestoredVfioConfig,
+    };
     use arch::CpuProfile;
 
     use super::*;
     #[cfg(target_arch = "x86_64")]
     use crate::vm_config::DebugConsoleConfig;
     use crate::vm_config::{
-        CommonConsoleConfig, ConsoleConfig, ConsoleOutputMode, DeviceConfig, MemoryConfig,
-        MemoryZoneConfig, PayloadConfig, PciDeviceCommonConfig, PlatformConfig, RngConfig,
-        SerialConfig,
+        CommonConsoleConfig, ConsoleConfig, MemoryConfig, MemoryZoneConfig, PayloadConfig,
+        PciDeviceCommonConfig, PlatformConfig, RngConfig, SerialConfig,
     };
 
     fn create_dummy_vmm() -> Vmm {

@@ -23,6 +23,7 @@ pub use restore::{
     RestoredNetConfig, RestoredVfioConfig, VmMemoryZoneUpdateData,
 };
 use serde::Deserialize;
+pub use vm_config::console_config::ConsoleOutputMode;
 pub use vm_config::cpus_config::{
     CoreScheduling, CpuAffinity, CpuFeatures, CpuTopology, CpuTopologyParseError, CpusConfig,
     CpusConfigParseError, ParseCoreSchedulingError,
