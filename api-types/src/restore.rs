@@ -9,20 +9,8 @@ use serde::{Deserialize, Serialize};
 pub struct RestoredVfioConfig {
     pub id: String,
     // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
-    #[serde(default, deserialize_with = "deserialize_restored_fd")]
+    #[serde(default, deserialize_with = "crate::deserialize_restored_fd")]
     pub fd: Option<i32>,
-}
-
-fn deserialize_restored_fd<'de, D>(d: D) -> Result<Option<i32>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let invalid_fd: Option<i32> = Option::deserialize(d)?;
-    if invalid_fd.is_some() {
-        Ok(Some(-1))
-    } else {
-        Ok(None)
-    }
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug, Eq, PartialEq)]

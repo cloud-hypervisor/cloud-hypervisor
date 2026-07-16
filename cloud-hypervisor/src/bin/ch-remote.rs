@@ -17,8 +17,8 @@ use api_client::{
     simple_api_full_command,
 };
 use api_types::{
-    VmCoredumpData, VmRemoveDeviceData, VmResizeData, VmResizeDiskData, VmResizeZoneData,
-    VmSnapshotConfig,
+    VmCoredumpData, VmReceiveMigrationData, VmRemoveDeviceData, VmResizeData, VmResizeDiskData,
+    VmResizeZoneData, VmSnapshotConfig,
 };
 #[cfg(feature = "dbus_api")]
 use clap::ArgAction;
@@ -77,7 +77,7 @@ enum Error {
     #[error("Invalid disk size")]
     InvalidDiskSize(#[source] ByteSizedParseError),
     #[error("Error parsing receive migration configuration")]
-    ReceiveMigrationConfig(#[from] api::VmReceiveMigrationConfigError),
+    ReceiveMigrationConfig(#[from] api_types::VmReceiveMigrationDataParseError),
     #[error("Error parsing send migration configuration")]
     SendMigrationConfig(#[from] api::VmSendMigrationConfigError),
 }
@@ -969,7 +969,7 @@ fn coredump_config(destination_url: &str) -> String {
 
 fn receive_migration_data(config: &str) -> Result<(String, Vec<i32>), Error> {
     let mut data =
-        api::VmReceiveMigrationData::parse(config).map_err(Error::ReceiveMigrationConfig)?;
+        api_types::VmReceiveMigrationData::parse(config).map_err(Error::ReceiveMigrationConfig)?;
 
     // The FDs are passed to the server side process via SCM_RIGHTS, in the
     // order vfio_fds then the iommufd FD, matching the server's split.
@@ -1096,7 +1096,7 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
             .arg(
                 Arg::new("receive_migration_config")
                     .index(1)
-                    .help(api::VmReceiveMigrationData::SYNTAX),
+                    .help(VmReceiveMigrationData::SYNTAX),
             ),
         Command::new("remove-device")
             .about("Remove VFIO and PCI device")

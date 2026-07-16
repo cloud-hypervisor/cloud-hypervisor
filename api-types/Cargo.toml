@@ -8,6 +8,8 @@ version = "0.1.0"
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+option_parser = { path = "../option_parser" }
 
 [lints]
 workspace = true

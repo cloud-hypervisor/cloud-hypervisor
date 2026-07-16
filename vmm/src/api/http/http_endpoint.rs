@@ -52,8 +52,8 @@ use crate::api::{
     AddDisk, ApiAction, ApiError, ApiRequest, DeviceConfig, NetConfig, VmAddDevice, VmAddFs,
     VmAddGenericVhostUser, VmAddNet, VmAddPmem, VmAddUserDevice, VmAddVdpa, VmAddVsock, VmBoot,
     VmConfig, VmCounters, VmDelete, VmNmi, VmPause, VmPowerButton, VmReboot, VmReceiveMigration,
-    VmReceiveMigrationData, VmRemoveDevice, VmResize, VmResizeDisk, VmResizeZone, VmRestore,
-    VmResume, VmSendMigration, VmShutdown, VmSnapshot,
+    VmRemoveDevice, VmResize, VmResizeDisk, VmResizeZone, VmRestore, VmResume, VmSendMigration,
+    VmShutdown, VmSnapshot,
 };
 use crate::config::RestoreConfig;
 use crate::cpu::Error as CpuError;
@@ -638,7 +638,7 @@ impl PutHandler for VmReceiveMigration {
         files: Vec<File>,
     ) -> result::Result<Option<Body>, HttpError> {
         if let Some(body) = body {
-            let mut data: VmReceiveMigrationData = serde_json::from_slice(body.raw())?;
+            let mut data: api_types::VmReceiveMigrationData = serde_json::from_slice(body.raw())?;
 
             let vfio_total = data.vfio_fds.as_ref().map_or(0, |c| c.len());
             let expected = if data.vfio_fds.is_some() {
