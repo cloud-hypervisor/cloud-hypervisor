@@ -28,6 +28,7 @@ pub use vm_config::cpus_config::{
     CpusConfigParseError, ParseCoreSchedulingError,
 };
 pub use vm_config::memory_config::HotplugMethod;
+pub use vm_config::net_config::{ParseVhostModeError, VhostMode};
 pub use vm_config::numa_config::NumaDistance;
 pub use vm_coredump::VmCoredumpData;
 pub use vm_remove_device::VmRemoveDeviceData;

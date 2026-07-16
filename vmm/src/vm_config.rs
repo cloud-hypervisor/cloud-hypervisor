@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{fs, result};
 
-use api_types::{CpusConfig, HotplugMethod, NumaDistance};
+use api_types::{CpusConfig, HotplugMethod, NumaDistance, VhostMode};
 use block::ImageType;
 pub use block::fcntl::LockGranularityChoice;
 #[cfg(target_arch = "x86_64")]
@@ -256,13 +256,6 @@ impl Default for MemoryConfig {
             thp: true,
         }
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
-pub enum VhostMode {
-    #[default]
-    Client,
-    Server,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]

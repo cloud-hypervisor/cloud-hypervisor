@@ -8,7 +8,6 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::result;
-use std::str::FromStr;
 use std::sync::LazyLock;
 
 use api_types::{
@@ -1502,23 +1501,6 @@ impl DiskConfig {
         }
 
         Ok(())
-    }
-}
-
-#[derive(Debug)]
-pub enum ParseVhostModeError {
-    InvalidValue(String),
-}
-
-impl FromStr for VhostMode {
-    type Err = ParseVhostModeError;
-
-    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "client" => Ok(VhostMode::Client),
-            "server" => Ok(VhostMode::Server),
-            _ => Err(ParseVhostModeError::InvalidValue(s.to_owned())),
-        }
     }
 }
 
@@ -3663,7 +3645,7 @@ mod unit_tests {
     use std::fs::File;
     use std::os::unix::io::AsRawFd;
 
-    use api_types::{CpuTopology, HotplugMethod};
+    use api_types::{CpuTopology, HotplugMethod, VhostMode};
     use net_util::MacAddr;
 
     use super::*;
