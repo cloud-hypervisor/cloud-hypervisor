@@ -2,3 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+
+mod vm_resize;
+
+pub use vm_resize::VmResizeData;

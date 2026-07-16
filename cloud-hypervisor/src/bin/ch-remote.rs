@@ -16,6 +16,7 @@ use api_client::{
     Error as ApiClientError, simple_api_command, simple_api_command_with_fds,
     simple_api_full_command,
 };
+use api_types::VmResizeData;
 #[cfg(feature = "dbus_api")]
 use clap::ArgAction;
 use clap::{Arg, ArgMatches, Command};
@@ -807,7 +808,7 @@ fn resize_config(
         None
     };
 
-    let resize = api::VmResizeData {
+    let resize = VmResizeData {
         desired_vcpus,
         desired_ram,
         desired_balloon,

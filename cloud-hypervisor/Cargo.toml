@@ -11,6 +11,7 @@ rust-version.workspace = true
 version = "54.0.0"
 
 [dependencies]
+api-types = { path = "../api-types" }
 api_client = { path = "../api_client" }
 clap = { workspace = true, features = ["string"] }
 dhat = { workspace = true, optional = true }

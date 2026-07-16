@@ -94,6 +94,9 @@ checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 [[package]]
 name = "api-types"
 version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "api_client"
@@ -480,6 +483,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 name = "cloud-hypervisor"
 version = "54.0.0"
 dependencies = [
+ "api-types",
  "api_client",
  "block",
  "clap",
@@ -2797,6 +2801,7 @@ version = "0.1.0"
 dependencies = [
  "acpi_tables",
  "anyhow",
+ "api-types",
  "arch",
  "bitflags 2.13.0",
  "block",
