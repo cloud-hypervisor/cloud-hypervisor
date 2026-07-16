@@ -41,6 +41,8 @@ use std::str::FromStr;
 use std::sync::mpsc::{RecvError, SendError, Sender, channel};
 use std::time::Duration;
 
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use api_types::VmCoredumpData;
 use api_types::{
     VmRemoveDeviceData, VmResizeData, VmResizeDiskData, VmResizeZoneData, VmSnapshotConfig,
 };
@@ -239,12 +241,6 @@ pub struct VmmPingResponse {
     pub version: String,
     pub pid: i64,
     pub features: Vec<String>,
-}
-
-#[derive(Clone, Deserialize, Serialize, Default, Debug)]
-pub struct VmCoredumpData {
-    /// The coredump destination file
-    pub destination_url: String,
 }
 
 /// Memory transfer mode for a migration.

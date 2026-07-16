@@ -17,7 +17,8 @@ use api_client::{
     simple_api_full_command,
 };
 use api_types::{
-    VmRemoveDeviceData, VmResizeData, VmResizeDiskData, VmResizeZoneData, VmSnapshotConfig,
+    VmCoredumpData, VmRemoveDeviceData, VmResizeData, VmResizeDiskData, VmResizeZoneData,
+    VmSnapshotConfig,
 };
 #[cfg(feature = "dbus_api")]
 use clap::ArgAction;
@@ -959,7 +960,7 @@ fn restore_config(config: &str) -> Result<(String, Vec<i32>), Error> {
 }
 
 fn coredump_config(destination_url: &str) -> String {
-    let coredump_config = api::VmCoredumpData {
+    let coredump_config = VmCoredumpData {
         destination_url: String::from(destination_url),
     };
 
