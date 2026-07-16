@@ -16,7 +16,7 @@ use api_client::{
     Error as ApiClientError, simple_api_command, simple_api_command_with_fds,
     simple_api_full_command,
 };
-use api_types::{VmResizeData, VmResizeDiskData};
+use api_types::{VmResizeData, VmResizeDiskData, VmResizeZoneData};
 #[cfg(feature = "dbus_api")]
 use clap::ArgAction;
 use clap::{Arg, ArgMatches, Command};
@@ -827,7 +827,7 @@ fn resize_disk_config(id: &str, size: &str) -> Result<String, Error> {
 }
 
 fn resize_zone_config(id: &str, size: &str) -> Result<String, Error> {
-    let resize_zone = api::VmResizeZoneData {
+    let resize_zone = VmResizeZoneData {
         id: id.to_owned(),
         desired_ram: size
             .parse::<ByteSized>()
