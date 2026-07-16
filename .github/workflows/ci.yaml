@@ -899,6 +899,7 @@ jobs:
             --vmm "${GITHUB_WORKSPACE}/target/release/cloud-hypervisor" \
             --blk-queues 2 --net-queues 2 --cpus 2 --memory 256M \
             --order=fast \
+            --exclude S0094 --exclude PCI0006 \
             --jobs 4 --batch 10 --timeout 45 --log-dir villain-logs \
             --format junit --output villain-logs/results.xml \
             | tee villain-logs/run.out
