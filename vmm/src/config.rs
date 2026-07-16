@@ -12,8 +12,8 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 
 use api_types::{
-    CpuAffinity, CpuFeatures, MemoryRestoreMode, RestoredNetConfig, RestoredVfioConfig,
-    VmMemoryZoneUpdateData,
+    CoreScheduling, CpuAffinity, CpuFeatures, MemoryRestoreMode, RestoredNetConfig,
+    RestoredVfioConfig, VmMemoryZoneUpdateData,
 };
 use arch::CpuProfile;
 use block::ImageType;
@@ -667,23 +667,6 @@ impl FromStr for HotplugMethod {
             "acpi" => Ok(HotplugMethod::Acpi),
             "virtio-mem" => Ok(HotplugMethod::VirtioMem),
             _ => Err(ParseHotplugMethodError::InvalidValue(s.to_owned())),
-        }
-    }
-}
-
-pub enum ParseCoreSchedulingError {
-    InvalidValue(String),
-}
-
-impl FromStr for CoreScheduling {
-    type Err = ParseCoreSchedulingError;
-
-    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "vm" => Ok(CoreScheduling::Vm),
-            "vcpu" => Ok(CoreScheduling::Vcpu),
-            "off" => Ok(CoreScheduling::Off),
-            _ => Err(ParseCoreSchedulingError::InvalidValue(s.to_owned())),
         }
     }
 }

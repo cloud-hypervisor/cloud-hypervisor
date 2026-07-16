@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{fs, result};
 
-use api_types::{CpuAffinity, CpuFeatures};
+use api_types::{CoreScheduling, CpuAffinity, CpuFeatures};
 use arch::CpuProfile;
 use block::ImageType;
 pub use block::fcntl::LockGranularityChoice;
@@ -30,14 +30,6 @@ pub type LandlockResult<T> = result::Result<T, LandlockError>;
 pub(crate) trait ApplyLandlock {
     /// Apply Landlock rules to file paths
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()>;
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
-pub enum CoreScheduling {
-    #[default]
-    Vm, // All vCPUs have the same cookie so can share a core
-    Vcpu, // Each vCPU has a unique cookie so can't share a core
-    Off,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
