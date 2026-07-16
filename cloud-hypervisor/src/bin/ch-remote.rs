@@ -16,7 +16,9 @@ use api_client::{
     Error as ApiClientError, simple_api_command, simple_api_command_with_fds,
     simple_api_full_command,
 };
-use api_types::{VmRemoveDeviceData, VmResizeData, VmResizeDiskData, VmResizeZoneData};
+use api_types::{
+    VmRemoveDeviceData, VmResizeData, VmResizeDiskData, VmResizeZoneData, VmSnapshotConfig,
+};
 #[cfg(feature = "dbus_api")]
 use clap::ArgAction;
 use clap::{Arg, ArgMatches, Command};
@@ -925,7 +927,7 @@ fn add_vsock_config(config: &str) -> Result<String, Error> {
 }
 
 fn snapshot_config(url: &str) -> String {
-    let snapshot_config = api::VmSnapshotConfig {
+    let snapshot_config = VmSnapshotConfig {
         destination_url: String::from(url),
     };
 

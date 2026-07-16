@@ -41,7 +41,9 @@ use std::str::FromStr;
 use std::sync::mpsc::{RecvError, SendError, Sender, channel};
 use std::time::Duration;
 
-use api_types::{VmRemoveDeviceData, VmResizeData, VmResizeDiskData, VmResizeZoneData};
+use api_types::{
+    VmRemoveDeviceData, VmResizeData, VmResizeDiskData, VmResizeZoneData, VmSnapshotConfig,
+};
 use log::info;
 use micro_http::Body;
 use option_parser::{OptionParser, OptionParserError, Toggle, Tuple, TupleList};
@@ -237,12 +239,6 @@ pub struct VmmPingResponse {
     pub version: String,
     pub pid: i64,
     pub features: Vec<String>,
-}
-
-#[derive(Clone, Deserialize, Serialize, Default, Debug)]
-pub struct VmSnapshotConfig {
-    /// The snapshot destination URL
-    pub destination_url: String,
 }
 
 #[derive(Clone, Deserialize, Serialize, Default, Debug)]
