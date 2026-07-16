@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{fs, result};
 
-use api_types::CpusConfig;
+use api_types::{CpusConfig, NumaDistance};
 use block::ImageType;
 pub use block::fcntl::LockGranularityChoice;
 #[cfg(target_arch = "x86_64")]
@@ -823,14 +823,6 @@ impl Default for IvshmemConfig {
             size: DEFAULT_IVSHMEM_SIZE << 20,
         }
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct NumaDistance {
-    #[serde(default)]
-    pub destination: u32,
-    #[serde(default)]
-    pub distance: u8,
 }
 
 #[serde_with::skip_serializing_none]

@@ -27,6 +27,7 @@ pub use vm_config::cpus_config::{
     CoreScheduling, CpuAffinity, CpuFeatures, CpuTopology, CpuTopologyParseError, CpusConfig,
     CpusConfigParseError, ParseCoreSchedulingError,
 };
+pub use vm_config::numa_config::NumaDistance;
 pub use vm_coredump::VmCoredumpData;
 pub use vm_remove_device::VmRemoveDeviceData;
 pub use vm_resize::VmResizeData;

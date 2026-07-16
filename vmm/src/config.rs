@@ -12,8 +12,8 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 
 use api_types::{
-    CpusConfig, CpusConfigParseError, MemoryRestoreMode, RestoredNetConfig, RestoredVfioConfig,
-    VmMemoryZoneUpdateData,
+    CpusConfig, CpusConfigParseError, MemoryRestoreMode, NumaDistance, RestoredNetConfig,
+    RestoredVfioConfig, VmMemoryZoneUpdateData,
 };
 use block::ImageType;
 use clap::ArgMatches;

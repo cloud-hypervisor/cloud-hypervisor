@@ -3434,9 +3434,9 @@ mod unit_tests {
     #[cfg(target_arch = "x86_64")]
     use crate::vm_config::DebugConsoleConfig;
     use crate::vm_config::{
-        CommonConsoleConfig, ConsoleConfig, ConsoleOutputMode,  DeviceConfig,
-        HotplugMethod, MemoryConfig, MemoryZoneConfig, PayloadConfig, PciDeviceCommonConfig,
-        PlatformConfig, RngConfig, SerialConfig,
+        CommonConsoleConfig, ConsoleConfig, ConsoleOutputMode, DeviceConfig, HotplugMethod,
+        MemoryConfig, MemoryZoneConfig, PayloadConfig, PciDeviceCommonConfig, PlatformConfig,
+        RngConfig, SerialConfig,
     };
 
     fn create_dummy_vmm() -> Vmm {
