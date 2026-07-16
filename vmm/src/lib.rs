@@ -21,7 +21,7 @@ use anyhow::{Context, anyhow};
 #[cfg(feature = "dbus_api")]
 use api::dbus::{DBusApiOptions, DBusApiShutdownChannels};
 use api::http::HttpApiHandle;
-use api_types::{MigrationMode, TimeoutStrategy, VmMemoryZoneUpdateData, VmmPingResponse};
+use api_types::{MemoryRestoreMode, MigrationMode, TimeoutStrategy, VmMemoryZoneUpdateData, VmmPingResponse};
 use console_devices::{ConsoleInfo, pre_create_console_devices};
 use event_monitor::event;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -49,7 +49,7 @@ use vmm_sys_util::signal::unblock_signal;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
 use crate::api::{ApiRequest, ApiResponse, RequestHandler, VmInfoResponse};
-use crate::config::{MemoryRestoreMode, RestoreConfig, add_to_config};
+use crate::config::{RestoreConfig, add_to_config};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::GuestDebuggable;
 use crate::device_manager::DeviceManager;

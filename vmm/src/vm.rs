@@ -25,6 +25,7 @@ use std::time::Instant;
 use std::{any, cmp, result, str, thread};
 
 use anyhow::{Context, anyhow};
+use api_types::MemoryRestoreMode;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use arch::PciSpaceInfo;
 #[cfg(target_arch = "x86_64")]
@@ -89,7 +90,7 @@ use vm_migration::{
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
-use crate::config::{MemoryRestoreMode, ValidationError, add_to_config};
+use crate::config::{ValidationError, add_to_config};
 use crate::console_devices::{ConsoleDeviceError, ConsoleInfo};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::{

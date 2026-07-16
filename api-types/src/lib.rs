@@ -19,6 +19,7 @@ pub use migration::{
 };
 pub use restore::{RestoredVfioConfig, VmMemoryZoneUpdateData};
 use serde::Deserialize;
+pub use restore::{MemoryRestoreMode, MemoryRestoreModeParseError};
 pub use vm_coredump::VmCoredumpData;
 pub use vm_remove_device::VmRemoveDeviceData;
 pub use vm_resize::VmResizeData;

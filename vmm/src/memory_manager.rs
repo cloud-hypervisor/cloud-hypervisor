@@ -21,6 +21,7 @@ use std::{cmp, ffi, panic, result, thread, time};
 
 use acpi_tables::{Aml, aml};
 use anyhow::{Context, anyhow};
+use api_types::MemoryRestoreMode;
 use arch::{RegionType, layout};
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
@@ -50,7 +51,6 @@ use vm_migration::{
 };
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::config::MemoryRestoreMode;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::{
     CoredumpMemoryRegion, CoredumpMemoryRegions, DumpState, GuestDebuggableError,
