@@ -12,5 +12,8 @@ option_parser = { path = "../option_parser" }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 
+[dev-dependencies]
+serde_json = { workspace = true }
+
 [lints]
 workspace = true

@@ -55,7 +55,6 @@ use crate::api::{
     VmRemoveDevice, VmResize, VmResizeDisk, VmResizeZone, VmRestore, VmResume, VmSendMigration,
     VmShutdown, VmSnapshot,
 };
-use crate::config::RestoreConfig;
 use crate::cpu::Error as CpuError;
 use crate::vm::Error as VmError;
 
@@ -581,7 +580,7 @@ impl PutHandler for VmRestore {
         files: Vec<File>,
     ) -> result::Result<Option<Body>, HttpError> {
         if let Some(body) = body {
-            let mut restore_cfg: RestoreConfig = serde_json::from_slice(body.raw())?;
+            let mut restore_cfg: api_types::RestoreConfig = serde_json::from_slice(body.raw())?;
 
             let net_total: usize = restore_cfg
                 .net_fds

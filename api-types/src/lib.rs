@@ -18,8 +18,8 @@ pub use migration::{
     VmSendMigrationData, VmSendMigrationDataParseError,
 };
 pub use restore::{
-    MemoryRestoreMode, MemoryRestoreModeParseError, RestoredNetConfig, RestoredVfioConfig,
-    VmMemoryZoneUpdateData,
+    MemoryRestoreMode, MemoryRestoreModeParseError, RestoreConfig, RestoreConfigParseError,
+    RestoredNetConfig, RestoredVfioConfig, VmMemoryZoneUpdateData,
 };
 use serde::Deserialize;
 pub use vm_coredump::VmCoredumpData;

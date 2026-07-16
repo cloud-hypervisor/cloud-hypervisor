@@ -29,7 +29,7 @@ use vm_migration::protocol;
 use vmm::api::dbus::{DBusApiOptions, dbus_api_graceful_shutdown};
 use vmm::api::http::http_api_graceful_shutdown;
 use vmm::api::{self, ApiAction};
-use vmm::config::{self, RestoreConfig, VmParams};
+use vmm::config::{self, VmParams};
 use vmm::landlock::{Landlock, LandlockError};
 use vmm::vm::Vm;
 use vmm::vm_config;
@@ -109,7 +109,7 @@ enum Error {
     #[error("Error restoring VM")]
     VmRestore(#[source] api::ApiError),
     #[error("Error parsing restore")]
-    ParsingRestore(#[source] config::Error),
+    ParsingRestore(#[source] api_types::RestoreConfigParseError),
     #[error("Failed to join on VMM thread: {0:?}")]
     ThreadJoin(Box<dyn any::Any + Send>),
     #[error("VMM thread exited with error")]
@@ -437,7 +437,7 @@ fn get_cli_options_sorted(
             .group("vm-config"),
         Arg::new("restore")
             .long("restore")
-            .help(RestoreConfig::SYNTAX)
+            .help(api_types::RestoreConfig::SYNTAX)
             .num_args(1)
             .group("vmm-config"),
         Arg::new("rng")
@@ -784,7 +784,8 @@ fn start_vmm(
                 .send(
                     api_evt.try_clone().unwrap(),
                     api_request_sender,
-                    RestoreConfig::parse(restore_params).map_err(Error::ParsingRestore)?,
+                    api_types::RestoreConfig::parse(restore_params)
+                        .map_err(Error::ParsingRestore)?,
                 )
                 .map_err(Error::VmRestore)?;
         }

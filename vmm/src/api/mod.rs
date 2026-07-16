@@ -1235,7 +1235,7 @@ impl ApiAction for VmResizeZone {
 pub struct VmRestore;
 
 impl ApiAction for VmRestore {
-    type RequestBody = RestoreConfig;
+    type RequestBody = api_types::RestoreConfig;
     type ResponseBody = Option<Body>;
 
     fn request(
@@ -1247,7 +1247,7 @@ impl ApiAction for VmRestore {
             info!("API request event: VmRestore {config:?}");
 
             let response = vmm
-                .vm_restore(config)
+                .vm_restore(config.into())
                 .map_err(ApiError::VmRestore)
                 .map(|_| ApiResponsePayload::Empty);
 

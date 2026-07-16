@@ -98,6 +98,7 @@ dependencies = [
  "log",
  "option_parser",
  "serde",
+ "serde_json",
  "thiserror",
 ]
 
