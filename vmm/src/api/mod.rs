@@ -44,8 +44,8 @@ use std::time::Duration;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use api_types::VmCoredumpData;
 use api_types::{
-    VmRemoveDeviceData, VmResizeData, VmResizeDiskData, VmResizeZoneData, VmSnapshotConfig,
-    VmmPingResponse,
+    MigrationMode, VmRemoveDeviceData, VmResizeData, VmResizeDiskData, VmResizeZoneData,
+    VmSnapshotConfig, VmmPingResponse,
 };
 use log::info;
 use micro_http::Body;
@@ -234,31 +234,6 @@ pub struct VmInfoResponse {
     pub state: VmState,
     pub memory_actual_size: u64,
     pub device_tree: Option<DeviceTree>,
-}
-
-/// Memory transfer mode for a migration.
-#[derive(Copy, Clone, Default, Deserialize, Serialize, Debug, PartialEq, Eq)]
-pub enum MigrationMode {
-    /// Transfer all guest memory before the destination resumes.
-    #[default]
-    Precopy,
-    /// Resume the destination first and fault guest pages in on demand.
-    /// This is an experimental mode. It uses a single connection even
-    /// when parallel connections are configured. Pages are served on
-    /// demand, but a background faulting mechanism also pulls in the
-    /// remaining pages to speed up completion.
-    Postcopy,
-}
-
-impl FromStr for MigrationMode {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "precopy" => Ok(MigrationMode::Precopy),
-            "postcopy" => Ok(MigrationMode::Postcopy),
-            _ => Err(format!("Invalid migration mode: {s}")),
-        }
-    }
 }
 
 #[derive(Clone, Deserialize, Serialize, Default, Debug)]

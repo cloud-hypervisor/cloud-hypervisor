@@ -21,7 +21,7 @@ use anyhow::{Context, anyhow};
 #[cfg(feature = "dbus_api")]
 use api::dbus::{DBusApiOptions, DBusApiShutdownChannels};
 use api::http::HttpApiHandle;
-use api_types::VmmPingResponse;
+use api_types::{MigrationMode, VmmPingResponse};
 use console_devices::{ConsoleInfo, pre_create_console_devices};
 use event_monitor::event;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -49,7 +49,7 @@ use vmm_sys_util::signal::unblock_signal;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
 use crate::api::{
-    ApiRequest, ApiResponse, MigrationMode, RequestHandler, TimeoutStrategy, VmInfoResponse,
+    ApiRequest, ApiResponse, RequestHandler, TimeoutStrategy, VmInfoResponse,
     VmReceiveMigrationData, VmSendMigrationData,
 };
 use crate::config::{MemoryRestoreMode, RestoreConfig, VmMemoryZoneUpdateData, add_to_config};

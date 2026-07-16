@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+mod migration;
 mod vm_coredump;
 mod vm_remove_device;
 mod vm_resize;
@@ -11,6 +12,7 @@ mod vm_resize_zone;
 mod vm_snapshot;
 mod vmm_ping_response;
 
+pub use migration::MigrationMode;
 pub use vm_coredump::VmCoredumpData;
 pub use vm_remove_device::VmRemoveDeviceData;
 pub use vm_resize::VmResizeData;
