@@ -25,7 +25,7 @@ use acpi_tables::pptt::{CacheNodeBuilder, CacheType, PPTT, ProcessorNode};
 use acpi_tables::sdt::Sdt;
 use acpi_tables::{Aml, aml};
 use anyhow::anyhow;
-use api_types::CoreScheduling;
+use api_types::{CoreScheduling, CpusConfig};
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::cache::{CacheTopologyInfo, read_cache_topology};
 use arch::{EntryPoint, NumaNodes, layout};
@@ -97,7 +97,6 @@ use crate::igvm::HV_PAGE_SIZE;
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 #[cfg(target_arch = "x86_64")]
 use crate::vm::physical_bits;
-use crate::vm_config::CpusConfig;
 use crate::{CPU_MANAGER_SNAPSHOT_ID, GuestMemoryMmap};
 
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]

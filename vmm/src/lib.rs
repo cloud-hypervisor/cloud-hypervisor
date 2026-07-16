@@ -3427,14 +3427,14 @@ mod util {
 mod unit_tests {
     use std::path::PathBuf;
 
-    use api_types::{CoreScheduling, CpuFeatures, RestoredVfioConfig};
+    use api_types::{CoreScheduling, CpuFeatures, CpusConfig, RestoredVfioConfig};
     use arch::CpuProfile;
 
     use super::*;
     #[cfg(target_arch = "x86_64")]
     use crate::vm_config::DebugConsoleConfig;
     use crate::vm_config::{
-        CommonConsoleConfig, ConsoleConfig, ConsoleOutputMode, CpusConfig, DeviceConfig,
+        CommonConsoleConfig, ConsoleConfig, ConsoleOutputMode,  DeviceConfig,
         HotplugMethod, MemoryConfig, MemoryZoneConfig, PayloadConfig, PciDeviceCommonConfig,
         PlatformConfig, RngConfig, SerialConfig,
     };

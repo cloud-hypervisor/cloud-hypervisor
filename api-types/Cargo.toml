@@ -7,9 +7,11 @@ rust-version.workspace = true
 version = "0.1.0"
 
 [dependencies]
+arch = { path = "../arch" }
 log = { workspace = true }
 option_parser = { path = "../option_parser" }
 serde = { workspace = true, features = ["derive"] }
+serde_with = { workspace = true, features = ["macros"] }
 thiserror = { workspace = true }
 
 [dev-dependencies]

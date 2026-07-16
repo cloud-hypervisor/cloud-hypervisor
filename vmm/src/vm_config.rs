@@ -9,8 +9,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{fs, result};
 
-use api_types::{CoreScheduling, CpuAffinity, CpuFeatures, CpuTopology};
-use arch::CpuProfile;
+use api_types::CpusConfig;
 use block::ImageType;
 pub use block::fcntl::LockGranularityChoice;
 #[cfg(target_arch = "x86_64")]
@@ -37,52 +36,7 @@ pub(crate) trait ApplyLandlock {
 // paging.
 pub const DEFAULT_MAX_PHYS_BITS: u8 = 46;
 
-pub fn default_cpuconfig_max_phys_bits() -> u8 {
-    DEFAULT_MAX_PHYS_BITS
-}
-
-#[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct CpusConfig {
-    pub boot_vcpus: u32,
-    pub max_vcpus: u32,
-    #[serde(default)]
-    pub topology: Option<CpuTopology>,
-    #[serde(default)]
-    pub kvm_hyperv: bool,
-    #[serde(default = "default_cpuconfig_max_phys_bits")]
-    pub max_phys_bits: u8,
-    #[serde(default)]
-    pub affinity: Option<Box<[CpuAffinity]>>,
-    #[serde(default)]
-    pub features: CpuFeatures,
-    #[serde(default = "default_cpusconfig_nested")]
-    pub nested: bool,
-    #[serde(default)]
-    pub core_scheduling: CoreScheduling,
-    // Defaults to "Host" if no profile is given.
-    #[serde(default)]
-    pub profile: CpuProfile,
-}
-
 pub const DEFAULT_VCPUS: u32 = 1;
-
-impl Default for CpusConfig {
-    fn default() -> Self {
-        CpusConfig {
-            boot_vcpus: DEFAULT_VCPUS,
-            max_vcpus: DEFAULT_VCPUS,
-            topology: None,
-            kvm_hyperv: false,
-            max_phys_bits: DEFAULT_MAX_PHYS_BITS,
-            affinity: None,
-            features: CpuFeatures::default(),
-            nested: true,
-            core_scheduling: CoreScheduling::default(),
-            profile: CpuProfile::default(),
-        }
-    }
-}
 
 pub const DEFAULT_NUM_PCI_SEGMENTS: u16 = 1;
 pub fn default_platformconfig_num_pci_segments() -> u16 {
@@ -259,10 +213,6 @@ pub enum HotplugMethod {
 }
 
 fn default_memoryconfig_thp() -> bool {
-    true
-}
-
-fn default_cpusconfig_nested() -> bool {
     true
 }
 
