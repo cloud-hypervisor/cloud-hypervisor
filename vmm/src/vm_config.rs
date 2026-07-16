@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{fs, result};
 
-use api_types::{CoreScheduling, CpuAffinity, CpuFeatures};
+use api_types::{CoreScheduling, CpuAffinity, CpuFeatures, CpuTopology};
 use arch::CpuProfile;
 use block::ImageType;
 pub use block::fcntl::LockGranularityChoice;
@@ -30,14 +30,6 @@ pub type LandlockResult<T> = result::Result<T, LandlockError>;
 pub(crate) trait ApplyLandlock {
     /// Apply Landlock rules to file paths
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()>;
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct CpuTopology {
-    pub threads_per_core: u16,
-    pub cores_per_die: u16,
-    pub dies_per_package: u16,
-    pub packages: u16,
 }
 
 // When booting with PVH boot the maximum physical addressable size

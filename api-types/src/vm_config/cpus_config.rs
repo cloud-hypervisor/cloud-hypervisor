@@ -44,3 +44,44 @@ impl FromStr for CoreScheduling {
         }
     }
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct CpuTopology {
+    pub threads_per_core: u16,
+    pub cores_per_die: u16,
+    pub dies_per_package: u16,
+    pub packages: u16,
+}
+
+pub enum CpuTopologyParseError {
+    InvalidValue(String),
+}
+
+impl FromStr for CpuTopology {
+    type Err = CpuTopologyParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let parts: Vec<&str> = s.split(':').collect();
+
+        if parts.len() != 4 {
+            return Err(Self::Err::InvalidValue(s.to_owned()));
+        }
+
+        let t = CpuTopology {
+            threads_per_core: parts[0]
+                .parse()
+                .map_err(|_| Self::Err::InvalidValue(s.to_owned()))?,
+            cores_per_die: parts[1]
+                .parse()
+                .map_err(|_| Self::Err::InvalidValue(s.to_owned()))?,
+            dies_per_package: parts[2]
+                .parse()
+                .map_err(|_| Self::Err::InvalidValue(s.to_owned()))?,
+            packages: parts[3]
+                .parse()
+                .map_err(|_| Self::Err::InvalidValue(s.to_owned()))?,
+        };
+
+        Ok(t)
+    }
+}

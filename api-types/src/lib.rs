@@ -24,7 +24,8 @@ pub use restore::{
 };
 use serde::Deserialize;
 pub use vm_config::cpus_config::{
-    CoreScheduling, CpuAffinity, CpuFeatures, ParseCoreSchedulingError,
+    CoreScheduling, CpuAffinity, CpuFeatures, CpuTopology, CpuTopologyParseError,
+    ParseCoreSchedulingError,
 };
 pub use vm_coredump::VmCoredumpData;
 pub use vm_remove_device::VmRemoveDeviceData;

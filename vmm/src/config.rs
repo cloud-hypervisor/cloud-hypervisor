@@ -671,39 +671,6 @@ impl FromStr for HotplugMethod {
     }
 }
 
-pub enum CpuTopologyParseError {
-    InvalidValue(String),
-}
-
-impl FromStr for CpuTopology {
-    type Err = CpuTopologyParseError;
-
-    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
-        let parts: Vec<&str> = s.split(':').collect();
-
-        if parts.len() != 4 {
-            return Err(Self::Err::InvalidValue(s.to_owned()));
-        }
-
-        let t = CpuTopology {
-            threads_per_core: parts[0]
-                .parse()
-                .map_err(|_| Self::Err::InvalidValue(s.to_owned()))?,
-            cores_per_die: parts[1]
-                .parse()
-                .map_err(|_| Self::Err::InvalidValue(s.to_owned()))?,
-            dies_per_package: parts[2]
-                .parse()
-                .map_err(|_| Self::Err::InvalidValue(s.to_owned()))?,
-            packages: parts[3]
-                .parse()
-                .map_err(|_| Self::Err::InvalidValue(s.to_owned()))?,
-        };
-
-        Ok(t)
-    }
-}
-
 impl CpusConfig {
     pub fn parse(cpus: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -3815,6 +3782,7 @@ mod unit_tests {
     use std::fs::File;
     use std::os::unix::io::AsRawFd;
 
+    use api_types::CpuTopology;
     use net_util::MacAddr;
 
     use super::*;
