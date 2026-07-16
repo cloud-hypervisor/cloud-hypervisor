@@ -16,7 +16,7 @@ use api_client::{
     Error as ApiClientError, simple_api_command, simple_api_command_with_fds,
     simple_api_full_command,
 };
-use api_types::{VmResizeData, VmResizeDiskData, VmResizeZoneData};
+use api_types::{VmRemoveDeviceData, VmResizeData, VmResizeDiskData, VmResizeZoneData};
 #[cfg(feature = "dbus_api")]
 use clap::ArgAction;
 use clap::{Arg, ArgMatches, Command};
@@ -863,7 +863,7 @@ fn add_user_device_config(config: &str) -> Result<String, Error> {
 }
 
 fn remove_device_config(id: &str) -> String {
-    let remove_device_data = api::VmRemoveDeviceData { id: id.to_owned() };
+    let remove_device_data = VmRemoveDeviceData { id: id.to_owned() };
 
     serde_json::to_string(&remove_device_data).unwrap()
 }
