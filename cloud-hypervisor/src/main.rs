@@ -979,13 +979,14 @@ fn main() {
 mod unit_tests {
     use std::path::PathBuf;
 
+    use api_types::CpuFeatures;
     use vmm::config::VmParams;
     #[cfg(target_arch = "x86_64")]
     use vmm::vm_config::DebugConsoleConfig;
     use vmm::vm_config::{
-        CommonConsoleConfig, ConsoleConfig, ConsoleOutputMode, CoreScheduling, CpuFeatures,
-        CpusConfig, HotplugMethod, MemoryConfig, PayloadConfig, PciDeviceCommonConfig, RngConfig,
-        SerialConfig, VmConfig,
+        CommonConsoleConfig, ConsoleConfig, ConsoleOutputMode, CoreScheduling, CpusConfig,
+        HotplugMethod, MemoryConfig, PayloadConfig, PciDeviceCommonConfig, RngConfig, SerialConfig,
+        VmConfig,
     };
 
     use crate::test_util::assert_args_sorted;

@@ -23,7 +23,7 @@ pub use restore::{
     RestoredNetConfig, RestoredVfioConfig, VmMemoryZoneUpdateData,
 };
 use serde::Deserialize;
-pub use vm_config::cpus_config::CpuAffinity;
+pub use vm_config::cpus_config::{CpuAffinity, CpuFeatures};
 pub use vm_coredump::VmCoredumpData;
 pub use vm_remove_device::VmRemoveDeviceData;
 pub use vm_resize::VmResizeData;
