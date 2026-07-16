@@ -26,7 +26,6 @@ use clap::{Arg, ArgMatches, Command};
 use log::error;
 use option_parser::{ByteSized, ByteSizedParseError};
 use thiserror::Error;
-use vmm::api;
 use vmm::config::{self, RestoreConfig};
 use vmm::vm_config::{
     DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
@@ -79,7 +78,7 @@ enum Error {
     #[error("Error parsing receive migration configuration")]
     ReceiveMigrationConfig(#[from] api_types::VmReceiveMigrationDataParseError),
     #[error("Error parsing send migration configuration")]
-    SendMigrationConfig(#[from] api::VmSendMigrationConfigError),
+    SendMigrationConfig(#[from] api_types::VmSendMigrationDataParseError),
 }
 
 enum TargetApi<'a> {
@@ -985,8 +984,7 @@ fn receive_migration_data(config: &str) -> Result<(String, Vec<i32>), Error> {
 }
 
 fn send_migration_data(config: &str) -> Result<String, Error> {
-    let send_migration_data =
-        api::VmSendMigrationData::parse(config).map_err(Error::SendMigrationConfig)?;
+    let send_migration_data = api_types::VmSendMigrationData::parse(config)?;
     let send_migration_config = serde_json::to_string(&send_migration_data).unwrap();
     Ok(send_migration_config)
 }
@@ -1163,7 +1161,7 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
             .arg(
                 Arg::new("send_migration_config")
                     .index(1)
-                    .help(api::VmSendMigrationData::SYNTAX),
+                    .help(api_types::VmSendMigrationData::SYNTAX),
             ),
         Command::new("shutdown").about("Shutdown the VM"),
         Command::new("shutdown-vmm").about("Shutdown the VMM"),

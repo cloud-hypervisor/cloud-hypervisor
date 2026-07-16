@@ -15,6 +15,7 @@ mod vmm_ping_response;
 
 pub use migration::{
     MigrationMode, TimeoutStrategy, VmReceiveMigrationData, VmReceiveMigrationDataParseError,
+    VmSendMigrationData, VmSendMigrationDataParseError,
 };
 pub use restore::{RestoredVfioConfig, VmMemoryZoneUpdateData};
 use serde::Deserialize;

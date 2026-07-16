@@ -5,18 +5,22 @@
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::Read;
+use std::num::{NonZeroU32, NonZeroU64};
 use std::path::PathBuf;
 use std::result;
+use std::time::Duration;
 
 use anyhow::{Context, anyhow};
-use api_types::{MigrationMode, RestoredVfioConfig, VmMemoryZoneUpdateData};
+use api_types::{MigrationMode, RestoredVfioConfig, TimeoutStrategy, VmMemoryZoneUpdateData};
 use thiserror::Error;
 use vm_migration::tls::{TlsConfigError, TlsEndpoint, validate_tls_dir};
 use vm_migration::{MigratableError, Snapshot};
 
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::GuestDebuggableError;
-use crate::migration::transport::{TcpAddressParseError, tcp_address_to_server_name};
+use crate::migration::transport::{
+    MAX_MIGRATION_CONNECTIONS, TcpAddressParseError, tcp_address_to_server_name,
+};
 use crate::vm::VmSnapshot;
 use crate::vm_config::VmConfig;
 
@@ -286,11 +290,157 @@ impl TryFrom<api_types::VmReceiveMigrationData> for VmReceiveMigrationData {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum VmSendMigrationConfigError {
+    #[error(
+        "Error validating send migration parameters: destination_url must use tcp:<host>:<port> or unix:<path>."
+    )]
+    InvalidDestinationUrl(#[source] TcpAddressParseError),
+
+    #[error("Error validating send migration parameters: {0}")]
+    ValidationError(String),
+}
+
+/// Configuration for an outgoing migration.
+#[derive(Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct VmSendMigrationData {
+    /// Migration destination, e.g. `tcp:<host>:<port>` or `unix:/path/to/socket`.
+    pub destination_url: String,
+    /// Send memory across socket without copying
+    pub local: bool,
+    /// The maximum downtime the migration aims for.
+    ///
+    /// Usually, on the order of a few hundred milliseconds.
+    downtime_ms: NonZeroU64,
+    /// The timeout for the migration, i.e., the maximum duration.
+    timeout_s: NonZeroU64,
+    /// The timeout strategy for the migration.
+    pub timeout_strategy: TimeoutStrategy,
+    /// The number of parallel TCP connections for migration.
+    ///
+    /// Must be between 1 and `MAX_MIGRATION_CONNECTIONS` inclusive.
+    pub connections: NonZeroU32,
+    /// Directory containing the TLS client certificate (`client-cert.pem`),
+    /// the TLS client key (`client-key.pem`), and the client's TLS root CA
+    /// certificate (`ca-cert.pem`).
+    ///
+    /// If this is `Some`, the migration is instructed to use mTLS.
+    pub tls_dir: Option<PathBuf>,
+    /// Memory transfer mode.
+    pub memory_mode: MigrationMode,
+}
+
+impl VmSendMigrationData {
+    pub fn downtime(&self) -> Duration {
+        Duration::from_millis(self.downtime_ms.get())
+    }
+
+    pub fn timeout(&self) -> Duration {
+        Duration::from_secs(self.timeout_s.get())
+    }
+
+    pub fn validate(&self) -> Result<(), VmSendMigrationConfigError> {
+        if let Some(addr) = self.destination_url.strip_prefix("tcp:") {
+            tcp_address_to_server_name(addr)
+                .map_err(VmSendMigrationConfigError::InvalidDestinationUrl)?;
+        } else if self
+            .destination_url
+            .strip_prefix("unix:")
+            .is_some_and(|path| !path.is_empty())
+        {
+            if self.connections.get() > 1 {
+                return Err(VmSendMigrationConfigError::ValidationError(
+                    "UNIX sockets and connections option cannot be used at the same time."
+                        .to_string(),
+                ));
+            }
+            if self.tls_dir.is_some() {
+                return Err(VmSendMigrationConfigError::ValidationError(
+                    "UNIX sockets and TLS encryption cannot be used at the same time.".to_string(),
+                ));
+            }
+        } else {
+            return Err(VmSendMigrationConfigError::ValidationError(
+                "destination_url must use tcp:<host>:<port> or unix:<path>.".to_string(),
+            ));
+        }
+
+        if self.connections.get() > MAX_MIGRATION_CONNECTIONS {
+            return Err(VmSendMigrationConfigError::ValidationError(format!(
+                "connections must not exceed {MAX_MIGRATION_CONNECTIONS}."
+            )));
+        }
+
+        if self.local {
+            if !self.destination_url.starts_with("unix:") {
+                return Err(VmSendMigrationConfigError::ValidationError(
+                    "local option is only supported with UNIX sockets.".to_string(),
+                ));
+            }
+
+            if self.connections.get() > 1 {
+                return Err(VmSendMigrationConfigError::ValidationError(
+                    "local option and connections option cannot be used at the same time."
+                        .to_string(),
+                ));
+            }
+        }
+
+        if let Some(tls_dir) = &self.tls_dir {
+            validate_tls_dir(tls_dir, TlsEndpoint::Client).map_err(|e| {
+                VmSendMigrationConfigError::ValidationError(format!(
+                    "invalid TLS configuration for send-migration: {e}"
+                ))
+            })?;
+        }
+
+        if matches!(self.memory_mode, MigrationMode::Postcopy) {
+            if self.local {
+                return Err(VmSendMigrationConfigError::ValidationError(
+                    "memory_mode=postcopy and local options are mutually exclusive.".to_string(),
+                ));
+            }
+
+            if self.connections.get() > 1 {
+                return Err(VmSendMigrationConfigError::ValidationError(
+                    "memory_mode=postcopy currently requires a single connection (connections=1)."
+                        .to_string(),
+                ));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl TryFrom<api_types::VmSendMigrationData> for VmSendMigrationData {
+    type Error = VmSendMigrationConfigError;
+
+    fn try_from(value: api_types::VmSendMigrationData) -> Result<Self, Self::Error> {
+        let result = Self {
+            destination_url: value.destination_url,
+            local: value.local,
+            downtime_ms: value.downtime_ms,
+            timeout_s: value.timeout_s,
+            timeout_strategy: value.timeout_strategy,
+            connections: value.connections,
+            tls_dir: value.tls_dir,
+            memory_mode: value.memory_mode,
+        };
+
+        result.validate()?;
+        Ok(result)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
     use std::{env, fs, process};
+
+    use api_types::VmMemoryZoneUpdateData;
 
     use super::*;
 
@@ -320,6 +470,12 @@ mod tests {
             self.add_file("ca-cert.pem");
             self.add_file("server-cert.pem");
             self.add_file("server-key.pem");
+        }
+
+        fn add_send_tls_files(&self) {
+            self.add_file("ca-cert.pem");
+            self.add_file("client-cert.pem");
+            self.add_file("client-key.pem");
         }
     }
 
@@ -465,5 +621,149 @@ mod tests {
             "Expected \"{:?}\"; got \"{e:?}\"",
             VmReceiveMigrationConfigError::MultipleMemoryZoneUpdates,
         );
+    }
+
+    #[test]
+    fn test_vm_send_migration_data_validate() {
+        fn fixture() -> VmSendMigrationData {
+            VmSendMigrationData {
+                destination_url: String::new(),
+                local: false,
+                downtime_ms: NonZeroU64::new(1).unwrap(),
+                timeout_s: NonZeroU64::new(1).unwrap(),
+                timeout_strategy: Default::default(),
+                connections: NonZeroU32::new(1).unwrap(),
+                tls_dir: None,
+                memory_mode: Default::default(),
+            }
+        }
+
+        // Invalid destination URL scheme is rejected
+        assert!(matches!(
+            VmSendMigrationData {
+                destination_url: "file:///tmp/migration".to_owned(),
+                ..fixture()
+            }
+            .validate()
+            .unwrap_err(),
+            VmSendMigrationConfigError::ValidationError(msg)
+                if msg.contains("destination_url must use tcp:<host>:<port> or unix:<path>.")
+        ));
+
+        // Excessive numbers of parallel connections are rejected
+        assert!(matches!(
+            VmSendMigrationData {
+                destination_url: "tcp:192.168.1.1:8080".to_owned(),
+                connections: NonZeroU32::new(129).unwrap(),
+                ..fixture()
+            }
+            .validate()
+            .unwrap_err(),
+            VmSendMigrationConfigError::ValidationError(msg)
+                if msg.contains("connections must not exceed 128.")
+        ));
+
+        assert!(matches!(
+            VmSendMigrationData {
+                destination_url: "tcp:192.168.1.1".to_owned(),
+                ..fixture()
+            }
+            .validate()
+            .unwrap_err(),
+            VmSendMigrationConfigError::InvalidDestinationUrl(TcpAddressParseError::MissingPort)
+        ));
+        assert!(matches!(
+            VmSendMigrationData {
+                destination_url: "tcp:[2001:db8::1]".to_owned(),
+                ..fixture()
+            }
+            .validate()
+            .unwrap_err(),
+            VmSendMigrationConfigError::InvalidDestinationUrl(
+                TcpAddressParseError::MissingPortSeparatorAfterBracketedHost
+            )
+        ));
+
+        // Local migration requires a UNIX socket destination
+        assert!(matches!(
+            VmSendMigrationData {
+                destination_url: "tcp:192.168.1.1:8080".to_owned(),
+                local: true,
+                ..fixture()
+            }
+            .validate()
+            .unwrap_err(),
+            VmSendMigrationConfigError::ValidationError(msg)
+                if msg.contains("local option is only supported with UNIX sockets.")
+        ));
+
+        // Local migration cannot use multiple connections
+        assert!(matches!(
+            VmSendMigrationData {
+                destination_url: "unix:/tmp/sock".to_owned(),
+                local: true,
+                connections: NonZeroU32::new(2).unwrap(),
+                ..fixture()
+            }
+            .validate()
+            .unwrap_err(),
+            VmSendMigrationConfigError::ValidationError(msg)
+                if msg.contains("UNIX sockets and connections option cannot be used at the same time.")
+        ));
+
+        // Happy path, fully specified
+        let tls_dir = TestDir::new("send-tls");
+        tls_dir.add_send_tls_files();
+        let tls_dir_path = tls_dir.path.clone();
+
+        VmSendMigrationData {
+            destination_url: "tcp:192.168.1.1:8080".to_string(),
+            local: false,
+            downtime_ms: NonZeroU64::new(150).unwrap(),
+            timeout_s: NonZeroU64::new(900).unwrap(),
+            timeout_strategy: TimeoutStrategy::Ignore,
+            connections: NonZeroU32::new(4).unwrap(),
+            tls_dir: Some(tls_dir_path),
+            memory_mode: MigrationMode::Precopy,
+        }
+        .validate()
+        .unwrap();
+
+        // Postcopy happy path (TCP only, single connection).
+        VmSendMigrationData {
+            destination_url: "tcp:192.168.1.1:8080".to_owned(),
+            memory_mode: MigrationMode::Postcopy,
+            ..fixture()
+        }
+        .validate()
+        .unwrap();
+
+        // memory_mode=postcopy + local must be rejected.
+        assert!(matches!(
+            VmSendMigrationData {
+                destination_url: "unix:/tmp/sock".to_owned(),
+                local: true,
+                memory_mode: MigrationMode::Postcopy,
+                ..fixture()
+            }
+            .validate()
+            .unwrap_err(),
+            VmSendMigrationConfigError::ValidationError(msg)
+                if msg.contains("memory_mode=postcopy and local options are mutually exclusive.")
+        ));
+
+        // memory_mode=postcopy + multi-connection must be rejected.
+        assert!(matches!(
+            VmSendMigrationData {
+                destination_url: "tcp:192.168.1.1:8080".to_owned(),
+                connections: NonZeroU32::new(4).unwrap(),
+                memory_mode: MigrationMode::Postcopy,
+                ..fixture()
+            }
+            .validate()
+            .unwrap_err(),
+            VmSendMigrationConfigError::ValidationError(msg)
+                if msg.contains("memory_mode=postcopy currently requires a single connection (connections=1).")
+        ));
     }
 }

@@ -48,7 +48,7 @@ use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::unblock_signal;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
-use crate::api::{ApiRequest, ApiResponse, RequestHandler, VmInfoResponse, VmSendMigrationData};
+use crate::api::{ApiRequest, ApiResponse, RequestHandler, VmInfoResponse};
 use crate::config::{MemoryRestoreMode, RestoreConfig, add_to_config};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::GuestDebuggable;
@@ -63,7 +63,9 @@ use crate::migration::transport::{
 use crate::migration::worker::{
     MigrationSeccompFilters, MigrationWorker, MigrationWorkerHandle, MigrationWorkerResult,
 };
-use crate::migration::{VmReceiveMigrationData, recv_vm_config, recv_vm_state};
+use crate::migration::{
+    VmReceiveMigrationData, VmSendMigrationData, recv_vm_config, recv_vm_state,
+};
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::vm::{Error as VmError, Vm, VmState};
 use crate::vm_config::{
