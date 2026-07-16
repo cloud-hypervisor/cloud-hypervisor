@@ -25,7 +25,7 @@ use std::time::Instant;
 use std::{any, cmp, result, str, thread};
 
 use anyhow::{Context, anyhow};
-use api_types::MemoryRestoreMode;
+use api_types::{HotplugMethod, MemoryRestoreMode};
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use arch::PciSpaceInfo;
 #[cfg(target_arch = "x86_64")]
@@ -116,8 +116,8 @@ use crate::sev::MeasuredBootInfo;
 #[cfg(feature = "fw_cfg")]
 use crate::vm_config::FwCfgConfig;
 use crate::vm_config::{
-    DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, HotplugMethod, NetConfig,
-    NumaConfig, PayloadConfig, PmemConfig, UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
+    DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, NumaConfig,
+    PayloadConfig, PmemConfig, UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
 };
 use crate::{
     CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, GuestMemoryMmap,

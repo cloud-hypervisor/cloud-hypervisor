@@ -4,4 +4,5 @@
 //
 
 pub(crate) mod cpus_config;
+pub(crate) mod memory_config;
 pub(crate) mod numa_config;

@@ -650,23 +650,6 @@ impl<'a> VmParams<'a> {
     }
 }
 
-#[derive(Debug)]
-pub enum ParseHotplugMethodError {
-    InvalidValue(String),
-}
-
-impl FromStr for HotplugMethod {
-    type Err = ParseHotplugMethodError;
-
-    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "acpi" => Ok(HotplugMethod::Acpi),
-            "virtio-mem" => Ok(HotplugMethod::VirtioMem),
-            _ => Err(ParseHotplugMethodError::InvalidValue(s.to_owned())),
-        }
-    }
-}
-
 impl PciSegmentConfig {
     pub const SYNTAX: &'static str = "PCI Segment parameters \
          \"pci_segment=<segment_id>,mmio32_aperture_weight=<scale>,mmio64_aperture_weight=<scale>\"";
@@ -3680,7 +3663,7 @@ mod unit_tests {
     use std::fs::File;
     use std::os::unix::io::AsRawFd;
 
-    use api_types::CpuTopology;
+    use api_types::{CpuTopology, HotplugMethod};
     use net_util::MacAddr;
 
     use super::*;

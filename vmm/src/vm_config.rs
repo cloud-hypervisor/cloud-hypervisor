@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{fs, result};
 
-use api_types::{CpusConfig, NumaDistance};
+use api_types::{CpusConfig, HotplugMethod, NumaDistance};
 use block::ImageType;
 pub use block::fcntl::LockGranularityChoice;
 #[cfg(target_arch = "x86_64")]
@@ -203,13 +203,6 @@ impl ApplyLandlock for MemoryZoneConfig {
         }
         Ok(())
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
-pub enum HotplugMethod {
-    #[default]
-    Acpi,
-    VirtioMem,
 }
 
 fn default_memoryconfig_thp() -> bool {
