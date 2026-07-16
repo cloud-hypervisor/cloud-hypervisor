@@ -4,5 +4,7 @@
 //
 
 mod vm_resize;
+mod vm_resize_disk;
 
 pub use vm_resize::VmResizeData;
+pub use vm_resize_disk::VmResizeDiskData;

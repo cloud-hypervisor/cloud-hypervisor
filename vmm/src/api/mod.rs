@@ -41,7 +41,7 @@ use std::str::FromStr;
 use std::sync::mpsc::{RecvError, SendError, Sender, channel};
 use std::time::Duration;
 
-use api_types::VmResizeData;
+use api_types::{VmResizeData, VmResizeDiskData};
 use log::info;
 use micro_http::Body;
 use option_parser::{OptionParser, OptionParserError, Toggle, Tuple, TupleList};
@@ -237,12 +237,6 @@ pub struct VmmPingResponse {
     pub version: String,
     pub pid: i64,
     pub features: Vec<String>,
-}
-
-#[derive(Clone, Deserialize, Serialize, Default, Debug)]
-pub struct VmResizeDiskData {
-    pub id: String,
-    pub desired_size: u64,
 }
 
 #[derive(Clone, Deserialize, Serialize, Default, Debug)]

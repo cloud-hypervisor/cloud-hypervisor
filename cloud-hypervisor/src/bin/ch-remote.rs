@@ -16,7 +16,7 @@ use api_client::{
     Error as ApiClientError, simple_api_command, simple_api_command_with_fds,
     simple_api_full_command,
 };
-use api_types::VmResizeData;
+use api_types::{VmResizeData, VmResizeDiskData};
 #[cfg(feature = "dbus_api")]
 use clap::ArgAction;
 use clap::{Arg, ArgMatches, Command};
@@ -818,7 +818,7 @@ fn resize_config(
 }
 
 fn resize_disk_config(id: &str, size: &str) -> Result<String, Error> {
-    let resize_disk = api::VmResizeDiskData {
+    let resize_disk = VmResizeDiskData {
         id: id.to_owned(),
         desired_size: size.parse::<ByteSized>().map_err(Error::InvalidDiskSize)?.0,
     };
