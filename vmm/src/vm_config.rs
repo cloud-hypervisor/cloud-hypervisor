@@ -264,6 +264,24 @@ pub struct RateLimiterGroupConfig {
     pub rate_limiter_config: RateLimiterConfig,
 }
 
+impl From<api_types::RateLimiterGroupConfig> for RateLimiterGroupConfig {
+    fn from(value: api_types::RateLimiterGroupConfig) -> Self {
+        Self {
+            id: value.id,
+            rate_limiter_config: value.rate_limiter_config,
+        }
+    }
+}
+
+impl From<&RateLimiterGroupConfig> for api_types::RateLimiterGroupConfig {
+    fn from(value: &RateLimiterGroupConfig) -> Self {
+        Self {
+            id: value.id.clone(),
+            rate_limiter_config: value.rate_limiter_config,
+        }
+    }
+}
+
 #[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct PciDeviceCommonConfig {

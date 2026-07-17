@@ -22,6 +22,7 @@ pub(crate) mod numa_config;
 pub(crate) mod pci_device_common_config;
 pub(crate) mod pci_segment_config;
 pub(crate) mod pmem_config;
+pub(crate) mod rate_limiter_group_config;
 pub(crate) mod rng_config;
 pub(crate) mod rtc_config;
 pub(crate) mod tpm_config;

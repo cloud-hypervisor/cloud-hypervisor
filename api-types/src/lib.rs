@@ -53,6 +53,9 @@ pub use vm_config::pci_device_common_config::{
 };
 pub use vm_config::pci_segment_config::{PciSegmentConfig, PciSegmentConfigParseError};
 pub use vm_config::pmem_config::{PmemConfig, PmemConfigParseError};
+pub use vm_config::rate_limiter_group_config::{
+    RateLimiterGroupConfig, RateLimiterGroupConfigParseError,
+};
 pub use vm_config::rng_config::{RngConfig, RngConfigParseError};
 pub use vm_config::rtc_config::{RtcConfig, RtcConfigParseError};
 pub use vm_config::tpm_config::{TpmConfig, TpmConfigParseError};
