@@ -905,6 +905,26 @@ pub struct VdpaConfig {
     pub num_queues: usize,
 }
 
+impl From<api_types::VdpaConfig> for VdpaConfig {
+    fn from(value: api_types::VdpaConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            path: value.path,
+            num_queues: value.num_queues,
+        }
+    }
+}
+
+impl From<&VdpaConfig> for api_types::VdpaConfig {
+    fn from(value: &VdpaConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            path: value.path.clone(),
+            num_queues: value.num_queues,
+        }
+    }
+}
+
 pub fn default_vdpaconfig_num_queues() -> usize {
     1
 }
