@@ -134,7 +134,7 @@ impl VhostUserNetBackend {
             ifname,
             Some(ip_addr),
             Some(netmask),
-            &mut Some(host_mac),
+            Some(host_mac),
             mtu,
             num_queues / 2,
             None,

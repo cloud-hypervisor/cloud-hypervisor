@@ -3261,7 +3261,7 @@ pub(crate) fn _test_tap_from_fd(guest: &Guest) {
             Ipv4Addr::from_str(&guest.network.host_ip0).unwrap(),
         )),
         None,
-        &mut None,
+        None,
         None,
         num_queue_pairs,
         Some(libc::O_RDWR | libc::O_NONBLOCK),
