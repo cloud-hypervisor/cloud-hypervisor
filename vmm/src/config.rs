@@ -12,8 +12,7 @@ use std::sync::LazyLock;
 
 use api_types::{
     ConsoleOutputMode, CpusConfig, CpusConfigParseError, MemoryRestoreMode, NumaDistance,
-    RestoredNetConfig,
-    RestoredVfioConfig, VmMemoryZoneUpdateData,
+    RestoredNetConfig, RestoredVfioConfig, VirtQueueAffinity, VmMemoryZoneUpdateData,
 };
 use block::ImageType;
 use clap::ArgMatches;

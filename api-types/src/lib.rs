@@ -28,6 +28,7 @@ pub use vm_config::cpus_config::{
     CoreScheduling, CpuAffinity, CpuFeatures, CpuTopology, CpuTopologyParseError, CpusConfig,
     CpusConfigParseError, ParseCoreSchedulingError,
 };
+pub use vm_config::disk_config::VirtQueueAffinity;
 pub use vm_config::memory_config::HotplugMethod;
 pub use vm_config::net_config::{ParseVhostModeError, VhostMode};
 pub use vm_config::numa_config::NumaDistance;

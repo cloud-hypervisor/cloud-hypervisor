@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{fs, result};
 
-use api_types::{ConsoleOutputMode, CpusConfig, HotplugMethod, NumaDistance, VhostMode};
+use api_types::{
+    ConsoleOutputMode, CpusConfig, HotplugMethod, NumaDistance, VhostMode, VirtQueueAffinity,
+};
 use block::ImageType;
 pub use block::fcntl::LockGranularityChoice;
 #[cfg(target_arch = "x86_64")]
@@ -264,12 +266,6 @@ pub struct RateLimiterGroupConfig {
     pub id: String,
     #[serde(default)]
     pub rate_limiter_config: RateLimiterConfig,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct VirtQueueAffinity {
-    pub queue_index: u16,
-    pub host_cpus: Box<[usize]>,
 }
 
 #[serde_with::skip_serializing_none]
