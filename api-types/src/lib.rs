@@ -36,6 +36,9 @@ pub use vm_config::fw_cfg_config::{FwCfgItem, FwCfgItemError, FwCfgItemList};
 pub use vm_config::memory_config::{HotplugMethod, MemoryZoneConfig};
 pub use vm_config::net_config::{ParseVhostModeError, VhostMode};
 pub use vm_config::numa_config::NumaDistance;
+pub use vm_config::pci_device_common_config::{
+    PciDeviceCommonConfig, PciDeviceCommonConfigParseError,
+};
 pub use vm_coredump::VmCoredumpData;
 pub use vm_remove_device::VmRemoveDeviceData;
 pub use vm_resize::VmResizeData;

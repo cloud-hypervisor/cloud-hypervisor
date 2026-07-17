@@ -257,6 +257,28 @@ pub struct PciDeviceCommonConfig {
     pub pci_device_id: Option<u8>,
 }
 
+impl From<api_types::PciDeviceCommonConfig> for PciDeviceCommonConfig {
+    fn from(value: api_types::PciDeviceCommonConfig) -> Self {
+        Self {
+            id: value.id,
+            iommu: value.iommu,
+            pci_segment: value.pci_segment,
+            pci_device_id: value.pci_device_id,
+        }
+    }
+}
+
+impl From<&PciDeviceCommonConfig> for api_types::PciDeviceCommonConfig {
+    fn from(value: &PciDeviceCommonConfig) -> Self {
+        Self {
+            id: value.id.clone(),
+            iommu: value.iommu,
+            pci_segment: value.pci_segment,
+            pci_device_id: value.pci_device_id,
+        }
+    }
+}
+
 #[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DiskConfig {
