@@ -120,13 +120,8 @@ impl AsyncIo for RawSync {
     }
 
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
-        punch_hole(
-            self.raw_file.as_raw_fd(),
-            self.is_block_device,
-            offset,
-            length,
-        )
-        .map_err(AsyncIoError::PunchHole)?;
+        punch_hole(&mut self.raw_file, self.is_block_device, offset, length)
+            .map_err(AsyncIoError::PunchHole)?;
         self.completion_list
             .push_back(AsyncIoCompletion::new(user_data, 0, None));
         self.eventfd.write(1).unwrap();
@@ -134,13 +129,8 @@ impl AsyncIo for RawSync {
     }
 
     fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
-        write_zeroes(
-            self.raw_file.as_raw_fd(),
-            self.is_block_device,
-            offset,
-            length,
-        )
-        .map_err(AsyncIoError::WriteZeroes)?;
+        write_zeroes(&mut self.raw_file, self.is_block_device, offset, length)
+            .map_err(AsyncIoError::WriteZeroes)?;
         self.completion_list
             .push_back(AsyncIoCompletion::new(user_data, 0, None));
         self.eventfd.write(1).unwrap();
