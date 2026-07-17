@@ -14,6 +14,7 @@ mod vm_resize_zone;
 mod vm_snapshot;
 mod vmm_ping_response;
 
+pub use block::ImageType;
 pub use block::fcntl::{LockGranularityChoice, LockGranularityParseError};
 pub use migration::{
     MigrationMode, TimeoutStrategy, VmReceiveMigrationData, VmReceiveMigrationDataParseError,

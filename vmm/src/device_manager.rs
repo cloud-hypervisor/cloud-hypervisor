@@ -33,13 +33,12 @@ use acpi_tables::sdt::GenericAddress;
 use acpi_tables::{Aml, aml};
 #[cfg(not(target_arch = "riscv64"))]
 use anyhow::anyhow;
-use api_types::{ConsoleOutputMode, VhostMode};
+use api_types::{ConsoleOutputMode, ImageType, VhostMode};
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use arch::{DeviceType, MmioDeviceInfo};
 use arch::{NumaNodes, layout};
-use block::ImageType;
 use block::error::BlockError;
 use block::factory::{DiskOpenOptions, open_disk};
 #[cfg(target_arch = "riscv64")]
