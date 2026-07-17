@@ -42,6 +42,7 @@ pub use vm_config::numa_config::NumaDistance;
 pub use vm_config::pci_device_common_config::{
     PciDeviceCommonConfig, PciDeviceCommonConfigParseError,
 };
+pub use vm_config::pci_segment_config::{PciSegmentConfig, PciSegmentConfigParseError};
 pub use vm_config::pmem_config::{PmemConfig, PmemConfigParseError};
 pub use vm_config::rng_config::{RngConfig, RngConfigParseError};
 pub use vm_config::rtc_config::{RtcConfig, RtcConfigParseError};

@@ -174,6 +174,26 @@ pub struct PciSegmentConfig {
     pub mmio64_aperture_weight: u32,
 }
 
+impl From<api_types::PciSegmentConfig> for PciSegmentConfig {
+    fn from(value: api_types::PciSegmentConfig) -> Self {
+        Self {
+            pci_segment: value.pci_segment,
+            mmio32_aperture_weight: value.mmio32_aperture_weight,
+            mmio64_aperture_weight: value.mmio64_aperture_weight,
+        }
+    }
+}
+
+impl From<&PciSegmentConfig> for api_types::PciSegmentConfig {
+    fn from(value: &PciSegmentConfig) -> Self {
+        Self {
+            pci_segment: value.pci_segment,
+            mmio32_aperture_weight: value.mmio32_aperture_weight,
+            mmio64_aperture_weight: value.mmio64_aperture_weight,
+        }
+    }
+}
+
 impl ApplyLandlock for MemoryZoneConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         if let Some(file) = &self.file {
