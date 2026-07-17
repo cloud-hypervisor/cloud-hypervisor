@@ -6,6 +6,9 @@ name = "api-types"
 rust-version.workspace = true
 version = "0.1.0"
 
+[features]
+pvmemcontrol = []
+
 [dependencies]
 arch = { path = "../arch" }
 log = { workspace = true }

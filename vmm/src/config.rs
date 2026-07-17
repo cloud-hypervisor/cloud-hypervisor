@@ -10,6 +10,8 @@ use std::path::PathBuf;
 use std::result;
 use std::sync::LazyLock;
 
+#[cfg(feature = "pvmemcontrol")]
+use api_types::PvmemcontrolConfig;
 use api_types::{
     ConsoleOutputMode, CpusConfig, CpusConfigParseError, MemoryRestoreMode, MemoryZoneConfig,
     NumaDistance, RestoredNetConfig, RestoredVfioConfig, VirtQueueAffinity, VmMemoryZoneUpdateData,

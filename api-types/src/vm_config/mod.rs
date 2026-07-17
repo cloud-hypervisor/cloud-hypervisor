@@ -3,9 +3,16 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#[cfg(feature = "pvmemcontrol")]
+use serde::{Deserialize, Serialize};
+
 pub(crate) mod console_config;
 pub(crate) mod cpus_config;
 pub(crate) mod disk_config;
 pub(crate) mod memory_config;
 pub(crate) mod net_config;
 pub(crate) mod numa_config;
+
+#[cfg(feature = "pvmemcontrol")]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub struct PvmemcontrolConfig {}

@@ -31,7 +31,7 @@ mshv = [
   "virtio-devices/mshv",
   "vm-device/mshv",
 ]
-pvmemcontrol = ["devices/pvmemcontrol"]
+pvmemcontrol = ["api-types/pvmemcontrol", "devices/pvmemcontrol"]
 sev_snp = [
   "arch/sev_snp",
   "hypervisor/sev_snp",

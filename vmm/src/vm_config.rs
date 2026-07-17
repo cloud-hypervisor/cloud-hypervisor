@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{fs, result};
 
+#[cfg(feature = "pvmemcontrol")]
+use api_types::PvmemcontrolConfig;
 use api_types::{
     ConsoleOutputMode, CpusConfig, HotplugMethod, MemoryZoneConfig, NumaDistance, VhostMode,
     VirtQueueAffinity,
@@ -448,10 +450,6 @@ pub struct BalloonConfig {
     #[serde(default)]
     pub free_page_reporting: bool,
 }
-
-#[cfg(feature = "pvmemcontrol")]
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
-pub struct PvmemcontrolConfig {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct FsConfig {
