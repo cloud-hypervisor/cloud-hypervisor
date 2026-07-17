@@ -1307,6 +1307,40 @@ pub struct PayloadConfig {
     pub fw_cfg_config: Option<FwCfgConfig>,
 }
 
+impl From<api_types::PayloadConfig> for PayloadConfig {
+    fn from(value: api_types::PayloadConfig) -> Self {
+        Self {
+            firmware: value.firmware,
+            kernel: value.kernel,
+            cmdline: value.cmdline,
+            initramfs: value.initramfs,
+            #[cfg(feature = "igvm")]
+            igvm: value.igvm,
+            #[cfg(feature = "sev_snp")]
+            host_data: value.host_data,
+            #[cfg(feature = "fw_cfg")]
+            fw_cfg_config: value.fw_cfg_config.map(Into::into),
+        }
+    }
+}
+
+impl From<&PayloadConfig> for api_types::PayloadConfig {
+    fn from(value: &PayloadConfig) -> Self {
+        Self {
+            firmware: value.firmware.clone(),
+            kernel: value.kernel.clone(),
+            cmdline: value.cmdline.clone(),
+            initramfs: value.initramfs.clone(),
+            #[cfg(feature = "igvm")]
+            igvm: value.igvm.clone(),
+            #[cfg(feature = "sev_snp")]
+            host_data: value.host_data.clone(),
+            #[cfg(feature = "fw_cfg")]
+            fw_cfg_config: value.fw_cfg_config.as_ref().map(Into::into),
+        }
+    }
+}
+
 #[cfg(feature = "fw_cfg")]
 #[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

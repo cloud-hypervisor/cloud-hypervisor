@@ -21,6 +21,7 @@ pub(crate) mod landlock_config;
 pub(crate) mod memory_config;
 pub(crate) mod net_config;
 pub(crate) mod numa_config;
+pub(crate) mod payload_config;
 pub(crate) mod pci_device_common_config;
 pub(crate) mod pci_segment_config;
 pub(crate) mod platform_config;

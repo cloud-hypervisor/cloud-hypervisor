@@ -52,6 +52,7 @@ pub use vm_config::landlock_config::{LandlockConfig, LandlockConfigParseError};
 pub use vm_config::memory_config::{HotplugMethod, MemoryZoneConfig};
 pub use vm_config::net_config::{NetConfig, NetConfigParseError, ParseVhostModeError, VhostMode};
 pub use vm_config::numa_config::NumaDistance;
+pub use vm_config::payload_config::PayloadConfig;
 pub use vm_config::pci_device_common_config::{
     PciDeviceCommonConfig, PciDeviceCommonConfigParseError,
 };
