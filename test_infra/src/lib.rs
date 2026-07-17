@@ -12,6 +12,7 @@ use std::fmt::{Display, Formatter};
 use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::os::unix::process::CommandExt;
@@ -722,21 +723,30 @@ impl DiskConfig for WindowsDiskConfig {
 }
 
 pub fn rate_limited_copy<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::Result<u64> {
+    let dest_dir = to
+        .as_ref()
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    let dest_dir_c = CString::new(dest_dir.as_os_str().as_bytes())?;
+
     for i in 0..10 {
         let free_bytes = unsafe {
             let mut stats = mem::MaybeUninit::zeroed();
-            let fs_name = CString::new("/tmp").unwrap();
-            libc::statvfs(fs_name.as_ptr(), stats.as_mut_ptr());
+            if libc::statvfs(dest_dir_c.as_ptr(), stats.as_mut_ptr()) != 0 {
+                return Err(io::Error::last_os_error());
+            }
 
-            let free_blocks = stats.assume_init().f_bfree;
-            let block_size = stats.assume_init().f_bsize;
-
-            free_blocks * block_size
+            let stats = stats.assume_init();
+            stats.f_bfree * stats.f_bsize
         };
 
         // Make sure there is at least 6 GiB of space
         if free_bytes < 6 << 30 {
-            eprintln!("Not enough space on disk ({free_bytes}). Attempt {i} of 10. Sleeping.");
+            eprintln!(
+                "Not enough space on disk ({free_bytes}) at {}. Attempt {i} of 10. Sleeping.",
+                dest_dir.display()
+            );
             thread::sleep(Duration::new(60, 0));
             continue;
         }
