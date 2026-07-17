@@ -387,6 +387,54 @@ pub struct NetConfig {
     pub offload_csum: bool,
 }
 
+impl From<api_types::NetConfig> for NetConfig {
+    fn from(value: api_types::NetConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            tap: value.tap,
+            ip: value.ip,
+            mask: value.mask,
+            mac: value.mac,
+            host_mac: value.host_mac,
+            mtu: value.mtu,
+            num_queues: value.num_queues,
+            queue_size: value.queue_size,
+            vhost_user: value.vhost_user,
+            vhost_socket: value.vhost_socket,
+            vhost_mode: value.vhost_mode,
+            fds: value.fds,
+            rate_limiter_config: value.rate_limiter_config,
+            offload_tso: value.offload_tso,
+            offload_ufo: value.offload_ufo,
+            offload_csum: value.offload_csum,
+        }
+    }
+}
+
+impl From<&NetConfig> for api_types::NetConfig {
+    fn from(value: &NetConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            tap: value.tap.clone(),
+            ip: value.ip,
+            mask: value.mask,
+            mac: value.mac,
+            host_mac: value.host_mac,
+            mtu: value.mtu,
+            num_queues: value.num_queues,
+            queue_size: value.queue_size,
+            vhost_user: value.vhost_user,
+            vhost_socket: value.vhost_socket.clone(),
+            vhost_mode: value.vhost_mode.clone(),
+            fds: value.fds.clone(),
+            rate_limiter_config: value.rate_limiter_config,
+            offload_tso: value.offload_tso,
+            offload_ufo: value.offload_ufo,
+            offload_csum: value.offload_csum,
+        }
+    }
+}
+
 pub fn default_netconfig_true() -> bool {
     true
 }

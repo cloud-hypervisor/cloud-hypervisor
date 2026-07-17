@@ -13,10 +13,12 @@ pvmemcontrol = []
 [dependencies]
 arch = { path = "../arch" }
 log = { workspace = true }
+net_util = { path = "../net_util" }
 option_parser = { path = "../option_parser" }
 serde = { workspace = true, features = ["derive"] }
 serde_with = { workspace = true, features = ["macros"] }
 thiserror = { workspace = true }
+virtio-devices = { path = "../virtio-devices" }
 
 [dev-dependencies]
 serde_json = { workspace = true }

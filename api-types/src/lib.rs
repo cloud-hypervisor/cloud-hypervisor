@@ -34,7 +34,7 @@ pub use vm_config::disk_config::VirtQueueAffinity;
 #[cfg(feature = "fw_cfg")]
 pub use vm_config::fw_cfg_config::{FwCfgItem, FwCfgItemError, FwCfgItemList};
 pub use vm_config::memory_config::{HotplugMethod, MemoryZoneConfig};
-pub use vm_config::net_config::{ParseVhostModeError, VhostMode};
+pub use vm_config::net_config::{NetConfig, NetConfigParseError, ParseVhostModeError, VhostMode};
 pub use vm_config::numa_config::NumaDistance;
 pub use vm_config::pci_device_common_config::{
     PciDeviceCommonConfig, PciDeviceCommonConfigParseError,

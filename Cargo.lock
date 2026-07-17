@@ -97,11 +97,13 @@ version = "0.1.0"
 dependencies = [
  "arch",
  "log",
+ "net_util",
  "option_parser",
  "serde",
  "serde_json",
  "serde_with",
  "thiserror",
+ "virtio-devices",
 ]
 
 [[package]]
