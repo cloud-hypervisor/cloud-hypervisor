@@ -46,6 +46,7 @@ pub use vm_config::pci_segment_config::{PciSegmentConfig, PciSegmentConfigParseE
 pub use vm_config::pmem_config::{PmemConfig, PmemConfigParseError};
 pub use vm_config::rng_config::{RngConfig, RngConfigParseError};
 pub use vm_config::rtc_config::{RtcConfig, RtcConfigParseError};
+pub use vm_config::tpm_config::{TpmConfig, TpmConfigParseError};
 pub use vm_config::user_device_config::{UserDeviceConfig, UserDeviceConfigParseError};
 pub use vm_config::vdpa_config::{VdpaConfig, VdpaConfigParseError};
 pub use vm_config::vsock_config::{VsockConfig, VsockConfigParseError};

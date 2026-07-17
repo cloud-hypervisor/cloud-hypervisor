@@ -22,6 +22,7 @@ pub(crate) mod pci_segment_config;
 pub(crate) mod pmem_config;
 pub(crate) mod rng_config;
 pub(crate) mod rtc_config;
+pub(crate) mod tpm_config;
 pub(crate) mod user_device_config;
 pub(crate) mod vdpa_config;
 pub(crate) mod vsock_config;

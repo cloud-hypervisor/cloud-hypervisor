@@ -1214,6 +1214,22 @@ pub struct TpmConfig {
     pub socket: PathBuf,
 }
 
+impl From<api_types::TpmConfig> for TpmConfig {
+    fn from(value: api_types::TpmConfig) -> Self {
+        Self {
+            socket: value.socket,
+        }
+    }
+}
+
+impl From<&TpmConfig> for api_types::TpmConfig {
+    fn from(value: &TpmConfig) -> Self {
+        Self {
+            socket: value.socket.clone(),
+        }
+    }
+}
+
 impl ApplyLandlock for TpmConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         landlock.add_rule_with_access(&self.socket, "rw")?;
