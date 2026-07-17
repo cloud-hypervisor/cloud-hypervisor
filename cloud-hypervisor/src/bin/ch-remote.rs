@@ -17,8 +17,11 @@ use api_client::{
     simple_api_full_command,
 };
 use api_types::{
-    VmCoredumpData, VmReceiveMigrationData, VmRemoveDeviceData, VmResizeData, VmResizeDiskData,
-    VmResizeZoneData, VmSnapshotConfig,
+    DeviceConfigParseError, DiskConfigParseError, FsConfigParseError,
+    GenericVhostUserConfigParseError, NetConfigParseError, PmemConfigParseError,
+    UserDeviceConfigParseError, VdpaConfigParseError, VmCoredumpData, VmReceiveMigrationData,
+    VmRemoveDeviceData, VmResizeData, VmResizeDiskData, VmResizeZoneData, VmSnapshotConfig,
+    VsockConfigParseError,
 };
 #[cfg(feature = "dbus_api")]
 use clap::ArgAction;
@@ -26,11 +29,6 @@ use clap::{Arg, ArgMatches, Command};
 use log::error;
 use option_parser::{ByteSized, ByteSizedParseError};
 use thiserror::Error;
-use vmm::config::{self};
-use vmm::vm_config::{
-    DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
-    UserDeviceConfig, VdpaConfig, VsockConfig,
-};
 #[cfg(feature = "dbus_api")]
 use zbus::{blocking::Connection, proxy, zvariant::Optional};
 
@@ -50,23 +48,23 @@ enum Error {
     #[error("Error parsing balloon size")]
     InvalidBalloonSize(#[source] ByteSizedParseError),
     #[error("Error parsing device syntax")]
-    AddDeviceConfig(#[source] config::Error),
+    AddDeviceConfig(#[source] DeviceConfigParseError),
     #[error("Error parsing disk syntax")]
-    AddDiskConfig(#[source] config::Error),
+    AddDiskConfig(#[source] DiskConfigParseError),
     #[error("Error parsing filesystem syntax")]
-    AddFsConfig(#[source] config::Error),
+    AddFsConfig(#[source] FsConfigParseError),
     #[error("Error parsing generic vhost-user syntax")]
-    AddGenericVhostUserConfig(#[source] config::Error),
+    AddGenericVhostUserConfig(#[source] GenericVhostUserConfigParseError),
     #[error("Error parsing persistent memory syntax")]
-    AddPmemConfig(#[source] config::Error),
+    AddPmemConfig(#[source] PmemConfigParseError),
     #[error("Error parsing network syntax")]
-    AddNetConfig(#[source] config::Error),
+    AddNetConfig(#[source] NetConfigParseError),
     #[error("Error parsing user device syntax")]
-    AddUserDeviceConfig(#[source] config::Error),
+    AddUserDeviceConfig(#[source] UserDeviceConfigParseError),
     #[error("Error parsing vDPA device syntax")]
-    AddVdpaConfig(#[source] config::Error),
+    AddVdpaConfig(#[source] VdpaConfigParseError),
     #[error("Error parsing vsock syntax")]
-    AddVsockConfig(#[source] config::Error),
+    AddVsockConfig(#[source] VsockConfigParseError),
     #[error("Error parsing restore syntax")]
     Restore(#[source] api_types::RestoreConfigParseError),
     #[error("Error reading from stdin")]
@@ -841,7 +839,8 @@ fn resize_zone_config(id: &str, size: &str) -> Result<String, Error> {
 }
 
 fn add_device_config(config: &str) -> Result<(String, Vec<i32>), Error> {
-    let mut device_config = DeviceConfig::parse(config).map_err(Error::AddDeviceConfig)?;
+    let mut device_config =
+        api_types::DeviceConfig::parse(config).map_err(Error::AddDeviceConfig)?;
 
     // DeviceConfig is modified on purpose here by taking the file
     // descriptor out. Keeping it and sending it over to the server side
@@ -858,7 +857,8 @@ fn add_device_config(config: &str) -> Result<(String, Vec<i32>), Error> {
 }
 
 fn add_user_device_config(config: &str) -> Result<String, Error> {
-    let device_config = UserDeviceConfig::parse(config).map_err(Error::AddUserDeviceConfig)?;
+    let device_config =
+        api_types::UserDeviceConfig::parse(config).map_err(Error::AddUserDeviceConfig)?;
     let device_config = serde_json::to_string(&device_config).unwrap();
 
     Ok(device_config)
@@ -871,36 +871,36 @@ fn remove_device_config(id: &str) -> String {
 }
 
 fn add_disk_config(config: &str) -> Result<String, Error> {
-    let disk_config = DiskConfig::parse(config).map_err(Error::AddDiskConfig)?;
+    let disk_config = api_types::DiskConfig::parse(config).map_err(Error::AddDiskConfig)?;
     let disk_config = serde_json::to_string(&disk_config).unwrap();
 
     Ok(disk_config)
 }
 
 fn add_fs_config(config: &str) -> Result<String, Error> {
-    let fs_config = FsConfig::parse(config).map_err(Error::AddFsConfig)?;
+    let fs_config = api_types::FsConfig::parse(config).map_err(Error::AddFsConfig)?;
     let fs_config = serde_json::to_string(&fs_config).unwrap();
 
     Ok(fs_config)
 }
 
 fn add_generic_vhost_user_config(config: &str) -> Result<String, Error> {
-    let generic_vhost_user_config =
-        GenericVhostUserConfig::parse(config).map_err(Error::AddGenericVhostUserConfig)?;
+    let generic_vhost_user_config = api_types::GenericVhostUserConfig::parse(config)
+        .map_err(Error::AddGenericVhostUserConfig)?;
     let generic_vhost_user_config = serde_json::to_string(&generic_vhost_user_config).unwrap();
 
     Ok(generic_vhost_user_config)
 }
 
 fn add_pmem_config(config: &str) -> Result<String, Error> {
-    let pmem_config = PmemConfig::parse(config).map_err(Error::AddPmemConfig)?;
+    let pmem_config = api_types::PmemConfig::parse(config).map_err(Error::AddPmemConfig)?;
     let pmem_config = serde_json::to_string(&pmem_config).unwrap();
 
     Ok(pmem_config)
 }
 
 fn add_net_config(config: &str) -> Result<(String, Vec<i32>), Error> {
-    let mut net_config = NetConfig::parse(config).map_err(Error::AddNetConfig)?;
+    let mut net_config = api_types::NetConfig::parse(config).map_err(Error::AddNetConfig)?;
 
     // NetConfig is modified on purpose here by taking the list of file
     // descriptors out. Keeping the list and send it to the server side
@@ -913,14 +913,14 @@ fn add_net_config(config: &str) -> Result<(String, Vec<i32>), Error> {
 }
 
 fn add_vdpa_config(config: &str) -> Result<String, Error> {
-    let vdpa_config = VdpaConfig::parse(config).map_err(Error::AddVdpaConfig)?;
+    let vdpa_config = api_types::VdpaConfig::parse(config).map_err(Error::AddVdpaConfig)?;
     let vdpa_config = serde_json::to_string(&vdpa_config).unwrap();
 
     Ok(vdpa_config)
 }
 
 fn add_vsock_config(config: &str) -> Result<String, Error> {
-    let vsock_config = VsockConfig::parse(config).map_err(Error::AddVsockConfig)?;
+    let vsock_config = api_types::VsockConfig::parse(config).map_err(Error::AddVsockConfig)?;
     let vsock_config = serde_json::to_string(&vsock_config).unwrap();
 
     Ok(vsock_config)
@@ -1040,40 +1040,56 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
         Command::new("add-device").about("Add VFIO device").arg(
             Arg::new("device_config")
                 .index(1)
-                .help(DeviceConfig::SYNTAX),
+                .help(api_types::DeviceConfig::SYNTAX),
         ),
-        Command::new("add-disk")
-            .about("Add block device")
-            .arg(Arg::new("disk_config").index(1).help(DiskConfig::SYNTAX)),
+        Command::new("add-disk").about("Add block device").arg(
+            Arg::new("disk_config")
+                .index(1)
+                .help(api_types::DiskConfig::SYNTAX),
+        ),
         Command::new("add-fs")
             .about("Add virtio-fs backed fs device")
-            .arg(Arg::new("fs_config").index(1).help(FsConfig::SYNTAX)),
+            .arg(
+                Arg::new("fs_config")
+                    .index(1)
+                    .help(api_types::FsConfig::SYNTAX),
+            ),
         Command::new("add-generic-vhost-user")
             .about("Add generic vhost-user device")
             .arg(
                 Arg::new("generic_vhost_user_config")
                     .index(1)
-                    .help(GenericVhostUserConfig::SYNTAX),
+                    .help(api_types::GenericVhostUserConfig::SYNTAX),
             ),
-        Command::new("add-net")
-            .about("Add network device")
-            .arg(Arg::new("net_config").index(1).help(NetConfig::SYNTAX)),
+        Command::new("add-net").about("Add network device").arg(
+            Arg::new("net_config")
+                .index(1)
+                .help(api_types::NetConfig::SYNTAX),
+        ),
         Command::new("add-pmem")
             .about("Add persistent memory device")
-            .arg(Arg::new("pmem_config").index(1).help(PmemConfig::SYNTAX)),
+            .arg(
+                Arg::new("pmem_config")
+                    .index(1)
+                    .help(api_types::PmemConfig::SYNTAX),
+            ),
         Command::new("add-user-device")
             .about("Add userspace device")
             .arg(
                 Arg::new("device_config")
                     .index(1)
-                    .help(UserDeviceConfig::SYNTAX),
+                    .help(api_types::UserDeviceConfig::SYNTAX),
             ),
-        Command::new("add-vdpa")
-            .about("Add vDPA device")
-            .arg(Arg::new("vdpa_config").index(1).help(VdpaConfig::SYNTAX)),
-        Command::new("add-vsock")
-            .about("Add vsock device")
-            .arg(Arg::new("vsock_config").index(1).help(VsockConfig::SYNTAX)),
+        Command::new("add-vdpa").about("Add vDPA device").arg(
+            Arg::new("vdpa_config")
+                .index(1)
+                .help(api_types::VdpaConfig::SYNTAX),
+        ),
+        Command::new("add-vsock").about("Add vsock device").arg(
+            Arg::new("vsock_config")
+                .index(1)
+                .help(api_types::VsockConfig::SYNTAX),
+        ),
         Command::new("boot").about("Boot a created VM"),
         Command::new("coredump")
             .about("Create a coredump from VM")

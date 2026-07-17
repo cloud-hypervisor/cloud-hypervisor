@@ -36,15 +36,9 @@ pub mod http;
 use std::io;
 use std::sync::mpsc::{RecvError, SendError, Sender, channel};
 
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use api_types::VmCoredumpData;
-use api_types::{
-    VmRemoveDeviceData, VmResizeData, VmResizeDiskData, VmResizeZoneData, VmSnapshotConfig,
-    VmmPingResponse,
-};
+use api_types::{VmInfoResponse, VmmPingResponse};
 use log::info;
 use micro_http::Body;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_migration::MigratableError;
 use vmm_sys_util::eventfd::EventFd;
@@ -52,18 +46,17 @@ use vmm_sys_util::eventfd::EventFd;
 #[cfg(feature = "dbus_api")]
 pub use self::dbus::start_dbus_thread;
 pub use self::http::{start_http_fd_thread, start_http_path_thread};
-use crate::Error as VmmError;
 use crate::config::RestoreConfig;
-use crate::device_tree::DeviceTree;
 use crate::migration::{
     VmReceiveMigrationConfigError, VmReceiveMigrationData, VmSendMigrationConfigError,
     VmSendMigrationData,
 };
-use crate::vm::{Error as VmError, VmState};
+use crate::vm::Error as VmError;
 use crate::vm_config::{
     DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
     UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
 };
+use crate::{Error as VmmError, vm};
 
 /// API errors are sent back from the VMM API server through the ApiResponse.
 #[derive(Error, Debug)]
@@ -226,15 +219,6 @@ pub enum ApiError {
     VmSendMigrationConfig(#[source] VmSendMigrationConfigError),
 }
 pub type ApiResult<T> = Result<T, ApiError>;
-
-#[serde_with::skip_serializing_none]
-#[derive(Clone, Deserialize, Serialize)]
-pub struct VmInfoResponse {
-    pub config: Box<VmConfig>,
-    pub state: VmState,
-    pub memory_actual_size: u64,
-    pub device_tree: Option<DeviceTree>,
-}
 
 pub enum ApiResponsePayload {
     /// No data is sent on the channel.
@@ -401,7 +385,7 @@ pub trait ApiAction: Send + Sync {
 pub struct VmAddDevice;
 
 impl ApiAction for VmAddDevice {
-    type RequestBody = DeviceConfig;
+    type RequestBody = api_types::DeviceConfig;
     type ResponseBody = Option<Body>;
 
     fn request(
@@ -413,7 +397,7 @@ impl ApiAction for VmAddDevice {
             info!("API request event: VmAddDevice {config:?}");
 
             let response = vmm
-                .vm_add_device(config)
+                .vm_add_device(config.into())
                 .map_err(ApiError::VmAddDevice)
                 .map(ApiResponsePayload::VmAction);
 
@@ -438,7 +422,7 @@ impl ApiAction for VmAddDevice {
 pub struct AddDisk;
 
 impl ApiAction for AddDisk {
-    type RequestBody = DiskConfig;
+    type RequestBody = api_types::DiskConfig;
     type ResponseBody = Option<Body>;
 
     fn request(
@@ -450,7 +434,7 @@ impl ApiAction for AddDisk {
             info!("API request event: AddDisk {config:?}");
 
             let response = vmm
-                .vm_add_disk(config)
+                .vm_add_disk(config.into())
                 .map_err(ApiError::VmAddDisk)
                 .map(ApiResponsePayload::VmAction);
 
@@ -475,7 +459,7 @@ impl ApiAction for AddDisk {
 pub struct VmAddFs;
 
 impl ApiAction for VmAddFs {
-    type RequestBody = FsConfig;
+    type RequestBody = api_types::FsConfig;
     type ResponseBody = Option<Body>;
 
     fn request(
@@ -487,7 +471,7 @@ impl ApiAction for VmAddFs {
             info!("API request event: VmAddFs {config:?}");
 
             let response = vmm
-                .vm_add_fs(config)
+                .vm_add_fs(config.into())
                 .map_err(ApiError::VmAddFs)
                 .map(ApiResponsePayload::VmAction);
 
@@ -512,7 +496,7 @@ impl ApiAction for VmAddFs {
 pub struct VmAddGenericVhostUser;
 
 impl ApiAction for VmAddGenericVhostUser {
-    type RequestBody = GenericVhostUserConfig;
+    type RequestBody = api_types::GenericVhostUserConfig;
     type ResponseBody = Option<Body>;
 
     fn request(
@@ -524,7 +508,7 @@ impl ApiAction for VmAddGenericVhostUser {
             info!("API request event: VmAddGenericVhostUser {config:?}");
 
             let response = vmm
-                .vm_add_generic_vhost_user(config)
+                .vm_add_generic_vhost_user(config.into())
                 .map_err(ApiError::VmAddGenericVhostUser)
                 .map(ApiResponsePayload::VmAction);
 
@@ -549,7 +533,7 @@ impl ApiAction for VmAddGenericVhostUser {
 pub struct VmAddPmem;
 
 impl ApiAction for VmAddPmem {
-    type RequestBody = PmemConfig;
+    type RequestBody = api_types::PmemConfig;
     type ResponseBody = Option<Body>;
 
     fn request(
@@ -561,7 +545,7 @@ impl ApiAction for VmAddPmem {
             info!("API request event: VmAddPmem {config:?}");
 
             let response = vmm
-                .vm_add_pmem(config)
+                .vm_add_pmem(config.into())
                 .map_err(ApiError::VmAddPmem)
                 .map(ApiResponsePayload::VmAction);
 
@@ -586,7 +570,7 @@ impl ApiAction for VmAddPmem {
 pub struct VmAddNet;
 
 impl ApiAction for VmAddNet {
-    type RequestBody = NetConfig;
+    type RequestBody = api_types::NetConfig;
     type ResponseBody = Option<Body>;
 
     fn request(
@@ -598,7 +582,7 @@ impl ApiAction for VmAddNet {
             info!("API request event: VmAddNet {config:?}");
 
             let response = vmm
-                .vm_add_net(config)
+                .vm_add_net(config.into())
                 .map_err(ApiError::VmAddNet)
                 .map(ApiResponsePayload::VmAction);
 
@@ -623,7 +607,7 @@ impl ApiAction for VmAddNet {
 pub struct VmAddVdpa;
 
 impl ApiAction for VmAddVdpa {
-    type RequestBody = VdpaConfig;
+    type RequestBody = api_types::VdpaConfig;
     type ResponseBody = Option<Body>;
 
     fn request(
@@ -635,7 +619,7 @@ impl ApiAction for VmAddVdpa {
             info!("API request event: VmAddVdpa {config:?}");
 
             let response = vmm
-                .vm_add_vdpa(config)
+                .vm_add_vdpa(config.into())
                 .map_err(ApiError::VmAddVdpa)
                 .map(ApiResponsePayload::VmAction);
 
@@ -660,7 +644,7 @@ impl ApiAction for VmAddVdpa {
 pub struct VmAddVsock;
 
 impl ApiAction for VmAddVsock {
-    type RequestBody = VsockConfig;
+    type RequestBody = api_types::VsockConfig;
     type ResponseBody = Option<Body>;
 
     fn request(
@@ -672,7 +656,7 @@ impl ApiAction for VmAddVsock {
             info!("API request event: VmAddVsock {config:?}");
 
             let response = vmm
-                .vm_add_vsock(config)
+                .vm_add_vsock(config.into())
                 .map_err(ApiError::VmAddVsock)
                 .map(ApiResponsePayload::VmAction);
 
@@ -697,7 +681,7 @@ impl ApiAction for VmAddVsock {
 pub struct VmAddUserDevice;
 
 impl ApiAction for VmAddUserDevice {
-    type RequestBody = UserDeviceConfig;
+    type RequestBody = api_types::UserDeviceConfig;
     type ResponseBody = Option<Body>;
 
     fn request(
@@ -709,7 +693,7 @@ impl ApiAction for VmAddUserDevice {
             info!("API request event: VmAddUserDevice {config:?}");
 
             let response = vmm
-                .vm_add_user_device(config)
+                .vm_add_user_device(config.into())
                 .map_err(ApiError::VmAddUserDevice)
                 .map(ApiResponsePayload::VmAction);
 
@@ -769,7 +753,7 @@ pub struct VmCoredump;
 
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 impl ApiAction for VmCoredump {
-    type RequestBody = VmCoredumpData;
+    type RequestBody = api_types::VmCoredumpData;
     type ResponseBody = Option<Body>;
 
     fn request(
@@ -839,7 +823,7 @@ impl ApiAction for VmCounters {
 pub struct VmCreate;
 
 impl ApiAction for VmCreate {
-    type RequestBody = Box<VmConfig>;
+    type RequestBody = Box<api_types::VmConfig>;
     type ResponseBody = ();
 
     fn request(
@@ -850,10 +834,19 @@ impl ApiAction for VmCreate {
         Box::new(move |vmm| {
             info!("API request event: VmCreate {config:?}");
 
-            let response = vmm
-                .vm_create(config)
-                .map_err(ApiError::VmCreate)
-                .map(|_| ApiResponsePayload::Empty);
+            let response = {
+                let config = (*config)
+                    .try_into()
+                    .map_err(vm::Error::ConfigValidation)
+                    .map_err(ApiError::VmCreate);
+                match config {
+                    Ok(config) => vmm
+                        .vm_create(Box::new(config))
+                        .map_err(ApiError::VmCreate)
+                        .map(|_| ApiResponsePayload::Empty),
+                    Err(error) => Err(error),
+                }
+            };
 
             response_sender
                 .send(response)
@@ -1085,7 +1078,7 @@ impl ApiAction for VmReceiveMigration {
 pub struct VmRemoveDevice;
 
 impl ApiAction for VmRemoveDevice {
-    type RequestBody = VmRemoveDeviceData;
+    type RequestBody = api_types::VmRemoveDeviceData;
     type ResponseBody = Option<Body>;
 
     fn request(
@@ -1122,7 +1115,7 @@ impl ApiAction for VmRemoveDevice {
 pub struct VmResize;
 
 impl ApiAction for VmResize {
-    type RequestBody = VmResizeData;
+    type RequestBody = api_types::VmResizeData;
     type ResponseBody = Option<Body>;
 
     fn request(
@@ -1163,7 +1156,7 @@ impl ApiAction for VmResize {
 pub struct VmResizeDisk;
 
 impl ApiAction for VmResizeDisk {
-    type RequestBody = VmResizeDiskData;
+    type RequestBody = api_types::VmResizeDiskData;
     type ResponseBody = Option<Body>;
 
     fn request(
@@ -1198,7 +1191,7 @@ impl ApiAction for VmResizeDisk {
 pub struct VmResizeZone;
 
 impl ApiAction for VmResizeZone {
-    type RequestBody = VmResizeZoneData;
+    type RequestBody = api_types::VmResizeZoneData;
     type ResponseBody = Option<Body>;
 
     fn request(
@@ -1379,7 +1372,7 @@ impl ApiAction for VmShutdown {
 pub struct VmSnapshot;
 
 impl ApiAction for VmSnapshot {
-    type RequestBody = VmSnapshotConfig;
+    type RequestBody = api_types::VmSnapshotConfig;
     type ResponseBody = Option<Body>;
 
     fn request(

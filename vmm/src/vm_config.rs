@@ -957,10 +957,6 @@ impl From<&SerialConfig> for api_types::SerialConfig {
     }
 }
 
-impl SerialConfig {
-    pub const SYNTAX: &str = "Control serial port: \"off|null|pty|tty|file=<path>|socket=<path>\"";
-}
-
 impl Default for SerialConfig {
     fn default() -> Self {
         Self {
@@ -1004,10 +1000,6 @@ impl From<&ConsoleConfig> for api_types::ConsoleConfig {
             pci_common: (&value.pci_common).into(),
         }
     }
-}
-
-impl ConsoleConfig {
-    pub const SYNTAX: &str = "Control (virtio) console: \"off|null|pty|tty|file=<path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 }
 
 impl Default for ConsoleConfig {

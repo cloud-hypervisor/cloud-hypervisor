@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::channel;
 use std::{any, cmp, env, io, num, process, str, thread};
 
-use api_types::VmParams;
+use api_types::RngConfig;
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use event_monitor::event;
 use libc::EFD_NONBLOCK;
@@ -30,20 +30,9 @@ use vm_migration::protocol;
 use vmm::api::dbus::{DBusApiOptions, dbus_api_graceful_shutdown};
 use vmm::api::http::http_api_graceful_shutdown;
 use vmm::api::{self, ApiAction};
-use vmm::config::{self};
 use vmm::landlock::{Landlock, LandlockError};
 use vmm::vm::Vm;
 use vmm::vm_config;
-#[cfg(feature = "fw_cfg")]
-use vmm::vm_config::FwCfgConfig;
-#[cfg(feature = "ivshmem")]
-use vmm::vm_config::IvshmemConfig;
-use vmm::vm_config::{
-    BalloonConfig, ConsoleConfig, DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig,
-    LandlockConfig, NetConfig, NumaConfig, PciSegmentConfig, PlatformConfig, PmemConfig,
-    RateLimiterGroupConfig, RngConfig, RtcConfig, SerialConfig, TpmConfig, UserDeviceConfig,
-    VdpaConfig, VmConfig, VsockConfig,
-};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::block_signal;
 
@@ -102,7 +91,7 @@ enum Error {
     #[error("Failed to start the VMM thread")]
     StartVmmThread(#[source] vmm::Error),
     #[error("Error parsing config")]
-    ParsingConfig(#[source] config::Error),
+    ParsingConfig(#[source] api_types::VmConfigParseError),
     #[error("Error creating VM")]
     VmCreate(#[source] api::ApiError),
     #[error("Error booting VM")]
@@ -198,7 +187,7 @@ fn get_cli_options_sorted(
             .group("vmm-config"),
         Arg::new("balloon")
             .long("balloon")
-            .help(BalloonConfig::SYNTAX)
+            .help(api_types::BalloonConfig::SYNTAX)
             .num_args(1)
             .group("vm-config"),
         Arg::new("cmdline")
@@ -208,7 +197,7 @@ fn get_cli_options_sorted(
             .group("vm-config"),
         Arg::new("console")
             .long("console")
-            .help(ConsoleConfig::SYNTAX)
+            .help(api_types::ConsoleConfig::SYNTAX)
             .default_value("tty")
             .group("vm-config"),
         Arg::new("cpus")
@@ -250,13 +239,13 @@ fn get_cli_options_sorted(
             .group("vm-config"),
         Arg::new("device")
             .long("device")
-            .help(DeviceConfig::SYNTAX)
+            .help(api_types::DeviceConfig::SYNTAX)
             .num_args(1..)
             .action(ArgAction::Append)
             .group("vm-config"),
         Arg::new("disk")
             .long("disk")
-            .help(DiskConfig::SYNTAX)
+            .help(api_types::DiskConfig::SYNTAX)
             .num_args(1..)
             .action(ArgAction::Append)
             .group("vm-config"),
@@ -272,14 +261,14 @@ fn get_cli_options_sorted(
             .group("vm-payload"),
         Arg::new("fs")
             .long("fs")
-            .help(FsConfig::SYNTAX)
+            .help(api_types::FsConfig::SYNTAX)
             .num_args(1..)
             .action(ArgAction::Append)
             .group("vm-config"),
         #[cfg(feature = "fw_cfg")]
         Arg::new("fw-cfg-config")
             .long("fw-cfg-config")
-            .help(FwCfgConfig::SYNTAX)
+            .help(api_types::FwCfgConfig::SYNTAX)
             .num_args(1)
             .group("vm-payload"),
         #[cfg(feature = "guest_debug")]
@@ -290,7 +279,7 @@ fn get_cli_options_sorted(
             .group("vmm-config"),
         Arg::new("generic-vhost-user")
             .long("generic-vhost-user")
-            .help(GenericVhostUserConfig::SYNTAX)
+            .help(api_types::GenericVhostUserConfig::SYNTAX)
             .num_args(1..)
             .action(ArgAction::Append)
             .group("vm-config"),
@@ -314,7 +303,7 @@ fn get_cli_options_sorted(
         #[cfg(feature = "ivshmem")]
         Arg::new("ivshmem")
             .long("ivshmem")
-            .help(IvshmemConfig::SYNTAX)
+            .help(api_types::IvshmemConfig::SYNTAX)
             .num_args(1)
             .group("vm-config"),
         Arg::new("kernel")
@@ -334,7 +323,7 @@ fn get_cli_options_sorted(
             .group("vm-config"),
         Arg::new("landlock-rules")
             .long("landlock-rules")
-            .help(LandlockConfig::SYNTAX)
+            .help(api_types::LandlockConfig::SYNTAX)
             .num_args(1..)
             .action(ArgAction::Append)
             .group("vm-config"),
@@ -384,7 +373,7 @@ fn get_cli_options_sorted(
             .group("vm-config"),
         Arg::new("net")
             .long("net")
-            .help(NetConfig::SYNTAX)
+            .help(api_types::NetConfig::SYNTAX)
             .num_args(1..)
             .action(ArgAction::Append)
             .group("vm-config"),
@@ -396,24 +385,24 @@ fn get_cli_options_sorted(
             .group("vmm-config"),
         Arg::new("numa")
             .long("numa")
-            .help(NumaConfig::SYNTAX)
+            .help(api_types::NumaConfig::SYNTAX)
             .num_args(1..)
             .action(ArgAction::Append)
             .group("vm-config"),
         Arg::new("pci-segment")
             .long("pci-segment")
-            .help(PciSegmentConfig::SYNTAX)
+            .help(api_types::PciSegmentConfig::SYNTAX)
             .num_args(1..)
             .action(ArgAction::Append)
             .group("vm-config"),
         Arg::new("platform")
             .long("platform")
-            .help(PlatformConfig::syntax())
+            .help(api_types::PlatformConfig::syntax())
             .num_args(1)
             .group("vm-config"),
         Arg::new("pmem")
             .long("pmem")
-            .help(PmemConfig::SYNTAX)
+            .help(api_types::PmemConfig::SYNTAX)
             .num_args(1..)
             .action(ArgAction::Append)
             .group("vm-config"),
@@ -432,7 +421,7 @@ fn get_cli_options_sorted(
             .group("vm-config"),
         Arg::new("rate-limit-group")
             .long("rate-limit-group")
-            .help(RateLimiterGroupConfig::SYNTAX)
+            .help(api_types::RateLimiterGroupConfig::SYNTAX)
             .num_args(1..)
             .action(ArgAction::Append)
             .group("vm-config"),
@@ -443,12 +432,12 @@ fn get_cli_options_sorted(
             .group("vmm-config"),
         Arg::new("rng")
             .long("rng")
-            .help(RngConfig::SYNTAX)
+            .help(api_types::RngConfig::SYNTAX)
             .default_value(default_rng)
             .group("vm-config"),
         Arg::new("rtc")
             .long("rtc")
-            .help(RtcConfig::SYNTAX)
+            .help(api_types::RtcConfig::SYNTAX)
             .num_args(0..=1)
             .default_missing_value("")
             .group("vm-config"),
@@ -459,17 +448,17 @@ fn get_cli_options_sorted(
             .default_value("true"),
         Arg::new("serial")
             .long("serial")
-            .help(SerialConfig::SYNTAX)
+            .help(api_types::SerialConfig::SYNTAX)
             .default_value("null")
             .group("vm-config"),
         Arg::new("tpm")
             .long("tpm")
             .num_args(1)
-            .help(TpmConfig::SYNTAX)
+            .help(api_types::TpmConfig::SYNTAX)
             .group("vm-config"),
         Arg::new("user-device")
             .long("user-device")
-            .help(UserDeviceConfig::SYNTAX)
+            .help(api_types::UserDeviceConfig::SYNTAX)
             .num_args(1..)
             .action(ArgAction::Append)
             .group("vm-config"),
@@ -480,7 +469,7 @@ fn get_cli_options_sorted(
             .group("logging"),
         Arg::new("vdpa")
             .long("vdpa")
-            .help(VdpaConfig::SYNTAX)
+            .help(api_types::VdpaConfig::SYNTAX)
             .num_args(1..)
             .action(ArgAction::Append)
             .group("vm-config"),
@@ -492,7 +481,7 @@ fn get_cli_options_sorted(
             .num_args(0),
         Arg::new("vsock")
             .long("vsock")
-            .help(VsockConfig::SYNTAX)
+            .help(api_types::VsockConfig::SYNTAX)
             .num_args(1)
             .group("vm-config"),
         Arg::new("watchdog")
@@ -765,8 +754,8 @@ fn start_vmm(
             cmd_arguments.contains_id("kernel") || cmd_arguments.contains_id("firmware");
 
         if payload_present {
-            let vm_params = VmParams::from_arg_matches(cmd_arguments);
-            let vm_config = VmConfig::parse(vm_params).map_err(Error::ParsingConfig)?;
+            let vm_params = api_types::VmParams::from_arg_matches(cmd_arguments);
+            let vm_config = api_types::VmConfig::parse(vm_params).map_err(Error::ParsingConfig)?;
 
             // Create and boot the VM based off the VM config we just built.
             let sender = api_request_sender.clone();
@@ -980,9 +969,7 @@ fn main() {
 mod unit_tests {
     use std::path::PathBuf;
 
-    use api_types::{
-        ConsoleOutputMode, CoreScheduling, CpuFeatures, CpusConfig, HotplugMethod, VmParams,
-    };
+    use api_types::{ConsoleOutputMode, CoreScheduling, CpuFeatures, CpusConfig, HotplugMethod};
     #[cfg(target_arch = "x86_64")]
     use vmm::vm_config::DebugConsoleConfig;
     use vmm::vm_config::{
@@ -997,9 +984,12 @@ mod unit_tests {
         let (default_vcpus, default_memory, default_rng) = prepare_default_values();
         let cmd_arguments =
             create_app(default_vcpus, default_memory, default_rng).get_matches_from(args);
-        let vm_params = VmParams::from_arg_matches(&cmd_arguments);
+        let vm_params = api_types::VmParams::from_arg_matches(&cmd_arguments);
 
-        VmConfig::parse(vm_params).unwrap()
+        api_types::VmConfig::parse(vm_params)
+            .unwrap()
+            .try_into()
+            .unwrap()
     }
 
     fn compare_vm_config_cli_vs_json(
@@ -1008,7 +998,10 @@ mod unit_tests {
         equal: bool,
     ) -> (VmConfig, VmConfig) {
         let cli_vm_config = get_vm_config_from_vec(cli);
-        let openapi_vm_config: VmConfig = serde_json::from_str(openapi).unwrap();
+        let openapi_vm_config: VmConfig = serde_json::from_str::<api_types::VmConfig>(openapi)
+            .unwrap()
+            .try_into()
+            .unwrap();
 
         if equal {
             assert_eq!(cli_vm_config, openapi_vm_config);
@@ -1504,7 +1497,7 @@ mod unit_tests {
                         {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 2, "queue_size": 256, "iommu": true}
                     ]
                 }"#,
-                false,
+                true,
             ),
             #[cfg(target_arch = "x86_64")]
             (
@@ -1707,7 +1700,7 @@ mod unit_tests {
                         {"file": "/path/to/img/1", "size": 1073741824, "iommu": true}
                     ]
                 }"#,
-                false,
+                true,
             ),
         ]
         .iter()
@@ -1914,7 +1907,7 @@ mod unit_tests {
                         {"path": "/path/to/device", "iommu": true}
                     ]
                 }"#,
-                false,
+                true,
             ),
             (
                 vec![
@@ -2044,7 +2037,7 @@ mod unit_tests {
                     "payload": {"kernel": "/path/to/kernel"},
                     "vsock": {"cid": 123, "socket": "/path/to/sock/1", "iommu": true}
                 }"#,
-                false,
+                true,
             ),
             (
                 vec![

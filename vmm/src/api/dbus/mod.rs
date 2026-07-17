@@ -27,7 +27,7 @@ use crate::api::{
     VmRestore, VmResume, VmSendMigration, VmShutdown, VmSnapshot, VmmPing, VmmShutdown,
 };
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
-use crate::{Error as VmmError, NetConfig, Result as VmmResult, VmConfig};
+use crate::{Error as VmmError, Result as VmmResult};
 
 pub type DBusApiShutdownChannels = (oneshot::Sender<()>, oneshot::Receiver<()>);
 
@@ -154,7 +154,8 @@ impl DBusApi {
     }
 
     async fn vm_add_net(&self, net_config: String) -> Result<Optional<String>> {
-        let mut net_config: NetConfig = serde_json::from_str(&net_config).map_err(api_error)?;
+        let mut net_config: api_types::NetConfig =
+            serde_json::from_str(&net_config).map_err(api_error)?;
         if net_config.fds.is_some() {
             warn!("Ignoring FDs sent via the D-Bus request body");
             net_config.fds = None;
@@ -213,7 +214,8 @@ impl DBusApi {
         let api_sender = self.clone_api_sender().await;
         let api_notifier = self.clone_api_notifier()?;
 
-        let mut vm_config: Box<VmConfig> = serde_json::from_str(&vm_config).map_err(api_error)?;
+        let mut vm_config: Box<api_types::VmConfig> =
+            serde_json::from_str(&vm_config).map_err(api_error)?;
 
         if let Some(ref mut nets) = vm_config.net {
             if nets.iter().any(|net| net.fds.is_some()) {

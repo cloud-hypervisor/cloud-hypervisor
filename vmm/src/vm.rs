@@ -3427,9 +3427,11 @@ impl Transportable for Vm {
             .map_err(MigratableError::MigrateSend)?;
 
         // Serialize and write the snapshot config
-        let vm_config = serde_json::to_string(self.config.lock().unwrap().deref())
-            .context("Error serializing VM config snapshot")
-            .map_err(MigratableError::MigrateSend)?;
+        let vm_config = serde_json::to_string::<api_types::VmConfig>(
+            &self.config.lock().unwrap().deref().into(),
+        )
+        .context("Error serializing VM config snapshot")
+        .map_err(MigratableError::MigrateSend)?;
 
         snapshot_config_file
             .write(vm_config.as_bytes())

@@ -59,7 +59,7 @@ pub fn url_to_file(url: &str) -> result::Result<PathBuf, GuestDebuggableError> {
     Ok(file)
 }
 
-pub fn recv_vm_config(source_url: &str) -> result::Result<VmConfig, MigratableError> {
+pub fn recv_vm_config(source_url: &str) -> result::Result<api_types::VmConfig, MigratableError> {
     let mut vm_config_path = url_to_path(source_url)?;
 
     vm_config_path.push(SNAPSHOT_CONFIG_FILE);
