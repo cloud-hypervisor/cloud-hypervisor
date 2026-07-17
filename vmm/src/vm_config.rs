@@ -306,6 +306,44 @@ impl Default for MemoryConfig {
     }
 }
 
+impl From<api_types::MemoryConfig> for MemoryConfig {
+    fn from(value: api_types::MemoryConfig) -> Self {
+        Self {
+            size: value.size,
+            mergeable: value.mergeable,
+            hotplug_method: value.hotplug_method,
+            hotplug_size: value.hotplug_size,
+            hotplugged_size: value.hotplugged_size,
+            shared: value.shared,
+            hugepages: value.hugepages,
+            hugepage_size: value.hugepage_size,
+            prefault: value.prefault,
+            reserve: value.reserve,
+            zones: value.zones,
+            thp: value.thp,
+        }
+    }
+}
+
+impl From<&MemoryConfig> for api_types::MemoryConfig {
+    fn from(value: &MemoryConfig) -> Self {
+        Self {
+            size: value.size,
+            mergeable: value.mergeable,
+            hotplug_method: value.hotplug_method,
+            hotplug_size: value.hotplug_size,
+            hotplugged_size: value.hotplugged_size,
+            shared: value.shared,
+            hugepages: value.hugepages,
+            hugepage_size: value.hugepage_size,
+            prefault: value.prefault,
+            reserve: value.reserve,
+            zones: value.zones.clone(),
+            thp: value.thp,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct RateLimiterGroupConfig {
     #[serde(default)]
