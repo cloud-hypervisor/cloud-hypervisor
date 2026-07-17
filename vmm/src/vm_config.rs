@@ -10,7 +10,8 @@ use std::str::FromStr;
 use std::{fs, result};
 
 use api_types::{
-    ConsoleOutputMode, CpusConfig, HotplugMethod, NumaDistance, VhostMode, VirtQueueAffinity,
+    ConsoleOutputMode, CpusConfig, HotplugMethod, MemoryZoneConfig, NumaDistance, VhostMode,
+    VirtQueueAffinity,
 };
 use block::ImageType;
 pub use block::fcntl::LockGranularityChoice;
@@ -169,33 +170,6 @@ pub struct PciSegmentConfig {
     pub mmio32_aperture_weight: u32,
     #[serde(default = "default_pci_segment_aperture_weight")]
     pub mmio64_aperture_weight: u32,
-}
-
-#[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
-pub struct MemoryZoneConfig {
-    pub id: String,
-    pub size: u64,
-    #[serde(default)]
-    pub file: Option<PathBuf>,
-    #[serde(default)]
-    pub shared: bool,
-    #[serde(default)]
-    pub hugepages: bool,
-    #[serde(default)]
-    pub hugepage_size: Option<u64>,
-    #[serde(default)]
-    pub host_numa_node: Option<u32>,
-    #[serde(default)]
-    pub hotplug_size: Option<u64>,
-    #[serde(default)]
-    pub hotplugged_size: Option<u64>,
-    #[serde(default)]
-    pub prefault: bool,
-    #[serde(default)]
-    pub reserve: bool,
-    #[serde(default)]
-    pub mergeable: bool,
 }
 
 impl ApplyLandlock for MemoryZoneConfig {
