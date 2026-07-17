@@ -74,3 +74,25 @@ _Example_
 ```
 --balloon size=0,free_page_reporting=on
 ```
+
+## Statistics
+
+Cloud Hypervisor offers the virtio statistics queue whenever a balloon device
+is configured. The guest must negotiate `VIRTIO_BALLOON_F_STATS_VQ` before
+statistics can be queried.
+
+Use `ch-remote` to request a fresh sample from the guest:
+
+```
+ch-remote --api-socket=/path/to/api.sock balloon-stats
+```
+
+The request returns the current balloon size in bytes and the statistics
+provided by the guest. Memory quantities are expressed in bytes. Unsupported
+statistics are omitted from the response. In addition to the statistics from
+the virtio 1.4 specification, Cloud Hypervisor recognizes the Linux OOM,
+allocation stall, scan, and reclaim statistics.
+
+Statistics are collected on demand. If the VM is not running or the guest does
+not respond within one second, the request fails rather than returning a stale
+sample.

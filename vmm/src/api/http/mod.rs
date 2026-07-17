@@ -24,7 +24,9 @@ use serde_json::Error as SerdeError;
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
-use self::http_endpoint::{VmActionHandler, VmCreate, VmInfo, VmmPing, VmmShutdown};
+use self::http_endpoint::{
+    VmActionHandler, VmBalloonStats, VmCreate, VmInfo, VmmPing, VmmShutdown,
+};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::api::VmCoredump;
 use crate::api::{
@@ -233,6 +235,8 @@ pub static HTTP_ROUTES: LazyLock<HttpRoutes> = LazyLock::new(|| {
         endpoint!("/vm.boot"),
         Box::new(VmActionHandler::new(&VmBoot)),
     );
+    r.routes
+        .insert(endpoint!("/vm.balloon-stats"), Box::new(VmBalloonStats {}));
     r.routes.insert(
         endpoint!("/vm.counters"),
         Box::new(VmActionHandler::new(&VmCounters)),
