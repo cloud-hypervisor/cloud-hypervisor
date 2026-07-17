@@ -19,6 +19,7 @@ option_parser = { path = "../option_parser" }
 serde = { workspace = true, features = ["derive"] }
 serde_with = { workspace = true, features = ["macros"] }
 thiserror = { workspace = true }
+virtio-bindings = { workspace = true }
 virtio-devices = { path = "../virtio-devices" }
 
 [dev-dependencies]

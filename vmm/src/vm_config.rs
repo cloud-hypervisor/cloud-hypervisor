@@ -657,6 +657,28 @@ pub struct GenericVhostUserConfig {
     pub device_type: u32,
 }
 
+impl From<api_types::GenericVhostUserConfig> for GenericVhostUserConfig {
+    fn from(value: api_types::GenericVhostUserConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            socket: value.socket,
+            queue_sizes: value.queue_sizes,
+            device_type: value.device_type,
+        }
+    }
+}
+
+impl From<&GenericVhostUserConfig> for api_types::GenericVhostUserConfig {
+    fn from(value: &GenericVhostUserConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            socket: value.socket.clone(),
+            queue_sizes: value.queue_sizes.clone(),
+            device_type: value.device_type,
+        }
+    }
+}
+
 impl ApplyLandlock for GenericVhostUserConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         landlock.add_rule_with_access(&self.socket, "rw")?;

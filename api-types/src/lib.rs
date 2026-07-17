@@ -41,6 +41,9 @@ pub use vm_config::disk_config::VirtQueueAffinity;
 pub use vm_config::fs_config::{FsConfig, FsConfigParseError};
 #[cfg(feature = "fw_cfg")]
 pub use vm_config::fw_cfg_config::{FwCfgItem, FwCfgItemError, FwCfgItemList};
+pub use vm_config::generic_vhost_user_config::{
+    GenericVhostUserConfig, GenericVhostUserConfigParseError,
+};
 pub use vm_config::landlock_config::{LandlockConfig, LandlockConfigParseError};
 pub use vm_config::memory_config::{HotplugMethod, MemoryZoneConfig};
 pub use vm_config::net_config::{NetConfig, NetConfigParseError, ParseVhostModeError, VhostMode};
