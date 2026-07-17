@@ -827,6 +827,30 @@ pub struct DeviceConfig {
     pub x_exclude_mmap_bars: Vec<u64>,
 }
 
+impl From<api_types::DeviceConfig> for DeviceConfig {
+    fn from(value: api_types::DeviceConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            path: value.path,
+            fd: value.fd,
+            x_nv_gpudirect_clique: value.x_nv_gpudirect_clique,
+            x_exclude_mmap_bars: value.x_exclude_mmap_bars,
+        }
+    }
+}
+
+impl From<&DeviceConfig> for api_types::DeviceConfig {
+    fn from(value: &DeviceConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            path: value.path.clone(),
+            fd: value.fd,
+            x_nv_gpudirect_clique: value.x_nv_gpudirect_clique,
+            x_exclude_mmap_bars: value.x_exclude_mmap_bars.clone(),
+        }
+    }
+}
+
 fn deserialize_deviceconfig_fd<'de, D>(d: D) -> Result<Option<i32>, D::Error>
 where
     D: serde::Deserializer<'de>,

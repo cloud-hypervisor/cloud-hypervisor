@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) mod balloon_config;
 pub(crate) mod console_config;
 pub(crate) mod cpus_config;
+pub(crate) mod device_config;
 pub(crate) mod disk_config;
 pub(crate) mod fs_config;
 #[cfg(feature = "fw_cfg")]

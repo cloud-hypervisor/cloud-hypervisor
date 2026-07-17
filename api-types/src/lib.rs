@@ -31,6 +31,7 @@ pub use vm_config::cpus_config::{
     CoreScheduling, CpuAffinity, CpuFeatures, CpuTopology, CpuTopologyParseError, CpusConfig,
     CpusConfigParseError, ParseCoreSchedulingError,
 };
+pub use vm_config::device_config::{DeviceConfig, DeviceConfigParseError};
 pub use vm_config::disk_config::VirtQueueAffinity;
 pub use vm_config::fs_config::{FsConfig, FsConfigParseError};
 #[cfg(feature = "fw_cfg")]
