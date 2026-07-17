@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 pub(crate) mod console_config;
 pub(crate) mod cpus_config;
 pub(crate) mod disk_config;
+#[cfg(feature = "fw_cfg")]
+pub(crate) mod fw_cfg_config;
 pub(crate) mod memory_config;
 pub(crate) mod net_config;
 pub(crate) mod numa_config;

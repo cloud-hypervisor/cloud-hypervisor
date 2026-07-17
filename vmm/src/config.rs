@@ -10,6 +10,8 @@ use std::path::PathBuf;
 use std::result;
 use std::sync::LazyLock;
 
+#[cfg(feature = "fw_cfg")]
+use api_types::FwCfgItemList;
 #[cfg(feature = "pvmemcontrol")]
 use api_types::PvmemcontrolConfig;
 use api_types::{
@@ -2092,25 +2094,6 @@ impl FwCfgConfig {
     }
 }
 
-#[cfg(feature = "fw_cfg")]
-impl FwCfgItem {
-    pub fn parse(fw_cfg: &str) -> Result<Self> {
-        let mut parser = OptionParser::new();
-        parser.add("name").add("file").add("string");
-        parser.parse(fw_cfg).map_err(Error::ParseFwCfgItem)?;
-
-        let name =
-            parser
-                .get("name")
-                .ok_or(Error::ParseFwCfgItem(OptionParserError::InvalidValue(
-                    "missing FwCfgItem name".to_string(),
-                )))?;
-        let file = parser.get("file").map(PathBuf::from);
-        let string = parser.get("string");
-        Ok(FwCfgItem { name, file, string })
-    }
-}
-
 impl PmemConfig {
     pub const SYNTAX: &'static str = "Persistent memory parameters \
     \"file=<backing_file_path>,size=<persistent_memory_size>,iommu=on|off,\
@@ -3648,6 +3631,8 @@ mod unit_tests {
     use std::os::unix::io::AsRawFd;
 
     use api_types::{CpuTopology, HotplugMethod, VhostMode};
+    #[cfg(feature = "fw_cfg")]
+    use api_types::{FwCfgItem, FwCfgItemList};
     use net_util::MacAddr;
 
     use super::*;

@@ -31,6 +31,8 @@ pub use vm_config::cpus_config::{
     CpusConfigParseError, ParseCoreSchedulingError,
 };
 pub use vm_config::disk_config::VirtQueueAffinity;
+#[cfg(feature = "fw_cfg")]
+pub use vm_config::fw_cfg_config::{FwCfgItem, FwCfgItemError, FwCfgItemList};
 pub use vm_config::memory_config::{HotplugMethod, MemoryZoneConfig};
 pub use vm_config::net_config::{ParseVhostModeError, VhostMode};
 pub use vm_config::numa_config::NumaDistance;
