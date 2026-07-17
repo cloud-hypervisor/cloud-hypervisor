@@ -906,6 +906,26 @@ pub struct VsockConfig {
     pub socket: PathBuf,
 }
 
+impl From<api_types::VsockConfig> for VsockConfig {
+    fn from(value: api_types::VsockConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            cid: value.cid,
+            socket: value.socket,
+        }
+    }
+}
+
+impl From<&VsockConfig> for api_types::VsockConfig {
+    fn from(value: &VsockConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            cid: value.cid,
+            socket: value.socket.clone(),
+        }
+    }
+}
+
 impl ApplyLandlock for VsockConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         if let Some(parent) = self.socket.parent() {

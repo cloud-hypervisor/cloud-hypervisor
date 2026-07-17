@@ -20,6 +20,7 @@ pub(crate) mod pci_device_common_config;
 pub(crate) mod pmem_config;
 pub(crate) mod rng_config;
 pub(crate) mod rtc_config;
+pub(crate) mod vsock_config;
 
 #[cfg(feature = "pvmemcontrol")]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]

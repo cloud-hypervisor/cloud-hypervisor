@@ -44,6 +44,7 @@ pub use vm_config::pci_device_common_config::{
 pub use vm_config::pmem_config::{PmemConfig, PmemConfigParseError};
 pub use vm_config::rng_config::{RngConfig, RngConfigParseError};
 pub use vm_config::rtc_config::{RtcConfig, RtcConfigParseError};
+pub use vm_config::vsock_config::{VsockConfig, VsockConfigParseError};
 pub use vm_coredump::VmCoredumpData;
 pub use vm_remove_device::VmRemoveDeviceData;
 pub use vm_resize::VmResizeData;
