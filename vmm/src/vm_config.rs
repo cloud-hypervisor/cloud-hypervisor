@@ -1201,6 +1201,28 @@ pub struct IvshmemConfig {
 }
 
 #[cfg(feature = "ivshmem")]
+impl From<api_types::IvshmemConfig> for IvshmemConfig {
+    fn from(value: api_types::IvshmemConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            path: value.path,
+            size: value.size,
+        }
+    }
+}
+
+#[cfg(feature = "ivshmem")]
+impl From<&IvshmemConfig> for api_types::IvshmemConfig {
+    fn from(value: &IvshmemConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            path: value.path.clone(),
+            size: value.size,
+        }
+    }
+}
+
+#[cfg(feature = "ivshmem")]
 impl Default for IvshmemConfig {
     fn default() -> Self {
         Self {

@@ -44,6 +44,8 @@ pub use vm_config::fw_cfg_config::{FwCfgItem, FwCfgItemError, FwCfgItemList};
 pub use vm_config::generic_vhost_user_config::{
     GenericVhostUserConfig, GenericVhostUserConfigParseError,
 };
+#[cfg(feature = "ivshmem")]
+pub use vm_config::ivshmem_config::{IvshmemConfig, IvshmemConfigParseError};
 pub use vm_config::landlock_config::{LandlockConfig, LandlockConfigParseError};
 pub use vm_config::memory_config::{HotplugMethod, MemoryZoneConfig};
 pub use vm_config::net_config::{NetConfig, NetConfigParseError, ParseVhostModeError, VhostMode};

@@ -15,6 +15,8 @@ pub(crate) mod fs_config;
 #[cfg(feature = "fw_cfg")]
 pub(crate) mod fw_cfg_config;
 pub(crate) mod generic_vhost_user_config;
+#[cfg(feature = "ivshmem")]
+pub(crate) mod ivshmem_config;
 pub(crate) mod landlock_config;
 pub(crate) mod memory_config;
 pub(crate) mod net_config;
