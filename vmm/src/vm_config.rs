@@ -1335,6 +1335,32 @@ pub struct NumaConfig {
     pub device_id: Option<String>,
 }
 
+impl From<api_types::NumaConfig> for NumaConfig {
+    fn from(value: api_types::NumaConfig) -> Self {
+        Self {
+            guest_numa_id: value.guest_numa_id,
+            cpus: value.cpus,
+            distances: value.distances,
+            memory_zones: value.memory_zones,
+            pci_segments: value.pci_segments,
+            device_id: value.device_id,
+        }
+    }
+}
+
+impl From<&NumaConfig> for api_types::NumaConfig {
+    fn from(value: &NumaConfig) -> Self {
+        Self {
+            guest_numa_id: value.guest_numa_id,
+            cpus: value.cpus.clone(),
+            distances: value.distances.clone(),
+            memory_zones: value.memory_zones.clone(),
+            pci_segments: value.pci_segments.clone(),
+            device_id: value.device_id.clone(),
+        }
+    }
+}
+
 /// Errors describing a misconfigured payload, i.e., a configuration that
 /// can't be booted by Cloud Hypervisor.
 ///
