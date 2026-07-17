@@ -408,6 +408,56 @@ pub struct DiskConfig {
     pub lock_granularity: LockGranularityChoice,
 }
 
+impl From<api_types::DiskConfig> for DiskConfig {
+    fn from(value: api_types::DiskConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            path: value.path,
+            readonly: value.readonly,
+            direct: value.direct,
+            num_queues: value.num_queues,
+            queue_size: value.queue_size,
+            vhost_user: value.vhost_user,
+            vhost_socket: value.vhost_socket,
+            rate_limit_group: value.rate_limit_group,
+            rate_limiter_config: value.rate_limiter_config,
+            disable_io_uring: value.disable_io_uring,
+            disable_aio: value.disable_aio,
+            serial: value.serial,
+            queue_affinity: value.queue_affinity,
+            backing_files: value.backing_files,
+            sparse: value.sparse,
+            image_type: value.image_type,
+            lock_granularity: value.lock_granularity,
+        }
+    }
+}
+
+impl From<&DiskConfig> for api_types::DiskConfig {
+    fn from(value: &DiskConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            path: value.path.clone(),
+            readonly: value.readonly,
+            direct: value.direct,
+            num_queues: value.num_queues,
+            queue_size: value.queue_size,
+            vhost_user: value.vhost_user,
+            vhost_socket: value.vhost_socket.clone(),
+            rate_limit_group: value.rate_limit_group.clone(),
+            rate_limiter_config: value.rate_limiter_config,
+            disable_io_uring: value.disable_io_uring,
+            disable_aio: value.disable_aio,
+            serial: value.serial.clone(),
+            queue_affinity: value.queue_affinity.clone(),
+            backing_files: value.backing_files,
+            sparse: value.sparse,
+            image_type: value.image_type,
+            lock_granularity: value.lock_granularity,
+        }
+    }
+}
+
 impl ApplyLandlock for DiskConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         if let Some(path) = &self.path {
