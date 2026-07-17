@@ -27,7 +27,6 @@ pub use restore::{
 use serde::Deserialize;
 #[cfg(feature = "pvmemcontrol")]
 pub use vm_config::PvmemcontrolConfig;
-pub use vm_config::VmParams;
 pub use vm_config::balloon_config::{BalloonConfig, BalloonConfigParseError};
 pub use vm_config::console_config::{
     CommonConsoleConfig, CommonConsoleConfigParseError, ConsoleConfig, ConsoleConfigParseError,
@@ -73,6 +72,7 @@ pub use vm_config::tpm_config::{TpmConfig, TpmConfigParseError};
 pub use vm_config::user_device_config::{UserDeviceConfig, UserDeviceConfigParseError};
 pub use vm_config::vdpa_config::{VdpaConfig, VdpaConfigParseError};
 pub use vm_config::vsock_config::{VsockConfig, VsockConfigParseError};
+pub use vm_config::{VmConfig, VmConfigParseError, VmParams};
 pub use vm_coredump::VmCoredumpData;
 pub use vm_remove_device::VmRemoveDeviceData;
 pub use vm_resize::VmResizeData;

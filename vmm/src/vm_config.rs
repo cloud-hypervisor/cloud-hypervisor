@@ -24,6 +24,7 @@ use thiserror::Error;
 use virtio_devices::RateLimiterConfig;
 
 use crate::Landlock;
+use crate::config::ValidationError;
 use crate::landlock::LandlockError;
 
 pub type LandlockResult<T> = result::Result<T, LandlockError>;
@@ -1693,6 +1694,187 @@ pub struct VmConfig {
     pub landlock_rules: Option<Box<[LandlockConfig]>>,
     #[cfg(feature = "ivshmem")]
     pub ivshmem: Option<IvshmemConfig>,
+}
+
+impl TryFrom<api_types::VmConfig> for VmConfig {
+    type Error = ValidationError;
+
+    fn try_from(value: api_types::VmConfig) -> Result<Self, Self::Error> {
+        let mut vm_config = Self {
+            cpus: value.cpus,
+            memory: value.memory.into(),
+            payload: value.payload.map(Into::into),
+            rate_limit_groups: value.rate_limit_groups.map(|configs| {
+                configs
+                    .into_vec()
+                    .into_iter()
+                    .map(Into::into)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice()
+            }),
+            disks: value
+                .disks
+                .map(|configs| configs.into_iter().map(Into::into).collect()),
+            net: value
+                .net
+                .map(|configs| configs.into_iter().map(Into::into).collect()),
+            rng: value.rng.into(),
+            balloon: value.balloon.map(Into::into),
+            generic_vhost_user: value
+                .generic_vhost_user
+                .map(|configs| configs.into_iter().map(Into::into).collect()),
+            fs: value
+                .fs
+                .map(|configs| configs.into_iter().map(Into::into).collect()),
+            pmem: value
+                .pmem
+                .map(|configs| configs.into_iter().map(Into::into).collect()),
+            serial: value.serial.into(),
+            console: value.console.into(),
+            #[cfg(target_arch = "x86_64")]
+            debug_console: value.debug_console.into(),
+            devices: value
+                .devices
+                .map(|configs| configs.into_iter().map(Into::into).collect()),
+            user_devices: value
+                .user_devices
+                .map(|configs| configs.into_iter().map(Into::into).collect()),
+            vdpa: value
+                .vdpa
+                .map(|configs| configs.into_iter().map(Into::into).collect()),
+            vsock: value.vsock.map(Into::into),
+            #[cfg(feature = "pvmemcontrol")]
+            pvmemcontrol: value.pvmemcontrol,
+            pvpanic: value.pvpanic,
+            iommu: value.iommu,
+            numa: value.numa.map(|configs| {
+                configs
+                    .into_vec()
+                    .into_iter()
+                    .map(Into::into)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice()
+            }),
+            watchdog: value.watchdog,
+            rtc: value.rtc.map(Into::into),
+            #[cfg(feature = "guest_debug")]
+            gdb: value.gdb,
+            pci_segments: value.pci_segments.map(|configs| {
+                configs
+                    .into_vec()
+                    .into_iter()
+                    .map(Into::into)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice()
+            }),
+            platform: value.platform.map(Into::into),
+            tpm: value.tpm.map(Into::into),
+            preserved_fds: None,
+            landlock_enable: value.landlock_enable,
+            landlock_rules: value.landlock_rules.map(|configs| {
+                configs
+                    .into_vec()
+                    .into_iter()
+                    .map(Into::into)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice()
+            }),
+            #[cfg(feature = "ivshmem")]
+            ivshmem: value.ivshmem.map(Into::into),
+        };
+        vm_config.validate()?;
+        Ok(vm_config)
+    }
+}
+
+impl From<&VmConfig> for api_types::VmConfig {
+    fn from(value: &VmConfig) -> Self {
+        Self {
+            cpus: value.cpus.clone(),
+            memory: (&value.memory).into(),
+            payload: value.payload.as_ref().map(Into::into),
+            rate_limit_groups: value.rate_limit_groups.as_ref().map(|configs| {
+                configs
+                    .iter()
+                    .map(Into::into)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice()
+            }),
+            disks: value
+                .disks
+                .as_ref()
+                .map(|configs| configs.iter().map(Into::into).collect()),
+            net: value
+                .net
+                .as_ref()
+                .map(|configs| configs.iter().map(Into::into).collect()),
+            rng: (&value.rng).into(),
+            balloon: value.balloon.as_ref().map(Into::into),
+            generic_vhost_user: value
+                .generic_vhost_user
+                .as_ref()
+                .map(|configs| configs.iter().map(Into::into).collect()),
+            fs: value
+                .fs
+                .as_ref()
+                .map(|configs| configs.iter().map(Into::into).collect()),
+            pmem: value
+                .pmem
+                .as_ref()
+                .map(|configs| configs.iter().map(Into::into).collect()),
+            serial: (&value.serial).into(),
+            console: (&value.console).into(),
+            #[cfg(target_arch = "x86_64")]
+            debug_console: (&value.debug_console).into(),
+            devices: value
+                .devices
+                .as_ref()
+                .map(|configs| configs.iter().map(Into::into).collect()),
+            user_devices: value
+                .user_devices
+                .as_ref()
+                .map(|configs| configs.iter().map(Into::into).collect()),
+            vdpa: value
+                .vdpa
+                .as_ref()
+                .map(|configs| configs.iter().map(Into::into).collect()),
+            vsock: value.vsock.as_ref().map(Into::into),
+            #[cfg(feature = "pvmemcontrol")]
+            pvmemcontrol: value.pvmemcontrol.clone(),
+            pvpanic: value.pvpanic,
+            iommu: value.iommu,
+            numa: value.numa.as_ref().map(|configs| {
+                configs
+                    .iter()
+                    .map(Into::into)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice()
+            }),
+            watchdog: value.watchdog,
+            rtc: value.rtc.as_ref().map(Into::into),
+            #[cfg(feature = "guest_debug")]
+            gdb: value.gdb,
+            pci_segments: value.pci_segments.as_ref().map(|configs| {
+                configs
+                    .iter()
+                    .map(Into::into)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice()
+            }),
+            platform: value.platform.as_ref().map(Into::into),
+            tpm: value.tpm.as_ref().map(Into::into),
+            landlock_enable: value.landlock_enable,
+            landlock_rules: value.landlock_rules.as_ref().map(|configs| {
+                configs
+                    .iter()
+                    .map(Into::into)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice()
+            }),
+            #[cfg(feature = "ivshmem")]
+            ivshmem: value.ivshmem.as_ref().map(Into::into),
+        }
+    }
 }
 
 impl VmConfig {
