@@ -13,7 +13,7 @@
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 
-use crate::async_io::{AsyncIo, AsyncIoError};
+use crate::async_io::AsyncIo;
 
 fn next_completion(async_io: &mut dyn AsyncIo) -> (u64, i32) {
     let completion = async_io.next_completed_request().expect("No completion");
@@ -67,8 +67,7 @@ pub fn test_punch_hole(async_io: &mut dyn AsyncIo, file: &mut File) {
 }
 
 /// Tests writing zeroes to a 512 KB region inside a 4 MB file and verifying
-/// surrounding data is preserved.  Gracefully skips when the filesystem does
-/// not support `FALLOC_FL_ZERO_RANGE`.
+/// surrounding data is preserved.
 pub fn test_write_zeroes(async_io: &mut dyn AsyncIo, file: &mut File) {
     // Write 4MB of data
     let data = vec![0xBB; 4 * 1024 * 1024];
@@ -78,17 +77,7 @@ pub fn test_write_zeroes(async_io: &mut dyn AsyncIo, file: &mut File) {
     // Write zeros in the middle (512KB at offset 2MB)
     let offset = 2 * 1024 * 1024;
     let length = 512 * 1024;
-    let write_zeroes_result = async_io.write_zeroes(offset, length, 2);
-
-    // FALLOC_FL_ZERO_RANGE might not be supported on all filesystems (e.g., tmpfs)
-    // If it fails with ENOTSUP, skip the test
-    if let Err(AsyncIoError::WriteZeroes(ref e)) = write_zeroes_result
-        && (e.raw_os_error() == Some(libc::EOPNOTSUPP) || e.raw_os_error() == Some(libc::ENOTSUP))
-    {
-        eprintln!("Skipping test_write_zeroes: filesystem doesn't support FALLOC_FL_ZERO_RANGE");
-        return;
-    }
-    write_zeroes_result.unwrap();
+    async_io.write_zeroes(offset, length, 2).unwrap();
 
     // Check completion
     let (user_data, result) = next_completion(async_io);
