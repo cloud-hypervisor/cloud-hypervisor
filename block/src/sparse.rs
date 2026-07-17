@@ -105,3 +105,55 @@ pub(crate) fn write_zeroes(
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use std::ffi::CString;
+    use std::fs::File;
+    use std::os::unix::fs::FileExt;
+    use std::os::unix::io::FromRawFd;
+
+    use super::*;
+
+    // Create a memfd backed file. memfd uses the same backing as tmpfs,
+    // so fallocate with ZERO_RANGE and PUNCH_HOLE returns EOPNOTSUPP,
+    // exercising the fallback path.
+    fn memfd_file() -> AlignedFile {
+        let name = CString::new("ch_sparse_test").unwrap();
+        // SAFETY: memfd_create is a safe syscall that returns a new fd.
+        let fd = unsafe { libc::memfd_create(name.as_ptr(), 0) };
+        assert!(fd >= 0, "memfd_create failed");
+        // SAFETY: fd is a valid open file descriptor we just created.
+        let f = unsafe { File::from_raw_fd(fd) };
+        AlignedFile::new(f, false)
+    }
+
+    #[test]
+    fn write_zeroes_fallback() {
+        let mut f = memfd_file();
+        f.file().write_all_at(&vec![0xAA; 4096], 0).unwrap();
+
+        write_zeroes(&mut f, false, 512, 1024).unwrap();
+
+        let mut buf = vec![0xFFu8; 4096];
+        f.file().read_exact_at(&mut buf, 0).unwrap();
+
+        assert!(buf[..512].iter().all(|&b| b == 0xAA));
+        assert!(buf[512..1536].iter().all(|&b| b == 0));
+        assert!(buf[1536..].iter().all(|&b| b == 0xAA));
+    }
+
+    #[test]
+    fn punch_hole_fallback() {
+        let mut f = memfd_file();
+        f.file().write_all_at(&vec![0xBB; 4096], 0).unwrap();
+
+        punch_hole(&mut f, false, 1024, 2048).unwrap();
+
+        let mut buf = vec![0xFFu8; 4096];
+        f.file().read_exact_at(&mut buf, 0).unwrap();
+
+        assert!(buf[..1024].iter().all(|&b| b == 0xBB));
+        assert!(buf[1024..3072].iter().all(|&b| b == 0));
+        assert!(buf[3072..].iter().all(|&b| b == 0xBB));
+    }
+}
