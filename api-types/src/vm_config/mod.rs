@@ -16,6 +16,7 @@ pub(crate) mod memory_config;
 pub(crate) mod net_config;
 pub(crate) mod numa_config;
 pub(crate) mod pci_device_common_config;
+pub(crate) mod pmem_config;
 pub(crate) mod rng_config;
 pub(crate) mod rtc_config;
 

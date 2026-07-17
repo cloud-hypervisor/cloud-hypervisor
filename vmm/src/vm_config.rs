@@ -632,6 +632,28 @@ pub struct PmemConfig {
     pub discard_writes: bool,
 }
 
+impl From<api_types::PmemConfig> for PmemConfig {
+    fn from(value: api_types::PmemConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            file: value.file,
+            size: value.size,
+            discard_writes: value.discard_writes,
+        }
+    }
+}
+
+impl From<&PmemConfig> for api_types::PmemConfig {
+    fn from(value: &PmemConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            file: value.file.clone(),
+            size: value.size,
+            discard_writes: value.discard_writes,
+        }
+    }
+}
+
 impl ApplyLandlock for PmemConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         let access = if self.discard_writes { "r" } else { "rw" };
