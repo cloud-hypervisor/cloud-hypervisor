@@ -30,6 +30,8 @@ pub use vm_config::console_config::{
     CommonConsoleConfig, CommonConsoleConfigParseError, ConsoleConfig, ConsoleConfigParseError,
     ConsoleOutputMode, SerialConfig, SerialConfigParseError,
 };
+#[cfg(target_arch = "x86_64")]
+pub use vm_config::console_config::{DebugConsoleConfig, DebugConsoleConfigParseError};
 pub use vm_config::cpus_config::{
     CoreScheduling, CpuAffinity, CpuFeatures, CpuTopology, CpuTopologyParseError, CpusConfig,
     CpusConfigParseError, ParseCoreSchedulingError,

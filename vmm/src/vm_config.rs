@@ -862,6 +862,28 @@ pub struct DebugConsoleConfig {
 }
 
 #[cfg(target_arch = "x86_64")]
+impl From<api_types::DebugConsoleConfig> for DebugConsoleConfig {
+    fn from(value: api_types::DebugConsoleConfig) -> Self {
+        Self {
+            file: value.file,
+            mode: value.mode,
+            iobase: value.iobase,
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+impl From<&DebugConsoleConfig> for api_types::DebugConsoleConfig {
+    fn from(value: &DebugConsoleConfig) -> Self {
+        Self {
+            file: value.file.clone(),
+            mode: value.mode.clone(),
+            iobase: value.iobase,
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
 impl Default for DebugConsoleConfig {
     fn default() -> Self {
         Self {

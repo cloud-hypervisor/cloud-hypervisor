@@ -12,6 +12,7 @@ pvmemcontrol = []
 
 [dependencies]
 arch = { path = "../arch" }
+devices = { path = "../devices" }
 log = { workspace = true }
 net_util = { path = "../net_util" }
 option_parser = { path = "../option_parser" }

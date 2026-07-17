@@ -6,6 +6,8 @@
 use std::error::Error;
 use std::path::PathBuf;
 
+#[cfg(target_arch = "x86_64")]
+use devices::debug_console;
 use option_parser::{OptionParser, OptionParserError};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -188,6 +190,95 @@ impl Default for ConsoleConfig {
             },
             pci_common: PciDeviceCommonConfig::default(),
         }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[serde_with::skip_serializing_none]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct DebugConsoleConfig {
+    #[serde(default)]
+    pub file: Option<PathBuf>,
+    pub mode: ConsoleOutputMode,
+    /// Optionally dedicated I/O-port, if the default port should not be used.
+    pub iobase: Option<u16>,
+}
+
+#[cfg(target_arch = "x86_64")]
+impl Default for DebugConsoleConfig {
+    fn default() -> Self {
+        Self {
+            file: None,
+            mode: ConsoleOutputMode::Off,
+            iobase: Some(debug_console::DEFAULT_PORT as u16),
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[derive(Debug, Error)]
+pub enum DebugConsoleConfigParseError {
+    #[error("Failed to parse debug console configuration")]
+    Parse(#[source] OptionParserError),
+    #[error("Debug console file path is missing")]
+    FileMissing,
+    #[error("Debug console output mode is missing or invalid")]
+    InvalidMode,
+    #[error("Invalid debug console I/O port: {0}")]
+    InvalidIoPortHex(String),
+}
+
+#[cfg(target_arch = "x86_64")]
+impl DebugConsoleConfig {
+    pub fn parse(debug_console_ops: &str) -> Result<Self, DebugConsoleConfigParseError> {
+        let mut parser = OptionParser::new();
+        parser
+            .add_valueless("off")
+            .add_valueless("pty")
+            .add_valueless("tty")
+            .add_valueless("null")
+            .add("file")
+            .add("iobase");
+        parser
+            .parse(debug_console_ops)
+            .map_err(DebugConsoleConfigParseError::Parse)?;
+
+        let mut file: Option<PathBuf> = None;
+        let mut iobase: Option<u16> = None;
+        let mut mode: ConsoleOutputMode = ConsoleOutputMode::Off;
+
+        if parser.is_set("off") {
+        } else if parser.is_set("pty") {
+            mode = ConsoleOutputMode::Pty;
+        } else if parser.is_set("tty") {
+            mode = ConsoleOutputMode::Tty;
+        } else if parser.is_set("null") {
+            mode = ConsoleOutputMode::Null;
+        } else if parser.is_set("file") {
+            mode = ConsoleOutputMode::File;
+            file = Some(PathBuf::from(
+                parser
+                    .get("file")
+                    .ok_or(DebugConsoleConfigParseError::FileMissing)?,
+            ));
+        } else {
+            return Err(DebugConsoleConfigParseError::InvalidMode);
+        }
+
+        if parser.is_set("iobase")
+            && let Some(iobase_opt) = parser.get("iobase")
+        {
+            if !iobase_opt.starts_with("0x") {
+                return Err(DebugConsoleConfigParseError::InvalidIoPortHex(
+                    iobase_opt.to_owned(),
+                ));
+            }
+            iobase = Some(u16::from_str_radix(&iobase_opt[2..], 16).map_err(|_| {
+                DebugConsoleConfigParseError::InvalidIoPortHex(iobase_opt.to_owned())
+            })?);
+        }
+
+        Ok(Self { file, mode, iobase })
     }
 }
 
