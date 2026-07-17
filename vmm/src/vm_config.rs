@@ -589,6 +589,30 @@ pub struct FsConfig {
     pub queue_size: u16,
 }
 
+impl From<api_types::FsConfig> for FsConfig {
+    fn from(value: api_types::FsConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            tag: value.tag,
+            socket: value.socket,
+            num_queues: value.num_queues,
+            queue_size: value.queue_size,
+        }
+    }
+}
+
+impl From<&FsConfig> for api_types::FsConfig {
+    fn from(value: &FsConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            tag: value.tag.clone(),
+            socket: value.socket.clone(),
+            num_queues: value.num_queues,
+            queue_size: value.queue_size,
+        }
+    }
+}
+
 pub fn default_fsconfig_num_queues() -> usize {
     1
 }
