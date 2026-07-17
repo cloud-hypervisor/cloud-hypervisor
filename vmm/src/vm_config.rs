@@ -871,6 +871,24 @@ pub struct UserDeviceConfig {
     pub socket: PathBuf,
 }
 
+impl From<api_types::UserDeviceConfig> for UserDeviceConfig {
+    fn from(value: api_types::UserDeviceConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            socket: value.socket,
+        }
+    }
+}
+
+impl From<&UserDeviceConfig> for api_types::UserDeviceConfig {
+    fn from(value: &UserDeviceConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            socket: value.socket.clone(),
+        }
+    }
+}
+
 impl ApplyLandlock for UserDeviceConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         landlock.add_rule_with_access(&self.socket, "rw")?;
