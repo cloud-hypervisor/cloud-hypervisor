@@ -6,7 +6,6 @@
 
 use std::os::unix::io::AsRawFd;
 
-use libc::{FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE};
 use vmm_sys_util::eventfd::EventFd;
 
 use super::{operation_is_aligned, run_unaligned_operation};
@@ -14,7 +13,7 @@ use crate::async_io::{
     AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, UringDataIo,
 };
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
-use crate::sparse::{blkdiscard, blkzeroout};
+use crate::sparse::{punch_hole, write_zeroes};
 use crate::{AlignedFile, is_block_device};
 
 pub(crate) struct RawAsync {
@@ -119,44 +118,27 @@ impl AsyncIo for RawAsync {
     }
 
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
-        // Some block devices don't support fallocate(). Use ioctl instead. The assumption is that
-        // this happens rarely and we don't need to introduce unnecessary complexity by submitting
-        // a fallocate request, reaping ENOTSUPP in the completion routine, and reissuing the
-        // request with an ioctl.
-        if self.is_block_device {
-            blkdiscard(self.raw_file.as_raw_fd(), offset, length)
-                .map_err(AsyncIoError::PunchHole)?;
-            // Deliver the completion through the normal io_uring path by
-            // queuing a NOP carrying `user_data`. The registered eventfd will
-            // fire when it completes, just like any other request.
-            return self
-                .data_io
-                .submit_nop(user_data)
-                .map_err(AsyncIoError::PunchHole);
-        }
-
-        let mode = FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE;
-
+        // Run synchronously rather than submitting a fallocate request through
+        // the ring. This avoids reaping ENOTSUPP in the completion routine and
+        // reissuing the request, and lets the sparse helper handle the ioctl
+        // path for block devices and the write fallback for unsupported
+        // filesystems.
+        punch_hole(&mut self.raw_file, self.is_block_device, offset, length)
+            .map_err(AsyncIoError::PunchHole)?;
+        // Deliver the completion through the normal io_uring path by
+        // queuing a NOP carrying `user_data`. The registered eventfd will
+        // fire when it completes, just like any other request.
         self.data_io
-            .submit_fallocate(self.raw_file.as_raw_fd(), offset, length, mode, user_data)
+            .submit_nop(user_data)
             .map_err(AsyncIoError::PunchHole)
     }
 
     fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
         // Same rationale as punch_hole().
-        if self.is_block_device {
-            blkzeroout(self.raw_file.as_raw_fd(), offset, length)
-                .map_err(AsyncIoError::WriteZeroes)?;
-            return self
-                .data_io
-                .submit_nop(user_data)
-                .map_err(AsyncIoError::WriteZeroes);
-        }
-
-        let mode = FALLOC_FL_ZERO_RANGE | FALLOC_FL_KEEP_SIZE;
-
+        write_zeroes(&mut self.raw_file, self.is_block_device, offset, length)
+            .map_err(AsyncIoError::WriteZeroes)?;
         self.data_io
-            .submit_fallocate(self.raw_file.as_raw_fd(), offset, length, mode, user_data)
+            .submit_nop(user_data)
             .map_err(AsyncIoError::WriteZeroes)
     }
 }

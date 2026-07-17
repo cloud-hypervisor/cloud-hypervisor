@@ -94,13 +94,8 @@ impl AsyncIo for RawAio {
         // Linux AIO has no IOCB command for fallocate, so perform the
         // operation synchronously and signal completion via the completion
         // list, matching the pattern used by the sync backend (RawSync).
-        punch_hole(
-            self.raw_file.as_raw_fd(),
-            self.is_block_device,
-            offset,
-            length,
-        )
-        .map_err(AsyncIoError::PunchHole)?;
+        punch_hole(&mut self.raw_file, self.is_block_device, offset, length)
+            .map_err(AsyncIoError::PunchHole)?;
         self.data_io
             .inject_completion(AsyncIoCompletion::new(user_data, 0, None));
 
@@ -109,13 +104,8 @@ impl AsyncIo for RawAio {
 
     fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
         // Same as punch_hole().
-        write_zeroes(
-            self.raw_file.as_raw_fd(),
-            self.is_block_device,
-            offset,
-            length,
-        )
-        .map_err(AsyncIoError::WriteZeroes)?;
+        write_zeroes(&mut self.raw_file, self.is_block_device, offset, length)
+            .map_err(AsyncIoError::WriteZeroes)?;
         self.data_io
             .inject_completion(AsyncIoCompletion::new(user_data, 0, None));
 
