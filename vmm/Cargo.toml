@@ -33,12 +33,13 @@ mshv = [
 ]
 pvmemcontrol = ["api-types/pvmemcontrol", "devices/pvmemcontrol"]
 sev_snp = [
+  "api-types/sev_snp",
   "arch/sev_snp",
   "hypervisor/sev_snp",
   "igvm",
   "virtio-devices/sev_snp",
 ]
-tdx = ["arch/tdx", "hypervisor/tdx"]
+tdx = ["api-types/tdx", "arch/tdx", "hypervisor/tdx"]
 tracing = ["tracer/tracing"]
 
 [dependencies]

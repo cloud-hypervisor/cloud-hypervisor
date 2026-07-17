@@ -99,6 +99,58 @@ pub struct PlatformConfig {
     pub vfio_p2p_dma: bool,
 }
 
+impl From<api_types::PlatformConfig> for PlatformConfig {
+    fn from(value: api_types::PlatformConfig) -> Self {
+        Self {
+            num_pci_segments: value.num_pci_segments,
+            iommu_segments: value.iommu_segments,
+            iommu_address_width_bits: value.iommu_address_width_bits,
+            system_serial_number: value.system_serial_number,
+            system_uuid: value.system_uuid,
+            oem_strings: value.oem_strings,
+            system_manufacturer: value.system_manufacturer,
+            system_product_name: value.system_product_name,
+            system_version: value.system_version,
+            system_family: value.system_family,
+            system_sku_number: value.system_sku_number,
+            chassis_asset_tag: value.chassis_asset_tag,
+            #[cfg(feature = "tdx")]
+            tdx: value.tdx,
+            #[cfg(feature = "sev_snp")]
+            sev_snp: value.sev_snp,
+            iommufd: value.iommufd,
+            iommufd_fd: value.iommufd_fd,
+            vfio_p2p_dma: value.vfio_p2p_dma,
+        }
+    }
+}
+
+impl From<&PlatformConfig> for api_types::PlatformConfig {
+    fn from(value: &PlatformConfig) -> Self {
+        Self {
+            num_pci_segments: value.num_pci_segments,
+            iommu_segments: value.iommu_segments.clone(),
+            iommu_address_width_bits: value.iommu_address_width_bits,
+            system_serial_number: value.system_serial_number.clone(),
+            system_uuid: value.system_uuid.clone(),
+            oem_strings: value.oem_strings.clone(),
+            system_manufacturer: value.system_manufacturer.clone(),
+            system_product_name: value.system_product_name.clone(),
+            system_version: value.system_version.clone(),
+            system_family: value.system_family.clone(),
+            system_sku_number: value.system_sku_number.clone(),
+            chassis_asset_tag: value.chassis_asset_tag.clone(),
+            #[cfg(feature = "tdx")]
+            tdx: value.tdx,
+            #[cfg(feature = "sev_snp")]
+            sev_snp: value.sev_snp,
+            iommufd: value.iommufd,
+            iommufd_fd: value.iommufd_fd,
+            vfio_p2p_dma: value.vfio_p2p_dma,
+        }
+    }
+}
+
 #[cfg(target_arch = "x86_64")]
 impl PlatformConfig {
     /// Returns `None` if no SMBIOS-relevant platform fields are set, otherwise

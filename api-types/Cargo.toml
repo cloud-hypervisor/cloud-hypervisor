@@ -9,6 +9,8 @@ version = "0.1.0"
 [features]
 fw_cfg = []
 pvmemcontrol = []
+sev_snp = []
+tdx = []
 
 [dependencies]
 arch = { path = "../arch" }

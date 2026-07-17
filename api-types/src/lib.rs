@@ -52,6 +52,7 @@ pub use vm_config::pci_device_common_config::{
     PciDeviceCommonConfig, PciDeviceCommonConfigParseError,
 };
 pub use vm_config::pci_segment_config::{PciSegmentConfig, PciSegmentConfigParseError};
+pub use vm_config::platform_config::{PlatformConfig, PlatformConfigParseError};
 pub use vm_config::pmem_config::{PmemConfig, PmemConfigParseError};
 pub use vm_config::rate_limiter_group_config::{
     RateLimiterGroupConfig, RateLimiterGroupConfigParseError,
