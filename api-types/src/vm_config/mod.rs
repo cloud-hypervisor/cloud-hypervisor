@@ -6,6 +6,7 @@
 #[cfg(feature = "pvmemcontrol")]
 use serde::{Deserialize, Serialize};
 
+pub(crate) mod balloon_config;
 pub(crate) mod console_config;
 pub(crate) mod cpus_config;
 pub(crate) mod disk_config;

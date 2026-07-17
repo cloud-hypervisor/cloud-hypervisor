@@ -555,6 +555,28 @@ pub struct BalloonConfig {
     pub free_page_reporting: bool,
 }
 
+impl From<api_types::BalloonConfig> for BalloonConfig {
+    fn from(value: api_types::BalloonConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            size: value.size,
+            deflate_on_oom: value.deflate_on_oom,
+            free_page_reporting: value.free_page_reporting,
+        }
+    }
+}
+
+impl From<&BalloonConfig> for api_types::BalloonConfig {
+    fn from(value: &BalloonConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            size: value.size,
+            deflate_on_oom: value.deflate_on_oom,
+            free_page_reporting: value.free_page_reporting,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct FsConfig {
     #[serde(flatten)]

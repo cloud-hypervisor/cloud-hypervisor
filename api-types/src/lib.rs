@@ -25,6 +25,7 @@ pub use restore::{
 use serde::Deserialize;
 #[cfg(feature = "pvmemcontrol")]
 pub use vm_config::PvmemcontrolConfig;
+pub use vm_config::balloon_config::{BalloonConfig, BalloonConfigParseError};
 pub use vm_config::console_config::ConsoleOutputMode;
 pub use vm_config::cpus_config::{
     CoreScheduling, CpuAffinity, CpuFeatures, CpuTopology, CpuTopologyParseError, CpusConfig,
