@@ -15,6 +15,7 @@ pub(crate) mod memory_config;
 pub(crate) mod net_config;
 pub(crate) mod numa_config;
 pub(crate) mod pci_device_common_config;
+pub(crate) mod rtc_config;
 
 #[cfg(feature = "pvmemcontrol")]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]

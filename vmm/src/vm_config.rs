@@ -500,6 +500,22 @@ pub struct RtcConfig {
     pub pci_common: PciDeviceCommonConfig,
 }
 
+impl From<api_types::RtcConfig> for RtcConfig {
+    fn from(value: api_types::RtcConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+        }
+    }
+}
+
+impl From<&RtcConfig> for api_types::RtcConfig {
+    fn from(value: &RtcConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+        }
+    }
+}
+
 impl ApplyLandlock for RngConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         // Rng Path only need read access
