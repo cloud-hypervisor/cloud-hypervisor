@@ -1243,6 +1243,24 @@ pub struct LandlockConfig {
     pub access: String,
 }
 
+impl From<api_types::LandlockConfig> for LandlockConfig {
+    fn from(value: api_types::LandlockConfig) -> Self {
+        Self {
+            path: value.path,
+            access: value.access,
+        }
+    }
+}
+
+impl From<&LandlockConfig> for api_types::LandlockConfig {
+    fn from(value: &LandlockConfig) -> Self {
+        Self {
+            path: value.path.clone(),
+            access: value.access.clone(),
+        }
+    }
+}
+
 impl ApplyLandlock for LandlockConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         landlock.add_rule_with_access(&self.path, self.access.clone().as_str())?;
