@@ -524,6 +524,24 @@ impl ApplyLandlock for RngConfig {
     }
 }
 
+impl From<api_types::RngConfig> for RngConfig {
+    fn from(value: api_types::RngConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            src: value.src,
+        }
+    }
+}
+
+impl From<&RngConfig> for api_types::RngConfig {
+    fn from(value: &RngConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            src: value.src.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct BalloonConfig {
     #[serde(flatten)]
