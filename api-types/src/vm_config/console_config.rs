@@ -47,12 +47,9 @@ pub struct CommonConsoleConfig {
 }
 
 impl CommonConsoleConfig {
-    #[expect(unused, reason = "will be used in a follow-up commit")]
     const VALUELESS_OPTIONS: &[&str] = &["off", "pty", "tty", "null"];
-    #[expect(unused, reason = "will be used in a follow-up commit")]
     const VALUE_OPTIONS: &[&str] = &["file", "socket"];
 
-    #[expect(unused, reason = "will be used in a follow-up commit")]
     fn parse<T>(console: &str) -> Result<Self, T>
     where
         T: Error + From<CommonConsoleConfigParseError> + From<OptionParserError>,
@@ -92,5 +89,49 @@ impl CommonConsoleConfig {
         }
 
         Ok(Self { mode, file, socket })
+    }
+}
+
+/// Configuration for a legacy serial console device.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct SerialConfig {
+    #[serde(flatten)]
+    pub common: CommonConsoleConfig,
+}
+
+impl SerialConfig {
+    pub const SYNTAX: &str = "Control serial port: \"off|null|pty|tty|file=<path>|socket=<path>\"";
+
+    pub fn parse(serial: &str) -> Result<Self, SerialConfigParseError> {
+        let mut parser = OptionParser::new();
+        parser
+            .add_all_valueless(CommonConsoleConfig::VALUELESS_OPTIONS)
+            .add_all(CommonConsoleConfig::VALUE_OPTIONS);
+        parser
+            .parse(serial)
+            .map_err(SerialConfigParseError::Parse)?;
+
+        let common = CommonConsoleConfig::parse::<SerialConfigParseError>(serial)?;
+        Ok(Self { common })
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum SerialConfigParseError {
+    #[error("Failed to parse serial configuration")]
+    Parse(#[from] OptionParserError),
+    #[error("Failed to parse common console configuration")]
+    CommonConsole(#[from] CommonConsoleConfigParseError),
+}
+
+impl Default for SerialConfig {
+    fn default() -> Self {
+        Self {
+            common: CommonConsoleConfig {
+                file: None,
+                mode: ConsoleOutputMode::Null,
+                socket: None,
+            },
+        }
     }
 }

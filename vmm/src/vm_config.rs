@@ -762,6 +762,22 @@ pub struct SerialConfig {
     pub common: CommonConsoleConfig,
 }
 
+impl From<api_types::SerialConfig> for SerialConfig {
+    fn from(value: api_types::SerialConfig) -> Self {
+        Self {
+            common: value.common.into(),
+        }
+    }
+}
+
+impl From<&SerialConfig> for api_types::SerialConfig {
+    fn from(value: &SerialConfig) -> Self {
+        Self {
+            common: (&value.common).into(),
+        }
+    }
+}
+
 impl SerialConfig {
     pub const SYNTAX: &str = "Control serial port: \"off|null|pty|tty|file=<path>|socket=<path>\"";
 }
