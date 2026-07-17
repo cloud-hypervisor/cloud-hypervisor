@@ -40,7 +40,9 @@ pub use vm_config::device_config::{DeviceConfig, DeviceConfigParseError};
 pub use vm_config::disk_config::VirtQueueAffinity;
 pub use vm_config::fs_config::{FsConfig, FsConfigParseError};
 #[cfg(feature = "fw_cfg")]
-pub use vm_config::fw_cfg_config::{FwCfgItem, FwCfgItemError, FwCfgItemList};
+pub use vm_config::fw_cfg_config::{
+    FwCfgConfig, FwCfgConfigParseError, FwCfgItem, FwCfgItemError, FwCfgItemList,
+};
 pub use vm_config::generic_vhost_user_config::{
     GenericVhostUserConfig, GenericVhostUserConfigParseError,
 };

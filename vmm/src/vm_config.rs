@@ -1321,6 +1321,34 @@ pub struct FwCfgConfig {
 }
 
 #[cfg(feature = "fw_cfg")]
+impl From<api_types::FwCfgConfig> for FwCfgConfig {
+    fn from(value: api_types::FwCfgConfig) -> Self {
+        Self {
+            e820: value.e820,
+            kernel: value.kernel,
+            cmdline: value.cmdline,
+            initramfs: value.initramfs,
+            acpi_tables: value.acpi_tables,
+            items: value.items,
+        }
+    }
+}
+
+#[cfg(feature = "fw_cfg")]
+impl From<&FwCfgConfig> for api_types::FwCfgConfig {
+    fn from(value: &FwCfgConfig) -> Self {
+        Self {
+            e820: value.e820,
+            kernel: value.kernel,
+            cmdline: value.cmdline,
+            initramfs: value.initramfs,
+            acpi_tables: value.acpi_tables,
+            items: value.items.clone(),
+        }
+    }
+}
+
+#[cfg(feature = "fw_cfg")]
 impl Default for FwCfgConfig {
     fn default() -> Self {
         FwCfgConfig {
