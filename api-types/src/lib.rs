@@ -27,8 +27,8 @@ use serde::Deserialize;
 pub use vm_config::PvmemcontrolConfig;
 pub use vm_config::balloon_config::{BalloonConfig, BalloonConfigParseError};
 pub use vm_config::console_config::{
-    CommonConsoleConfig, CommonConsoleConfigParseError, ConsoleOutputMode, SerialConfig,
-    SerialConfigParseError,
+    CommonConsoleConfig, CommonConsoleConfigParseError, ConsoleConfig, ConsoleConfigParseError,
+    ConsoleOutputMode, SerialConfig, SerialConfigParseError,
 };
 pub use vm_config::cpus_config::{
     CoreScheduling, CpuAffinity, CpuFeatures, CpuTopology, CpuTopologyParseError, CpusConfig,

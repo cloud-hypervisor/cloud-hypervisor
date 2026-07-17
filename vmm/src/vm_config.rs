@@ -809,6 +809,24 @@ pub struct ConsoleConfig {
     pub pci_common: PciDeviceCommonConfig,
 }
 
+impl From<api_types::ConsoleConfig> for ConsoleConfig {
+    fn from(value: api_types::ConsoleConfig) -> Self {
+        Self {
+            common: value.common.into(),
+            pci_common: value.pci_common.into(),
+        }
+    }
+}
+
+impl From<&ConsoleConfig> for api_types::ConsoleConfig {
+    fn from(value: &ConsoleConfig) -> Self {
+        Self {
+            common: (&value.common).into(),
+            pci_common: (&value.pci_common).into(),
+        }
+    }
+}
+
 impl ConsoleConfig {
     pub const SYNTAX: &str = "Control (virtio) console: \"off|null|pty|tty|file=<path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 }

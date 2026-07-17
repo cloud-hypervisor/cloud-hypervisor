@@ -10,6 +10,8 @@ use option_parser::{OptionParser, OptionParserError};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use super::pci_device_common_config::{PciDeviceCommonConfig, PciDeviceCommonConfigParseError};
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub enum ConsoleOutputMode {
     Off,
@@ -133,5 +135,130 @@ impl Default for SerialConfig {
                 socket: None,
             },
         }
+    }
+}
+
+/// Configuration for a virtio-console device.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ConsoleConfig {
+    #[serde(flatten)]
+    pub common: CommonConsoleConfig,
+    #[serde(default, flatten)]
+    pub pci_common: PciDeviceCommonConfig,
+}
+
+impl ConsoleConfig {
+    pub const SYNTAX: &str = "Control (virtio) console: \"off|null|pty|tty|file=<path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
+
+    pub fn parse(console: &str) -> Result<Self, ConsoleConfigParseError> {
+        let mut parser = OptionParser::new();
+        parser
+            .add_all_valueless(CommonConsoleConfig::VALUELESS_OPTIONS)
+            .add_all(CommonConsoleConfig::VALUE_OPTIONS)
+            .add_all(PciDeviceCommonConfig::OPTIONS_IOMMU);
+        parser
+            .parse(console)
+            .map_err(ConsoleConfigParseError::Parse)?;
+
+        let common = CommonConsoleConfig::parse::<ConsoleConfigParseError>(console)?;
+        let pci_common = PciDeviceCommonConfig::parse(console)
+            .map_err(ConsoleConfigParseError::PciDeviceCommon)?;
+
+        Ok(Self { common, pci_common })
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum ConsoleConfigParseError {
+    #[error("Failed to parse console configuration")]
+    Parse(#[from] OptionParserError),
+    #[error("Failed to parse common console configuration")]
+    CommonConsole(#[from] CommonConsoleConfigParseError),
+    #[error("Failed to parse PCI device configuration")]
+    PciDeviceCommon(#[source] PciDeviceCommonConfigParseError),
+}
+
+impl Default for ConsoleConfig {
+    fn default() -> Self {
+        Self {
+            common: CommonConsoleConfig {
+                file: None,
+                mode: ConsoleOutputMode::Tty,
+                socket: None,
+            },
+            pci_common: PciDeviceCommonConfig::default(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use crate::{
+        CommonConsoleConfig, ConsoleConfig, ConsoleConfigParseError, ConsoleOutputMode,
+        PciDeviceCommonConfig,
+    };
+
+    #[test]
+    fn test_console_parsing() -> Result<(), ConsoleConfigParseError> {
+        let console_config = |mode, file, socket, iommu| ConsoleConfig {
+            common: CommonConsoleConfig { file, mode, socket },
+            pci_common: PciDeviceCommonConfig {
+                iommu,
+                ..Default::default()
+            },
+        };
+
+        ConsoleConfig::parse("").unwrap_err();
+        ConsoleConfig::parse("badmode").unwrap_err();
+        assert_eq!(
+            ConsoleConfig::parse("off")?,
+            console_config(ConsoleOutputMode::Off, None, None, false)
+        );
+        assert_eq!(
+            ConsoleConfig::parse("pty")?,
+            console_config(ConsoleOutputMode::Pty, None, None, false)
+        );
+        assert_eq!(
+            ConsoleConfig::parse("tty")?,
+            console_config(ConsoleOutputMode::Tty, None, None, false)
+        );
+        assert_eq!(
+            ConsoleConfig::parse("null")?,
+            console_config(ConsoleOutputMode::Null, None, None, false)
+        );
+        assert_eq!(
+            ConsoleConfig::parse("file=/tmp/console")?,
+            console_config(
+                ConsoleOutputMode::File,
+                Some(PathBuf::from("/tmp/console")),
+                None,
+                false
+            )
+        );
+        assert_eq!(
+            ConsoleConfig::parse("null,iommu=on")?,
+            console_config(ConsoleOutputMode::Null, None, None, true)
+        );
+        assert_eq!(
+            ConsoleConfig::parse("file=/tmp/console,iommu=on")?,
+            console_config(
+                ConsoleOutputMode::File,
+                Some(PathBuf::from("/tmp/console")),
+                None,
+                true
+            )
+        );
+        assert_eq!(
+            ConsoleConfig::parse("socket=/tmp/serial.sock,iommu=on")?,
+            console_config(
+                ConsoleOutputMode::Socket,
+                None,
+                Some(PathBuf::from("/tmp/serial.sock")),
+                true
+            )
+        );
+        Ok(())
     }
 }
