@@ -12,11 +12,10 @@ use api_types::FwCfgItemList;
 #[cfg(feature = "pvmemcontrol")]
 use api_types::PvmemcontrolConfig;
 use api_types::{
-    ConsoleOutputMode, CpusConfig, HotplugMethod, MemoryZoneConfig, NumaDistance, VhostMode,
-    VirtQueueAffinity,
+    ConsoleOutputMode, CpusConfig, HotplugMethod, LockGranularityChoice, MemoryZoneConfig,
+    NumaDistance, VhostMode, VirtQueueAffinity,
 };
 use block::ImageType;
-pub use block::fcntl::LockGranularityChoice;
 #[cfg(target_arch = "x86_64")]
 use devices::debug_console;
 use log::{debug, warn};

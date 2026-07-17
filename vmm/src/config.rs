@@ -15,8 +15,9 @@ use api_types::FwCfgItemList;
 #[cfg(feature = "pvmemcontrol")]
 use api_types::PvmemcontrolConfig;
 use api_types::{
-    ConsoleOutputMode, CpusConfig, CpusConfigParseError, MemoryRestoreMode, MemoryZoneConfig,
-    NumaDistance, RestoredNetConfig, RestoredVfioConfig, VirtQueueAffinity, VmMemoryZoneUpdateData,
+    ConsoleOutputMode, CpusConfig, CpusConfigParseError, LockGranularityChoice, MemoryRestoreMode,
+    MemoryZoneConfig, NumaDistance, RestoredNetConfig, RestoredVfioConfig, VirtQueueAffinity,
+    VmMemoryZoneUpdateData,
 };
 use block::ImageType;
 use clap::ArgMatches;

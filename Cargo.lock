@@ -96,6 +96,7 @@ name = "api-types"
 version = "0.1.0"
 dependencies = [
  "arch",
+ "block",
  "devices",
  "log",
  "net_util",

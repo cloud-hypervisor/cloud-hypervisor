@@ -16,6 +16,7 @@ tdx = []
 
 [dependencies]
 arch = { path = "../arch" }
+block = { path = "../block" }
 devices = { path = "../devices" }
 log = { workspace = true }
 net_util = { path = "../net_util" }
