@@ -719,6 +719,26 @@ pub struct CommonConsoleConfig {
     pub socket: Option<PathBuf>,
 }
 
+impl From<api_types::CommonConsoleConfig> for CommonConsoleConfig {
+    fn from(value: api_types::CommonConsoleConfig) -> Self {
+        Self {
+            file: value.file,
+            mode: value.mode,
+            socket: value.socket,
+        }
+    }
+}
+
+impl From<&CommonConsoleConfig> for api_types::CommonConsoleConfig {
+    fn from(value: &CommonConsoleConfig) -> Self {
+        Self {
+            file: value.file.clone(),
+            mode: value.mode.clone(),
+            socket: value.socket.clone(),
+        }
+    }
+}
+
 impl ApplyLandlock for CommonConsoleConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         if self.mode == ConsoleOutputMode::Pty {

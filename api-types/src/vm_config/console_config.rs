@@ -3,7 +3,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::error::Error;
+use std::path::PathBuf;
+
+use option_parser::{OptionParser, OptionParserError};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub enum ConsoleOutputMode {
@@ -13,4 +18,79 @@ pub enum ConsoleOutputMode {
     File,
     Socket,
     Null,
+}
+
+#[derive(Debug, PartialEq, Eq, Error)]
+pub enum CommonConsoleConfigParseError {
+    /// Missing file value for console
+    #[error("Path missing when using file console mode")]
+    ConsoleFileMissing,
+    /// Missing socket path for console
+    #[error("Path missing when using socket console mode")]
+    ConsoleSocketPathMissing,
+    /// No mode given for console
+    #[error("Error parsing --console: invalid console mode given")]
+    ParseConsoleInvalidModeGiven,
+}
+
+/// Common configuration for plain console configs.
+///
+/// Independent of PCI or legacy devices.
+#[serde_with::skip_serializing_none]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct CommonConsoleConfig {
+    #[serde(default)]
+    pub file: Option<PathBuf>,
+    pub mode: ConsoleOutputMode,
+    #[serde(default)]
+    pub socket: Option<PathBuf>,
+}
+
+impl CommonConsoleConfig {
+    #[expect(unused, reason = "will be used in a follow-up commit")]
+    const VALUELESS_OPTIONS: &[&str] = &["off", "pty", "tty", "null"];
+    #[expect(unused, reason = "will be used in a follow-up commit")]
+    const VALUE_OPTIONS: &[&str] = &["file", "socket"];
+
+    #[expect(unused, reason = "will be used in a follow-up commit")]
+    fn parse<T>(console: &str) -> Result<Self, T>
+    where
+        T: Error + From<CommonConsoleConfigParseError> + From<OptionParserError>,
+    {
+        let mut parser = OptionParser::new();
+        parser
+            .add_all_valueless(Self::VALUELESS_OPTIONS)
+            .add_all(Self::VALUE_OPTIONS);
+        parser.parse_subset(console)?;
+
+        let mut file: Option<PathBuf> = None;
+        let mut socket: Option<PathBuf> = None;
+        let mut mode: ConsoleOutputMode = ConsoleOutputMode::Off;
+
+        if parser.is_set("off") {
+        } else if parser.is_set("pty") {
+            mode = ConsoleOutputMode::Pty;
+        } else if parser.is_set("tty") {
+            mode = ConsoleOutputMode::Tty;
+        } else if parser.is_set("null") {
+            mode = ConsoleOutputMode::Null;
+        } else if parser.is_set("file") {
+            mode = ConsoleOutputMode::File;
+            file = Some(PathBuf::from(
+                parser
+                    .get("file")
+                    .ok_or(CommonConsoleConfigParseError::ConsoleFileMissing)?,
+            ));
+        } else if parser.is_set("socket") {
+            mode = ConsoleOutputMode::Socket;
+            socket =
+                Some(PathBuf::from(parser.get("socket").ok_or(
+                    CommonConsoleConfigParseError::ConsoleSocketPathMissing,
+                )?));
+        } else {
+            Err(CommonConsoleConfigParseError::ParseConsoleInvalidModeGiven)?;
+        }
+
+        Ok(Self { mode, file, socket })
+    }
 }
