@@ -496,4 +496,78 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
     }
+
+    /// Build an iovec over `buf`, which must outlive the iovec.
+    fn iovec_of(buf: &mut [u8]) -> libc::iovec {
+        libc::iovec {
+            iov_base: buf.as_mut_ptr() as *mut libc::c_void,
+            iov_len: buf.len(),
+        }
+    }
+
+    #[test]
+    fn vectored_empty_is_noop() {
+        let tf = pattern_file(100);
+        let af = forced(tf.as_file().try_clone().unwrap(), 512);
+        // SAFETY: empty iovec slices point to no memory.
+        assert_eq!(unsafe { af.read_vectored_at(&[], 0) }.unwrap(), 0);
+        // SAFETY: empty iovec slices point to no memory.
+        assert_eq!(unsafe { af.write_vectored_at(&[], 0) }.unwrap(), 0);
+    }
+
+    #[test]
+    fn vectored_fast_path_roundtrip() {
+        let tf = pattern_file(4096);
+        // alignment 0 sends any iovecs through the single preadv/pwritev path.
+        let af = forced(tf.as_file().try_clone().unwrap(), 0);
+
+        let mut w0: Vec<u8> = (0..30).map(|i| ((i + 7) % 239) as u8).collect();
+        let mut w1: Vec<u8> = (0..70).map(|i| ((i + 37) % 239) as u8).collect();
+        let wiovecs = [iovec_of(&mut w0), iovec_of(&mut w1)];
+        // SAFETY: the iovecs describe the live w0/w1 buffers.
+        assert_eq!(unsafe { af.write_vectored_at(&wiovecs, 10) }.unwrap(), 100);
+        let data = [w0.as_slice(), &w1].concat();
+
+        let mut plain = vec![0u8; 100];
+        tf.as_file().read_exact_at(&mut plain, 10).unwrap();
+        assert_eq!(plain, data);
+
+        let mut r0 = vec![0u8; 30];
+        let mut r1 = vec![0u8; 70];
+        let riovecs = [iovec_of(&mut r0), iovec_of(&mut r1)];
+        // SAFETY: the iovecs describe the live r0/r1 buffers.
+        assert_eq!(unsafe { af.read_vectored_at(&riovecs, 10) }.unwrap(), 100);
+        assert_eq!([r0.as_slice(), &r1].concat(), data);
+    }
+
+    #[test]
+    fn vectored_unaligned_scatter_gather_roundtrip() {
+        let tf = pattern_file(8192);
+        let af = forced(tf.as_file().try_clone().unwrap(), 512);
+
+        // Gather three iovecs into an unaligned read-modify-write.
+        let mut w0: Vec<u8> = (0..50).map(|i| ((i + 1) % 239) as u8).collect();
+        let mut w1: Vec<u8> = (0..100).map(|i| ((i + 51) % 239) as u8).collect();
+        let mut w2: Vec<u8> = (0..50).map(|i| ((i + 151) % 239) as u8).collect();
+        let wiovecs = [iovec_of(&mut w0), iovec_of(&mut w1), iovec_of(&mut w2)];
+        // SAFETY: the iovecs describe the live w0/w1/w2 buffers.
+        assert_eq!(unsafe { af.write_vectored_at(&wiovecs, 100) }.unwrap(), 200);
+        let data = [w0.as_slice(), &w1, &w2].concat();
+
+        // Independently confirm the region and the untouched neighbors.
+        let mut expected: Vec<u8> = (0..8192).map(|i| (i % 251) as u8).collect();
+        expected[100..300].copy_from_slice(&data);
+        let mut whole = vec![0u8; 8192];
+        tf.as_file().read_exact_at(&mut whole, 0).unwrap();
+        assert_eq!(whole, expected);
+
+        // Scatter the same region back across three iovecs.
+        let mut r0 = vec![0u8; 50];
+        let mut r1 = vec![0u8; 100];
+        let mut r2 = vec![0u8; 50];
+        let riovecs = [iovec_of(&mut r0), iovec_of(&mut r1), iovec_of(&mut r2)];
+        // SAFETY: the iovecs describe the live r0/r1/r2 buffers.
+        assert_eq!(unsafe { af.read_vectored_at(&riovecs, 100) }.unwrap(), 200);
+        assert_eq!([r0.as_slice(), &r1, &r2].concat(), data);
+    }
 }
