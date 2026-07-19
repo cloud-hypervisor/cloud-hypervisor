@@ -399,6 +399,9 @@ pub enum ValidationError {
     /// Prefault cannot be combined with on-demand restore
     #[error("'prefault' cannot be combined with 'memory_restore_mode=ondemand'")]
     InvalidRestorePrefaultWithOnDemand,
+    /// A diff-snapshot chain cannot be combined with on-demand restore
+    #[error("'memory_chain' cannot be combined with 'memory_restore_mode=ondemand'")]
+    InvalidRestoreMemoryChainWithOnDemand,
     /// Path provided in landlock-rules doesn't exist
     #[error("Path {0:?} provided in landlock-rules does not exist")]
     LandlockPathDoesNotExist(PathBuf),
@@ -2850,6 +2853,10 @@ pub struct RestoreConfig {
     pub prefault: bool,
     #[serde(default)]
     pub memory_restore_mode: MemoryRestoreMode,
+    // Ancestor snapshot URLs of a diff-snapshot series, oldest (the full
+    // baseline) first; source_url is the newest delta and is not repeated here.
+    #[serde(default)]
+    pub memory_chain: Vec<PathBuf>,
     #[serde(default)]
     pub net_fds: Option<Vec<RestoredNetConfig>>,
     #[serde(default)]
@@ -2866,12 +2873,14 @@ pub struct RestoreConfig {
 impl RestoreConfig {
     pub const SYNTAX: &'static str = "Restore from a VM snapshot. \
         \nRestore parameters \"source_url=<source_url>,prefault=on|off,memory_restore_mode=copy|ondemand,\
+        memory_chain=<list_of_ancestor_snapshot_urls>,\
         net_fds=<list_of_net_ids_with_their_associated_fds>,\
         vfio_fds=<list_of_vfio_ids_with_their_associated_fd>,iommufd_fd=<fd>,resume=true|false,\
         zone_updates=<list_of_updates>\"
         \n`source_url` should be a valid URL (e.g file:///foo/bar or tcp://192.168.1.10/foo) \
         \n`prefault` controls eager prefaulting for the copy-based restore path (disabled by default) \
         \n`memory_restore_mode=copy` preserves the existing eager read-copy restore behavior, while `memory_restore_mode=ondemand` enables lazy demand paging and fails restore if userfaultfd support is unavailable \
+        \n`memory_chain` restores from a diff snapshot: the ancestor snapshot URLs of the series, oldest (the full baseline) first, e.g. memory_chain=[file:///foo/base,file:///foo/diff1] with source_url pointing at the newest delta \
         \n`net_fds` is a list of net ids with new file descriptors. \
         Only net devices backed by FDs directly are needed as input.\
         \n`vfio_fds` is a list of VFIO device ids each paired with a new cdev file descriptor, \
@@ -2888,6 +2897,7 @@ impl RestoreConfig {
             .add("source_url")
             .add("prefault")
             .add("memory_restore_mode")
+            .add("memory_chain")
             .add("net_fds")
             .add("vfio_fds")
             .add("iommufd_fd")
@@ -2908,6 +2918,10 @@ impl RestoreConfig {
             .convert::<MemoryRestoreMode>("memory_restore_mode")
             .map_err(Error::ParseRestore)?
             .unwrap_or_default();
+        let memory_chain = parser
+            .convert::<StringList>("memory_chain")
+            .map_err(Error::ParseRestore)?
+            .map_or(Vec::new(), |v| v.0.iter().map(PathBuf::from).collect());
         let net_fds = parser
             .convert::<TupleList<String, Vec<u64>>>("net_fds")
             .map_err(Error::ParseRestore)?
@@ -2956,6 +2970,7 @@ impl RestoreConfig {
             source_url,
             prefault,
             memory_restore_mode,
+            memory_chain,
             net_fds,
             vfio_fds,
             iommufd_fd,
@@ -2970,6 +2985,11 @@ impl RestoreConfig {
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
         if self.memory_restore_mode == MemoryRestoreMode::OnDemand && self.prefault {
             return Err(ValidationError::InvalidRestorePrefaultWithOnDemand);
+        }
+
+        if self.memory_restore_mode == MemoryRestoreMode::OnDemand && !self.memory_chain.is_empty()
+        {
+            return Err(ValidationError::InvalidRestoreMemoryChainWithOnDemand);
         }
 
         let mut restored_net_with_fds = HashMap::new();
@@ -5237,6 +5257,26 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 source_url: PathBuf::from("/path/to/snapshot"),
                 prefault: false,
                 memory_restore_mode: MemoryRestoreMode::Copy,
+                memory_chain: vec![],
+                net_fds: None,
+                vfio_fds: None,
+                iommufd_fd: None,
+                resume: false,
+                zone_updates: vec![],
+            }
+        );
+        assert_eq!(
+            RestoreConfig::parse(
+                "source_url=/path/to/diff2,memory_chain=[file:///path/to/base,file:///path/to/diff1]"
+            )?,
+            RestoreConfig {
+                source_url: PathBuf::from("/path/to/diff2"),
+                prefault: false,
+                memory_restore_mode: MemoryRestoreMode::Copy,
+                memory_chain: vec![
+                    PathBuf::from("file:///path/to/base"),
+                    PathBuf::from("file:///path/to/diff1"),
+                ],
                 net_fds: None,
                 vfio_fds: None,
                 iommufd_fd: None,
@@ -5252,6 +5292,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 source_url: PathBuf::from("/path/to/snapshot"),
                 prefault: false,
                 memory_restore_mode: MemoryRestoreMode::Copy,
+                memory_chain: vec![],
                 net_fds: Some(vec![
                     RestoredNetConfig {
                         id: "net0".to_string(),
@@ -5276,6 +5317,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 source_url: PathBuf::from("/path/to/snapshot"),
                 prefault: false,
                 memory_restore_mode: MemoryRestoreMode::OnDemand,
+                memory_chain: vec![],
                 net_fds: None,
                 vfio_fds: None,
                 iommufd_fd: None,
@@ -5289,6 +5331,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 source_url: PathBuf::from("/path/to/snapshot"),
                 prefault: false,
                 memory_restore_mode: MemoryRestoreMode::Copy,
+                memory_chain: vec![],
                 net_fds: None,
                 vfio_fds: None,
                 iommufd_fd: None,
@@ -5307,6 +5350,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 source_url: PathBuf::from("/path/to/snapshot"),
                 prefault: false,
                 memory_restore_mode: MemoryRestoreMode::Copy,
+                memory_chain: vec![],
                 net_fds: None,
                 vfio_fds: Some(vec![
                     RestoredVfioConfig {
@@ -5331,6 +5375,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 source_url: PathBuf::from("/path/to/snapshot"),
                 prefault: false,
                 memory_restore_mode: MemoryRestoreMode::Copy,
+                memory_chain: vec![],
                 net_fds: None,
                 vfio_fds: Some(vec![
                     RestoredVfioConfig {
@@ -5467,6 +5512,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             source_url: PathBuf::from("/path/to/snapshot"),
             prefault: false,
             memory_restore_mode: MemoryRestoreMode::Copy,
+            memory_chain: vec![],
             net_fds: Some(vec![
                 RestoredNetConfig {
                     id: "net0".to_string(),
@@ -5546,6 +5592,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             source_url: PathBuf::from("/path/to/snapshot"),
             prefault: false,
             memory_restore_mode: MemoryRestoreMode::Copy,
+            memory_chain: vec![],
             net_fds: None,
             vfio_fds: None,
             iommufd_fd: None,
@@ -5566,6 +5613,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             source_url: PathBuf::from("/path/to/snapshot"),
             prefault: true,
             memory_restore_mode: MemoryRestoreMode::OnDemand,
+            memory_chain: vec![],
             net_fds: None,
             vfio_fds: None,
             iommufd_fd: None,
@@ -5575,6 +5623,22 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             invalid_restore_mode.validate(&snapshot_vm_config),
             Err(ValidationError::InvalidRestorePrefaultWithOnDemand)
+        );
+
+        let invalid_chain_mode = RestoreConfig {
+            source_url: PathBuf::from("/path/to/diff1"),
+            prefault: false,
+            memory_restore_mode: MemoryRestoreMode::OnDemand,
+            memory_chain: vec![PathBuf::from("/path/to/base")],
+            net_fds: None,
+            vfio_fds: None,
+            iommufd_fd: None,
+            resume: false,
+            zone_updates: vec![],
+        };
+        assert_eq!(
+            invalid_chain_mode.validate(&snapshot_vm_config),
+            Err(ValidationError::InvalidRestoreMemoryChainWithOnDemand)
         );
 
         // It is invalid to submit more than one update for a single zone.
@@ -5665,6 +5729,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             source_url: PathBuf::from("/path/to/snapshot"),
             prefault: false,
             memory_restore_mode: MemoryRestoreMode::Copy,
+            memory_chain: vec![],
             net_fds: None,
             vfio_fds: Some(vec![RestoredVfioConfig {
                 id: "vfio0".to_string(),
