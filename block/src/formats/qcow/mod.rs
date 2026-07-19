@@ -294,6 +294,14 @@ impl disk_file::Resizable for QcowDisk {
     }
 }
 
+impl disk_file::MetadataSync for QcowDisk {
+    fn sync_metadata(&self) -> BlockResult<()> {
+        self.metadata
+            .flush()
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::SyncMetadata(e)))
+    }
+}
+
 impl disk_file::DiskFile for QcowDisk {}
 
 impl disk_file::AsyncDiskFile for QcowDisk {

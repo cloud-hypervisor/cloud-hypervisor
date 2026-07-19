@@ -41,6 +41,9 @@ pub enum DiskFileError {
     /// Resize failed
     #[error("Resize failed")]
     ResizeError(#[source] io::Error),
+    /// Flushing cached metadata failed
+    #[error("Flushing cached metadata failed")]
+    SyncMetadata(#[source] io::Error),
     #[error("Failed cloning disk file")]
     Clone(#[source] io::Error),
 }
