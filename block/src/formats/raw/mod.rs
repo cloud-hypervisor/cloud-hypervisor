@@ -132,6 +132,8 @@ impl disk_file::Resizable for RawDisk {
     }
 }
 
+impl disk_file::MetadataSync for RawDisk {}
+
 impl disk_file::DiskFile for RawDisk {}
 
 impl disk_file::AsyncDiskFile for RawDisk {

@@ -318,7 +318,7 @@ mod unit_tests {
     use super::*;
     use crate::aligned_file::AlignedFile;
     use crate::async_io::{AsyncIoCompletion, OwnedIoBuffer};
-    use crate::disk_file::{AsyncDiskFile, DiskSize, Resizable};
+    use crate::disk_file::{AsyncDiskFile, DiskSize, MetadataSync, Resizable};
     use crate::error::BlockErrorKind;
     use crate::formats::qcow;
     use crate::formats::qcow::common::unit_tests::compress_allocated_clusters;
@@ -579,6 +579,47 @@ mod unit_tests {
             tracked_after <= tracked_before + 8,
             "reopen recovered {} clusters the allocator had stranded",
             tracked_after.saturating_sub(tracked_before),
+        );
+    }
+
+    // sync_metadata must make completed writes visible to a fresh reader of
+    // the file while the writing disk stays open. Device pause relies on
+    // this so snapshot copies and migration reopen a self-consistent image
+    // without a guest-initiated flush.
+    #[test]
+    fn write_visible_after_sync_metadata_and_reopen() {
+        const CL: u64 = 65536;
+        let virtual_size = 512 * 1024 * 1024;
+        let (temp, disk) = create_disk_with_data(virtual_size, &[], 0, false, false);
+        let pattern = vec![0xA5u8; CL as usize];
+        async_write(&disk, 0, &pattern);
+
+        let reopen = || {
+            QcowDisk::new(
+                temp.as_file().try_clone().unwrap(),
+                false,
+                false,
+                false,
+                false,
+            )
+            .unwrap()
+        };
+
+        // Without the flush the L2 mapping exists only in the writer's
+        // in-memory cache: a fresh reader sees the cluster unallocated.
+        let stale = reopen();
+        assert_eq!(
+            async_read(&stale, 0, CL as usize),
+            vec![0u8; CL as usize],
+            "write leaked to disk without a metadata flush; test is vacuous",
+        );
+
+        disk.sync_metadata().unwrap();
+        let fresh = reopen();
+        assert_eq!(
+            async_read(&fresh, 0, CL as usize),
+            pattern,
+            "write not visible after sync_metadata and reopen",
         );
     }
 

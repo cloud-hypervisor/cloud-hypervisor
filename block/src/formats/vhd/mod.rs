@@ -104,6 +104,8 @@ impl disk_file::Resizable for VhdDisk {
     }
 }
 
+impl disk_file::MetadataSync for VhdDisk {}
+
 impl disk_file::DiskFile for VhdDisk {}
 
 impl disk_file::AsyncDiskFile for VhdDisk {
