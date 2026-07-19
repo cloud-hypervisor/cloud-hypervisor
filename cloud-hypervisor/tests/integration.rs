@@ -8291,6 +8291,12 @@ mod ivshmem {
 
     #[test]
     #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_restore_diff_chain() {
+        snapshot_restore_common::_test_snapshot_restore_diff_chain();
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_with_resume() {
         snapshot_restore_common::_test_snapshot_restore(
             snapshot_restore_common::SnapshotRestoreTest {
@@ -8417,7 +8423,7 @@ mod ivshmem {
 
 #[cfg(not(feature = "mshv"))]
 mod snapshot_restore_common {
-    use std::fs::remove_dir_all;
+    use std::fs::{create_dir, remove_dir_all};
     use std::process::Command;
 
     use crate::*;
@@ -8475,6 +8481,141 @@ mod snapshot_restore_common {
             &latest_events,
             event_path
         ));
+    }
+
+    fn snapshot_diff(api_socket: &str, url: &str) -> bool {
+        let output = Command::new(clh_command("ch-remote"))
+            .args([
+                &format!("--api-socket={api_socket}"),
+                "snapshot",
+                "--diff",
+                url,
+            ])
+            .output()
+            .unwrap();
+        if !output.status.success() {
+            eprintln!(
+                "ch-remote snapshot --diff failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        output.status.success()
+    }
+
+    // A diff series baseline plus one delta, restored through memory_chain.
+    // tmpfs markers written before and after the baseline prove the delta
+    // rebases onto the baseline: marker A lives in the baseline pages, marker
+    // B only in the delta's dirty extents.
+    pub(crate) fn _test_snapshot_restore_diff_chain() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
+        let net_params = format!(
+            "id=net123,tap=,mac={},ip={},mask=255.255.255.128",
+            guest.network.guest_mac0, guest.network.host_ip0
+        );
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_source])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=1G"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args([
+                "--disk",
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+                .as_str(),
+            ])
+            .args(["--net", net_params.as_str()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
+        let base_dir = format!("{snapshot_dir}/base");
+        let delta_dir = format!("{snapshot_dir}/delta");
+        create_dir(&base_dir).unwrap();
+        create_dir(&delta_dir).unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            guest
+                .ssh_command("echo diffmarkerA > /dev/shm/marker_a")
+                .unwrap();
+
+            // First diff of a series writes the full baseline.
+            assert!(remote_command(&api_socket_source, "pause", None));
+            assert!(snapshot_diff(
+                &api_socket_source,
+                format!("file://{base_dir}").as_str(),
+            ));
+            assert!(remote_command(&api_socket_source, "resume", None));
+
+            guest
+                .ssh_command("echo diffmarkerB > /dev/shm/marker_b")
+                .unwrap();
+
+            // Second diff carries only the pages dirtied since the baseline.
+            assert!(remote_command(&api_socket_source, "pause", None));
+            assert!(snapshot_diff(
+                &api_socket_source,
+                format!("file://{delta_dir}").as_str(),
+            ));
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        // Restore from the delta, chaining it onto the baseline.
+        let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_restored])
+            .args([
+                "--restore",
+                format!(
+                    "source_url=file://{delta_dir},memory_chain=[file://{base_dir}],resume=true"
+                )
+                .as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            assert!(wait_until(Duration::from_secs(30), || remote_command(
+                &api_socket_restored,
+                "info",
+                None
+            )));
+
+            // Both markers must survive: A from the baseline pages the delta
+            // never dirtied, B from the delta's extents.
+            assert_eq!(
+                guest.ssh_command("cat /dev/shm/marker_a").unwrap().trim(),
+                "diffmarkerA"
+            );
+            assert_eq!(
+                guest.ssh_command("cat /dev/shm/marker_b").unwrap().trim(),
+                "diffmarkerB"
+            );
+        });
+
+        let _ = remove_dir_all(snapshot_dir.as_str());
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
     }
 
     /// Easy disambiguation between snapshot/restore variants.

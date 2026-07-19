@@ -1475,6 +1475,14 @@ components:
       properties:
         destination_url:
           type: string
+        snapshot_type:
+          type: string
+          enum: [full, diff]
+          default: full
+          description:
+            With "diff", only pages dirtied since the previous snapshot of the
+            series are written; the first "diff" takes a full baseline and
+            starts dirty tracking.
 
     VmCoredumpData:
       type: object
@@ -1498,6 +1506,13 @@ components:
           type: boolean
         memory_restore_mode:
           $ref: "#/components/schemas/MemoryRestoreMode"
+        memory_chain:
+          type: array
+          items:
+            type: string
+          description:
+            Ancestor snapshot URLs of a diff-snapshot series, oldest (the
+            full baseline) first; source_url is the newest delta.
         resume:
           type: boolean
         zone_updates:
