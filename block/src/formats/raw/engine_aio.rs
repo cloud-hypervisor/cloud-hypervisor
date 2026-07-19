@@ -51,7 +51,7 @@ impl AsyncIo for RawAio {
         self.alignment
     }
 
-    fn submit_data_operation(&mut self, mut op: AsyncIoOperation) -> AsyncIoResult<()> {
+    fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
         let is_read = op.is_read();
 
         if operation_is_aligned(&op, self.alignment) {
@@ -65,7 +65,7 @@ impl AsyncIo for RawAio {
             });
         }
 
-        let result = run_unaligned_operation(&self.raw_file, &mut op)?;
+        let result = run_unaligned_operation(&self.raw_file, &op)?;
         self.data_io
             .inject_completion(AsyncIoCompletion::from_operation(op, result));
 
