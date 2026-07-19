@@ -2,6 +2,9 @@
 # Don't let one individual test run for more than 10 minutes
 slow-timeout = { period = "60s", terminate-after = 10 }
 
+[test-groups]
+windows = { max-threads = 4 }
+
 [profile.integration]
 fail-fast = false
 retries = 3
@@ -36,3 +39,12 @@ junit.path = "/root/workloads/junit/ivshmem.xml"
 inherits = "integration"
 default-filter = 'test(common_cvm::)'
 junit.path = "/root/workloads/junit/cvm.xml"
+
+[profile.windows]
+inherits = "integration"
+default-filter = 'test(windows::)'
+junit.path = "/root/workloads/junit/windows.xml"
+
+[[profile.windows.overrides]]
+filter = 'test(windows::)'
+test-group = 'windows'
