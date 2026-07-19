@@ -4030,7 +4030,7 @@ mod unit_tests {
             &mem,
             "console=tty0",
             &[0],
-            Some((0, 0, 0, 0)),
+            None,
             &dev_info,
             &gic,
             &None,
