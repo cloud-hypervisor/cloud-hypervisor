@@ -10,7 +10,6 @@ use std::os::unix::io::AsRawFd;
 
 use vmm_sys_util::eventfd::EventFd;
 
-use super::{operation_is_aligned, run_unaligned_operation};
 use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
 use crate::sparse::{punch_hole, write_zeroes};
 use crate::{AlignedFile, is_block_device};
@@ -46,52 +45,22 @@ impl AsyncIo for RawSync {
         self.alignment
     }
 
-    fn submit_data_operation(&mut self, mut op: AsyncIoOperation) -> AsyncIoResult<()> {
+    fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
         let is_read = op.is_read();
+        let iovecs = op.iovecs();
+        let offset = op.offset() as u64;
 
-        let result = if operation_is_aligned(&op, self.alignment) {
-            let fd = self.raw_file.as_raw_fd();
-            let offset = op.offset();
-            let iovecs = op.iovecs();
-
-            let result = if is_read {
-                // SAFETY: the memory pointed to by `iovecs` is backed by the op,
-                // and valid for the kernel to write to by construction of
-                // AsyncIoOperation.
-                unsafe {
-                    libc::preadv(
-                        fd as libc::c_int,
-                        iovecs.as_ptr(),
-                        iovecs.len() as libc::c_int,
-                        offset,
-                    )
-                }
-            } else {
-                // SAFETY: the memory pointed to by `iovecs` is backed by the op,
-                // and valid for the kernel to read from by construction of
-                // AsyncIoOperation.
-                unsafe {
-                    libc::pwritev(
-                        fd as libc::c_int,
-                        iovecs.as_ptr(),
-                        iovecs.len() as libc::c_int,
-                        offset,
-                    )
-                }
-            };
-            if result < 0 {
-                let error = io::Error::last_os_error();
-                return Err(if is_read {
-                    AsyncIoError::ReadVectored(error)
-                } else {
-                    AsyncIoError::WriteVectored(error)
-                });
-            }
-            result as i32
+        let result = if is_read {
+            // SAFETY: op.iovecs() describes valid memory for iov_len bytes by
+            // construction of AsyncIoOperation.
+            unsafe { self.raw_file.read_vectored_at(iovecs, offset) }
+                .map_err(AsyncIoError::ReadVectored)?
         } else {
-            run_unaligned_operation(&self.raw_file, &mut op)?
-        };
-
+            // SAFETY: op.iovecs() describes valid memory for iov_len bytes by
+            // construction of AsyncIoOperation.
+            unsafe { self.raw_file.write_vectored_at(iovecs, offset) }
+                .map_err(AsyncIoError::WriteVectored)?
+        } as i32;
         self.completion_list
             .push_back(AsyncIoCompletion::from_operation(op, result));
         self.eventfd.write(1).unwrap();
