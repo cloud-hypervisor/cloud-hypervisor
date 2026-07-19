@@ -181,22 +181,24 @@ fn operation_is_aligned(op: &AsyncIoOperation, alignment: u64) -> bool {
 /// Runs an unaligned O_DIRECT operation synchronously through `aligned_file`.
 fn run_unaligned_operation(
     aligned_file: &AlignedFile,
-    op: &mut AsyncIoOperation,
+    op: &AsyncIoOperation,
 ) -> AsyncIoResult<i32> {
     let offset = op.offset() as u64;
-    let total_len = op.total_len();
+    let iovecs = op.iovecs();
 
-    if op.is_read() {
-        let n = aligned_file
-            .read_unaligned(offset, total_len, |data| op.write_bytes_at(0, data))
-            .map_err(AsyncIoError::ReadVectored)?;
-        Ok(n as i32)
+    let n = if op.is_read() {
+        // SAFETY: op.iovecs() describes valid memory for iov_len bytes by
+        // construction of AsyncIoOperation.
+        unsafe { aligned_file.read_vectored_at(iovecs, offset) }
+            .map_err(AsyncIoError::ReadVectored)?
     } else {
-        let n = aligned_file
-            .write_unaligned(offset, total_len, |data| op.read_bytes_at(0, data))
-            .map_err(AsyncIoError::WriteVectored)?;
-        Ok(n as i32)
-    }
+        // SAFETY: op.iovecs() describes valid memory for iov_len bytes by
+        // construction of AsyncIoOperation.
+        unsafe { aligned_file.write_vectored_at(iovecs, offset) }
+            .map_err(AsyncIoError::WriteVectored)?
+    };
+
+    Ok(n as i32)
 }
 
 #[cfg(test)]

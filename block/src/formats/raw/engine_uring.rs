@@ -48,7 +48,7 @@ impl AsyncIo for RawAsync {
         self.alignment
     }
 
-    fn submit_data_operation(&mut self, mut op: AsyncIoOperation) -> AsyncIoResult<()> {
+    fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
         let is_read = op.is_read();
 
         if operation_is_aligned(&op, self.alignment) {
@@ -62,7 +62,7 @@ impl AsyncIo for RawAsync {
             });
         }
 
-        let result = run_unaligned_operation(&self.raw_file, &mut op)?;
+        let result = run_unaligned_operation(&self.raw_file, &op)?;
         self.data_io
             .inject_completion(AsyncIoCompletion::from_operation(op, result));
 
@@ -94,11 +94,11 @@ impl AsyncIo for RawAsync {
     fn submit_batch_requests(&mut self, batch_request: Vec<AsyncIoOperation>) -> AsyncIoResult<()> {
         if self.alignment != 0 {
             let mut aligned_batch = Vec::with_capacity(batch_request.len());
-            for mut op in batch_request {
+            for op in batch_request {
                 if operation_is_aligned(&op, self.alignment) {
                     aligned_batch.push(op);
                 } else {
-                    let result = run_unaligned_operation(&self.raw_file, &mut op)?;
+                    let result = run_unaligned_operation(&self.raw_file, &op)?;
                     self.data_io
                         .inject_completion(AsyncIoCompletion::from_operation(op, result));
                 }
