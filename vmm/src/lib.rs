@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Write, stdout};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
@@ -51,7 +51,7 @@ use crate::api::{
     ApiRequest, ApiResponse, MigrationMode, RequestHandler, TimeoutStrategy, VmInfoResponse,
     VmReceiveMigrationData, VmSendMigrationData, VmmPingResponse,
 };
-use crate::config::{MemoryRestoreMode, RestoreConfig, add_to_config};
+use crate::config::{MemoryRestoreMode, RestoreConfig, VmMemoryZoneUpdateData, add_to_config};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::GuestDebuggable;
 use crate::device_manager::DeviceManager;
@@ -233,6 +233,27 @@ pub enum Error {
     /// Cannot apply landlock based sandboxing
     #[error("Error applying landlock")]
     ApplyLandlock(#[source] LandlockError),
+}
+
+/// Errors associated with updating memory zones
+#[derive(Debug, Error)]
+pub enum MemoryZoneUpdateError {
+    /// Cannot apply update as the original configuration didn't specify any memory zones
+    #[error("No zones specified in original config")]
+    NoZones,
+    /// The memory zone is backed by a shared file and thus cannot be bound to a NUMA node.
+    #[error(
+        "Zone with ID \"{0}\" is a shared zone backed by a regular file and thus cannot be bound to a node"
+    )]
+    SharedZoneBackedByFile(String),
+    /// The original [`VmConfig`] did not contain the memory zone with the given
+    /// ID, thus the memory zone update is not compatible with the original configuration.
+    #[error("Zone ID \"{0}\" wasn't contained in original config")]
+    ZoneNotFound(String),
+    /// The update list contains multiple updates for the same memory zone ID. Any update is
+    /// rejected because no assumptions can be made about which update is the correct one.
+    #[error("Multiple updates were specified for memory zone with ID \"{0}\"")]
+    MultipleUpdates(String),
 }
 
 impl From<&VmConfig> for hypervisor::HypervisorVmConfig {
@@ -2244,6 +2265,52 @@ fn apply_vfio_fds_to_vm_config(
         .iommufd_fd = Some(iommufd_fd);
 }
 
+#[allow(unused)]
+fn update_memory_zones(
+    zone_updates: &[VmMemoryZoneUpdateData],
+    vm_config: &Arc<Mutex<VmConfig>>,
+) -> result::Result<(), MemoryZoneUpdateError> {
+    if !zone_updates.is_empty() {
+        let mut vm_config = vm_config.lock().unwrap();
+        // Clone zones so we can abort if we encounter an error without leaving the VmConfig in a
+        // inconsistent state.
+        let mut config_zones = vm_config
+            .memory
+            .zones
+            .clone()
+            .ok_or(MemoryZoneUpdateError::NoZones)?;
+
+        let mut seen_zone_ids = HashSet::new();
+        for zone_update in zone_updates {
+            // We currently only support to move MemoryZones to different host nodes.
+            if !seen_zone_ids.insert(zone_update.id.clone()) {
+                return Err(MemoryZoneUpdateError::MultipleUpdates(
+                    zone_update.id.clone(),
+                ));
+            }
+            let matched_zone = config_zones
+                .iter_mut()
+                .find(|z| z.id == zone_update.id)
+                .ok_or_else(|| MemoryZoneUpdateError::ZoneNotFound(zone_update.id.clone()))?;
+
+            if matched_zone.shared && matched_zone.file.is_some() {
+                error!(
+                    "Invalid to set host NUMA policy for a memory zone \
+                        backed by a regular file and mapped as 'shared' "
+                );
+                return Err(MemoryZoneUpdateError::SharedZoneBackedByFile(
+                    zone_update.id.clone(),
+                ));
+            }
+
+            matched_zone.host_numa_node = Some(zone_update.host_numa_node);
+        }
+        // Write back updated zones after all updates were successful
+        *(vm_config.memory.zones.as_mut().unwrap()) = config_zones;
+    }
+    Ok(())
+}
+
 impl RequestHandler for Vmm {
     fn vm_create(&mut self, config: Box<VmConfig>) -> result::Result<(), VmError> {
         match &self.vm {
@@ -3356,7 +3423,7 @@ mod unit_tests {
     use crate::vm_config::DebugConsoleConfig;
     use crate::vm_config::{
         CommonConsoleConfig, ConsoleConfig, ConsoleOutputMode, CoreScheduling, CpuFeatures,
-        CpusConfig, DeviceConfig, HotplugMethod, MemoryConfig, PayloadConfig,
+        CpusConfig, DeviceConfig, HotplugMethod, MemoryConfig, MemoryZoneConfig, PayloadConfig,
         PciDeviceCommonConfig, PlatformConfig, RngConfig, SerialConfig,
     };
 
@@ -4032,5 +4099,155 @@ mod unit_tests {
         let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
         let data = receive_data(Some(vec![vfio_fd("vfio0", 5)]), Some(6));
         data.validate_vfio_fds(&vm_config.lock().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn test_updates_memory_zones() {
+        const NEW_NUMA_NODE1: u32 = 3;
+        const NEW_NUMA_NODE2: u32 = 2;
+
+        let mut dummy_config = create_dummy_vm_config();
+        let memzone_updates = vec![
+            VmMemoryZoneUpdateData {
+                id: "zone1".to_string(),
+                host_numa_node: NEW_NUMA_NODE1,
+            },
+            VmMemoryZoneUpdateData {
+                id: "zone2".to_string(),
+                host_numa_node: NEW_NUMA_NODE2,
+            },
+        ];
+
+        // No zones configured in the original config -> Error
+        dummy_config.memory.zones = None;
+        let result = update_memory_zones(
+            &memzone_updates,
+            &Arc::new(Mutex::new(*dummy_config.clone())),
+        );
+        assert!(
+            matches!(result, Err(MemoryZoneUpdateError::NoZones)),
+            "Expected `Err(MemoryZoneUpdateError::NoZones)` but got {result:?}"
+        );
+
+        // More zone updates than originally specified zones -> Error
+        dummy_config.memory.zones = Some(vec![MemoryZoneConfig {
+            host_numa_node: Some(0),
+            id: "zone1".to_string(),
+            ..Default::default()
+        }]);
+        let result = update_memory_zones(
+            &memzone_updates,
+            &Arc::new(Mutex::new(*dummy_config.clone())),
+        );
+        assert!(
+            matches!(
+                result,
+                Err(MemoryZoneUpdateError::ZoneNotFound(ref id)) if id=="zone2"
+            ),
+            "Expected `Err(MemoryZoneUpdateError::ZoneNotFound(\"zone2\"))` but got {result:?}"
+        );
+
+        // The second zone update does not match -> Error
+        dummy_config.memory.zones = Some(vec![
+            MemoryZoneConfig {
+                host_numa_node: Some(0),
+                id: "zone1".to_string(),
+                ..Default::default()
+            },
+            MemoryZoneConfig {
+                host_numa_node: Some(1),
+                id: "zone3".to_string(),
+                ..Default::default()
+            },
+        ]);
+        let result = update_memory_zones(
+            &memzone_updates,
+            &Arc::new(Mutex::new(*dummy_config.clone())),
+        );
+        assert!(
+            matches!(
+                result,
+                Err(MemoryZoneUpdateError::ZoneNotFound(ref id)) if id=="zone2"
+            ),
+            "Expected `Err(MemoryZoneUpdateError::ZoneNotFound(\"zone2\"))` but got {result:?}"
+        );
+
+        // List contains two updates for the same memory Zone -> Error
+        dummy_config.memory.zones = Some(vec![
+            MemoryZoneConfig {
+                host_numa_node: Some(0),
+                id: "zone1".to_string(),
+                ..Default::default()
+            },
+            MemoryZoneConfig {
+                host_numa_node: Some(1),
+                id: "zone3".to_string(),
+                ..Default::default()
+            },
+        ]);
+
+        let memzone_updates = vec![
+            VmMemoryZoneUpdateData {
+                id: "zone1".to_string(),
+                host_numa_node: NEW_NUMA_NODE1,
+            },
+            VmMemoryZoneUpdateData {
+                id: "zone1".to_string(),
+                host_numa_node: NEW_NUMA_NODE2,
+            },
+        ];
+        let result = update_memory_zones(
+            &memzone_updates,
+            &Arc::new(Mutex::new(*dummy_config.clone())),
+        );
+        assert!(
+            matches!(
+                result,
+                Err(MemoryZoneUpdateError::MultipleUpdates(ref id)) if id=="zone1"
+            ),
+            "Expected `Err(MemoryZoneUpdateError::MultipleUpdates(\"zone1\"))` but got {result:?}"
+        );
+
+        // The update works. Result is okay and the update is written to the config
+        dummy_config.memory.zones = Some(vec![
+            MemoryZoneConfig {
+                host_numa_node: Some(0),
+                id: "zone1".to_string(),
+                ..Default::default()
+            },
+            MemoryZoneConfig {
+                host_numa_node: Some(1),
+                id: "zone2".to_string(),
+                ..Default::default()
+            },
+        ]);
+
+        let memzone_updates = vec![
+            VmMemoryZoneUpdateData {
+                id: "zone1".to_string(),
+                host_numa_node: NEW_NUMA_NODE1,
+            },
+            VmMemoryZoneUpdateData {
+                id: "zone2".to_string(),
+                host_numa_node: NEW_NUMA_NODE2,
+            },
+        ];
+        let dummy_config = Arc::new(Mutex::new(*dummy_config));
+        let result = update_memory_zones(&memzone_updates, &dummy_config.clone());
+        assert!(
+            matches!(result, Ok(()),),
+            "Result should have been Ok(()) but got {result:?}"
+        );
+        let result_zones = dummy_config.lock().unwrap().memory.zones.clone().unwrap();
+        assert_eq!(
+            result_zones[0].host_numa_node,
+            Some(NEW_NUMA_NODE1),
+            "Expected \"zone1\" to be updated to {NEW_NUMA_NODE1:?}"
+        );
+        assert_eq!(
+            result_zones[1].host_numa_node,
+            Some(NEW_NUMA_NODE2),
+            "Expected \"zone2\" to be updated to {NEW_NUMA_NODE2:?}"
+        );
     }
 }
