@@ -285,8 +285,8 @@ fn create_cpu_nodes(
     if cache_exist && l3_cache_size != 0 && !l2_cache_shared && l3_cache_shared {
         let mut i: u32 = 0;
         while i < packages.into() {
-            let l3_cache_name = "l3-cache0";
-            let l3_cache_node = fdt.begin_node(l3_cache_name)?;
+            let l3_cache_name = format!("l3-cache{i}");
+            let l3_cache_node = fdt.begin_node(&l3_cache_name)?;
             // ARM L3 cache is generally shared within the package (socket), so the
             // L3 cache node pointed to by the CPU in the package has the same L3
             // cache PHANDLE. The L3 cache phandle must start from the largest L2
