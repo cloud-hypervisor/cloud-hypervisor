@@ -47,7 +47,7 @@ use option_parser::{OptionParser, OptionParserError, Toggle, Tuple, TupleList};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_migration::MigratableError;
-use vm_migration::tls::{TlsEndpoint, validate_tls_dir};
+use vm_migration::tls::{TlsConfigError, TlsEndpoint, validate_tls_dir};
 use vmm_sys_util::eventfd::EventFd;
 
 #[cfg(feature = "dbus_api")]
@@ -328,11 +328,47 @@ pub struct VmReceiveMigrationData {
 
 #[derive(Debug, Error)]
 pub enum VmReceiveMigrationConfigError {
+    /// Parsing of `VmReceiveMigrationData` failed
     #[error("Error parsing receive migration parameters")]
     ParseError(#[source] OptionParserError),
-
-    #[error("Error validating receive migration parameters: {0}")]
-    ValidationError(String),
+    /// Variant returned of validation of `receiver_url` failed.
+    #[error("Expected receiver_url in the form of either `tcp:<host>:<port>` or `unix:<path>:`")]
+    MalformedReceiverUrl(#[source] TcpAddressParseError),
+    /// TLS encryption cannot be used for UNIX sockets. It is therefore
+    /// forbidden to use TLS encryption with UNIX sockets.
+    #[error("UNIX sockets and TLS encryption cannot be used at the same time")]
+    TlsEncryptionUsedForUnixSocket,
+    /// The `receiver_url` does not contain one of the supported
+    /// prefixes. Supported prefixes are "tcp" and "unix".
+    #[error("Expected receiver_url to either use `tcp` or `unix` prefix")]
+    InvalidSocketPrefix,
+    /// The TLS configuration is invalid.
+    #[error("Invalid TLS configuration for receive-migration")]
+    InvalidTlsConfiguration(#[source] TlsConfigError),
+    /// Every VFIO device needs a replacement in vfio_fds and none was found for the respective
+    /// device
+    #[error(
+        "VFIO device '{0}' has no replacement in vfio_fds, its source path or fd is not usable on the destination"
+    )]
+    VfioDeviceNoReplacementFd(String),
+    /// The `vfio_fds` option was used without supplying `iommufd_fd`
+    #[error("Usage of `vfio_fds` requires `iommufd_fd` to be specified")]
+    VfioFdRequiresIommufdFd,
+    /// `iommufd_fd` was provided without also enabling the iommufd backend.
+    #[error("Platform `iommufd_fd=<fd>` requires `iommufd=on`")]
+    IommufdFdRequiresIommufd,
+    /// Identified duplicate fd replacements for the FD with the given ID.
+    #[error("Multiple replacements defined for fd with ID {0}")]
+    VfioFdMultipleReplacements(String),
+    /// Identified a fd replacements for a FD not present in the VmConfig.
+    #[error("Replacement ID {0} in vfio_fds id does not match any device in the received VmConfig")]
+    VfioFdReplacementWithoutTarget(String),
+    /// Multiple updates for the same memory zone were defined.
+    #[error("More than one update was defined for at least one memory zone")]
+    MultipleMemoryZoneUpdates,
+    /// An update with an empty memory zone ID was specified.
+    #[error("One or more memory zone updates contained an empty ID")]
+    MemoryZoneUpdatesEmptyId,
 }
 
 impl VmReceiveMigrationData {
@@ -410,33 +446,23 @@ impl VmReceiveMigrationData {
 
     pub fn validate(&self) -> Result<(), VmReceiveMigrationConfigError> {
         if let Some(addr) = self.receiver_url.strip_prefix("tcp:") {
-            tcp_address_to_server_name(addr).map_err(|e| {
-                VmReceiveMigrationConfigError::ValidationError(format!(
-                    "receiver_url must use tcp:<host>:<port> or unix:<path>: {e}."
-                ))
-            })?;
+            tcp_address_to_server_name(addr)
+                .map_err(VmReceiveMigrationConfigError::MalformedReceiverUrl)?;
         } else if self
             .receiver_url
             .strip_prefix("unix:")
             .is_some_and(|path| !path.is_empty())
         {
             if self.tls_dir.is_some() {
-                return Err(VmReceiveMigrationConfigError::ValidationError(
-                    "UNIX sockets and TLS encryption cannot be used at the same time.".to_string(),
-                ));
+                return Err(VmReceiveMigrationConfigError::TlsEncryptionUsedForUnixSocket);
             }
         } else {
-            return Err(VmReceiveMigrationConfigError::ValidationError(
-                "receiver_url must use tcp:<host>:<port> or unix:<path>.".to_string(),
-            ));
+            return Err(VmReceiveMigrationConfigError::InvalidSocketPrefix);
         }
 
         if let Some(tls_dir) = &self.tls_dir {
-            validate_tls_dir(tls_dir, TlsEndpoint::Server).map_err(|e| {
-                VmReceiveMigrationConfigError::ValidationError(format!(
-                    "invalid TLS configuration for receive-migration: {e}"
-                ))
-            })?;
+            validate_tls_dir(tls_dir, TlsEndpoint::Server)
+                .map_err(VmReceiveMigrationConfigError::InvalidTlsConfiguration)?;
         }
 
         let unique_zones = self
@@ -445,14 +471,10 @@ impl VmReceiveMigrationData {
             .map(|update| update.id.as_str())
             .collect::<HashSet<_>>();
         if self.zone_updates.len() != unique_zones.len() {
-            return Err(VmReceiveMigrationConfigError::ValidationError(
-                "more than one update was defined for at least one memory zone".to_string(),
-            ));
+            return Err(VmReceiveMigrationConfigError::MultipleMemoryZoneUpdates);
         }
         if unique_zones.contains("") {
-            return Err(VmReceiveMigrationConfigError::ValidationError(
-                "Empty Id".to_string(),
-            ));
+            return Err(VmReceiveMigrationConfigError::MemoryZoneUpdatesEmptyId);
         }
 
         Ok(())
@@ -476,10 +498,9 @@ impl VmReceiveMigrationData {
                 .as_deref()
                 .is_some_and(|id| substituted.contains(id))
             {
-                return Err(VmReceiveMigrationConfigError::ValidationError(format!(
-                    "VFIO device '{}' has no replacement in vfio_fds, its source path or fd is not usable on the destination",
-                    d.pci_common.id.as_deref().unwrap_or_default()
-                )));
+                return Err(VmReceiveMigrationConfigError::VfioDeviceNoReplacementFd(
+                    d.pci_common.id.as_deref().unwrap_or_default().to_owned(),
+                ));
             }
         }
 
@@ -489,23 +510,18 @@ impl VmReceiveMigrationData {
 
         // The supplied vfio_fds must be usable against the received VmConfig.
         if self.iommufd_fd.is_none() {
-            return Err(VmReceiveMigrationConfigError::ValidationError(
-                "vfio_fds requires iommufd_fd".to_string(),
-            ));
+            return Err(VmReceiveMigrationConfigError::VfioFdRequiresIommufdFd);
         }
         if !vm_config.platform.as_ref().is_some_and(|p| p.iommufd) {
-            return Err(VmReceiveMigrationConfigError::ValidationError(
-                "vfio_fds requires platform iommufd=on in the received VmConfig".to_string(),
-            ));
+            return Err(VmReceiveMigrationConfigError::IommufdFdRequiresIommufd);
         }
 
         let mut seen = HashSet::new();
         for v in vfio_fds {
             if !seen.insert(v.id.as_str()) {
-                return Err(VmReceiveMigrationConfigError::ValidationError(format!(
-                    "duplicate vfio_fds id '{}'",
-                    v.id
-                )));
+                return Err(VmReceiveMigrationConfigError::VfioFdMultipleReplacements(
+                    v.id.to_owned(),
+                ));
             }
         }
 
@@ -517,10 +533,9 @@ impl VmReceiveMigrationData {
             .collect();
         for v in vfio_fds {
             if !known_ids.contains(v.id.as_str()) {
-                return Err(VmReceiveMigrationConfigError::ValidationError(format!(
-                    "vfio_fds id '{}' does not match any device in the received VmConfig",
-                    v.id
-                )));
+                return Err(
+                    VmReceiveMigrationConfigError::VfioFdReplacementWithoutTarget(v.id.to_owned()),
+                );
             }
         }
 
@@ -2166,10 +2181,46 @@ mod unit_tests {
         ))
         .unwrap_err();
 
-        VmReceiveMigrationData::parse("receiver_url=file:///tmp/migration").unwrap_err();
-        VmReceiveMigrationData::parse("receiver_url=tcp:192.168.1.1").unwrap_err();
-        VmReceiveMigrationData::parse("receiver_url=tcp:[2001:db8::1]").unwrap_err();
-        VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,tls_dir=/tmp").unwrap_err();
+        let e = VmReceiveMigrationData::parse("receiver_url=file:///tmp/migration").unwrap_err();
+        assert!(
+            matches!(e, VmReceiveMigrationConfigError::InvalidSocketPrefix),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            VmReceiveMigrationConfigError::InvalidSocketPrefix,
+        );
+        let e = VmReceiveMigrationData::parse("receiver_url=tcp:192.168.1.1").unwrap_err();
+        assert!(
+            matches!(
+                e,
+                VmReceiveMigrationConfigError::MalformedReceiverUrl(
+                    TcpAddressParseError::MissingPort
+                )
+            ),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            VmReceiveMigrationConfigError::MalformedReceiverUrl(TcpAddressParseError::MissingPort),
+        );
+        let e = VmReceiveMigrationData::parse("receiver_url=tcp:[2001:db8::1]").unwrap_err();
+        assert!(
+            matches!(
+                e,
+                VmReceiveMigrationConfigError::MalformedReceiverUrl(
+                    TcpAddressParseError::MissingPortSeparatorAfterBracketedHost
+                )
+            ),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            VmReceiveMigrationConfigError::MalformedReceiverUrl(
+                TcpAddressParseError::MissingPortSeparatorAfterBracketedHost
+            ),
+        );
+        let e =
+            VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,tls_dir=/tmp").unwrap_err();
+        assert!(
+            matches!(
+                e,
+                VmReceiveMigrationConfigError::TlsEncryptionUsedForUnixSocket
+            ),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            VmReceiveMigrationConfigError::TlsEncryptionUsedForUnixSocket,
+        );
 
         // memory_mode defaults to precopy when not specified.
         let data = VmReceiveMigrationData::parse("receiver_url=tcp:127.0.0.1:1234").unwrap();
@@ -2202,7 +2253,11 @@ mod unit_tests {
         );
 
         // Missing receiver_url in keyed form must fail.
-        VmReceiveMigrationData::parse("memory_mode=postcopy").unwrap_err();
+        let e = VmReceiveMigrationData::parse("memory_mode=postcopy").unwrap_err();
+        assert!(
+            matches!(e, VmReceiveMigrationConfigError::ParseError(_)),
+            "Expected \"ParseError\"; got \"{e:?}\"",
+        );
 
         // vfio_fds without iommufd_fd parses fine now, the pairing is checked
         // later against the received VmConfig by validate_vfio_fds.
@@ -2225,19 +2280,38 @@ mod unit_tests {
         assert_eq!(data.iommufd_fd, Some(9));
 
         // zone update tests
-        VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,zone_updates=[]").unwrap_err();
-        VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,zone_updates=[zone1 3]")
+        let e = VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,zone_updates=[]")
             .unwrap_err();
-        VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,zone_updates=[zone1@invalid]")
+        assert!(
+            matches!(e, VmReceiveMigrationConfigError::ParseError(_)),
+            "Expected \"ParseError\"; got \"{e:?}\"",
+        );
+        let e = VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,zone_updates=[zone1 3]")
             .unwrap_err();
-        VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,zone_updates=[zone1@1,zone1@2]")
-            .unwrap_err();
-        // Mind the space before the second zone. If the whitespace isn't trimmed, we end up with
-        // two different ID
-        VmReceiveMigrationData::parse(
+        assert!(
+            matches!(e, VmReceiveMigrationConfigError::ParseError(_)),
+            "Expected \"ParseError\"; got \"{e:?}\"",
+        );
+        let e = VmReceiveMigrationData::parse(
+            "receiver_url=unix:/tmp/sock,zone_updates=[zone1@1,zone1@2]",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(e, VmReceiveMigrationConfigError::MultipleMemoryZoneUpdates),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            VmReceiveMigrationConfigError::MultipleMemoryZoneUpdates,
+        );
+        //Mind the space before the second zone. If the whitespace isn't trimmed, we end up with two
+        //different ID and the error does not trigger
+        let e = VmReceiveMigrationData::parse(
             "receiver_url=unix:/tmp/sock,zone_updates=[zone1@1, zone1@2]",
         )
         .unwrap_err();
+        assert!(
+            matches!(e, VmReceiveMigrationConfigError::MultipleMemoryZoneUpdates),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            VmReceiveMigrationConfigError::MultipleMemoryZoneUpdates,
+        );
     }
 
     #[test]
