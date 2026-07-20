@@ -10,7 +10,6 @@
 #![allow(dead_code)]
 use std::fs::{File, OpenOptions, copy};
 use std::io::{BufRead, BufReader, Read, Seek, Write};
-#[cfg(not(feature = "mshv"))]
 use std::net::TcpListener;
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
@@ -40,14 +39,11 @@ macro_rules! basic_regular_guest {
 mod common_parallel {
     use std::cell::Cell;
     use std::io::{self, SeekFrom};
-    #[cfg(not(feature = "mshv"))]
     use std::num::NonZeroU32;
     use std::process::Command;
-    #[cfg(not(feature = "mshv"))]
     use std::sync::mpsc;
 
     use test_infra::GuestFactory;
-    #[cfg(not(feature = "mshv"))]
     use vmm::api::TimeoutStrategy;
 
     use crate::*;
@@ -6737,7 +6733,6 @@ mod common_parallel {
     // 4. The destination VM is functional (including various virtio-devices are working properly) after
     //    live migration;
     // Note: This test does not use vsock as we can't create two identical vsock on the same host.
-    #[cfg(not(feature = "mshv"))]
     fn _test_live_migration(upgrade_test: bool, local: bool, paused: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -6896,7 +6891,6 @@ mod common_parallel {
     // 5. The destination VM is functional after live migration;
     // 6. Ensure Landlock is enabled on destination VM by hotplugging a disk. As the path for
     //    this disk is not known to the destination VM this step will fail.
-    #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_with_landlock() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -7026,7 +7020,6 @@ mod common_parallel {
     }
 
     // Function to get an available port
-    #[cfg(not(feature = "mshv"))]
     fn get_available_port() -> u16 {
         TcpListener::bind("127.0.0.1:0")
             .expect("Failed to bind to address")
@@ -7035,7 +7028,6 @@ mod common_parallel {
             .port()
     }
 
-    #[cfg(not(feature = "mshv"))]
     fn start_live_migration_tcp(
         src_api_socket: &str,
         dest_api_socket: &str,
@@ -7051,7 +7043,6 @@ mod common_parallel {
         )
     }
 
-    #[cfg(not(feature = "mshv"))]
     fn start_live_migration_tcp_with_flags(
         src_api_socket: &str,
         dest_api_socket: &str,
@@ -7156,7 +7147,6 @@ mod common_parallel {
         send_success && receive_success
     }
 
-    #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_tcp(connections: NonZeroU32) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -7288,7 +7278,6 @@ mod common_parallel {
     // Postcopy live migration. Verifies the destination boots a guest
     // that touches all of its memory, which forces every page to be
     // demand-faulted across the network.
-    #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_tcp_postcopy() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -7389,7 +7378,6 @@ mod common_parallel {
         handle_child_output(r, &dest_output);
     }
 
-    #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_tcp_timeout(timeout_strategy: TimeoutStrategy) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -7581,37 +7569,31 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_migration_basic() {
         _test_live_migration(false, false, false);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_migration_local() {
         _test_live_migration(false, true, false);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_migration_basic_paused() {
         _test_live_migration(false, false, true);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_migration_local_paused() {
         _test_live_migration(false, true, true);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_migration_tcp() {
         _test_live_migration_tcp(NonZeroU32::new(1).unwrap());
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_migration_tcp_parallel_connections() {
         _test_live_migration_tcp(NonZeroU32::new(8).unwrap());
     }
@@ -7623,14 +7605,12 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     #[ignore = "See #8651"]
     fn test_live_migration_tcp_timeout_cancel() {
         _test_live_migration_tcp_timeout(TimeoutStrategy::Cancel);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_migration_tcp_timeout_ignore() {
         _test_live_migration_tcp_timeout(TimeoutStrategy::Ignore);
     }
@@ -7638,25 +7618,21 @@ mod common_parallel {
     // TODO: Add test of live upgrade paused vm after cloud-hypervisor-static
     // version is updated.
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_basic() {
         _test_live_migration(true, false, false);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_local() {
         _test_live_migration(true, true, false);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     #[cfg(target_arch = "x86_64")]
     fn test_live_migration_with_landlock() {
         _test_live_migration_with_landlock();
     }
 
-    #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_virtio_fs(local: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -7840,13 +7816,11 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_migration_virtio_fs() {
         _test_live_migration_virtio_fs(false);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_migration_virtio_fs_local() {
         _test_live_migration_virtio_fs(true);
     }
@@ -7970,7 +7944,6 @@ mod dbus_api {
 }
 
 mod ivshmem {
-    #[cfg(not(feature = "mshv"))]
     use std::fs::remove_dir_all;
     use std::process::Command;
 
@@ -7978,7 +7951,6 @@ mod ivshmem {
 
     use crate::*;
 
-    #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_ivshmem(local: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -8210,7 +8182,6 @@ mod ivshmem {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_ivshmem() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -8363,19 +8334,16 @@ mod ivshmem {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_migration_ivshmem() {
         _test_live_migration_ivshmem(false);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_migration_ivshmem_local() {
         _test_live_migration_ivshmem(true);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_hotplug_virtiomem() {
         snapshot_restore_common::_test_snapshot_restore(
             snapshot_restore_common::SnapshotRestoreTest {
@@ -8386,7 +8354,6 @@ mod ivshmem {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))] // See issue #7437
     fn test_snapshot_restore_basic() {
         snapshot_restore_common::_test_snapshot_restore(
             snapshot_restore_common::SnapshotRestoreTest::default(),
@@ -8394,7 +8361,6 @@ mod ivshmem {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_with_resume() {
         snapshot_restore_common::_test_snapshot_restore(
             snapshot_restore_common::SnapshotRestoreTest {
@@ -8489,20 +8455,17 @@ mod ivshmem {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))] // See issue #7437
     #[cfg(target_arch = "x86_64")]
     fn test_snapshot_restore_pvpanic() {
         snapshot_restore_common::_test_snapshot_restore_devices(true);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_offload() {
         snapshot_restore_common::_test_snapshot_restore_offload(false, false);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_offload_virtio_mem() {
         snapshot_restore_common::_test_snapshot_restore_offload(true, false);
     }
@@ -8525,7 +8488,6 @@ mod ivshmem {
     }
 }
 
-#[cfg(not(feature = "mshv"))]
 mod snapshot_restore_common {
     use std::fs::remove_dir_all;
     use std::process::Command;
@@ -8904,6 +8866,7 @@ mod snapshot_restore_common {
         handle_child_output(r, &output);
     }
 
+    #[cfg(not(feature = "mshv"))]
     pub(crate) fn _test_snapshot_restore_uffd(
         memory_config: &str,
         memory_zone_config: &[&str],
@@ -9680,9 +9643,7 @@ mod snapshot_restore_common {
 }
 
 mod common_sequential {
-    #[cfg(not(feature = "mshv"))]
     use std::fs::remove_dir_all;
-    #[cfg(not(feature = "mshv"))]
     use std::net::{IpAddr, Ipv4Addr};
 
     use crate::*;
@@ -9720,7 +9681,6 @@ mod common_sequential {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))] // See issue #7437
     #[ignore = "See #6970"]
     fn test_snapshot_restore_with_fd() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -9954,7 +9914,6 @@ mod common_sequential {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_virtio_fs() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -10115,7 +10074,6 @@ mod common_sequential {
         let _ = fs::remove_file(shared_dir.join("post_restore_file"));
     }
 
-    #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_balloon(upgrade_test: bool, local: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -10304,7 +10262,6 @@ mod common_sequential {
         handle_child_output(r, &dest_output);
     }
 
-    #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_numa(upgrade_test: bool, local: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -10655,49 +10612,41 @@ mod common_sequential {
     // NUMA and balloon live migration tests run sequentially
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_migration_balloon() {
         _test_live_migration_balloon(false, false);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_migration_balloon_local() {
         _test_live_migration_balloon(false, true);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_balloon() {
         _test_live_migration_balloon(true, false);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_balloon_local() {
         _test_live_migration_balloon(true, true);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_migration_numa() {
         _test_live_migration_numa(false, false);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_migration_numa_local() {
         _test_live_migration_numa(false, true);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_numa() {
         _test_live_migration_numa(true, false);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_numa_local() {
         _test_live_migration_numa(true, true);
     }
@@ -10735,7 +10684,6 @@ mod common_sequential {
         _test_live_migration_ovs_dpdk(true, true);
     }
 
-    #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_watchdog(upgrade_test: bool, local: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -10929,7 +10877,6 @@ mod common_sequential {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_migration_watchdog() {
         _test_live_migration_watchdog(false, false);
     }
@@ -11549,7 +11496,6 @@ mod windows {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     #[cfg_attr(target_arch = "aarch64", ignore = "See #4327")]
     fn test_windows_guest_snapshot_restore() {
         let windows_guest = WindowsGuest::new();
