@@ -3384,6 +3384,8 @@ impl BusDevice for AcpiCpuHotplugController {
                     // lock for the entire function doesn't cause any deadlock.
                     let mut vcpu_states = self.vcpu_states.lock().unwrap();
                     let state = &mut vcpu_states[usize::try_from(self.selected_cpu).unwrap()];
+                    // Save before the removal ack below clears it.
+                    let removal_requested = state.removing;
                     // The ACPI code writes back a 1 to acknowledge the insertion
                     if (data[0] & (1 << Self::CPU_INSERTING_FLAG) == 1 << Self::CPU_INSERTING_FLAG)
                         && state.inserting
@@ -3396,11 +3398,22 @@ impl BusDevice for AcpiCpuHotplugController {
                     {
                         state.removing = false;
                     }
-                    // Trigger removal of vCPU:
-                    if data[0] & (1 << Self::CPU_EJECT_FLAG) == 1 << Self::CPU_EJECT_FLAG
-                        && let Err(e) = Self::remove_vcpu(self.selected_cpu, state)
-                    {
-                        error!("Error removing vCPU: {e:?}");
+                    // Only allow the guest to eject vCPUs we expect to be ejected (also deny boot
+                    // vcpu).
+                    if data[0] & (1 << Self::CPU_EJECT_FLAG) == 1 << Self::CPU_EJECT_FLAG {
+                        if self.selected_cpu == 0 {
+                            warn!("Ignoring guest request to eject the boot vCPU (CPU 0)");
+                        } else if removal_requested {
+                            if let Err(e) = Self::remove_vcpu(self.selected_cpu, state) {
+                                error!("Error removing vCPU: {e:?}");
+                            }
+                        } else {
+                            warn!(
+                                "Ignoring guest request to eject vCPU {} not marked for \
+                                 removal by the VMM",
+                                self.selected_cpu
+                            );
+                        }
                     }
                 } else {
                     warn!("Out of range vCPU id: {}", self.selected_cpu);
