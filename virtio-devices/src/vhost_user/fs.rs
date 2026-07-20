@@ -89,8 +89,14 @@ impl Fs {
         let num_queues = NUM_QUEUE_OFFSET + req_num_queues;
 
         // Connect to the vhost-user socket.
-        let mut vu =
-            VhostUserHandle::connect_vhost_user(false, path, num_queues as u64, false, &exit_evt)?;
+        let mut vu = VhostUserHandle::connect_vhost_user(
+            false,
+            path,
+            num_queues as u64,
+            false,
+            &exit_evt,
+            |_| Ok(()),
+        )?;
 
         let (
             avail_features,

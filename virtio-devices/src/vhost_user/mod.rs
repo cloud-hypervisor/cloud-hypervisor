@@ -330,47 +330,42 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
             epoll::Events::EPOLLHUP,
         )?;
 
+        let queues = self
+            .queues
+            .iter()
+            .map(|(i, q, e)| (*i, vm_virtio::clone_queue(q), e.try_clone().unwrap()))
+            .collect::<Vec<_>>();
+
         let mut vhost_user = match VhostUserHandle::connect_vhost_user(
             self.server,
             &self.socket_path,
             self.queues.len() as u64,
             true,
             &self.kill_evt,
+            |vhost_user| {
+                vhost_user.reinitialize_vhost_user(
+                    self.mem.memory().deref(),
+                    &queues,
+                    self.virtio_interrupt.as_ref(),
+                    self.acked_features,
+                    self.acked_protocol_features,
+                    &self.backend_req_handler,
+                    self.inflight.as_mut(),
+                )
+            },
         ) {
             Ok(vu) => vu,
-            // Kill event fired during the connect retry loop; abandon the
+            // Kill event fired during the reconnect retry loop; abandon the
             // reconnect attempt. The EpollHelper observes the same kill
             // event and will tear down on its next iteration.
             Err(Error::ConnectKilled) => return Ok(()),
             Err(e) => {
                 return Err(EpollHelperError::IoError(io::Error::other(format!(
-                    "failed connecting vhost-user backend for socket {}: {e:?}",
+                    "failed reconnecting vhost-user backend for socket {}: {e:?}",
                     self.socket_path
                 ))));
             }
         };
-
-        let queues = self
-            .queues
-            .iter()
-            .map(|(i, q, e)| (*i, vm_virtio::clone_queue(q), e.try_clone().unwrap()))
-            .collect::<Vec<_>>();
-        // Initialize the backend
-        vhost_user
-            .reinitialize_vhost_user(
-                self.mem.memory().deref(),
-                &queues,
-                self.virtio_interrupt.as_ref(),
-                self.acked_features,
-                self.acked_protocol_features,
-                &self.backend_req_handler,
-                self.inflight.as_mut(),
-            )
-            .map_err(|e| {
-                EpollHelperError::IoError(io::Error::other(format!(
-                    "failed reconnecting vhost-user backend: {e:?}"
-                )))
-            })?;
 
         helper.add_event_custom(
             vhost_user.socket_handle().as_raw_fd(),
@@ -873,5 +868,64 @@ impl VhostUserCommon {
         self.vu = None;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use std::io::{Read, Write};
+    use std::os::unix::net::{UnixListener, UnixStream};
+    use std::thread;
+
+    use vhost::vhost_user::message::{FrontendReq, VhostUserHeaderFlag};
+    use vmm_sys_util::tempdir::TempDir;
+
+    use super::*;
+
+    fn read_request(stream: &mut UnixStream, expected_request: FrontendReq) {
+        let mut header = [0u8; 12];
+        stream.read_exact(&mut header).unwrap();
+        assert_eq!(
+            u32::from_ne_bytes(header[0..4].try_into().unwrap()),
+            u32::from(expected_request)
+        );
+        assert_eq!(u32::from_ne_bytes(header[8..12].try_into().unwrap()), 0);
+    }
+
+    #[test]
+    fn connect_retries_get_features_disconnect_with_fresh_socket() {
+        let temp_dir = TempDir::new_with_prefix("/tmp/vhost-user-reconnect-").unwrap();
+        let socket_path = temp_dir.as_path().join("backend.sock");
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        let backend = thread::spawn(move || {
+            let (mut first, _) = listener.accept().unwrap();
+            read_request(&mut first, FrontendReq::SET_OWNER);
+            read_request(&mut first, FrontendReq::GET_FEATURES);
+            drop(first);
+
+            let (mut second, _) = listener.accept().unwrap();
+            read_request(&mut second, FrontendReq::SET_OWNER);
+            read_request(&mut second, FrontendReq::GET_FEATURES);
+
+            let mut reply = Vec::with_capacity(20);
+            reply.extend_from_slice(&u32::from(FrontendReq::GET_FEATURES).to_ne_bytes());
+            reply.extend_from_slice(&(VhostUserHeaderFlag::REPLY.bits() | 1).to_ne_bytes());
+            reply.extend_from_slice(&8u32.to_ne_bytes());
+            reply.extend_from_slice(&0u64.to_ne_bytes());
+            second.write_all(&reply).unwrap();
+        });
+
+        let kill_evt = EventFd::new(libc::EFD_NONBLOCK).unwrap();
+        VhostUserHandle::connect_vhost_user(
+            false,
+            socket_path.to_str().unwrap(),
+            1,
+            false,
+            &kill_evt,
+            |_| Ok(()),
+        )
+        .unwrap();
+
+        backend.join().unwrap();
     }
 }
