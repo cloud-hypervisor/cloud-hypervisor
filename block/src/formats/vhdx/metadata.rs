@@ -175,8 +175,7 @@ impl DiskSpec {
                 f.read_exact_at(&mut item, item_offset)
                     .map_err(VhdxMetadataError::ReadMetadata)?;
                 disk_spec.logical_sector_size = LittleEndian::read_u32(&item);
-                if !(disk_spec.logical_sector_size == 512 || disk_spec.logical_sector_size == 4096)
-                {
+                if disk_spec.logical_sector_size != 512 {
                     return Err(VhdxMetadataError::InvalidLogicalSectorSize);
                 }
 
