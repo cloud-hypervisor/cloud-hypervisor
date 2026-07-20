@@ -6,6 +6,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Write, stdout};
+use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::panic::AssertUnwindSafe;
 #[cfg(feature = "guest_debug")]
@@ -620,6 +621,38 @@ pub struct VmMigrationConfig {
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     common_cpuid: Vec<x86::CpuIdEntry>,
     memory_manager_data: MemoryManagerSnapshotData,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct VmMigrationConfigWire {
+    vm_config: api_types::VmConfig,
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    common_cpuid: Vec<x86::CpuIdEntry>,
+    memory_manager_data: MemoryManagerSnapshotData,
+}
+
+impl TryFrom<VmMigrationConfigWire> for VmMigrationConfig {
+    type Error = <VmConfig as TryFrom<api_types::VmConfig>>::Error;
+
+    fn try_from(value: VmMigrationConfigWire) -> result::Result<Self, Self::Error> {
+        Ok(Self {
+            vm_config: Arc::new(Mutex::new(value.vm_config.try_into()?)),
+            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+            common_cpuid: value.common_cpuid,
+            memory_manager_data: value.memory_manager_data,
+        })
+    }
+}
+
+impl From<&VmMigrationConfig> for VmMigrationConfigWire {
+    fn from(value: &VmMigrationConfig) -> Self {
+        Self {
+            vm_config: value.vm_config.lock().unwrap().deref().into(),
+            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+            common_cpuid: value.common_cpuid.clone(),
+            memory_manager_data: value.memory_manager_data.clone(),
+        }
+    }
 }
 
 impl VmMigrationConfig {
