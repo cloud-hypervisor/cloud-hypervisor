@@ -616,7 +616,7 @@ where
     Ok((value, duration))
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone)]
 pub struct VmMigrationConfig {
     vm_config: Arc<Mutex<VmConfig>>,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
