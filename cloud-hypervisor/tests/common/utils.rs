@@ -5,9 +5,7 @@ use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-#[cfg(not(feature = "mshv"))]
-use std::process::Stdio;
-use std::process::{Child, Command, Output};
+use std::process::{Child, Command, Output, Stdio};
 use std::string::String;
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
@@ -17,7 +15,6 @@ use std::{cmp, fs, io, panic, thread};
 use block::formats::qcow::ImageType as QcowImageType;
 use test_infra::*;
 use vmm_sys_util::tempdir::TempDir;
-#[cfg(not(feature = "mshv"))]
 use wait_timeout::ChildExt;
 
 const QCOW2_INCOMPATIBLE_FEATURES_OFFSET: u64 = 72;
@@ -1124,7 +1121,6 @@ pub(crate) fn bdf_from_hotplug_response(
     (segment_id, bus_id, device_id, function_id)
 }
 
-#[cfg(not(feature = "mshv"))]
 pub(crate) fn start_live_migration(
     migration_socket: &str,
     src_api_socket: &str,
@@ -1242,7 +1238,6 @@ pub(crate) fn start_live_migration(
     send_success && receive_success
 }
 
-#[cfg(not(feature = "mshv"))]
 pub(crate) fn print_and_panic(
     src_vm: Child,
     dest_vm: Child,
