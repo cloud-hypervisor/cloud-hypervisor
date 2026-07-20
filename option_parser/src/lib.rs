@@ -426,7 +426,7 @@ impl<T: TryFrom<u64>> Parseable for IntegerList<T> {
 
 /// Types that can appear as the second element of a [`Tuple`] pair.
 ///
-/// Implemented for `u64`, `Vec<u8>`, `Vec<u64>`, and `Vec<usize>`.
+/// Implemented for `u32`, `u64`, `Vec<u8>`, `Vec<u64>`, and `Vec<usize>`.
 pub trait TupleValue {
     /// Parses the value portion of a `key@value` tuple element.
     fn parse_value(input: &str) -> Result<Self, TupleError>
@@ -437,6 +437,12 @@ pub trait TupleValue {
 impl TupleValue for u64 {
     fn parse_value(input: &str) -> Result<Self, TupleError> {
         input.parse::<u64>().map_err(TupleError::InvalidInteger)
+    }
+}
+
+impl TupleValue for u32 {
+    fn parse_value(input: &str) -> Result<Self, TupleError> {
+        input.parse::<u32>().map_err(TupleError::InvalidInteger)
     }
 }
 
@@ -1023,6 +1029,20 @@ mod unit_tests {
             matches!(e, TupleError::EmptyKey(ref s) if s == expected_value),
             "Expected \"{:?}\"; got \"{e:?}\"",
             TupleError::EmptyKey(expected_value.to_string()),
+        );
+    }
+
+    #[test]
+    fn test_tuple_parse_u32_value() {
+        use std::num::IntErrorKind;
+        let t = Tuple::<String, u32>::from_str("foo@42").unwrap();
+        assert_eq!(t, Tuple("foo".to_owned(), 42));
+        let t = Tuple::<String, u32>::from_str("foo@0").unwrap();
+        assert_eq!(t, Tuple("foo".to_owned(), 0));
+        let e = Tuple::<String, u32>::from_str("foo@-1").unwrap_err();
+        assert!(
+            matches!(e, TupleError::InvalidInteger(ref e) if *e.kind() == IntErrorKind::InvalidDigit),
+            "Expected \"InvalidInteger(ParseIntError(kind: InvalidDigit))\"; got \"{e:?}\"",
         );
     }
 
