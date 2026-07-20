@@ -54,7 +54,9 @@ use vmm_sys_util::eventfd::EventFd;
 pub use self::dbus::start_dbus_thread;
 pub use self::http::{start_http_fd_thread, start_http_path_thread};
 use crate::Error as VmmError;
-use crate::config::{RestoreConfig, RestoredVfioConfig, deserialize_restored_fd};
+use crate::config::{
+    RestoreConfig, RestoredVfioConfig, VmMemoryZoneUpdateData, deserialize_restored_fd,
+};
 use crate::device_tree::DeviceTree;
 use crate::migration::transport::{
     MAX_MIGRATION_CONNECTIONS, TcpAddressParseError, tcp_address_to_server_name,
@@ -319,6 +321,9 @@ pub struct VmReceiveMigrationData {
     // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
     #[serde(default, deserialize_with = "deserialize_restored_fd")]
     pub iommufd_fd: Option<i32>,
+    /// Optional memory zone update data
+    #[serde(default)]
+    pub zone_updates: Vec<VmMemoryZoneUpdateData>,
 }
 
 #[derive(Debug, Error)]
@@ -381,6 +386,7 @@ impl VmReceiveMigrationData {
             memory_mode,
             vfio_fds,
             iommufd_fd,
+            zone_updates: vec![],
         };
 
         data.validate()?;
@@ -2089,6 +2095,7 @@ mod unit_tests {
                 memory_mode: MigrationMode::Precopy,
                 vfio_fds: None,
                 iommufd_fd: None,
+                zone_updates: vec![],
             }
         );
 
@@ -2118,6 +2125,7 @@ mod unit_tests {
                 memory_mode: MigrationMode::Precopy,
                 vfio_fds: None,
                 iommufd_fd: None,
+                zone_updates: vec![],
             }
         );
 
@@ -2143,6 +2151,7 @@ mod unit_tests {
                 memory_mode: MigrationMode::Precopy,
                 vfio_fds: None,
                 iommufd_fd: None,
+                ..Default::default()
             }
         );
 
@@ -2158,6 +2167,7 @@ mod unit_tests {
                 memory_mode: MigrationMode::Postcopy,
                 vfio_fds: None,
                 iommufd_fd: None,
+                ..Default::default()
             }
         );
 

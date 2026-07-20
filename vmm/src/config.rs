@@ -2808,6 +2808,15 @@ impl FromStr for MemoryRestoreMode {
     }
 }
 
+#[derive(Clone, Deserialize, Serialize, Debug, Eq, PartialEq)]
+/// Data required for updating memory zone <-> host NUMA node mappings.
+pub struct VmMemoryZoneUpdateData {
+    /// Id of the MemoryZone to update
+    pub id: String,
+    /// Host NUMA node to relocate the MemoryZone to
+    pub host_numa_node: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct RestoredVfioConfig {
     pub id: String,
@@ -2844,6 +2853,8 @@ pub struct RestoreConfig {
     pub iommufd_fd: Option<i32>,
     #[serde(default)]
     pub resume: bool,
+    #[serde(default)]
+    pub zone_updates: Vec<VmMemoryZoneUpdateData>,
 }
 
 impl RestoreConfig {
@@ -2928,6 +2939,7 @@ impl RestoreConfig {
             vfio_fds,
             iommufd_fd,
             resume,
+            zone_updates: vec![],
         })
     }
 
@@ -5196,6 +5208,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 vfio_fds: None,
                 iommufd_fd: None,
                 resume: false,
+                zone_updates: vec![],
             }
         );
         assert_eq!(
@@ -5221,6 +5234,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 vfio_fds: None,
                 iommufd_fd: None,
                 resume: false,
+                zone_updates: vec![],
             }
         );
         assert_eq!(
@@ -5233,6 +5247,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 vfio_fds: None,
                 iommufd_fd: None,
                 resume: false,
+                zone_updates: vec![],
             }
         );
         assert_eq!(
@@ -5245,6 +5260,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 vfio_fds: None,
                 iommufd_fd: None,
                 resume: true,
+                zone_updates: vec![],
             }
         );
         assert_eq!(
@@ -5268,6 +5284,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 ]),
                 iommufd_fd: Some(7),
                 resume: false,
+                zone_updates: vec![],
             }
         );
         // Parsing should fail as source_url is a required field
@@ -5382,6 +5399,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             vfio_fds: None,
             iommufd_fd: None,
             resume: false,
+            zone_updates: vec![],
         };
         valid_config.validate(&snapshot_vm_config).unwrap();
 
@@ -5449,6 +5467,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             vfio_fds: None,
             iommufd_fd: None,
             resume: false,
+            zone_updates: vec![],
         };
         snapshot_vm_config.net = Some(vec![NetConfig {
             pci_common: PciDeviceCommonConfig {
@@ -5468,6 +5487,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             vfio_fds: None,
             iommufd_fd: None,
             resume: false,
+            zone_updates: vec![],
         };
         assert_eq!(
             invalid_restore_mode.validate(&snapshot_vm_config),
@@ -5541,6 +5561,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             }]),
             iommufd_fd: Some(6),
             resume: false,
+            zone_updates: vec![],
         };
         valid_config.validate(&snapshot_vm_config).unwrap();
 
