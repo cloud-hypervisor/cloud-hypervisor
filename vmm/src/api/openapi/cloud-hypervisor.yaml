@@ -1500,6 +1500,10 @@ components:
           $ref: "#/components/schemas/MemoryRestoreMode"
         resume:
           type: boolean
+        zone_updates:
+          type: array
+          items:
+            $ref: "#/components/schemas/VmMemoryZoneUpdateData"
 
     ReceiveMigrationData:
       required:
@@ -1516,6 +1520,10 @@ components:
             TLS is only supported with tcp:<host>:<port> receiver URLs.
         memory_mode:
           $ref: "#/components/schemas/MigrationMode"
+        zone_updates:
+          type: array
+          items:
+            $ref: "#/components/schemas/VmMemoryZoneUpdateData"
 
     MigrationMode:
       type: string
@@ -1525,6 +1533,18 @@ components:
         Memory transfer mode. Precopy transfers all guest memory before the
         destination resumes. Postcopy resumes the destination first and faults
         guest pages in on demand.
+
+    VmMemoryZoneUpdateData:
+      type: object
+      required: [id, host_numa_node]
+      properties:
+        id:
+          type: string
+          minLength: 1
+        host_numa_node:
+          type: integer
+          format: uint32
+          minimum: 0
 
     TimeoutStrategy:
       type: string
