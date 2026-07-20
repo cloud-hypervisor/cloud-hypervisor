@@ -1178,6 +1178,7 @@ impl Vmm {
         T: Read,
     {
         let mode = receive_data_migration.memory_mode;
+        let zone_updates = &receive_data_migration.zone_updates;
 
         // Read in config data along with memory manager data
         let mut data: Vec<u8> = Vec::new();
@@ -1221,6 +1222,10 @@ impl Vmm {
             &vm_migration_config.vm_config,
             &vm_migration_config.common_cpuid,
         )?;
+
+        update_memory_zones(zone_updates, &vm_migration_config.vm_config).map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!("Error updating memory zones: {e:?}"))
+        })?;
 
         let config = vm_migration_config.vm_config.clone();
         self.vm_config = Some(vm_migration_config.vm_config);
@@ -2517,6 +2522,11 @@ impl RequestHandler for Vmm {
                         .expect("restore validated iommufd=on, so a platform exists")
                         .iommufd_fd = Some(iommufd_fd);
                 }
+
+                update_memory_zones(&restore_cfg.zone_updates, &vm_config).map_err(|e| {
+                    error!("VM Restore failed: {e:?}");
+                    VmError::ApplyMemoryZoneUpdate(e)
+                })?;
 
                 self.vm_restore(
                     source_url,
