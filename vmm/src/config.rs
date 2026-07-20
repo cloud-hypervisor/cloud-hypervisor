@@ -439,6 +439,12 @@ pub enum ValidationError {
     /// Invalid to set both 'mergeable' and 'shared' for memory
     #[error("Invalid to set both 'mergeable' and 'shared' for memory")]
     InvalidSharedMemoryWithMergeable,
+    /// More than one update was specified for one or more MemoryZone
+    #[error("Multiple updates for the same zone defined")]
+    MultipleMemoryZoneUpdates,
+    /// More than one update was specified that contains an empty memory zone ID
+    #[error("At least one memory zone update with an empty ID was defined")]
+    MemoryZoneUpdatesEmptyId,
 }
 
 type ValidationResult<T> = result::Result<T, ValidationError>;
@@ -2861,7 +2867,8 @@ impl RestoreConfig {
     pub const SYNTAX: &'static str = "Restore from a VM snapshot. \
         \nRestore parameters \"source_url=<source_url>,prefault=on|off,memory_restore_mode=copy|ondemand,\
         net_fds=<list_of_net_ids_with_their_associated_fds>,\
-        vfio_fds=<list_of_vfio_ids_with_their_associated_fd>,iommufd_fd=<fd>,resume=true|false\" \
+        vfio_fds=<list_of_vfio_ids_with_their_associated_fd>,iommufd_fd=<fd>,resume=true|false,\
+        zone_updates=<list_of_updates>\"
         \n`source_url` should be a valid URL (e.g file:///foo/bar or tcp://192.168.1.10/foo) \
         \n`prefault` controls eager prefaulting for the copy-based restore path (disabled by default) \
         \n`memory_restore_mode=copy` preserves the existing eager read-copy restore behavior, while `memory_restore_mode=ondemand` enables lazy demand paging and fails restore if userfaultfd support is unavailable \
@@ -2872,7 +2879,8 @@ impl RestoreConfig {
         sysfs path or host. Requires `iommufd_fd`.\
         \n`iommufd_fd` is a new iommufd file descriptor for the restored VM. \
         The one saved in the snapshot does not survive serialization.\
-        \n `resume` controls whether the VM will be directly resumed after restore ";
+        \n `resume` controls whether the VM will be directly resumed after restore \
+        \n `zone_updates` can be used to update NUMA memory zones. Expects a list of elements in the form `id@host_numa_node`";
 
     pub fn parse(restore: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2883,7 +2891,8 @@ impl RestoreConfig {
             .add("net_fds")
             .add("vfio_fds")
             .add("iommufd_fd")
-            .add("resume");
+            .add("resume")
+            .add("zone_updates");
         parser.parse(restore).map_err(Error::ParseRestore)?;
 
         let source_url = parser
@@ -2931,6 +2940,18 @@ impl RestoreConfig {
             .unwrap_or(Toggle(false))
             .0;
 
+        let zone_updates: Vec<VmMemoryZoneUpdateData> = parser
+            .convert::<TupleList<String, u32>>("zone_updates")
+            .map_err(Error::ParseRestore)?
+            .map_or(Vec::new(), |v| {
+                v.0.iter()
+                    .map(|Tuple(id, host_numa_node)| VmMemoryZoneUpdateData {
+                        id: id.clone(),
+                        host_numa_node: *host_numa_node,
+                    })
+                    .collect()
+            });
+
         Ok(RestoreConfig {
             source_url,
             prefault,
@@ -2939,7 +2960,7 @@ impl RestoreConfig {
             vfio_fds,
             iommufd_fd,
             resume,
-            zone_updates: vec![],
+            zone_updates,
         })
     }
 
@@ -2984,6 +3005,18 @@ impl RestoreConfig {
                     ));
                 }
             }
+        }
+
+        let unique_zones = self
+            .zone_updates
+            .iter()
+            .map(|update| update.id.as_str())
+            .collect::<HashSet<_>>();
+        if self.zone_updates.len() != unique_zones.len() {
+            return Err(ValidationError::MultipleMemoryZoneUpdates);
+        }
+        if unique_zones.contains("") {
+            return Err(ValidationError::MemoryZoneUpdatesEmptyId);
         }
 
         if !restored_net_with_fds.is_empty() {
@@ -5251,7 +5284,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             }
         );
         assert_eq!(
-            RestoreConfig::parse("source_url=/path/to/snapshot,resume=on")?,
+            RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[zone1@1]")?,
             RestoreConfig {
                 source_url: PathBuf::from("/path/to/snapshot"),
                 prefault: false,
@@ -5260,6 +5293,33 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 vfio_fds: None,
                 iommufd_fd: None,
                 resume: true,
+                zone_updates: vec![VmMemoryZoneUpdateData {
+                    host_numa_node: 1,
+                    id: "zone1".to_string(),
+                }],
+            }
+        );
+        assert_eq!(
+            RestoreConfig::parse(
+                "source_url=/path/to/snapshot,vfio_fds=[vfio0@5,vfio1@6],iommufd_fd=7"
+            )?,
+            RestoreConfig {
+                source_url: PathBuf::from("/path/to/snapshot"),
+                prefault: false,
+                memory_restore_mode: MemoryRestoreMode::Copy,
+                net_fds: None,
+                vfio_fds: Some(vec![
+                    RestoredVfioConfig {
+                        id: "vfio0".to_string(),
+                        fd: Some(5),
+                    },
+                    RestoredVfioConfig {
+                        id: "vfio1".to_string(),
+                        fd: Some(6),
+                    },
+                ]),
+                iommufd_fd: Some(7),
+                resume: false,
                 zone_updates: vec![],
             }
         );
@@ -5290,6 +5350,18 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         // Parsing should fail as source_url is a required field
         RestoreConfig::parse("prefault=off").unwrap_err();
         RestoreConfig::parse("source_url=/path/to/snapshot,memory_restore_mode=bogus").unwrap_err();
+        RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[@1]")
+            .unwrap_err();
+        RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[@]")
+            .unwrap_err();
+        RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[id1@]")
+            .unwrap_err();
+        RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[id1 1]")
+            .unwrap_err();
+        RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[[id1@1]]")
+            .unwrap_err();
+        RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=id1@1")
+            .unwrap_err();
         Ok(())
     }
 
@@ -5308,6 +5380,17 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             .unwrap()
             .memory_restore_mode,
             MemoryRestoreMode::OnDemand
+        );
+        assert_eq!(
+            serde_json::from_str::<RestoreConfig>(
+                r#"{"source_url":"/path/to/snapshot","zone_updates":[{"id": "zone1", "host_numa_node": 1}]}"#
+            )
+            .unwrap()
+            .zone_updates,
+            vec![VmMemoryZoneUpdateData {
+                    host_numa_node: 1,
+                    id: "zone1".to_string(),
+                }],
         );
     }
 
@@ -5492,6 +5575,34 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             invalid_restore_mode.validate(&snapshot_vm_config),
             Err(ValidationError::InvalidRestorePrefaultWithOnDemand)
+        );
+
+        // It is invalid to submit more than one update for a single zone.
+        let mut invalid_config_zone_updates = valid_config.clone();
+        invalid_config_zone_updates.zone_updates = vec![
+            VmMemoryZoneUpdateData {
+                id: "id1".to_string(),
+                host_numa_node: 0,
+            },
+            VmMemoryZoneUpdateData {
+                id: "id1".to_string(),
+                host_numa_node: 20,
+            },
+        ];
+        assert_eq!(
+            invalid_config_zone_updates.validate(&snapshot_vm_config),
+            Err(ValidationError::MultipleMemoryZoneUpdates)
+        );
+
+        // It is invalid to submit an update without referring to a memory zone by specifying an ID.
+        let mut invalid_config_zone_updates = valid_config.clone();
+        invalid_config_zone_updates.zone_updates = vec![VmMemoryZoneUpdateData {
+            id: String::new(),
+            host_numa_node: 0,
+        }];
+        assert_eq!(
+            invalid_config_zone_updates.validate(&snapshot_vm_config),
+            Err(ValidationError::MemoryZoneUpdatesEmptyId)
         );
     }
 

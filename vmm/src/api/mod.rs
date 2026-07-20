@@ -338,7 +338,8 @@ pub enum VmReceiveMigrationConfigError {
 impl VmReceiveMigrationData {
     pub const SYNTAX: &'static str = "VM receive migration parameters \
         \"<receiver_url>\" or \"receiver_url=<url>[,tls_dir=<path>][,memory_mode=precopy|postcopy]\
-        [,vfio_fds=<list_of_vfio_ids_with_their_associated_fd>][,iommufd_fd=<fd>]\"";
+        [,vfio_fds=<list_of_vfio_ids_with_their_associated_fd>][,iommufd_fd=<fd>]\
+        [,zone_updates=[<id@host_numa_node>]]\"";
 
     pub fn parse(migration: &str) -> Result<Self, VmReceiveMigrationConfigError> {
         let mut parser = OptionParser::new();
@@ -347,7 +348,8 @@ impl VmReceiveMigrationData {
             .add("tls_dir")
             .add("memory_mode")
             .add("vfio_fds")
-            .add("iommufd_fd");
+            .add("iommufd_fd")
+            .add("zone_updates");
         parser
             .parse(migration)
             .map_err(VmReceiveMigrationConfigError::ParseError)?;
@@ -380,13 +382,25 @@ impl VmReceiveMigrationData {
             .convert::<i32>("iommufd_fd")
             .map_err(VmReceiveMigrationConfigError::ParseError)?;
 
+        let zone_updates: Vec<VmMemoryZoneUpdateData> = parser
+            .convert::<TupleList<String, u32>>("zone_updates")
+            .map_err(VmReceiveMigrationConfigError::ParseError)?
+            .map_or(Vec::new(), |v| {
+                v.0.iter()
+                    .map(|Tuple(id, host_numa_node)| VmMemoryZoneUpdateData {
+                        id: id.clone(),
+                        host_numa_node: *host_numa_node,
+                    })
+                    .collect()
+            });
+
         let data = Self {
             receiver_url,
             tls_dir,
             memory_mode,
             vfio_fds,
             iommufd_fd,
-            zone_updates: vec![],
+            zone_updates,
         };
 
         data.validate()?;
@@ -423,6 +437,22 @@ impl VmReceiveMigrationData {
                     "invalid TLS configuration for receive-migration: {e}"
                 ))
             })?;
+        }
+
+        let unique_zones = self
+            .zone_updates
+            .iter()
+            .map(|update| update.id.as_str())
+            .collect::<HashSet<_>>();
+        if self.zone_updates.len() != unique_zones.len() {
+            return Err(VmReceiveMigrationConfigError::ValidationError(
+                "more than one update was defined for at least one memory zone".to_string(),
+            ));
+        }
+        if unique_zones.contains("") {
+            return Err(VmReceiveMigrationConfigError::ValidationError(
+                "Empty Id".to_string(),
+            ));
         }
 
         Ok(())
@@ -2193,6 +2223,21 @@ mod unit_tests {
         assert_eq!(fds[1].id, "vfio1");
         assert_eq!(fds[1].fd, Some(7));
         assert_eq!(data.iommufd_fd, Some(9));
+
+        // zone update tests
+        VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,zone_updates=[]").unwrap_err();
+        VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,zone_updates=[zone1 3]")
+            .unwrap_err();
+        VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,zone_updates=[zone1@invalid]")
+            .unwrap_err();
+        VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,zone_updates=[zone1@1,zone1@2]")
+            .unwrap_err();
+        // Mind the space before the second zone. If the whitespace isn't trimmed, we end up with
+        // two different ID
+        VmReceiveMigrationData::parse(
+            "receiver_url=unix:/tmp/sock,zone_updates=[zone1@1, zone1@2]",
+        )
+        .unwrap_err();
     }
 
     #[test]
