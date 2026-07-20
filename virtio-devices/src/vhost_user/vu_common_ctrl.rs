@@ -59,6 +59,7 @@ struct VringInfo {
 #[derive(Clone)]
 pub struct VhostUserHandle {
     vu: Frontend,
+    backend_features: u64,
     ready: bool,
     supports_migration: bool,
     supports_device_state: bool,
@@ -123,16 +124,7 @@ impl VhostUserHandle {
         avail_features: u64,
         avail_protocol_features: VhostUserProtocolFeatures,
     ) -> Result<(u64, u64)> {
-        // Set vhost-user owner.
-        self.vu.set_owner().map_err(Error::VhostUserSetOwner)?;
-
-        // Get features from backend, do negotiation to get a feature collection which
-        // both VMM and backend support.
-        let backend_features = self
-            .vu
-            .get_features()
-            .map_err(Error::VhostUserGetFeatures)?;
-        let acked_features = avail_features & backend_features;
+        let acked_features = avail_features & self.backend_features;
 
         let acked_protocol_features =
             if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
@@ -333,11 +325,6 @@ impl VhostUserHandle {
         acked_features: u64,
         acked_protocol_features: u64,
     ) -> Result<()> {
-        self.vu.set_owner().map_err(Error::VhostUserSetOwner)?;
-        self.vu
-            .get_features()
-            .map_err(Error::VhostUserGetFeatures)?;
-
         if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0
             && let Some(acked_protocol_features) =
                 VhostUserProtocolFeatures::from_bits(acked_protocol_features)
@@ -418,6 +405,7 @@ impl VhostUserHandle {
         num_queues: u64,
         unlink_socket: bool,
         kill_evt: &EventFd,
+        mut initialize: impl FnMut(&mut Self) -> Result<()>,
     ) -> Result<Self> {
         if server {
             if unlink_socket {
@@ -429,8 +417,9 @@ impl VhostUserHandle {
             info!("Waiting for incoming vhost-user connection...");
             let (stream, _) = listener.accept().map_err(Error::AcceptConnection)?;
 
-            Ok(VhostUserHandle {
+            let mut vhost_user = Self {
                 vu: Frontend::from_stream(stream, num_queues),
+                backend_features: 0,
                 ready: false,
                 supports_migration: false,
                 supports_device_state: false,
@@ -438,7 +427,17 @@ impl VhostUserHandle {
                 acked_features: 0,
                 vrings_info: None,
                 queue_indexes: Vec::new(),
-            })
+            };
+            vhost_user
+                .vu
+                .set_owner()
+                .map_err(Error::VhostUserSetOwner)?;
+            vhost_user.backend_features = vhost_user
+                .vu
+                .get_features()
+                .map_err(Error::VhostUserGetFeatures)?;
+            initialize(&mut vhost_user)?;
+            Ok(vhost_user)
         } else {
             const RETRY_INTERVAL: Duration = Duration::from_millis(100);
             const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
@@ -475,44 +474,71 @@ impl VhostUserHandle {
             let mut events = [EpollEvent::default(); 1];
 
             loop {
-                let err = match Frontend::connect(socket_path, num_queues) {
-                    Ok(m) => {
-                        return Ok(VhostUserHandle {
-                            vu: m,
-                            ready: false,
-                            supports_migration: false,
-                            supports_device_state: false,
-                            shm_log: None,
-                            acked_features: 0,
-                            vrings_info: None,
-                            queue_indexes: Vec::new(),
-                        });
-                    }
-                    Err(e) => e,
-                };
+                let connection = Frontend::connect(socket_path, num_queues)
+                    .map(|vu| Self {
+                        vu,
+                        backend_features: 0,
+                        ready: false,
+                        supports_migration: false,
+                        supports_device_state: false,
+                        shm_log: None,
+                        acked_features: 0,
+                        vrings_info: None,
+                        queue_indexes: Vec::new(),
+                    })
+                    .map_err(Error::VhostUserConnect);
 
-                let retryable = match &err {
-                    VhostError::VhostUserProtocol(VhostUserError::SocketConnect(io_err)) => {
-                        matches!(
-                            io_err.kind(),
-                            io::ErrorKind::NotFound
-                                | io::ErrorKind::Interrupted
-                                | io::ErrorKind::ConnectionRefused
-                        )
-                    }
-                    _ => false,
-                };
+                let (err, connect_failed) = match connection {
+                    Ok(mut vhost_user) => match vhost_user
+                        .vu
+                        .set_owner()
+                        .map_err(Error::VhostUserSetOwner)
+                        .and_then(|()| {
+                            vhost_user.backend_features = vhost_user
+                                .vu
+                                .get_features()
+                                .map_err(Error::VhostUserGetFeatures)?;
+                            initialize(&mut vhost_user)
+                        }) {
+                        Ok(()) => return Ok(vhost_user),
+                        Err(e) if e.is_transport_lost() => (e, false),
+                        Err(e) => return Err(e),
+                    },
+                    Err(Error::VhostUserConnect(err)) => {
+                        let retryable = match &err {
+                            VhostError::VhostUserProtocol(VhostUserError::SocketConnect(
+                                io_err,
+                            )) => {
+                                matches!(
+                                    io_err.kind(),
+                                    io::ErrorKind::NotFound
+                                        | io::ErrorKind::Interrupted
+                                        | io::ErrorKind::ConnectionRefused
+                                )
+                            }
+                            _ => false,
+                        };
 
-                if !retryable {
-                    error!(
-                        "Failed connecting to vhost-user backend for socket {socket_path}: {err:?}"
-                    );
-                    return Err(Error::VhostUserConnect(err));
-                }
+                        if !retryable {
+                            error!(
+                                "Failed connecting to vhost-user backend for socket {socket_path}: {err:?}"
+                            );
+                            return Err(Error::VhostUserConnect(err));
+                        }
+
+                        (Error::VhostUserConnect(err), true)
+                    }
+                    Err(e) => return Err(e),
+                };
 
                 if start.elapsed() >= CONNECT_TIMEOUT {
-                    error!("Timed out waiting for vhost-user connection on socket {socket_path}");
-                    return Err(Error::VhostUserConnectTimeout);
+                    if connect_failed {
+                        error!(
+                            "Timed out waiting for vhost-user connection on socket {socket_path}"
+                        );
+                        return Err(Error::VhostUserConnectTimeout);
+                    }
+                    return Err(err);
                 }
 
                 loop {
