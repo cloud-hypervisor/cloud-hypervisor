@@ -12,8 +12,6 @@ use super::bat::{self, BatEntry, VhdxBatError};
 use super::metadata::{self, DiskSpec};
 use crate::aligned_file::AlignedFile;
 
-const SECTOR_SIZE: u64 = 512;
-
 #[sorted]
 #[derive(Error, Debug)]
 pub enum VhdxIoError {
@@ -116,8 +114,7 @@ pub(super) fn read(
             | bat::PAYLOAD_BLOCK_ZERO => {}
             bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
                 f.read_exact_at(
-                    &mut buf
-                        [read_count..(read_count + (sector.free_sectors * SECTOR_SIZE) as usize)],
+                    &mut buf[read_count..(read_count + sector.free_bytes as usize)],
                     sector.file_offset,
                 )
                 .map_err(VhdxIoError::ReadSectorBlock)?;
@@ -187,7 +184,7 @@ pub(super) fn write(
                 }
 
                 f.write_all_at(
-                    &buf[write_count..(write_count + (sector.free_sectors * SECTOR_SIZE) as usize)],
+                    &buf[write_count..(write_count + sector.free_bytes as usize)],
                     file_offset,
                 )
                 .map_err(VhdxIoError::ReadSectorBlock)?;
@@ -198,7 +195,7 @@ pub(super) fn write(
                 }
 
                 f.write_all_at(
-                    &buf[write_count..(write_count + (sector.free_sectors * SECTOR_SIZE) as usize)],
+                    &buf[write_count..(write_count + sector.free_bytes as usize)],
                     sector.file_offset,
                 )
                 .map_err(VhdxIoError::ReadSectorBlock)?;
@@ -215,4 +212,66 @@ pub(super) fn write(
         write_count += sector.free_bytes as usize;
     }
     Ok(write_count)
+}
+
+#[cfg(test)]
+mod tests {
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::*;
+
+    // 512 is the only sector size read/write allowed by metadata::parse_metadata.
+    // [MS-VHDX] allows 4096, but it's not currently implemented
+    const SECTOR_SIZE: u64 = 512;
+
+    // The first BLOCK_SIZE_MIN bytes of a VHDx file are always headers, so
+    // write() treats a file offset below BLOCK_SIZE_MIN as malformed and skips
+    // the writing operation.
+    // Use a DATA_OFFSET greater than BLOCK_SIZE_MIN to bypass that early exit.
+    const DATA_OFFSET: u64 = 2 * metadata::BLOCK_SIZE_MIN as u64;
+
+    fn fixture() -> (AlignedFile, DiskSpec, Vec<BatEntry>) {
+        let disk_spec = DiskSpec {
+            // One block == one sector, so there's exactly one BAT entry.
+            sectors_per_block: 1,
+            logical_sector_size: SECTOR_SIZE as u32,
+            virtual_disk_size: SECTOR_SIZE,
+            image_size: DATA_OFFSET + SECTOR_SIZE,
+            block_size: SECTOR_SIZE as u32,
+            ..Default::default()
+        };
+
+        let file = TempFile::new().unwrap().into_file();
+        file.set_len(DATA_OFFSET + SECTOR_SIZE).unwrap();
+        file.write_all_at(&vec![0xABu8; SECTOR_SIZE as usize], DATA_OFFSET)
+            .unwrap();
+        // A BAT entry saying "this block's data is already written to the
+        // file at `file_offset`".
+        let bat = vec![BatEntry(DATA_OFFSET | bat::PAYLOAD_BLOCK_FULLY_PRESENT)];
+        (AlignedFile::new(file, false), disk_spec, bat)
+    }
+
+    #[test]
+    fn read_sector() {
+        let (f, disk_spec, bat) = fixture();
+
+        let mut buf = vec![0u8; SECTOR_SIZE as usize];
+        let n = read(&f, &mut buf, &disk_spec, &bat, 0, 1).unwrap();
+
+        assert_eq!(n, SECTOR_SIZE as usize);
+        assert!(buf.iter().all(|&b| b == 0xAB));
+    }
+
+    #[test]
+    fn write_sector() {
+        let (f, mut disk_spec, mut bat) = fixture();
+
+        let data = vec![0xCDu8; SECTOR_SIZE as usize];
+        let n = write(&f, &data, &mut disk_spec, 0, &mut bat, 0, 1).unwrap();
+        assert_eq!(n, SECTOR_SIZE as usize);
+
+        let mut readback = vec![0u8; SECTOR_SIZE as usize];
+        f.file().read_exact_at(&mut readback, DATA_OFFSET).unwrap();
+        assert_eq!(readback, data);
+    }
 }
