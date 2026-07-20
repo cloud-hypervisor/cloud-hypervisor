@@ -98,8 +98,18 @@ impl Read for Vhdx {
     /// Wrapper function to satisfy Read trait implementation for VHDx disk.
     /// Convert the offset to sector index and buffer length to sector count.
     fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
-        let sector_count = (buf.len() as u64).div_ceil(self.disk_spec.logical_sector_size as u64);
-        let sector_index = self.current_offset / self.disk_spec.logical_sector_size as u64;
+        let sector_size = self.disk_spec.logical_sector_size as u64;
+        if !(buf.len() as u64).is_multiple_of(sector_size) {
+            return Err(IoError::new(
+                IoErrorKind::InvalidInput,
+                format!(
+                    "Read buffer length {} is not a multiple of the {sector_size}-byte logical sector size",
+                    buf.len()
+                ),
+            ));
+        }
+        let sector_count = buf.len() as u64 / sector_size;
+        let sector_index = self.current_offset / sector_size;
 
         let result = io::read(
             &self.aligned,
@@ -129,8 +139,18 @@ impl Write for Vhdx {
     /// Wrapper function to satisfy Write trait implementation for VHDx disk.
     /// Convert the offset to sector index and buffer length to sector count.
     fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
-        let sector_count = (buf.len() as u64).div_ceil(self.disk_spec.logical_sector_size as u64);
-        let sector_index = self.current_offset / self.disk_spec.logical_sector_size as u64;
+        let sector_size = self.disk_spec.logical_sector_size as u64;
+        if !(buf.len() as u64).is_multiple_of(sector_size) {
+            return Err(IoError::new(
+                IoErrorKind::InvalidInput,
+                format!(
+                    "Write buffer length {} is not a multiple of the {sector_size}-byte logical sector size",
+                    buf.len()
+                ),
+            ));
+        }
+        let sector_count = buf.len() as u64 / sector_size;
+        let sector_index = self.current_offset / sector_size;
 
         if self.first_write {
             self.first_write = false;
@@ -304,5 +324,43 @@ mod tests {
         vhdx.seek(SeekFrom::Start(0)).unwrap();
         assert_eq!(vhdx.read(&mut readback).unwrap(), readback.len());
         assert_eq!(readback, data);
+    }
+
+    #[test]
+    fn read_misaligned_buffer_is_rejected() {
+        let Some(tf) = create_dynamic_vhdx(16) else {
+            eprintln!("skipping read_misaligned_buffer_is_rejected: qemu-img unavailable");
+            return;
+        };
+
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(tf.as_path())
+            .unwrap();
+        let mut vhdx = Vhdx::new(file, false).unwrap();
+
+        let mut buf = vec![0u8; vhdx.disk_spec.logical_sector_size as usize - 1];
+        let err = vhdx.read(&mut buf).unwrap_err();
+        assert_eq!(err.kind(), IoErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn write_misaligned_buffer_is_rejected() {
+        let Some(tf) = create_dynamic_vhdx(16) else {
+            eprintln!("skipping write_misaligned_buffer_is_rejected: qemu-img unavailable");
+            return;
+        };
+
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(tf.as_path())
+            .unwrap();
+        let mut vhdx = Vhdx::new(file, false).unwrap();
+
+        let buf = vec![0u8; vhdx.disk_spec.logical_sector_size as usize - 1];
+        let err = vhdx.write(&buf).unwrap_err();
+        assert_eq!(err.kind(), IoErrorKind::InvalidInput);
     }
 }
