@@ -19,6 +19,8 @@ pub enum VhdxIoError {
     InvalidBatEntryState,
     #[error("Invalid BAT entry count")]
     InvalidBatIndex,
+    #[error("Buffer length does not match the requested sector count")]
+    InvalidBufferLength,
     #[error("Invalid disk size")]
     InvalidDiskSize,
     #[error("Failed reading sector blocks from file {0}")]
@@ -95,6 +97,12 @@ pub(super) fn read(
     if disk_spec.has_parent {
         return Err(VhdxIoError::UnsupportedMode);
     }
+    let expected_len = sector_count
+        .checked_mul(disk_spec.logical_sector_size as u64)
+        .ok_or(VhdxIoError::InvalidBufferLength)?;
+    if buf.len() as u64 != expected_len {
+        return Err(VhdxIoError::InvalidBufferLength);
+    }
 
     let mut read_count: usize = 0;
     while sector_count > 0 {
@@ -146,6 +154,12 @@ pub(super) fn write(
 ) -> Result<usize> {
     if disk_spec.has_parent {
         return Err(VhdxIoError::UnsupportedMode);
+    }
+    let expected_len = sector_count
+        .checked_mul(disk_spec.logical_sector_size as u64)
+        .ok_or(VhdxIoError::InvalidBufferLength)?;
+    if buf.len() as u64 != expected_len {
+        return Err(VhdxIoError::InvalidBufferLength);
     }
 
     let mut write_count: usize = 0;
@@ -273,5 +287,25 @@ mod tests {
         let mut readback = vec![0u8; SECTOR_SIZE as usize];
         f.file().read_exact_at(&mut readback, DATA_OFFSET).unwrap();
         assert_eq!(readback, data);
+    }
+
+    #[test]
+    fn read_short_buffer_is_rejected() {
+        let (f, disk_spec, bat) = fixture();
+
+        let mut buf = vec![0u8; SECTOR_SIZE as usize - 1];
+        let err = read(&f, &mut buf, &disk_spec, &bat, 0, 1).unwrap_err();
+
+        assert!(matches!(err, VhdxIoError::InvalidBufferLength));
+    }
+
+    #[test]
+    fn write_short_buffer_is_rejected() {
+        let (f, mut disk_spec, mut bat) = fixture();
+
+        let data = vec![0xCDu8; SECTOR_SIZE as usize - 1];
+        let err = write(&f, &data, &mut disk_spec, 0, &mut bat, 0, 1).unwrap_err();
+
+        assert!(matches!(err, VhdxIoError::InvalidBufferLength));
     }
 }
