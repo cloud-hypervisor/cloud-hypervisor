@@ -120,7 +120,7 @@ use crate::vm_config::{
 };
 use crate::{
     CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, GuestMemoryMmap,
-    MEMORY_MANAGER_SNAPSHOT_ID, PciDeviceInfo, acpi, cpu,
+    MEMORY_MANAGER_SNAPSHOT_ID, MemoryZoneUpdateError, PciDeviceInfo, acpi, cpu,
 };
 
 /// Errors associated with VM management
@@ -399,6 +399,10 @@ pub enum Error {
     #[cfg(feature = "fw_cfg")]
     #[error("Error using fw_cfg while disabled")]
     FwCfgDisabled,
+
+    /// Cannot apply NUMA memory zone updates
+    #[error("Error applying memory zone updates")]
+    ApplyMemoryZoneUpdate(#[source] MemoryZoneUpdateError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
