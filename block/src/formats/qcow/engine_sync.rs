@@ -5,7 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::cmp::min;
-use std::collections::VecDeque;
 use std::os::unix::fs::FileExt;
 use std::sync::Arc;
 
@@ -18,7 +17,9 @@ use super::metadata::{
     BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
 };
 use super::qcow_raw_file::QcowRawFile;
-use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
+use crate::async_io::{
+    AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, SyncCompletionQueue,
+};
 
 pub(super) struct QcowSync {
     metadata: Arc<QcowMetadata>,
@@ -28,8 +29,7 @@ pub(super) struct QcowSync {
     sparse: bool,
     cluster_size: u64,
     decoder: Arc<dyn Decoder>,
-    eventfd: EventFd,
-    completion_list: VecDeque<AsyncIoCompletion>,
+    completions: SyncCompletionQueue,
 }
 
 impl QcowSync {
@@ -46,9 +46,7 @@ impl QcowSync {
             data_file,
             backing_file,
             sparse,
-            eventfd: EventFd::new(libc::EFD_NONBLOCK)
-                .expect("Failed creating EventFd for QcowSync"),
-            completion_list: VecDeque::new(),
+            completions: SyncCompletionQueue::new(),
         }
     }
 
@@ -200,7 +198,7 @@ impl QcowSync {
 
 impl AsyncIo for QcowSync {
     fn notifier(&self) -> &EventFd {
-        &self.eventfd
+        self.completions.notifier()
     }
 
     fn submit_data_operation(&mut self, mut op: AsyncIoOperation) -> AsyncIoResult<()> {
@@ -210,24 +208,22 @@ impl AsyncIo for QcowSync {
         } else {
             self.write_operation(&op)?
         };
-        self.completion_list
-            .push_back(AsyncIoCompletion::from_operation(op, total_len as i32));
-        self.eventfd.write(1).unwrap();
+        self.completions
+            .complete(AsyncIoCompletion::from_operation(op, total_len as i32));
         Ok(())
     }
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
         self.metadata.flush().map_err(AsyncIoError::Fsync)?;
         if let Some(user_data) = user_data {
-            self.completion_list
-                .push_back(AsyncIoCompletion::new(user_data, 0, None));
-            self.eventfd.write(1).unwrap();
+            self.completions
+                .complete(AsyncIoCompletion::new(user_data, 0, None));
         }
         Ok(())
     }
 
     fn next_completed_request(&mut self) -> Option<AsyncIoCompletion> {
-        self.completion_list.pop_front()
+        self.completions.next_completed()
     }
 
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
@@ -247,9 +243,8 @@ impl AsyncIo for QcowSync {
                 for action in &actions {
                     self.apply_dealloc_action(action);
                 }
-                self.completion_list
-                    .push_back(AsyncIoCompletion::new(user_data, 0, None));
-                self.eventfd.write(1).unwrap();
+                self.completions
+                    .complete(AsyncIoCompletion::new(user_data, 0, None));
                 Ok(())
             }
             Err(e) => {
@@ -258,9 +253,8 @@ impl AsyncIo for QcowSync {
                 } else {
                     -libc::EIO
                 };
-                self.completion_list
-                    .push_back(AsyncIoCompletion::new(user_data, errno, None));
-                self.eventfd.write(1).unwrap();
+                self.completions
+                    .complete(AsyncIoCompletion::new(user_data, errno, None));
                 Ok(())
             }
         }
@@ -283,9 +277,8 @@ impl AsyncIo for QcowSync {
                 for action in &actions {
                     self.apply_dealloc_action(action);
                 }
-                self.completion_list
-                    .push_back(AsyncIoCompletion::new(user_data, 0, None));
-                self.eventfd.write(1).unwrap();
+                self.completions
+                    .complete(AsyncIoCompletion::new(user_data, 0, None));
                 Ok(())
             }
             Err(e) => {
@@ -294,9 +287,8 @@ impl AsyncIo for QcowSync {
                 } else {
                     -libc::EIO
                 };
-                self.completion_list
-                    .push_back(AsyncIoCompletion::new(user_data, errno, None));
-                self.eventfd.write(1).unwrap();
+                self.completions
+                    .complete(AsyncIoCompletion::new(user_data, errno, None));
                 Ok(())
             }
         }

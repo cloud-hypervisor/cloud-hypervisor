@@ -17,6 +17,7 @@ use std::{io, result};
 
 pub use aio_data_io::AioDataIo;
 pub use completion::AsyncIoCompletion;
+pub(crate) use completion::SyncCompletionQueue;
 pub use guest_memory_target::GuestMemoryTarget;
 pub use operation::AsyncIoOperation;
 pub use owned_io_buffer::OwnedIoBuffer;
