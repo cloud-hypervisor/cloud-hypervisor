@@ -3426,10 +3426,10 @@ mod util {
 mod unit_tests {
     use std::path::PathBuf;
 
+    use api_types::RestoredVfioConfig;
     use arch::CpuProfile;
 
     use super::*;
-    use crate::config::RestoredVfioConfig;
     #[cfg(target_arch = "x86_64")]
     use crate::vm_config::DebugConsoleConfig;
     use crate::vm_config::{

@@ -4,6 +4,7 @@
 //
 
 mod migration;
+mod restore;
 mod vm_coredump;
 mod vm_remove_device;
 mod vm_resize;
@@ -13,6 +14,7 @@ mod vm_snapshot;
 mod vmm_ping_response;
 
 pub use migration::{MigrationMode, TimeoutStrategy};
+pub use restore::RestoredVfioConfig;
 pub use vm_coredump::VmCoredumpData;
 pub use vm_remove_device::VmRemoveDeviceData;
 pub use vm_resize::VmResizeData;

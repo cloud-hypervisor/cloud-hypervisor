@@ -11,6 +11,7 @@ use std::result;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
+use api_types::RestoredVfioConfig;
 use arch::CpuProfile;
 use block::ImageType;
 use clap::ArgMatches;
@@ -2821,14 +2822,6 @@ pub struct VmMemoryZoneUpdateData {
     pub id: String,
     /// Host NUMA node to relocate the MemoryZone to
     pub host_numa_node: u32,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
-pub struct RestoredVfioConfig {
-    pub id: String,
-    // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
-    #[serde(default, deserialize_with = "deserialize_restored_fd")]
-    pub fd: Option<i32>,
 }
 
 pub(crate) fn deserialize_restored_fd<'de, D>(d: D) -> result::Result<Option<i32>, D::Error>
