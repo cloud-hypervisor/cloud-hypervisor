@@ -97,6 +97,7 @@ version = "0.1.0"
 dependencies = [
  "arch",
  "block",
+ "clap",
  "devices",
  "log",
  "net_util",
@@ -2818,7 +2819,6 @@ dependencies = [
  "block",
  "blocking",
  "cfg-if",
- "clap",
  "devices",
  "dhat",
  "epoll",

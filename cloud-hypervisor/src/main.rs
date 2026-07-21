@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::channel;
 use std::{any, cmp, env, io, num, process, str, thread};
 
+use api_types::VmParams;
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use event_monitor::event;
 use libc::EFD_NONBLOCK;
@@ -29,7 +30,7 @@ use vm_migration::protocol;
 use vmm::api::dbus::{DBusApiOptions, dbus_api_graceful_shutdown};
 use vmm::api::http::http_api_graceful_shutdown;
 use vmm::api::{self, ApiAction};
-use vmm::config::{self, VmParams};
+use vmm::config::{self};
 use vmm::landlock::{Landlock, LandlockError};
 use vmm::vm::Vm;
 use vmm::vm_config;
@@ -979,8 +980,9 @@ fn main() {
 mod unit_tests {
     use std::path::PathBuf;
 
-    use api_types::{ConsoleOutputMode, CoreScheduling, CpuFeatures, CpusConfig, HotplugMethod};
-    use vmm::config::VmParams;
+    use api_types::{
+        ConsoleOutputMode, CoreScheduling, CpuFeatures, CpusConfig, HotplugMethod, VmParams,
+    };
     #[cfg(target_arch = "x86_64")]
     use vmm::vm_config::DebugConsoleConfig;
     use vmm::vm_config::{

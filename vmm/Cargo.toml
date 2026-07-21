@@ -10,8 +10,15 @@ dbus_api = ["blocking", "futures", "zbus"]
 default = []
 dhat-heap = ["dhat"] # For heap profiling
 fw_cfg = ["api-types/fw_cfg", "devices/fw_cfg"]
-guest_debug = ["gdbstub", "gdbstub_arch", "kvm"]
-igvm = ["api-types/igvm", "dep:igvm", "hex", "igvm_defs", "mshv-bindings", "range_map_vec"]
+guest_debug = ["api-types/guest_debug", "gdbstub", "gdbstub_arch", "kvm"]
+igvm = [
+  "api-types/igvm",
+  "dep:igvm",
+  "hex",
+  "igvm_defs",
+  "mshv-bindings",
+  "range_map_vec",
+]
 io_uring = ["block/io_uring"]
 ivshmem = ["api-types/ivshmem", "devices/ivshmem"]
 kvm = [
@@ -51,7 +58,6 @@ bitflags = { workspace = true }
 block = { path = "../block" }
 blocking = { version = "1.6.2", optional = true }
 cfg-if = { workspace = true }
-clap = { workspace = true }
 devices = { path = "../devices" }
 dhat = { workspace = true, optional = true }
 epoll = { workspace = true }

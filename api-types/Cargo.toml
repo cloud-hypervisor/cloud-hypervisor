@@ -8,6 +8,7 @@ version = "0.1.0"
 
 [features]
 fw_cfg = []
+guest_debug = []
 igvm = []
 ivshmem = []
 pvmemcontrol = []
@@ -17,6 +18,7 @@ tdx = []
 [dependencies]
 arch = { path = "../arch" }
 block = { path = "../block" }
+clap = { workspace = true }
 devices = { path = "../devices" }
 log = { workspace = true }
 net_util = { path = "../net_util" }
