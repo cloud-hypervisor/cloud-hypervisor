@@ -416,6 +416,18 @@ pub enum VmState {
     BreakPoint,
 }
 
+impl From<VmState> for api_types::VmState {
+    fn from(value: VmState) -> Self {
+        match value {
+            VmState::Created => Self::Created,
+            VmState::Running => Self::Running,
+            VmState::Shutdown => Self::Shutdown,
+            VmState::Paused => Self::Paused,
+            VmState::BreakPoint => Self::BreakPoint,
+        }
+    }
+}
+
 impl VmState {
     fn valid_transition(self, new_state: VmState) -> Result<()> {
         match self {

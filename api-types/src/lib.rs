@@ -12,6 +12,7 @@ mod vm_resize;
 mod vm_resize_disk;
 mod vm_resize_zone;
 mod vm_snapshot;
+mod vm_state;
 mod vmm_ping_response;
 
 pub use block::ImageType;
@@ -79,6 +80,7 @@ pub use vm_resize::VmResizeData;
 pub use vm_resize_disk::VmResizeDiskData;
 pub use vm_resize_zone::VmResizeZoneData;
 pub use vm_snapshot::VmSnapshotConfig;
+pub use vm_state::VmState;
 pub use vmm_ping_response::VmmPingResponse;
 
 pub(crate) fn deserialize_restored_fd<'de, D>(d: D) -> Result<Option<i32>, D::Error>
