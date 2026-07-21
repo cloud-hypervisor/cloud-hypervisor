@@ -76,7 +76,7 @@ pub use vm_config::vdpa_config::{VdpaConfig, VdpaConfigParseError};
 pub use vm_config::vsock_config::{VsockConfig, VsockConfigParseError};
 pub use vm_config::{VmConfig, VmConfigParseError, VmParams};
 pub use vm_coredump::VmCoredumpData;
-pub use vm_info::{DeviceNode, DeviceTree};
+pub use vm_info::{DeviceNode, DeviceTree, VmInfoResponse};
 pub use vm_remove_device::VmRemoveDeviceData;
 pub use vm_resize::VmResizeData;
 pub use vm_resize_disk::VmResizeDiskData;
