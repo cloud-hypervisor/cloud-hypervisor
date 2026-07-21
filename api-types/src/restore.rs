@@ -24,3 +24,12 @@ where
         Ok(None)
     }
 }
+
+#[derive(Clone, Deserialize, Serialize, Debug, Eq, PartialEq)]
+/// Data required for updating memory zone <-> host NUMA node mappings.
+pub struct VmMemoryZoneUpdateData {
+    /// Id of the MemoryZone to update
+    pub id: String,
+    /// Host NUMA node to relocate the MemoryZone to
+    pub host_numa_node: u32,
+}

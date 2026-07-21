@@ -11,7 +11,7 @@ use std::result;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use api_types::RestoredVfioConfig;
+use api_types::{RestoredVfioConfig, VmMemoryZoneUpdateData};
 use arch::CpuProfile;
 use block::ImageType;
 use clap::ArgMatches;
@@ -2813,15 +2813,6 @@ impl FromStr for MemoryRestoreMode {
             _ => Err(MemoryRestoreModeParseError::InvalidValue(s.to_owned())),
         }
     }
-}
-
-#[derive(Clone, Deserialize, Serialize, Debug, Eq, PartialEq)]
-/// Data required for updating memory zone <-> host NUMA node mappings.
-pub struct VmMemoryZoneUpdateData {
-    /// Id of the MemoryZone to update
-    pub id: String,
-    /// Host NUMA node to relocate the MemoryZone to
-    pub host_numa_node: u32,
 }
 
 pub(crate) fn deserialize_restored_fd<'de, D>(d: D) -> result::Result<Option<i32>, D::Error>

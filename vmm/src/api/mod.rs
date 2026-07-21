@@ -43,8 +43,8 @@ use std::time::Duration;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use api_types::VmCoredumpData;
 use api_types::{
-    MigrationMode, RestoredVfioConfig, TimeoutStrategy, VmRemoveDeviceData, VmResizeData,
-    VmResizeDiskData, VmResizeZoneData, VmSnapshotConfig, VmmPingResponse,
+    MigrationMode, RestoredVfioConfig, TimeoutStrategy, VmMemoryZoneUpdateData, VmRemoveDeviceData,
+    VmResizeData, VmResizeDiskData, VmResizeZoneData, VmSnapshotConfig, VmmPingResponse,
 };
 use log::info;
 use micro_http::Body;
@@ -59,7 +59,7 @@ use vmm_sys_util::eventfd::EventFd;
 pub use self::dbus::start_dbus_thread;
 pub use self::http::{start_http_fd_thread, start_http_path_thread};
 use crate::Error as VmmError;
-use crate::config::{RestoreConfig, VmMemoryZoneUpdateData, deserialize_restored_fd};
+use crate::config::{RestoreConfig, deserialize_restored_fd};
 use crate::device_tree::DeviceTree;
 use crate::migration::transport::{
     MAX_MIGRATION_CONNECTIONS, TcpAddressParseError, tcp_address_to_server_name,

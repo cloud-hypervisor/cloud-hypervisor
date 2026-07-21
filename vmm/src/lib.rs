@@ -21,7 +21,7 @@ use anyhow::{Context, anyhow};
 #[cfg(feature = "dbus_api")]
 use api::dbus::{DBusApiOptions, DBusApiShutdownChannels};
 use api::http::HttpApiHandle;
-use api_types::{MigrationMode, TimeoutStrategy, VmmPingResponse};
+use api_types::{MigrationMode, TimeoutStrategy, VmMemoryZoneUpdateData, VmmPingResponse};
 use console_devices::{ConsoleInfo, pre_create_console_devices};
 use event_monitor::event;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -52,7 +52,7 @@ use crate::api::{
     ApiRequest, ApiResponse, RequestHandler, VmInfoResponse, VmReceiveMigrationData,
     VmSendMigrationData,
 };
-use crate::config::{MemoryRestoreMode, RestoreConfig, VmMemoryZoneUpdateData, add_to_config};
+use crate::config::{MemoryRestoreMode, RestoreConfig, add_to_config};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::GuestDebuggable;
 use crate::device_manager::DeviceManager;

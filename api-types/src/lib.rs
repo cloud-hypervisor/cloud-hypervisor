@@ -14,7 +14,7 @@ mod vm_snapshot;
 mod vmm_ping_response;
 
 pub use migration::{MigrationMode, TimeoutStrategy};
-pub use restore::RestoredVfioConfig;
+pub use restore::{RestoredVfioConfig, VmMemoryZoneUpdateData};
 pub use vm_coredump::VmCoredumpData;
 pub use vm_remove_device::VmRemoveDeviceData;
 pub use vm_resize::VmResizeData;
