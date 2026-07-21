@@ -2,6 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use std::collections::VecDeque;
+
+use vmm_sys_util::eventfd::EventFd;
+
 use super::{AsyncIoOperation, OwnedIoBuffer};
 
 /// Completion returned by an owned async I/O backend.
@@ -38,5 +42,37 @@ impl AsyncIoCompletion {
     pub fn from_operation(op: AsyncIoOperation, result: i32) -> Self {
         let user_data = op.user_data();
         Self::new(user_data, result, op.into_completion_buffer())
+    }
+}
+
+/// Pending completions plus the eventfd that signals the device to
+/// drain them. Sync engines run each operation inline, enqueue its
+/// completion, and signal the eventfd.
+pub(crate) struct SyncCompletionQueue {
+    queue: VecDeque<AsyncIoCompletion>,
+    eventfd: EventFd,
+}
+
+impl SyncCompletionQueue {
+    pub(crate) fn new() -> Self {
+        Self {
+            queue: VecDeque::new(),
+            eventfd: EventFd::new(libc::EFD_NONBLOCK)
+                .expect("Failed creating EventFd for sync completion queue"),
+        }
+    }
+
+    pub(crate) fn notifier(&self) -> &EventFd {
+        &self.eventfd
+    }
+
+    /// Enqueues a completion and signals the eventfd.
+    pub(crate) fn complete(&mut self, completion: AsyncIoCompletion) {
+        self.queue.push_back(completion);
+        self.eventfd.write(1).unwrap();
+    }
+
+    pub(crate) fn next_completed(&mut self) -> Option<AsyncIoCompletion> {
+        self.queue.pop_front()
     }
 }
