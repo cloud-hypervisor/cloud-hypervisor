@@ -102,12 +102,14 @@ dependencies = [
  "log",
  "net_util",
  "option_parser",
+ "pci",
  "serde",
  "serde_json",
  "serde_with",
  "thiserror",
  "virtio-bindings",
  "virtio-devices",
+ "vm-device",
 ]
 
 [[package]]

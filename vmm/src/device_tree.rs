@@ -105,6 +105,30 @@ impl DeviceTree {
     }
 }
 
+impl From<&DeviceTree> for api_types::DeviceTree {
+    fn from(value: &DeviceTree) -> Self {
+        Self(
+            value
+                .0
+                .iter()
+                .map(|(key, value)| (key.clone(), value.into()))
+                .collect(),
+        )
+    }
+}
+
+impl From<&DeviceNode> for api_types::DeviceNode {
+    fn from(value: &DeviceNode) -> Self {
+        Self {
+            id: value.id.clone(),
+            resources: value.resources.clone(),
+            parent: value.parent.clone(),
+            children: value.children.clone(),
+            pci_bdf: value.pci_bdf,
+        }
+    }
+}
+
 // Breadth first traversal iterator.
 pub struct BftIter<'a> {
     nodes: Vec<&'a DeviceNode>,

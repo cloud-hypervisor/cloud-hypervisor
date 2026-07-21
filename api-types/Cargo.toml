@@ -23,11 +23,14 @@ devices = { path = "../devices" }
 log = { workspace = true }
 net_util = { path = "../net_util" }
 option_parser = { path = "../option_parser" }
+pci = { path = "../pci" }
 serde = { workspace = true, features = ["derive"] }
 serde_with = { workspace = true, features = ["macros"] }
 thiserror = { workspace = true }
 virtio-bindings = { workspace = true }
 virtio-devices = { path = "../virtio-devices" }
+vm-device = { path = "../vm-device" }
+
 
 [dev-dependencies]
 serde_json = { workspace = true }
