@@ -281,7 +281,7 @@ pub struct VirtioCommon {
     pub paused_sync: Option<Arc<Barrier>>,
     pub workers: Option<WorkerThreads>,
     pub queue_sizes: Vec<u16>,
-    pub queue_evts: Vec<EventFd>,
+    pub queue_evts: Vec<(u16, EventFd)>,
     pub device_type: u32,
     pub min_queues: u16,
     pub access_platform: Option<Arc<dyn AccessPlatform>>,
@@ -321,11 +321,14 @@ impl VirtioCommon {
 
         self.queue_evts = queues
             .iter()
-            .map(|(_, _, queue_evt)| {
-                queue_evt.try_clone().map_err(|e| {
-                    error!("failed cloning queue EventFd: {e}");
-                    ActivateError::BadActivate
-                })
+            .map(|(queue_index, _, queue_evt)| {
+                queue_evt
+                    .try_clone()
+                    .map(|queue_evt| (*queue_index, queue_evt))
+                    .map_err(|e| {
+                        error!("Failed cloning queue EventFd: {e}");
+                        ActivateError::BadActivate
+                    })
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -493,7 +496,7 @@ impl Pausable for VirtioCommon {
 
         // Signal each activated queue eventfd so workers process restored queues
         // that may already contain pending requests.
-        for queue_evt in &self.queue_evts {
+        for (_, queue_evt) in &self.queue_evts {
             queue_evt.write(1).map_err(|e| {
                 MigratableError::Resume(anyhow!(
                     "Could not notify restored virtio worker on resume: {e}"
@@ -502,8 +505,8 @@ impl Pausable for VirtioCommon {
         }
 
         // Also trigger interrupts into the guest to wake up the driver to avoid a "livelock"
-        for i in 0..self.queue_evts.len() {
-            self.trigger_interrupt(crate::VirtioInterruptType::Queue(i as u16))
+        for (queue_index, _) in &self.queue_evts {
+            self.trigger_interrupt(crate::VirtioInterruptType::Queue(*queue_index))
                 .ok();
         }
 
