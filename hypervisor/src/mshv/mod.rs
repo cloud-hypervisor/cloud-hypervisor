@@ -42,7 +42,7 @@ use crate::arch::emulator::PlatformEmulator;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::emulator::Emulator;
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86::{LapicState, SpecialRegisters};
+use crate::arch::x86::{LapicState, SpecialRegisters, VcpuMsrConfigUpdate};
 #[cfg(target_arch = "aarch64")]
 use crate::mshv::aarch64::emulator;
 use crate::mshv::emulator::MshvEmulatorContext;
@@ -481,7 +481,7 @@ pub struct MshvVcpu {
 /// let mshv = MshvHypervisor::new().unwrap();
 /// let hypervisor = Arc::new(mshv);
 /// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
-/// let vcpu = vm.create_vcpu(0, None).unwrap();
+/// let vcpu = vm.create_vcpu(0, None, #[cfg(target_arch = x86_64)] Default::default()).unwrap();
 /// ```
 impl cpu::Vcpu for MshvVcpu {
     ///
@@ -1896,6 +1896,7 @@ impl vm::Vm for MshvVm {
         &self,
         id: u32,
         vm_ops: Option<Arc<dyn VmOps>>,
+        #[cfg(target_arch = "x86_64")] _msr_config_update: Option<VcpuMsrConfigUpdate>,
     ) -> vm::Result<Box<dyn cpu::Vcpu>> {
         let id: u8 = id.try_into().unwrap();
         let vcpu_fd = self

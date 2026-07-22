@@ -95,7 +95,7 @@ use crate::ClockData;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{
     CpuIdEntry, FpuState, LapicState, MTRR_MSR_INDICES, MsrEntry, NUM_IOAPIC_PINS,
-    SpecialRegisters, XsaveState,
+    SpecialRegisters, VcpuMsrConfigUpdate, XsaveState,
 };
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use crate::{ClockRestoreMode, ClockState};
@@ -886,6 +886,7 @@ impl vm::Vm for KvmVm {
         &self,
         id: u32,
         vm_ops: Option<Arc<dyn VmOps>>,
+        #[cfg(target_arch = "x86_64")] msr_config_update: Option<VcpuMsrConfigUpdate>,
     ) -> vm::Result<Box<dyn cpu::Vcpu>> {
         let fd = self
             .fd
@@ -912,6 +913,21 @@ impl vm::Vm for KvmVm {
         }
 
         #[cfg(target_arch = "x86_64")]
+        let (feature_msrs, msrs) = msr_config_update.map_or_else(
+            || (Vec::new(), self.msrs.clone()),
+            |update| {
+                (
+                    update.feature_msrs,
+                    update
+                        .snapshottable_msr_indices
+                        .into_iter()
+                        .map(|index| MsrEntry { index, data: 0 })
+                        .collect(),
+                )
+            },
+        );
+
+        #[cfg(target_arch = "x86_64")]
         // Safety: `xsave_size` will not change after vcpu creation because:
         // 1. `xsave_size` depends on cpuid
         // 2. The only factor that affects cpuid is xsave permission, obtained via
@@ -924,7 +940,9 @@ impl vm::Vm for KvmVm {
         let vcpu = KvmVcpu {
             fd,
             #[cfg(target_arch = "x86_64")]
-            msrs: self.msrs.clone(),
+            msrs,
+            #[cfg(target_arch = "x86_64")]
+            feature_msrs,
             vm_ops,
             #[cfg(target_arch = "x86_64")]
             hyperv_synic: AtomicBool::new(false),
@@ -1919,6 +1937,8 @@ pub struct KvmVcpu {
     fd: VcpuFd,
     #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
+    #[cfg(target_arch = "x86_64")]
+    feature_msrs: Vec<MsrEntry>,
     vm_ops: Option<Arc<dyn vm::VmOps>>,
     #[cfg(target_arch = "x86_64")]
     hyperv_synic: AtomicBool,
@@ -2009,7 +2029,7 @@ impl KvmVcpu {
 /// let kvm = KvmHypervisor::new().unwrap();
 /// let hypervisor = Arc::new(kvm);
 /// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
-/// let vcpu = vm.create_vcpu(0, None).unwrap();
+/// let vcpu = vm.create_vcpu(0, None, #[cfg(target_arch = "x86_64")] Default::default()).unwrap();
 /// ```
 impl cpu::Vcpu for KvmVcpu {
     ///
@@ -3066,7 +3086,7 @@ impl cpu::Vcpu for KvmVcpu {
     /// let hv = Arc::new(kvm);
     /// let vm = hv.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
     /// vm.enable_split_irq().unwrap();
-    /// let vcpu = vm.create_vcpu(0, None).unwrap();
+    /// let vcpu = vm.create_vcpu(0, None, Default::default()).unwrap();
     /// let state = vcpu.state().unwrap();
     /// ```
     fn state(&self) -> cpu::Result<CpuState> {
@@ -3331,7 +3351,7 @@ impl cpu::Vcpu for KvmVcpu {
     /// let hv = Arc::new(kvm);
     /// let vm = hv.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
     /// vm.enable_split_irq().unwrap();
-    /// let vcpu = vm.create_vcpu(0, None).unwrap();
+    /// let vcpu = vm.create_vcpu(0, None, Default::default()).unwrap();
     /// let state = vcpu.state().unwrap();
     /// vcpu.set_state(&state).unwrap();
     /// ```
