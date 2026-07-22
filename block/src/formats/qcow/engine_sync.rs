@@ -56,7 +56,13 @@ impl QcowSync {
             DeallocAction::PunchHole {
                 host_offset,
                 length,
-            } => self.data_file.file_mut().punch_hole(*host_offset, *length),
+            } => {
+                self.data_file
+                    .file_mut()
+                    .punch_hole(*host_offset, *length)?;
+                self.metadata.complete_punch_hole(*host_offset);
+                Ok(())
+            }
             DeallocAction::WriteZeroes {
                 host_offset,
                 length,
@@ -1981,6 +1987,113 @@ mod unit_tests {
     }
 
     #[test]
+    fn test_partial_zero_action_failure_is_reported() {
+        const CLUSTER_SIZE: u64 = 1 << 16;
+        let data = vec![0xa5; CLUSTER_SIZE as usize];
+        let (temp, disk) = create_disk_with_data(4 * CLUSTER_SIZE, &data, 0, true, false);
+        drop(disk);
+
+        let raw = AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+        let (inner, backing, sparse) = super::super::parser::parse_qcow(raw, 0, true).unwrap();
+        assert!(backing.is_none());
+        let refcount_bits = 1u64 << inner.header.refcount_order;
+        let metadata = Arc::new(QcowMetadata::new(inner));
+
+        // Metadata remains writable, but use a read-only per-queue data fd so
+        // the partial-cluster WriteZeroes action deterministically fails.
+        let read_only = File::open(temp.as_path()).unwrap();
+        let data_file = QcowRawFile::from(
+            AlignedFile::new(read_only, false),
+            CLUSTER_SIZE,
+            refcount_bits,
+        )
+        .unwrap();
+        let mut aio = QcowSync::new(Arc::clone(&metadata), data_file, None, sparse);
+
+        aio.write_zeroes(4096, 4096, 901).unwrap();
+        let (user_data, result) = next_completion(&mut aio);
+        assert_eq!(user_data, 901);
+        assert!(result < 0, "host WriteZeroes failure must reach the guest");
+
+        drop(aio);
+        metadata.shutdown();
+        drop(metadata);
+
+        let reopened = QcowDisk::new(
+            temp.as_file().try_clone().unwrap(),
+            false,
+            false,
+            true,
+            false,
+        )
+        .unwrap();
+        assert_eq!(async_read(&reopened, 0, data.len()), data);
+    }
+
+    #[test]
+    fn test_failed_punch_is_reported_and_cluster_stays_reserved() {
+        const CLUSTER_SIZE: u64 = 1 << 16;
+        const L2_ENTRIES: u64 = CLUSTER_SIZE / 8;
+        const L1_SPAN: u64 = CLUSTER_SIZE * L2_ENTRIES;
+
+        let data = vec![0x3c; CLUSTER_SIZE as usize];
+        let (temp, disk) = create_disk_with_data(L1_SPAN + 2 * CLUSTER_SIZE, &data, 0, true, false);
+        drop(disk);
+
+        let raw = AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+        let (inner, backing, sparse) = super::super::parser::parse_qcow(raw, 0, true).unwrap();
+        assert!(backing.is_none());
+        let refcount_bits = 1u64 << inner.header.refcount_order;
+        let writable_data_file = inner.raw_file.clone();
+        let metadata = Arc::new(QcowMetadata::new(inner));
+        let old_host_offset = match &metadata
+            .map_clusters_for_read(0, CLUSTER_SIZE as usize, false)
+            .unwrap()[0]
+        {
+            ClusterReadMapping::Allocated { offset, .. } => *offset,
+            other => panic!("expected allocated mapping, got {other:?}"),
+        };
+
+        // A read-only per-queue fd makes the host punch fail after the
+        // metadata deallocation has already completed.
+        let read_only = File::open(temp.as_path()).unwrap();
+        let read_only_data_file = QcowRawFile::from(
+            AlignedFile::new(read_only, false),
+            CLUSTER_SIZE,
+            refcount_bits,
+        )
+        .unwrap();
+        let mut failing_aio =
+            QcowSync::new(Arc::clone(&metadata), read_only_data_file, None, sparse);
+        failing_aio.punch_hole(0, CLUSTER_SIZE, 902).unwrap();
+        let (user_data, result) = next_completion(&mut failing_aio);
+        assert_eq!(user_data, 902);
+        assert!(result < 0, "host PunchHole failure must reach the guest");
+        drop(failing_aio);
+
+        // A FLUSH cannot make the failed-punch cluster reusable.
+        metadata.flush().unwrap();
+        let mut writer = QcowSync::new(Arc::clone(&metadata), writable_data_file, None, sparse);
+        writer
+            .write_from_vec(
+                L1_SPAN as libc::off_t,
+                OwnedIoBuffer::from_vec(vec![0x7e; CLUSTER_SIZE as usize]),
+                903,
+            )
+            .unwrap();
+        assert_eq!(
+            completion_tuple(&writer.next_completed_request().unwrap()),
+            (903, CLUSTER_SIZE as i32)
+        );
+        writer.fsync(None).unwrap();
+
+        let mut inspect = temp.as_file().try_clone().unwrap();
+        let l1_table_offset = read_be_u64_at(&mut inspect, TEST_HEADER_L1_TABLE_OFFSET);
+        let new_l2 = read_be_u64_at(&mut inspect, l1_table_offset + 8) & TEST_L1_L2_ADDR_MASK;
+        assert_ne!(new_l2, old_host_offset);
+    }
+
+    #[test]
     fn test_resize_grow() {
         let cluster_size = 1u64 << 16;
         let initial_size = cluster_size * 4;
@@ -2130,5 +2243,83 @@ mod unit_tests {
 
         let buf = async_read(&disk, 0, cluster_size);
         assert_eq!(buf, data);
+    }
+
+    // Regression test for a valid cross-queue schedule where a guest FLUSH
+    // and a new allocation run while a returned PunchHole side effect is
+    // still pending.
+    #[test]
+    fn stale_punch_cannot_reuse_or_destroy_new_l2() {
+        const CLUSTER_SIZE: u64 = 1 << 16;
+        const L2_ENTRIES: u64 = CLUSTER_SIZE / 8;
+        const L1_SPAN: u64 = CLUSTER_SIZE * L2_ENTRIES;
+
+        let temp = TempFile::new().unwrap();
+        let file = temp.as_file().try_clone().unwrap();
+        let virtual_size = L1_SPAN + 2 * CLUSTER_SIZE;
+        qcow::create_image(&file, virtual_size, None).unwrap();
+
+        // Seed one allocated data cluster below L1[0].
+        {
+            let disk = QcowDisk::new(file.try_clone().unwrap(), false, false, true, false).unwrap();
+            async_write(&disk, 0, &vec![0x11; CLUSTER_SIZE as usize]);
+            async_fsync(&disk);
+        }
+
+        let raw = AlignedFile::new(file.try_clone().unwrap(), false);
+        let (inner, backing, sparse) = super::super::parser::parse_qcow(raw, 0, true).unwrap();
+        assert!(backing.is_none());
+        let data_file = inner.raw_file.clone();
+        let metadata = Arc::new(QcowMetadata::new(inner));
+        let mut aio = QcowSync::new(Arc::clone(&metadata), data_file, None, sparse);
+
+        // Queue A: update metadata, retain the old host side effect.
+        let actions = metadata
+            .deallocate_bytes(0, CLUSTER_SIZE as usize, true, false, None)
+            .unwrap();
+        assert_eq!(actions.len(), 1);
+        let stale_punch_offset = match actions[0] {
+            DeallocAction::PunchHole {
+                host_offset,
+                length,
+            } => {
+                assert_eq!(length, CLUSTER_SIZE);
+                host_offset
+            }
+            _ => panic!("expected one full-cluster PunchHole"),
+        };
+
+        // Queue B: guest FLUSH must not publish the pending-punch cluster.
+        metadata.flush().unwrap();
+
+        // Queue C: allocate a new L2 and commit it. The pending-punch
+        // cluster must not be selected.
+        let new_guest_offset = L1_SPAN;
+        aio.write_from_vec(
+            new_guest_offset as libc::off_t,
+            OwnedIoBuffer::from_vec(vec![0x5a; CLUSTER_SIZE as usize]),
+            77,
+        )
+        .unwrap();
+        let completion = aio.next_completed_request().unwrap();
+        assert_eq!(completion_tuple(&completion), (77, CLUSTER_SIZE as i32));
+        aio.fsync(None).unwrap();
+
+        let mut inspect = file.try_clone().unwrap();
+        let l1_table_offset = read_be_u64_at(&mut inspect, TEST_HEADER_L1_TABLE_OFFSET);
+        let committed_l2 = read_be_u64_at(&mut inspect, l1_table_offset + 8) & TEST_L1_L2_ADDR_MASK;
+        assert_ne!(committed_l2, stale_punch_offset);
+
+        // Queue A resumes. Completing the old action must not touch the new
+        // L2, and only now may the old data cluster enter unref_clusters.
+        aio.apply_dealloc_action(&actions[0]).unwrap();
+        metadata.flush().unwrap();
+        metadata.shutdown();
+        drop(aio);
+        drop(metadata);
+
+        let reopened = QcowDisk::new(file.try_clone().unwrap(), false, false, true, false).unwrap();
+        let read_back = async_read(&reopened, new_guest_offset, CLUSTER_SIZE as usize);
+        assert!(read_back.iter().all(|&byte| byte == 0x5a));
     }
 }

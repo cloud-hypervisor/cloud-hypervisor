@@ -71,7 +71,13 @@ impl QcowAsync {
             DeallocAction::PunchHole {
                 host_offset,
                 length,
-            } => self.data_file.file_mut().punch_hole(*host_offset, *length),
+            } => {
+                self.data_file
+                    .file_mut()
+                    .punch_hole(*host_offset, *length)?;
+                self.metadata.complete_punch_hole(*host_offset);
+                Ok(())
+            }
             DeallocAction::WriteZeroes {
                 host_offset,
                 length,
