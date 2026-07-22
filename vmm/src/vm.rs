@@ -2749,14 +2749,6 @@ impl Vm {
             return self.resume().map_err(Error::Resume);
         }
 
-        // We acquire all advisory disk image locks here and not on device creation
-        // to enable live-migration without locking issues.
-        self.device_manager
-            .lock()
-            .unwrap()
-            .try_lock_disks()
-            .map_err(Error::LockingError)?;
-
         let new_state = if self.stop_on_boot {
             VmState::BreakPoint
         } else {
@@ -2764,6 +2756,14 @@ impl Vm {
         };
 
         current_state.valid_transition(new_state)?;
+
+        // We acquire all advisory disk image locks here and not on device creation
+        // to enable live-migration without locking issues.
+        self.device_manager
+            .lock()
+            .unwrap()
+            .try_lock_disks()
+            .map_err(Error::LockingError)?;
 
         #[cfg(feature = "fw_cfg")]
         {
