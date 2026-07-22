@@ -908,11 +908,28 @@ impl CpuManager {
         #[cfg(not(feature = "tdx"))]
         let dynamic = true;
 
+        #[cfg(target_arch = "x86_64")]
+        let cpuid = {
+            let phys_bits = physical_bits(hypervisor.as_ref(), config.max_phys_bits);
+            arch::generate_common_cpuid(
+                hypervisor.as_ref(),
+                &arch::CpuidConfig {
+                    phys_bits,
+                    kvm_hyperv: config.kvm_hyperv,
+                    #[cfg(feature = "tdx")]
+                    tdx: tdx_enabled,
+                    amx: config.features.amx,
+                    profile: config.profile,
+                },
+            )
+            .map_err(Error::CommonCpuId)?
+        };
+
         Ok(Arc::new(Mutex::new(CpuManager {
             config: config.clone(),
             interrupt_controller: None,
             #[cfg(target_arch = "x86_64")]
-            cpuid: Vec::new(),
+            cpuid,
             vm,
             vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
             vcpus_pause_signalled: Arc::new(AtomicBool::new(false)),
@@ -938,31 +955,6 @@ impl CpuManager {
             #[cfg(feature = "igvm")]
             igvm_enabled,
         })))
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    pub fn populate_cpuid(
-        &mut self,
-        hypervisor: &dyn hypervisor::Hypervisor,
-        #[cfg(feature = "tdx")] tdx: bool,
-    ) -> Result<()> {
-        self.cpuid = {
-            let phys_bits = physical_bits(hypervisor, self.config.max_phys_bits);
-            arch::generate_common_cpuid(
-                hypervisor,
-                &arch::CpuidConfig {
-                    phys_bits,
-                    kvm_hyperv: self.config.kvm_hyperv,
-                    #[cfg(feature = "tdx")]
-                    tdx,
-                    amx: self.config.features.amx,
-                    profile: self.config.profile,
-                },
-            )
-            .map_err(Error::CommonCpuId)?
-        };
-
-        Ok(())
     }
 
     fn create_vcpu(
