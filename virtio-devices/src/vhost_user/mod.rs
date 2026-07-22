@@ -265,6 +265,7 @@ pub const DEFAULT_VIRTIO_FEATURES: u64 = (1 << VIRTIO_F_RING_INDIRECT_DESC)
 
 const HUP_CONNECTION_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 const BACKEND_REQ_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
+const RESUME_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
 
 #[derive(Default)]
 pub struct Inflight {
@@ -287,6 +288,7 @@ pub struct VhostUserEpollHandler<S: VhostUserFrontendReqHandler> {
     pub inflight: Option<Inflight>,
     /// Flag set by the worker when the vhost-user backend is no longer reachable.
     pub disconnected: Arc<AtomicBool>,
+    pub resume_evt: EventFd,
 }
 
 impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
@@ -305,6 +307,8 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
         if let Some(backend_req_handler) = &self.backend_req_handler {
             helper.add_event(backend_req_handler.as_raw_fd(), BACKEND_REQ_EVENT)?;
         }
+
+        helper.add_event(self.resume_evt.as_raw_fd(), RESUME_EVENT)?;
 
         helper.run(paused, paused_sync, self)?;
 
@@ -415,6 +419,26 @@ impl<S: VhostUserFrontendReqHandler> EpollHelperHandler for VhostUserEpollHandle
                     Ok(())
                 }
             }
+            RESUME_EVENT => {
+                let _ = self.resume_evt.read();
+                self.vu
+                    .lock()
+                    .unwrap()
+                    .resume(
+                        &self.mem.memory(),
+                        &self.queues,
+                        self.virtio_interrupt.as_ref(),
+                        self.acked_features,
+                        &self.backend_req_handler,
+                        self.inflight.as_mut(),
+                    )
+                    .map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "failed to resume vhost-user backend for socket {}: {e:?}",
+                            self.socket_path
+                        ))
+                    })
+            }
             _ => Err(EpollHelperError::HandleEvent(anyhow!(
                 "Unknown event for vhost-user thread"
             ))),
@@ -472,6 +496,7 @@ pub struct VhostUserCommon {
     pub disconnected: Arc<AtomicBool>,
     saved_dirty_log: Option<MemoryRangeTable>,
     dirty_logging: bool,
+    resume_evt: Option<EventFd>,
 }
 
 impl VhostUserCommon {
@@ -527,6 +552,13 @@ impl VhostUserCommon {
             )
             .map_err(ActivateError::VhostUserSetup)?;
 
+        let resume_evt = EventFd::new(libc::EFD_NONBLOCK).map_err(ActivateError::CreateEventFd)?;
+        self.resume_evt = Some(
+            resume_evt
+                .try_clone()
+                .map_err(ActivateError::CloneEventFd)?,
+        );
+
         Ok(VhostUserEpollHandler {
             vu: vu.clone(),
             mem,
@@ -541,6 +573,7 @@ impl VhostUserCommon {
             backend_req_handler,
             inflight,
             disconnected: self.disconnected.clone(),
+            resume_evt,
         })
     }
 
@@ -706,31 +739,22 @@ impl VhostUserCommon {
     }
 
     fn resume_internal(&mut self) -> result::Result<(), MigratableError> {
-        // Skip the resume_vhost_user call if the backend is disconnected. Process the queue
-        // interrupts to kick any paused workers.
         if self.disconnected.load(Ordering::Relaxed) {
             return Err(MigratableError::DeviceDisconnected(
                 self.socket_path.clone(),
             ));
         }
 
-        if let Some(vu) = &self.vu
-            && let Err(e) = vu.lock().unwrap().resume_vhost_user()
-        {
-            if e.is_transport_lost() {
-                self.disconnected.store(true, Ordering::Relaxed);
-                return Err(MigratableError::DeviceDisconnected(
-                    self.socket_path.clone(),
-                ));
-            }
+        let Some(evt) = &self.resume_evt else {
+            return Ok(());
+        };
 
-            return Err(MigratableError::Resume(anyhow!(
-                "Error resuming vhost-user backend for socket {}: {e:?}",
+        evt.write(1).map_err(|e| {
+            MigratableError::Resume(anyhow!(
+                "Error signaling vhost-user resume for socket {}: {e}",
                 self.socket_path
-            )));
-        }
-
-        Ok(())
+            ))
+        })
     }
 
     pub fn resume(&mut self) -> result::Result<(), MigratableError> {

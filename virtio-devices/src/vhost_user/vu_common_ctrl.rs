@@ -67,6 +67,7 @@ pub struct VhostUserHandle {
     acked_features: u64,
     vrings_info: Option<Vec<VringInfo>>,
     queue_indexes: Vec<u16>,
+    vring_bases: Option<Vec<u64>>,
 }
 
 impl VhostUserHandle {
@@ -171,6 +172,9 @@ impl VhostUserHandle {
         {
             return Err(Error::VringBasesCountMismatch(bases.len(), queues.len()));
         }
+
+        // May run more than once on the same handle (resume after snapshot)
+        self.queue_indexes.clear();
 
         self.vu
             .set_features(acked_features)
@@ -427,6 +431,7 @@ impl VhostUserHandle {
                 acked_features: 0,
                 vrings_info: None,
                 queue_indexes: Vec::new(),
+                vring_bases: None,
             };
             vhost_user
                 .vu
@@ -485,6 +490,7 @@ impl VhostUserHandle {
                         acked_features: 0,
                         vrings_info: None,
                         queue_indexes: Vec::new(),
+                        vring_bases: None,
                     })
                     .map_err(Error::VhostUserConnect);
 
@@ -580,7 +586,7 @@ impl VhostUserHandle {
         Ok(())
     }
 
-    pub fn resume_vhost_user(&mut self) -> Result<()> {
+    fn resume_vhost_user(&mut self) -> Result<()> {
         if self.ready {
             self.enable_vhost_user_vrings(self.queue_indexes.clone(), true)?;
         }
@@ -641,7 +647,37 @@ impl VhostUserHandle {
             .check_device_state()
             .map_err(Error::VhostUserCheckDeviceState)?;
 
+        // Store the bases in case we need to resume after snapshot
+        self.vring_bases = Some(vring_bases.clone());
+
         Ok((state, vring_bases))
+    }
+
+    /// Resume the vhost-user backend from the device thread.
+    /// Initialize the vrings from the bases captured earlier, or simply
+    /// enable them if they haven't been stopped.
+    pub fn resume<S: VhostUserFrontendReqHandler>(
+        &mut self,
+        mem: &GuestMemoryMmap,
+        queues: &[(u16, Queue, EventFd)],
+        virtio_interrupt: &dyn VirtioInterrupt,
+        acked_features: u64,
+        backend_req_handler: &Option<FrontendReqHandler<S>>,
+        inflight: Option<&mut Inflight>,
+    ) -> Result<()> {
+        let Some(vring_bases) = self.vring_bases.take() else {
+            return self.resume_vhost_user();
+        };
+
+        self.setup_vhost_user(
+            mem,
+            queues,
+            virtio_interrupt,
+            acked_features,
+            backend_req_handler,
+            inflight,
+            Some(&vring_bases),
+        )
     }
 
     pub fn restore_state<C>(&mut self, state: &VhostUserState<C>) -> Result<()> {
