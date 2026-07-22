@@ -316,7 +316,7 @@ pub struct VirtioPciDeviceActivator {
     memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     device: Arc<Mutex<dyn VirtioDevice>>,
     device_activated: Arc<AtomicBool>,
-    queues: Option<Vec<(usize, Queue, EventFd)>>,
+    queues: Option<Vec<(u16, Queue, EventFd)>>,
     barrier: Option<Arc<Barrier>>,
     id: String,
     status: Arc<AtomicU8>,
@@ -834,7 +834,7 @@ impl VirtioPciDevice {
             }
 
             queues.push((
-                queue_index,
+                queue_index as u16,
                 vm_virtio::clone_queue(queue),
                 self.queue_evts[queue_index].try_clone().unwrap(),
             ));
