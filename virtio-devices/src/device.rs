@@ -68,7 +68,7 @@ pub struct VirtioSharedMemoryList {
 pub struct ActivationContext {
     pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
     pub interrupt_cb: Arc<dyn VirtioInterrupt>,
-    pub queues: Vec<(usize, Queue, EventFd)>,
+    pub queues: Vec<(u16, Queue, EventFd)>,
     pub device_status: Arc<AtomicU8>,
 }
 
@@ -307,7 +307,7 @@ impl VirtioCommon {
 
     pub fn activate(
         &mut self,
-        queues: &[(usize, Queue, EventFd)],
+        queues: &[(u16, Queue, EventFd)],
         interrupt_cb: Arc<dyn VirtioInterrupt>,
     ) -> ActivateResult {
         if queues.len() < self.min_queues.into() {

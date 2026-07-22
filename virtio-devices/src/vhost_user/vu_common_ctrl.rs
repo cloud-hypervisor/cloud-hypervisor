@@ -65,7 +65,7 @@ pub struct VhostUserHandle {
     shm_log: Option<Arc<MmapRegion>>,
     acked_features: u64,
     vrings_info: Option<Vec<VringInfo>>,
-    queue_indexes: Vec<usize>,
+    queue_indexes: Vec<u16>,
 }
 
 impl VhostUserHandle {
@@ -167,7 +167,7 @@ impl VhostUserHandle {
     pub fn setup_vhost_user<S: VhostUserFrontendReqHandler>(
         &mut self,
         mem: &GuestMemoryMmap,
-        queues: &[(usize, Queue, EventFd)],
+        queues: &[(u16, Queue, EventFd)],
         virtio_interrupt: &dyn VirtioInterrupt,
         acked_features: u64,
         backend_req_handler: &Option<FrontendReqHandler<S>>,
@@ -195,7 +195,7 @@ impl VhostUserHandle {
         // at early stage.
         for (queue_index, queue, _) in queues.iter() {
             self.vu
-                .set_vring_num(*queue_index, queue.size())
+                .set_vring_num(*queue_index as usize, queue.size())
                 .map_err(Error::VhostUserSetVringNum)?;
         }
 
@@ -260,7 +260,7 @@ impl VhostUserHandle {
             });
 
             self.vu
-                .set_vring_addr(*queue_index, &config_data)
+                .set_vring_addr(*queue_index as usize, &config_data)
                 .map_err(Error::VhostUserSetVringAddr)?;
             let base = if let Some(bases) = vring_bases {
                 bases[i] as u16
@@ -271,19 +271,19 @@ impl VhostUserHandle {
                     .0
             };
             self.vu
-                .set_vring_base(*queue_index, base)
+                .set_vring_base(*queue_index as usize, base)
                 .map_err(Error::VhostUserSetVringBase)?;
 
             if let Some(eventfd) =
-                virtio_interrupt.notifier(VirtioInterruptType::Queue(*queue_index as u16))
+                virtio_interrupt.notifier(VirtioInterruptType::Queue(*queue_index))
             {
                 self.vu
-                    .set_vring_call(*queue_index, &eventfd)
+                    .set_vring_call(*queue_index as usize, &eventfd)
                     .map_err(Error::VhostUserSetVringCall)?;
             }
 
             self.vu
-                .set_vring_kick(*queue_index, queue_evt)
+                .set_vring_kick(*queue_index as usize, queue_evt)
                 .map_err(Error::VhostUserSetVringKick)?;
 
             self.queue_indexes.push(*queue_index);
@@ -303,10 +303,10 @@ impl VhostUserHandle {
         Ok(())
     }
 
-    fn enable_vhost_user_vrings(&mut self, queue_indexes: Vec<usize>, enable: bool) -> Result<()> {
+    fn enable_vhost_user_vrings(&mut self, queue_indexes: Vec<u16>, enable: bool) -> Result<()> {
         for queue_index in queue_indexes {
             self.vu
-                .set_vring_enable(queue_index, enable)
+                .set_vring_enable(queue_index as usize, enable)
                 .map_err(Error::VhostUserSetVringEnable)?;
         }
 
@@ -316,12 +316,12 @@ impl VhostUserHandle {
     pub fn reset_vhost_user(&mut self) -> Result<()> {
         for queue_index in self.queue_indexes.drain(..) {
             self.vu
-                .set_vring_enable(queue_index, false)
+                .set_vring_enable(queue_index as usize, false)
                 .map_err(Error::VhostUserSetVringEnable)?;
 
             let _ = self
                 .vu
-                .get_vring_base(queue_index)
+                .get_vring_base(queue_index as usize)
                 .map_err(Error::VhostUserGetVringBase)?;
         }
 
@@ -360,7 +360,7 @@ impl VhostUserHandle {
     pub fn reinitialize_vhost_user<S: VhostUserFrontendReqHandler>(
         &mut self,
         mem: &GuestMemoryMmap,
-        queues: &[(usize, Queue, EventFd)],
+        queues: &[(u16, Queue, EventFd)],
         virtio_interrupt: &dyn VirtioInterrupt,
         acked_features: u64,
         acked_protocol_features: u64,
@@ -581,7 +581,7 @@ impl VhostUserHandle {
         for queue_index in &self.queue_indexes {
             let base = self
                 .vu
-                .get_vring_base(*queue_index)
+                .get_vring_base(*queue_index as usize)
                 .map_err(Error::VhostUserGetVringBase)?;
             vring_bases.push(base as u64);
         }
