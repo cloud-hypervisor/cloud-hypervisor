@@ -4,31 +4,26 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::collections::{HashMap, VecDeque};
-use std::os::fd::{AsRawFd, RawFd};
-use std::{io, mem};
+use std::io;
+use std::os::fd::RawFd;
 
 use io_uring::{IoUring, opcode, squeue, types};
 use log::{error, warn};
 use vmm_sys_util::eventfd::EventFd;
 
-use super::common::{duplicate_user_data_error, validate_batch};
+use super::async_io_core::AsyncIoCore;
+use super::common::duplicate_user_data_error;
 use super::{AsyncIoCompletion, AsyncIoOperation};
 
 /// `io_uring` wrapper for async I/O.
 ///
-/// Holds the `IoUring` and its `EventFd`. Tracks ops that are pending.
+/// Owns the `IoUring` ring. Completion and in flight state live in `core`.
 pub struct UringDataIo {
+    // Keep `io_uring` before `core`. Rust drops fields in declaration order,
+    // so dropping the ring stops kernel access before `core` releases the
+    // retained operations whose iovecs reference the backing buffers.
     io_uring: IoUring,
-    // The `EventFd` for completion signals.
-    eventfd: EventFd,
-    // `in_flight` tracks every user_data value accepted by the kernel. Owned
-    // data operations store `Some(op)` so their iovecs and backing buffers
-    // remain valid until completion; metadata operations store `None`.
-    in_flight: HashMap<u64, Option<AsyncIoOperation>>,
-    // `injected` holds locally produced completions so synchronous failures
-    // and short-circuited requests use the same drain path as kernel CQEs.
-    injected: VecDeque<AsyncIoCompletion>,
+    core: AsyncIoCore,
     // `needs_submit_retry` is set when SQEs have been published to the ring,
     // but the submit syscall failed before confirming kernel ownership.
     needs_submit_retry: bool,
@@ -38,21 +33,19 @@ impl UringDataIo {
     /// Creates an io_uring queue and registers its completion eventfd.
     pub fn new(ring_depth: u32) -> io::Result<Self> {
         let io_uring = IoUring::new(ring_depth)?;
-        let eventfd = EventFd::new(libc::EFD_NONBLOCK)?;
-        io_uring.submitter().register_eventfd(eventfd.as_raw_fd())?;
+        let core = AsyncIoCore::new()?;
+        io_uring.submitter().register_eventfd(core.eventfd_raw())?;
 
         Ok(Self {
             io_uring,
-            eventfd,
-            in_flight: HashMap::new(),
-            injected: VecDeque::new(),
+            core,
             needs_submit_retry: false,
         })
     }
 
     /// Returns the eventfd signaled when completions are available.
     pub fn notifier(&self) -> &EventFd {
-        &self.eventfd
+        self.core.notifier()
     }
 
     /// Submits one owned read or write operation to the queue.
@@ -61,10 +54,10 @@ impl UringDataIo {
     }
 
     fn reserve_user_data(&mut self, user_data: u64) -> io::Result<()> {
-        if self.in_flight.contains_key(&user_data) {
+        if self.core.is_in_flight(user_data) {
             return Err(duplicate_user_data_error(user_data));
         }
-        self.in_flight.insert(user_data, None);
+        self.core.track(user_data, None);
 
         Ok(())
     }
@@ -76,7 +69,7 @@ impl UringDataIo {
         // SAFETY: the entry has no caller-owned buffer. `user_data` is retained
         // in `in_flight` until the CQE is consumed.
         if let Err(e) = unsafe { sq.push(entry) } {
-            self.in_flight.remove(&user_data);
+            self.core.take(user_data);
             return Err(io::Error::other(format!("Submission queue is full: {e:?}")));
         }
         sq.sync();
@@ -86,7 +79,7 @@ impl UringDataIo {
             Err(e) => {
                 self.needs_submit_retry = true;
                 warn!("io_uring submit failed after SQE was published: {e}");
-                self.eventfd.write(1).unwrap();
+                self.core.signal();
             }
         }
 
@@ -103,7 +96,7 @@ impl UringDataIo {
             return Ok(());
         }
 
-        validate_batch(|user_data| self.in_flight.contains_key(&user_data), &batch)?;
+        self.core.validate_batch(&batch)?;
 
         let (submitter, mut sq, _) = self.io_uring.split();
         let available = sq.capacity() - sq.len();
@@ -112,10 +105,10 @@ impl UringDataIo {
             // Drop sq, which will re-publish an unmodified tail pointer
             drop(sq);
             for op in batch {
-                self.injected
-                    .push_back(AsyncIoCompletion::from_operation(op, -libc::EAGAIN));
+                self.core
+                    .enqueue_completion(AsyncIoCompletion::from_operation(op, -libc::EAGAIN));
             }
-            self.eventfd.write(1).unwrap();
+            self.core.signal();
             return Ok(());
         }
 
@@ -124,19 +117,13 @@ impl UringDataIo {
         while let Some(op) = batch.next() {
             let user_data = op.user_data();
             let entry = Self::build_entry(fd, &op);
-            self.in_flight.insert(user_data, Some(op));
+            self.core.track(user_data, Some(op));
 
             // SAFETY: the SQ capacity was just checked. Every iovec's pointer is retained in
             // self.in_flight before the SQ tail is advanced by sync or drop. in_flight only
             // drops the memory after a completion.
             if let Err(e) = unsafe { sq.push(&entry) } {
-                Self::handle_push_failure(
-                    &mut self.in_flight,
-                    &mut self.injected,
-                    user_data,
-                    batch.by_ref(),
-                    &e,
-                );
+                Self::handle_push_failure(&mut self.core, user_data, batch.by_ref(), &e);
                 signal_completion = true;
                 break;
             }
@@ -152,7 +139,7 @@ impl UringDataIo {
             }
         }
         if signal_completion {
-            self.eventfd.write(1).unwrap();
+            self.core.signal();
         }
 
         Ok(())
@@ -160,8 +147,7 @@ impl UringDataIo {
 
     #[cold]
     fn handle_push_failure(
-        in_flight: &mut HashMap<u64, Option<AsyncIoOperation>>,
-        injected: &mut VecDeque<AsyncIoCompletion>,
+        core: &mut AsyncIoCore,
         user_data: u64,
         remaining: impl Iterator<Item = AsyncIoOperation>,
         error: &squeue::PushError,
@@ -169,13 +155,12 @@ impl UringDataIo {
         // Since capacity was just checked, this should only happen if the ring
         // state changed unexpectedly. Keep all affected operations memory safe
         // by returning local completions through the normal path.
-        let op = in_flight
-            .remove(&user_data)
-            .flatten()
+        let op = core
+            .take(user_data)
             .expect("pending operation missing after failed push");
-        injected.push_back(AsyncIoCompletion::from_operation(op, -libc::EAGAIN));
+        core.enqueue_completion(AsyncIoCompletion::from_operation(op, -libc::EAGAIN));
         for op in remaining {
-            injected.push_back(AsyncIoCompletion::from_operation(op, -libc::EAGAIN));
+            core.enqueue_completion(AsyncIoCompletion::from_operation(op, -libc::EAGAIN));
         }
         warn!("io_uring submission queue became full after capacity check: {error:?}");
     }
@@ -216,8 +201,7 @@ impl UringDataIo {
     /// The notifier is signaled so callers can drain it with
     /// [`Self::next_completion`].
     pub fn inject_completion(&mut self, completion: AsyncIoCompletion) {
-        self.injected.push_back(completion);
-        self.eventfd.write(1).unwrap();
+        self.core.inject_completion(completion);
     }
 
     /// Returns the next kernel or injected completion if one is available.
@@ -234,17 +218,14 @@ impl UringDataIo {
 
         if let Some(entry) = self.io_uring.completion().next() {
             let user_data = entry.user_data();
-            return Some(AsyncIoCompletion::new(
-                user_data,
-                entry.result(),
-                self.in_flight
-                    .remove(&user_data)
-                    .flatten()
-                    .and_then(AsyncIoOperation::into_completion_buffer),
-            ));
+            let buffer = self
+                .core
+                .take(user_data)
+                .and_then(AsyncIoOperation::into_completion_buffer);
+            return Some(AsyncIoCompletion::new(user_data, entry.result(), buffer));
         }
 
-        self.injected.pop_front()
+        self.core.next_completion()
     }
 }
 
@@ -259,23 +240,23 @@ impl Drop for UringDataIo {
             self.needs_submit_retry = false;
         }
 
-        let max_drain_iterations = self.in_flight.len().saturating_mul(2);
+        let max_drain_iterations = self.core.in_flight_len().saturating_mul(2);
         let mut drain_iterations = 0;
-        while !self.in_flight.is_empty() {
+        while self.core.in_flight_len() != 0 {
             if drain_iterations == max_drain_iterations {
                 error!(
                     "io_uring drain abandoned with {} operations still in flight after {} drain iterations",
-                    self.in_flight.len(),
+                    self.core.in_flight_len(),
                     drain_iterations
                 );
                 // Keep retained buffers mapped if the ring cannot be drained.
-                mem::forget(mem::take(&mut self.in_flight));
+                self.core.forget_in_flight();
                 break;
             }
             drain_iterations += 1;
 
             if let Some(entry) = self.io_uring.completion().next() {
-                self.in_flight.remove(&entry.user_data());
+                self.core.take(entry.user_data());
                 continue;
             }
 
@@ -286,10 +267,10 @@ impl Drop for UringDataIo {
                 }
                 error!(
                     "io_uring drain abandoned with {} operations still in flight: {e}",
-                    self.in_flight.len()
+                    self.core.in_flight_len()
                 );
                 // Keep retained buffers mapped if the ring cannot be drained.
-                mem::forget(mem::take(&mut self.in_flight));
+                self.core.forget_in_flight();
                 break;
             }
         }
