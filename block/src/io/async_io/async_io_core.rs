@@ -93,3 +93,48 @@ impl AsyncIoCore {
         self.completions.pop_front()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+
+    use super::AsyncIoCore;
+    use crate::async_io::{AsyncIoCompletion, AsyncIoOperation, OwnedIoBuffer};
+
+    #[test]
+    fn completions_signal_only_on_inject() {
+        let mut core = AsyncIoCore::new().unwrap();
+
+        core.enqueue_completion(AsyncIoCompletion::new(4, 512, None));
+        assert_eq!(
+            core.notifier().read().unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
+
+        core.inject_completion(AsyncIoCompletion::new(9, -libc::EIO, None));
+        assert_eq!(core.notifier().read().unwrap(), 1);
+
+        assert_eq!(core.next_completion().unwrap().user_data, 4);
+        assert_eq!(core.next_completion().unwrap().user_data, 9);
+        assert!(core.next_completion().is_none());
+    }
+
+    #[test]
+    fn in_flight_tracks_and_rejects_duplicates() {
+        let mut core = AsyncIoCore::new().unwrap();
+        let op = || AsyncIoOperation::read_to_vec(0, OwnedIoBuffer::from_vec(vec![0; 512]), 3);
+        core.track(3, Some(op()));
+        core.track(4, None);
+
+        assert!(core.is_in_flight(3));
+        assert_eq!(
+            core.validate_batch(&[op()]).unwrap_err().kind(),
+            io::ErrorKind::AlreadyExists
+        );
+
+        assert_eq!(core.take(3).unwrap().user_data(), 3);
+        assert!(core.take(4).is_none());
+        assert!(core.take(3).is_none());
+        assert!(!core.is_in_flight(3));
+    }
+}
