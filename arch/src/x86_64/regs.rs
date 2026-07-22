@@ -11,6 +11,8 @@ use std::result;
 use hypervisor::arch::x86::gdt::{gdt_entry, segment_from_gdt};
 use hypervisor::arch::x86::regs::CR0_PE;
 use hypervisor::arch::x86::{FpuState, SpecialRegisters};
+#[cfg(all(feature = "kvm", not(feature = "sev_snp")))]
+use log::error;
 use thiserror::Error;
 use vm_memory::{Address, Bytes, GuestMemoryBackend, GuestMemoryError};
 
@@ -33,6 +35,9 @@ pub enum Error {
     /// Setting up MSRs failed.
     #[error("Setting up MSRs failed")]
     SetModelSpecificRegisters(#[source] hypervisor::HypervisorCpuError),
+    /// Setting up MSRs failed because not all setup entries were set.
+    #[error("Some MSRs could not be set")]
+    SetModelSpecificRegistersAll,
     /// Failed to set SREGs for this CPU.
     #[error("Failed to set SREGs for this CPU")]
     SetStatusRegisters(#[source] hypervisor::HypervisorCpuError),
@@ -81,10 +86,31 @@ pub fn setup_fpu(vcpu: &dyn hypervisor::Vcpu) -> Result<()> {
 /// # Arguments
 ///
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
+#[cfg_attr(
+    any(not(feature = "kvm"), feature = "sev_snp"),
+    allow(unused_variables)
+)]
 pub fn setup_msrs(vcpu: &dyn hypervisor::Vcpu) -> Result<()> {
-    vcpu.set_msrs(vcpu.boot_msr_entries())
+    let setup_entries = vcpu.boot_msr_entries();
+    let num_msrs_set = vcpu
+        .set_msrs(&setup_entries)
         .map_err(Error::SetModelSpecificRegisters)?;
 
+    // Check that all setup entries were set. We can only do this for KVM
+    // (when SEV-SNP is not enabled) as MSHV always returns Ok(0) on success.
+    #[cfg(all(feature = "kvm", not(feature = "sev_snp")))]
+    if matches!(vcpu.hypervisor_type(), hypervisor::HypervisorType::Kvm)
+        && num_msrs_set != setup_entries.len()
+    {
+        for msr in &setup_entries[num_msrs_set..] {
+            error!(
+                "Could not set MSR with register address={:#x} and value={:#x}",
+                msr.index, msr.data
+            );
+        }
+
+        return Err(Error::SetModelSpecificRegistersAll);
+    }
     Ok(())
 }
 

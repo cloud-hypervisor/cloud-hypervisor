@@ -1564,10 +1564,10 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Return the list of initial MSR entries for a VCPU
     ///
-    fn boot_msr_entries(&self) -> &'static [MsrEntry] {
+    fn boot_msr_entries(&self) -> Vec<MsrEntry> {
         use crate::arch::x86::{MTRR_ENABLE, MTRR_MEM_TYPE_WB, msr_index};
 
-        &[
+        vec![
             msr!(msr_index::MSR_IA32_SYSENTER_CS),
             msr!(msr_index::MSR_IA32_SYSENTER_ESP),
             msr!(msr_index::MSR_IA32_SYSENTER_EIP),
