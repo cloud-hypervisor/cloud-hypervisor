@@ -340,6 +340,12 @@ pub struct MsrEntry {
     pub data: u64,
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct VcpuMsrConfigUpdate {
+    pub feature_msrs: Vec<MsrEntry>,
+    pub snapshottable_msr_indices: Vec<u32>,
+}
+
 #[serde_with::serde_as]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct XsaveState {
