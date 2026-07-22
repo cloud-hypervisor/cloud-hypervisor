@@ -516,11 +516,36 @@ impl Pausable for VirtioCommon {
 
 #[cfg(test)]
 mod unit_tests {
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use virtio_queue::QueueT;
     use vmm_sys_util::eventfd::EFD_NONBLOCK;
 
     use super::*;
+
+    #[derive(Default)]
+    struct RecordingInterrupt {
+        queue_indices: Mutex<Vec<u16>>,
+    }
+
+    impl VirtioInterrupt for RecordingInterrupt {
+        fn trigger(&self, int_type: VirtioInterruptType) -> io::Result<()> {
+            if let VirtioInterruptType::Queue(queue_index) = int_type {
+                self.queue_indices.lock().unwrap().push(queue_index);
+            }
+            Ok(())
+        }
+
+        fn set_notifier(
+            &self,
+            _: u32,
+            _: Option<EventFd>,
+            _: &dyn hypervisor::Vm,
+        ) -> io::Result<()> {
+            Ok(())
+        }
+    }
 
     struct NoopInterrupt;
     impl VirtioInterrupt for NoopInterrupt {
@@ -614,6 +639,31 @@ mod unit_tests {
         // Dropping `common` alone must join the worker via WorkerThreads' Drop.
         drop(common);
         assert_eq!(started.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn resume_preserves_sparse_queue_indices() {
+        let interrupt = Arc::new(RecordingInterrupt::default());
+        let queues = vec![
+            (
+                1,
+                Queue::new(256).unwrap(),
+                EventFd::new(EFD_NONBLOCK).unwrap(),
+            ),
+            (
+                3,
+                Queue::new(256).unwrap(),
+                EventFd::new(EFD_NONBLOCK).unwrap(),
+            ),
+        ];
+        let mut common = VirtioCommon::default();
+
+        common.activate(&queues, interrupt.clone()).unwrap();
+        common.resume().unwrap();
+
+        assert_eq!(queues[0].2.read().unwrap(), 1);
+        assert_eq!(queues[1].2.read().unwrap(), 1);
+        assert_eq!(*interrupt.queue_indices.lock().unwrap(), vec![1, 3]);
     }
 
     #[test]
