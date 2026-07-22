@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::cmp::min;
+use std::io;
 use std::os::unix::fs::FileExt;
 use std::sync::Arc;
 
@@ -50,23 +51,20 @@ impl QcowSync {
         }
     }
 
-    fn apply_dealloc_action(&mut self, action: &DeallocAction) {
+    fn apply_dealloc_action(&mut self, action: &DeallocAction) -> io::Result<()> {
         match action {
             DeallocAction::PunchHole {
                 host_offset,
                 length,
-            } => {
-                let _ = self.data_file.file_mut().punch_hole(*host_offset, *length);
-            }
+            } => self.data_file.file_mut().punch_hole(*host_offset, *length),
             DeallocAction::WriteZeroes {
                 host_offset,
                 length,
-            } => {
-                let _ = self
-                    .data_file
-                    .file_mut()
-                    .write_zeroes_at(*host_offset, *length);
-            }
+            } => self
+                .data_file
+                .file_mut()
+                .write_zeroes_at(*host_offset, *length)
+                .map(|_| ()),
         }
     }
 
@@ -236,13 +234,19 @@ impl AsyncIo for QcowSync {
                 false,
                 self.backing_file.as_deref(),
             )
+            .and_then(|actions| {
+                let mut first_error = None;
+                for action in &actions {
+                    if let Err(e) = self.apply_dealloc_action(action) {
+                        first_error.get_or_insert(e);
+                    }
+                }
+                first_error.map_or(Ok(()), Err)
+            })
             .map_err(AsyncIoError::PunchHole);
 
         match result {
-            Ok(actions) => {
-                for action in &actions {
-                    self.apply_dealloc_action(action);
-                }
+            Ok(()) => {
                 self.completions
                     .complete(AsyncIoCompletion::new(user_data, 0, None));
                 Ok(())
@@ -270,13 +274,19 @@ impl AsyncIo for QcowSync {
                 true,
                 self.backing_file.as_deref(),
             )
+            .and_then(|actions| {
+                let mut first_error = None;
+                for action in &actions {
+                    if let Err(e) = self.apply_dealloc_action(action) {
+                        first_error.get_or_insert(e);
+                    }
+                }
+                first_error.map_or(Ok(()), Err)
+            })
             .map_err(AsyncIoError::WriteZeroes);
 
         match result {
-            Ok(actions) => {
-                for action in &actions {
-                    self.apply_dealloc_action(action);
-                }
+            Ok(()) => {
                 self.completions
                     .complete(AsyncIoCompletion::new(user_data, 0, None));
                 Ok(())
