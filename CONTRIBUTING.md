@@ -154,6 +154,17 @@ removed in the next commit).
 
 ## Pull requests
 
+> [!IMPORTANT]
+> Before opening a pull request for a new feature or enhancement request please
+> create an issue with the "feature request" template and ensure there is
+> agreement from the maintainers to move ahead with that feature.
+
+> [!TIP]
+> When fixing a bug, especially a complex one, please consider opening an issue
+> with the "bug report" template to make it easier for other users to discover
+> your fix and aid reviewers. _This is not required for opening a pull request
+> nor is any agreement required before implementation._
+
 Cloud Hypervisor uses the “fork-and-pull” development model. Follow these steps if
 you want to merge your changes to `cloud-hypervisor`:
 
