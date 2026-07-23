@@ -101,6 +101,11 @@ pub enum HypervisorCpuError {
     #[error("Failed to set Msr entries")]
     SetMsrEntries(#[source] anyhow::Error),
     ///
+    /// Restoring required feature MSR
+    ///
+    #[error("Failed to restore required feature MSR")]
+    RestoreFeatureMsr,
+    ///
     /// Getting Msr entries error
     ///
     #[error("Failed to get Msr entries")]

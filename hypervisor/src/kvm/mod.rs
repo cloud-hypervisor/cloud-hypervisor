@@ -3392,12 +3392,18 @@ impl cpu::Vcpu for KvmVcpu {
         let num_msrs = self.set_msrs(&state.msrs)?;
         if num_msrs != expected_num_msrs {
             let mut faulty_msr_index = num_msrs;
-
+            let mut required_feature_msr_not_set = false;
             loop {
-                warn!(
-                    "Detected faulty MSR 0x{:x} while setting MSRs",
-                    state.msrs[faulty_msr_index].index
-                );
+                let msr_address = state.msrs[faulty_msr_index].index;
+                warn!("Detected faulty MSR {msr_address:#x} while setting MSRs");
+
+                if self.feature_msrs.iter().any(|msr| msr.index == msr_address) {
+                    error!(
+                        "Unable to set feature MSR {msr_address:#x}, MSR value={}",
+                        state.msrs[faulty_msr_index].data
+                    );
+                    required_feature_msr_not_set = true;
+                }
 
                 // Skip the first bad MSR
                 let start_pos = faulty_msr_index + 1;
@@ -3411,6 +3417,9 @@ impl cpu::Vcpu for KvmVcpu {
                 }
 
                 faulty_msr_index = start_pos + num_msrs;
+            }
+            if required_feature_msr_not_set {
+                return Err(cpu::HypervisorCpuError::RestoreFeatureMsr);
             }
         }
 
