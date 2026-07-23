@@ -2746,6 +2746,7 @@ impl DeviceManager {
                 backing_files: disk_cfg.backing_files,
                 disable_io_uring: disk_cfg.disable_io_uring,
                 disable_aio: disk_cfg.disable_aio,
+                logical_block_size: disk_cfg.logical_block_size,
             })
             .map_err(DeviceManagerError::Disk)?;
 

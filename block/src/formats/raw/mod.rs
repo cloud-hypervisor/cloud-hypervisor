@@ -54,6 +54,7 @@ pub struct RawDisk {
     file: File,
     backend: RawBackend,
     direct: bool,
+    logical_block_size: Option<u64>,
 }
 
 impl RawDisk {
@@ -62,7 +63,13 @@ impl RawDisk {
             file,
             backend,
             direct,
+            logical_block_size: None,
         }
+    }
+
+    pub fn with_logical_block_size(mut self, logical_block_size: Option<u64>) -> Self {
+        self.logical_block_size = logical_block_size;
+        self
     }
 }
 
@@ -90,10 +97,22 @@ impl disk_file::DiskFd for RawDisk {
 
 impl disk_file::Geometry for RawDisk {
     fn topology(&self) -> DiskTopology {
-        DiskTopology::probe(&self.file).unwrap_or_else(|_| {
+        let topology = DiskTopology::probe(&self.file).unwrap_or_else(|_| {
             warn!("Unable to get device topology. Using default topology");
             DiskTopology::default()
-        })
+        });
+        if let Some(logical_block_size) = self.logical_block_size {
+            // A physical block or minimum I/O below one logical block
+            // cannot exist.
+            DiskTopology {
+                logical_block_size,
+                physical_block_size: topology.physical_block_size.max(logical_block_size),
+                minimum_io_size: topology.minimum_io_size.max(logical_block_size),
+                ..topology
+            }
+        } else {
+            topology
+        }
     }
 }
 
@@ -146,6 +165,7 @@ impl disk_file::AsyncDiskFile for RawDisk {
             file,
             backend: self.backend,
             direct: self.direct,
+            logical_block_size: self.logical_block_size,
         }))
     }
 
@@ -209,7 +229,7 @@ mod unit_tests {
 
     use super::*;
     use crate::async_io::AsyncIo;
-    use crate::disk_file::{AsyncDiskFile, DiskSize, PhysicalSize, Resizable};
+    use crate::disk_file::{AsyncDiskFile, DiskSize, Geometry, PhysicalSize, Resizable};
 
     const TEST_SIZE: u64 = 0x1122_3344;
 
@@ -275,6 +295,37 @@ mod unit_tests {
         let file = make_raw_file();
         let disk = RawDisk::new(file, RawBackend::IoUring, false);
         assert_io_uring_backend(&disk);
+    }
+
+    #[test]
+    fn logical_block_size_overrides_topology() {
+        let file = make_raw_file();
+        let base = RawDisk::new(file.try_clone().unwrap(), RawBackend::Sync, false).topology();
+        let disk = RawDisk::new(file, RawBackend::Sync, false).with_logical_block_size(Some(4096));
+        let topology = disk.topology();
+        assert_eq!(topology.logical_block_size, 4096);
+        assert_eq!(
+            topology.physical_block_size,
+            base.physical_block_size.max(4096)
+        );
+        assert_eq!(topology.minimum_io_size, base.minimum_io_size.max(4096));
+        assert_eq!(topology.optimal_io_size, base.optimal_io_size);
+    }
+
+    #[test]
+    fn no_logical_block_size_keeps_probed_topology() {
+        let file = make_raw_file();
+        let base = RawDisk::new(file.try_clone().unwrap(), RawBackend::Sync, false).topology();
+        let disk = RawDisk::new(file, RawBackend::Sync, false).with_logical_block_size(None);
+        assert_eq!(disk.topology().logical_block_size, base.logical_block_size);
+    }
+
+    #[test]
+    fn try_clone_preserves_logical_block_size() {
+        let file = make_raw_file();
+        let disk = RawDisk::new(file, RawBackend::Sync, false).with_logical_block_size(Some(4096));
+        let cloned = disk.try_clone().unwrap();
+        assert_eq!(cloned.topology().logical_block_size, 4096);
     }
 
     fn assert_try_clone(disk: &RawDisk, expect_backend: RawBackend) {

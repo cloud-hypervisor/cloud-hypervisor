@@ -14,7 +14,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 use std::{fmt, fs};
 
-use log::info;
+use log::{info, warn};
 
 #[cfg(feature = "io_uring")]
 use crate::block_io_uring_is_supported;
@@ -25,7 +25,8 @@ use crate::formats::raw::{RawBackend, RawDisk};
 use crate::formats::vhd::VhdDisk;
 use crate::formats::vhdx::VhdxDisk;
 use crate::{
-    ImageType, block_aio_is_supported, detect_image_type, open_disk_image, preallocate_disk,
+    DiskTopology, ImageType, block_aio_is_supported, detect_image_type, open_disk_image,
+    preallocate_disk,
 };
 
 /// Options for opening a disk image via [`open_disk`].
@@ -37,6 +38,7 @@ pub struct DiskOpenOptions<'a> {
     pub backing_files: bool,
     pub disable_io_uring: bool,
     pub disable_aio: bool,
+    pub logical_block_size: Option<u64>,
 }
 
 /// Result of [`open_disk`], carrying the detected image type alongside
@@ -93,6 +95,13 @@ pub fn open_disk(options: &DiskOpenOptions<'_>) -> BlockResult<OpenedDisk> {
     let mut file = open_disk_image(options.path, &fs_options)?;
     let image_type = detect_image_type(&mut file)?;
 
+    if options.logical_block_size.is_some() && image_type != ImageType::Raw {
+        warn!("logical_block_size is only supported for raw disk images");
+        return Err(
+            BlockError::from_kind(BlockErrorKind::UnsupportedFeature).with_path(options.path)
+        );
+    }
+
     let disk: Box<dyn AsyncFullDiskFile> = match image_type {
         ImageType::FixedVhd => open_fixed_vhd(file, options)?,
         ImageType::Raw => open_raw(file, options)?,
@@ -147,15 +156,33 @@ fn open_raw(
         preallocate_disk(&file, options.path);
     }
 
+    if let Some(logical_block_size) = options.logical_block_size
+        && options.direct
+    {
+        let topology = DiskTopology::probe(&file).unwrap_or_else(|_| {
+            warn!("Unable to get device topology. Using default topology");
+            DiskTopology::default()
+        });
+        if logical_block_size != topology.logical_block_size {
+            warn!(
+                "logical_block_size {} does not match device logical block size {} \
+                and cannot be emulated with direct I/O",
+                logical_block_size, topology.logical_block_size
+            );
+            return Err(
+                BlockError::from_kind(BlockErrorKind::UnsupportedFeature).with_path(options.path)
+            );
+        }
+    }
+
     #[cfg(feature = "io_uring")]
     if !options.disable_io_uring {
         if io_uring_supported() {
             info!("Opening RAW disk file with io_uring backend");
-            return Ok(Box::new(RawDisk::new(
-                file,
-                RawBackend::IoUring,
-                options.direct,
-            )));
+            return Ok(Box::new(
+                RawDisk::new(file, RawBackend::IoUring, options.direct)
+                    .with_logical_block_size(options.logical_block_size),
+            ));
         }
         info!("io_uring runtime probe failed for RAW, trying next backend");
     }
@@ -163,21 +190,19 @@ fn open_raw(
     if !options.disable_aio {
         if aio_supported() {
             info!("Opening RAW disk file with AIO backend");
-            return Ok(Box::new(RawDisk::new(
-                file,
-                RawBackend::Aio,
-                options.direct,
-            )));
+            return Ok(Box::new(
+                RawDisk::new(file, RawBackend::Aio, options.direct)
+                    .with_logical_block_size(options.logical_block_size),
+            ));
         }
         info!("AIO runtime probe failed for RAW, using synchronous backend");
     }
 
     info!("Opening RAW disk file with synchronous backend");
-    Ok(Box::new(RawDisk::new(
-        file,
-        RawBackend::Sync,
-        options.direct,
-    )))
+    Ok(Box::new(
+        RawDisk::new(file, RawBackend::Sync, options.direct)
+            .with_logical_block_size(options.logical_block_size),
+    ))
 }
 
 fn open_qcow2(
@@ -233,6 +258,7 @@ mod unit_tests {
             backing_files: false,
             disable_io_uring: true,
             disable_aio: true,
+            logical_block_size: None,
         }
     }
 
@@ -268,6 +294,54 @@ mod unit_tests {
     }
 
     #[test]
+    fn logical_block_size_overrides_raw_topology() {
+        let tmp = TempFile::new().unwrap();
+        tmp.as_file().set_len(1 << 20).unwrap();
+        let path = tmp.as_path().to_owned();
+        let mut options = default_options(&path);
+        options.logical_block_size = Some(4096);
+        let opened = open_disk(&options).unwrap();
+        assert_eq!(opened.image_type, ImageType::Raw);
+        assert_eq!(opened.disk.topology().logical_block_size, 4096);
+    }
+
+    #[test]
+    fn logical_block_size_rejected_for_qcow2() {
+        let tmp = qcow::QcowTempDisk::new(100 * 1024 * 1024, None, false, true, false)
+            .unwrap()
+            .into_tempfile();
+        let path = tmp.as_path().to_owned();
+        let mut options = default_options(&path);
+        options.logical_block_size = Some(4096);
+        match open_disk(&options) {
+            Err(e) => assert_eq!(e.kind(), BlockErrorKind::UnsupportedFeature),
+            Ok(_) => panic!("expected error for qcow2 with logical_block_size"),
+        }
+    }
+
+    #[test]
+    fn logical_block_size_mismatch_rejected_with_direct() {
+        let tmp = TempFile::new().unwrap();
+        tmp.as_file().set_len(1 << 20).unwrap();
+        let path = tmp.as_path().to_owned();
+        let mut options = default_options(&path);
+        options.direct = true;
+        options.logical_block_size = Some(4096);
+        // The file is opened without O_DIRECT on purpose. The topology
+        // probe then falls back to the 512 default on any host filesystem,
+        // which guarantees the mismatch against 4096.
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        match open_raw(file, &options) {
+            Err(e) => assert_eq!(e.kind(), BlockErrorKind::UnsupportedFeature),
+            Ok(_) => panic!("expected error for mismatched logical_block_size with direct"),
+        }
+    }
+
+    #[test]
     fn open_readonly() {
         let tmp = TempFile::new().unwrap();
         tmp.as_file().set_len(1 << 20).unwrap();
@@ -292,6 +366,7 @@ mod unit_tests {
             backing_files: false,
             disable_io_uring: true,
             disable_aio: true,
+            logical_block_size: None,
         };
         let opened = open_disk(&options).unwrap();
         assert_eq!(opened.image_type, ImageType::Raw);
