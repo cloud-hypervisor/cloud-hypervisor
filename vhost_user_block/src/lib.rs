@@ -337,6 +337,7 @@ impl VhostUserBackendMut for VhostUserBlkBackend {
         VhostUserProtocolFeatures::CONFIG
             | VhostUserProtocolFeatures::MQ
             | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
+            | VhostUserProtocolFeatures::DEVICE_STATE
     }
 
     fn set_event_idx(&mut self, enabled: bool) {
@@ -450,6 +451,21 @@ impl VhostUserBackendMut for VhostUserBlkBackend {
         &mut self,
         _mem: GuestMemoryAtomic<GuestMemoryMmap>,
     ) -> VhostUserBackendResult<()> {
+        Ok(())
+    }
+
+    fn set_device_state_fd(
+        &mut self,
+        _direction: VhostTransferStateDirection,
+        _phase: VhostTransferStatePhase,
+        _file: File,
+    ) -> VhostUserBackendResult<Option<File>> {
+        // This device completes requests synchronously and keeps no inflight
+        // state.
+        Ok(None)
+    }
+
+    fn check_device_state(&self) -> VhostUserBackendResult<()> {
         Ok(())
     }
 }
