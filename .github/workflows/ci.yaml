@@ -854,7 +854,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VILLAIN_REPO: https://github.com/weltling/virtio-villain.git
-      VILLAIN_REF: v0.5.5
+      VILLAIN_REF: v0.6.4
     steps:
       - name: Code checkout
         uses: actions/checkout@v7
@@ -899,8 +899,7 @@ jobs:
             --vmm "${GITHUB_WORKSPACE}/target/release/cloud-hypervisor" \
             --blk-queues 2 --net-queues 2 --cpus 2 --memory 256M \
             --order=fast \
-            --exclude S0094 --exclude PCI0006 \
-            --jobs 4 --batch 10 --timeout 45 --log-dir villain-logs \
+            --jobs 4 --batch 10 --timeout 45 --retries 2 --log-dir villain-logs \
             --format junit --output villain-logs/results.xml \
             | tee villain-logs/run.out
       - name: Publish results to run summary
