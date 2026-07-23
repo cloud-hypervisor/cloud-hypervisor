@@ -127,6 +127,7 @@ impl MigrationWorker {
             vm,
             migration_result,
             initial_vm_state: self.initial_vm_state,
+            preserve_source: self.config.preserve_source,
         }
     }
 
@@ -180,11 +181,13 @@ impl MigrationWorker {
 pub struct MigrationWorkerResult {
     /// The VM that was migrated.
     ///
-    /// If `migration_result` is `Ok`, the VM is paused and can be deleted.
-    /// If `migration_result` is `Err`, the VM can be resumed and given back to
-    /// the VMM.
+    /// If `migration_result` is `Ok`, the VM is paused and can be deleted
+    /// unless `preserve_source` is true, which means the VM is given back
+    /// to the VMM in a paused state.
+    /// If `Err`, the VM can be resumed and given back to the VMM.
     pub vm: Vm,
     /// The result of [`Vmm::send_migration`].
     pub migration_result: Result<(), MigratableError>,
     pub initial_vm_state: VmState,
+    pub preserve_source: bool,
 }
