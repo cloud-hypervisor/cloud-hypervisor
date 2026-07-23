@@ -9,7 +9,7 @@
 // related warnings for our quality workflow to pass.
 #![allow(dead_code)]
 use std::fs::{File, OpenOptions, copy};
-use std::io::{Read, Seek, Write};
+use std::io::{BufRead, BufReader, Read, Seek, Write};
 #[cfg(not(feature = "mshv"))]
 use std::net::TcpListener;
 use std::os::unix::io::AsRawFd;
@@ -3395,6 +3395,71 @@ mod common_parallel {
         let guest =
             basic_regular_guest!(JAMMY_IMAGE_NAME).with_memory(&format!("{guest_memory_size_kb}K"));
         _test_memory_overhead(&guest, guest_memory_size_kb);
+    }
+
+    #[test]
+    fn test_memory_prefault() {
+        let guest_memory_region_sizes_kb = [128 * 1024, 128 * 1024];
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let mut child = GuestCommand::new(&guest)
+            .default_cpus()
+            .args(["--memory", "size=0"])
+            .args([
+                "--memory-zone",
+                "id=mem0,size=128M,prefault=on",
+                "id=mem1,size=128M,prefault=on",
+            ])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            let smaps = File::open(format!("/proc/{}/smaps", child.id())).unwrap();
+            let reader = BufReader::new(smaps);
+            let mut remaining_region_sizes = guest_memory_region_sizes_kb.to_vec();
+            let mut guest_memory_mapping = None;
+            let mut rss = 0;
+
+            for line in reader.lines() {
+                let line = line.unwrap();
+                if line.starts_with("Size:") {
+                    let size: u32 = line.split_whitespace().nth(1).unwrap().parse().unwrap();
+                    guest_memory_mapping = remaining_region_sizes.iter().position(|&s| s == size);
+                } else if let Some(index) = guest_memory_mapping
+                    && line.starts_with("Rss:")
+                {
+                    rss += line
+                        .split_whitespace()
+                        .nth(1)
+                        .unwrap()
+                        .parse::<u32>()
+                        .unwrap();
+                    remaining_region_sizes.swap_remove(index);
+                    guest_memory_mapping = None;
+                }
+            }
+
+            assert!(
+                remaining_region_sizes.is_empty(),
+                "Could not find guest memory mappings of {remaining_region_sizes:?} KiB"
+            );
+            assert_eq!(
+                rss,
+                guest_memory_region_sizes_kb.iter().sum::<u32>(),
+                "Guest memory was not fully populated"
+            );
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
     }
 
     #[test]
