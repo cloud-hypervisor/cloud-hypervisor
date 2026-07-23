@@ -590,6 +590,10 @@ pub struct VmSendMigrationData {
     /// Send memory across socket without copying
     #[serde(default)]
     pub local: bool,
+    /// Keep the source VM alive in a paused state once the migration is
+    /// complete.
+    #[serde(default)]
+    pub preserve_source: bool,
     /// The maximum downtime the migration aims for.
     ///
     /// Usually, on the order of a few hundred milliseconds.
@@ -621,7 +625,7 @@ pub struct VmSendMigrationData {
 
 impl VmSendMigrationData {
     pub const SYNTAX: &'static str = "VM send migration parameters \
-        \"destination_url=<url>[,local=on|off,\
+        \"destination_url=<url>[,local=on|off,preserve_source=on|off,\
         downtime_ms=<milliseconds>,timeout_s=<seconds>,\
         timeout_strategy=cancel|ignore,connections=<amount>,\
         tls_dir=<path>,memory_mode=precopy|postcopy]\"";
@@ -649,6 +653,7 @@ impl VmSendMigrationData {
         parser
             .add("destination_url")
             .add("local")
+            .add("preserve_source")
             .add("downtime_ms")
             .add("timeout_s")
             .add("timeout_strategy")
@@ -666,6 +671,11 @@ impl VmSendMigrationData {
         })?;
         let local = parser
             .convert::<Toggle>("local")
+            .map_err(VmSendMigrationConfigError::ParseError)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let preserve_source = parser
+            .convert::<Toggle>("preserve_source")
             .map_err(VmSendMigrationConfigError::ParseError)?
             .unwrap_or(Toggle(false))
             .0;
@@ -718,6 +728,7 @@ impl VmSendMigrationData {
         let data = Self {
             destination_url,
             local,
+            preserve_source,
             downtime_ms,
             timeout_s,
             timeout_strategy,
@@ -784,6 +795,12 @@ impl VmSendMigrationData {
                         .to_string(),
                 ));
             }
+        }
+
+        if self.preserve_source && !self.local {
+            return Err(VmSendMigrationConfigError::ValidationError(
+                "preserve_source option is only supported with the local option.".to_string(),
+            ));
         }
 
         if let Some(tls_dir) = &self.tls_dir {
@@ -2408,6 +2425,7 @@ mod unit_tests {
             VmSendMigrationData {
                 destination_url: "tcp:192.168.1.1:8080".to_string(),
                 local: false,
+                preserve_source: false,
                 downtime_ms: NonZeroU64::new(150).unwrap(),
                 timeout_s: VmSendMigrationData::default_timeout_s(),
                 timeout_strategy: Default::default(),
@@ -2429,6 +2447,7 @@ mod unit_tests {
             VmSendMigrationData {
                 destination_url: "tcp:192.168.1.1:8080".to_string(),
                 local: false,
+                preserve_source: false,
                 downtime_ms: NonZeroU64::new(150).unwrap(),
                 timeout_s: NonZeroU64::new(900).unwrap(),
                 timeout_strategy: TimeoutStrategy::Ignore,
@@ -2453,5 +2472,23 @@ mod unit_tests {
             "destination_url=tcp:192.168.1.1:8080,memory_mode=postcopy,connections=4",
         )
         .unwrap_err();
+
+        // preserve_source is accepted together with local (offload snapshot).
+        let data = VmSendMigrationData::parse(
+            "destination_url=unix:/tmp/sock,local=on,preserve_source=on",
+        )
+        .unwrap();
+        assert!(data.preserve_source);
+        assert!(data.local);
+
+        // preserve_source defaults to false when unspecified.
+        let data = VmSendMigrationData::parse("destination_url=unix:/tmp/sock,local=on").unwrap();
+        assert!(!data.preserve_source);
+
+        // preserve_source without local must be rejected.
+        VmSendMigrationData::parse("destination_url=tcp:192.168.1.1:8080,preserve_source=on")
+            .unwrap_err();
+        VmSendMigrationData::parse("destination_url=unix:/tmp/sock,preserve_source=on")
+            .unwrap_err();
     }
 }
