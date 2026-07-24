@@ -5,6 +5,7 @@
 use std::marker::PhantomData;
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 mod aio_data_io;
+mod async_io_core;
 mod common;
 mod completion;
 mod guest_memory_target;
