@@ -261,6 +261,11 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to complete isolated import")]
     CompleteIsolatedImport(#[source] anyhow::Error),
+    ///
+    /// Failed to register the memory conversion handler
+    ///
+    #[error("Failed to register the memory conversion handler")]
+    RegisterMemoryConversionHandler(#[source] anyhow::Error),
     /// Failed to set VM property
     ///
     #[error("Failed to set VM property")]
@@ -327,6 +332,28 @@ pub enum InterruptSourceConfig {
     MsiIrq(MsiIrqSourceConfig),
 }
 
+/// Handler invoked when a confidential VM converts guest memory between shared
+/// and private states.
+pub trait MemoryConversionHandler: Send + Sync {
+    /// Handles conversion of `[gpa, gpa + size)` to shared or private memory.
+    fn handle_conversion(&self, gpa: u64, size: u64, to_shared: bool) -> anyhow::Result<()>;
+
+    /// Whether this strategy allows reclaiming host RAM after a page is
+    /// converted to private.
+    fn reclaims_shared_mapping(&self) -> bool {
+        false
+    }
+}
+
+/// Whether guest memory is shared or private from the host
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MemoryVisibility {
+    /// Host-visible guest RAM.
+    Shared,
+    /// Confidential guest RAM (guest_memfd).
+    Private,
+}
+
 ///
 /// Trait to represent a Vm
 ///
@@ -372,6 +399,7 @@ pub trait Vm: Send + Sync + Any {
     ///
     /// `[userspace_addr, userspace_addr + memory_size)` must be valid memory,
     /// and that address range must remain valid until [`Vm::remove_user_memory_region`] is called.
+    #[expect(clippy::too_many_arguments)]
     unsafe fn create_user_memory_region(
         &self,
         slot: u32,
@@ -380,6 +408,7 @@ pub trait Vm: Send + Sync + Any {
         userspace_addr: *mut u8,
         readonly: bool,
         log_dirty_pages: bool,
+        visibility: MemoryVisibility,
     ) -> Result<()>;
     /// Removes a guest physical memory slot.
     ///
@@ -487,6 +516,17 @@ pub trait Vm: Send + Sync + Any {
     ) -> Result<()> {
         unimplemented!()
     }
+
+    /// Register a handler invoked on guest-memory shared/private conversions.
+    fn register_memory_conversion_handler(
+        &self,
+        _handler: Arc<dyn MemoryConversionHandler>,
+    ) -> Result<()> {
+        Err(HypervisorVmError::RegisterMemoryConversionHandler(
+            anyhow::anyhow!("memory conversion handler not supported"),
+        ))
+    }
+
     /// Initialize the VM
     fn init(&self) -> Result<()> {
         Ok(())
