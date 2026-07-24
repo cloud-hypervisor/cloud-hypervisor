@@ -1484,7 +1484,7 @@ components:
 
     MemoryRestoreMode:
       type: string
-      enum: [Copy, OnDemand]
+      enum: [Copy, OnDemand, CopyOnWrite]
       default: Copy
 
     RestoreConfig:

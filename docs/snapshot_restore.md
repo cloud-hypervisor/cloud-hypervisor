@@ -127,6 +127,35 @@ Current constraints for `memory_restore_mode=ondemand`:
 - `prefault=on` is not supported
 - the snapshot memory ranges must be page-aligned
 
+### Copy-on-write restore
+
+With `memory_restore_mode=copyonwrite`, guest RAM is created by mapping the snapshot
+memory file copy-on-write before any KVM memslot or device consumes the
+mapping: nothing is copied up front, pages fault in from the page cache — so
+many VMs restored from the same snapshot share it — and guest writes stay
+private to each VM.
+
+Current constraints for `memory_restore_mode=copyonwrite`:
+
+- Plain private guest RAM only. Anything else falls back to the eager copy
+  (logged): `shared=on` or hugepages (global or per-zone), zones with
+  `host_numa_node`, `reserve`, `mergeable` or hotplug fields (a purely static
+  `id`+`size` zone is fine), resizable RAM (`hotplug_size`, virtio-mem), KSM
+  (`mergeable=on`), `--pvmemcontrol`, device passthrough
+  (`--device`/`--user-device`/`--vdpa`), and snapshot ranges that are not
+  page-aligned single-region extents. `reserve=on` and THP are re-applied to
+  the mapped region.
+- A snapshot memory file shorter than the saved ranges is rejected up front (it
+  would otherwise fault `SIGBUS` at run time).
+- `prefault` is rejected.
+- The snapshot memory file must remain on disk **and unchanged** for the
+  entire lifetime of the VM. This is stronger than `ondemand`: UFFD copies each
+  page into the original anonymous mapping and stops needing the file once every
+  page is populated, and a read error there is a controlled VM exit; the CoW
+  region stays file-backed forever, so truncating it delivers a synchronous
+  `SIGBUS` and any in-place edit corrupts the guest. The length check only
+  rejects a file that is already short at restore time.
+
 ## Restore a VM with new Net FDs
 For a VM created with FDs explicitly passed to NetConfig, a set of valid FDs
 need to be provided along with the VM restore command in the following syntax:

@@ -530,6 +530,38 @@ pub fn physical_bits(hypervisor: &dyn hypervisor::Hypervisor, max_phys_bits: u8)
     cmp::min(host_phys_bits, max_phys_bits)
 }
 
+/// Whether the VM configuration supports the copy-on-write restore path at
+/// runtime. Consumers that rely on guest RAM staying anonymous (DMA pinning,
+/// MADV_DONTNEED zeroing, KSM, per-zone reserve/NUMA replay) keep the eager
+/// copy. Shared and hugepage zones are already rejected per region.
+fn is_restore_cow_supported(config: &VmConfig) -> bool {
+    let mem = &config.memory;
+    // vDPA dma-maps guest RAM into the vhost-vdpa IOTLB, pinning host pages the
+    // same way VFIO does, so it also needs the anonymous eager-copy mapping.
+    let passthrough = config.devices.as_ref().is_some_and(|d| !d.is_empty())
+        || config.user_devices.as_ref().is_some_and(|d| !d.is_empty())
+        || config.vdpa.as_ref().is_some_and(|d| !d.is_empty());
+    // pvmemcontrol madvises guest RAM as if anonymous.
+    #[cfg(feature = "pvmemcontrol")]
+    let pvmemcontrol = config.pvmemcontrol.is_some();
+    #[cfg(not(feature = "pvmemcontrol"))]
+    let pvmemcontrol = false;
+    let unsupported_zone = mem.zones.as_ref().is_some_and(|zones| {
+        zones.iter().any(|z| {
+            z.host_numa_node.is_some()
+                || z.hotplug_size.is_some()
+                || z.hotplugged_size.is_some()
+                || z.reserve
+                || z.mergeable
+        })
+    });
+    !(passthrough
+        || pvmemcontrol
+        || mem.mergeable
+        || mem.hotplug_size.is_some()
+        || unsupported_zone)
+}
+
 /// Guest clock baseline captured for snapshot/restore, plus how it must be
 /// re-established on the next resume. `mode` is runtime-only (`SnapshotRestore`
 /// after restore/migration-receive, `SameHostResume` for a live same-host capture)
@@ -1398,6 +1430,16 @@ impl Vm {
             vm_config.lock().unwrap().cpus.max_phys_bits,
         );
 
+        let mut memory_restore_mode = memory_restore_mode.unwrap_or_default();
+        if memory_restore_mode == MemoryRestoreMode::CopyOnWrite
+            && !is_restore_cow_supported(&vm_config.lock().unwrap())
+        {
+            warn!(
+                "Restore (mode=copyonwrite): requires non-resizable private RAM without passthrough, NUMA binding or KSM, falling back to copy"
+            );
+            memory_restore_mode = MemoryRestoreMode::Copy;
+        }
+
         let memory_manager =
             if let Some(snapshot) = snapshot_from_id(snapshot, MEMORY_MANAGER_SNAPSHOT_ID) {
                 MemoryManager::new_from_snapshot(
@@ -1406,7 +1448,7 @@ impl Vm {
                     &vm_config.lock().unwrap().memory.clone(),
                     source_url,
                     prefault.unwrap_or(false),
-                    memory_restore_mode.unwrap_or_default(),
+                    memory_restore_mode,
                     phys_bits,
                     &exit_evt,
                 )
