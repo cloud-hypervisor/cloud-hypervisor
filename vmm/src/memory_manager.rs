@@ -229,7 +229,9 @@ pub struct UffdRegionInfo {
 /// Newest uffd-handoff protocol version sent by this implementation.
 ///
 /// Carried in the `Handoff` handshake so the manager can tell what
-/// wire contract it is talking to. Mirrors the migration protocol's
+/// wire contract it is talking to; follow-up messages on an
+/// established session (e.g. `AddRegion`) inherit the handshake's
+/// version and don't repeat it. Mirrors the migration protocol's
 /// `CURRENT_PROTOCOL_VERSION` idiom (see `vm-migration::protocol`): a
 /// missing/zeroed version is legacy `v0`, and the field only ever
 /// grows additively unless the shape changes incompatibly.
@@ -258,17 +260,19 @@ const UFFD_HANDOFF_TIMEOUT: Duration = Duration::from_secs(2);
 ///   `UffdHandoffSpec` token string, e.g. `"MISSING|WP|WP_ASYNC"`) so
 ///   the message is self-describing: the manager learns from the
 ///   handoff itself what the fd is registered for, rather than relying
-///   on out-of-band agreement. `regions` is sorted by `guest_phys_addr`
-///   ascending so the on-the-wire layout is reproducible across runs.
-///   The VMM's pid is included so the manager can construct
-///   `/proc/<vmm_pid>/map_files/...` paths if it needs direct
-///   backing-store access.
+///   on out-of-band agreement. This also lets a future mode transition
+///   (re-key: a fresh fd with a different `mode` over the same socket)
+///   reuse the exact same message with no new variant. `regions` is
+///   sorted by `guest_phys_addr` ascending so the on-the-wire layout is
+///   reproducible across runs. The VMM's pid is included so the
+///   manager can construct `/proc/<vmm_pid>/map_files/...` paths if
+///   it needs direct backing-store access.
 /// - `AddRegion` is sent on memory hot-add (ACPI hotplug) after the
 ///   initial handoff and carries no SCM_RIGHTS ancillary data — the
-///   uffd was already handed off, and any backing-store fd the manager
-///   needs is obtained via the same /proc/<pid>/map_files mechanism.
-///   The session `mode`/`version` are those of the preceding `Handoff`,
-///   so they are not repeated here.
+///   uffd was already handed off, and any backing-store fd the
+///   manager needs is obtained via the same /proc/<pid>/map_files
+///   mechanism. The session `mode`/`version` are those of the
+///   preceding `Handoff`, so they are not repeated here.
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum UffdHandoffMessage<'a> {
@@ -348,21 +352,25 @@ pub struct MemoryManager {
 
     /// Connection back to the uffd manager, kept alive after the
     /// initial handoff so the VMM can push add-region notifications on
-    /// memory hot-add. `None` if no manager is attached or the
-    /// connection has been dropped after an I/O failure.
+    /// memory hot-add. `None` if no manager is currently attached or
+    /// the connection has been dropped after an I/O failure.
     uffd_handoff_sock: Option<UnixStream>,
 
-    /// CH's own copy of the userfaultfd handed off to the manager,
-    /// held for the VM's lifetime. The kernel refcounts the fd, so
-    /// keeping our dup keeps the registrations alive even if the
-    /// manager exits — faulting threads then block until a manager
-    /// returns rather than losing data (CH never resolves faults).
+    /// CH's own copy of the userfaultfd handed off to the manager.
+    /// Held so that hot-added VMAs can be registered against the same
+    /// uffd context (mirroring the boot-time handoff, where the VMM
+    /// does all the `UFFDIO_REGISTER` calls before handing the fd
+    /// over). Kernel refcounts the fd, so the manager's dup'd copy is
+    /// unaffected by us holding ours.
     uffd_handoff_fd: Option<OwnedFd>,
 
-    /// Register-mode bits the active uffd was configured with — used
-    /// when issuing `UFFDIO_REGISTER` against newly hot-added VMAs so
-    /// they match the rest of the registered set.
-    uffd_register_mode: Option<u64>,
+    /// The `UffdHandoffSpec` the active uffd was configured with. The
+    /// register bits drive `UFFDIO_REGISTER` against newly hot-added
+    /// VMAs so they match the rest of the registered set, and the whole
+    /// spec is compared against a re-attach request to distinguish a
+    /// resume (same spec) from a mode change (different spec — a re-key,
+    /// which is not yet supported).
+    uffd_spec: Option<userfaultfd::UffdHandoffSpec>,
 }
 
 #[derive(Error, Debug)]
@@ -558,9 +566,28 @@ pub enum Error {
     #[error("uffd handoff JSON encode error")]
     UffdHandoffEncode(#[source] serde_json::Error),
 
-    /// uffd already handed off to this VM
-    #[error("uffd already handed off to this VM")]
-    UffdAlreadyAttached,
+    /// A uffd is already attached with a different mode. Re-attaching
+    /// with the same mode is a resume; changing the mode would be a
+    /// re-key (tear down the old uffd, create a new one), which is not
+    /// implemented yet.
+    #[error(
+        "uffd already attached with mode '{active}'; changing mode to \
+         '{requested}' (re-key) is not supported"
+    )]
+    UffdHandoffModeMismatch {
+        active: userfaultfd::UffdHandoffSpec,
+        requested: userfaultfd::UffdHandoffSpec,
+    },
+
+    /// A uffd manager is already attached and still appears alive on its
+    /// handoff socket. Resuming would put a second reader on the uffd
+    /// queue and corrupt fault handling, so refuse. The orchestrator
+    /// must ensure the previous manager is gone before re-attaching.
+    #[error(
+        "uffd manager already attached and still alive; refusing to resume \
+         (ensure the previous manager has exited first)"
+    )]
+    UffdManagerStillAttached,
 }
 
 impl From<UffdError> for Error {
@@ -1334,8 +1361,40 @@ impl MemoryManager {
     ) -> Result<(), Error> {
         use std::os::fd::AsFd;
 
+        // A uffd is already attached. Re-attaching with the *same* spec
+        // is a resume/reconnect — re-send the existing uffd fd and the
+        // current region set rather than creating a fresh uffd (the
+        // manager side is identical to a first attach, so it need not
+        // know whether it is resuming; see `resume_uffd_handoff`).
+        //
+        // Re-attaching with a *different* spec would be a mode change
+        // (re-key): tear down the old uffd, create a new one, transition
+        // the registrations. That is not implemented yet, so reject it
+        // explicitly rather than silently ignoring the new spec and
+        // re-sending the old fd. Erroring here reserves the "different
+        // mode" semantics for a future re-key without defining a
+        // behaviour callers could come to depend on.
         if self.uffd_attached {
-            return Err(Error::UffdAlreadyAttached);
+            let active = self
+                .uffd_spec
+                .expect("uffd_attached implies uffd_spec is set");
+            if active != mode {
+                return Err(Error::UffdHandoffModeMismatch {
+                    active,
+                    requested: mode,
+                });
+            }
+            // Best-effort guard against putting a second reader on the
+            // uffd queue: only resume if the previous manager appears
+            // gone (its handoff socket is closed). This catches an
+            // accidental double-attach against a healthy manager; it is
+            // not full enforcement (the single-live-manager invariant
+            // remains the orchestrator's — CH cannot revoke a dup once
+            // sent).
+            if !self.manager_appears_gone() {
+                return Err(Error::UffdManagerStillAttached);
+            }
+            return self.resume_uffd_handoff(socket_path);
         }
 
         let register_mode = mode.register;
@@ -1372,14 +1431,17 @@ impl MemoryManager {
 
         let sock = Self::send_uffd_handoff(socket_path, mode, &regions, uffd.as_fd())?;
 
-        // Keep the uffd fd, the register mode, and the manager socket
-        // so a later ACPI hot-add can register the new VMA against this
-        // uffd and notify the manager (see `notify_uffd_add_region`).
-        // Holding CH's dup of the uffd for the VM's lifetime also keeps
-        // the registrations alive if the manager dies: faulting vCPUs
-        // block (CH never resolves faults itself) instead of losing data.
+        // Keep the socket, the uffd fd, and the spec so future ACPI
+        // hot-adds can register the new VMA against this uffd and notify
+        // the manager (see `notify_uffd_add_region`), so a restarted
+        // manager can resume by being re-sent this same fd (see
+        // `resume_uffd_handoff`), and so a re-attach with a different
+        // spec can be recognised as a mode change. CH holds this dup for
+        // the VM's lifetime: it keeps the kernel registrations alive so
+        // that if the manager dies, faulting vCPUs block (CH never
+        // resolves faults itself — no zero-fill) instead of losing data.
         self.uffd_attached = true;
-        self.uffd_register_mode = Some(register_mode);
+        self.uffd_spec = Some(mode);
         self.uffd_handoff_sock = Some(sock);
         self.uffd_handoff_fd = Some(uffd);
 
@@ -1398,7 +1460,7 @@ impl MemoryManager {
     /// Collect uffd region descriptors for all guest RAM zones, sorted
     /// by guest physical address. `self.memory_zones` is a HashMap with
     /// non-deterministic iteration order, so the sort keeps the on-wire
-    /// layout reproducible across runs.
+    /// layout reproducible across runs and across resume.
     fn collect_uffd_regions(&self) -> Vec<UffdRegionInfo> {
         let mut regions = Vec::new();
         for zone in self.memory_zones.values() {
@@ -1421,7 +1483,8 @@ impl MemoryManager {
 
     /// Connect to `socket_path`, send a framed `Handoff` message with
     /// `uffd_fd` attached via SCM_RIGHTS, and wait for the manager's
-    /// 1-byte ACK. Returns the connected handshake socket.
+    /// 1-byte ACK. Returns the connected socket (kept for later
+    /// add-region notifications and as the resume channel).
     ///
     /// Framing: every message is `<u32 LE body length><body>`, sent as
     /// two iovecs in one sendmsg so the SCM_RIGHTS ancillary fd attaches
@@ -1467,6 +1530,92 @@ impl MemoryManager {
         Ok(sock)
     }
 
+    /// Best-effort liveness probe of the currently-attached manager via
+    /// its retained handoff socket. Returns true when the manager looks
+    /// gone (safe to resume): the socket peer has closed (EOF/reset), or
+    /// no socket is retained (the connection was already dropped).
+    /// Returns false when the connection is still open — a live manager,
+    /// so resuming would race two readers on the uffd queue.
+    ///
+    /// A `MSG_PEEK | MSG_DONTWAIT` recv is non-destructive and never
+    /// blocks. On manager exit/kill the kernel closes its fds
+    /// synchronously, so a dead manager reads as EOF here and a live one
+    /// as EAGAIN — the probe never resumes against a detectably-live
+    /// manager. It is a guard rail, not enforcement of the
+    /// single-live-manager invariant (which stays the orchestrator's).
+    fn manager_appears_gone(&self) -> bool {
+        use std::os::fd::AsRawFd;
+
+        let Some(sock) = self.uffd_handoff_sock.as_ref() else {
+            return true; // connection already dropped -> assume gone
+        };
+        let mut buf = [0u8; 1];
+        // SAFETY: peeking one byte into a valid local buffer on a valid fd.
+        let n = unsafe {
+            libc::recv(
+                sock.as_raw_fd(),
+                buf.as_mut_ptr().cast(),
+                buf.len(),
+                libc::MSG_PEEK | libc::MSG_DONTWAIT,
+            )
+        };
+        match n {
+            0 => true, // EOF: peer closed -> manager gone
+            n if n < 0 => matches!(
+                io::Error::last_os_error().raw_os_error(),
+                // Peer reset/gone -> safe to resume. EAGAIN (open, no
+                // data pending) and any other error -> treat as alive
+                // and refuse, erring on the side of not racing readers.
+                Some(libc::ECONNRESET) | Some(libc::ENOTCONN) | Some(libc::EPIPE)
+            ),
+            _ => false, // unexpected pending data -> connection alive
+        }
+    }
+
+    /// Resume a uffd handoff after the external manager restarted.
+    ///
+    /// CH keeps its dup of the uffd for the VM's lifetime, so the
+    /// kernel-side registrations and WP markers survive a manager
+    /// crash, and while the manager is gone faulting vCPUs simply block
+    /// — CH never resolves faults itself (no zero-fill, no data loss).
+    /// On reconnect we re-send the *same* uffd fd plus the current
+    /// region set to the new manager, which then drains the queued fault
+    /// backlog and wakes the stalled vCPUs. No new uffd is created and
+    /// no VMA is re-registered.
+    ///
+    /// INVARIANT: at most one live manager at a time. Once the fd is
+    /// sent via SCM_RIGHTS, CH cannot revoke a manager's dup, and two
+    /// readers racing the uffd queue corrupts fault handling. The
+    /// orchestrator MUST ensure the previous manager is dead before
+    /// resuming (and must not attach a second manager while one is
+    /// live). CH does not — cannot — enforce this. `manager_appears_gone`
+    /// is a best-effort guard against the accidental case.
+    fn resume_uffd_handoff(&mut self, socket_path: &str) -> Result<(), Error> {
+        use std::os::fd::AsFd;
+
+        // `uffd_attached` is only ever set together with
+        // `uffd_handoff_fd` and `uffd_spec`, so both are present here.
+        // Resume re-sends the same spec the uffd was created with, so
+        // the resumed manager sees an identical `Handoff` to a first
+        // attach.
+        let mode = self
+            .uffd_spec
+            .expect("uffd_attached implies uffd_spec is set");
+        let uffd = self
+            .uffd_handoff_fd
+            .as_ref()
+            .expect("uffd_attached implies uffd_handoff_fd is set");
+        let regions = self.collect_uffd_regions();
+        let sock = Self::send_uffd_handoff(socket_path, mode, &regions, uffd.as_fd())?;
+        self.uffd_handoff_sock = Some(sock);
+
+        info!(
+            "uffd: resumed handoff ({} regions) to {socket_path}",
+            regions.len()
+        );
+        Ok(())
+    }
+
     /// Register a hot-added VMA against the active uffd, matching the
     /// register modes negotiated for the initial handoff. No-op when no
     /// manager is attached.
@@ -1479,16 +1628,14 @@ impl MemoryManager {
     fn register_hotadd_region_with_uffd(&self, region: &Arc<GuestRegionMmap>) -> Result<(), Error> {
         use std::os::fd::AsFd;
 
-        let (Some(uffd_fd), Some(register_mode)) =
-            (self.uffd_handoff_fd.as_ref(), self.uffd_register_mode)
-        else {
+        let (Some(uffd_fd), Some(spec)) = (self.uffd_handoff_fd.as_ref(), self.uffd_spec) else {
             return Ok(()); // no manager attached
         };
         uffd::register(
             uffd_fd.as_fd(),
             region.as_ptr() as u64,
             region.len(),
-            register_mode,
+            spec.register,
         )
         .map_err(Error::UffdHandoffRegister)?;
         Ok(())
@@ -2268,7 +2415,7 @@ impl MemoryManager {
             uffd_attached: false,
             uffd_handoff_sock: None,
             uffd_handoff_fd: None,
-            uffd_register_mode: None,
+            uffd_spec: None,
         };
 
         if let Some(handoff) = &config.uffd_handoff {
