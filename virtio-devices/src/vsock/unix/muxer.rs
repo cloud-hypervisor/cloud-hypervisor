@@ -39,7 +39,8 @@
 //! mapping `RawFd`s to `EpollListener`s.
 
 use std::cmp::max;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::fs::File;
 use std::io::{self, ErrorKind, Read};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
@@ -132,9 +133,10 @@ pub struct VsockMuxer {
     host_sock_path: String,
     /// The nested epoll File, used to register epoll listeners.
     epoll_file: File,
-    /// A hash set used to keep track of used host-side (local) ports, in order to assign local
-    /// ports to host-initiated connections.
-    local_port_set: HashSet<u32>,
+    /// A hash map used to keep track of used host-side ports, in order to assign local
+    /// ports to host-initiated connections. Each allocated port is mapped to the peer
+    /// port of the connection owning it, so that a port can only be released by its owner.
+    local_port_map: HashMap<u32, u32>,
     /// The last used host-side port.
     local_port_last: u32,
 }
@@ -392,7 +394,7 @@ impl VsockMuxer {
             partial_command_map: Default::default(),
             killq: MuxerKillQ::new(),
             local_port_last: (1u32 << 30) - 1,
-            local_port_set: HashSet::with_capacity(defs::MAX_CONNECTIONS),
+            local_port_map: HashMap::with_capacity(defs::MAX_CONNECTIONS),
         };
 
         muxer.add_listener(muxer.host_sock.as_raw_fd(), EpollListener::HostSock)?;
@@ -477,7 +479,7 @@ impl VsockMuxer {
                     };
 
                     port.and_then(|peer_port| {
-                        let local_port = self.allocate_local_port();
+                        let local_port = self.allocate_local_port(peer_port);
 
                         self.add_connection(
                             ConnMapKey {
@@ -616,7 +618,7 @@ impl VsockMuxer {
         if let Some(conn) = self.conn_map.remove(&key) {
             self.remove_listener(conn.get_polled_fd());
         }
-        self.free_local_port(key.local_port);
+        self.free_local_port(key);
     }
 
     /// Schedule a connection for immediate termination.
@@ -684,25 +686,27 @@ impl VsockMuxer {
 
     /// Allocate a host-side port to be assigned to a new host-initiated connection.
     ///
-    ///
-    fn allocate_local_port(&mut self) -> u32 {
+    fn allocate_local_port(&mut self, peer_port: u32) -> u32 {
         // TODO: this doesn't seem very space-efficient.
         // Maybe rewrite this to limit port range and use a bitmap?
         //
 
         loop {
             self.local_port_last = (self.local_port_last + 1) & !(1 << 31) | (1 << 30);
-            if self.local_port_set.insert(self.local_port_last) {
+            if let Entry::Vacant(entry) = self.local_port_map.entry(self.local_port_last) {
+                entry.insert(peer_port);
                 break;
             }
         }
         self.local_port_last
     }
 
-    /// Mark a previously used host-side port as free.
+    /// Mark the host-side port allocated to `key`, if any, as free.
     ///
-    fn free_local_port(&mut self, port: u32) {
-        self.local_port_set.remove(&port);
+    fn free_local_port(&mut self, key: ConnMapKey) {
+        if self.local_port_map.get(&key.local_port) == Some(&key.peer_port) {
+            self.local_port_map.remove(&key.local_port);
+        }
     }
 
     /// Handle a new connection request coming from our peer (the guest vsock driver).
@@ -1051,7 +1055,7 @@ mod unit_tests {
                 peer_port,
             };
             assert!(self.muxer.conn_map.contains_key(&key));
-            assert!(self.muxer.local_port_set.contains(&local_port));
+            assert_eq!(self.muxer.local_port_map.get(&local_port), Some(&peer_port));
 
             // A connection request for the peer should now be available from the muxer.
             assert!(self.muxer.has_pending_rx());
@@ -1278,7 +1282,52 @@ mod unit_tests {
             peer_port,
         };
         assert!(!ctx.muxer.conn_map.contains_key(&key));
-        assert!(!ctx.muxer.local_port_set.contains(&local_port));
+        assert!(!ctx.muxer.local_port_map.contains_key(&local_port));
+    }
+
+    // A guest-initiated connection whose guest-chosen destination port happens to collide
+    // with a host-allocated local port must not release that port when it is torn down: the
+    // host-initiated connection that actually owns the allocation is still using it
+    #[test]
+    fn test_peer_init_conn_does_not_free_host_local_port() {
+        let host_peer_port = 1111;
+        let guest_src_port = 2222;
+        let mut ctx = MuxerTestContext::new("peer_init_conn_does_not_free_host_local_port");
+
+        // Establish and take note of the local port allocated to it
+        let (_host_stream, local_port) = ctx.local_connect(host_peer_port);
+        let host_key = ConnMapKey {
+            local_port,
+            peer_port: host_peer_port,
+        };
+        assert!(ctx.muxer.conn_map.contains_key(&host_key));
+        assert_eq!(
+            ctx.muxer.local_port_map.get(&local_port),
+            Some(&host_peer_port)
+        );
+
+        // open a second connection to that same local port, from a different
+        // guest-side port. This needs a host listener at "<host_sock_path>_<local_port>", for
+        // the muxer to connect to
+        let _listener = ctx.create_local_listener(local_port);
+        ctx.init_pkt(local_port, guest_src_port, uapi::VSOCK_OP_REQUEST);
+        ctx.send();
+        let guest_key = ConnMapKey {
+            local_port,
+            peer_port: guest_src_port,
+        };
+        assert!(ctx.muxer.conn_map.contains_key(&guest_key));
+
+        // breaking down the guest-initiated connection must leave the host-initiated one, and
+        // its port allocation alone
+        ctx.init_pkt(local_port, guest_src_port, uapi::VSOCK_OP_RST);
+        ctx.send();
+        assert!(!ctx.muxer.conn_map.contains_key(&guest_key));
+        assert!(ctx.muxer.conn_map.contains_key(&host_key));
+        assert_eq!(
+            ctx.muxer.local_port_map.get(&local_port),
+            Some(&host_peer_port)
+        );
     }
 
     #[test]
