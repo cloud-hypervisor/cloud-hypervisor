@@ -319,6 +319,16 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
             simple_api_command(socket, "PUT", "shutdown", None).map_err(Error::HttpApiClient)
         }
         Some("nmi") => simple_api_command(socket, "PUT", "nmi", None).map_err(Error::HttpApiClient),
+        Some("uffd-attach") => {
+            let sub = matches.subcommand_matches("uffd-attach").unwrap();
+            let body = serde_json::json!({
+                "handoff_socket": sub.get_one::<String>("socket").unwrap(),
+                "mode": sub.get_one::<String>("mode").unwrap(),
+            })
+            .to_string();
+            simple_api_command(socket, "PUT", "uffd-attach", Some(&body))
+                .map_err(Error::HttpApiClient)
+        }
         Some("resize") => {
             let resize = resize_config(
                 matches
@@ -1170,6 +1180,22 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
                     .index(1)
                     .required(true)
                     .help("<destination_url>"),
+            ),
+        Command::new("uffd-attach")
+            .about("Attach an external userfaultfd manager to a running VM")
+            .arg(
+                Arg::new("mode")
+                    .long("mode")
+                    .help("'|'-separated UFFD mode tokens, e.g. WP|WP_ASYNC")
+                    .required(true)
+                    .num_args(1),
+            )
+            .arg(
+                Arg::new("socket")
+                    .long("socket")
+                    .help("Path to the userfaultfd manager's Unix socket")
+                    .required(true)
+                    .num_args(1),
             ),
     ]
     .to_vec()
