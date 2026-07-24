@@ -60,6 +60,32 @@ be needed.
 `state.json` contains the virtual machine state. It is used to restore each
 component in the state it was left before the snapshot occurred.
 
+## Diff snapshots
+
+Passing `snapshot_type=diff` (`ch-remote snapshot --diff <url>`) writes only
+the pages dirtied since the previous snapshot of the series. The first `diff`
+request takes a full baseline and enables dirty-page tracking; each subsequent
+one dumps the delta, so the pause cost is proportional to the amount of dirtied
+memory rather than to the guest RAM size. A `full` request (or any snapshot
+failure, a memory layout change, a migration, or deleting the VM) ends the
+series; the next `diff` starts a new one with a fresh baseline.
+
+A delta directory contains `config.json`, `state.json` and
+`memory-ranges.diff`, a sparse file whose extents sit at the same offsets as
+in the baseline `memory-ranges`. Restore it by pointing `source_url` at the
+newest delta and listing its ancestors, oldest first, in `memory_chain`:
+
+```bash
+./ch-remote --api-socket=/tmp/cloud-hypervisor.sock restore \
+    source_url=file:///foo/diff2,memory_chain=[file:///foo/base,file:///foo/diff1]
+```
+
+Memory is filled from the baseline, then each delta's dirty extents are
+replayed in order; device state and config come from the newest delta. The
+files must all come from one uninterrupted series and sit on a filesystem
+with `SEEK_DATA`/`SEEK_HOLE` support, and `memory_chain` cannot be combined
+with `memory_restore_mode=ondemand`.
+
 ## Restore a Cloud Hypervisor VM
 
 Given that one has access to an existing snapshot in `/home/foo/snapshot`,

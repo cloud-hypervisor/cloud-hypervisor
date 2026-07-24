@@ -15,7 +15,7 @@ use vm_migration::MigratableError;
 use vmm::api::http::*;
 use vmm::api::{
     ApiRequest, RequestHandler, VmInfoResponse, VmReceiveMigrationData, VmSendMigrationData,
-    VmmPingResponse,
+    VmSnapshotConfig, VmmPingResponse,
 };
 use vmm::config::RestoreConfig;
 use vmm::vm::{Error as VmError, VmState};
@@ -100,7 +100,7 @@ impl RequestHandler for StubApiRequestHandler {
         Ok(())
     }
 
-    fn vm_snapshot(&mut self, _: &str) -> Result<(), VmError> {
+    fn vm_snapshot(&mut self, _: &VmSnapshotConfig) -> Result<(), VmError> {
         Ok(())
     }
 

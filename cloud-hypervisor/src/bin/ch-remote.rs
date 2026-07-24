@@ -487,12 +487,10 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
                 .map_err(Error::HttpApiClient)
         }
         Some("snapshot") => {
+            let sub = matches.subcommand_matches("snapshot").unwrap();
             let snapshot_config = snapshot_config(
-                matches
-                    .subcommand_matches("snapshot")
-                    .unwrap()
-                    .get_one::<String>("snapshot_config")
-                    .unwrap(),
+                sub.get_one::<String>("snapshot_config").unwrap(),
+                sub.get_flag("diff"),
             );
             simple_api_command(socket, "PUT", "snapshot", Some(&snapshot_config))
                 .map_err(Error::HttpApiClient)
@@ -711,12 +709,10 @@ fn dbus_api_do_command(matches: &ArgMatches, proxy: &DBusApi1ProxyBlocking<'_>) 
             proxy.api_vm_add_vsock(&vsock_config)
         }
         Some("snapshot") => {
+            let sub = matches.subcommand_matches("snapshot").unwrap();
             let snapshot_config = snapshot_config(
-                matches
-                    .subcommand_matches("snapshot")
-                    .unwrap()
-                    .get_one::<String>("snapshot_config")
-                    .unwrap(),
+                sub.get_one::<String>("snapshot_config").unwrap(),
+                sub.get_flag("diff"),
             );
             proxy.api_vm_snapshot(&snapshot_config)
         }
@@ -923,9 +919,14 @@ fn add_vsock_config(config: &str) -> Result<String, Error> {
     Ok(vsock_config)
 }
 
-fn snapshot_config(url: &str) -> String {
+fn snapshot_config(url: &str, diff: bool) -> String {
     let snapshot_config = api::VmSnapshotConfig {
         destination_url: String::from(url),
+        snapshot_type: if diff {
+            api::VmSnapshotType::Diff
+        } else {
+            api::VmSnapshotType::Full
+        },
     };
 
     serde_json::to_string(&snapshot_config).unwrap()
@@ -1165,6 +1166,15 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
         Command::new("shutdown-vmm").about("Shutdown the VMM"),
         Command::new("snapshot")
             .about("Create a snapshot from VM")
+            .arg(
+                Arg::new("diff")
+                    .long("diff")
+                    .action(clap::ArgAction::SetTrue)
+                    .help(
+                        "Write only pages dirtied since the previous snapshot; \
+                         the first --diff takes a full baseline and starts dirty tracking",
+                    ),
+            )
             .arg(
                 Arg::new("snapshot_config")
                     .index(1)
