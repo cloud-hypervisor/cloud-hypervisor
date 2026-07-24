@@ -22,9 +22,10 @@ use super::{ApiAction, ApiRequest};
 use crate::api::VmCoredump;
 use crate::api::{
     AddDisk, Body, VmAddDevice, VmAddFs, VmAddGenericVhostUser, VmAddNet, VmAddPmem,
-    VmAddUserDevice, VmAddVdpa, VmAddVsock, VmBoot, VmCounters, VmCreate, VmDelete, VmInfo,
-    VmPause, VmPowerButton, VmReboot, VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeZone,
-    VmRestore, VmResume, VmSendMigration, VmShutdown, VmSnapshot, VmmPing, VmmShutdown,
+    VmAddUserDevice, VmAddVdpa, VmAddVsock, VmBalloonStats, VmBoot, VmCounters, VmCreate, VmDelete,
+    VmInfo, VmPause, VmPowerButton, VmReboot, VmReceiveMigration, VmRemoveDevice, VmResize,
+    VmResizeZone, VmRestore, VmResume, VmSendMigration, VmShutdown, VmSnapshot, VmmPing,
+    VmmShutdown,
 };
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::{Error as VmmError, NetConfig, Result as VmmResult, VmConfig};
@@ -207,6 +208,16 @@ impl DBusApi {
 
     async fn vm_counters(&self) -> Result<Optional<String>> {
         self.vm_action(&VmCounters, ()).await
+    }
+
+    async fn vm_balloon_stats(&self) -> Result<String> {
+        let api_sender = self.clone_api_sender().await;
+        let api_notifier = self.clone_api_notifier()?;
+
+        let result = blocking::unblock(move || VmBalloonStats.send(api_notifier, api_sender, ()))
+            .await
+            .map_err(api_error)?;
+        serde_json::to_string(&result).map_err(api_error)
     }
 
     async fn vm_create(&self, vm_config: String) -> Result<()> {

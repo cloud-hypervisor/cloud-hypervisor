@@ -102,6 +102,10 @@ pub enum ApiError {
     #[error("The VM info is not available")]
     VmInfo(#[source] VmError),
 
+    /// The virtio-balloon statistics are not available.
+    #[error("The virtio-balloon statistics are not available")]
+    VmBalloonStats(#[source] VmError),
+
     /// The VM could not be paused.
     #[error("The VM could not be paused")]
     VmPause(#[source] VmError),
@@ -228,6 +232,12 @@ pub struct VmInfoResponse {
     pub state: VmState,
     pub memory_actual_size: u64,
     pub device_tree: Option<DeviceTree>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct BalloonStatsResponse {
+    pub balloon_actual: u64,
+    pub stats: virtio_devices::BalloonStats,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -820,6 +830,9 @@ pub enum ApiResponsePayload {
     /// Virtual machine information
     VmInfo(VmInfoResponse),
 
+    /// Virtio-balloon statistics
+    VmBalloonStats(Box<BalloonStatsResponse>),
+
     /// Vmm ping response
     VmmPing(VmmPingResponse),
 
@@ -851,6 +864,8 @@ pub trait RequestHandler {
     fn vm_reboot(&mut self) -> Result<(), VmError>;
 
     fn vm_info(&self) -> Result<VmInfoResponse, VmError>;
+
+    fn vm_balloon_stats(&mut self) -> Result<BalloonStatsResponse, VmError>;
 
     fn vmm_ping(&self) -> VmmPingResponse;
 
@@ -1410,6 +1425,43 @@ impl ApiAction for VmCounters {
         data: Self::RequestBody,
     ) -> ApiResult<Self::ResponseBody> {
         get_response_body(self, api_evt, api_sender, data)
+    }
+}
+
+pub struct VmBalloonStats;
+
+impl ApiAction for VmBalloonStats {
+    type RequestBody = ();
+    type ResponseBody = BalloonStatsResponse;
+
+    fn request(&self, _: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmBalloonStats");
+
+            let response = vmm
+                .vm_balloon_stats()
+                .map_err(ApiError::VmBalloonStats)
+                .map(Box::new)
+                .map(ApiResponsePayload::VmBalloonStats);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        match get_response(self, api_evt, api_sender, data)? {
+            ApiResponsePayload::VmBalloonStats(stats) => Ok(*stats),
+            _ => Err(ApiError::ResponsePayloadType),
+        }
     }
 }
 
@@ -2127,6 +2179,22 @@ mod unit_tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.path);
         }
+    }
+
+    #[test]
+    fn test_balloon_stats_response_omits_unsupported_stats() {
+        let response = BalloonStatsResponse {
+            balloon_actual: 4096,
+            stats: virtio_devices::BalloonStats {
+                free_memory: Some(1024),
+                ..Default::default()
+            },
+        };
+
+        let value = serde_json::to_value(response).unwrap();
+        assert_eq!(value["balloon_actual"], 4096);
+        assert_eq!(value["stats"]["free_memory"], 1024);
+        assert!(value["stats"].get("swap_in").is_none());
     }
 
     #[test]
