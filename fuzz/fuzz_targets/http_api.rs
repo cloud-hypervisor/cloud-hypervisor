@@ -153,6 +153,7 @@ impl RequestHandler for StubApiRequestHandler {
                     reserve: false,
                     zones: None,
                     thp: true,
+                    uffd_handoff: None,
                 },
                 payload: Some(PayloadConfig {
                     kernel: Some(PathBuf::from("/path/to/kernel")),
