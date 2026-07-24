@@ -484,6 +484,7 @@ pub fn preallocate_disk<P: AsRef<Path>>(file: &File, path: P) {
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ImageType {
+    FlatVmdk,
     FixedVhd,
     Qcow2,
     Raw,
@@ -495,6 +496,7 @@ pub enum ImageType {
 impl fmt::Display for ImageType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            ImageType::FlatVmdk => write!(f, "vmdk"),
             ImageType::FixedVhd => write!(f, "vhd"),
             ImageType::Qcow2 => write!(f, "qcow2"),
             ImageType::Raw => write!(f, "raw"),
@@ -513,6 +515,7 @@ impl FromStr for ImageType {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
+            "vmdk" => Ok(ImageType::FlatVmdk),
             "vhd" => Ok(ImageType::FixedVhd),
             "qcow2" => Ok(ImageType::Qcow2),
             "raw" => Ok(ImageType::Raw),
@@ -538,10 +541,23 @@ pub fn open_disk_image(path: &Path, options: &OpenOptions) -> BlockResult<File> 
 /// Determine image type through file parsing.
 pub fn detect_image_type(f: &mut File) -> BlockResult<ImageType> {
     let aligned = AlignedFile::new(f.try_clone()?, true);
+    // A VMDK descriptor file is small few hundred bytes of text. Read
+    // best-effort so a short file yields a zero-padded partial block instead
+    // of an UnexpectedEof, and let the per-format probes below decide.
     let mut block = vec![0u8; aligned.alignment()];
-    aligned
-        .read_exact_at(&mut block, 0)
-        .map_err(|e| BlockError::new(BlockErrorKind::Io, e).with_op(ErrorOp::DetectImageType))?;
+    let mut filled = 0;
+    while filled < block.len() {
+        match aligned.read_at(&mut block[filled..], filled as u64) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => {
+                return Err(
+                    BlockError::new(BlockErrorKind::Io, e).with_op(ErrorOp::DetectImageType)
+                );
+            }
+        }
+    }
 
     // Check 4 first bytes to get the header value and determine the image type
     let image_type = if u32::from_be_bytes(block[0..4].try_into().unwrap()) == QCOW_MAGIC {
@@ -552,6 +568,11 @@ pub fn detect_image_type(f: &mut File) -> BlockResult<ImageType> {
         ImageType::FixedVhd
     } else if u64::from_le_bytes(block[0..8].try_into().unwrap()) == VHDX_SIGN {
         ImageType::Vhdx
+    } else if formats::vmdk::has_descriptor_header(&block)
+        && formats::vmdk::is_flat_vmdk(f)
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, e).with_op(ErrorOp::DetectImageType))?
+    {
+        ImageType::FlatVmdk
     } else {
         ImageType::Raw
     };
@@ -681,6 +702,18 @@ mod unit_tests {
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
+
+    #[test]
+    fn detect_short_file_is_not_eof_error() {
+        let tmp = TempFile::new().unwrap();
+        let mut f = tmp.into_file();
+        f.write_all(b"not-a-disk-magic-just-some-short-text\n")
+            .unwrap();
+        f.sync_all().unwrap();
+
+        let image_type = detect_image_type(&mut f).unwrap();
+        assert_eq!(image_type, ImageType::Raw);
+    }
 
     #[test]
     fn test_probe_regular_file_returns_valid_alignment() {

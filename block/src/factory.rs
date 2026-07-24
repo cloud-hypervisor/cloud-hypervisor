@@ -24,6 +24,7 @@ use crate::formats::qcow::QcowDisk;
 use crate::formats::raw::{RawBackend, RawDisk};
 use crate::formats::vhd::VhdDisk;
 use crate::formats::vhdx::VhdxDisk;
+use crate::formats::vmdk::VmdkDisk;
 use crate::{
     ImageType, block_aio_is_supported, detect_image_type, open_disk_image, preallocate_disk,
 };
@@ -98,6 +99,7 @@ pub fn open_disk(options: &DiskOpenOptions<'_>) -> BlockResult<OpenedDisk> {
         ImageType::Raw => open_raw(file, options)?,
         ImageType::Qcow2 => open_qcow2(file, options)?,
         ImageType::Vhdx => open_vhdx(file, options)?,
+        ImageType::FlatVmdk => open_flat_vmdk(file, options)?,
         ImageType::Unknown => {
             return Err(
                 BlockError::from_kind(BlockErrorKind::UnsupportedFeature).with_path(options.path)
@@ -212,6 +214,16 @@ fn open_qcow2(
             false,
         )
         .map_err(|e| e.with_path(options.path))?,
+    ))
+}
+
+fn open_flat_vmdk(
+    file: fs::File,
+    options: &DiskOpenOptions<'_>,
+) -> BlockResult<Box<dyn AsyncFullDiskFile>> {
+    info!("Opening VMDK disk file with synchronous backend");
+    Ok(Box::new(
+        VmdkDisk::new(file, options.path, options.direct).map_err(|e| e.with_path(options.path))?,
     ))
 }
 

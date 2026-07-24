@@ -714,6 +714,7 @@ fn vmm_thread_rules(
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_open, vec![]),
         (libc::SYS_openat, vec![]),
+        (libc::SYS_openat2, vec![]),
         (libc::SYS_pipe2, vec![]),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_poll, vec![]),

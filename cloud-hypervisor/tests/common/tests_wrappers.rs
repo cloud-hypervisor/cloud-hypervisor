@@ -2170,6 +2170,290 @@ pub fn _test_virtio_block_dynamic_vhdx_expand(guest: &Guest) {
     disk_check_consistency(vhdx_path, None);
 }
 
+pub(crate) fn _test_virtio_block_vmdk(guest: &Guest, subformat: &str) {
+    let raw_os_disk = guest.disk_config.disk(DiskType::OperatingSystem).unwrap();
+    let vmdk_path = guest.tmp_dir.as_path().join("osdisk.vmdk");
+    let vmdk_path_str = vmdk_path.to_str().unwrap();
+
+    // Convert the prepared RAW OS disk into a flat VMDK. qemu-img writes the
+    // extent file(s) next to the descriptor automatically.
+    let convert = Command::new("qemu-img")
+        .arg("convert")
+        .args(["-f", "raw"])
+        .args(["-O", "vmdk"])
+        .args(["-o", &format!("subformat={subformat}")])
+        .arg(&raw_os_disk)
+        .arg(vmdk_path_str)
+        .output()
+        .expect("Expect generating flat VMDK image from RAW image");
+    assert!(
+        convert.status.success(),
+        "qemu-img convert to VMDK (subformat={subformat}) failed: {}",
+        String::from_utf8_lossy(&convert.stderr)
+    );
+
+    let mut cloud_child = GuestCommand::new(guest)
+        .default_cpus()
+        .default_memory()
+        .default_kernel_cmdline()
+        .args([
+            "--disk",
+            // Force the flat VMDK backend explicitly instead of relying on
+            // image-format auto-detection.
+            format!("path={vmdk_path_str},image_type=vmdk").as_str(),
+            format!(
+                "path={}",
+                guest.disk_config.disk(DiskType::CloudInit).unwrap()
+            )
+            .as_str(),
+        ])
+        .default_net()
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    let r = panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
+        assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
+        assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+
+        // Exercise the flat VMDK write + read paths through the guest root
+        // filesystem: write a marker file, flush, and read it back.
+        guest
+            .ssh_command(
+                "echo cloud-hypervisor-vmdk | sudo tee /root/vmdk_marker > /dev/null && sync",
+            )
+            .unwrap();
+        assert_eq!(
+            guest
+                .ssh_command("sudo cat /root/vmdk_marker")
+                .unwrap()
+                .trim(),
+            "cloud-hypervisor-vmdk"
+        );
+    });
+
+    kill_child(&mut cloud_child);
+    let output = cloud_child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+
+    disk_check_consistency(vmdk_path_str, None);
+}
+
+pub(crate) fn _test_virtio_block_vmdk_enospc(guest: &Guest, subformat: &str) {
+    const DISK_SIZE_MIB: u64 = 16;
+
+    let vmdk_path = guest.tmp_dir.as_path().join("data.vmdk");
+    let vmdk_path_str = vmdk_path.to_str().unwrap();
+
+    let create = Command::new("qemu-img")
+        .arg("create")
+        .args(["-f", "vmdk"])
+        .args(["-o", &format!("subformat={subformat}")])
+        .arg(vmdk_path_str)
+        .arg(format!("{DISK_SIZE_MIB}M"))
+        .output()
+        .expect("Expect creating flat VMDK data disk");
+    assert!(
+        create.status.success(),
+        "qemu-img create VMDK (subformat={subformat}) failed: {}",
+        String::from_utf8_lossy(&create.stderr)
+    );
+
+    let mut cloud_child = GuestCommand::new(guest)
+        .default_cpus()
+        .default_memory()
+        .default_kernel_cmdline()
+        .args([
+            "--disk",
+            format!(
+                "path={}",
+                guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+            )
+            .as_str(),
+            format!(
+                "path={}",
+                guest.disk_config.disk(DiskType::CloudInit).unwrap()
+            )
+            .as_str(),
+            // Force the flat VMDK backend explicitly.
+            format!("path={vmdk_path_str},image_type=vmdk").as_str(),
+        ])
+        .default_net()
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    let r = panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
+        // The flat VMDK data disk shows up as vdc.
+        assert_eq!(
+            guest
+                .ssh_command("lsblk | grep -c vdc")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            1
+        );
+
+        // 1) In-bounds direct-IO round trip: write a random pattern near the
+        //    start of the device and read it back to confirm the VMDK I/O
+        //    path is correct.
+        guest
+            .ssh_command(
+                "sudo dd if=/dev/urandom of=/tmp/pattern bs=1M count=4 && \
+                 sudo dd if=/tmp/pattern of=/dev/vdc bs=1M count=4 seek=0 \
+                     oflag=direct conv=fsync && \
+                 sudo dd if=/dev/vdc of=/tmp/readback bs=1M count=4 skip=0 \
+                     iflag=direct && \
+                 cmp /tmp/pattern /tmp/readback",
+            )
+            .expect("in-bounds flat VMDK direct IO round trip failed");
+
+        // 2) Writing past the fixed virtual capacity must fail with ENOSPC:
+        //    a flat VMDK is pre-allocated and cannot grow. dd exits non-zero
+        //    once the device is full, so `|| true` keeps ssh_command happy
+        //    while we assert on the reported error.
+        let enospc = guest
+            .ssh_command(&format!(
+                "sudo dd if=/dev/zero of=/dev/vdc bs=1M count={} oflag=direct 2>&1 || true",
+                DISK_SIZE_MIB + 8
+            ))
+            .unwrap();
+        assert!(
+            enospc.contains("No space left on device"),
+            "expected ENOSPC writing past end of pre-allocated flat VMDK, got: {enospc}"
+        );
+    });
+
+    kill_child(&mut cloud_child);
+    let output = cloud_child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+
+    disk_check_consistency(vmdk_path_str, None);
+}
+
+pub(crate) fn _test_virtio_block_vmdk_extent_spanning(guest: &Guest, direct: bool) {
+    // 3 GiB virtual size => a 2 GiB first extent + a 1 GiB second extent.
+    let vmdk_path = guest.tmp_dir.as_path().join("spanning.vmdk");
+    let vmdk_path_str = vmdk_path.to_str().unwrap();
+
+    let create = Command::new("qemu-img")
+        .arg("create")
+        .args(["-f", "vmdk"])
+        .args(["-o", "subformat=twoGbMaxExtentFlat"])
+        .arg(vmdk_path_str)
+        .arg("3G")
+        .output()
+        .expect("Expect creating twoGbMaxExtentFlat VMDK data disk");
+    assert!(
+        create.status.success(),
+        "qemu-img create twoGbMaxExtentFlat VMDK failed: {}",
+        String::from_utf8_lossy(&create.stderr)
+    );
+
+    let descriptor = fs::read_to_string(&vmdk_path).expect("read VMDK descriptor");
+    let extent_lines: Vec<&str> = descriptor
+        .lines()
+        .filter(|l| l.starts_with("RW ") && l.contains("FLAT"))
+        .collect();
+    assert!(
+        extent_lines.len() >= 2,
+        "twoGbMaxExtentFlat should produce >= 2 extents, descriptor was:\n{descriptor}"
+    );
+    let first_extent_sectors: u64 = extent_lines[0]
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .expect("parse first extent sector count from descriptor");
+    let boundary_bytes = first_extent_sectors * 512;
+
+    // Straddle the boundary with a 2 MiB, 4 KiB-aligned direct-IO window
+    // (~1 MiB in each extent). Round the start down to the O_DIRECT alignment
+    // without assuming the extent size itself is 4 KiB aligned.
+    const BS: u64 = 4096;
+    const HALF: u64 = 1024 * 1024;
+    let raw_start = boundary_bytes - HALF;
+    let start = raw_start - (raw_start % BS);
+    let seek = start / BS;
+    let count = (2 * HALF) / BS;
+    assert!(
+        start < boundary_bytes && boundary_bytes < start + count * BS,
+        "write window [{start}, {}) does not straddle extent boundary {boundary_bytes}",
+        start + count * BS
+    );
+
+    // Force the flat VMDK backend explicitly, and honor the requested cache
+    // mode. `direct=on` opens the extents with `O_DIRECT` on the host.
+    let data_disk = if direct {
+        format!("path={vmdk_path_str},image_type=vmdk,direct=on")
+    } else {
+        format!("path={vmdk_path_str},image_type=vmdk")
+    };
+
+    let mut cloud_child = GuestCommand::new(guest)
+        .default_cpus()
+        .default_memory()
+        .default_kernel_cmdline()
+        .args([
+            "--disk",
+            format!(
+                "path={}",
+                guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+            )
+            .as_str(),
+            format!(
+                "path={}",
+                guest.disk_config.disk(DiskType::CloudInit).unwrap()
+            )
+            .as_str(),
+            data_disk.as_str(),
+        ])
+        .default_net()
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    let r = panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
+        // The twoGbMaxExtentFlat data disk shows up as vdc.
+        assert_eq!(
+            guest
+                .ssh_command("lsblk | grep -c vdc")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            1
+        );
+
+        // Write a random pattern that spans the 2 GiB extent boundary.
+        guest
+            .ssh_command(&format!(
+                "sudo dd if=/dev/urandom of=/tmp/pattern bs={BS} count={count} && \
+                 sudo dd if=/tmp/pattern of=/dev/vdc bs={BS} count={count} seek={seek} \
+                     oflag=direct conv=fsync && \
+                 sudo dd if=/dev/vdc of=/tmp/readback bs={BS} count={count} skip={seek} \
+                     iflag=direct && \
+                 cmp /tmp/pattern /tmp/readback",
+            ))
+            .expect("extent-spanning direct IO round trip across the 2 GiB boundary failed");
+    });
+
+    kill_child(&mut cloud_child);
+    let output = cloud_child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+
+    disk_check_consistency(vmdk_path_str, None);
+}
+
 fn vhdx_image_size(disk_name: &str) -> u64 {
     fs::File::open(disk_name)
         .unwrap()

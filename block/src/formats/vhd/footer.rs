@@ -119,7 +119,11 @@ impl VhdFooter {
 
 /// Determine image type through file parsing.
 pub fn is_fixed_vhd(f: &mut File) -> io::Result<bool> {
-    let footer = VhdFooter::new(f)?;
+    let footer = match VhdFooter::new(f) {
+        Ok(footer) => footer,
+        Err(e) if e.kind() == io::ErrorKind::InvalidInput => return Ok(false),
+        Err(e) => return Err(e),
+    };
 
     // "conectix" => 0x636f6e6563746978
     Ok(footer.cookie() == 0x636f6e6563746978
@@ -228,5 +232,12 @@ mod unit_tests {
         with_file(&valid_dynamic_vhd_footer(), |mut file: File| {
             assert!(!(is_fixed_vhd(&mut file).unwrap()));
         });
+    }
+
+    #[test]
+    fn test_is_fixed_vhd_short_file_is_not_vhd() {
+        let mut file: File = TempFile::new().unwrap().into_file();
+        file.write_all(b"# Disk DescriptorFile\n").unwrap();
+        assert!(!is_fixed_vhd(&mut file).unwrap());
     }
 }
