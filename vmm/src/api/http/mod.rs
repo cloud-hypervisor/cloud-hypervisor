@@ -31,7 +31,7 @@ use crate::api::{
     AddDisk, ApiError, ApiRequest, VmAddDevice, VmAddFs, VmAddGenericVhostUser, VmAddNet,
     VmAddPmem, VmAddUserDevice, VmAddVdpa, VmAddVsock, VmBoot, VmCounters, VmDelete, VmNmi,
     VmPause, VmPowerButton, VmReboot, VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeDisk,
-    VmResizeZone, VmRestore, VmResume, VmSendMigration, VmShutdown, VmSnapshot,
+    VmResizeZone, VmRestore, VmResume, VmSendMigration, VmShutdown, VmSnapshot, VmUffdAttach,
 };
 use crate::device_manager::DeviceManagerError;
 use crate::landlock::Landlock;
@@ -313,6 +313,10 @@ pub static HTTP_ROUTES: LazyLock<HttpRoutes> = LazyLock::new(|| {
         .insert(endpoint!("/vmm.shutdown"), Box::new(VmmShutdown {}));
     r.routes
         .insert(endpoint!("/vm.nmi"), Box::new(VmActionHandler::new(&VmNmi)));
+    r.routes.insert(
+        endpoint!("/vm.uffd-attach"),
+        Box::new(VmActionHandler::new(&VmUffdAttach)),
+    );
 
     r
 });

@@ -3087,6 +3087,10 @@ impl Vm {
         unimplemented!()
     }
 
+    pub fn memory_manager(&self) -> &Arc<Mutex<MemoryManager>> {
+        &self.memory_manager
+    }
+
     pub fn memory_manager_data(&self) -> MemoryManagerSnapshotData {
         self.memory_manager.lock().unwrap().snapshot_data()
     }
