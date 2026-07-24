@@ -111,6 +111,8 @@ pub enum ActivateError {
     BadActivate,
     #[error("Failed to clone EventFd")]
     CloneEventFd(#[source] io::Error),
+    #[error("Failed to create EventFd")]
+    CreateEventFd(#[source] io::Error),
     #[error("Failed to spawn thread")]
     ThreadSpawn(#[source] io::Error),
     #[error("Failed to setup vhost-user-fs daemon")]

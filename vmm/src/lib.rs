@@ -1670,8 +1670,11 @@ impl Vmm {
         };
         transport::send_config(&mut socket, &vm_migration_config)?;
 
-        // Let every Migratable object know about the migration being started.
-        vm.start_migration()?;
+        // Let every Migratable object know about the migration being started
+        // unless the source VM must be preserved.
+        if !send_data_migration.preserve_source {
+            vm.start_migration()?;
+        }
 
         if send_data_migration.local
             || matches!(send_data_migration.memory_mode, MigrationMode::Postcopy)
@@ -1716,8 +1719,11 @@ impl Vmm {
 
         // We release the locks early to enable locking them on the destination host.
         // The VM is already stopped.
-        vm.release_disk_locks()
-            .map_err(|e| MigratableError::UnlockError(anyhow!("{e}")))?;
+        // Keep the locks held if the source VM must be preserved.
+        if !send_data_migration.preserve_source {
+            vm.release_disk_locks()
+                .map_err(|e| MigratableError::UnlockError(anyhow!("{e}")))?;
+        }
 
         // For postcopy, serve faults before sending State so the destination
         // can fault pages in during restore.
@@ -1809,7 +1815,12 @@ impl Vmm {
         }
 
         // Let every Migratable object know about the migration being complete
-        vm.complete_migration()
+        // unless the source VM must be preserved.
+        if send_data_migration.preserve_source {
+            Ok(())
+        } else {
+            vm.complete_migration()
+        }
     }
 
     /// Serve `Command::PageFault` requests from local guest memory on the fault
@@ -2031,6 +2042,7 @@ impl Vmm {
             vm,
             migration_result: migration_res,
             initial_vm_state,
+            preserve_source,
         } = migration_worker_handle.join();
 
         let mut try_resume_vm_after_failed_migration = |mut vm: Vm| {
@@ -2056,6 +2068,17 @@ impl Vmm {
         };
 
         match migration_res {
+            Ok(()) if preserve_source => {
+                let mut vm = vm;
+
+                // Ensure full VM performance. The operation is idempotent.
+                let _ = vm.stop_dirty_log().inspect_err(|e| {
+                    warn!("Failed stopping dirty log after snapshot: {e} - VM performance might be slower than usual");
+                });
+
+                // Give the source VM back to the VMM.
+                self.vm = VmOwnership::Owned(vm);
+            }
             Ok(()) => {
                 self.vm = VmOwnership::None;
                 let mut vm = vm;
