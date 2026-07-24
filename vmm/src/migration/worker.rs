@@ -27,7 +27,7 @@ use vm_migration::MigratableError;
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::Vmm;
-use crate::api::VmSendMigrationData;
+use crate::migration::VmSendMigrationData;
 use crate::vm::{Vm, VmState};
 
 #[derive(thiserror::Error)]

@@ -19,13 +19,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::{io, result};
 
+use api_types::ConsoleOutputMode;
 use libc::{TCSANOW, cfmakeraw, isatty, tcgetattr, tcsetattr, termios};
 use thiserror::Error;
 use vmm_sys_util::errno;
 
 use crate::Vmm;
 use crate::sigwinch_listener::listen_for_sigwinch_on_tty;
-use crate::vm_config::ConsoleOutputMode;
 
 const TIOCSPTLCK: libc::c_int = 0x4004_5431;
 const TIOCGPTPEER: libc::c_int = 0x5441;

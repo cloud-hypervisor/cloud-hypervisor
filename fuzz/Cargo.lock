@@ -74,6 +74,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "api-types"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "arbitrary"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -247,6 +254,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 name = "cloud-hypervisor-fuzz"
 version = "0.0.0"
 dependencies = [
+ "api-types",
  "arbitrary",
  "block",
  "devices",
@@ -1652,6 +1660,7 @@ version = "0.1.0"
 dependencies = [
  "acpi_tables",
  "anyhow",
+ "api-types",
  "arch",
  "bitflags 2.13.1",
  "block",

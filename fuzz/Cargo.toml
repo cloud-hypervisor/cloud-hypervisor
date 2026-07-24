@@ -16,6 +16,7 @@ mshv_emulator = ["hypervisor/mshv_emulator"]
 pvmemcontrol = []
 
 [dependencies]
+api-types = { path = "../api-types" }
 arbitrary = "1.4.2"
 block = { path = "../block" }
 devices = { path = "../devices" }

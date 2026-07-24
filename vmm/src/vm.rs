@@ -25,6 +25,7 @@ use std::time::Instant;
 use std::{any, cmp, result, str, thread};
 
 use anyhow::{Context, anyhow};
+use api_types::{HotplugMethod, MemoryRestoreMode};
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use arch::PciSpaceInfo;
 #[cfg(target_arch = "x86_64")]
@@ -89,7 +90,7 @@ use vm_migration::{
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
-use crate::config::{MemoryRestoreMode, ValidationError, add_to_config};
+use crate::config::{ValidationError, add_to_config};
 use crate::console_devices::{ConsoleDeviceError, ConsoleInfo};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::{
@@ -115,8 +116,8 @@ use crate::sev::MeasuredBootInfo;
 #[cfg(feature = "fw_cfg")]
 use crate::vm_config::FwCfgConfig;
 use crate::vm_config::{
-    DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, HotplugMethod, NetConfig,
-    NumaConfig, PayloadConfig, PmemConfig, UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
+    DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, NumaConfig,
+    PayloadConfig, PmemConfig, UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
 };
 use crate::{
     CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, GuestMemoryMmap,
@@ -413,6 +414,18 @@ pub enum VmState {
     Shutdown,
     Paused,
     BreakPoint,
+}
+
+impl From<VmState> for api_types::VmState {
+    fn from(value: VmState) -> Self {
+        match value {
+            VmState::Created => Self::Created,
+            VmState::Running => Self::Running,
+            VmState::Shutdown => Self::Shutdown,
+            VmState::Paused => Self::Paused,
+            VmState::BreakPoint => Self::BreakPoint,
+        }
+    }
 }
 
 impl VmState {
@@ -3402,9 +3415,11 @@ impl Transportable for Vm {
             .map_err(MigratableError::MigrateSend)?;
 
         // Serialize and write the snapshot config
-        let vm_config = serde_json::to_string(self.config.lock().unwrap().deref())
-            .context("Error serializing VM config snapshot")
-            .map_err(MigratableError::MigrateSend)?;
+        let vm_config = serde_json::to_string::<api_types::VmConfig>(
+            &self.config.lock().unwrap().deref().into(),
+        )
+        .context("Error serializing VM config snapshot")
+        .map_err(MigratableError::MigrateSend)?;
 
         snapshot_config_file
             .write(vm_config.as_bytes())

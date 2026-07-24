@@ -15,6 +15,7 @@ strip = false
 
 [workspace]
 members = [
+  "api-types",
   "api_client",
   "arch",
   "block",

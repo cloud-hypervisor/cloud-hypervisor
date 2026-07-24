@@ -5,22 +5,25 @@
 use std::collections::HashSet;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
-#[cfg(feature = "fw_cfg")]
-use std::str::FromStr;
 use std::{fs, result};
 
-use arch::CpuProfile;
-use block::ImageType;
-pub use block::fcntl::LockGranularityChoice;
+#[cfg(feature = "fw_cfg")]
+use api_types::FwCfgItemList;
+#[cfg(feature = "pvmemcontrol")]
+use api_types::PvmemcontrolConfig;
+use api_types::{
+    ConsoleOutputMode, CpusConfig, HotplugMethod, ImageType, LockGranularityChoice,
+    MemoryZoneConfig, NumaDistance, VhostMode, VirtQueueAffinity,
+};
 #[cfg(target_arch = "x86_64")]
 use devices::debug_console;
-use log::{debug, warn};
+use log::warn;
 use net_util::MacAddr;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_devices::RateLimiterConfig;
 
 use crate::Landlock;
+use crate::config::ValidationError;
 use crate::landlock::LandlockError;
 
 pub type LandlockResult<T> = result::Result<T, LandlockError>;
@@ -31,86 +34,12 @@ pub(crate) trait ApplyLandlock {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()>;
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct CpuAffinity {
-    pub vcpu: u32,
-    pub host_cpus: Box<[usize]>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
-pub struct CpuFeatures {
-    #[cfg(target_arch = "x86_64")]
-    #[serde(default)]
-    pub amx: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
-pub enum CoreScheduling {
-    #[default]
-    Vm, // All vCPUs have the same cookie so can share a core
-    Vcpu, // Each vCPU has a unique cookie so can't share a core
-    Off,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct CpuTopology {
-    pub threads_per_core: u16,
-    pub cores_per_die: u16,
-    pub dies_per_package: u16,
-    pub packages: u16,
-}
-
 // When booting with PVH boot the maximum physical addressable size
 // is a 46 bit address space even when the host supports with 5-level
 // paging.
 pub const DEFAULT_MAX_PHYS_BITS: u8 = 46;
 
-pub fn default_cpuconfig_max_phys_bits() -> u8 {
-    DEFAULT_MAX_PHYS_BITS
-}
-
-#[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct CpusConfig {
-    pub boot_vcpus: u32,
-    pub max_vcpus: u32,
-    #[serde(default)]
-    pub topology: Option<CpuTopology>,
-    #[serde(default)]
-    pub kvm_hyperv: bool,
-    #[serde(default = "default_cpuconfig_max_phys_bits")]
-    pub max_phys_bits: u8,
-    #[serde(default)]
-    pub affinity: Option<Box<[CpuAffinity]>>,
-    #[serde(default)]
-    pub features: CpuFeatures,
-    #[serde(default = "default_cpusconfig_nested")]
-    pub nested: bool,
-    #[serde(default)]
-    pub core_scheduling: CoreScheduling,
-    // Defaults to "Host" if no profile is given.
-    #[serde(default)]
-    pub profile: CpuProfile,
-}
-
 pub const DEFAULT_VCPUS: u32 = 1;
-
-impl Default for CpusConfig {
-    fn default() -> Self {
-        CpusConfig {
-            boot_vcpus: DEFAULT_VCPUS,
-            max_vcpus: DEFAULT_VCPUS,
-            topology: None,
-            kvm_hyperv: false,
-            max_phys_bits: DEFAULT_MAX_PHYS_BITS,
-            affinity: None,
-            features: CpuFeatures::default(),
-            nested: true,
-            core_scheduling: CoreScheduling::default(),
-            profile: CpuProfile::default(),
-        }
-    }
-}
 
 pub const DEFAULT_NUM_PCI_SEGMENTS: u16 = 1;
 pub fn default_platformconfig_num_pci_segments() -> u16 {
@@ -126,46 +55,79 @@ pub fn default_platformconfig_vfio_p2p_dma() -> bool {
     true
 }
 
-#[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlatformConfig {
-    #[serde(default = "default_platformconfig_num_pci_segments")]
     pub num_pci_segments: u16,
-    #[serde(default)]
     pub iommu_segments: Option<Box<[u16]>>,
-    #[serde(default = "default_platformconfig_iommu_address_width_bits")]
     pub iommu_address_width_bits: u8,
-    #[serde(default, alias = "serial_number")]
     pub system_serial_number: Option<String>,
-    #[serde(default, alias = "uuid")]
     pub system_uuid: Option<String>,
-    #[serde(default)]
     pub oem_strings: Option<Box<[String]>>,
-    #[serde(default)]
     pub system_manufacturer: Option<String>,
-    #[serde(default)]
     pub system_product_name: Option<String>,
-    #[serde(default)]
     pub system_version: Option<String>,
-    #[serde(default)]
     pub system_family: Option<String>,
-    #[serde(default)]
     pub system_sku_number: Option<String>,
-    #[serde(default)]
     pub chassis_asset_tag: Option<String>,
     #[cfg(feature = "tdx")]
-    #[serde(default)]
     pub tdx: bool,
     #[cfg(feature = "sev_snp")]
-    #[serde(default)]
     pub sev_snp: bool,
-    #[serde(default)]
     pub iommufd: bool,
-    // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
-    #[serde(default, deserialize_with = "deserialize_platformconfig_iommufd_fd")]
     pub iommufd_fd: Option<i32>,
-    #[serde(default = "default_platformconfig_vfio_p2p_dma")]
     pub vfio_p2p_dma: bool,
+}
+
+impl From<api_types::PlatformConfig> for PlatformConfig {
+    fn from(value: api_types::PlatformConfig) -> Self {
+        Self {
+            num_pci_segments: value.num_pci_segments,
+            iommu_segments: value.iommu_segments,
+            iommu_address_width_bits: value.iommu_address_width_bits,
+            system_serial_number: value.system_serial_number,
+            system_uuid: value.system_uuid,
+            oem_strings: value.oem_strings,
+            system_manufacturer: value.system_manufacturer,
+            system_product_name: value.system_product_name,
+            system_version: value.system_version,
+            system_family: value.system_family,
+            system_sku_number: value.system_sku_number,
+            chassis_asset_tag: value.chassis_asset_tag,
+            #[cfg(feature = "tdx")]
+            tdx: value.tdx,
+            #[cfg(feature = "sev_snp")]
+            sev_snp: value.sev_snp,
+            iommufd: value.iommufd,
+            iommufd_fd: value.iommufd_fd,
+            vfio_p2p_dma: value.vfio_p2p_dma,
+        }
+    }
+}
+
+impl From<&PlatformConfig> for api_types::PlatformConfig {
+    fn from(value: &PlatformConfig) -> Self {
+        Self {
+            num_pci_segments: value.num_pci_segments,
+            iommu_segments: value.iommu_segments.clone(),
+            iommu_address_width_bits: value.iommu_address_width_bits,
+            system_serial_number: value.system_serial_number.clone(),
+            system_uuid: value.system_uuid.clone(),
+            oem_strings: value.oem_strings.clone(),
+            system_manufacturer: value.system_manufacturer.clone(),
+            system_product_name: value.system_product_name.clone(),
+            system_version: value.system_version.clone(),
+            system_family: value.system_family.clone(),
+            system_sku_number: value.system_sku_number.clone(),
+            chassis_asset_tag: value.chassis_asset_tag.clone(),
+            #[cfg(feature = "tdx")]
+            tdx: value.tdx,
+            #[cfg(feature = "sev_snp")]
+            sev_snp: value.sev_snp,
+            iommufd: value.iommufd,
+            iommufd_fd: value.iommufd_fd,
+            vfio_p2p_dma: value.vfio_p2p_dma,
+        }
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -212,62 +174,33 @@ impl PlatformConfig {
     }
 }
 
-fn deserialize_platformconfig_iommufd_fd<'de, D>(d: D) -> Result<Option<i32>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let invalid_fd: Option<i32> = Option::deserialize(d)?;
-    if invalid_fd.is_some() {
-        debug!(
-            "FD in 'PlatformConfig::iommufd_fd' won't be deserialized as it is most likely invalid now. Deserializing it as -1."
-        );
-        Ok(Some(-1))
-    } else {
-        Ok(None)
-    }
-}
-
 pub const DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT: u32 = 1;
 
-fn default_pci_segment_aperture_weight() -> u32 {
-    DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PciSegmentConfig {
-    #[serde(default)]
     pub pci_segment: u16,
-    #[serde(default = "default_pci_segment_aperture_weight")]
     pub mmio32_aperture_weight: u32,
-    #[serde(default = "default_pci_segment_aperture_weight")]
     pub mmio64_aperture_weight: u32,
 }
 
-#[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
-pub struct MemoryZoneConfig {
-    pub id: String,
-    pub size: u64,
-    #[serde(default)]
-    pub file: Option<PathBuf>,
-    #[serde(default)]
-    pub shared: bool,
-    #[serde(default)]
-    pub hugepages: bool,
-    #[serde(default)]
-    pub hugepage_size: Option<u64>,
-    #[serde(default)]
-    pub host_numa_node: Option<u32>,
-    #[serde(default)]
-    pub hotplug_size: Option<u64>,
-    #[serde(default)]
-    pub hotplugged_size: Option<u64>,
-    #[serde(default)]
-    pub prefault: bool,
-    #[serde(default)]
-    pub reserve: bool,
-    #[serde(default)]
-    pub mergeable: bool,
+impl From<api_types::PciSegmentConfig> for PciSegmentConfig {
+    fn from(value: api_types::PciSegmentConfig) -> Self {
+        Self {
+            pci_segment: value.pci_segment,
+            mmio32_aperture_weight: value.mmio32_aperture_weight,
+            mmio64_aperture_weight: value.mmio64_aperture_weight,
+        }
+    }
+}
+
+impl From<&PciSegmentConfig> for api_types::PciSegmentConfig {
+    fn from(value: &PciSegmentConfig) -> Self {
+        Self {
+            pci_segment: value.pci_segment,
+            mmio32_aperture_weight: value.mmio32_aperture_weight,
+            mmio64_aperture_weight: value.mmio64_aperture_weight,
+        }
+    }
 }
 
 impl ApplyLandlock for MemoryZoneConfig {
@@ -279,46 +212,19 @@ impl ApplyLandlock for MemoryZoneConfig {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
-pub enum HotplugMethod {
-    #[default]
-    Acpi,
-    VirtioMem,
-}
-
-fn default_memoryconfig_thp() -> bool {
-    true
-}
-
-fn default_cpusconfig_nested() -> bool {
-    true
-}
-
-#[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MemoryConfig {
     pub size: u64,
-    #[serde(default)]
     pub mergeable: bool,
-    #[serde(default)]
     pub hotplug_method: HotplugMethod,
-    #[serde(default)]
     pub hotplug_size: Option<u64>,
-    #[serde(default)]
     pub hotplugged_size: Option<u64>,
-    #[serde(default)]
     pub shared: bool,
-    #[serde(default)]
     pub hugepages: bool,
-    #[serde(default)]
     pub hugepage_size: Option<u64>,
-    #[serde(default)]
     pub prefault: bool,
-    #[serde(default)]
     pub reserve: bool,
-    #[serde(default)]
     pub zones: Option<Vec<MemoryZoneConfig>>,
-    #[serde(default = "default_memoryconfig_thp")]
     pub thp: bool,
 }
 
@@ -343,79 +249,170 @@ impl Default for MemoryConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
-pub enum VhostMode {
-    #[default]
-    Client,
-    Server,
+impl From<api_types::MemoryConfig> for MemoryConfig {
+    fn from(value: api_types::MemoryConfig) -> Self {
+        Self {
+            size: value.size,
+            mergeable: value.mergeable,
+            hotplug_method: value.hotplug_method,
+            hotplug_size: value.hotplug_size,
+            hotplugged_size: value.hotplugged_size,
+            shared: value.shared,
+            hugepages: value.hugepages,
+            hugepage_size: value.hugepage_size,
+            prefault: value.prefault,
+            reserve: value.reserve,
+            zones: value.zones,
+            thp: value.thp,
+        }
+    }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+impl From<&MemoryConfig> for api_types::MemoryConfig {
+    fn from(value: &MemoryConfig) -> Self {
+        Self {
+            size: value.size,
+            mergeable: value.mergeable,
+            hotplug_method: value.hotplug_method,
+            hotplug_size: value.hotplug_size,
+            hotplugged_size: value.hotplugged_size,
+            shared: value.shared,
+            hugepages: value.hugepages,
+            hugepage_size: value.hugepage_size,
+            prefault: value.prefault,
+            reserve: value.reserve,
+            zones: value.zones.clone(),
+            thp: value.thp,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RateLimiterGroupConfig {
-    #[serde(default)]
     pub id: String,
-    #[serde(default)]
     pub rate_limiter_config: RateLimiterConfig,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct VirtQueueAffinity {
-    pub queue_index: u16,
-    pub host_cpus: Box<[usize]>,
+impl From<api_types::RateLimiterGroupConfig> for RateLimiterGroupConfig {
+    fn from(value: api_types::RateLimiterGroupConfig) -> Self {
+        Self {
+            id: value.id,
+            rate_limiter_config: value.rate_limiter_config,
+        }
+    }
 }
 
-#[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+impl From<&RateLimiterGroupConfig> for api_types::RateLimiterGroupConfig {
+    fn from(value: &RateLimiterGroupConfig) -> Self {
+        Self {
+            id: value.id.clone(),
+            rate_limiter_config: value.rate_limiter_config,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct PciDeviceCommonConfig {
-    #[serde(default)]
     pub id: Option<String>,
-    #[serde(default, skip_serializing_if = "<&bool as std::ops::Not>::not")]
     pub iommu: bool,
-    #[serde(default)]
     pub pci_segment: u16,
-    #[serde(default)]
     pub pci_device_id: Option<u8>,
 }
 
-#[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+impl From<api_types::PciDeviceCommonConfig> for PciDeviceCommonConfig {
+    fn from(value: api_types::PciDeviceCommonConfig) -> Self {
+        Self {
+            id: value.id,
+            iommu: value.iommu,
+            pci_segment: value.pci_segment,
+            pci_device_id: value.pci_device_id,
+        }
+    }
+}
+
+impl From<&PciDeviceCommonConfig> for api_types::PciDeviceCommonConfig {
+    fn from(value: &PciDeviceCommonConfig) -> Self {
+        Self {
+            id: value.id.clone(),
+            iommu: value.iommu,
+            pci_segment: value.pci_segment,
+            pci_device_id: value.pci_device_id,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DiskConfig {
-    #[serde(flatten)]
     pub pci_common: PciDeviceCommonConfig,
     pub path: Option<PathBuf>,
-    #[serde(default)]
     pub readonly: bool,
-    #[serde(default)]
     pub direct: bool,
-    #[serde(default = "default_diskconfig_num_queues")]
     pub num_queues: usize,
-    #[serde(default = "default_diskconfig_queue_size")]
     pub queue_size: u16,
-    #[serde(default)]
     pub vhost_user: bool,
     pub vhost_socket: Option<String>,
-    #[serde(default)]
     pub rate_limit_group: Option<String>,
-    #[serde(default)]
     pub rate_limiter_config: Option<RateLimiterConfig>,
     // For testing use only. Not exposed in API.
-    #[serde(default)]
     pub disable_io_uring: bool,
     // For testing use only. Not exposed in API.
-    #[serde(default)]
     pub disable_aio: bool,
-    #[serde(default)]
     pub serial: Option<String>,
-    #[serde(default)]
     pub queue_affinity: Option<Box<[VirtQueueAffinity]>>,
-    #[serde(default)]
     pub backing_files: bool,
-    #[serde(default = "default_diskconfig_sparse")]
     pub sparse: bool,
-    #[serde(default)]
     pub image_type: ImageType,
-    #[serde(default)]
     pub lock_granularity: LockGranularityChoice,
+}
+
+impl From<api_types::DiskConfig> for DiskConfig {
+    fn from(value: api_types::DiskConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            path: value.path,
+            readonly: value.readonly,
+            direct: value.direct,
+            num_queues: value.num_queues,
+            queue_size: value.queue_size,
+            vhost_user: value.vhost_user,
+            vhost_socket: value.vhost_socket,
+            rate_limit_group: value.rate_limit_group,
+            rate_limiter_config: value.rate_limiter_config,
+            disable_io_uring: value.disable_io_uring,
+            disable_aio: value.disable_aio,
+            serial: value.serial,
+            queue_affinity: value.queue_affinity,
+            backing_files: value.backing_files,
+            sparse: value.sparse,
+            image_type: value.image_type,
+            lock_granularity: value.lock_granularity,
+        }
+    }
+}
+
+impl From<&DiskConfig> for api_types::DiskConfig {
+    fn from(value: &DiskConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            path: value.path.clone(),
+            readonly: value.readonly,
+            direct: value.direct,
+            num_queues: value.num_queues,
+            queue_size: value.queue_size,
+            vhost_user: value.vhost_user,
+            vhost_socket: value.vhost_socket.clone(),
+            rate_limit_group: value.rate_limit_group.clone(),
+            rate_limiter_config: value.rate_limiter_config,
+            disable_io_uring: value.disable_io_uring,
+            disable_aio: value.disable_aio,
+            serial: value.serial.clone(),
+            queue_affinity: value.queue_affinity.clone(),
+            backing_files: value.backing_files,
+            sparse: value.sparse,
+            image_type: value.image_type,
+            lock_granularity: value.lock_granularity,
+        }
+    }
 }
 
 impl ApplyLandlock for DiskConfig {
@@ -443,46 +440,73 @@ pub fn default_diskconfig_sparse() -> bool {
     true
 }
 
-#[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NetConfig {
-    #[serde(flatten)]
     pub pci_common: PciDeviceCommonConfig,
-    #[serde(default = "default_netconfig_tap")]
     pub tap: Option<String>,
     pub ip: Option<IpAddr>,
     pub mask: Option<IpAddr>,
-    #[serde(default = "default_netconfig_mac")]
     pub mac: MacAddr,
-    #[serde(default)]
     pub host_mac: Option<MacAddr>,
-    #[serde(default)]
     pub mtu: Option<u16>,
-    #[serde(default = "default_netconfig_num_queues")]
     pub num_queues: usize,
-    #[serde(default = "default_netconfig_queue_size")]
     pub queue_size: u16,
-    #[serde(default)]
     pub vhost_user: bool,
     pub vhost_socket: Option<String>,
-    #[serde(default)]
     pub vhost_mode: VhostMode,
-    // Special deserialize handling:
-    // Therefore, we don't serialize FDs, and whatever value is here after
-    // deserialization is invalid.
-    //
-    // Valid FDs are transmitted via a different channel (SCM_RIGHTS message)
-    // and will be populated into this struct on the destination VMM eventually.
-    #[serde(default, deserialize_with = "deserialize_netconfig_fds")]
     pub fds: Option<Vec<i32>>,
-    #[serde(default)]
     pub rate_limiter_config: Option<RateLimiterConfig>,
-    #[serde(default = "default_netconfig_true")]
     pub offload_tso: bool,
-    #[serde(default = "default_netconfig_true")]
     pub offload_ufo: bool,
-    #[serde(default = "default_netconfig_true")]
     pub offload_csum: bool,
+}
+
+impl From<api_types::NetConfig> for NetConfig {
+    fn from(value: api_types::NetConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            tap: value.tap,
+            ip: value.ip,
+            mask: value.mask,
+            mac: value.mac,
+            host_mac: value.host_mac,
+            mtu: value.mtu,
+            num_queues: value.num_queues,
+            queue_size: value.queue_size,
+            vhost_user: value.vhost_user,
+            vhost_socket: value.vhost_socket,
+            vhost_mode: value.vhost_mode,
+            fds: value.fds,
+            rate_limiter_config: value.rate_limiter_config,
+            offload_tso: value.offload_tso,
+            offload_ufo: value.offload_ufo,
+            offload_csum: value.offload_csum,
+        }
+    }
+}
+
+impl From<&NetConfig> for api_types::NetConfig {
+    fn from(value: &NetConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            tap: value.tap.clone(),
+            ip: value.ip,
+            mask: value.mask,
+            mac: value.mac,
+            host_mac: value.host_mac,
+            mtu: value.mtu,
+            num_queues: value.num_queues,
+            queue_size: value.queue_size,
+            vhost_user: value.vhost_user,
+            vhost_socket: value.vhost_socket.clone(),
+            vhost_mode: value.vhost_mode.clone(),
+            fds: value.fds.clone(),
+            rate_limiter_config: value.rate_limiter_config,
+            offload_tso: value.offload_tso,
+            offload_ufo: value.offload_ufo,
+            offload_csum: value.offload_csum,
+        }
+    }
 }
 
 pub fn default_netconfig_true() -> bool {
@@ -509,24 +533,8 @@ pub fn default_netconfig_queue_size() -> u16 {
     DEFAULT_NET_QUEUE_SIZE
 }
 
-fn deserialize_netconfig_fds<'de, D>(d: D) -> Result<Option<Vec<i32>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let invalid_fds: Option<Vec<i32>> = Option::deserialize(d)?;
-    if let Some(invalid_fds) = invalid_fds {
-        debug!(
-            "FDs in 'NetConfig' won't be deserialized as they are most likely invalid now. Deserializing them as -1."
-        );
-        Ok(Some(vec![-1; invalid_fds.len()]))
-    } else {
-        Ok(None)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RngConfig {
-    #[serde(flatten)]
     pub pci_common: PciDeviceCommonConfig,
     pub src: PathBuf,
 }
@@ -544,10 +552,25 @@ impl Default for RngConfig {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RtcConfig {
-    #[serde(flatten)]
     pub pci_common: PciDeviceCommonConfig,
+}
+
+impl From<api_types::RtcConfig> for RtcConfig {
+    fn from(value: api_types::RtcConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+        }
+    }
+}
+
+impl From<&RtcConfig> for api_types::RtcConfig {
+    fn from(value: &RtcConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+        }
+    }
 }
 
 impl ApplyLandlock for RngConfig {
@@ -558,33 +581,87 @@ impl ApplyLandlock for RngConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+impl From<api_types::RngConfig> for RngConfig {
+    fn from(value: api_types::RngConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            src: value.src,
+        }
+    }
+}
+
+impl From<&RngConfig> for api_types::RngConfig {
+    fn from(value: &RngConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            src: value.src.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BalloonConfig {
-    #[serde(flatten)]
     pub pci_common: PciDeviceCommonConfig,
     pub size: u64,
     /// Option to deflate the balloon in case the guest is out of memory.
-    #[serde(default)]
     pub deflate_on_oom: bool,
     /// Option to enable free page reporting from the guest.
-    #[serde(default)]
     pub free_page_reporting: bool,
 }
 
-#[cfg(feature = "pvmemcontrol")]
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
-pub struct PvmemcontrolConfig {}
+impl From<api_types::BalloonConfig> for BalloonConfig {
+    fn from(value: api_types::BalloonConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            size: value.size,
+            deflate_on_oom: value.deflate_on_oom,
+            free_page_reporting: value.free_page_reporting,
+        }
+    }
+}
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+impl From<&BalloonConfig> for api_types::BalloonConfig {
+    fn from(value: &BalloonConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            size: value.size,
+            deflate_on_oom: value.deflate_on_oom,
+            free_page_reporting: value.free_page_reporting,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FsConfig {
-    #[serde(flatten)]
     pub pci_common: PciDeviceCommonConfig,
     pub tag: String,
     pub socket: PathBuf,
-    #[serde(default = "default_fsconfig_num_queues")]
     pub num_queues: usize,
-    #[serde(default = "default_fsconfig_queue_size")]
     pub queue_size: u16,
+}
+
+impl From<api_types::FsConfig> for FsConfig {
+    fn from(value: api_types::FsConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            tag: value.tag,
+            socket: value.socket,
+            num_queues: value.num_queues,
+            queue_size: value.queue_size,
+        }
+    }
+}
+
+impl From<&FsConfig> for api_types::FsConfig {
+    fn from(value: &FsConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            tag: value.tag.clone(),
+            socket: value.socket.clone(),
+            num_queues: value.num_queues,
+            queue_size: value.queue_size,
+        }
+    }
 }
 
 pub fn default_fsconfig_num_queues() -> usize {
@@ -602,13 +679,34 @@ impl ApplyLandlock for FsConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GenericVhostUserConfig {
-    #[serde(flatten)]
     pub pci_common: PciDeviceCommonConfig,
     pub socket: PathBuf,
     pub queue_sizes: Vec<u16>,
     pub device_type: u32,
+}
+
+impl From<api_types::GenericVhostUserConfig> for GenericVhostUserConfig {
+    fn from(value: api_types::GenericVhostUserConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            socket: value.socket,
+            queue_sizes: value.queue_sizes,
+            device_type: value.device_type,
+        }
+    }
+}
+
+impl From<&GenericVhostUserConfig> for api_types::GenericVhostUserConfig {
+    fn from(value: &GenericVhostUserConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            socket: value.socket.clone(),
+            queue_sizes: value.queue_sizes.clone(),
+            device_type: value.device_type,
+        }
+    }
 }
 
 impl ApplyLandlock for GenericVhostUserConfig {
@@ -618,16 +716,34 @@ impl ApplyLandlock for GenericVhostUserConfig {
     }
 }
 
-#[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PmemConfig {
-    #[serde(flatten)]
     pub pci_common: PciDeviceCommonConfig,
     pub file: PathBuf,
-    #[serde(default)]
     pub size: Option<u64>,
-    #[serde(default)]
     pub discard_writes: bool,
+}
+
+impl From<api_types::PmemConfig> for PmemConfig {
+    fn from(value: api_types::PmemConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            file: value.file,
+            size: value.size,
+            discard_writes: value.discard_writes,
+        }
+    }
+}
+
+impl From<&PmemConfig> for api_types::PmemConfig {
+    fn from(value: &PmemConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            file: value.file.clone(),
+            size: value.size,
+            discard_writes: value.discard_writes,
+        }
+    }
 }
 
 impl ApplyLandlock for PmemConfig {
@@ -638,27 +754,34 @@ impl ApplyLandlock for PmemConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub enum ConsoleOutputMode {
-    Off,
-    Pty,
-    Tty,
-    File,
-    Socket,
-    Null,
-}
-
 /// Common configuration for plain console configs.
 ///
 /// Independent of PCI or legacy devices.
-#[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommonConsoleConfig {
-    #[serde(default)]
     pub file: Option<PathBuf>,
     pub mode: ConsoleOutputMode,
-    #[serde(default)]
     pub socket: Option<PathBuf>,
+}
+
+impl From<api_types::CommonConsoleConfig> for CommonConsoleConfig {
+    fn from(value: api_types::CommonConsoleConfig) -> Self {
+        Self {
+            file: value.file,
+            mode: value.mode,
+            socket: value.socket,
+        }
+    }
+}
+
+impl From<&CommonConsoleConfig> for api_types::CommonConsoleConfig {
+    fn from(value: &CommonConsoleConfig) -> Self {
+        Self {
+            file: value.file.clone(),
+            mode: value.mode.clone(),
+            socket: value.socket.clone(),
+        }
+    }
 }
 
 impl ApplyLandlock for CommonConsoleConfig {
@@ -678,14 +801,25 @@ impl ApplyLandlock for CommonConsoleConfig {
 }
 
 /// Configuration for a legacy serial console device.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SerialConfig {
-    #[serde(flatten)]
     pub common: CommonConsoleConfig,
 }
 
-impl SerialConfig {
-    pub const SYNTAX: &str = "Control serial port: \"off|null|pty|tty|file=<path>|socket=<path>\"";
+impl From<api_types::SerialConfig> for SerialConfig {
+    fn from(value: api_types::SerialConfig) -> Self {
+        Self {
+            common: value.common.into(),
+        }
+    }
+}
+
+impl From<&SerialConfig> for api_types::SerialConfig {
+    fn from(value: &SerialConfig) -> Self {
+        Self {
+            common: (&value.common).into(),
+        }
+    }
 }
 
 impl Default for SerialConfig {
@@ -707,16 +841,28 @@ impl ApplyLandlock for SerialConfig {
 }
 
 /// Configuration for a virtio-console device.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConsoleConfig {
-    #[serde(flatten)]
     pub common: CommonConsoleConfig,
-    #[serde(default, flatten)]
     pub pci_common: PciDeviceCommonConfig,
 }
 
-impl ConsoleConfig {
-    pub const SYNTAX: &str = "Control (virtio) console: \"off|null|pty|tty|file=<path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
+impl From<api_types::ConsoleConfig> for ConsoleConfig {
+    fn from(value: api_types::ConsoleConfig) -> Self {
+        Self {
+            common: value.common.into(),
+            pci_common: value.pci_common.into(),
+        }
+    }
+}
+
+impl From<&ConsoleConfig> for api_types::ConsoleConfig {
+    fn from(value: &ConsoleConfig) -> Self {
+        Self {
+            common: (&value.common).into(),
+            pci_common: (&value.pci_common).into(),
+        }
+    }
 }
 
 impl Default for ConsoleConfig {
@@ -739,14 +885,34 @@ impl ApplyLandlock for ConsoleConfig {
 }
 
 #[cfg(target_arch = "x86_64")]
-#[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DebugConsoleConfig {
-    #[serde(default)]
     pub file: Option<PathBuf>,
     pub mode: ConsoleOutputMode,
     /// Optionally dedicated I/O-port, if the default port should not be used.
     pub iobase: Option<u16>,
+}
+
+#[cfg(target_arch = "x86_64")]
+impl From<api_types::DebugConsoleConfig> for DebugConsoleConfig {
+    fn from(value: api_types::DebugConsoleConfig) -> Self {
+        Self {
+            file: value.file,
+            mode: value.mode,
+            iobase: value.iobase,
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+impl From<&DebugConsoleConfig> for api_types::DebugConsoleConfig {
+    fn from(value: &DebugConsoleConfig) -> Self {
+        Self {
+            file: value.file.clone(),
+            mode: value.mode.clone(),
+            iobase: value.iobase,
+        }
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -773,34 +939,36 @@ impl ApplyLandlock for DebugConsoleConfig {
     }
 }
 
-#[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeviceConfig {
-    #[serde(flatten)]
     pub pci_common: PciDeviceCommonConfig,
-    #[serde(default)]
     pub path: Option<PathBuf>,
-    // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
-    #[serde(default, deserialize_with = "deserialize_deviceconfig_fd")]
     pub fd: Option<i32>,
-    #[serde(default)]
     pub x_nv_gpudirect_clique: Option<u8>,
-    #[serde(default)]
     pub x_exclude_mmap_bars: Vec<u64>,
 }
 
-fn deserialize_deviceconfig_fd<'de, D>(d: D) -> Result<Option<i32>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let invalid_fd: Option<i32> = Option::deserialize(d)?;
-    if invalid_fd.is_some() {
-        debug!(
-            "FD in 'DeviceConfig' won't be deserialized as it is most likely invalid now. Deserializing it as -1."
-        );
-        Ok(Some(-1))
-    } else {
-        Ok(None)
+impl From<api_types::DeviceConfig> for DeviceConfig {
+    fn from(value: api_types::DeviceConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            path: value.path,
+            fd: value.fd,
+            x_nv_gpudirect_clique: value.x_nv_gpudirect_clique,
+            x_exclude_mmap_bars: value.x_exclude_mmap_bars,
+        }
+    }
+}
+
+impl From<&DeviceConfig> for api_types::DeviceConfig {
+    fn from(value: &DeviceConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            path: value.path.clone(),
+            fd: value.fd,
+            x_nv_gpudirect_clique: value.x_nv_gpudirect_clique,
+            x_exclude_mmap_bars: value.x_exclude_mmap_bars.clone(),
+        }
     }
 }
 
@@ -826,11 +994,28 @@ impl ApplyLandlock for DeviceConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UserDeviceConfig {
-    #[serde(flatten)]
     pub pci_common: PciDeviceCommonConfig,
     pub socket: PathBuf,
+}
+
+impl From<api_types::UserDeviceConfig> for UserDeviceConfig {
+    fn from(value: api_types::UserDeviceConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            socket: value.socket,
+        }
+    }
+}
+
+impl From<&UserDeviceConfig> for api_types::UserDeviceConfig {
+    fn from(value: &UserDeviceConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            socket: value.socket.clone(),
+        }
+    }
 }
 
 impl ApplyLandlock for UserDeviceConfig {
@@ -840,13 +1025,31 @@ impl ApplyLandlock for UserDeviceConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VdpaConfig {
-    #[serde(flatten)]
     pub pci_common: PciDeviceCommonConfig,
     pub path: PathBuf,
-    #[serde(default = "default_vdpaconfig_num_queues")]
     pub num_queues: usize,
+}
+
+impl From<api_types::VdpaConfig> for VdpaConfig {
+    fn from(value: api_types::VdpaConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            path: value.path,
+            num_queues: value.num_queues,
+        }
+    }
+}
+
+impl From<&VdpaConfig> for api_types::VdpaConfig {
+    fn from(value: &VdpaConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            path: value.path.clone(),
+            num_queues: value.num_queues,
+        }
+    }
 }
 
 pub fn default_vdpaconfig_num_queues() -> usize {
@@ -860,12 +1063,31 @@ impl ApplyLandlock for VdpaConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VsockConfig {
-    #[serde(flatten)]
     pub pci_common: PciDeviceCommonConfig,
     pub cid: u32,
     pub socket: PathBuf,
+}
+
+impl From<api_types::VsockConfig> for VsockConfig {
+    fn from(value: api_types::VsockConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            cid: value.cid,
+            socket: value.socket,
+        }
+    }
+}
+
+impl From<&VsockConfig> for api_types::VsockConfig {
+    fn from(value: &VsockConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            cid: value.cid,
+            socket: value.socket.clone(),
+        }
+    }
 }
 
 impl ApplyLandlock for VsockConfig {
@@ -884,12 +1106,33 @@ impl ApplyLandlock for VsockConfig {
 pub const DEFAULT_IVSHMEM_SIZE: usize = 128;
 
 #[cfg(feature = "ivshmem")]
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IvshmemConfig {
-    #[serde(flatten)]
     pub pci_common: PciDeviceCommonConfig,
     pub path: PathBuf,
     pub size: usize,
+}
+
+#[cfg(feature = "ivshmem")]
+impl From<api_types::IvshmemConfig> for IvshmemConfig {
+    fn from(value: api_types::IvshmemConfig) -> Self {
+        Self {
+            pci_common: value.pci_common.into(),
+            path: value.path,
+            size: value.size,
+        }
+    }
+}
+
+#[cfg(feature = "ivshmem")]
+impl From<&IvshmemConfig> for api_types::IvshmemConfig {
+    fn from(value: &IvshmemConfig) -> Self {
+        Self {
+            pci_common: (&value.pci_common).into(),
+            path: value.path.clone(),
+            size: value.size,
+        }
+    }
 }
 
 #[cfg(feature = "ivshmem")]
@@ -903,28 +1146,40 @@ impl Default for IvshmemConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct NumaDistance {
-    #[serde(default)]
-    pub destination: u32,
-    #[serde(default)]
-    pub distance: u8,
-}
-
-#[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NumaConfig {
     pub guest_numa_id: u32,
-    #[serde(default)]
     pub cpus: Option<Box<[u32]>>,
-    #[serde(default)]
     pub distances: Option<Box<[NumaDistance]>>,
-    #[serde(default)]
     pub memory_zones: Option<Box<[String]>>,
-    #[serde(default)]
     pub pci_segments: Option<Box<[u16]>>,
-    #[serde(default)]
     pub device_id: Option<String>,
+}
+
+impl From<api_types::NumaConfig> for NumaConfig {
+    fn from(value: api_types::NumaConfig) -> Self {
+        Self {
+            guest_numa_id: value.guest_numa_id,
+            cpus: value.cpus,
+            distances: value.distances,
+            memory_zones: value.memory_zones,
+            pci_segments: value.pci_segments,
+            device_id: value.device_id,
+        }
+    }
+}
+
+impl From<&NumaConfig> for api_types::NumaConfig {
+    fn from(value: &NumaConfig) -> Self {
+        Self {
+            guest_numa_id: value.guest_numa_id,
+            cpus: value.cpus.clone(),
+            distances: value.distances.clone(),
+            memory_zones: value.memory_zones.clone(),
+            pci_segments: value.pci_segments.clone(),
+            device_id: value.device_id.clone(),
+        }
+    }
 }
 
 /// Errors describing a misconfigured payload, i.e., a configuration that
@@ -964,31 +1219,56 @@ pub enum PayloadConfigError {
     FwCfgInvalidItem(String),
 }
 
-#[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PayloadConfig {
-    #[serde(default)]
     pub firmware: Option<PathBuf>,
-    #[serde(default)]
     pub kernel: Option<PathBuf>,
-    #[serde(default)]
     pub cmdline: Option<String>,
-    #[serde(default)]
     pub initramfs: Option<PathBuf>,
     #[cfg(feature = "igvm")]
-    #[serde(default)]
     pub igvm: Option<PathBuf>,
     #[cfg(feature = "sev_snp")]
-    #[serde(default)]
     pub host_data: Option<String>,
     #[cfg(feature = "fw_cfg")]
     pub fw_cfg_config: Option<FwCfgConfig>,
 }
 
+impl From<api_types::PayloadConfig> for PayloadConfig {
+    fn from(value: api_types::PayloadConfig) -> Self {
+        Self {
+            firmware: value.firmware,
+            kernel: value.kernel,
+            cmdline: value.cmdline,
+            initramfs: value.initramfs,
+            #[cfg(feature = "igvm")]
+            igvm: value.igvm,
+            #[cfg(feature = "sev_snp")]
+            host_data: value.host_data,
+            #[cfg(feature = "fw_cfg")]
+            fw_cfg_config: value.fw_cfg_config.map(Into::into),
+        }
+    }
+}
+
+impl From<&PayloadConfig> for api_types::PayloadConfig {
+    fn from(value: &PayloadConfig) -> Self {
+        Self {
+            firmware: value.firmware.clone(),
+            kernel: value.kernel.clone(),
+            cmdline: value.cmdline.clone(),
+            initramfs: value.initramfs.clone(),
+            #[cfg(feature = "igvm")]
+            igvm: value.igvm.clone(),
+            #[cfg(feature = "sev_snp")]
+            host_data: value.host_data.clone(),
+            #[cfg(feature = "fw_cfg")]
+            fw_cfg_config: value.fw_cfg_config.as_ref().map(Into::into),
+        }
+    }
+}
+
 #[cfg(feature = "fw_cfg")]
-#[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(default)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FwCfgConfig {
     pub e820: bool,
     pub kernel: bool,
@@ -996,6 +1276,34 @@ pub struct FwCfgConfig {
     pub initramfs: bool,
     pub acpi_tables: bool,
     pub items: Option<FwCfgItemList>,
+}
+
+#[cfg(feature = "fw_cfg")]
+impl From<api_types::FwCfgConfig> for FwCfgConfig {
+    fn from(value: api_types::FwCfgConfig) -> Self {
+        Self {
+            e820: value.e820,
+            kernel: value.kernel,
+            cmdline: value.cmdline,
+            initramfs: value.initramfs,
+            acpi_tables: value.acpi_tables,
+            items: value.items,
+        }
+    }
+}
+
+#[cfg(feature = "fw_cfg")]
+impl From<&FwCfgConfig> for api_types::FwCfgConfig {
+    fn from(value: &FwCfgConfig) -> Self {
+        Self {
+            e820: value.e820,
+            kernel: value.kernel,
+            cmdline: value.cmdline,
+            initramfs: value.initramfs,
+            acpi_tables: value.acpi_tables,
+            items: value.items.clone(),
+        }
+    }
 }
 
 #[cfg(feature = "fw_cfg")]
@@ -1009,55 +1317,6 @@ impl Default for FwCfgConfig {
             acpi_tables: true,
             items: None,
         }
-    }
-}
-
-#[cfg(feature = "fw_cfg")]
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct FwCfgItemList {
-    #[serde(default)]
-    pub item_list: Vec<FwCfgItem>,
-}
-
-#[cfg(feature = "fw_cfg")]
-#[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct FwCfgItem {
-    #[serde(default)]
-    pub name: String,
-    #[serde(default)]
-    pub file: Option<PathBuf>,
-    #[serde(default)]
-    pub string: Option<String>,
-}
-
-#[cfg(feature = "fw_cfg")]
-pub enum FwCfgItemError {
-    InvalidValue(String),
-}
-
-#[cfg(feature = "fw_cfg")]
-impl FromStr for FwCfgItemList {
-    type Err = FwCfgItemError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let body = s
-            .trim()
-            .strip_prefix('[')
-            .and_then(|s| s.strip_suffix(']'))
-            .ok_or_else(|| FwCfgItemError::InvalidValue(s.to_string()))?;
-
-        let mut fw_cfg_items: Vec<FwCfgItem> = vec![];
-        let items: Vec<&str> = body.split(':').collect();
-        for item in items {
-            fw_cfg_items.push(
-                FwCfgItem::parse(item)
-                    .map_err(|_| FwCfgItemError::InvalidValue(item.to_string()))?,
-            );
-        }
-        Ok(FwCfgItemList {
-            item_list: fw_cfg_items,
-        })
     }
 }
 
@@ -1126,9 +1385,25 @@ impl ApplyLandlock for PayloadConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TpmConfig {
     pub socket: PathBuf,
+}
+
+impl From<api_types::TpmConfig> for TpmConfig {
+    fn from(value: api_types::TpmConfig) -> Self {
+        Self {
+            socket: value.socket,
+        }
+    }
+}
+
+impl From<&TpmConfig> for api_types::TpmConfig {
+    fn from(value: &TpmConfig) -> Self {
+        Self {
+            socket: value.socket.clone(),
+        }
+    }
 }
 
 impl ApplyLandlock for TpmConfig {
@@ -1138,10 +1413,28 @@ impl ApplyLandlock for TpmConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LandlockConfig {
     pub path: PathBuf,
     pub access: String,
+}
+
+impl From<api_types::LandlockConfig> for LandlockConfig {
+    fn from(value: api_types::LandlockConfig) -> Self {
+        Self {
+            path: value.path,
+            access: value.access,
+        }
+    }
+}
+
+impl From<&LandlockConfig> for api_types::LandlockConfig {
+    fn from(value: &LandlockConfig) -> Self {
+        Self {
+            path: value.path.clone(),
+            access: value.access.clone(),
+        }
+    }
 }
 
 impl ApplyLandlock for LandlockConfig {
@@ -1151,48 +1444,35 @@ impl ApplyLandlock for LandlockConfig {
     }
 }
 
-#[serde_with::skip_serializing_none]
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct VmConfig {
-    #[serde(default)]
     pub cpus: CpusConfig,
-    #[serde(default)]
     pub memory: MemoryConfig,
     pub payload: Option<PayloadConfig>,
     pub rate_limit_groups: Option<Box<[RateLimiterGroupConfig]>>,
     pub disks: Option<Vec<DiskConfig>>,
     pub net: Option<Vec<NetConfig>>,
-    #[serde(default)]
     pub rng: RngConfig,
     pub balloon: Option<BalloonConfig>,
     pub generic_vhost_user: Option<Vec<GenericVhostUserConfig>>,
     pub fs: Option<Vec<FsConfig>>,
     pub pmem: Option<Vec<PmemConfig>>,
-    #[serde(default)]
     pub serial: SerialConfig,
-    #[serde(default)]
     pub console: ConsoleConfig,
     #[cfg(target_arch = "x86_64")]
-    #[serde(default)]
     pub debug_console: DebugConsoleConfig,
     pub devices: Option<Vec<DeviceConfig>>,
     pub user_devices: Option<Vec<UserDeviceConfig>>,
     pub vdpa: Option<Vec<VdpaConfig>>,
     pub vsock: Option<VsockConfig>,
     #[cfg(feature = "pvmemcontrol")]
-    #[serde(default)]
     pub pvmemcontrol: Option<PvmemcontrolConfig>,
-    #[serde(default)]
     pub pvpanic: bool,
-    #[serde(default)]
     pub iommu: bool,
     pub numa: Option<Box<[NumaConfig]>>,
-    #[serde(default)]
     pub watchdog: bool,
-    #[serde(default)]
     pub rtc: Option<RtcConfig>,
     #[cfg(feature = "guest_debug")]
-    #[serde(default)]
     pub gdb: bool,
     pub pci_segments: Option<Box<[PciSegmentConfig]>>,
     pub platform: Option<PlatformConfig>,
@@ -1205,13 +1485,192 @@ pub struct VmConfig {
     // This is populated as devices are added at runtime. Removing them again
     // causes the FDs to be closed early. This allows management software to
     // gracefully clean up resources (e.g., libvirt closes tap devices).
-    #[serde(skip)]
     pub preserved_fds: Option<HashSet<i32>>,
-    #[serde(default)]
     pub landlock_enable: bool,
     pub landlock_rules: Option<Box<[LandlockConfig]>>,
     #[cfg(feature = "ivshmem")]
     pub ivshmem: Option<IvshmemConfig>,
+}
+
+impl TryFrom<api_types::VmConfig> for VmConfig {
+    type Error = ValidationError;
+
+    fn try_from(value: api_types::VmConfig) -> Result<Self, Self::Error> {
+        let mut vm_config = Self {
+            cpus: value.cpus,
+            memory: value.memory.into(),
+            payload: value.payload.map(Into::into),
+            rate_limit_groups: value.rate_limit_groups.map(|configs| {
+                configs
+                    .into_vec()
+                    .into_iter()
+                    .map(Into::into)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice()
+            }),
+            disks: value
+                .disks
+                .map(|configs| configs.into_iter().map(Into::into).collect()),
+            net: value
+                .net
+                .map(|configs| configs.into_iter().map(Into::into).collect()),
+            rng: value.rng.into(),
+            balloon: value.balloon.map(Into::into),
+            generic_vhost_user: value
+                .generic_vhost_user
+                .map(|configs| configs.into_iter().map(Into::into).collect()),
+            fs: value
+                .fs
+                .map(|configs| configs.into_iter().map(Into::into).collect()),
+            pmem: value
+                .pmem
+                .map(|configs| configs.into_iter().map(Into::into).collect()),
+            serial: value.serial.into(),
+            console: value.console.into(),
+            #[cfg(target_arch = "x86_64")]
+            debug_console: value.debug_console.into(),
+            devices: value
+                .devices
+                .map(|configs| configs.into_iter().map(Into::into).collect()),
+            user_devices: value
+                .user_devices
+                .map(|configs| configs.into_iter().map(Into::into).collect()),
+            vdpa: value
+                .vdpa
+                .map(|configs| configs.into_iter().map(Into::into).collect()),
+            vsock: value.vsock.map(Into::into),
+            #[cfg(feature = "pvmemcontrol")]
+            pvmemcontrol: value.pvmemcontrol,
+            pvpanic: value.pvpanic,
+            iommu: value.iommu,
+            numa: value.numa.map(|configs| {
+                configs
+                    .into_vec()
+                    .into_iter()
+                    .map(Into::into)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice()
+            }),
+            watchdog: value.watchdog,
+            rtc: value.rtc.map(Into::into),
+            #[cfg(feature = "guest_debug")]
+            gdb: value.gdb,
+            pci_segments: value.pci_segments.map(|configs| {
+                configs
+                    .into_vec()
+                    .into_iter()
+                    .map(Into::into)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice()
+            }),
+            platform: value.platform.map(Into::into),
+            tpm: value.tpm.map(Into::into),
+            preserved_fds: None,
+            landlock_enable: value.landlock_enable,
+            landlock_rules: value.landlock_rules.map(|configs| {
+                configs
+                    .into_vec()
+                    .into_iter()
+                    .map(Into::into)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice()
+            }),
+            #[cfg(feature = "ivshmem")]
+            ivshmem: value.ivshmem.map(Into::into),
+        };
+        vm_config.validate()?;
+        Ok(vm_config)
+    }
+}
+
+impl From<&VmConfig> for api_types::VmConfig {
+    fn from(value: &VmConfig) -> Self {
+        Self {
+            cpus: value.cpus.clone(),
+            memory: (&value.memory).into(),
+            payload: value.payload.as_ref().map(Into::into),
+            rate_limit_groups: value.rate_limit_groups.as_ref().map(|configs| {
+                configs
+                    .iter()
+                    .map(Into::into)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice()
+            }),
+            disks: value
+                .disks
+                .as_ref()
+                .map(|configs| configs.iter().map(Into::into).collect()),
+            net: value
+                .net
+                .as_ref()
+                .map(|configs| configs.iter().map(Into::into).collect()),
+            rng: (&value.rng).into(),
+            balloon: value.balloon.as_ref().map(Into::into),
+            generic_vhost_user: value
+                .generic_vhost_user
+                .as_ref()
+                .map(|configs| configs.iter().map(Into::into).collect()),
+            fs: value
+                .fs
+                .as_ref()
+                .map(|configs| configs.iter().map(Into::into).collect()),
+            pmem: value
+                .pmem
+                .as_ref()
+                .map(|configs| configs.iter().map(Into::into).collect()),
+            serial: (&value.serial).into(),
+            console: (&value.console).into(),
+            #[cfg(target_arch = "x86_64")]
+            debug_console: (&value.debug_console).into(),
+            devices: value
+                .devices
+                .as_ref()
+                .map(|configs| configs.iter().map(Into::into).collect()),
+            user_devices: value
+                .user_devices
+                .as_ref()
+                .map(|configs| configs.iter().map(Into::into).collect()),
+            vdpa: value
+                .vdpa
+                .as_ref()
+                .map(|configs| configs.iter().map(Into::into).collect()),
+            vsock: value.vsock.as_ref().map(Into::into),
+            #[cfg(feature = "pvmemcontrol")]
+            pvmemcontrol: value.pvmemcontrol.clone(),
+            pvpanic: value.pvpanic,
+            iommu: value.iommu,
+            numa: value.numa.as_ref().map(|configs| {
+                configs
+                    .iter()
+                    .map(Into::into)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice()
+            }),
+            watchdog: value.watchdog,
+            rtc: value.rtc.as_ref().map(Into::into),
+            #[cfg(feature = "guest_debug")]
+            gdb: value.gdb,
+            pci_segments: value.pci_segments.as_ref().map(|configs| {
+                configs
+                    .iter()
+                    .map(Into::into)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice()
+            }),
+            platform: value.platform.as_ref().map(Into::into),
+            tpm: value.tpm.as_ref().map(Into::into),
+            landlock_enable: value.landlock_enable,
+            landlock_rules: value.landlock_rules.as_ref().map(|configs| {
+                configs
+                    .iter()
+                    .map(Into::into)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice()
+            }),
+            #[cfg(feature = "ivshmem")]
+            ivshmem: value.ivshmem.as_ref().map(Into::into),
+        }
+    }
 }
 
 impl VmConfig {

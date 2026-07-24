@@ -9,16 +9,19 @@ use std::sync::mpsc::{channel, Receiver};
 use std::sync::LazyLock;
 use std::thread;
 
+use api_types::{
+    CommonConsoleConfig, ConsoleConfig, ConsoleOutputMode, CoreScheduling, CpuFeatures, CpusConfig,
+    DebugConsoleConfig, HotplugMethod, MemoryConfig, PayloadConfig, PciDeviceCommonConfig,
+    RngConfig, SerialConfig, VmInfoResponse, VmState, VmmPingResponse,
+};
 use libfuzzer_sys::{fuzz_target, Corpus};
 use micro_http::Request;
 use vm_migration::MigratableError;
 use vmm::api::http::*;
-use vmm::api::{
-    ApiRequest, RequestHandler, VmInfoResponse, VmReceiveMigrationData, VmSendMigrationData,
-    VmmPingResponse,
-};
+use vmm::api::{ApiRequest, RequestHandler};
 use vmm::config::RestoreConfig;
-use vmm::vm::{Error as VmError, VmState};
+use vmm::migration::{VmReceiveMigrationData, VmSendMigrationData};
+use vmm::vm::Error as VmError;
 use vmm::vm_config::*;
 use vmm::{EpollContext, EpollDispatch};
 use vmm_sys_util::eventfd::EventFd;
@@ -127,7 +130,7 @@ impl RequestHandler for StubApiRequestHandler {
 
     fn vm_info(&self) -> Result<VmInfoResponse, VmError> {
         Ok(VmInfoResponse {
-            config: Box::new(VmConfig {
+            config: Box::new(api_types::VmConfig {
                 cpus: CpusConfig {
                     boot_vcpus: 1,
                     max_vcpus: 1,
@@ -205,7 +208,6 @@ impl RequestHandler for StubApiRequestHandler {
                 pci_segments: None,
                 platform: None,
                 tpm: None,
-                preserved_fds: None,
                 landlock_enable: false,
                 landlock_rules: None,
                 #[cfg(feature = "ivshmem")]

@@ -31,6 +31,7 @@ class TitleStartsWithComponent(LineRule):
     def validate(self, line, _commit):
         valid_components = (
             'api_client',
+            'api-types',
             'arch',
             'block',
             'build',

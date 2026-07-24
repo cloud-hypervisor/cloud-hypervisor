@@ -16,18 +16,19 @@ use api_client::{
     Error as ApiClientError, simple_api_command, simple_api_command_with_fds,
     simple_api_full_command,
 };
+use api_types::{
+    DeviceConfigParseError, DiskConfigParseError, FsConfigParseError,
+    GenericVhostUserConfigParseError, NetConfigParseError, PmemConfigParseError,
+    UserDeviceConfigParseError, VdpaConfigParseError, VmCoredumpData, VmReceiveMigrationData,
+    VmRemoveDeviceData, VmResizeData, VmResizeDiskData, VmResizeZoneData, VmSnapshotConfig,
+    VsockConfigParseError,
+};
 #[cfg(feature = "dbus_api")]
 use clap::ArgAction;
 use clap::{Arg, ArgMatches, Command};
 use log::error;
 use option_parser::{ByteSized, ByteSizedParseError};
 use thiserror::Error;
-use vmm::api;
-use vmm::config::{self, RestoreConfig};
-use vmm::vm_config::{
-    DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
-    UserDeviceConfig, VdpaConfig, VsockConfig,
-};
 #[cfg(feature = "dbus_api")]
 use zbus::{blocking::Connection, proxy, zvariant::Optional};
 
@@ -47,25 +48,25 @@ enum Error {
     #[error("Error parsing balloon size")]
     InvalidBalloonSize(#[source] ByteSizedParseError),
     #[error("Error parsing device syntax")]
-    AddDeviceConfig(#[source] config::Error),
+    AddDeviceConfig(#[source] DeviceConfigParseError),
     #[error("Error parsing disk syntax")]
-    AddDiskConfig(#[source] config::Error),
+    AddDiskConfig(#[source] DiskConfigParseError),
     #[error("Error parsing filesystem syntax")]
-    AddFsConfig(#[source] config::Error),
+    AddFsConfig(#[source] FsConfigParseError),
     #[error("Error parsing generic vhost-user syntax")]
-    AddGenericVhostUserConfig(#[source] config::Error),
+    AddGenericVhostUserConfig(#[source] GenericVhostUserConfigParseError),
     #[error("Error parsing persistent memory syntax")]
-    AddPmemConfig(#[source] config::Error),
+    AddPmemConfig(#[source] PmemConfigParseError),
     #[error("Error parsing network syntax")]
-    AddNetConfig(#[source] config::Error),
+    AddNetConfig(#[source] NetConfigParseError),
     #[error("Error parsing user device syntax")]
-    AddUserDeviceConfig(#[source] config::Error),
+    AddUserDeviceConfig(#[source] UserDeviceConfigParseError),
     #[error("Error parsing vDPA device syntax")]
-    AddVdpaConfig(#[source] config::Error),
+    AddVdpaConfig(#[source] VdpaConfigParseError),
     #[error("Error parsing vsock syntax")]
-    AddVsockConfig(#[source] config::Error),
+    AddVsockConfig(#[source] VsockConfigParseError),
     #[error("Error parsing restore syntax")]
-    Restore(#[source] config::Error),
+    Restore(#[source] api_types::RestoreConfigParseError),
     #[error("Error reading from stdin")]
     ReadingStdin(#[source] io::Error),
     #[error("Error reading from file")]
@@ -73,9 +74,9 @@ enum Error {
     #[error("Invalid disk size")]
     InvalidDiskSize(#[source] ByteSizedParseError),
     #[error("Error parsing receive migration configuration")]
-    ReceiveMigrationConfig(#[from] api::VmReceiveMigrationConfigError),
+    ReceiveMigrationConfig(#[from] api_types::VmReceiveMigrationDataParseError),
     #[error("Error parsing send migration configuration")]
-    SendMigrationConfig(#[from] api::VmSendMigrationConfigError),
+    SendMigrationConfig(#[from] api_types::VmSendMigrationDataParseError),
 }
 
 enum TargetApi<'a> {
@@ -807,7 +808,7 @@ fn resize_config(
         None
     };
 
-    let resize = api::VmResizeData {
+    let resize = VmResizeData {
         desired_vcpus,
         desired_ram,
         desired_balloon,
@@ -817,7 +818,7 @@ fn resize_config(
 }
 
 fn resize_disk_config(id: &str, size: &str) -> Result<String, Error> {
-    let resize_disk = api::VmResizeDiskData {
+    let resize_disk = VmResizeDiskData {
         id: id.to_owned(),
         desired_size: size.parse::<ByteSized>().map_err(Error::InvalidDiskSize)?.0,
     };
@@ -826,7 +827,7 @@ fn resize_disk_config(id: &str, size: &str) -> Result<String, Error> {
 }
 
 fn resize_zone_config(id: &str, size: &str) -> Result<String, Error> {
-    let resize_zone = api::VmResizeZoneData {
+    let resize_zone = VmResizeZoneData {
         id: id.to_owned(),
         desired_ram: size
             .parse::<ByteSized>()
@@ -838,7 +839,8 @@ fn resize_zone_config(id: &str, size: &str) -> Result<String, Error> {
 }
 
 fn add_device_config(config: &str) -> Result<(String, Vec<i32>), Error> {
-    let mut device_config = DeviceConfig::parse(config).map_err(Error::AddDeviceConfig)?;
+    let mut device_config =
+        api_types::DeviceConfig::parse(config).map_err(Error::AddDeviceConfig)?;
 
     // DeviceConfig is modified on purpose here by taking the file
     // descriptor out. Keeping it and sending it over to the server side
@@ -855,49 +857,50 @@ fn add_device_config(config: &str) -> Result<(String, Vec<i32>), Error> {
 }
 
 fn add_user_device_config(config: &str) -> Result<String, Error> {
-    let device_config = UserDeviceConfig::parse(config).map_err(Error::AddUserDeviceConfig)?;
+    let device_config =
+        api_types::UserDeviceConfig::parse(config).map_err(Error::AddUserDeviceConfig)?;
     let device_config = serde_json::to_string(&device_config).unwrap();
 
     Ok(device_config)
 }
 
 fn remove_device_config(id: &str) -> String {
-    let remove_device_data = api::VmRemoveDeviceData { id: id.to_owned() };
+    let remove_device_data = VmRemoveDeviceData { id: id.to_owned() };
 
     serde_json::to_string(&remove_device_data).unwrap()
 }
 
 fn add_disk_config(config: &str) -> Result<String, Error> {
-    let disk_config = DiskConfig::parse(config).map_err(Error::AddDiskConfig)?;
+    let disk_config = api_types::DiskConfig::parse(config).map_err(Error::AddDiskConfig)?;
     let disk_config = serde_json::to_string(&disk_config).unwrap();
 
     Ok(disk_config)
 }
 
 fn add_fs_config(config: &str) -> Result<String, Error> {
-    let fs_config = FsConfig::parse(config).map_err(Error::AddFsConfig)?;
+    let fs_config = api_types::FsConfig::parse(config).map_err(Error::AddFsConfig)?;
     let fs_config = serde_json::to_string(&fs_config).unwrap();
 
     Ok(fs_config)
 }
 
 fn add_generic_vhost_user_config(config: &str) -> Result<String, Error> {
-    let generic_vhost_user_config =
-        GenericVhostUserConfig::parse(config).map_err(Error::AddGenericVhostUserConfig)?;
+    let generic_vhost_user_config = api_types::GenericVhostUserConfig::parse(config)
+        .map_err(Error::AddGenericVhostUserConfig)?;
     let generic_vhost_user_config = serde_json::to_string(&generic_vhost_user_config).unwrap();
 
     Ok(generic_vhost_user_config)
 }
 
 fn add_pmem_config(config: &str) -> Result<String, Error> {
-    let pmem_config = PmemConfig::parse(config).map_err(Error::AddPmemConfig)?;
+    let pmem_config = api_types::PmemConfig::parse(config).map_err(Error::AddPmemConfig)?;
     let pmem_config = serde_json::to_string(&pmem_config).unwrap();
 
     Ok(pmem_config)
 }
 
 fn add_net_config(config: &str) -> Result<(String, Vec<i32>), Error> {
-    let mut net_config = NetConfig::parse(config).map_err(Error::AddNetConfig)?;
+    let mut net_config = api_types::NetConfig::parse(config).map_err(Error::AddNetConfig)?;
 
     // NetConfig is modified on purpose here by taking the list of file
     // descriptors out. Keeping the list and send it to the server side
@@ -910,21 +913,21 @@ fn add_net_config(config: &str) -> Result<(String, Vec<i32>), Error> {
 }
 
 fn add_vdpa_config(config: &str) -> Result<String, Error> {
-    let vdpa_config = VdpaConfig::parse(config).map_err(Error::AddVdpaConfig)?;
+    let vdpa_config = api_types::VdpaConfig::parse(config).map_err(Error::AddVdpaConfig)?;
     let vdpa_config = serde_json::to_string(&vdpa_config).unwrap();
 
     Ok(vdpa_config)
 }
 
 fn add_vsock_config(config: &str) -> Result<String, Error> {
-    let vsock_config = VsockConfig::parse(config).map_err(Error::AddVsockConfig)?;
+    let vsock_config = api_types::VsockConfig::parse(config).map_err(Error::AddVsockConfig)?;
     let vsock_config = serde_json::to_string(&vsock_config).unwrap();
 
     Ok(vsock_config)
 }
 
 fn snapshot_config(url: &str) -> String {
-    let snapshot_config = api::VmSnapshotConfig {
+    let snapshot_config = VmSnapshotConfig {
         destination_url: String::from(url),
     };
 
@@ -932,7 +935,7 @@ fn snapshot_config(url: &str) -> String {
 }
 
 fn restore_config(config: &str) -> Result<(String, Vec<i32>), Error> {
-    let mut restore_config = RestoreConfig::parse(config).map_err(Error::Restore)?;
+    let mut restore_config = api_types::RestoreConfig::parse(config).map_err(Error::Restore)?;
     // RestoreConfig is modified on purpose to take out the file descriptors.
     // These fds are passed to the server side process via SCM_RIGHTS, in the
     // order net_fds, then vfio_fds, then the iommufd FD, matching the
@@ -956,7 +959,7 @@ fn restore_config(config: &str) -> Result<(String, Vec<i32>), Error> {
 }
 
 fn coredump_config(destination_url: &str) -> String {
-    let coredump_config = api::VmCoredumpData {
+    let coredump_config = VmCoredumpData {
         destination_url: String::from(destination_url),
     };
 
@@ -965,7 +968,7 @@ fn coredump_config(destination_url: &str) -> String {
 
 fn receive_migration_data(config: &str) -> Result<(String, Vec<i32>), Error> {
     let mut data =
-        api::VmReceiveMigrationData::parse(config).map_err(Error::ReceiveMigrationConfig)?;
+        api_types::VmReceiveMigrationData::parse(config).map_err(Error::ReceiveMigrationConfig)?;
 
     // The FDs are passed to the server side process via SCM_RIGHTS, in the
     // order vfio_fds then the iommufd FD, matching the server's split.
@@ -981,8 +984,7 @@ fn receive_migration_data(config: &str) -> Result<(String, Vec<i32>), Error> {
 }
 
 fn send_migration_data(config: &str) -> Result<String, Error> {
-    let send_migration_data =
-        api::VmSendMigrationData::parse(config).map_err(Error::SendMigrationConfig)?;
+    let send_migration_data = api_types::VmSendMigrationData::parse(config)?;
     let send_migration_config = serde_json::to_string(&send_migration_data).unwrap();
     Ok(send_migration_config)
 }
@@ -1038,40 +1040,56 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
         Command::new("add-device").about("Add VFIO device").arg(
             Arg::new("device_config")
                 .index(1)
-                .help(DeviceConfig::SYNTAX),
+                .help(api_types::DeviceConfig::SYNTAX),
         ),
-        Command::new("add-disk")
-            .about("Add block device")
-            .arg(Arg::new("disk_config").index(1).help(DiskConfig::SYNTAX)),
+        Command::new("add-disk").about("Add block device").arg(
+            Arg::new("disk_config")
+                .index(1)
+                .help(api_types::DiskConfig::SYNTAX),
+        ),
         Command::new("add-fs")
             .about("Add virtio-fs backed fs device")
-            .arg(Arg::new("fs_config").index(1).help(FsConfig::SYNTAX)),
+            .arg(
+                Arg::new("fs_config")
+                    .index(1)
+                    .help(api_types::FsConfig::SYNTAX),
+            ),
         Command::new("add-generic-vhost-user")
             .about("Add generic vhost-user device")
             .arg(
                 Arg::new("generic_vhost_user_config")
                     .index(1)
-                    .help(GenericVhostUserConfig::SYNTAX),
+                    .help(api_types::GenericVhostUserConfig::SYNTAX),
             ),
-        Command::new("add-net")
-            .about("Add network device")
-            .arg(Arg::new("net_config").index(1).help(NetConfig::SYNTAX)),
+        Command::new("add-net").about("Add network device").arg(
+            Arg::new("net_config")
+                .index(1)
+                .help(api_types::NetConfig::SYNTAX),
+        ),
         Command::new("add-pmem")
             .about("Add persistent memory device")
-            .arg(Arg::new("pmem_config").index(1).help(PmemConfig::SYNTAX)),
+            .arg(
+                Arg::new("pmem_config")
+                    .index(1)
+                    .help(api_types::PmemConfig::SYNTAX),
+            ),
         Command::new("add-user-device")
             .about("Add userspace device")
             .arg(
                 Arg::new("device_config")
                     .index(1)
-                    .help(UserDeviceConfig::SYNTAX),
+                    .help(api_types::UserDeviceConfig::SYNTAX),
             ),
-        Command::new("add-vdpa")
-            .about("Add vDPA device")
-            .arg(Arg::new("vdpa_config").index(1).help(VdpaConfig::SYNTAX)),
-        Command::new("add-vsock")
-            .about("Add vsock device")
-            .arg(Arg::new("vsock_config").index(1).help(VsockConfig::SYNTAX)),
+        Command::new("add-vdpa").about("Add vDPA device").arg(
+            Arg::new("vdpa_config")
+                .index(1)
+                .help(api_types::VdpaConfig::SYNTAX),
+        ),
+        Command::new("add-vsock").about("Add vsock device").arg(
+            Arg::new("vsock_config")
+                .index(1)
+                .help(api_types::VsockConfig::SYNTAX),
+        ),
         Command::new("boot").about("Boot a created VM"),
         Command::new("coredump")
             .about("Create a coredump from VM")
@@ -1092,7 +1110,7 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
             .arg(
                 Arg::new("receive_migration_config")
                     .index(1)
-                    .help(api::VmReceiveMigrationData::SYNTAX),
+                    .help(VmReceiveMigrationData::SYNTAX),
             ),
         Command::new("remove-device")
             .about("Remove VFIO and PCI device")
@@ -1151,7 +1169,7 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
                 Arg::new("restore_config")
                     .index(1)
                     .required(true)
-                    .help(RestoreConfig::SYNTAX),
+                    .help(api_types::RestoreConfig::SYNTAX),
             ),
         Command::new("resume").about("Resume the VM"),
         Command::new("send-migration")
@@ -1159,7 +1177,7 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
             .arg(
                 Arg::new("send_migration_config")
                     .index(1)
-                    .help(api::VmSendMigrationData::SYNTAX),
+                    .help(api_types::VmSendMigrationData::SYNTAX),
             ),
         Command::new("shutdown").about("Shutdown the VM"),
         Command::new("shutdown-vmm").about("Shutdown the VMM"),

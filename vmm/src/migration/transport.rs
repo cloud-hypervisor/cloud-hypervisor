@@ -33,7 +33,7 @@ use vmm_sys_util::eventfd::EventFd;
 
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::sync_utils::Gate;
-use crate::{GuestMemoryMmap, VmMigrationConfig};
+use crate::{GuestMemoryMmap, VmMigrationConfig, VmMigrationConfigWire};
 
 /// Hard upper bound for migration worker connections on both the sender and
 /// receiver side.
@@ -1134,7 +1134,7 @@ pub(crate) fn send_config(
     socket: &mut SocketStream,
     config: &VmMigrationConfig,
 ) -> Result<(), MigratableError> {
-    let config_data = serde_json::to_vec(config)
+    let config_data = serde_json::to_vec::<VmMigrationConfigWire>(&config.into())
         .context("Error serializing VM migration config")
         .map_err(MigratableError::MigrateSend)?;
     Request::config(config_data.len() as u64).write_to(socket)?;

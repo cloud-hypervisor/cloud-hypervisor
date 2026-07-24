@@ -6,6 +6,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Write, stdout};
+use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::panic::AssertUnwindSafe;
 #[cfg(feature = "guest_debug")]
@@ -21,6 +22,10 @@ use anyhow::{Context, anyhow};
 #[cfg(feature = "dbus_api")]
 use api::dbus::{DBusApiOptions, DBusApiShutdownChannels};
 use api::http::HttpApiHandle;
+use api_types::{
+    MemoryRestoreMode, MigrationMode, TimeoutStrategy, VmInfoResponse, VmMemoryZoneUpdateData,
+    VmmPingResponse,
+};
 use console_devices::{ConsoleInfo, pre_create_console_devices};
 use event_monitor::event;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -47,11 +52,8 @@ use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::unblock_signal;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
-use crate::api::{
-    ApiRequest, ApiResponse, MigrationMode, RequestHandler, TimeoutStrategy, VmInfoResponse,
-    VmReceiveMigrationData, VmSendMigrationData, VmmPingResponse,
-};
-use crate::config::{MemoryRestoreMode, RestoreConfig, VmMemoryZoneUpdateData, add_to_config};
+use crate::api::{ApiRequest, ApiResponse, RequestHandler};
+use crate::config::{RestoreConfig, add_to_config};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::GuestDebuggable;
 use crate::device_manager::DeviceManager;
@@ -65,7 +67,9 @@ use crate::migration::transport::{
 use crate::migration::worker::{
     MigrationSeccompFilters, MigrationWorker, MigrationWorkerHandle, MigrationWorkerResult,
 };
-use crate::migration::{recv_vm_config, recv_vm_state};
+use crate::migration::{
+    VmReceiveMigrationData, VmSendMigrationData, recv_vm_config, recv_vm_state,
+};
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::vm::{Error as VmError, Vm, VmState};
 use crate::vm_config::{
@@ -612,12 +616,44 @@ where
     Ok((value, duration))
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone)]
 pub struct VmMigrationConfig {
     vm_config: Arc<Mutex<VmConfig>>,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     common_cpuid: Vec<x86::CpuIdEntry>,
     memory_manager_data: MemoryManagerSnapshotData,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct VmMigrationConfigWire {
+    vm_config: api_types::VmConfig,
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    common_cpuid: Vec<x86::CpuIdEntry>,
+    memory_manager_data: MemoryManagerSnapshotData,
+}
+
+impl TryFrom<VmMigrationConfigWire> for VmMigrationConfig {
+    type Error = <VmConfig as TryFrom<api_types::VmConfig>>::Error;
+
+    fn try_from(value: VmMigrationConfigWire) -> result::Result<Self, Self::Error> {
+        Ok(Self {
+            vm_config: Arc::new(Mutex::new(value.vm_config.try_into()?)),
+            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+            common_cpuid: value.common_cpuid,
+            memory_manager_data: value.memory_manager_data,
+        })
+    }
+}
+
+impl From<&VmMigrationConfig> for VmMigrationConfigWire {
+    fn from(value: &VmMigrationConfig) -> Self {
+        Self {
+            vm_config: value.vm_config.lock().unwrap().deref().into(),
+            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+            common_cpuid: value.common_cpuid.clone(),
+            memory_manager_data: value.memory_manager_data.clone(),
+        }
+    }
 }
 
 impl VmMigrationConfig {
@@ -1187,9 +1223,13 @@ impl Vmm {
             .read_exact(&mut data)
             .map_err(MigratableError::MigrateSocket)?;
 
-        let vm_migration_config: VmMigrationConfig = serde_json::from_slice(&data)
-            .context("Error deserialising config")
-            .map_err(MigratableError::MigrateReceive)?;
+        let vm_migration_config: VmMigrationConfig =
+            serde_json::from_slice::<VmMigrationConfigWire>(&data)
+                .context("Error deserialising config")
+                .map_err(MigratableError::MigrateReceive)?
+                .try_into()
+                .map_err(|error| anyhow!("Failed to validate VmConfig: {error}"))
+                .map_err(MigratableError::MigrateReceive)?;
 
         // Mirrors the vm_restore handling of RestoreConfig.vfio_fds. The
         // received VmConfig carries the source's device paths or stale FDs,
@@ -2474,8 +2514,11 @@ impl RequestHandler for Vmm {
                 // Safe to unwrap as we checked it was Some(&str).
                 let source_url = source_url.unwrap();
 
-                let vm_config = Arc::new(Mutex::new(
-                    recv_vm_config(source_url).map_err(VmError::Restore)?,
+                let vm_config: Arc<Mutex<VmConfig>> = Arc::new(Mutex::new(
+                    recv_vm_config(source_url)
+                        .map_err(VmError::Restore)?
+                        .try_into()
+                        .map_err(VmError::ConfigValidation)?,
                 ));
                 restore_cfg
                     .validate(&vm_config.lock().unwrap().clone())
@@ -2683,10 +2726,10 @@ impl RequestHandler for Vmm {
         };
 
         Ok(VmInfoResponse {
-            config: Box::new(vm_config),
-            state,
+            config: Box::new((&vm_config).into()),
+            state: state.into(),
             memory_actual_size,
-            device_tree,
+            device_tree: device_tree.as_ref().map(Into::into),
         })
     }
 
@@ -3425,16 +3468,18 @@ mod util {
 mod unit_tests {
     use std::path::PathBuf;
 
+    use api_types::{
+        ConsoleOutputMode, CoreScheduling, CpuFeatures, CpusConfig, HotplugMethod,
+        MemoryZoneConfig, PlatformConfig, RestoredVfioConfig,
+    };
     use arch::CpuProfile;
 
     use super::*;
-    use crate::config::RestoredVfioConfig;
     #[cfg(target_arch = "x86_64")]
     use crate::vm_config::DebugConsoleConfig;
     use crate::vm_config::{
-        CommonConsoleConfig, ConsoleConfig, ConsoleOutputMode, CoreScheduling, CpuFeatures,
-        CpusConfig, DeviceConfig, HotplugMethod, MemoryConfig, MemoryZoneConfig, PayloadConfig,
-        PciDeviceCommonConfig, PlatformConfig, RngConfig, SerialConfig,
+        CommonConsoleConfig, ConsoleConfig, MemoryConfig, PayloadConfig, PciDeviceCommonConfig,
+        RngConfig, SerialConfig,
     };
 
     fn create_dummy_vmm() -> Vmm {
@@ -3561,7 +3606,9 @@ mod unit_tests {
     #[test]
     fn test_vmm_vm_cold_add_device() {
         let mut vmm = create_dummy_vmm();
-        let device_config = DeviceConfig::parse("path=/path/to/device").unwrap();
+        let device_config: DeviceConfig = api_types::DeviceConfig::parse("path=/path/to/device")
+            .unwrap()
+            .into();
 
         assert!(matches!(
             vmm.vm_add_device(device_config.clone()),
@@ -3608,7 +3655,10 @@ mod unit_tests {
     #[test]
     fn test_vmm_vm_cold_add_user_device() {
         let mut vmm = create_dummy_vmm();
-        let user_device_config = UserDeviceConfig::parse("socket=/path/to/socket,id=8").unwrap();
+        let user_device_config: UserDeviceConfig =
+            api_types::UserDeviceConfig::parse("socket=/path/to/socket,id=8")
+                .unwrap()
+                .into();
 
         assert!(matches!(
             vmm.vm_add_user_device(user_device_config.clone()),
@@ -3659,7 +3709,9 @@ mod unit_tests {
     #[test]
     fn test_vmm_vm_cold_add_disk() {
         let mut vmm = create_dummy_vmm();
-        let disk_config = DiskConfig::parse("path=/path/to_file").unwrap();
+        let disk_config: DiskConfig = api_types::DiskConfig::parse("path=/path/to_file")
+            .unwrap()
+            .into();
 
         assert!(matches!(
             vmm.vm_add_disk(disk_config.clone()),
@@ -3706,7 +3758,9 @@ mod unit_tests {
     #[test]
     fn test_vmm_vm_cold_add_fs() {
         let mut vmm = create_dummy_vmm();
-        let fs_config = FsConfig::parse("tag=mytag,socket=/tmp/sock").unwrap();
+        let fs_config: FsConfig = api_types::FsConfig::parse("tag=mytag,socket=/tmp/sock")
+            .unwrap()
+            .into();
 
         assert!(matches!(
             vmm.vm_add_fs(fs_config.clone()),
@@ -3745,9 +3799,12 @@ mod unit_tests {
     #[test]
     fn test_vmm_vm_cold_add_generic_vhost_user() {
         let mut vmm = create_dummy_vmm();
-        let generic_vhost_user_config =
-            GenericVhostUserConfig::parse("device_type=26,socket=/tmp/sock,queue_sizes=[1024]")
-                .unwrap();
+        let generic_vhost_user_config: GenericVhostUserConfig =
+            api_types::GenericVhostUserConfig::parse(
+                "device_type=26,socket=/tmp/sock,queue_sizes=[1024]",
+            )
+            .unwrap()
+            .into();
 
         assert!(matches!(
             vmm.vm_add_generic_vhost_user(generic_vhost_user_config.clone()),
@@ -3798,7 +3855,9 @@ mod unit_tests {
     #[test]
     fn test_vmm_vm_cold_add_pmem() {
         let mut vmm = create_dummy_vmm();
-        let pmem_config = PmemConfig::parse("file=/tmp/pmem,size=128M").unwrap();
+        let pmem_config: PmemConfig = api_types::PmemConfig::parse("file=/tmp/pmem,size=128M")
+            .unwrap()
+            .into();
 
         assert!(matches!(
             vmm.vm_add_pmem(pmem_config.clone()),
@@ -3845,10 +3904,11 @@ mod unit_tests {
     #[test]
     fn test_vmm_vm_cold_add_net() {
         let mut vmm = create_dummy_vmm();
-        let net_config = NetConfig::parse(
+        let net_config: NetConfig = api_types::NetConfig::parse(
             "mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,vhost_user=true,socket=/tmp/sock",
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         assert!(matches!(
             vmm.vm_add_net(net_config.clone()),
@@ -3895,7 +3955,10 @@ mod unit_tests {
     #[test]
     fn test_vmm_vm_cold_add_vdpa() {
         let mut vmm = create_dummy_vmm();
-        let vdpa_config = VdpaConfig::parse("path=/dev/vhost-vdpa,num_queues=2").unwrap();
+        let vdpa_config: VdpaConfig =
+            api_types::VdpaConfig::parse("path=/dev/vhost-vdpa,num_queues=2")
+                .unwrap()
+                .into();
 
         assert!(matches!(
             vmm.vm_add_vdpa(vdpa_config.clone()),
@@ -3942,7 +4005,10 @@ mod unit_tests {
     #[test]
     fn test_vmm_vm_cold_add_vsock() {
         let mut vmm = create_dummy_vmm();
-        let vsock_config = VsockConfig::parse("socket=/tmp/sock,cid=3,iommu=on").unwrap();
+        let vsock_config: VsockConfig =
+            api_types::VsockConfig::parse("socket=/tmp/sock,cid=3,iommu=on")
+                .unwrap()
+                .into();
 
         assert!(matches!(
             vmm.vm_add_vsock(vsock_config.clone()),
@@ -3977,7 +4043,7 @@ mod unit_tests {
     fn vm_config_with_vfio_devices(ids: &[&str], iommufd: bool) -> Arc<Mutex<VmConfig>> {
         let mut config = *create_dummy_vm_config();
         let platform = if iommufd { "iommufd=on" } else { "iommufd=off" };
-        config.platform = Some(PlatformConfig::parse(platform).unwrap());
+        config.platform = Some(PlatformConfig::parse(platform).unwrap().into());
         config.devices = Some(
             ids.iter()
                 .map(|id| DeviceConfig {

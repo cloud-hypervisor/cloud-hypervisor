@@ -1,0 +1,39 @@
+[package]
+authors = ["The Cloud Hypervisor Authors"]
+edition.workspace = true
+license = "Apache-2.0"
+name = "api-types"
+rust-version.workspace = true
+version = "0.1.0"
+
+[features]
+fw_cfg = []
+guest_debug = []
+igvm = []
+ivshmem = []
+pvmemcontrol = []
+sev_snp = []
+tdx = []
+
+[dependencies]
+arch = { path = "../arch" }
+block = { path = "../block" }
+clap = { workspace = true }
+devices = { path = "../devices" }
+log = { workspace = true }
+net_util = { path = "../net_util" }
+option_parser = { path = "../option_parser" }
+pci = { path = "../pci" }
+serde = { workspace = true, features = ["derive"] }
+serde_with = { workspace = true, features = ["macros"] }
+thiserror = { workspace = true }
+virtio-bindings = { workspace = true }
+virtio-devices = { path = "../virtio-devices" }
+vm-device = { path = "../vm-device" }
+
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
