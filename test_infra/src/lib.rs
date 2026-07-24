@@ -1954,6 +1954,25 @@ impl<'a> GuestCommand<'a> {
         self
     }
 
+    /// Clear an inherited `PR_SET_THP_DISABLE` in the spawned child so
+    /// transparent huge pages can form even when the launching
+    /// environment disabled THP process-wide (e.g. some dev hosts set
+    /// this by default). Needed by tests that assert on THP / PMD
+    /// mappings; harmless otherwise.
+    pub fn enable_thp_in_child(&mut self) -> &mut Self {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: prctl(PR_SET_THP_DISABLE, 0) is async-signal-safe and
+        // the closure does nothing else, so it is safe to run between
+        // fork and exec.
+        unsafe {
+            self.command.pre_exec(|| {
+                libc::prctl(libc::PR_SET_THP_DISABLE, 0, 0, 0, 0);
+                Ok(())
+            });
+        }
+        self
+    }
+
     pub fn spawn(&mut self) -> io::Result<Child> {
         use VerbosityLevel::*;
         match &self.verbosity {

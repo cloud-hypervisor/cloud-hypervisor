@@ -68,6 +68,47 @@ mod common_parallel {
     }
 
     #[test]
+    fn test_uffd_handoff() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        _test_uffd_handoff(&guest);
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_uffd_writeset_anon() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        _test_uffd_writeset_anon(&guest);
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_uffd_writeset_shmem() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        _test_uffd_writeset_shmem(&guest);
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_uffd_writeset_anon_thp() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        _test_uffd_writeset_anon_thp(&guest);
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_uffd_writeset_shmem_thp() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        _test_uffd_writeset_shmem_thp(&guest);
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_uffd_resume() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        _test_uffd_resume(&guest);
+    }
+
+    #[test]
     fn test_multi_cpu() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_multi_cpu(&guest);
