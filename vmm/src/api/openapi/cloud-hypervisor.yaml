@@ -40,6 +40,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/VmInfo"
+        404:
+          description: The VM information is not available because the VM is not created.
 
   /vm.counters:
     get:
@@ -176,6 +178,8 @@ paths:
       responses:
         204:
           description: The disk was successfully resized.
+        404:
+          description: The disk could not be resized because the VM is not created.
         500:
           description: The disk could not be resized.
 
@@ -192,6 +196,8 @@ paths:
       responses:
         204:
           description: The memory zone was successfully resized.
+        404:
+          description: The memory zone could not be resized because the VM is not created.
         500:
           description: The memory zone could not be resized.
 
@@ -252,6 +258,8 @@ paths:
                 $ref: "#/components/schemas/PciDeviceInfo"
         204:
           description: The new disk was successfully (cold) added to the VM instance.
+        404:
+          description: The new disk could not be added because the VM is not created.
         500:
           description: The new disk could not be added to the VM instance.
 
@@ -274,6 +282,8 @@ paths:
                 $ref: "#/components/schemas/PciDeviceInfo"
         204:
           description: The new device was successfully (cold) added to the VM instance.
+        404:
+          description: The new device could not be added because the VM is not created.
         500:
           description: The new device could not be added to the VM instance.
 
@@ -296,6 +306,8 @@ paths:
                 $ref: "#/components/schemas/PciDeviceInfo"
         204:
           description: The new device was successfully (cold) added to the VM instance.
+        404:
+          description: The new device could not be added because the VM is not created.
         500:
           description: The new device could not be added to the VM instance.
 
@@ -318,6 +330,8 @@ paths:
                 $ref: "#/components/schemas/PciDeviceInfo"
         204:
           description: The new device was successfully (cold) added to the VM instance.
+        404:
+          description: The new device could not be added because the VM is not created.
         500:
           description: The new device could not be added to the VM instance.
 
@@ -340,6 +354,8 @@ paths:
                 $ref: "#/components/schemas/PciDeviceInfo"
         204:
           description: The new device was successfully (cold) added to the VM instance.
+        404:
+          description: The new device could not be added because the VM is not created.
         500:
           description: The new device could not be added to the VM instance.
 
@@ -362,6 +378,8 @@ paths:
                 $ref: "#/components/schemas/PciDeviceInfo"
         204:
           description: The new device was successfully (cold) added to the VM instance.
+        404:
+          description: The new device could not be added because the VM is not created.
         500:
           description: The new device could not be added to the VM instance.
 
@@ -384,6 +402,8 @@ paths:
                 $ref: "#/components/schemas/PciDeviceInfo"
         204:
           description: The new vDPA device was successfully (cold) added to the VM instance.
+        404:
+          description: The new vDPA device could not be added because the VM is not created.
         500:
           description: The new vDPA device could not be added to the VM instance.
 
