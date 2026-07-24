@@ -3,20 +3,31 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::collections::HashSet;
+use std::ops::RangeInclusive;
+
 use hypervisor::CpuVendor;
-use hypervisor::arch::x86::CpuIdEntry;
+use hypervisor::arch::x86::msr_index::{MSR_IA32_VMX_BASIC, MSR_IA32_VMX_VMFUNC};
+use hypervisor::arch::x86::{CpuIdEntry, MsrEntry, VcpuMsrConfigUpdate};
+use log::{error, warn};
 
 use crate::x86_64::cpu_profile::cpuid_adjustments::{
     CpuidOutputRegisterAdjustments, CpuidProfileData, MissingCpuidEntriesError,
 };
-use crate::x86_64::{AMX_TILECFG_BIT, AMX_TILEDATA_BIT, CpuidReg};
+use crate::x86_64::cpu_profile::msr_adjustments::{FeatureMsrAdjustment, MsrProfileData};
+use crate::x86_64::hyperv_msrs::HYPERV_MSRS;
+use crate::x86_64::{AMX_TILECFG_BIT, AMX_TILEDATA_BIT, CpuidReg, Error};
 
 /// Mask indicating availability of the AMX TILECFG state component
 const TILECFG_MASK: u32 = 1_u32 << AMX_TILECFG_BIT;
 /// Mask indicating availability of the AMX TILEDATA state component
 const TILEDATA_MASK: u32 = 1_u32 << AMX_TILEDATA_BIT;
+/// A range starting at the register address of the first Intel VMX related feature MSR and ending at the last one
+/// emulated by KVM.
+const VMX_FEATURE_MSR_RANGE: RangeInclusive<u32> = MSR_IA32_VMX_BASIC..=MSR_IA32_VMX_VMFUNC;
 
 pub mod cpuid_adjustments;
+pub mod msr_adjustments;
 
 // TODO: Auto generate the CpuProfile enum with a build script once we introduce user facing CPU profiles.
 
@@ -62,6 +73,50 @@ impl CpuProfile {
         match self {
             CpuProfile::Host => None,
         }
+    }
+
+    /// Obtain MSR adjustment data related to the given CPU profile.
+    fn msr_data(&self) -> Option<MsrProfileData> {
+        match self {
+            CpuProfile::Host => None,
+        }
+    }
+
+    /// Compute the MSR-related updates required by the chosen CPU profile.
+    ///
+    /// This method does **not** perform any compatibility checks beyond
+    /// ensuring that all expected MSRs are present.
+    ///
+    /// The caller is responsible for ensuring that the returned feature MSRs
+    /// may be utilized.
+    ///
+    /// If (KVM) Hyper-V is not desired, then passing `kvm_hyperv = false` will ignore
+    /// missing MSRs that are **purely Hyper-V related**.
+    ///
+    /// If nested virtualization is disabled then the output will not include any
+    /// feature MSRs used for nested virtualization.
+    ///
+    /// The Host profile guarantees that `Ok(None)` is returned.
+    pub(in crate::x86_64) fn required_msr_updates(
+        &self,
+        feature_msrs: &[MsrEntry],
+        msr_index_list: &[u32],
+        kvm_hyperv: bool,
+        nested: bool,
+    ) -> Result<Option<VcpuMsrConfigUpdate>, Error> {
+        if matches!(self, Self::Host) {
+            return Ok(None);
+        }
+
+        required_msr_updates(
+            self.msr_data()
+                .expect("There should always be data for a CPU profile different from Host"),
+            feature_msrs,
+            msr_index_list,
+            kvm_hyperv,
+            nested,
+        )
+        .map(Some)
     }
 }
 
@@ -117,15 +172,93 @@ fn adjust_cpuid(
     CpuidOutputRegisterAdjustments::adjust_cpuid_entries(cpuid, &adjustments)
 }
 
+/// See [`CpuProfile::required_msr_updates`]
+fn required_msr_updates(
+    MsrProfileData {
+        mut adjustments,
+        mut required_msrs,
+    }: MsrProfileData,
+    feature_msrs: &[MsrEntry],
+    msr_index_list: &[u32],
+    kvm_hyperv: bool,
+    nested: bool,
+) -> Result<VcpuMsrConfigUpdate, Error> {
+    if !nested {
+        adjustments.retain(|(address, _)| !VMX_FEATURE_MSR_RANGE.contains(&address.0));
+        required_msrs.retain(|address| !VMX_FEATURE_MSR_RANGE.contains(&address.0));
+    }
+
+    let adjusted_feature_msrs = FeatureMsrAdjustment::adjust_to(&adjustments, feature_msrs)?;
+
+    let queryable_msrs: HashSet<u32> = feature_msrs
+        .iter()
+        .map(|entry| &entry.index)
+        .chain(msr_index_list)
+        .copied()
+        .collect();
+
+    let required: HashSet<u32> = required_msrs.iter().map(|r| r.0).collect();
+
+    // required_msrs extracts its MSRs from feature MSRs and the MSR index list returned from the hypervisor
+    // at the point when the CPU profile is generated. We need to check that the host has all of these
+    // MSRs, otherwise we have a compatibility issue.
+    if !required.is_subset(&queryable_msrs) {
+        let mut missing_required_msr = false;
+
+        // Log the missing entries at the error level
+        for missing_msr in required.difference(&queryable_msrs) {
+            if (!kvm_hyperv) && HYPERV_MSRS.contains(missing_msr) {
+                warn!(
+                    "CPU profile required MSR {missing_msr:#x} was not found: continuing under the assumption that the MSR is Hyper-V related (kvm_hyperv=off)"
+                );
+                continue;
+            }
+
+            missing_required_msr = true;
+            error!("Did not find MSR {missing_msr:#x}, but it is required by the CPU profile");
+        }
+
+        if missing_required_msr {
+            return Err(Error::CpuProfileMissingMsr);
+        }
+    }
+
+    // Our MSR snapshottable MSRs should consist of the MSR indices that are contained in the set of required MSRs and the feature MSRs to be set.
+    // The MSR indices/addresses in this vector will be a subset of `required`, but not necessarily an equality as required may contain MSRs
+    // that the hypervisor does not permit setting (e.g. various VMX CTLS, IA32_VMX_CR0_FIXED, IA32_VMX_CR4_FIXED).
+    let mut snapshottable_msr_indices: Vec<u32> = msr_index_list
+        .iter()
+        .copied()
+        .filter(|msr| required.contains(msr))
+        .chain(adjusted_feature_msrs.iter().map(|msr| msr.index))
+        .collect();
+    // Remove any duplicate entries
+    snapshottable_msr_indices.sort_unstable();
+    snapshottable_msr_indices.dedup();
+
+    Ok(VcpuMsrConfigUpdate {
+        feature_msrs: adjusted_feature_msrs,
+        snapshottable_msr_indices,
+    })
+}
+
 #[cfg(test)]
 mod unit_tests {
+    use hypervisor::arch::x86::MsrEntry;
+    use hypervisor::arch::x86::msr_index::{MSR_IA32_UCODE_REV, MSR_IA32_VMX_MISC};
     use proptest::prelude::*;
 
     use super::{CpuIdEntry, CpuVendor, CpuidProfileData, CpuidReg, adjust_cpuid};
     use crate::x86_64::cpu_profile::cpuid_adjustments::{
         CpuidOutputRegisterAdjustments, CpuidParameters,
     };
-    use crate::x86_64::cpu_profile::{TILECFG_MASK, TILEDATA_MASK};
+    use crate::x86_64::cpu_profile::msr_adjustments::{
+        FeatureMsrAdjustment, MsrProfileData, RegisterAddress,
+    };
+    use crate::x86_64::cpu_profile::{
+        TILECFG_MASK, TILEDATA_MASK, VMX_FEATURE_MSR_RANGE, required_msr_updates,
+    };
+    use crate::x86_64::hyperv_msrs::HYPERV_MSRS;
 
     // Note that the tests for adjust_cpuid within this module tend to use much simpler inputs
     // than what it will be called with at runtime within Cloud hypervisor. We do this here in order
@@ -876,5 +1009,279 @@ mod unit_tests {
             CpuVendor::Intel,
         )
         .unwrap();
+    }
+
+    // Note that the tests for required_msr_updates within this module tend to use much simpler inputs
+    // than what it will be called with at runtime within Cloud hypervisor. We do this here in order
+    // to keep each test focused on the behavioral aspect under test.
+    proptest! {
+    #[test]
+    fn failure_on_missing_msrs(
+        host_feature_msrs in prop::collection::hash_set(any::<(u32,u64)>(), 20),
+        mut host_msr_index_list in prop::collection::vec(any::<u32>(), 200),
+        feature_msr_removal_idx in  any::<usize>(),
+        msr_index_list_removal_idx in any::<usize>(),
+    ) {
+        // Let our adjustments just retain whatever we have got in this test
+        let adjustments = host_feature_msrs
+            .iter()
+            .map(|(idx, _)| {
+                (
+                    RegisterAddress(*idx),
+                    FeatureMsrAdjustment {
+                        replacements: 0,
+                        mask: u64::MAX,
+                    },
+                )
+            })
+            .collect();
+
+        // Make sure that host_msr_index_list has at least one MSR that is not a feature MSR
+        for i in 0.. u32::try_from(host_feature_msrs.len()).unwrap()  + 1 {
+            if !host_feature_msrs.iter().any(|entry| entry.0 == i) {
+                host_msr_index_list.push(i);
+            }
+        }
+
+        let mut host_feature_msrs: Vec<MsrEntry> = host_feature_msrs
+            .into_iter()
+            .map(|(idx, data)| MsrEntry {
+                index: idx,
+                data,
+            })
+            .collect();
+
+
+
+        let required_msrs = host_msr_index_list
+            .iter()
+            .map(|addr| RegisterAddress(*addr))
+            .chain(host_feature_msrs.iter().map(|entry| RegisterAddress(entry.index)))
+            .collect();
+
+        let profile_data = MsrProfileData {
+            adjustments,
+            required_msrs,
+        };
+
+        // Reality check that the current host_feature_msrs and host_msr_index_list are accepted by the artificial profile
+        let required_updates = required_msr_updates(
+            profile_data.clone(),
+            &host_feature_msrs,
+            &host_msr_index_list,
+            true,
+            true
+        )
+        .unwrap();
+
+        // Small additional reality check that the required feature MSRs stay the same
+        let random_idx = feature_msr_removal_idx % host_feature_msrs.len();
+        let random_feature_msr = required_updates.feature_msrs[random_idx];
+        assert!(
+            host_feature_msrs
+                .iter()
+                .any(|entry| entry.index == random_feature_msr.index
+                    && entry.data == random_feature_msr.data)
+        );
+
+        // Now we try again, but with one of the host's feature MSRs removed this should not work
+        let removed_feature_msr = host_feature_msrs.remove(random_idx);
+        let _ = required_msr_updates(
+            profile_data.clone(),
+            &host_feature_msrs,
+            &host_msr_index_list,
+            true,
+            true
+        )
+        .unwrap_err();
+
+        // Re-insert the removed feature MSR, but remove an MSR from msr_index_list and try again.
+        // If the removed MSR is not a feature MSR then we must have an error, otherwise the function should succeed
+        // (because the MSR is then contained in host_feature_msrs).
+        host_feature_msrs.insert(random_idx, removed_feature_msr);
+
+        let random_idx = msr_index_list_removal_idx % host_msr_index_list.len();
+        let removed_msr = host_msr_index_list.remove(random_idx);
+        if host_feature_msrs.iter().any(|entry| entry.index == removed_msr) {
+            prop_assert!(required_msr_updates(profile_data, &host_feature_msrs, &host_msr_index_list, true, true).is_ok());
+        } else {
+            prop_assert!(required_msr_updates(profile_data, &host_feature_msrs, &host_msr_index_list, true, true).is_err());
+            }
+        }
+    }
+
+    // This test is very contrived. It's only purpose is to illustrate behavior with regards to missing hyper-V MSRs.
+    #[test]
+    fn required_msr_updates_hyperv() {
+        let hyperv_msrs = HYPERV_MSRS.to_vec();
+        let profile_data = MsrProfileData {
+            adjustments: Vec::new(),
+            required_msrs: hyperv_msrs
+                .iter()
+                .map(|msr| RegisterAddress(*msr))
+                .collect(),
+        };
+
+        // If the host doesn't have the hyper-V related MSR that are permitted by the CPU profile then the call to required_msr_updates
+        // must fail
+        let _ = required_msr_updates(profile_data.clone(), &[], &[0x10], true, true).unwrap_err();
+
+        // If kvm_hyperv is false, then missing such MSRs is permitted however
+        let _ = required_msr_updates(profile_data, &[], &[0x10], false, true).unwrap();
+    }
+
+    // Check that the CPU profile adjustments satisfy our expectations.
+    //
+    // We only focus on two required feature MSRs in this test. Realistically
+    // there would be a few more, but we only want to illustrate that MSR
+    // adjustments required by the CPU profile have the expected behavior.
+    #[test]
+    fn required_msr_updates_expected_adjustments() {
+        let host_feature_msrs = [
+            MsrEntry {
+                index: MSR_IA32_UCODE_REV,
+                data: 1 << 42,
+            },
+            // Extracted from KVM on a Granite Rapids CPU
+            MsrEntry {
+                index: MSR_IA32_VMX_MISC,
+                data: 0x20000165,
+            },
+            // Artificial "feature MSR" not required by the CPU profile
+            MsrEntry {
+                index: 42,
+                data: 42,
+            },
+        ];
+
+        // Example where the profile decides to retain the patch signature ID
+        // thus keeping whatever the host has. Zeroing the value out would also
+        // make sense since guests should not rely on this MSR anyway.
+        let bios_sign_id_msr_adjustment = (
+            RegisterAddress(MSR_IA32_UCODE_REV),
+            FeatureMsrAdjustment {
+                replacements: 0,
+                mask: 0xffffffff00000000,
+            },
+        );
+
+        // We zero out IA32_VMX_MISC[8] (wait-for-SIPI), but otherwise set exactly
+        // what we extracted from a Sapphire Rapids machine
+        let vmx_misc_msr_adjustment = (
+            RegisterAddress(MSR_IA32_VMX_MISC),
+            FeatureMsrAdjustment {
+                replacements: 0x20000065,
+                mask: 0,
+            },
+        );
+
+        let profile_data = MsrProfileData {
+            adjustments: vec![bios_sign_id_msr_adjustment, vmx_misc_msr_adjustment.clone()],
+            required_msrs: vec![
+                RegisterAddress(MSR_IA32_UCODE_REV),
+                RegisterAddress(MSR_IA32_VMX_MISC),
+            ],
+        };
+
+        let mut required_updates = required_msr_updates(
+            profile_data.clone(),
+            &host_feature_msrs,
+            &[MSR_IA32_UCODE_REV, MSR_IA32_VMX_MISC],
+            false,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(
+            required_updates.feature_msrs.len(),
+            profile_data.adjustments.len()
+        );
+
+        for feat_msr in &required_updates.feature_msrs {
+            match feat_msr.index {
+                MSR_IA32_UCODE_REV => {
+                    // The original value should be retained
+                    assert_eq!(feat_msr.data, host_feature_msrs[0].data);
+                }
+                MSR_IA32_VMX_MISC => {
+                    // In this case the value should match the replacement
+                    assert_eq!(feat_msr.data, vmx_misc_msr_adjustment.1.replacements);
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        required_updates.snapshottable_msr_indices.sort_unstable();
+        assert_eq!(
+            &[MSR_IA32_UCODE_REV, MSR_IA32_VMX_MISC,][..],
+            &required_updates.snapshottable_msr_indices
+        );
+    }
+
+    proptest! {
+        #[test]
+        fn nested_off_does_not_return_vmx_msrs(
+            host_feature_msrs in prop::collection::vec(any::<(u32, u64)>(), 42),
+            vmx_msr_address in VMX_FEATURE_MSR_RANGE,
+        ) {
+            let mut host_feature_msrs: Vec<MsrEntry> = host_feature_msrs
+                .into_iter()
+                .map(|(index, data)| MsrEntry { index, data })
+                .chain([MsrEntry {
+                    index: vmx_msr_address,
+                    data: 0x42,
+                }])
+                .collect();
+            host_feature_msrs.sort_by_key(|msr| msr.index);
+            host_feature_msrs.dedup_by_key(|msr| msr.index);
+
+            let msr_profile_data = MsrProfileData {
+                adjustments: host_feature_msrs
+                    .iter()
+                    .map(|msr| {
+                        (
+                            RegisterAddress(msr.index),
+                            FeatureMsrAdjustment {
+                                mask: u64::MAX,
+                                replacements: 0,
+                            },
+                        )
+                    })
+                    .collect(),
+                required_msrs: host_feature_msrs
+                    .iter()
+                    .map(|msr| RegisterAddress(msr.index))
+                    .collect(),
+            };
+
+            let msr_index_list: Vec<u32> = host_feature_msrs.iter().map(|msr| msr.index).collect();
+
+            let kvm_hyperv = false;
+
+            let nested = false;
+
+            let required_updates = required_msr_updates(
+                msr_profile_data,
+                &host_feature_msrs,
+                &msr_index_list,
+                kvm_hyperv,
+                nested,
+            )
+            .unwrap();
+
+            prop_assert!(
+                !required_updates
+                    .feature_msrs
+                    .iter()
+                    .any(|msr| VMX_FEATURE_MSR_RANGE.contains(&msr.index))
+            );
+
+            prop_assert!(
+                !required_updates
+                    .snapshottable_msr_indices
+                    .iter()
+                    .any(|msr| VMX_FEATURE_MSR_RANGE.contains(msr))
+            );
+        }
     }
 }

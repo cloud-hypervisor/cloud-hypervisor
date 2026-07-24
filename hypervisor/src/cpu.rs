@@ -101,6 +101,11 @@ pub enum HypervisorCpuError {
     #[error("Failed to set Msr entries")]
     SetMsrEntries(#[source] anyhow::Error),
     ///
+    /// Restoring required feature MSR
+    ///
+    #[error("Failed to restore required feature MSR")]
+    RestoreFeatureMsr,
+    ///
     /// Getting Msr entries error
     ///
     #[error("Failed to get Msr entries")]
@@ -614,7 +619,7 @@ pub trait Vcpu: Send + Sync {
     ///
     /// Return the list of initial MSR entries for a VCPU
     ///
-    fn boot_msr_entries(&self) -> &'static [MsrEntry];
+    fn boot_msr_entries(&self) -> Vec<MsrEntry>;
 
     #[cfg(target_arch = "x86_64")]
     ///

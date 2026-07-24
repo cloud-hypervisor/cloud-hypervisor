@@ -42,7 +42,7 @@ use crate::arch::emulator::PlatformEmulator;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::emulator::Emulator;
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86::{LapicState, SpecialRegisters};
+use crate::arch::x86::{LapicState, SpecialRegisters, VcpuMsrConfigUpdate};
 #[cfg(target_arch = "aarch64")]
 use crate::mshv::aarch64::emulator;
 use crate::mshv::emulator::MshvEmulatorContext;
@@ -400,6 +400,16 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         Ok(cpuid)
     }
 
+    #[cfg(target_arch = "x86_64")]
+    fn get_msr_index_list(&self) -> hypervisor::Result<Vec<u32>> {
+        unimplemented!()
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn get_feature_msrs(&self) -> hypervisor::Result<Vec<MsrEntry>> {
+        unimplemented!()
+    }
+
     /// Get maximum number of vCPUs
     fn get_max_vcpus(&self) -> u32 {
         // TODO: Using HV_MAXIMUM_PROCESSORS would be better
@@ -471,7 +481,7 @@ pub struct MshvVcpu {
 /// let mshv = MshvHypervisor::new().unwrap();
 /// let hypervisor = Arc::new(mshv);
 /// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
-/// let vcpu = vm.create_vcpu(0, None).unwrap();
+/// let vcpu = vm.create_vcpu(0, None, #[cfg(target_arch = x86_64)] Default::default()).unwrap();
 /// ```
 impl cpu::Vcpu for MshvVcpu {
     ///
@@ -1554,10 +1564,10 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Return the list of initial MSR entries for a VCPU
     ///
-    fn boot_msr_entries(&self) -> &'static [MsrEntry] {
+    fn boot_msr_entries(&self) -> Vec<MsrEntry> {
         use crate::arch::x86::{MTRR_ENABLE, MTRR_MEM_TYPE_WB, msr_index};
 
-        &[
+        vec![
             msr!(msr_index::MSR_IA32_SYSENTER_CS),
             msr!(msr_index::MSR_IA32_SYSENTER_ESP),
             msr!(msr_index::MSR_IA32_SYSENTER_EIP),
@@ -1886,6 +1896,7 @@ impl vm::Vm for MshvVm {
         &self,
         id: u32,
         vm_ops: Option<Arc<dyn VmOps>>,
+        #[cfg(target_arch = "x86_64")] _msr_config_update: Option<VcpuMsrConfigUpdate>,
     ) -> vm::Result<Box<dyn cpu::Vcpu>> {
         let id: u8 = id.try_into().unwrap();
         let vcpu_fd = self

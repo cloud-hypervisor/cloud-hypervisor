@@ -95,7 +95,7 @@ use crate::ClockData;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{
     CpuIdEntry, FpuState, LapicState, MTRR_MSR_INDICES, MsrEntry, NUM_IOAPIC_PINS,
-    SpecialRegisters, XsaveState,
+    SpecialRegisters, VcpuMsrConfigUpdate, XsaveState,
 };
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use crate::{ClockRestoreMode, ClockState};
@@ -886,6 +886,7 @@ impl vm::Vm for KvmVm {
         &self,
         id: u32,
         vm_ops: Option<Arc<dyn VmOps>>,
+        #[cfg(target_arch = "x86_64")] msr_config_update: Option<VcpuMsrConfigUpdate>,
     ) -> vm::Result<Box<dyn cpu::Vcpu>> {
         let fd = self
             .fd
@@ -912,6 +913,21 @@ impl vm::Vm for KvmVm {
         }
 
         #[cfg(target_arch = "x86_64")]
+        let (feature_msrs, msrs) = msr_config_update.map_or_else(
+            || (Vec::new(), self.msrs.clone()),
+            |update| {
+                (
+                    update.feature_msrs,
+                    update
+                        .snapshottable_msr_indices
+                        .into_iter()
+                        .map(|index| MsrEntry { index, data: 0 })
+                        .collect(),
+                )
+            },
+        );
+
+        #[cfg(target_arch = "x86_64")]
         // Safety: `xsave_size` will not change after vcpu creation because:
         // 1. `xsave_size` depends on cpuid
         // 2. The only factor that affects cpuid is xsave permission, obtained via
@@ -924,7 +940,9 @@ impl vm::Vm for KvmVm {
         let vcpu = KvmVcpu {
             fd,
             #[cfg(target_arch = "x86_64")]
-            msrs: self.msrs.clone(),
+            msrs,
+            #[cfg(target_arch = "x86_64")]
+            feature_msrs,
             vm_ops,
             #[cfg(target_arch = "x86_64")]
             hyperv_synic: AtomicBool::new(false),
@@ -1825,6 +1843,45 @@ impl hypervisor::Hypervisor for KvmHypervisor {
         Ok(v)
     }
 
+    #[cfg(target_arch = "x86_64")]
+    fn get_feature_msrs(&self) -> hypervisor::Result<Vec<MsrEntry>> {
+        let list = self
+            .kvm
+            .get_msr_feature_index_list()
+            .map_err(|e| hypervisor::HypervisorError::GetMsrList(e.into()))?;
+
+        let kvm_msrs: Vec<kvm_msr_entry> = list
+            .as_slice()
+            .iter()
+            .copied()
+            .map(|index| kvm_msr_entry {
+                index,
+                ..Default::default()
+            })
+            .collect();
+
+        let mut kvm_msrs = MsrEntries::from_entries(&kvm_msrs).unwrap();
+
+        let num_feature_msrs = self
+            .kvm
+            .get_msrs(&mut kvm_msrs)
+            .map_err(|e| hypervisor::HypervisorError::GetFeatureMsrs(e.into()))?;
+
+        assert_eq!(list.as_slice().len(), num_feature_msrs,);
+
+        Ok(kvm_msrs
+            .as_slice()
+            .iter()
+            .copied()
+            .map(MsrEntry::from)
+            .collect())
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn get_msr_index_list(&self) -> hypervisor::Result<Vec<u32>> {
+        self.get_msr_list().map(|list| list.as_slice().to_vec())
+    }
+
     #[cfg(target_arch = "aarch64")]
     ///
     /// Retrieve AArch64 host maximum IPA size supported by KVM.
@@ -1880,6 +1937,8 @@ pub struct KvmVcpu {
     fd: VcpuFd,
     #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
+    #[cfg(target_arch = "x86_64")]
+    feature_msrs: Vec<MsrEntry>,
     vm_ops: Option<Arc<dyn vm::VmOps>>,
     #[cfg(target_arch = "x86_64")]
     hyperv_synic: AtomicBool,
@@ -1970,7 +2029,7 @@ impl KvmVcpu {
 /// let kvm = KvmHypervisor::new().unwrap();
 /// let hypervisor = Arc::new(kvm);
 /// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
-/// let vcpu = vm.create_vcpu(0, None).unwrap();
+/// let vcpu = vm.create_vcpu(0, None, #[cfg(target_arch = "x86_64")] Default::default()).unwrap();
 /// ```
 impl cpu::Vcpu for KvmVcpu {
     ///
@@ -3027,7 +3086,7 @@ impl cpu::Vcpu for KvmVcpu {
     /// let hv = Arc::new(kvm);
     /// let vm = hv.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
     /// vm.enable_split_irq().unwrap();
-    /// let vcpu = vm.create_vcpu(0, None).unwrap();
+    /// let vcpu = vm.create_vcpu(0, None, Default::default()).unwrap();
     /// let state = vcpu.state().unwrap();
     /// ```
     fn state(&self) -> cpu::Result<CpuState> {
@@ -3292,7 +3351,7 @@ impl cpu::Vcpu for KvmVcpu {
     /// let hv = Arc::new(kvm);
     /// let vm = hv.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
     /// vm.enable_split_irq().unwrap();
-    /// let vcpu = vm.create_vcpu(0, None).unwrap();
+    /// let vcpu = vm.create_vcpu(0, None, Default::default()).unwrap();
     /// let state = vcpu.state().unwrap();
     /// vcpu.set_state(&state).unwrap();
     /// ```
@@ -3333,12 +3392,18 @@ impl cpu::Vcpu for KvmVcpu {
         let num_msrs = self.set_msrs(&state.msrs)?;
         if num_msrs != expected_num_msrs {
             let mut faulty_msr_index = num_msrs;
-
+            let mut required_feature_msr_not_set = false;
             loop {
-                warn!(
-                    "Detected faulty MSR 0x{:x} while setting MSRs",
-                    state.msrs[faulty_msr_index].index
-                );
+                let msr_address = state.msrs[faulty_msr_index].index;
+                warn!("Detected faulty MSR {msr_address:#x} while setting MSRs");
+
+                if self.feature_msrs.iter().any(|msr| msr.index == msr_address) {
+                    error!(
+                        "Unable to set feature MSR {msr_address:#x}, MSR value={}",
+                        state.msrs[faulty_msr_index].data
+                    );
+                    required_feature_msr_not_set = true;
+                }
 
                 // Skip the first bad MSR
                 let start_pos = faulty_msr_index + 1;
@@ -3352,6 +3417,9 @@ impl cpu::Vcpu for KvmVcpu {
                 }
 
                 faulty_msr_index = start_pos + num_msrs;
+            }
+            if required_feature_msr_not_set {
+                return Err(cpu::HypervisorCpuError::RestoreFeatureMsr);
             }
         }
 
@@ -3488,10 +3556,12 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     /// Return the list of initial MSR entries for a VCPU
     ///
-    fn boot_msr_entries(&self) -> &'static [MsrEntry] {
+    fn boot_msr_entries(&self) -> Vec<MsrEntry> {
         use crate::arch::x86::{MTRR_ENABLE, MTRR_MEM_TYPE_WB, msr_index};
 
-        &[
+        let mut boot_entries = self.feature_msrs.clone();
+
+        boot_entries.extend([
             msr!(msr_index::MSR_IA32_SYSENTER_CS),
             msr!(msr_index::MSR_IA32_SYSENTER_ESP),
             msr!(msr_index::MSR_IA32_SYSENTER_EIP),
@@ -3506,7 +3576,9 @@ impl cpu::Vcpu for KvmVcpu {
                 msr_index::MSR_IA32_MISC_ENABLE_FAST_STRING as u64
             ),
             msr_data!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
-        ]
+        ]);
+
+        boot_entries
     }
 
     #[cfg(target_arch = "aarch64")]
