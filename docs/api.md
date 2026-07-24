@@ -101,6 +101,7 @@ The Cloud Hypervisor API exposes the following actions through its endpoints:
 | Remove device from the VM               | `/vm.remove-device`          | `/schemas/VmRemoveDevice`         | N/A                      | The VM is booted                                       |
 | Dump the VM counters                    | `/vm.counters`               | N/A                               | `/schemas/VmCounters`    | The VM is booted                                       |
 | Inject an NMI                           | `/vm.nmi`                    | N/A                               | N/A                      | The VM is booted                                       |
+| Attach an external userfaultfd manager  | `/vm.uffd-attach`            | `/schemas/UffdAttachData`         | N/A                      | The VM is running                                      |
 | Prepare to receive a migration          | `/vm.receive-migration`      | `/schemas/ReceiveMigrationData`   | N/A                      | N/A                                                    |
 | Start to send migration to target       | `/vm.send-migration`         | `/schemas/SendMigrationData`      | N/A                      | The VM is booted and (shared mem or hugepages enabled) |
 

@@ -23,11 +23,12 @@ struct MemoryConfig {
     reserve: bool,
     thp: bool,
     zones: Option<Vec<MemoryZoneConfig>>,
+    uffd_handoff: Option<UffdHandoffConfig>,
 }
 ```
 
 ```
---memory <memory>	Memory parameters "size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,hotplug_method=acpi|virtio-mem,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off,reserve=on|off,thp=on|off" [default: size=512M,thp=on]
+--memory <memory>	Memory parameters "size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,hotplug_method=acpi|virtio-mem,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off,reserve=on|off,thp=on|off,uffd_handoff_socket=<path>,uffd_handoff_mode=<modes>" [default: size=512M,thp=on]
 ```
 
 ### `size`
@@ -223,6 +224,44 @@ _Example_
 
 ```
 --memory size=1G,thp=on
+```
+
+### `uffd_handoff_socket` and `uffd_handoff_mode`
+
+Hand the guest RAM off to an external `userfaultfd` manager at boot. When both
+options are set, the VMM creates a `userfaultfd`, registers all guest RAM
+according to `uffd_handoff_mode`, connects to the Unix socket at
+`uffd_handoff_socket`, and passes the fd (with a description of the registered
+regions) to the manager over `SCM_RIGHTS` before the VM boots. The manager then
+owns fault handling and/or access tracking for guest memory (for example demand
+paging, working-set tracking, or eviction).
+
+Both options must be set together. `uffd_handoff_mode` is a `|`-separated set of
+tokens: register-mode tokens `MISSING` and `WP` drive `UFFDIO_REGISTER`, and
+feature tokens `WP_UNPOPULATED` and `WP_ASYNC` drive `UFFDIO_API`. At least one
+register-mode token is required, and the tokens are validated when the
+configuration is parsed. The same handoff can also be performed at runtime on a
+running VM via the `vm.uffd-attach` HTTP API.
+
+The handoff message includes the VMM's pid so the manager can reach
+`/proc/<vmm_pid>/pagemap` (working-set scanning) and
+`/proc/<vmm_pid>/map_files` (backing-store access). This requires the manager to
+run in the **same PID namespace** as the VMM (and see a `/proc` mounted for it),
+plus `CAP_SYS_PTRACE`-equivalent access. Cross-PID-namespace handoff is not
+supported — the orchestrator that launches the VMM and the manager is
+responsible for placing them in the same PID namespace. The userfaultfd itself
+is passed as a file descriptor and works regardless; only the `/proc/<vmm_pid>`
+side-channel needs the shared namespace.
+
+When Landlock is enabled, the boot-time `uffd_handoff_socket` is authorized
+automatically. A runtime `vm.uffd-attach` uses a socket path not known at boot,
+so it is not covered by the boot-time ruleset — authorize that path explicitly
+via `--landlock-rules` (or perform the handoff at boot instead).
+
+_Example_
+
+```
+--memory size=1G,shared=on,uffd_handoff_socket=/tmp/uffd.sock,uffd_handoff_mode=MISSING
 ```
 
 ## Advanced Parameters
