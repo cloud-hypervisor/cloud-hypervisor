@@ -728,6 +728,15 @@ impl QcowState {
         set_refcounts: &mut Vec<(u64, u64)>,
     ) -> io::Result<()> {
         if !self.l2_cache.get(l1_index).unwrap().dirty() {
+            // Allocate the new cluster for the relocated L2 table before
+            // releasing the old one: if this allocation fails (ENOSPC at
+            // allocator exhaustion) the old table must stay off the free
+            // lists, or a later allocation would hand it out and overwrite a
+            // live L2 table (issue #8606). The cluster will be written when
+            // the cache is flushed.
+            let new_addr = self.get_new_cluster(None)?;
+            set_refcounts.push((new_addr, 1));
+
             // Free the previously used cluster if one exists. Modified tables are always
             // written to new clusters so the L1 table can be committed to disk after they
             // are and L1 never points at an invalid table.
@@ -737,10 +746,6 @@ impl QcowState {
                 set_refcounts.push((addr, 0));
             }
 
-            // Allocate a new cluster to store the L2 table and update the L1 table to point
-            // to the new table. The cluster will be written when the cache is flushed.
-            let new_addr = self.get_new_cluster(None)?;
-            set_refcounts.push((new_addr, 1));
             self.l1_table[l1_index] = new_addr; // marks l1_table dirty via IndexMut
         }
         // Write the L2 entry - IndexMut marks the L2 table dirty automatically.
@@ -1134,5 +1139,165 @@ impl QcowState {
         if let Err(e) = self.header.set_corrupt_bit(self.raw_file.file_mut()) {
             log::warn!("Failed to persist corrupt bit: {e}");
         }
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    // Regression for the ENOSPC unwind on the relocate-on-write path: when
+    // the allocation for the relocated table fails, the still-referenced old
+    // L2 table must not be left on the free lists (issue #8606).
+    #[test]
+    fn failed_l2_relocate_keeps_live_table_off_free_lists() {
+        let cluster_size: u64 = 1 << 16;
+        let temp = super::super::QcowTempDisk::new(64 * cluster_size, None, false, true, false)
+            .unwrap()
+            .into_tempfile();
+        let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+        let (mut inner, _backing, _sparse) =
+            super::super::parser::parse_qcow(raw, 0, true).unwrap();
+
+        // Materialize an L2 table plus one data cluster, then flush so the
+        // next write to the region takes the relocate-on-write path.
+        let super::ClusterWriteMapping::Allocated {
+            offset: data_cluster,
+        } = inner.map_write(0, None).expect("initial write");
+        inner.sync_caches().expect("flush");
+        let live_l2 = inner.l1_table[0];
+        assert_ne!(live_l2, 0);
+
+        // Exhaust the allocator down to two reusable clusters: shrink the
+        // refcount horizon so the file cannot grow, and leave exactly enough
+        // for the data cluster of the next write plus the refcount-block
+        // relocation it triggers, but nothing for relocating its L2 table.
+        let file_clusters = inner
+            .raw_file
+            .file_mut()
+            .metadata()
+            .unwrap()
+            .len()
+            .div_ceil(cluster_size);
+        inner.refcounts = super::super::refcount::RefCount::new(
+            &mut inner.raw_file,
+            inner.header.refcount_table_offset,
+            1,
+            file_clusters,
+            cluster_size,
+            16,
+        )
+        .unwrap();
+        let freed = super::mem::take(&mut inner.unref_clusters);
+        assert!(
+            !freed.is_empty(),
+            "the first write must have relocated the refcount block, freeing its old cluster"
+        );
+        inner.avail_clusters.clear();
+        inner.avail_clusters.push(data_cluster);
+        inner.avail_clusters.extend(freed);
+
+        let err = inner
+            .map_write(cluster_size, None)
+            .expect_err("relocation must fail with the allocator exhausted");
+        assert_eq!(err.raw_os_error(), Some(libc::ENOSPC));
+        assert!(
+            inner.avail_clusters.is_empty(),
+            "the failure must land on the L2 relocation, with every candidate consumed"
+        );
+
+        assert_eq!(
+            inner.l1_table[0], live_l2,
+            "L1 must still reference the old table after the failed write"
+        );
+        assert!(
+            !inner.unref_clusters.contains(&live_l2) && !inner.avail_clusters.contains(&live_l2),
+            "a still-referenced L2 table must never enter the free lists"
+        );
+    }
+
+    // The same defect is reached constantly by images holding compressed
+    // clusters: writing to a compressed cluster always takes the
+    // decompress -> append_data_cluster -> update_cluster_addr path, so every
+    // such write relocates its L2 table.
+    #[test]
+    fn failed_l2_relocate_after_compressed_write_keeps_live_table() {
+        use std::os::unix::fs::FileExt;
+
+        const COMPRESSED_FLAG: u64 = 1 << 62;
+        let cluster_size: u64 = 1 << 16;
+        let temp = super::super::QcowTempDisk::new(64 * cluster_size, None, false, true, false)
+            .unwrap()
+            .into_tempfile();
+
+        // Seed an L2 table plus a data cluster, flush, then compress that data
+        // cluster in place so re-writing it takes the compressed path.
+        {
+            let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+            let (mut inner, _backing, _sparse) =
+                super::super::parser::parse_qcow(raw, 0, true).unwrap();
+            inner
+                .map_write(0, Some(vec![0xab; cluster_size as usize]))
+                .expect("seed write");
+            inner.sync_caches().expect("flush");
+        }
+        super::super::common::unit_tests::compress_allocated_clusters(
+            &mut temp.as_file().try_clone().unwrap(),
+        );
+
+        // Re-open so the L2 cache reflects the on-disk compressed entry.
+        let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+        let (mut inner, _backing, _sparse) =
+            super::super::parser::parse_qcow(raw, 0, true).unwrap();
+        let live_l2 = inner.l1_table[0];
+        assert_ne!(live_l2, 0);
+
+        // An already allocated plain cluster would be written in place with no
+        // relocation, so confirm the seed really is compressed.
+        let mut entry = [0u8; 8];
+        temp.as_file().read_exact_at(&mut entry, live_l2).unwrap();
+        assert_ne!(
+            u64::from_be_bytes(entry) & COMPRESSED_FLAG,
+            0,
+            "the seed cluster must be compressed to trigger the relocation"
+        );
+
+        // Cap file growth at the current horizon and leave exactly two free
+        // clusters: enough for the write's data cluster and the refcount block
+        // relocation it triggers, but nothing for relocating the L2 table.
+        let file_clusters = inner
+            .raw_file
+            .file_mut()
+            .metadata()
+            .unwrap()
+            .len()
+            .div_ceil(cluster_size);
+        inner.refcounts = super::super::refcount::RefCount::new(
+            &mut inner.raw_file,
+            inner.header.refcount_table_offset,
+            1,
+            file_clusters,
+            cluster_size,
+            16,
+        )
+        .unwrap();
+        let mut free = super::mem::take(&mut inner.avail_clusters);
+        free.retain(|&c| c != live_l2 && c != 0);
+        assert!(free.len() >= 2, "need two free clusters for the budget");
+        inner.avail_clusters.clear();
+        inner.avail_clusters.push(free[0]);
+        inner.avail_clusters.push(free[1]);
+
+        let err = inner
+            .map_write(0, None)
+            .expect_err("the L2 relocation must fail with the allocator exhausted");
+        assert_eq!(err.raw_os_error(), Some(libc::ENOSPC));
+
+        assert_eq!(
+            inner.l1_table[0], live_l2,
+            "L1 must still reference the old table after the failed write"
+        );
+        assert!(
+            !inner.unref_clusters.contains(&live_l2) && !inner.avail_clusters.contains(&live_l2),
+            "a still-referenced L2 table must never enter the free lists"
+        );
     }
 }
