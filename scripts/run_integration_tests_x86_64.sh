@@ -26,10 +26,21 @@ JAMMY_OS_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_IMAGE_NAME"
 JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.raw"
 JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
 
-for required in "$FW" "$WORKLOADS_DIR/CLOUDHV.fd" "$JAMMY_OS_IMAGE" \
-    "$WORKLOADS_DIR/vmlinux-x86_64" "$WORKLOADS_DIR/bzImage-x86_64" \
-    "$WORKLOADS_DIR/alpine-minirootfs-x86_64.tar.gz" \
-    "$WORKLOADS_DIR/cloud-hypervisor-static"; do
+required_files=(
+    "$FW"
+    "$WORKLOADS_DIR/CLOUDHV.fd"
+    "$JAMMY_OS_IMAGE"
+    "$WORKLOADS_DIR/vmlinux-x86_64"
+    "$WORKLOADS_DIR/bzImage-x86_64"
+    "$WORKLOADS_DIR/alpine-minirootfs-x86_64.tar.gz"
+    "$WORKLOADS_DIR/cloud-hypervisor-static"
+)
+# MSHV support in that baseline stabilised on v50.2
+if [ "$hypervisor" = "mshv" ]; then
+    required_files+=("$WORKLOADS_DIR/cloud-hypervisor-static-mshv")
+fi
+
+for required in "${required_files[@]}"; do
     if [ ! -f "$required" ]; then
         echo "Missing: $required — run: python3 scripts/fetch_workloads.py --test integration"
         exit 1
