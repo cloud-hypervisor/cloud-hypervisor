@@ -1860,7 +1860,12 @@ impl Vm {
             self.config.lock().unwrap().payload.as_ref().unwrap(),
             &self.device_manager,
         )?;
-        let vcpu_mpidrs = self.cpu_manager.lock().unwrap().get_mpidrs();
+        let vcpu_mpidrs = self
+            .cpu_manager
+            .lock()
+            .unwrap()
+            .get_mpidrs()
+            .map_err(Error::CpuManager)?;
         let vcpu_topology = self.cpu_manager.lock().unwrap().get_vcpu_topology();
         let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
         let mut pci_space_info: Vec<PciSpaceInfo> = Vec::new();
@@ -1910,6 +1915,8 @@ impl Vm {
                     arch::aarch64::Error::SetupGic,
                 ))
             })?;
+
+        vgic.lock().unwrap().set_mpidrs(vcpu_mpidrs.clone());
 
         // PMU interrupt sticks to PPI, so need to be added by 16 to get real irq number.
         let pmu_supported = self

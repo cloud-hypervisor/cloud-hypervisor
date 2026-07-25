@@ -14,7 +14,7 @@ use thiserror::Error;
 use crate::kvm::aarch64::gic::Gicv3ItsState;
 #[cfg(feature = "mshv")]
 use crate::mshv::aarch64::gic::MshvGicV2MState;
-use crate::{CpuState, HypervisorDeviceError, HypervisorVmError};
+use crate::{HypervisorDeviceError, HypervisorVmError};
 
 /// Errors thrown while setting up the VGIC.
 #[derive(Debug, Error)]
@@ -111,9 +111,6 @@ pub trait Vgic: Send + Sync {
     /// Returns the MSI reg property of the device
     fn msi_properties(&self) -> [u64; 2];
 
-    /// Get the values of GICR_TYPER for each vCPU.
-    fn set_gicr_typers(&mut self, vcpu_states: &[CpuState]);
-
     /// Downcast the trait object to its concrete type.
     fn as_any_concrete_mut(&mut self) -> &mut dyn Any;
 
@@ -125,4 +122,7 @@ pub trait Vgic: Send + Sync {
 
     /// Saves GIC internal data tables into RAM.
     fn save_data_tables(&self) -> Result<()>;
+
+    /// Set the per-vCPU MPIDRs.
+    fn set_mpidrs(&mut self, mpidrs: Vec<u64>);
 }
