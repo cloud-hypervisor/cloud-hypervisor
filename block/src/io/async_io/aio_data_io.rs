@@ -6,7 +6,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::os::fd::{AsRawFd, RawFd};
 use std::{io, slice};
 
@@ -15,7 +15,7 @@ use vmm_sys_util::aio;
 use vmm_sys_util::eventfd::EventFd;
 
 use super::common::{duplicate_user_data_error, errno_result, validate_batch};
-use super::{AsyncIoCompletion, AsyncIoOperation};
+use super::{AsyncIoCompletion, AsyncIoOperation, CompletionCommon};
 
 /// Retained Linux AIO queue for owned async data I/O operations.
 pub struct AioDataIo {
@@ -23,15 +23,11 @@ pub struct AioDataIo {
     // dropping the context destroys kernel AIO state before retained
     // operations release the buffers referenced by their iovecs.
     ctx: aio::IoContext,
-    // The `EventFd` for completion signals.
-    eventfd: EventFd,
     // `in_flight` tracks every user_data value accepted by the kernel. Owned
     // data operations store `Some(op)` so their iovecs and backing buffers
     // remain valid until completion; metadata operations store `None`.
     in_flight: HashMap<u64, Option<AsyncIoOperation>>,
-    // `completions` holds locally produced completions and kernel events that
-    // have been fetched but not yet returned to the caller.
-    completions: VecDeque<AsyncIoCompletion>,
+    completions: CompletionCommon,
 }
 
 impl AioDataIo {
@@ -39,15 +35,14 @@ impl AioDataIo {
     pub fn new(queue_depth: u32) -> io::Result<Self> {
         Ok(Self {
             ctx: aio::IoContext::new(queue_depth)?,
-            eventfd: EventFd::new(libc::EFD_NONBLOCK)?,
             in_flight: HashMap::new(),
-            completions: VecDeque::new(),
+            completions: CompletionCommon::new(),
         })
     }
 
     /// Returns the eventfd signaled when completions are available.
     pub fn notifier(&self) -> &EventFd {
-        &self.eventfd
+        self.completions.notifier()
     }
 
     #[allow(unused_unsafe)]
@@ -84,7 +79,7 @@ impl AioDataIo {
             aio_offset: op.offset(),
             aio_data: user_data,
             aio_flags: aio::IOCB_FLAG_RESFD,
-            aio_resfd: self.eventfd.as_raw_fd() as u32,
+            aio_resfd: self.completions.notifier().as_raw_fd() as u32,
             ..Default::default()
         };
         self.in_flight.insert(user_data, Some(op));
@@ -115,7 +110,7 @@ impl AioDataIo {
             aio_lio_opcode: aio::IOCB_CMD_FSYNC as u16,
             aio_data: user_data,
             aio_flags: aio::IOCB_FLAG_RESFD,
-            aio_resfd: self.eventfd.as_raw_fd() as u32,
+            aio_resfd: self.completions.notifier().as_raw_fd() as u32,
             ..Default::default()
         };
         self.in_flight.insert(user_data, None);
@@ -135,8 +130,7 @@ impl AioDataIo {
     /// The notifier is signaled so callers can drain it with
     /// [`Self::next_completion`].
     pub fn inject_completion(&mut self, completion: AsyncIoCompletion) {
-        self.completions.push_back(completion);
-        self.eventfd.write(1).unwrap();
+        self.completions.complete(completion);
     }
 
     /// Returns the next kernel or injected completion if one is available.
@@ -144,28 +138,30 @@ impl AioDataIo {
     /// Consuming a kernel completion returns ownership of any buffer retained
     /// by the corresponding operation.
     pub fn next_completion(&mut self) -> Option<AsyncIoCompletion> {
-        if self.completions.is_empty() {
-            let mut events = [aio::IoEvent::default(); 32];
-            let rc = match self.ctx.get_events(0, &mut events, None) {
-                Ok(rc) => rc,
-                Err(e) => {
-                    warn!("Linux AIO get_events failed: {e}");
-                    return None;
-                }
-            };
-            for event in &events[..rc] {
-                self.completions.push_back(AsyncIoCompletion::new(
-                    event.data,
-                    event.res as i32,
-                    self.in_flight
-                        .remove(&event.data)
-                        .flatten()
-                        .and_then(AsyncIoOperation::into_completion_buffer),
-                ));
-            }
+        if let Some(completion) = self.completions.next_completed() {
+            return Some(completion);
         }
 
-        self.completions.pop_front()
+        let mut events = [aio::IoEvent::default(); 32];
+        let rc = match self.ctx.get_events(0, &mut events, None) {
+            Ok(rc) => rc,
+            Err(e) => {
+                warn!("Linux AIO get_events failed: {e}");
+                return None;
+            }
+        };
+        for event in &events[..rc] {
+            self.completions.complete(AsyncIoCompletion::new(
+                event.data,
+                event.res as i32,
+                self.in_flight
+                    .remove(&event.data)
+                    .flatten()
+                    .and_then(AsyncIoOperation::into_completion_buffer),
+            ));
+        }
+
+        self.completions.next_completed()
     }
 }
 
