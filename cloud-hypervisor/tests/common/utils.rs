@@ -194,8 +194,10 @@ pub(crate) fn cloud_hypervisor_release_path() -> String {
     workload_path.push("workloads");
 
     let mut ch_release_path = workload_path;
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", not(feature = "mshv")))]
     ch_release_path.push("cloud-hypervisor-static");
+    #[cfg(all(target_arch = "x86_64", feature = "mshv"))]
+    ch_release_path.push("cloud-hypervisor-static-mshv");
     #[cfg(target_arch = "aarch64")]
     ch_release_path.push("cloud-hypervisor-static-aarch64");
 
