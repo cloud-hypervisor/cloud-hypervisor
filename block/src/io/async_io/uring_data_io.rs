@@ -4,7 +4,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::os::fd::{AsRawFd, RawFd};
 use std::{io, mem};
 
@@ -13,22 +13,18 @@ use log::{error, warn};
 use vmm_sys_util::eventfd::EventFd;
 
 use super::common::{duplicate_user_data_error, validate_batch};
-use super::{AsyncIoCompletion, AsyncIoOperation};
+use super::{AsyncIoCompletion, AsyncIoOperation, CompletionCommon};
 
 /// `io_uring` wrapper for async I/O.
 ///
-/// Holds the `IoUring` and its `EventFd`. Tracks ops that are pending.
+/// Holds the `IoUring` and tracks the ops that are pending.
 pub struct UringDataIo {
     io_uring: IoUring,
-    // The `EventFd` for completion signals.
-    eventfd: EventFd,
     // `in_flight` tracks every user_data value accepted by the kernel. Owned
     // data operations store `Some(op)` so their iovecs and backing buffers
     // remain valid until completion; metadata operations store `None`.
     in_flight: HashMap<u64, Option<AsyncIoOperation>>,
-    // `injected` holds locally produced completions so synchronous failures
-    // and short-circuited requests use the same drain path as kernel CQEs.
-    injected: VecDeque<AsyncIoCompletion>,
+    completions: CompletionCommon,
     // `needs_submit_retry` is set when SQEs have been published to the ring,
     // but the submit syscall failed before confirming kernel ownership.
     needs_submit_retry: bool,
@@ -38,21 +34,22 @@ impl UringDataIo {
     /// Creates an io_uring queue and registers its completion eventfd.
     pub fn new(ring_depth: u32) -> io::Result<Self> {
         let io_uring = IoUring::new(ring_depth)?;
-        let eventfd = EventFd::new(libc::EFD_NONBLOCK)?;
-        io_uring.submitter().register_eventfd(eventfd.as_raw_fd())?;
+        let completions = CompletionCommon::new();
+        io_uring
+            .submitter()
+            .register_eventfd(completions.notifier().as_raw_fd())?;
 
         Ok(Self {
             io_uring,
-            eventfd,
             in_flight: HashMap::new(),
-            injected: VecDeque::new(),
+            completions,
             needs_submit_retry: false,
         })
     }
 
     /// Returns the eventfd signaled when completions are available.
     pub fn notifier(&self) -> &EventFd {
-        &self.eventfd
+        self.completions.notifier()
     }
 
     /// Submits one owned read or write operation to the queue.
@@ -86,7 +83,7 @@ impl UringDataIo {
             Err(e) => {
                 self.needs_submit_retry = true;
                 warn!("io_uring submit failed after SQE was published: {e}");
-                self.eventfd.write(1).unwrap();
+                self.completions.notifier().write(1).unwrap();
             }
         }
 
@@ -112,10 +109,9 @@ impl UringDataIo {
             // Drop sq, which will re-publish an unmodified tail pointer
             drop(sq);
             for op in batch {
-                self.injected
-                    .push_back(AsyncIoCompletion::from_operation(op, -libc::EAGAIN));
+                self.completions
+                    .complete(AsyncIoCompletion::from_operation(op, -libc::EAGAIN));
             }
-            self.eventfd.write(1).unwrap();
             return Ok(());
         }
 
@@ -132,7 +128,7 @@ impl UringDataIo {
             if let Err(e) = unsafe { sq.push(&entry) } {
                 Self::handle_push_failure(
                     &mut self.in_flight,
-                    &mut self.injected,
+                    &mut self.completions,
                     user_data,
                     batch.by_ref(),
                     &e,
@@ -152,7 +148,7 @@ impl UringDataIo {
             }
         }
         if signal_completion {
-            self.eventfd.write(1).unwrap();
+            self.completions.notifier().write(1).unwrap();
         }
 
         Ok(())
@@ -161,7 +157,7 @@ impl UringDataIo {
     #[cold]
     fn handle_push_failure(
         in_flight: &mut HashMap<u64, Option<AsyncIoOperation>>,
-        injected: &mut VecDeque<AsyncIoCompletion>,
+        completions: &mut CompletionCommon,
         user_data: u64,
         remaining: impl Iterator<Item = AsyncIoOperation>,
         error: &squeue::PushError,
@@ -173,9 +169,9 @@ impl UringDataIo {
             .remove(&user_data)
             .flatten()
             .expect("pending operation missing after failed push");
-        injected.push_back(AsyncIoCompletion::from_operation(op, -libc::EAGAIN));
+        completions.complete(AsyncIoCompletion::from_operation(op, -libc::EAGAIN));
         for op in remaining {
-            injected.push_back(AsyncIoCompletion::from_operation(op, -libc::EAGAIN));
+            completions.complete(AsyncIoCompletion::from_operation(op, -libc::EAGAIN));
         }
         warn!("io_uring submission queue became full after capacity check: {error:?}");
     }
@@ -216,8 +212,7 @@ impl UringDataIo {
     /// The notifier is signaled so callers can drain it with
     /// [`Self::next_completion`].
     pub fn inject_completion(&mut self, completion: AsyncIoCompletion) {
-        self.injected.push_back(completion);
-        self.eventfd.write(1).unwrap();
+        self.completions.complete(completion);
     }
 
     /// Returns the next kernel or injected completion if one is available.
@@ -244,7 +239,7 @@ impl UringDataIo {
             ));
         }
 
-        self.injected.pop_front()
+        self.completions.next_completed()
     }
 }
 

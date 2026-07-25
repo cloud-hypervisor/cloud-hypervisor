@@ -46,8 +46,8 @@ impl AsyncIoCompletion {
 }
 
 /// Pending completions plus the eventfd that signals the device to
-/// drain them. Sync engines run each operation inline, enqueue its
-/// completion, and signal the eventfd.
+/// drain them. The sync engines and the async backends enqueue their
+/// completions here and wake the device through the eventfd.
 pub(crate) struct CompletionCommon {
     queue: VecDeque<AsyncIoCompletion>,
     eventfd: EventFd,
