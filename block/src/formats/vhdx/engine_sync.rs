@@ -10,13 +10,13 @@ use std::sync::{Arc, Mutex};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{
-    AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, SyncCompletionQueue,
+    AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, CompletionCommon,
 };
 use crate::formats::vhdx::Vhdx;
 
 pub(super) struct VhdxSync {
     vhdx_file: Arc<Mutex<Vhdx>>,
-    completions: SyncCompletionQueue,
+    completions: CompletionCommon,
     size: u64,
 }
 
@@ -24,7 +24,7 @@ impl VhdxSync {
     pub(super) fn new(vhdx_file: Arc<Mutex<Vhdx>>, size: u64) -> Self {
         VhdxSync {
             vhdx_file,
-            completions: SyncCompletionQueue::new(),
+            completions: CompletionCommon::new(),
             size,
         }
     }
