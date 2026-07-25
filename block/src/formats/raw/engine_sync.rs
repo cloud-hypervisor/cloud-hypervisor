@@ -10,14 +10,14 @@ use std::os::unix::io::AsRawFd;
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{
-    AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, SyncCompletionQueue,
+    AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, CompletionCommon,
 };
 use crate::sparse::{punch_hole, write_zeroes};
 use crate::{AlignedFile, is_block_device};
 
 pub(crate) struct RawSync {
     raw_file: AlignedFile,
-    completions: SyncCompletionQueue,
+    completions: CompletionCommon,
     alignment: u64,
     is_block_device: bool,
 }
@@ -28,7 +28,7 @@ impl RawSync {
         let alignment = raw_file.alignment() as u64;
         RawSync {
             raw_file,
-            completions: SyncCompletionQueue::new(),
+            completions: CompletionCommon::new(),
             alignment,
             is_block_device,
         }

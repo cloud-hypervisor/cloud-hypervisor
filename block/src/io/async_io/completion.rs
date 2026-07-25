@@ -48,17 +48,17 @@ impl AsyncIoCompletion {
 /// Pending completions plus the eventfd that signals the device to
 /// drain them. Sync engines run each operation inline, enqueue its
 /// completion, and signal the eventfd.
-pub(crate) struct SyncCompletionQueue {
+pub(crate) struct CompletionCommon {
     queue: VecDeque<AsyncIoCompletion>,
     eventfd: EventFd,
 }
 
-impl SyncCompletionQueue {
+impl CompletionCommon {
     pub(crate) fn new() -> Self {
         Self {
             queue: VecDeque::new(),
             eventfd: EventFd::new(libc::EFD_NONBLOCK)
-                .expect("Failed creating EventFd for sync completion queue"),
+                .expect("Failed creating EventFd for the completion queue"),
         }
     }
 

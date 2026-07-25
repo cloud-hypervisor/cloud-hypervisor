@@ -19,7 +19,7 @@ use super::metadata::{
 };
 use super::qcow_raw_file::QcowRawFile;
 use crate::async_io::{
-    AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, SyncCompletionQueue,
+    AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, CompletionCommon,
 };
 
 pub(super) struct QcowSync {
@@ -30,7 +30,7 @@ pub(super) struct QcowSync {
     sparse: bool,
     cluster_size: u64,
     decoder: Arc<dyn Decoder>,
-    completions: SyncCompletionQueue,
+    completions: CompletionCommon,
 }
 
 impl QcowSync {
@@ -47,7 +47,7 @@ impl QcowSync {
             data_file,
             backing_file,
             sparse,
-            completions: SyncCompletionQueue::new(),
+            completions: CompletionCommon::new(),
         }
     }
 
