@@ -45,15 +45,6 @@ impl AioDataIo {
         self.completions.notifier()
     }
 
-    #[allow(unused_unsafe)]
-    fn submit_iocbs(ctx: &aio::IoContext, iocbs: &[&mut aio::IoControlBlock]) -> io::Result<usize> {
-        // SAFETY: vmm_sys_util currently marks IoContext::submit safe, but
-        // io_submit consumes raw pointers asynchronously. Callers must ensure
-        // all iovec and buffer memory referenced by each iocb remains valid
-        // until completion or failed submission.
-        unsafe { ctx.submit(iocbs) }
-    }
-
     /// Submits one owned read or write operation to the queue.
     ///
     /// Submission failures are converted into injected completions so callers
@@ -84,7 +75,7 @@ impl AioDataIo {
         };
         self.in_flight.insert(user_data, Some(op));
 
-        let result = match Self::submit_iocbs(&self.ctx, &[&mut iocb]) {
+        let result = match self.ctx.submit(&[&mut iocb]) {
             Ok(1) => return Ok(()),
             Ok(_) => -libc::EAGAIN,
             Err(e) => errno_result(&e),
@@ -114,7 +105,7 @@ impl AioDataIo {
             ..Default::default()
         };
         self.in_flight.insert(user_data, None);
-        let result = match Self::submit_iocbs(&self.ctx, &[&mut iocb]) {
+        let result = match self.ctx.submit(&[&mut iocb]) {
             Ok(1) => return Ok(()),
             Ok(_) => -libc::EAGAIN,
             Err(e) => errno_result(&e),
