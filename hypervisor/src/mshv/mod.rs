@@ -1626,6 +1626,10 @@ impl cpu::Vcpu for MshvVcpu {
 
         Ok(())
     }
+
+    fn hypervisor_type(&self) -> HypervisorType {
+        HypervisorType::Mshv
+    }
 }
 
 impl MshvVcpu {
