@@ -62,7 +62,7 @@ cargo build --features "$build_features" --all --release --target "$BUILD_TARGET
 # setup hugepages
 HUGEPAGESIZE=$(grep Hugepagesize /proc/meminfo | awk '{print $2}')
 PAGE_NUM=$((12288 * 1024 / HUGEPAGESIZE))
-echo "$PAGE_NUM" | sudo tee /proc/sys/vm/nr_hugepages
+setup_hugepages_pool "$HUGEPAGESIZE" "$PAGE_NUM"
 sudo chmod a+rwX /dev/hugepages
 
 if [ -n "$test_filter" ]; then

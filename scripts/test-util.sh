@@ -383,3 +383,13 @@ download_x86_guest_images() {
         popd || exit
     fi
 }
+
+setup_hugepages_pool() {
+    local HUGEPAGE_SIZE="$1"
+    local PAGE_NUM="$2"
+    local NR_HUGEPAGE_PATH="/sys/kernel/mm/hugepages/hugepages-${HUGEPAGE_SIZE}kB/nr_hugepages"
+
+    if [ "$(cat ${NR_HUGEPAGE_PATH} 2>/dev/null || echo 0)" -lt "$PAGE_NUM" ]; then
+        echo "$PAGE_NUM" | sudo tee ${NR_HUGEPAGE_PATH}
+    fi
+}
