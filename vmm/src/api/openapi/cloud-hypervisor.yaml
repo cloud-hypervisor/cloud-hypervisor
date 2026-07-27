@@ -179,7 +179,7 @@ paths:
         204:
           description: The disk was successfully resized.
         404:
-          description: The disk could not be resized because the VM is not created.
+          description: The disk could not be resized because the VM is not created, or no disk with the given identifier exists.
         500:
           description: The disk could not be resized.
 
@@ -237,7 +237,7 @@ paths:
         204:
           description: The device was successfully removed from the VM instance.
         404:
-          description: The device could not be removed from the VM instance.
+          description: The device could not be removed because the VM is not created, or no device with the given identifier exists.
 
   /vm.add-disk:
     put:
