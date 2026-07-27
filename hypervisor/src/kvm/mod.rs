@@ -3765,6 +3765,10 @@ impl cpu::Vcpu for KvmVcpu {
 
         Ok(())
     }
+
+    fn hypervisor_type(&self) -> HypervisorType {
+        HypervisorType::Kvm
+    }
 }
 
 #[cfg(target_arch = "aarch64")]
