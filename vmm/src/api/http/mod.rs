@@ -33,6 +33,7 @@ use crate::api::{
     VmPause, VmPowerButton, VmReboot, VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeDisk,
     VmResizeZone, VmRestore, VmResume, VmSendMigration, VmShutdown, VmSnapshot,
 };
+use crate::device_manager::DeviceManagerError;
 use crate::landlock::Landlock;
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::util::{error_chain_messages, flatten_error_chain_to_string};
@@ -87,7 +88,12 @@ impl HttpError {
 /// Maps an [`ApiError`] to an HTTP [`StatusCode`].
 fn api_error_status_code(error: &ApiError) -> StatusCode {
     match error.source().and_then(|e| e.downcast_ref::<VmError>()) {
-        Some(VmError::VmNotCreated | VmError::VmMissingConfig) => StatusCode::NotFound,
+        Some(
+            VmError::VmNotCreated
+            | VmError::VmMissingConfig
+            | VmError::NoDeviceToRemove(_)
+            | VmError::DeviceManager(DeviceManagerError::UnknownDeviceId(_)),
+        ) => StatusCode::NotFound,
         _ => StatusCode::InternalServerError,
     }
 }
@@ -494,4 +500,43 @@ pub fn http_api_graceful_shutdown(http_handle: HttpApiHandle) -> Result<()> {
 
     api_shutdown_fd.write(1).unwrap();
     api_thread.join().map_err(VmmError::ThreadCleanup)?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_missing_target_maps_to_not_found() {
+        assert_eq!(
+            api_error_status_code(&ApiError::VmInfo(VmError::VmNotCreated)),
+            StatusCode::NotFound
+        );
+        assert_eq!(
+            api_error_status_code(&ApiError::VmRemoveDevice(VmError::NoDeviceToRemove(
+                "dev0".to_string()
+            ))),
+            StatusCode::NotFound
+        );
+        assert_eq!(
+            api_error_status_code(&ApiError::VmRemoveDevice(VmError::DeviceManager(
+                DeviceManagerError::UnknownDeviceId("dev0".to_string())
+            ))),
+            StatusCode::NotFound
+        );
+        assert_eq!(
+            api_error_status_code(&ApiError::VmResizeDisk(VmError::DeviceManager(
+                DeviceManagerError::UnknownDeviceId("disk0".to_string())
+            ))),
+            StatusCode::NotFound
+        );
+    }
+
+    #[test]
+    fn test_other_errors_map_to_internal_server_error() {
+        assert_eq!(
+            api_error_status_code(&ApiError::VmRemoveDevice(VmError::VmMigrating)),
+            StatusCode::InternalServerError
+        );
+    }
 }
