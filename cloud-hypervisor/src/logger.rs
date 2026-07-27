@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::cell::LazyCell;
 use std::io::{self, Write};
 use std::str::FromStr;
 use std::sync::Mutex;
@@ -217,8 +218,8 @@ impl log::Log for Logger {
         let duration_s = Instant::now().duration_since(self.start).as_secs_f32();
         // Compute the wallclock timestamps lazily, but at most once per record so
         // that multiple `{hour}`/`{minute}`/`{second}`/etc. fields stay coherent.
-        let mut zoned_utc: Option<jiff::Zoned> = None;
-        let mut zoned_local: Option<jiff::Zoned> = None;
+        let zoned_utc = LazyCell::new(|| jiff::Timestamp::now().to_zoned(TimeZone::UTC));
+        let zoned_local = LazyCell::new(|| jiff::Timestamp::now().to_zoned(self.local_tz.clone()));
         let mut out = self.output.lock().unwrap();
         for token in &self.tokens {
             let _ = match token {
@@ -226,20 +227,13 @@ impl log::Log for Logger {
                 // 10: 6 decimal places + sep => whole seconds in range `0..=999` properly aligned
                 Token::BootTime => write!(&mut *out, "{duration_s:>10.6?}"),
                 Token::WallClock => {
-                    let zoned = zoned_utc
-                        .get_or_insert_with(|| jiff::Timestamp::now().to_zoned(TimeZone::UTC));
-                    write!(&mut *out, "{:.6}", zoned.timestamp())
+                    write!(&mut *out, "{:.6}", zoned_utc.timestamp())
                 }
                 Token::Glog => {
-                    let zoned = zoned_utc
-                        .get_or_insert_with(|| jiff::Timestamp::now().to_zoned(TimeZone::UTC));
-                    write!(&mut *out, "{}", zoned.strftime("%m%d %H:%M:%S%.6f"))
+                    write!(&mut *out, "{}", zoned_utc.strftime("%m%d %H:%M:%S%.6f"))
                 }
                 Token::LocalGlog => {
-                    let zoned = zoned_local.get_or_insert_with(|| {
-                        jiff::Timestamp::now().to_zoned(self.local_tz.clone())
-                    });
-                    write!(&mut *out, "{}", zoned.strftime("%m%d %H:%M:%S%.6f"))
+                    write!(&mut *out, "{}", zoned_local.strftime("%m%d %H:%M:%S%.6f"))
                 }
                 Token::Pid => write!(&mut *out, "{}", self.pid),
                 // SAFETY: gettid(2) always succeeds
@@ -258,11 +252,8 @@ impl log::Log for Logger {
                 Token::Msg => write!(&mut *out, "{}", record.args()),
                 Token::Time(field, zone) => {
                     let zoned = match zone {
-                        Zone::Utc => zoned_utc
-                            .get_or_insert_with(|| jiff::Timestamp::now().to_zoned(TimeZone::UTC)),
-                        Zone::Local => zoned_local.get_or_insert_with(|| {
-                            jiff::Timestamp::now().to_zoned(self.local_tz.clone())
-                        }),
+                        Zone::Utc => &*zoned_utc,
+                        Zone::Local => &*zoned_local,
                     };
                     write_time_field(&mut *out, *field, zoned)
                 }
