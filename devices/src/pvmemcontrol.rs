@@ -21,8 +21,8 @@ use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::{BusDeviceSync, Resource};
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
-    GuestMemoryError, GuestMemoryMmap, Le32, Le64,
+    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
+    GuestMemoryBackend, GuestMemoryError, GuestMemoryMmap, Le32, Le64,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 

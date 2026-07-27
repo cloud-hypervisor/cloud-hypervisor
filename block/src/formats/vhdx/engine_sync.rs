@@ -4,19 +4,19 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::VecDeque;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::sync::{Arc, Mutex};
 
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
+use crate::async_io::{
+    AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, SyncCompletionQueue,
+};
 use crate::formats::vhdx::Vhdx;
 
 pub(super) struct VhdxSync {
     vhdx_file: Arc<Mutex<Vhdx>>,
-    eventfd: EventFd,
-    completion_list: VecDeque<AsyncIoCompletion>,
+    completions: SyncCompletionQueue,
     size: u64,
 }
 
@@ -24,9 +24,7 @@ impl VhdxSync {
     pub(super) fn new(vhdx_file: Arc<Mutex<Vhdx>>, size: u64) -> Self {
         VhdxSync {
             vhdx_file,
-            eventfd: EventFd::new(libc::EFD_NONBLOCK)
-                .expect("Failed creating EventFd for VhdxSync"),
-            completion_list: VecDeque::new(),
+            completions: SyncCompletionQueue::new(),
             size,
         }
     }
@@ -61,7 +59,7 @@ impl VhdxSync {
 
 impl AsyncIo for VhdxSync {
     fn notifier(&self) -> &EventFd {
-        &self.eventfd
+        self.completions.notifier()
     }
 
     fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
@@ -74,9 +72,8 @@ impl AsyncIo for VhdxSync {
             self.write_operation(&op)?
         };
 
-        self.completion_list
-            .push_back(AsyncIoCompletion::from_operation(op, result as i32));
-        self.eventfd.write(1).unwrap();
+        self.completions
+            .complete(AsyncIoCompletion::from_operation(op, result as i32));
         Ok(())
     }
 
@@ -87,15 +84,14 @@ impl AsyncIo for VhdxSync {
             .flush()
             .map_err(AsyncIoError::Fsync)?;
         if let Some(user_data) = user_data {
-            self.completion_list
-                .push_back(AsyncIoCompletion::new(user_data, 0, None));
-            self.eventfd.write(1).unwrap();
+            self.completions
+                .complete(AsyncIoCompletion::new(user_data, 0, None));
         }
         Ok(())
     }
 
     fn next_completed_request(&mut self) -> Option<AsyncIoCompletion> {
-        self.completion_list.pop_front()
+        self.completions.next_completed()
     }
 
     fn punch_hole(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {

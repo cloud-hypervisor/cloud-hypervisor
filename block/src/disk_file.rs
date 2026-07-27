@@ -12,6 +12,7 @@
 //! - [`Geometry`] - sector/cluster geometry (default 512B)
 //! - [`SparseCapable`] - sparse and zero flag support
 //! - [`Resizable`] - online resize
+//! - [`MetadataSync`] - flush of format metadata cached in memory
 //!
 //! [`DiskFile`] is a supertrait that bundles the universal capabilities
 //! (`DiskSize` + `Geometry`). [`FullDiskFile`] adds all optional
@@ -25,7 +26,7 @@
 //! FullDiskFile:                           AsyncDiskFile:
 //!   DiskFile + PhysicalSize +               DiskFile + Unpin
 //!   DiskFd + SparseCapable +               try_clone, create_async_io
-//!   Resizable
+//!   Resizable + MetadataSync
 //!         \                                     /
 //!          AsyncFullDiskFile: FullDiskFile + AsyncDiskFile
 //! ```
@@ -91,6 +92,22 @@ pub trait Resizable: Send + Debug {
     fn resize(&mut self, size: u64) -> BlockResult<()>;
 }
 
+/// Flush of format metadata cached in memory.
+///
+/// Default is a no-op for formats that keep no metadata cache
+/// (e.g. raw, fixed vhd).
+pub trait MetadataSync: Send + Debug {
+    /// Flushes format metadata cached in memory (e.g. qcow2 L2/refcount
+    /// tables) to the underlying file.
+    ///
+    /// Called on device pause so that an externally copied or reopened
+    /// image is self-consistent without requiring a guest-initiated
+    /// flush.
+    fn sync_metadata(&self) -> BlockResult<()> {
+        Ok(())
+    }
+}
+
 /// Supertrait bundling universal disk capabilities.
 ///
 /// Every disk format implements `DiskSize` and `Geometry`.
@@ -101,14 +118,20 @@ pub trait DiskFile: DiskSize + Geometry + Sync {}
 /// Full capability disk file trait.
 ///
 /// Bundles all optional capabilities on top of [`DiskFile`]:
-/// file descriptor access, physical size, sparse operations, and resize.
-/// Used by consumers that need feature negotiation without async I/O
-/// (e.g. vhost user block).
-pub trait FullDiskFile: DiskFile + PhysicalSize + DiskFd + SparseCapable + Resizable {}
+/// file descriptor access, physical size, sparse operations, resize,
+/// and metadata sync. Used by consumers that need feature negotiation
+/// without async I/O (e.g. vhost user block).
+pub trait FullDiskFile:
+    DiskFile + PhysicalSize + DiskFd + SparseCapable + Resizable + MetadataSync
+{
+}
 
 /// Blanket implementation: any type implementing all constituent traits
 /// automatically satisfies [`FullDiskFile`].
-impl<T: DiskFile + PhysicalSize + DiskFd + SparseCapable + Resizable> FullDiskFile for T {}
+impl<T: DiskFile + PhysicalSize + DiskFd + SparseCapable + Resizable + MetadataSync> FullDiskFile
+    for T
+{
+}
 
 /// Extended disk file trait for virtio queue workers.
 ///

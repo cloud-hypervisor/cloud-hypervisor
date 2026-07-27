@@ -68,7 +68,7 @@ pub struct VirtioSharedMemoryList {
 pub struct ActivationContext {
     pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
     pub interrupt_cb: Arc<dyn VirtioInterrupt>,
-    pub queues: Vec<(usize, Queue, EventFd)>,
+    pub queues: Vec<(u16, Queue, EventFd)>,
     pub device_status: Arc<AtomicU8>,
 }
 
@@ -281,7 +281,7 @@ pub struct VirtioCommon {
     pub paused_sync: Option<Arc<Barrier>>,
     pub workers: Option<WorkerThreads>,
     pub queue_sizes: Vec<u16>,
-    pub queue_evts: Vec<EventFd>,
+    pub queue_evts: Vec<(u16, EventFd)>,
     pub device_type: u32,
     pub min_queues: u16,
     pub access_platform: Option<Arc<dyn AccessPlatform>>,
@@ -307,7 +307,7 @@ impl VirtioCommon {
 
     pub fn activate(
         &mut self,
-        queues: &[(usize, Queue, EventFd)],
+        queues: &[(u16, Queue, EventFd)],
         interrupt_cb: Arc<dyn VirtioInterrupt>,
     ) -> ActivateResult {
         if queues.len() < self.min_queues.into() {
@@ -321,11 +321,14 @@ impl VirtioCommon {
 
         self.queue_evts = queues
             .iter()
-            .map(|(_, _, queue_evt)| {
-                queue_evt.try_clone().map_err(|e| {
-                    error!("failed cloning queue EventFd: {e}");
-                    ActivateError::BadActivate
-                })
+            .map(|(queue_index, _, queue_evt)| {
+                queue_evt
+                    .try_clone()
+                    .map(|queue_evt| (*queue_index, queue_evt))
+                    .map_err(|e| {
+                        error!("Failed cloning queue EventFd: {e}");
+                        ActivateError::BadActivate
+                    })
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -493,7 +496,7 @@ impl Pausable for VirtioCommon {
 
         // Signal each activated queue eventfd so workers process restored queues
         // that may already contain pending requests.
-        for queue_evt in &self.queue_evts {
+        for (_, queue_evt) in &self.queue_evts {
             queue_evt.write(1).map_err(|e| {
                 MigratableError::Resume(anyhow!(
                     "Could not notify restored virtio worker on resume: {e}"
@@ -502,8 +505,8 @@ impl Pausable for VirtioCommon {
         }
 
         // Also trigger interrupts into the guest to wake up the driver to avoid a "livelock"
-        for i in 0..self.queue_evts.len() {
-            self.trigger_interrupt(crate::VirtioInterruptType::Queue(i as u16))
+        for (queue_index, _) in &self.queue_evts {
+            self.trigger_interrupt(crate::VirtioInterruptType::Queue(*queue_index))
                 .ok();
         }
 
@@ -513,11 +516,36 @@ impl Pausable for VirtioCommon {
 
 #[cfg(test)]
 mod unit_tests {
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use virtio_queue::QueueT;
     use vmm_sys_util::eventfd::EFD_NONBLOCK;
 
     use super::*;
+
+    #[derive(Default)]
+    struct RecordingInterrupt {
+        queue_indices: Mutex<Vec<u16>>,
+    }
+
+    impl VirtioInterrupt for RecordingInterrupt {
+        fn trigger(&self, int_type: VirtioInterruptType) -> io::Result<()> {
+            if let VirtioInterruptType::Queue(queue_index) = int_type {
+                self.queue_indices.lock().unwrap().push(queue_index);
+            }
+            Ok(())
+        }
+
+        fn set_notifier(
+            &self,
+            _: u32,
+            _: Option<EventFd>,
+            _: &dyn hypervisor::Vm,
+        ) -> io::Result<()> {
+            Ok(())
+        }
+    }
 
     struct NoopInterrupt;
     impl VirtioInterrupt for NoopInterrupt {
@@ -611,6 +639,31 @@ mod unit_tests {
         // Dropping `common` alone must join the worker via WorkerThreads' Drop.
         drop(common);
         assert_eq!(started.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn resume_preserves_sparse_queue_indices() {
+        let interrupt = Arc::new(RecordingInterrupt::default());
+        let queues = vec![
+            (
+                1,
+                Queue::new(256).unwrap(),
+                EventFd::new(EFD_NONBLOCK).unwrap(),
+            ),
+            (
+                3,
+                Queue::new(256).unwrap(),
+                EventFd::new(EFD_NONBLOCK).unwrap(),
+            ),
+        ];
+        let mut common = VirtioCommon::default();
+
+        common.activate(&queues, interrupt.clone()).unwrap();
+        common.resume().unwrap();
+
+        assert_eq!(queues[0].2.read().unwrap(), 1);
+        assert_eq!(queues[1].2.read().unwrap(), 1);
+        assert_eq!(*interrupt.queue_indices.lock().unwrap(), vec![1, 3]);
     }
 
     #[test]

@@ -23,7 +23,7 @@ use vhost::vhost_user::{Error as VhostUserError, FrontendReqHandler, VhostUserFr
 use virtio_queue::{Error as QueueError, Queue};
 use vm_memory::guest_memory::Error as MmapError;
 use vm_memory::mmap::MmapRegionError;
-use vm_memory::{Address, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
+use vm_memory::{Address, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend};
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{MigratableError, Pausable, Snapshot};
 use vmm_sys_util::eventfd::EventFd;
@@ -143,6 +143,10 @@ pub enum Error {
     MissingIrqFd,
     #[error("Failed getting the available index")]
     GetAvailableIndex(#[source] QueueError),
+    #[error("Failed getting the used index")]
+    GetUsedIndex(#[source] QueueError),
+    #[error("Failed to kick vhost-user vring")]
+    VhostUserKickVring(#[source] io::Error),
     #[error("Migration is not supported by this vhost-user device")]
     MigrationNotSupported,
     #[error("Failed creating memfd")]
@@ -179,6 +183,8 @@ pub enum Error {
     EpollWait(#[source] io::Error),
     #[error("Aborted vhost-user connect: kill event received")]
     ConnectKilled,
+    #[error("Timed out waiting for vhost-user connection")]
+    VhostUserConnectTimeout,
 }
 type Result<T> = result::Result<T, Error>;
 
@@ -259,6 +265,7 @@ pub const DEFAULT_VIRTIO_FEATURES: u64 = (1 << VIRTIO_F_RING_INDIRECT_DESC)
 
 const HUP_CONNECTION_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 const BACKEND_REQ_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
+const RESUME_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
 
 #[derive(Default)]
 pub struct Inflight {
@@ -271,7 +278,7 @@ pub struct VhostUserEpollHandler<S: VhostUserFrontendReqHandler> {
     pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
-    pub queues: Vec<(usize, Queue, EventFd)>,
+    pub queues: Vec<(u16, Queue, EventFd)>,
     pub virtio_interrupt: Arc<dyn VirtioInterrupt>,
     pub acked_features: u64,
     pub acked_protocol_features: u64,
@@ -281,6 +288,7 @@ pub struct VhostUserEpollHandler<S: VhostUserFrontendReqHandler> {
     pub inflight: Option<Inflight>,
     /// Flag set by the worker when the vhost-user backend is no longer reachable.
     pub disconnected: Arc<AtomicBool>,
+    pub resume_evt: EventFd,
 }
 
 impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
@@ -299,6 +307,8 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
         if let Some(backend_req_handler) = &self.backend_req_handler {
             helper.add_event(backend_req_handler.as_raw_fd(), BACKEND_REQ_EVENT)?;
         }
+
+        helper.add_event(self.resume_evt.as_raw_fd(), RESUME_EVENT)?;
 
         helper.run(paused, paused_sync, self)?;
 
@@ -324,47 +334,42 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
             epoll::Events::EPOLLHUP,
         )?;
 
-        let mut vhost_user = match VhostUserHandle::connect_vhost_user(
-            self.server,
-            &self.socket_path,
-            self.queues.len() as u64,
-            true,
-            Some(&self.kill_evt),
-        ) {
-            Ok(vu) => vu,
-            // Kill event fired during the connect retry loop; abandon the
-            // reconnect attempt. The EpollHelper observes the same kill
-            // event and will tear down on its next iteration.
-            Err(Error::ConnectKilled) => return Ok(()),
-            Err(e) => {
-                return Err(EpollHelperError::IoError(io::Error::other(format!(
-                    "failed connecting vhost-user backend for socket {}: {e:?}",
-                    self.socket_path
-                ))));
-            }
-        };
-
         let queues = self
             .queues
             .iter()
             .map(|(i, q, e)| (*i, vm_virtio::clone_queue(q), e.try_clone().unwrap()))
             .collect::<Vec<_>>();
-        // Initialize the backend
-        vhost_user
-            .reinitialize_vhost_user(
-                self.mem.memory().deref(),
-                &queues,
-                self.virtio_interrupt.as_ref(),
-                self.acked_features,
-                self.acked_protocol_features,
-                &self.backend_req_handler,
-                self.inflight.as_mut(),
-            )
-            .map_err(|e| {
-                EpollHelperError::IoError(io::Error::other(format!(
-                    "failed reconnecting vhost-user backend: {e:?}"
-                )))
-            })?;
+
+        let mut vhost_user = match VhostUserHandle::connect_vhost_user(
+            self.server,
+            &self.socket_path,
+            self.queues.len() as u64,
+            true,
+            &self.kill_evt,
+            |vhost_user| {
+                vhost_user.reinitialize_vhost_user(
+                    self.mem.memory().deref(),
+                    &queues,
+                    self.virtio_interrupt.as_ref(),
+                    self.acked_features,
+                    self.acked_protocol_features,
+                    &self.backend_req_handler,
+                    self.inflight.as_mut(),
+                )
+            },
+        ) {
+            Ok(vu) => vu,
+            // Kill event fired during the reconnect retry loop; abandon the
+            // reconnect attempt. The EpollHelper observes the same kill
+            // event and will tear down on its next iteration.
+            Err(Error::ConnectKilled) => return Ok(()),
+            Err(e) => {
+                return Err(EpollHelperError::IoError(io::Error::other(format!(
+                    "failed reconnecting vhost-user backend for socket {}: {e:?}",
+                    self.socket_path
+                ))));
+            }
+        };
 
         helper.add_event_custom(
             vhost_user.socket_handle().as_raw_fd(),
@@ -413,6 +418,26 @@ impl<S: VhostUserFrontendReqHandler> EpollHelperHandler for VhostUserEpollHandle
                 } else {
                     Ok(())
                 }
+            }
+            RESUME_EVENT => {
+                let _ = self.resume_evt.read();
+                self.vu
+                    .lock()
+                    .unwrap()
+                    .resume(
+                        &self.mem.memory(),
+                        &self.queues,
+                        self.virtio_interrupt.as_ref(),
+                        self.acked_features,
+                        &self.backend_req_handler,
+                        self.inflight.as_mut(),
+                    )
+                    .map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "failed to resume vhost-user backend for socket {}: {e:?}",
+                            self.socket_path
+                        ))
+                    })
             }
             _ => Err(EpollHelperError::HandleEvent(anyhow!(
                 "Unknown event for vhost-user thread"
@@ -471,6 +496,7 @@ pub struct VhostUserCommon {
     pub disconnected: Arc<AtomicBool>,
     saved_dirty_log: Option<MemoryRangeTable>,
     dirty_logging: bool,
+    resume_evt: Option<EventFd>,
 }
 
 impl VhostUserCommon {
@@ -478,7 +504,7 @@ impl VhostUserCommon {
     pub fn activate<T: VhostUserFrontendReqHandler>(
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
-        queues: &[(usize, Queue, EventFd)],
+        queues: &[(u16, Queue, EventFd)],
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         acked_features: u64,
         backend_req_handler: Option<FrontendReqHandler<T>>,
@@ -526,6 +552,13 @@ impl VhostUserCommon {
             )
             .map_err(ActivateError::VhostUserSetup)?;
 
+        let resume_evt = EventFd::new(libc::EFD_NONBLOCK).map_err(ActivateError::CreateEventFd)?;
+        self.resume_evt = Some(
+            resume_evt
+                .try_clone()
+                .map_err(ActivateError::CloneEventFd)?,
+        );
+
         Ok(VhostUserEpollHandler {
             vu: vu.clone(),
             mem,
@@ -540,6 +573,7 @@ impl VhostUserCommon {
             backend_req_handler,
             inflight,
             disconnected: self.disconnected.clone(),
+            resume_evt,
         })
     }
 
@@ -705,31 +739,22 @@ impl VhostUserCommon {
     }
 
     fn resume_internal(&mut self) -> result::Result<(), MigratableError> {
-        // Skip the resume_vhost_user call if the backend is disconnected. Process the queue
-        // interrupts to kick any paused workers.
         if self.disconnected.load(Ordering::Relaxed) {
             return Err(MigratableError::DeviceDisconnected(
                 self.socket_path.clone(),
             ));
         }
 
-        if let Some(vu) = &self.vu
-            && let Err(e) = vu.lock().unwrap().resume_vhost_user()
-        {
-            if e.is_transport_lost() {
-                self.disconnected.store(true, Ordering::Relaxed);
-                return Err(MigratableError::DeviceDisconnected(
-                    self.socket_path.clone(),
-                ));
-            }
+        let Some(evt) = &self.resume_evt else {
+            return Ok(());
+        };
 
-            return Err(MigratableError::Resume(anyhow!(
-                "Error resuming vhost-user backend for socket {}: {e:?}",
+        evt.write(1).map_err(|e| {
+            MigratableError::Resume(anyhow!(
+                "Error signaling vhost-user resume for socket {}: {e}",
                 self.socket_path
-            )));
-        }
-
-        Ok(())
+            ))
+        })
     }
 
     pub fn resume(&mut self) -> result::Result<(), MigratableError> {
@@ -867,5 +892,64 @@ impl VhostUserCommon {
         self.vu = None;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use std::io::{Read, Write};
+    use std::os::unix::net::{UnixListener, UnixStream};
+    use std::thread;
+
+    use vhost::vhost_user::message::{FrontendReq, VhostUserHeaderFlag};
+    use vmm_sys_util::tempdir::TempDir;
+
+    use super::*;
+
+    fn read_request(stream: &mut UnixStream, expected_request: FrontendReq) {
+        let mut header = [0u8; 12];
+        stream.read_exact(&mut header).unwrap();
+        assert_eq!(
+            u32::from_ne_bytes(header[0..4].try_into().unwrap()),
+            u32::from(expected_request)
+        );
+        assert_eq!(u32::from_ne_bytes(header[8..12].try_into().unwrap()), 0);
+    }
+
+    #[test]
+    fn connect_retries_get_features_disconnect_with_fresh_socket() {
+        let temp_dir = TempDir::new_with_prefix("/tmp/vhost-user-reconnect-").unwrap();
+        let socket_path = temp_dir.as_path().join("backend.sock");
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        let backend = thread::spawn(move || {
+            let (mut first, _) = listener.accept().unwrap();
+            read_request(&mut first, FrontendReq::SET_OWNER);
+            read_request(&mut first, FrontendReq::GET_FEATURES);
+            drop(first);
+
+            let (mut second, _) = listener.accept().unwrap();
+            read_request(&mut second, FrontendReq::SET_OWNER);
+            read_request(&mut second, FrontendReq::GET_FEATURES);
+
+            let mut reply = Vec::with_capacity(20);
+            reply.extend_from_slice(&u32::from(FrontendReq::GET_FEATURES).to_ne_bytes());
+            reply.extend_from_slice(&(VhostUserHeaderFlag::REPLY.bits() | 1).to_ne_bytes());
+            reply.extend_from_slice(&8u32.to_ne_bytes());
+            reply.extend_from_slice(&0u64.to_ne_bytes());
+            second.write_all(&reply).unwrap();
+        });
+
+        let kill_evt = EventFd::new(libc::EFD_NONBLOCK).unwrap();
+        VhostUserHandle::connect_vhost_user(
+            false,
+            socket_path.to_str().unwrap(),
+            1,
+            false,
+            &kill_evt,
+            |_| Ok(()),
+        )
+        .unwrap();
+
+        backend.join().unwrap();
     }
 }

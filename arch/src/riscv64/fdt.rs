@@ -18,7 +18,7 @@ use hypervisor::arch::riscv64::aia::Vaia;
 use log::debug;
 use thiserror::Error;
 use vm_fdt::{FdtWriter, FdtWriterResult};
-use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryRegion};
+use vm_memory::{Address, Bytes, GuestMemoryBackend, GuestMemoryError, GuestMemoryRegion};
 
 use super::super::{DeviceType, GuestMemoryMmap, InitramfsConfig};
 use super::layout::{
@@ -151,14 +151,14 @@ fn create_cpu_nodes(
 }
 
 fn create_memory_node(fdt: &mut FdtWriter, guest_mem: &GuestMemoryMmap) -> FdtWriterResult<()> {
-    // Note: memory regions from "GuestMemory" are sorted and non-zero sized.
+    // Note: memory regions from "GuestMemoryBackend" are sorted and non-zero sized.
     let ram_regions = {
         let mut ram_regions = Vec::new();
         let mut current_start = guest_mem
             .iter()
             .next()
             .map(GuestMemoryRegion::start_addr)
-            .expect("GuestMemory must have one memory region at least")
+            .expect("GuestMemoryBackend must have one memory region at least")
             .raw_value();
         let mut current_end = current_start;
 

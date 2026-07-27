@@ -339,6 +339,18 @@ impl QcowMetadata {
         Ok(actions)
     }
 
+    /// Makes a fully deallocated data cluster eligible for reuse after the
+    /// caller has successfully completed the corresponding host punch-hole.
+    ///
+    /// The cluster is deliberately kept out of both free lists while the
+    /// destructive host operation is pending. Publishing it to
+    /// `unref_clusters` (rather than directly to `avail_clusters`) preserves
+    /// the existing rule that metadata must be flushed before a freed cluster
+    /// can be allocated again.
+    pub(super) fn complete_punch_hole(&self, host_offset: u64) {
+        self.inner.write().unwrap().unref_clusters.push(host_offset);
+    }
+
     pub(super) fn virtual_size(&self) -> u64 {
         self.inner.read().unwrap().header.size
     }
@@ -355,6 +367,12 @@ impl QcowMetadata {
     #[cfg(test)]
     pub fn header(&self) -> QcowHeader {
         self.inner.read().unwrap().header.clone()
+    }
+
+    #[cfg(test)]
+    pub fn free_list_len(&self) -> usize {
+        let inner = self.inner.read().unwrap();
+        inner.avail_clusters.len() + inner.unref_clusters.len()
     }
 
     #[cfg(test)]
@@ -916,7 +934,10 @@ impl QcowState {
             self.set_cluster_refcount_track_freed(cluster_addr, new_refcount)?;
             self.l2_cache.get_mut(l1_index).unwrap()[l2_index] = dealloc_entry;
             if new_refcount == 0 {
-                self.unref_clusters.push(cluster_addr);
+                // The caller still has to punch this range in the host file.
+                // Do not publish it to either free list until that destructive
+                // operation has completed, otherwise another queue can reuse
+                // the cluster before the delayed punch runs.
                 return Ok(Some(cluster_addr));
             }
         } else if refcount == 1 {
@@ -954,6 +975,7 @@ impl QcowState {
                 }
                 Ok(Some(freed_cluster)) => {
                     let mut freed = self.set_cluster_refcount(freed_cluster, 0)?;
+                    unref_clusters.push(freed_cluster);
                     unref_clusters.append(&mut freed);
                     refcount_set = true;
                 }

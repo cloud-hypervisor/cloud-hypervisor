@@ -162,9 +162,11 @@ over the existing local live-migration protocol, playing the migration
 peer role:
 
 - On snapshot, CH acts as the migration sender and the daemon acts as the
-  receiver. The source VM shuts down on success, exactly as it would for a
-  local live migration. Memory is transferred via `SCM_RIGHTS`, CH handing
-  off the daemon one memfd per guest-memory slot.
+  receiver. By default the source VM shuts down on success, exactly as it
+  would for a local live migration. Passing `preserve_source=on` instead
+  leaves the source VM paused and owned by the VMM once the snapshot
+  completes, so it can be resumed afterwards. Memory is transferred via
+  `SCM_RIGHTS`, CH handing off the daemon one memfd per guest-memory slot.
 - On restore, CH acts as the migration receiver and the daemon acts as the
   sender. The daemon provides one memfd per slot, populated from its
   storage, and CH uses those memfds directly as guest RAM backing.
@@ -200,6 +202,30 @@ migration today.
 ./ch-remote --api-socket /tmp/cloud-hypervisor.sock \
     send-migration destination_url=unix:/tmp/offload.sock,local=on
 ```
+
+### Preserve the source VM
+
+By default an offload snapshot destroys the source VM on success. If you want
+to preserve the source VM, add `preserve_source=on` (only valid together
+with `local=on`) to the `send-migration` command:
+
+```bash
+./ch-remote --api-socket /tmp/cloud-hypervisor.sock pause
+./ch-remote --api-socket /tmp/cloud-hypervisor.sock \
+    send-migration destination_url=unix:/tmp/offload.sock,local=on,preserve_source=on
+# The source VMM keeps running, the VM is left paused. Resume it when ready:
+./ch-remote --api-socket /tmp/cloud-hypervisor.sock resume
+```
+
+With `preserve_source=on` the VM is left `paused` and owned by the VMM, with
+its devices intact and its disk locks still held.
+
+Because the source keeps running and holding its disk locks, its live disk
+content diverges from the memory captured in the snapshot, and a restore
+cannot re-acquire the locks on those same images. To restore the snapshot
+consistently, you should copy the disk images while the VM is still
+paused, and restore the daemon's snapshot against those copies. Otherwise,
+you might end up in an undefined state leading to possible bugs.
 
 ### Restore offload usage
 
@@ -258,9 +284,11 @@ The daemon implements the local live-migration wire protocol defined in
 On the snapshot path, the daemon must finish reading from every memory fd
 before it ACKs `CompletePaused`. Cloud Hypervisor blocks at the
 `CompletePaused` handshake until the daemon ACKs. Once it ACKs, the source
-VM shuts down and the daemon's fds are the only remaining record of guest
-RAM. The reference daemon dumps each slot to disk and `fsync`s before
-ACKing.
+VM shuts down (unless `preserve_source=on` was requested) and the daemon's
+fds are the only remaining record of guest RAM. The reference daemon dumps
+each slot to disk and `fsync`s before ACKing. This ordering matters even with
+`preserve_source=on` because the source is only resumed after the handshake
+returns, so the daemon always captures a consistent image.
 
 ### Reference daemon
 

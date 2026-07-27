@@ -27,6 +27,7 @@ const STATUS_REG_CAPABILITIES_USED_MASK: u32 = 0x0010_0000;
 const BAR0_REG: usize = 4;
 const ROM_BAR_REG: usize = 12;
 const ROM_BAR_IDX: usize = 6;
+const BAR_SIZE_PROBE_ALL_ONES: u32 = 0xffff_ffff;
 const BAR_IO_ADDR_MASK: u32 = 0xffff_fffc;
 const BAR_MEM_ADDR_MASK: u32 = 0xffff_fff0;
 const ROM_BAR_ADDR_MASK: u32 = 0xffff_f800;
@@ -646,12 +647,10 @@ impl PciConfiguration {
     pub fn write_reg(&mut self, reg_idx: usize, value: u32) {
         let mut mask = self.writable_bits[reg_idx];
 
-        if (BAR0_REG..BAR0_REG + NUM_BAR_REGS).contains(&reg_idx) {
-            // Handle very specific case where the BAR is being written with
-            // all 1's to retrieve the BAR size during next BAR reading.
-            if value == 0xffff_ffff {
-                mask &= self.bars[reg_idx - 4].size;
-            }
+        // Handle the case where all BAR address bits are set to retrieve
+        // the BAR size during the next BAR read.
+        if self.is_bar_size_probe(reg_idx, value) {
+            mask &= self.bars[reg_idx - BAR0_REG].size;
         } else if reg_idx == ROM_BAR_REG {
             // Handle very specific case where the BAR is being written with
             // all 1's on bits 31-11 to retrieve the BAR size during next BAR
@@ -974,13 +973,13 @@ impl PciConfiguration {
 
         let value = LittleEndian::read_u32(data);
 
+        // Ignore the case where the BAR size is being asked for.
+        if self.is_bar_size_probe(reg_idx, value) {
+            return None;
+        }
+
         let mask = self.writable_bits[reg_idx];
         if (BAR0_REG..BAR0_REG + NUM_BAR_REGS).contains(&reg_idx) {
-            // Ignore the case where the BAR size is being asked for.
-            if value == 0xffff_ffff {
-                return None;
-            }
-
             let bar_idx = reg_idx - BAR0_REG;
             // Handle special case where the address being written is
             // different from the address initially provided. This is a
@@ -1078,6 +1077,27 @@ impl PciConfiguration {
         }
 
         None
+    }
+
+    /// Guests determine a BAR's size by disabling address decoding, writing
+    /// ones to its address bits, and reading back the device's size mask.
+    /// Matching only the address portion recognizes probes that preserve the
+    /// BAR type bits, such as OpenBSD's `0xffff_fff0`, and keeps them out of
+    /// the BAR reprogramming path. A 64-bit BAR's upper half and an unused BAR
+    /// have no type bits and therefore use the literal all-ones pattern.
+    fn is_bar_size_probe(&self, reg_idx: usize, value: u32) -> bool {
+        if !(BAR0_REG..BAR0_REG + NUM_BAR_REGS).contains(&reg_idx) {
+            return false;
+        }
+
+        let bar_idx = reg_idx - BAR0_REG;
+        match self.bars[bar_idx].r#type {
+            Some(PciBarRegionType::IoRegion) => value & BAR_IO_ADDR_MASK == BAR_IO_ADDR_MASK,
+            Some(PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion) => {
+                value & BAR_MEM_ADDR_MASK == BAR_MEM_ADDR_MASK
+            }
+            None => value == BAR_SIZE_PROBE_ALL_ONES,
+        }
     }
 
     pub(crate) fn pending_bar_reprogram(&self) -> Vec<BarReprogrammingParams> {
@@ -1335,5 +1355,75 @@ mod unit_tests {
         assert_eq!(class_code, 0x04);
         assert_eq!(subclass, 0x01);
         assert_eq!(prog_if, 0x5a);
+    }
+
+    #[test]
+    fn mem_bar_size_probe_ignores_all_address_bits_set() {
+        let mut cfg = PciConfiguration::new(
+            0x1234,
+            0x5678,
+            0x1,
+            PciClassCode::MultimediaController,
+            &PciMultimediaSubclass::AudioController,
+            None,
+            PciHeaderType::Device,
+            0xABCD,
+            0x2468,
+            None,
+            None,
+        );
+        let bar_addr = 0xc000_0000;
+        let bar = PciBarConfiguration::new(
+            0,
+            0x80000,
+            PciBarRegionType::Memory32BitRegion,
+            PciBarPrefetchable::NotPrefetchable,
+        )
+        .set_address(bar_addr);
+
+        cfg.add_pci_bar(&bar).unwrap();
+        cfg.write_reg(COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK);
+
+        let reprogram = cfg.write_config_register(BAR0_REG, 0, &0xffff_fff0u32.to_le_bytes());
+
+        assert!(reprogram.is_empty());
+        assert_eq!(cfg.read_reg(BAR0_REG), 0xfff8_0000);
+        assert_eq!(cfg.get_bar_addr(0), bar_addr);
+    }
+
+    #[test]
+    fn unused_bar_size_probe_does_not_reprogram_previous_bar() {
+        let mut cfg = PciConfiguration::new(
+            0x1234,
+            0x5678,
+            0x1,
+            PciClassCode::MultimediaController,
+            &PciMultimediaSubclass::AudioController,
+            None,
+            PciHeaderType::Device,
+            0xABCD,
+            0x2468,
+            None,
+            None,
+        );
+        let bar_addr = 0xc000_0000;
+        let bar = PciBarConfiguration::new(
+            0,
+            0x80000,
+            PciBarRegionType::Memory32BitRegion,
+            PciBarPrefetchable::NotPrefetchable,
+        )
+        .set_address(bar_addr);
+
+        cfg.add_pci_bar(&bar).unwrap();
+
+        cfg.write_config_register(BAR0_REG, 0, &BAR_SIZE_PROBE_ALL_ONES.to_le_bytes());
+        cfg.write_config_register(BAR0_REG + 1, 0, &BAR_SIZE_PROBE_ALL_ONES.to_le_bytes());
+        cfg.write_config_register(BAR0_REG, 0, &(bar_addr as u32).to_le_bytes());
+        let reprogram =
+            cfg.write_config_register(COMMAND_REG, 0, &COMMAND_REG_MEMORY_SPACE_MASK.to_le_bytes());
+
+        assert!(reprogram.is_empty());
+        assert_eq!(cfg.get_bar_addr(0), bar_addr);
     }
 }

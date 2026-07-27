@@ -8,7 +8,9 @@ use std::sync::Arc;
 
 use smallvec::SmallVec;
 use vm_memory::bitmap::Bitmap;
-use vm_memory::{Address, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap};
+use vm_memory::{
+    Address, Bytes, GuestAddress, GuestMemoryBackend, GuestMemoryError, GuestMemoryMmap,
+};
 
 trait GuestMemoryTargetOwner: Send + Sync {
     fn iovec_for_range(

@@ -14,7 +14,7 @@ use rate_limiter::{RateLimiter, TokenType};
 use thiserror::Error;
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
 use vm_memory::bitmap::Bitmap;
-use vm_memory::{Bytes, GuestAddress, GuestMemory};
+use vm_memory::{Bytes, GuestAddress, GuestMemoryBackend};
 use vm_virtio::{AccessPlatform, Translatable};
 
 use super::{Tap, register_listener, unregister_listener, vnet_hdr_len};

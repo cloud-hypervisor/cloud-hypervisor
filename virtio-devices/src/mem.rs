@@ -29,8 +29,8 @@ use thiserror::Error;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
-    GuestMemoryError, GuestMemoryLoadGuard, GuestMemoryRegion,
+    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
+    GuestMemoryBackend, GuestMemoryError, GuestMemoryLoadGuard, GuestMemoryRegion,
 };
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};

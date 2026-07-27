@@ -17,6 +17,7 @@ use std::{io, result};
 
 pub use aio_data_io::AioDataIo;
 pub use completion::AsyncIoCompletion;
+pub(crate) use completion::SyncCompletionQueue;
 pub use guest_memory_target::GuestMemoryTarget;
 pub use operation::AsyncIoOperation;
 pub use owned_io_buffer::OwnedIoBuffer;
@@ -41,6 +42,9 @@ pub enum DiskFileError {
     /// Resize failed
     #[error("Resize failed")]
     ResizeError(#[source] io::Error),
+    /// Flushing cached metadata failed
+    #[error("Flushing cached metadata failed")]
+    SyncMetadata(#[source] io::Error),
     #[error("Failed cloning disk file")]
     Clone(#[source] io::Error),
 }

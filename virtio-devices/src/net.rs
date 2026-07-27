@@ -656,7 +656,7 @@ impl Net {
         ip_addr: Option<IpAddr>,
         netmask: Option<IpAddr>,
         guest_mac: Option<MacAddr>,
-        host_mac: &mut Option<MacAddr>,
+        host_mac: Option<MacAddr>,
         mtu: Option<u16>,
         access_platform_enabled: bool,
         num_queues: usize,

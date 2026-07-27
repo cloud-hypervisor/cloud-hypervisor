@@ -33,7 +33,7 @@ use log::{debug, error, info};
 pub use smbios::{SmbiosChassisConfig, SmbiosConfig, SmbiosSystem};
 use thiserror::Error;
 use vm_memory::{
-    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
+    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend,
     GuestMemoryRegion,
 };
 use vmm_sys_util::fam;
@@ -1030,9 +1030,9 @@ pub fn configure_vcpu(
 
 /// Returns a Vec of the valid memory addresses.
 ///
-/// These should be used to configure the GuestMemory structure for the platform.
-/// For x86_64 all addresses are valid from the start of the kernel except a
-/// carve out at the end of 32bit address space.
+/// These should be used to configure the GuestMemoryBackend structure for the
+/// platform. For x86_64 all addresses are valid from the start of the kernel
+/// except a carve out at the end of 32bit address space.
 pub fn arch_memory_regions() -> Vec<(GuestAddress, usize, RegionType)> {
     vec![
         // 0 GiB ~ 3GiB: memory before the gap
@@ -1116,14 +1116,14 @@ type RamRange = (u64, u64);
 /// These should be used to create e820_RAM memory maps
 pub fn generate_ram_ranges(guest_mem: &GuestMemoryMmap) -> super::Result<Vec<RamRange>> {
     // Merge continuous memory regions into one region.
-    // Note: memory regions from "GuestMemory" are sorted and non-zero sized.
+    // Note: memory regions from "GuestMemoryBackend" are sorted and non-zero sized.
     let ram_regions = {
         let mut ram_regions = Vec::new();
         let mut current_start = guest_mem
             .iter()
             .next()
             .map(GuestMemoryRegion::start_addr)
-            .expect("GuestMemory must have one memory region at least")
+            .expect("GuestMemoryBackend must have one memory region at least")
             .raw_value();
         let mut current_end = current_start;
 
@@ -1392,7 +1392,7 @@ fn add_e820_entry(
 
     params.e820_table[params.e820_entries as usize].addr = addr;
     params.e820_table[params.e820_entries as usize].size = size;
-    params.e820_table[params.e820_entries as usize].type_ = mem_type;
+    params.e820_table[params.e820_entries as usize].r#type = mem_type;
     params.e820_entries += 1;
 
     Ok(())
@@ -1688,7 +1688,7 @@ mod unit_tests {
         let e820_table = [(boot_e820_entry {
             addr: 0x1,
             size: 4,
-            type_: 1,
+            r#type: 1,
         }); 128];
 
         let expected_params = boot_params {
@@ -1702,7 +1702,7 @@ mod unit_tests {
             &mut params,
             e820_table[0].addr,
             e820_table[0].size,
-            e820_table[0].type_,
+            e820_table[0].r#type,
         )
         .unwrap();
         assert_eq!(
@@ -1718,7 +1718,7 @@ mod unit_tests {
             &mut params,
             e820_table[0].addr,
             e820_table[0].size,
-            e820_table[0].type_,
+            e820_table[0].r#type,
         )
         .unwrap_err();
     }

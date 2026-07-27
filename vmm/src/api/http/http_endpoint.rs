@@ -35,9 +35,11 @@
 //! [special HTTP library]: https://github.com/firecracker-microvm/micro-http
 
 use std::fs::File;
+use std::os::fd::IntoRawFd;
 use std::result;
 use std::sync::mpsc::Sender;
 
+use log::error;
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -50,8 +52,8 @@ use crate::api::{
     AddDisk, ApiAction, ApiError, ApiRequest, DeviceConfig, NetConfig, VmAddDevice, VmAddFs,
     VmAddGenericVhostUser, VmAddNet, VmAddPmem, VmAddUserDevice, VmAddVdpa, VmAddVsock, VmBoot,
     VmConfig, VmCounters, VmDelete, VmNmi, VmPause, VmPowerButton, VmReboot, VmReceiveMigration,
-    VmRemoveDevice, VmResize, VmResizeDisk, VmResizeZone, VmRestore, VmResume, VmSendMigration,
-    VmShutdown, VmSnapshot, VmUffdAttach,
+    VmReceiveMigrationData, VmRemoveDevice, VmResize, VmResizeDisk, VmResizeZone, VmRestore,
+    VmResume, VmSendMigration, VmShutdown, VmSnapshot, VmUffdAttach,
 };
 use crate::config::RestoreConfig;
 use crate::cpu::Error as CpuError;
@@ -121,7 +123,7 @@ mod fds_helper {
         use std::slice::from_ref;
 
         use super::{ConfigWithFDs, ConfigWithVariableFDs};
-        use crate::config::RestoredNetConfig;
+        use crate::config::{RestoredNetConfig, RestoredVfioConfig};
         use crate::vm_config::{DeviceConfig, NetConfig};
 
         impl ConfigWithFDs for NetConfig {
@@ -173,6 +175,26 @@ mod fds_helper {
         impl ConfigWithVariableFDs for RestoredNetConfig {
             fn expected_num_fds(&self) -> usize {
                 self.num_fds
+            }
+        }
+
+        impl ConfigWithFDs for RestoredVfioConfig {
+            fn id(&self) -> Option<&str> {
+                Some(self.id.as_str())
+            }
+
+            fn fds_from_http_body(&self) -> Option<&[RawFd]> {
+                self.fd.as_ref().map(from_ref)
+            }
+
+            fn set_fds(&mut self, fds: Option<Vec<RawFd>>) {
+                self.fd = fds.and_then(|mut v| v.pop());
+            }
+        }
+
+        impl ConfigWithVariableFDs for RestoredVfioConfig {
+            fn expected_num_fds(&self) -> usize {
+                1
             }
         }
     }
@@ -463,7 +485,6 @@ vm_action_put_handler_body!(VmRemoveDevice);
 vm_action_put_handler_body!(VmResizeDisk);
 vm_action_put_handler_body!(VmResizeZone);
 vm_action_put_handler_body!(VmSnapshot);
-vm_action_put_handler_body!(VmReceiveMigration);
 vm_action_put_handler_body!(VmSendMigration);
 
 // Custom handler (rather than vm_action_put_handler_body!) so a re-attach
@@ -597,10 +618,37 @@ impl PutHandler for VmRestore {
         if let Some(body) = body {
             let mut restore_cfg: RestoreConfig = serde_json::from_slice(body.raw())?;
 
+            let net_total: usize = restore_cfg
+                .net_fds
+                .iter()
+                .flatten()
+                .map(|c| c.num_fds)
+                .sum();
+            let vfio_total = restore_cfg.vfio_fds.as_ref().map_or(0, |c| c.len());
+            let iommufd_total = usize::from(restore_cfg.vfio_fds.is_some());
+            let expected = net_total + vfio_total + iommufd_total;
+            if files.len() != expected {
+                error!(
+                    "Expected {expected} FDs in VmRestore request, received {}",
+                    files.len()
+                );
+                return Err(HttpError::BadRequest);
+            }
+
+            // Split in the order net_fds, then vfio_fds, then the iommufd FD.
+            let mut files = files;
             if let Some(cfgs) = restore_cfg.net_fds.as_mut() {
+                let net_files: Vec<File> = files.drain(..net_total).collect();
                 let mut cfgs = cfgs.iter_mut().collect::<Vec<&mut _>>();
-                let cfgs = cfgs.as_mut_slice();
-                attach_fds_to_cfgs(files, cfgs)?;
+                attach_fds_to_cfgs(net_files, cfgs.as_mut_slice())?;
+            }
+            if let Some(cfgs) = restore_cfg.vfio_fds.as_mut() {
+                let vfio_files: Vec<File> = files.drain(..vfio_total).collect();
+                let mut cfgs = cfgs.iter_mut().collect::<Vec<&mut _>>();
+                attach_fds_to_cfgs(vfio_files, cfgs.as_mut_slice())?;
+            }
+            if restore_cfg.vfio_fds.is_some() {
+                restore_cfg.iommufd_fd = Some(files.remove(0).into_raw_fd());
             }
 
             self.send(api_notifier, api_sender, restore_cfg)
@@ -612,6 +660,54 @@ impl PutHandler for VmRestore {
 }
 
 impl GetHandler for VmRestore {}
+
+// Custom handler so the SCM_RIGHTS file pool can be split the same way
+// VmRestore does, cdev FDs for the vfio_fds entries then the iommufd FD.
+impl PutHandler for VmReceiveMigration {
+    fn handle_request(
+        &'static self,
+        api_notifier: EventFd,
+        api_sender: Sender<ApiRequest>,
+        body: &Option<Body>,
+        files: Vec<File>,
+    ) -> result::Result<Option<Body>, HttpError> {
+        if let Some(body) = body {
+            let mut data: VmReceiveMigrationData = serde_json::from_slice(body.raw())?;
+
+            let vfio_total = data.vfio_fds.as_ref().map_or(0, |c| c.len());
+            let expected = if data.vfio_fds.is_some() {
+                vfio_total + 1
+            } else {
+                0
+            };
+            if files.len() != expected {
+                error!(
+                    "Expected {expected} FDs in VmReceiveMigration request, received {}",
+                    files.len()
+                );
+                return Err(HttpError::BadRequest);
+            }
+
+            // Split in the order vfio_fds, then the iommufd FD.
+            let mut files = files;
+            if let Some(cfgs) = data.vfio_fds.as_mut() {
+                let vfio_files: Vec<File> = files.drain(..vfio_total).collect();
+                let mut cfgs = cfgs.iter_mut().collect::<Vec<&mut _>>();
+                attach_fds_to_cfgs(vfio_files, cfgs.as_mut_slice())?;
+            }
+            if data.vfio_fds.is_some() {
+                data.iommufd_fd = Some(files.remove(0).into_raw_fd());
+            }
+
+            self.send(api_notifier, api_sender, data)
+                .map_err(HttpError::ApiError)
+        } else {
+            Err(HttpError::BadRequest)
+        }
+    }
+}
+
+impl GetHandler for VmReceiveMigration {}
 
 // Common handler for boot, shutdown and reboot
 pub struct VmActionHandler {

@@ -21,7 +21,7 @@ use vhost::{VhostBackend, VringConfigData};
 use virtio_queue::desc::RawDescriptor;
 use virtio_queue::{Queue, QueueT};
 use vm_device::dma_mapping::ExternalDmaMapping;
-use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
+use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
@@ -112,7 +112,7 @@ pub struct Vdpa {
     id: String,
     vhost: Option<VhostKernVdpa<GuestMemoryAtomic<GuestMemoryMmap>>>,
     iova_range: VhostVdpaIovaRange,
-    enabled_queues: BTreeMap<usize, bool>,
+    enabled_queues: BTreeMap<u16, bool>,
     backend_features: u64,
     migrating: bool,
 }
@@ -209,7 +209,7 @@ impl Vdpa {
                 self.vhost
                     .as_ref()
                     .unwrap()
-                    .set_vring_enable(*queue_index, enable)
+                    .set_vring_enable(*queue_index as usize, enable)
                     .map_err(Error::SetVringEnable)?;
                 *enabled = enable;
             }
@@ -222,7 +222,7 @@ impl Vdpa {
         &mut self,
         _mem: &GuestMemoryMmap,
         virtio_interrupt: &dyn VirtioInterrupt,
-        queues: &[(usize, Queue, EventFd)],
+        queues: &[(u16, Queue, EventFd)],
     ) -> Result<()> {
         assert!(self.vhost.is_some());
         self.vhost
@@ -242,7 +242,7 @@ impl Vdpa {
             self.vhost
                 .as_ref()
                 .unwrap()
-                .set_vring_num(*queue_index, queue_size)
+                .set_vring_num(*queue_index as usize, queue_size)
                 .map_err(Error::SetVringNum)?;
 
             let config_data = VringConfigData {
@@ -276,28 +276,28 @@ impl Vdpa {
             self.vhost
                 .as_ref()
                 .unwrap()
-                .set_vring_addr(*queue_index, &config_data)
+                .set_vring_addr(*queue_index as usize, &config_data)
                 .map_err(Error::SetVringAddr)?;
             self.vhost
                 .as_ref()
                 .unwrap()
-                .set_vring_base(*queue_index, 0)
+                .set_vring_base(*queue_index as usize, 0)
                 .map_err(Error::SetVringBase)?;
 
             if let Some(eventfd) =
-                virtio_interrupt.notifier(VirtioInterruptType::Queue(*queue_index as u16))
+                virtio_interrupt.notifier(VirtioInterruptType::Queue(*queue_index))
             {
                 self.vhost
                     .as_ref()
                     .unwrap()
-                    .set_vring_call(*queue_index, &eventfd)
+                    .set_vring_call(*queue_index as usize, &eventfd)
                     .map_err(Error::SetVringCall)?;
             }
 
             self.vhost
                 .as_ref()
                 .unwrap()
-                .set_vring_kick(*queue_index, queue_evt)
+                .set_vring_kick(*queue_index as usize, queue_evt)
                 .map_err(Error::SetVringKick)?;
 
             self.enabled_queues.insert(*queue_index, false);
@@ -564,7 +564,10 @@ impl<M: GuestAddressSpace> VdpaDmaMapping<M> {
     }
 }
 
-impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VdpaDmaMapping<M> {
+impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VdpaDmaMapping<M>
+where
+    M::M: GuestMemoryBackend,
+{
     fn map(&self, iova: u64, gpa: u64, size: u64) -> result::Result<(), io::Error> {
         let usize_size = size.try_into().unwrap();
         let mem = self.memory.memory();

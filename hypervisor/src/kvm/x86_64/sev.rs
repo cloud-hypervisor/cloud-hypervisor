@@ -23,8 +23,6 @@ const KVM_SEV_INIT2: u32 = 22;
 const KVM_SEV_SNP_LAUNCH_START: u32 = 100;
 const KVM_SEV_SNP_LAUNCH_UPDATE: u32 = 101;
 const KVM_SEV_SNP_LAUNCH_FINISH: u32 = 102;
-// SNP_LAUNCH_UPDATE page types — linux/arch/x86/include/uapi/asm/sev-guest.h
-pub const SNP_PAGE_TYPE_VMSA: u32 = 2;
 
 // See AMD Spec Section 8.17 — SNP_LAUNCH_UPDATE
 // The last 12 bits are metadata about the guest context

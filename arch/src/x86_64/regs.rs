@@ -12,7 +12,7 @@ use hypervisor::arch::x86::gdt::{gdt_entry, segment_from_gdt};
 use hypervisor::arch::x86::regs::CR0_PE;
 use hypervisor::arch::x86::{FpuState, SpecialRegisters};
 use thiserror::Error;
-use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError};
+use vm_memory::{Address, Bytes, GuestMemoryBackend, GuestMemoryError};
 
 use crate::layout::{
     BOOT_GDT_START, BOOT_IDT_START, BOOT_STACK_POINTER, PVH_INFO_START, ZERO_PAGE_START,

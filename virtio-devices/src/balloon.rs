@@ -30,8 +30,8 @@ use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
 use vm_allocator::page_size::{align_page_size_down, get_page_size};
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
-    GuestMemoryError, GuestMemoryRegion,
+    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
+    GuestMemoryBackend, GuestMemoryError, GuestMemoryRegion,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
@@ -81,7 +81,7 @@ pub enum Error {
     #[error("Madvise fail.")]
     MadviseFail(#[source] io::Error),
     #[error("Invalid queue index: {0}")]
-    InvalidQueueIndex(usize),
+    InvalidQueueIndex(u16),
     #[error("Failed to signal")]
     FailedSignal(#[source] io::Error),
     #[error("Failed adding used index")]
@@ -270,10 +270,10 @@ impl BalloonEpollHandler {
         Ok(())
     }
 
-    fn process_queue(&mut self, queue_index: usize) -> result::Result<(), Error> {
+    fn process_queue(&mut self, queue_index: u16) -> result::Result<(), Error> {
         let mut used_descs = false;
         while let Some(mut desc_chain) =
-            self.queues[queue_index].pop_descriptor_chain(self.mem.memory())
+            self.queues[queue_index as usize].pop_descriptor_chain(self.mem.memory())
         {
             let data_chunk_size = size_of::<u32>();
 
@@ -348,14 +348,14 @@ impl BalloonEpollHandler {
                 }
             }
 
-            self.queues[queue_index]
+            self.queues[queue_index as usize]
                 .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
                 .map_err(Error::QueueAddUsed)?;
             used_descs = true;
         }
 
         if used_descs {
-            self.signal(VirtioInterruptType::Queue(queue_index as u16))
+            self.signal(VirtioInterruptType::Queue(queue_index))
         } else {
             Ok(())
         }

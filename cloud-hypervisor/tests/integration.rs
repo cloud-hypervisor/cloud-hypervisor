@@ -9,7 +9,7 @@
 // related warnings for our quality workflow to pass.
 #![allow(dead_code)]
 use std::fs::{File, OpenOptions, copy};
-use std::io::{Read, Seek, Write};
+use std::io::{BufRead, BufReader, Read, Seek, Write};
 #[cfg(not(feature = "mshv"))]
 use std::net::TcpListener;
 use std::os::unix::io::AsRawFd;
@@ -3436,6 +3436,71 @@ mod common_parallel {
         let guest =
             basic_regular_guest!(JAMMY_IMAGE_NAME).with_memory(&format!("{guest_memory_size_kb}K"));
         _test_memory_overhead(&guest, guest_memory_size_kb);
+    }
+
+    #[test]
+    fn test_memory_prefault() {
+        let guest_memory_region_sizes_kb = [128 * 1024, 128 * 1024];
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let mut child = GuestCommand::new(&guest)
+            .default_cpus()
+            .args(["--memory", "size=0"])
+            .args([
+                "--memory-zone",
+                "id=mem0,size=128M,prefault=on",
+                "id=mem1,size=128M,prefault=on",
+            ])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            let smaps = File::open(format!("/proc/{}/smaps", child.id())).unwrap();
+            let reader = BufReader::new(smaps);
+            let mut remaining_region_sizes = guest_memory_region_sizes_kb.to_vec();
+            let mut guest_memory_mapping = None;
+            let mut rss = 0;
+
+            for line in reader.lines() {
+                let line = line.unwrap();
+                if line.starts_with("Size:") {
+                    let size: u32 = line.split_whitespace().nth(1).unwrap().parse().unwrap();
+                    guest_memory_mapping = remaining_region_sizes.iter().position(|&s| s == size);
+                } else if let Some(index) = guest_memory_mapping
+                    && line.starts_with("Rss:")
+                {
+                    rss += line
+                        .split_whitespace()
+                        .nth(1)
+                        .unwrap()
+                        .parse::<u32>()
+                        .unwrap();
+                    remaining_region_sizes.swap_remove(index);
+                    guest_memory_mapping = None;
+                }
+            }
+
+            assert!(
+                remaining_region_sizes.is_empty(),
+                "Could not find guest memory mappings of {remaining_region_sizes:?} KiB"
+            );
+            assert_eq!(
+                rss,
+                guest_memory_region_sizes_kb.iter().sum::<u32>(),
+                "Guest memory was not fully populated"
+            );
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
     }
 
     #[test]
@@ -8451,6 +8516,12 @@ mod ivshmem {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_restore_offload_preserve_source() {
+        snapshot_restore_common::_test_snapshot_restore_offload_preserve_source();
+    }
+
+    #[test]
     fn test_virtio_pmem_persist_writes() {
         test_virtio_pmem(false, false);
     }
@@ -9439,6 +9510,208 @@ mod snapshot_restore_common {
 
         let _ = remove_dir_all(offload_dir.as_str());
     }
+
+    // Offload snapshot with the source VM preserved.
+    pub(crate) fn _test_snapshot_restore_offload_preserve_source() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        let offload_dir = String::from(
+            guest
+                .tmp_dir
+                .as_path()
+                .join("offload-store")
+                .to_str()
+                .unwrap(),
+        );
+        fs::create_dir(&offload_dir).unwrap();
+        let snapshot_socket = String::from(
+            guest
+                .tmp_dir
+                .as_path()
+                .join("snapshot-offload.sock")
+                .to_str()
+                .unwrap(),
+        );
+
+        // Second round uses its own dir and socket to avoid path contention.
+        let offload_dir2 = String::from(
+            guest
+                .tmp_dir
+                .as_path()
+                .join("offload-store2")
+                .to_str()
+                .unwrap(),
+        );
+        fs::create_dir(&offload_dir2).unwrap();
+        let snapshot_socket2 = String::from(
+            guest
+                .tmp_dir
+                .as_path()
+                .join("snapshot-offload2.sock")
+                .to_str()
+                .unwrap(),
+        );
+
+        let num_queues = 2;
+        let (mut blk_daemon_child, vubd_socket_path) =
+            prepare_vubd(&guest.tmp_dir, "blk.img", num_queues, false, false);
+
+        let blk_params = format!(
+            "vhost_user=true,socket={vubd_socket_path},num_queues={num_queues},queue_size=128",
+        );
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket])
+            .args(["--cpus", "boot=2"])
+            .args(["--memory", "size=512M,shared=on"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
+                "--disk",
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+                .as_str(),
+                blk_params.as_str(),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let snap_daemon: Mutex<Option<Child>> = Mutex::new(None);
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
+
+            // The vhost-user-block device shows up as /dev/vdc (after the OS and
+            // cloud-init disks).
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep -c vdc")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            // Read the whole block device with direct I/O so the request always
+            // reaches the backend rather than the guest page cache.
+            let read_vhost_user_blk = || {
+                assert_eq!(
+                    guest
+                        .ssh_command(
+                            "sudo dd if=/dev/vdc of=/dev/null bs=1M count=16 iflag=direct \
+                             > /dev/null 2>&1 && echo ok"
+                        )
+                        .unwrap()
+                        .trim(),
+                    "ok"
+                );
+            };
+
+            // Baseline read before any snapshot.
+            read_vhost_user_blk();
+
+            // Snapshot the paused source, resume and prove the vhost-user-block
+            // device still serves I/O.
+            let snapshot_round = |snapshot_socket: &str, offload_dir: &str| {
+                // Daemon binds the socket and listens for the snapshot.
+                let daemon = Command::new(clh_command("offload_daemon"))
+                    .args([
+                        "snapshot",
+                        "--socket",
+                        snapshot_socket,
+                        "--output-dir",
+                        offload_dir,
+                    ])
+                    .stderr(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .spawn()
+                    .unwrap();
+                *snap_daemon.lock().unwrap() = Some(daemon);
+                assert!(wait_until(Duration::from_secs(5), || Path::new(
+                    snapshot_socket
+                )
+                .exists()));
+
+                // Pause, then snapshot while asking to preserve the source.
+                assert!(remote_command(&api_socket, "pause", None));
+                assert!(remote_command(
+                    &api_socket,
+                    "send-migration",
+                    Some(
+                        format!(
+                            "destination_url=unix:{snapshot_socket},local=on,preserve_source=on"
+                        )
+                        .as_str(),
+                    ),
+                ));
+
+                // The daemon should exit cleanly after persisting the snapshot.
+                let daemon_output = snap_daemon
+                    .lock()
+                    .unwrap()
+                    .take()
+                    .unwrap()
+                    .wait_with_output()
+                    .unwrap();
+                assert!(
+                    daemon_output.status.success(),
+                    "offload daemon (snapshot) failed: stderr={}",
+                    String::from_utf8_lossy(&daemon_output.stderr)
+                );
+
+                // The source VMM must not have exited.
+                thread::sleep(Duration::from_secs(2));
+                assert!(
+                    remote_command(&api_socket, "ping", None),
+                    "source VMM exited after preserve_source snapshot"
+                );
+
+                // The VM must be left paused, and be resumable.
+                assert_eq!(vm_state(&api_socket), "Paused");
+                assert!(remote_command(&api_socket, "resume", None));
+                assert_eq!(vm_state(&api_socket), "Running");
+
+                // A direct read succeeds only if the vhost-user-block vrings
+                // resumed after the snapshot.
+                guest.wait_for_ssh(Duration::from_secs(30)).unwrap();
+                read_vhost_user_blk();
+            };
+
+            // Exercises the device state save and resume path.
+            snapshot_round(&snapshot_socket, &offload_dir);
+            // Second round proves vring re-initialization stays correct across
+            // repeated snapshots, otherwise the second save would capture
+            // mismatched bases and resume would fail.
+            snapshot_round(&snapshot_socket2, &offload_dir2);
+        });
+
+        if let Some(mut daemon) = snap_daemon.into_inner().unwrap() {
+            let _ = daemon.kill();
+            let _ = daemon.wait();
+        }
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        let _ = blk_daemon_child.kill();
+        let _ = blk_daemon_child.wait();
+        let _ = fs::remove_file(&snapshot_socket);
+        let _ = fs::remove_file(&snapshot_socket2);
+        let _ = remove_dir_all(offload_dir.as_str());
+        let _ = remove_dir_all(offload_dir2.as_str());
+        handle_child_output(r, &output);
+    }
 }
 
 mod common_sequential {
@@ -9502,7 +9775,7 @@ mod common_sequential {
                 Ipv4Addr::from_str(&guest.network.host_ip0).unwrap(),
             )),
             None,
-            &mut None,
+            None,
             None,
             num_queue_pairs,
             Some(libc::O_RDWR | libc::O_NONBLOCK),
@@ -9606,7 +9879,7 @@ mod common_sequential {
                 Ipv4Addr::from_str(&guest.network.host_ip0).unwrap(),
             )),
             None,
-            &mut None,
+            None,
             None,
             num_queue_pairs,
             Some(libc::O_RDWR | libc::O_NONBLOCK),

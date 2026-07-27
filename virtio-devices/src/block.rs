@@ -1327,6 +1327,14 @@ impl Pausable for Block {
         let result = self
             .wait_for_active_requests()
             .map_err(MigratableError::Pause)
+            .and_then(|()| {
+                // Flush cached format metadata (e.g. qcow2 L2/refcount tables) so
+                // the on-disk image is self-consistent while paused: snapshot
+                // copies and migration disk-lock handoff read the file directly.
+                self.disk_image.sync_metadata().map_err(|e| {
+                    MigratableError::Pause(anyhow::Error::new(e).context("sync disk metadata"))
+                })
+            })
             .and_then(|()| self.common.pause());
 
         self.draining_active_requests.store(false, Ordering::SeqCst);

@@ -22,7 +22,8 @@ use std::ops::Deref;
 use byteorder::{ByteOrder, LittleEndian};
 use virtio_queue::DescriptorChain;
 use vm_memory::{
-    Address, Bytes, GuestAddress, GuestMemory, ReadVolatile, VolatileMemoryError, WriteVolatile,
+    Address, Bytes, GuestAddress, GuestMemoryBackend, ReadVolatile, VolatileMemoryError,
+    WriteVolatile,
 };
 use vm_virtio::AccessPlatform;
 use vm_virtio::checked_descriptor::DescriptorChainExt;
@@ -502,7 +503,7 @@ impl VsockPacket {
 
     /// Writes the local copy of the packet header to the guest memory.
     ///
-    pub fn commit_hdr<M: GuestMemory>(&mut self, guest_mem: &M) -> Result<()> {
+    pub fn commit_hdr<M: GuestMemoryBackend>(&mut self, guest_mem: &M) -> Result<()> {
         self.validate_len()?;
 
         guest_mem

@@ -24,7 +24,7 @@ use virtio_bindings::virtio_blk::{
 use virtio_queue::DescriptorChain;
 use vm_memory::bitmap::Bitmap;
 use vm_memory::{
-    Address as _, Bytes as _, GuestAddress, GuestMemory as _, GuestMemoryError,
+    Address as _, Bytes as _, GuestAddress, GuestMemoryBackend as _, GuestMemoryError,
     GuestMemoryLoadGuard,
 };
 use vm_virtio::AccessPlatform;

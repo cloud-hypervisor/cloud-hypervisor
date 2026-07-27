@@ -16,7 +16,7 @@ use block::ImageType;
 use clap::ArgMatches;
 use log::{debug, warn};
 use option_parser::{
-    ByteSized, IntegerList, OptionParser, OptionParserError, StringList, Toggle, Tuple,
+    ByteSized, IntegerList, OptionParser, OptionParserError, StringList, Toggle, Tuple, TupleList,
 };
 use pci::NUM_DEVICE_IDS;
 use serde::{Deserialize, Serialize};
@@ -391,6 +391,12 @@ pub enum ValidationError {
     /// Number of FDs passed during Restore are incorrect to the NetConfig
     #[error("Number of Net FDs passed for '{0}' during Restore: {1}. Expected: {2}")]
     RestoreNetFdCountMismatch(String, usize, usize),
+    /// vfio_fds entry does not match any DeviceConfig.id in the snapshot
+    #[error("VFIO device id '{0}' in 'vfio_fds' does not match any device in the snapshot")]
+    RestoreUnknownVfioId(String),
+    /// A device saved with an FD has no replacement FD for the restore
+    #[error("VFIO device '{0}' was FD backed and needs a new fd in 'vfio_fds'")]
+    RestoreMissingVfioFd(String),
     /// Prefault cannot be combined with on-demand restore
     #[error("'prefault' cannot be combined with 'memory_restore_mode=ondemand'")]
     InvalidRestorePrefaultWithOnDemand,
@@ -434,6 +440,12 @@ pub enum ValidationError {
     /// Invalid to set both 'mergeable' and 'shared' for memory
     #[error("Invalid to set both 'mergeable' and 'shared' for memory")]
     InvalidSharedMemoryWithMergeable,
+    /// More than one update was specified for one or more MemoryZone
+    #[error("Multiple updates for the same zone defined")]
+    MultipleMemoryZoneUpdates,
+    /// More than one update was specified that contains an empty memory zone ID
+    #[error("At least one memory zone update with an empty ID was defined")]
+    MemoryZoneUpdatesEmptyId,
 }
 
 type ValidationResult<T> = result::Result<T, ValidationError>;
@@ -745,11 +757,11 @@ impl CpusConfig {
             .map_err(Error::ParseCpus)?
             .unwrap_or(DEFAULT_MAX_PHYS_BITS);
         let affinity = parser
-            .convert::<Tuple<u32, Vec<usize>>>("affinity")
+            .convert::<TupleList<u32, Vec<usize>>>("affinity")
             .map_err(Error::ParseCpus)?
             .map(|v| {
                 v.0.iter()
-                    .map(|(e1, e2)| CpuAffinity {
+                    .map(|Tuple(e1, e2)| CpuAffinity {
                         vcpu: *e1,
                         host_cpus: e2.clone().into_boxed_slice(),
                     })
@@ -1549,11 +1561,11 @@ impl DiskConfig {
             .unwrap_or_default();
         let serial = parser.get("serial");
         let queue_affinity = parser
-            .convert::<Tuple<u16, Vec<usize>>>("queue_affinity")
+            .convert::<TupleList<u16, Vec<usize>>>("queue_affinity")
             .map_err(Error::ParseDisk)?
             .map(|v| {
                 v.0.iter()
-                    .map(|(e1, e2)| VirtQueueAffinity {
+                    .map(|Tuple(e1, e2)| VirtQueueAffinity {
                         queue_index: *e1,
                         host_cpus: e2.clone().into_boxed_slice(),
                     })
@@ -2674,11 +2686,11 @@ impl NumaConfig {
             .map_err(Error::ParseNuma)?
             .map(|v| v.0.iter().map(|e| *e as u32).collect());
         let distances = parser
-            .convert::<Tuple<u64, u64>>("distances")
+            .convert::<TupleList<u64, u64>>("distances")
             .map_err(Error::ParseNuma)?
             .map(|v| {
                 v.0.iter()
-                    .map(|(e1, e2)| NumaDistance {
+                    .map(|Tuple(e1, e2)| NumaDistance {
                         destination: *e1 as u32,
                         distance: *e2 as u8,
                     })
@@ -2822,6 +2834,35 @@ impl FromStr for MemoryRestoreMode {
     }
 }
 
+#[derive(Clone, Deserialize, Serialize, Debug, Eq, PartialEq)]
+/// Data required for updating memory zone <-> host NUMA node mappings.
+pub struct VmMemoryZoneUpdateData {
+    /// Id of the MemoryZone to update
+    pub id: String,
+    /// Host NUMA node to relocate the MemoryZone to
+    pub host_numa_node: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub struct RestoredVfioConfig {
+    pub id: String,
+    // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
+    #[serde(default, deserialize_with = "deserialize_restored_fd")]
+    pub fd: Option<i32>,
+}
+
+pub(crate) fn deserialize_restored_fd<'de, D>(d: D) -> result::Result<Option<i32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let invalid_fd: Option<i32> = Option::deserialize(d)?;
+    if invalid_fd.is_some() {
+        Ok(Some(-1))
+    } else {
+        Ok(None)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct RestoreConfig {
     pub source_url: PathBuf,
@@ -2832,19 +2873,34 @@ pub struct RestoreConfig {
     #[serde(default)]
     pub net_fds: Option<Vec<RestoredNetConfig>>,
     #[serde(default)]
+    pub vfio_fds: Option<Vec<RestoredVfioConfig>>,
+    // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
+    #[serde(default, deserialize_with = "deserialize_restored_fd")]
+    pub iommufd_fd: Option<i32>,
+    #[serde(default)]
     pub resume: bool,
+    #[serde(default)]
+    pub zone_updates: Vec<VmMemoryZoneUpdateData>,
 }
 
 impl RestoreConfig {
     pub const SYNTAX: &'static str = "Restore from a VM snapshot. \
         \nRestore parameters \"source_url=<source_url>,prefault=on|off,memory_restore_mode=copy|ondemand,\
-        net_fds=<list_of_net_ids_with_their_associated_fds>,resume=true|false\" \
+        net_fds=<list_of_net_ids_with_their_associated_fds>,\
+        vfio_fds=<list_of_vfio_ids_with_their_associated_fd>,iommufd_fd=<fd>,resume=true|false,\
+        zone_updates=<list_of_updates>\"
         \n`source_url` should be a valid URL (e.g file:///foo/bar or tcp://192.168.1.10/foo) \
         \n`prefault` controls eager prefaulting for the copy-based restore path (disabled by default) \
         \n`memory_restore_mode=copy` preserves the existing eager read-copy restore behavior, while `memory_restore_mode=ondemand` enables lazy demand paging and fails restore if userfaultfd support is unavailable \
         \n`net_fds` is a list of net ids with new file descriptors. \
         Only net devices backed by FDs directly are needed as input.\
-        \n `resume` controls whether the VM will be directly resumed after restore ";
+        \n`vfio_fds` is a list of VFIO device ids each paired with a new cdev file descriptor, \
+        e.g. vfio_fds=[vfio0@5,vfio1@6]. Use this to restore a VFIO device onto a different \
+        sysfs path or host. Requires `iommufd_fd`.\
+        \n`iommufd_fd` is a new iommufd file descriptor for the restored VM. \
+        The one saved in the snapshot does not survive serialization.\
+        \n `resume` controls whether the VM will be directly resumed after restore \
+        \n `zone_updates` can be used to update NUMA memory zones. Expects a list of elements in the form `id@host_numa_node`";
 
     pub fn parse(restore: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2853,7 +2909,10 @@ impl RestoreConfig {
             .add("prefault")
             .add("memory_restore_mode")
             .add("net_fds")
-            .add("resume");
+            .add("vfio_fds")
+            .add("iommufd_fd")
+            .add("resume")
+            .add("zone_updates");
         parser.parse(restore).map_err(Error::ParseRestore)?;
 
         let source_url = parser
@@ -2870,29 +2929,58 @@ impl RestoreConfig {
             .map_err(Error::ParseRestore)?
             .unwrap_or_default();
         let net_fds = parser
-            .convert::<Tuple<String, Vec<u64>>>("net_fds")
+            .convert::<TupleList<String, Vec<u64>>>("net_fds")
             .map_err(Error::ParseRestore)?
             .map(|v| {
                 v.0.iter()
-                    .map(|(id, fds)| RestoredNetConfig {
+                    .map(|Tuple(id, fds)| RestoredNetConfig {
                         id: id.clone(),
                         num_fds: fds.len(),
                         fds: Some(fds.iter().map(|e| *e as i32).collect()),
                     })
                     .collect()
             });
+        let vfio_fds = parser
+            .convert::<TupleList<String, u64>>("vfio_fds")
+            .map_err(Error::ParseRestore)?
+            .map(|v| {
+                v.0.iter()
+                    .map(|Tuple(id, fd)| RestoredVfioConfig {
+                        id: id.clone(),
+                        fd: Some(*fd as i32),
+                    })
+                    .collect()
+            });
+        let iommufd_fd = parser
+            .convert::<i32>("iommufd_fd")
+            .map_err(Error::ParseRestore)?;
         let resume = parser
             .convert::<Toggle>("resume")
             .map_err(Error::ParseRestore)?
             .unwrap_or(Toggle(false))
             .0;
 
+        let zone_updates: Vec<VmMemoryZoneUpdateData> = parser
+            .convert::<TupleList<String, u32>>("zone_updates")
+            .map_err(Error::ParseRestore)?
+            .map_or(Vec::new(), |v| {
+                v.0.iter()
+                    .map(|Tuple(id, host_numa_node)| VmMemoryZoneUpdateData {
+                        id: id.clone(),
+                        host_numa_node: *host_numa_node,
+                    })
+                    .collect()
+            });
+
         Ok(RestoreConfig {
             source_url,
             prefault,
             memory_restore_mode,
             net_fds,
+            vfio_fds,
+            iommufd_fd,
             resume,
+            zone_updates,
         })
     }
 
@@ -2939,8 +3027,68 @@ impl RestoreConfig {
             }
         }
 
+        let unique_zones = self
+            .zone_updates
+            .iter()
+            .map(|update| update.id.as_str())
+            .collect::<HashSet<_>>();
+        if self.zone_updates.len() != unique_zones.len() {
+            return Err(ValidationError::MultipleMemoryZoneUpdates);
+        }
+        if unique_zones.contains("") {
+            return Err(ValidationError::MemoryZoneUpdatesEmptyId);
+        }
+
         if !restored_net_with_fds.is_empty() {
             warn!("Ignoring unused 'net_fds' for VM restore.");
+        }
+
+        let vfio_fds = self.vfio_fds.as_deref().unwrap_or_default();
+        if !vfio_fds.is_empty() {
+            // Substituted devices become FD backed, which requires an
+            // externally supplied iommufd FD and the iommufd backend.
+            if self.iommufd_fd.is_none() {
+                return Err(ValidationError::VfioFdRequiresIommufdFd);
+            }
+            if !vm_config.platform.as_ref().is_some_and(|p| p.iommufd) {
+                return Err(ValidationError::IommufdFdRequiresIommufd);
+            }
+
+            let mut seen = HashSet::new();
+            for v in vfio_fds {
+                if !seen.insert(v.id.as_str()) {
+                    return Err(ValidationError::IdentifierNotUnique(v.id.clone()));
+                }
+            }
+
+            let known_ids: HashSet<&str> = vm_config
+                .devices
+                .iter()
+                .flatten()
+                .filter_map(|d| d.pci_common.id.as_deref())
+                .collect();
+            for v in vfio_fds {
+                if !known_ids.contains(v.id.as_str()) {
+                    return Err(ValidationError::RestoreUnknownVfioId(v.id.clone()));
+                }
+            }
+        }
+
+        // A device saved with an FD cannot reuse it, the snapshot carries no
+        // live descriptor. Each one needs a replacement in vfio_fds.
+        let substituted: HashSet<&str> = vfio_fds.iter().map(|v| v.id.as_str()).collect();
+        for d in vm_config.devices.iter().flatten() {
+            if d.fd.is_some()
+                && !d
+                    .pci_common
+                    .id
+                    .as_deref()
+                    .is_some_and(|id| substituted.contains(id))
+            {
+                return Err(ValidationError::RestoreMissingVfioFd(
+                    d.pci_common.id.clone().unwrap_or_default(),
+                ));
+            }
         }
 
         Ok(())
@@ -5140,7 +5288,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 prefault: false,
                 memory_restore_mode: MemoryRestoreMode::Copy,
                 net_fds: None,
+                vfio_fds: None,
+                iommufd_fd: None,
                 resume: false,
+                zone_updates: vec![],
             }
         );
         assert_eq!(
@@ -5163,7 +5314,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                         fds: Some(vec![5, 6, 7, 8]),
                     }
                 ]),
+                vfio_fds: None,
+                iommufd_fd: None,
                 resume: false,
+                zone_updates: vec![],
             }
         );
         assert_eq!(
@@ -5173,22 +5327,91 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 prefault: false,
                 memory_restore_mode: MemoryRestoreMode::OnDemand,
                 net_fds: None,
+                vfio_fds: None,
+                iommufd_fd: None,
                 resume: false,
+                zone_updates: vec![],
             }
         );
         assert_eq!(
-            RestoreConfig::parse("source_url=/path/to/snapshot,resume=on")?,
+            RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[zone1@1]")?,
             RestoreConfig {
                 source_url: PathBuf::from("/path/to/snapshot"),
                 prefault: false,
                 memory_restore_mode: MemoryRestoreMode::Copy,
                 net_fds: None,
+                vfio_fds: None,
+                iommufd_fd: None,
                 resume: true,
+                zone_updates: vec![VmMemoryZoneUpdateData {
+                    host_numa_node: 1,
+                    id: "zone1".to_string(),
+                }],
+            }
+        );
+        assert_eq!(
+            RestoreConfig::parse(
+                "source_url=/path/to/snapshot,vfio_fds=[vfio0@5,vfio1@6],iommufd_fd=7"
+            )?,
+            RestoreConfig {
+                source_url: PathBuf::from("/path/to/snapshot"),
+                prefault: false,
+                memory_restore_mode: MemoryRestoreMode::Copy,
+                net_fds: None,
+                vfio_fds: Some(vec![
+                    RestoredVfioConfig {
+                        id: "vfio0".to_string(),
+                        fd: Some(5),
+                    },
+                    RestoredVfioConfig {
+                        id: "vfio1".to_string(),
+                        fd: Some(6),
+                    },
+                ]),
+                iommufd_fd: Some(7),
+                resume: false,
+                zone_updates: vec![],
+            }
+        );
+        assert_eq!(
+            RestoreConfig::parse(
+                "source_url=/path/to/snapshot,vfio_fds=[vfio0@5,vfio1@6],iommufd_fd=7"
+            )?,
+            RestoreConfig {
+                source_url: PathBuf::from("/path/to/snapshot"),
+                prefault: false,
+                memory_restore_mode: MemoryRestoreMode::Copy,
+                net_fds: None,
+                vfio_fds: Some(vec![
+                    RestoredVfioConfig {
+                        id: "vfio0".to_string(),
+                        fd: Some(5),
+                    },
+                    RestoredVfioConfig {
+                        id: "vfio1".to_string(),
+                        fd: Some(6),
+                    },
+                ]),
+                iommufd_fd: Some(7),
+                resume: false,
+                zone_updates: vec![],
             }
         );
         // Parsing should fail as source_url is a required field
         RestoreConfig::parse("prefault=off").unwrap_err();
         RestoreConfig::parse("source_url=/path/to/snapshot,memory_restore_mode=bogus").unwrap_err();
+        RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[@1]")
+            .unwrap_err();
+        RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[@]")
+            .unwrap_err();
+        RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[id1@]")
+            .unwrap_err();
+        RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[id1 1]")
+            .unwrap_err();
+        RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=[[id1@1]]")
+            .unwrap_err();
+        RestoreConfig::parse("source_url=/path/to/snapshot,resume=on,zone_updates=id1@1")
+            .unwrap_err();
         Ok(())
     }
 
@@ -5207,6 +5430,17 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             .unwrap()
             .memory_restore_mode,
             MemoryRestoreMode::OnDemand
+        );
+        assert_eq!(
+            serde_json::from_str::<RestoreConfig>(
+                r#"{"source_url":"/path/to/snapshot","zone_updates":[{"id": "zone1", "host_numa_node": 1}]}"#
+            )
+            .unwrap()
+            .zone_updates,
+            vec![VmMemoryZoneUpdateData {
+                    host_numa_node: 1,
+                    id: "zone1".to_string(),
+                }],
         );
     }
 
@@ -5295,7 +5529,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                     fds: Some(vec![7, 8]),
                 },
             ]),
+            vfio_fds: None,
+            iommufd_fd: None,
             resume: false,
+            zone_updates: vec![],
         };
         valid_config.validate(&snapshot_vm_config).unwrap();
 
@@ -5360,7 +5597,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             prefault: false,
             memory_restore_mode: MemoryRestoreMode::Copy,
             net_fds: None,
+            vfio_fds: None,
+            iommufd_fd: None,
             resume: false,
+            zone_updates: vec![],
         };
         snapshot_vm_config.net = Some(vec![NetConfig {
             pci_common: PciDeviceCommonConfig {
@@ -5377,11 +5617,172 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             prefault: true,
             memory_restore_mode: MemoryRestoreMode::OnDemand,
             net_fds: None,
+            vfio_fds: None,
+            iommufd_fd: None,
             resume: false,
+            zone_updates: vec![],
         };
         assert_eq!(
             invalid_restore_mode.validate(&snapshot_vm_config),
             Err(ValidationError::InvalidRestorePrefaultWithOnDemand)
+        );
+
+        // It is invalid to submit more than one update for a single zone.
+        let mut invalid_config_zone_updates = valid_config.clone();
+        invalid_config_zone_updates.zone_updates = vec![
+            VmMemoryZoneUpdateData {
+                id: "id1".to_string(),
+                host_numa_node: 0,
+            },
+            VmMemoryZoneUpdateData {
+                id: "id1".to_string(),
+                host_numa_node: 20,
+            },
+        ];
+        assert_eq!(
+            invalid_config_zone_updates.validate(&snapshot_vm_config),
+            Err(ValidationError::MultipleMemoryZoneUpdates)
+        );
+
+        // It is invalid to submit an update without referring to a memory zone by specifying an ID.
+        let mut invalid_config_zone_updates = valid_config.clone();
+        invalid_config_zone_updates.zone_updates = vec![VmMemoryZoneUpdateData {
+            id: String::new(),
+            host_numa_node: 0,
+        }];
+        assert_eq!(
+            invalid_config_zone_updates.validate(&snapshot_vm_config),
+            Err(ValidationError::MemoryZoneUpdatesEmptyId)
+        );
+    }
+
+    #[test]
+    fn test_restore_config_vfio_fds_validation() {
+        // interested in only VmConfig.devices and platform, so set rest to
+        // default values
+        let mut snapshot_vm_config = VmConfig {
+            cpus: CpusConfig::default(),
+            memory: MemoryConfig::default(),
+            payload: None,
+            rate_limit_groups: None,
+            disks: None,
+            rng: RngConfig::default(),
+            generic_vhost_user: None,
+            balloon: None,
+            fs: None,
+            pmem: None,
+            serial: SerialConfig::default(),
+            console: ConsoleConfig::default(),
+            #[cfg(target_arch = "x86_64")]
+            debug_console: DebugConsoleConfig::default(),
+            devices: Some(vec![DeviceConfig {
+                pci_common: PciDeviceCommonConfig {
+                    id: Some("vfio0".to_owned()),
+                    ..Default::default()
+                },
+                path: Some(PathBuf::from("/sys/bus/pci/devices/0000:01:00.0")),
+                fd: None,
+                x_nv_gpudirect_clique: None,
+                x_exclude_mmap_bars: Vec::new(),
+            }]),
+            user_devices: None,
+            vdpa: None,
+            vsock: None,
+            #[cfg(feature = "pvmemcontrol")]
+            pvmemcontrol: None,
+            pvpanic: false,
+            iommu: false,
+            numa: None,
+            watchdog: false,
+            rtc: None,
+            #[cfg(feature = "guest_debug")]
+            gdb: false,
+            pci_segments: None,
+            platform: Some(PlatformConfig {
+                iommufd: true,
+                ..platform_fixture()
+            }),
+            tpm: None,
+            preserved_fds: None,
+            net: None,
+            landlock_enable: false,
+            landlock_rules: None,
+            #[cfg(feature = "ivshmem")]
+            ivshmem: None,
+        };
+
+        let valid_config = RestoreConfig {
+            source_url: PathBuf::from("/path/to/snapshot"),
+            prefault: false,
+            memory_restore_mode: MemoryRestoreMode::Copy,
+            net_fds: None,
+            vfio_fds: Some(vec![RestoredVfioConfig {
+                id: "vfio0".to_string(),
+                fd: Some(5),
+            }]),
+            iommufd_fd: Some(6),
+            resume: false,
+            zone_updates: vec![],
+        };
+        valid_config.validate(&snapshot_vm_config).unwrap();
+
+        let missing_iommufd = RestoreConfig {
+            iommufd_fd: None,
+            ..valid_config.clone()
+        };
+        assert_eq!(
+            missing_iommufd.validate(&snapshot_vm_config),
+            Err(ValidationError::VfioFdRequiresIommufdFd)
+        );
+
+        let unknown_id = RestoreConfig {
+            vfio_fds: Some(vec![RestoredVfioConfig {
+                id: "missing".to_string(),
+                fd: Some(5),
+            }]),
+            ..valid_config.clone()
+        };
+        assert_eq!(
+            unknown_id.validate(&snapshot_vm_config),
+            Err(ValidationError::RestoreUnknownVfioId("missing".to_string()))
+        );
+
+        let duplicate_id = RestoreConfig {
+            vfio_fds: Some(vec![
+                RestoredVfioConfig {
+                    id: "vfio0".to_string(),
+                    fd: Some(5),
+                },
+                RestoredVfioConfig {
+                    id: "vfio0".to_string(),
+                    fd: Some(6),
+                },
+            ]),
+            ..valid_config.clone()
+        };
+        assert_eq!(
+            duplicate_id.validate(&snapshot_vm_config),
+            Err(ValidationError::IdentifierNotUnique("vfio0".to_string()))
+        );
+
+        // A device saved with an FD must get a replacement FD.
+        snapshot_vm_config.devices.as_mut().unwrap()[0].path = None;
+        snapshot_vm_config.devices.as_mut().unwrap()[0].fd = Some(-1);
+        let no_substitution = RestoreConfig {
+            vfio_fds: None,
+            iommufd_fd: None,
+            ..valid_config.clone()
+        };
+        assert_eq!(
+            no_substitution.validate(&snapshot_vm_config),
+            Err(ValidationError::RestoreMissingVfioFd("vfio0".to_string()))
+        );
+
+        // The iommufd backend must be enabled in the snapshot config.
+        snapshot_vm_config.platform = Some(platform_fixture());
+        assert_eq!(
+            valid_config.validate(&snapshot_vm_config),
+            Err(ValidationError::IommufdFdRequiresIommufd)
         );
     }
 

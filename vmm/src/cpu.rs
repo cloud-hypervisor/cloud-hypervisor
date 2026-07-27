@@ -908,11 +908,28 @@ impl CpuManager {
         #[cfg(not(feature = "tdx"))]
         let dynamic = true;
 
+        #[cfg(target_arch = "x86_64")]
+        let cpuid = {
+            let phys_bits = physical_bits(hypervisor.as_ref(), config.max_phys_bits);
+            arch::generate_common_cpuid(
+                hypervisor.as_ref(),
+                &arch::CpuidConfig {
+                    phys_bits,
+                    kvm_hyperv: config.kvm_hyperv,
+                    #[cfg(feature = "tdx")]
+                    tdx: tdx_enabled,
+                    amx: config.features.amx,
+                    profile: config.profile,
+                },
+            )
+            .map_err(Error::CommonCpuId)?
+        };
+
         Ok(Arc::new(Mutex::new(CpuManager {
             config: config.clone(),
             interrupt_controller: None,
             #[cfg(target_arch = "x86_64")]
-            cpuid: Vec::new(),
+            cpuid,
             vm,
             vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
             vcpus_pause_signalled: Arc::new(AtomicBool::new(false)),
@@ -938,31 +955,6 @@ impl CpuManager {
             #[cfg(feature = "igvm")]
             igvm_enabled,
         })))
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    pub fn populate_cpuid(
-        &mut self,
-        hypervisor: &dyn hypervisor::Hypervisor,
-        #[cfg(feature = "tdx")] tdx: bool,
-    ) -> Result<()> {
-        self.cpuid = {
-            let phys_bits = physical_bits(hypervisor, self.config.max_phys_bits);
-            arch::generate_common_cpuid(
-                hypervisor,
-                &arch::CpuidConfig {
-                    phys_bits,
-                    kvm_hyperv: self.config.kvm_hyperv,
-                    #[cfg(feature = "tdx")]
-                    tdx,
-                    amx: self.config.features.amx,
-                    profile: self.config.profile,
-                },
-            )
-            .map_err(Error::CommonCpuId)?
-        };
-
-        Ok(())
     }
 
     fn create_vcpu(
@@ -3384,6 +3376,8 @@ impl BusDevice for AcpiCpuHotplugController {
                     // lock for the entire function doesn't cause any deadlock.
                     let mut vcpu_states = self.vcpu_states.lock().unwrap();
                     let state = &mut vcpu_states[usize::try_from(self.selected_cpu).unwrap()];
+                    // Save before the removal ack below clears it.
+                    let removal_requested = state.removing;
                     // The ACPI code writes back a 1 to acknowledge the insertion
                     if (data[0] & (1 << Self::CPU_INSERTING_FLAG) == 1 << Self::CPU_INSERTING_FLAG)
                         && state.inserting
@@ -3396,11 +3390,22 @@ impl BusDevice for AcpiCpuHotplugController {
                     {
                         state.removing = false;
                     }
-                    // Trigger removal of vCPU:
-                    if data[0] & (1 << Self::CPU_EJECT_FLAG) == 1 << Self::CPU_EJECT_FLAG
-                        && let Err(e) = Self::remove_vcpu(self.selected_cpu, state)
-                    {
-                        error!("Error removing vCPU: {e:?}");
+                    // Only allow the guest to eject vCPUs we expect to be ejected (also deny boot
+                    // vcpu).
+                    if data[0] & (1 << Self::CPU_EJECT_FLAG) == 1 << Self::CPU_EJECT_FLAG {
+                        if self.selected_cpu == 0 {
+                            warn!("Ignoring guest request to eject the boot vCPU (CPU 0)");
+                        } else if removal_requested {
+                            if let Err(e) = Self::remove_vcpu(self.selected_cpu, state) {
+                                error!("Error removing vCPU: {e:?}");
+                            }
+                        } else {
+                            warn!(
+                                "Ignoring guest request to eject vCPU {} not marked for \
+                                 removal by the VMM",
+                                self.selected_cpu
+                            );
+                        }
                     }
                 } else {
                     warn!("Out of range vCPU id: {}", self.selected_cpu);

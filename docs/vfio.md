@@ -198,9 +198,9 @@ mmio address space is available for use by devices on PCI segment 1.
 ## Snapshot and Restore of VFIO Devices
 
 Cloud Hypervisor supports snapshotting and restoring VFIO devices that advertise
-the kernel VFIO migration v2 protocol. Live migration of VFIO devices, where the
-guest keeps running while its state transfers, is a separate effort not covered
-by this section.
+the kernel VFIO migration v2 protocol. Live migration of VFIO devices builds on
+the same protocol and is covered in
+[Live Migration of VFIO Devices](#live-migration-of-vfio-devices).
 
 ### Requirements
 
@@ -238,3 +238,70 @@ INFO  vfio: VFIO device 0000:01:00.0 supports migration v2 (flags=0x7, ...)
 The current snapshot format stores the blob as base64 inside the snapshot
 JSON. Very large blobs may benefit from a binary transport path in the
 future.
+
+## Live Migration of VFIO Devices
+
+Cloud Hypervisor can live migrate a VM with a migratable VFIO device. Guest
+memory moves according to the selected memory mode while the guest runs. The
+opaque device state is captured through STOP_COPY during the downtime window,
+after the guest is paused, and is loaded on the destination through RESUMING
+before the guest resumes. There is no iterative device state transfer, so a
+large device state extends the downtime accordingly.
+
+### Requirements
+
+All the snapshot and restore requirements apply, plus the following.
+
+- **Dirty tracking.** The variant driver must implement VFIO DMA logging so
+  the pages the device writes to guest memory are tracked during the memory
+  transfer. Without it a precopy migration fails at the start.
+- **iommufd.** The destination receives the device as file descriptors, which
+  requires the config to carry `iommufd=on`. The iommufd itself arrives as a
+  file descriptor with the receive request, see below.
+- **BAR mapping.** `vfio_p2p_dma=off` is needed on older Linux kernels
+  (pre 6.19) that cannot map VFIO BAR MMIO into iommufd.
+- **No virtual IOMMU.** Live migration of a VFIO device behind a virtual
+  IOMMU is not supported and is refused at migration start. Assign the
+  device without a virtual IOMMU.
+
+### Dirty Tracking
+
+When the migration starts, Cloud Hypervisor programs the device with the IOVA
+ranges to track and merges the reported dirty pages into the memory transfer.
+The device sees an identity mapping of guest memory, so the tracked ranges are
+the guest memory layout with iova equal to gpa. Devices behind a virtual IOMMU
+are out of scope, see the requirement above.
+
+### Destination File Descriptors
+
+The device paths and file descriptors in the source configuration are
+meaningless on the destination host. The receive migration request therefore
+carries replacements. Each `vfio_fds` entry pairs a device id with a cdev
+file descriptor opened on the destination, and `iommufd_fd` carries a freshly
+opened iommufd. Both travel over the ch-remote UNIX socket via SCM_RIGHTS.
+
+The destination VF can live at a different BDF than the source's, and the
+kernel assigns its cdev name independently of the device id. The `vfio-dev`
+directory under the VF's sysfs node names the cdev to open.
+
+```console
+dst $ ls /sys/bus/pci/devices/0000:41:00.3/vfio-dev/
+vfio12
+dst $ exec 5<>/dev/vfio/devices/vfio12
+dst $ exec 6<>/dev/iommu
+dst $ ch-remote --api-socket=/tmp/api receive-migration \
+          receiver_url=tcp:0.0.0.0:{port},vfio_fds=[vfio0@5],iommufd_fd=6
+```
+
+The id in each `vfio_fds` entry must match the `id` of the corresponding
+device in the source VM configuration. The same substitution is available on
+snapshot restore through the `vfio_fds` and `iommufd_fd` parameters of the
+restore request, for restoring onto a different VF or host.
+
+### Failure Recovery
+
+A failed migration state transition can leave the device in an indeterminate
+state, including ERROR. Cloud Hypervisor first attempts to return the device
+to a known state and resets it as a last resort, so a failed snapshot or
+migration leaves the guest with a functional device. The original error is
+reported either way.

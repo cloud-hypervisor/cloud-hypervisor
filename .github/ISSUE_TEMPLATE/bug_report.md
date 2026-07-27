@@ -4,7 +4,7 @@ about: File a bug report
 title: ''
 labels: ''
 assignees: ''
-
+type: Bug
 ---
 
 **Describe the bug**

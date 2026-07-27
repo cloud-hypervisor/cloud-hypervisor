@@ -41,7 +41,7 @@ pub use sparse::{BLKDISCARD, BLKZEROOUT};
 use thiserror::Error;
 use virtio_bindings::virtio_blk::*;
 use vm_memory::bitmap::Bitmap;
-use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError};
+use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryBackend, GuestMemoryError};
 use vmm_sys_util::{aio, ioctl_io_nr, ioctl_ior_nr};
 
 use crate::async_io::AsyncIoError;

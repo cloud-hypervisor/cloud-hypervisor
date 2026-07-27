@@ -211,25 +211,6 @@ impl UringDataIo {
         )
     }
 
-    /// Submits a fallocate operation carrying `user_data`.
-    pub fn submit_fallocate(
-        &mut self,
-        fd: RawFd,
-        offset: u64,
-        length: u64,
-        mode: i32,
-        user_data: u64,
-    ) -> io::Result<()> {
-        self.submit_kernel_entry(
-            user_data,
-            &opcode::Fallocate::new(types::Fd(fd), length)
-                .offset(offset)
-                .mode(mode)
-                .build()
-                .user_data(user_data),
-        )
-    }
-
     /// Injects a completion that did not come from a kernel CQE.
     ///
     /// The notifier is signaled so callers can drain it with
@@ -358,13 +339,6 @@ mod tests {
         );
         assert_eq!(
             data_io.submit_nop(7).unwrap_err().kind(),
-            io::ErrorKind::AlreadyExists
-        );
-        assert_eq!(
-            data_io
-                .submit_fallocate(fd, 0, 512, 0, 7)
-                .unwrap_err()
-                .kind(),
             io::ErrorKind::AlreadyExists
         );
 

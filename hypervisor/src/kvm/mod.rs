@@ -785,11 +785,6 @@ impl vm::Vm for KvmVm {
             return Ok(());
         }
         assert_eq!(pfns.len(), uaddrs.len());
-        // VMSA pages are not supported by launch_update
-        // https://elixir.bootlin.com/linux/v6.11/source/arch/x86/kvm/svm/sev.c#L2377
-        if page_type == sev::SNP_PAGE_TYPE_VMSA {
-            return Ok(());
-        }
         for i in 0..pfns.len() {
             self.fd
                 .set_memory_attributes(kvm_memory_attributes {

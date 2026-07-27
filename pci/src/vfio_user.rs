@@ -21,7 +21,8 @@ use vm_device::interrupt::{InterruptManager, InterruptSourceGroup, MsiIrqGroupCo
 use vm_device::{BusDevice, Resource};
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{
-    Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryRegion, GuestRegionMmap,
+    Address, GuestAddress, GuestAddressSpace, GuestMemoryBackend, GuestMemoryRegion,
+    GuestRegionMmap,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -540,7 +541,10 @@ impl<M: GuestAddressSpace> VfioUserDmaMapping<M> {
     }
 }
 
-impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioUserDmaMapping<M> {
+impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioUserDmaMapping<M>
+where
+    M::M: GuestMemoryBackend,
+{
     fn map(&self, iova: u64, gpa: u64, size: u64) -> result::Result<(), io::Error> {
         let mem = self.memory.memory();
         let guest_addr = GuestAddress(gpa);

@@ -27,8 +27,6 @@ pub enum Error {
     TapSetIpNetmask(#[source] TapError),
     #[error("Setting MAC address failed")]
     TapSetMac(#[source] TapError),
-    #[error("Getting MAC address failed")]
-    TapGetMac(#[source] TapError),
     #[error("Setting vnet header size failed")]
     TapSetVnetHdrSize(#[source] TapError),
     #[error("Setting MTU failed")]
@@ -66,7 +64,7 @@ fn open_tap_rx_q_0(
     if_name: Option<&str>,
     ip_addr: Option<IpAddr>,
     netmask: Option<IpAddr>,
-    host_mac: &mut Option<MacAddr>,
+    host_mac: Option<MacAddr>,
     mtu: Option<u16>,
     num_rx_q: usize,
     flags: Option<i32>,
@@ -90,9 +88,7 @@ fn open_tap_rx_q_0(
             .map_err(Error::TapSetIpNetmask)?;
     }
     if let Some(mac) = host_mac {
-        tap.set_mac_addr(*mac).map_err(Error::TapSetMac)?;
-    } else {
-        *host_mac = Some(tap.get_mac_addr().map_err(Error::TapGetMac)?);
+        tap.set_mac_addr(mac).map_err(Error::TapSetMac)?;
     }
     if let Some(mtu) = mtu {
         tap.set_mtu(mtu as i32).map_err(Error::TapSetMtu)?;
@@ -111,7 +107,7 @@ pub fn open_tap(
     if_name: Option<&str>,
     ip_addr: Option<IpAddr>,
     netmask: Option<IpAddr>,
-    host_mac: &mut Option<MacAddr>,
+    host_mac: Option<MacAddr>,
     mtu: Option<u16>,
     num_rx_q: usize,
     flags: Option<i32>,

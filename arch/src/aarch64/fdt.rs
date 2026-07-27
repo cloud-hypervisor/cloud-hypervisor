@@ -23,7 +23,7 @@ use hypervisor::arch::aarch64::regs::{
 use log::{debug, info};
 use thiserror::Error;
 use vm_fdt::{FdtWriter, FdtWriterResult};
-use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryRegion};
+use vm_memory::{Address, Bytes, GuestMemoryBackend, GuestMemoryError, GuestMemoryRegion};
 
 use super::super::{DeviceType, GuestMemoryMmap, InitramfsConfig};
 use super::cache::{CacheTopologyInfo, read_cache_topology};
@@ -285,8 +285,8 @@ fn create_cpu_nodes(
     if cache_exist && l3_cache_size != 0 && !l2_cache_shared && l3_cache_shared {
         let mut i: u32 = 0;
         while i < packages.into() {
-            let l3_cache_name = "l3-cache0";
-            let l3_cache_node = fdt.begin_node(l3_cache_name)?;
+            let l3_cache_name = format!("l3-cache{i}");
+            let l3_cache_node = fdt.begin_node(&l3_cache_name)?;
             // ARM L3 cache is generally shared within the package (socket), so the
             // L3 cache node pointed to by the CPU in the package has the same L3
             // cache PHANDLE. The L3 cache phandle must start from the largest L2
@@ -397,14 +397,14 @@ fn create_memory_node(
             }
         }
     } else {
-        // Note: memory regions from "GuestMemory" are sorted and non-zero sized.
+        // Note: memory regions from "GuestMemoryBackend" are sorted and non-zero sized.
         let ram_regions = {
             let mut ram_regions = Vec::new();
             let mut current_start = guest_mem
                 .iter()
                 .next()
                 .map(GuestMemoryRegion::start_addr)
-                .expect("GuestMemory must have one memory region at least")
+                .expect("GuestMemoryBackend must have one memory region at least")
                 .raw_value();
             let mut current_end = current_start;
 

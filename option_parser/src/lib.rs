@@ -71,16 +71,16 @@ struct OptionParserValue {
 #[derive(Debug, Error)]
 pub enum OptionParserError {
     /// An option name was not previously registered with [`OptionParser::add`].
-    #[error("unknown option: {0}")]
+    #[error("Unknown option: {0}")]
     UnknownOption(String),
     /// The input string has invalid syntax (unbalanced quotes/brackets, missing `=`).
-    #[error("invalid syntax: {0}")]
+    #[error("Invalid syntax: {0}")]
     InvalidSyntax(String),
     /// A value could not be converted to the requested type.
-    #[error("unable to convert {1} for {0}")]
+    #[error("Unable to convert {1} for {0}")]
     Conversion(String /* field */, String /* value */),
     /// A value was syntactically valid but semantically wrong.
-    #[error("invalid value: {0}")]
+    #[error("Invalid value: {0}")]
     InvalidValue(String),
 }
 type OptionParserResult<T> = result::Result<T, OptionParserError>;
@@ -272,7 +272,7 @@ impl OptionParser {
     ///
     /// `T` can be any type that implements `FromStr` (e.g. `u32`, `String`),
     /// or one of this crate's types such as [`Toggle`], [`IntegerList`],
-    /// [`Tuple`], or [`StringList`].
+    /// [`Tuple`], [`TupleList`] or [`StringList`].
     pub fn convert<T: Parseable>(&self, option: &str) -> OptionParserResult<Option<T>> {
         match self.options.get(option).and_then(|v| v.value.as_ref()) {
             None => Ok(None),
@@ -296,7 +296,7 @@ pub struct Toggle(pub bool);
 
 #[derive(Error, Debug)]
 pub enum ToggleParseError {
-    #[error("invalid value: {0}")]
+    #[error("Invalid value: {0}")]
     InvalidValue(String),
 }
 
@@ -323,7 +323,7 @@ pub struct ByteSized(pub u64);
 
 #[derive(Error, Debug)]
 pub enum ByteSizedParseError {
-    #[error("invalid value: {0}")]
+    #[error("Invalid value: {0}")]
     InvalidValue(String),
 }
 
@@ -375,7 +375,7 @@ impl<T: Display> Display for IntegerList<T> {
 
 #[derive(Error, Debug)]
 pub enum IntegerListParseError {
-    #[error("invalid value: {0}")]
+    #[error("Invalid value: {0}")]
     InvalidValue(String),
 }
 
@@ -426,7 +426,7 @@ impl<T: TryFrom<u64>> Parseable for IntegerList<T> {
 
 /// Types that can appear as the second element of a [`Tuple`] pair.
 ///
-/// Implemented for `u64`, `Vec<u8>`, `Vec<u64>`, and `Vec<usize>`.
+/// Implemented for `u32`, `u64`, `Vec<u8>`, `Vec<u64>`, and `Vec<usize>`.
 pub trait TupleValue {
     /// Parses the value portion of a `key@value` tuple element.
     fn parse_value(input: &str) -> Result<Self, TupleError>
@@ -437,6 +437,12 @@ pub trait TupleValue {
 impl TupleValue for u64 {
     fn parse_value(input: &str) -> Result<Self, TupleError> {
         input.parse::<u64>().map_err(TupleError::InvalidInteger)
+    }
+}
+
+impl TupleValue for u32 {
+    fn parse_value(input: &str) -> Result<Self, TupleError> {
+        input.parse::<u32>().map_err(TupleError::InvalidInteger)
     }
 }
 
@@ -464,62 +470,84 @@ impl TupleValue for Vec<usize> {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum TupleError {
+    #[error("Invalid value: {0}")]
+    InvalidValue(String),
+    #[error("Unbalanced brackets in one of the values")]
+    SplitInsideBrackets(#[source] OptionParserError),
+    #[error("Expected a single pair of enclosing brackets in input: {0}")]
+    UnbalancedOutsideBrackets(String),
+    #[error("Invalid integer list")]
+    InvalidIntegerList(#[source] IntegerListParseError),
+    #[error("Invalid integer")]
+    InvalidInteger(#[source] ParseIntError),
+    #[error("Empty key in tuple: {0}")]
+    EmptyKey(String),
+}
+
+/// A tuple consisting of a `key@value` pair parsed from a string.
+#[derive(PartialEq, Eq, Debug)]
+pub struct Tuple<S, T>(pub S, pub T);
+
 /// A list of `key@value` pairs parsed from a bracket-enclosed string.
 ///
 /// The format is `[key1@value1,key2@value2,...]` where `@` separates each
 /// pair's elements. `S` is the key type and `T` is the value type.
 #[derive(PartialEq, Eq, Debug)]
-pub struct Tuple<S, T>(pub Vec<(S, T)>);
-
-#[derive(Error, Debug)]
-pub enum TupleError {
-    #[error("invalid value: {0}")]
-    InvalidValue(String),
-    #[error("split outside brackets")]
-    SplitOutsideBrackets(#[source] OptionParserError),
-    #[error("invalid integer list")]
-    InvalidIntegerList(#[source] IntegerListParseError),
-    #[error("invalid integer")]
-    InvalidInteger(#[source] ParseIntError),
-}
+pub struct TupleList<S, T>(pub Vec<Tuple<S, T>>);
 
 impl<S: Parseable, T: TupleValue> Parseable for Tuple<S, T> {
     type Err = TupleError;
 
+    fn from_str(tuple: &str) -> result::Result<Self, Self::Err> {
+        let mut in_quotes = false;
+        let mut last_idx = 0;
+        let mut first_val = None;
+        let trimmed = tuple.trim();
+        for (idx, c) in trimmed.as_bytes().iter().enumerate() {
+            match c {
+                b'"' => in_quotes = !in_quotes,
+                b'@' if !in_quotes => {
+                    if last_idx != 0 {
+                        return Err(TupleError::InvalidValue((*trimmed).to_string()));
+                    }
+                    let key = &trimmed[last_idx..idx];
+                    first_val = if key.is_empty() {
+                        return Err(TupleError::EmptyKey((*trimmed).to_string()));
+                    } else {
+                        Some(key)
+                    };
+                    last_idx = idx + 1;
+                }
+                _ => {}
+            }
+        }
+        let item1 = <S as Parseable>::from_str(
+            first_val.ok_or(TupleError::InvalidValue((*trimmed).to_string()))?,
+        )
+        .map_err(|_| TupleError::InvalidValue(first_val.unwrap().to_owned()))?;
+        let item2: T = TupleValue::parse_value(&trimmed[last_idx..])?;
+        Ok(Tuple(item1, item2))
+    }
+}
+
+impl<S: Parseable, T: TupleValue> Parseable for TupleList<S, T> {
+    type Err = TupleError;
+
     fn from_str(s: &str) -> result::Result<Self, Self::Err> {
-        let mut list: Vec<(S, T)> = Vec::new();
+        let mut list: Vec<Tuple<S, T>> = Vec::new();
         let body = s
             .trim()
             .strip_prefix('[')
             .and_then(|s| s.strip_suffix(']'))
-            .ok_or_else(|| TupleError::InvalidValue(s.to_string()))?;
-        let tuples_list = split_commas(body).map_err(TupleError::SplitOutsideBrackets)?;
-        for tuple in tuples_list.iter() {
-            let mut in_quotes = false;
-            let mut last_idx = 0;
-            let mut first_val = None;
-            for (idx, c) in tuple.as_bytes().iter().enumerate() {
-                match c {
-                    b'"' => in_quotes = !in_quotes,
-                    b'@' if !in_quotes => {
-                        if last_idx != 0 {
-                            return Err(TupleError::InvalidValue((*tuple).to_string()));
-                        }
-                        first_val = Some(&tuple[last_idx..idx]);
-                        last_idx = idx + 1;
-                    }
-                    _ => {}
-                }
-            }
-            let item1 = <S as Parseable>::from_str(
-                first_val.ok_or(TupleError::InvalidValue((*tuple).to_string()))?,
-            )
-            .map_err(|_| TupleError::InvalidValue(first_val.unwrap().to_owned()))?;
-            let item2 = TupleValue::parse_value(&tuple[last_idx..])?;
-            list.push((item1, item2));
+            .ok_or_else(|| TupleError::UnbalancedOutsideBrackets(s.to_string()))?;
+        let tuples_raw = split_commas(body).map_err(TupleError::SplitInsideBrackets)?;
+        for tuple_raw in tuples_raw.iter() {
+            list.push(Tuple::from_str(tuple_raw.trim())?);
         }
 
-        Ok(Tuple(list))
+        Ok(TupleList(list))
     }
 }
 
@@ -531,7 +559,7 @@ pub struct StringList(pub Vec<String>);
 
 #[derive(Error, Debug)]
 pub enum StringListParseError {
-    #[error("invalid value: {0}")]
+    #[error("Invalid value: {0}")]
     InvalidValue(String),
 }
 
@@ -636,10 +664,10 @@ mod unit_tests {
         parser.parse("topology=[\"@\"\"b\"@[1,2]]").unwrap();
         assert_eq!(
             parser
-                .convert::<Tuple<String, Vec<u8>>>("topology")
+                .convert::<TupleList<String, Vec<u8>>>("topology")
                 .unwrap()
                 .unwrap(),
-            Tuple(vec![("@\"b".to_owned(), vec![1, 2])])
+            TupleList(vec![Tuple("@\"b".to_owned(), vec![1, 2])])
         );
 
         parser.parse("cmdline=\"console=ttyS0,9600n8\"").unwrap();
@@ -836,36 +864,194 @@ mod unit_tests {
 
     #[test]
     fn test_tuple_single_pair() {
-        let t = Tuple::<String, u64>::from_str("[foo@42]").unwrap();
-        assert_eq!(t, Tuple(vec![("foo".to_owned(), 42)]));
+        let t = Tuple::<String, u64>::from_str("foo@42").unwrap();
+        assert_eq!(t, Tuple("foo".to_owned(), 42));
+        let t = Tuple::<String, Vec<u64>>::from_str("foo@[42]").unwrap();
+        assert_eq!(t, Tuple("foo".to_owned(), vec![42]));
     }
 
     #[test]
-    fn test_tuple_multiple_pairs() {
-        let t = Tuple::<String, Vec<u64>>::from_str("[a@[1,2],b@[3,4]]").unwrap();
+    fn test_tuple_allowed_whitespace() {
+        let t = Tuple::<String, u64>::from_str(" foo@42").unwrap();
+        assert_eq!(t, Tuple("foo".to_owned(), 42));
+        let t = Tuple::<String, u64>::from_str("foo@42 ").unwrap();
+        assert_eq!(t, Tuple("foo".to_owned(), 42));
+        let t = Tuple::<String, u64>::from_str(" foo@42 ").unwrap();
+        assert_eq!(t, Tuple("foo".to_owned(), 42));
+        let t = Tuple::<u64, u64>::from_str(" 5@42 ").unwrap();
+        assert_eq!(t, Tuple(5, 42));
+        // Still a valid string as key, even with trailing whitespace
+        let t = Tuple::<String, u64>::from_str(" foo @42 ").unwrap();
+        assert_eq!(t, Tuple("foo ".to_owned(), 42));
+    }
+
+    #[test]
+    fn test_tuple_whitespace_surrounding_delimiter_fails() {
+        let e = Tuple::<String, u64>::from_str("foo@ 42").unwrap_err();
+        assert!(
+            matches!(e, TupleError::InvalidInteger(_)),
+            "Expected \"ParseInt\"; got \"{e:?}\"",
+        );
+        let expected_value = "42 ";
+        let e = Tuple::<u64, Vec<u64>>::from_str("42 @[]").unwrap_err();
+        assert!(
+            matches!(e, TupleError::InvalidValue(ref s) if s == expected_value),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            TupleError::InvalidValue(expected_value.to_string()),
+        );
+        // We abuse of the fact that space can be converted to a valid string as long as the
+        // string isn't empty. We use this to check the correct error for tuple value parsing.
+        let e = Tuple::<String, u64>::from_str(" foo @ 42 ").unwrap_err();
+        assert!(
+            matches!(e, TupleError::InvalidInteger(_)),
+            "Expected \"ParseInt\"; got \"{e:?}\"",
+        );
+        // Cannot parse the space into a list
+        let expected_value = "";
+        let e = Tuple::<u64, Vec<u64>>::from_str("42@ []").unwrap_err();
+        assert!(
+            matches!(
+                e,
+                TupleError::InvalidIntegerList(
+                    IntegerListParseError::InvalidValue(ref s),
+                ) if s == expected_value
+            ),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            TupleError::InvalidIntegerList(IntegerListParseError::InvalidValue(
+                expected_value.to_string()
+            ),)
+        );
+    }
+
+    #[test]
+    fn test_tuple_list_single_pair() {
+        let t = TupleList::<String, u64>::from_str("[foo@42]").unwrap();
+        assert_eq!(t, TupleList(vec![Tuple("foo".to_owned(), 42)]));
+    }
+
+    #[test]
+    fn test_tuple_list_multiple_pairs() {
+        let t = TupleList::<String, Vec<u64>>::from_str("[a@[1,2],b@[3,4]]").unwrap();
         assert_eq!(
             t,
-            Tuple(vec![
-                ("a".to_owned(), vec![1, 2]),
-                ("b".to_owned(), vec![3, 4]),
+            TupleList(vec![
+                Tuple("a".to_owned(), vec![1, 2]),
+                Tuple("b".to_owned(), vec![3, 4]),
             ])
         );
     }
 
     #[test]
-    fn test_tuple_missing_at_separator() {
-        Tuple::<String, u64>::from_str("[foo42]").unwrap_err();
+    fn test_tuple_list_unbalanced_brackets_in_element() {
+        let expected_value = "a@[1,2]],b@[3,4]";
+        let e = TupleList::<String, Vec<u64>>::from_str("[a@[1,2]],b@[3,4]]").unwrap_err();
+        assert!(
+            matches!(e, TupleError::SplitInsideBrackets(OptionParserError::InvalidSyntax(ref s)) if s == expected_value),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            TupleError::SplitInsideBrackets(OptionParserError::InvalidSyntax(
+                expected_value.to_string()
+            )),
+        );
     }
 
     #[test]
-    fn test_tuple_missing_brackets() {
-        Tuple::<String, u64>::from_str("foo@42").unwrap_err();
+    fn test_tuple_list_missing_brackets() {
+        let expected_value = "foo@42";
+        let e = TupleList::<String, u64>::from_str("foo@42").unwrap_err();
+        assert!(
+            matches!(e, TupleError::UnbalancedOutsideBrackets(ref s) if s == expected_value),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            TupleError::UnbalancedOutsideBrackets(expected_value.to_string()),
+        );
+    }
+
+    #[test]
+    fn test_tuple_list_trim_whitespace() {
+        let t = TupleList::<String, Vec<u64>>::from_str("[a@[1,2], b@[3,4] ,\tc@[5,6],\nd@[7,8]]")
+            .unwrap();
+        assert_eq!(
+            t,
+            TupleList(vec![
+                Tuple("a".to_owned(), vec![1, 2]),
+                Tuple("b".to_owned(), vec![3, 4]),
+                Tuple("c".to_owned(), vec![5, 6]),
+                Tuple("d".to_owned(), vec![7, 8]),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_tuple_successful_parse_quoted_at() {
+        assert_eq!(
+            Tuple::<String, u64>::from_str("\"foo@\"@42").unwrap(),
+            Tuple("foo@".to_string(), 42)
+        );
+    }
+
+    #[test]
+    fn test_tuple_successful_parse_quoted_whitespace() {
+        assert_eq!(
+            Tuple::<String, u64>::from_str("\" \"@42").unwrap(),
+            Tuple(" ".to_string(), 42)
+        );
+    }
+
+    #[test]
+    fn test_tuple_missing_at_separator() {
+        Tuple::<String, u64>::from_str("foo42").unwrap_err();
+    }
+
+    #[test]
+    fn test_tuple_missing_key() {
+        let expected_value = "@42";
+        let e = Tuple::<String, u64>::from_str("@42").unwrap_err();
+        assert!(
+            matches!(e, TupleError::EmptyKey(ref s) if s == expected_value),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            TupleError::EmptyKey(expected_value.to_string()),
+        );
+    }
+
+    #[test]
+    fn test_tuple_missing_value() {
+        let e = Tuple::<String, u64>::from_str("foo@").unwrap_err();
+        assert!(
+            matches!(e, TupleError::InvalidInteger(_)),
+            "Expected \"TupleError::InvalidInteger\"; got \"{e:?}\"",
+        );
+    }
+
+    #[test]
+    fn test_tuple_reject_whitespace_as_empty_key() {
+        let expected_value = "@42";
+        let e = Tuple::<String, u64>::from_str(" @42").unwrap_err();
+        assert!(
+            matches!(e, TupleError::EmptyKey(ref s) if s == expected_value),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            TupleError::EmptyKey(expected_value.to_string()),
+        );
+    }
+
+    #[test]
+    fn test_tuple_parse_u32_value() {
+        use std::num::IntErrorKind;
+        let t = Tuple::<String, u32>::from_str("foo@42").unwrap();
+        assert_eq!(t, Tuple("foo".to_owned(), 42));
+        let t = Tuple::<String, u32>::from_str("foo@0").unwrap();
+        assert_eq!(t, Tuple("foo".to_owned(), 0));
+        let e = Tuple::<String, u32>::from_str("foo@-1").unwrap_err();
+        assert!(
+            matches!(e, TupleError::InvalidInteger(ref e) if *e.kind() == IntErrorKind::InvalidDigit),
+            "Expected \"InvalidInteger(ParseIntError(kind: InvalidDigit))\"; got \"{e:?}\"",
+        );
     }
 
     #[test]
     fn test_split_commas_unbalanced_bracket() {
         split_commas("[a,b").unwrap_err();
         split_commas("a]").unwrap_err();
+        split_commas("[a]]").unwrap_err();
+        split_commas("[[[a]]").unwrap_err();
     }
 
     #[test]

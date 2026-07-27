@@ -78,7 +78,7 @@ use thiserror::Error;
 use tracer::trace_scoped;
 use vm_device::Bus;
 #[cfg(feature = "tdx")]
-use vm_memory::GuestMemory;
+use vm_memory::GuestMemoryBackend;
 #[cfg(feature = "tdx")]
 use vm_memory::{Address, ByteValued, GuestMemoryRegion, ReadVolatile};
 use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
@@ -105,7 +105,7 @@ use crate::landlock::LandlockError;
 #[cfg(feature = "tdx")]
 use crate::memory_manager;
 use crate::memory_manager::{
-    Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData,
+    Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData, MemoryRangePolicy,
 };
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::migration::url_to_file;
@@ -120,7 +120,7 @@ use crate::vm_config::{
 };
 use crate::{
     CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, GuestMemoryMmap,
-    MEMORY_MANAGER_SNAPSHOT_ID, PciDeviceInfo, acpi, cpu,
+    MEMORY_MANAGER_SNAPSHOT_ID, MemoryZoneUpdateError, PciDeviceInfo, acpi, cpu,
 };
 
 /// Errors associated with VM management
@@ -399,6 +399,10 @@ pub enum Error {
     #[cfg(feature = "fw_cfg")]
     #[error("Error using fw_cfg while disabled")]
     FwCfgDisabled,
+
+    /// Cannot apply NUMA memory zone updates
+    #[error("Error applying memory zone updates")]
+    ApplyMemoryZoneUpdate(#[source] MemoryZoneUpdateError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -814,18 +818,6 @@ impl Vm {
             igvm_enabled,
         )
         .map_err(Error::CpuManager)?;
-
-        #[cfg(target_arch = "x86_64")]
-        cpu_manager
-            .lock()
-            .unwrap()
-            .populate_cpuid(
-                hypervisor.as_ref(),
-                #[cfg(feature = "tdx")]
-                tdx_enabled,
-            )
-            .map_err(Error::CpuManager)?;
-
         Ok(cpu_manager)
     }
 
@@ -2757,14 +2749,6 @@ impl Vm {
             return self.resume().map_err(Error::Resume);
         }
 
-        // We acquire all advisory disk image locks here and not on device creation
-        // to enable live-migration without locking issues.
-        self.device_manager
-            .lock()
-            .unwrap()
-            .try_lock_disks()
-            .map_err(Error::LockingError)?;
-
         let new_state = if self.stop_on_boot {
             VmState::BreakPoint
         } else {
@@ -2772,6 +2756,14 @@ impl Vm {
         };
 
         current_state.valid_transition(new_state)?;
+
+        // We acquire all advisory disk image locks here and not on device creation
+        // to enable live-migration without locking issues.
+        self.device_manager
+            .lock()
+            .unwrap()
+            .try_lock_disks()
+            .map_err(Error::LockingError)?;
 
         #[cfg(feature = "fw_cfg")]
         {
@@ -3029,11 +3021,11 @@ impl Vm {
         Ok(())
     }
 
-    pub fn memory_range_table(&self) -> result::Result<MemoryRangeTable, MigratableError> {
-        self.memory_manager
-            .lock()
-            .unwrap()
-            .memory_range_table(false)
+    pub fn memory_range_table(
+        &self,
+        mode: MemoryRangePolicy,
+    ) -> result::Result<MemoryRangeTable, MigratableError> {
+        self.memory_manager.lock().unwrap().memory_range_table(mode)
     }
 
     pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemoryMmap> {
@@ -3909,7 +3901,7 @@ mod unit_tests {
     #[test]
     pub fn test_vm() {
         use hypervisor::VmExit;
-        use vm_memory::{Address, GuestMemory, GuestMemoryRegion};
+        use vm_memory::{Address, GuestMemoryBackend, GuestMemoryRegion};
         // This example based on https://lwn.net/Articles/658511/
         let code = [
             0xba, 0xf8, 0x03, /* mov $0x3f8, %dx */
@@ -4030,7 +4022,7 @@ mod unit_tests {
             &mem,
             "console=tty0",
             &[0],
-            Some((0, 0, 0, 0)),
+            None,
             &dev_info,
             &gic,
             &None,
@@ -4047,7 +4039,7 @@ mod unit_tests {
 #[test]
 pub fn test_vm() {
     use hypervisor::VmExit;
-    use vm_memory::{Address, GuestMemory, GuestMemoryRegion};
+    use vm_memory::{Address, GuestMemoryBackend, GuestMemoryRegion};
     // This example based on https://lwn.net/Articles/658511/
     let code = [
         0xba, 0xf8, 0x03, /* mov $0x3f8, %dx */

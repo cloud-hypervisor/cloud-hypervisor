@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Write, stdout};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
@@ -51,12 +51,12 @@ use crate::api::{
     ApiRequest, ApiResponse, MigrationMode, RequestHandler, TimeoutStrategy, UffdAttachData,
     VmInfoResponse, VmReceiveMigrationData, VmSendMigrationData, VmmPingResponse,
 };
-use crate::config::{MemoryRestoreMode, RestoreConfig, add_to_config};
+use crate::config::{MemoryRestoreMode, RestoreConfig, VmMemoryZoneUpdateData, add_to_config};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::GuestDebuggable;
 use crate::device_manager::DeviceManager;
 use crate::landlock::Landlock;
-use crate::memory_manager::MemoryManager;
+use crate::memory_manager::{MemoryManager, MemoryRangePolicy};
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::migration::get_vm_snapshot;
 use crate::migration::transport::{
@@ -233,6 +233,27 @@ pub enum Error {
     /// Cannot apply landlock based sandboxing
     #[error("Error applying landlock")]
     ApplyLandlock(#[source] LandlockError),
+}
+
+/// Errors associated with updating memory zones
+#[derive(Debug, Error)]
+pub enum MemoryZoneUpdateError {
+    /// Cannot apply update as the original configuration didn't specify any memory zones
+    #[error("No zones specified in original config")]
+    NoZones,
+    /// The memory zone is backed by a shared file and thus cannot be bound to a NUMA node.
+    #[error(
+        "Zone with ID \"{0}\" is a shared zone backed by a regular file and thus cannot be bound to a node"
+    )]
+    SharedZoneBackedByFile(String),
+    /// The original [`VmConfig`] did not contain the memory zone with the given
+    /// ID, thus the memory zone update is not compatible with the original configuration.
+    #[error("Zone ID \"{0}\" wasn't contained in original config")]
+    ZoneNotFound(String),
+    /// The update list contains multiple updates for the same memory zone ID. Any update is
+    /// rejected because no assumptions can be made about which update is the correct one.
+    #[error("Multiple updates were specified for memory zone with ID \"{0}\"")]
+    MultipleUpdates(String),
 }
 
 impl From<&VmConfig> for hypervisor::HypervisorVmConfig {
@@ -962,13 +983,13 @@ impl Vmm {
             )))
         };
 
-        let mode = receive_data_migration.memory_mode;
         let mut configure_vm =
             |socket: &mut SocketStream,
              memory_files: HashMap<u32, File>|
              -> result::Result<ReceiveMigrationConfiguredData, MigratableError> {
                 let shared_backing = !memory_files.is_empty();
-                let memory_manager = self.vm_receive_config(req, socket, memory_files, mode)?;
+                let memory_manager =
+                    self.vm_receive_config(req, socket, memory_files, receive_data_migration)?;
                 let guest_memory = memory_manager.lock().unwrap().guest_memory();
                 // Create the additional-connection receiver even in the single-connection case.
                 // At this point the receiver does not know whether the sender will use extra TCP
@@ -1112,7 +1133,10 @@ impl Vmm {
                     ))
                 })?;
             let mm = config_data.memory_manager.clone();
-            let saved_regions = mm.lock().unwrap().memory_range_table(false)?;
+            let saved_regions = mm
+                .lock()
+                .unwrap()
+                .memory_range_table(MemoryRangePolicy::Full)?;
             mm.lock()
                 .unwrap()
                 .start_postcopy_serving(
@@ -1148,11 +1172,14 @@ impl Vmm {
         req: &Request,
         socket: &mut T,
         existing_memory_files: HashMap<u32, File>,
-        mode: MigrationMode,
+        receive_data_migration: &VmReceiveMigrationData,
     ) -> result::Result<Arc<Mutex<MemoryManager>>, MigratableError>
     where
         T: Read,
     {
+        let mode = receive_data_migration.memory_mode;
+        let zone_updates = &receive_data_migration.zone_updates;
+
         // Read in config data along with memory manager data
         let mut data: Vec<u8> = Vec::new();
         data.resize_with(req.length() as usize, Default::default);
@@ -1163,6 +1190,14 @@ impl Vmm {
         let vm_migration_config: VmMigrationConfig = serde_json::from_slice(&data)
             .context("Error deserialising config")
             .map_err(MigratableError::MigrateReceive)?;
+
+        // Mirrors the vm_restore handling of RestoreConfig.vfio_fds. The
+        // received VmConfig carries the source's device paths or stale FDs,
+        // neither of which is usable on this host.
+        receive_data_migration
+            .validate_vfio_fds(&vm_migration_config.vm_config.lock().unwrap())
+            .map_err(|e| MigratableError::MigrateReceive(e.into()))?;
+        apply_vfio_fds_to_vm_config(receive_data_migration, &vm_migration_config.vm_config);
 
         // Eager prefault populates memory before UFFD is registered, so those
         // pages never fault and are never served. Reject postcopy+prefault
@@ -1187,6 +1222,10 @@ impl Vmm {
             &vm_migration_config.vm_config,
             &vm_migration_config.common_cpuid,
         )?;
+
+        update_memory_zones(zone_updates, &vm_migration_config.vm_config).map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!("Error updating memory zones: {e:?}"))
+        })?;
 
         let config = vm_migration_config.vm_config.clone();
         self.vm_config = Some(vm_migration_config.vm_config);
@@ -1362,7 +1401,7 @@ impl Vmm {
             let iteration_begin = Instant::now();
 
             let iteration_table = if ctx.iteration == 0 {
-                vm.memory_range_table()?
+                vm.memory_range_table(MemoryRangePolicy::Sparse)?
             } else {
                 // TODO do this in a thread #7816
                 vm.dirty_log()?
@@ -1631,8 +1670,11 @@ impl Vmm {
         };
         transport::send_config(&mut socket, &vm_migration_config)?;
 
-        // Let every Migratable object know about the migration being started.
-        vm.start_migration()?;
+        // Let every Migratable object know about the migration being started
+        // unless the source VM must be preserved.
+        if !send_data_migration.preserve_source {
+            vm.start_migration()?;
+        }
 
         if send_data_migration.local
             || matches!(send_data_migration.memory_mode, MigrationMode::Postcopy)
@@ -1677,8 +1719,11 @@ impl Vmm {
 
         // We release the locks early to enable locking them on the destination host.
         // The VM is already stopped.
-        vm.release_disk_locks()
-            .map_err(|e| MigratableError::UnlockError(anyhow!("{e}")))?;
+        // Keep the locks held if the source VM must be preserved.
+        if !send_data_migration.preserve_source {
+            vm.release_disk_locks()
+                .map_err(|e| MigratableError::UnlockError(anyhow!("{e}")))?;
+        }
 
         // For postcopy, serve faults before sending State so the destination
         // can fault pages in during restore.
@@ -1770,7 +1815,12 @@ impl Vmm {
         }
 
         // Let every Migratable object know about the migration being complete
-        vm.complete_migration()
+        // unless the source VM must be preserved.
+        if send_data_migration.preserve_source {
+            Ok(())
+        } else {
+            vm.complete_migration()
+        }
     }
 
     /// Serve `Command::PageFault` requests from local guest memory on the fault
@@ -1992,6 +2042,7 @@ impl Vmm {
             vm,
             migration_result: migration_res,
             initial_vm_state,
+            preserve_source,
         } = migration_worker_handle.join();
 
         let mut try_resume_vm_after_failed_migration = |mut vm: Vm| {
@@ -2017,6 +2068,10 @@ impl Vmm {
         };
 
         match migration_res {
+            Ok(()) if preserve_source => {
+                // Give the source VM back to the VMM.
+                self.vm = VmOwnership::Owned(vm);
+            }
             Ok(()) => {
                 self.vm = VmOwnership::None;
                 let mut vm = vm;
@@ -2190,6 +2245,90 @@ impl Vmm {
 
 fn apply_landlock(vm_config: &mut VmConfig) -> result::Result<(), LandlockError> {
     vm_config.apply_landlock()?;
+    Ok(())
+}
+
+// For each matched DeviceConfig.id, swap the saved path or stale FD for the
+// cdev FD received with the request, and install the fresh iommufd FD backing
+// them. The values in the migrated VmConfig are stale. validate_vfio_fds has
+// already confirmed the ids match and the iommufd FD is present.
+fn apply_vfio_fds_to_vm_config(
+    receive_data_migration: &VmReceiveMigrationData,
+    vm_config: &Arc<Mutex<VmConfig>>,
+) {
+    let vfio_fds = receive_data_migration
+        .vfio_fds
+        .as_deref()
+        .unwrap_or_default();
+    if vfio_fds.is_empty() {
+        return;
+    }
+
+    let mut config = vm_config.lock().unwrap();
+    if let Some(devices) = config.devices.as_mut() {
+        for v in vfio_fds {
+            for device in devices.iter_mut() {
+                if device.pci_common.id.as_deref() == Some(v.id.as_str()) {
+                    device.path = None;
+                    device.fd = v.fd;
+                }
+            }
+        }
+    }
+
+    let iommufd_fd = receive_data_migration
+        .iommufd_fd
+        .expect("receive-migration validated an iommufd FD accompanies vfio_fds");
+    config
+        .platform
+        .as_mut()
+        .expect("receive-migration validated iommufd=on, so a platform exists")
+        .iommufd_fd = Some(iommufd_fd);
+}
+
+#[allow(unused)]
+fn update_memory_zones(
+    zone_updates: &[VmMemoryZoneUpdateData],
+    vm_config: &Arc<Mutex<VmConfig>>,
+) -> result::Result<(), MemoryZoneUpdateError> {
+    if !zone_updates.is_empty() {
+        let mut vm_config = vm_config.lock().unwrap();
+        // Clone zones so we can abort if we encounter an error without leaving the VmConfig in a
+        // inconsistent state.
+        let mut config_zones = vm_config
+            .memory
+            .zones
+            .clone()
+            .ok_or(MemoryZoneUpdateError::NoZones)?;
+
+        let mut seen_zone_ids = HashSet::new();
+        for zone_update in zone_updates {
+            // We currently only support to move MemoryZones to different host nodes.
+            if !seen_zone_ids.insert(zone_update.id.clone()) {
+                return Err(MemoryZoneUpdateError::MultipleUpdates(
+                    zone_update.id.clone(),
+                ));
+            }
+            let matched_zone = config_zones
+                .iter_mut()
+                .find(|z| z.id == zone_update.id)
+                .ok_or_else(|| MemoryZoneUpdateError::ZoneNotFound(zone_update.id.clone()))?;
+
+            if matched_zone.shared && matched_zone.file.is_some() {
+                error!(
+                    "Invalid to set host NUMA policy for a memory zone \
+                        backed by a regular file and mapped as 'shared' "
+                );
+                return Err(MemoryZoneUpdateError::SharedZoneBackedByFile(
+                    zone_update.id.clone(),
+                ));
+            }
+
+            matched_zone.host_numa_node = Some(zone_update.host_numa_node);
+        }
+        // Write back updated zones after all updates were successful
+        *(vm_config.memory.zones.as_mut().unwrap()) = config_zones;
+    }
     Ok(())
 }
 
@@ -2373,6 +2512,37 @@ impl RequestHandler for Vmm {
                         }
                     }
                 }
+
+                // Swap each VFIO device's saved path or stale FD for the cdev
+                // FD received with the restore request, and install the fresh
+                // iommufd FD backing them. The one saved in the snapshot is
+                // stale, and validate() has confirmed both accompany vfio_fds.
+                if let Some(restored_vfios) = restore_cfg.vfio_fds {
+                    let mut config = vm_config.lock().unwrap();
+                    if let Some(vm_device_configs) = config.devices.as_mut() {
+                        for v in restored_vfios.iter() {
+                            for device_config in vm_device_configs.iter_mut() {
+                                if device_config.pci_common.id.as_ref() == Some(&v.id) {
+                                    device_config.path = None;
+                                    device_config.fd = v.fd;
+                                }
+                            }
+                        }
+                    }
+                    let iommufd_fd = restore_cfg
+                        .iommufd_fd
+                        .expect("restore validated an iommufd FD accompanies vfio_fds");
+                    config
+                        .platform
+                        .as_mut()
+                        .expect("restore validated iommufd=on, so a platform exists")
+                        .iommufd_fd = Some(iommufd_fd);
+                }
+
+                update_memory_zones(&restore_cfg.zone_updates, &vm_config).map_err(|e| {
+                    error!("VM Restore failed: {e:?}");
+                    VmError::ApplyMemoryZoneUpdate(e)
+                })?;
 
                 self.vm_restore(
                     source_url,
@@ -3027,9 +3197,10 @@ impl RequestHandler for Vmm {
             .map_err(MigratableError::MigrateReceive)?;
 
         info!(
-            "Receiving migration: receiver_url={},tls={}",
+            "Receiving migration: receiver_url={},tls={},zone_updates={:?}",
             receive_data_migration.receiver_url,
-            receive_data_migration.tls_dir.is_some()
+            receive_data_migration.tls_dir.is_some(),
+            receive_data_migration.zone_updates,
         );
 
         let mut listener = transport::receive_migration_listener(
@@ -3295,12 +3466,13 @@ mod unit_tests {
     use arch::CpuProfile;
 
     use super::*;
+    use crate::config::RestoredVfioConfig;
     #[cfg(target_arch = "x86_64")]
     use crate::vm_config::DebugConsoleConfig;
     use crate::vm_config::{
         CommonConsoleConfig, ConsoleConfig, ConsoleOutputMode, CoreScheduling, CpuFeatures,
-        CpusConfig, HotplugMethod, MemoryConfig, PayloadConfig, PciDeviceCommonConfig, RngConfig,
-        SerialConfig,
+        CpusConfig, DeviceConfig, HotplugMethod, MemoryConfig, MemoryZoneConfig, PayloadConfig,
+        PciDeviceCommonConfig, PlatformConfig, RngConfig, SerialConfig,
     };
 
     fn create_dummy_vmm() -> Vmm {
@@ -3838,6 +4010,293 @@ mod unit_tests {
                 .clone()
                 .unwrap(),
             vsock_config
+        );
+    }
+
+    fn vm_config_with_vfio_devices(ids: &[&str], iommufd: bool) -> Arc<Mutex<VmConfig>> {
+        let mut config = *create_dummy_vm_config();
+        let platform = if iommufd { "iommufd=on" } else { "iommufd=off" };
+        config.platform = Some(PlatformConfig::parse(platform).unwrap());
+        config.devices = Some(
+            ids.iter()
+                .map(|id| DeviceConfig {
+                    pci_common: PciDeviceCommonConfig {
+                        id: Some((*id).to_owned()),
+                        ..Default::default()
+                    },
+                    path: Some(PathBuf::from(format!("/sys/bus/pci/devices/{id}"))),
+                    fd: None,
+                    x_nv_gpudirect_clique: None,
+                    x_exclude_mmap_bars: Vec::new(),
+                })
+                .collect(),
+        );
+        Arc::new(Mutex::new(config))
+    }
+
+    fn receive_data(
+        vfio_fds: Option<Vec<RestoredVfioConfig>>,
+        iommufd_fd: Option<i32>,
+    ) -> VmReceiveMigrationData {
+        VmReceiveMigrationData {
+            receiver_url: "tcp:127.0.0.1:4321".to_string(),
+            tls_dir: None,
+            memory_mode: MigrationMode::default(),
+            vfio_fds,
+            iommufd_fd,
+            zone_updates: vec![],
+        }
+    }
+
+    fn vfio_fd(id: &str, fd: i32) -> RestoredVfioConfig {
+        RestoredVfioConfig {
+            id: id.to_owned(),
+            fd: Some(fd),
+        }
+    }
+
+    #[test]
+    fn test_apply_vfio_fds_empty_is_noop() {
+        let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
+        apply_vfio_fds_to_vm_config(&receive_data(None, None), &vm_config);
+        let config = vm_config.lock().unwrap();
+        let device = &config.devices.as_ref().unwrap()[0];
+        assert!(device.path.is_some());
+        assert!(device.fd.is_none());
+    }
+
+    #[test]
+    fn test_apply_vfio_fds_swaps_path_for_fd() {
+        let vm_config = vm_config_with_vfio_devices(&["vfio0", "vfio1"], true);
+        let data = receive_data(Some(vec![vfio_fd("vfio1", 5)]), Some(6));
+        apply_vfio_fds_to_vm_config(&data, &vm_config);
+        let config = vm_config.lock().unwrap();
+        let devices = config.devices.as_ref().unwrap();
+        assert!(devices[0].path.is_some());
+        assert!(devices[0].fd.is_none());
+        assert!(devices[1].path.is_none());
+        assert_eq!(devices[1].fd, Some(5));
+        assert_eq!(config.platform.as_ref().unwrap().iommufd_fd, Some(6));
+    }
+
+    #[test]
+    fn test_validate_vfio_fds_requires_iommufd_fd() {
+        let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
+        let data = receive_data(Some(vec![vfio_fd("vfio0", 5)]), None);
+        data.validate_vfio_fds(&vm_config.lock().unwrap())
+            .unwrap_err();
+    }
+
+    #[test]
+    fn test_validate_vfio_fds_unknown_id_fails() {
+        // vfio0 is covered so coverage passes, the extra bogus id is what the
+        // id match must reject.
+        let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
+        let data = receive_data(
+            Some(vec![vfio_fd("vfio0", 5), vfio_fd("missing", 6)]),
+            Some(7),
+        );
+        data.validate_vfio_fds(&vm_config.lock().unwrap())
+            .unwrap_err();
+    }
+
+    #[test]
+    fn test_validate_vfio_fds_duplicate_id_fails() {
+        let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
+        let data = receive_data(
+            Some(vec![vfio_fd("vfio0", 5), vfio_fd("vfio0", 6)]),
+            Some(7),
+        );
+        data.validate_vfio_fds(&vm_config.lock().unwrap())
+            .unwrap_err();
+    }
+
+    #[test]
+    fn test_validate_vfio_fds_requires_iommufd_backend() {
+        let vm_config = vm_config_with_vfio_devices(&["vfio0"], false);
+        let data = receive_data(Some(vec![vfio_fd("vfio0", 5)]), Some(6));
+        data.validate_vfio_fds(&vm_config.lock().unwrap())
+            .unwrap_err();
+    }
+
+    #[test]
+    fn test_validate_vfio_fds_stale_fd_needs_replacement() {
+        let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
+        {
+            let mut config = vm_config.lock().unwrap();
+            let device = &mut config.devices.as_mut().unwrap()[0];
+            device.path = None;
+            device.fd = Some(-1);
+        }
+        receive_data(None, None)
+            .validate_vfio_fds(&vm_config.lock().unwrap())
+            .unwrap_err();
+    }
+
+    #[test]
+    fn test_validate_vfio_fds_path_based_needs_replacement() {
+        // A path based device carries its source path, which is unusable on
+        // the destination, so it must be replaced in vfio_fds as well.
+        let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
+        receive_data(None, None)
+            .validate_vfio_fds(&vm_config.lock().unwrap())
+            .unwrap_err();
+    }
+
+    #[test]
+    fn test_validate_vfio_fds_all_substituted_ok() {
+        let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
+        let data = receive_data(Some(vec![vfio_fd("vfio0", 5)]), Some(6));
+        data.validate_vfio_fds(&vm_config.lock().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn test_updates_memory_zones() {
+        const NEW_NUMA_NODE1: u32 = 3;
+        const NEW_NUMA_NODE2: u32 = 2;
+
+        let mut dummy_config = create_dummy_vm_config();
+        let memzone_updates = vec![
+            VmMemoryZoneUpdateData {
+                id: "zone1".to_string(),
+                host_numa_node: NEW_NUMA_NODE1,
+            },
+            VmMemoryZoneUpdateData {
+                id: "zone2".to_string(),
+                host_numa_node: NEW_NUMA_NODE2,
+            },
+        ];
+
+        // No zones configured in the original config -> Error
+        dummy_config.memory.zones = None;
+        let result = update_memory_zones(
+            &memzone_updates,
+            &Arc::new(Mutex::new(*dummy_config.clone())),
+        );
+        assert!(
+            matches!(result, Err(MemoryZoneUpdateError::NoZones)),
+            "Expected `Err(MemoryZoneUpdateError::NoZones)` but got {result:?}"
+        );
+
+        // More zone updates than originally specified zones -> Error
+        dummy_config.memory.zones = Some(vec![MemoryZoneConfig {
+            host_numa_node: Some(0),
+            id: "zone1".to_string(),
+            ..Default::default()
+        }]);
+        let result = update_memory_zones(
+            &memzone_updates,
+            &Arc::new(Mutex::new(*dummy_config.clone())),
+        );
+        assert!(
+            matches!(
+                result,
+                Err(MemoryZoneUpdateError::ZoneNotFound(ref id)) if id=="zone2"
+            ),
+            "Expected `Err(MemoryZoneUpdateError::ZoneNotFound(\"zone2\"))` but got {result:?}"
+        );
+
+        // The second zone update does not match -> Error
+        dummy_config.memory.zones = Some(vec![
+            MemoryZoneConfig {
+                host_numa_node: Some(0),
+                id: "zone1".to_string(),
+                ..Default::default()
+            },
+            MemoryZoneConfig {
+                host_numa_node: Some(1),
+                id: "zone3".to_string(),
+                ..Default::default()
+            },
+        ]);
+        let result = update_memory_zones(
+            &memzone_updates,
+            &Arc::new(Mutex::new(*dummy_config.clone())),
+        );
+        assert!(
+            matches!(
+                result,
+                Err(MemoryZoneUpdateError::ZoneNotFound(ref id)) if id=="zone2"
+            ),
+            "Expected `Err(MemoryZoneUpdateError::ZoneNotFound(\"zone2\"))` but got {result:?}"
+        );
+
+        // List contains two updates for the same memory Zone -> Error
+        dummy_config.memory.zones = Some(vec![
+            MemoryZoneConfig {
+                host_numa_node: Some(0),
+                id: "zone1".to_string(),
+                ..Default::default()
+            },
+            MemoryZoneConfig {
+                host_numa_node: Some(1),
+                id: "zone3".to_string(),
+                ..Default::default()
+            },
+        ]);
+
+        let memzone_updates = vec![
+            VmMemoryZoneUpdateData {
+                id: "zone1".to_string(),
+                host_numa_node: NEW_NUMA_NODE1,
+            },
+            VmMemoryZoneUpdateData {
+                id: "zone1".to_string(),
+                host_numa_node: NEW_NUMA_NODE2,
+            },
+        ];
+        let result = update_memory_zones(
+            &memzone_updates,
+            &Arc::new(Mutex::new(*dummy_config.clone())),
+        );
+        assert!(
+            matches!(
+                result,
+                Err(MemoryZoneUpdateError::MultipleUpdates(ref id)) if id=="zone1"
+            ),
+            "Expected `Err(MemoryZoneUpdateError::MultipleUpdates(\"zone1\"))` but got {result:?}"
+        );
+
+        // The update works. Result is okay and the update is written to the config
+        dummy_config.memory.zones = Some(vec![
+            MemoryZoneConfig {
+                host_numa_node: Some(0),
+                id: "zone1".to_string(),
+                ..Default::default()
+            },
+            MemoryZoneConfig {
+                host_numa_node: Some(1),
+                id: "zone2".to_string(),
+                ..Default::default()
+            },
+        ]);
+
+        let memzone_updates = vec![
+            VmMemoryZoneUpdateData {
+                id: "zone1".to_string(),
+                host_numa_node: NEW_NUMA_NODE1,
+            },
+            VmMemoryZoneUpdateData {
+                id: "zone2".to_string(),
+                host_numa_node: NEW_NUMA_NODE2,
+            },
+        ];
+        let dummy_config = Arc::new(Mutex::new(*dummy_config));
+        let result = update_memory_zones(&memzone_updates, &dummy_config.clone());
+        assert!(
+            matches!(result, Ok(()),),
+            "Result should have been Ok(()) but got {result:?}"
+        );
+        let result_zones = dummy_config.lock().unwrap().memory.zones.clone().unwrap();
+        assert_eq!(
+            result_zones[0].host_numa_node,
+            Some(NEW_NUMA_NODE1),
+            "Expected \"zone1\" to be updated to {NEW_NUMA_NODE1:?}"
+        );
+        assert_eq!(
+            result_zones[1].host_numa_node,
+            Some(NEW_NUMA_NODE2),
+            "Expected \"zone2\" to be updated to {NEW_NUMA_NODE2:?}"
         );
     }
 }

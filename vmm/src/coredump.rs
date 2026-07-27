@@ -194,16 +194,16 @@ const EM_X86_64: u16 = 62;
 pub trait Elf64Writable {
     fn write_header(&mut self, dump_state: &DumpState) -> result::Result<(), GuestDebuggableError> {
         let e_ident = [
-            elf::ELFMAG0 as u8, // magic
+            elf::ELFMAG0, // magic
             elf::ELFMAG1,
             elf::ELFMAG2,
             elf::ELFMAG3,
-            ELFCLASS64,             // class
-            elf::ELFDATA2LSB as u8, //data
-            EV_CURRENT,             // version
-            0,                      // os_abi
-            0,                      // abi_version
-            0,                      // padding
+            ELFCLASS64,       // class
+            elf::ELFDATA2LSB, // data
+            EV_CURRENT,       // version
+            0,                // os_abi
+            0,                // abi_version
+            0,                // padding
             0,
             0,
             0,

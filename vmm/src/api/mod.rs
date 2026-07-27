@@ -33,6 +33,7 @@
 pub mod dbus;
 pub mod http;
 
+use std::collections::HashSet;
 use std::io;
 use std::num::{NonZeroU32, NonZeroU64};
 use std::path::PathBuf;
@@ -42,18 +43,20 @@ use std::time::Duration;
 
 use log::info;
 use micro_http::Body;
-use option_parser::{OptionParser, OptionParserError, Toggle};
+use option_parser::{OptionParser, OptionParserError, Toggle, Tuple, TupleList};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_migration::MigratableError;
-use vm_migration::tls::{TlsEndpoint, validate_tls_dir};
+use vm_migration::tls::{TlsConfigError, TlsEndpoint, validate_tls_dir};
 use vmm_sys_util::eventfd::EventFd;
 
 #[cfg(feature = "dbus_api")]
 pub use self::dbus::start_dbus_thread;
 pub use self::http::{start_http_fd_thread, start_http_path_thread};
 use crate::Error as VmmError;
-use crate::config::RestoreConfig;
+use crate::config::{
+    RestoreConfig, RestoredVfioConfig, VmMemoryZoneUpdateData, deserialize_restored_fd,
+};
 use crate::device_tree::DeviceTree;
 use crate::migration::transport::{
     MAX_MIGRATION_CONNECTIONS, TcpAddressParseError, tcp_address_to_server_name,
@@ -316,24 +319,78 @@ pub struct VmReceiveMigrationData {
     /// Memory transfer mode.
     #[serde(default)]
     pub memory_mode: MigrationMode,
+    /// Optional VFIO device id to cdev FD pairs, used to substitute each
+    /// device's saved path or stale FD in the received VmConfig.
+    #[serde(default)]
+    pub vfio_fds: Option<Vec<RestoredVfioConfig>>,
+    // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
+    #[serde(default, deserialize_with = "deserialize_restored_fd")]
+    pub iommufd_fd: Option<i32>,
+    /// Optional memory zone update data
+    #[serde(default)]
+    pub zone_updates: Vec<VmMemoryZoneUpdateData>,
 }
 
 #[derive(Debug, Error)]
 pub enum VmReceiveMigrationConfigError {
+    /// Parsing of `VmReceiveMigrationData` failed
     #[error("Error parsing receive migration parameters")]
     ParseError(#[source] OptionParserError),
-
-    #[error("Error validating receive migration parameters: {0}")]
-    ValidationError(String),
+    /// Variant returned of validation of `receiver_url` failed.
+    #[error("Expected receiver_url in the form of either `tcp:<host>:<port>` or `unix:<path>:`")]
+    MalformedReceiverUrl(#[source] TcpAddressParseError),
+    /// TLS encryption cannot be used for UNIX sockets. It is therefore
+    /// forbidden to use TLS encryption with UNIX sockets.
+    #[error("UNIX sockets and TLS encryption cannot be used at the same time")]
+    TlsEncryptionUsedForUnixSocket,
+    /// The `receiver_url` does not contain one of the supported
+    /// prefixes. Supported prefixes are "tcp" and "unix".
+    #[error("Expected receiver_url to either use `tcp` or `unix` prefix")]
+    InvalidSocketPrefix,
+    /// The TLS configuration is invalid.
+    #[error("Invalid TLS configuration for receive-migration")]
+    InvalidTlsConfiguration(#[source] TlsConfigError),
+    /// Every VFIO device needs a replacement in vfio_fds and none was found for the respective
+    /// device
+    #[error(
+        "VFIO device '{0}' has no replacement in vfio_fds, its source path or fd is not usable on the destination"
+    )]
+    VfioDeviceNoReplacementFd(String),
+    /// The `vfio_fds` option was used without supplying `iommufd_fd`
+    #[error("Usage of `vfio_fds` requires `iommufd_fd` to be specified")]
+    VfioFdRequiresIommufdFd,
+    /// `iommufd_fd` was provided without also enabling the iommufd backend.
+    #[error("Platform `iommufd_fd=<fd>` requires `iommufd=on`")]
+    IommufdFdRequiresIommufd,
+    /// Identified duplicate fd replacements for the FD with the given ID.
+    #[error("Multiple replacements defined for fd with ID {0}")]
+    VfioFdMultipleReplacements(String),
+    /// Identified a fd replacements for a FD not present in the VmConfig.
+    #[error("Replacement ID {0} in vfio_fds id does not match any device in the received VmConfig")]
+    VfioFdReplacementWithoutTarget(String),
+    /// Multiple updates for the same memory zone were defined.
+    #[error("More than one update was defined for at least one memory zone")]
+    MultipleMemoryZoneUpdates,
+    /// An update with an empty memory zone ID was specified.
+    #[error("One or more memory zone updates contained an empty ID")]
+    MemoryZoneUpdatesEmptyId,
 }
 
 impl VmReceiveMigrationData {
     pub const SYNTAX: &'static str = "VM receive migration parameters \
-        \"<receiver_url>\" or \"receiver_url=<url>[,tls_dir=<path>][,memory_mode=precopy|postcopy]\"";
+        \"<receiver_url>\" or \"receiver_url=<url>[,tls_dir=<path>][,memory_mode=precopy|postcopy]\
+        [,vfio_fds=<list_of_vfio_ids_with_their_associated_fd>][,iommufd_fd=<fd>]\
+        [,zone_updates=[<id@host_numa_node>]]\"";
 
     pub fn parse(migration: &str) -> Result<Self, VmReceiveMigrationConfigError> {
         let mut parser = OptionParser::new();
-        parser.add("receiver_url").add("tls_dir").add("memory_mode");
+        parser
+            .add("receiver_url")
+            .add("tls_dir")
+            .add("memory_mode")
+            .add("vfio_fds")
+            .add("iommufd_fd")
+            .add("zone_updates");
         parser
             .parse(migration)
             .map_err(VmReceiveMigrationConfigError::ParseError)?;
@@ -351,11 +408,40 @@ impl VmReceiveMigrationData {
             .convert::<MigrationMode>("memory_mode")
             .map_err(VmReceiveMigrationConfigError::ParseError)?
             .unwrap_or_default();
+        let vfio_fds = parser
+            .convert::<TupleList<String, u64>>("vfio_fds")
+            .map_err(VmReceiveMigrationConfigError::ParseError)?
+            .map(|v| {
+                v.0.iter()
+                    .map(|Tuple(id, fd)| RestoredVfioConfig {
+                        id: id.clone(),
+                        fd: Some(*fd as i32),
+                    })
+                    .collect()
+            });
+        let iommufd_fd = parser
+            .convert::<i32>("iommufd_fd")
+            .map_err(VmReceiveMigrationConfigError::ParseError)?;
+
+        let zone_updates: Vec<VmMemoryZoneUpdateData> = parser
+            .convert::<TupleList<String, u32>>("zone_updates")
+            .map_err(VmReceiveMigrationConfigError::ParseError)?
+            .map_or(Vec::new(), |v| {
+                v.0.iter()
+                    .map(|Tuple(id, host_numa_node)| VmMemoryZoneUpdateData {
+                        id: id.clone(),
+                        host_numa_node: *host_numa_node,
+                    })
+                    .collect()
+            });
 
         let data = Self {
             receiver_url,
             tls_dir,
             memory_mode,
+            vfio_fds,
+            iommufd_fd,
+            zone_updates,
         };
 
         data.validate()?;
@@ -365,33 +451,97 @@ impl VmReceiveMigrationData {
 
     pub fn validate(&self) -> Result<(), VmReceiveMigrationConfigError> {
         if let Some(addr) = self.receiver_url.strip_prefix("tcp:") {
-            tcp_address_to_server_name(addr).map_err(|e| {
-                VmReceiveMigrationConfigError::ValidationError(format!(
-                    "receiver_url must use tcp:<host>:<port> or unix:<path>: {e}."
-                ))
-            })?;
+            tcp_address_to_server_name(addr)
+                .map_err(VmReceiveMigrationConfigError::MalformedReceiverUrl)?;
         } else if self
             .receiver_url
             .strip_prefix("unix:")
             .is_some_and(|path| !path.is_empty())
         {
             if self.tls_dir.is_some() {
-                return Err(VmReceiveMigrationConfigError::ValidationError(
-                    "UNIX sockets and TLS encryption cannot be used at the same time.".to_string(),
-                ));
+                return Err(VmReceiveMigrationConfigError::TlsEncryptionUsedForUnixSocket);
             }
         } else {
-            return Err(VmReceiveMigrationConfigError::ValidationError(
-                "receiver_url must use tcp:<host>:<port> or unix:<path>.".to_string(),
-            ));
+            return Err(VmReceiveMigrationConfigError::InvalidSocketPrefix);
         }
 
         if let Some(tls_dir) = &self.tls_dir {
-            validate_tls_dir(tls_dir, TlsEndpoint::Server).map_err(|e| {
-                VmReceiveMigrationConfigError::ValidationError(format!(
-                    "invalid TLS configuration for receive-migration: {e}"
-                ))
-            })?;
+            validate_tls_dir(tls_dir, TlsEndpoint::Server)
+                .map_err(VmReceiveMigrationConfigError::InvalidTlsConfiguration)?;
+        }
+
+        let unique_zones = self
+            .zone_updates
+            .iter()
+            .map(|update| update.id.as_str())
+            .collect::<HashSet<_>>();
+        if self.zone_updates.len() != unique_zones.len() {
+            return Err(VmReceiveMigrationConfigError::MultipleMemoryZoneUpdates);
+        }
+        if unique_zones.contains("") {
+            return Err(VmReceiveMigrationConfigError::MemoryZoneUpdatesEmptyId);
+        }
+
+        Ok(())
+    }
+
+    pub fn validate_vfio_fds(
+        &self,
+        vm_config: &VmConfig,
+    ) -> Result<(), VmReceiveMigrationConfigError> {
+        let vfio_fds = self.vfio_fds.as_deref().unwrap_or_default();
+
+        // A migrated VFIO device cannot reuse its source handle. Its fd is
+        // invalid across the migration and its path names the source host's
+        // topology, so every device needs a replacement in vfio_fds. This
+        // holds even when no vfio_fds are supplied at all.
+        let substituted: HashSet<&str> = vfio_fds.iter().map(|v| v.id.as_str()).collect();
+        for d in vm_config.devices.iter().flatten() {
+            if !d
+                .pci_common
+                .id
+                .as_deref()
+                .is_some_and(|id| substituted.contains(id))
+            {
+                return Err(VmReceiveMigrationConfigError::VfioDeviceNoReplacementFd(
+                    d.pci_common.id.as_deref().unwrap_or_default().to_owned(),
+                ));
+            }
+        }
+
+        if vfio_fds.is_empty() {
+            return Ok(());
+        }
+
+        // The supplied vfio_fds must be usable against the received VmConfig.
+        if self.iommufd_fd.is_none() {
+            return Err(VmReceiveMigrationConfigError::VfioFdRequiresIommufdFd);
+        }
+        if !vm_config.platform.as_ref().is_some_and(|p| p.iommufd) {
+            return Err(VmReceiveMigrationConfigError::IommufdFdRequiresIommufd);
+        }
+
+        let mut seen = HashSet::new();
+        for v in vfio_fds {
+            if !seen.insert(v.id.as_str()) {
+                return Err(VmReceiveMigrationConfigError::VfioFdMultipleReplacements(
+                    v.id.to_owned(),
+                ));
+            }
+        }
+
+        let known_ids: HashSet<&str> = vm_config
+            .devices
+            .iter()
+            .flatten()
+            .filter_map(|d| d.pci_common.id.as_deref())
+            .collect();
+        for v in vfio_fds {
+            if !known_ids.contains(v.id.as_str()) {
+                return Err(
+                    VmReceiveMigrationConfigError::VfioFdReplacementWithoutTarget(v.id.to_owned()),
+                );
+            }
         }
 
         Ok(())
@@ -458,6 +608,10 @@ pub struct VmSendMigrationData {
     /// Send memory across socket without copying
     #[serde(default)]
     pub local: bool,
+    /// Keep the source VM alive in a paused state once the migration is
+    /// complete.
+    #[serde(default)]
+    pub preserve_source: bool,
     /// The maximum downtime the migration aims for.
     ///
     /// Usually, on the order of a few hundred milliseconds.
@@ -489,7 +643,7 @@ pub struct VmSendMigrationData {
 
 impl VmSendMigrationData {
     pub const SYNTAX: &'static str = "VM send migration parameters \
-        \"destination_url=<url>[,local=on|off,\
+        \"destination_url=<url>[,local=on|off,preserve_source=on|off,\
         downtime_ms=<milliseconds>,timeout_s=<seconds>,\
         timeout_strategy=cancel|ignore,connections=<amount>,\
         tls_dir=<path>,memory_mode=precopy|postcopy]\"";
@@ -517,6 +671,7 @@ impl VmSendMigrationData {
         parser
             .add("destination_url")
             .add("local")
+            .add("preserve_source")
             .add("downtime_ms")
             .add("timeout_s")
             .add("timeout_strategy")
@@ -534,6 +689,11 @@ impl VmSendMigrationData {
         })?;
         let local = parser
             .convert::<Toggle>("local")
+            .map_err(VmSendMigrationConfigError::ParseError)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let preserve_source = parser
+            .convert::<Toggle>("preserve_source")
             .map_err(VmSendMigrationConfigError::ParseError)?
             .unwrap_or(Toggle(false))
             .0;
@@ -586,6 +746,7 @@ impl VmSendMigrationData {
         let data = Self {
             destination_url,
             local,
+            preserve_source,
             downtime_ms,
             timeout_s,
             timeout_strategy,
@@ -652,6 +813,12 @@ impl VmSendMigrationData {
                         .to_string(),
                 ));
             }
+        }
+
+        if self.preserve_source && !self.local {
+            return Err(VmSendMigrationConfigError::ValidationError(
+                "preserve_source option is only supported with the local option.".to_string(),
+            ));
         }
 
         if let Some(tls_dir) = &self.tls_dir {
@@ -2041,6 +2208,9 @@ mod unit_tests {
                 receiver_url: "tcp:192.168.1.1:8080".to_string(),
                 tls_dir: None,
                 memory_mode: MigrationMode::Precopy,
+                vfio_fds: None,
+                iommufd_fd: None,
+                zone_updates: vec![],
             }
         );
 
@@ -2068,6 +2238,9 @@ mod unit_tests {
                 receiver_url: "tcp:192.168.1.1:8080".to_string(),
                 tls_dir: Some(tls_dir_path),
                 memory_mode: MigrationMode::Precopy,
+                vfio_fds: None,
+                iommufd_fd: None,
+                zone_updates: vec![],
             }
         );
 
@@ -2078,10 +2251,46 @@ mod unit_tests {
         ))
         .unwrap_err();
 
-        VmReceiveMigrationData::parse("receiver_url=file:///tmp/migration").unwrap_err();
-        VmReceiveMigrationData::parse("receiver_url=tcp:192.168.1.1").unwrap_err();
-        VmReceiveMigrationData::parse("receiver_url=tcp:[2001:db8::1]").unwrap_err();
-        VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,tls_dir=/tmp").unwrap_err();
+        let e = VmReceiveMigrationData::parse("receiver_url=file:///tmp/migration").unwrap_err();
+        assert!(
+            matches!(e, VmReceiveMigrationConfigError::InvalidSocketPrefix),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            VmReceiveMigrationConfigError::InvalidSocketPrefix,
+        );
+        let e = VmReceiveMigrationData::parse("receiver_url=tcp:192.168.1.1").unwrap_err();
+        assert!(
+            matches!(
+                e,
+                VmReceiveMigrationConfigError::MalformedReceiverUrl(
+                    TcpAddressParseError::MissingPort
+                )
+            ),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            VmReceiveMigrationConfigError::MalformedReceiverUrl(TcpAddressParseError::MissingPort),
+        );
+        let e = VmReceiveMigrationData::parse("receiver_url=tcp:[2001:db8::1]").unwrap_err();
+        assert!(
+            matches!(
+                e,
+                VmReceiveMigrationConfigError::MalformedReceiverUrl(
+                    TcpAddressParseError::MissingPortSeparatorAfterBracketedHost
+                )
+            ),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            VmReceiveMigrationConfigError::MalformedReceiverUrl(
+                TcpAddressParseError::MissingPortSeparatorAfterBracketedHost
+            ),
+        );
+        let e =
+            VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,tls_dir=/tmp").unwrap_err();
+        assert!(
+            matches!(
+                e,
+                VmReceiveMigrationConfigError::TlsEncryptionUsedForUnixSocket
+            ),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            VmReceiveMigrationConfigError::TlsEncryptionUsedForUnixSocket,
+        );
 
         // memory_mode defaults to precopy when not specified.
         let data = VmReceiveMigrationData::parse("receiver_url=tcp:127.0.0.1:1234").unwrap();
@@ -2091,6 +2300,9 @@ mod unit_tests {
                 receiver_url: "tcp:127.0.0.1:1234".to_string(),
                 tls_dir: None,
                 memory_mode: MigrationMode::Precopy,
+                vfio_fds: None,
+                iommufd_fd: None,
+                ..Default::default()
             }
         );
 
@@ -2104,11 +2316,72 @@ mod unit_tests {
                 receiver_url: "unix:/tmp/sock".to_string(),
                 tls_dir: None,
                 memory_mode: MigrationMode::Postcopy,
+                vfio_fds: None,
+                iommufd_fd: None,
+                ..Default::default()
             }
         );
 
         // Missing receiver_url in keyed form must fail.
-        VmReceiveMigrationData::parse("memory_mode=postcopy").unwrap_err();
+        let e = VmReceiveMigrationData::parse("memory_mode=postcopy").unwrap_err();
+        assert!(
+            matches!(e, VmReceiveMigrationConfigError::ParseError(_)),
+            "Expected \"ParseError\"; got \"{e:?}\"",
+        );
+
+        // vfio_fds without iommufd_fd parses fine now, the pairing is checked
+        // later against the received VmConfig by validate_vfio_fds.
+        let data =
+            VmReceiveMigrationData::parse("receiver_url=tcp:127.0.0.1:1234,vfio_fds=[vfio0@5]")
+                .unwrap();
+        assert!(data.iommufd_fd.is_none());
+
+        // vfio_fds entries with the iommufd FD.
+        let data = VmReceiveMigrationData::parse(
+            "receiver_url=tcp:127.0.0.1:1234,vfio_fds=[vfio0@5,vfio1@7],iommufd_fd=9",
+        )
+        .unwrap();
+        let fds = data.vfio_fds.expect("vfio_fds populated");
+        assert_eq!(fds.len(), 2);
+        assert_eq!(fds[0].id, "vfio0");
+        assert_eq!(fds[0].fd, Some(5));
+        assert_eq!(fds[1].id, "vfio1");
+        assert_eq!(fds[1].fd, Some(7));
+        assert_eq!(data.iommufd_fd, Some(9));
+
+        // zone update tests
+        let e = VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,zone_updates=[]")
+            .unwrap_err();
+        assert!(
+            matches!(e, VmReceiveMigrationConfigError::ParseError(_)),
+            "Expected \"ParseError\"; got \"{e:?}\"",
+        );
+        let e = VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,zone_updates=[zone1 3]")
+            .unwrap_err();
+        assert!(
+            matches!(e, VmReceiveMigrationConfigError::ParseError(_)),
+            "Expected \"ParseError\"; got \"{e:?}\"",
+        );
+        let e = VmReceiveMigrationData::parse(
+            "receiver_url=unix:/tmp/sock,zone_updates=[zone1@1,zone1@2]",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(e, VmReceiveMigrationConfigError::MultipleMemoryZoneUpdates),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            VmReceiveMigrationConfigError::MultipleMemoryZoneUpdates,
+        );
+        //Mind the space before the second zone. If the whitespace isn't trimmed, we end up with two
+        //different ID and the error does not trigger
+        let e = VmReceiveMigrationData::parse(
+            "receiver_url=unix:/tmp/sock,zone_updates=[zone1@1, zone1@2]",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(e, VmReceiveMigrationConfigError::MultipleMemoryZoneUpdates),
+            "Expected \"{:?}\"; got \"{e:?}\"",
+            VmReceiveMigrationConfigError::MultipleMemoryZoneUpdates,
+        );
     }
 
     #[test]
@@ -2205,6 +2478,7 @@ mod unit_tests {
             VmSendMigrationData {
                 destination_url: "tcp:192.168.1.1:8080".to_string(),
                 local: false,
+                preserve_source: false,
                 downtime_ms: NonZeroU64::new(150).unwrap(),
                 timeout_s: VmSendMigrationData::default_timeout_s(),
                 timeout_strategy: Default::default(),
@@ -2226,6 +2500,7 @@ mod unit_tests {
             VmSendMigrationData {
                 destination_url: "tcp:192.168.1.1:8080".to_string(),
                 local: false,
+                preserve_source: false,
                 downtime_ms: NonZeroU64::new(150).unwrap(),
                 timeout_s: NonZeroU64::new(900).unwrap(),
                 timeout_strategy: TimeoutStrategy::Ignore,
@@ -2250,5 +2525,23 @@ mod unit_tests {
             "destination_url=tcp:192.168.1.1:8080,memory_mode=postcopy,connections=4",
         )
         .unwrap_err();
+
+        // preserve_source is accepted together with local (offload snapshot).
+        let data = VmSendMigrationData::parse(
+            "destination_url=unix:/tmp/sock,local=on,preserve_source=on",
+        )
+        .unwrap();
+        assert!(data.preserve_source);
+        assert!(data.local);
+
+        // preserve_source defaults to false when unspecified.
+        let data = VmSendMigrationData::parse("destination_url=unix:/tmp/sock,local=on").unwrap();
+        assert!(!data.preserve_source);
+
+        // preserve_source without local must be rejected.
+        VmSendMigrationData::parse("destination_url=tcp:192.168.1.1:8080,preserve_source=on")
+            .unwrap_err();
+        VmSendMigrationData::parse("destination_url=unix:/tmp/sock,preserve_source=on")
+            .unwrap_err();
     }
 }

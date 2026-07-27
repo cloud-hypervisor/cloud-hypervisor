@@ -12,6 +12,11 @@ use std::sync::{Arc, Mutex};
 use std::{ffi, io};
 
 use hypervisor::HypervisorType;
+#[cfg(feature = "kvm")]
+use hypervisor::kvm::kvm_bindings::{
+    KVM_SEV_SNP_PAGE_TYPE_CPUID, KVM_SEV_SNP_PAGE_TYPE_NORMAL, KVM_SEV_SNP_PAGE_TYPE_SECRETS,
+    KVM_SEV_SNP_PAGE_TYPE_UNMEASURED, KVM_SEV_SNP_PAGE_TYPE_ZERO,
+};
 #[cfg(feature = "sev_snp")]
 use igvm::IgvmInitializationHeader;
 use igvm::snp_defs::SevVmsa;
@@ -32,7 +37,7 @@ use thiserror::Error;
 #[cfg(all(feature = "kvm", feature = "sev_snp"))]
 use vm_memory::Bytes;
 #[cfg(feature = "sev_snp")]
-use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory};
+use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryBackend};
 #[cfg(all(feature = "kvm", feature = "sev_snp"))]
 use vm_migration::Snapshottable;
 #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
@@ -124,20 +129,6 @@ pub enum Error {
     },
 }
 
-// KVM SNP page types — linux/arch/x86/include/uapi/asm/sev-guest.h
-#[cfg(feature = "kvm")]
-const KVM_SNP_PAGE_TYPE_NORMAL: u32 = 1;
-#[cfg(feature = "kvm")]
-const KVM_SNP_PAGE_TYPE_VMSA: u32 = 2;
-#[cfg(feature = "kvm")]
-const KVM_SNP_PAGE_TYPE_ZERO: u32 = 3;
-#[cfg(feature = "kvm")]
-const KVM_SNP_PAGE_TYPE_UNMEASURED: u32 = 4;
-#[cfg(feature = "kvm")]
-const KVM_SNP_PAGE_TYPE_SECRETS: u32 = 5;
-#[cfg(feature = "kvm")]
-const KVM_SNP_PAGE_TYPE_CPUID: u32 = 6;
-
 // Consolidated page type/size configuration per hypervisor.
 struct PageTypeConfig {
     isolated_page_size_4kb: u32,
@@ -147,7 +138,7 @@ struct PageTypeConfig {
     unmeasured: u32,
     cpuid: u32,
     secrets: u32,
-    vmsa: u32,
+    vmsa: Option<u32>,
 }
 
 #[derive(Copy, Clone)]
@@ -277,7 +268,7 @@ pub fn load_igvm(
     #[cfg(feature = "sev_snp")] host_data: &Option<String>,
 ) -> Result<Box<IgvmLoadedInfo>, Error> {
     let hypervisor_type = cpu_manager.lock().unwrap().hypervisor_type();
-    let page_types = match hypervisor_type {
+    let page_types: PageTypeConfig = match hypervisor_type {
         #[cfg(feature = "mshv")]
         HypervisorType::Mshv => PageTypeConfig {
             isolated_page_size_4kb: mshv_bindings::hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
@@ -286,17 +277,18 @@ pub fn load_igvm(
             unmeasured: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_UNMEASURED,
             cpuid: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_CPUID,
             secrets: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_SECRETS,
-            vmsa: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_VMSA,
+            vmsa: Some(mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_VMSA),
         },
         #[cfg(feature = "kvm")]
         HypervisorType::Kvm => PageTypeConfig {
             isolated_page_size_4kb: HV_PAGE_SIZE as u32,
-            normal: KVM_SNP_PAGE_TYPE_NORMAL,
-            zero: KVM_SNP_PAGE_TYPE_ZERO,
-            unmeasured: KVM_SNP_PAGE_TYPE_UNMEASURED,
-            cpuid: KVM_SNP_PAGE_TYPE_CPUID,
-            secrets: KVM_SNP_PAGE_TYPE_SECRETS,
-            vmsa: KVM_SNP_PAGE_TYPE_VMSA,
+            normal: KVM_SEV_SNP_PAGE_TYPE_NORMAL,
+            zero: KVM_SEV_SNP_PAGE_TYPE_ZERO,
+            unmeasured: KVM_SEV_SNP_PAGE_TYPE_UNMEASURED,
+            cpuid: KVM_SEV_SNP_PAGE_TYPE_CPUID,
+            secrets: KVM_SEV_SNP_PAGE_TYPE_SECRETS,
+            // KVM doesn't import a VMSA page, it instead constructs it internally
+            vmsa: None,
         },
     };
 
@@ -627,11 +619,13 @@ pub fn load_igvm(
                     }
                 }
 
-                gpas.push(GpaPages {
-                    gpa: *gpa,
-                    page_type: page_types.vmsa,
-                    page_size: page_types.isolated_page_size_4kb,
-                });
+                if let Some(vmsa_page_type) = page_types.vmsa {
+                    gpas.push(GpaPages {
+                        gpa: *gpa,
+                        page_type: vmsa_page_type,
+                        page_size: page_types.isolated_page_size_4kb,
+                    });
+                }
             }
             IgvmDirectiveHeader::SnpIdBlock {
                 compatibility_mask,

@@ -19,9 +19,11 @@
 // `__u64[2]` array rather than two separate `*const u64` pointers.
 
 use std::io;
-use std::os::unix::io::RawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 
-use libc::{FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE};
+use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
+
+use crate::AlignedFile;
 
 // `_IO(0x12, 119)` — issue a discard request to a block device.
 pub const BLKDISCARD: libc::c_ulong = 0x1277;
@@ -61,44 +63,97 @@ pub(crate) fn blkzeroout(fd: RawFd, offset: u64, length: u64) -> io::Result<()> 
 //
 // On block devices the kernel rejects `fallocate(PUNCH_HOLE)` (notably ZFS
 // zvols), so route through `BLKDISCARD` instead. On regular files use
-// `fallocate(FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE)`.
-pub(crate) fn punch_hole(fd: RawFd, is_blkdev: bool, offset: u64, length: u64) -> io::Result<()> {
+// `PunchHole`, falling back to `WriteZeroesAt` on EOPNOTSUPP (e.g. tmpfs).
+pub(crate) fn punch_hole(
+    file: &mut AlignedFile,
+    is_blkdev: bool,
+    offset: u64,
+    length: u64,
+) -> io::Result<()> {
     if is_blkdev {
-        blkdiscard(fd, offset, length)
-    } else {
-        fallocate(
-            fd,
-            FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
-            offset,
-            length,
-        )
+        return match blkdiscard(file.as_raw_fd(), offset, length) {
+            Ok(()) => Ok(()),
+            Err(e) if e.raw_os_error() == Some(libc::EOPNOTSUPP) => Ok(()),
+            Err(e) => Err(e),
+        };
+    }
+    match file.punch_hole(offset, length) {
+        Ok(()) => Ok(()),
+        Err(e) if e.raw_os_error() == Some(libc::EOPNOTSUPP) => {
+            file.write_all_zeroes_at(offset, length as usize)?;
+            Ok(())
+        }
+        Err(e) => Err(e),
     }
 }
 
 // Zero the byte range `[offset, offset + length)` in `fd`.
 //
 // Uses `BLKZEROOUT` on block devices (see [`punch_hole`] for the rationale)
-// and `fallocate(FALLOC_FL_ZERO_RANGE | FALLOC_FL_KEEP_SIZE)` on regular
-// files.
-pub(crate) fn write_zeroes(fd: RawFd, is_blkdev: bool, offset: u64, length: u64) -> io::Result<()> {
+// and `WriteZeroesAt` on regular files, which tries fallocate and falls
+// back to positional writes on EOPNOTSUPP (e.g. tmpfs).
+pub(crate) fn write_zeroes(
+    file: &mut AlignedFile,
+    is_blkdev: bool,
+    offset: u64,
+    length: u64,
+) -> io::Result<()> {
     if is_blkdev {
-        blkzeroout(fd, offset, length)
-    } else {
-        fallocate(
-            fd,
-            FALLOC_FL_ZERO_RANGE | FALLOC_FL_KEEP_SIZE,
-            offset,
-            length,
-        )
+        return blkzeroout(file.as_raw_fd(), offset, length);
     }
+    file.write_all_zeroes_at(offset, length as usize)?;
+    Ok(())
 }
 
-fn fallocate(fd: RawFd, mode: libc::c_int, offset: u64, length: u64) -> io::Result<()> {
-    // SAFETY: FFI call with a valid fd; fallocate touches no userspace memory.
-    let ret = unsafe { libc::fallocate(fd, mode, offset as libc::off_t, length as libc::off_t) };
-    if ret == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
+#[cfg(test)]
+mod tests {
+    use std::ffi::CString;
+    use std::fs::File;
+    use std::os::unix::fs::FileExt;
+    use std::os::unix::io::FromRawFd;
+
+    use super::*;
+
+    // Create a memfd backed file. memfd uses the same backing as tmpfs,
+    // so fallocate with ZERO_RANGE and PUNCH_HOLE returns EOPNOTSUPP,
+    // exercising the fallback path.
+    fn memfd_file() -> AlignedFile {
+        let name = CString::new("ch_sparse_test").unwrap();
+        // SAFETY: memfd_create is a safe syscall that returns a new fd.
+        let fd = unsafe { libc::memfd_create(name.as_ptr(), 0) };
+        assert!(fd >= 0, "memfd_create failed");
+        // SAFETY: fd is a valid open file descriptor we just created.
+        let f = unsafe { File::from_raw_fd(fd) };
+        AlignedFile::new(f, false)
+    }
+
+    #[test]
+    fn write_zeroes_fallback() {
+        let mut f = memfd_file();
+        f.file().write_all_at(&vec![0xAA; 4096], 0).unwrap();
+
+        write_zeroes(&mut f, false, 512, 1024).unwrap();
+
+        let mut buf = vec![0xFFu8; 4096];
+        f.file().read_exact_at(&mut buf, 0).unwrap();
+
+        assert!(buf[..512].iter().all(|&b| b == 0xAA));
+        assert!(buf[512..1536].iter().all(|&b| b == 0));
+        assert!(buf[1536..].iter().all(|&b| b == 0xAA));
+    }
+
+    #[test]
+    fn punch_hole_fallback() {
+        let mut f = memfd_file();
+        f.file().write_all_at(&vec![0xBB; 4096], 0).unwrap();
+
+        punch_hole(&mut f, false, 1024, 2048).unwrap();
+
+        let mut buf = vec![0xFFu8; 4096];
+        f.file().read_exact_at(&mut buf, 0).unwrap();
+
+        assert!(buf[..1024].iter().all(|&b| b == 0xBB));
+        assert!(buf[1024..3072].iter().all(|&b| b == 0));
+        assert!(buf[3072..].iter().all(|&b| b == 0xBB));
     }
 }
