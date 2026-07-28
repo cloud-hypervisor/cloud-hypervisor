@@ -13,9 +13,7 @@ use libc::{
     TCGETS, TCGETS2, TCSETS, TCSETS2, TIOCGPGRP, TIOCGPTPEER, TIOCGWINSZ, TIOCSCTTY, TIOCSPGRP,
     TIOCSPTLCK, TUNGETFEATURES, TUNGETIFF, TUNSETIFF, TUNSETOFFLOAD, TUNSETVNETHDRSZ,
 };
-use seccompiler::SeccompCmpOp::Eq;
-#[cfg(all(feature = "sev_snp", feature = "kvm"))]
-use seccompiler::SeccompCmpOp::MaskedEq;
+use seccompiler::SeccompCmpOp::{Eq, MaskedEq};
 use seccompiler::{
     BackendError, BpfProgram, Error, SeccompAction, SeccompCmpArgLen as ArgLen,
     SeccompCondition as Cond, SeccompFilter, SeccompRule,
@@ -572,7 +570,11 @@ fn create_serial_manager_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Backen
 // Syscalls needed by all threads, because they are used in the seccomp signal
 // handler.
 fn common_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
-    Ok(vec![(libc::SYS_gettid, vec![]), (libc::SYS_write, vec![])])
+    Ok(vec![
+        (libc::SYS_gettid, vec![]),
+        (libc::SYS_read, vec![]),
+        (libc::SYS_write, vec![]),
+    ])
 }
 
 fn create_signal_handler_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
@@ -632,7 +634,6 @@ fn pty_foreground_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_poll, vec![]),
         #[cfg(target_arch = "aarch64")]
         (libc::SYS_ppoll, vec![]),
-        (libc::SYS_read, vec![]),
         (libc::SYS_restart_syscall, vec![]),
         (libc::SYS_rt_sigaction, vec![]),
         (libc::SYS_rt_sigreturn, vec![]),
@@ -732,7 +733,6 @@ fn vmm_thread_rules(
         (libc::SYS_prlimit64, vec![]),
         (libc::SYS_pwrite64, vec![]),
         (libc::SYS_pwritev, vec![]),
-        (libc::SYS_read, vec![]),
         (libc::SYS_readv, vec![]),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_readlink, vec![]),
@@ -938,10 +938,8 @@ fn vcpu_thread_rules(
         (libc::SYS_newfstatat, vec![]),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_open, vec![]),
-        (libc::SYS_openat, vec![]),
         (libc::SYS_pread64, vec![]),
         (libc::SYS_pwrite64, vec![]),
-        (libc::SYS_read, vec![]),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_readlink, vec![]),
         #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
@@ -993,19 +991,7 @@ fn http_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
         (libc::SYS_mmap, vec![]),
         (libc::SYS_mprotect, vec![]),
         (libc::SYS_munmap, vec![]),
-        #[cfg(all(feature = "sev_snp", feature = "kvm"))]
-        (
-            libc::SYS_openat,
-            or![and![Cond::new(
-                2, // openat() flags argument
-                ArgLen::Dword,
-                MaskedEq(libc::O_ACCMODE as u64),
-                libc::O_RDONLY as u64,
-            )?]],
-        ),
         (libc::SYS_prctl, vec![]),
-        #[cfg(all(feature = "sev_snp", feature = "kvm"))]
-        (libc::SYS_read, vec![]),
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_recvmsg, vec![]),
         (libc::SYS_rt_sigprocmask, vec![]),
@@ -1097,7 +1083,6 @@ fn migration_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError
         #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
         (libc::SYS_ppoll, vec![]),
         (libc::SYS_prctl, vec![]),
-        (libc::SYS_read, vec![]),
         (libc::SYS_readv, vec![]),
         (libc::SYS_tkill, vec![]),
         (libc::SYS_recvfrom, vec![]),
@@ -1139,14 +1124,12 @@ fn migration_tcp_worker_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, B
         (libc::SYS_mmap, vec![]),
         (libc::SYS_mprotect, vec![]),
         (libc::SYS_munmap, vec![]),
-        (libc::SYS_openat, vec![]),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_poll, vec![]),
         #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
         (libc::SYS_ppoll, vec![]),
         (libc::SYS_prctl, vec![]),
         (libc::SYS_pwrite64, vec![]),
-        (libc::SYS_read, vec![]),
         (libc::SYS_readv, vec![]),
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_recvmsg, vec![]),
@@ -1184,7 +1167,6 @@ fn serial_manager_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_mmap, vec![]),
         (libc::SYS_munmap, vec![]),
         (libc::SYS_nanosleep, vec![]),
-        (libc::SYS_read, vec![]),
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_rt_sigprocmask, vec![]),
         (libc::SYS_rt_sigreturn, vec![]),
@@ -1208,7 +1190,6 @@ fn migrate_send_postcopy_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, 
         (libc::SYS_mmap, vec![]),
         (libc::SYS_mprotect, vec![]),
         (libc::SYS_munmap, vec![]),
-        (libc::SYS_read, vec![]),
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_recvmsg, vec![]),
         (libc::SYS_rt_sigprocmask, vec![]),
@@ -1244,6 +1225,21 @@ fn get_seccomp_rules(
         Thread::PtyForeground => pty_foreground_thread_rules()?,
         Thread::MigrateSendPostcopy => migrate_send_postcopy_thread_rules()?,
     };
+    if !rules
+        .iter()
+        .chain(specific_rules.iter())
+        .any(|(syscall, _)| *syscall == libc::SYS_openat)
+    {
+        rules.push((
+            libc::SYS_openat,
+            or![and![Cond::new(
+                2, // openat() flags argument
+                ArgLen::Dword,
+                MaskedEq(libc::O_ACCMODE as u64),
+                libc::O_RDONLY as u64,
+            )?]],
+        ));
+    }
     rules.extend(specific_rules);
     Ok(rules)
 }
