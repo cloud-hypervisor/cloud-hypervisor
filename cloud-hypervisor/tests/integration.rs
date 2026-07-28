@@ -3082,7 +3082,6 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))] // See issue #7435
     #[cfg(target_arch = "x86_64")]
     fn test_cpu_hotplug() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
