@@ -9,6 +9,7 @@
         - [Create a Virtual Machine](#create-a-virtual-machine)
         - [Boot a Virtual Machine](#boot-a-virtual-machine)
         - [Dump Virtual Machine Information](#dump-virtual-machine-information)
+        - [Get Balloon Statistics](#get-balloon-statistics)
         - [Reboot a Virtual Machine](#reboot-a-virtual-machine)
         - [Shut a Virtual Machine Down](#shut-a-virtual-machine-down)
     - [D-Bus API](#d-bus-api)
@@ -89,6 +90,7 @@ The Cloud Hypervisor API exposes the following actions through its endpoints:
 | Resize a disk attached to the VM        | `/vm.resize-disk`            | `/schemas/VmResizeDisk`           | N/A                      | The VM is created                                      |
 | Add/remove memory from a zone           | `/vm.resize-zone`            | `/schemas/VmResizeZone`           | N/A                      | The VM is booted                                       |
 | Dump the VM information                 | `/vm.info`                   | N/A                               | `/schemas/VmInfo`        | The VM is created                                      |
+| Get virtio-balloon statistics           | `/vm.balloon-stats`          | N/A                               | `/schemas/BalloonStatsResponse` | The VM is running and balloon statistics were negotiated |
 | Add VFIO PCI device to the VM           | `/vm.add-device`             | `/schemas/VmAddDevice`            | `/schemas/PciDeviceInfo` | The VM is booted                                       |
 | Add disk device to the VM               | `/vm.add-disk`               | `/schemas/DiskConfig`             | `/schemas/PciDeviceInfo` | The VM is booted                                       |
 | Add fs device to the VM                 | `/vm.add-fs`                 | `/schemas/FsConfig`               | `/schemas/PciDeviceInfo` | The VM is booted                                       |
@@ -167,6 +169,20 @@ curl --unix-socket /tmp/cloud-hypervisor.sock -i \
      -X GET 'http://localhost/api/v1/vm.info' \
      -H 'Accept: application/json'
 ```
+
+##### Get Balloon Statistics
+
+When the running VM has negotiated the virtio-balloon statistics feature, a
+fresh guest sample can be requested with:
+
+```shell
+curl --unix-socket /tmp/cloud-hypervisor.sock -i \
+     -X GET 'http://localhost/api/v1/vm.balloon-stats' \
+     -H 'Accept: application/json'
+```
+
+The same request is available through `ch-remote balloon-stats`. Unsupported
+guest statistics are omitted from the response.
 
 ##### Reboot a Virtual Machine
 
