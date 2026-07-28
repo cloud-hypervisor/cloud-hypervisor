@@ -41,7 +41,7 @@ use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{GuestAddress, GuestMemory};
 use vm_virtio::VirtioDeviceType;
 
-pub use self::balloon::Balloon;
+pub use self::balloon::{Balloon, BalloonStats};
 pub use self::block::{Block, BlockState};
 pub use self::console::{Console, ConsoleResizer, Endpoint};
 pub use self::device::{
