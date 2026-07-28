@@ -102,6 +102,7 @@ trait DBusApi1 {
     fn vm_add_vdpa(&self, vdpa_config: &str) -> zbus::Result<Optional<String>>;
     fn vm_add_vsock(&self, vsock_config: &str) -> zbus::Result<Optional<String>>;
     fn vm_boot(&self) -> zbus::Result<()>;
+    fn vm_balloon_stats(&self) -> zbus::Result<String>;
     fn vm_coredump(&self, vm_coredump_data: &str) -> zbus::Result<()>;
     fn vm_counters(&self) -> zbus::Result<Optional<String>>;
     fn vm_create(&self, vm_config: &str) -> zbus::Result<()>;
@@ -194,6 +195,12 @@ impl<'a> DBusApi1ProxyBlocking<'a> {
 
     fn api_vm_boot(&self) -> ApiResult {
         self.vm_boot().map_err(Error::DBusApiClient)
+    }
+
+    fn api_vm_balloon_stats(&self) -> ApiResult {
+        self.vm_balloon_stats()
+            .map(|stats| println!("{stats}"))
+            .map_err(Error::DBusApiClient)
     }
 
     fn api_vm_coredump(&self, vm_coredump_data: &str) -> ApiResult {
@@ -308,6 +315,9 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
         }
         Some("info") => {
             simple_api_command(socket, "GET", "info", None).map_err(Error::HttpApiClient)
+        }
+        Some("balloon-stats") => {
+            simple_api_command(socket, "GET", "balloon-stats", None).map_err(Error::HttpApiClient)
         }
         Some("counters") => {
             simple_api_command(socket, "GET", "counters", None).map_err(Error::HttpApiClient)
@@ -572,6 +582,7 @@ fn dbus_api_do_command(matches: &ArgMatches, proxy: &DBusApi1ProxyBlocking<'_>) 
         Some("reboot") => proxy.api_vm_reboot(),
         Some("pause") => proxy.api_vm_pause(),
         Some("info") => proxy.api_vm_info(),
+        Some("balloon-stats") => proxy.api_vm_balloon_stats(),
         Some("counters") => proxy.api_vm_counters(),
         Some("ping") => proxy.api_vmm_ping(),
         Some("shutdown") => proxy.api_vm_shutdown(),
@@ -1072,6 +1083,7 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
         Command::new("add-vsock")
             .about("Add vsock device")
             .arg(Arg::new("vsock_config").index(1).help(VsockConfig::SYNTAX)),
+        Command::new("balloon-stats").about("Statistics from the virtio-balloon device"),
         Command::new("boot").about("Boot a created VM"),
         Command::new("coredump")
             .about("Create a coredump from VM")
