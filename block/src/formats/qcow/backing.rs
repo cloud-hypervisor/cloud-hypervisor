@@ -139,12 +139,6 @@ impl Qcow2Backing {
     }
 }
 
-impl Drop for Qcow2Backing {
-    fn drop(&mut self) {
-        self.metadata.shutdown();
-    }
-}
-
 /// Construct a thread safe backing file reader.
 pub(super) fn shared_backing_from(bf: BackingFile) -> BlockResult<Arc<dyn BackingRead>> {
     let (kind, virtual_size) = bf.into_kind();

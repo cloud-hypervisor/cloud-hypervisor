@@ -240,12 +240,6 @@ impl QcowTempDisk {
     }
 }
 
-impl Drop for QcowDisk {
-    fn drop(&mut self) {
-        self.metadata.shutdown();
-    }
-}
-
 impl disk_file::DiskSize for QcowDisk {
     fn logical_size(&self) -> BlockResult<u64> {
         Ok(self.metadata.virtual_size())
@@ -349,6 +343,8 @@ impl disk_file::AsyncDiskFile for QcowDisk {
 
 #[cfg(test)]
 mod unit_tests {
+    use std::os::unix::fs::FileExt;
+
     use super::*;
     use crate::async_io::AsyncIo;
     use crate::disk_file::{AsyncDiskFile, DiskSize, PhysicalSize};
@@ -360,6 +356,13 @@ mod unit_tests {
             .unwrap()
             .into_tempfile()
             .into_file()
+    }
+
+    fn dirty_bit_is_set(file: &File) -> bool {
+        let mut buf = [0u8; 8];
+        file.read_exact_at(&mut buf, header::V2_BARE_HEADER_SIZE as u64)
+            .unwrap();
+        u64::from_be_bytes(buf) & IncompatFeatures::DIRTY.bits() != 0
     }
 
     #[test]
@@ -399,6 +402,34 @@ mod unit_tests {
         let disk = QcowDisk::new(file, false, false, true, false).unwrap();
         let cloned = disk.try_clone().unwrap();
         assert_async_io_from_dyn(cloned.as_ref(), false);
+    }
+
+    #[test]
+    fn dropping_clone_does_not_clear_dirty_bit() {
+        let file = make_qcow_file();
+        let disk = QcowDisk::new(file, false, false, true, false).unwrap();
+        let cloned = disk.try_clone().unwrap();
+
+        drop(cloned);
+
+        assert_ne!(
+            disk.metadata().header().incompatible_features & IncompatFeatures::DIRTY.bits(),
+            0
+        );
+    }
+
+    #[test]
+    fn async_io_clears_dirty_bit_when_last_metadata_owner_drops() {
+        let file = make_qcow_file();
+        let inspect = file.try_clone().unwrap();
+        let disk = QcowDisk::new(file, false, false, true, false).unwrap();
+        let async_io = disk.create_async_io(1).unwrap();
+
+        drop(disk);
+        assert!(dirty_bit_is_set(&inspect));
+
+        drop(async_io);
+        assert!(!dirty_bit_is_set(&inspect));
     }
 
     #[cfg(feature = "io_uring")]
