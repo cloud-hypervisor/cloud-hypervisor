@@ -2016,7 +2016,6 @@ mod unit_tests {
         assert!(result < 0, "host WriteZeroes failure must reach the guest");
 
         drop(aio);
-        metadata.shutdown();
         drop(metadata);
 
         let reopened = QcowDisk::new(
@@ -2314,7 +2313,6 @@ mod unit_tests {
         // L2, and only now may the old data cluster enter unref_clusters.
         aio.apply_dealloc_action(&actions[0]).unwrap();
         metadata.flush().unwrap();
-        metadata.shutdown();
         drop(aio);
         drop(metadata);
 

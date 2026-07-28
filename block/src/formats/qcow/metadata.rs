@@ -389,6 +389,12 @@ impl QcowMetadata {
     }
 }
 
+impl Drop for QcowMetadata {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
 impl QcowState {
     /// Fast path read mapping under read lock only. Returns None on cache
     /// miss.
