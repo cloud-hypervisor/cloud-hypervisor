@@ -4,15 +4,14 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::cmp::min;
 use std::os::unix::fs::FileExt;
 use std::sync::Arc;
 
 use vmm_sys_util::eventfd::EventFd;
 
-use super::common::{deallocate_range_result, decompress_cluster};
+use super::common::{cow_write_sync, deallocate_range_result, decompress_cluster};
 use super::decoder::Decoder;
-use super::metadata::{BackingRead, ClusterReadMapping, ClusterWriteMapping, QcowMetadata};
+use super::metadata::{BackingRead, ClusterReadMapping, QcowMetadata};
 use super::qcow_raw_file::QcowRawFile;
 use crate::async_io::{
     AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, CompletionCommon,
@@ -119,58 +118,6 @@ impl QcowSync {
 
         Ok(total_len)
     }
-
-    fn write_operation(&mut self, op: &AsyncIoOperation) -> AsyncIoResult<usize> {
-        let address = op.offset() as u64;
-        let total_len = op.total_len();
-        let mut buf_offset = 0usize;
-
-        while buf_offset < total_len {
-            let curr_addr = address + buf_offset as u64;
-            let intra_offset = curr_addr & (self.cluster_size - 1);
-            let remaining_in_cluster = (self.cluster_size - intra_offset) as usize;
-            let count = min(total_len - buf_offset, remaining_in_cluster);
-
-            // Read backing data for COW if this is a partial cluster
-            // write to an unallocated cluster with a backing file.
-            let backing_data = if let Some(backing) = self
-                .backing_file
-                .as_ref()
-                .filter(|_| intra_offset != 0 || count < self.cluster_size as usize)
-            {
-                let cluster_begin = curr_addr - intra_offset;
-                let mut data = vec![0u8; self.cluster_size as usize];
-                backing
-                    .read_at(cluster_begin, &mut data)
-                    .map_err(AsyncIoError::WriteVectored)?;
-                Some(data)
-            } else {
-                None
-            };
-
-            let mapping = self
-                .metadata
-                .map_cluster_for_write(curr_addr, backing_data)
-                .map_err(AsyncIoError::WriteVectored)?;
-
-            match mapping {
-                ClusterWriteMapping::Allocated {
-                    offset: host_offset,
-                } => {
-                    let mut buf = vec![0u8; count];
-                    op.read_bytes_at(buf_offset, &mut buf)
-                        .map_err(AsyncIoError::WriteVectored)?;
-                    self.data_file
-                        .file()
-                        .write_all_at(&buf, host_offset)
-                        .map_err(AsyncIoError::WriteVectored)?;
-                }
-            }
-            buf_offset += count;
-        }
-
-        Ok(total_len)
-    }
 }
 
 impl AsyncIo for QcowSync {
@@ -179,11 +126,18 @@ impl AsyncIo for QcowSync {
     }
 
     fn submit_data_operation(&mut self, mut op: AsyncIoOperation) -> AsyncIoResult<()> {
-        let is_read = op.is_read();
-        let total_len = if is_read {
+        let total_len = if op.is_read() {
             self.read_operation(&mut op)?
         } else {
-            self.write_operation(&op)?
+            cow_write_sync(
+                op.offset() as u64,
+                &op,
+                &self.metadata,
+                &self.data_file,
+                &self.backing_file,
+                self.cluster_size,
+            )?;
+            op.total_len()
         };
         self.completions
             .complete(AsyncIoCompletion::from_operation(op, total_len as i32));

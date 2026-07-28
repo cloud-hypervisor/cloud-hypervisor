@@ -8,7 +8,6 @@
 
 //! QCOW2 async disk backend.
 
-use std::cmp::min;
 use std::io;
 use std::os::unix::fs::FileExt;
 use std::os::unix::io::AsRawFd;
@@ -16,9 +15,9 @@ use std::sync::Arc;
 
 use vmm_sys_util::eventfd::EventFd;
 
-use super::common::{deallocate_range_result, decompress_cluster};
+use super::common::{cow_write_sync, deallocate_range_result, decompress_cluster};
 use super::decoder::Decoder;
-use super::metadata::{BackingRead, ClusterReadMapping, ClusterWriteMapping, QcowMetadata};
+use super::metadata::{BackingRead, ClusterReadMapping, QcowMetadata};
 use super::qcow_raw_file::QcowRawFile;
 use crate::async_io::{
     AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, UringDataIo,
@@ -118,7 +117,7 @@ impl QcowAsync {
         // write, L2 commit) with per request buffer lifetime tracking
         // and write ordering.
         let total_len = op.total_len();
-        if let Err(e) = Self::cow_write_sync(
+        if let Err(e) = cow_write_sync(
             op.offset() as u64,
             &op,
             &self.metadata,
@@ -349,60 +348,6 @@ impl QcowAsync {
                     buf_offset += length as usize;
                 }
             }
-        }
-        Ok(())
-    }
-
-    /// Write owned operation data cluster-by-cluster with COW from backing file.
-    fn cow_write_sync(
-        address: u64,
-        op: &AsyncIoOperation,
-        metadata: &QcowMetadata,
-        data_file: &QcowRawFile,
-        backing_file: &Option<Arc<dyn BackingRead>>,
-        cluster_size: u64,
-    ) -> AsyncIoResult<()> {
-        let total_len = op.total_len();
-        let mut buf_offset = 0usize;
-
-        while buf_offset < total_len {
-            let curr_addr = address + buf_offset as u64;
-            let intra_offset = curr_addr & (cluster_size - 1);
-            let remaining_in_cluster = (cluster_size - intra_offset) as usize;
-            let count = min(total_len - buf_offset, remaining_in_cluster);
-
-            let backing_data = if let Some(backing) = backing_file
-                .as_ref()
-                .filter(|_| intra_offset != 0 || count < cluster_size as usize)
-            {
-                let cluster_begin = curr_addr - intra_offset;
-                let mut data = vec![0u8; cluster_size as usize];
-                backing
-                    .read_at(cluster_begin, &mut data)
-                    .map_err(AsyncIoError::WriteVectored)?;
-                Some(data)
-            } else {
-                None
-            };
-
-            let mapping = metadata
-                .map_cluster_for_write(curr_addr, backing_data)
-                .map_err(AsyncIoError::WriteVectored)?;
-
-            match mapping {
-                ClusterWriteMapping::Allocated {
-                    offset: host_offset,
-                } => {
-                    let mut buf = vec![0u8; count];
-                    op.read_bytes_at(buf_offset, &mut buf)
-                        .map_err(AsyncIoError::WriteVectored)?;
-                    data_file
-                        .file()
-                        .write_all_at(&buf, host_offset)
-                        .map_err(AsyncIoError::WriteVectored)?;
-                }
-            }
-            buf_offset += count;
         }
         Ok(())
     }
