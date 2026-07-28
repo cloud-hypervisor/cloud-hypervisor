@@ -894,9 +894,13 @@ fn vcpu_thread_rules(
     hypervisor_type: HypervisorType,
 ) -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
     Ok(vec![
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_arch_prctl, vec![]),
         (libc::SYS_brk, vec![]),
         (libc::SYS_clock_gettime, vec![]),
         (libc::SYS_clock_nanosleep, vec![]),
+        (libc::SYS_clone, vec![]),
+        (libc::SYS_clone3, vec![]),
         (libc::SYS_close, vec![]),
         (libc::SYS_dup, vec![]),
         (libc::SYS_exit, vec![]),
@@ -932,6 +936,8 @@ fn vcpu_thread_rules(
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_open, vec![]),
         (libc::SYS_openat, vec![]),
+        (libc::SYS_prctl, vec![]),
+        (libc::SYS_prlimit64, vec![]),
         (libc::SYS_pread64, vec![]),
         (libc::SYS_pwrite64, vec![]),
         (libc::SYS_read, vec![]),
@@ -941,12 +947,15 @@ fn vcpu_thread_rules(
         (libc::SYS_readlinkat, vec![]),
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_recvmsg, vec![]),
+        (libc::SYS_rseq, vec![]),
         (libc::SYS_rt_sigaction, vec![]),
         (libc::SYS_rt_sigprocmask, vec![]),
         (libc::SYS_rt_sigreturn, vec![]),
+        (libc::SYS_sched_getaffinity, vec![]),
         (libc::SYS_sched_yield, vec![]),
         (libc::SYS_sendmsg, vec![]),
         (libc::SYS_sendto, vec![]),
+        (libc::SYS_set_robust_list, vec![]),
         (libc::SYS_shutdown, vec![]),
         (libc::SYS_sigaltstack, vec![]),
         (libc::SYS_statx, vec![]),

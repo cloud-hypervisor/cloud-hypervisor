@@ -37,8 +37,6 @@ use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 use gdbstub_arch::x86::reg::{X86_64CoreRegs as CoreRegs, X86SegmentRegs};
 #[cfg(target_arch = "x86_64")]
 use hypervisor::CpuVendor;
-#[cfg(feature = "kvm")]
-use hypervisor::HypervisorType;
 #[cfg(feature = "guest_debug")]
 use hypervisor::StandardRegisters;
 #[cfg(target_arch = "aarch64")]
@@ -57,7 +55,7 @@ use hypervisor::arch::x86::msr_index;
 use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
 #[cfg(feature = "mshv")]
 use hypervisor::mshv;
-use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
+use hypervisor::{CpuState, HypervisorCpuError, HypervisorType, VmExit, VmOps};
 #[cfg(feature = "sev_snp")]
 use igvm::snp_defs;
 use libc::{c_void, siginfo_t};
@@ -769,6 +767,8 @@ struct VcpuState {
     pending_removal: Arc<AtomicBool>,
     /// Handle to the vCPU thread.
     handle: Option<thread::JoinHandle<()>>,
+    /// Handle to the MSHV async reaper thread, if any.
+    removal_handle: Option<thread::JoinHandle<()>>,
     /// Instructs the thread to exit the run-vCPU loop.
     kill: Arc<AtomicBool>,
     /// Used to ACK interruption from the run vCPU loop to the CPU Manager.
@@ -795,10 +795,7 @@ impl VcpuState {
     /// vCPU thread immediately exits to handle the event in user-space.
     fn signal_thread(&self) {
         if let Some(handle) = self.handle.as_ref() {
-            // SAFETY: FFI call with correct arguments
-            unsafe {
-                libc::pthread_kill(handle.as_pthread_t() as _, SIGRTMIN());
-            }
+            signal_thread_handle(handle);
         }
     }
 
@@ -836,10 +833,40 @@ impl VcpuState {
         Ok(())
     }
 
+    /// Join the async removal reaper thread (MSHV), if one is set.
+    fn join_removal_thread(&mut self) -> Result<()> {
+        if let Some(handle) = self.removal_handle.take() {
+            handle.join().map_err(Error::ThreadCleanup)?;
+        }
+
+        Ok(())
+    }
+
+    /// Join the reaper only if it has already finished, so that pause/kick
+    /// paths do not stall on an in-flight removal.
+    fn join_finished_removal_thread(&mut self) -> Result<()> {
+        if self
+            .removal_handle
+            .as_ref()
+            .is_some_and(thread::JoinHandle::is_finished)
+        {
+            self.join_removal_thread()?;
+        }
+
+        Ok(())
+    }
+
     fn unpark_thread(&self) {
         if let Some(handle) = self.handle.as_ref() {
             handle.thread().unpark();
         }
+    }
+}
+
+fn signal_thread_handle(handle: &thread::JoinHandle<()>) {
+    // SAFETY: FFI call with correct arguments
+    unsafe {
+        libc::pthread_kill(handle.as_pthread_t() as _, SIGRTMIN());
     }
 }
 
@@ -1338,6 +1365,16 @@ impl CpuManager {
                             // loads and stores to different atomics and we need
                             // to see them in a consistent order in all threads
 
+                            // Kill must win over pause; otherwise a vCPU asked
+                            // to pause and kill concurrently could park before
+                            // observing the kill request.
+                            if vcpus_kill_signalled.load(Ordering::SeqCst)
+                                || vcpu_kill.load(Ordering::SeqCst)
+                            {
+                                vcpu_run_interrupted.store(true, Ordering::SeqCst);
+                                break;
+                            }
+
                             if vcpus_pause_signalled.load(Ordering::SeqCst) {
                                 // As a pause can be caused by PIO & MMIO exits then we need to ensure they are
                                 // completed by returning to KVM_RUN. From the kernel docs:
@@ -1536,7 +1573,7 @@ impl CpuManager {
 
     pub fn check_pending_removed_vcpu(&mut self) -> bool {
         for state in self.vcpu_states.lock().unwrap().iter() {
-            if state.active() && state.pending_removal.load(Ordering::SeqCst) {
+            if state.pending_removal.load(Ordering::SeqCst) {
                 return true;
             }
         }
@@ -1642,6 +1679,14 @@ impl CpuManager {
             let vcpu_states = self.vcpu_states.lock().unwrap();
             vcpu_states[cpu_id].wait_until_signal_acknowledged()?;
         }
+        // Join any outstanding MSHV async removal reapers so pause/kick paths
+        // do not race with in-flight teardown.
+        {
+            let mut vcpu_states = self.vcpu_states.lock().unwrap();
+            for state in vcpu_states.iter_mut() {
+                state.join_removal_thread()?;
+            }
+        }
 
         Ok(())
     }
@@ -1663,6 +1708,7 @@ impl CpuManager {
         // Wait for all the threads to finish. This removes the state from the vector.
         for mut state in self.vcpu_states.lock().unwrap().drain(..) {
             state.join_thread()?;
+            state.join_removal_thread()?;
         }
 
         Ok(())
@@ -3272,6 +3318,7 @@ pub struct AcpiCpuHotplugController {
     vcpu_states: Arc<Mutex<Vec<VcpuState>>>,
     /// Maximum number of vCPUS of the VM.
     max_vcpus: u32,
+    use_async_removal: bool,
 }
 
 impl AcpiCpuHotplugController {
@@ -3285,10 +3332,18 @@ impl AcpiCpuHotplugController {
 
     /// Creates a new [`AcpiCpuHotplugController`].
     pub fn new(cpu_manager: &CpuManager) -> AcpiCpuHotplugController {
+        #[cfg(feature = "mshv")]
+        let use_async_removal = matches!(
+            cpu_manager.hypervisor.hypervisor_type(),
+            HypervisorType::Mshv
+        );
+        #[cfg(not(feature = "mshv"))]
+        let use_async_removal = false;
         Self {
             max_vcpus: cpu_manager.config.max_vcpus,
             selected_cpu: 0,
             vcpu_states: cpu_manager.vcpu_states.clone(),
+            use_async_removal,
         }
     }
 
@@ -3298,6 +3353,9 @@ impl AcpiCpuHotplugController {
     fn remove_vcpu(cpu_id: u32, state: &mut VcpuState) -> Result<()> {
         info!("Removing vCPU: cpu_id = {cpu_id}");
         state.kill.store(true, Ordering::SeqCst);
+        // Clear any stale ACK from a prior NMI kick so the wait below
+        // observes only the ACK for the signal we're about to send.
+        state.vcpu_run_interrupted.store(false, Ordering::SeqCst);
         state.signal_thread();
         state.wait_until_signal_acknowledged()?;
         state.join_thread()?;
@@ -3306,6 +3364,54 @@ impl AcpiCpuHotplugController {
         // Once the thread has exited, clear the "kill" so that it can reused
         state.kill.store(false, Ordering::SeqCst);
         state.pending_removal.store(false, Ordering::SeqCst);
+
+        Ok(())
+    }
+
+    /// MSHV async removal: kick the vCPU and hand the join off to a
+    /// per-eject reaper thread so the calling vCPU returns to the guest
+    /// immediately. MSHV lacks KVM's race-free signal delivery around VP
+    /// run, so the inline `wait_until_signal_acknowledged` can stall for
+    /// up to a second, starving RCU on the surviving vCPUs.
+    fn remove_vcpu_async(cpu_id: u32, state: &mut VcpuState) -> Result<()> {
+        info!("Removing vCPU asynchronously: cpu_id = {cpu_id}");
+
+        state.join_finished_removal_thread()?;
+        if state.removal_handle.is_some() {
+            return Ok(());
+        }
+
+        state.kill.store(true, Ordering::SeqCst);
+        state.vcpu_run_interrupted.store(false, Ordering::SeqCst);
+        state.signal_thread();
+
+        let Some(handle) = state.handle.take() else {
+            state.kill.store(false, Ordering::SeqCst);
+            state.pending_removal.store(false, Ordering::SeqCst);
+            return Ok(());
+        };
+
+        let pending_removal = state.pending_removal.clone();
+        let kill = state.kill.clone();
+        let vcpu_run_interrupted = state.vcpu_run_interrupted.clone();
+
+        state.removal_handle = Some(thread::spawn(move || {
+            let mut count = 0;
+            while !vcpu_run_interrupted.load(Ordering::SeqCst) && !handle.is_finished() {
+                thread::sleep(time::Duration::from_millis(1));
+                count += 1;
+                if count % 10 == 0 {
+                    warn!("vCPU thread did not respond in {count}ms to async removal - retrying");
+                    signal_thread_handle(&handle);
+                }
+            }
+            if handle.join().is_err() {
+                error!("Error removing vCPU: ThreadCleanup");
+            }
+            vcpu_run_interrupted.store(false, Ordering::SeqCst);
+            kill.store(false, Ordering::SeqCst);
+            pending_removal.store(false, Ordering::SeqCst);
+        }));
 
         Ok(())
     }
@@ -3396,7 +3502,15 @@ impl BusDevice for AcpiCpuHotplugController {
                         if self.selected_cpu == 0 {
                             warn!("Ignoring guest request to eject the boot vCPU (CPU 0)");
                         } else if removal_requested {
-                            if let Err(e) = Self::remove_vcpu(self.selected_cpu, state) {
+                            let result = if self.use_async_removal {
+                                // MSHV: run remove on a per-eject reaper thread.
+                                Self::remove_vcpu_async(self.selected_cpu, state)
+                            } else {
+                                // KVM: run inline, matching KVM_SET_SIGNAL_MASK
+                                // race-free semantics.
+                                Self::remove_vcpu(self.selected_cpu, state)
+                            };
+                            if let Err(e) = result {
                                 error!("Error removing vCPU: {e:?}");
                             }
                         } else {
