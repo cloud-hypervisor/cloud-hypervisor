@@ -6,15 +6,15 @@
 use std::io::{self, ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::num::{NonZeroU32, ParseIntError};
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::result::Result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, SyncSender, TrySendError, channel, sync_channel};
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::Duration;
-use std::{mem, thread};
 
 use anyhow::{Context, anyhow};
 use log::{debug, error, info, warn};
@@ -166,15 +166,7 @@ impl SocketStream {
         match self {
             SocketStream::Unix(s) => s.set_read_timeout(dur),
             SocketStream::Tcp(s) => s.set_read_timeout(dur),
-            SocketStream::Tls(s) => {
-                let fd = s.as_fd().as_raw_fd();
-                // SAFETY: fd is borrowed from the TLS stream and forgotten
-                // immediately. The TLS stream retains ownership.
-                let tcp = unsafe { TcpStream::from_raw_fd(fd) };
-                let r = tcp.set_read_timeout(dur);
-                mem::forget(tcp);
-                r
-            }
+            SocketStream::Tls(s) => s.tcp_stream().set_read_timeout(dur),
         }
     }
 
@@ -182,15 +174,7 @@ impl SocketStream {
         match self {
             SocketStream::Unix(_) => Ok(()),
             SocketStream::Tcp(s) => s.set_nodelay(nodelay),
-            SocketStream::Tls(s) => {
-                let fd = s.as_fd().as_raw_fd();
-                // SAFETY: fd is borrowed from the TLS stream and forgotten
-                // immediately. The TLS stream retains ownership.
-                let tcp = unsafe { TcpStream::from_raw_fd(fd) };
-                let r = tcp.set_nodelay(nodelay);
-                mem::forget(tcp);
-                r
-            }
+            SocketStream::Tls(s) => s.tcp_stream().set_nodelay(nodelay),
         }
     }
 }
