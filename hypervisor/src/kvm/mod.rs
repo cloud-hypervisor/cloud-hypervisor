@@ -2693,8 +2693,13 @@ impl cpu::Vcpu for KvmVcpu {
                             attributes,
                             flags: 0,
                         })
-                        .map(|_| cpu::VmExit::Ignore)
-                        .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))
+                        .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
+
+                    if attributes == 0 {
+                        Self::punch_holes_in_guest_memfd(&self.memory_slots, gpa, size);
+                    }
+
+                    Ok(cpu::VmExit::Ignore)
                 }
 
                 r => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
