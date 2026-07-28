@@ -573,6 +573,10 @@ pub enum DeviceManagerError {
     #[error("Failed to resize virtio-balloon")]
     VirtioBalloonResize(#[source] balloon::Error),
 
+    /// Failed to request virtio-balloon statistics.
+    #[error("Failed to request virtio-balloon statistics")]
+    VirtioBalloonStats(#[source] balloon::Error),
+
     /// Missing virtio-balloon, can't proceed as expected.
     #[error("Missing virtio-balloon, can't proceed as expected")]
     MissingVirtioBalloon,
@@ -5466,6 +5470,18 @@ impl DeviceManager {
         }
 
         0
+    }
+
+    pub fn balloon_stats(&self) -> DeviceManagerResult<virtio_devices::BalloonStatsSnapshot> {
+        let balloon = self
+            .balloon
+            .as_ref()
+            .ok_or(DeviceManagerError::MissingVirtioBalloon)?;
+        balloon
+            .lock()
+            .unwrap()
+            .stats()
+            .map_err(DeviceManagerError::VirtioBalloonStats)
     }
 
     pub fn resize_disk(&mut self, device_id: &str, new_size: u64) -> DeviceManagerResult<()> {
