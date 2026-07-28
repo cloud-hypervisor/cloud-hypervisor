@@ -20,6 +20,7 @@ use anyhow::{Context, anyhow};
 use log::{debug, error, info, warn};
 use seccompiler::{BpfProgram, SeccompAction, apply_filter};
 use serde_json;
+use socket2::{SockRef, TcpKeepalive};
 use thiserror::Error;
 use vm_memory::bitmap::BitmapSlice;
 use vm_memory::{
@@ -51,11 +52,18 @@ impl ReceiveListener {
     /// Block until a connection is accepted.
     pub(crate) fn accept(&mut self) -> Result<SocketStream, MigratableError> {
         match self {
-            ReceiveListener::Tcp(listener) => listener
-                .accept()
-                .map(|(socket, _)| SocketStream::Tcp(socket))
-                .context("Failed to accept TCP migration connection")
-                .map_err(MigratableError::MigrateReceive),
+            ReceiveListener::Tcp(listener) => {
+                let (socket, _) = listener
+                    .accept()
+                    .context("Failed to accept TCP migration connection")
+                    .map_err(MigratableError::MigrateReceive)?;
+
+                set_tcp_keepalive_and_user_timeout(&socket)
+                    .context("Failed to set socket options")
+                    .map_err(MigratableError::MigrateReceive)?;
+
+                Ok(SocketStream::Tcp(socket))
+            }
             ReceiveListener::Unix(listener) => listener
                 .accept()
                 .map(|(socket, _)| SocketStream::Unix(socket))
@@ -65,6 +73,10 @@ impl ReceiveListener {
                 let (socket, _) = listener
                     .accept()
                     .context("Failed to accept TCP connection")
+                    .map_err(MigratableError::MigrateReceive)?;
+
+                set_tcp_keepalive_and_user_timeout(&socket)
+                    .context("Failed to set socket options")
                     .map_err(MigratableError::MigrateReceive)?;
 
                 TlsStream::new_server(socket, config)
@@ -1028,6 +1040,33 @@ pub fn tcp_address_to_server_name(address: &str) -> Result<&str, TcpAddressParse
     Ok(host)
 }
 
+/// Enables `SO_KEEPALIVE` and `TCP_USER_TIMEOUT` for the `tcp_stream`'s socket.
+///
+/// The set options target a failure detection time of two to three minutes.
+fn set_tcp_keepalive_and_user_timeout(tcp_stream: &TcpStream) -> io::Result<()> {
+    /// [`TcpKeepalive`] config for migration TCP sockets.
+    ///
+    /// After 60 seconds, the kernel starts sending keepalive probes.
+    /// Every 15 seconds another keepalive probe is sent.
+    /// If 4 probes are sent without response, the connection is dropped.
+    const MIGRATION_TCP_KEEPALIVE: TcpKeepalive = TcpKeepalive::new()
+        .with_retries(4)
+        .with_time(Duration::from_secs(60))
+        .with_interval(Duration::from_secs(15));
+
+    let socket_ref = SockRef::from(&tcp_stream);
+
+    // `TCP_USER_TIMEOUT` overrides `SO_KEEPALIVE` partially as per documentation:
+    // "[...] TCP_USER_TIMEOUT will override keepalive to determine when
+    // to close a connection due to keepalive failure."
+    // https://man7.org/linux/man-pages/man7/tcp.7.html
+    //TODO: Look into setting the keepalive via `std` once
+    // https://github.com/rust-lang/rust/issues/155889 is stabilized.
+    socket_ref.set_tcp_keepalive(&MIGRATION_TCP_KEEPALIVE)?;
+
+    socket_ref.set_tcp_user_timeout(Some(Duration::from_secs(120)))
+}
+
 /// Connect to a migration endpoint and return the established stream.
 pub(crate) fn send_migration_socket(
     destination_url: &str,
@@ -1038,6 +1077,10 @@ pub(crate) fn send_migration_socket(
 
         let socket = TcpStream::connect(address)
             .context("Error connecting to TCP socket")
+            .map_err(MigratableError::MigrateSend)?;
+
+        set_tcp_keepalive_and_user_timeout(&socket)
+            .context("Failed to set socket options")
             .map_err(MigratableError::MigrateSend)?;
 
         if let Some(tls_dir) = tls_dir {
