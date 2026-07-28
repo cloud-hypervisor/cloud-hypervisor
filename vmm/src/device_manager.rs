@@ -24,7 +24,9 @@ use std::os::unix::io::{AsRawFd, FromRawFd};
 #[cfg(not(target_arch = "riscv64"))]
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 #[cfg(not(target_arch = "riscv64"))]
 use std::time::Instant;
 use std::{iter, path, result, sync};
@@ -573,6 +575,22 @@ pub enum DeviceManagerError {
     /// Failed to resize virtio-balloon
     #[error("Failed to resize virtio-balloon")]
     VirtioBalloonResize(#[source] balloon::Error),
+
+    /// Failed to request virtio-balloon statistics.
+    #[error("Failed to request virtio-balloon statistics")]
+    VirtioBalloonStats(#[source] balloon::Error),
+
+    /// Guest returned invalid virtio-balloon statistics.
+    #[error("Guest returned invalid virtio-balloon statistics")]
+    InvalidVirtioBalloonStats(#[source] balloon::BalloonStatsError),
+
+    /// Timed out waiting for virtio-balloon statistics.
+    #[error("Timed out waiting for virtio-balloon statistics")]
+    VirtioBalloonStatsTimeout,
+
+    /// Virtio-balloon statistics worker disconnected.
+    #[error("Virtio-balloon statistics worker disconnected")]
+    VirtioBalloonStatsDisconnected,
 
     /// Missing virtio-balloon, can't proceed as expected.
     #[error("Missing virtio-balloon, can't proceed as expected")]
@@ -5487,6 +5505,33 @@ impl DeviceManager {
         }
 
         0
+    }
+
+    pub fn balloon_stats(&self) -> DeviceManagerResult<(u64, virtio_devices::BalloonStats)> {
+        // Keep a non-responsive guest from blocking the VMM API loop indefinitely.
+        const STATS_TIMEOUT: Duration = Duration::from_secs(1);
+
+        let balloon = self
+            .balloon
+            .as_ref()
+            .ok_or(DeviceManagerError::MissingVirtioBalloon)?;
+        let response_receiver = balloon
+            .lock()
+            .unwrap()
+            .begin_stats_request()
+            .map_err(DeviceManagerError::VirtioBalloonStats)?;
+        let stats = match response_receiver.recv_timeout(STATS_TIMEOUT) {
+            Ok(result) => result.map_err(DeviceManagerError::InvalidVirtioBalloonStats)?,
+            Err(RecvTimeoutError::Timeout) => {
+                return Err(DeviceManagerError::VirtioBalloonStatsTimeout);
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                return Err(DeviceManagerError::VirtioBalloonStatsDisconnected);
+            }
+        };
+        let actual = balloon.lock().unwrap().get_actual();
+
+        Ok((actual, stats))
     }
 
     pub fn resize_disk(&mut self, device_id: &str, new_size: u64) -> DeviceManagerResult<()> {

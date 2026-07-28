@@ -2993,6 +2993,14 @@ impl Vm {
         self.device_manager.lock().unwrap().balloon_size()
     }
 
+    pub fn balloon_stats(&self) -> Result<(u64, virtio_devices::BalloonStats)> {
+        self.device_manager
+            .lock()
+            .unwrap()
+            .balloon_stats()
+            .map_err(Error::DeviceManager)
+    }
+
     /// Get the actual size of the virtio_mem regions
     pub fn virtio_mem_plugged_size(&self) -> u64 {
         self.memory_manager
