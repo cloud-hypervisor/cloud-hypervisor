@@ -48,8 +48,8 @@ use vmm_sys_util::signal::unblock_signal;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
 use crate::api::{
-    ApiRequest, ApiResponse, MigrationMode, RequestHandler, TimeoutStrategy, VmInfoResponse,
-    VmReceiveMigrationData, VmSendMigrationData, VmmPingResponse,
+    ApiRequest, ApiResponse, BalloonStatsResponse, MigrationMode, RequestHandler, TimeoutStrategy,
+    VmInfoResponse, VmReceiveMigrationData, VmSendMigrationData, VmmPingResponse,
 };
 use crate::config::{MemoryRestoreMode, RestoreConfig, add_to_config};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -2611,6 +2611,20 @@ impl RequestHandler for Vmm {
             memory_actual_size,
             device_tree,
         })
+    }
+
+    fn vm_balloon_stats(&mut self) -> result::Result<BalloonStatsResponse, VmError> {
+        match &mut self.vm {
+            VmOwnership::Owned(vm) if vm.get_state() == VmState::Running => {
+                let (balloon_actual, stats) = vm.balloon_stats()?;
+                Ok(BalloonStatsResponse {
+                    balloon_actual,
+                    stats,
+                })
+            }
+            VmOwnership::Owned(_) | VmOwnership::None => Err(VmError::VmNotRunning),
+            VmOwnership::Migration { .. } => Err(VmError::VmMigrating),
+        }
     }
 
     fn vmm_ping(&self) -> VmmPingResponse {

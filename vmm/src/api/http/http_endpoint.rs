@@ -50,10 +50,10 @@ use crate::api::http::http_endpoint::fds_helper::{attach_fds_to_cfg, attach_fds_
 use crate::api::http::{EndpointHandler, HttpError, error_response};
 use crate::api::{
     AddDisk, ApiAction, ApiError, ApiRequest, DeviceConfig, NetConfig, VmAddDevice, VmAddFs,
-    VmAddGenericVhostUser, VmAddNet, VmAddPmem, VmAddUserDevice, VmAddVdpa, VmAddVsock, VmBoot,
-    VmConfig, VmCounters, VmDelete, VmNmi, VmPause, VmPowerButton, VmReboot, VmReceiveMigration,
-    VmReceiveMigrationData, VmRemoveDevice, VmResize, VmResizeDisk, VmResizeZone, VmRestore,
-    VmResume, VmSendMigration, VmShutdown, VmSnapshot,
+    VmAddGenericVhostUser, VmAddNet, VmAddPmem, VmAddUserDevice, VmAddVdpa, VmAddVsock,
+    VmBalloonStats as VmBalloonStatsAction, VmBoot, VmConfig, VmCounters, VmDelete, VmNmi, VmPause,
+    VmPowerButton, VmReboot, VmReceiveMigration, VmReceiveMigrationData, VmRemoveDevice, VmResize,
+    VmResizeDisk, VmResizeZone, VmRestore, VmResume, VmSendMigration, VmShutdown, VmSnapshot,
 };
 use crate::config::RestoreConfig;
 use crate::cpu::Error as CpuError;
@@ -725,6 +725,33 @@ impl EndpointHandler for VmInfo {
                     let info_serialized = serde_json::to_string(&info).unwrap();
 
                     response.set_body(Body::new(info_serialized));
+                    response
+                }
+                Err(e) => error_response(e),
+            },
+            _ => error_response(HttpError::BadRequest),
+        }
+    }
+}
+
+// /api/v1/vm.balloon-stats handler
+pub struct VmBalloonStats {}
+
+impl EndpointHandler for VmBalloonStats {
+    fn handle_request(
+        &self,
+        req: &Request,
+        api_notifier: EventFd,
+        api_sender: Sender<ApiRequest>,
+    ) -> Response {
+        match req.method() {
+            Method::Get => match VmBalloonStatsAction
+                .send(api_notifier, api_sender, ())
+                .map_err(HttpError::ApiError)
+            {
+                Ok(stats) => {
+                    let mut response = Response::new(Version::Http11, StatusCode::OK);
+                    response.set_body(Body::new(serde_json::to_string(&stats).unwrap()));
                     response
                 }
                 Err(e) => error_response(e),
