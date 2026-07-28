@@ -24,7 +24,9 @@ use std::os::unix::io::{AsRawFd, FromRawFd};
 #[cfg(not(target_arch = "riscv64"))]
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 #[cfg(not(target_arch = "riscv64"))]
 use std::time::Instant;
 use std::{iter, path, result, sync};
@@ -574,6 +576,30 @@ pub enum DeviceManagerError {
     #[error("Failed to resize virtio-balloon")]
     VirtioBalloonResize(#[source] balloon::Error),
 
+    /// Failed to request virtio-balloon statistics.
+    #[error("Failed to request virtio-balloon statistics")]
+    VirtioBalloonStats(#[source] balloon::Error),
+
+    /// Another virtio-balloon statistics request is already pending.
+    #[error("Virtio-balloon statistics request is already pending")]
+    VirtioBalloonStatsRequestPending,
+
+    /// The virtio-balloon statistics queue is not ready yet.
+    #[error("Virtio-balloon statistics queue is not ready")]
+    VirtioBalloonStatsQueueNotReady,
+
+    /// Guest returned invalid virtio-balloon statistics.
+    #[error("Guest returned invalid virtio-balloon statistics")]
+    InvalidVirtioBalloonStats(#[source] balloon::BalloonStatsError),
+
+    /// Timed out waiting for virtio-balloon statistics.
+    #[error("Timed out waiting for virtio-balloon statistics")]
+    VirtioBalloonStatsTimeout,
+
+    /// Virtio-balloon statistics worker disconnected.
+    #[error("Virtio-balloon statistics worker disconnected")]
+    VirtioBalloonStatsDisconnected,
+
     /// Missing virtio-balloon, can't proceed as expected.
     #[error("Missing virtio-balloon, can't proceed as expected")]
     MissingVirtioBalloon,
@@ -707,6 +733,30 @@ pub enum DeviceManagerError {
 }
 
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
+
+/// A pending virtio-balloon statistics request.
+#[must_use = "The balloon statistics response must be collected"]
+pub struct BalloonStatsRequest {
+    response_receiver:
+        Receiver<result::Result<virtio_devices::BalloonStats, balloon::BalloonStatsError>>,
+}
+
+impl BalloonStatsRequest {
+    /// Wait for the guest to return balloon statistics.
+    pub fn wait(self, timeout: Duration) -> DeviceManagerResult<virtio_devices::BalloonStats> {
+        match self.response_receiver.recv_timeout(timeout) {
+            Ok(Ok(stats)) => Ok(stats),
+            Ok(Err(balloon::BalloonStatsError::QueueNotReady)) => {
+                Err(DeviceManagerError::VirtioBalloonStatsQueueNotReady)
+            }
+            Ok(Err(error)) => Err(DeviceManagerError::InvalidVirtioBalloonStats(error)),
+            Err(RecvTimeoutError::Timeout) => Err(DeviceManagerError::VirtioBalloonStatsTimeout),
+            Err(RecvTimeoutError::Disconnected) => {
+                Err(DeviceManagerError::VirtioBalloonStatsDisconnected)
+            }
+        }
+    }
+}
 
 const DEVICE_MANAGER_ACPI_SIZE: usize = 0x10;
 
@@ -5489,6 +5539,22 @@ impl DeviceManager {
         0
     }
 
+    pub fn request_balloon_stats(&self) -> DeviceManagerResult<BalloonStatsRequest> {
+        let balloon = self
+            .balloon
+            .as_ref()
+            .ok_or(DeviceManagerError::MissingVirtioBalloon)?;
+        let response_receiver = match balloon.lock().unwrap().begin_stats_request() {
+            Ok(response_receiver) => response_receiver,
+            Err(balloon::Error::StatsRequestPending) => {
+                return Err(DeviceManagerError::VirtioBalloonStatsRequestPending);
+            }
+            Err(error) => return Err(DeviceManagerError::VirtioBalloonStats(error)),
+        };
+
+        Ok(BalloonStatsRequest { response_receiver })
+    }
+
     pub fn resize_disk(&mut self, device_id: &str, new_size: u64) -> DeviceManagerResult<()> {
         for dev in &self.block_devices {
             let mut disk = dev.lock().unwrap();
@@ -6149,7 +6215,23 @@ impl Drop for DeviceManager {
 
 #[cfg(test)]
 mod unit_tests {
+    use std::sync::mpsc::sync_channel;
+
     use super::*;
+
+    #[test]
+    fn balloon_stats_request_maps_not_ready_response() {
+        let (response_sender, response_receiver) = sync_channel(1);
+        response_sender
+            .send(Err(balloon::BalloonStatsError::QueueNotReady))
+            .unwrap();
+        let request = BalloonStatsRequest { response_receiver };
+
+        assert!(matches!(
+            request.wait(Duration::ZERO),
+            Err(DeviceManagerError::VirtioBalloonStatsQueueNotReady)
+        ));
+    }
 
     #[test]
     fn test_s5_sleep_state_uses_complete_package() {
