@@ -5,18 +5,14 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::cmp::min;
-use std::io;
 use std::os::unix::fs::FileExt;
 use std::sync::Arc;
 
 use vmm_sys_util::eventfd::EventFd;
-use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
-use super::common::decompress_cluster;
+use super::common::{deallocate_range_result, decompress_cluster};
 use super::decoder::Decoder;
-use super::metadata::{
-    BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
-};
+use super::metadata::{BackingRead, ClusterReadMapping, ClusterWriteMapping, QcowMetadata};
 use super::qcow_raw_file::QcowRawFile;
 use crate::async_io::{
     AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, CompletionCommon,
@@ -48,29 +44,6 @@ impl QcowSync {
             backing_file,
             sparse,
             completions: CompletionCommon::new(),
-        }
-    }
-
-    fn apply_dealloc_action(&mut self, action: &DeallocAction) -> io::Result<()> {
-        match action {
-            DeallocAction::PunchHole {
-                host_offset,
-                length,
-            } => {
-                self.data_file
-                    .file_mut()
-                    .punch_hole(*host_offset, *length)?;
-                self.metadata.complete_punch_hole(*host_offset);
-                Ok(())
-            }
-            DeallocAction::WriteZeroes {
-                host_offset,
-                length,
-            } => self
-                .data_file
-                .file_mut()
-                .write_zeroes_at(*host_offset, *length)
-                .map(|_| ()),
         }
     }
 
@@ -231,83 +204,33 @@ impl AsyncIo for QcowSync {
     }
 
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
-        let result = self
-            .metadata
-            .deallocate_bytes(
-                offset,
-                length as usize,
-                self.sparse,
-                false,
-                self.backing_file.as_deref(),
-            )
-            .and_then(|actions| {
-                let mut first_error = None;
-                for action in &actions {
-                    if let Err(e) = self.apply_dealloc_action(action) {
-                        first_error.get_or_insert(e);
-                    }
-                }
-                first_error.map_or(Ok(()), Err)
-            })
-            .map_err(AsyncIoError::PunchHole);
-
-        match result {
-            Ok(()) => {
-                self.completions
-                    .complete(AsyncIoCompletion::new(user_data, 0, None));
-                Ok(())
-            }
-            Err(e) => {
-                let errno = if let AsyncIoError::PunchHole(ref io_err) = e {
-                    -io_err.raw_os_error().unwrap_or(libc::EIO)
-                } else {
-                    -libc::EIO
-                };
-                self.completions
-                    .complete(AsyncIoCompletion::new(user_data, errno, None));
-                Ok(())
-            }
-        }
+        let result = deallocate_range_result(
+            &self.metadata,
+            &mut self.data_file,
+            offset,
+            length as usize,
+            self.sparse,
+            false,
+            self.backing_file.as_deref(),
+        );
+        self.completions
+            .complete(AsyncIoCompletion::new(user_data, result, None));
+        Ok(())
     }
 
     fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
-        let result = self
-            .metadata
-            .deallocate_bytes(
-                offset,
-                length as usize,
-                self.sparse,
-                true,
-                self.backing_file.as_deref(),
-            )
-            .and_then(|actions| {
-                let mut first_error = None;
-                for action in &actions {
-                    if let Err(e) = self.apply_dealloc_action(action) {
-                        first_error.get_or_insert(e);
-                    }
-                }
-                first_error.map_or(Ok(()), Err)
-            })
-            .map_err(AsyncIoError::WriteZeroes);
-
-        match result {
-            Ok(()) => {
-                self.completions
-                    .complete(AsyncIoCompletion::new(user_data, 0, None));
-                Ok(())
-            }
-            Err(e) => {
-                let errno = if let AsyncIoError::WriteZeroes(ref io_err) = e {
-                    -io_err.raw_os_error().unwrap_or(libc::EIO)
-                } else {
-                    -libc::EIO
-                };
-                self.completions
-                    .complete(AsyncIoCompletion::new(user_data, errno, None));
-                Ok(())
-            }
-        }
+        let result = deallocate_range_result(
+            &self.metadata,
+            &mut self.data_file,
+            offset,
+            length as usize,
+            self.sparse,
+            true,
+            self.backing_file.as_deref(),
+        );
+        self.completions
+            .complete(AsyncIoCompletion::new(user_data, result, None));
+        Ok(())
     }
 }
 
@@ -329,7 +252,9 @@ mod unit_tests {
     use crate::disk_file::{AsyncDiskFile, DiskSize, MetadataSync, Resizable};
     use crate::error::BlockErrorKind;
     use crate::formats::qcow;
+    use crate::formats::qcow::common::apply_dealloc_action;
     use crate::formats::qcow::common::unit_tests::compress_allocated_clusters;
+    use crate::formats::qcow::metadata::DeallocAction;
     use crate::formats::qcow::{
         BackingFileConfig, Error as QcowError, ImageType, QcowDisk, QcowHeader, QcowTempDisk,
     };
@@ -2311,7 +2236,7 @@ mod unit_tests {
 
         // Queue A resumes. Completing the old action must not touch the new
         // L2, and only now may the old data cluster enter unref_clusters.
-        aio.apply_dealloc_action(&actions[0]).unwrap();
+        apply_dealloc_action(&aio.metadata, &mut aio.data_file, &actions[0]).unwrap();
         metadata.flush().unwrap();
         drop(aio);
         drop(metadata);

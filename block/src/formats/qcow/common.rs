@@ -10,7 +10,12 @@
 
 use std::io;
 
+use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
+
 use super::decoder::Decoder;
+use super::metadata::{BackingRead, DeallocAction, QcowMetadata};
+use super::qcow_raw_file::QcowRawFile;
+use crate::async_io::AsyncIoError;
 
 /// Decompress a full QCOW2 cluster from compressed data.
 ///
@@ -30,6 +35,68 @@ pub(super) fn decompress_cluster(
         return Err(io::Error::from_raw_os_error(libc::EIO));
     }
     Ok(decompressed)
+}
+
+/// Applies one deallocation action to the data file and refcount table.
+pub(super) fn apply_dealloc_action(
+    metadata: &QcowMetadata,
+    data_file: &mut QcowRawFile,
+    action: &DeallocAction,
+) -> io::Result<()> {
+    match action {
+        DeallocAction::PunchHole {
+            host_offset,
+            length,
+        } => {
+            data_file.file_mut().punch_hole(*host_offset, *length)?;
+            metadata.complete_punch_hole(*host_offset);
+            Ok(())
+        }
+        DeallocAction::WriteZeroes {
+            host_offset,
+            length,
+        } => data_file
+            .file_mut()
+            .write_zeroes_at(*host_offset, *length)
+            .map(|_| ()),
+    }
+}
+
+/// Deallocates a byte range and returns the completion result, 0 on
+/// success or a negative errno on the first failing action.
+pub(super) fn deallocate_range_result(
+    metadata: &QcowMetadata,
+    data_file: &mut QcowRawFile,
+    offset: u64,
+    length: usize,
+    sparse: bool,
+    write_zeroes: bool,
+    backing_file: Option<&dyn BackingRead>,
+) -> i32 {
+    let wrap_error: fn(io::Error) -> AsyncIoError = if write_zeroes {
+        AsyncIoError::WriteZeroes
+    } else {
+        AsyncIoError::PunchHole
+    };
+    let result = metadata
+        .deallocate_bytes(offset, length, sparse, write_zeroes, backing_file)
+        .and_then(|actions| {
+            let mut first_error = None;
+            for action in &actions {
+                if let Err(e) = apply_dealloc_action(metadata, data_file, action) {
+                    first_error.get_or_insert(e);
+                }
+            }
+            first_error.map_or(Ok(()), Err)
+        })
+        .map_err(wrap_error);
+    match result {
+        Ok(()) => 0,
+        Err(AsyncIoError::PunchHole(e) | AsyncIoError::WriteZeroes(e)) => {
+            -e.raw_os_error().unwrap_or(libc::EIO)
+        }
+        Err(_) => -libc::EIO,
+    }
 }
 
 #[cfg(test)]

@@ -15,13 +15,10 @@ use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 
 use vmm_sys_util::eventfd::EventFd;
-use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
-use super::common::decompress_cluster;
+use super::common::{deallocate_range_result, decompress_cluster};
 use super::decoder::Decoder;
-use super::metadata::{
-    BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
-};
+use super::metadata::{BackingRead, ClusterReadMapping, ClusterWriteMapping, QcowMetadata};
 use super::qcow_raw_file::QcowRawFile;
 use crate::async_io::{
     AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, UringDataIo,
@@ -64,29 +61,6 @@ impl QcowAsync {
             backing_file,
             sparse,
         })
-    }
-
-    fn apply_dealloc_action(&mut self, action: &DeallocAction) -> io::Result<()> {
-        match action {
-            DeallocAction::PunchHole {
-                host_offset,
-                length,
-            } => {
-                self.data_file
-                    .file_mut()
-                    .punch_hole(*host_offset, *length)?;
-                self.metadata.complete_punch_hole(*host_offset);
-                Ok(())
-            }
-            DeallocAction::WriteZeroes {
-                host_offset,
-                length,
-            } => self
-                .data_file
-                .file_mut()
-                .write_zeroes_at(*host_offset, *length)
-                .map(|_| ()),
-        }
     }
 
     fn async_error_result(error: &AsyncIoError) -> i32 {
@@ -196,83 +170,33 @@ impl AsyncIo for QcowAsync {
     }
 
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
-        let result = self
-            .metadata
-            .deallocate_bytes(
-                offset,
-                length as usize,
-                self.sparse,
-                false,
-                self.backing_file.as_deref(),
-            )
-            .and_then(|actions| {
-                let mut first_error = None;
-                for action in &actions {
-                    if let Err(e) = self.apply_dealloc_action(action) {
-                        first_error.get_or_insert(e);
-                    }
-                }
-                first_error.map_or(Ok(()), Err)
-            })
-            .map_err(AsyncIoError::PunchHole);
-
-        match result {
-            Ok(()) => {
-                self.data_io
-                    .inject_completion(AsyncIoCompletion::new(user_data, 0, None));
-                Ok(())
-            }
-            Err(e) => {
-                let errno = if let AsyncIoError::PunchHole(ref io_err) = e {
-                    -io_err.raw_os_error().unwrap_or(libc::EIO)
-                } else {
-                    -libc::EIO
-                };
-                self.data_io
-                    .inject_completion(AsyncIoCompletion::new(user_data, errno, None));
-                Ok(())
-            }
-        }
+        let result = deallocate_range_result(
+            &self.metadata,
+            &mut self.data_file,
+            offset,
+            length as usize,
+            self.sparse,
+            false,
+            self.backing_file.as_deref(),
+        );
+        self.data_io
+            .inject_completion(AsyncIoCompletion::new(user_data, result, None));
+        Ok(())
     }
 
     fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
-        let result = self
-            .metadata
-            .deallocate_bytes(
-                offset,
-                length as usize,
-                self.sparse,
-                true,
-                self.backing_file.as_deref(),
-            )
-            .and_then(|actions| {
-                let mut first_error = None;
-                for action in &actions {
-                    if let Err(e) = self.apply_dealloc_action(action) {
-                        first_error.get_or_insert(e);
-                    }
-                }
-                first_error.map_or(Ok(()), Err)
-            })
-            .map_err(AsyncIoError::WriteZeroes);
-
-        match result {
-            Ok(()) => {
-                self.data_io
-                    .inject_completion(AsyncIoCompletion::new(user_data, 0, None));
-                Ok(())
-            }
-            Err(e) => {
-                let errno = if let AsyncIoError::WriteZeroes(ref io_err) = e {
-                    -io_err.raw_os_error().unwrap_or(libc::EIO)
-                } else {
-                    -libc::EIO
-                };
-                self.data_io
-                    .inject_completion(AsyncIoCompletion::new(user_data, errno, None));
-                Ok(())
-            }
-        }
+        let result = deallocate_range_result(
+            &self.metadata,
+            &mut self.data_file,
+            offset,
+            length as usize,
+            self.sparse,
+            true,
+            self.backing_file.as_deref(),
+        );
+        self.data_io
+            .inject_completion(AsyncIoCompletion::new(user_data, result, None));
+        Ok(())
     }
 
     fn batch_requests_enabled(&self) -> bool {
