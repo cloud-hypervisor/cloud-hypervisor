@@ -734,6 +734,33 @@ impl EndpointHandler for VmInfo {
     }
 }
 
+// /api/v1/vm.balloon-stats handler
+pub struct VmBalloonStats {}
+
+impl EndpointHandler for VmBalloonStats {
+    fn handle_request(
+        &self,
+        req: &Request,
+        api_notifier: EventFd,
+        api_sender: Sender<ApiRequest>,
+    ) -> Response {
+        match req.method() {
+            Method::Get => match api::VmBalloonStats
+                .send(api_notifier, api_sender, ())
+                .map_err(HttpError::ApiError)
+            {
+                Ok(stats) => {
+                    let mut response = Response::new(Version::Http11, StatusCode::OK);
+                    response.set_body(Body::new(serde_json::to_string(&stats).unwrap()));
+                    response
+                }
+                Err(e) => error_response(e),
+            },
+            _ => error_response(HttpError::BadRequest),
+        }
+    }
+}
+
 // /api/v1/vmm.info handler
 pub struct VmmPing {}
 
