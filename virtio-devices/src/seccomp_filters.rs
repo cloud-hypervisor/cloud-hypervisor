@@ -8,7 +8,7 @@ use std::env;
 
 use block::{BLKDISCARD, BLKZEROOUT};
 use libc::{FIONBIO, TIOCGWINSZ, TUNSETOFFLOAD};
-use seccompiler::SeccompCmpOp::Eq;
+use seccompiler::SeccompCmpOp::{Eq, MaskedEq};
 use seccompiler::{
     BpfProgram, Error, SeccompAction, SeccompCmpArgLen as ArgLen, SeccompCondition as Cond,
     SeccompFilter, SeccompRule,
@@ -364,7 +364,18 @@ fn virtio_thread_common() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_mprotect, vec![]),
         (libc::SYS_mremap, vec![]),
         (libc::SYS_munmap, vec![]),
-        (libc::SYS_openat, vec![]),
+        (
+            libc::SYS_openat,
+            or![and![
+                Cond::new(
+                    2, // openat() flags argument
+                    ArgLen::Dword,
+                    MaskedEq(libc::O_ACCMODE as u64),
+                    libc::O_RDONLY as u64,
+                )
+                .unwrap()
+            ]],
+        ),
         (libc::SYS_read, vec![]),
         (libc::SYS_rt_sigprocmask, vec![]),
         (libc::SYS_rt_sigreturn, vec![]),
