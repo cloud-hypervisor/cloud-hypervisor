@@ -216,6 +216,14 @@ impl TlsStream {
     /// from growing without bound.
     const BUF_SIZE: usize = 64 /* KiB */ << 10;
 
+    /// Returns a reference to the underlying [`TcpStream`].
+    pub fn tcp_stream(&self) -> &TcpStream {
+        match &self.stream {
+            TlsStreamParticipant::Client(stream) => stream.get_ref(),
+            TlsStreamParticipant::Server(stream) => stream.get_ref(),
+        }
+    }
+
     /// Creates a client [`TlsStream`].
     ///
     /// The client verifies the server certificate against `ca-cert.pem` and the
