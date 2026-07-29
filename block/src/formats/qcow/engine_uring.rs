@@ -9,13 +9,12 @@
 //! QCOW2 async disk backend.
 
 use std::io;
-use std::os::unix::fs::FileExt;
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 
 use vmm_sys_util::eventfd::EventFd;
 
-use super::common::{cow_write_sync, deallocate_range_result, decompress_cluster};
+use super::common::{cow_write_sync, deallocate_range_result, scatter_read_sync};
 use super::decoder::Decoder;
 use super::metadata::{BackingRead, ClusterReadMapping, QcowMetadata};
 use super::qcow_raw_file::QcowRawFile;
@@ -277,79 +276,8 @@ impl QcowAsync {
             return Ok(Some(*host_offset));
         }
 
-        Self::scatter_read_sync(mappings, op, data_file, backing_file, cluster_size, decoder)?;
+        scatter_read_sync(mappings, op, data_file, backing_file, cluster_size, decoder)?;
         Ok(None)
-    }
-
-    /// Scatter-read cluster mappings synchronously into an owned operation.
-    fn scatter_read_sync(
-        mappings: Vec<ClusterReadMapping>,
-        op: &mut AsyncIoOperation,
-        data_file: &QcowRawFile,
-        backing_file: &Option<Arc<dyn BackingRead>>,
-        cluster_size: u64,
-        decoder: &dyn Decoder,
-    ) -> AsyncIoResult<()> {
-        let mut buf_offset = 0usize;
-        for mapping in mappings {
-            match mapping {
-                ClusterReadMapping::Zero { length } => {
-                    op.fill_zeroes_at(buf_offset, length as usize)
-                        .map_err(AsyncIoError::ReadVectored)?;
-                    buf_offset += length as usize;
-                }
-                ClusterReadMapping::Allocated {
-                    offset: host_offset,
-                    length,
-                } => {
-                    let len = length as usize;
-                    let mut buf = vec![0u8; len];
-                    data_file
-                        .file()
-                        .read_exact_at(&mut buf, host_offset)
-                        .map_err(AsyncIoError::ReadVectored)?;
-                    op.write_bytes_at(buf_offset, &buf)
-                        .map_err(AsyncIoError::ReadVectored)?;
-                    buf_offset += len;
-                }
-                ClusterReadMapping::Compressed {
-                    host_offset,
-                    compressed_size,
-                    cluster_offset,
-                    length,
-                } => {
-                    let mut compressed = vec![0u8; compressed_size];
-                    data_file
-                        .file()
-                        .read_exact_at(&mut compressed, host_offset)
-                        .map_err(AsyncIoError::ReadVectored)?;
-                    let decompressed =
-                        decompress_cluster(&compressed, cluster_size as usize, decoder)
-                            .map_err(AsyncIoError::ReadVectored)?;
-                    op.write_bytes_at(
-                        buf_offset,
-                        &decompressed[cluster_offset..cluster_offset + length],
-                    )
-                    .map_err(AsyncIoError::ReadVectored)?;
-                    buf_offset += length;
-                }
-                ClusterReadMapping::Backing {
-                    offset: backing_offset,
-                    length,
-                } => {
-                    let mut buf = vec![0u8; length as usize];
-                    backing_file
-                        .as_ref()
-                        .unwrap()
-                        .read_at(backing_offset, &mut buf)
-                        .map_err(AsyncIoError::ReadVectored)?;
-                    op.write_bytes_at(buf_offset, &buf)
-                        .map_err(AsyncIoError::ReadVectored)?;
-                    buf_offset += length as usize;
-                }
-            }
-        }
-        Ok(())
     }
 }
 
