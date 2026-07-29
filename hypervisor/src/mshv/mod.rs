@@ -2598,3 +2598,54 @@ impl vm::Vm for MshvVm {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[cfg(target_arch = "x86_64")]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mshv_sregs_for_set_clears_interrupt_bitmap() {
+        let sregs = SpecialRegisters {
+            interrupt_bitmap: [1, 2, 3, 4],
+            cr0: 0x8000_0011,
+            cr3: 0x1_2000,
+            efer: 0x500,
+            apic_base: 0xfee0_0900,
+            ..Default::default()
+        };
+
+        let out = mshv_sregs_for_set(&sregs);
+
+        assert_eq!(out.interrupt_bitmap, [0; 4]);
+        assert_eq!(out.cr0, sregs.cr0);
+        assert_eq!(out.cr3, sregs.cr3);
+        assert_eq!(out.efer, sregs.efer);
+        assert_eq!(out.apic_base, sregs.apic_base);
+    }
+
+    #[test]
+    fn pending_interrupt_survives_snapshot_restore() {
+        const PENDING_INTERRUPTION: u64 = 0x8000_0000_0000_0030;
+        let sregs = SpecialRegisters {
+            interrupt_bitmap: [0, 0, 0, 1 << 16],
+            ..Default::default()
+        };
+        let events = VcpuEvents {
+            pending_interruption: PENDING_INTERRUPTION,
+            ..Default::default()
+        };
+
+        let sregs: MshvSpecialRegisters = sregs.into();
+        let sregs: MshvSpecialRegisters =
+            serde_json::from_str(&serde_json::to_string(&sregs).unwrap()).unwrap();
+        let events: VcpuEvents =
+            serde_json::from_str(&serde_json::to_string(&events).unwrap()).unwrap();
+
+        let restored: SpecialRegisters = sregs.into();
+        let out = mshv_sregs_for_set(&restored);
+
+        assert_eq!(events.pending_interruption, PENDING_INTERRUPTION);
+        assert_eq!(out.interrupt_bitmap, [0; 4]);
+    }
+}
