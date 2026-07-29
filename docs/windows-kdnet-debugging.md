@@ -43,10 +43,90 @@ routing/firewalling must allow the chosen debug port -- in particular, open the
 UDP debug port inbound on the **debugger** host's firewall, otherwise the
 target's connection packets are dropped before WinDbg sees them.
 
+### Routing the debug NIC with NAT for remote or cross subnet debuggers
+
+Bridging assumes the debug NIC can appear directly on a network the debugger
+shares. That is not always possible or desirable. The debugger may live on a
+different subnet reached only through the default route of the host, or the
+host uplink may drop frames carrying the debuggee MAC. Many cloud and virtual
+switch uplinks reject foreign MACs unless MAC address spoofing is explicitly
+enabled.
+
+Because KDNET connections are always **target initiated**, source NAT on the
+Cloud Hypervisor host is sufficient. The outbound UDP from the debuggee creates
+a conntrack entry and the replies from the debugger return along it, so no
+inbound port forward is needed on the Cloud Hypervisor host. Put the tap on its
+own private subnet and masquerade it out the uplink.
+
+```bash
+sudo ip addr add 192.168.250.1/24 dev chdbg0
+sudo ip link set chdbg0 up
+
+sudo sysctl -w net.ipv4.ip_forward=1
+sudo iptables -t nat -A POSTROUTING -s 192.168.250.0/24 -o eth0 -j MASQUERADE
+sudo iptables -A FORWARD -i chdbg0 -o eth0 -j ACCEPT
+sudo iptables -A FORWARD -i eth0 -o chdbg0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+sudo iptables -t mangle -A POSTROUTING -o chdbg0 -p udp -j CHECKSUM --checksum-fill
+
+sudo dnsmasq --port=0 --interface=chdbg0 --bind-interfaces \
+    --dhcp-range=192.168.250.50,192.168.250.150,255.255.255.0,1h \
+    --dhcp-option=option:router,192.168.250.1 --dhcp-authoritative
+```
+
+KDNET needs a routable address on the tap subnet, provided in one of two ways.
+Either serve DHCP on the tap with the dnsmasq invocation above, or assign a
+static address on the debug subnet from SAC as shown in the guest
+configuration. A link local `169.254.x` address is not enough. The Linux
+kernel refuses to forward it per RFC 3927, so those packets die on the tap
+before reaching NAT. When using a static address, the dnsmasq line is not
+needed. Set `hostip` to the debugger address, and the firewall on the debugger
+must still allow the debug port inbound.
+
 ## Guest configuration (Windows debuggee)
 
-Identify the virtio-net adapter's PCI bus/device/function (KDNET selects the NIC
-by `busparams`). The location of each adapter can be read with PowerShell:
+Cloud Hypervisor exposes no VGA adapter, so with `--serial tty --console off`
+the only built-in console is **SAC**, a minimal text menu over the serial line.
+SAC is not a full shell. It can assign a NIC address with its `i` command and
+open a plain `cmd` channel, which is enough to run `bcdedit`. The channel
+prompts for the guest credentials, and once logged in it is an ordinary
+Windows command prompt from which `powershell` can be started. PowerShell is
+needed only for `busparams` discovery, so no RDP or SSH is required. See
+[Windows Support](windows.md).
+
+### Enable KDNET from SAC
+
+Give the debug NIC a static address on the debug subnet, where `10` is the
+device index printed by bare `i`, then open a command channel. This is the
+alternative to serving DHCP on the tap. Either one gives KDNET a routable
+address.
+
+```
+SAC>i
+SAC>i 10 192.168.250.2 255.255.255.0 192.168.250.1
+SAC>cmd
+SAC>ch -si 1
+```
+
+In that channel, enable KDNET. `busparams` is omitted here so KDNET
+autoselects the single virtio-net adapter.
+
+```bat
+bcdedit /debug on
+bcdedit /dbgsettings net hostip:<debugger-ip> port:<50000-50039> key:<key>
+```
+
+- `hostip` is the WinDbg host address.
+- `port` is a UDP port in the 49152-65535 range (50000-50039 is conventional).
+- `key` is the debug encryption key (four dot-separated groups). Use a fixed
+  key, or omit it to let Windows generate one and print it.
+
+Reboot the debuggee after applying the settings.
+
+### Optionally pinning a specific NIC with busparams
+
+When the guest has more than one supported adapter, select the debug NIC
+explicitly by its PCI bus/device/function. Read the location from a
+PowerShell started in the logged in SAC `cmd` channel, no RDP or SSH needed.
 
 ```powershell
 Get-NetAdapter | ForEach-Object {
@@ -56,22 +136,19 @@ Get-NetAdapter | ForEach-Object {
 }
 ```
 
-Then, from an elevated prompt on the debuggee:
+Then, from an elevated prompt, pin it and reboot.
 
 ```bat
-bcdedit /debug on
-bcdedit /dbgsettings net hostip:<debugger-ip> port:<50000-50039> key:<key>
 bcdedit /set "{dbgsettings}" busparams <bus>.<device>.<function>
 ```
 
-- `hostip` is the WinDbg host address.
-- `port` is a UDP port in the 49152-65535 range (50000-50039 is conventional).
-- `key` is the debug encryption key (four dot-separated groups). Use a fixed
-  key, or omit it to let Windows generate one and print it.
-- `busparams` selects the virtio-net NIC. Omit it to let KDNET auto-select a
-  supported adapter.
-
-Reboot the debuggee after applying the settings.
+- `busparams` selects the virtio-net NIC. Omit it entirely to let KDNET
+  autoselect a supported adapter. It is only a disambiguator, not a
+  requirement. When omitted, KDNET scans the PCI bus at boot. It picks the
+  first adapter that has a KDNET extensibility module and skips unsupported
+  ones. A single supported NIC therefore works without it. With several
+  supported NICs, leave only the debug NIC attached. Otherwise confirm which
+  one KDNET chose by MAC with `.kdtargetmac` in WinDbg.
 
 ## Debugger host (WinDbg)
 
@@ -102,7 +179,10 @@ or configure an equivalent network kernel-debug connection in the WinDbg UI.
   debug port. Allow the port (and/or the `windbg.exe` program) inbound.
   KDNET connections are always initiated by the *target*, so the debugger must
   be listening before (or while) the target polls; start it first, or reboot
-  the debuggee with the debugger already running.
+  the debuggee with the debugger already running. When routing with NAT, KDNET
+  must have a routable address on the tap, from DHCP or a static SAC
+  assignment. Without one it uses a link local `169.254.x` source that the
+  kernel will not forward.
 - **No packets reach the debugger host.** Check tap bridging and host routing.
   When bridging guests through the host, note that host-originated replies can
   carry offloaded (incomplete) UDP checksums; if a guest ignores them, add an
