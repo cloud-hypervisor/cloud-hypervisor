@@ -3470,6 +3470,15 @@ impl VmConfig {
                 if zone.shared && zone.mergeable {
                     return Err(ValidationError::InvalidSharedMemoryWithMergeable);
                 }
+
+                if let Some(hugepage_size) = &zone.hugepage_size {
+                    if !zone.hugepages {
+                        return Err(ValidationError::HugePageSizeWithoutHugePages);
+                    }
+                    if !hugepage_size.is_power_of_two() {
+                        return Err(ValidationError::InvalidHugePageSize(*hugepage_size));
+                    }
+                }
             }
         }
 
@@ -6201,6 +6210,41 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             invalid_config.validate(),
             Err(ValidationError::InvalidHugePageSize(3 << 20))
+        );
+
+        let mut still_valid_config = valid_config.clone();
+        still_valid_config.memory.zones = Some(vec![MemoryZoneConfig {
+            id: "mem0".to_string(),
+            size: 1 << 30,
+            hugepages: true,
+            hugepage_size: Some(2 << 20),
+            ..Default::default()
+        }]);
+        still_valid_config.validate().unwrap();
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.memory.zones = Some(vec![MemoryZoneConfig {
+            id: "mem0".to_string(),
+            size: 1 << 30,
+            hugepage_size: Some(2 << 20),
+            ..Default::default()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::HugePageSizeWithoutHugePages)
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.memory.zones = Some(vec![MemoryZoneConfig {
+            id: "mem0".to_string(),
+            size: 1 << 30,
+            hugepages: true,
+            hugepage_size: Some(0),
+            ..Default::default()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::InvalidHugePageSize(0))
         );
 
         // Test mergeable and shared validation for global memory
