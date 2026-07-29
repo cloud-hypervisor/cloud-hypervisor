@@ -605,6 +605,9 @@ impl ReceiveAdditionalConnections {
 
 impl Drop for ReceiveAdditionalConnections {
     fn drop(&mut self) {
+        if let Err(error) = self.kill_evt.write(1) {
+            warn!("Failed to write to kill eventfd: {error}");
+        }
         if self.accept_thread.is_some() {
             warn!(
                 "ReceiveAdditionalConnections was not cleaned up! Either cleanup() was never called (programming error) or it failed before completing."
