@@ -297,8 +297,8 @@ fn wait_for_readable(fd: &impl AsFd, abort_event: &impl AsRawFd) -> Result<bool,
 pub(crate) struct ReceiveAdditionalConnections {
     accept_thread: Option<thread::JoinHandle<Result<(), MigratableError>>>,
 
-    /// Shared termination event for the accept thread and memory workers.
-    terminate_fd: EventFd,
+    /// Shared kill eventfd for the accept thread and memory workers.
+    kill_evt: EventFd,
 }
 
 impl ReceiveAdditionalConnections {
@@ -313,12 +313,12 @@ impl ReceiveAdditionalConnections {
         seccomp_action: &SeccompAction,
     ) -> Result<Self, MigratableError> {
         let event_fd = EventFd::new(0)
-            .context("Error creating terminate fd")
+            .context("Error creating kill_evt fd")
             .map_err(MigratableError::MigrateReceive)?;
 
-        let terminate_fd = event_fd
+        let kill_evt = event_fd
             .try_clone()
-            .context("Error cloning terminate fd")
+            .context("Error cloning kill_evt fd")
             .map_err(MigratableError::MigrateReceive)?;
 
         let seccomp_filter = get_seccomp_filter(seccomp_action, Thread::MigrationTcpWorker, None)
@@ -336,7 +336,7 @@ impl ReceiveAdditionalConnections {
 
                 Self::accept_connections(
                     listener,
-                    &terminate_fd,
+                    &kill_evt,
                     &guest_memory,
                     &fault_tx,
                     &seccomp_filter,
@@ -347,7 +347,7 @@ impl ReceiveAdditionalConnections {
 
         Ok(Self {
             accept_thread: Some(accept_thread),
-            terminate_fd: event_fd,
+            kill_evt: event_fd,
         })
     }
 
@@ -364,7 +364,7 @@ impl ReceiveAdditionalConnections {
     /// until EOF, error, or termination.
     fn accept_connections(
         mut listener: ReceiveListener,
-        terminate_fd: &EventFd,
+        kill_evt: &EventFd,
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         fault_tx: &Sender<SocketStream>,
         seccomp_filter: &BpfProgram,
@@ -372,7 +372,7 @@ impl ReceiveAdditionalConnections {
         let mut threads = Vec::new();
         let first_err = Self::accept_connections_loop(
             &mut listener,
-            terminate_fd,
+            kill_evt,
             guest_memory,
             fault_tx,
             &mut threads,
@@ -381,7 +381,7 @@ impl ReceiveAdditionalConnections {
 
         if first_err.is_err() {
             warn!("Signaling termination due to an error while accepting connections.");
-            let _ = terminate_fd.write(1);
+            let _ = kill_evt.write(1);
         }
 
         debug!("Stopped accepting additional connections. Cleaning up threads.");
@@ -397,14 +397,14 @@ impl ReceiveAdditionalConnections {
     /// migration thread and do not spawn workers.
     fn accept_connections_loop(
         listener: &mut ReceiveListener,
-        terminate_fd: &EventFd,
+        kill_evt: &EventFd,
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         fault_tx: &Sender<SocketStream>,
         threads: &mut Vec<thread::JoinHandle<Result<(), MigratableError>>>,
         seccomp_filter: &BpfProgram,
     ) -> Result<(), MigratableError> {
         loop {
-            let socket = listener.abortable_accept(terminate_fd)?;
+            let socket = listener.abortable_accept(kill_evt)?;
             let Some(socket) = socket else {
                 return Ok(());
             };
@@ -422,7 +422,7 @@ impl ReceiveAdditionalConnections {
             let thread = Self::spawn_memory_worker(
                 socket,
                 threads.len(),
-                terminate_fd,
+                kill_evt,
                 guest_memory.clone(),
                 seccomp_filter,
             )?;
@@ -477,13 +477,13 @@ impl ReceiveAdditionalConnections {
     fn spawn_memory_worker(
         mut socket: SocketStream,
         index: usize,
-        terminate_fd: &EventFd,
+        kill_evt: &EventFd,
         guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
         seccomp_filter: &BpfProgram,
     ) -> Result<thread::JoinHandle<Result<(), MigratableError>>, MigratableError> {
-        let terminate_fd = terminate_fd
+        let kill_evt = kill_evt
             .try_clone()
-            .context("Error cloning terminate fd")
+            .context("Error cloning kill_evt fd")
             .map_err(MigratableError::MigrateReceive)?;
 
         let seccomp_filter_t = seccomp_filter.clone();
@@ -495,7 +495,7 @@ impl ReceiveAdditionalConnections {
                         .context("Error applying migration TCP worker seccomp filter")
                         .map_err(MigratableError::MigrateReceive)?;
                 }
-                Self::worker_receive_memory(&mut socket, &terminate_fd, &guest_memory)
+                Self::worker_receive_memory(&mut socket, &kill_evt, &guest_memory)
             })
             .map_err(|e| {
                 error!("Error spawning receive-memory thread: {e}");
@@ -534,13 +534,13 @@ impl ReceiveAdditionalConnections {
     /// memory.
     fn worker_receive_memory(
         mut socket: &mut SocketStream,
-        terminate_fd: &EventFd,
+        kill_evt: &EventFd,
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
     ) -> Result<(), MigratableError> {
         loop {
             // We only check whether we should abort when waiting for a new request. If the
             // sender stops sending data mid-request, we will hang forever.
-            if !wait_for_readable(socket, terminate_fd)
+            if !wait_for_readable(socket, kill_evt)
                 .context("Failed to poll fds")
                 .map_err(MigratableError::MigrateReceive)?
             {
@@ -583,9 +583,9 @@ impl ReceiveAdditionalConnections {
     /// Signals to the worker threads that the migration is finished and joins them.
     /// If any thread encountered an error, this error is returned by this function.
     pub(crate) fn cleanup(&mut self) -> Result<(), MigratableError> {
-        self.terminate_fd
+        self.kill_evt
             .write(1)
-            .context("Failed to signal termination to worker threads.")
+            .context("Failed to write to kill eventfd")
             .map_err(MigratableError::MigrateReceive)?;
         let accept_thread = self
             .accept_thread
