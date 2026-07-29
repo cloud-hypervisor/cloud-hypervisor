@@ -1110,6 +1110,47 @@ pub(crate) fn bdf_from_hotplug_response(
     (segment_id, bus_id, device_id, function_id)
 }
 
+/// `--net` argument for the guest's management NIC, kept plugged during the
+/// primary NIC's remove-device/add-net cycle.
+pub(crate) fn mgmt_net_params(guest: &Guest) -> String {
+    format!(
+        "tap=,mac={},ip={},mask=255.255.255.128",
+        guest.network.guest_mac1, guest.network.host_ip1
+    )
+}
+
+fn mgmt_auth() -> PasswordAuth {
+    PasswordAuth {
+        username: String::from("cloud"),
+        password: String::from("cloud123"),
+    }
+}
+
+pub(crate) fn ensure_mgmt_nic_ready(guest: &Guest) {
+    wait_for_ssh(
+        "true",
+        &mgmt_auth(),
+        &guest.network.guest_ip1,
+        Duration::from_secs(30),
+    )
+    .expect("management NIC SSH not reachable");
+}
+
+/// Restart systemd-networkd on the guest over the management NIC and wait
+/// for the primary NIC to come back. Works around a udev-rename vs
+/// networkd race on Ubuntu 22.04 that otherwise leaves the re-plugged
+/// primary in `state DOWN, off (unmanaged)`.
+pub(crate) fn recover_primary_nic_via_mgmt(guest: &Guest) {
+    ssh_command_ip_with_auth(
+        "sudo systemctl restart systemd-networkd",
+        &mgmt_auth(),
+        &guest.network.guest_ip1,
+        Some(Duration::from_secs(30)),
+    )
+    .expect("failed to restart systemd-networkd via mgmt");
+    guest.wait_for_ssh(Duration::from_secs(60)).unwrap();
+}
+
 #[cfg(not(feature = "mshv"))]
 pub(crate) fn start_live_migration(
     migration_socket: &str,

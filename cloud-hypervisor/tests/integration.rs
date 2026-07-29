@@ -6629,6 +6629,7 @@ mod common_parallel {
             "id={},tap=,mac={},ip={},mask=255.255.255.128",
             net_id, guest.network.guest_mac0, guest.network.host_ip0
         );
+        let mgmt_net_params = mgmt_net_params(&guest);
 
         let memory_param: &[&str] = if local {
             &["--memory", "size=1500M,shared=on"]
@@ -6664,7 +6665,7 @@ mod common_parallel {
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
-            .args(["--net", net_params.as_str()])
+            .args(["--net", net_params.as_str(), mgmt_net_params.as_str()])
             .args(["--api-socket", &src_api_socket])
             .args([
                 "--pmem",
@@ -6699,6 +6700,8 @@ mod common_parallel {
             // not break the live-migration support for virtio-pci.
             #[cfg(target_arch = "x86_64")]
             {
+                ensure_mgmt_nic_ready(&guest);
+
                 assert!(remote_command(
                     &src_api_socket,
                     "remove-device",
@@ -6714,7 +6717,8 @@ mod common_parallel {
                     "add-net",
                     Some(net_params.as_str()),
                 ));
-                guest.wait_for_ssh(Duration::from_secs(10)).unwrap();
+
+                recover_primary_nic_via_mgmt(&guest);
             }
 
             // Start the live-migration
