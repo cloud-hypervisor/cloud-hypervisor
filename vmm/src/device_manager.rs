@@ -4676,7 +4676,6 @@ impl DeviceManager {
             devices::IvshmemDevice::new(
                 id.clone(),
                 ivshmem_cfg.size as u64,
-                Some(ivshmem_cfg.path.clone()),
                 ivshmem_ops.clone(),
                 snapshot,
             )
@@ -5601,6 +5600,16 @@ impl IvshmemOps for IvshmemHandler {
             false,
         )
         .map_err(|e| IvshmemError::CreateUserMemoryRegion(e.into()))?;
+        let region = Arc::new(region);
+        let mapping = self.create_userspace_mapping(start_addr, region.clone())?;
+        Ok((region, mapping))
+    }
+
+    fn create_userspace_mapping(
+        &mut self,
+        start_addr: u64,
+        region: Arc<MmapRegion<AtomicBitmap>>,
+    ) -> Result<UserspaceMapping, IvshmemError> {
         let mem_slot = {
             let mut manager = self.memory_manager.lock().unwrap();
             // SAFETY: guaranteed by MmapRegion invariants
@@ -5616,14 +5625,12 @@ impl IvshmemOps for IvshmemHandler {
             }
         }
         .map_err(|e| IvshmemError::CreateUserspaceMapping(e.into()))?;
-        let region = Arc::new(region);
-        let mapping = UserspaceMapping {
-            mapping: region.clone(),
+        Ok(UserspaceMapping {
+            mapping: region,
             mem_slot,
             addr: GuestAddress(start_addr),
             mergeable: false,
-        };
-        Ok((region, mapping))
+        })
     }
 
     fn unmap_ram_region(&mut self, mapping: UserspaceMapping) -> Result<(), IvshmemError> {
