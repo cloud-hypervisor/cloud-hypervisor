@@ -642,6 +642,10 @@ pub enum DeviceManagerError {
     #[error("Cannot hotplug device behind vIOMMU")]
     InvalidIommuHotplug,
 
+    /// Cannot remove a device from behind vIOMMU
+    #[error("Cannot remove device from behind vIOMMU: bdf={0}")]
+    InvalidIommuRemove(PciBdf),
+
     /// Invalid identifier as it is not unique.
     #[error("Invalid identifier as it is not unique: {0}")]
     IdentifierNotUnique(String),
@@ -5004,6 +5008,15 @@ impl DeviceManager {
             .ok_or(DeviceManagerError::MissingDeviceNodePciBdf)?;
         let pci_segment_id = pci_device_bdf.segment();
 
+        if !self.is_iommu_segment(pci_segment_id)
+            && self
+                .iommu_attached_devices
+                .as_ref()
+                .is_some_and(|(_, devices)| devices.contains(&pci_device_bdf))
+        {
+            return Err(DeviceManagerError::InvalidIommuRemove(pci_device_bdf));
+        }
+
         let pci_device_handle = pci_device_node
             .pci_device_handle
             .as_ref()
@@ -5098,6 +5111,15 @@ impl DeviceManager {
 
         // Convert the device ID into the corresponding b/d/f.
         let pci_device_bdf = PciBdf::new(pci_segment_id, 0, device_id, 0);
+
+        if !self.is_iommu_segment(pci_segment_id)
+            && self
+                .iommu_attached_devices
+                .as_ref()
+                .is_some_and(|(_, devices)| devices.contains(&pci_device_bdf))
+        {
+            return Err(DeviceManagerError::InvalidIommuRemove(pci_device_bdf));
+        }
 
         // Give the PCI device ID back to the PCI bus.
         self.pci_segments[pci_segment_id as usize]
