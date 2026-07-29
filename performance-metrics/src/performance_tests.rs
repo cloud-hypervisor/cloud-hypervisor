@@ -519,8 +519,10 @@ fn measure_restore_time(
 
     parse_restore_time_output(&json_events).inspect_err(|_| {
         eprintln!(
-            "\n\n==== Start child stdout ====\n\n{}\n\n==== End child stdout ====\
+            "\n\n==== Restore child exit status: {} ====\
+            \n\n==== Start child stdout ====\n\n{}\n\n==== End child stdout ====\
             \n\n==== Start child stderr ====\n\n{}\n\n==== End child stderr ====",
+            output.status,
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
