@@ -49,6 +49,8 @@ pub enum IvshmemError {
     CreateUserspaceMapping(#[source] anyhow::Error),
     #[error("Failed to remove old userspace mapping.")]
     RemoveUserspaceMapping(#[source] anyhow::Error),
+    #[error("Missing memory region")]
+    MissingMemoryRegion,
 }
 
 #[derive(Copy, Clone)]
@@ -69,6 +71,12 @@ pub trait IvshmemOps: Send + Sync {
         size: usize,
         backing_file: Option<PathBuf>,
     ) -> Result<(Arc<MmapRegion>, UserspaceMapping), IvshmemError>;
+
+    fn create_userspace_mapping(
+        &mut self,
+        start_addr: u64,
+        region: Arc<MmapRegion>,
+    ) -> Result<UserspaceMapping, IvshmemError>;
 
     fn unmap_ram_region(&mut self, mapping: UserspaceMapping) -> Result<(), IvshmemError>;
 }
@@ -94,7 +102,6 @@ pub struct IvshmemDevice {
 
     region_size: u64,
     ivshmem_ops: Arc<Mutex<dyn IvshmemOps>>,
-    backend_file: Option<PathBuf>,
     region: Option<Arc<MmapRegion>>,
     userspace_mapping: Option<UserspaceMapping>,
 }
@@ -111,7 +118,6 @@ impl IvshmemDevice {
     pub fn new(
         id: String,
         region_size: u64,
-        backend_file: Option<PathBuf>,
         ivshmem_ops: Arc<Mutex<dyn IvshmemOps>>,
         snapshot: Option<&Snapshot>,
     ) -> Result<Self, IvshmemError> {
@@ -159,7 +165,6 @@ impl IvshmemDevice {
                 ivshmem_ops,
                 region: None,
                 userspace_mapping: None,
-                backend_file,
             }
         } else {
             IvshmemDevice {
@@ -174,7 +179,6 @@ impl IvshmemDevice {
                 ivshmem_ops,
                 region: None,
                 userspace_mapping: None,
-                backend_file,
             }
         };
         Ok(device)
@@ -353,6 +357,10 @@ impl PciDevice for IvshmemDevice {
 
     fn move_bar(&mut self, old_base: u64, new_base: u64) -> io::Result<()> {
         if new_base == self.data_bar_addr() {
+            let region = self
+                .region
+                .clone()
+                .ok_or_else(|| io::Error::other(IvshmemError::MissingMemoryRegion))?;
             if let Some(old_mapping) = self.userspace_mapping.take() {
                 self.ivshmem_ops
                     .lock()
@@ -360,17 +368,13 @@ impl PciDevice for IvshmemDevice {
                     .unmap_ram_region(old_mapping)
                     .map_err(io::Error::other)?;
             }
-            let (region, new_mapping) = self
+            let new_mapping = self
                 .ivshmem_ops
                 .lock()
                 .unwrap()
-                .map_ram_region(
-                    new_base,
-                    self.region_size as usize,
-                    self.backend_file.clone(),
-                )
+                .create_userspace_mapping(new_base, region)
                 .map_err(io::Error::other)?;
-            self.set_region(region, new_mapping);
+            self.userspace_mapping = Some(new_mapping);
         }
         for bar in self.bar_regions.iter_mut() {
             if bar.addr() == old_base {
