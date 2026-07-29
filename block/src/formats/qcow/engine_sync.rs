@@ -4,14 +4,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::os::unix::fs::FileExt;
 use std::sync::Arc;
 
 use vmm_sys_util::eventfd::EventFd;
 
-use super::common::{cow_write_sync, deallocate_range_result, decompress_cluster};
+use super::common::{cow_write_sync, deallocate_range_result, scatter_read_sync};
 use super::decoder::Decoder;
-use super::metadata::{BackingRead, ClusterReadMapping, QcowMetadata};
+use super::metadata::{BackingRead, QcowMetadata};
 use super::qcow_raw_file::QcowRawFile;
 use crate::async_io::{
     AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, CompletionCommon,
@@ -56,65 +55,14 @@ impl QcowSync {
             .map_clusters_for_read(address, total_len, has_backing)
             .map_err(AsyncIoError::ReadVectored)?;
 
-        let mut buf_offset = 0usize;
-        for mapping in mappings {
-            match mapping {
-                ClusterReadMapping::Zero { length } => {
-                    op.fill_zeroes_at(buf_offset, length as usize)
-                        .map_err(AsyncIoError::ReadVectored)?;
-                    buf_offset += length as usize;
-                }
-                ClusterReadMapping::Allocated {
-                    offset: host_offset,
-                    length,
-                } => {
-                    let len = length as usize;
-                    let mut buf = vec![0u8; len];
-                    self.data_file
-                        .file()
-                        .read_exact_at(&mut buf, host_offset)
-                        .map_err(AsyncIoError::ReadVectored)?;
-                    op.write_bytes_at(buf_offset, &buf)
-                        .map_err(AsyncIoError::ReadVectored)?;
-                    buf_offset += len;
-                }
-                ClusterReadMapping::Compressed {
-                    host_offset,
-                    compressed_size,
-                    cluster_offset,
-                    length,
-                } => {
-                    let mut compressed = vec![0u8; compressed_size];
-                    self.data_file
-                        .file()
-                        .read_exact_at(&mut compressed, host_offset)
-                        .map_err(AsyncIoError::ReadVectored)?;
-                    let decompressed =
-                        decompress_cluster(&compressed, self.cluster_size as usize, &*self.decoder)
-                            .map_err(AsyncIoError::ReadVectored)?;
-                    op.write_bytes_at(
-                        buf_offset,
-                        &decompressed[cluster_offset..cluster_offset + length],
-                    )
-                    .map_err(AsyncIoError::ReadVectored)?;
-                    buf_offset += length;
-                }
-                ClusterReadMapping::Backing {
-                    offset: backing_offset,
-                    length,
-                } => {
-                    let mut buf = vec![0u8; length as usize];
-                    self.backing_file
-                        .as_ref()
-                        .unwrap()
-                        .read_at(backing_offset, &mut buf)
-                        .map_err(AsyncIoError::ReadVectored)?;
-                    op.write_bytes_at(buf_offset, &buf)
-                        .map_err(AsyncIoError::ReadVectored)?;
-                    buf_offset += length as usize;
-                }
-            }
-        }
+        scatter_read_sync(
+            mappings,
+            op,
+            &self.data_file,
+            &self.backing_file,
+            self.cluster_size,
+            &*self.decoder,
+        )?;
 
         Ok(total_len)
     }
@@ -208,7 +156,7 @@ mod unit_tests {
     use crate::formats::qcow;
     use crate::formats::qcow::common::apply_dealloc_action;
     use crate::formats::qcow::common::unit_tests::compress_allocated_clusters;
-    use crate::formats::qcow::metadata::DeallocAction;
+    use crate::formats::qcow::metadata::{ClusterReadMapping, DeallocAction};
     use crate::formats::qcow::{
         BackingFileConfig, Error as QcowError, ImageType, QcowDisk, QcowHeader, QcowTempDisk,
     };
