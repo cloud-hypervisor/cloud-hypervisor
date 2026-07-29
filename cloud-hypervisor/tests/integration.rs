@@ -9682,6 +9682,32 @@ mod common_sequential {
 
     use crate::*;
 
+    // Fails with EINVAL before the set_sregs interrupt_bitmap fix.
+    #[test]
+    #[cfg(feature = "mshv")]
+    #[cfg(target_arch = "x86_64")]
+    fn test_mshv_set_sregs_pending_interrupt_bitmap() {
+        use hypervisor::HypervisorVmConfig;
+        use hypervisor::mshv::MshvHypervisor;
+
+        if !PathBuf::from("/dev/mshv").exists() {
+            println!("SKIPPED: /dev/mshv not present, host is not running MSHV");
+            return;
+        }
+
+        let hv = MshvHypervisor::new().unwrap();
+        let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
+        vm.init().unwrap();
+        let vcpu = vm.create_vcpu(0, None, None).unwrap();
+
+        let mut sregs = vcpu.get_sregs().unwrap();
+        vcpu.set_sregs(&sregs).unwrap();
+
+        sregs.interrupt_bitmap[0] = 1;
+        vcpu.set_sregs(&sregs)
+            .expect("set_sregs rejected a non zero interrupt_bitmap (EINVAL)");
+    }
+
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_memory_mergeable_on() {
