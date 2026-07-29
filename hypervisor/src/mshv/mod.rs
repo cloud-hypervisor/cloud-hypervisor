@@ -171,6 +171,15 @@ impl From<crate::StandardRegisters> for mshv_bindings::StandardRegisters {
     }
 }
 
+/// Microsoft Hypervisor rejects set_sregs when interrupt_bitmap is non zero, so
+/// clear it. A pending interrupt is restored through set_vcpu_events instead.
+#[cfg(target_arch = "x86_64")]
+fn mshv_sregs_for_set(sregs: &SpecialRegisters) -> MshvSpecialRegisters {
+    let mut sregs: MshvSpecialRegisters = (*sregs).into();
+    sregs.interrupt_bitmap.fill(0);
+    sregs
+}
+
 impl From<mshv_user_irq_entry> for IrqRoutingEntry {
     fn from(s: mshv_user_irq_entry) -> Self {
         IrqRoutingEntry::Mshv(s)
@@ -528,7 +537,7 @@ impl cpu::Vcpu for MshvVcpu {
     /// Sets the vCPU special registers.
     ///
     fn set_sregs(&self, sregs: &SpecialRegisters) -> cpu::Result<()> {
-        let sregs = (*sregs).into();
+        let sregs = mshv_sregs_for_set(sregs);
         self.fd
             .set_sregs(&sregs)
             .map_err(|e| cpu::HypervisorCpuError::SetSpecialRegs(e.into()))
