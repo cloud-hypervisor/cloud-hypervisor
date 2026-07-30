@@ -171,6 +171,18 @@ pub(super) fn scatter_read_sync(
     cluster_size: u64,
     decoder: &dyn Decoder,
 ) -> AsyncIoResult<()> {
+    if let [ClusterReadMapping::Allocated { offset, length }] = mappings.as_slice()
+        && op.is_read()
+        && *length as usize == op.total_len()
+    {
+        // SAFETY: the iovecs come from op, which owns the destination
+        // memory for the duration of this call.
+        let n = unsafe { data_file.file().read_vectored_at(op.iovecs(), *offset) };
+        if matches!(n, Ok(n) if n == op.total_len()) {
+            return Ok(());
+        }
+    }
+
     let mut buf_offset = 0usize;
     for mapping in mappings {
         match mapping {
