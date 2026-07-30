@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 use std::collections::HashMap;
+#[cfg(target_arch = "x86_64")]
+use std::env;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -12,6 +14,8 @@ use std::string::String;
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
+#[cfg(target_arch = "x86_64")]
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{cmp, fs, io, panic, thread};
 
 use block::formats::qcow::ImageType as QcowImageType;
@@ -1112,29 +1116,61 @@ pub(crate) fn bdf_from_hotplug_response(
 
 #[cfg(target_arch = "x86_64")]
 /// Shared hotplug-disk probe used by live-migration tests to verify that
-/// hot(re)plugging keeps working across a migration or upgrade.
+/// hot-added block devices and their on-disk data survive a migration or
+/// upgrade.
 ///
-/// Uses the 16 MiB `blk.img` workload disk that is already fetched for the
-/// disk-hotplug tests; when hot-added it appears in the guest as `/dev/vdc`.
+/// Creates a fresh 128 MiB backing file on the host, hot-adds it as `/dev/vdc`
+/// on the source, formats it with ext4, mounts it, writes a nonce file, and
+/// unmounts. After migration the destination re-mounts the disk, checks the
+/// nonce, unmounts, and hot-removes the device.
 pub(crate) struct HotplugDiskProbe {
     disk_id: &'static str,
+    disk_path: PathBuf,
     params: String,
+    mount_point: &'static str,
+    file_name: &'static str,
+    token: String,
 }
 
 #[cfg(target_arch = "x86_64")]
 impl HotplugDiskProbe {
     pub(crate) fn new() -> Self {
-        let mut path = dirs::home_dir().unwrap();
-        path.push("workloads");
-        path.push("blk.img");
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let disk_path = env::temp_dir().join(format!("clh-mig-probe-{nanos:x}.img"));
+        let status = Command::new("dd")
+            .args([
+                "if=/dev/zero",
+                &format!("of={}", disk_path.to_str().unwrap()),
+                "bs=1M",
+                "count=128",
+                "status=none",
+            ])
+            .status()
+            .expect("failed to spawn dd");
+        assert!(status.success(), "failed to create hotplug probe image");
+
         let disk_id = "test0";
-        let params = format!("path={},id={disk_id},readonly=true", path.to_str().unwrap());
-        Self { disk_id, params }
+        let params = format!(
+            "path={},id={disk_id},image_type=raw",
+            disk_path.to_str().unwrap()
+        );
+        let token = format!("clh-mig-{nanos:x}");
+        Self {
+            disk_id,
+            disk_path,
+            params,
+            mount_point: "/tmp/probe_mnt",
+            file_name: "probe.txt",
+            token,
+        }
     }
 
     fn count_is(guest: &Guest, expected: u32) -> bool {
         guest
-            .ssh_command("lsblk | grep -c 'vdc.*16M' || true")
+            .ssh_command("lsblk | grep -c 'vdc.*128M' || true")
             .is_ok_and(|s| s.trim().parse::<u32>().is_ok_and(|c| c == expected))
     }
 
@@ -1146,8 +1182,8 @@ impl HotplugDiskProbe {
         Self::count_is(guest, 0)
     }
 
-    /// Before migration: assert the probe disk is absent, hot-add it, and
-    /// wait for the guest to enumerate it.
+    /// Before migration: hot-add the probe disk, format it, mount, write a
+    /// nonce file, and unmount.
     pub(crate) fn pre_migration_add(&self, guest: &Guest, src_api_socket: &str) {
         assert!(Self::absent(guest));
         assert!(remote_command(
@@ -1156,24 +1192,58 @@ impl HotplugDiskProbe {
             Some(self.params.as_str()),
         ));
         assert!(wait_until(Duration::from_secs(10), || Self::exists(guest)));
+
+        guest.ssh_command("sudo mkfs.ext4 -F /dev/vdc").unwrap();
+        guest
+            .ssh_command(&format!("sudo mkdir -p {}", self.mount_point))
+            .unwrap();
+        guest
+            .ssh_command(&format!("sudo mount /dev/vdc {}", self.mount_point))
+            .unwrap();
+        guest
+            .ssh_command(&format!(
+                "echo -n {} | sudo tee {}/{} > /dev/null",
+                self.token, self.mount_point, self.file_name
+            ))
+            .unwrap();
+        guest
+            .ssh_command(&format!("sudo umount {}", self.mount_point))
+            .unwrap();
     }
 
-    /// After migration: assert the probe disk carried over, then remove and
-    /// re-add it on the destination to prove hot(re)plug still works.
+    /// After migration: re-mount the probe disk, verify the nonce, unmount,
+    /// then hot-remove the device on the destination.
     pub(crate) fn post_migration_recheck(&self, guest: &Guest, dest_api_socket: &str) {
         assert!(Self::exists(guest));
+
+        // release that doesn't propagate `image_type=raw`, so the destination
+        // re-auto-detects the disk as raw and re-arms the sector-0 write
+        // guard. A read-write mount would then fail trying to update the
+        // ext4 superblock.
+        guest
+            .ssh_command(&format!("sudo mount -o ro /dev/vdc {}", self.mount_point))
+            .unwrap();
+        let content = guest
+            .ssh_command(&format!("cat {}/{}", self.mount_point, self.file_name))
+            .unwrap();
+        assert_eq!(content.trim(), self.token);
+        guest
+            .ssh_command(&format!("sudo umount {}", self.mount_point))
+            .unwrap();
+
         assert!(remote_command(
             dest_api_socket,
             "remove-device",
             Some(self.disk_id),
         ));
         assert!(wait_until(Duration::from_secs(10), || Self::absent(guest)));
-        assert!(remote_command(
-            dest_api_socket,
-            "add-disk",
-            Some(self.params.as_str()),
-        ));
-        assert!(wait_until(Duration::from_secs(10), || Self::exists(guest)));
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+impl Drop for HotplugDiskProbe {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.disk_path);
     }
 }
 
