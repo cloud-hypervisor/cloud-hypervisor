@@ -378,7 +378,6 @@ impl Drop for SocketUffdMemorySource {
     }
 }
 
-#[allow(dead_code)]
 pub(crate) struct ExternalUffdConfig {
     pub socket_path: PathBuf,
     pub uffd: OwnedFd,
@@ -388,13 +387,11 @@ pub(crate) struct ExternalUffdConfig {
     pub backing_fds: Vec<OwnedFd>,
 }
 
-#[allow(dead_code)]
 pub(crate) struct ExternalUffdHandler {
     block: Arc<UffdBlock>,
     worker: Option<ExternalUffdWorker>,
 }
 
-#[allow(dead_code)]
 struct ExternalUffdWorker {
     stop_evt: EventFd,
     result_rx: Receiver<io::Result<()>>,
@@ -402,7 +399,6 @@ struct ExternalUffdWorker {
     thread: Option<JoinHandle<()>>,
 }
 
-#[allow(dead_code)]
 impl ExternalUffdHandler {
     pub(crate) fn new(
         name: &str,
@@ -440,6 +436,7 @@ impl ExternalUffdHandler {
     }
 
     /// Add or update a region in a managed external UFFD session.
+    #[allow(dead_code)]
     pub(crate) fn add_region(
         &mut self,
         region: VmaRegion,
@@ -449,6 +446,7 @@ impl ExternalUffdHandler {
     }
 
     /// Remove a region from a managed external UFFD session.
+    #[allow(dead_code)]
     pub(crate) fn remove_region(&mut self, host_addr: u64, len: u64) -> io::Result<()> {
         self.block_mut()?.remove_region(host_addr, len)
     }
@@ -463,7 +461,6 @@ impl ExternalUffdHandler {
     }
 }
 
-#[allow(dead_code)]
 impl ExternalUffdWorker {
     fn spawn(name: &str, block: &Arc<UffdBlock>, exit_evt: EventFd) -> io::Result<Self> {
         let thread_block = Arc::clone(block);
