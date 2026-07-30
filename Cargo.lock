@@ -1583,6 +1583,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
+name = "ondemand-block"
+version = "0.1.0"
+source = "git+https://github.com/joy-allen/ondemand-block#318df209abba7a305aed8425157efce9a0e58108"
+dependencies = [
+ "libc",
+ "sendfd",
+]
+
+[[package]]
 name = "open-enum"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2170,6 +2179,15 @@ name = "seccompiler"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4ae55de56877481d112a559bbc12667635fdaf5e005712fd4e2b2fa50ffc884"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "sendfd"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b183bfd5b1bc64ab0c1ef3ee06b008a9ef1b68a7d3a99ba566fbfe7a7c6d745b"
 dependencies = [
  "libc",
 ]
@@ -2850,6 +2868,7 @@ dependencies = [
  "micro_http",
  "mshv-bindings",
  "net_util",
+ "ondemand-block",
  "option_parser",
  "pci",
  "range_map_vec",
