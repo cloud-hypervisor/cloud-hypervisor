@@ -160,6 +160,26 @@ pub(super) fn cow_write_sync(
     Ok(())
 }
 
+fn advance_iovecs(iovecs: &mut Vec<libc::iovec>, mut n: usize) {
+    let mut consumed = 0;
+    for iov in iovecs.iter_mut() {
+        if n == 0 {
+            break;
+        }
+        if n >= iov.iov_len {
+            n -= iov.iov_len;
+            consumed += 1;
+        } else {
+            // SAFETY: n is within this iovec, so the base stays inside the
+            // same buffer.
+            iov.iov_base = unsafe { (iov.iov_base as *mut u8).add(n) as *mut libc::c_void };
+            iov.iov_len -= n;
+            n = 0;
+        }
+    }
+    iovecs.drain(..consumed);
+}
+
 /// Reads cluster mappings synchronously into an owned operation, filling
 /// holes, decompressing, and reading from the backing file as each
 /// mapping requires.
@@ -171,6 +191,36 @@ pub(super) fn scatter_read_sync(
     cluster_size: u64,
     decoder: &dyn Decoder,
 ) -> AsyncIoResult<()> {
+    if let [ClusterReadMapping::Allocated { offset, length }] = mappings.as_slice()
+        && *length as usize == op.total_len()
+        && op.iovecs().len() <= libc::UIO_MAXIOV as usize
+    {
+        let total = op.total_len();
+        let mut iovs = op.iovecs().to_vec();
+        let mut filled = 0usize;
+        while filled < total {
+            // SAFETY: iovs describes valid writable memory for the
+            // remaining total - filled bytes.
+            let n = match unsafe {
+                data_file
+                    .file()
+                    .read_vectored_at(&iovs, *offset + filled as u64)
+            } {
+                Ok(0) => {
+                    return Err(AsyncIoError::ReadVectored(io::Error::from(
+                        io::ErrorKind::UnexpectedEof,
+                    )));
+                }
+                Ok(n) => n,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(AsyncIoError::ReadVectored(e)),
+            };
+            filled += n;
+            advance_iovecs(&mut iovs, n);
+        }
+        return Ok(());
+    }
+
     let mut buf_offset = 0usize;
     for mapping in mappings {
         match mapping {
