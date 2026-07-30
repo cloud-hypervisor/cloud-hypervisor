@@ -6647,6 +6647,9 @@ mod common_parallel {
             .expect("Expect creating disk image to succeed");
         let pmem_path = String::from("/dev/pmem0");
 
+        #[cfg(target_arch = "x86_64")]
+        let hotplug_probe = HotplugDiskProbe::new();
+
         // Start the source VM
         let src_vm_path = if upgrade_test {
             cloud_hypervisor_release_path()
@@ -6693,6 +6696,10 @@ mod common_parallel {
 
             // Check the guest virtio-devices, e.g. block, rng, console, and net
             guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+
+            // Test hot(re)plugging works before a migration.
+            #[cfg(target_arch = "x86_64")]
+            hotplug_probe.pre_migration_add(&guest, &src_api_socket);
 
             // Start the live-migration
             let migration_socket = String::from(
@@ -6745,6 +6752,10 @@ mod common_parallel {
             assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
 
             guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+
+            // Test hot(re)plugging works after a migration.
+            #[cfg(target_arch = "x86_64")]
+            hotplug_probe.post_migration_recheck(&guest, &dest_api_socket);
         });
 
         // Clean-up the destination VM and make sure it terminated correctly
@@ -7051,23 +7062,8 @@ mod common_parallel {
             .output()
             .expect("Expect creating disk image to succeed");
         let pmem_path = String::from("/dev/pmem0");
-        let mut hotplug_blk_file_path = dirs::home_dir().unwrap();
-        hotplug_blk_file_path.push("workloads");
-        hotplug_blk_file_path.push("blk.img");
-        let hotplug_disk_id = "test0";
-        let hotplug_disk_params = format!(
-            "path={},id={hotplug_disk_id},readonly=true",
-            hotplug_blk_file_path.to_str().unwrap()
-        );
-        // The hotplugged disk is expected to appear as /dev/vdc and blk.img is
-        // the 16 MiB workload image used by the disk hotplug tests.
-        let hotplug_disk_count_is = |expected| {
-            guest
-                .ssh_command("lsblk | grep -c 'vdc.*16M' || true")
-                .is_ok_and(|s| s.trim().parse::<u32>().is_ok_and(|count| count == expected))
-        };
-        let hotplug_disk_exists = || hotplug_disk_count_is(1);
-        let hotplug_disk_absent = || hotplug_disk_count_is(0);
+        #[cfg(target_arch = "x86_64")]
+        let hotplug_probe = HotplugDiskProbe::new();
 
         // Start the source VM
         let src_vm_path = clh_command("cloud-hypervisor");
@@ -7116,19 +7112,8 @@ mod common_parallel {
             guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
 
             // Test hot(re)plugging works before a migration.
-            //
-            // This currently excludes ARM, because on ARM we boot without OVMF,
-            // using direct kernel boot, where ACPI support is missing.
             #[cfg(target_arch = "x86_64")]
-            {
-                assert!(hotplug_disk_absent());
-                assert!(remote_command(
-                    &src_api_socket,
-                    "add-disk",
-                    Some(hotplug_disk_params.as_str()),
-                ));
-                assert!(wait_until(Duration::from_secs(10), hotplug_disk_exists));
-            }
+            hotplug_probe.pre_migration_add(&guest, &src_api_socket);
             // Start TCP live migration
             assert!(
                 start_live_migration_tcp(
@@ -7171,27 +7156,8 @@ mod common_parallel {
             guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
 
             // Test hot(re)plugging works after a migration.
-            //
-            // This currently excludes ARM, because on ARM we boot without OVMF,
-            // using direct kernel boot, where ACPI support is missing.
             #[cfg(target_arch = "x86_64")]
-            {
-                assert!(hotplug_disk_exists());
-
-                assert!(remote_command(
-                    &dest_api_socket,
-                    "remove-device",
-                    Some(hotplug_disk_id),
-                ));
-                assert!(wait_until(Duration::from_secs(10), hotplug_disk_absent));
-
-                assert!(remote_command(
-                    &dest_api_socket,
-                    "add-disk",
-                    Some(hotplug_disk_params.as_str()),
-                ));
-                assert!(wait_until(Duration::from_secs(10), hotplug_disk_exists));
-            }
+            hotplug_probe.post_migration_recheck(&guest, &dest_api_socket);
         });
 
         // Clean up the destination VM and ensure it terminates properly
@@ -7204,13 +7170,6 @@ mod common_parallel {
             assert!(String::from_utf8_lossy(&dest_output.stdout).contains(&console_text));
         });
         handle_child_output(r, &dest_output);
-
-        #[cfg(not(target_arch = "x86_64"))]
-        {
-            let _ = hotplug_disk_params;
-            let _ = hotplug_disk_exists;
-            let _ = hotplug_disk_absent;
-        }
     }
 
     // Postcopy live migration. Verifies the destination boots a guest
@@ -7229,6 +7188,9 @@ mod common_parallel {
         );
         let memory_param: &[&str] = &["--memory", "size=512M"];
         let boot_vcpus = 2;
+
+        #[cfg(target_arch = "x86_64")]
+        let hotplug_probe = HotplugDiskProbe::new();
 
         let src_vm_path = clh_command("cloud-hypervisor");
         let src_api_socket = temp_api_path(&guest.tmp_dir);
@@ -7262,6 +7224,10 @@ mod common_parallel {
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
             assert!(guest.get_total_memory().unwrap_or_default() > 400_000);
             guest.check_devices_common(None, Some(&console_text), None);
+
+            // Test hot(re)plugging works before a migration.
+            #[cfg(target_arch = "x86_64")]
+            hotplug_probe.pre_migration_add(&guest, &src_api_socket);
 
             assert!(
                 start_live_migration_tcp_with_flags(
@@ -7302,6 +7268,10 @@ mod common_parallel {
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
             assert!(guest.get_total_memory().unwrap_or_default() > 400_000);
             guest.check_devices_common(None, Some(&console_text), None);
+
+            // Test hot(re)plugging works after a migration.
+            #[cfg(target_arch = "x86_64")]
+            hotplug_probe.post_migration_recheck(&guest, &dest_api_socket);
         });
 
         let _ = dest_child.kill();
@@ -7587,6 +7557,8 @@ mod common_parallel {
             prepare_virtiofsd(&guest.tmp_dir, shared_dir.to_str().unwrap());
 
         let src_api_socket = temp_api_path(&guest.tmp_dir);
+        #[cfg(target_arch = "x86_64")]
+        let hotplug_probe = HotplugDiskProbe::new();
 
         // Start the source VM
         let mut src_child = GuestCommand::new(&guest)
@@ -7665,6 +7637,10 @@ mod common_parallel {
                 "pre_migration_data"
             );
 
+            // Test hot(re)plugging works before a migration.
+            #[cfg(target_arch = "x86_64")]
+            hotplug_probe.pre_migration_add(&guest, &src_api_socket);
+
             let migration_socket = String::from(
                 guest
                     .tmp_dir
@@ -7735,6 +7711,10 @@ mod common_parallel {
             // Verify the new file exists on the host
             let post_content = fs::read_to_string(shared_dir.join("post_migration_file")).unwrap();
             assert_eq!(post_content.trim(), "post_migration_data");
+
+            // Test hot(re)plugging works after a migration.
+            #[cfg(target_arch = "x86_64")]
+            hotplug_probe.post_migration_recheck(&guest, &dest_api_socket);
         });
 
         // Clean up
@@ -7939,6 +7919,9 @@ mod ivshmem {
             .status()
             .unwrap();
 
+        #[cfg(target_arch = "x86_64")]
+        let hotplug_probe = HotplugDiskProbe::new();
+
         // Start the source VM
         let src_vm_path = clh_command("cloud-hypervisor");
         let src_api_socket = temp_api_path(&guest.tmp_dir);
@@ -7988,6 +7971,10 @@ mod ivshmem {
             _test_ivshmem(&guest, &ivshmem_file_path, file_size);
             // Allow some normal time to elapse to check we don't get spurious reboots
             thread::sleep(Duration::new(40, 0));
+
+            // Test hot(re)plugging works before a migration.
+            #[cfg(target_arch = "x86_64")]
+            hotplug_probe.pre_migration_add(&guest, &src_api_socket);
 
             // Start the live-migration
             let migration_socket = String::from(
@@ -8043,6 +8030,10 @@ mod ivshmem {
 
             // Check ivshmem device
             _test_ivshmem(&guest, &ivshmem_file_path, file_size);
+
+            // Test hot(re)plugging works after a migration.
+            #[cfg(target_arch = "x86_64")]
+            hotplug_probe.post_migration_recheck(&guest, &dest_api_socket);
         });
 
         // Clean-up the destination VM and make sure it terminated correctly
@@ -10057,6 +10048,9 @@ mod common_sequential {
             .expect("Expect creating disk image to succeed");
         let pmem_path = String::from("/dev/pmem0");
 
+        #[cfg(target_arch = "x86_64")]
+        let hotplug_probe = HotplugDiskProbe::new();
+
         // Start the source VM
         let src_vm_path = if upgrade_test {
             cloud_hypervisor_release_path()
@@ -10118,6 +10112,10 @@ mod common_sequential {
 
             // Check the guest virtio-devices, e.g. block, rng, console, and net
             guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+
+            // Test hot(re)plugging works before a migration.
+            #[cfg(target_arch = "x86_64")]
+            hotplug_probe.pre_migration_add(&guest, &src_api_socket);
 
             // Start the live-migration
             let migration_socket = String::from(
@@ -10185,6 +10183,10 @@ mod common_sequential {
             let total_memory = guest.get_total_memory().unwrap_or_default();
             assert!(total_memory > 4_800_000);
             assert!(total_memory < 5_760_000);
+
+            // Test hot(re)plugging works after a migration.
+            #[cfg(target_arch = "x86_64")]
+            hotplug_probe.post_migration_recheck(&guest, &dest_api_socket);
         });
 
         // Clean-up the destination VM and make sure it terminated correctly
@@ -10249,6 +10251,9 @@ mod common_sequential {
             .output()
             .expect("Expect creating disk image to succeed");
         let pmem_path = String::from("/dev/pmem0");
+
+        #[cfg(target_arch = "x86_64")]
+        let hotplug_probe = HotplugDiskProbe::new();
 
         // Start the source VM
         let src_vm_path = if upgrade_test {
@@ -10323,6 +10328,10 @@ mod common_sequential {
                     guest.check_numa_common(Some(&[1_920_000, 1_920_000, 1_920_000]), None, None);
                 }
             }
+
+            // Test hot(re)plugging works before a migration.
+            #[cfg(target_arch = "x86_64")]
+            hotplug_probe.pre_migration_add(&guest, &src_api_socket);
 
             // Start the live-migration
             let migration_socket = String::from(
@@ -10419,6 +10428,10 @@ mod common_sequential {
                     );
                 }
             }
+
+            // Test hot(re)plugging works after a migration.
+            #[cfg(target_arch = "x86_64")]
+            hotplug_probe.post_migration_recheck(&guest, &dest_api_socket);
         });
 
         // Clean-up the destination VM and make sure it terminated correctly

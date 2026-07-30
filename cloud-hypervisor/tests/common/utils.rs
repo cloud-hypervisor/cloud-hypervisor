@@ -1110,6 +1110,73 @@ pub(crate) fn bdf_from_hotplug_response(
     (segment_id, bus_id, device_id, function_id)
 }
 
+#[cfg(target_arch = "x86_64")]
+/// Shared hotplug-disk probe used by live-migration tests to verify that
+/// hot(re)plugging keeps working across a migration or upgrade.
+///
+/// Uses the 16 MiB `blk.img` workload disk that is already fetched for the
+/// disk-hotplug tests; when hot-added it appears in the guest as `/dev/vdc`.
+pub(crate) struct HotplugDiskProbe {
+    disk_id: &'static str,
+    params: String,
+}
+
+#[cfg(target_arch = "x86_64")]
+impl HotplugDiskProbe {
+    pub(crate) fn new() -> Self {
+        let mut path = dirs::home_dir().unwrap();
+        path.push("workloads");
+        path.push("blk.img");
+        let disk_id = "test0";
+        let params = format!("path={},id={disk_id},readonly=true", path.to_str().unwrap());
+        Self { disk_id, params }
+    }
+
+    fn count_is(guest: &Guest, expected: u32) -> bool {
+        guest
+            .ssh_command("lsblk | grep -c 'vdc.*16M' || true")
+            .is_ok_and(|s| s.trim().parse::<u32>().is_ok_and(|c| c == expected))
+    }
+
+    fn exists(guest: &Guest) -> bool {
+        Self::count_is(guest, 1)
+    }
+
+    fn absent(guest: &Guest) -> bool {
+        Self::count_is(guest, 0)
+    }
+
+    /// Before migration: assert the probe disk is absent, hot-add it, and
+    /// wait for the guest to enumerate it.
+    pub(crate) fn pre_migration_add(&self, guest: &Guest, src_api_socket: &str) {
+        assert!(Self::absent(guest));
+        assert!(remote_command(
+            src_api_socket,
+            "add-disk",
+            Some(self.params.as_str()),
+        ));
+        assert!(wait_until(Duration::from_secs(10), || Self::exists(guest)));
+    }
+
+    /// After migration: assert the probe disk carried over, then remove and
+    /// re-add it on the destination to prove hot(re)plug still works.
+    pub(crate) fn post_migration_recheck(&self, guest: &Guest, dest_api_socket: &str) {
+        assert!(Self::exists(guest));
+        assert!(remote_command(
+            dest_api_socket,
+            "remove-device",
+            Some(self.disk_id),
+        ));
+        assert!(wait_until(Duration::from_secs(10), || Self::absent(guest)));
+        assert!(remote_command(
+            dest_api_socket,
+            "add-disk",
+            Some(self.params.as_str()),
+        ));
+        assert!(wait_until(Duration::from_secs(10), || Self::exists(guest)));
+    }
+}
+
 #[cfg(not(feature = "mshv"))]
 pub(crate) fn start_live_migration(
     migration_socket: &str,
