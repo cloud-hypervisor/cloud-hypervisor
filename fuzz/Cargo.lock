@@ -869,7 +869,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 [[package]]
 name = "micro_http"
 version = "0.1.0"
-source = "git+https://github.com/firecracker-microvm/micro-http?branch=main#876f3feccc30e09225f2c77bf95a6b2d46a9259e"
+source = "git+https://github.com/firecracker-microvm/micro-http?branch=main#f2d91703a103521430209f48ddf5925be1e35ff8"
 dependencies = [
  "libc",
  "vmm-sys-util",
@@ -1316,6 +1316,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
+name = "socket2"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "spin"
 version = "0.9.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1681,6 +1691,7 @@ dependencies = [
  "serial_buffer",
  "sha2",
  "signal-hook",
+ "socket2",
  "thiserror",
  "tracer",
  "uuid",
