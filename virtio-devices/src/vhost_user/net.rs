@@ -8,7 +8,9 @@ use std::sync::{Arc, Barrier, Mutex};
 use log::{error, info};
 use net_util::{CtrlQueue, MacAddr, VirtioNetConfig};
 use seccompiler::SeccompAction;
-use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
+use vhost::vhost_user::message::{
+    VhostUserConfigFlags, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
+};
 use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler};
 use virtio_bindings::virtio_net::{
     VIRTIO_NET_F_CSUM, VIRTIO_NET_F_CTRL_VQ, VIRTIO_NET_F_GUEST_ANNOUNCE, VIRTIO_NET_F_GUEST_CSUM,
@@ -54,8 +56,8 @@ pub struct Net {
 
 impl Net {
     /// Derive the guest-visible feature set from the backend-negotiated
-    /// features plus frontend-only bits that VMM implements.
-    fn guest_avail_features(backend_acked_features: u64) -> u64 {
+    /// features plus frontend only bits.
+    fn guest_avail_features(backend_acked_features: u64, advertise_mtu: bool) -> u64 {
         let mut guest_avail_features = backend_acked_features | (1 << VIRTIO_NET_F_MAC);
 
         // Guest announce is implemented by the frontend through config
@@ -63,6 +65,10 @@ impl Net {
         if guest_avail_features & (1 << VIRTIO_NET_F_CTRL_VQ) != 0 {
             guest_avail_features |= 1 << VIRTIO_NET_F_STATUS;
             guest_avail_features |= 1 << VIRTIO_NET_F_GUEST_ANNOUNCE;
+        }
+
+        if advertise_mtu {
+            guest_avail_features |= 1 << VIRTIO_NET_F_MTU;
         }
 
         guest_avail_features
@@ -141,12 +147,9 @@ impl Net {
                 | (1 << VIRTIO_NET_F_CTRL_VQ)
                 | (1 << VIRTIO_NET_F_GUEST_ANNOUNCE)
                 | (1 << VIRTIO_NET_F_MAC)
+                | (1 << VIRTIO_NET_F_MTU)
                 | (1 << VIRTIO_NET_F_MQ)
                 | DEFAULT_VIRTIO_FEATURES;
-
-            if mtu.is_some() {
-                backend_avail_features |= 1u64 << VIRTIO_NET_F_MTU;
-            }
 
             // Configure TSO/UFO features when hardware checksum offload is enabled.
             if offload_csum {
@@ -167,16 +170,13 @@ impl Net {
                 }
             }
 
-            let mut config = VirtioNetConfig::default();
-            let guest_mac = Some(*mac_addr.get_or_insert_with(MacAddr::local_random));
-            config.populate(guest_mac, num_queues, mtu);
-
             let avail_protocol_features = VhostUserProtocolFeatures::MQ
                 | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
                 | VhostUserProtocolFeatures::REPLY_ACK
                 | VhostUserProtocolFeatures::INFLIGHT_SHMFD
                 | VhostUserProtocolFeatures::LOG_SHMFD
-                | VhostUserProtocolFeatures::DEVICE_STATE;
+                | VhostUserProtocolFeatures::DEVICE_STATE
+                | VhostUserProtocolFeatures::CONFIG;
 
             let (backend_acked_features, acked_protocol_features) =
                 vu.negotiate_features_vhost_user(backend_avail_features, avail_protocol_features)?;
@@ -197,6 +197,42 @@ impl Net {
                 return Err(Error::BadQueueNum);
             }
 
+            let backend_config =
+                if acked_protocol_features & VhostUserProtocolFeatures::CONFIG.bits() != 0 {
+                    let config_len = size_of::<VirtioNetConfig>();
+                    let config_space: Vec<u8> = vec![0u8; config_len];
+
+                    let (_, config_space) = vu
+                        .socket_handle()
+                        .get_config(
+                            0,
+                            config_len as u32,
+                            VhostUserConfigFlags::WRITABLE,
+                            config_space.as_slice(),
+                        )
+                        .map_err(Error::VhostUserGetConfig)?;
+                    VirtioNetConfig::from_slice(config_space.as_slice()).copied()
+                } else {
+                    None
+                };
+
+            let backend_provides_mac = backend_acked_features & (1 << VIRTIO_NET_F_MAC) != 0
+                && backend_config.is_some()
+                && mac_addr.is_none();
+
+            let guest_mac = if backend_provides_mac {
+                None
+            } else {
+                Some(*mac_addr.get_or_insert_with(MacAddr::local_random))
+            };
+
+            let backend_provides_mtu = backend_acked_features & (1 << VIRTIO_NET_F_MTU) != 0
+                && backend_config.is_some()
+                && mtu.is_none();
+
+            let mut config = backend_config.unwrap_or_default();
+            config.populate(guest_mac, num_queues, mtu);
+
             // If the control queue feature has been negotiated, let's increase
             // the number of queues.
             let vu_num_queues = num_queues;
@@ -206,7 +242,10 @@ impl Net {
 
             // Build the feature set that gets exposed to the guest. Some frontend available
             // features are dependent on the features the backend supports.
-            let guest_avail_features = Self::guest_avail_features(backend_acked_features);
+            let guest_avail_features = Self::guest_avail_features(
+                backend_acked_features,
+                backend_provides_mtu || mtu.is_some(),
+            );
 
             (
                 guest_avail_features,
