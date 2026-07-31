@@ -116,6 +116,7 @@ pub struct VhostUserNetBackend {
     queue_size: u16,
     queues_per_thread: Vec<u64>,
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    avail_features: u64,
 }
 
 impl VhostUserNetBackend {
@@ -149,12 +150,30 @@ impl VhostUserNetBackend {
             queues_per_thread.push(0b11 << (i * 2));
         }
 
+        let avail_features = (1 << VIRTIO_NET_F_GUEST_CSUM)
+            | (1 << VIRTIO_NET_F_CSUM)
+            | (1 << VIRTIO_NET_F_GUEST_TSO4)
+            | (1 << VIRTIO_NET_F_GUEST_TSO6)
+            | (1 << VIRTIO_NET_F_GUEST_ECN)
+            | (1 << VIRTIO_NET_F_GUEST_UFO)
+            | (1 << VIRTIO_NET_F_HOST_TSO4)
+            | (1 << VIRTIO_NET_F_HOST_TSO6)
+            | (1 << VIRTIO_NET_F_HOST_ECN)
+            | (1 << VIRTIO_NET_F_HOST_UFO)
+            | (1 << VIRTIO_NET_F_CTRL_VQ)
+            | (1 << VIRTIO_NET_F_MAC)
+            | (1 << VIRTIO_NET_F_MTU)
+            | (1 << VIRTIO_NET_F_MQ)
+            | (1 << VIRTIO_F_NOTIFY_ON_EMPTY)
+            | (1 << VIRTIO_F_VERSION_1);
+
         Ok(VhostUserNetBackend {
             threads,
             num_queues,
             queue_size,
             queues_per_thread,
             mem,
+            avail_features,
         })
     }
 }
@@ -172,23 +191,7 @@ impl VhostUserBackendMut for VhostUserNetBackend {
     }
 
     fn features(&self) -> u64 {
-        (1 << VIRTIO_NET_F_GUEST_CSUM)
-            | (1 << VIRTIO_NET_F_CSUM)
-            | (1 << VIRTIO_NET_F_GUEST_TSO4)
-            | (1 << VIRTIO_NET_F_GUEST_TSO6)
-            | (1 << VIRTIO_NET_F_GUEST_ECN)
-            | (1 << VIRTIO_NET_F_GUEST_UFO)
-            | (1 << VIRTIO_NET_F_HOST_TSO4)
-            | (1 << VIRTIO_NET_F_HOST_TSO6)
-            | (1 << VIRTIO_NET_F_HOST_ECN)
-            | (1 << VIRTIO_NET_F_HOST_UFO)
-            | (1 << VIRTIO_NET_F_CTRL_VQ)
-            | (1 << VIRTIO_NET_F_MQ)
-            | (1 << VIRTIO_NET_F_MAC)
-            | (1 << VIRTIO_NET_F_MTU)
-            | (1 << VIRTIO_F_NOTIFY_ON_EMPTY)
-            | (1 << VIRTIO_F_VERSION_1)
-            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
+        self.avail_features | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
     }
 
     fn protocol_features(&self) -> VhostUserProtocolFeatures {
