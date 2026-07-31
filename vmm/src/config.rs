@@ -338,7 +338,7 @@ pub enum ValidationError {
     #[error("Identifier {0} is not unique")]
     IdentifierNotUnique(String),
     /// Invalid identifier
-    #[error("Identifier {0} is not invalid")]
+    #[error("Identifier {0} is not valid")]
     InvalidIdentifier(String),
     /// Placing the device behind a virtual IOMMU is not supported
     #[error("Device does not support being placed behind IOMMU")]

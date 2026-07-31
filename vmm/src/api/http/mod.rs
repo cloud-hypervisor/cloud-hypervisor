@@ -33,6 +33,7 @@ use crate::api::{
     VmPause, VmPowerButton, VmReboot, VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeDisk,
     VmResizeZone, VmRestore, VmResume, VmSendMigration, VmShutdown, VmSnapshot,
 };
+use crate::config::ValidationError;
 use crate::device_manager::DeviceManagerError;
 use crate::landlock::Landlock;
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
@@ -94,6 +95,12 @@ fn api_error_status_code(error: &ApiError) -> StatusCode {
             | VmError::NoDeviceToRemove(_)
             | VmError::DeviceManager(DeviceManagerError::UnknownDeviceId(_)),
         ) => StatusCode::NotFound,
+        Some(VmError::ConfigValidation(e)) => match e {
+            ValidationError::IdentifierNotUnique(_) | ValidationError::DuplicateDevicePath(_) => {
+                StatusCode::Conflict
+            }
+            _ => StatusCode::BadRequest,
+        },
         _ => StatusCode::InternalServerError,
     }
 }
@@ -529,6 +536,50 @@ mod tests {
                 DeviceManagerError::UnknownDeviceId("disk0".to_string())
             ))),
             StatusCode::NotFound
+        );
+    }
+
+    #[test]
+    fn test_duplicate_identifier_or_path_maps_to_conflict() {
+        assert_eq!(
+            api_error_status_code(&ApiError::VmAddDisk(VmError::ConfigValidation(
+                ValidationError::IdentifierNotUnique("disk0".to_string())
+            ))),
+            StatusCode::Conflict
+        );
+        assert_eq!(
+            api_error_status_code(&ApiError::VmAddVdpa(VmError::ConfigValidation(
+                ValidationError::IdentifierNotUnique("vdpa0".to_string())
+            ))),
+            StatusCode::Conflict
+        );
+        assert_eq!(
+            api_error_status_code(&ApiError::VmAddDevice(VmError::ConfigValidation(
+                ValidationError::DuplicateDevicePath("/dev/foo".to_string())
+            ))),
+            StatusCode::Conflict
+        );
+        assert_eq!(
+            api_error_status_code(&ApiError::VmRestore(VmError::ConfigValidation(
+                ValidationError::IdentifierNotUnique("net0".to_string())
+            ))),
+            StatusCode::Conflict
+        );
+    }
+
+    #[test]
+    fn test_invalid_config_maps_to_bad_request() {
+        assert_eq!(
+            api_error_status_code(&ApiError::VmAddDisk(VmError::ConfigValidation(
+                ValidationError::InvalidIdentifier("__disk0".to_string())
+            ))),
+            StatusCode::BadRequest
+        );
+        assert_eq!(
+            api_error_status_code(&ApiError::VmAddDisk(VmError::ConfigValidation(
+                ValidationError::BalloonLargerThanRam(1024, 512)
+            ))),
+            StatusCode::BadRequest
         );
     }
 

@@ -220,8 +220,12 @@ paths:
                 $ref: "#/components/schemas/PciDeviceInfo"
         204:
           description: The new device was successfully (cold) added to the VM instance.
+        400:
+          description: The new device could not be added because the configuration is not valid.
         404:
           description: The new device could not be added to the VM instance.
+        409:
+          description: The new device could not be added because a device with the same identifier or path already exists.
 
   /vm.remove-device:
     put:
@@ -258,8 +262,12 @@ paths:
                 $ref: "#/components/schemas/PciDeviceInfo"
         204:
           description: The new disk was successfully (cold) added to the VM instance.
+        400:
+          description: The new disk could not be added because the configuration is not valid.
         404:
           description: The new disk could not be added because the VM is not created.
+        409:
+          description: The new disk could not be added because a device with the same identifier already exists.
         500:
           description: The new disk could not be added to the VM instance.
 
@@ -282,8 +290,12 @@ paths:
                 $ref: "#/components/schemas/PciDeviceInfo"
         204:
           description: The new device was successfully (cold) added to the VM instance.
+        400:
+          description: The new device could not be added because the configuration is not valid.
         404:
           description: The new device could not be added because the VM is not created.
+        409:
+          description: The new device could not be added because a device with the same identifier already exists.
         500:
           description: The new device could not be added to the VM instance.
 
@@ -306,8 +318,12 @@ paths:
                 $ref: "#/components/schemas/PciDeviceInfo"
         204:
           description: The new device was successfully (cold) added to the VM instance.
+        400:
+          description: The new device could not be added because the configuration is not valid.
         404:
           description: The new device could not be added because the VM is not created.
+        409:
+          description: The new device could not be added because a device with the same identifier already exists.
         500:
           description: The new device could not be added to the VM instance.
 
@@ -330,8 +346,12 @@ paths:
                 $ref: "#/components/schemas/PciDeviceInfo"
         204:
           description: The new device was successfully (cold) added to the VM instance.
+        400:
+          description: The new device could not be added because the configuration is not valid.
         404:
           description: The new device could not be added because the VM is not created.
+        409:
+          description: The new device could not be added because a device with the same identifier already exists.
         500:
           description: The new device could not be added to the VM instance.
 
@@ -354,8 +374,12 @@ paths:
                 $ref: "#/components/schemas/PciDeviceInfo"
         204:
           description: The new device was successfully (cold) added to the VM instance.
+        400:
+          description: The new device could not be added because the configuration is not valid.
         404:
           description: The new device could not be added because the VM is not created.
+        409:
+          description: The new device could not be added because a device with the same identifier already exists.
         500:
           description: The new device could not be added to the VM instance.
 
@@ -378,8 +402,12 @@ paths:
                 $ref: "#/components/schemas/PciDeviceInfo"
         204:
           description: The new device was successfully (cold) added to the VM instance.
+        400:
+          description: The new device could not be added because the configuration is not valid.
         404:
           description: The new device could not be added because the VM is not created.
+        409:
+          description: The new device could not be added because a device with the same identifier already exists.
         500:
           description: The new device could not be added to the VM instance.
 
@@ -402,8 +430,12 @@ paths:
                 $ref: "#/components/schemas/PciDeviceInfo"
         204:
           description: The new vDPA device was successfully (cold) added to the VM instance.
+        400:
+          description: The new vDPA device could not be added because the configuration is not valid.
         404:
           description: The new vDPA device could not be added because the VM is not created.
+        409:
+          description: The new vDPA device could not be added because a device with the same identifier already exists.
         500:
           description: The new vDPA device could not be added to the VM instance.
 
@@ -425,6 +457,10 @@ paths:
           description: The new device was successfully added to the VM instance.
         "204":
           description: The new device was successfully (cold) added to the VM instance.
+        "400":
+          description: The new device could not be added because the configuration is not valid.
+        "409":
+          description: The new device could not be added because a device with the same identifier already exists.
         "404":
           description: The new device could not be added to the VM instance.
       summary: Add a new userspace device to the VM
@@ -485,8 +521,12 @@ paths:
       responses:
         204:
           description: The VM instance was successfully restored.
+        400:
+          description: The VM could not be restored because the restore configuration is not valid.
         404:
           description: The VM instance could not be restored because it is already created.
+        409:
+          description: The VM could not be restored because a device with the same identifier or path already exists.
 
   /vm.receive-migration:
     put:
