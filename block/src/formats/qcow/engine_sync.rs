@@ -145,12 +145,13 @@ mod unit_tests {
     use std::sync::Arc;
     use std::{env, thread};
 
+    use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
     use vmm_sys_util::tempdir::TempDir;
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
     use crate::aligned_file::AlignedFile;
-    use crate::async_io::{AsyncIoCompletion, OwnedIoBuffer};
+    use crate::async_io::{AsyncIoCompletion, GuestMemoryTarget, OwnedIoBuffer};
     use crate::disk_file::{AsyncDiskFile, DiskSize, MetadataSync, Resizable};
     use crate::error::BlockErrorKind;
     use crate::formats::qcow;
@@ -314,6 +315,32 @@ mod unit_tests {
         async_io.fsync(Some(7)).unwrap();
         let (user_data, _result) = next_completion(async_io.as_mut());
         assert_eq!(user_data, 7);
+    }
+
+    #[test]
+    fn many_iovecs_single_cluster_read_falls_back() {
+        let chunk = 32usize;
+        let ranges_count = libc::UIO_MAXIOV as usize + 1;
+        let total = ranges_count * chunk;
+        let data: Vec<u8> = (0..total).map(|i| (i % 251) as u8).collect();
+        let (_tmp, disk) = create_disk_with_data(65536 * 4, &data, 0, true, false);
+
+        let mem =
+            Arc::new(GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), total)]).unwrap());
+        let ranges: Vec<(GuestAddress, u32)> = (0..ranges_count)
+            .map(|i| (GuestAddress((i * chunk) as u64), chunk as u32))
+            .collect();
+        let target = GuestMemoryTarget::new(mem.clone(), &ranges).unwrap();
+
+        let mut async_io = disk.create_async_io(1).unwrap();
+        async_io.read_to_memory(0, target, 1).unwrap();
+        let (user_data, result) = next_completion(async_io.as_mut());
+        assert_eq!(user_data, 1);
+        assert_eq!(result as usize, total);
+
+        let mut got = vec![0u8; total];
+        mem.read_slice(&mut got, GuestAddress(0)).unwrap();
+        assert_eq!(got, data);
     }
 
     // Freed relocation clusters must be reused so committed blocks track
