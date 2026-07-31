@@ -13,9 +13,10 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::{io, process, result};
 
 use libc::EFD_NONBLOCK;
-use log::error;
+use log::{error, warn};
 use net_util::{
-    MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TxVirtio, open_tap,
+    MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TxVirtio, VirtioNetConfig,
+    open_tap,
 };
 use option_parser::{OptionParser, OptionParserError, Toggle};
 use thiserror::Error;
@@ -25,7 +26,7 @@ use vhost_user_backend::bitmap::BitmapMmapRegion;
 use vhost_user_backend::{VhostUserBackendMut, VhostUserDaemon, VringRwLock, VringT};
 use virtio_bindings::virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1};
 use virtio_bindings::virtio_net::*;
-use vm_memory::{GuestAddressSpace, GuestMemoryAtomic};
+use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic};
 use vmm_sys_util::epoll::EventSet;
 use vmm_sys_util::event::{EventConsumer, EventNotifier};
 use vmm_sys_util::eventfd::EventFd;
@@ -118,6 +119,7 @@ pub struct VhostUserNetBackend {
     queues_per_thread: Vec<u64>,
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
     avail_features: u64,
+    config: Option<VirtioNetConfig>,
 }
 
 impl VhostUserNetBackend {
@@ -125,7 +127,7 @@ impl VhostUserNetBackend {
     fn new(
         ip_addr: IpAddr,
         host_mac: MacAddr,
-        _mac: Option<MacAddr>,
+        mac: Option<MacAddr>,
         netmask: IpAddr,
         mtu: Option<u16>,
         num_queues: usize,
@@ -152,7 +154,7 @@ impl VhostUserNetBackend {
             queues_per_thread.push(0b11 << (i * 2));
         }
 
-        let avail_features = (1 << VIRTIO_NET_F_GUEST_CSUM)
+        let mut avail_features = (1 << VIRTIO_NET_F_GUEST_CSUM)
             | (1 << VIRTIO_NET_F_CSUM)
             | (1 << VIRTIO_NET_F_GUEST_TSO4)
             | (1 << VIRTIO_NET_F_GUEST_TSO6)
@@ -163,11 +165,23 @@ impl VhostUserNetBackend {
             | (1 << VIRTIO_NET_F_HOST_ECN)
             | (1 << VIRTIO_NET_F_HOST_UFO)
             | (1 << VIRTIO_NET_F_CTRL_VQ)
-            | (1 << VIRTIO_NET_F_MAC)
-            | (1 << VIRTIO_NET_F_MTU)
             | (1 << VIRTIO_NET_F_MQ)
             | (1 << VIRTIO_F_NOTIFY_ON_EMPTY)
             | (1 << VIRTIO_F_VERSION_1);
+
+        let config = if mac.is_some() || mtu.is_some() {
+            let mut config = VirtioNetConfig::default();
+            config.populate(mac, num_queues, mtu);
+            if mac.is_some() {
+                avail_features |= 1 << VIRTIO_NET_F_MAC;
+            }
+            if mtu.is_some() {
+                avail_features |= 1 << VIRTIO_NET_F_MTU;
+            }
+            Some(config)
+        } else {
+            None
+        };
 
         Ok(VhostUserNetBackend {
             threads,
@@ -176,6 +190,7 @@ impl VhostUserNetBackend {
             queues_per_thread,
             mem,
             avail_features,
+            config,
         })
     }
 }
@@ -200,6 +215,11 @@ impl VhostUserBackendMut for VhostUserNetBackend {
         VhostUserProtocolFeatures::MQ
             | VhostUserProtocolFeatures::REPLY_ACK
             | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
+            | if self.config.is_some() {
+                VhostUserProtocolFeatures::CONFIG
+            } else {
+                VhostUserProtocolFeatures::empty()
+            }
     }
 
     fn set_event_idx(&mut self, _enabled: bool) {}
@@ -275,6 +295,23 @@ impl VhostUserBackendMut for VhostUserNetBackend {
         _mem: GuestMemoryAtomic<GuestMemoryMmap>,
     ) -> VhostUserBackendResult<()> {
         Ok(())
+    }
+
+    fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {
+        if let Some(config) = self.config {
+            let subset = config
+                .as_slice()
+                .get(offset as usize..(offset + size) as usize);
+
+            if let Some(subset) = subset {
+                subset.to_vec()
+            } else {
+                warn!("Invalid config offset {offset} or size {size}");
+                vec![]
+            }
+        } else {
+            vec![]
+        }
     }
 }
 
