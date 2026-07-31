@@ -67,8 +67,9 @@ pub enum Error {
 }
 
 pub const SYNTAX: &str = "vhost-user-net backend parameters \
-\"ip=<ip_addr>,mask=<net_mask>,socket=<socket_path>,client=on|off,\
-num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,tap=<if_name>\"";
+\"ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>,host_mac=<mac_addr>,mtu=<mtu>,\
+socket=<socket_path>,client=on|off,num_queues=<number_of_queues>,\
+queue_size=<size_of_each_queue>,tap=<if_name>\"";
 
 impl From<Error> for io::Error {
     fn from(e: Error) -> Self {
@@ -124,6 +125,7 @@ impl VhostUserNetBackend {
     fn new(
         ip_addr: IpAddr,
         host_mac: MacAddr,
+        _mac: Option<MacAddr>,
         netmask: IpAddr,
         mtu: Option<u16>,
         num_queues: usize,
@@ -286,6 +288,7 @@ pub struct VhostUserNetBackendConfig {
     pub queue_size: u16,
     pub tap: Option<String>,
     pub client: bool,
+    pub mac: Option<MacAddr>,
 }
 
 impl VhostUserNetBackendConfig {
@@ -301,7 +304,8 @@ impl VhostUserNetBackendConfig {
             .add("queue_size")
             .add("num_queues")
             .add("socket")
-            .add("client");
+            .add("client")
+            .add("mac");
 
         parser.parse(backend).map_err(Error::FailedConfigParse)?;
 
@@ -333,6 +337,7 @@ impl VhostUserNetBackendConfig {
             .map_err(Error::FailedConfigParse)?
             .unwrap_or(Toggle(false))
             .0;
+        let mac = parser.convert("mac").map_err(Error::FailedConfigParse)?;
 
         Ok(VhostUserNetBackendConfig {
             ip,
@@ -344,6 +349,7 @@ impl VhostUserNetBackendConfig {
             queue_size,
             tap,
             client,
+            mac,
         })
     }
 }
@@ -365,6 +371,7 @@ pub fn start_net_backend(backend_command: &str) {
         VhostUserNetBackend::new(
             backend_config.ip,
             backend_config.host_mac,
+            backend_config.mac,
             backend_config.mask,
             backend_config.mtu,
             backend_config.num_queues,
