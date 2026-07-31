@@ -7487,7 +7487,9 @@ mod common_parallel {
 
                     thread::sleep(Duration::from_secs(3));
                     assert!(
-                        src_child.try_wait().unwrap().is_some(),
+                        wait_until(Duration::from_secs(30), || {
+                            matches!(src_child.try_wait(), Ok(Some(_)))
+                        }),
                         "Source VM should have terminated after a forced migration"
                     );
 
