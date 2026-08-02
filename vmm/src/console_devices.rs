@@ -221,7 +221,9 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                 ConsoleTransport::Tty(Arc::new(stdout))
             }
             ConsoleOutputMode::Socket => {
-                return Err(ConsoleDeviceError::NoSocketOptionSupportForConsoleDevice);
+                let listener = UnixListener::bind(vmconfig.console.common.socket.as_ref().unwrap())
+                    .map_err(ConsoleDeviceError::CreateConsoleDevice)?;
+                ConsoleTransport::Socket(Arc::new(listener))
             }
             ConsoleOutputMode::Null => ConsoleTransport::Null,
             ConsoleOutputMode::Off => ConsoleTransport::Off,
