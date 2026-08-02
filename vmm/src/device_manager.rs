@@ -2483,6 +2483,7 @@ impl DeviceManager {
         let (virtio_console_device, console_resizer) = virtio_devices::Console::new(
             id.clone(),
             endpoint,
+            None, // socket_path
             self.console_resize_pipe
                 .as_ref()
                 .map(|p| p.try_clone().unwrap()),

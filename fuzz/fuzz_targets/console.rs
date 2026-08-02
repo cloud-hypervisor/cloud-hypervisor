@@ -73,6 +73,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     let (mut console, _) = virtio_devices::Console::new(
         "fuzzer_console".to_owned(),
         endpoint,
+        None,  // socket_path
         None,  // resize_pipe
         false, // iommu
         SeccompAction::Allow,
