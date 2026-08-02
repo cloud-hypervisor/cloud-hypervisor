@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::collections::VecDeque;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
+use std::os::unix::net::UnixListener;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result};
@@ -15,7 +17,7 @@ use libc::{EFD_NONBLOCK, TIOCGWINSZ};
 use log::{error, info, warn};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
-use serial_buffer::SerialBuffer;
+use serial_buffer::{SerialBuffer, SocketConsole};
 use smallvec::SmallVec;
 use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
@@ -47,6 +49,8 @@ const CONFIG_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
 const FILE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
 // Console resized
 const RESIZE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 5;
+// New client on the listening socket
+const SOCKET_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 6;
 
 //Console size feature bit
 const VIRTIO_CONSOLE_F_SIZE: u64 = 0;
@@ -97,6 +101,7 @@ struct ConsoleEpollHandler {
     access_platform: Option<Arc<dyn AccessPlatform>>,
     out: Option<Box<dyn Write + Send>>,
     write_out: Option<Arc<AtomicBool>>,
+    socket_console: Option<SocketConsole>,
     file_event_registered: bool,
 }
 
@@ -105,6 +110,7 @@ pub enum Endpoint {
     File(Arc<File>),
     FilePair(Arc<File>, Arc<File>),
     PtyPair(Arc<File>, Arc<File>),
+    Socket(Arc<UnixListener>, Option<PathBuf>),
     Null,
 }
 
@@ -114,6 +120,7 @@ impl Endpoint {
             Self::File(f) => Some(f),
             Self::FilePair(f, _) => Some(f),
             Self::PtyPair(f, _) => Some(f),
+            Self::Socket(..) => None,
             Self::Null => None,
         }
     }
@@ -123,6 +130,7 @@ impl Endpoint {
             Self::File(_) => None,
             Self::FilePair(_, f) => Some(f),
             Self::PtyPair(_, f) => Some(f),
+            Self::Socket(..) => None,
             Self::Null => None,
         }
     }
@@ -150,8 +158,16 @@ impl ConsoleEpollHandler {
         pause_evt: EventFd,
         access_platform: Option<Arc<dyn AccessPlatform>>,
     ) -> Self {
+        let socket_console = if let Endpoint::Socket(..) = &endpoint {
+            Some(SocketConsole::new())
+        } else {
+            None
+        };
+
         let out_file = endpoint.out_file();
-        let (out, write_out) = if let Some(out_file) = out_file {
+        let (out, write_out) = if let Some(console) = &socket_console {
+            (Some(console.out_sink()), None)
+        } else if let Some(out_file) = out_file {
             let writer = out_file.try_clone().unwrap();
             if endpoint.is_pty() {
                 let pty_write_out = Arc::new(AtomicBool::new(false));
@@ -182,6 +198,7 @@ impl ConsoleEpollHandler {
             access_platform,
             out,
             write_out,
+            socket_console,
             file_event_registered: false,
         }
     }
@@ -326,6 +343,9 @@ impl ConsoleEpollHandler {
             helper.add_event_custom(in_file.as_raw_fd(), FILE_EVENT, events)?;
             self.file_event_registered = true;
         }
+        if let Endpoint::Socket(listener, _) = &self.endpoint {
+            helper.add_event(listener.as_raw_fd(), SOCKET_EVENT)?;
+        }
 
         // In case of PTY, we want to be able to detect a connection on the
         // other end of the PTY. This is done by detecting there's no event
@@ -437,27 +457,53 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                     })?;
                 self.resizer.update_console_size();
             }
+            SOCKET_EVENT => {
+                let fd = if let (Some(console), Endpoint::Socket(listener, _)) =
+                    (self.socket_console.as_mut(), &self.endpoint)
+                {
+                    Some(console.accept(listener).map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to accept console socket: {e:?}"
+                        ))
+                    })?)
+                } else {
+                    None
+                };
+                if let Some(fd) = fd {
+                    helper
+                        .add_event_custom(fd, FILE_EVENT, epoll::Events::EPOLLIN)
+                        .map_err(|e| {
+                            EpollHelperError::HandleEvent(anyhow!(
+                                "Failed to register console socket client: {e:?}"
+                            ))
+                        })?;
+                }
+            }
             FILE_EVENT => {
                 if event.events & libc::EPOLLIN as u32 != 0 {
                     let mut input = [0u8; 64];
-                    if let Some(ref mut in_file) = self.endpoint.in_file() {
-                        if let Ok(count) = in_file.read(&mut input) {
-                            let mut in_buffer = self.in_buffer.lock().unwrap();
-                            in_buffer.extend(&input[..count]);
-                        }
+                    let count = if let Some(console) = self.socket_console.as_mut() {
+                        console.read(&mut input).unwrap_or(0)
+                    } else if let Some(mut in_file) = self.endpoint.in_file() {
+                        in_file.read(&mut input).unwrap_or(0)
+                    } else {
+                        0
+                    };
+                    if count > 0 {
+                        self.in_buffer.lock().unwrap().extend(&input[..count]);
+                    }
 
-                        let needs_notification = self.process_input_queue().map_err(|e| {
+                    let needs_notification = self.process_input_queue().map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to process input queue : {e:?}"
+                        ))
+                    })?;
+                    if needs_notification {
+                        self.signal_used_queue(0).map_err(|e| {
                             EpollHelperError::HandleEvent(anyhow!(
-                                "Failed to process input queue : {e:?}"
+                                "Failed to signal used queue: {e:?}"
                             ))
                         })?;
-                        if needs_notification {
-                            self.signal_used_queue(0).map_err(|e| {
-                                EpollHelperError::HandleEvent(anyhow!(
-                                    "Failed to signal used queue: {e:?}"
-                                ))
-                            })?;
-                        }
                     }
                 }
                 if self.endpoint.is_pty() {
@@ -603,6 +649,14 @@ fn get_win_size(tty: &dyn AsRawFd) -> (u16, u16) {
     }
 
     (ws.cols, ws.rows)
+}
+
+impl Drop for Console {
+    fn drop(&mut self) {
+        if let Endpoint::Socket(_, Some(path)) = &self.endpoint {
+            let _ = fs::remove_file(path);
+        }
+    }
 }
 
 impl Console {
