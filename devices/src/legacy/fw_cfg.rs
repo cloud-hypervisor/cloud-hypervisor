@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-/// Cloud Hypervisor implementation of Qemu's fw_cfg spec
+/// Cloud Hypervisor implementation of QEMU's fw_cfg spec
 /// https://www.qemu.org/docs/master/specs/fw_cfg.html
 /// Linux kernel fw_cfg driver header
 /// https://github.com/torvalds/linux/blob/master/include/uapi/linux/qemu_fw_cfg.h
@@ -93,7 +93,8 @@ const FW_CFG_FILE_DIR: u16 = 0x19;
 const FW_CFG_KNOWN_ITEMS: usize = 0x20;
 
 pub const FW_CFG_FILE_FIRST: u16 = 0x20;
-pub const FW_CFG_DMA_SIGNATURE: [u8; 8] = *b"QEMU CFG";
+pub const FW_CFG_DMA_SIGNATURE_CONTENT: [u8; 8] = *b"QEMU CFG";
+pub const FW_CFG_SIGNATURE_CONTENT: [u8; 4] = *b"QEMU";
 // https://github.com/torvalds/linux/blob/master/include/uapi/linux/qemu_fw_cfg.h
 pub const FW_CFG_ACPI_ID: &str = "QEMU0002";
 // Reserved (must be enabled)
@@ -421,7 +422,7 @@ impl FwCfg {
     pub fn new(memory: GuestMemoryAtomic<GuestMemoryMmap<AtomicBitmap>>) -> FwCfg {
         const DEFAULT_ITEM: FwCfgContent = FwCfgContent::Slice(&[]);
         let mut known_items = [DEFAULT_ITEM; FW_CFG_KNOWN_ITEMS];
-        known_items[FW_CFG_SIGNATURE as usize] = FwCfgContent::Slice(&FW_CFG_DMA_SIGNATURE);
+        known_items[FW_CFG_SIGNATURE as usize] = FwCfgContent::Slice(&FW_CFG_SIGNATURE_CONTENT);
         known_items[FW_CFG_ID as usize] = FwCfgContent::Slice(&FW_CFG_FEATURE);
         let file_buf = Vec::from(FwCfgFilesHeader { count_be: 0 }.as_mut_bytes());
         known_items[FW_CFG_FILE_DIR as usize] = FwCfgContent::Bytes(file_buf);
@@ -893,7 +894,7 @@ mod tests {
 
         let mut data = vec![0u8];
 
-        let mut sig_iter = FW_CFG_DMA_SIGNATURE.into_iter();
+        let mut sig_iter = FW_CFG_SIGNATURE_CONTENT.into_iter();
         fw_cfg.write(0, SELECTOR_OFFSET, &[FW_CFG_SIGNATURE as u8, 0]);
         loop {
             if let Some(char) = sig_iter.next() {
