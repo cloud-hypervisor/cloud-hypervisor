@@ -79,6 +79,20 @@ seed_vhd() {
     "$QEMU_IMG" convert -O vpc -o subformat=dynamic "$source" "$out/dynamic.vhd"
 }
 
+# Writes the VMDK seeds. Only the descriptor is a seed: it is what the disk
+# path points at, and the fuzz harness supplies the extent files itself.
+seed_vmdk() {
+    local source=$1
+    local out="$CORPUS_DIR/disk_vmdk"
+    local work="$WORK_DIR/vmdk"
+
+    mkdir -p "$out" "$work"
+    "$QEMU_IMG" convert -O vmdk -o subformat=monolithicFlat "$source" "$work/flat.vmdk"
+    "$QEMU_IMG" convert -O vmdk -o subformat=twoGbMaxExtentFlat "$source" "$work/two.vmdk"
+    cp "$work/flat.vmdk" "$out/monolithic.vmdk"
+    cp "$work/two.vmdk" "$out/twogb.vmdk"
+}
+
 main() {
     if ! command -v "$QEMU_IMG" >/dev/null; then
         echo "error: $QEMU_IMG not found, install qemu-utils" >&2
@@ -91,6 +105,7 @@ main() {
     seed_qcow2 "$source"
     seed_vhd "$source"
     seed_vhdx "$source"
+    seed_vmdk "$source"
 
     echo "seed corpora written under $CORPUS_DIR"
     du -sh "$CORPUS_DIR"

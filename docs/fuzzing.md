@@ -113,6 +113,15 @@ cargo fuzz run disk_vhd -j `nproc` -- -max_len=4194304 \
     -dict=fuzz/dictionaries/vhd.dict
 ```
 
+A VMDK image is the text descriptor, not the data: the extents it names are
+separate files that the harness provides in a scratch directory. Its inputs
+are therefore small, and the limit is set accordingly:
+
+```
+cargo fuzz run disk_vmdk -j `nproc` -- -max_len=65536 \
+    -dict=fuzz/dictionaries/vmdk.dict
+```
+
 The same limit is why `DiskFormat::MAX_IMAGE_LEN` is a per format constant:
 the harness rejects anything larger, and a format whose metadata reaches far
 into the file needs a bigger budget than the 8 MiB default.

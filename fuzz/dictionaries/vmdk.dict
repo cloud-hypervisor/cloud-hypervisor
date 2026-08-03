@@ -1,0 +1,46 @@
+# Copyright © 2026 The Cloud Hypervisor Authors. All rights reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# libFuzzer dictionary for the flat VMDK descriptor, used by the disk_vmdk
+# target. A descriptor is line oriented text, so the tokens are the section
+# comments, keywords and values the parser matches on.
+
+section_header="# Disk DescriptorFile"
+section_extent="# Extent description"
+section_ddb="# The Disk Data Base"
+section_ddb_short="#DDB"
+
+version="version=1"
+cid="CID=ffffffff"
+parent_cid="parentCID=ffffffff"
+
+create_type="createType="
+create_monolithic_flat="monolithicFlat"
+create_two_gb_flat="twoGbMaxExtentFlat"
+create_monolithic_sparse="monolithicSparse"
+create_two_gb_sparse="twoGbMaxExtentSparse"
+create_stream_optimized="streamOptimized"
+create_full_device="fullDevice"
+
+# Extent access modes and the only supported extent type.
+access_rw="RW"
+access_rdonly="RDONLY"
+access_noaccess="NOACCESS"
+extent_flat="FLAT"
+extent_sparse="SPARSE"
+extent_zero="ZERO"
+
+# A whole extent line, the shape the parser splits on.
+extent_line="RW 2048 FLAT \"image-flat.vmdk\" 0"
+
+# Disk database keys.
+ddb_hw_version="ddb.virtualHWVersion"
+ddb_cylinders="ddb.geometry.cylinders"
+ddb_heads="ddb.geometry.heads"
+ddb_sectors="ddb.geometry.sectors"
+ddb_adapter="ddb.adapterType"
+ddb_tools="ddb.toolsVersion"
+adapter_ide="ide"
+adapter_lsilogic="lsilogic"
+adapter_buslogic="buslogic"
