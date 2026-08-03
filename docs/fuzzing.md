@@ -57,6 +57,7 @@ The formats covered today:
 | Format | Image target | Operation target |
 | ------ | ------------ | ---------------- |
 | qcow2 | `disk_qcow2` | `disk_qcow2_ops` |
+| fixed VHD | `disk_vhd` | none |
 
 An operation target needs a valid image that the harness can build in process
 and that reads back as zeroes, which is what `DiskFormat::template` returns. A
@@ -64,6 +65,11 @@ format without one gets no operation target and so no shadow model, which
 means nothing anywhere can catch it returning the *wrong bytes*: an engine
 that loses or misplaces a guest write passes every other check the framework
 makes.
+
+Fixed VHD deliberately stays without one. `FixedVhdSync` is a bounds check in
+front of `preadv`/`pwritev` on the image file, so a shadow model over it would
+be asserting that the kernel implements `pwritev`, not that the `block` crate
+is correct.
 
 ### Operation targets and the shadow model
 
@@ -103,6 +109,8 @@ at least the size of the largest seed:
 ```
 cargo fuzz run disk_vhdx -j `nproc` -- -max_len=16777216 \
     -dict=fuzz/dictionaries/vhdx.dict
+cargo fuzz run disk_vhd -j `nproc` -- -max_len=4194304 \
+    -dict=fuzz/dictionaries/vhd.dict
 ```
 
 The same limit is why `DiskFormat::MAX_IMAGE_LEN` is a per format constant:

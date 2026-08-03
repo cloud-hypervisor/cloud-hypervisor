@@ -68,6 +68,17 @@ seed_vhdx() {
     "$QEMU_IMG" create -f vhdx -o "$opts" "$out/empty.vhdx" 1M >/dev/null
 }
 
+# Writes the VHD seeds. Cloud Hypervisor reads the fixed subformat only, so
+# the dynamic one is here to exercise the rejection path.
+seed_vhd() {
+    local source=$1
+    local out="$CORPUS_DIR/disk_vhd"
+
+    mkdir -p "$out"
+    "$QEMU_IMG" convert -O vpc -o subformat=fixed "$source" "$out/fixed.vhd"
+    "$QEMU_IMG" convert -O vpc -o subformat=dynamic "$source" "$out/dynamic.vhd"
+}
+
 main() {
     if ! command -v "$QEMU_IMG" >/dev/null; then
         echo "error: $QEMU_IMG not found, install qemu-utils" >&2
@@ -78,6 +89,7 @@ main() {
     source=$(make_source)
 
     seed_qcow2 "$source"
+    seed_vhd "$source"
     seed_vhdx "$source"
 
     echo "seed corpora written under $CORPUS_DIR"

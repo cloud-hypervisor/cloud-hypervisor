@@ -1,0 +1,32 @@
+# Copyright © 2026 The Cloud Hypervisor Authors. All rights reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# libFuzzer dictionary for the VHD image format, used by the disk_vhd target.
+# The footer sits in the last 512 bytes of the file and is what decides
+# whether Cloud Hypervisor accepts an image at all.
+
+footer_cookie="conectix"
+dynamic_header_cookie="cxsparse"
+
+# A fixed VHD is the combination the parser insists on: this format version,
+# this data offset and this disk type.
+file_format_version_1_0="\x00\x01\x00\x00"
+data_offset_fixed="\xff\xff\xff\xff\xff\xff\xff\xff"
+disk_type_fixed="\x00\x00\x00\x02"
+disk_type_dynamic="\x00\x00\x00\x03"
+disk_type_differencing="\x00\x00\x00\x04"
+
+# Creator applications and host operating systems seen in real images.
+creator_qemu="qemu"
+creator_vpc="vpc "
+creator_vs="vs  "
+creator_win="win "
+host_os_windows="Wi2k"
+host_os_macintosh="Mac "
+
+# Geometry and saved state.
+geometry_cylinders_max="\xff\xff"
+geometry_heads_16="\x10"
+geometry_sectors_255="\xff"
+saved_state_set="\x01"

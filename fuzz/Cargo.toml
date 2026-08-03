@@ -84,6 +84,12 @@ test = false
 
 [[bin]]
 doc = false
+name = "disk_vhd"
+path = "fuzz_targets/disk_vhd.rs"
+test = false
+
+[[bin]]
+doc = false
 name = "disk_vhdx"
 path = "fuzz_targets/disk_vhdx.rs"
 test = false
