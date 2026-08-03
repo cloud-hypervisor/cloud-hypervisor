@@ -20,6 +20,9 @@ arbitrary = { version = "1.4.2", features = ["derive"] }
 # test-utils provides the valid template images that the disk_*_ops targets
 # run their op programs against.
 block = { path = "../block", features = ["test-utils"] }
+# The disk_vhdx mutator recomputes the VHDX CRC-32C checksums, and must use
+# the same implementation the parser verifies them with.
+crc-any = "3.0.0"
 devices = { path = "../devices" }
 epoll = "4.4.0"
 hypervisor = { path = "../hypervisor", features = ["mshv_emulator"] }

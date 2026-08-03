@@ -252,6 +252,7 @@ version = "0.0.0"
 dependencies = [
  "arbitrary",
  "block",
+ "crc-any",
  "devices",
  "epoll",
  "hypervisor",
