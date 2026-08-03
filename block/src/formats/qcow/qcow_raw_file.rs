@@ -13,6 +13,12 @@ use byteorder::{BigEndian, WriteBytesExt};
 use vmm_sys_util::write_zeroes::WriteZeroesAt;
 
 use crate::aligned_file::AlignedFile;
+use crate::is_block_device;
+use crate::sparse::punch_hole;
+
+/// Number of entries buffered by one `write_pointer_table_padded()` write.
+/// The buffer is 64 KiB, independent of the table's declared size.
+const POINTER_TABLE_CHUNK_ENTRIES: usize = 8 * 1024;
 
 // Type aliases for the refcount read/write function pointers
 type RefcountReader = fn(&mut AlignedFile, u64, usize) -> io::Result<Vec<u64>>;
@@ -241,6 +247,51 @@ impl QcowRawFile {
         self.file.write_all_at(&buffer, offset)
     }
 
+    /// Writes `entries` at `offset` and zeroes the rest of a table that
+    /// declares `total_entries` entries.
+    ///
+    /// The entries are written a chunk at a time and the remainder of the
+    /// table is zeroed with a hole punch, so the buffer stays at
+    /// `POINTER_TABLE_CHUNK_ENTRIES` no matter how many entries the table
+    /// declares. `total_entries` comes from the image header on the refcount
+    /// rebuild path, so it must never size an allocation. This mirrors qemu's
+    /// `rebuild_refcount_structure()`, which writes the reftable it has
+    /// rather than materialising the declared one.
+    ///
+    /// Bytes past the end of the file already read as zero, so the tail is
+    /// clamped to the file's current length.
+    pub(super) fn write_pointer_table_padded(
+        &mut self,
+        offset: u64,
+        entries: &[u64],
+        total_entries: u64,
+    ) -> io::Result<()> {
+        let entry_size = size_of::<u64>() as u64;
+        let mut buffer = Vec::with_capacity(POINTER_TABLE_CHUNK_ENTRIES * entry_size as usize);
+        for (i, chunk) in entries.chunks(POINTER_TABLE_CHUNK_ENTRIES).enumerate() {
+            buffer.clear();
+            for entry in chunk {
+                buffer.extend_from_slice(&entry.to_be_bytes());
+            }
+            let chunk_offset = offset
+                .checked_add((i * POINTER_TABLE_CHUNK_ENTRIES) as u64 * entry_size)
+                .ok_or_else(|| io::Error::from_raw_os_error(libc::EINVAL))?;
+            self.file.write_all_at(&buffer, chunk_offset)?;
+        }
+
+        let tail_start = offset
+            .checked_add(entries.len() as u64 * entry_size)
+            .ok_or_else(|| io::Error::from_raw_os_error(libc::EINVAL))?;
+        let declared_end = offset.saturating_add(total_entries.saturating_mul(entry_size));
+        let tail_end = declared_end.min(self.file.metadata()?.len());
+        if tail_end > tail_start {
+            let is_blkdev = is_block_device(self.file.as_raw_fd());
+            punch_hole(&mut self.file, is_blkdev, tail_start, tail_end - tail_start)?;
+        }
+
+        Ok(())
+    }
+
     /// Writes a pointer table directly without transforming values.
     ///
     /// Uses the same materialize-then-write path as `write_pointer_table`.
@@ -446,6 +497,39 @@ mod unit_tests {
             at_target, expected,
             "write_pointer_table_direct did not land at {TARGET_OFFSET:#x}"
         );
+    }
+
+    #[test]
+    fn write_pointer_table_padded_zeroes_the_declared_tail() {
+        let (temp_file, mut qcow) = make_qcow_raw();
+        // Fill the table region with garbage so a missing tail write shows up.
+        let garbage = vec![0x5au8; 1024];
+        temp_file
+            .as_file()
+            .write_all_at(&garbage, TARGET_OFFSET)
+            .unwrap();
+
+        let entries: Vec<u64> = vec![0xAAAA_BBBB_CCCC_DDDDu64; 4];
+        // Declare far more entries than the file holds; the tail must be
+        // zeroed without the declared size sizing a buffer.
+        qcow.write_pointer_table_padded(TARGET_OFFSET, &entries, 1 << 40)
+            .expect("write_pointer_table_padded");
+
+        let verify = temp_file.as_file().try_clone().unwrap();
+        let mut at_target = vec![0u8; 1024];
+        verify.read_exact_at(&mut at_target, TARGET_OFFSET).unwrap();
+        assert_eq!(
+            &at_target[..entries.len() * size_of::<u64>()],
+            &be_bytes(&entries)[..]
+        );
+        assert!(
+            at_target[entries.len() * size_of::<u64>()..]
+                .iter()
+                .all(|&b| b == 0),
+            "the declared table tail was not zeroed"
+        );
+        // The file is not grown past what it held.
+        assert_eq!(verify.metadata().unwrap().len(), FILE_LEN);
     }
 
     #[test]

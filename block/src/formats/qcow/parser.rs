@@ -714,10 +714,14 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
     }
 
     // Write the updated reference count blocks and reftable.
+    // `declared_table_entries` is how many entries the refcount table the
+    // header describes can hold, which is what has to be left valid on disk;
+    // `ref_table` covers only the refblocks this rebuild produced.
     fn write_refblocks(
         refcounts: &[u64],
         mut header: QcowHeader,
         ref_table: &[u64],
+        declared_table_entries: u64,
         raw_file: &mut QcowRawFile,
         refcount_block_entries: u64,
     ) -> Result<()> {
@@ -748,9 +752,17 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
             }
         }
 
-        // Rewrite the top-level refcount table.
+        // Rewrite the top-level refcount table. The entries past the
+        // refblocks that were rebuilt have to be zeroed to remove
+        // stale entries. The declared table size is image controlled, so
+        // the write is chunked and the tail is punched out rather than
+        // built in memory first.
         raw_file
-            .write_pointer_table_direct(header.refcount_table_offset, ref_table.iter())
+            .write_pointer_table_padded(
+                header.refcount_table_offset,
+                ref_table,
+                declared_table_entries,
+            )
             .map_err(Error::WritingHeader)?;
 
         // Rewrite the header again, now with lazy refcounts disabled.
@@ -839,21 +851,30 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
     )
     .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
 
+    // Rebuilding only the refblocks that cover the file keeps the work proportional to the image
+    let file_clusters = div_round_up_u64(file_size, cluster_size);
+    let used_refblocks =
+        div_round_up_u64(file_clusters, refcount_block_entries).min(refblock_clusters);
+
     // Allocate clusters to store the new reference count blocks.
     let ref_table = alloc_refblocks(
         &mut refcounts,
         cluster_size,
-        refblock_clusters,
+        used_refblocks,
         max_refcount,
         refcount_bits,
     )
     .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
+
+    let declared_table_entries =
+        u64::from(header.refcount_table_clusters) * cluster_size / size_of::<u64>() as u64;
 
     // Write updated reference counts and point the reftable at them.
     write_refblocks(
         &refcounts,
         header,
         &ref_table,
+        declared_table_entries,
         raw_file,
         refcount_block_entries,
     )
@@ -1966,6 +1987,174 @@ mod unit_tests {
             disk.metadata().header().is_corrupt(),
             "Corrupt bit should be set"
         );
+    }
+
+    #[test]
+    fn rebuild_refcounts_is_bounded_by_the_file() {
+        use std::fs;
+        use std::os::unix::fs::FileExt;
+
+        let temp = QcowTempDisk::new(1 << 40, None, false, true, false).unwrap();
+        let path = temp.path().to_owned();
+        let file = temp.into_tempfile();
+        let header = QcowHeader::new(&AlignedFile::new(
+            file.as_file().try_clone().unwrap(),
+            false,
+        ))
+        .unwrap();
+
+        // Clearing the first refcount table entry forces the rebuild on open.
+        file.as_file()
+            .write_all_at(&[0u8; 8], header.refcount_table_offset)
+            .unwrap();
+        drop(
+            QcowDisk::new(
+                file.as_file().try_clone().unwrap(),
+                false,
+                false,
+                true,
+                false,
+            )
+            .unwrap(),
+        );
+
+        let len = fs::metadata(&path).unwrap().len();
+        assert!(
+            len < 8 << 20,
+            "a one terabyte claim over a small file produced a {len} byte image"
+        );
+    }
+
+    // Offset of `refcount_table_clusters` in the qcow2 header.
+    const REFCOUNT_TABLE_CLUSTERS_OFFSET: u64 = 0x38;
+
+    // Peak resident set size of this process, in bytes.
+    fn peak_rss() -> u64 {
+        use std::fs::read_to_string;
+
+        let status = read_to_string("/proc/self/status").unwrap();
+        let line = status
+            .lines()
+            .find(|l| l.starts_with("VmHWM:"))
+            .expect("VmHWM");
+        let kb: u64 = line
+            .split_whitespace()
+            .nth(1)
+            .and_then(|v| v.parse().ok())
+            .expect("VmHWM value");
+        kb * 1024
+    }
+
+    #[test]
+    fn rebuild_refcounts_does_not_materialise_the_declared_table() {
+        use std::os::unix::fs::FileExt;
+        use std::time::Instant;
+
+        let temp = QcowTempDisk::new(1 << 40, None, false, true, false).unwrap();
+        let file = temp.into_tempfile();
+        let header = QcowHeader::new(&AlignedFile::new(
+            file.as_file().try_clone().unwrap(),
+            false,
+        ))
+        .unwrap();
+
+        // Declare a refcount table of 0xffffff clusters: 1 TiB of table
+        // entries, none of which the file holds. Building that table in
+        // memory before writing it is a 1 TiB allocation.
+        file.as_file()
+            .write_all_at(
+                &0x00ff_ffffu32.to_be_bytes(),
+                REFCOUNT_TABLE_CLUSTERS_OFFSET,
+            )
+            .unwrap();
+        // Clearing the first refcount table entry forces the rebuild on open.
+        file.as_file()
+            .write_all_at(&[0u8; 8], header.refcount_table_offset)
+            .unwrap();
+
+        let rss_before = peak_rss();
+        let start = Instant::now();
+        // The image is rejected for the oversized table once the rebuild is
+        // done; what matters is that getting there is cheap.
+        let _ = QcowDisk::new(
+            file.as_file().try_clone().unwrap(),
+            false,
+            false,
+            true,
+            false,
+        );
+        let elapsed = start.elapsed();
+        let growth = peak_rss().saturating_sub(rss_before);
+
+        assert!(
+            growth < 512 << 20,
+            "opening an image declaring a 1 TiB refcount table grew the peak RSS by {growth} bytes"
+        );
+        assert!(
+            elapsed.as_secs() < 10,
+            "opening an image declaring a 1 TiB refcount table took {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn rebuild_refcounts_zeroes_the_declared_table_tail() {
+        use std::os::unix::fs::FileExt;
+
+        let temp = QcowTempDisk::new(64 << 30, None, false, true, false).unwrap();
+        let file = temp.into_tempfile();
+        let header = QcowHeader::new(&AlignedFile::new(
+            file.as_file().try_clone().unwrap(),
+            false,
+        ))
+        .unwrap();
+        let cluster_size = 1u64 << header.cluster_bits;
+        let table_entries =
+            u64::from(header.refcount_table_clusters) * cluster_size / size_of::<u64>() as u64;
+        assert!(table_entries > 128, "table too small to have a tail");
+
+        // Seed stale pointers well past anything the rebuild will produce,
+        // then clear the first entry to force the rebuild on open.
+        for i in 64..128u64 {
+            let stale = 0xdead_beef_0000u64 + i * 512;
+            file.as_file()
+                .write_all_at(
+                    &stale.to_be_bytes(),
+                    header.refcount_table_offset + i * size_of::<u64>() as u64,
+                )
+                .unwrap();
+        }
+        file.as_file()
+            .write_all_at(&[0u8; 8], header.refcount_table_offset)
+            .unwrap();
+
+        drop(
+            QcowDisk::new(
+                file.as_file().try_clone().unwrap(),
+                false,
+                false,
+                true,
+                false,
+            )
+            .unwrap(),
+        );
+
+        let mut table = vec![0u8; (table_entries * size_of::<u64>() as u64) as usize];
+        file.as_file()
+            .read_exact_at(&mut table, header.refcount_table_offset)
+            .unwrap();
+        let entries: Vec<u64> = table
+            .as_chunks::<{ size_of::<u64>() }>()
+            .0
+            .iter()
+            .map(|c| u64::from_be_bytes(*c))
+            .collect();
+        assert_ne!(entries[0], 0, "the rebuild left no refblock at entry 0");
+        for (i, entry) in entries.iter().enumerate().skip(1) {
+            assert_eq!(
+                *entry, 0,
+                "declared refcount table entry {i} survived the rebuild as {entry:#x}"
+            );
+        }
     }
 
     #[test]
