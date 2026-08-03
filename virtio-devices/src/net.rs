@@ -599,16 +599,13 @@ impl Net {
                 avail_features |= 1 << VIRTIO_NET_F_CTRL_VQ;
                 avail_features |= 1 << VIRTIO_NET_F_STATUS;
                 avail_features |= 1 << VIRTIO_NET_F_GUEST_ANNOUNCE;
+                avail_features |= 1 << VIRTIO_NET_F_MAC;
+                avail_features |= 1 << VIRTIO_NET_F_MQ;
+
                 let queue_num = num_queues + 1;
 
                 let mut config = VirtioNetConfig::default();
-                build_net_config_space(
-                    &mut config,
-                    guest_mac,
-                    num_queues,
-                    mtu,
-                    &mut avail_features,
-                );
+                build_net_config_space(&mut config, guest_mac, num_queues, mtu);
 
                 (
                     avail_features,
