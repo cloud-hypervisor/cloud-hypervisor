@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 
 use log::{error, info};
-use net_util::{CtrlQueue, MacAddr, VirtioNetConfig, build_net_config_space};
+use net_util::{CtrlQueue, MacAddr, VirtioNetConfig};
 use seccompiler::SeccompAction;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler};
@@ -176,7 +176,7 @@ impl Net {
             }
 
             let mut config = VirtioNetConfig::default();
-            build_net_config_space(&mut config, mac_addr, num_queues, mtu);
+            config.populate(Some(mac_addr), num_queues, mtu);
 
             let avail_protocol_features = VhostUserProtocolFeatures::MQ
                 | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
