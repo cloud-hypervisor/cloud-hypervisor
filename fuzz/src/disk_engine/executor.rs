@@ -13,7 +13,8 @@
 //!   `user_data`, and a rejected op produces none;
 //! - a completion never reports more bytes than were requested;
 //! - a format with a fixed capacity never reports a different size unless a
-//!   resize succeeded, and never transfers bytes beyond that size.
+//!   resize succeeded, and never transfers bytes beyond that size;
+//! - read back data matches the shadow model, when one is available.
 
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -25,7 +26,11 @@ use block::disk_file::{AsyncDiskFile, AsyncFullDiskFile};
 use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
 
 use crate::disk_engine::format::DiskFormat;
+use crate::disk_engine::model::Model;
 use crate::disk_engine::program::{ring_depth, Op, MAX_OPS, MAX_OP_LEN};
+
+/// Largest disk size the shadow model is kept for.
+const MAX_MODEL_LEN: u64 = 8 << 20;
 
 /// Largest size a `Resize` op may ask for.
 const MAX_RESIZE_LEN: u64 = 64 << 20;
@@ -37,6 +42,7 @@ pub struct Executor<F: DiskFormat> {
     io: Box<dyn AsyncIo>,
     mem: Arc<GuestMemoryMmap<()>>,
     size: u64,
+    model: Option<Model>,
     user_data: u64,
     format: PhantomData<F>,
 }
@@ -44,12 +50,19 @@ pub struct Executor<F: DiskFormat> {
 impl<F: DiskFormat> Executor<F> {
     /// Prepares an executor for `disk`.
     ///
-    /// Returns `None` when the engine refuses to create the I/O resources,
-    /// which is a normal outcome for a malformed image.
-    pub fn new(disk: Box<dyn AsyncFullDiskFile>, ring_depth: u32) -> Option<Self> {
+    /// `with_model` enables the shadow model, which is only sound when the
+    /// image started out valid and its contents are known. Returns `None`
+    /// when the engine refuses to create the I/O resources, which is a normal
+    /// outcome for a malformed image.
+    pub fn new(
+        disk: Box<dyn AsyncFullDiskFile>,
+        ring_depth: u32,
+        with_model: bool,
+    ) -> Option<Self> {
         let io = disk.create_async_io(ring_depth).ok()?;
         let size = disk.logical_size().ok()?;
         let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MAX_OP_LEN)]).ok()?;
+        let model = (with_model && size <= MAX_MODEL_LEN).then(|| Model::new(size as usize));
 
         Some(Self {
             disk,
@@ -57,6 +70,7 @@ impl<F: DiskFormat> Executor<F> {
             io,
             mem: Arc::new(mem),
             size,
+            model,
             user_data: 0,
             format: PhantomData,
         })
@@ -100,9 +114,17 @@ impl<F: DiskFormat> Executor<F> {
         let buffer = OwnedIoBuffer::from_vec(vec![0u8; len]);
         let op = AsyncIoOperation::read_to_vec(offset as libc::off_t, buffer, user_data);
 
-        if let Some(completion) = self.submit(op, user_data) {
-            self.transferred(&completion, offset, len);
-        }
+        let Some(completion) = self.submit(op, user_data) else {
+            return;
+        };
+        let Some(done) = self.transferred(&completion, offset, len) else {
+            return;
+        };
+        let Some(buffer) = completion.buffer.as_ref() else {
+            panic!("{}: read completion returned no buffer", F::NAME);
+        };
+
+        self.check_read(offset, &buffer.as_slice()[..done]);
     }
 
     fn write_vec(&mut self, offset: u64, len: usize, seed: u8) {
@@ -111,8 +133,13 @@ impl<F: DiskFormat> Executor<F> {
         let buffer = OwnedIoBuffer::from_vec(data.clone());
         let op = AsyncIoOperation::write_from_vec(offset as libc::off_t, buffer, user_data);
 
-        if let Some(completion) = self.submit(op, user_data) {
-            self.transferred(&completion, offset, len);
+        let Some(completion) = self.submit(op, user_data) else {
+            self.record_unknown(offset, len);
+            return;
+        };
+        match self.transferred(&completion, offset, len) {
+            Some(done) => self.record_write(offset, &data[..done], len - done),
+            None => self.record_unknown(offset, len),
         }
     }
 
@@ -123,8 +150,16 @@ impl<F: DiskFormat> Executor<F> {
         let user_data = self.next_user_data();
         let op = AsyncIoOperation::read_to_memory(offset as libc::off_t, target, user_data);
 
-        if let Some(completion) = self.submit(op, user_data) {
-            self.transferred(&completion, offset, len);
+        let Some(completion) = self.submit(op, user_data) else {
+            return;
+        };
+        let Some(done) = self.transferred(&completion, offset, len) else {
+            return;
+        };
+
+        let mut data = vec![0u8; done];
+        if self.mem.read_slice(&mut data, GuestAddress(0)).is_ok() {
+            self.check_read(offset, &data);
         }
     }
 
@@ -139,22 +174,36 @@ impl<F: DiskFormat> Executor<F> {
         let user_data = self.next_user_data();
         let op = AsyncIoOperation::write_from_memory(offset as libc::off_t, target, user_data);
 
-        if let Some(completion) = self.submit(op, user_data) {
-            self.transferred(&completion, offset, len);
+        let Some(completion) = self.submit(op, user_data) else {
+            self.record_unknown(offset, len);
+            return;
+        };
+        match self.transferred(&completion, offset, len) {
+            Some(done) => self.record_write(offset, &data[..done], len - done),
+            None => self.record_unknown(offset, len),
         }
     }
 
     fn punch_hole(&mut self, offset: u64, len: usize) {
         let user_data = self.next_user_data();
-        if self.io.punch_hole(offset, len as u64, user_data).is_ok() {
-            self.completion_succeeded(user_data);
+        let submitted = self.io.punch_hole(offset, len as u64, user_data).is_ok();
+        let succeeded = submitted && self.completion_succeeded(user_data);
+
+        if succeeded && F::PUNCH_HOLE_READS_ZEROES {
+            self.record_zeroes(offset, len);
+        } else {
+            self.record_unknown(offset, len);
         }
     }
 
     fn write_zeroes(&mut self, offset: u64, len: usize) {
         let user_data = self.next_user_data();
-        if self.io.write_zeroes(offset, len as u64, user_data).is_ok() {
-            self.completion_succeeded(user_data);
+        let submitted = self.io.write_zeroes(offset, len as u64, user_data).is_ok();
+
+        if submitted && self.completion_succeeded(user_data) {
+            self.record_zeroes(offset, len);
+        } else {
+            self.record_unknown(offset, len);
         }
     }
 
@@ -183,7 +232,17 @@ impl<F: DiskFormat> Executor<F> {
         // Trust the engine's own report rather than the requested size: a
         // format may round the capacity, and a failed resize may still have
         // changed it.
-        self.size = self.disk.logical_size().unwrap_or(self.size);
+        let reported = self.disk.logical_size().unwrap_or(self.size);
+        if reported == self.size {
+            return;
+        }
+
+        self.size = reported;
+        if reported > MAX_MODEL_LEN {
+            self.model = None;
+        } else if let Some(model) = self.model.as_mut() {
+            model.resize(reported as usize);
+        }
     }
 
     fn use_clone(&mut self, ring_depth: u32) {
@@ -194,8 +253,8 @@ impl<F: DiskFormat> Executor<F> {
             return;
         };
 
-        // The clone shares engine state with the original. It is kept alive
-        // for as long as its I/O engine is in use.
+        // The clone shares engine state with the original, so the model stays
+        // valid. It is kept alive for as long as its I/O engine is in use.
         self.io = io;
         self.clone = Some(clone);
     }
@@ -300,6 +359,37 @@ impl<F: DiskFormat> Executor<F> {
 
     fn guest_target(&self, len: usize) -> Option<GuestMemoryTarget> {
         GuestMemoryTarget::new(Arc::clone(&self.mem), &[(GuestAddress(0), len as u32)]).ok()
+    }
+
+    fn check_read(&self, offset: u64, data: &[u8]) {
+        let Some(model) = self.model.as_ref() else {
+            return;
+        };
+        if let Err(mismatch) = model.check(offset, data) {
+            panic!("{}: read back mismatch: {mismatch}", F::NAME);
+        }
+    }
+
+    fn record_write(&mut self, offset: u64, written: &[u8], missing: usize) {
+        let Some(model) = self.model.as_mut() else {
+            return;
+        };
+        model.record_write(offset, written);
+        if missing > 0 {
+            model.record_unknown(offset + written.len() as u64, missing);
+        }
+    }
+
+    fn record_zeroes(&mut self, offset: u64, len: usize) {
+        if let Some(model) = self.model.as_mut() {
+            model.record_zeroes(offset, len);
+        }
+    }
+
+    fn record_unknown(&mut self, offset: u64, len: usize) {
+        if let Some(model) = self.model.as_mut() {
+            model.record_unknown(offset, len);
+        }
     }
 
     fn next_user_data(&mut self) -> u64 {

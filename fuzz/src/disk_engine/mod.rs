@@ -17,11 +17,13 @@
 mod executor;
 mod format;
 mod image;
+mod model;
 mod program;
 
 pub use crate::disk_engine::executor::Executor;
 pub use crate::disk_engine::format::{DiskFormat, OpenConfig};
 pub use crate::disk_engine::image::{image_file, image_memfd, scratch_dir};
+pub use crate::disk_engine::model::Model;
 pub use crate::disk_engine::program::{
     default_program, Op, OpLen, OpOffset, Program, MAX_OPS, MAX_OP_LEN,
 };
