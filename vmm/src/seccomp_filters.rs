@@ -734,6 +734,7 @@ fn vmm_thread_rules(
         (libc::SYS_prlimit64, vec![]),
         (libc::SYS_pwrite64, vec![]),
         (libc::SYS_pwritev, vec![]),
+        (libc::SYS_pwritev2, vec![]),
         (libc::SYS_readv, vec![]),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_readlink, vec![]),
@@ -941,6 +942,7 @@ fn vcpu_thread_rules(
         (libc::SYS_open, vec![]),
         (libc::SYS_pread64, vec![]),
         (libc::SYS_pwrite64, vec![]),
+        (libc::SYS_pwritev2, vec![]),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_readlink, vec![]),
         #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
