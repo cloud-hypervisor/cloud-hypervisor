@@ -33,3 +33,14 @@ cargo fuzz add <new_fuzzer>
 ```
 
 Inspiration for fuzzers can be found in [crosvm](https://chromium.googlesource.com/chromiumos/platform/crosvm/+/refs/heads/master/fuzz/)
+
+## Fuzzing disk image formats
+
+The `disk_*` targets share a format agnostic framework in
+`fuzz/src/disk_engine`. It fuzzes the disk image engine of the `block`
+crate: everything between the point where untrusted image bytes are parsed
+(`factory::open_disk` and the per format constructors) and the trait contract
+the rest of the VMM consumes (`disk_file::AsyncFullDiskFile` and
+`async_io::AsyncIo`). Virtio request parsing sits above that boundary and is
+covered by the `block` target instead.
+
