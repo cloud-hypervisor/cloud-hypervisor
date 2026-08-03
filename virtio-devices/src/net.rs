@@ -23,8 +23,7 @@ use log::{debug, error, info, warn};
 use net_util::virtio_features_to_tap_offload;
 use net_util::{
     CtrlQueue, MAC_ADDR_LEN, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap,
-    TapError, TxVirtio, VirtioNetConfig, build_net_config_space, build_net_config_space_with_mq,
-    open_tap, vnet_hdr_len,
+    TapError, TxVirtio, VirtioNetConfig, build_net_config_space, open_tap, vnet_hdr_len,
 };
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
@@ -529,7 +528,7 @@ impl Net {
     pub fn new_with_tap(
         id: String,
         taps: Vec<Tap>,
-        guest_mac: Option<MacAddr>,
+        guest_mac: MacAddr,
         access_platform_enabled: bool,
         num_queues: usize,
         queue_size: u16,
@@ -603,16 +602,13 @@ impl Net {
                 let queue_num = num_queues + 1;
 
                 let mut config = VirtioNetConfig::default();
-                if let Some(mac) = guest_mac {
-                    build_net_config_space(&mut config, mac, num_queues, mtu, &mut avail_features);
-                } else {
-                    build_net_config_space_with_mq(
-                        &mut config,
-                        num_queues,
-                        mtu,
-                        &mut avail_features,
-                    );
-                }
+                build_net_config_space(
+                    &mut config,
+                    guest_mac,
+                    num_queues,
+                    mtu,
+                    &mut avail_features,
+                );
 
                 (
                     avail_features,
@@ -655,7 +651,7 @@ impl Net {
         if_name: Option<&str>,
         ip_addr: Option<IpAddr>,
         netmask: Option<IpAddr>,
-        guest_mac: Option<MacAddr>,
+        guest_mac: MacAddr,
         host_mac: Option<MacAddr>,
         mtu: Option<u16>,
         access_platform_enabled: bool,
@@ -701,7 +697,7 @@ impl Net {
     pub fn from_tap_fds(
         id: String,
         fds: &[RawFd],
-        guest_mac: Option<MacAddr>,
+        guest_mac: MacAddr,
         mtu: Option<u16>,
         access_platform_enabled: bool,
         queue_size: u16,

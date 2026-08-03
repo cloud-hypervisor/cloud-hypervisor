@@ -146,7 +146,7 @@ pub fn build_net_config_space(
     build_net_config_space_with_mq(config, num_queues, mtu, avail_features);
 }
 
-pub fn build_net_config_space_with_mq(
+fn build_net_config_space_with_mq(
     config: &mut VirtioNetConfig,
     num_queues: usize,
     mtu: Option<u16>,
