@@ -10,6 +10,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::sync::Arc;
 
 use libfuzzer_sys::{fuzz_target, Corpus};
+use net_util::MacAddr;
 use seccompiler::SeccompAction;
 use virtio_devices::{VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
@@ -70,7 +71,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     let mut net = virtio_devices::Net::new_with_tap(
         "fuzzer_net".to_owned(),
         vec![tap],
-        None,  // guest_mac
+        MacAddr::local_random(),
         false, // iommu
         QUEUE_NUM,
         QUEUE_SIZE,
