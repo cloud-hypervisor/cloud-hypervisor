@@ -44,6 +44,21 @@ the rest of the VMM consumes (`disk_file::AsyncFullDiskFile` and
 `async_io::AsyncIo`). Virtio request parsing sits above that boundary and is
 covered by the `block` target instead.
 
+Every format has two targets, because the two interesting input spaces do not
+mix well in a single one:
+
+| Target | Input | What it finds |
+| ------ | ----- | ------------- |
+| `disk_<format>` | the whole input is the disk image | parser bugs: headers, tables, region descriptors |
+| `disk_<format>_ops` | an operation program run against a valid image | engine bugs: offset translation, allocation, discard, resize |
+
+An operation target needs a valid image that the harness can build in process
+and that reads back as zeroes, which is what `DiskFormat::template` returns. A
+format without one gets no operation target and so no shadow model, which
+means nothing anywhere can catch it returning the *wrong bytes*: an engine
+that loses or misplaces a guest write passes every other check the framework
+makes.
+
 ### Operation targets and the shadow model
 
 Because that image is valid and starts out reading as zeroes, the framework
