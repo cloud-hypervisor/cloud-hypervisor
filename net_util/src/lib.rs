@@ -22,7 +22,7 @@ use thiserror::Error;
 use virtio_bindings::virtio_net::{
     VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN, VIRTIO_NET_F_GUEST_CSUM,
     VIRTIO_NET_F_GUEST_ECN, VIRTIO_NET_F_GUEST_TSO4, VIRTIO_NET_F_GUEST_TSO6,
-    VIRTIO_NET_F_GUEST_UFO, VIRTIO_NET_F_MAC, VIRTIO_NET_F_MQ, virtio_net_hdr_v1,
+    VIRTIO_NET_F_GUEST_UFO, virtio_net_hdr_v1,
 };
 use vm_memory::ByteValued;
 use vm_memory::bitmap::AtomicBitmap;
@@ -138,26 +138,14 @@ pub fn build_net_config_space(
     mac: MacAddr,
     num_queues: usize,
     mtu: Option<u16>,
-    avail_features: &mut u64,
 ) {
     config.mac.copy_from_slice(mac.get_bytes());
-    *avail_features |= 1 << VIRTIO_NET_F_MAC;
 
-    build_net_config_space_with_mq(config, num_queues, mtu, avail_features);
-}
-
-fn build_net_config_space_with_mq(
-    config: &mut VirtioNetConfig,
-    num_queues: usize,
-    mtu: Option<u16>,
-    avail_features: &mut u64,
-) {
     let num_queue_pairs = (num_queues / 2) as u16;
     if (num_queue_pairs >= VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN as u16)
         && (num_queue_pairs <= VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX as u16)
     {
         config.max_virtqueue_pairs = num_queue_pairs;
-        *avail_features |= 1 << VIRTIO_NET_F_MQ;
     }
     if let Some(mtu) = mtu {
         config.mtu = mtu;
