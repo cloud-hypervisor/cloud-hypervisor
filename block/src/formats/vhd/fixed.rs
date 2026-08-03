@@ -6,7 +6,7 @@ use std::fs::File;
 use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
 
-use super::footer::VhdFooter;
+use super::footer::{VHD_FOOTER_LEN, VhdFooter};
 
 #[derive(Debug)]
 pub(super) struct FixedVhd {
@@ -17,11 +17,21 @@ pub(super) struct FixedVhd {
 impl FixedVhd {
     pub(super) fn new(mut file: File) -> io::Result<Self> {
         let footer = VhdFooter::new(&mut file)?;
+        let size = footer.current_size();
 
-        Ok(Self {
-            file,
-            size: footer.current_size(),
-        })
+        // A fixed VHD is the data followed by a 512 byte footer. The size
+        // the footer states cannot exceed what the file can hold.
+        let data_len = file.metadata()?.len().saturating_sub(VHD_FOOTER_LEN);
+        if size > data_len {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "Fixed VHD footer declares {size} bytes, more than the {data_len} bytes the file holds"
+                ),
+            ));
+        }
+
+        Ok(Self { file, size })
     }
 
     pub(crate) fn file(&self) -> &File {
