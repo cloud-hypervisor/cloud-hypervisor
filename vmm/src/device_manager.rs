@@ -81,6 +81,7 @@ use libc::{
     termios,
 };
 use log::{debug, error, info, warn};
+use net_util::MacAddr;
 use pci::{
     DeviceRelocation, MmioRegion, PciBarConfiguration, PciBarRegionType, PciBdf, PciDevice,
     VfioDmaMapping, VfioPciDevice, VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError,
@@ -2946,7 +2947,7 @@ impl DeviceManager {
             let vhost_user_net = Arc::new(Mutex::new(
                 match vhost_user::Net::new(
                     id.clone(),
-                    net_cfg.mac,
+                    &mut net_cfg.mac,
                     net_cfg.mtu,
                     vu_cfg,
                     server,
@@ -2975,6 +2976,8 @@ impl DeviceManager {
         } else {
             let state = state_from_id(snapshot, id.as_str())
                 .map_err(DeviceManagerError::RestoreGetState)?;
+            let guest_mac = *net_cfg.mac.get_or_insert_with(MacAddr::local_random);
+
             let virtio_net = if let Some(ref tap_if_name) = net_cfg.tap {
                 Arc::new(Mutex::new(
                     virtio_devices::Net::new(
@@ -2982,7 +2985,7 @@ impl DeviceManager {
                         Some(tap_if_name),
                         net_cfg.ip,
                         net_cfg.mask,
-                        net_cfg.mac,
+                        guest_mac,
                         net_cfg.host_mac,
                         net_cfg.mtu,
                         self.force_access_platform | net_cfg.pci_common.iommu,
@@ -3004,7 +3007,7 @@ impl DeviceManager {
                 let net = virtio_devices::Net::from_tap_fds(
                     id.clone(),
                     fds,
-                    net_cfg.mac,
+                    guest_mac,
                     net_cfg.mtu,
                     self.force_access_platform | net_cfg.pci_common.iommu,
                     net_cfg.queue_size,
@@ -3033,7 +3036,7 @@ impl DeviceManager {
                         None,
                         net_cfg.ip,
                         net_cfg.mask,
-                        net_cfg.mac,
+                        guest_mac,
                         net_cfg.host_mac,
                         net_cfg.mtu,
                         self.force_access_platform | net_cfg.pci_common.iommu,

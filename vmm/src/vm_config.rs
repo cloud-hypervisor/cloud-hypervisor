@@ -452,8 +452,8 @@ pub struct NetConfig {
     pub tap: Option<String>,
     pub ip: Option<IpAddr>,
     pub mask: Option<IpAddr>,
-    #[serde(default = "default_netconfig_mac")]
-    pub mac: MacAddr,
+    #[serde(default)]
+    pub mac: Option<MacAddr>,
     #[serde(default)]
     pub host_mac: Option<MacAddr>,
     #[serde(default)]
@@ -491,10 +491,6 @@ pub fn default_netconfig_true() -> bool {
 
 pub fn default_netconfig_tap() -> Option<String> {
     None
-}
-
-pub fn default_netconfig_mac() -> MacAddr {
-    MacAddr::local_random()
 }
 
 pub const DEFAULT_NET_NUM_QUEUES: usize = 2;
