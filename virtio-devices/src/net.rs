@@ -23,7 +23,7 @@ use log::{debug, error, info, warn};
 use net_util::virtio_features_to_tap_offload;
 use net_util::{
     CtrlQueue, MAC_ADDR_LEN, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap,
-    TapError, TxVirtio, VirtioNetConfig, build_net_config_space, open_tap, vnet_hdr_len,
+    TapError, TxVirtio, VirtioNetConfig, open_tap, vnet_hdr_len,
 };
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
@@ -605,7 +605,7 @@ impl Net {
                 let queue_num = num_queues + 1;
 
                 let mut config = VirtioNetConfig::default();
-                build_net_config_space(&mut config, guest_mac, num_queues, mtu);
+                config.populate(Some(guest_mac), num_queues, mtu);
 
                 (
                     avail_features,

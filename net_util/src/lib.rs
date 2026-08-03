@@ -57,6 +57,25 @@ pub struct VirtioNetConfig {
 // SAFETY: it only has data and has no implicit padding.
 unsafe impl ByteValued for VirtioNetConfig {}
 
+impl VirtioNetConfig {
+    pub fn populate(&mut self, mac: Option<MacAddr>, num_queues: usize, mtu: Option<u16>) {
+        if let Some(mac) = mac {
+            self.mac.copy_from_slice(mac.get_bytes());
+        }
+
+        let num_queue_pairs = (num_queues / 2) as u16;
+        if (num_queue_pairs >= VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN as u16)
+            && (num_queue_pairs <= VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX as u16)
+        {
+            self.max_virtqueue_pairs = num_queue_pairs;
+        }
+
+        if let Some(mtu) = mtu {
+            self.mtu = mtu;
+        }
+    }
+}
+
 /// Create a sockaddr_in from an IPv4 address, and expose it as
 /// an opaque sockaddr suitable for usage by socket ioctls.
 fn create_sockaddr(ip_addr: net::Ipv4Addr) -> libc::sockaddr {
@@ -131,25 +150,6 @@ pub fn unregister_listener(
         fd,
         epoll::Event::new(ev_type, data),
     )
-}
-
-pub fn build_net_config_space(
-    config: &mut VirtioNetConfig,
-    mac: MacAddr,
-    num_queues: usize,
-    mtu: Option<u16>,
-) {
-    config.mac.copy_from_slice(mac.get_bytes());
-
-    let num_queue_pairs = (num_queues / 2) as u16;
-    if (num_queue_pairs >= VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN as u16)
-        && (num_queue_pairs <= VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX as u16)
-    {
-        config.max_virtqueue_pairs = num_queue_pairs;
-    }
-    if let Some(mtu) = mtu {
-        config.mtu = mtu;
-    }
 }
 
 pub fn virtio_features_to_tap_offload(features: u64) -> c_uint {
