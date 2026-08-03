@@ -100,6 +100,7 @@ impl disk_file::AsyncDiskFile for VmdkDisk {
 
 #[cfg(test)]
 mod tests {
+    use std::fs::OpenOptions;
     use std::io::Write;
     use std::os::unix::io::AsRawFd;
     use std::path::PathBuf;
@@ -107,6 +108,7 @@ mod tests {
     use vmm_sys_util::tempdir::TempDir;
 
     use super::*;
+    use crate::async_io::OwnedIoBuffer;
     use crate::disk_file::{AsyncDiskFile, DiskFd, DiskSize, PhysicalSize, Resizable};
 
     const SECTOR: u64 = 512;
@@ -256,6 +258,31 @@ mod tests {
         let disk = VmdkDisk::new(file, &path, false).unwrap();
 
         assert_eq!(disk.fd().as_raw_fd(), expected);
+    }
+
+    // An out-of-range request must be rejected, not abort while formatting
+    // the error message describing it.
+    #[test]
+    fn out_of_range_request_reports_error_without_overflow() {
+        let dir = TempDir::new().unwrap();
+        let path = build_flat_vmdk(
+            dir.as_path(),
+            "monolithicFlat",
+            &[("e-flat.vmdk", "RW", 8)],
+            true,
+        );
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        let disk = VmdkDisk::new(file, &path, false).unwrap();
+        let mut io = disk.create_async_io(1).unwrap();
+
+        let buffer = OwnedIoBuffer::from_vec(vec![0u8; 512]);
+        let result = io.read_to_vec(u64::MAX as libc::off_t, buffer, 0);
+
+        assert!(result.is_err());
     }
 
     #[test]

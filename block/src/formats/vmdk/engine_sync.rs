@@ -201,8 +201,7 @@ impl AsyncIo for FlatVmdkSync {
             let error = io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
-                    "VMDK request [{start}, {}) exceeds virtual size {}",
-                    start + total,
+                    "VMDK request (start {start}, length {total}) exceeds virtual size {}",
                     self.size
                 ),
             );
