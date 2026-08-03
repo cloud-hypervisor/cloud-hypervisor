@@ -52,6 +52,12 @@ mix well in a single one:
 | `disk_<format>` | the whole input is the disk image | parser bugs: headers, tables, region descriptors |
 | `disk_<format>_ops` | an operation program run against a valid image | engine bugs: offset translation, allocation, discard, resize |
 
+The formats covered today:
+
+| Format | Image target | Operation target |
+| ------ | ------------ | ---------------- |
+| qcow2 | `disk_qcow2` | `disk_qcow2_ops` |
+
 An operation target needs a valid image that the harness can build in process
 and that reads back as zeroes, which is what `DiskFormat::template` returns. A
 format without one gets no operation target and so no shadow model, which
@@ -61,6 +67,19 @@ makes.
 
 ### Operation targets and the shadow model
 
+```
+cargo fuzz run disk_qcow2_ops -j `nproc`
+```
+
+None of them needs `-max_len` or a seed corpus: the input is an operation
+program, not an image.
+
+`disk_<format>_ops` builds its own valid image, so it needs no corpus:
+
+```
+cargo fuzz run disk_qcow2_ops -j `nproc`
+```
+
 Because that image is valid and starts out reading as zeroes, the framework
 keeps a shadow model of the disk contents and compares every read against it,
 which turns a silent offset translation bug into a crash. Both target families
@@ -68,3 +87,54 @@ also check the trait contract itself: an accepted operation completes exactly
 once and carries its own user data, a rejected operation does not complete at
 all, a completion never reports more bytes than were requested, and a format
 with a fixed capacity neither changes its reported size without a successful
+### Running in OSS-Fuzz
+
+Cloud Hypervisor is an [OSS-Fuzz](https://github.com/google/oss-fuzz) project,
+which builds every target in `fuzz/fuzz_targets` and runs it continuously.
+Staging these targets there - the `$OUT` layout, the seed corpora and the
+dictionaries - is left to a later change. Two properties matter for a target
+that runs there, and both are worth preserving when adding a format:
+
+- A target must be self contained at run time. It may read nothing from the
+  source tree, because only `$OUT` is shipped to the fuzzing machines. Images
+  live in a memfd, or, for a format that has to be opened from a directory,
+  in a scratch directory the target creates, and an `_ops` target builds its
+  template once per process through a temporary file and keeps it in memory
+  afterwards.
+- A crash must reproduce in a fresh process from its input alone. A template
+  image therefore has to be byte identical on every run, which rules out
+  timestamps, random identifiers and anything else that varies per process.
+
+Seed generation needs `qemu-img`, so an OSS-Fuzz build would have to install
+`qemu-utils`; without it the targets still build and run, just unseeded.
+
+### Adding a disk format
+
+Implement `DiskFormat` in `fuzz/src/disk_engine/formats/`:
+
+```rust
+impl DiskFormat for MyFormat {
+    const NAME: &'static str = "myformat";
+
+    fn open(
+        file: File,
+        path: Option<&Path>,
+        config: &OpenConfig,
+    ) -> BlockResult<Box<dyn AsyncFullDiskFile>> {
+        Ok(Box::new(MyDisk::new(file, config.direct)?))
+    }
+
+    fn template() -> Option<&'static [u8]> {
+        // A freshly created image of this format, built once per process,
+        // or None for a format the `block` crate cannot write.
+    }
+}
+```
+
+`path` is `Some` only when the format sets `NEEDS_PATH`, and a format whose
+`template` returns `None` gets no operation target.
+
+add the targets, the image target always and the operation target when there
+is a template, each a single call into the framework, and register them in
+`fuzz/Cargo.toml`.
+

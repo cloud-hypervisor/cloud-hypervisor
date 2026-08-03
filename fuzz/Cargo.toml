@@ -17,7 +17,9 @@ pvmemcontrol = []
 
 [dependencies]
 arbitrary = { version = "1.4.2", features = ["derive"] }
-block = { path = "../block" }
+# test-utils provides the valid template images that the disk_*_ops targets
+# run their op programs against.
+block = { path = "../block", features = ["test-utils"] }
 devices = { path = "../devices" }
 epoll = "4.4.0"
 hypervisor = { path = "../hypervisor", features = ["mshv_emulator"] }
@@ -63,6 +65,18 @@ test = false
 doc = false
 name = "console"
 path = "fuzz_targets/console.rs"
+test = false
+
+[[bin]]
+doc = false
+name = "disk_qcow2"
+path = "fuzz_targets/disk_qcow2.rs"
+test = false
+
+[[bin]]
+doc = false
+name = "disk_qcow2_ops"
+path = "fuzz_targets/disk_qcow2_ops.rs"
 test = false
 
 [[bin]]
