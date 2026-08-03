@@ -7,3 +7,4 @@
 pub mod qcow2;
 pub mod vhd;
 pub mod vhdx;
+pub mod vmdk;
