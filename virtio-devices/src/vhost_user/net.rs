@@ -74,7 +74,7 @@ impl Net {
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
-        mac_addr: MacAddr,
+        mac_addr: &mut Option<MacAddr>,
         mtu: Option<u16>,
         vu_cfg: VhostUserConfig,
         server: bool,
@@ -176,7 +176,8 @@ impl Net {
             }
 
             let mut config = VirtioNetConfig::default();
-            config.populate(Some(mac_addr), num_queues, mtu);
+            let guest_mac = Some(*mac_addr.get_or_insert_with(MacAddr::local_random));
+            config.populate(guest_mac, num_queues, mtu);
 
             let avail_protocol_features = VhostUserProtocolFeatures::MQ
                 | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS

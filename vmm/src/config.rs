@@ -1733,10 +1733,7 @@ impl NetConfig {
         let ip = parser.convert("ip").map_err(Error::ParseNetwork)?;
         let mask = parser.convert("mask").map_err(Error::ParseNetwork)?;
 
-        let mac = parser
-            .convert("mac")
-            .map_err(Error::ParseNetwork)?
-            .unwrap_or_else(default_netconfig_mac);
+        let mac = parser.convert("mac").map_err(Error::ParseNetwork)?;
         let host_mac = parser.convert("host_mac").map_err(Error::ParseNetwork)?;
         let offload_tso = parser
             .convert::<Toggle>("offload_tso")
@@ -4524,7 +4521,7 @@ mod unit_tests {
             tap: None,
             ip: None,
             mask: None,
-            mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
+            mac: Some(MacAddr::parse_str("de:ad:be:ef:12:34").unwrap()),
             host_mac: Some(MacAddr::parse_str("12:34:de:ad:be:ef").unwrap()),
             mtu: None,
             num_queues: 2,
@@ -4542,7 +4539,6 @@ mod unit_tests {
 
     #[test]
     fn test_net_parsing() -> Result<()> {
-        // mac address is random
         assert_eq!(
             NetConfig::parse("mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef")?,
             net_fixture(),
