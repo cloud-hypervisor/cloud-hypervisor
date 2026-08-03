@@ -1263,6 +1263,8 @@ components:
         pci_device_id:
           type: integer
           format: uint8
+        id:
+          type: string
         device_type:
           type: integer
           format: uint32
