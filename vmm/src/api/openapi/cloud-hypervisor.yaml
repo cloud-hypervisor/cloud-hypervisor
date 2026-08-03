@@ -582,7 +582,7 @@ components:
 
     VmState:
       type: string
-      enum: [Created, Running, Shutdown, Paused]
+      enum: [Created, Running, Shutdown, Paused, BreakPoint]
 
     VmInfo:
       required:
