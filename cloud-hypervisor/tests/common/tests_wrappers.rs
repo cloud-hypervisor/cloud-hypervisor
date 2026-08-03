@@ -524,12 +524,18 @@ pub(crate) fn _test_power_button(guest: &Guest) {
     handle_child_output(r, &output);
 }
 
+// A MAC address for the backend to advertise when the test wants the address
+// supplied to the frontend to take precedence over it.
+pub(crate) const OVERRIDDEN_MAC: &str = "de:ad:be:ef:00:01";
+
 pub(crate) fn test_vhost_user_net(
     tap: Option<&str>,
     num_queues: usize,
     prepare_daemon: &PrepareNetDaemon,
     generate_host_mac: bool,
     client_mode_daemon: bool,
+    backend_mac: Option<&str>,
+    frontend_mtu: Option<u16>,
 ) {
     let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
     let guest = Guest::new(Box::new(disk_config));
@@ -543,20 +549,38 @@ pub(crate) fn test_vhost_user_net(
         None
     };
 
-    let mtu = Some(3000);
+    // The backend always advertises an MTU, both so that the host side of the
+    // tap is never smaller than the guest's and so that a frontend supplied
+    // MTU can be seen to take precedence over it.
+    let backend_mtu = 9000;
+    let expected_mtu = frontend_mtu.unwrap_or(backend_mtu);
+
+    // The backend always advertises a MAC address, and the guest is expected
+    // to end up with the guest MAC of the test network since that is the
+    // address its cloud-init configuration matches on. So when the backend is
+    // given a different address the frontend supplies the guest MAC and must
+    // take precedence, otherwise the guest never reaches the network at all.
+    let (backend_mac, frontend_mac) = match backend_mac {
+        Some(mac) => (
+            mac.to_string(),
+            format!(",mac={}", guest.network.guest_mac0),
+        ),
+        None => (guest.network.guest_mac0.clone(), String::new()),
+    };
 
     let (mut daemon_command, vunet_socket_path) = prepare_daemon(
         &guest.tmp_dir,
         &guest.network.host_ip0,
         tap,
-        mtu,
+        Some(backend_mac.as_str()),
+        Some(backend_mtu),
         num_queues,
         client_mode_daemon,
     );
 
     let net_params = format!(
-        "vhost_user=true,mac={},socket={},num_queues={},queue_size=1024{},vhost_mode={},mtu=3000",
-        guest.network.guest_mac0,
+        "vhost_user=true{},socket={},num_queues={},queue_size=1024{},vhost_mode={}{}",
+        frontend_mac,
         vunet_socket_path,
         num_queues,
         if let Some(host_mac) = host_mac {
@@ -568,6 +592,11 @@ pub(crate) fn test_vhost_user_net(
             "server"
         } else {
             "client"
+        },
+        if let Some(mtu) = frontend_mtu {
+            format!(",mtu={mtu}")
+        } else {
+            String::new()
         },
     );
 
@@ -626,7 +655,15 @@ pub(crate) fn test_vhost_user_net(
                 .ssh_command(format!("cat /sys/class/net/{iface}/mtu").as_str())
                 .unwrap()
                 .trim(),
-            "3000"
+            expected_mtu.to_string()
+        );
+
+        assert_eq!(
+            guest
+                .ssh_command(format!("cat /sys/class/net/{iface}/address").as_str())
+                .unwrap()
+                .trim(),
+            guest.network.guest_mac0
         );
 
         // 1 network interface + default localhost ==> 2 interfaces

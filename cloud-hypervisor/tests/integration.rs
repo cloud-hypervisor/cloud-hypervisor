@@ -2092,7 +2092,15 @@ mod common_parallel {
 
     #[test]
     fn test_vhost_user_net_default() {
-        test_vhost_user_net(None, 2, &prepare_vhost_user_net_daemon, false, false);
+        test_vhost_user_net(
+            None,
+            2,
+            &prepare_vhost_user_net_daemon,
+            false,
+            false,
+            Some(OVERRIDDEN_MAC),
+            Some(3000),
+        );
     }
 
     #[test]
@@ -2103,6 +2111,8 @@ mod common_parallel {
             &prepare_vhost_user_net_daemon,
             false,
             false,
+            Some(OVERRIDDEN_MAC),
+            Some(3000),
         );
     }
 
@@ -2114,12 +2124,22 @@ mod common_parallel {
             &prepare_vhost_user_net_daemon,
             false,
             false,
+            Some(OVERRIDDEN_MAC),
+            Some(3000),
         );
     }
 
     #[test]
     fn test_vhost_user_net_multiple_queues() {
-        test_vhost_user_net(None, 4, &prepare_vhost_user_net_daemon, false, false);
+        test_vhost_user_net(
+            None,
+            4,
+            &prepare_vhost_user_net_daemon,
+            false,
+            false,
+            Some(OVERRIDDEN_MAC),
+            Some(3000),
+        );
     }
 
     #[test]
@@ -2130,17 +2150,74 @@ mod common_parallel {
             &prepare_vhost_user_net_daemon,
             false,
             false,
+            Some(OVERRIDDEN_MAC),
+            Some(3000),
         );
     }
 
     #[test]
     fn test_vhost_user_net_host_mac() {
-        test_vhost_user_net(None, 2, &prepare_vhost_user_net_daemon, true, false);
+        test_vhost_user_net(
+            None,
+            2,
+            &prepare_vhost_user_net_daemon,
+            true,
+            false,
+            Some(OVERRIDDEN_MAC),
+            Some(3000),
+        );
     }
 
     #[test]
     fn test_vhost_user_net_client_mode() {
-        test_vhost_user_net(None, 2, &prepare_vhost_user_net_daemon, false, true);
+        test_vhost_user_net(
+            None,
+            2,
+            &prepare_vhost_user_net_daemon,
+            false,
+            true,
+            Some(OVERRIDDEN_MAC),
+            Some(3000),
+        );
+    }
+
+    #[test]
+    fn test_vhost_user_net_backend_mac() {
+        test_vhost_user_net(
+            None,
+            2,
+            &prepare_vhost_user_net_daemon,
+            false,
+            false,
+            None,
+            Some(3000),
+        );
+    }
+
+    #[test]
+    fn test_vhost_user_net_backend_mtu() {
+        test_vhost_user_net(
+            None,
+            2,
+            &prepare_vhost_user_net_daemon,
+            false,
+            false,
+            Some(OVERRIDDEN_MAC),
+            None,
+        );
+    }
+
+    #[test]
+    fn test_vhost_user_net_backend_mac_and_mtu() {
+        test_vhost_user_net(
+            None,
+            2,
+            &prepare_vhost_user_net_daemon,
+            false,
+            false,
+            None,
+            None,
+        );
     }
 
     #[test]

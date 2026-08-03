@@ -206,6 +206,7 @@ pub(crate) fn prepare_vhost_user_net_daemon(
     tmp_dir: &TempDir,
     ip: &str,
     tap: Option<&str>,
+    mac: Option<&str>,
     mtu: Option<u16>,
     num_queues: usize,
     client_mode: bool,
@@ -219,6 +220,10 @@ pub(crate) fn prepare_vhost_user_net_daemon(
 
     if let Some(tap) = tap {
         net_params.push_str(format!(",tap={tap}").as_str());
+    }
+
+    if let Some(mac) = mac {
+        net_params.push_str(format!(",mac={mac}").as_str());
     }
 
     if let Some(mtu) = mtu {
@@ -657,8 +662,15 @@ pub(super) fn get_msi_interrupt_pattern() -> String {
     }
 }
 
-pub(super) type PrepareNetDaemon =
-    dyn Fn(&TempDir, &str, Option<&str>, Option<u16>, usize, bool) -> (Command, String);
+pub(super) type PrepareNetDaemon = dyn Fn(
+    &TempDir,
+    &str,
+    Option<&str>,
+    Option<&str>,
+    Option<u16>,
+    usize,
+    bool,
+) -> (Command, String);
 
 pub(super) fn get_ksm_pages_shared() -> u32 {
     fs::read_to_string("/sys/kernel/mm/ksm/pages_shared")
