@@ -74,6 +74,22 @@ cargo fuzz run disk_qcow2_ops -j `nproc`
 None of them needs `-max_len` or a seed corpus: the input is an operation
 program, not an image.
 
+Corpus entries for `disk_<format>` are ordinary disk images, so anything
+`qemu-img` can write is a usable seed. `scripts/generate-fuzz-seeds.sh` writes
+a set of them per format, covering header versions, compression, cluster sizes
+and preallocation:
+
+```
+scripts/generate-fuzz-seeds.sh
+cargo fuzz run disk_qcow2 -j `nproc` -- -max_len=2097152 \
+    -dict=fuzz/dictionaries/qcow2.dict
+```
+
+Seeds matter here: without them libFuzzer caps generated inputs at 4 KiB and
+the target rarely gets past the header check. On a short run of the qcow2
+target an empty corpus reached 479 edges, a single image reached 1605, and the
+generated seeds with the dictionary reached 2073.
+
 `disk_<format>_ops` builds its own valid image, so it needs no corpus:
 
 ```
