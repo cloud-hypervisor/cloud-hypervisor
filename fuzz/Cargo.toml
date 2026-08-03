@@ -19,6 +19,8 @@ pvmemcontrol = []
 arbitrary = { version = "1.4.2", features = ["derive"] }
 # test-utils provides the disk_*_ops template images.
 block = { path = "../block", features = ["test-utils"] }
+# Must match the VHDX parser's CRC-32C implementation.
+crc-any = "3.0.0"
 devices = { path = "../devices" }
 epoll = "4.4.0"
 hypervisor = { path = "../hypervisor", features = ["mshv_emulator"] }
@@ -76,6 +78,12 @@ test = false
 doc = false
 name = "disk_qcow2_ops"
 path = "fuzz_targets/disk_qcow2_ops.rs"
+test = false
+
+[[bin]]
+doc = false
+name = "disk_vhdx"
+path = "fuzz_targets/disk_vhdx.rs"
 test = false
 
 [[bin]]
