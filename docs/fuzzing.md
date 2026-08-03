@@ -90,6 +90,25 @@ the target rarely gets past the header check. On a short run of the qcow2
 target an empty corpus reached 479 edges, a single image reached 1605, and the
 generated seeds with the dictionary reached 2073.
 
+**Always pass `-max_len`.** Left to itself libFuzzer derives the limit from
+the corpus but never above 1 MiB, and it truncates larger corpus entries to
+that limit. A truncated image is a rejected image, so the target then fuzzes
+nothing but its own rejection path. It is not hypothetical: `disk_vhdx` covers
+268 edges without the flag and 1071 with it, because the VHDX layout places
+its BAT region at 2 MiB and its metadata region at 3 MiB, so a parseable image
+is 8 MiB when empty and 9 to 10 MiB once it holds data. A fixed VHD keeps its footer in the last 512
+bytes, so truncation removes exactly the part that identifies the format. Use
+at least the size of the largest seed:
+
+```
+cargo fuzz run disk_vhdx -j `nproc` -- -max_len=16777216 \
+    -dict=fuzz/dictionaries/vhdx.dict
+```
+
+The same limit is why `DiskFormat::MAX_IMAGE_LEN` is a per format constant:
+the harness rejects anything larger, and a format whose metadata reaches far
+into the file needs a bigger budget than the 8 MiB default.
+
 `disk_<format>_ops` builds its own valid image, so it needs no corpus:
 
 ```

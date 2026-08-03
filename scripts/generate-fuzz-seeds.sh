@@ -51,6 +51,23 @@ seed_qcow2() {
     "$QEMU_IMG" create -f qcow2 "$out/empty.qcow2" 1M >/dev/null
 }
 
+# Writes the VHDX seeds. Cloud Hypervisor reads dynamic VHDX, so the fixed
+# subformat is here to exercise the rejection path.
+seed_vhdx() {
+    local source=$1
+    local out="$CORPUS_DIR/disk_vhdx"
+
+    mkdir -p "$out"
+    # The smallest block size the format allows keeps the seeds close to the
+    # 8 MiB an empty VHDX already costs.
+    local opts=subformat=dynamic,block_size=1M
+
+    "$QEMU_IMG" convert -O vhdx -o "$opts" "$source" "$out/dynamic.vhdx"
+    "$QEMU_IMG" convert -O vhdx -o subformat=fixed,block_size=1M "$source" \
+        "$out/fixed.vhdx"
+    "$QEMU_IMG" create -f vhdx -o "$opts" "$out/empty.vhdx" 1M >/dev/null
+}
+
 main() {
     if ! command -v "$QEMU_IMG" >/dev/null; then
         echo "error: $QEMU_IMG not found, install qemu-utils" >&2
@@ -61,6 +78,7 @@ main() {
     source=$(make_source)
 
     seed_qcow2 "$source"
+    seed_vhdx "$source"
 
     echo "seed corpora written under $CORPUS_DIR"
     du -sh "$CORPUS_DIR"

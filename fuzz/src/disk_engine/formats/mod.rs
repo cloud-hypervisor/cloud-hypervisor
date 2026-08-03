@@ -5,3 +5,4 @@
 //! Format adapters.
 
 pub mod qcow2;
+pub mod vhdx;
