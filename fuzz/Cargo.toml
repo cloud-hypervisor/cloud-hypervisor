@@ -16,7 +16,7 @@ mshv_emulator = ["hypervisor/mshv_emulator"]
 pvmemcontrol = []
 
 [dependencies]
-arbitrary = "1.4.2"
+arbitrary = { version = "1.4.2", features = ["derive"] }
 block = { path = "../block" }
 devices = { path = "../devices" }
 epoll = "4.4.0"
