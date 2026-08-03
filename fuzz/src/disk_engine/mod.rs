@@ -11,6 +11,7 @@
 
 mod executor;
 mod format;
+pub mod formats;
 mod image;
 mod model;
 mod program;
