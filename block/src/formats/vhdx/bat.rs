@@ -60,7 +60,7 @@ impl BatEntry {
             return Err(VhdxBatError::InvalidEntryCount);
         }
 
-        let mut bat: Vec<BatEntry> = Vec::with_capacity(bat_entry.length as usize);
+        let mut bat: Vec<BatEntry> = Vec::with_capacity(entry_count as usize);
         let offset = bat_entry.file_offset;
         for i in 0..entry_count {
             let mut entry = [0u8; size_of::<u64>()];
