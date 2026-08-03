@@ -318,6 +318,23 @@ mod unit_tests {
     }
 
     #[test]
+    fn new_rejects_footer_claiming_more_than_the_file_holds() {
+        let mut file: File = TempFile::new().unwrap().into_file();
+        let data_size: u64 = 0x1000;
+        file.set_len(data_size + 0x200).unwrap();
+        file.seek(SeekFrom::Start(data_size)).unwrap();
+
+        let mut footer = fixed_vhd_footer().to_vec();
+        // current_size, at offset 48, claims a terabyte.
+        footer[48..56].copy_from_slice(&(1u64 << 40).to_be_bytes());
+        file.write_all(&footer).unwrap();
+
+        let err = VhdDisk::new(file, false, false)
+            .expect_err("a footer larger than the file must be rejected");
+        assert_eq!(err.kind(), BlockErrorKind::Io);
+    }
+
+    #[test]
     fn resize_returns_error() {
         let file = make_vhd_file();
         let mut disk = VhdDisk::new(file, false, false).unwrap();

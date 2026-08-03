@@ -9,6 +9,9 @@ use std::os::unix::fs::FileExt;
 use crate::{AlignedFile, query_device_size};
 
 // Production code uses: cookie, file_format_version, data_offset,
+/// A VHD footer occupies the last sector of the file.
+pub(super) const VHD_FOOTER_LEN: u64 = 512;
+
 // current_size, disk_type. The remaining fields are parsed for VHD
 // spec completeness and exercised only by unit tests.
 #[derive(Clone, Copy)]
@@ -35,10 +38,10 @@ impl VhdFooter {
     pub(super) fn new(file: &mut File) -> io::Result<VhdFooter> {
         let aligned = AlignedFile::new(file.try_clone()?, true);
         let size = query_device_size(file)?.0;
-        let footer_offset = size.checked_sub(512).ok_or_else(|| {
+        let footer_offset = size.checked_sub(VHD_FOOTER_LEN).ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "file too small for VHD footer")
         })?;
-        let mut sector = [0u8; 512];
+        let mut sector = [0u8; VHD_FOOTER_LEN as usize];
         aligned.read_exact_at(&mut sector, footer_offset)?;
 
         Ok(VhdFooter {
