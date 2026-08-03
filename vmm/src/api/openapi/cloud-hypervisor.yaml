@@ -689,7 +689,7 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FsConfig"
-        generic-vhost-user:
+        generic_vhost_user:
           type: array
           items:
             $ref: "#/components/schemas/GenericVhostUserConfig"
