@@ -94,6 +94,12 @@ test = false
 
 [[bin]]
 doc = false
+name = "disk_vmdk"
+path = "fuzz_targets/disk_vmdk.rs"
+test = false
+
+[[bin]]
+doc = false
 name = "http_api"
 path = "fuzz_targets/http_api.rs"
 test = false
