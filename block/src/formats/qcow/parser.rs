@@ -917,6 +917,7 @@ mod unit_tests {
     use super::super::util::{self, ZERO_FLAG};
     use super::*;
     use crate::formats::qcow::{QcowDisk, QcowTempDisk};
+    use crate::test_util::require_direct_io;
 
     fn valid_header_v3() -> Vec<u8> {
         vec![
@@ -1212,6 +1213,30 @@ mod unit_tests {
             read_header_with_patched_backing(cluster_size - 16, 16).expect("Header should parse.");
         assert_eq!(header.backing_file_offset, cluster_size - 16);
         assert_eq!(header.backing_file_size, 16);
+    }
+
+    #[test]
+    fn raw_backing_file_uses_direct_io() {
+        require_direct_io!();
+        let tmp = TempFile::new().unwrap();
+        tmp.as_file().write_all(&[0u8; 4096]).unwrap();
+        let config = BackingFileConfig {
+            path: tmp.as_path().to_string_lossy().into_owned(),
+            format: Some(ImageType::Raw),
+        };
+
+        let backing = BackingFile::new(Some(&config), true, 1, false)
+            .unwrap()
+            .unwrap();
+        let (kind, _) = backing.into_kind();
+        let BackingKind::Raw(file) = kind else {
+            panic!("Expected raw backing file");
+        };
+
+        // SAFETY: file owns a valid descriptor for the duration of this call.
+        let flags = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFL) };
+        assert!(flags >= 0);
+        assert_ne!(flags & libc::O_DIRECT, 0);
     }
 
     /// Helper to create a test file with header extensions
