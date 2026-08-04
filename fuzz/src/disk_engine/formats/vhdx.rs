@@ -93,6 +93,14 @@ const REGION_SIZE: usize = 64 * 1024;
 /// (header.rs lines 138 and 214).
 const CHECKSUM_OFFSET: usize = 4;
 
+/// Signature of a VHDX `Header` structure, from `HEADER_SIGN`
+/// (block/src/formats/vhdx/header.rs:18).
+const HEADER_SIGNATURE: &[u8; 4] = b"head";
+
+/// Signature of a VHDX `RegionTableHeader`, from `REGION_SIGN`
+/// (block/src/formats/vhdx/header.rs:19).
+const REGION_SIGNATURE: &[u8; 4] = b"regi";
+
 /// The structures the parser checksums, as `(start, length)` pairs.
 const CHECKSUMMED: [(usize, usize); 4] = [
     (HEADER_1_START, HEADER_SIZE),
@@ -132,6 +140,40 @@ pub fn repair_checksums(image: &mut [u8]) {
     }
 }
 
+/// Restores the signatures that identify a VHDX file and its structures.
+///
+/// `VhdxHeader::new` tests four signatures before it verifies any checksum:
+/// the eight byte `vhdxfile` file type identifier at offset 0
+/// (block/src/formats/vhdx/header.rs:101), and the `head` and `regi`
+/// signatures at the start of each header and each region table
+/// (lines 134 and 210). A mutation that lands on one of them makes the image
+/// unopenable for a reason that has nothing to do with the structure it
+/// changed, and repairing the checksums does not help: the signature is
+/// checked first. Measured on a campaign corpus, 717 of 872 disk_vhdx entries
+/// failed the file type identifier alone.
+///
+/// Call this *before* [`repair_checksums`]: the header and region signatures
+/// are inside the checksummed areas.
+///
+/// Structures that do not fit in `image` are skipped, so this is safe to call
+/// on arbitrary, short or non VHDX buffers.
+pub fn restore_signatures(image: &mut [u8]) {
+    if let Some(sign) = image.get_mut(..FILE_SIGNATURE.len()) {
+        sign.copy_from_slice(FILE_SIGNATURE);
+    }
+
+    for (start, signature) in [
+        (HEADER_1_START, HEADER_SIGNATURE),
+        (HEADER_2_START, HEADER_SIGNATURE),
+        (REGION_TABLE_1_START, REGION_SIGNATURE),
+        (REGION_TABLE_2_START, REGION_SIGNATURE),
+    ] {
+        if let Some(sign) = image.get_mut(start..start + signature.len()) {
+            sign.copy_from_slice(signature);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -141,10 +183,12 @@ mod tests {
     use super::*;
     use crate::disk_engine::image::image_memfd;
 
-    fn qemu_vhdx() -> Option<Vec<u8>> {
+    // `name` keeps concurrently running tests off each other's image:
+    // qemu-img takes a lock on the file it creates.
+    fn qemu_vhdx(name: &str) -> Option<Vec<u8>> {
         let dir = std::env::temp_dir().join("vhdx-mutator-check");
         let _ = fs::create_dir_all(&dir);
-        let path = dir.join("seed.vhdx");
+        let path = dir.join(format!("{name}.vhdx"));
         let _ = fs::remove_file(&path);
         let status = Command::new("qemu-img")
             .args([
@@ -179,7 +223,7 @@ mod tests {
     // table entries, are checksum protected but otherwise unconstrained.
     #[test]
     fn repair_makes_a_mutated_structure_open_again() {
-        let Some(seed) = qemu_vhdx() else {
+        let Some(seed) = qemu_vhdx("checksum-repair") else {
             eprintln!("skipping: qemu-img unavailable");
             return;
         };
@@ -216,6 +260,82 @@ mod tests {
         for len in [0usize, 1, 4096, 100_000] {
             let mut buf = vec![0x5au8; len];
             repair_checksums(&mut buf);
+            restore_signatures(&mut buf);
         }
+    }
+
+    // The mutator writes the signatures back before recomputing the
+    // checksums, so a mutation that landed on one still reaches the parser.
+    //
+    // The headers and the region tables come in pairs and the parser accepts
+    // an image as long as one of each pair is valid, so a case that has to be
+    // rejected breaks both copies.
+    #[test]
+    fn restoring_the_signatures_rescues_a_mutated_image() {
+        let Some(seed) = qemu_vhdx("signature-restore") else {
+            eprintln!("skipping: qemu-img unavailable");
+            return;
+        };
+
+        for (label, offsets) in [
+            ("file type identifier", vec![0]),
+            ("header signatures", vec![HEADER_1_START, HEADER_2_START]),
+            (
+                "region table signatures",
+                vec![REGION_TABLE_1_START, REGION_TABLE_2_START],
+            ),
+        ] {
+            if offsets.iter().any(|o| *o >= seed.len()) {
+                continue;
+            }
+            let mut mutated = seed.clone();
+            for offset in &offsets {
+                mutated[*offset] ^= 0xff;
+            }
+            repair_checksums(&mut mutated);
+            assert!(
+                open_result(&mutated).is_err(),
+                "{label}: a broken signature must be rejected"
+            );
+
+            // The mutator's order: signatures first, checksums over them
+            // after.
+            restore_signatures(&mut mutated);
+            repair_checksums(&mut mutated);
+            assert!(
+                open_result(&mutated).is_ok(),
+                "{label}: a restored image must open again"
+            );
+        }
+    }
+
+    // Both rejection branches the mutator leaves reachable have to be
+    // reachable separately: a signature is tested before the checksum of the
+    // structure it introduces.
+    #[test]
+    fn the_unrepaired_fractions_reach_distinct_rejections() {
+        let Some(seed) = qemu_vhdx("rejection-branches") else {
+            eprintln!("skipping: qemu-img unavailable");
+            return;
+        };
+
+        // seed % 8 == 0: signatures left mutated, checksums recomputed.
+        let mut signature_branch = seed.clone();
+        signature_branch[HEADER_1_START] ^= 0xff;
+        signature_branch[HEADER_2_START] ^= 0xff;
+        repair_checksums(&mut signature_branch);
+        assert!(open_result(&signature_branch).is_err());
+
+        // seed % 8 == 1: signatures restored, checksums left mutated. The
+        // image is still identifiably a VHDX, which is what lets the parser
+        // get as far as the checksum test.
+        let mut checksum_branch = seed.clone();
+        checksum_branch[HEADER_1_START] ^= 0xff;
+        checksum_branch[HEADER_1_START + CHECKSUM_OFFSET] ^= 0xff;
+        checksum_branch[HEADER_2_START + CHECKSUM_OFFSET] ^= 0xff;
+        restore_signatures(&mut checksum_branch);
+        let err = open_result(&checksum_branch).expect_err("must be rejected");
+        println!("checksum branch: {err}");
+        assert!(Vhdx::magic_ok(&checksum_branch));
     }
 }

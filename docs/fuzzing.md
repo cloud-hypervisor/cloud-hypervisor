@@ -168,6 +168,33 @@ campaign corpora, 110 of 764 entries for `disk_vhd`, 265 of 872 for
 `disk_vhdx`, 1056 of 1198 for `disk_vmdk` and 1633 of 2129 for `disk_qcow2`,
 cover every region the full corpora cover.
 
+A checksum protected format needs one more thing: a custom mutator. `disk_vhd`
+and `disk_vhdx` both have one, because their parsers verify a signature and a
+checksum before they look at anything else, so a plain byte mutation is
+rejected at open and the fuzzer never reaches the structure it changed. Each
+target runs `libfuzzer_sys::fuzzer_mutate` and then restores the identifying
+bytes and recomputes the checksums over the result:
+
+| Target | What it restores | What it repairs | Why |
+| ------ | ---------------- | --------------- | --- |
+| `disk_vhdx` | the `vhdxfile` file type identifier and the `head` and `regi` signatures | the CRC-32C of both headers and both region tables | `VhdxHeader::new` refuses an image whose signatures or four checksums do not match |
+| `disk_vhd` | the `conectix` cookie in the last 512 bytes | the fixed VHD footer checksum, big endian | `VhdFooter::validate_fixed` refuses an image whose cookie or footer checksum does not match |
+
+The order matters: the identifying bytes sit inside the checksummed areas, so
+they are written first and the checksum is computed over them.
+
+The offsets and the algorithms are taken from the parser under test rather
+than from the specification, so the mutator and the code it feeds cannot
+disagree. Repair is necessary but not sufficient: the other validated fields
+still reject a mutation on their own merits. Neither repair is unconditional,
+so both rejection branches stay reachable and stay separable. One mutation in
+eight keeps its mutated magic with the checksums repaired, which is the only
+way to reach the signature branch with otherwise valid structures, and a
+different one in eight keeps its mutated checksum with the magic restored,
+which is the only way to reach the checksum branch at all, since the magic is
+tested first. Both targets still take arbitrary bytes, since the corpus
+holds images the mutator never produced.
+
 `disk_<format>_ops` builds its own valid image, so it needs no corpus:
 
 ```
@@ -245,4 +272,10 @@ never reach it. Then
 add the targets, the image target always and the operation target when there
 is a template, each a single call into the framework, and register them in
 `fuzz/Cargo.toml`.
+
+Finally give the image target something to start from: a `seed_<format>`
+function in `scripts/generate-fuzz-seeds.sh` and, when the format is magic
+heavy, a dictionary in `fuzz/dictionaries/`. If the parser checksums part of
+the image, add a repair function next to the adapter and a `fuzz_mutator!`
+that restores the magic and calls it, as `disk_vhd` and `disk_vhdx` do.
 
