@@ -417,6 +417,12 @@ impl QcowHeader {
                 }?;
             }
         }
+
+        // Everything below derives from the cluster size. Validate it before it is used.
+        if !(MIN_CLUSTER_BITS..=MAX_CLUSTER_BITS).contains(&header.cluster_bits) {
+            return Err(Error::InvalidClusterSize);
+        }
+
         if header.backing_file_size > MAX_BACKING_FILE_SIZE {
             return Err(Error::BackingFileTooLong(header.backing_file_size as usize));
         }
@@ -431,9 +437,7 @@ impl QcowHeader {
             ));
         }
         if header.backing_file_offset != 0 {
-            let cluster_size = 1u64
-                .checked_shl(header.cluster_bits)
-                .ok_or(Error::InvalidClusterSize)?;
+            let cluster_size = 1u64 << header.cluster_bits;
             if header.backing_file_offset < u64::from(header.header_size) {
                 return Err(Error::BackingFileOverlapsHeader(
                     header.backing_file_offset,
