@@ -293,10 +293,18 @@ impl QcowHeader {
         header: &mut QcowHeader,
         mut feature_table: Option<&mut Vec<(u8, String)>>,
     ) -> Result<()> {
-        // Extensions start directly after the header.
+        // Extensions start directly after the header and run to the end of
+        // the extension area: the backing file name when there is one, and
+        // otherwise the end of the first cluster.
         let mut offset = header.header_size as u64;
+        let cluster_size = 1u64 << header.cluster_bits;
+        let extension_area_end = if header.backing_file_offset != 0 {
+            header.backing_file_offset
+        } else {
+            cluster_size
+        };
 
-        loop {
+        while offset < extension_area_end {
             let mut field = [0u8; size_of::<ExtensionHeader>()];
             f.read_exact_at(&mut field, offset)
                 .map_err(Error::ReadingHeader)?;
@@ -310,6 +318,13 @@ impl QcowHeader {
             }
 
             let ext_length = extension.length.get();
+            if offset > extension_area_end || u64::from(ext_length) > extension_area_end - offset {
+                return Err(Error::HeaderExtensionTooLong(
+                    offset,
+                    ext_length,
+                    extension_area_end,
+                ));
+            }
 
             match ext_type {
                 HEADER_EXT_BACKING_FORMAT => {

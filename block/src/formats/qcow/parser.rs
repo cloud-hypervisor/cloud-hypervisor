@@ -66,6 +66,10 @@ pub enum Error {
     GettingFileSize(#[source] io::Error),
     #[error("Failed to get refcount")]
     GettingRefcount(#[source] refcount::Error),
+    #[error(
+        "Header extension at {0:#x} declares {1} bytes, past the extension area ending at {2:#x}"
+    )]
+    HeaderExtensionTooLong(u64, u32, u64),
     #[error("Failed to parse filename")]
     InvalidBackingFileName(#[source] str::Utf8Error),
     #[error("Invalid cluster index")]
@@ -1231,6 +1235,43 @@ mod unit_tests {
                 "cluster_bits {cluster_bits}: unexpected error {err:?}"
             );
         }
+    }
+
+    // A header extension states its own length, and that length sizes the
+    // buffer read for it. The code should reject value that is not bounded correctly.
+    #[test]
+    fn read_header_extensions_rejects_a_length_past_the_extension_area() {
+        let mut header = QcowHeader::create_for_size_and_path(3, 0x10_0000, None).unwrap();
+        let temp = TempFile::new().unwrap();
+        temp.as_file().set_len(2 << 30).unwrap();
+        let disk_file: AlignedFile = AlignedFile::new(temp.into_file(), false);
+        header.write_to(&disk_file).unwrap();
+
+        let cluster_size = 1u64 << header.cluster_bits;
+        let claim: u32 = 1 << 30;
+        let file_len = disk_file.metadata().unwrap().len();
+        assert!(
+            u64::from(claim) < file_len,
+            "the claim has to fit in the file for this to prove anything"
+        );
+        assert!(
+            u64::from(claim) > cluster_size,
+            "the claim has to exceed the extension area"
+        );
+
+        let mut ext = Vec::new();
+        ext.extend_from_slice(&HEADER_EXT_BACKING_FORMAT.to_be_bytes());
+        ext.extend_from_slice(&claim.to_be_bytes());
+        disk_file
+            .write_all_at(&ext, header.header_size as u64)
+            .unwrap();
+
+        let err = QcowHeader::read_header_extensions(&disk_file, &mut header, None)
+            .expect_err("an extension past the extension area must be rejected");
+        assert!(
+            matches!(err, Error::HeaderExtensionTooLong(..)),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[test]
