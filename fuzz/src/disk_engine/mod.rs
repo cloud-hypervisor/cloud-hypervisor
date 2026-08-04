@@ -41,7 +41,10 @@ mod image;
 mod model;
 mod program;
 
+use std::collections::{HashMap, HashSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use libfuzzer_sys::Corpus;
 
@@ -53,6 +56,63 @@ pub use crate::disk_engine::program::{
     default_program, Op, OpLen, OpOffset, Program, MAX_OPS, MAX_OP_LEN,
 };
 
+/// How many distinct inputs that fail [`DiskFormat::magic_ok`] a process
+/// keeps per length class.
+///
+/// Rejecting all of them would be wrong: a parser does real work before it
+/// looks at the magic. `VhdFooter::new` queries the device size, does the
+/// length arithmetic that finds the footer and computes the footer checksum,
+/// and `VhdxHeader::new` reads and checksums both headers, all before the
+/// signature test, and those paths are reached only by inputs that then fail
+/// it. Measured per region on the campaign corpora, dropping every non magic
+/// input loses 7 regions in `block` for `disk_vhd`, 3 for `disk_vhdx`, 9 for
+/// `disk_vmdk` and 2 for `disk_qcow2`, so the budget is what keeps those
+/// paths alive.
+const NON_MAGIC_BUDGET: usize = 8;
+
+/// Length class of an input, used to spread [`NON_MAGIC_BUDGET`] over input
+/// sizes rather than over arrival order.
+///
+/// A flat budget is not enough. What the code in front of a magic check
+/// branches on is the length: `FileTypeIdentifier::new` fails its eight byte
+/// read (block/src/formats/vhdx/header.rs:99) and the VMDK descriptor reader
+/// refuses a file shorter than four bytes
+/// (block/src/formats/vmdk/descriptor.rs:83) only for inputs far smaller than
+/// anything else in the corpus. A first come first served budget fills up
+/// with megabyte sized rejects and those regions go uncovered, which is
+/// measurable: a flat budget of 64 still lost exactly those two regions on
+/// the campaign corpora. Bucketing by binary magnitude keeps one of every
+/// size.
+fn length_class(len: usize) -> u32 {
+    usize::BITS - len.leading_zeros()
+}
+
+/// Decides whether an input that failed the magic check is worth keeping.
+///
+/// The budget is per process, per target and per length class, which is all
+/// libFuzzer needs: the point is to stop an unbounded number of near
+/// identical rejects from accumulating, not to pick the best ones.
+fn keep_non_magic(bytes: &[u8]) -> Corpus {
+    static SEEN: Mutex<Option<HashMap<u32, HashSet<u64>>>> = Mutex::new(None);
+
+    let mut hasher = DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    let digest = hasher.finish();
+
+    let Ok(mut guard) = SEEN.lock() else {
+        return Corpus::Reject;
+    };
+    let seen = guard
+        .get_or_insert_with(HashMap::new)
+        .entry(length_class(bytes.len()))
+        .or_default();
+    if seen.len() < NON_MAGIC_BUDGET && seen.insert(digest) {
+        Corpus::Keep
+    } else {
+        Corpus::Reject
+    }
+}
+
 /// Fuzzes the format parsers with `bytes` as the complete disk image.
 ///
 /// The image is materialized in a memfd, opened through the format adapter,
@@ -60,6 +120,13 @@ pub use crate::disk_engine::program::{
 /// executor runs without the shadow model and only checks the invariants that
 /// hold for any image (completion accounting, reported byte counts, stable
 /// reported size).
+///
+/// An input that does not carry the format's identifying bytes is still
+/// opened, so the code in front of the magic check stays covered, but it is
+/// only retained while the [`NON_MAGIC_BUDGET`] for its length class lasts. Without that, the corpus
+/// drowns in inputs that can never reach the parser: measured on a campaign
+/// corpus, 634 of the 666 disk_vhd rejections were the `conectix` cookie
+/// alone, and only 6 of 764 entries, 0.8%, opened at all.
 pub fn fuzz_image<F: DiskFormat>(bytes: &[u8]) -> Corpus {
     if bytes.len() > F::MAX_IMAGE_LEN {
         return Corpus::Reject;
@@ -76,15 +143,23 @@ pub fn fuzz_image<F: DiskFormat>(bytes: &[u8]) -> Corpus {
         let _ = block::detect_image_type(&mut probe);
     }
 
+    // The magic check is on the harness side, but the open is not: the
+    // parser's own rejection path is part of what this target fuzzes.
+    let verdict = if F::magic_ok(bytes) {
+        Corpus::Keep
+    } else {
+        keep_non_magic(bytes)
+    };
+
     let Ok(disk) = F::open(file, path.as_deref(), &OpenConfig::default()) else {
-        return Corpus::Keep;
+        return verdict;
     };
 
     if let Some(mut executor) = Executor::<F>::new(disk, 1, false) {
         executor.run(&default_program());
     }
 
-    Corpus::Keep
+    verdict
 }
 
 /// Fuzzes the engine op handling with an arbitrary program.
@@ -125,5 +200,38 @@ fn materialize<F: DiskFormat>(bytes: &[u8]) -> std::io::Result<(std::fs::File, O
         Ok((file, Some(path)))
     } else {
         Ok((image_memfd(F::NAME, bytes)?, None))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn length_classes_separate_magnitudes() {
+        assert_eq!(length_class(0), 0);
+        assert_eq!(length_class(1), 1);
+        assert_eq!(length_class(511), length_class(300));
+        assert_ne!(length_class(511), length_class(512));
+    }
+
+    // The budget has to be per length class: a run that sees a megabyte of
+    // rejects first must still keep the tiny inputs that reach the length
+    // checks in front of a magic check.
+    #[test]
+    fn the_non_magic_budget_is_per_length_class() {
+        let kept = |bytes: &[u8]| matches!(keep_non_magic(bytes), Corpus::Keep);
+
+        // Fill one class.
+        for i in 0..NON_MAGIC_BUDGET {
+            assert!(kept(&[i as u8; 4096]), "input {i} of the budget");
+        }
+        assert!(!kept(&[0xaa; 4096]), "the class budget is spent");
+        // A repeat of an input already seen is not kept either.
+        assert!(!kept(&[0u8; 4096]));
+
+        // A different magnitude has its own budget.
+        assert!(kept(b"1"), "a one byte input is a different class");
+        assert!(kept(b"12"));
     }
 }

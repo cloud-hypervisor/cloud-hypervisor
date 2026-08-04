@@ -126,6 +126,48 @@ The same limit is why `DiskFormat::MAX_IMAGE_LEN` is a per format constant:
 the harness rejects anything larger, and a format whose metadata reaches far
 into the file needs a bigger budget than the 8 MiB default.
 
+### Keeping the corpus openable
+
+A seeded corpus is not enough on its own, because libFuzzer keeps every input
+that found a new edge, including the ones that only found new edges in the
+rejection path. Measured on a campaign corpus, that is what the disk targets
+had become: 6 of 764 `disk_vhd` entries opened (0.8%), 17 of 872 `disk_vhdx`
+(1.9%) and 131 of 1198 `disk_vmdk` (10.9%). For VHD, 634 of the 666 rejections
+were the `conectix` cookie alone, so nearly the whole mutation budget was
+spent on byte strings that could never reach the parser.
+
+`DiskFormat::magic_ok` is the harness side mirror of the first check the
+parser makes, and `fuzz_image` uses it to decide what to retain:
+
+| Format | Magic | Parser check it mirrors |
+| ------ | ----- | ----------------------- |
+| qcow2 | `QFI\xfb` at offset 0 | `QcowHeader::new` |
+| VHDX | `vhdxfile` at offset 0 | `FileTypeIdentifier::new` |
+| fixed VHD | `conectix` at the start of the last 512 bytes | `VhdFooter::validate_fixed` |
+| flat VMDK | a first line of `# Disk DescriptorFile` | `parse_header` |
+
+An input that fails it is still opened, so the parser's own rejection path is
+still fuzzed, but it is returned as `Corpus::Reject` and never retained. It
+cannot be a blanket rejection, because a parser does real work before it looks
+at the magic: `VhdFooter::new` queries the device size, does the length
+arithmetic that finds the footer and computes the footer checksum, and
+`VhdxHeader::new` reads and checksums both headers, all before their signature
+tests. Those paths are reached by exactly the inputs that then fail the magic,
+and the cost of dropping them was measured per region on the campaign
+corpora: 7 `block` regions lost for `disk_vhd`, 3 for `disk_vhdx`, 9 for
+`disk_vmdk` and 2 for `disk_qcow2`.
+
+So the harness keeps a bounded number of them instead: 8 distinct inputs per
+length class, per process, where the class is the binary magnitude of the
+input length. The budget is per class rather than flat because what the code
+in front of a magic check branches on is the length, and the shortest inputs
+are the rarest: a flat budget of 64 still lost the eight byte read failure in
+`FileTypeIdentifier::new` and the four byte length check in the VMDK
+descriptor reader. With the per class budget the retained subsets of the
+campaign corpora, 110 of 764 entries for `disk_vhd`, 265 of 872 for
+`disk_vhdx`, 1056 of 1198 for `disk_vmdk` and 1633 of 2129 for `disk_qcow2`,
+cover every region the full corpora cover.
+
 `disk_<format>_ops` builds its own valid image, so it needs no corpus:
 
 ```
@@ -197,6 +239,9 @@ and which invariants hold for it: `NEEDS_PATH`, `MAX_IMAGE_LEN`,
 `COMPLETES_INLINE`, `PUNCH_HOLE_READS_ZEROES`, `FIXED_CAPACITY`,
 `CAPACITY_FILE_TAIL` and `NO_SHORT_READS`. Each defaults to the value that
 checks nothing, so a format only gains an invariant it can actually keep.
+Override `magic_ok` with the format's identifying bytes, mirroring the first
+check the parser makes, so the image target does not retain inputs that can
+never reach it. Then
 add the targets, the image target always and the operation target when there
 is a template, each a single call into the framework, and register them in
 `fuzz/Cargo.toml`.

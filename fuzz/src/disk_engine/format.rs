@@ -99,6 +99,26 @@ pub trait DiskFormat {
     /// shadow model instead of expecting zeroes.
     const PUNCH_HOLE_READS_ZEROES: bool = false;
 
+    /// Whether `bytes` carries the bytes that identify this format.
+    ///
+    /// This is the harness side mirror of the first check the parser makes,
+    /// and it exists so that [`fuzz_image`](super::fuzz_image) can tell
+    /// "this input is a mutation of an image of my format" from "this input
+    /// is a byte string that will never be one". An input that fails it is
+    /// still handed to [`DiskFormat::open`], because the code in front of the
+    /// magic check is worth covering, but it is only retained in the corpus
+    /// while the budget in [`fuzz_image`](super::fuzz_image) lasts.
+    ///
+    /// The default accepts everything, so a format that has no identifying
+    /// bytes keeps the old behaviour.
+    ///
+    /// Implementations must mirror the parser rather than the specification:
+    /// a check the parser does not make would drop inputs the parser would
+    /// have accepted.
+    fn magic_ok(_bytes: &[u8]) -> bool {
+        true
+    }
+
     /// Opens `file` as this format.
     ///
     /// `path` is `Some` only when [`DiskFormat::NEEDS_PATH`] is set; a memfd

@@ -20,6 +20,10 @@ use crate::disk_engine::format::{DiskFormat, OpenConfig};
 /// staying small enough to keep the shadow model cheap.
 const TEMPLATE_SIZE: u64 = 1 << 20;
 
+/// The magic every qcow image starts with, from `QCOW_MAGIC`
+/// (block/src/formats/qcow/header.rs:70), big endian on disk.
+const QCOW_MAGIC: &[u8; 4] = b"QFI\xfb";
+
 /// QCOW2 images, as opened by [`QcowDisk`].
 pub struct Qcow2;
 
@@ -41,6 +45,13 @@ impl DiskFormat for Qcow2 {
     // `None`: a sparse image holds only the clusters that were written, and
     // its file is routinely far smaller than the virtual disk size.
     const NO_SHORT_READS: bool = true;
+
+    // `QcowHeader::new` rejects an image whose first four bytes are not the
+    // QCOW magic (block/src/formats/qcow/header.rs:382, QCOW_MAGIC at line
+    // 70), before it reads any other field.
+    fn magic_ok(bytes: &[u8]) -> bool {
+        bytes.len() >= QCOW_MAGIC.len() && bytes[..QCOW_MAGIC.len()] == *QCOW_MAGIC
+    }
 
     fn open(
         file: File,

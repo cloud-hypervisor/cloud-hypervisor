@@ -18,6 +18,10 @@ use crate::disk_engine::image::scratch_dir;
 /// Size of each extent file the harness provides.
 const EXTENT_LEN: u64 = 1 << 20;
 
+/// The first line of every descriptor, from `VMDK_DESCRIPTOR_HEADER` in the
+/// parser under test (block/src/formats/vmdk/descriptor.rs:19).
+const DESCRIPTOR_HEADER: &str = "# Disk DescriptorFile";
+
 /// Extent names the harness creates in the scratch directory.
 ///
 /// A descriptor referring to one of these opens successfully and reaches the
@@ -100,6 +104,23 @@ impl DiskFormat for Vmdk {
     // A descriptor is a small text file; the data lives in the extents.
     const MAX_IMAGE_LEN: usize = 64 << 10;
 
+    // `parse_header` rejects a descriptor whose first line is not exactly
+    // "# Disk DescriptorFile" (block/src/formats/vmdk/descriptor.rs:133,
+    // VMDK_DESCRIPTOR_HEADER at line 19), and `read_descriptor` rejects one
+    // that is not UTF-8 (line 118). Both run before anything else is parsed.
+    //
+    // The parser compares the line with its trailing whitespace stripped, so
+    // this does too: a check the parser does not make would drop inputs it
+    // would have accepted.
+    fn magic_ok(bytes: &[u8]) -> bool {
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            return false;
+        };
+        text.lines()
+            .next()
+            .is_some_and(|line| line.trim_end() == DESCRIPTOR_HEADER)
+    }
+
     // Neither new invariant holds for a flat VMDK, so both keep their
     // conservative default.
     //
@@ -173,6 +194,19 @@ mod tests {
                 "{name} must be rejected"
             );
         }
+    }
+
+    // `magic_ok` decides whether a corpus entry is a descriptor at all, so it
+    // has to agree with the header line test the parser makes.
+    #[test]
+    fn magic_ok_tracks_the_descriptor_header() {
+        assert!(Vmdk::magic_ok(descriptor("image-flat.vmdk").as_bytes()));
+        // The parser trims trailing whitespace off the header line.
+        assert!(Vmdk::magic_ok(b"# Disk DescriptorFile \nversion=1\n"));
+        assert!(!Vmdk::magic_ok(b"# Disk Descriptor\n"));
+        assert!(!Vmdk::magic_ok(b"version=1\n# Disk DescriptorFile\n"));
+        assert!(!Vmdk::magic_ok(b""));
+        assert!(!Vmdk::magic_ok(&[0xff, 0xfe, 0xfd]));
     }
 
     #[test]
