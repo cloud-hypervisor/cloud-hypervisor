@@ -146,6 +146,7 @@ mod unit_tests {
 
     use vmm_sys_util::tempfile::TempFile;
 
+    use super::footer::checksummed_footer;
     use super::*;
     use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoOperation, OwnedIoBuffer};
     use crate::disk_file::{AsyncDiskFile, DiskSize, PhysicalSize, Resizable};
@@ -176,7 +177,8 @@ mod unit_tests {
         let data_size: u64 = 0x1122_3344;
         file.set_len(data_size + 0x200).unwrap();
         file.seek(SeekFrom::Start(data_size)).unwrap();
-        file.write_all(fixed_vhd_footer()).unwrap();
+        file.write_all(&checksummed_footer(fixed_vhd_footer()))
+            .unwrap();
         file
     }
 
