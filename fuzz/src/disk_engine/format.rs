@@ -50,6 +50,13 @@ pub trait DiskFormat {
     /// Whether a successful `punch_hole` makes the range read back as zeroes.
     const PUNCH_HOLE_READS_ZEROES: bool = false;
 
+    /// Whether `bytes` carry the format's identifying bytes, mirroring the
+    /// parser's first check. Other inputs are still opened, but only kept in
+    /// the corpus within a small budget.
+    fn magic_ok(_bytes: &[u8]) -> bool {
+        true
+    }
+
     /// Opens `file` as this format. `path` is `Some` only with `NEEDS_PATH`.
     fn open(
         file: File,

@@ -16,7 +16,10 @@ mod image;
 mod model;
 mod program;
 
+use std::collections::{HashMap, HashSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use block::ImageType;
 use libfuzzer_sys::Corpus;
@@ -28,6 +31,38 @@ pub use crate::disk_engine::model::Model;
 pub use crate::disk_engine::program::{
     default_program, Op, OpLen, OpOffset, Program, MAX_OPS, MAX_OP_LEN,
 };
+
+/// How many inputs failing [`DiskFormat::magic_ok`] are kept per length
+/// class. Parsers do work before the magic check, so some must be kept.
+const NON_MAGIC_BUDGET: usize = 8;
+
+/// Length class of an input, its binary magnitude, so the budget keeps short
+/// inputs too.
+fn length_class(len: usize) -> u32 {
+    usize::BITS - len.leading_zeros()
+}
+
+/// Whether to keep an input that failed the magic check.
+fn keep_non_magic(bytes: &[u8]) -> Corpus {
+    static SEEN: Mutex<Option<HashMap<u32, HashSet<u64>>>> = Mutex::new(None);
+
+    let mut hasher = DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    let digest = hasher.finish();
+
+    let Ok(mut guard) = SEEN.lock() else {
+        return Corpus::Reject;
+    };
+    let seen = guard
+        .get_or_insert_with(HashMap::new)
+        .entry(length_class(bytes.len()))
+        .or_default();
+    if seen.len() < NON_MAGIC_BUDGET && seen.insert(digest) {
+        Corpus::Keep
+    } else {
+        Corpus::Reject
+    }
+}
 
 /// Fuzzes a format parser with `bytes` as the image, then runs
 /// [`default_program`] without a model.
@@ -53,15 +88,22 @@ pub fn fuzz_image<F: DiskFormat>(bytes: &[u8]) -> Corpus {
         }
     }
 
+    // Inputs without the magic are still opened.
+    let verdict = if F::magic_ok(bytes) {
+        Corpus::Keep
+    } else {
+        keep_non_magic(bytes)
+    };
+
     let Ok(disk) = F::open(file, path.as_deref(), &OpenConfig::default()) else {
-        return Corpus::Keep;
+        return verdict;
     };
 
     if let Some(mut executor) = Executor::<F>::new(disk, 1, false) {
         executor.run(&default_program());
     }
 
-    Corpus::Keep
+    verdict
 }
 
 /// Fuzzes a format's I/O path with `program`, under the shadow model.
@@ -91,5 +133,36 @@ fn materialize<F: DiskFormat>(bytes: &[u8]) -> std::io::Result<(std::fs::File, O
         Ok((file, Some(path)))
     } else {
         Ok((image_memfd(F::NAME, bytes)?, None))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn length_classes_separate_magnitudes() {
+        assert_eq!(length_class(0), 0);
+        assert_eq!(length_class(1), 1);
+        assert_eq!(length_class(511), length_class(300));
+        assert_ne!(length_class(511), length_class(512));
+    }
+
+    // A megabyte of rejects must not use up the budget for tiny inputs.
+    #[test]
+    fn the_non_magic_budget_is_per_length_class() {
+        let kept = |bytes: &[u8]| matches!(keep_non_magic(bytes), Corpus::Keep);
+
+        // Fill one class.
+        for i in 0..NON_MAGIC_BUDGET {
+            assert!(kept(&[i as u8; 4096]), "input {i} of the budget");
+        }
+        assert!(!kept(&[0xaa; 4096]), "the class budget is spent");
+        // A repeat is not kept.
+        assert!(!kept(&[0u8; 4096]));
+
+        // A different magnitude has its own budget.
+        assert!(kept(b"1"), "a one byte input is a different class");
+        assert!(kept(b"12"));
     }
 }

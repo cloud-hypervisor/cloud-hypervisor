@@ -17,6 +17,9 @@ use crate::disk_engine::format::{DiskFormat, OpenConfig};
 /// Virtual size of the template.
 const TEMPLATE_SIZE: u64 = 1 << 20;
 
+/// `QCOW_MAGIC` as stored on disk.
+const QCOW_MAGIC: &[u8; 4] = b"QFI\xfb";
+
 /// QCOW2 images, as opened by [`QcowDisk`].
 pub struct Qcow2;
 
@@ -28,6 +31,11 @@ impl DiskFormat for Qcow2 {
 
     // An unallocated cluster is zero filled, never short.
     const NO_SHORT_READS: bool = true;
+
+    // Mirrors the `QCOW_MAGIC` test in `QcowHeader::new`.
+    fn magic_ok(bytes: &[u8]) -> bool {
+        bytes.len() >= QCOW_MAGIC.len() && bytes[..QCOW_MAGIC.len()] == *QCOW_MAGIC
+    }
 
     fn open(
         file: File,

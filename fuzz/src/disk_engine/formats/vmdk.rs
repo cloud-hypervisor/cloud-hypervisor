@@ -18,6 +18,9 @@ use crate::disk_engine::image::scratch_dir;
 /// Size of each extent file the harness provides.
 const EXTENT_LEN: u64 = 1 << 20;
 
+/// `VMDK_DESCRIPTOR_HEADER` in the parser.
+const DESCRIPTOR_HEADER: &str = "# Disk DescriptorFile";
+
 /// Extent names the harness creates and zeroes before every open.
 const EXTENTS: [&str; 6] = [
     "image-flat.vmdk",
@@ -73,6 +76,16 @@ impl DiskFormat for Vmdk {
 
     // A descriptor is a small text file; the data lives in the extents.
     const MAX_IMAGE_LEN: usize = 64 << 10;
+
+    // Mirrors `read_descriptor` and `parse_header`: UTF-8 and the header line.
+    fn magic_ok(bytes: &[u8]) -> bool {
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            return false;
+        };
+        text.lines()
+            .next()
+            .is_some_and(|line| line.trim_end() == DESCRIPTOR_HEADER)
+    }
 
     // No capacity or short read invariants: the data lives in extent files, and
     // an extent longer than its file reads short.
@@ -131,6 +144,18 @@ mod tests {
                 "{name} must be rejected"
             );
         }
+    }
+
+    // `magic_ok` must track the parser's header check.
+    #[test]
+    fn magic_ok_tracks_the_descriptor_header() {
+        assert!(Vmdk::magic_ok(descriptor("image-flat.vmdk").as_bytes()));
+        // The parser trims trailing whitespace off the header line.
+        assert!(Vmdk::magic_ok(b"# Disk DescriptorFile \nversion=1\n"));
+        assert!(!Vmdk::magic_ok(b"# Disk Descriptor\n"));
+        assert!(!Vmdk::magic_ok(b"version=1\n# Disk DescriptorFile\n"));
+        assert!(!Vmdk::magic_ok(b""));
+        assert!(!Vmdk::magic_ok(&[0xff, 0xfe, 0xfd]));
     }
 
     #[test]
