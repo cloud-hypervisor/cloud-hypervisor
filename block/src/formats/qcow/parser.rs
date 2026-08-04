@@ -882,7 +882,8 @@ mod unit_tests {
 
     use super::super::header::{
         AUTOCLEAR_FEATURES_OFFSET, DEFAULT_CLUSTER_BITS, DEFAULT_REFCOUNT_ORDER,
-        HEADER_EXT_BACKING_FORMAT, HEADER_EXT_END, V2_BARE_HEADER_SIZE, V3_BARE_HEADER_SIZE,
+        HEADER_EXT_BACKING_FORMAT, HEADER_EXT_END, MAX_CLUSTER_BITS, MIN_CLUSTER_BITS,
+        V2_BARE_HEADER_SIZE, V3_BARE_HEADER_SIZE,
     };
     use super::super::util::{self, ZERO_FLAG};
     use super::*;
@@ -1206,6 +1207,30 @@ mod unit_tests {
             .unwrap();
 
         (disk_file, header)
+    }
+
+    // The cluster size bounds the backing file name and the header extension
+    // area, so a value outside the format's limits has to be refused while the
+    // header is parsed rather than later: a shift that merely fits in a u64
+    // still yields a cluster size no image can honour.
+    #[test]
+    fn header_rejects_a_cluster_size_outside_the_format_limits() {
+        for cluster_bits in [MIN_CLUSTER_BITS - 1, MAX_CLUSTER_BITS + 1, 40] {
+            let header = QcowHeader::create_for_size_and_path(3, 0x10_0000, None).unwrap();
+            let disk_file: AlignedFile =
+                AlignedFile::new(TempFile::new().unwrap().into_file(), false);
+            header.write_to(&disk_file).unwrap();
+            disk_file
+                .write_all_at(&cluster_bits.to_be_bytes(), 20)
+                .unwrap();
+
+            let err = QcowHeader::new(&disk_file)
+                .expect_err("a cluster size outside the limits must be rejected");
+            assert!(
+                matches!(err, Error::InvalidClusterSize),
+                "cluster_bits {cluster_bits}: unexpected error {err:?}"
+            );
+        }
     }
 
     #[test]
