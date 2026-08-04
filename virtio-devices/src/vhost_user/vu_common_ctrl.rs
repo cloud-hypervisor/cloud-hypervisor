@@ -176,6 +176,9 @@ impl VhostUserHandle {
         // May run more than once on the same handle (resume after snapshot)
         self.queue_indexes.clear();
 
+        // Mask out any frontend only negotiated features
+        let acked_features = acked_features & self.backend_features;
+
         self.vu
             .set_features(acked_features)
             .map_err(Error::VhostUserSetFeatures)?;
