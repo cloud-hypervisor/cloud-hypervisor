@@ -160,6 +160,7 @@ mod unit_tests {
     use crate::formats::qcow::{
         BackingFileConfig, Error as QcowError, ImageType, QcowDisk, QcowHeader, QcowTempDisk,
     };
+    use crate::test_util::require_direct_io;
 
     const TEST_L1_L2_ADDR_MASK: u64 = 0x00ff_ffff_ffff_fe00;
     const TEST_HEADER_L1_TABLE_OFFSET: u64 = 40;
@@ -822,6 +823,7 @@ mod unit_tests {
 
     #[test]
     fn test_backing_file_read_direct_io() {
+        require_direct_io!();
         test_backing_file_read_impl(true);
     }
 
@@ -1057,6 +1059,7 @@ mod unit_tests {
 
     #[test]
     fn test_partial_write_after_write_zeroes_must_not_reintroduce_backing_data_direct_io() {
+        require_direct_io!();
         test_partial_write_after_write_zeroes_must_not_reintroduce_backing_data_impl(true);
     }
 
@@ -1125,6 +1128,7 @@ mod unit_tests {
 
     #[test]
     fn test_backing_file_read_qcow2_backing_direct_io() {
+        require_direct_io!();
         test_backing_file_read_qcow2_backing_impl(true);
     }
 
@@ -1226,6 +1230,7 @@ mod unit_tests {
 
     #[test]
     fn test_multi_queue_concurrent_reads_qcow2_backing_direct_io() {
+        require_direct_io!();
         test_multi_queue_concurrent_reads_qcow2_backing_impl(true);
     }
 
@@ -1318,6 +1323,7 @@ mod unit_tests {
 
     #[test]
     fn test_three_layer_backing_chain_direct_io() {
+        require_direct_io!();
         test_three_layer_backing_chain_impl(true);
     }
 
@@ -1384,6 +1390,7 @@ mod unit_tests {
 
     #[test]
     fn test_backing_cow_preserves_all_unwritten_clusters_direct_io() {
+        require_direct_io!();
         test_backing_cow_preserves_all_unwritten_clusters_impl(true);
     }
 
@@ -1427,6 +1434,7 @@ mod unit_tests {
 
     #[test]
     fn test_qcow2_backing_read_beyond_virtual_size_direct_io() {
+        require_direct_io!();
         test_qcow2_backing_read_beyond_virtual_size_impl(true);
     }
 
@@ -1479,6 +1487,7 @@ mod unit_tests {
 
     #[test]
     fn test_qcow2_backing_read_spanning_virtual_size_direct_io() {
+        require_direct_io!();
         test_qcow2_backing_read_spanning_virtual_size_impl(true);
     }
 
@@ -1533,6 +1542,7 @@ mod unit_tests {
 
     #[test]
     fn test_raw_backing_read_beyond_virtual_size_direct_io() {
+        require_direct_io!();
         test_raw_backing_read_beyond_virtual_size_impl(true);
     }
 
@@ -1587,6 +1597,7 @@ mod unit_tests {
 
     #[test]
     fn test_qcow2_backing_cross_cluster_read_direct_io() {
+        require_direct_io!();
         test_qcow2_backing_cross_cluster_read_impl(true);
     }
 
@@ -1656,6 +1667,7 @@ mod unit_tests {
 
     #[test]
     fn test_punch_hole_with_backing_fallthrough_direct_io() {
+        require_direct_io!();
         test_punch_hole_with_backing_fallthrough_impl(true);
     }
 
@@ -1761,6 +1773,7 @@ mod unit_tests {
 
     #[test]
     fn test_partial_cluster_write_with_backing_cow_direct_io() {
+        require_direct_io!();
         test_partial_cluster_write_with_backing_cow_impl(true);
     }
 
