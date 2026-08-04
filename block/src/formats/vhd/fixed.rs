@@ -58,13 +58,11 @@ impl FixedVhd {
             .map(|m| m.len())
             .map_err(crate::Error::GetFileMetadata)
     }
-}
 
-impl Clone for FixedVhd {
-    fn clone(&self) -> Self {
-        Self {
-            file: self.file.try_clone().expect("FixedVhd cloning failed"),
+    pub(super) fn try_clone(&self) -> io::Result<Self> {
+        Ok(Self {
+            file: self.file.try_clone()?,
             size: self.size,
-        }
+        })
     }
 }
