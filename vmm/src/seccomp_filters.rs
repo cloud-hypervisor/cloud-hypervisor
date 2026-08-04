@@ -690,6 +690,7 @@ fn vmm_thread_rules(
         (libc::SYS_getpgrp, vec![]),
         (libc::SYS_getpid, vec![]),
         (libc::SYS_getrandom, vec![]),
+        (libc::SYS_getsockname, vec![]),
         (libc::SYS_gettimeofday, vec![]),
         (libc::SYS_getuid, vec![]),
         (
@@ -764,6 +765,7 @@ fn vmm_thread_rules(
                 and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_UNIX as u64)?],
                 and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_INET as u64)?],
                 and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_INET6 as u64)?],
+                and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_NETLINK as u64)?],
             ],
         ),
         (libc::SYS_socketpair, vec![]),
@@ -1056,6 +1058,7 @@ fn event_monitor_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendE
 fn migration_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
     Ok(vec![
         (libc::SYS_accept4, vec![]),
+        (libc::SYS_bind, vec![]),
         (libc::SYS_brk, vec![]),
         (libc::SYS_clock_gettime, vec![]),
         (libc::SYS_clock_nanosleep, vec![]),
@@ -1071,6 +1074,7 @@ fn migration_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError
         (libc::SYS_futex, vec![]),
         (libc::SYS_getpid, vec![]),
         (libc::SYS_getrandom, vec![]),
+        (libc::SYS_getsockname, vec![]),
         (libc::SYS_ioctl, vec![]),
         (libc::SYS_lseek, vec![]),
         (libc::SYS_madvise, vec![]),
