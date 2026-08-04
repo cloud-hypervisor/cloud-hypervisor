@@ -54,10 +54,8 @@ pub struct Net {
 
 impl Net {
     /// Derive the guest-visible feature set from the backend-negotiated
-    /// features plus frontend-only bits that Cloud Hypervisor implements
-    /// locally, such as `VIRTIO_NET_F_MAC`, `VIRTIO_NET_F_STATUS`, and
-    /// `VIRTIO_NET_F_GUEST_ANNOUNCE`.
-    fn frontend_avail_features(backend_acked_features: u64) -> u64 {
+    /// features plus frontend-only bits that VMM implements.
+    fn guest_avail_features(backend_acked_features: u64) -> u64 {
         let mut guest_avail_features = backend_acked_features | (1 << VIRTIO_NET_F_MAC);
 
         // Guest announce is implemented by the frontend through config
@@ -146,7 +144,7 @@ impl Net {
             )
         } else {
             // Filling device and vring features VMM supports.
-            let mut avail_features = (1 << VIRTIO_NET_F_MRG_RXBUF)
+            let mut backend_avail_features = (1 << VIRTIO_NET_F_MRG_RXBUF)
                 | (1 << VIRTIO_NET_F_CTRL_VQ)
                 | (1 << VIRTIO_NET_F_GUEST_ANNOUNCE)
                 | (1 << VIRTIO_NET_F_MAC)
@@ -154,15 +152,15 @@ impl Net {
                 | DEFAULT_VIRTIO_FEATURES;
 
             if mtu.is_some() {
-                avail_features |= 1u64 << VIRTIO_NET_F_MTU;
+                backend_avail_features |= 1u64 << VIRTIO_NET_F_MTU;
             }
 
             // Configure TSO/UFO features when hardware checksum offload is enabled.
             if offload_csum {
-                avail_features |= (1 << VIRTIO_NET_F_CSUM) | (1 << VIRTIO_NET_F_GUEST_CSUM);
+                backend_avail_features |= (1 << VIRTIO_NET_F_CSUM) | (1 << VIRTIO_NET_F_GUEST_CSUM);
 
                 if offload_tso {
-                    avail_features |= (1 << VIRTIO_NET_F_HOST_ECN)
+                    backend_avail_features |= (1 << VIRTIO_NET_F_HOST_ECN)
                         | (1 << VIRTIO_NET_F_HOST_TSO4)
                         | (1 << VIRTIO_NET_F_HOST_TSO6)
                         | (1 << VIRTIO_NET_F_GUEST_ECN)
@@ -171,7 +169,8 @@ impl Net {
                 }
 
                 if offload_ufo {
-                    avail_features |= (1 << VIRTIO_NET_F_HOST_UFO) | (1 << VIRTIO_NET_F_GUEST_UFO);
+                    backend_avail_features |=
+                        (1 << VIRTIO_NET_F_HOST_UFO) | (1 << VIRTIO_NET_F_GUEST_UFO);
                 }
             }
 
@@ -186,8 +185,8 @@ impl Net {
                 | VhostUserProtocolFeatures::LOG_SHMFD
                 | VhostUserProtocolFeatures::DEVICE_STATE;
 
-            let (acked_features, acked_protocol_features) =
-                vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
+            let (backend_acked_features, acked_protocol_features) =
+                vu.negotiate_features_vhost_user(backend_avail_features, avail_protocol_features)?;
 
             let backend_num_queues =
                 if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
@@ -208,13 +207,13 @@ impl Net {
             // If the control queue feature has been negotiated, let's increase
             // the number of queues.
             let vu_num_queues = num_queues;
-            if acked_features & (1 << VIRTIO_NET_F_CTRL_VQ) != 0 {
+            if backend_acked_features & (1 << VIRTIO_NET_F_CTRL_VQ) != 0 {
                 num_queues += 1;
             }
 
             // Build the feature set that gets exposed to the guest. Some frontend available
             // features are dependent on the features the backend supports.
-            let guest_avail_features = Self::frontend_avail_features(acked_features);
+            let guest_avail_features = Self::guest_avail_features(backend_acked_features);
 
             (
                 guest_avail_features,
@@ -222,7 +221,7 @@ impl Net {
                 // the PROTOCOL_FEATURES bit must be already set through
                 // the VIRTIO acked features as we know the guest would
                 // never ack it, thus the feature would be lost.
-                acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits(),
+                backend_acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits(),
                 acked_protocol_features,
                 vu_num_queues,
                 config,
