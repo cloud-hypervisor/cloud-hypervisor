@@ -254,8 +254,10 @@ impl AsRawFd for Vhdx {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::os::unix::fs::FileExt;
 
     use super::*;
+    use crate::formats::vhdx::bat::PAYLOAD_BLOCK_FULLY_PRESENT;
     use crate::formats::vhdx::test_util::create_dynamic_vhdx;
 
     /// An unaligned sector write under a forced O_DIRECT alignment must go
@@ -362,5 +364,42 @@ mod tests {
         let buf = vec![0u8; vhdx.disk_spec.logical_sector_size as usize - 1];
         let err = vhdx.write(&buf).unwrap_err();
         assert_eq!(err.kind(), IoErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn write_with_bat_entry_in_header_area_is_rejected() {
+        let Some(tf) = create_dynamic_vhdx(16) else {
+            eprintln!(
+                "skipping write_with_bat_entry_in_header_area_is_rejected: qemu-img unavailable"
+            );
+            return;
+        };
+
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(tf.as_path())
+            .unwrap();
+        let mut vhdx = Vhdx::new(file, false).unwrap();
+
+        // Simulate a corrupt image: BAT entry 0 says "fully present at file
+        // offset 0", i.e. on top of the VHDX file header.
+        vhdx.bat_entries[0] = BatEntry(PAYLOAD_BLOCK_FULLY_PRESENT);
+
+        let data = [0x33u8; 512];
+        vhdx.seek(SeekFrom::Start(0)).unwrap();
+        let err = vhdx.write(&data).unwrap_err();
+        assert!(
+            err.to_string().contains("BAT entry file offset"),
+            "unexpected error: {err}"
+        );
+
+        // The file identifier must still be intact.
+        let mut signature = [0u8; 8];
+        vhdx.aligned
+            .file()
+            .read_exact_at(&mut signature, 0)
+            .unwrap();
+        assert_eq!(&signature, b"vhdxfile");
     }
 }
