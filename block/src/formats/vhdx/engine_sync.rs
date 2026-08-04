@@ -52,8 +52,8 @@ impl VhdxSync {
         let mut vhdx = self.vhdx_file.lock().unwrap();
         vhdx.seek(SeekFrom::Start(offset as u64))
             .map_err(AsyncIoError::WriteVectored)?;
-        let result = vhdx.write(&buf).map_err(AsyncIoError::WriteVectored)?;
-        Ok(result)
+        vhdx.write_all(&buf).map_err(AsyncIoError::WriteVectored)?;
+        Ok(buf.len())
     }
 }
 
