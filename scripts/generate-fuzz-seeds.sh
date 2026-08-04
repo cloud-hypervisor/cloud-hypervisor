@@ -93,6 +93,28 @@ seed_vmdk() {
     cp "$work/two.vmdk" "$out/twogb.vmdk"
 }
 
+# Writes the image type detection seeds: every image the per format seed
+# functions produced, in one directory. `detect_image_type` sniffs all four
+# formats in sequence, so its corpus wants an example of each, and a mutation
+# of one format's image is exactly what makes the sniffer look at the next
+# probe in the chain.
+seed_detect() {
+    local out="$CORPUS_DIR/disk_detect"
+    local dir name
+
+    mkdir -p "$out"
+    for dir in "$CORPUS_DIR"/disk_qcow2 "$CORPUS_DIR"/disk_vhd \
+        "$CORPUS_DIR"/disk_vhdx "$CORPUS_DIR"/disk_vmdk; do
+        [ -d "$dir" ] || continue
+        # This script runs with globbing off, so the file list comes from
+        # find. The names are prefixed with the format they came from, both
+        # to make the origin obvious and so that two formats cannot collide.
+        while IFS= read -r name; do
+            cp "$name" "$out/$(basename "$dir")-$(basename "$name")"
+        done < <(find "$dir" -maxdepth 1 -type f)
+    done
+}
+
 main() {
     if ! command -v "$QEMU_IMG" >/dev/null; then
         echo "error: $QEMU_IMG not found, install qemu-utils" >&2
@@ -106,6 +128,7 @@ main() {
     seed_vhd "$source"
     seed_vhdx "$source"
     seed_vmdk "$source"
+    seed_detect
 
     echo "seed corpora written under $CORPUS_DIR"
     du -sh "$CORPUS_DIR"

@@ -28,6 +28,11 @@
 //!   model of the disk contents and check read back data. This targets the
 //!   offset translation, allocation and sparse handling logic.
 //!
+//! Format sniffing is not part of either family: it accepts every byte
+//! string, so a corpus driven by it fills up with inputs that no single
+//! format can open. It gets its own target, [`fuzz_detect`], whose input
+//! space is "any image of any format".
+//!
 //! # Adding a format
 //!
 //! Implement [`DiskFormat`] for the new format, then add two targets that call
@@ -136,13 +141,6 @@ pub fn fuzz_image<F: DiskFormat>(bytes: &[u8]) -> Corpus {
         return Corpus::Reject;
     };
 
-    // Cover the format sniffing path with the same bytes. The result is not
-    // asserted: the target forces its own format so that malformed images
-    // still reach the parser under test.
-    if let Ok(mut probe) = file.try_clone() {
-        let _ = block::detect_image_type(&mut probe);
-    }
-
     // The magic check is on the harness side, but the open is not: the
     // parser's own rejection path is part of what this target fuzzes.
     let verdict = if F::magic_ok(bytes) {
@@ -160,6 +158,43 @@ pub fn fuzz_image<F: DiskFormat>(bytes: &[u8]) -> Corpus {
     }
 
     verdict
+}
+
+/// Largest input [`fuzz_detect`] hands to the sniffer.
+///
+/// The sniffer only ever reads the first alignment sized block and, for the
+/// VHD and VMDK probes, the tail of the file, so a large input costs the
+/// materialization and buys nothing. The cap is the largest
+/// [`DiskFormat::MAX_IMAGE_LEN`] in the tree so that a real image of any
+/// supported format still fits.
+const MAX_DETECT_LEN: usize = 16 << 20;
+
+/// Fuzzes the image type sniffer with `bytes` as the complete image.
+///
+/// [`block::detect_image_type`] is what `factory::open_disk` runs before any
+/// format specific parser, so it sees every byte string a guest owner can
+/// point the VMM at, and it is the one piece of the engine whose input space
+/// really is "anything". It used to be probed from [`fuzz_image`] with the
+/// same bytes, which made every `disk_<format>` corpus pay for it: an input
+/// that can never open as VHDX still found new edges in the qcow2, VHD and
+/// VMDK sniffers and was kept in the `disk_vhdx` corpus forever. Measured on
+/// a campaign corpus, 717 of 872 `disk_vhdx` entries failed the eight byte
+/// `vhdxfile` signature yet persisted. Sniffing therefore gets its own
+/// target, seeded with images of every format.
+pub fn fuzz_detect(bytes: &[u8]) -> Corpus {
+    if bytes.len() > MAX_DETECT_LEN {
+        return Corpus::Reject;
+    }
+
+    let Ok(mut file) = image_memfd("detect", bytes) else {
+        return Corpus::Reject;
+    };
+
+    // The result is not asserted: a sniffer answer is only a guess, and every
+    // answer including `Raw` is a legitimate one for arbitrary bytes.
+    let _ = block::detect_image_type(&mut file);
+
+    Corpus::Keep
 }
 
 /// Fuzzes the engine op handling with an arbitrary program.

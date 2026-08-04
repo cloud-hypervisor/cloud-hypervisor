@@ -72,6 +72,12 @@ test = false
 
 [[bin]]
 doc = false
+name = "disk_detect"
+path = "fuzz_targets/disk_detect.rs"
+test = false
+
+[[bin]]
+doc = false
 name = "disk_qcow2"
 path = "fuzz_targets/disk_qcow2.rs"
 test = false

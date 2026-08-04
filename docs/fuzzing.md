@@ -52,6 +52,19 @@ mix well in a single one:
 | `disk_<format>` | the whole input is the disk image | parser bugs: headers, tables, region descriptors |
 | `disk_<format>_ops` | an operation program run against a valid image | engine bugs: offset translation, allocation, discard, resize |
 
+One target sits outside that scheme. `disk_detect` drives
+`block::detect_image_type`, the sniffer `factory::open_disk` runs before it
+chooses a parser. Its input space is every format at once, so it cannot live
+inside a per format target: an input that finds a new edge in the VHD sniffer
+says nothing about the VHDX parser, and keeping it in the `disk_vhdx` corpus
+only spends that target's budget on images it can never open. Its seed corpus
+is the union of the per format seeds, which
+`scripts/generate-fuzz-seeds.sh` writes to `fuzz/corpus/disk_detect`:
+
+```
+cargo fuzz run disk_detect -j `nproc` -- -max_len=16777216
+```
+
 The formats covered today:
 
 | Format | Image target | Operation target |
