@@ -326,12 +326,14 @@ impl QcowHeader {
                 ));
             }
 
+            let data_offset = offset;
+            offset += u64::from(ext_length).next_multiple_of(8);
+
             match ext_type {
                 HEADER_EXT_BACKING_FORMAT => {
                     let mut format_bytes = vec![0u8; ext_length as usize];
-                    f.read_exact_at(&mut format_bytes, offset)
+                    f.read_exact_at(&mut format_bytes, data_offset)
                         .map_err(Error::ReadingHeader)?;
-                    offset += format_bytes.len() as u64;
                     let format_str = String::from_utf8(format_bytes)
                         .map_err(|err| Error::InvalidBackingFileName(err.utf8_error()))?;
                     if let Some(backing_file) = &mut header.backing_file {
@@ -341,9 +343,8 @@ impl QcowHeader {
                 HEADER_EXT_FEATURE_NAME_TABLE if feature_table.is_some() => {
                     const FEATURE_NAME_ENTRY_SIZE: usize = 1 + 1 + 46; // type + bit + name
                     let mut data = vec![0u8; ext_length as usize];
-                    f.read_exact_at(&mut data, offset)
+                    f.read_exact_at(&mut data, data_offset)
                         .map_err(Error::ReadingHeader)?;
-                    offset += data.len() as u64;
                     let table = feature_table.as_mut().unwrap();
                     for entry in data.as_chunks::<FEATURE_NAME_ENTRY_SIZE>().0 {
                         if entry[0] == FEAT_TYPE_INCOMPATIBLE {
@@ -356,14 +357,10 @@ impl QcowHeader {
                     }
                 }
                 _ => {
-                    // Skip unknown extension
-                    offset += ext_length as u64;
+                    // An unknown extension is skipped: the offset already
+                    // points past it.
                 }
             }
-
-            // Skip to the next 8 byte boundary
-            let padding = (8 - (ext_length % 8)) % 8;
-            offset += padding as u64;
         }
 
         Ok(())
