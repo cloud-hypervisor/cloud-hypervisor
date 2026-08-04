@@ -28,6 +28,21 @@ pub struct Vhd;
 impl DiskFormat for Vhd {
     const NAME: &'static str = "vhd";
 
+    // A fixed VHD is the disk data followed by the 512 byte hard disk
+    // footer, so the capacity the footer states cannot exceed the file
+    // length less that footer. `FixedVhd::new` rejects an image where it
+    // does (block/src/formats/vhd/fixed.rs:27), and this is the harness
+    // side guard on that check.
+    const CAPACITY_FILE_TAIL: Option<u64> = Some(512);
+
+    // Reads go through `RawSync`, which serves them with a single `preadv`
+    // on the image file (block/src/formats/raw/engine_sync.rs:55), after
+    // `FixedVhdSync` has bounded the request by the capacity
+    // (block/src/formats/vhd/engine_sync.rs:35). A `preadv` only comes up
+    // short at end of file, and the capacity check above keeps every byte
+    // below the capacity inside the file, so it cannot.
+    const NO_SHORT_READS: bool = true;
+
     fn open(
         file: File,
         _path: Option<&Path>,

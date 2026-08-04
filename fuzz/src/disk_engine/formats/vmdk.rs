@@ -100,6 +100,20 @@ impl DiskFormat for Vmdk {
     // A descriptor is a small text file; the data lives in the extents.
     const MAX_IMAGE_LEN: usize = 64 << 10;
 
+    // Neither new invariant holds for a flat VMDK, so both keep their
+    // conservative default.
+    //
+    // The capacity is the sum of the extent sizes the descriptor declares,
+    // and the data lives in those separate files rather than in the image
+    // file, so `physical_size` says nothing about it.
+    //
+    // A read can legitimately come up short: an extent declared longer than
+    // the file behind it makes the buffered path stop at end of file
+    // (block/src/formats/vmdk/engine_sync.rs:100) and the spanning path
+    // break out of its loop (block/src/formats/vmdk/engine_sync.rs:180),
+    // both reporting the partial count as a success. A fuzzed descriptor
+    // declares extent sizes freely, so this is reachable by construction.
+
     fn open(
         file: File,
         path: Option<&Path>,

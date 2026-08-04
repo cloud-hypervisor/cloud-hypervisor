@@ -64,6 +64,34 @@ pub trait DiskFormat {
     /// raw images, set this to `false` and lose the capacity invariants.
     const FIXED_CAPACITY: bool = true;
 
+    /// How the image file backs the capacity the format advertises.
+    ///
+    /// `Some(tail)` says the disk data lives directly in the image file,
+    /// followed by `tail` bytes of trailing metadata, so a capacity larger
+    /// than `physical_size() - tail` is storage that does not exist: a read
+    /// inside it cannot be served and a write inside it grows the file past
+    /// what was provisioned. A fixed VHD is exactly that layout, with a 512
+    /// byte footer.
+    ///
+    /// `None`, the default, makes no claim. It is the only sound value for a
+    /// sparse format such as qcow2 or VHDX, whose file holds only the
+    /// allocated clusters, and for a multi file format such as flat VMDK,
+    /// whose data lives in extent files that the image file merely names.
+    const CAPACITY_FILE_TAIL: Option<u64> = None;
+
+    /// Whether a read the engine accepted and completed successfully always
+    /// transfers the whole requested length.
+    ///
+    /// A block backend has no way to tell its caller which bytes of a partly
+    /// filled buffer are real, so a short read that reports success leaves
+    /// the guest reading whatever its buffer held before. Formats whose read
+    /// path is all-or-error, or which fill unallocated ranges themselves, set
+    /// this and get the check. The default is off because a read served
+    /// straight from a file can legitimately stop at end of file.
+    ///
+    /// Reads only: the check says nothing about writes.
+    const NO_SHORT_READS: bool = false;
+
     /// Whether a successful `punch_hole` guarantees that the range reads back
     /// as zeroes.
     ///

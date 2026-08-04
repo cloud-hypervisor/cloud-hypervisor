@@ -11,9 +11,13 @@
 //!
 //! - an accepted op produces exactly one completion, carrying its own
 //!   `user_data`, and a rejected op produces none;
-//! - a completion never reports more bytes than were requested;
+//! - a completion never reports more bytes than were requested, and a
+//!   successfully completed read transfers all of them, for a format that
+//!   promises no short reads;
 //! - a format with a fixed capacity never reports a different size unless a
 //!   resize succeeded, and never transfers bytes beyond that size;
+//! - a format whose data lives in the image file never advertises more
+//!   capacity than the file can hold;
 //! - read back data matches the shadow model, when one is available.
 
 use std::marker::PhantomData;
@@ -64,7 +68,7 @@ impl<F: DiskFormat> Executor<F> {
         let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MAX_OP_LEN)]).ok()?;
         let model = (with_model && size <= MAX_MODEL_LEN).then(|| Model::new(size as usize));
 
-        Some(Self {
+        let executor = Self {
             disk,
             clone: None,
             io,
@@ -73,7 +77,10 @@ impl<F: DiskFormat> Executor<F> {
             model,
             user_data: 0,
             format: PhantomData,
-        })
+        };
+        executor.check_capacity_backing();
+
+        Some(executor)
     }
 
     /// Runs up to [`MAX_OPS`] ops.
@@ -117,7 +124,7 @@ impl<F: DiskFormat> Executor<F> {
         let Some(completion) = self.submit(op, user_data) else {
             return;
         };
-        let Some(done) = self.transferred(&completion, offset, len) else {
+        let Some(done) = self.read_transferred(&completion, offset, len) else {
             return;
         };
         let Some(buffer) = completion.buffer.as_ref() else {
@@ -153,7 +160,7 @@ impl<F: DiskFormat> Executor<F> {
         let Some(completion) = self.submit(op, user_data) else {
             return;
         };
-        let Some(done) = self.transferred(&completion, offset, len) else {
+        let Some(done) = self.read_transferred(&completion, offset, len) else {
             return;
         };
 
@@ -273,6 +280,7 @@ impl<F: DiskFormat> Executor<F> {
         }
 
         let _ = self.disk.physical_size();
+        self.check_capacity_backing();
         let _ = self.disk.topology();
         let _ = self.disk.supports_sparse_operations();
         let _ = self.disk.supports_zero_flag();
@@ -355,6 +363,52 @@ impl<F: DiskFormat> Executor<F> {
         }
 
         Some(done)
+    }
+
+    /// Returns how many bytes a completed read transferred.
+    ///
+    /// Only a read the engine both accepted and completed successfully
+    /// reaches the short read check: a rejected op returns before this, and a
+    /// failed one returns `None` from [`Executor::transferred`].
+    fn read_transferred(
+        &self,
+        completion: &AsyncIoCompletion,
+        offset: u64,
+        len: usize,
+    ) -> Option<usize> {
+        let done = self.transferred(completion, offset, len)?;
+
+        if F::NO_SHORT_READS {
+            assert_eq!(
+                done,
+                len,
+                "{}: read at offset {offset} transferred {done} of the {len} bytes requested",
+                F::NAME
+            );
+        }
+
+        Some(done)
+    }
+
+    /// Checks the advertised capacity against the file that holds it.
+    ///
+    /// Only a format that claims the layout is checked, and only when the
+    /// engine answers both queries: an engine that fails a size query has
+    /// made no claim to contradict.
+    fn check_capacity_backing(&self) {
+        let Some(tail) = F::CAPACITY_FILE_TAIL else {
+            return;
+        };
+        let (Ok(logical), Ok(physical)) = (self.disk.logical_size(), self.disk.physical_size())
+        else {
+            return;
+        };
+
+        assert!(
+            logical.saturating_add(tail) <= physical,
+            "{}: capacity {logical} plus a {tail} byte tail exceeds the {physical} byte image file",
+            F::NAME
+        );
     }
 
     fn guest_target(&self, len: usize) -> Option<GuestMemoryTarget> {

@@ -31,6 +31,17 @@ impl DiskFormat for Qcow2 {
     // backing files, so the guarantee holds.
     const PUNCH_HOLE_READS_ZEROES: bool = true;
 
+    // A qcow2 read reports the whole requested length or fails:
+    // `QcowSync::read_operation` returns `total_len`
+    // (block/src/formats/qcow/engine_sync.rs:67), because an unallocated
+    // cluster is filled with zeroes by the scatter read rather than left
+    // short.
+    //
+    // The capacity is not file backed, so `CAPACITY_FILE_TAIL` stays
+    // `None`: a sparse image holds only the clusters that were written, and
+    // its file is routinely far smaller than the virtual disk size.
+    const NO_SHORT_READS: bool = true;
+
     fn open(
         file: File,
         _path: Option<&Path>,
