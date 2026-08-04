@@ -4,6 +4,7 @@
 
 use std::fs::File;
 use std::io;
+use std::ops::Range;
 use std::os::unix::fs::FileExt;
 
 use crate::{AlignedFile, query_device_size};
@@ -24,6 +25,33 @@ const VHD_FIXED_DATA_OFFSET: u64 = 0xffff_ffff_ffff_ffff;
 /// Disk type 2 is a fixed hard disk (3 is dynamic, 4 differencing).
 const VHD_DISK_TYPE_FIXED: u32 = 2;
 
+/// The checksum field, at offset 64, covers the whole footer.
+const VHD_CHECKSUM_RANGE: Range<usize> = 64..68;
+
+/// The footer checksum: the one's complement of the sum of the footer
+/// bytes with the checksum field itself taken as zero.
+fn footer_checksum(sector: &[u8; VHD_FOOTER_LEN as usize]) -> u32 {
+    let sum = sector
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !VHD_CHECKSUM_RANGE.contains(i))
+        .fold(0u32, |acc, (_, b)| acc.wrapping_add(u32::from(*b)));
+
+    !sum
+}
+
+/// Build a 512 byte footer from `template`, zero padded, carrying the
+/// checksum the specification defines for it.
+#[cfg(test)]
+pub(super) fn checksummed_footer(template: &[u8]) -> Vec<u8> {
+    let mut sector = [0u8; VHD_FOOTER_LEN as usize];
+    sector[..template.len()].copy_from_slice(template);
+    let checksum = footer_checksum(&sector);
+    sector[VHD_CHECKSUM_RANGE].copy_from_slice(&checksum.to_be_bytes());
+
+    sector.to_vec()
+}
+
 // Production code uses: cookie, file_format_version, data_offset,
 // current_size, disk_type. The remaining fields are parsed for VHD
 // spec completeness and exercised only by unit tests.
@@ -43,6 +71,7 @@ pub(super) struct VhdFooter {
     disk_geometry: u32,
     disk_type: u32,
     checksum: u32,
+    computed_checksum: u32,
     unique_id: u128,
     saved_state: u8,
 }
@@ -71,6 +100,7 @@ impl VhdFooter {
             disk_geometry: u32::from_be_bytes(sector[56..60].try_into().unwrap()),
             disk_type: u32::from_be_bytes(sector[60..64].try_into().unwrap()),
             checksum: u32::from_be_bytes(sector[64..68].try_into().unwrap()),
+            computed_checksum: footer_checksum(&sector),
             unique_id: u128::from_be_bytes(sector[68..84].try_into().unwrap()),
             saved_state: u8::from_be_bytes(sector[84..85].try_into().unwrap()),
         })
@@ -153,6 +183,12 @@ impl VhdFooter {
                 self.disk_type
             )));
         }
+        if self.checksum != self.computed_checksum {
+            return Err(invalid_data(format!(
+                "VHD footer checksum is {:#010x}, computed {:#010x}",
+                self.checksum, self.computed_checksum
+            )));
+        }
 
         Ok(())
     }
@@ -189,7 +225,7 @@ mod unit_tests {
 
     use vmm_sys_util::tempfile::TempFile;
 
-    use super::{VhdFooter, is_fixed_vhd};
+    use super::{VhdFooter, checksummed_footer, is_fixed_vhd};
 
     fn valid_fixed_vhd_footer() -> Vec<u8> {
         vec![
@@ -247,41 +283,68 @@ mod unit_tests {
 
     #[test]
     fn test_check_vhd_footer() {
-        with_file(&valid_fixed_vhd_footer(), |mut file: File| {
-            let vhd_footer = VhdFooter::new(&mut file).expect("Failed to create VHD footer");
-            assert_eq!(vhd_footer.cookie(), 0x636f_6e65_6374_6978);
-            assert_eq!(vhd_footer.features(), 0x0000_0002);
-            assert_eq!(vhd_footer.file_format_version(), 0x0001_0000);
-            assert_eq!(vhd_footer.data_offset(), 0xffff_ffff_ffff_ffff);
-            assert_eq!(vhd_footer.time_stamp(), 0x27a6_a65d);
-            assert_eq!(vhd_footer.creator_application(), 0x7165_6d75);
-            assert_eq!(vhd_footer.creator_version(), 0x0005_0003);
-            assert_eq!(vhd_footer.creator_host_os(), 0x5769_326b);
-            assert_eq!(vhd_footer.original_size(), 0x0000_0000_1000_0000);
-            assert_eq!(vhd_footer.current_size(), 0x0000_0000_1000_0000);
-            assert_eq!(vhd_footer.disk_geometry(), 0x11e0_103f);
-            assert_eq!(vhd_footer.disk_type(), 0x0000_0002);
-            assert_eq!(vhd_footer.checksum(), 0x0000_0000);
-            assert_eq!(
-                vhd_footer.unique_id(),
-                0x987b_b1cd_8414_41fc_a4ab_d069_452b_f223
-            );
-            assert_eq!(vhd_footer.saved_state(), 0x00);
-        });
+        with_file(
+            &checksummed_footer(&valid_fixed_vhd_footer()),
+            |mut file: File| {
+                let vhd_footer = VhdFooter::new(&mut file).expect("Failed to create VHD footer");
+                assert_eq!(vhd_footer.cookie(), 0x636f_6e65_6374_6978);
+                assert_eq!(vhd_footer.features(), 0x0000_0002);
+                assert_eq!(vhd_footer.file_format_version(), 0x0001_0000);
+                assert_eq!(vhd_footer.data_offset(), 0xffff_ffff_ffff_ffff);
+                assert_eq!(vhd_footer.time_stamp(), 0x27a6_a65d);
+                assert_eq!(vhd_footer.creator_application(), 0x7165_6d75);
+                assert_eq!(vhd_footer.creator_version(), 0x0005_0003);
+                assert_eq!(vhd_footer.creator_host_os(), 0x5769_326b);
+                assert_eq!(vhd_footer.original_size(), 0x0000_0000_1000_0000);
+                assert_eq!(vhd_footer.current_size(), 0x0000_0000_1000_0000);
+                assert_eq!(vhd_footer.disk_geometry(), 0x11e0_103f);
+                assert_eq!(vhd_footer.disk_type(), 0x0000_0002);
+                assert_eq!(vhd_footer.checksum(), 0xffff_e5e5);
+                assert_eq!(
+                    vhd_footer.unique_id(),
+                    0x987b_b1cd_8414_41fc_a4ab_d069_452b_f223
+                );
+                assert_eq!(vhd_footer.saved_state(), 0x00);
+            },
+        );
     }
 
     #[test]
     fn test_is_fixed_vhd() {
+        with_file(
+            &checksummed_footer(&valid_fixed_vhd_footer()),
+            |mut file: File| {
+                assert!(is_fixed_vhd(&mut file).unwrap());
+            },
+        );
+    }
+
+    #[test]
+    fn test_is_fixed_vhd_rejects_a_bad_checksum() {
+        let mut footer = checksummed_footer(&valid_fixed_vhd_footer());
+        let stored = u32::from_be_bytes(footer[64..68].try_into().unwrap());
+        footer[64..68].copy_from_slice(&stored.wrapping_add(1).to_be_bytes());
+
+        with_file(&footer, |mut file: File| {
+            assert!(!is_fixed_vhd(&mut file).unwrap());
+        });
+    }
+
+    #[test]
+    fn test_is_fixed_vhd_rejects_an_unset_checksum() {
         with_file(&valid_fixed_vhd_footer(), |mut file: File| {
-            assert!(is_fixed_vhd(&mut file).unwrap());
+            assert!(!is_fixed_vhd(&mut file).unwrap());
         });
     }
 
     #[test]
     fn test_is_not_fixed_vhd() {
-        with_file(&valid_dynamic_vhd_footer(), |mut file: File| {
-            assert!(!(is_fixed_vhd(&mut file).unwrap()));
-        });
+        with_file(
+            &checksummed_footer(&valid_dynamic_vhd_footer()),
+            |mut file: File| {
+                assert!(!(is_fixed_vhd(&mut file).unwrap()));
+            },
+        );
     }
 
     #[test]
