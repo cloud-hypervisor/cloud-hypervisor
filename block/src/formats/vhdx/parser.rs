@@ -247,10 +247,10 @@ impl Vhdx {
     }
 }
 
-impl Clone for Vhdx {
-    fn clone(&self) -> Self {
-        Vhdx {
-            aligned: self.aligned.try_clone().unwrap(),
+impl Vhdx {
+    pub fn try_clone(&self) -> IoResult<Vhdx> {
+        Ok(Vhdx {
+            aligned: self.aligned.try_clone()?,
             vhdx_header: self.vhdx_header.clone(),
             region_entries: self.region_entries.clone(),
             bat_entry: self.bat_entry,
@@ -259,7 +259,7 @@ impl Clone for Vhdx {
             bat_entries: self.bat_entries.clone(),
             current_offset: self.current_offset,
             first_write: self.first_write,
-        }
+        })
     }
 }
 
