@@ -17,6 +17,8 @@ use crate::aligned_file::AlignedFile;
 pub enum VhdxIoError {
     #[error("Invalid BAT entry state")]
     InvalidBatEntryState,
+    #[error("Invalid BAT entry file offset: payload block inside the header area")]
+    InvalidBatFileOffset,
     #[error("Invalid BAT entry count")]
     InvalidBatIndex,
     #[error("Buffer length does not match the requested sector count")]
@@ -194,7 +196,7 @@ pub(super) fn write(
                 BatEntry::write_bat_entries(f, bat_offset, bat).map_err(VhdxIoError::WriteBat)?;
 
                 if file_offset < metadata::BLOCK_SIZE_MIN as u64 {
-                    break;
+                    return Err(VhdxIoError::InvalidBatFileOffset);
                 }
 
                 f.write_all_at(
@@ -205,7 +207,7 @@ pub(super) fn write(
             }
             bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
                 if sector.file_offset < metadata::BLOCK_SIZE_MIN as u64 {
-                    break;
+                    return Err(VhdxIoError::InvalidBatFileOffset);
                 }
 
                 f.write_all_at(
@@ -297,6 +299,26 @@ mod tests {
         let err = read(&f, &mut buf, &disk_spec, &bat, 0, 1).unwrap_err();
 
         assert!(matches!(err, VhdxIoError::InvalidBufferLength));
+    }
+
+    #[test]
+    fn write_rejects_bat_entry_pointing_into_header_area() {
+        let (f, mut disk_spec, mut bat) = fixture();
+
+        // Fully present, file offset 0: on top of the file header.
+        bat[0] = BatEntry(bat::PAYLOAD_BLOCK_FULLY_PRESENT);
+
+        let data = vec![0xCDu8; SECTOR_SIZE as usize];
+        let err = write(&f, &data, &mut disk_spec, 0, &mut bat, 0, 1).unwrap_err();
+        assert!(
+            matches!(err, VhdxIoError::InvalidBatFileOffset),
+            "expected InvalidBatFileOffset, got {err:?}"
+        );
+
+        // The header area must not have been written to.
+        let mut header = [0u8; 16];
+        f.file().read_exact_at(&mut header, 0).unwrap();
+        assert_eq!(header, [0u8; 16]);
     }
 
     #[test]
