@@ -110,8 +110,13 @@ impl disk_file::DiskFile for VhdDisk {}
 
 impl disk_file::AsyncDiskFile for VhdDisk {
     fn try_clone(&self) -> BlockResult<Box<dyn disk_file::AsyncDiskFile>> {
+        let inner = self.inner.try_clone().map_err(|e| {
+            BlockError::new(BlockErrorKind::Io, DiskFileError::Clone(e))
+                .with_op(ErrorOp::DupBackingFd)
+        })?;
+
         Ok(Box::new(VhdDisk {
-            inner: self.inner.clone(),
+            inner,
             use_io_uring: self.use_io_uring,
             direct: self.direct,
         }))
