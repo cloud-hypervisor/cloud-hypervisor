@@ -199,9 +199,12 @@ pub(super) fn write(
                     return Err(VhdxIoError::InvalidBatFileOffset);
                 }
 
+                // The BAT entry addresses the start of the payload block;
+                // the sector's data lives at its own offset within that
+                // block, not at the block base.
                 f.write_all_at(
                     &buf[write_count..(write_count + sector.free_bytes as usize)],
-                    file_offset,
+                    file_offset + sector.block_offset,
                 )
                 .map_err(VhdxIoError::ReadSectorBlock)?;
             }
@@ -289,6 +292,53 @@ mod tests {
         let mut readback = vec![0u8; SECTOR_SIZE as usize];
         f.file().read_exact_at(&mut readback, DATA_OFFSET).unwrap();
         assert_eq!(readback, data);
+    }
+
+    // A block that spans several sectors and a BAT that says the block is
+    // not allocated yet, so a write has to allocate it first.
+    fn unallocated_block_fixture() -> (AlignedFile, DiskSpec, Vec<BatEntry>) {
+        const SECTORS_PER_BLOCK: u64 = 4;
+        let block_size = SECTORS_PER_BLOCK * SECTOR_SIZE;
+
+        let disk_spec = DiskSpec {
+            sectors_per_block: SECTORS_PER_BLOCK as u32,
+            logical_sector_size: SECTOR_SIZE as u32,
+            virtual_disk_size: block_size,
+            // Anything the allocator appends lands at or beyond DATA_OFFSET,
+            // which is above BLOCK_SIZE_MIN.
+            image_size: DATA_OFFSET,
+            block_size: block_size as u32,
+            ..Default::default()
+        };
+
+        let file = TempFile::new().unwrap().into_file();
+        file.set_len(DATA_OFFSET).unwrap();
+        let bat = vec![BatEntry(bat::PAYLOAD_BLOCK_NOT_PRESENT)];
+        (AlignedFile::new(file, false), disk_spec, bat)
+    }
+
+    #[test]
+    fn write_allocating_a_block_honours_the_sector_offset() {
+        let (f, mut disk_spec, mut bat) = unallocated_block_fixture();
+
+        // Sector 1: the second sector of the (still unallocated) block.
+        let data = vec![0xBBu8; SECTOR_SIZE as usize];
+        let n = write(&f, &data, &mut disk_spec, 0, &mut bat, 1, 1).unwrap();
+        assert_eq!(n, SECTOR_SIZE as usize);
+
+        // The data must come back from the sector it was written to...
+        let mut readback = vec![0u8; SECTOR_SIZE as usize];
+        let n = read(&f, &mut readback, &disk_spec, &bat, 1, 1).unwrap();
+        assert_eq!(n, SECTOR_SIZE as usize);
+        assert_eq!(readback, data, "data not readable at the offset written");
+
+        // ... and must not have clobbered the first sector of the block.
+        let mut first = vec![0xFFu8; SECTOR_SIZE as usize];
+        read(&f, &mut first, &disk_spec, &bat, 0, 1).unwrap();
+        assert!(
+            first.iter().all(|&b| b == 0),
+            "sector 0 of the block was overwritten"
+        );
     }
 
     #[test]
