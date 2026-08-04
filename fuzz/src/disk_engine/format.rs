@@ -39,6 +39,14 @@ pub trait DiskFormat {
     /// Whether the capacity only changes through a successful resize.
     const FIXED_CAPACITY: bool = true;
 
+    /// `Some(tail)` if the disk data sits in the image file followed by `tail`
+    /// bytes of metadata, so the capacity may not exceed
+    /// `physical_size() - tail`. `None` makes no claim.
+    const CAPACITY_FILE_TAIL: Option<u64> = None;
+
+    /// Whether a successful read always transfers the whole request.
+    const NO_SHORT_READS: bool = false;
+
     /// Whether a successful `punch_hole` makes the range read back as zeroes.
     const PUNCH_HOLE_READS_ZEROES: bool = false;
 

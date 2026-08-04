@@ -20,6 +20,12 @@ pub struct Vhd;
 impl DiskFormat for Vhd {
     const NAME: &'static str = "vhd";
 
+    // A fixed VHD is the disk data followed by a 512 byte footer.
+    const CAPACITY_FILE_TAIL: Option<u64> = Some(512);
+
+    // A read is one bounded `preadv` of data within the file.
+    const NO_SHORT_READS: bool = true;
+
     fn open(
         file: File,
         _path: Option<&Path>,
