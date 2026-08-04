@@ -223,7 +223,8 @@ fn open_flat_vmdk(
 ) -> BlockResult<Box<dyn AsyncFullDiskFile>> {
     info!("Opening VMDK disk file with synchronous backend");
     Ok(Box::new(
-        VmdkDisk::new(file, options.path, options.direct).map_err(|e| e.with_path(options.path))?,
+        VmdkDisk::new(file, options.path, options.readonly, options.direct)
+            .map_err(|e| e.with_path(options.path))?,
     ))
 }
 

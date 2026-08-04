@@ -279,7 +279,11 @@ fn overflow_error(what: &str) -> io::Error {
 
 impl FlatVmdk {
     /// Opens a flat VMDK image from its already-open descriptor file.
-    pub fn new(file: File, path: &Path, direct: bool) -> io::Result<Self> {
+    ///
+    /// `readonly` is the access mode the caller asked for and is
+    /// authoritative: when it is set, every extent is opened without write
+    /// access no matter what the (untrusted) descriptor declares.
+    pub fn new(file: File, path: &Path, readonly: bool, direct: bool) -> io::Result<Self> {
         let descriptor = VmdkDescriptor::new(&file, path)?;
 
         if descriptor.extents_list.extents.is_empty() {
@@ -322,10 +326,17 @@ impl FlatVmdk {
             //   "RW"       -> read + write
             //   "RDONLY"   -> read only
             //   "NOACCESS" -> not accessible, do not open the file at all
+            //
+            // A caller-requested read-only open downgrades "RW" to read-only:
+            // the descriptor may never widen the access the operator asked for.
             let (access, extent_file) = match extent.access.as_str() {
-                "RW" => {
+                "RW" if !readonly => {
                     let f = open_extent(&descriptor.base_path, &extent.filename, true, direct)?;
                     (ExtentAccess::ReadWrite, Some(f))
+                }
+                "RW" => {
+                    let f = open_extent(&descriptor.base_path, &extent.filename, false, direct)?;
+                    (ExtentAccess::ReadOnly, Some(f))
                 }
                 "RDONLY" => {
                     let f = open_extent(&descriptor.base_path, &extent.filename, false, direct)?;
