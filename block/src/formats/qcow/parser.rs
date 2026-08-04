@@ -8,7 +8,7 @@ use std::cmp::{max, min};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::fs::{OpenOptions, read_link};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::FileExt;
+use std::os::unix::fs::{FileExt, OpenOptionsExt};
 use std::path::Path;
 use std::{io, result, str};
 
@@ -56,6 +56,8 @@ pub enum Error {
     BackingFilesDisabled,
     #[error("Backing file name is too long: {0} bytes over")]
     BackingFileTooLong(usize),
+    #[error("Failed to clone backing file")]
+    CloneBackingFile(#[source] io::Error),
     #[error("Image is marked corrupt and cannot be opened for writing")]
     CorruptImage,
     #[error("Failed to evict cache")]
@@ -189,15 +191,17 @@ impl BackingFile {
             ));
         }
 
-        let backing_raw_file = OpenOptions::new()
-            .read(true)
-            .open(&config.path)
-            .map_err(|e| {
-                BlockError::new(
-                    BlockErrorKind::Io,
-                    Error::BackingFileIo(config.path.clone(), e),
-                )
-            })?;
+        let mut options = OpenOptions::new();
+        options.read(true);
+        if direct_io {
+            options.custom_flags(libc::O_DIRECT);
+        }
+        let backing_raw_file = options.open(&config.path).map_err(|e| {
+            BlockError::new(
+                BlockErrorKind::Io,
+                Error::BackingFileIo(config.path.clone(), e),
+            )
+        })?;
 
         let mut raw_file = AlignedFile::new(backing_raw_file, direct_io);
 
