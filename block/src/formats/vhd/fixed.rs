@@ -17,6 +17,7 @@ pub(super) struct FixedVhd {
 impl FixedVhd {
     pub(super) fn new(mut file: File) -> io::Result<Self> {
         let footer = VhdFooter::new(&mut file)?;
+        footer.validate_fixed()?;
         let size = footer.current_size();
 
         // A fixed VHD is the data followed by a 512 byte footer. The size

@@ -8,10 +8,23 @@ use std::os::unix::fs::FileExt;
 
 use crate::{AlignedFile, query_device_size};
 
-// Production code uses: cookie, file_format_version, data_offset,
 /// A VHD footer occupies the last sector of the file.
 pub(super) const VHD_FOOTER_LEN: u64 = 512;
 
+/// "conectix", the cookie every hard disk footer begins with.
+const VHD_COOKIE: u64 = 0x636f_6e65_6374_6978;
+
+/// The only file format version the specification defines: 1.0.
+const VHD_FILE_FORMAT_VERSION: u32 = 0x0001_0000;
+
+/// A fixed image has no dynamic disk header, so its data offset is
+/// 0xFFFFFFFFFFFFFFFF.
+const VHD_FIXED_DATA_OFFSET: u64 = 0xffff_ffff_ffff_ffff;
+
+/// Disk type 2 is a fixed hard disk (3 is dynamic, 4 differencing).
+const VHD_DISK_TYPE_FIXED: u32 = 2;
+
+// Production code uses: cookie, file_format_version, data_offset,
 // current_size, disk_type. The remaining fields are parsed for VHD
 // spec completeness and exercised only by unit tests.
 #[derive(Clone, Copy)]
@@ -63,17 +76,20 @@ impl VhdFooter {
         })
     }
 
-    pub(super) fn cookie(&self) -> u64 {
+    #[cfg(test)]
+    pub fn cookie(&self) -> u64 {
         self.cookie
     }
     #[cfg(test)]
     pub fn features(&self) -> u32 {
         self.features
     }
-    pub(super) fn file_format_version(&self) -> u32 {
+    #[cfg(test)]
+    pub fn file_format_version(&self) -> u32 {
         self.file_format_version
     }
-    pub(super) fn data_offset(&self) -> u64 {
+    #[cfg(test)]
+    pub fn data_offset(&self) -> u64 {
         self.data_offset
     }
     #[cfg(test)]
@@ -103,9 +119,44 @@ impl VhdFooter {
     pub fn disk_geometry(&self) -> u32 {
         self.disk_geometry
     }
-    pub(super) fn disk_type(&self) -> u32 {
+    #[cfg(test)]
+    pub fn disk_type(&self) -> u32 {
         self.disk_type
     }
+
+    pub(super) fn validate_fixed(&self) -> io::Result<()> {
+        fn invalid_data(msg: String) -> io::Error {
+            io::Error::new(io::ErrorKind::InvalidData, msg)
+        }
+
+        if self.cookie != VHD_COOKIE {
+            return Err(invalid_data(format!(
+                "VHD footer cookie is {:#018x}, not \"conectix\"",
+                self.cookie
+            )));
+        }
+        if self.file_format_version != VHD_FILE_FORMAT_VERSION {
+            return Err(invalid_data(format!(
+                "VHD file format version is {:#010x}, not 1.0",
+                self.file_format_version
+            )));
+        }
+        if self.data_offset != VHD_FIXED_DATA_OFFSET {
+            return Err(invalid_data(format!(
+                "VHD data offset is {:#018x}, not the all ones a fixed image requires",
+                self.data_offset
+            )));
+        }
+        if self.disk_type != VHD_DISK_TYPE_FIXED {
+            return Err(invalid_data(format!(
+                "VHD disk type is {}, not 2 (fixed hard disk)",
+                self.disk_type
+            )));
+        }
+
+        Ok(())
+    }
+
     #[cfg(test)]
     pub fn checksum(&self) -> u32 {
         self.checksum
@@ -128,11 +179,7 @@ pub fn is_fixed_vhd(f: &mut File) -> io::Result<bool> {
         Err(e) => return Err(e),
     };
 
-    // "conectix" => 0x636f6e6563746978
-    Ok(footer.cookie() == 0x636f6e6563746978
-        && footer.file_format_version() == 0x0001_0000
-        && footer.data_offset() == 0xffff_ffff_ffff_ffff
-        && footer.disk_type() == 0x2)
+    Ok(footer.validate_fixed().is_ok())
 }
 
 #[cfg(test)]
