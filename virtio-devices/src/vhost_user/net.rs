@@ -107,15 +107,8 @@ impl Net {
         ) = if let Some(state) = state {
             info!("Restoring vhost-user-net {id}");
 
-            // The backend acknowledged features must not contain frontend-only
-            // bits since we don't expect the backend to handle them.
-            let backend_acked_features = state.acked_features
-                & !((1 << VIRTIO_NET_F_MAC)
-                    | (1 << VIRTIO_NET_F_STATUS)
-                    | (1 << VIRTIO_NET_F_GUEST_ANNOUNCE));
-
             vu.set_protocol_features_vhost_user(
-                backend_acked_features,
+                state.acked_features,
                 state.acked_protocol_features,
             )?;
 
@@ -403,13 +396,6 @@ impl VirtioDevice for Net {
 
         let backend_req_handler: Option<FrontendReqHandler<BackendReqHandler>> = None;
 
-        // The backend acknowledged features must not contain frontend-only
-        // features since we don't expect the backend to handle them.
-        let backend_acked_features = self.vu_common.virtio_common.acked_features
-            & !((1 << VIRTIO_NET_F_MAC)
-                | (1 << VIRTIO_NET_F_STATUS)
-                | (1 << VIRTIO_NET_F_GUEST_ANNOUNCE));
-
         // Run a dedicated thread for handling potential reconnections with
         // the backend.
         let (kill_evt, pause_evt) = self.vu_common.virtio_common.dup_eventfds()?;
@@ -418,7 +404,7 @@ impl VirtioDevice for Net {
             mem,
             &queues,
             interrupt_cb.clone(),
-            backend_acked_features,
+            self.vu_common.virtio_common.acked_features,
             backend_req_handler,
             kill_evt,
             pause_evt,
