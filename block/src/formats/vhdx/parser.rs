@@ -300,12 +300,7 @@ mod tests {
             return;
         };
 
-        let file = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(tf.as_path())
-            .unwrap();
-        let mut vhdx = Vhdx::new(file, false).unwrap();
+        let mut vhdx = open_vhdx(tf.as_path());
 
         // Force a non-zero alignment so all of vhdx's positioned I/O exercises
         // the bounce/RMW path even though the tempfile is not really O_DIRECT.
@@ -335,23 +330,13 @@ mod tests {
 
         let data = [0xa5u8; 512];
         {
-            let file = fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(tf.as_path())
-                .unwrap();
-            let mut vhdx = Vhdx::new(file, false).unwrap();
+            let mut vhdx = open_vhdx(tf.as_path());
             vhdx.seek(SeekFrom::Start(0)).unwrap();
             assert_eq!(vhdx.write(&data).unwrap(), data.len());
             vhdx.flush().unwrap();
         }
 
-        let file = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(tf.as_path())
-            .unwrap();
-        let mut vhdx = Vhdx::new(file, false).unwrap();
+        let mut vhdx = open_vhdx(tf.as_path());
         let mut readback = [0u8; 512];
         vhdx.seek(SeekFrom::Start(0)).unwrap();
         assert_eq!(vhdx.read(&mut readback).unwrap(), readback.len());
@@ -365,12 +350,7 @@ mod tests {
             return;
         };
 
-        let file = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(tf.as_path())
-            .unwrap();
-        let mut vhdx = Vhdx::new(file, false).unwrap();
+        let mut vhdx = open_vhdx(tf.as_path());
 
         let mut buf = vec![0u8; vhdx.disk_spec.logical_sector_size as usize - 1];
         let err = vhdx.read(&mut buf).unwrap_err();
@@ -384,12 +364,7 @@ mod tests {
             return;
         };
 
-        let file = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(tf.as_path())
-            .unwrap();
-        let mut vhdx = Vhdx::new(file, false).unwrap();
+        let mut vhdx = open_vhdx(tf.as_path());
 
         let buf = vec![0u8; vhdx.disk_spec.logical_sector_size as usize - 1];
         let err = vhdx.write(&buf).unwrap_err();
@@ -405,12 +380,7 @@ mod tests {
             return;
         };
 
-        let file = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(tf.as_path())
-            .unwrap();
-        let mut vhdx = Vhdx::new(file, false).unwrap();
+        let mut vhdx = open_vhdx(tf.as_path());
 
         // Simulate a corrupt image: BAT entry 0 says "fully present at file
         // offset 0", i.e. on top of the VHDX file header.
