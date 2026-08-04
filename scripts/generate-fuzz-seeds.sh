@@ -83,6 +83,22 @@ seed_vmdk() {
     cp "$work/two.vmdk" "$out/twogb.vmdk"
 }
 
+# disk_detect seeds: the seeds of every image target.
+seed_detect() {
+    local out="$CORPUS_DIR/disk_detect"
+    local dir name
+
+    mkdir -p "$out"
+    for dir in "$CORPUS_DIR"/disk_qcow2 "$CORPUS_DIR"/disk_vhd \
+        "$CORPUS_DIR"/disk_vhdx "$CORPUS_DIR"/disk_vmdk; do
+        [ -d "$dir" ] || continue
+        # Globbing is off, so list with find. Prefix names with their format.
+        while IFS= read -r name; do
+            cp "$name" "$out/$(basename "$dir")-$(basename "$name")"
+        done < <(find "$dir" -maxdepth 1 -type f)
+    done
+}
+
 main() {
     if ! command -v "$QEMU_IMG" >/dev/null; then
         echo "error: $QEMU_IMG not found, install qemu-utils" >&2
@@ -96,6 +112,7 @@ main() {
     seed_vhd "$source"
     seed_vhdx "$source"
     seed_vmdk "$source"
+    seed_detect
 
     echo "seed corpora written under $CORPUS_DIR"
     du -sh "$CORPUS_DIR"

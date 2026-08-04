@@ -8,6 +8,7 @@
 //! - `disk_<format>` ([`fuzz_image`]): the input is the image.
 //! - `disk_<format>_ops` ([`fuzz_program`]): the input is an op program run
 //!   against a template and checked by a shadow model.
+//! - `disk_detect` ([`fuzz_detect`]): image type validation.
 
 mod executor;
 mod format;
@@ -75,19 +76,6 @@ pub fn fuzz_image<F: DiskFormat>(bytes: &[u8]) -> Corpus {
         return Corpus::Reject;
     };
 
-    // Also probe image type validation, once per type since each call confirms
-    // one type. The answers are not asserted.
-    if let Ok(mut probe) = file.try_clone() {
-        for image_type in [
-            ImageType::Qcow2,
-            ImageType::FixedVhd,
-            ImageType::Vhdx,
-            ImageType::FlatVmdk,
-        ] {
-            let _ = block::validate_image_type(&mut probe, image_type);
-        }
-    }
-
     // Inputs without the magic are still opened.
     let verdict = if F::magic_ok(bytes) {
         Corpus::Keep
@@ -104,6 +92,35 @@ pub fn fuzz_image<F: DiskFormat>(bytes: &[u8]) -> Corpus {
     }
 
     verdict
+}
+
+/// Largest input [`fuzz_detect`] accepts: the largest `MAX_IMAGE_LEN`.
+const MAX_DETECT_LEN: usize = 16 << 20;
+
+/// The image types with a probe. `Raw` and `Unknown` read nothing.
+const DETECT_TYPES: [ImageType; 4] = [
+    ImageType::Qcow2,
+    ImageType::FixedVhd,
+    ImageType::Vhdx,
+    ImageType::FlatVmdk,
+];
+
+/// Fuzzes image type validation by probing `bytes` as every image type.
+pub fn fuzz_detect(bytes: &[u8]) -> Corpus {
+    if bytes.len() > MAX_DETECT_LEN {
+        return Corpus::Reject;
+    }
+
+    let Ok(mut file) = image_memfd("detect", bytes) else {
+        return Corpus::Reject;
+    };
+
+    for image_type in DETECT_TYPES {
+        // Any answer is valid. Probes read positionally, so the file is shared.
+        let _ = block::validate_image_type(&mut file, image_type);
+    }
+
+    Corpus::Keep
 }
 
 /// Fuzzes a format's I/O path with `program`, under the shadow model.
