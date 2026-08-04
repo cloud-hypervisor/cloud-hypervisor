@@ -26,6 +26,14 @@ impl DiskFormat for Vhd {
     // A read is one bounded `preadv` of data within the file.
     const NO_SHORT_READS: bool = true;
 
+    // Mirrors the `VHD_COOKIE` test in `VhdFooter::validate_fixed`.
+    fn magic_ok(bytes: &[u8]) -> bool {
+        let Some(footer) = bytes.len().checked_sub(FOOTER_LEN) else {
+            return false;
+        };
+        bytes[footer..footer + COOKIE.len()] == *COOKIE
+    }
+
     fn open(
         file: File,
         _path: Option<&Path>,
@@ -38,6 +46,9 @@ impl DiskFormat for Vhd {
 
 /// `VHD_FOOTER_LEN` in the parser.
 const FOOTER_LEN: usize = 512;
+
+/// `VHD_COOKIE` in the parser.
+const COOKIE: &[u8; 8] = b"conectix";
 
 /// `VHD_CHECKSUM_RANGE` in the parser.
 const CHECKSUM_OFFSET: usize = 64;
@@ -60,6 +71,15 @@ pub fn repair_footer_checksum(image: &mut [u8]) {
     let checksum = !sum;
     footer[CHECKSUM_OFFSET..CHECKSUM_OFFSET + CHECKSUM_LEN]
         .copy_from_slice(&checksum.to_be_bytes());
+}
+
+/// Restores the footer cookie. Call before [`repair_footer_checksum`], since
+/// the cookie is checksummed.
+pub fn restore_footer_cookie(image: &mut [u8]) {
+    let Some(start) = image.len().checked_sub(FOOTER_LEN) else {
+        return;
+    };
+    image[start..start + COOKIE.len()].copy_from_slice(COOKIE);
 }
 
 #[cfg(test)]
@@ -140,13 +160,86 @@ mod tests {
         }
     }
 
+    // `magic_ok` must track the parser's cookie test and nothing else.
+    #[test]
+    fn magic_ok_tracks_the_cookie() {
+        let seed = seed_vhd();
+        assert!(Vhd::magic_ok(&seed), "the seed carries the cookie");
+
+        let mut broken = seed.clone();
+        broken[512] ^= 0xff;
+        repair_footer_checksum(&mut broken);
+        assert!(!Vhd::magic_ok(&broken), "a broken cookie is not VHD magic");
+        assert!(open_result(&broken).is_err());
+
+        // `magic_ok` is not an open oracle.
+        let mut wrong_type = seed.clone();
+        wrong_type[512 + 63] ^= 0xff;
+        repair_footer_checksum(&mut wrong_type);
+        assert!(Vhd::magic_ok(&wrong_type));
+        assert!(open_result(&wrong_type).is_err());
+
+        for len in [0usize, 1, 7, 511] {
+            assert!(!Vhd::magic_ok(&vec![0u8; len]));
+        }
+    }
+
     // Short and non-VHD buffers must not panic.
     #[test]
     fn repair_tolerates_junk() {
         for len in [0usize, 1, 511, 512, 4096] {
             let mut buf = vec![0x5au8; len];
             repair_footer_checksum(&mut buf);
+            restore_footer_cookie(&mut buf);
         }
+    }
+
+    // Restoring the cookie before the checksum rescues a mutated cookie.
+    #[test]
+    fn restoring_the_cookie_rescues_a_mutated_footer() {
+        let seed = seed_vhd();
+
+        for offset in 0..COOKIE.len() {
+            let mut mutated = seed.clone();
+            mutated[512 + offset] ^= 0xff;
+            repair_footer_checksum(&mut mutated);
+            assert!(!Vhd::magic_ok(&mutated), "the cookie is broken");
+            assert!(open_result(&mutated).is_err());
+
+            // The mutator's order: cookie first, checksum over it after.
+            restore_footer_cookie(&mut mutated);
+            repair_footer_checksum(&mut mutated);
+            assert!(Vhd::magic_ok(&mutated), "the cookie is back");
+            assert!(
+                open_result(&mutated).is_ok(),
+                "a restored footer must open again"
+            );
+        }
+    }
+
+    // The cookie and checksum rejection branches must be separately reachable.
+    #[test]
+    fn the_unrepaired_fractions_reach_distinct_rejections() {
+        let seed = seed_vhd();
+
+        // seed % 8 == 0: cookie left mutated, checksum repaired.
+        let mut cookie_branch = seed.clone();
+        cookie_branch[512] ^= 0xff;
+        repair_footer_checksum(&mut cookie_branch);
+        assert!(!Vhd::magic_ok(&cookie_branch));
+        assert!(open_result(&cookie_branch).is_err());
+
+        // seed % 8 == 1: cookie restored, checksum left mutated.
+        let mut checksum_branch = seed.clone();
+        checksum_branch[512] ^= 0xff;
+        checksum_branch[512 + CHECKSUM_OFFSET] ^= 0xff;
+        restore_footer_cookie(&mut checksum_branch);
+        assert!(Vhd::magic_ok(&checksum_branch));
+        assert!(open_result(&checksum_branch).is_err());
+
+        // Repairing the checksum then makes it open.
+        repair_footer_checksum(&mut checksum_branch);
+        assert!(open_result(&checksum_branch).is_ok());
     }
 
     // Unrepaired mutations never open. Repaired ones almost always do.
