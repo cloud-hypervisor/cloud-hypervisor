@@ -23,6 +23,9 @@ impl DiskFormat for Vhdx {
     // A parseable VHDX is 8 to 10 MiB.
     const MAX_IMAGE_LEN: usize = 16 << 20;
 
+    // A VHDX read covers the whole request or fails.
+    const NO_SHORT_READS: bool = true;
+
     fn open(
         file: File,
         _path: Option<&Path>,

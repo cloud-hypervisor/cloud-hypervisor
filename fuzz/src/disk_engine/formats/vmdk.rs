@@ -74,6 +74,9 @@ impl DiskFormat for Vmdk {
     // A descriptor is a small text file; the data lives in the extents.
     const MAX_IMAGE_LEN: usize = 64 << 10;
 
+    // No capacity or short read invariants: the data lives in extent files, and
+    // an extent longer than its file reads short.
+
     fn open(
         file: File,
         path: Option<&Path>,

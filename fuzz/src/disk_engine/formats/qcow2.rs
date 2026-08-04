@@ -26,6 +26,9 @@ impl DiskFormat for Qcow2 {
     // Holds because no template has a backing file.
     const PUNCH_HOLE_READS_ZEROES: bool = true;
 
+    // An unallocated cluster is zero filled, never short.
+    const NO_SHORT_READS: bool = true;
+
     fn open(
         file: File,
         _path: Option<&Path>,
