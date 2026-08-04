@@ -72,6 +72,19 @@ struct OpenHow {
     resolve: u64,
 }
 
+// `open_how.resolve` flags from openat2(2). The libc crate does not export
+// them, so they are defined here with the values from the kernel UAPI
+// (include/uapi/linux/openat2.h).
+//
+// RESOLVE_NO_MAGICLINKS: refuse to traverse "magic links" such as
+// /proc/self/mem or /proc/<pid>/fd/N, which docs/threat-model.md calls out as
+// able to corrupt the VMM's own memory.
+const RESOLVE_NO_MAGICLINKS: u64 = 0x02;
+// RESOLVE_BENEATH: every component of the resolution must stay beneath the
+// anchor directory fd. '..' escapes, escaping symlinks and absolute pathnames
+// are all rejected with EXDEV.
+const RESOLVE_BENEATH: u64 = 0x08;
+
 // Splits an untrusted extent `filename` into its `Normal` path components for
 // the fallback walk, rejecting any `..`/`.` traversal.
 fn extent_components(filename: &str) -> io::Result<Vec<&OsStr>> {
@@ -108,6 +121,13 @@ fn extent_components(filename: &str) -> io::Result<Vec<&OsStr>> {
 //   - relative -> colocated with descriptor file
 //   - absolute -> the filesystem root
 // The symlink policy rejects the final component if it is a symlink (O_NOFOLLOW).
+//
+// A relative extent name is confined beneath the descriptor directory: an
+// attacker-supplied '..' (or a symlink leading out of it) is refused with
+// EXDEV by openat2(2)'s RESOLVE_BENEATH and by the fallback walk's
+// `extent_components`. EXDEV is not part of the fallback condition below, so
+// a confinement failure is a hard error and never degrades to the permissive
+// walk.
 //
 // Resolution prefers openat2(2). On kernels without it (< 5.6, ENOSYS) or
 // where it is blocked (EPERM, e.g. a seccomp filter), it falls back to a
@@ -162,10 +182,19 @@ fn open_extent_openat2(
     if direct {
         flags |= libc::O_DIRECT;
     }
+    // Confine a relative extent name beneath the descriptor directory. An
+    // absolute name is anchored at the filesystem root by the caller and its
+    // policy is deliberately left unchanged here, so RESOLVE_BENEATH (which
+    // rejects absolute pathnames outright) is not applied to it.
+    let mut resolve = RESOLVE_NO_MAGICLINKS;
+    if !Path::new(filename).is_absolute() {
+        resolve |= RESOLVE_BENEATH;
+    }
+
     let how = OpenHow {
         flags: flags as u64,
         mode: 0,
-        resolve: 0,
+        resolve,
     };
 
     // SAFETY: FFI syscall. `cname` is NUL-terminated and outlives the call,
@@ -597,16 +626,77 @@ mod tests {
         use vmm_sys_util::tempdir::TempDir;
 
         // A relative path may traverse a symlinked intermediate directory
-        // (only the final component is guarded).
+        // (only the final component is guarded), as long as the symlink stays
+        // beneath the descriptor directory.
+        let dir = TempDir::new_with_prefix("/tmp/vmdk-rel-symdir-test").unwrap();
+        let base = dir.as_path();
+        fs::create_dir(base.join("extents")).unwrap();
+        fs::write(base.join("extents").join("s001.vmdk"), b"data").unwrap();
+        symlink("extents", base.join("sub")).unwrap();
+
+        let (openat2_res, walk_res) = open_both(base, "sub/s001.vmdk", false, false);
+        check_openat2(&openat2_res, true);
+        check_walk(&walk_res, true);
+    }
+
+    #[test]
+    fn open_extent_rejects_relative_traversal() {
+        use vmm_sys_util::tempdir::TempDir;
+
+        // Regression test for the extent path traversal: a descriptor naming
+        // its extent "../escape.vmdk" must not reach a file outside the
+        // descriptor's own directory. Both implementations refuse it, openat2
+        // via RESOLVE_BENEATH (EXDEV) and the walk via `extent_components`.
+        let outer = TempDir::new_with_prefix("/tmp/vmdk-traversal-test").unwrap();
+        fs::write(outer.as_path().join("escape.vmdk"), b"secret").unwrap();
+        let base = outer.as_path().join("descriptor-dir");
+        fs::create_dir(&base).unwrap();
+
+        for name in [
+            "../escape.vmdk",
+            "./../escape.vmdk",
+            "sub/../../escape.vmdk",
+        ] {
+            let (openat2_res, walk_res) = open_both(&base, name, true, false);
+            check_openat2(&openat2_res, false);
+            check_walk(&walk_res, false);
+        }
+
+        // And the refusal surfaces from `open_extent` itself: EXDEV is not in
+        // the ENOSYS/EPERM fallback condition, so it is a hard error rather
+        // than a silent downgrade to the permissive walk.
+        let err = open_extent(base.to_str().unwrap(), "../escape.vmdk", true, false).unwrap_err();
+        assert_eq!(
+            err.raw_os_error(),
+            Some(libc::EXDEV),
+            "extent traversal must fail with EXDEV, not fall back to the walk"
+        );
+    }
+
+    #[test]
+    fn open_extent_rejects_symlinked_intermediate_directory_escaping_relative() {
+        use std::os::unix::fs::symlink;
+
+        use vmm_sys_util::tempdir::TempDir;
+
+        // A relative extent name may not leave the descriptor directory
+        // through a symlinked intermediate directory either: openat2 refuses
+        // it with EXDEV. (The fallback walk, which can only inspect the name
+        // and not the resolution, still follows it.)
         let real = TempDir::new_with_prefix("/tmp/vmdk-rel-real-test").unwrap();
         fs::write(real.as_path().join("s001.vmdk"), b"data").unwrap();
 
-        let dir = TempDir::new_with_prefix("/tmp/vmdk-rel-symdir-test").unwrap();
+        let dir = TempDir::new_with_prefix("/tmp/vmdk-rel-escapedir-test").unwrap();
         let base = dir.as_path();
         symlink(real.as_path(), base.join("sub")).unwrap();
 
         let (openat2_res, walk_res) = open_both(base, "sub/s001.vmdk", false, false);
-        check_openat2(&openat2_res, true);
+        if openat2_available(&openat2_res) {
+            assert_eq!(
+                openat2_res.as_ref().err().and_then(|e| e.raw_os_error()),
+                Some(libc::EXDEV)
+            );
+        }
         check_walk(&walk_res, true);
     }
 
