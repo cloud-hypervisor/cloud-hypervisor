@@ -108,6 +108,15 @@ impl Read for Vhdx {
                 ),
             ));
         }
+        if !self.current_offset.is_multiple_of(sector_size) {
+            return Err(IoError::new(
+                IoErrorKind::InvalidInput,
+                format!(
+                    "Read offset {} is not a multiple of the {sector_size}-byte logical sector size",
+                    self.current_offset
+                ),
+            ));
+        }
         let sector_count = buf.len() as u64 / sector_size;
         let sector_index = self.current_offset / sector_size;
 
@@ -146,6 +155,15 @@ impl Write for Vhdx {
                 format!(
                     "Write buffer length {} is not a multiple of the {sector_size}-byte logical sector size",
                     buf.len()
+                ),
+            ));
+        }
+        if !self.current_offset.is_multiple_of(sector_size) {
+            return Err(IoError::new(
+                IoErrorKind::InvalidInput,
+                format!(
+                    "Write offset {} is not a multiple of the {sector_size}-byte logical sector size",
+                    self.current_offset
                 ),
             ));
         }
@@ -255,10 +273,22 @@ impl AsRawFd for Vhdx {
 mod tests {
     use std::fs;
     use std::os::unix::fs::FileExt;
+    use std::path::Path;
 
     use super::*;
     use crate::formats::vhdx::bat::PAYLOAD_BLOCK_FULLY_PRESENT;
     use crate::formats::vhdx::test_util::create_dynamic_vhdx;
+
+    /// Opens an image read-write, which is what every test here needs: they
+    /// all write through the handle, or check that a write is refused.
+    fn open_vhdx(path: &Path) -> Vhdx {
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .unwrap();
+        Vhdx::new(file, false).unwrap()
+    }
 
     /// An unaligned sector write under a forced O_DIRECT alignment must go
     /// through `AlignedFile`'s read-modify-write bounce (the data block and the
@@ -401,5 +431,51 @@ mod tests {
             .read_exact_at(&mut signature, 0)
             .unwrap();
         assert_eq!(&signature, b"vhdxfile");
+    }
+
+    #[test]
+    fn read_misaligned_offset_is_rejected() {
+        let Some(tf) = create_dynamic_vhdx(16) else {
+            eprintln!("skipping read_misaligned_offset_is_rejected: qemu-img unavailable");
+            return;
+        };
+
+        let mut vhdx = open_vhdx(tf.as_path());
+        let sector = vhdx.disk_spec.logical_sector_size as usize;
+
+        vhdx.seek(SeekFrom::Start(100)).unwrap();
+        let mut buf = vec![0u8; sector];
+        let err = vhdx.read(&mut buf).unwrap_err();
+        assert_eq!(err.kind(), IoErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn write_misaligned_offset_is_rejected() {
+        let Some(tf) = create_dynamic_vhdx(16) else {
+            eprintln!("skipping write_misaligned_offset_is_rejected: qemu-img unavailable");
+            return;
+        };
+
+        let mut vhdx = open_vhdx(tf.as_path());
+        let sector = vhdx.disk_spec.logical_sector_size as usize;
+
+        // Establish known content in sector 0 and sector 1.
+        vhdx.seek(SeekFrom::Start(0)).unwrap();
+        assert_eq!(vhdx.write(&vec![0xAAu8; sector]).unwrap(), sector);
+        vhdx.seek(SeekFrom::Start(sector as u64)).unwrap();
+        assert_eq!(vhdx.write(&vec![0xBBu8; sector]).unwrap(), sector);
+
+        vhdx.seek(SeekFrom::Start(100)).unwrap();
+        let err = vhdx.write(&vec![0xCCu8; sector]).unwrap_err();
+        assert_eq!(err.kind(), IoErrorKind::InvalidInput);
+
+        // Neither sector may have been touched by the rejected write.
+        let mut buf = vec![0u8; sector];
+        vhdx.seek(SeekFrom::Start(0)).unwrap();
+        assert_eq!(vhdx.read(&mut buf).unwrap(), sector);
+        assert!(buf.iter().all(|&b| b == 0xAA), "sector 0 was modified");
+        vhdx.seek(SeekFrom::Start(sector as u64)).unwrap();
+        assert_eq!(vhdx.read(&mut buf).unwrap(), sector);
+        assert!(buf.iter().all(|&b| b == 0xBB), "sector 1 was modified");
     }
 }
