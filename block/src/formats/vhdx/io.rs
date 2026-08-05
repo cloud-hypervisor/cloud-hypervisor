@@ -33,6 +33,8 @@ pub enum VhdxIoError {
     UnsupportedMode,
     #[error("Failed writing BAT to file {0}")]
     WriteBat(#[source] VhdxBatError),
+    #[error("Failed writing sector blocks from file {0}")]
+    WriteSectorBlock(#[source] io::Error),
 }
 
 pub(super) type Result<T> = result::Result<T, VhdxIoError>;
@@ -206,7 +208,7 @@ pub(super) fn write(
                     &buf[write_count..(write_count + sector.free_bytes as usize)],
                     file_offset + sector.block_offset,
                 )
-                .map_err(VhdxIoError::ReadSectorBlock)?;
+                .map_err(VhdxIoError::WriteSectorBlock)?;
             }
             bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
                 if sector.file_offset < metadata::BLOCK_SIZE_MIN as u64 {
@@ -217,7 +219,7 @@ pub(super) fn write(
                     &buf[write_count..(write_count + sector.free_bytes as usize)],
                     sector.file_offset,
                 )
-                .map_err(VhdxIoError::ReadSectorBlock)?;
+                .map_err(VhdxIoError::WriteSectorBlock)?;
             }
             bat::PAYLOAD_BLOCK_PARTIALLY_PRESENT => {
                 return Err(VhdxIoError::UnsupportedMode);
