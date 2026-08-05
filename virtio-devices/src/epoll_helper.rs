@@ -279,13 +279,22 @@ impl EpollHelper {
                 return Ok(());
             }
 
+            // Unlike the regular loop, do not return as soon as the kill
+            // event is seen: the fuzz targets drop the device (and thus
+            // write the kill event) right after kicking the queue, so the
+            // kill event is typically ready in the very same batch as the
+            // queue event. Returning immediately would race the queue event
+            // away and leave the device handler unexercised. Drain the whole
+            // batch first, then stop.
+            let mut killed = false;
+
             for event in events.iter().take(num_events) {
                 let ev_type = event.data as u16;
 
                 match ev_type {
                     EPOLL_HELPER_EVENT_KILL => {
                         debug!("KILL_EVENT received, stopping epoll loop");
-                        return Ok(());
+                        killed = true;
                     }
                     EPOLL_HELPER_EVENT_PAUSE => {
                         debug!("PAUSE_EVENT received, pausing epoll loop");
@@ -310,6 +319,10 @@ impl EpollHelper {
                         handler.handle_event(self, event)?;
                     }
                 }
+            }
+
+            if killed {
+                return Ok(());
             }
         }
     }
