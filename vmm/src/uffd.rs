@@ -141,11 +141,22 @@ pub(crate) fn create(required_features: u64) -> Result<OwnedFd, Error> {
 }
 
 /// Register a memory range for missing-page fault handling.
-pub(crate) fn register(fd: BorrowedFd<'_>, addr: u64, len: u64) -> Result<u64, Error> {
+pub(crate) fn register(
+    fd: BorrowedFd<'_>,
+    addr: u64,
+    len: u64,
+    uffd_requires_minor_mode: bool,
+) -> Result<u64, Error> {
+    let mode = if uffd_requires_minor_mode {
+        userfaultfd::UFFDIO_REGISTER_MODE_MISSING | userfaultfd::UFFDIO_REGISTER_MODE_MINOR
+    } else {
+        userfaultfd::UFFDIO_REGISTER_MODE_MISSING
+    };
+
     let mut reg = UffdioRegister {
         range_start: addr,
         range_len: len,
-        mode: userfaultfd::UFFDIO_REGISTER_MODE_MISSING,
+        mode,
         ioctls: 0,
     };
     // SAFETY: `reg` is a valid, correctly-sized struct for this ioctl.
@@ -258,6 +269,8 @@ pub(crate) trait UffdMemorySource: Send {
         range: &UffdRange,
         page_idx: u64,
     ) -> Result<FaultResolution, io::Error>;
+
+    fn requires_uffd_minor_mode(&self) -> bool;
 }
 
 /// Source that reads pages from a local snapshot file.
@@ -304,6 +317,10 @@ impl UffdMemorySource for FileUffdMemorySource {
             Err(e) if e.raw_os_error() == Some(libc::EAGAIN) => Ok(FaultResolution::Retry),
             Err(e) => Err(e),
         }
+    }
+
+    fn requires_uffd_minor_mode(&self) -> bool {
+        false
     }
 }
 
@@ -362,8 +379,15 @@ impl UffdMemorySource for SocketUffdMemorySource {
                     "shared-backing PageFault response carried {resp_len} unexpected bytes",
                 )));
             }
-            match wake(uffd_fd, page_addr, page_size) {
+            match uffd_continue(uffd_fd, page_addr, page_size) {
                 Ok(()) => Ok(FaultResolution::Served),
+                // This is fine, someone mapped the page before us.
+                Err(e) if e.raw_os_error() == Some(libc::EEXIST) => {
+                    if let Err(e) = wake(uffd_fd, page_addr, page_size) {
+                        log::warn!("UFFDIO_WAKE failed at {page_addr:#x}: {e}");
+                    }
+                    Ok(FaultResolution::Served)
+                }
                 Err(e) if e.raw_os_error() == Some(libc::EAGAIN) => Ok(FaultResolution::Retry),
                 Err(e) => Err(e),
             }
@@ -390,6 +414,10 @@ impl UffdMemorySource for SocketUffdMemorySource {
                 Err(e) => Err(e),
             }
         }
+    }
+
+    fn requires_uffd_minor_mode(&self) -> bool {
+        self.shared_backing
     }
 }
 

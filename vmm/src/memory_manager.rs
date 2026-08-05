@@ -945,16 +945,22 @@ impl MemoryManager {
         exit_evt: &EventFd,
     ) -> Result<(), Error> {
         let mut file_offset: u64 = 0;
-        let Some((uffd_fd, ranges)) = self.prepare_uffd(saved_regions, |r| {
-            let o = file_offset;
-            file_offset += r.length;
-            o
-        })?
+
+        let snapshot_file = File::open(file_path).map_err(Error::SnapshotOpen)?;
+        let source: Box<dyn UffdMemorySource> = Box::new(FileUffdMemorySource::new(snapshot_file));
+
+        let Some((uffd_fd, ranges)) = self.prepare_uffd(
+            saved_regions,
+            |r| {
+                let o = file_offset;
+                file_offset += r.length;
+                o
+            },
+            source.requires_uffd_minor_mode(),
+        )?
         else {
             return Ok(());
         };
-        let snapshot_file = File::open(file_path).map_err(Error::SnapshotOpen)?;
-        let source: Box<dyn UffdMemorySource> = Box::new(FileUffdMemorySource::new(snapshot_file));
         self.spawn_uffd_handler(uffd_fd, None, ranges, source, exit_evt)?;
         info!("UFFD restore: demand-paged restore enabled");
         Ok(())
@@ -969,10 +975,6 @@ impl MemoryManager {
         socket: SocketStream,
         exit_evt: &EventFd,
     ) -> Result<(), Error> {
-        // PageFault uses the GPA as the page identifier on the wire.
-        let Some((uffd_fd, ranges)) = self.prepare_uffd(saved_regions, |r| r.gpa)? else {
-            return Ok(());
-        };
         // Make every fault a small request/response round-trip.
         socket.set_nodelay(true).map_err(UffdError::SetSocket)?;
         let socket_fd = socket
@@ -981,6 +983,14 @@ impl MemoryManager {
             .map_err(UffdError::SetSocket)?;
         let source: Box<dyn UffdMemorySource> =
             Box::new(SocketUffdMemorySource::new(socket, shared_backing));
+
+        // PageFault uses the GPA as the page identifier on the wire.
+        let Some((uffd_fd, ranges)) =
+            self.prepare_uffd(saved_regions, |r| r.gpa, source.requires_uffd_minor_mode())?
+        else {
+            return Ok(());
+        };
+
         self.spawn_uffd_handler(uffd_fd, Some(socket_fd), ranges, source, exit_evt)
     }
 
@@ -989,6 +999,7 @@ impl MemoryManager {
         &mut self,
         saved_regions: &MemoryRangeTable,
         mut source_offset_for: F,
+        uffd_requires_minor_mode: bool,
     ) -> Result<Option<(OwnedFd, Vec<UffdRange>)>, Error>
     where
         F: FnMut(&MemoryRange) -> u64,
@@ -998,7 +1009,7 @@ impl MemoryManager {
         }
 
         let guest_memory = self.guest_memory.memory();
-        let required_uffd_features = self.required_uffd_features();
+        let required_uffd_features = self.required_uffd_features(uffd_requires_minor_mode);
 
         // SAFETY: FFI call. Trivially safe.
         let base_page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u64;
@@ -1028,17 +1039,25 @@ impl MemoryManager {
                     source: e,
                 })? as u64;
 
-            let ioctls = uffd::register(uffd_fd.as_fd(), host_addr, range.length).map_err(|e| {
-                UffdError::Register {
-                    addr: host_addr,
-                    len: range.length,
-                    source: e,
-                }
+            let ioctls = uffd::register(
+                uffd_fd.as_fd(),
+                host_addr,
+                range.length,
+                uffd_requires_minor_mode,
+            )
+            .map_err(|e| UffdError::Register {
+                addr: host_addr,
+                len: range.length,
+                source: e,
             })?;
 
-            if ioctls & userfaultfd::UFFD_API_RANGE_IOCTLS_BASIC
-                != userfaultfd::UFFD_API_RANGE_IOCTLS_BASIC
-            {
+            let required_ioctls = if uffd_requires_minor_mode {
+                userfaultfd::UFFD_API_RANGE_IOCTLS_MINOR
+            } else {
+                userfaultfd::UFFD_API_RANGE_IOCTLS_BASIC
+            };
+
+            if ioctls & required_ioctls != required_ioctls {
                 return Err(UffdError::MissingIoctlSupport {
                     addr: host_addr,
                     len: range.length,
@@ -1134,13 +1153,19 @@ impl MemoryManager {
         Ok(())
     }
 
-    fn required_uffd_features(&self) -> u64 {
+    fn required_uffd_features(&self, uffd_requires_minor_mode: bool) -> u64 {
         let mut features = 0u64;
         if self.memory_zones.values().any(|z| z.shared || !z.hugepages) {
             features |= userfaultfd::UFFD_FEATURE_MISSING_SHMEM;
+            if uffd_requires_minor_mode {
+                features |= userfaultfd::UFFD_FEATURE_MINOR_SHMEM;
+            }
         }
         if self.memory_zones.values().any(|z| z.hugepages) {
             features |= userfaultfd::UFFD_FEATURE_MISSING_HUGETLBFS;
+            if uffd_requires_minor_mode {
+                features |= userfaultfd::UFFD_FEATURE_MINOR_HUGETLBFS;
+            }
         }
         features
     }
