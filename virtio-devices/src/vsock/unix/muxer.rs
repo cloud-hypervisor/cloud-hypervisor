@@ -252,6 +252,12 @@ impl VsockChannel for VsockMuxer {
             return Ok(());
         }
 
+        // An RST forcefully terminates the connection it names and no reply should be made.
+        if pkt.op() == uapi::VSOCK_OP_RST {
+            self.remove_connection(conn_key);
+            return Ok(());
+        }
+
         if !self.conn_map.contains_key(&conn_key) {
             // This packet can't be routed to any active connection (based on its src and dst
             // ports).  The only orphan / unroutable packets we know how to handle are
@@ -263,14 +269,6 @@ impl VsockChannel for VsockMuxer {
                 // Send back an RST, to let the drive know we weren't expecting this packet.
                 self.enq_rst(pkt.dst_port(), pkt.src_port());
             }
-            return Ok(());
-        }
-
-        // Right, we know where to send this packet, then (to `conn_key`).
-        // However, if this is an RST, we have to forcefully terminate the connection, so
-        // there's no point in forwarding it the packet.
-        if pkt.op() == uapi::VSOCK_OP_RST {
-            self.remove_connection(conn_key);
             return Ok(());
         }
 
@@ -1157,6 +1155,59 @@ mod unit_tests {
             .set_dst_cid(uapi::VSOCK_HOST_CID + 1);
         ctx.send();
         assert!(!ctx.muxer.has_pending_rx());
+
+        // An orphan RST, however, must be absorbed silently.
+        ctx.init_pkt(LOCAL_PORT, PEER_PORT, uapi::VSOCK_OP_RST);
+        ctx.send();
+        assert!(!ctx.muxer.has_pending_rx());
+    }
+
+    // Both ends of a vsock connection can close it at the same instant, in which case their
+    // teardown packets cross in flight and the peer's RST arrives after we've already dropped
+    // the connection. Answering that orphan RST is not just pointless but dangerous: by the
+    // time the reply is delivered, the peer may have reused the port pair, and the reply will
+    // kill that innocent connection instead.
+    #[test]
+    fn test_orphan_rst_does_not_kill_reused_port_pair() {
+        const LOCAL_PORT: u32 = 1026;
+        const PEER_PORT: u32 = 1025;
+
+        let mut ctx = MuxerTestContext::new("orphan_rst_reused_port_pair");
+        let mut listener = ctx.create_local_listener(LOCAL_PORT);
+        let key = ConnMapKey {
+            local_port: LOCAL_PORT,
+            peer_port: PEER_PORT,
+        };
+
+        // Establish a peer-initiated connection, then tear it down from our end.
+        ctx.init_pkt(LOCAL_PORT, PEER_PORT, uapi::VSOCK_OP_REQUEST);
+        ctx.send();
+        let _stream = listener.accept();
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RESPONSE);
+        ctx.muxer.kill_connection(key);
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RST);
+        assert!(!ctx.muxer.conn_map.contains_key(&key));
+
+        // The peer's own RST, sent before it could have seen ours, now arrives for a connection
+        // we no longer have.
+        ctx.init_pkt(LOCAL_PORT, PEER_PORT, uapi::VSOCK_OP_RST);
+        ctx.send();
+        assert!(!ctx.muxer.has_pending_rx());
+
+        // The peer's ephemeral port allocator hands out the same port again.
+        ctx.init_pkt(LOCAL_PORT, PEER_PORT, uapi::VSOCK_OP_REQUEST);
+        ctx.send();
+        let _stream = listener.accept();
+        assert!(ctx.muxer.conn_map.contains_key(&key));
+
+        // The new connection must come up cleanly. A reply to the orphan RST would still be
+        // queued ahead of this response, and delivering it would drop the new connection.
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RESPONSE);
+        assert!(!ctx.muxer.has_pending_rx());
+        assert!(ctx.muxer.conn_map.contains_key(&key));
     }
 
     #[test]
