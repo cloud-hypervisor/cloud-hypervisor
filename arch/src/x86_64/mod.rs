@@ -1026,7 +1026,12 @@ fn common_cpuid_tdx_configuration(
     info!("TDX capabilities {caps:#?}");
 
     for entry in cpuid.iter_mut().filter(|entry| entry.function == 0xd) {
-        let xcr0_mask: u64 = 0x82ff;
+        // XCR0-managed (user) XSAVE state components. Must include the AMX
+        // tile state components (XTILECFG bit 17, XTILEDATA bit 18); otherwise
+        // AMX is stripped from CPUID.0xD.0 and never makes it into the TD XFAM.
+        // Bits: x87(0) SSE(1) AVX(2) BNDREG(3) BNDCSR(4) OPMASK(5) ZMM_Hi256(6)
+        //       Hi16_ZMM(7) PKRU(9) XTILECFG(17) XTILEDATA(18).
+        let xcr0_mask: u64 = 0x602ff;
         let xss_mask: u64 = !xcr0_mask;
         // Upstream Linux 6.16 reports a single `supported_xfam` mask of the
         // XSAVE state components the TDX module can virtualize, replacing the
