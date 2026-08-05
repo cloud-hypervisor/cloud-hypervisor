@@ -48,6 +48,14 @@ pub(crate) struct UffdioCopy {
     pub copy: i64,
 }
 
+#[repr(C)]
+pub(crate) struct UffdioContinue {
+    pub range_start: u64,
+    pub range_len: u64,
+    pub mode: u64,
+    pub mapped: i64,
+}
+
 /// Flat representation of `struct uffd_msg` (32 bytes).
 ///
 /// The kernel struct contains an 8-byte header followed by a 24-byte
@@ -169,6 +177,28 @@ pub(crate) fn copy(fd: BorrowedFd<'_>, dst: u64, src: *const u8, len: u64) -> Re
             fd.as_raw_fd(),
             userfaultfd::UFFDIO_COPY as libc::Ioctl,
             &mut cp,
+        )
+    };
+    if ret < 0 {
+        return Err(Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// Resolves a minor page fault by installing PTEs for a range.
+pub(crate) fn uffd_continue(fd: BorrowedFd<'_>, dst: u64, len: u64) -> Result<(), Error> {
+    let mut cont = UffdioContinue {
+        range_start: dst,
+        range_len: len,
+        mode: 0,
+        mapped: 0,
+    };
+    // SAFETY: `cont` is a valid, correctly-sized struct for this ioctl.
+    let ret = unsafe {
+        libc::ioctl(
+            fd.as_raw_fd(),
+            userfaultfd::UFFDIO_CONTINUE as libc::Ioctl,
+            &mut cont,
         )
     };
     if ret < 0 {
@@ -376,9 +406,9 @@ fn io_other<E: fmt::Display>(e: E) -> io::Error {
 
 /// Wake threads waiting on a fault in the given range without copying data.
 ///
-/// Needed after UFFDIO_COPY returns EEXIST: the page was already resolved
-/// by a concurrent fault, but any additional threads blocked on that page
-/// may not have been woken.
+/// Needed after UFFDIO_COPY or UFFDIO_CONTINUE returns EEXIST: the page was
+/// already resolved by a concurrent fault, but any additional threads blocked
+/// on that page may not have been woken.
 pub(crate) fn wake(fd: BorrowedFd<'_>, addr: u64, len: u64) -> Result<(), Error> {
     let mut range = UffdioRange { start: addr, len };
     // SAFETY: `range` is a valid, correctly-sized struct for this ioctl.
