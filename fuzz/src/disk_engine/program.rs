@@ -11,6 +11,13 @@ use crate::disk_engine::format::OpenConfig;
 /// Largest number of ops executed from one program.
 pub const MAX_OPS: usize = 64;
 
+/// Bytes covered by one L2 table of the small cluster qcow2 template.
+const L2_SPAN: u64 = crate::disk_engine::formats::qcow2::SMALL_L2_SPAN;
+
+/// Largest number of L2 tables one [`Op::Sweep`] walks: more than the 100
+/// the qcow2 engine caches. Sweeps longer than the template wrap around.
+const MAX_SWEEP: u64 = 192;
+
 /// Largest byte count of a data op, and the size of guest memory.
 pub const MAX_OP_LEN: usize = 64 << 10;
 
@@ -84,6 +91,19 @@ pub enum Op {
     UseClone { ring_depth: u8 },
     /// Query every capability trait.
     QueryCaps,
+    /// Write one sector into each of a run of L2 tables, then read them all
+    /// back, so a table the cache evicts badly shows up as a mismatch.
+    Sweep { first: u8, tables: u8, seed: u8 },
+}
+
+impl Op {
+    /// Returns the offsets one [`Op::Sweep`] writes.
+    pub fn sweep_offsets(first: u8, tables: u8, size: u64) -> impl Iterator<Item = u64> {
+        let size = size.max(1);
+        let count = u64::from(tables) % MAX_SWEEP + 1;
+        let first = u64::from(first);
+        (0..count).map(move |i| (first + i) * L2_SPAN % size)
+    }
 }
 
 /// An open configuration plus the ops to run against it.
@@ -91,6 +111,8 @@ pub enum Op {
 pub struct Program {
     /// How the image is opened.
     pub open: OpenConfig,
+    /// Which of the format's template images to run against.
+    pub template: u8,
     /// Ring depth for the first I/O engine.
     pub ring_depth: u8,
     /// Ops to execute, truncated to [`MAX_OPS`].
@@ -183,4 +205,38 @@ pub fn default_program() -> Vec<Op> {
         Op::Fsync { completion: false },
         Op::QueryCaps,
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // One sweep must cover more than 100 distinct, table aligned offsets.
+    #[test]
+    fn a_sweep_can_outrun_the_l2_cache() {
+        let size = 4 << 20;
+        let offsets: Vec<u64> = Op::sweep_offsets(0, 191, size).collect();
+        assert_eq!(offsets.len(), 192);
+
+        let distinct: std::collections::BTreeSet<u64> = offsets.iter().copied().collect();
+        assert!(
+            distinct.len() > 100,
+            "{} distinct tables, the cache holds 100",
+            distinct.len()
+        );
+        for offset in offsets {
+            assert!(offset < size, "offset {offset} is outside the disk");
+            assert_eq!(offset % L2_SPAN, 0, "offset {offset} is not table aligned");
+        }
+    }
+
+    // A sweep stays inside any disk.
+    #[test]
+    fn a_sweep_stays_inside_the_disk() {
+        for size in [1, 512, 4096, L2_SPAN, 1 << 20] {
+            for offset in Op::sweep_offsets(u8::MAX, u8::MAX, size) {
+                assert!(offset < size.max(1), "size {size}, offset {offset}");
+            }
+        }
+    }
 }

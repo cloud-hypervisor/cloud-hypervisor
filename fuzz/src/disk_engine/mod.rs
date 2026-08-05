@@ -131,8 +131,8 @@ pub fn fuzz_detect(bytes: &[u8]) -> Corpus {
 
 /// Fuzzes a format's I/O path with `program`, under the shadow model.
 pub fn fuzz_program<F: DiskFormat>(program: &Program) -> Corpus {
-    let template =
-        F::template().unwrap_or_else(|| panic!("{}: format has no template image", F::NAME));
+    let template = F::template_variant(program.template)
+        .unwrap_or_else(|| panic!("{}: format has no template image", F::NAME));
     let Ok((file, path)) = materialize_template::<F>(template) else {
         return Corpus::Reject;
     };
@@ -150,6 +150,8 @@ pub fn fuzz_program<F: DiskFormat>(program: &Program) -> Corpus {
     let Some(mut executor) = Executor::<F>::new(disk, program.ring_depth(), true) else {
         return Corpus::Reject;
     };
+    // See `DiskFormat::sweeps_metadata_cache`.
+    executor.set_sweeps(F::sweeps_metadata_cache(program.template));
     executor.run(program.ops());
 
     Corpus::Keep

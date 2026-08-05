@@ -77,4 +77,16 @@ pub trait DiskFormat {
     fn template() -> Option<&'static [u8]> {
         None
     }
+
+    /// The template selected by `variant`, for formats with more than one
+    /// layout worth fuzzing.
+    fn template_variant(_variant: u8) -> Option<&'static [u8]> {
+        Self::template()
+    }
+
+    /// Whether template `variant` has more metadata tables than the engine
+    /// caches, so an [`crate::disk_engine::Op::Sweep`] can evict them.
+    fn sweeps_metadata_cache(_variant: u8) -> bool {
+        false
+    }
 }
