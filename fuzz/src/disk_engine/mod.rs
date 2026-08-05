@@ -215,8 +215,12 @@ pub fn fuzz_detect(bytes: &[u8]) -> Corpus {
 /// Only formats that build a template in process can be fuzzed this way, so
 /// a missing template is a harness error rather than a finding.
 pub fn fuzz_program<F: DiskFormat>(program: &Program) -> Corpus {
-    let template =
-        F::template().unwrap_or_else(|| panic!("{}: format has no template image", F::NAME));
+    // Both halves of the merge matter: the variant picks WHICH template (the
+    // small-cluster one is the only one whose L2 cache can overflow), and the
+    // template materializer skips the zero pages so an 8 MiB image does not
+    // cost a full copy per iteration.
+    let template = F::template_variant(program.template)
+        .unwrap_or_else(|| panic!("{}: format has no template image", F::NAME));
     let Ok((file, path)) = materialize_template::<F>(template) else {
         return Corpus::Reject;
     };

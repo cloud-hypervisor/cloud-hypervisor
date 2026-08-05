@@ -98,6 +98,8 @@ pub enum Op {
 pub struct Program {
     /// How the image is opened.
     pub open: OpenConfig,
+    /// Which of the format's template images to run against.
+    pub template: u8,
     /// Ring depth for the first I/O engine.
     pub ring_depth: u8,
     /// Ops to execute, truncated to [`MAX_OPS`].

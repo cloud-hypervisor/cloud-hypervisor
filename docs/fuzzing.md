@@ -501,6 +501,18 @@ holds images the mutator never produced.
 cargo fuzz run disk_qcow2_ops -j `nproc`
 ```
 
+#### Templates and the L2 cache
+
+A format may build more than one template image, and the program picks one by
+index, because some engine behaviour follows from the image layout rather
+than from the operations. qcow2 is the case in point: the number of L2 tables
+an image has follows from its cluster size, the engine caches 100 of them and
+writes a dirty table back when it evicts it, and with the default 64 KiB
+cluster one L2 table covers 512 MiB of the disk. No image small enough for
+the shadow model can then hold more tables than the cache does, so nothing
+ever evicted. The second qcow2 template is 4 MiB with 512 byte clusters,
+which is 128 L2 tables and still under the model's 8 MiB limit.
+
 Because that image is valid and starts out reading as zeroes, the framework
 keeps a shadow model of the disk contents and compares every read against it,
 which turns a silent offset translation bug into a crash. Both target families

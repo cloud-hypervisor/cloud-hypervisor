@@ -170,4 +170,19 @@ pub trait DiskFormat {
     fn template() -> Option<&'static [u8]> {
         None
     }
+
+    /// Returns the template a program asked for by index.
+    ///
+    /// A format may build more than one valid image when the layouts differ
+    /// in a way the engine branches on. qcow2 does: the number of L2 tables
+    /// an image has follows from its cluster size, and the L2 cache only
+    /// evicts once more tables are live than it holds, which a single
+    /// template cannot reach at any size the shadow model can afford.
+    ///
+    /// The index comes from the input, so which image an iteration ran
+    /// against is part of what reproduces it. The default ignores it and
+    /// hands back the single template.
+    fn template_variant(_variant: u8) -> Option<&'static [u8]> {
+        Self::template()
+    }
 }
