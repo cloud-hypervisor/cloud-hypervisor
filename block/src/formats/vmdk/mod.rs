@@ -17,6 +17,8 @@ use std::os::unix::io::AsRawFd;
 use std::path::Path;
 
 pub use descriptor::{has_descriptor_header, is_flat_vmdk};
+#[cfg(fuzzing)]
+pub use flat::set_force_extent_walk;
 
 use self::engine_sync::FlatVmdkSync;
 use self::flat::FlatVmdk;

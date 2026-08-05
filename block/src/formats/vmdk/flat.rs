@@ -13,6 +13,8 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::{Component, Path};
 use std::sync::Arc;
+#[cfg(fuzzing)]
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use log::warn;
 
@@ -85,6 +87,32 @@ const RESOLVE_NO_MAGICLINKS: u64 = 0x02;
 // are all rejected with EXDEV.
 const RESOLVE_BENEATH: u64 = 0x08;
 
+/// Selects the `openat2(2)` fallback walk in a fuzz build.
+///
+/// `open_extent` prefers `openat2(2)` and only walks the path component by
+/// component when the syscall is missing or blocked. On any kernel a fuzzer
+/// runs on the first call succeeds, so the walk, which carries its own path
+/// traversal rejection because there is no `RESOLVE_BENEATH` behind it, is
+/// never entered and cannot be fuzzed at all.
+///
+/// A fuzz target therefore sets this from its input, before it opens an
+/// image, so that the resolution path is a property of the input and a crash
+/// still reproduces from the input alone. It only exists in a build with
+/// `cfg(fuzzing)`, which is what `cargo fuzz` sets and what no shipped build
+/// has.
+#[cfg(fuzzing)]
+pub fn set_force_extent_walk(force: bool) {
+    FORCE_EXTENT_WALK.store(force, Ordering::Relaxed);
+}
+
+#[cfg(fuzzing)]
+static FORCE_EXTENT_WALK: AtomicBool = AtomicBool::new(false);
+
+#[cfg(fuzzing)]
+fn force_extent_walk() -> bool {
+    FORCE_EXTENT_WALK.load(Ordering::Relaxed)
+}
+
 // Splits an untrusted extent `filename` into its `Normal` path components for
 // the fallback walk, rejecting any `..`/`.` traversal.
 fn extent_components(filename: &str) -> io::Result<Vec<&OsStr>> {
@@ -132,6 +160,8 @@ fn extent_components(filename: &str) -> io::Result<Vec<&OsStr>> {
 // Resolution prefers openat2(2). On kernels without it (< 5.6, ENOSYS) or
 // where it is blocked (EPERM, e.g. a seccomp filter), it falls back to a
 // per-component openat walk.
+//
+// A fuzz build can select the fallback directly, see `force_extent_walk`.
 fn open_extent(
     base_path: &str,
     filename: &str,
@@ -148,6 +178,12 @@ fn open_extent(
         .read(true)
         .custom_flags(libc::O_DIRECTORY | libc::O_CLOEXEC)
         .open(anchor)?;
+
+    #[cfg(fuzzing)]
+    if force_extent_walk() {
+        let components = extent_components(filename)?;
+        return open_extent_walk(dir, &components, writable, direct);
+    }
 
     match open_extent_openat2(dir.as_raw_fd(), filename, writable, direct) {
         Ok(file) => Ok(AlignedFile::new(file, direct)),
