@@ -134,6 +134,40 @@ impl Vmdk {
         Ok(())
     }
 
+    /// Decides from the input whether this iteration resolves its extents
+    /// with the `openat2` fallback walk.
+    ///
+    /// One input in two, by a hash of the descriptor, so both resolution
+    /// paths keep a share of the corpus and neither depends on anything
+    /// outside the input.
+    ///
+    /// A descriptor naming an absolute extent is the exception: it is the
+    /// only thing that reaches the `openat2` arm which deliberately leaves
+    /// `RESOLVE_BENEATH` off, so sending it down the walk would spend the
+    /// one input that can cover it.
+    #[cfg_attr(not(fuzzing), allow(dead_code))]
+    fn force_walk(bytes: &[u8]) -> bool {
+        if bytes
+            .windows(SCRATCH_TOKEN.len())
+            .any(|window| window == SCRATCH_TOKEN.as_bytes())
+        {
+            return false;
+        }
+
+        // FNV-1a rather than `DefaultHasher`: std explicitly disclaims
+        // stability of its default hasher across releases, and this hash
+        // decides which of the two resolution paths an input takes. The
+        // whole point of deriving it from the input is that a crash
+        // reproduces from its bytes alone, and OSS-Fuzz re-runs regression
+        // testcases on newer toolchains: a reshuffle would send one down the
+        // other arm and silently close a live bug as fixed. A fixed
+        // algorithm costs no dependency and one line.
+        let mixed = bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, &b| {
+            (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+        });
+        !mixed.is_multiple_of(2)
+    }
+
     /// Expands [`SCRATCH_TOKEN`] in `descriptor` into the scratch directory.
     ///
     /// Returns `None` when there is nothing to expand, so the common case
@@ -268,6 +302,14 @@ impl DiskFormat for Vmdk {
 
         Self::reset_extents(dir)?;
 
+        // Which resolution path the engine takes is derived from the input
+        // rather than from the environment, so a crash found on the fallback
+        // walk reproduces from its bytes alone. Without this the walk is
+        // dead code on every kernel a fuzzer runs on, because `openat2`
+        // always succeeds there.
+        #[cfg(fuzzing)]
+        block::formats::vmdk::set_force_extent_walk(Self::force_walk(&raw[..len]));
+
         // The fuzzer drives the writable path, so it asks for a writable
         // open and lets the descriptor's own access field decide per extent.
         let disk = VmdkDisk::new(file, path, false, config.direct)?;
@@ -364,6 +406,39 @@ mod tests {
         assert!(expanded.contains(&dir.display().to_string()));
         assert!(!Vmdk::names_escaping_extent(&expanded, dir, true));
         assert!(Vmdk::expand_scratch_token("no token here", dir).is_none());
+    }
+
+    // The resolution path must depend on the input alone, and both paths
+    // have to keep a share of it.
+    #[test]
+    fn the_walk_choice_is_a_function_of_the_input() {
+        let a = descriptor("image-flat.vmdk");
+        assert_eq!(
+            Vmdk::force_walk(a.as_bytes()),
+            Vmdk::force_walk(a.as_bytes())
+        );
+
+        // Pinned, not merely reproducible in this process: the split has to
+        // survive a toolchain upgrade, or a regression testcase re-run on a
+        // newer compiler would take the other arm and close a live bug.
+        assert!(Vmdk::force_walk(b""), "the FNV-1a basis is odd");
+        assert!(!Vmdk::force_walk(b"a"));
+        assert!(Vmdk::force_walk(b"b"));
+        assert!(!Vmdk::force_walk(b"# Disk DescriptorFile\n"));
+
+        let mixed = (0..64u8)
+            .map(|i| Vmdk::force_walk(format!("{a}{i}").as_bytes()))
+            .filter(|walk| *walk)
+            .count();
+        assert!(
+            (8..56).contains(&mixed),
+            "{mixed} of 64 inputs took the walk, expected a rough split"
+        );
+
+        // An absolute name has to reach openat2, which is the only arm that
+        // can cover the unconfined resolve.
+        let absolute = descriptor(&format!("{SCRATCH_TOKEN}/image-flat.vmdk"));
+        assert!(!Vmdk::force_walk(absolute.as_bytes()));
     }
 
     // A name that is lexically inside the scratch directory but traverses a

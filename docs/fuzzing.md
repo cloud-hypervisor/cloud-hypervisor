@@ -147,6 +147,19 @@ into the file needs a bigger budget than the 8 MiB default.
 The extent opener has two arms the harness has to reach on purpose, and both
 are security relevant.
 
+The first is the fallback walk. `open_extent` resolves a name with
+`openat2(2)` and `RESOLVE_BENEATH` and only walks the path component by
+component when the syscall is missing (`ENOSYS`, kernels before 5.6) or
+blocked (`EPERM`). On any kernel a fuzzer runs on the first call succeeds, so
+`open_extent_walk` and `extent_components` never run, and they are precisely
+where the fallback rejects a traversing name itself, without a kernel to do
+it. A `cfg(fuzzing)` switch in `block/src/formats/vmdk/flat.rs` lets the
+harness take the walk instead, and the VMDK adapter sets it from a hash of
+the descriptor, one input in two. Deriving it from the input rather than from
+an environment variable is what keeps a crash reproducible from its bytes
+alone; a seccomp filter could not do that, because a filter is process wide
+and cannot be lifted once installed.
+
 The second is the absolute name. An extent name may be absolute, and then the
 engine anchors resolution at the filesystem root and deliberately does not
 apply `RESOLVE_BENEATH`. A fuzzer may only open an absolute path inside its
