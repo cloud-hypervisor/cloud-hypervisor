@@ -243,6 +243,10 @@ pub fn fuzz_program<F: DiskFormat>(program: &Program) -> Corpus {
     let Some(mut executor) = Executor::<F>::new(disk, program.ring_depth(), true) else {
         return Corpus::Reject;
     };
+    // A sweep is only worth its I/O against a template with more metadata
+    // tables than the engine caches; against any other it is up to 384 I/Os
+    // that revisit one table.
+    executor.set_sweeps(F::sweeps_metadata_cache(program.template));
     executor.run(program.ops());
 
     Corpus::Keep

@@ -120,6 +120,14 @@ impl DiskFormat for Qcow2 {
 
         Some(template)
     }
+
+    // Only the small cluster variant can evict. The default template is 1
+    // MiB with 64 KiB clusters, so one L2 table maps 512 MiB and the whole
+    // image is a single table: a sweep over it revisits that one table up to
+    // MAX_SWEEP times and cannot reach the cache's eviction path at all.
+    fn sweeps_metadata_cache(variant: u8) -> bool {
+        !variant.is_multiple_of(2)
+    }
 }
 
 #[cfg(test)]

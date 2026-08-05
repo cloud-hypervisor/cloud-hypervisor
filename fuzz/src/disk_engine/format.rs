@@ -185,4 +185,18 @@ pub trait DiskFormat {
     fn template_variant(_variant: u8) -> Option<&'static [u8]> {
         Self::template()
     }
+
+    /// Whether template `variant` has more L2 style metadata tables than the
+    /// engine caches, so that an [`crate::disk_engine::Op::Sweep`] over them
+    /// can evict.
+    ///
+    /// A sweep is expensive: up to `MAX_SWEEP` sector writes and the same
+    /// number of read backs in one op. Against an image whose whole capacity
+    /// is one table it buys nothing at all - every offset lands in the same
+    /// table, nothing is ever evicted, and the op is pure cost. The default
+    /// is therefore `false`, and a format opts in for the variants whose
+    /// layout can actually reach the eviction path.
+    fn sweeps_metadata_cache(_variant: u8) -> bool {
+        false
+    }
 }

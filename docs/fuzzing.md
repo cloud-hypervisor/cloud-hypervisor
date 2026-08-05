@@ -513,6 +513,28 @@ the shadow model can then hold more tables than the cache does, so nothing
 ever evicted. The second qcow2 template is 4 MiB with 512 byte clusters,
 which is 128 L2 tables and still under the model's 8 MiB limit.
 
+A template alone is not enough either: with `MAX_OPS` at 64, no program of
+ordinary operations can keep 101 tables live however its offsets fall. The
+`Sweep` operation writes one sector into each of up to 192 consecutive L2
+tables and then reads every one of them back. The write pass outruns the
+cache; the read back pass is what makes the eviction testable rather than
+merely reachable, since a table written back to the wrong place, or dropped
+without a write back, only shows up when the data behind it is read after the
+cache has moved on. Because the sweep runs under the shadow model, that shows
+up as a read back mismatch.
+
+A sweep only walks its full run against a template that can actually evict.
+The stride is one L2 table of the small cluster image, 32 KiB, but the
+program picks the template by index and an even index selects the default
+one, whose single L2 table maps the whole disk: half of all programs were
+paying up to 384 I/Os per `Sweep` to write and read back the same table,
+which cannot evict anything. A format now declares which of its templates has
+more tables than the engine caches, and a sweep against any other walks a
+single table, so the operation stays live on both layouts and only the
+repeats go. Measured on `disk_qcow2_ops`, replaying a fixed 1080 entry corpus
+fell from 11.1s to 10.6s, and dirty evictions over that corpus were identical
+at 7000, so the saving costs no eviction coverage at all.
+
 Because that image is valid and starts out reading as zeroes, the framework
 keeps a shadow model of the disk contents and compares every read against it,
 which turns a silent offset translation bug into a crash. Both target families

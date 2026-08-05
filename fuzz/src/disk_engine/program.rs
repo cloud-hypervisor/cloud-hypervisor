@@ -11,6 +11,31 @@ use crate::disk_engine::format::OpenConfig;
 /// Largest number of ops executed from one program.
 pub const MAX_OPS: usize = 64;
 
+/// Bytes covered by one L2 table of the small cluster qcow2 template.
+///
+/// A program that means to press on the L2 cache has to touch tables, not
+/// clusters, so the stride it walks with is the span of a table.
+const L2_SPAN: u64 = crate::disk_engine::formats::qcow2::SMALL_L2_SPAN;
+
+/// Largest number of L2 tables one [`Op::Sweep`] walks.
+///
+/// The qcow2 L2 cache holds 100 tables, so a sweep has to be able to touch
+/// more than that in a single op: with [`MAX_OPS`] at 64, no program made of
+/// ordinary ops can reach 101 distinct tables however its offsets are
+/// chosen.
+///
+/// It stays at 192 even though the small cluster template has only 128 L2
+/// tables, so a longer sweep wraps onto tables it has already walked.
+/// Lowering it to 128 to remove those repeats was measured and made the
+/// target *slower*: 20 000 executions of `disk_qcow2_ops` fell from 307 to
+/// 273 exec/s, and a replay of a fixed 1080 entry corpus rose from 11.1s to
+/// 13.5s. A repeat is cheap - the table is already cached and the cluster
+/// already allocated - while a *distinct* table costs an allocation and an
+/// eviction, and `tables % MAX_SWEEP` maps a whole range of inputs onto
+/// short sweeps only while the modulus exceeds the table count. Wrapping is
+/// therefore where the cheap inputs come from, not waste.
+const MAX_SWEEP: u64 = 192;
+
 /// Largest byte count for a single data op.
 ///
 /// This also sizes the guest memory region shared by all guest memory ops.
@@ -91,6 +116,25 @@ pub enum Op {
     UseClone { ring_depth: u8 },
     /// Query every capability trait.
     QueryCaps,
+    /// Write one sector into each of a run of consecutive L2 tables.
+    ///
+    /// The engine caches 100 L2 tables and writes a dirty one back when it
+    /// evicts it, so nothing evicts until a program has more tables live
+    /// than the cache holds. One op that strides table by table is what
+    /// reaches that, and because every write is recorded in the shadow
+    /// model, a table written back to the wrong place, or not written back
+    /// at all, turns into a read back mismatch rather than silence.
+    Sweep { first: u8, tables: u8, seed: u8 },
+}
+
+impl Op {
+    /// Returns the offsets and byte count one [`Op::Sweep`] writes.
+    pub fn sweep_offsets(first: u8, tables: u8, size: u64) -> impl Iterator<Item = u64> {
+        let size = size.max(1);
+        let count = u64::from(tables) % MAX_SWEEP + 1;
+        let first = u64::from(first);
+        (0..count).map(move |i| (first + i) * L2_SPAN % size)
+    }
 }
 
 /// An open configuration plus the ops to run against it.
@@ -196,4 +240,42 @@ pub fn default_program() -> Vec<Op> {
         Op::Fsync { completion: false },
         Op::QueryCaps,
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The qcow2 L2 cache holds 100 tables, so a sweep is only worth having
+    // if one op can touch more than that; and every offset it names has to
+    // be the start of a distinct table, or it presses on the cache far less
+    // than it appears to.
+    #[test]
+    fn a_sweep_can_outrun_the_l2_cache() {
+        let size = 4 << 20;
+        let offsets: Vec<u64> = Op::sweep_offsets(0, 191, size).collect();
+        assert_eq!(offsets.len(), 192);
+
+        let distinct: std::collections::BTreeSet<u64> = offsets.iter().copied().collect();
+        assert!(
+            distinct.len() > 100,
+            "{} distinct tables, the cache holds 100",
+            distinct.len()
+        );
+        for offset in offsets {
+            assert!(offset < size, "offset {offset} is outside the disk");
+            assert_eq!(offset % L2_SPAN, 0, "offset {offset} is not table aligned");
+        }
+    }
+
+    // A sweep must stay inside the disk whatever the fuzzer names, including
+    // a disk far smaller than one table.
+    #[test]
+    fn a_sweep_stays_inside_the_disk() {
+        for size in [1, 512, 4096, L2_SPAN, 1 << 20] {
+            for offset in Op::sweep_offsets(u8::MAX, u8::MAX, size) {
+                assert!(offset < size.max(1), "size {size}, offset {offset}");
+            }
+        }
+    }
 }
