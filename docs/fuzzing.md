@@ -142,6 +142,31 @@ The same limit is why `DiskFormat::MAX_IMAGE_LEN` is a per format constant:
 the harness rejects anything larger, and a format whose metadata reaches far
 into the file needs a bigger budget than the 8 MiB default.
 
+#### How a VMDK extent name is resolved
+
+The extent opener has two arms the harness has to reach on purpose, and both
+are security relevant.
+
+The second is the absolute name. An extent name may be absolute, and then the
+engine anchors resolution at the filesystem root and deliberately does not
+apply `RESOLVE_BENEATH`. A fuzzer may only open an absolute path inside its
+own scratch directory, whose name carries the process id, so no fixed corpus
+entry can name it. A descriptor therefore writes the placeholder
+`/@fuzz-scratch@`, which the harness expands into the scratch directory
+before the parser reads the file, and the name guard accepts an absolute name
+only when it starts with that directory and every component after it is a
+plain name. The expansion is a function of the input alone, and
+`scripts/generate-fuzz-seeds.sh` writes a seed that uses it.
+
+That name guard is lexical, and for an absolute name a lexical guard is not
+enough on its own. `<scratch>/link/victim` is all plain components and still
+leaves the directory when `link` is a symlink, because the absolute arm has no
+`RESOLVE_BENEATH` behind it and `O_NOFOLLOW` only guards the final component -
+and the extent is opened writable. `disk_vmdk` therefore confines the process
+with the same Landlock sandbox `disk_qcow2_chain` uses before the first
+iteration, and fails closed: with no confinement it refuses every absolute
+name and keeps fuzzing the relative arm, which the kernel still confines.
+
 ### QCOW2 backing chains
 
 A qcow2 image may name a backing file, and `disk_qcow2` reaches none of the
@@ -206,6 +231,9 @@ target refuses every input rather than running unconfined. This second belt
 exists because, unlike the VMDK extent path, the engine takes no `openat2`
 `RESOLVE_BENEATH` precaution for a qcow2 backing file, deliberately, so the
 harness guard would otherwise be the only thing between a corpus entry and a
+host path. The same sandbox is used by `disk_vmdk`, where the absolute extent
+arm gives up `RESOLVE_BENEATH` on a *writable* open; there the fail closed
+behaviour is to refuse absolute extent names rather than the whole input.
 
 #### Why it is a separate target
 

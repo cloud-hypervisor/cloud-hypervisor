@@ -288,7 +288,7 @@ pub fn fuzz_chain(bytes: &[u8]) -> Corpus {
     let Ok(dir) = scratch_dir(Qcow2Chain::NAME) else {
         return Corpus::Reject;
     };
-    if !sandbox::confine(dir) {
+    if !sandbox::confine(dir, sandbox::Directories::ScratchOnly) {
         return Corpus::Reject;
     }
 

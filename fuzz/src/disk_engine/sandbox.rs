@@ -2,10 +2,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//! Process level filesystem confinement for the backing chain target.
+//! Process level filesystem confinement for the path backed targets.
 //!
 //! # Why a second belt
 //!
+//! Two targets hand the engine a *path* out of an untrusted image.
 //! A qcow2 image names its backing file by path, and the engine resolves a
 //! relative name against the directory of the image that stores it
 //! (block/src/formats/qcow/parser.rs:317) with a plain `Path::join`, which
@@ -24,6 +25,15 @@
 //! iteration. A bug in the name guard then costs a denied `open` rather than
 //! the contents of a host file.
 //!
+//! A flat VMDK descriptor names its data extents by path too, and those are
+//! opened *writable*. A relative name is confined by `openat2`'s
+//! `RESOLVE_BENEATH` (block/src/formats/vmdk/flat.rs:223), but an absolute
+//! one is anchored at the filesystem root with that flag deliberately left
+//! off, and `O_NOFOLLOW` only guards the final component: a symlink planted
+//! in the scratch directory is followed straight out of it, past a lexical
+//! guard that sees nothing but plain components. `disk_vmdk` therefore takes
+//! the same belt, and refuses absolute names when it cannot have it.
+//!
 //! # Why not a namespace
 //!
 //! `unshare` plus `pivot_root` would be a tighter jail, but it breaks the
@@ -35,7 +45,10 @@
 //!
 //! Every step is checked, and the whole target refuses to run with backing
 //! files enabled when any of them fails, including the `ENOSYS` and
-//! `EOPNOTSUPP` of a kernel built without Landlock. Raw syscalls rather than
+//! `EOPNOTSUPP` of a kernel built without Landlock. `disk_vmdk` refuses the
+//! absolute extent names whose resolution the kernel does not confine, and
+//! keeps fuzzing the relative ones, which `RESOLVE_BENEATH` still covers.
+//! Raw syscalls rather than
 //! a crate, so that the fuzzer gains no dependency for 150 lines of ABI.
 
 use std::ffi::CString;
@@ -208,8 +221,31 @@ fn fuzzer_paths() -> Vec<PathBuf> {
     paths
 }
 
+/// Whether the target has to `open(2)` directories outside its scratch
+/// directory.
+///
+/// The VMDK extent opener anchors an absolute extent name at the filesystem
+/// root by opening `/` with `O_DIRECTORY` (block/src/formats/vmdk/flat.rs),
+/// and Landlock needs `LANDLOCK_ACCESS_FS_READ_DIR` for that open. Without a
+/// rule the anchor fails with `EACCES` and the absolute arm becomes dead
+/// code, which is the arm the confinement is here to make safe to fuzz.
+///
+/// [`Directories::ListAnywhere`] therefore grants `READ_DIR` beneath `/`,
+/// and only that: a directory may be opened and listed, but no file beneath
+/// it may be opened for reading, writing or execution, and nothing may be
+/// created, removed, linked or truncated. The escape this module exists to
+/// stop needs to *open a file*, so it stays denied.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Directories {
+    /// Only the scratch directory and the runtime's own directories may be
+    /// opened.
+    ScratchOnly,
+    /// Any directory may be opened and listed. No file becomes reachable.
+    ListAnywhere,
+}
+
 /// Confines this process to `scratch` plus what the runtime needs.
-fn restrict(scratch: &Path) -> Result<(), ()> {
+fn restrict(scratch: &Path, directories: Directories) -> Result<(), ()> {
     // Landlock needs no privilege, but it does need no_new_privs.
     // SAFETY: FFI call with the documented argument count.
     if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } != 0 {
@@ -256,6 +292,15 @@ fn restrict(scratch: &Path) -> Result<(), ()> {
         for path in fuzzer_paths() {
             add_rule(ruleset_fd, &path, write)?;
         }
+
+        // Directory opens, and nothing else: see [`Directories`].
+        if directories == Directories::ListAnywhere {
+            add_rule(
+                ruleset_fd,
+                Path::new("/"),
+                ACCESS_READ_DIR & attr.handled_access_fs,
+            )?;
+        }
         Ok(())
     })();
 
@@ -276,17 +321,19 @@ fn restrict(scratch: &Path) -> Result<(), ()> {
 
 /// Confines the process once and reports whether it is confined.
 ///
-/// The caller must refuse to enable backing files when this returns `false`:
-/// the harness name guard would then be the only protection left, and this
-/// module exists because one is not enough.
-pub fn confine(scratch: &Path) -> bool {
+/// The caller must fail closed when this returns `false`: `disk_qcow2_chain`
+/// refuses to enable backing files and `disk_vmdk` refuses absolute extent
+/// names, because the harness name guard would then be the only protection
+/// left, and this module exists because one is not enough.
+pub fn confine(scratch: &Path, directories: Directories) -> bool {
     static CONFINED: OnceLock<bool> = OnceLock::new();
 
     *CONFINED.get_or_init(|| {
-        let confined = restrict(scratch).is_ok();
+        let confined = restrict(scratch, directories).is_ok();
         if !confined {
             eprintln!(
-                "disk_qcow2_chain: Landlock unavailable, refusing to enable qcow2 backing files"
+                "disk fuzz sandbox: Landlock unavailable, the process is not confined; the \
+                 targets that need it fail closed"
             );
         }
         confined
@@ -356,7 +403,10 @@ mod tests {
         let victim = std::env::temp_dir().join("ch-fuzz-sandbox-victim");
         std::fs::write(&victim, b"secret").expect("victim file");
 
-        assert!(confine(&scratch), "the process must be confined");
+        assert!(
+            confine(&scratch, Directories::ScratchOnly),
+            "the process must be confined"
+        );
 
         std::fs::write(scratch.join("backing.img"), b"backing")
             .expect("the scratch directory stays writable");
