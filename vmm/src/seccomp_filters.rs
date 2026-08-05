@@ -573,6 +573,7 @@ fn common_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
     Ok(vec![
         (libc::SYS_gettid, vec![]),
         (libc::SYS_read, vec![]),
+        (libc::SYS_rt_sigaction, vec![]),
         (libc::SYS_write, vec![]),
     ])
 }
@@ -635,7 +636,6 @@ fn pty_foreground_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         #[cfg(target_arch = "aarch64")]
         (libc::SYS_ppoll, vec![]),
         (libc::SYS_restart_syscall, vec![]),
-        (libc::SYS_rt_sigaction, vec![]),
         (libc::SYS_rt_sigreturn, vec![]),
         (libc::SYS_sched_yield, vec![]),
         (libc::SYS_setsid, vec![]),
@@ -745,7 +745,6 @@ fn vmm_thread_rules(
         (libc::SYS_recvmsg, vec![]),
         (libc::SYS_restart_syscall, vec![]),
         (libc::SYS_rseq, vec![]),
-        (libc::SYS_rt_sigaction, vec![]),
         (libc::SYS_rt_sigprocmask, vec![]),
         (libc::SYS_rt_sigreturn, vec![]),
         (libc::SYS_sched_getaffinity, vec![]),
@@ -951,7 +950,6 @@ fn vcpu_thread_rules(
         (libc::SYS_readlinkat, vec![]),
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_recvmsg, vec![]),
-        (libc::SYS_rt_sigaction, vec![]),
         (libc::SYS_rt_sigprocmask, vec![]),
         (libc::SYS_rt_sigreturn, vec![]),
         (libc::SYS_sched_yield, vec![]),
