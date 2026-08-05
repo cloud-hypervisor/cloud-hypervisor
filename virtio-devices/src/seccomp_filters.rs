@@ -359,6 +359,7 @@ fn virtio_thread_common() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_exit, vec![]),
         (libc::SYS_fcntl, vec![]),
         (libc::SYS_futex, vec![]),
+        (libc::SYS_getpid, vec![]),
         (libc::SYS_gettid, vec![]),
         (libc::SYS_madvise, vec![]),
         (libc::SYS_mmap, vec![]),
@@ -378,9 +379,12 @@ fn virtio_thread_common() -> Vec<(i64, Vec<SeccompRule>)> {
             ]],
         ),
         (libc::SYS_read, vec![]),
+        (libc::SYS_rt_sigaction, vec![]),
         (libc::SYS_rt_sigprocmask, vec![]),
         (libc::SYS_rt_sigreturn, vec![]),
         (libc::SYS_sigaltstack, vec![]),
+        (libc::SYS_tgkill, vec![]),
+        (libc::SYS_tkill, vec![]),
         (libc::SYS_write, vec![]),
     ]
 }
