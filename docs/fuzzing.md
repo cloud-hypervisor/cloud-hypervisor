@@ -168,6 +168,13 @@ limit stops it. The directory also holds `leaf.raw`, a fixed empty file: two
 fuzzer images can only build a chain that closes on itself, which the nesting
 limit always refuses, so a chain that reads through three levels needs a third
 file, and any file is a valid raw backing.
+
+```
+scripts/generate-fuzz-seeds.sh
+cargo fuzz run disk_qcow2_chain -j `nproc` -- -max_len=4194312 \
+    -dict=fuzz/dictionaries/qcow2_chain.dict
+```
+
 #### The sandbox
 
 The backing file is named by *path*, and the engine resolves a relative name

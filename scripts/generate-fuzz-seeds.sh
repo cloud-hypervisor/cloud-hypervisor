@@ -51,6 +51,67 @@ seed_qcow2() {
     "$QEMU_IMG" create -f qcow2 "$out/empty.qcow2" 1M >/dev/null
 }
 
+# Writes the qcow2 backing chain seeds.
+#
+# The disk_qcow2_chain input is two images, so a seed is a length prefixed
+# pair: [u32 LE top_len][top image][backing image]. The top image names its
+# backing file by a plain relative name and the harness materializes the
+# second half under that name, so the pair is self contained.
+#
+# Four chains: a qcow2 backing file and a raw one, one per dispatch arm in
+# `BackingFile::new`; a compressed backing image, which is the only way to
+# reach the compressed cluster arm of `Qcow2Backing::read_clusters`; and a
+# three deep chain whose middle image names leaf.raw, the fixed raw file the
+# harness provides, since a chain built only out of the two images of an
+# input closes on itself; and one that does close on itself, which is what
+# reaches the MAX_NESTING_DEPTH refusal.
+seed_qcow2_chain() {
+    local source=$1
+    local out="$CORPUS_DIR/disk_qcow2_chain"
+    local work="$WORK_DIR/chain"
+
+    mkdir -p "$out" "$work"
+    "$QEMU_IMG" convert -O qcow2 "$source" "$work/base.qcow2"
+    "$QEMU_IMG" convert -O qcow2 -c "$source" "$work/compressed.qcow2"
+    cp "$source" "$work/base.raw"
+    truncate -s 1M "$work/leaf.raw"
+
+    # The backing name is stored as given, so these run inside $work to keep
+    # it relative.
+    (
+        cd "$work"
+        "$QEMU_IMG" create -f qcow2 -F qcow2 -b base.qcow2 qcow2-top.qcow2 1M
+        "$QEMU_IMG" create -f qcow2 -F raw -b base.raw raw-top.qcow2 1M
+        "$QEMU_IMG" create -f qcow2 -F qcow2 -b compressed.qcow2 compressed-top.qcow2 1M
+        # The top image names backing.img, the file the harness writes the
+        # backing half to, and that half names leaf.raw, which terminates the
+        # chain: top, backing image, raw leaf.
+        "$QEMU_IMG" create -f qcow2 -F raw -b leaf.raw nested.qcow2 1M
+        cp nested.qcow2 backing.img
+        "$QEMU_IMG" create -f qcow2 -F qcow2 -b backing.img nested-top.qcow2 1M
+        # Both halves name backing.img, which is where the harness writes the
+        # second half, so the chain never terminates and the engine refuses
+        # it at MAX_NESTING_DEPTH (block/src/formats/qcow/util.rs:13).
+        "$QEMU_IMG" create -f qcow2 -F qcow2 -b backing.img cyclic.qcow2 1M
+    ) >/dev/null
+
+    pack_chain "$work/qcow2-top.qcow2" "$work/base.qcow2" "$out/qcow2-backed"
+    pack_chain "$work/raw-top.qcow2" "$work/base.raw" "$out/raw-backed"
+    pack_chain "$work/compressed-top.qcow2" "$work/compressed.qcow2" \
+        "$out/compressed-backed"
+    pack_chain "$work/nested-top.qcow2" "$work/nested.qcow2" "$out/nested"
+    pack_chain "$work/cyclic.qcow2" "$work/cyclic.qcow2" "$out/cyclic"
+}
+
+# Concatenates a top image and a backing image into one seed, prefixed with
+# the top image length as a little endian u32.
+pack_chain() {
+    python3 -c 'import struct, sys
+top = open(sys.argv[1], "rb").read()
+backing = open(sys.argv[2], "rb").read()
+open(sys.argv[3], "wb").write(struct.pack("<I", len(top)) + top + backing)' "$1" "$2" "$3"
+}
+
 # Writes the VHDX seeds. Cloud Hypervisor reads dynamic VHDX, so the fixed
 # subformat is here to exercise the rejection path.
 seed_vhdx() {
@@ -125,6 +186,7 @@ main() {
     source=$(make_source)
 
     seed_qcow2 "$source"
+    seed_qcow2_chain "$source"
     seed_vhd "$source"
     seed_vhdx "$source"
     seed_vmdk "$source"
