@@ -1231,6 +1231,21 @@ fn get_seccomp_rules(
             )?]],
         ));
     }
+    if !rules
+        .iter()
+        .chain(specific_rules.iter())
+        .any(|(syscall, _)| *syscall == libc::SYS_prctl)
+    {
+        rules.push((
+            libc::SYS_prctl,
+            or![and![Cond::new(
+                0, // prctl() option argument
+                ArgLen::Dword,
+                Eq,
+                libc::PR_GET_NAME as u64,
+            )?]],
+        ));
+    }
     rules.extend(specific_rules);
     Ok(rules)
 }

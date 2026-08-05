@@ -12,8 +12,9 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::Path;
 #[cfg(feature = "guest_debug")]
 use std::path::PathBuf;
+use std::ptr::from_ref;
 use std::sync::mpsc::channel;
-use std::{any, cmp, env, io, num, process, str, thread};
+use std::{any, cmp, env, io, num, process, str};
 
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use event_monitor::event;
@@ -61,26 +62,75 @@ struct SeccompSiginfo {
     si_arch: libc::c_uint,
 }
 
-fn handle_sigsys(info: &libc::siginfo_t) {
-    // SAFETY: The handler only reads the provided siginfo pointer, writes a
-    // diagnostic message, and then delegates to the default SIGSYS handler.
-    unsafe {
-        let current_thread = thread::current();
-        let thread_name = current_thread.name().unwrap_or("<unknown>");
-        let tid = libc::syscall(libc::SYS_gettid) as i64;
-        let info = &*(info as *const libc::siginfo_t as *const SeccompSiginfo);
-        eprintln!(
-            concat!(
-                "\n==== Possible seccomp violation ====\n",
-                "Syscall number: {} (arch: {:#x}, tid: {}, thread: {})\n",
-                "Try running with `strace -ff` to identify the cause and open an issue: ",
-                "https://github.com/cloud-hypervisor/cloud-hypervisor/issues/new",
-            ),
-            info.si_syscall, info.si_arch, tid, thread_name,
-        );
+impl SeccompSiginfo {
+    const OUTPUT_LEN: usize = 128;
 
-        low_level::emulate_default_handler(SIGSYS).unwrap();
+    // Only valid for a SIGSYS raised by seccomp, as that is what determines
+    // which member of the siginfo_t union is populated.
+    fn from_siginfo(info: &libc::siginfo_t) -> &Self {
+        // SAFETY: SeccompSiginfo mirrors Linux's siginfo_t layout for SIGSYS.
+        unsafe { &*from_ref(info).cast::<SeccompSiginfo>() }
     }
+
+    // Inside a signal handler can't do any dynamic allocation
+    fn format_into<'a>(&self, buf: &'a mut [u8; Self::OUTPUT_LEN]) -> &'a [u8] {
+        fn append(buf: &mut [u8], len: &mut usize, bytes: &[u8]) {
+            for byte in bytes {
+                let Some(slot) = buf.get_mut(*len) else {
+                    return;
+                };
+                *slot = *byte;
+                *len = len.saturating_add(1);
+            }
+        }
+
+        fn append_number(buf: &mut [u8], len: &mut usize, mut value: u64, radix: u64) {
+            const DIGITS: &[u8] = b"0123456789abcdef";
+
+            let mut digits = [0; 64];
+            let mut start = digits.len();
+            loop {
+                start -= 1;
+                digits[start] = DIGITS[(value % radix) as usize];
+                value /= radix;
+                if value == 0 {
+                    break;
+                }
+            }
+
+            append(buf, len, &digits[start..]);
+        }
+
+        let mut name = [0u8; 16];
+        // SAFETY: prctl(PR_GET_NAME) writes at most 16 bytes into the buffer.
+        unsafe { libc::prctl(libc::PR_GET_NAME, name.as_mut_ptr()) };
+        let name_len = name.iter().position(|b| *b == 0).unwrap_or(name.len());
+
+        let mut len = 0;
+        append(buf, &mut len, b"Probable seccomp violation:");
+        append(buf, &mut len, b" si_syscall=");
+        append_number(buf, &mut len, self.si_syscall as u32 as u64, 10);
+        append(buf, &mut len, b" si_arch=0x");
+        append_number(buf, &mut len, self.si_arch as u64, 16);
+        append(buf, &mut len, b" thread=");
+        append(buf, &mut len, &name[..name_len]);
+        append(buf, &mut len, b"\n");
+
+        &buf[..len]
+    }
+}
+
+fn handle_sigsys(info: &libc::siginfo_t) {
+    let info = SeccompSiginfo::from_siginfo(info);
+    let mut buffer = [0; SeccompSiginfo::OUTPUT_LEN];
+    let message = info.format_into(&mut buffer);
+    // SAFETY: message points to initialized memory for message.len() bytes.
+    unsafe {
+        libc::write(libc::STDERR_FILENO, message.as_ptr().cast(), message.len());
+    }
+
+    // For SIGSYS this terminates or aborts and does not return.
+    let _ = low_level::emulate_default_handler(SIGSYS);
 }
 
 #[cfg(feature = "dhat-heap")]
@@ -599,8 +649,7 @@ fn start_vmm(
     };
 
     if seccomp_action == SeccompAction::Trap {
-        // SAFETY: We only use signal_hook for managing signals and only execute signal
-        // handler safe functions (writing to stderr) and manipulating signals.
+        // SAFETY: handle_sigsys only performs async signal safe operations.
         unsafe {
             signal_hook_registry::register_sigaction(SIGSYS, handle_sigsys)
                 .map_err(|e| error!("Error adding SIGSYS signal handler: {e}"))
@@ -976,7 +1025,10 @@ fn main() {
 
 #[cfg(test)]
 mod unit_tests {
+    use std::mem::zeroed;
     use std::path::PathBuf;
+    use std::ptr::from_mut;
+    use std::thread;
 
     use vmm::config::VmParams;
     #[cfg(target_arch = "x86_64")]
@@ -988,7 +1040,33 @@ mod unit_tests {
     };
 
     use crate::test_util::assert_args_sorted;
-    use crate::{create_app, get_cli_options_sorted, prepare_default_values};
+    use crate::{SeccompSiginfo, create_app, get_cli_options_sorted, prepare_default_values};
+
+    #[test]
+    fn test_seccomp_siginfo_output() {
+        thread::Builder::new()
+            .name("test-sigsys".to_string())
+            .spawn(|| {
+                // SAFETY: An all-zero libc::siginfo_t is valid on Linux.
+                let mut siginfo = unsafe { zeroed::<libc::siginfo_t>() };
+                // SAFETY: SeccompSiginfo mirrors the initial Linux siginfo_t layout.
+                unsafe {
+                    let seccomp = &mut *from_mut(&mut siginfo).cast::<SeccompSiginfo>();
+                    seccomp.si_syscall = 47;
+                    seccomp.si_arch = 0x3e;
+                }
+
+                let info = SeccompSiginfo::from_siginfo(&siginfo);
+                let mut buffer = [0; SeccompSiginfo::OUTPUT_LEN];
+                let expected = "Probable seccomp violation: si_syscall=47 \
+                     si_arch=0x3e thread=test-sigsys\n";
+
+                assert_eq!(info.format_into(&mut buffer), expected.as_bytes());
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
 
     fn get_vm_config_from_vec(args: &[&str]) -> VmConfig {
         let (default_vcpus, default_memory, default_rng) = prepare_default_values();
