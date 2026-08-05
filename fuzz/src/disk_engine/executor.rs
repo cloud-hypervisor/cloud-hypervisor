@@ -25,6 +25,9 @@ const MAX_MODEL_LEN: u64 = 8 << 20;
 /// Largest size a `Resize` op may ask for.
 const MAX_RESIZE_LEN: u64 = 64 << 20;
 
+/// Bytes written into each L2 table by a `Sweep` op.
+const SWEEP_LEN: usize = 512;
+
 /// Drives an op program against one opened disk image.
 pub struct Executor<F: DiskFormat> {
     disk: Box<dyn AsyncFullDiskFile>,
@@ -34,6 +37,7 @@ pub struct Executor<F: DiskFormat> {
     size: u64,
     model: Option<Model>,
     user_data: u64,
+    sweeps: bool,
     format: PhantomData<F>,
 }
 
@@ -58,11 +62,17 @@ impl<F: DiskFormat> Executor<F> {
             size,
             model,
             user_data: 0,
+            sweeps: false,
             format: PhantomData,
         };
         executor.check_capacity_backing();
 
         Some(executor)
+    }
+
+    /// Lets a `Sweep` op walk its full run of metadata tables.
+    pub fn set_sweeps(&mut self, sweeps: bool) {
+        self.sweeps = sweeps;
     }
 
     /// Runs up to [`MAX_OPS`] ops.
@@ -107,6 +117,24 @@ impl<F: DiskFormat> Executor<F> {
             }
             Op::UseClone { ring_depth: depth } => self.use_clone(ring_depth(depth)),
             Op::QueryCaps => self.query_caps(),
+            Op::Sweep {
+                first,
+                tables,
+                seed,
+            } => self.sweep(first, tables, seed),
+        }
+    }
+
+    /// Writes one sector into each of a run of L2 tables and reads it back.
+    fn sweep(&mut self, first: u8, tables: u8, seed: u8) {
+        // Only a template with more L2 tables than the cache gets a full sweep.
+        let tables = if self.sweeps { tables } else { 0 };
+        let offsets: Vec<u64> = Op::sweep_offsets(first, tables, self.size).collect();
+        for &offset in &offsets {
+            self.write_vec(offset, SWEEP_LEN, seed);
+        }
+        for &offset in &offsets {
+            self.read_vec(offset, SWEEP_LEN);
         }
     }
 

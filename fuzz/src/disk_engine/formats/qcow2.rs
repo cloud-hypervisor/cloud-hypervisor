@@ -14,8 +14,18 @@ use block::formats::qcow::{QcowDisk, QcowTempDisk};
 
 use crate::disk_engine::format::{DiskFormat, OpenConfig};
 
-/// Virtual size of the template.
+/// Virtual size of the default template.
 const TEMPLATE_SIZE: u64 = 1 << 20;
+
+/// Cluster bits of the small cluster template: `MIN_CLUSTER_BITS`.
+const SMALL_CLUSTER_BITS: u32 = 9;
+
+/// Virtual size of the small cluster template: 128 L2 tables of 32 KiB, more
+/// than the 100 the engine caches, within the model's 8 MiB limit.
+const SMALL_TEMPLATE_SIZE: u64 = 4 << 20;
+
+/// Bytes covered by one L2 table of the small cluster template.
+pub const SMALL_L2_SPAN: u64 = (1 << SMALL_CLUSTER_BITS) / 8 * (1 << SMALL_CLUSTER_BITS);
 
 /// `QCOW_MAGIC` as stored on disk.
 const QCOW_MAGIC: &[u8; 4] = b"QFI\xfb";
@@ -58,6 +68,36 @@ impl DiskFormat for Qcow2 {
         });
 
         Some(template)
+    }
+
+    // Odd indices select the small cluster template.
+    fn template_variant(variant: u8) -> Option<&'static [u8]> {
+        if variant.is_multiple_of(2) {
+            return Self::template();
+        }
+
+        static SMALL: OnceLock<Vec<u8>> = OnceLock::new();
+
+        let template = SMALL.get_or_init(|| {
+            let disk = QcowTempDisk::new_with_cluster_bits(
+                SMALL_TEMPLATE_SIZE,
+                None,
+                false,
+                true,
+                false,
+                SMALL_CLUSTER_BITS,
+            )
+            .expect("failed to create the small cluster qcow2 template image");
+            let file = disk.into_tempfile();
+            fs::read(file.as_path()).expect("failed to read the small cluster qcow2 template")
+        });
+
+        Some(template)
+    }
+
+    // The default template is a single L2 table.
+    fn sweeps_metadata_cache(variant: u8) -> bool {
+        !variant.is_multiple_of(2)
     }
 }
 
