@@ -34,6 +34,13 @@ extent_zero="ZERO"
 # A whole extent line, the shape the parser splits on.
 extent_line="RW 2048 FLAT \"image-flat.vmdk\" 0"
 
+# The harness expands this placeholder into its scratch directory, which is
+# the only way a corpus entry can name an absolute extent path: the engine
+# resolves an absolute name from the filesystem root and deliberately does
+# not confine it, and that arm is unreachable with any fixed real path.
+scratch_token="/@fuzz-scratch@"
+extent_line_absolute="RW 2048 FLAT \"/@fuzz-scratch@/image-flat.vmdk\" 0"
+
 # Disk database keys.
 ddb_hw_version="ddb.virtualHWVersion"
 ddb_cylinders="ddb.geometry.cylinders"

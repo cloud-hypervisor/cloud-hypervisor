@@ -152,6 +152,29 @@ seed_vmdk() {
     "$QEMU_IMG" convert -O vmdk -o subformat=twoGbMaxExtentFlat "$source" "$work/two.vmdk"
     cp "$work/flat.vmdk" "$out/monolithic.vmdk"
     cp "$work/two.vmdk" "$out/twogb.vmdk"
+
+    # A descriptor naming its extent by absolute path. The engine resolves an
+    # absolute extent name from the filesystem root and deliberately does not
+    # confine it, which is a separate arm of the extent opener
+    # (block/src/formats/vmdk/flat.rs:141 and :190) and is unreachable with any
+    # real path: the only absolute path a fuzzer may open is one inside its own
+    # scratch directory, whose name carries the process id. The harness expands
+    # the /@fuzz-scratch@ placeholder into that directory before the parser
+    # reads the file.
+    cat >"$out/absolute.vmdk" <<'DESCRIPTOR'
+# Disk DescriptorFile
+version=1
+CID=fffffffe
+parentCID=ffffffff
+createType="monolithicFlat"
+
+# Extent description
+RW 2048 FLAT "/@fuzz-scratch@/image-flat.vmdk" 0
+
+# The Disk Data Base
+#DDB
+ddb.virtualHWVersion = "4"
+DESCRIPTOR
 }
 
 # Writes the image type detection seeds: every image the per format seed
