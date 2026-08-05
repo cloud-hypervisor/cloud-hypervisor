@@ -378,6 +378,18 @@ fn virtio_thread_common() -> Vec<(i64, Vec<SeccompRule>)> {
                 .unwrap()
             ]],
         ),
+        (
+            libc::SYS_prctl,
+            or![and![
+                Cond::new(
+                    0, // prctl() option argument
+                    ArgLen::Dword,
+                    Eq,
+                    libc::PR_GET_NAME as u64,
+                )
+                .unwrap()
+            ]],
+        ),
         (libc::SYS_read, vec![]),
         (libc::SYS_rt_sigaction, vec![]),
         (libc::SYS_rt_sigprocmask, vec![]),
