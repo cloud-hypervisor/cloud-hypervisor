@@ -11,13 +11,17 @@ use arbitrary::Arbitrary;
 use block::disk_file::AsyncFullDiskFile;
 use block::error::BlockResult;
 
-/// Open options handed to a format adapter. Backing files are never opened.
+/// Open options handed to a format adapter.
 #[derive(Arbitrary, Clone, Copy, Debug, Default)]
 pub struct OpenConfig {
     /// Open the image with the direct I/O alignment rules.
     pub direct: bool,
     /// Advertise sparse operations to the engine.
     pub sparse: bool,
+    /// Open backing files named by the image. Never fuzzer selected: only a
+    /// target that confines the filesystem may set it.
+    #[arbitrary(value = false)]
+    pub backing: bool,
 }
 
 /// A disk image format the framework can fuzz.

@@ -9,6 +9,7 @@
 //! - `disk_<format>_ops` ([`fuzz_program`]): the input is an op program run
 //!   against a template and checked by a shadow model.
 //! - `disk_detect` ([`fuzz_detect`]): image type validation.
+//! - `disk_qcow2_chain` ([`formats::qcow2_chain`]): qcow2 backing chains.
 
 mod executor;
 mod format;
@@ -132,8 +133,14 @@ pub fn fuzz_program<F: DiskFormat>(program: &Program) -> Corpus {
         return Corpus::Reject;
     };
 
+    // The model assumes a discarded cluster reads as zeroes.
+    let open = OpenConfig {
+        backing: false,
+        ..program.open
+    };
+
     // A template that fails to open is a harness bug.
-    let disk = F::open(file, path.as_deref(), &program.open)
+    let disk = F::open(file, path.as_deref(), &open)
         .unwrap_or_else(|e| panic!("{}: template image failed to open: {e}", F::NAME));
 
     let Some(mut executor) = Executor::<F>::new(disk, program.ring_depth(), true) else {

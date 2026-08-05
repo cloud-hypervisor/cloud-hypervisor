@@ -45,6 +45,49 @@ seed_qcow2() {
     "$QEMU_IMG" create -f qcow2 "$out/empty.qcow2" 1M >/dev/null
 }
 
+# qcow2 chain seeds, each [u32 LE top_len][top image][backing image]: qcow2,
+# raw and compressed backing files, a chain ending in leaf.raw, and a cycle.
+seed_qcow2_chain() {
+    local source=$1
+    local out="$CORPUS_DIR/disk_qcow2_chain"
+    local work="$WORK_DIR/chain"
+
+    mkdir -p "$out" "$work"
+    "$QEMU_IMG" convert -O qcow2 "$source" "$work/base.qcow2"
+    "$QEMU_IMG" convert -O qcow2 -c "$source" "$work/compressed.qcow2"
+    cp "$source" "$work/base.raw"
+    truncate -s 1M "$work/leaf.raw"
+
+    # Run in $work so the backing names stay relative.
+    (
+        cd "$work"
+        "$QEMU_IMG" create -f qcow2 -F qcow2 -b base.qcow2 qcow2-top.qcow2 1M
+        "$QEMU_IMG" create -f qcow2 -F raw -b base.raw raw-top.qcow2 1M
+        "$QEMU_IMG" create -f qcow2 -F qcow2 -b compressed.qcow2 compressed-top.qcow2 1M
+        # top -> backing.img -> leaf.raw
+        "$QEMU_IMG" create -f qcow2 -F raw -b leaf.raw nested.qcow2 1M
+        cp nested.qcow2 backing.img
+        "$QEMU_IMG" create -f qcow2 -F qcow2 -b backing.img nested-top.qcow2 1M
+        # A cycle through backing.img, refused at MAX_NESTING_DEPTH.
+        "$QEMU_IMG" create -f qcow2 -F qcow2 -b backing.img cyclic.qcow2 1M
+    ) >/dev/null
+
+    pack_chain "$work/qcow2-top.qcow2" "$work/base.qcow2" "$out/qcow2-backed"
+    pack_chain "$work/raw-top.qcow2" "$work/base.raw" "$out/raw-backed"
+    pack_chain "$work/compressed-top.qcow2" "$work/compressed.qcow2" \
+        "$out/compressed-backed"
+    pack_chain "$work/nested-top.qcow2" "$work/nested.qcow2" "$out/nested"
+    pack_chain "$work/cyclic.qcow2" "$work/cyclic.qcow2" "$out/cyclic"
+}
+
+# Writes [u32 LE top_len][top image][backing image] to $3.
+pack_chain() {
+    python3 -c 'import struct, sys
+top = open(sys.argv[1], "rb").read()
+backing = open(sys.argv[2], "rb").read()
+open(sys.argv[3], "wb").write(struct.pack("<I", len(top)) + top + backing)' "$1" "$2" "$3"
+}
+
 # VHDX seeds. The fixed subformat exercises the rejection path.
 seed_vhdx() {
     local source=$1
@@ -109,6 +152,7 @@ main() {
     source=$(make_source)
 
     seed_qcow2 "$source"
+    seed_qcow2_chain "$source"
     seed_vhd "$source"
     seed_vhdx "$source"
     seed_vmdk "$source"
