@@ -13,16 +13,24 @@ use block::error::BlockResult;
 
 /// Open options handed to a format adapter.
 ///
-/// Backing file support is deliberately absent: a fuzzed image names its
-/// backing file by path, so enabling it would let the corpus open arbitrary
-/// host files from inside the fuzzer. Fuzzing backing chains needs a
-/// controlled path namespace and is left to a follow-up.
+/// [`OpenConfig::backing`] is not fuzzer selectable: it is set by the
+/// harness, never derived from input bytes. A fuzzed image names its backing
+/// file by path, so a target that enables it has to sandbox the name space
+/// first, which only `disk_qcow2_chain` does, and enabling it under the
+/// shadow model would be unsound besides: with a backing file a discarded
+/// cluster reads through to the backing data rather than as zeroes.
 #[derive(Arbitrary, Clone, Copy, Debug, Default)]
 pub struct OpenConfig {
     /// Open the image with the direct I/O alignment rules.
     pub direct: bool,
     /// Advertise sparse operations (discard, write zeroes) to the engine.
     pub sparse: bool,
+    /// Open backing files named by the image.
+    ///
+    /// Fixed at `false` for a fuzzer generated configuration; only a target
+    /// that has confined the filesystem may set it.
+    #[arbitrary(value = false)]
+    pub backing: bool,
 }
 
 /// A disk image format that the framework can fuzz.

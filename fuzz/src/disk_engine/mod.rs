@@ -211,9 +211,19 @@ pub fn fuzz_program<F: DiskFormat>(program: &Program) -> Corpus {
         return Corpus::Reject;
     };
 
+    // A template image names no backing file, but the switch is forced off
+    // regardless: the shadow model this target runs with assumes that a
+    // discarded cluster reads back as zeroes, which stops being true the
+    // moment an image has a backing file. Backing chains are fuzzed by
+    // `disk_qcow2_chain`, which runs without the model.
+    let open = OpenConfig {
+        backing: false,
+        ..program.open
+    };
+
     // A template that does not open means the adapter is broken, which is a
     // harness bug rather than a finding, so fail loudly.
-    let disk = F::open(file, path.as_deref(), &program.open)
+    let disk = F::open(file, path.as_deref(), &open)
         .unwrap_or_else(|e| panic!("{}: template image failed to open: {e}", F::NAME));
 
     let Some(mut executor) = Executor::<F>::new(disk, program.ring_depth(), true) else {
