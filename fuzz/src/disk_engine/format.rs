@@ -54,6 +54,10 @@ pub trait DiskFormat {
     /// Whether a successful `punch_hole` makes the range read back as zeroes.
     const PUNCH_HOLE_READS_ZEROES: bool = false;
 
+    /// Alignment the engine requires of data ops. The executor aligns in-range
+    /// offsets and lengths to it. Must divide `MAX_OP_LEN`.
+    const IO_ALIGNMENT: u64 = 1;
+
     /// Whether `bytes` carry the format's identifying bytes, mirroring the
     /// parser's first check. Other inputs are still opened, but only kept in
     /// the corpus within a small budget.

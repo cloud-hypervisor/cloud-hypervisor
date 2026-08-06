@@ -17,7 +17,7 @@ use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
 
 use crate::disk_engine::format::DiskFormat;
 use crate::disk_engine::model::Model;
-use crate::disk_engine::program::{ring_depth, Op, MAX_OPS, MAX_OP_LEN};
+use crate::disk_engine::program::{ring_depth, Op, OpLen, OpOffset, MAX_OPS, MAX_OP_LEN};
 
 /// Largest disk size the shadow model is kept for.
 const MAX_MODEL_LEN: u64 = 8 << 20;
@@ -74,17 +74,29 @@ impl<F: DiskFormat> Executor<F> {
 
     fn step(&mut self, op: &Op) {
         match *op {
-            Op::ReadVec { offset, len } => self.read_vec(offset.resolve(self.size), len.get()),
+            Op::ReadVec { offset, len } => {
+                let (offset, len) = (self.offset(offset), self.len(len));
+                self.read_vec(offset, len)
+            }
             Op::WriteVec { offset, len, seed } => {
-                self.write_vec(offset.resolve(self.size), len.get(), seed)
+                let (offset, len) = (self.offset(offset), self.len(len));
+                self.write_vec(offset, len, seed)
             }
-            Op::ReadMem { offset, len } => self.read_mem(offset.resolve(self.size), len.get()),
+            Op::ReadMem { offset, len } => {
+                let (offset, len) = (self.offset(offset), self.len(len));
+                self.read_mem(offset, len)
+            }
             Op::WriteMem { offset, len, seed } => {
-                self.write_mem(offset.resolve(self.size), len.get(), seed)
+                let (offset, len) = (self.offset(offset), self.len(len));
+                self.write_mem(offset, len, seed)
             }
-            Op::PunchHole { offset, len } => self.punch_hole(offset.resolve(self.size), len.get()),
+            Op::PunchHole { offset, len } => {
+                let (offset, len) = (self.offset(offset), self.len(len));
+                self.punch_hole(offset, len)
+            }
             Op::WriteZeroes { offset, len } => {
-                self.write_zeroes(offset.resolve(self.size), len.get())
+                let (offset, len) = (self.offset(offset), self.len(len));
+                self.write_zeroes(offset, len)
             }
             Op::Fsync { completion } => self.fsync(completion),
             Op::Resize { size_kib } => self.resize(u64::from(size_kib) * 1024),
@@ -96,6 +108,22 @@ impl<F: DiskFormat> Executor<F> {
             Op::UseClone { ring_depth: depth } => self.use_clone(ring_depth(depth)),
             Op::QueryCaps => self.query_caps(),
         }
+    }
+
+    /// Resolves `offset` and aligns it down. `Wild` offsets stay unaligned.
+    fn offset(&self, offset: OpOffset) -> u64 {
+        let resolved = offset.resolve(self.size);
+        if matches!(offset, OpOffset::Wild(_)) {
+            return resolved;
+        }
+        resolved - resolved % F::IO_ALIGNMENT
+    }
+
+    /// Rounds `len` up to [`DiskFormat::IO_ALIGNMENT`].
+    fn len(&self, len: OpLen) -> usize {
+        let alignment = F::IO_ALIGNMENT as usize;
+        debug_assert!(MAX_OP_LEN.is_multiple_of(alignment));
+        len.get().div_ceil(alignment) * alignment
     }
 
     fn read_vec(&mut self, offset: u64, len: usize) {
@@ -175,10 +203,13 @@ impl<F: DiskFormat> Executor<F> {
 
     fn punch_hole(&mut self, offset: u64, len: usize) {
         let user_data = self.next_user_data();
-        let submitted = self.io.punch_hole(offset, len as u64, user_data).is_ok();
-        let succeeded = submitted && self.completion_succeeded(user_data);
+        if self.io.punch_hole(offset, len as u64, user_data).is_err() {
+            // A refused op changed nothing. VHD and VHDX refuse every sparse
+            // op, so marking the range unknown would blank the model.
+            return;
+        }
 
-        if succeeded && F::PUNCH_HOLE_READS_ZEROES {
+        if self.completion_succeeded(user_data) && F::PUNCH_HOLE_READS_ZEROES {
             self.record_zeroes(offset, len);
         } else {
             self.record_unknown(offset, len);
@@ -187,9 +218,12 @@ impl<F: DiskFormat> Executor<F> {
 
     fn write_zeroes(&mut self, offset: u64, len: usize) {
         let user_data = self.next_user_data();
-        let submitted = self.io.write_zeroes(offset, len as u64, user_data).is_ok();
+        if self.io.write_zeroes(offset, len as u64, user_data).is_err() {
+            // As in `punch_hole`.
+            return;
+        }
 
-        if submitted && self.completion_succeeded(user_data) {
+        if self.completion_succeeded(user_data) {
             self.record_zeroes(offset, len);
         } else {
             self.record_unknown(offset, len);
