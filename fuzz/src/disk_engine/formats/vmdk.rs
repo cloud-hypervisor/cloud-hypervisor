@@ -41,6 +41,74 @@ const EXTENTS: [&str; 6] = [
     "two-f002.vmdk",
 ];
 
+/// The template descriptor `disk_vmdk_ops` runs its programs against.
+///
+/// For a flat VMDK the image file *is* the descriptor: the data lives in the
+/// extent files the harness already creates and resets, so the template is
+/// two hundred bytes of ASCII rather than a binary run table. There is
+/// nothing to expand and nothing to checksum.
+///
+/// The layout is chosen so that the engine's translation logic is under the
+/// shadow model rather than merely reachable:
+///
+/// - **Two extents**, so a request can straddle the boundary at virtual
+///   offset 1,048,576 and take `spanning_io`
+///   (block/src/formats/vmdk/engine_sync.rs:154) with its per segment byte
+///   accounting, instead of always taking `single_extent_io`. A one extent
+///   descriptor would leave the spanning path, which is where the byte
+///   counting can go wrong, completely unexercised.
+/// - **A non-zero base offset on the second extent**, 512 bytes, one sector.
+///   `file_base_offset + (offset - virtual_start)` is the whole of the
+///   format's offset arithmetic, and with a zero base offset the term
+///   vanishes and an error in it cannot be observed. One sector is enough:
+///   an off-by-one in either operand moves every byte of the second extent.
+/// - **Different extent lengths**, 2048 and 1024 sectors, so that a bug
+///   using the wrong extent's length or start is not masked by the two being
+///   interchangeable.
+/// - **Both extents `RW`**, because the model's precondition is that the
+///   whole disk is readable and writable. `RDONLY` and `NOACCESS` extents
+///   drive `check_access`, but a `NOACCESS` extent cannot be read at all, so
+///   a template containing one could not satisfy assertion (c) of
+///   [`crate::disk_engine::selftest`]. Those arms stay with `disk_vmdk`,
+///   whose descriptors are fuzzer generated.
+///
+/// Both extent names must be in [`EXTENTS`], which is what makes them exist
+/// and be reset to zeroes before every open, and both are relative, so the
+/// template is unaffected by whatever policy absolute extent names end up
+/// with.
+///
+/// The `# Extent description` line is mandatory: `parse_extents` rejects a
+/// descriptor without it (block/src/formats/vmdk/descriptor.rs:170,
+/// "Expected the extents section comment line").
+const TEMPLATE: &str = "\
+# Disk DescriptorFile
+version=1
+CID=fffffffe
+parentCID=ffffffff
+createType=\"twoGbMaxExtentFlat\"
+
+# Extent description
+RW 2048 FLAT \"image-f001.vmdk\" 0
+RW 1024 FLAT \"image-f002.vmdk\" 1
+
+# The Disk Data Base
+ddb.virtualHWVersion = \"4\"
+";
+
+/// Virtual disk size [`TEMPLATE`] advertises, in bytes.
+///
+/// The capacity of a flat VMDK is the sum of its extent sector counts
+/// (block/src/formats/vmdk/flat.rs:400), so this is (2048 + 1024) * 512 =
+/// 1,572,864. Pinned here so that the self test proves the template is the
+/// disk it is supposed to be rather than merely a descriptor that parses.
+pub const TEMPLATE_LOGICAL_SIZE: u64 = (2048 + 1024) * 512;
+
+/// Virtual offset at which [`TEMPLATE`]'s first extent ends.
+///
+/// A request that starts below this and ends above it is the one that takes
+/// `spanning_io`.
+pub const TEMPLATE_EXTENT_BOUNDARY: u64 = 2048 * 512;
+
 /// Placeholder a descriptor uses to name the scratch directory.
 ///
 /// An extent name may be absolute, and the engine treats an absolute name
@@ -315,12 +383,32 @@ impl DiskFormat for Vmdk {
         let disk = VmdkDisk::new(file, path, false, config.direct)?;
         Ok(Box::new(disk))
     }
+
+    fn template() -> Option<&'static [u8]> {
+        Some(TEMPLATE.as_bytes())
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use super::*;
     use crate::disk_engine::image::{image_file, scratch_dir};
+    use crate::disk_engine::selftest::assert_template_is_sound;
+    use crate::disk_engine::{Executor, Op, OpLen, OpOffset};
+
+    /// Serializes the tests that drive I/O against the template.
+    ///
+    /// Unlike every other format's, a VMDK template is not a memfd: the
+    /// descriptor and its extents are real files in the one scratch
+    /// directory the process owns, and opening the template truncates and
+    /// zero fills the extents (`reset_extents`). Two such tests running on
+    /// the harness's own threads therefore share a disk, and the second
+    /// one's open blanks the first one's data underneath it. That is a
+    /// property of the test harness, not of the target: a fuzz process runs
+    /// exactly one iteration at a time.
+    static TEMPLATE_IO: Mutex<()> = Mutex::new(());
 
     fn descriptor(name: &str) -> String {
         format!("# Disk DescriptorFile\nversion=1\ncreateType=\"monolithicFlat\"\nRW 2048 FLAT \"{name}\" 0\n")
@@ -568,5 +656,145 @@ mod tests {
             !Path::new("/tmp/victim").exists(),
             "the harness must not have created /tmp/victim"
         );
+    }
+
+    /// The template is what the whole operation target rests on, and a
+    /// template that is subtly wrong makes that target an expensive no-op
+    /// that passes forever. See `disk_engine::selftest`.
+    #[test]
+    fn the_template_is_a_blank_one_and_a_half_mib_disk() {
+        let _guard = TEMPLATE_IO.lock().unwrap_or_else(|e| e.into_inner());
+        assert_template_is_sound::<Vmdk>(TEMPLATE_LOGICAL_SIZE);
+    }
+
+    /// The layout the template exists for is pinned, not merely described.
+    ///
+    /// Every property below is one the operation target's value depends on,
+    /// and each is one edit away from being lost silently: an extent name
+    /// that is not in [`EXTENTS`] is never created or zeroed, a zero base
+    /// offset takes the offset arithmetic out of the oracle's reach, and a
+    /// single extent takes `spanning_io` out of it.
+    #[test]
+    fn the_template_descriptor_is_the_pinned_layout() {
+        let text = std::str::from_utf8(Vmdk::template().expect("vmdk has a template"))
+            .expect("the template is ASCII");
+        assert!(Vmdk::magic_ok(text.as_bytes()));
+        assert!(text.lines().any(|line| line == "# Extent description"));
+
+        let extents: Vec<Vec<&str>> = text
+            .lines()
+            .filter(|line| line.starts_with("RW ") || line.starts_with("RDONLY "))
+            .map(|line| line.split_whitespace().collect())
+            .collect();
+        assert_eq!(extents.len(), 2, "a single extent never spans");
+
+        let mut virtual_start = 0u64;
+        for (index, parts) in extents.iter().enumerate() {
+            assert_eq!(parts.len(), 5, "an extent line without a base offset");
+            assert_eq!(parts[2], "FLAT");
+            let name = parts[3].trim_matches('"');
+            assert!(
+                !Path::new(name).is_absolute(),
+                "{name}: the template must use relative extent names only"
+            );
+            assert!(
+                EXTENTS.contains(&name),
+                "{name} is not created and reset by the harness"
+            );
+            let sectors: u64 = parts[1].parse().expect("a sector count");
+            let base: u64 = parts[4].parse().expect("a base offset");
+            assert!(
+                base * 512 + sectors * 512 <= EXTENT_LEN,
+                "{name} does not fit the {EXTENT_LEN} byte extent files"
+            );
+            if index == 1 {
+                assert!(base > 0, "a zero base offset hides the offset arithmetic");
+            }
+            virtual_start += sectors * 512;
+            if index == 0 {
+                assert_eq!(virtual_start, TEMPLATE_EXTENT_BOUNDARY);
+            }
+        }
+        assert_eq!(virtual_start, TEMPLATE_LOGICAL_SIZE);
+    }
+
+    /// The shadow model has to be armed against the arithmetic this target
+    /// exists for.
+    ///
+    /// There is no known VMDK data corruption bug to reproduce here, so this
+    /// is the shape a future one would take rather than a regression test for
+    /// a past one: a write that straddles the extent boundary, so every byte
+    /// past it goes through `file_base_offset + (cur - virtual_start)` in
+    /// `spanning_io`, read back *through the other path*.
+    ///
+    /// Reading it back the same way it was written is not enough, and this is
+    /// the trap worth spelling out: an offset error that both the write and
+    /// the read make cancels out, and the data comes back exactly where the
+    /// oracle expects it. What catches a misplaced byte is a read whose
+    /// translation does not share the mistake, so each write below is read
+    /// back both ways - once spanning, once as a plain single extent read of
+    /// each side of the boundary.
+    ///
+    /// Both cache modes, because the direct arm goes through
+    /// `AlignedFile::{read,write}_unaligned` and its bounce buffer instead of
+    /// straight `pread`/`pwrite`.
+    #[test]
+    fn the_model_catches_a_misplaced_spanning_write() {
+        let _guard = TEMPLATE_IO.lock().unwrap_or_else(|e| e.into_inner());
+        let straddle = TEMPLATE_EXTENT_BOUNDARY - 512;
+        let tail = TEMPLATE_LOGICAL_SIZE - 4096;
+        let program = vec![
+            // Spanning write: 512 bytes into the first extent, 1536 into the
+            // second at its non-zero base offset.
+            Op::WriteVec {
+                offset: OpOffset::Byte(straddle as u32),
+                len: OpLen(2048),
+                seed: 0x27,
+            },
+            // Read the far side back on its own, which takes
+            // `single_extent_io`. A spanning write that landed at the wrong
+            // file offset shows up here even though a spanning read of the
+            // same range would have hidden it.
+            Op::ReadVec {
+                offset: OpOffset::Byte(TEMPLATE_EXTENT_BOUNDARY as u32),
+                len: OpLen(1536),
+            },
+            // And the near side, still inside the first extent.
+            Op::ReadVec {
+                offset: OpOffset::Byte(straddle as u32),
+                len: OpLen(512),
+            },
+            // The same range spanning, so the spanning read path is checked
+            // against data the model already agrees on.
+            Op::ReadVec {
+                offset: OpOffset::Byte(straddle as u32),
+                len: OpLen(2048),
+            },
+            // A single extent write at the tail, read back spanning the
+            // boundary, which is the mirror of the first pair.
+            Op::WriteVec {
+                offset: OpOffset::Byte(tail as u32),
+                len: OpLen(4096),
+                seed: 0x93,
+            },
+            Op::ReadVec {
+                offset: OpOffset::Byte(straddle as u32),
+                len: OpLen(65535),
+            },
+        ];
+
+        let template = Vmdk::template().expect("vmdk has a template");
+        for direct in [false, true] {
+            let (file, path) =
+                crate::disk_engine::materialize_template::<Vmdk>(template).expect("template");
+            let config = OpenConfig {
+                direct,
+                ..OpenConfig::default()
+            };
+            let disk = Vmdk::open(file, path.as_deref(), &config).expect("the template opens");
+            let mut executor = Executor::<Vmdk>::new(disk, 1, true).expect("executor");
+            // Panics on a read back mismatch, which is the point.
+            executor.run(&program);
+        }
     }
 }

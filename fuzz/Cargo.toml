@@ -125,6 +125,12 @@ test = false
 
 [[bin]]
 doc = false
+name = "disk_vmdk_ops"
+path = "fuzz_targets/disk_vmdk_ops.rs"
+test = false
+
+[[bin]]
+doc = false
 name = "http_api"
 path = "fuzz_targets/http_api.rs"
 test = false

@@ -72,6 +72,7 @@ The formats covered today:
 | qcow2 | `disk_qcow2` | `disk_qcow2_ops` |
 | VHDX | `disk_vhdx` | `disk_vhdx_ops` |
 | fixed VHD | `disk_vhd` | none |
+| flat VMDK | `disk_vmdk` | `disk_vmdk_ops` |
 
 The sniffer in front of them all is fuzzed by `disk_detect`, and qcow2 backing
 chains by `disk_qcow2_chain`.
@@ -93,6 +94,7 @@ is correct.
 ```
 cargo fuzz run disk_qcow2_ops -j `nproc`
 cargo fuzz run disk_vhdx_ops -j `nproc`
+cargo fuzz run disk_vmdk_ops -j `nproc`
 ```
 
 None of them needs `-max_len` or a seed corpus: the input is an operation
@@ -179,6 +181,88 @@ loud, or the disk is not the disk the program addresses and the target quietly
 checks nothing. It then reports a 100% pass rate forever, and neither the
 coverage report, nor the crash count, nor CI can tell that state from a
 healthy one.
+
+#### The flat VMDK template, and why it is two extents
+
+Flat VMDK is the third format with an operation target, and the last one with
+translation logic worth an oracle. `FlatVmdkSync` picks an extent for an
+offset, computes `file_base_offset + (offset - virtual_start)` inside it, and
+for a request that crosses an extent boundary splits it into per extent
+segments and counts the bytes each one moved. None of that is the kernel
+doing the work at the same offset the guest asked for, which is what rules
+fixed VHD out, and all of it is invisible to every check the framework makes
+other than reading the data back.
+
+The image file for a flat VMDK *is* its descriptor - the data lives in the
+extent files it names - so the template is two hundred bytes of ASCII rather
+than a binary run table, and there is nothing to expand and nothing to
+checksum:
+
+```
+# Disk DescriptorFile
+version=1
+CID=fffffffe
+parentCID=ffffffff
+createType="twoGbMaxExtentFlat"
+
+# Extent description
+RW 2048 FLAT "image-f001.vmdk" 0
+RW 1024 FLAT "image-f002.vmdk" 1
+
+# The Disk Data Base
+ddb.virtualHWVersion = "4"
+```
+
+That is 1,572,864 bytes of virtual disk, which is the pinned constant the self
+test checks, with the extent boundary at virtual offset 1,048,576. Each part
+of the shape earns its place:
+
+- **two extents**, so a request can straddle the boundary and take
+  `spanning_io`; a one extent descriptor leaves that path, where the byte
+  accounting lives, entirely unexercised;
+- **a non-zero base offset on the second extent**, one sector, because with a
+  zero base offset the `file_base_offset` term vanishes and an error in it
+  cannot be observed;
+- **different extent lengths**, so a bug that used the wrong extent's start or
+  length is not masked by the two being interchangeable;
+- **both extents `RW`**, because a `NOACCESS` extent cannot be read at all and
+  a template containing one could not satisfy the self test's "reads back as
+  zeroes" assertion. `check_access` under `RDONLY` and `NOACCESS` stays with
+  `disk_vmdk`, whose descriptors are fuzzer generated.
+
+Both extent names are relative and both are in the adapter's `EXTENTS` list,
+which is what makes the harness create them and truncate and zero fill them
+before every open - exactly the "reads back as all zeroes" precondition the
+shadow model starts from.
+
+One trap is worth stating, because it applies to any format whose engine
+translates offsets. Writing through a path and reading back through the *same*
+path does not test the translation: an offset error that both the write and
+the read make cancels out and the data comes back where the oracle expects it.
+The adapter's fixed probe therefore reads every write back both ways, once
+spanning and once as a plain single extent read of each side of the boundary,
+and a randomly generated program mixes the two by construction.
+
+There is no known VMDK data corruption bug to point at, and a prior run of ten
+thousand random operations against this shape found no mismatch, so this
+target is a regression net rather than a bug hunt. That it is an *armed* net
+was checked the only way available: a deliberate `+ 512` added to the file
+offset expression, in `single_extent_io` and in `spanning_io` in turn, is
+caught by the fixed probe immediately and by the fuzzer within 24,000 to
+134,000 executions from an empty corpus, or 326 executions when an existing
+corpus is replayed.
+
+The measured effect on `block/src/formats/vmdk/`, with `disk_vmdk` on a 1311
+entry campaign corpus before and the two targets' profiles merged after:
+
+| File | Regions before | after | Branches before | after |
+| ---- | -------------- | ----- | --------------- | ----- |
+| `engine_sync.rs` | 82.11% | 89.82% | 82.00% | 92.00% |
+| `flat.rs` | 88.92% | 89.24% | 73.33% | 76.67% |
+| `descriptor.rs` | 71.06% | 71.06% | 72.22% | 72.22% |
+
+`descriptor.rs` does not move and is not meant to: the operation target parses
+one fixed descriptor. The I/O engine is what it is for.
 
 Corpus entries for `disk_<format>` are ordinary disk images, so anything
 `qemu-img` can write is a usable seed. `scripts/generate-fuzz-seeds.sh` writes
