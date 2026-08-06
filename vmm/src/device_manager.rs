@@ -55,7 +55,7 @@ use devices::interrupt_controller::InterruptController;
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
 #[cfg(feature = "ivshmem")]
-use devices::ivshmem::{IvshmemError, IvshmemOps};
+use devices::ivshmem::{IVSHMEM_DATA_BAR_IDX, IvshmemError, IvshmemOps};
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
 #[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))]
@@ -98,7 +98,9 @@ use tracer::trace_scoped;
 use vfio_ioctls::VfioIommufd;
 use vfio_ioctls::{VfioContainer, VfioDevice, VfioDeviceFd, VfioOps};
 use virtio_devices::block::Error as VirtioBlockError;
-use virtio_devices::transport::{VirtioPciDevice, VirtioPciDeviceActivator, VirtioTransport};
+use virtio_devices::transport::{
+    VIRTIO_CONFIG_BAR_INDEX, VirtioPciDevice, VirtioPciDeviceActivator, VirtioTransport,
+};
 use virtio_devices::vhost_user::VhostUserConfig;
 use virtio_devices::{
     AccessPlatformMapping, Block, Endpoint, IommuMapping, VdpaDmaMapping, VirtioMemMappingSource,
@@ -4584,7 +4586,8 @@ impl DeviceManager {
             resources,
         )?;
 
-        let bar_addr = virtio_pci_device.lock().unwrap().config_bar_addr();
+        let bar = PciBarConfiguration::bar_of_idx(&bars, VIRTIO_CONFIG_BAR_INDEX).unwrap();
+        let bar_addr = bar.addr();
         for (event, addr) in virtio_pci_device.lock().unwrap().ioeventfds(bar_addr) {
             let io_addr = IoEventAddress::Mmio(addr);
             self.address_manager
@@ -4696,7 +4699,8 @@ impl DeviceManager {
             resources,
         )?;
 
-        let start_addr = ivshmem_device.lock().unwrap().data_bar_addr();
+        let bar = PciBarConfiguration::bar_of_idx(&bars, IVSHMEM_DATA_BAR_IDX).unwrap();
+        let start_addr = bar.addr();
         let (region, mapping) = ivshmem_ops
             .lock()
             .unwrap()

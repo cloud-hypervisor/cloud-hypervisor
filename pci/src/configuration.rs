@@ -1356,6 +1356,10 @@ impl PciBarConfiguration {
     pub fn prefetchable(&self) -> PciBarPrefetchable {
         self.prefetchable
     }
+
+    pub fn bar_of_idx(bars: &[PciBarConfiguration], idx: usize) -> Option<&PciBarConfiguration> {
+        bars.iter().find(|bar| bar.idx() == idx)
+    }
 }
 
 #[cfg(test)]
