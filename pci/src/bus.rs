@@ -223,7 +223,17 @@ impl PciBus {
 
     fn apply_bar_reprogramming(&self, device: &mut dyn PciDevice, bars: &[BarReprogrammingParams]) {
         for bar in bars {
+            let Some(bar_idx) = bar.bar_idx else {
+                // Migration case: the previous version doesn't snapshot the BAR index being moved.
+                warn!(
+                    "BAR reprogramming without a BAR index: 0x{:x}->0x{:x}(0x{:x}), keeping old BAR",
+                    bar.old_base, bar.new_base, bar.len
+                );
+                device.restore_bar_addr(bar);
+                continue;
+            };
             if let Err(e) = self.device_reloc.move_bar(
+                bar_idx,
                 bar.old_base,
                 bar.new_base,
                 bar.len,
@@ -516,6 +526,7 @@ mod tests {
     impl DeviceRelocation for MockDeviceRelocation {
         fn move_bar(
             &self,
+            _bar_idx: usize,
             _old_base: u64,
             _new_base: u64,
             _len: u64,

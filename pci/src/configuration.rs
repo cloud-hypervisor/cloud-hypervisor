@@ -999,6 +999,7 @@ impl PciConfiguration {
                 self.bars[bar_idx].addr = value;
 
                 return Some(BarReprogrammingParams {
+                    bar_idx: Some(bar_idx),
                     old_base,
                     new_base,
                     len,
@@ -1027,6 +1028,9 @@ impl PciConfiguration {
                 self.bars[bar_idx - 1].addr = self.registers[reg_idx - 1];
 
                 return Some(BarReprogrammingParams {
+                    // The high-dword write completes the move for a 64-bit BAR.
+                    // Report the low slot.
+                    bar_idx: Some(bar_idx - 1),
                     old_base,
                     new_base,
                     len,
@@ -1055,6 +1059,7 @@ impl PciConfiguration {
             self.rom_bar_addr = value;
 
             return Some(BarReprogrammingParams {
+                bar_idx: Some(ROM_BAR_IDX),
                 old_base,
                 new_base,
                 len,

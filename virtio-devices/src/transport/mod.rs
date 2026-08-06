@@ -7,7 +7,8 @@ mod pci_common_config;
 mod pci_device;
 pub use pci_common_config::{VIRTIO_PCI_COMMON_CONFIG_ID, VirtioPciCommonConfig};
 pub use pci_device::{
-    VIRTIO_CONFIG_BAR_INDEX, VirtioPciDevice, VirtioPciDeviceActivator, VirtioPciDeviceError,
+    VIRTIO_CONFIG_BAR_INDEX, VIRTIO_SHM_BAR_INDEX, VirtioPciDevice, VirtioPciDeviceActivator,
+    VirtioPciDeviceError,
 };
 
 pub trait VirtioTransport {
