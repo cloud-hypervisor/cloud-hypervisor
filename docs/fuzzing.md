@@ -70,6 +70,7 @@ The formats covered today:
 | Format | Image target | Operation target |
 | ------ | ------------ | ---------------- |
 | qcow2 | `disk_qcow2` | `disk_qcow2_ops` |
+| VHDX | `disk_vhdx` | `disk_vhdx_ops` |
 | fixed VHD | `disk_vhd` | none |
 
 The sniffer in front of them all is fuzzed by `disk_detect`, and qcow2 backing
@@ -91,10 +92,27 @@ is correct.
 
 ```
 cargo fuzz run disk_qcow2_ops -j `nproc`
+cargo fuzz run disk_vhdx_ops -j `nproc`
 ```
 
 None of them needs `-max_len` or a seed corpus: the input is an operation
 program, not an image.
+
+VHDX is the format that most needs this. It has the most involved write path
+in the tree - BAT lookup, block state transitions, allocation at the end of
+the file, and sector offset arithmetic within the allocated block - and until
+`disk_vhdx_ops` existed none of it had a data correctness oracle. That is not
+hypothetical: the block allocating arm of `vhdx::io::write` used to write the
+payload at the *block base* rather than at the sector's offset within the
+block, so a guest write to any sector but the first of an unallocated block
+was silently misplaced and the data lost. It was found by a hand written two
+operation probe rather than by the fuzzer, precisely because no VHDX operation
+target existed.
+
+VHDX also gets *better* oracle coverage per execution than qcow2 does. It does
+not support resize, so `Op::Resize` always fails and the model is never wiped
+mid program; in `disk_qcow2_ops` a successful resize drops everything the
+model knew and the rest of the program runs unchecked.
 
 Two pieces of the framework exist for these targets:
 

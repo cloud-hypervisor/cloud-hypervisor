@@ -113,6 +113,12 @@ test = false
 
 [[bin]]
 doc = false
+name = "disk_vhdx_ops"
+path = "fuzz_targets/disk_vhdx_ops.rs"
+test = false
+
+[[bin]]
+doc = false
 name = "disk_vmdk"
 path = "fuzz_targets/disk_vmdk.rs"
 test = false
