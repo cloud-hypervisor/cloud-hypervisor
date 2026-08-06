@@ -51,6 +51,8 @@ mod image;
 mod model;
 mod program;
 pub mod sandbox;
+#[cfg(test)]
+mod selftest;
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};

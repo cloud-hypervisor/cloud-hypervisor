@@ -111,6 +111,27 @@ copy: a template is the same buffer every time, so its page map is computed
 once per format and reused. `image_memfd`, which materializes fuzzer input,
 keeps writing it whole - that input is dense and different every time.
 
+#### The template self test
+
+Every templated format has a `#[test]` that asserts four things about its
+template, and it is a merge condition for adding one:
+
+1. the template opens through the format adapter;
+2. `logical_size()` equals an exact pinned constant;
+3. reading the whole disk returns nothing but zero bytes;
+4. the fixed operation program runs through the executor with the shadow model
+   enabled without panicking.
+
+The failure this guards against is not a template that fails to open, which
+`fuzz_program` panics on within one iteration. It is a template that *opens
+but is subtly wrong* - the wrong size, or one extracted from an image that had
+already been written to. The model is initialised to "all zeroes, this many
+bytes"; if the image disagrees, either every read trips the oracle, which is
+loud, or the disk is not the disk the program addresses and the target quietly
+checks nothing. It then reports a 100% pass rate forever, and neither the
+coverage report, nor the crash count, nor CI can tell that state from a
+healthy one.
+
 Corpus entries for `disk_<format>` are ordinary disk images, so anything
 `qemu-img` can write is a usable seed. `scripts/generate-fuzz-seeds.sh` writes
 a set of them per format, covering header versions, compression, cluster sizes
