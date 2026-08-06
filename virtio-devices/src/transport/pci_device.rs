@@ -691,13 +691,12 @@ impl VirtioPciDevice {
         self.common_config.driver_status.load(Ordering::SeqCst) == DEVICE_INIT as u8
     }
 
-    pub fn config_bar_addr(&self) -> u64 {
-        self.configuration
-            .get_bar_addr(VIRTIO_COMMON_BAR_INDEX.into())
-    }
-
     pub fn config_bar_index() -> usize {
         VIRTIO_COMMON_BAR_INDEX.into()
+    }
+
+    pub fn shm_bar_index() -> usize {
+        VIRTIO_SHM_BAR_INDEX
     }
 
     fn add_pci_capabilities(
@@ -1164,11 +1163,11 @@ impl PciDevice for VirtioPciDevice {
         Ok(())
     }
 
-    fn move_bar(&mut self, old_base: u64, new_base: u64) -> io::Result<()> {
+    fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> io::Result<()> {
         // We only update our idea of the bar in order to support free_bars() above.
         // The majority of the reallocation is done inside DeviceManager.
         for bar in self.bar_regions.iter_mut() {
-            if bar.addr() == old_base {
+            if bar.idx() == bar_idx {
                 *bar = bar.set_address(new_base);
             }
         }
