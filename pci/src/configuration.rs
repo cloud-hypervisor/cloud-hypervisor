@@ -1013,6 +1013,7 @@ impl PciConfiguration {
                 self.bars[bar_idx].addr = value;
 
                 return Some(BarReprogrammingParams {
+                    bar_idx: Some(bar_idx),
                     old_base,
                     new_base,
                     len,
@@ -1041,6 +1042,9 @@ impl PciConfiguration {
                 self.bars[bar_idx - 1].addr = self.registers[reg_idx - 1];
 
                 return Some(BarReprogrammingParams {
+                    // The high-dword write completes the move for a 64-bit BAR.
+                    // Report the low slot.
+                    bar_idx: Some(bar_idx - 1),
                     old_base,
                     new_base,
                     len,
@@ -1069,6 +1073,7 @@ impl PciConfiguration {
             self.rom_bar_addr = value;
 
             return Some(BarReprogrammingParams {
+                bar_idx: Some(ROM_BAR_IDX),
                 old_base,
                 new_base,
                 len,
@@ -1425,5 +1430,181 @@ mod unit_tests {
 
         assert!(reprogram.is_empty());
         assert_eq!(cfg.get_bar_addr(0), bar_addr);
+    }
+
+    const RELOC_BAR_SIZE: u64 = 0x8_0000;
+
+    fn reloc_config(state: Option<PciConfigurationState>) -> PciConfiguration {
+        PciConfiguration::new(
+            0x1234,
+            0x5678,
+            0x1,
+            PciClassCode::MultimediaController,
+            &PciMultimediaSubclass::AudioController,
+            None,
+            PciHeaderType::Device,
+            0xABCD,
+            0x2468,
+            None,
+            state,
+        )
+    }
+
+    /// Adds a 32-bit memory BAR at `idx` and enables memory space decoding, so
+    /// that subsequent BAR writes are reported as reprogramming requests.
+    fn add_reloc_bar(cfg: &mut PciConfiguration, idx: usize, addr: u64) {
+        let bar = PciBarConfiguration::new(
+            idx,
+            RELOC_BAR_SIZE,
+            PciBarRegionType::Memory32BitRegion,
+            PciBarPrefetchable::NotPrefetchable,
+        )
+        .set_address(addr);
+        cfg.add_pci_bar(&bar).unwrap();
+        cfg.write_reg(COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK);
+    }
+
+    #[test]
+    fn bar_reprogramming_reports_the_moved_bar_index() {
+        let mut cfg = reloc_config(None);
+        add_reloc_bar(&mut cfg, 0, 0xc000_0000);
+        add_reloc_bar(&mut cfg, 1, 0xd000_0000);
+
+        let reprogram = cfg.write_config_register(BAR0_REG + 1, 0, &0xe000_0000u32.to_le_bytes());
+
+        assert_eq!(reprogram.len(), 1);
+        assert_eq!(reprogram[0].bar_idx, Some(1));
+        assert_eq!(reprogram[0].old_base, 0xd000_0000);
+        assert_eq!(reprogram[0].new_base, 0xe000_0000);
+        assert_eq!(reprogram[0].len, RELOC_BAR_SIZE);
+    }
+
+    #[test]
+    fn bar_reprogramming_distinguishes_bars_sharing_a_base() {
+        let mut cfg = reloc_config(None);
+        add_reloc_bar(&mut cfg, 0, 0xc000_0000);
+        add_reloc_bar(&mut cfg, 1, 0xd000_0000);
+
+        // Point BAR 0 at BAR 1's base. A guest is free to do this, and both
+        // BARs now read back the same address.
+        let aliased = cfg.write_config_register(BAR0_REG, 0, &0xd000_0000u32.to_le_bytes());
+        assert_eq!(aliased.len(), 1);
+        assert_eq!(aliased[0].bar_idx, Some(0));
+        assert_eq!(cfg.get_bar_addr(0), cfg.get_bar_addr(1));
+
+        // Moving BAR 1 away must name BAR 1, even though its old base no
+        // longer identifies it: an address comparison would match BAR 0 too.
+        let reprogram = cfg.write_config_register(BAR0_REG + 1, 0, &0xe000_0000u32.to_le_bytes());
+
+        assert_eq!(reprogram.len(), 1);
+        assert_eq!(reprogram[0].bar_idx, Some(1));
+        assert_eq!(reprogram[0].old_base, 0xd000_0000);
+        assert_eq!(reprogram[0].new_base, 0xe000_0000);
+        assert_eq!(cfg.get_bar_addr(0), 0xd000_0000);
+    }
+
+    #[test]
+    fn bar_reprogramming_of_64bit_bar_reports_the_low_slot() {
+        let mut cfg = reloc_config(None);
+        let bar = PciBarConfiguration::new(
+            0,
+            RELOC_BAR_SIZE,
+            PciBarRegionType::Memory64BitRegion,
+            PciBarPrefetchable::NotPrefetchable,
+        )
+        .set_address(0x4_0000_0000);
+        cfg.add_pci_bar(&bar).unwrap();
+        cfg.write_reg(COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK);
+
+        // The low-dword write alone must not move anything: the address is
+        // only complete once the high dword lands.
+        assert!(
+            cfg.write_config_register(BAR0_REG, 0, &0u32.to_le_bytes())
+                .is_empty()
+        );
+
+        // The high-dword write completes the move. It must report the low
+        // slot, which is the slot devices record their BAR under.
+        let reprogram = cfg.write_config_register(BAR0_REG + 1, 0, &8u32.to_le_bytes());
+
+        assert_eq!(reprogram.len(), 1);
+        assert_eq!(reprogram[0].bar_idx, Some(0));
+        assert_eq!(reprogram[0].old_base, 0x4_0000_0000);
+        assert_eq!(reprogram[0].new_base, 0x8_0000_0000);
+    }
+
+    #[test]
+    fn rom_bar_reprogramming_reports_the_rom_slot() {
+        let mut cfg = reloc_config(None);
+        let bar = PciBarConfiguration::new(
+            ROM_BAR_IDX,
+            RELOC_BAR_SIZE,
+            PciBarRegionType::Memory32BitRegion,
+            PciBarPrefetchable::NotPrefetchable,
+        )
+        .set_address(0xf000_0000);
+        cfg.add_pci_rom_bar(&bar, 0).unwrap();
+        cfg.write_reg(COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK);
+
+        let reprogram = cfg.write_config_register(ROM_BAR_REG, 0, &0xf100_0000u32.to_le_bytes());
+
+        assert_eq!(reprogram.len(), 1);
+        assert_eq!(reprogram[0].bar_idx, Some(ROM_BAR_IDX));
+        assert_eq!(reprogram[0].old_base, 0xf000_0000);
+        assert_eq!(reprogram[0].new_base, 0xf100_0000);
+    }
+
+    #[test]
+    fn restored_bar_reprogram_without_index_stays_unidentified() {
+        let mut cfg = reloc_config(None);
+        add_reloc_bar(&mut cfg, 0, 0xc000_0000);
+
+        // A snapshot written before bar_idx existed deserializes it as None.
+        // The entry must survive as None so that the caller rolls the move
+        // back instead of applying it to a guessed slot.
+        let mut state = cfg.state();
+        state.pending_bar_reprogram = vec![BarReprogrammingParams {
+            bar_idx: None,
+            old_base: 0xc000_0000,
+            new_base: 0xd000_0000,
+            len: RELOC_BAR_SIZE,
+            region_type: PciBarRegionType::Memory32BitRegion,
+        }];
+
+        let restored = reloc_config(Some(state));
+
+        let pending = restored.pending_bar_reprogram();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].bar_idx, None);
+        assert_eq!(pending[0].old_base, 0xc000_0000);
+    }
+
+    #[test]
+    fn bar_reprogram_params_deserialize_without_bar_idx() {
+        // Exactly what a snapshot taken before bar_idx existed contains.
+        // Snapshots are JSON (see vm-migration), so the field is simply absent
+        // and has to keep deserializing rather than erroring out.
+        let legacy = r#"{
+            "old_base": 3221225472,
+            "new_base": 3489660928,
+            "len": 524288,
+            "region_type": "Memory32BitRegion"
+        }"#;
+
+        let params: BarReprogrammingParams = serde_json::from_str(legacy).unwrap();
+
+        assert_eq!(params.bar_idx, None);
+        assert_eq!(params.old_base, 0xc000_0000);
+        assert_eq!(params.new_base, 0xd000_0000);
+
+        // A current snapshot round-trips the index.
+        let current = BarReprogrammingParams {
+            bar_idx: Some(3),
+            ..params
+        };
+        let encoded = serde_json::to_string(&current).unwrap();
+        let decoded: BarReprogrammingParams = serde_json::from_str(&encoded).unwrap();
+
+        assert_eq!(decoded.bar_idx, Some(3));
     }
 }
