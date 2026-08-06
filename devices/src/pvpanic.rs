@@ -135,10 +135,6 @@ impl PvPanicDevice {
             events: self.events,
         }
     }
-
-    pub fn config_bar_addr(&self) -> u64 {
-        self.configuration.get_bar_addr(0)
-    }
 }
 
 impl BusDevice for PvPanicDevice {
