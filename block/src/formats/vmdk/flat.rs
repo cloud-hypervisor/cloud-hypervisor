@@ -16,20 +16,10 @@ use std::sync::Arc;
 
 use log::warn;
 
-use crate::formats::vmdk::descriptor::VmdkDescriptor;
+use crate::formats::vmdk::descriptor::{ExtentAccess, VmdkDescriptor};
 use crate::{AlignedFile, DiskTopology, query_device_size};
 
 const VMDK_SECTOR_SIZE: u64 = 512;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ExtentAccess {
-    /// "RW": readable and writable.
-    ReadWrite,
-    /// "RDONLY": readable only, writes must be rejected.
-    ReadOnly,
-    /// "NOACCESS": cannot be accessed, reads and writes must be rejected.
-    NoAccess,
-}
 
 /// A single Flat VMDK extent
 ///
@@ -288,34 +278,27 @@ impl FlatVmdk {
                 .checked_add(length)
                 .ok_or_else(|| overflow_error("extent file range"))?;
 
-            // Open the backing file using exactly the access declared for this
-            // extent. The VMDK spec defines three values:
-            //   "RW"       -> read + write
-            //   "RDONLY"   -> read only
-            //   "NOACCESS" -> not accessible, do not open the file at all
-            let (access, extent_file) = match extent.access.as_str() {
-                "RW" => {
-                    // Downgrade "RW" to read-only if the caller requested a read-only open.
-                    if readonly {
-                        let f =
-                            open_extent(&descriptor.base_path, &extent.filename, false, direct)?;
-                        (ExtentAccess::ReadOnly, Some(f))
-                    } else {
-                        let f = open_extent(&descriptor.base_path, &extent.filename, true, direct)?;
-                        (ExtentAccess::ReadWrite, Some(f))
-                    }
-                }
-                "RDONLY" => {
-                    let f = open_extent(&descriptor.base_path, &extent.filename, false, direct)?;
-                    (ExtentAccess::ReadOnly, Some(f))
-                }
-                "NOACCESS" => (ExtentAccess::NoAccess, None),
-                other => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("unsupported VMDK extent access mode '{other}'"),
-                    ));
-                }
+            // Downgrade "RW" to read-only if the caller requested a read-only open.
+            let access = if readonly && matches!(extent.access, ExtentAccess::ReadWrite) {
+                ExtentAccess::ReadOnly
+            } else {
+                extent.access
+            };
+
+            let extent_file = match access {
+                ExtentAccess::ReadWrite => Some(open_extent(
+                    &descriptor.base_path,
+                    &extent.filename,
+                    true,
+                    direct,
+                )?),
+                ExtentAccess::ReadOnly => Some(open_extent(
+                    &descriptor.base_path,
+                    &extent.filename,
+                    false,
+                    direct,
+                )?),
+                ExtentAccess::NoAccess => None,
             };
 
             extents.push(VmdkExtent {

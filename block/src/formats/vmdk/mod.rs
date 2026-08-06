@@ -110,7 +110,7 @@ mod tests {
     use super::*;
     use crate::async_io::OwnedIoBuffer;
     use crate::disk_file::{AsyncDiskFile, DiskFd, DiskSize, PhysicalSize, Resizable};
-    use crate::formats::vmdk::flat::ExtentAccess;
+    use crate::formats::vmdk::descriptor::ExtentAccess;
 
     const SECTOR: u64 = 512;
 
