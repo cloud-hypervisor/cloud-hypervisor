@@ -604,15 +604,18 @@ mod tests {
 
     #[test]
     fn open_with_bat_entry_past_eof_is_rejected() {
-        let tf = create_dynamic_vhdx(16, None);
+        // A 32 TiB image makes the BAT span multiple 1 MiB read batches.
+        let tf = create_dynamic_vhdx(32 << 20, None);
 
         let vhdx = open_vhdx(tf.as_path()).unwrap();
         let bat_offset = vhdx.bat_entry.file_offset;
+        let entry_offset = bat_offset + (vhdx.bat_entries.len() as u64 - 1) * 8;
+        assert!(entry_offset - bat_offset >= 1 << 20);
         let past_eof = ((vhdx.disk_spec.image_size / (1 << 20) + 1) << 20 & bat::BAT_FILE_OFF_MASK)
             | PAYLOAD_BLOCK_FULLY_PRESENT;
         vhdx.aligned
             .file()
-            .write_all_at(&past_eof.to_le_bytes(), bat_offset)
+            .write_all_at(&past_eof.to_le_bytes(), entry_offset)
             .unwrap();
         drop(vhdx);
 

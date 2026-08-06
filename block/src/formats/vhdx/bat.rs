@@ -59,20 +59,27 @@ impl BatEntry {
             return Err(VhdxBatError::InvalidEntryCount);
         }
 
+        // Bound the read buffer while avoiding a bounce buffer per entry.
+        let bytes = (entry_count as usize)
+            .checked_mul(size_of::<u64>())
+            .ok_or(VhdxBatError::InvalidEntryCount)?;
+        let mut buf = vec![0u8; bytes.min(1 << 20)];
+
         let mut bat: Vec<BatEntry> = Vec::with_capacity(entry_count as usize);
-        let offset = bat_entry.file_offset;
-        for i in 0..entry_count {
-            let mut entry = [0u8; size_of::<u64>()];
-            f.read_exact_at(&mut entry, offset + i * size_of::<u64>() as u64)
+        for offset in (0..bytes).step_by(1 << 20) {
+            let len = (bytes - offset).min(buf.len());
+            f.read_exact_at(&mut buf[..len], bat_entry.file_offset + offset as u64)
                 .map_err(VhdxBatError::ReadBat)?;
-            let raw_entry = u64::from_le_bytes(entry);
-            if raw_entry & BAT_STATE_BIT_MASK == PAYLOAD_BLOCK_FULLY_PRESENT
-                && (raw_entry & BAT_FILE_OFF_MASK).saturating_add(disk_spec.block_size as u64)
-                    > disk_spec.image_size
-            {
-                return Err(VhdxBatError::PayloadPastEnd);
+            for chunk in buf[..len].as_chunks::<{ size_of::<u64>() }>().0 {
+                let raw_entry = u64::from_le_bytes(*chunk);
+                if raw_entry & BAT_STATE_BIT_MASK == PAYLOAD_BLOCK_FULLY_PRESENT
+                    && (raw_entry & BAT_FILE_OFF_MASK).saturating_add(disk_spec.block_size as u64)
+                        > disk_spec.image_size
+                {
+                    return Err(VhdxBatError::PayloadPastEnd);
+                }
+                bat.push(BatEntry(raw_entry));
             }
-            bat.insert(i as usize, BatEntry(raw_entry));
         }
 
         Ok(bat)
