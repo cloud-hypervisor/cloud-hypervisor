@@ -38,6 +38,14 @@ pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct BarReprogrammingParams {
+    /// Index of the PCI BAR being moved.
+    ///
+    /// `None` only for parameters deserialized from a snapshot taken
+    /// by the previous version before the BAR index was recorded.
+    /// As such an entry cannot identify its BAR, the move is rolled
+    /// back to old_base.
+    #[serde(default)]
+    pub bar_idx: Option<usize>,
     pub old_base: u64,
     pub new_base: u64,
     pub len: u64,
@@ -90,7 +98,7 @@ pub trait PciDevice: Send {
         None
     }
     /// Relocates the BAR to a different address in guest address space.
-    fn move_bar(&mut self, _old_base: u64, _new_base: u64) -> result::Result<(), io::Error> {
+    fn move_bar(&mut self, _bar_idx: usize, _new_base: u64) -> result::Result<(), io::Error> {
         Ok(())
     }
     /// Restore BAR address in config space after a failed move_bar.
@@ -110,8 +118,10 @@ pub trait PciDevice: Send {
 pub trait DeviceRelocation: Send + Sync {
     /// The BAR needs to be moved to a different location in the guest address
     /// space. This follows a decision from the software running in the guest.
+    /// The BAR is identified by its BAR index.
     fn move_bar(
         &self,
+        bar_idx: usize,
         old_base: u64,
         new_base: u64,
         len: u64,

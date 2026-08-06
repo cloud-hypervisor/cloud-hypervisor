@@ -355,8 +355,8 @@ impl PciDevice for IvshmemDevice {
         None
     }
 
-    fn move_bar(&mut self, old_base: u64, new_base: u64) -> io::Result<()> {
-        if new_base == self.data_bar_addr() {
+    fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> io::Result<()> {
+        if bar_idx == IVSHMEM_DATA_BAR_IDX {
             let region = self
                 .region
                 .clone()
@@ -377,7 +377,7 @@ impl PciDevice for IvshmemDevice {
             self.userspace_mapping = Some(new_mapping);
         }
         for bar in self.bar_regions.iter_mut() {
-            if bar.addr() == old_base {
+            if bar.idx() == bar_idx {
                 *bar = bar.set_address(new_base);
             }
         }

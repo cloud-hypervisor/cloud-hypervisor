@@ -285,7 +285,7 @@ const CAPABILITY_BAR_SIZE: u64 = (MSIX_PBA_BAR_OFFSET + MSIX_PBA_SIZE).next_powe
 // Align larger than natural alignment to work around Windows driver issues
 const VIRTIO_PCI_BAR_ALIGN: u64 = 0x80_0000;
 pub const VIRTIO_CONFIG_BAR_INDEX: usize = 0;
-const VIRTIO_SHM_BAR_INDEX: usize = 2;
+pub const VIRTIO_SHM_BAR_INDEX: usize = 2;
 
 const NOTIFY_OFF_MULTIPLIER: u32 = 4; // A dword per notification address.
 
@@ -1160,11 +1160,11 @@ impl PciDevice for VirtioPciDevice {
         Ok(())
     }
 
-    fn move_bar(&mut self, old_base: u64, new_base: u64) -> io::Result<()> {
+    fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> io::Result<()> {
         // We only update our idea of the bar in order to support free_bars() above.
         // The majority of the reallocation is done inside DeviceManager.
         for bar in self.bar_regions.iter_mut() {
-            if bar.addr() == old_base {
+            if bar.idx() == bar_idx {
                 *bar = bar.set_address(new_base);
             }
         }
