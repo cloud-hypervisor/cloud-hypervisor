@@ -96,6 +96,21 @@ cargo fuzz run disk_qcow2_ops -j `nproc`
 None of them needs `-max_len` or a seed corpus: the input is an operation
 program, not an image.
 
+A third piece is about throughput rather than correctness. An operation target
+rewrites its template every iteration, and the VHDX template is 8 MiB, so a
+plain `write_all` of it caps `disk_vhdx_ops` at 142 executions a second,
+measured on a loaded 96 way host. `template_memfd` and `template_file` instead
+size the file with `set_len`, which costs nothing and reads back as zeroes,
+and write only the pages that carry data - six of 2048. That is 560
+executions a second, four times as many.
+
+The obvious form of that does not work. Scanning the buffer for zero pages on
+every iteration takes 6.1 ms for 8 MiB where writing it takes 5.9 ms, and the
+target ran at 17 executions a second. What has to go is the scan, not the
+copy: a template is the same buffer every time, so its page map is computed
+once per format and reused. `image_memfd`, which materializes fuzzer input,
+keeps writing it whole - that input is dense and different every time.
+
 Corpus entries for `disk_<format>` are ordinary disk images, so anything
 `qemu-img` can write is a usable seed. `scripts/generate-fuzz-seeds.sh` writes
 a set of them per format, covering header versions, compression, cluster sizes
