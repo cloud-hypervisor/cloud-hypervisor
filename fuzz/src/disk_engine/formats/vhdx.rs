@@ -30,6 +30,14 @@ impl DiskFormat for Vhdx {
     // default budget would reject those.
     const MAX_IMAGE_LEN: usize = 16 << 20;
 
+    // The engine refuses an offset or a length that is not a multiple of the
+    // logical sector size before it does anything else
+    // (block/src/formats/vhdx/parser.rs:100 and 111 for reads, 149 and 160
+    // for writes), so an unshaped program would be rejected at the door and
+    // the shadow model would never see a byte. 512 is the
+    // `LogicalSectorSize` metadata item of the template.
+    const IO_ALIGNMENT: u64 = 512;
+
     // A VHDX read is all or error. `io::read` loops until every requested
     // sector is accounted for and returns early with an error on any entry
     // it cannot serve, so the `Ok(read_count)` it reaches

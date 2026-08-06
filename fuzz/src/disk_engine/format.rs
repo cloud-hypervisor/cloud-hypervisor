@@ -107,6 +107,25 @@ pub trait DiskFormat {
     /// shadow model instead of expecting zeroes.
     const PUNCH_HOLE_READS_ZEROES: bool = false;
 
+    /// Granularity the engine requires data ops to be aligned to.
+    ///
+    /// A format whose engine refuses an offset or a length that is not a
+    /// multiple of its logical sector size gets almost nothing out of a
+    /// uniformly random program: a `u16` length is a multiple of 512 in 0.2%
+    /// of cases, so 99.8% of the data ops in a generated program would be
+    /// rejected before reaching any translation logic, and the shadow model
+    /// would have nothing to check. The executor therefore snaps in range
+    /// offsets down and lengths up to this value.
+    ///
+    /// Misaligned requests stay reachable: [`crate::disk_engine::OpOffset::Wild`]
+    /// offsets are passed through untouched, and the image target drives
+    /// [`crate::disk_engine::default_program`], whose 65535 byte read is not
+    /// a multiple of any sector size.
+    ///
+    /// Must divide [`crate::disk_engine::MAX_OP_LEN`], so that rounding a
+    /// length up cannot exceed the guest memory region.
+    const IO_ALIGNMENT: u64 = 1;
+
     /// Whether `bytes` carries the bytes that identify this format.
     ///
     /// This is the harness side mirror of the first check the parser makes,

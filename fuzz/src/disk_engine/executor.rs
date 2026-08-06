@@ -31,7 +31,7 @@ use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
 
 use crate::disk_engine::format::DiskFormat;
 use crate::disk_engine::model::Model;
-use crate::disk_engine::program::{ring_depth, Op, MAX_OPS, MAX_OP_LEN};
+use crate::disk_engine::program::{ring_depth, Op, OpLen, OpOffset, MAX_OPS, MAX_OP_LEN};
 
 /// Largest disk size the shadow model is kept for.
 const MAX_MODEL_LEN: u64 = 8 << 20;
@@ -92,17 +92,29 @@ impl<F: DiskFormat> Executor<F> {
 
     fn step(&mut self, op: &Op) {
         match *op {
-            Op::ReadVec { offset, len } => self.read_vec(offset.resolve(self.size), len.get()),
+            Op::ReadVec { offset, len } => {
+                let (offset, len) = (self.offset(offset), self.len(len));
+                self.read_vec(offset, len)
+            }
             Op::WriteVec { offset, len, seed } => {
-                self.write_vec(offset.resolve(self.size), len.get(), seed)
+                let (offset, len) = (self.offset(offset), self.len(len));
+                self.write_vec(offset, len, seed)
             }
-            Op::ReadMem { offset, len } => self.read_mem(offset.resolve(self.size), len.get()),
+            Op::ReadMem { offset, len } => {
+                let (offset, len) = (self.offset(offset), self.len(len));
+                self.read_mem(offset, len)
+            }
             Op::WriteMem { offset, len, seed } => {
-                self.write_mem(offset.resolve(self.size), len.get(), seed)
+                let (offset, len) = (self.offset(offset), self.len(len));
+                self.write_mem(offset, len, seed)
             }
-            Op::PunchHole { offset, len } => self.punch_hole(offset.resolve(self.size), len.get()),
+            Op::PunchHole { offset, len } => {
+                let (offset, len) = (self.offset(offset), self.len(len));
+                self.punch_hole(offset, len)
+            }
             Op::WriteZeroes { offset, len } => {
-                self.write_zeroes(offset.resolve(self.size), len.get())
+                let (offset, len) = (self.offset(offset), self.len(len));
+                self.write_zeroes(offset, len)
             }
             Op::Fsync { completion } => self.fsync(completion),
             Op::Resize { size_kib } => self.resize(u64::from(size_kib) * 1024),
@@ -114,6 +126,31 @@ impl<F: DiskFormat> Executor<F> {
             Op::UseClone { ring_depth: depth } => self.use_clone(ring_depth(depth)),
             Op::QueryCaps => self.query_caps(),
         }
+    }
+
+    /// Resolves a program offset against the current disk size and snaps it to
+    /// [`DiskFormat::IO_ALIGNMENT`].
+    ///
+    /// A `Wild` offset is passed through unchanged: it exists to reach the
+    /// bounds and overflow checks, which run in front of any alignment test,
+    /// and aligning it would take that reach away.
+    fn offset(&self, offset: OpOffset) -> u64 {
+        let resolved = offset.resolve(self.size);
+        if matches!(offset, OpOffset::Wild(_)) {
+            return resolved;
+        }
+        resolved - resolved % F::IO_ALIGNMENT
+    }
+
+    /// Returns a byte count rounded up to [`DiskFormat::IO_ALIGNMENT`].
+    ///
+    /// Rounding up rather than down keeps a short op an op: a length below
+    /// one sector would otherwise become zero and the program would spend its
+    /// budget on requests that transfer nothing.
+    fn len(&self, len: OpLen) -> usize {
+        let alignment = F::IO_ALIGNMENT as usize;
+        debug_assert!(MAX_OP_LEN.is_multiple_of(alignment));
+        len.get().div_ceil(alignment) * alignment
     }
 
     fn read_vec(&mut self, offset: u64, len: usize) {

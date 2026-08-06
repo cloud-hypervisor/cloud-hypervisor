@@ -96,6 +96,14 @@ cargo fuzz run disk_qcow2_ops -j `nproc`
 None of them needs `-max_len` or a seed corpus: the input is an operation
 program, not an image.
 
+Two pieces of the framework exist for these targets:
+
+- `DiskFormat::IO_ALIGNMENT`. The VHDX engine refuses an offset or a length
+  that is not a multiple of the logical sector size. A uniformly random `u16`
+  length is a multiple of 512 in 0.2% of cases, so an unshaped program would
+  be rejected at the door and the model would never see a byte. The executor
+  snaps in range offsets down and lengths up to this value; `OpOffset::Wild`
+  offsets are left alone so the bounds and overflow checks stay reachable.
 A third piece is about throughput rather than correctness. An operation target
 rewrites its template every iteration, and the VHDX template is 8 MiB, so a
 plain `write_all` of it caps `disk_vhdx_ops` at 142 executions a second,
