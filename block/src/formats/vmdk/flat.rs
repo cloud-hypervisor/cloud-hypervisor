@@ -240,7 +240,7 @@ fn overflow_error(what: &str) -> io::Error {
 
 impl FlatVmdk {
     /// Opens a flat VMDK image from its already-open descriptor file.
-    pub fn new(file: File, path: &Path, direct: bool) -> io::Result<Self> {
+    pub fn new(file: File, path: &Path, readonly: bool, direct: bool) -> io::Result<Self> {
         let descriptor = VmdkDescriptor::new(&file, path)?;
 
         if descriptor.extents_list.extents.is_empty() {
@@ -278,12 +278,14 @@ impl FlatVmdk {
                 .checked_add(length)
                 .ok_or_else(|| overflow_error("extent file range"))?;
 
-            // Open the backing file using exactly the access declared for this
-            // extent. The VMDK spec defines three values:
-            //   "RW"       -> read + write
-            //   "RDONLY"   -> read only
-            //   "NOACCESS" -> not accessible, do not open the file at all
-            let extent_file = match extent.access {
+            // Downgrade "RW" to read-only if the caller requested a read-only open.
+            let access = if readonly && matches!(extent.access, ExtentAccess::ReadWrite) {
+                ExtentAccess::ReadOnly
+            } else {
+                extent.access
+            };
+
+            let extent_file = match access {
                 ExtentAccess::ReadWrite => Some(open_extent(
                     &descriptor.base_path,
                     &extent.filename,
@@ -301,7 +303,7 @@ impl FlatVmdk {
 
             extents.push(VmdkExtent {
                 file: extent_file,
-                access: extent.access,
+                access,
                 virtual_start,
                 length,
                 file_base_offset,
