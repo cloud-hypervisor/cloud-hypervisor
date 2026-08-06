@@ -26,7 +26,7 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 
 const IVSHMEM_BAR0_IDX: usize = 0;
 const IVSHMEM_BAR1_IDX: usize = 1;
-const IVSHMEM_DATA_BAR_IDX: usize = 2;
+pub const IVSHMEM_DATA_BAR_IDX: usize = 2;
 
 const IVSHMEM_VENDOR_ID: u16 = 0x1af4;
 const IVSHMEM_DEVICE_ID: u16 = 0x1110;

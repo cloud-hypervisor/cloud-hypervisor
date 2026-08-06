@@ -53,7 +53,7 @@ use devices::interrupt_controller::InterruptController;
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
 #[cfg(feature = "ivshmem")]
-use devices::ivshmem::{IvshmemError, IvshmemOps};
+use devices::ivshmem::{IVSHMEM_DATA_BAR_IDX, IvshmemError, IvshmemOps};
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
 #[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))]
@@ -96,7 +96,9 @@ use tracer::trace_scoped;
 use vfio_ioctls::VfioIommufd;
 use vfio_ioctls::{VfioContainer, VfioDevice, VfioDeviceFd, VfioOps};
 use virtio_devices::block::Error as VirtioBlockError;
-use virtio_devices::transport::{VirtioPciDevice, VirtioPciDeviceActivator, VirtioTransport};
+use virtio_devices::transport::{
+    VIRTIO_CONFIG_BAR_INDEX, VirtioPciDevice, VirtioPciDeviceActivator, VirtioTransport,
+};
 use virtio_devices::vhost_user::VhostUserConfig;
 use virtio_devices::{
     AccessPlatformMapping, Block, Endpoint, IommuMapping, VdpaDmaMapping, VirtioMemMappingSource,
@@ -409,6 +411,10 @@ pub enum DeviceManagerError {
     /// Missing PCI device.
     #[error("Missing PCI device")]
     MissingPciDevice,
+
+    /// Missing PCI BAR.
+    #[error("Missing PCI BAR at index {0:#x}")]
+    MissingPciBar(usize),
 
     /// Failed to remove a PCI device from the PCI bus.
     #[error("Failed to remove a PCI device from the PCI bus")]
@@ -4516,7 +4522,8 @@ impl DeviceManager {
         let (bars, new_resources) =
             self.allocate_pci_bars(virtio_pci_device.clone(), pci_segment_id, resources)?;
 
-        let bar_addr = virtio_pci_device.lock().unwrap().config_bar_addr();
+        let bar_addr = PciBarConfiguration::addr_of_idx(&bars, VIRTIO_CONFIG_BAR_INDEX)
+            .ok_or(DeviceManagerError::MissingPciBar(VIRTIO_CONFIG_BAR_INDEX))?;
         for (event, addr) in virtio_pci_device.lock().unwrap().ioeventfds(bar_addr) {
             let io_addr = IoEventAddress::Mmio(addr);
             self.address_manager
@@ -4622,7 +4629,8 @@ impl DeviceManager {
         let (bars, new_resources) =
             self.allocate_pci_bars(ivshmem_device.clone(), pci_segment_id, resources)?;
 
-        let start_addr = ivshmem_device.lock().unwrap().data_bar_addr();
+        let start_addr = PciBarConfiguration::addr_of_idx(&bars, IVSHMEM_DATA_BAR_IDX)
+            .ok_or(DeviceManagerError::MissingPciBar(IVSHMEM_DATA_BAR_IDX))?;
         let (region, mapping) = ivshmem_ops
             .lock()
             .unwrap()
