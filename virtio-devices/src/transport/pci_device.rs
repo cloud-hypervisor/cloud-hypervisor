@@ -700,6 +700,10 @@ impl VirtioPciDevice {
             .get_bar_addr(VIRTIO_COMMON_BAR_INDEX.into())
     }
 
+    pub fn config_bar_index() -> usize {
+        VIRTIO_COMMON_BAR_INDEX.into()
+    }
+
     fn add_pci_capabilities(
         &mut self,
         device_config_size: u64,

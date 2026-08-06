@@ -197,6 +197,10 @@ impl IvshmemDevice {
         self.configuration.get_bar_addr(IVSHMEM_BAR2_IDX)
     }
 
+    pub fn data_bar_index() -> usize {
+        IVSHMEM_BAR2_IDX
+    }
+
     fn state(&self) -> IvshmemDeviceState {
         IvshmemDeviceState {
             interrupt_mask: self._interrupt_mask,

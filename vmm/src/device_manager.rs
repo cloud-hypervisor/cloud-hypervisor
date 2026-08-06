@@ -482,6 +482,10 @@ pub enum DeviceManagerError {
     #[error("Missing PCI device")]
     MissingPciDevice,
 
+    /// Missing PCI BAR.
+    #[error("Missing PCI BAR at index {0}")]
+    MissingPciBar(usize),
+
     /// Failed to remove a PCI device from the PCI bus.
     #[error("Failed to remove a PCI device from the PCI bus")]
     RemoveDeviceFromPciBus(#[source] pci::PciRootError),
@@ -1224,6 +1228,13 @@ fn use_64bit_bar_for_virtio_device(
     is_hotplug: bool,
 ) -> bool {
     pci_segment_id > 0 || device_type != VirtioDeviceType::Block as u32 || is_hotplug
+}
+
+fn bar_addr_of_idx(bars: &[PciBarConfiguration], idx: usize) -> DeviceManagerResult<u64> {
+    bars.iter()
+        .find(|bar| bar.idx() == idx)
+        .map(PciBarConfiguration::addr)
+        .ok_or(DeviceManagerError::MissingPciBar(idx))
 }
 
 impl DeviceManager {
@@ -4582,7 +4593,8 @@ impl DeviceManager {
         let (bars, new_resources) =
             self.allocate_pci_bars(virtio_pci_device.clone(), pci_segment_id, resources)?;
 
-        let bar_addr = virtio_pci_device.lock().unwrap().config_bar_addr();
+        let config_bar_idx = VirtioPciDevice::config_bar_index();
+        let bar_addr = bar_addr_of_idx(&bars, config_bar_idx)?;
         for (event, addr) in virtio_pci_device.lock().unwrap().ioeventfds(bar_addr) {
             let io_addr = IoEventAddress::Mmio(addr);
             self.address_manager
@@ -4688,7 +4700,8 @@ impl DeviceManager {
         let (bars, new_resources) =
             self.allocate_pci_bars(ivshmem_device.clone(), pci_segment_id, resources)?;
 
-        let start_addr = ivshmem_device.lock().unwrap().data_bar_addr();
+        let data_bar_idx = devices::IvshmemDevice::data_bar_index();
+        let start_addr = bar_addr_of_idx(&bars, data_bar_idx)?;
         let (region, mapping) = ivshmem_ops
             .lock()
             .unwrap()
