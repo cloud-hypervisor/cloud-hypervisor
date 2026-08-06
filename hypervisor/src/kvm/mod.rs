@@ -1503,7 +1503,7 @@ impl vm::Vm for KvmVm {
     /// Initialize TDX for this VM
     ///
     #[cfg(feature = "tdx")]
-    fn tdx_init(&self, cpuid: &[CpuIdEntry], max_vcpus: u32) -> vm::Result<()> {
+    fn tdx_init(&self, cpuid: &[CpuIdEntry]) -> vm::Result<()> {
         let guest_cpuid: Vec<kvm_bindings::kvm_cpuid_entry2> =
             cpuid.iter().map(|e| (*e).into()).collect();
 
@@ -1520,23 +1520,10 @@ impl vm::Vm for KvmVm {
 
         // The upstream Linux 6.16 `struct kvm_tdx_init_vm` no longer carries
         // `max_vcpus`; the TDX module derives the TD's `TD_PARAMS.max_vcpus`
-        // from the VM's `kvm->max_vcpus`. Some kernels let userspace lower that
-        // bound via KVM_CAP_MAX_VCPUS before KVM_TDX_INIT_VM (and before any
-        // vCPU is created); others do not implement setting that capability and
-        // simply rely on the default (capped at the number of present CPUs).
-        // Attempt it best-effort so we honor an explicit limit where supported,
-        // but never fail TDX init when the capability is query-only.
-        let cap = kvm_bindings::kvm_enable_cap {
-            cap: kvm_bindings::KVM_CAP_MAX_VCPUS,
-            args: [max_vcpus as u64, 0, 0, 0],
-            ..Default::default()
-        };
-        if let Err(e) = self.fd.enable_cap(&cap) {
-            warn!(
-                "KVM_CAP_MAX_VCPUS not settable ({e}); TD max_vcpus will use the \
-                 kernel default derived from kvm->max_vcpus"
-            );
-        }
+        // from the VM's `kvm->max_vcpus`. We do not attempt to lower that bound
+        // here (KVM_CAP_MAX_VCPUS): like QEMU, we leave it at the kernel default
+        // and rely on the query+compare check performed earlier against
+        // KVM_CAP_MAX_VCPUS (see CpuManager::new) to reject over-provisioning.
 
         // Query the TDX capabilities (a VM-scoped ioctl) to learn both the
         // supported attribute/XFAM masks and the set of CPUID leaves the TDX

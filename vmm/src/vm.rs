@@ -828,8 +828,7 @@ impl Vm {
     ) -> Result<()> {
         if config.lock().unwrap().is_tdx_enabled() {
             let cpuid = cpu_manager.lock().unwrap().common_cpuid();
-            let max_vcpus = cpu_manager.lock().unwrap().max_vcpus();
-            vm.tdx_init(&cpuid, max_vcpus)
+            vm.tdx_init(&cpuid)
                 .map_err(Error::InitializeTdxVm)?;
         }
         Ok(())
