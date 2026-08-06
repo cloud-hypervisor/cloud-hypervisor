@@ -351,8 +351,13 @@ impl Vhdx {
                     let new_bat_entry =
                         file_offset | (bat::PAYLOAD_BLOCK_FULLY_PRESENT & bat::BAT_STATE_BIT_MASK);
                     self.bat_entries[sector.bat_index as usize] = BatEntry(new_bat_entry);
-                    BatEntry::write_bat_entries(&self.aligned, bat_offset, &self.bat_entries)
-                        .map_err(VhdxIoError::WriteBat)?;
+                    BatEntry::write_bat_entry(
+                        &self.aligned,
+                        bat_offset,
+                        sector.bat_index,
+                        new_bat_entry,
+                    )
+                    .map_err(VhdxIoError::WriteBat)?;
 
                     // The BAT entry addresses the start of the payload block;
                     // the sector's data lives at its own offset within that
