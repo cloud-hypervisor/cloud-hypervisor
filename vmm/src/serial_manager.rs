@@ -4,7 +4,7 @@
 //
 
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::net::Shutdown;
 use std::os::fd::OwnedFd;
 use std::os::unix::io::{AsRawFd, FromRawFd};
@@ -22,7 +22,7 @@ use devices::legacy::Serial;
 use libc::EFD_NONBLOCK;
 use log::{error, info, warn};
 use seccompiler::{SeccompAction, apply_filter};
-use serial_buffer::SerialBuffer;
+use serial_buffer::{SerialBuffer, SharedSerialBuffer, SocketConsole};
 use thiserror::Error;
 use vmm_sys_util::errno;
 use vmm_sys_util::eventfd::EventFd;
@@ -131,43 +131,6 @@ pub struct SerialManager {
     handle: Option<thread::JoinHandle<()>>,
     pty_write_out: Option<Arc<AtomicBool>>,
     socket_console: Option<SocketConsole>,
-}
-
-/// A `Write` handle so the serial device and the serial-manager thread can
-/// share one `SerialBuffer` (the device holds it as its output sink).
-struct SharedSerialBuffer(Arc<Mutex<SerialBuffer>>);
-
-impl Write for SharedSerialBuffer {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0.lock().unwrap().write(buf)
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        self.0.lock().unwrap().flush()
-    }
-}
-
-#[derive(Clone)]
-struct SocketConsole {
-    path: PathBuf,
-    /// Persistent ring buffer: captures serial output while no client is
-    /// connected and replays it on connect. Shared with the serial device's
-    /// `out` sink and retargeted by the epoll thread.
-    buffer: Arc<Mutex<SerialBuffer>>,
-    write_out: Arc<AtomicBool>,
-}
-
-impl SocketConsole {
-    fn attach_client(&self, writer: UnixStream) -> Result<()> {
-        let mut buffer = self.buffer.lock().unwrap();
-        buffer.set_out(Box::new(writer));
-        self.write_out.store(true, Ordering::Release);
-        buffer.flush().map_err(Error::FlushOutput)
-    }
-
-    fn detach_client(&self) {
-        self.write_out.store(false, Ordering::Release);
-        self.buffer.lock().unwrap().set_out(Box::new(io::sink()));
-    }
 }
 
 impl SerialManager {
@@ -436,7 +399,9 @@ impl SerialManager {
                                     reader = Some(unix_stream);
 
                                     if let Some(ref socket_console) = socket_console {
-                                        socket_console.attach_client(writer)?;
+                                        socket_console
+                                            .attach_client(writer)
+                                            .map_err(Error::FlushOutput)?;
                                     }
                                 }
                                 EpollDispatch::File => {
