@@ -6294,4 +6294,43 @@ mod unit_tests {
             vm_memory::GuestAddress(0x3fffff)
         );
     }
+
+    fn test_bar(idx: usize, addr: u64) -> PciBarConfiguration {
+        PciBarConfiguration::new(
+            idx,
+            0x1000,
+            PciBarRegionType::Memory64BitRegion,
+            pci::PciBarPrefetchable::NotPrefetchable,
+        )
+        .set_address(addr)
+    }
+
+    #[test]
+    fn test_bar_addr_of_idx_returns_the_matching_bar_address() {
+        // The list is not ordered by index, so the lookup must not rely on
+        // the BAR's position in it.
+        let bars = [
+            test_bar(2, 0xd000_0000),
+            test_bar(0, 0xc000_0000),
+            test_bar(4, 0xe000_0000),
+        ];
+
+        assert_eq!(bar_addr_of_idx(&bars, 0).unwrap(), 0xc000_0000);
+        assert_eq!(bar_addr_of_idx(&bars, 2).unwrap(), 0xd000_0000);
+        assert_eq!(bar_addr_of_idx(&bars, 4).unwrap(), 0xe000_0000);
+    }
+
+    #[test]
+    fn test_bar_addr_of_idx_errors_on_missing_bar() {
+        let bars = [test_bar(0, 0xc000_0000)];
+
+        assert!(matches!(
+            bar_addr_of_idx(&bars, 2),
+            Err(DeviceManagerError::MissingPciBar(2))
+        ));
+        assert!(matches!(
+            bar_addr_of_idx(&[], 0),
+            Err(DeviceManagerError::MissingPciBar(0))
+        ));
+    }
 }
