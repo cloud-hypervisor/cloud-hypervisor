@@ -104,6 +104,11 @@ Two pieces of the framework exist for these targets:
   be rejected at the door and the model would never see a byte. The executor
   snaps in range offsets down and lengths up to this value; `OpOffset::Wild`
   offsets are left alone so the bounds and overflow checks stay reachable.
+- A refused sparse op leaves the model alone. VHDX and VHD reject every
+  `punch_hole` and `write_zeroes` outright, and an op the engine refused
+  changed nothing, so marking its range unknown would let a program blank the
+  model out range by range and check nothing.
+
 A third piece is about throughput rather than correctness. An operation target
 rewrites its template every iteration, and the VHDX template is 8 MiB, so a
 plain `write_all` of it caps `disk_vhdx_ops` at 142 executions a second,

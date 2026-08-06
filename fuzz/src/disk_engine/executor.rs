@@ -230,10 +230,16 @@ impl<F: DiskFormat> Executor<F> {
 
     fn punch_hole(&mut self, offset: u64, len: usize) {
         let user_data = self.next_user_data();
-        let submitted = self.io.punch_hole(offset, len as u64, user_data).is_ok();
-        let succeeded = submitted && self.completion_succeeded(user_data);
+        if self.io.punch_hole(offset, len as u64, user_data).is_err() {
+            // A request the engine refused outright owes no completion and
+            // changed nothing, so the model still describes the disk. This
+            // matters: VHDX and VHD refuse every sparse op, and marking the
+            // range unknown anyway would let a program blank the model out
+            // range by range and check nothing.
+            return;
+        }
 
-        if succeeded && F::PUNCH_HOLE_READS_ZEROES {
+        if self.completion_succeeded(user_data) && F::PUNCH_HOLE_READS_ZEROES {
             self.record_zeroes(offset, len);
         } else {
             self.record_unknown(offset, len);
@@ -242,9 +248,12 @@ impl<F: DiskFormat> Executor<F> {
 
     fn write_zeroes(&mut self, offset: u64, len: usize) {
         let user_data = self.next_user_data();
-        let submitted = self.io.write_zeroes(offset, len as u64, user_data).is_ok();
+        if self.io.write_zeroes(offset, len as u64, user_data).is_err() {
+            // As in `punch_hole`: a refused request did nothing.
+            return;
+        }
 
-        if submitted && self.completion_succeeded(user_data) {
+        if self.completion_succeeded(user_data) {
             self.record_zeroes(offset, len);
         } else {
             self.record_unknown(offset, len);
