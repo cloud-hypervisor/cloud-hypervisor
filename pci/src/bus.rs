@@ -226,6 +226,29 @@ impl PciBus {
             Err(PciRootError::InvalidPciDeviceSlot(id as usize))
         }
     }
+
+    fn apply_bar_reprogramming(
+        &self,
+        device: &mut dyn PciDevice,
+        bar_reprogram: &[BarReprogrammingParams],
+    ) {
+        for params in bar_reprogram {
+            if let Err(e) = self.device_reloc.move_bar(
+                params.old_base,
+                params.new_base,
+                params.len,
+                device,
+                params.region_type,
+            ) {
+                // Rollback the changes from detect_bar_reprogramming().
+                warn!(
+                    "Failed moving device BAR: {}: 0x{:x}->0x{:x}(0x{:x}), keeping old BAR",
+                    e, params.old_base, params.new_base, params.len
+                );
+                device.restore_bar_addr(params);
+            }
+        }
+    }
 }
 
 pub struct PciConfigIo {
@@ -298,25 +321,7 @@ impl PciConfigIo {
             let (bar_reprogram, ret) = device.write_config_register(register, offset, data);
 
             // Move the device's BAR if needed
-            for params in &bar_reprogram {
-                if let Err(e) = pci_bus.device_reloc.move_bar(
-                    params.old_base,
-                    params.new_base,
-                    params.len,
-                    device.deref_mut(),
-                    params.region_type,
-                ) {
-                    warn!(
-                        "Failed moving device BAR: {}: 0x{:x}->0x{:x}(0x{:x}), keeping old BAR",
-                        e, params.old_base, params.new_base, params.len
-                    );
-                    // Rollback: the config register was already updated to
-                    // new_base by detect_bar_reprogramming(). Restore it by
-                    // writing back the old address so device state stays
-                    // consistent with the MMIO bus mapping.
-                    device.restore_bar_addr(params);
-                }
-            }
+            pci_bus.apply_bar_reprogramming(device.deref_mut(), &bar_reprogram);
 
             ret
         } else {
@@ -428,21 +433,7 @@ impl PciConfigMmio {
             let (bar_reprogram, _) = device.write_config_register(register, offset, data);
 
             // Move the device's BAR if needed
-            for params in &bar_reprogram {
-                if let Err(e) = pci_bus.device_reloc.move_bar(
-                    params.old_base,
-                    params.new_base,
-                    params.len,
-                    device.deref_mut(),
-                    params.region_type,
-                ) {
-                    warn!(
-                        "Failed moving device BAR: {}: 0x{:x}->0x{:x}(0x{:x}), keeping old BAR",
-                        e, params.old_base, params.new_base, params.len
-                    );
-                    device.restore_bar_addr(params);
-                }
-            }
+            pci_bus.apply_bar_reprogramming(device.deref_mut(), &bar_reprogram);
         }
     }
 }
