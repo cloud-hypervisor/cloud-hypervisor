@@ -1423,4 +1423,168 @@ mod tests {
         assert!(reprogram.is_empty());
         assert_eq!(cfg.get_bar_addr(0), bar_addr);
     }
+
+    const RELOC_BAR_SIZE: u64 = 0x8_0000;
+
+    fn reloc_config(state: Option<PciConfigurationState>) -> PciConfiguration {
+        PciConfiguration::new(
+            0x1234,
+            0x5678,
+            0x1,
+            PciClassCode::MultimediaController,
+            &PciMultimediaSubclass::AudioController,
+            None,
+            PciHeaderType::Device,
+            0xABCD,
+            0x2468,
+            None,
+            state,
+        )
+    }
+
+    /// Adds a 32-bit memory BAR at `idx` and enables memory space decoding, so
+    /// that subsequent BAR writes are reported as reprogramming requests.
+    fn add_reloc_bar(cfg: &mut PciConfiguration, idx: usize, addr: u64) {
+        let bar = PciBarConfiguration::new(
+            idx,
+            RELOC_BAR_SIZE,
+            PciBarRegionType::Memory32BitRegion,
+            PciBarPrefetchable::NotPrefetchable,
+        )
+        .set_address(addr);
+        cfg.add_pci_bar(&bar).unwrap();
+        cfg.write_reg(COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK);
+    }
+
+    #[test]
+    fn bar_reprogramming_reports_the_moved_bar_index() {
+        let mut cfg = reloc_config(None);
+        add_reloc_bar(&mut cfg, 0, 0xc000_0000);
+        add_reloc_bar(&mut cfg, 1, 0xd000_0000);
+
+        let reprogram = cfg.write_config_register(BAR0_REG + 1, 0, &0xe000_0000u32.to_le_bytes());
+
+        assert_eq!(reprogram.len(), 1);
+        assert_eq!(reprogram[0].bar_idx, Some(1));
+        assert_eq!(reprogram[0].old_base, 0xd000_0000);
+        assert_eq!(reprogram[0].new_base, 0xe000_0000);
+        assert_eq!(reprogram[0].len, RELOC_BAR_SIZE);
+    }
+
+    #[test]
+    fn bar_reprogramming_distinguishes_bars_sharing_a_base() {
+        let mut cfg = reloc_config(None);
+        add_reloc_bar(&mut cfg, 0, 0xc000_0000);
+        add_reloc_bar(&mut cfg, 1, 0xd000_0000);
+
+        // Point BAR 0 at BAR 1's base. A guest is free to do this, and both
+        // BARs now read back the same address.
+        let aliased = cfg.write_config_register(BAR0_REG, 0, &0xd000_0000u32.to_le_bytes());
+        assert_eq!(aliased.len(), 1);
+        assert_eq!(aliased[0].bar_idx, Some(0));
+        assert_eq!(cfg.get_bar_addr(0), cfg.get_bar_addr(1));
+
+        // Moving BAR 1 away must name BAR 1, even though its old base no
+        // longer identifies it: an address comparison would match BAR 0 too.
+        let reprogram = cfg.write_config_register(BAR0_REG + 1, 0, &0xe000_0000u32.to_le_bytes());
+
+        assert_eq!(reprogram.len(), 1);
+        assert_eq!(reprogram[0].bar_idx, Some(1));
+        assert_eq!(reprogram[0].old_base, 0xd000_0000);
+        assert_eq!(reprogram[0].new_base, 0xe000_0000);
+        assert_eq!(cfg.get_bar_addr(0), 0xd000_0000);
+    }
+
+    #[test]
+    fn bar_reprogramming_of_64bit_bar_reports_the_low_slot() {
+        let mut cfg = reloc_config(None);
+        let bar = PciBarConfiguration::new(
+            0,
+            RELOC_BAR_SIZE,
+            PciBarRegionType::Memory64BitRegion,
+            PciBarPrefetchable::NotPrefetchable,
+        )
+        .set_address(0x4_0000_0000);
+        cfg.add_pci_bar(&bar).unwrap();
+        cfg.write_reg(COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK);
+
+        // The low-dword write alone must not move anything: the address is
+        // only complete once the high dword lands.
+        assert!(
+            cfg.write_config_register(BAR0_REG, 0, &0u32.to_le_bytes())
+                .is_empty()
+        );
+
+        // The high-dword write completes the move. It must report the low
+        // slot, which is the slot devices record their BAR under.
+        let reprogram = cfg.write_config_register(BAR0_REG + 1, 0, &8u32.to_le_bytes());
+
+        assert_eq!(reprogram.len(), 1);
+        assert_eq!(reprogram[0].bar_idx, Some(0));
+        assert_eq!(reprogram[0].old_base, 0x4_0000_0000);
+        assert_eq!(reprogram[0].new_base, 0x8_0000_0000);
+    }
+
+    #[test]
+    fn rom_bar_reprogramming_reports_the_rom_slot() {
+        let mut cfg = reloc_config(None);
+        let bar = PciBarConfiguration::new(
+            ROM_BAR_IDX,
+            RELOC_BAR_SIZE,
+            PciBarRegionType::Memory32BitRegion,
+            PciBarPrefetchable::NotPrefetchable,
+        )
+        .set_address(0xf000_0000);
+        cfg.add_pci_rom_bar(&bar, 0).unwrap();
+        cfg.write_reg(COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK);
+
+        let reprogram = cfg.write_config_register(ROM_BAR_REG, 0, &0xf100_0000u32.to_le_bytes());
+
+        assert_eq!(reprogram.len(), 1);
+        assert_eq!(reprogram[0].bar_idx, Some(ROM_BAR_IDX));
+        assert_eq!(reprogram[0].old_base, 0xf000_0000);
+        assert_eq!(reprogram[0].new_base, 0xf100_0000);
+    }
+
+    fn bar_with_idx_and_addr(idx: usize, addr: u64) -> PciBarConfiguration {
+        PciBarConfiguration::new(
+            idx,
+            0x1000,
+            PciBarRegionType::Memory64BitRegion,
+            PciBarPrefetchable::NotPrefetchable,
+        )
+        .set_address(addr)
+    }
+
+    #[test]
+    fn addr_of_idx_returns_the_matching_bar_address() {
+        // The list is not ordered by index, so the lookup must not rely on
+        // the BAR's position in it.
+        let bars = [
+            bar_with_idx_and_addr(2, 0xd000_0000),
+            bar_with_idx_and_addr(0, 0xc000_0000),
+            bar_with_idx_and_addr(4, 0xe000_0000),
+        ];
+
+        assert_eq!(
+            PciBarConfiguration::addr_of_idx(&bars, 0),
+            Some(0xc000_0000)
+        );
+        assert_eq!(
+            PciBarConfiguration::addr_of_idx(&bars, 2),
+            Some(0xd000_0000)
+        );
+        assert_eq!(
+            PciBarConfiguration::addr_of_idx(&bars, 4),
+            Some(0xe000_0000)
+        );
+    }
+
+    #[test]
+    fn addr_of_idx_returns_none_on_missing_bar() {
+        let bars = [bar_with_idx_and_addr(0, 0xc000_0000)];
+
+        assert_eq!(PciBarConfiguration::addr_of_idx(&bars, 2), None);
+        assert_eq!(PciBarConfiguration::addr_of_idx(&[], 0), None);
+    }
 }
