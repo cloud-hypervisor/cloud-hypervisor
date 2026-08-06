@@ -284,7 +284,7 @@ const MSIX_PBA_SIZE: u64 = 0x800;
 const CAPABILITY_BAR_SIZE: u64 = (MSIX_PBA_BAR_OFFSET + MSIX_PBA_SIZE).next_power_of_two();
 // Align larger than natural alignment to work around Windows driver issues
 const VIRTIO_PCI_BAR_ALIGN: u64 = 0x80_0000;
-const VIRTIO_CONFIG_BAR_INDEX: usize = 0;
+pub const VIRTIO_CONFIG_BAR_INDEX: usize = 0;
 const VIRTIO_SHM_BAR_INDEX: usize = 2;
 
 const NOTIFY_OFF_MULTIPLIER: u32 = 4; // A dword per notification address.
