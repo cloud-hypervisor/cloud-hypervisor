@@ -37,10 +37,8 @@ const MDR_GUID: [u8; 16] = [
 
 #[derive(Error, Debug)]
 pub enum VhdxHeaderError {
-    #[error("BAT entry is not unique")]
-    DuplicateBATEntry,
-    #[error("Metadata region entry is not unique")]
-    DuplicateMDREntry,
+    #[error("Region GUID is not unique")]
+    DuplicateRegionEntry,
     #[error("Checksum doesn't match for {0}")]
     InvalidChecksum(String),
     #[error("Invalid entry count")]
@@ -229,7 +227,7 @@ impl RegionTableHeader {
 /// Returns `true` if the half-open byte ranges `[a_start, a_end)` and
 /// `[b_start, b_end)` overlap.
 fn ranges_overlap(a_start: u64, a_end: u64, b_start: u64, b_end: u64) -> bool {
-    a_start < b_end && b_start < a_end
+    a_start < a_end && b_start < b_end && a_start < b_end && b_start < a_end
 }
 
 pub(super) struct RegionInfo {
@@ -267,28 +265,24 @@ impl RegionInfo {
                 VhdxHeaderError::RegionEntryOverflow(start, entry.length as usize),
             )?;
 
-            for (region_ent_start, region_ent_end) in region_entries.iter() {
+            for (region_ent_start, region_ent_end) in region_entries.values() {
                 if ranges_overlap(start, end, *region_ent_start, *region_ent_end) {
                     return Err(VhdxHeaderError::RegionOverlap);
                 }
             }
 
-            region_entries.insert(start, end);
+            if region_entries.insert(entry.guid, (start, end)).is_some() {
+                return Err(VhdxHeaderError::DuplicateRegionEntry);
+            }
 
             if entry.guid == BAT_GUID {
-                if bat_entry.is_none() {
-                    bat_entry = Some(entry);
-                    continue;
-                }
-                return Err(VhdxHeaderError::DuplicateBATEntry);
+                bat_entry = Some(entry);
+                continue;
             }
 
             if entry.guid == MDR_GUID {
-                if mdr_entry.is_none() {
-                    mdr_entry = Some(entry);
-                    continue;
-                }
-                return Err(VhdxHeaderError::DuplicateMDREntry);
+                mdr_entry = Some(entry);
+                continue;
             }
 
             if (entry.required & REGION_ENTRY_REQUIRED) == 1 {
@@ -419,6 +413,8 @@ fn calculate_checksum(buffer: &mut [u8], csum_offset: usize) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::FileExt;
+
     use zerocopy::{FromBytes, IntoBytes};
 
     use super::{
@@ -476,6 +472,9 @@ mod tests {
             (0, 5, 10, 20, false),   // disjoint, new before existing
             (30, 40, 10, 20, false), // disjoint, new after existing
             (0, 10, 10, 20, false),  // touching at the boundary (half-open)
+            (0, 0, 0, 10, false),    // empty at the start
+            (5, 5, 0, 10, false),    // empty inside
+            (10, 10, 0, 10, false),  // empty at the end
         ];
 
         for &(a_start, a_end, b_start, b_end, expected) in cases {
@@ -491,6 +490,36 @@ mod tests {
                 "symmetry: [{b_start},{b_end}) vs [{a_start},{a_end})"
             );
         }
+    }
+
+    #[test]
+    fn region_guids_are_unique() {
+        const MIB: u64 = 1 << 20;
+        let entries_at = REGION_TABLE_1_START + size_of::<RegionTableHeader>() as u64;
+        let file = region_file(
+            4 * MIB,
+            &[
+                region_entry(BAT_GUID, MIB, MIB as u32),
+                region_entry(MDR_GUID, 2 * MIB, MIB as u32),
+                region_entry([1; 16], MIB, 0),
+                region_entry([2; 16], MIB, 0),
+            ],
+        );
+        RegionInfo::new(&file, REGION_TABLE_1_START, 4).unwrap();
+
+        file.write_all_at(&region_entry([1; 16], 3 * MIB, 0), entries_at + 96)
+            .unwrap();
+        assert!(matches!(
+            RegionInfo::new(&file, REGION_TABLE_1_START, 4),
+            Err(VhdxHeaderError::DuplicateRegionEntry)
+        ));
+
+        file.write_all_at(&region_entry([2; 16], MIB, MIB as u32), entries_at + 96)
+            .unwrap();
+        assert!(matches!(
+            RegionInfo::new(&file, REGION_TABLE_1_START, 4),
+            Err(VhdxHeaderError::RegionOverlap)
+        ));
     }
 
     #[test]
