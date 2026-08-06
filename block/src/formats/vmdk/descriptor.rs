@@ -12,7 +12,7 @@ use std::fs::File;
 use std::io;
 use std::os::unix::fs::FileExt;
 use std::path::Path;
-use std::str::Lines;
+use std::str::{FromStr, Lines};
 
 use crate::AlignedFile;
 
@@ -30,12 +30,39 @@ pub enum VMDKDiskType {
     TwoGbMaxExtentFlat,
 }
 
+/// Extents Access Mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExtentAccess {
+    /// "RW": readable and writable.
+    ReadWrite,
+    /// "RDONLY": readable only, writes must be rejected.
+    ReadOnly,
+    /// "NOACCESS": cannot be accessed, reads and writes must be rejected.
+    NoAccess,
+}
+
+impl FromStr for ExtentAccess {
+    type Err = io::Error;
+
+    fn from_str(token: &str) -> Result<Self, Self::Err> {
+        match token {
+            "RW" => Ok(Self::ReadWrite),
+            "RDONLY" => Ok(Self::ReadOnly),
+            "NOACCESS" => Ok(Self::NoAccess),
+            other => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unsupported VMDK extent access mode '{other}'"),
+            )),
+        }
+    }
+}
+
 /// Flat VMDK extent line fields.
 /// Format of each extent line:
 /// `<access> <sectors> <type> "<file>" [offset]`.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct VmdkExtentHeader {
-    pub access: String,
+    pub access: ExtentAccess,
     pub size_in_sectors: u64,
     pub extent_type: String,
     pub filename: String,
@@ -207,7 +234,7 @@ pub(crate) fn parse_extents(
                 None => 0,
             };
             extents.extents.push(VmdkExtentHeader {
-                access: parts[0].to_string(),
+                access: parts[0].parse::<ExtentAccess>()?,
                 size_in_sectors,
                 extent_type: parts[2].to_string(),
                 filename: parts[3].trim_matches('"').to_string(),
@@ -336,7 +363,7 @@ mod tests {
 
         assert_eq!(extents.extents.len(), 1);
         let e = &extents.extents[0];
-        assert_eq!(e.access, "RW");
+        assert_eq!(e.access, ExtentAccess::ReadWrite);
         assert_eq!(e.size_in_sectors, 2_097_152);
         assert_eq!(e.extent_type, "FLAT");
         assert_eq!(e.filename, "disk-flat.vmdk");
@@ -377,8 +404,8 @@ mod tests {
         let extents = parse_body("# Extent description", body).unwrap();
 
         assert_eq!(extents.extents.len(), 2);
-        assert_eq!(extents.extents[0].access, "RDONLY");
-        assert_eq!(extents.extents[1].access, "NOACCESS");
+        assert_eq!(extents.extents[0].access, ExtentAccess::ReadOnly);
+        assert_eq!(extents.extents[1].access, ExtentAccess::NoAccess);
     }
 
     #[test]
@@ -392,6 +419,13 @@ mod tests {
     fn rejects_malformed_extent_line() {
         // Only three fields -> malformed.
         let body: &str = "RW 2097152 FLAT\n";
+        parse_body("# Extent description", body).unwrap_err();
+    }
+
+    #[test]
+    fn rejects_unsupported_access_mode() {
+        // Access must be one of RW / RDONLY / NOACCESS.
+        let body: &str = "BOGUS 2097152 FLAT \"disk-flat.vmdk\"\n";
         parse_body("# Extent description", body).unwrap_err();
     }
 
@@ -477,7 +511,7 @@ mod tests {
 
         assert!(matches!(header.create_type, VMDKDiskType::MonolithicFlat));
         assert_eq!(extents.extents.len(), 1);
-        assert_eq!(extents.extents[0].access, "RW");
+        assert_eq!(extents.extents[0].access, ExtentAccess::ReadWrite);
     }
 
     #[test]
@@ -523,7 +557,7 @@ mod tests {
 
         assert!(matches!(header.create_type, VMDKDiskType::MonolithicFlat));
         assert_eq!(extents.extents.len(), 1);
-        assert_eq!(extents.extents[0].access, "RW");
+        assert_eq!(extents.extents[0].access, ExtentAccess::ReadWrite);
         assert_eq!(extents.extents[0].size_in_sectors, 6_291_456);
         assert_eq!(extents.extents[0].extent_type, "FLAT");
         assert_eq!(extents.extents[0].filename, "t-flat.vmdk");

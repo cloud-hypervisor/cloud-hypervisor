@@ -16,20 +16,10 @@ use std::sync::Arc;
 
 use log::warn;
 
-use crate::formats::vmdk::descriptor::VmdkDescriptor;
+use crate::formats::vmdk::descriptor::{ExtentAccess, VmdkDescriptor};
 use crate::{AlignedFile, DiskTopology, query_device_size};
 
 const VMDK_SECTOR_SIZE: u64 = 512;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ExtentAccess {
-    /// "RW": readable and writable.
-    ReadWrite,
-    /// "RDONLY": readable only, writes must be rejected.
-    ReadOnly,
-    /// "NOACCESS": cannot be accessed, reads and writes must be rejected.
-    NoAccess,
-}
 
 /// A single Flat VMDK extent
 ///
@@ -293,27 +283,25 @@ impl FlatVmdk {
             //   "RW"       -> read + write
             //   "RDONLY"   -> read only
             //   "NOACCESS" -> not accessible, do not open the file at all
-            let (access, extent_file) = match extent.access.as_str() {
-                "RW" => {
-                    let f = open_extent(&descriptor.base_path, &extent.filename, true, direct)?;
-                    (ExtentAccess::ReadWrite, Some(f))
-                }
-                "RDONLY" => {
-                    let f = open_extent(&descriptor.base_path, &extent.filename, false, direct)?;
-                    (ExtentAccess::ReadOnly, Some(f))
-                }
-                "NOACCESS" => (ExtentAccess::NoAccess, None),
-                other => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("unsupported VMDK extent access mode '{other}'"),
-                    ));
-                }
+            let extent_file = match extent.access {
+                ExtentAccess::ReadWrite => Some(open_extent(
+                    &descriptor.base_path,
+                    &extent.filename,
+                    true,
+                    direct,
+                )?),
+                ExtentAccess::ReadOnly => Some(open_extent(
+                    &descriptor.base_path,
+                    &extent.filename,
+                    false,
+                    direct,
+                )?),
+                ExtentAccess::NoAccess => None,
             };
 
             extents.push(VmdkExtent {
                 file: extent_file,
-                access,
+                access: extent.access,
                 virtual_start,
                 length,
                 file_base_offset,

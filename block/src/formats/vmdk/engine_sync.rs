@@ -12,7 +12,8 @@ use crate::AlignedFile;
 use crate::async_io::{
     AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, CompletionCommon,
 };
-use crate::formats::vmdk::flat::{ExtentAccess, VmdkExtent};
+use crate::formats::vmdk::descriptor::ExtentAccess;
+use crate::formats::vmdk::flat::VmdkExtent;
 
 /// Synchronous, extent-aware I/O worker for flat VMDK images.
 ///
