@@ -124,6 +124,23 @@ copy: a template is the same buffer every time, so its page map is computed
 once per format and reused. `image_memfd`, which materializes fuzzer input,
 keeps writing it whole - that input is dense and different every time.
 
+#### The VHDX template, and why it is a table
+
+The `block` crate parses VHDX but never writes one, so the template is the
+image `qemu-img create -f vhdx -o subformat=dynamic,block_size=1M t.vhdx 4M`
+produces, stored in `fuzz/src/disk_engine/formats/vhdx.rs` as the offsets and
+bytes of its non-zero runs. The file is 8,388,608 bytes of which 333 are
+non-zero, in eleven runs, so the table is eleven lines and the harness expands
+it into the full image once per process behind a `OnceLock`.
+
+The alternatives were worse. An 8 MiB binary blob is not something upstream
+takes into the tree. Calling `qemu-img` at build time makes the harness need
+`qemu-utils` under OSS-Fuzz and makes the template depend on the qemu version,
+so a crash would stop reproducing when the build host changed. Writing the
+format by hand means two 4 KiB headers, two 64 KiB region tables, a 1 MiB BAT
+and a metadata region: some three hundred lines that would fuzz the harness
+author's reading of the specification rather than the parser under test.
+
 #### The template self test
 
 Every templated format has a `#[test]` that asserts four things about its
