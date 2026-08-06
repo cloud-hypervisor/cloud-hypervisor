@@ -189,14 +189,6 @@ impl IvshmemDevice {
         self.userspace_mapping = Some(userspace_mapping);
     }
 
-    pub fn config_bar_addr(&self) -> u64 {
-        self.configuration.get_bar_addr(IVSHMEM_BAR0_IDX)
-    }
-
-    pub fn data_bar_addr(&self) -> u64 {
-        self.configuration.get_bar_addr(IVSHMEM_DATA_BAR_IDX)
-    }
-
     fn state(&self) -> IvshmemDeviceState {
         IvshmemDeviceState {
             interrupt_mask: self._interrupt_mask,

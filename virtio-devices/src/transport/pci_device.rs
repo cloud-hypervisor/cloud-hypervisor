@@ -691,11 +691,6 @@ impl VirtioPciDevice {
         self.common_config.driver_status.load(Ordering::SeqCst) == DEVICE_INIT as u8
     }
 
-    pub fn config_bar_addr(&self) -> u64 {
-        self.configuration
-            .get_bar_addr(VIRTIO_CONFIG_BAR_INDEX)
-    }
-
     fn add_pci_capabilities(
         &mut self,
         device_config_size: u64,
