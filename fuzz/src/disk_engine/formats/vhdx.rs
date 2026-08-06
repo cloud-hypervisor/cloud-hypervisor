@@ -6,6 +6,7 @@
 
 use std::fs::File;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use block::disk_file::AsyncFullDiskFile;
 use block::error::BlockResult;
@@ -13,8 +14,55 @@ use block::formats::vhdx::VhdxDisk;
 
 use crate::disk_engine::format::{DiskFormat, OpenConfig};
 
-/// Dynamic VHDX images, as opened by [`VhdxDisk`]. There is no template: the
-/// `block` crate cannot write a VHDX.
+/// Virtual size of the template, pinned by its self test.
+pub const TEMPLATE_LOGICAL_SIZE: u64 = 4 << 20;
+
+/// Length of the template file. An empty dynamic VHDX is 8 MiB.
+const TEMPLATE_LEN: usize = 8 << 20;
+
+/// The non-zero runs of `qemu-img create -f vhdx -o
+/// subformat=dynamic,block_size=1M t.vhdx 4M`: the file type identifier,
+/// both headers and region tables, four zero BAT entries and the metadata
+/// region. Stored as runs, the template is reviewable and independent of the
+/// host's qemu.
+const TEMPLATE_RUNS: [(usize, &str); 11] = [
+    (0x000000, "7668647866696c65510045004d00550020007600310030002e0032002e0031"),
+    (0x010000, "68656164763f022f40a3b97400000000968d9ca5c1574f418f461232fa33ff932bc1289d3cd44c73b882f83d656353e5"),
+    (0x010042, "010000001000000010"),
+    (0x020000, "6865616401a3faad41a3b97400000000968d9ca5c1574f418f461232fa33ff932bc1289d3cd44c73b882f83d656353e5"),
+    (0x020042, "010000001000000010"),
+    (0x030000, "7265676983ce6f2c02000000000000006677c22d23f600429d64115e9bfd4a080000200000000000000010000000000006a27c8b90479a4bb8fe575f050f886e0000300000000000000010"),
+    (0x040000, "7265676983ce6f2c02000000000000006677c22d23f600429d64115e9bfd4a080000200000000000000010000000000006a27c8b90479a4bb8fe575f050f886e0000300000000000000010"),
+    (0x200000, "02000000000000000200000000000000020000000000000002"),
+    (0x300000, "6d65746164617461000005"),
+    (0x300020, "3767a1ca36fa434db3b633f0aa44e76b000001000800000004000000000000002442a52f1bcd7648b2115dbed83bf4b808000100080000000600000000000000ab12cabee6b2234593efc309e000c746100001001000000006000000000000001dbf41816fa90947ba47f233a8faab5f20000100040000000600000000000000c748a3cd5d4471449cc9e9885251c556240001000400000006"),
+    (0x310002, "1000000000000000400000000000dd83c75228904fd484ece3b363199ea3000200000002"),
+];
+
+/// Expands [`TEMPLATE_RUNS`] into the full image.
+fn build_template() -> Vec<u8> {
+    let mut image = vec![0u8; TEMPLATE_LEN];
+
+    for (offset, hex) in TEMPLATE_RUNS {
+        assert!(
+            hex.len().is_multiple_of(2),
+            "run at {offset:#x} is half a byte"
+        );
+        let bytes: Vec<u8> = hex
+            .as_bytes()
+            .chunks(2)
+            .map(|pair| {
+                let text = std::str::from_utf8(pair).expect("the run table is ASCII");
+                u8::from_str_radix(text, 16).expect("the run table is hexadecimal")
+            })
+            .collect();
+        image[offset..offset + bytes.len()].copy_from_slice(&bytes);
+    }
+
+    image
+}
+
+/// Dynamic VHDX images, as opened by [`VhdxDisk`].
 pub struct Vhdx;
 
 impl DiskFormat for Vhdx {
@@ -22,6 +70,9 @@ impl DiskFormat for Vhdx {
 
     // A parseable VHDX is 8 to 10 MiB.
     const MAX_IMAGE_LEN: usize = 16 << 20;
+
+    // `Vhdx::sector_range` refuses unaligned offsets and lengths.
+    const IO_ALIGNMENT: u64 = 512;
 
     // A VHDX read covers the whole request or fails.
     const NO_SHORT_READS: bool = true;
@@ -38,6 +89,12 @@ impl DiskFormat for Vhdx {
     ) -> BlockResult<Box<dyn AsyncFullDiskFile>> {
         let disk = VhdxDisk::new(file, config.direct)?;
         Ok(Box::new(disk))
+    }
+
+    fn template() -> Option<&'static [u8]> {
+        static TEMPLATE: OnceLock<Vec<u8>> = OnceLock::new();
+
+        Some(TEMPLATE.get_or_init(build_template))
     }
 }
 
@@ -111,7 +168,54 @@ mod tests {
     use std::process::Command;
 
     use super::*;
-    use crate::disk_engine::image::image_memfd;
+    use crate::disk_engine::image::{image_memfd, template_memfd};
+    use crate::disk_engine::selftest::assert_template_is_sound;
+    use crate::disk_engine::{Executor, Op, OpLen, OpOffset};
+
+    /// See `disk_engine::selftest`.
+    #[test]
+    fn the_template_is_a_blank_four_mib_disk() {
+        assert_template_is_sound::<Vhdx>(TEMPLATE_LOGICAL_SIZE);
+    }
+
+    /// Regression test for a write to an unallocated block landing at the block
+    /// base instead of the sector's offset.
+    #[test]
+    fn the_model_catches_a_misplaced_block_allocating_write() {
+        // Sector 1 of the unallocated block 1.
+        let offset = (1 << 20) + 512;
+        let program = vec![
+            Op::WriteVec {
+                offset: OpOffset::Byte(offset),
+                len: OpLen(512),
+                seed: 0x11,
+            },
+            Op::ReadVec {
+                offset: OpOffset::Byte(offset),
+                len: OpLen(512),
+            },
+        ];
+
+        let template = Vhdx::template().expect("vhdx has a template");
+        let file = template_memfd(Vhdx::NAME, template).expect("memfd");
+        let disk = Vhdx::open(file, None, &OpenConfig::default()).expect("the template opens");
+        let mut executor = Executor::<Vhdx>::new(disk, 1, true).expect("executor");
+        // Panics on a read back mismatch.
+        executor.run(&program);
+    }
+
+    /// Pins the shape of the run table.
+    #[test]
+    fn the_run_table_expands_to_the_qemu_image() {
+        let template = Vhdx::template().expect("vhdx has a template");
+        assert_eq!(template.len(), TEMPLATE_LEN);
+        assert_eq!(
+            template.iter().filter(|byte| **byte != 0).count(),
+            333,
+            "the number of non-zero bytes in the template changed"
+        );
+        assert!(Vhdx::magic_ok(template));
+    }
 
     // qemu-img locks the file, so each test uses its own name.
     fn qemu_vhdx(name: &str) -> Option<Vec<u8>> {

@@ -60,3 +60,15 @@ impl DiskFormat for Qcow2 {
         Some(template)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::disk_engine::selftest::assert_template_is_sound;
+
+    /// See `disk_engine::selftest`.
+    #[test]
+    fn the_template_is_a_blank_one_mib_disk() {
+        assert_template_is_sound::<Qcow2>(TEMPLATE_SIZE);
+    }
+}

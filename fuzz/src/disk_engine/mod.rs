@@ -18,6 +18,8 @@ mod image;
 mod model;
 mod program;
 pub mod sandbox;
+#[cfg(test)]
+mod selftest;
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -29,7 +31,9 @@ use libfuzzer_sys::Corpus;
 
 pub use crate::disk_engine::executor::Executor;
 pub use crate::disk_engine::format::{DiskFormat, OpenConfig};
-pub use crate::disk_engine::image::{image_file, image_memfd, scratch_dir};
+pub use crate::disk_engine::image::{
+    image_file, image_memfd, scratch_dir, template_file, template_memfd,
+};
 pub use crate::disk_engine::model::Model;
 pub use crate::disk_engine::program::{
     default_program, Op, OpLen, OpOffset, Program, MAX_OPS, MAX_OP_LEN,
@@ -129,7 +133,7 @@ pub fn fuzz_detect(bytes: &[u8]) -> Corpus {
 pub fn fuzz_program<F: DiskFormat>(program: &Program) -> Corpus {
     let template =
         F::template().unwrap_or_else(|| panic!("{}: format has no template image", F::NAME));
-    let Ok((file, path)) = materialize::<F>(template) else {
+    let Ok((file, path)) = materialize_template::<F>(template) else {
         return Corpus::Reject;
     };
 
@@ -158,6 +162,18 @@ fn materialize<F: DiskFormat>(bytes: &[u8]) -> std::io::Result<(std::fs::File, O
         Ok((file, Some(path)))
     } else {
         Ok((image_memfd(F::NAME, bytes)?, None))
+    }
+}
+
+/// As [`materialize`], but skipping the template's zero pages.
+fn materialize_template<F: DiskFormat>(
+    bytes: &'static [u8],
+) -> std::io::Result<(std::fs::File, Option<PathBuf>)> {
+    if F::NEEDS_PATH {
+        let (file, path) = template_file(F::NAME, bytes)?;
+        Ok((file, Some(path)))
+    } else {
+        Ok((template_memfd(F::NAME, bytes)?, None))
     }
 }
 
