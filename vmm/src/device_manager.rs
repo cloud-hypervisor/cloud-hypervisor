@@ -126,6 +126,8 @@ use vmm_sys_util::errno;
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::console_devices::{ConsoleDeviceError, ConsoleInfo, ConsoleTransport};
+#[cfg(target_arch = "aarch64")]
+use crate::cpu::Error as CpuManagerError;
 use crate::cpu::{AcpiCpuHotplugController, CPU_MANAGER_ACPI_SIZE, CpuManager};
 use crate::device_tree::{DeviceNode, DeviceTree};
 use crate::interrupt::{LegacyUserspaceInterruptManager, MsiInterruptManager};
@@ -709,6 +711,11 @@ pub enum DeviceManagerError {
         specified: ImageType,
         detected: ImageType,
     },
+
+    #[cfg(target_arch = "aarch64")]
+    /// Error from CpuManager
+    #[error("Error from CpuManager")]
+    CpuManager(#[source] CpuManagerError),
 }
 
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
@@ -1836,14 +1843,19 @@ impl DeviceManager {
                 info!("Failed to initialize PMU");
             }
 
+            let mpidrs = self
+                .cpu_manager
+                .lock()
+                .unwrap()
+                .get_mpidrs()
+                .map_err(DeviceManagerError::CpuManager)?;
             let vgic_state = vgic_snapshot
                 .to_state()
                 .map_err(DeviceManagerError::RestoreGetState)?;
-            let saved_vcpu_states = self.cpu_manager.lock().unwrap().get_saved_states();
             interrupt_controller
                 .lock()
                 .unwrap()
-                .restore_vgic(vgic_state, &saved_vcpu_states)
+                .restore_vgic(vgic_state, mpidrs)
                 .unwrap();
         }
 

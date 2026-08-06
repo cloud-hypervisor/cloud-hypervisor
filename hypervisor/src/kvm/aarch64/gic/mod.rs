@@ -11,13 +11,13 @@ use std::any::Any;
 use dist_regs::{get_dist_regs, read_ctlr, set_dist_regs, write_ctlr};
 use icc_regs::{get_icc_regs, set_icc_regs};
 use kvm_ioctls::DeviceFd;
-use redist_regs::{construct_gicr_typers, get_redist_regs, set_redist_regs};
+use redist_regs::{get_gicr_typers, get_redist_regs, set_redist_regs};
 use serde::{Deserialize, Serialize};
 
+use crate::Vm;
 use crate::arch::aarch64::gic::{Error, GicState, Result, Vgic, VgicConfig};
 use crate::device::HypervisorDeviceError;
 use crate::kvm::KvmVm;
-use crate::{CpuState, Vm};
 
 const GITS_CTLR: u32 = 0x0000;
 const GITS_IIDR: u32 = 0x0004;
@@ -85,8 +85,8 @@ pub struct KvmGicV3Its {
     /// The KVM device for the Its device
     its_device: Option<DeviceFd>,
 
-    /// Vector holding values of GICR_TYPER for each vCPU
-    gicr_typers: Vec<u64>,
+    /// Per-vCPU MPIDRs.
+    vcpu_mpidrs: Option<Vec<u64>>,
 
     /// GIC distributor address
     dist_addr: u64,
@@ -271,7 +271,7 @@ impl KvmGicV3Its {
         let mut gic_device = KvmGicV3Its {
             device: vgic,
             its_device: None,
-            gicr_typers: vec![0; config.vcpu_count.try_into().unwrap()],
+            vcpu_mpidrs: None,
             dist_addr: config.dist_addr,
             dist_size: config.dist_size,
             redists_addr: config.redists_addr,
@@ -321,18 +321,17 @@ impl Vgic for KvmGicV3Its {
         [self.msi_addr, self.msi_size]
     }
 
-    fn set_gicr_typers(&mut self, vcpu_states: &[CpuState]) {
-        let gicr_typers = construct_gicr_typers(vcpu_states);
-        self.gicr_typers = gicr_typers;
-    }
-
     fn as_any_concrete_mut(&mut self) -> &mut dyn Any {
         self
     }
 
     /// Save the state of GICv3ITS.
     fn state(&self) -> Result<GicState> {
-        let gicr_typers = self.gicr_typers.clone();
+        let mpidrs = self
+            .vcpu_mpidrs
+            .as_ref()
+            .expect("vGIC MPIDRs must be set before save/restore");
+        let gicr_typers = get_gicr_typers(mpidrs);
 
         let gicd_ctlr = read_ctlr(&self.device)?;
 
@@ -402,7 +401,11 @@ impl Vgic for KvmGicV3Its {
     fn set_state(&mut self, state: &GicState) -> Result<()> {
         let kvm_state: Gicv3ItsState = state.clone().into();
 
-        let gicr_typers = self.gicr_typers.clone();
+        let mpidrs = self
+            .vcpu_mpidrs
+            .as_ref()
+            .expect("vGIC MPIDRs must be set before save/restore");
+        let gicr_typers = get_gicr_typers(mpidrs);
 
         write_ctlr(&self.device, kvm_state.gicd_ctlr)?;
 
@@ -478,15 +481,21 @@ impl Vgic for KvmGicV3Its {
         // Flush ITS tables to guest RAM.
         gicv3_its_tables_access(self.its_device.as_ref().unwrap(), true)
     }
+
+    fn set_mpidrs(&mut self, mpidrs: Vec<u64>) {
+        self.vcpu_mpidrs = Some(mpidrs);
+    }
 }
 
 #[cfg(test)]
 mod unit_tests {
     use crate::HypervisorVmConfig;
     use crate::aarch64::gic::{
-        get_dist_regs, get_icc_regs, get_redist_regs, set_dist_regs, set_icc_regs, set_redist_regs,
+        get_dist_regs, get_gicr_typers, get_icc_regs, get_redist_regs, set_dist_regs, set_icc_regs,
+        set_redist_regs,
     };
-    use crate::arch::aarch64::gic::VgicConfig;
+    use crate::arch::aarch64::gic::{Vgic, VgicConfig};
+    use crate::arch::aarch64::regs::MPIDR_EL1;
     use crate::kvm::KvmGicV3Its;
 
     fn create_test_vgic_config() -> VgicConfig {
@@ -564,5 +573,70 @@ mod unit_tests {
         let gic = vm.create_vgic(&vgic_config).expect("Cannot create gic");
 
         gic.lock().unwrap().save_data_tables().unwrap();
+    }
+
+    fn create_test_multi_vcpu_vgic_config() -> VgicConfig {
+        // Two redistributors (2 * GIC_V3_REDIST_SIZE = 2 * 0x02_0000).
+        VgicConfig {
+            vcpu_count: 2,
+            dist_addr: 0x0900_0000 - 0x01_0000,
+            dist_size: 0x01_0000,
+            redists_addr: 0x0900_0000 - 0x01_0000 - 0x04_0000,
+            redists_size: 0x04_0000,
+            msi_addr: 0x0900_0000 - 0x01_0000 - 0x04_0000 - 0x02_0000,
+            msi_size: 0x02_0000,
+            nr_irqs: 256,
+        }
+    }
+
+    #[test]
+    fn test_gic_state_save_restore_roundtrip() {
+        let hv = crate::new().unwrap();
+        let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
+        let vcpu0 = vm.create_vcpu(0, None).unwrap();
+        let vcpu1 = vm.create_vcpu(1, None).unwrap();
+
+        // Initialise vCPUs
+        let mut kvi = vcpu0.create_vcpu_init();
+        vm.get_preferred_target(&mut kvi).unwrap();
+        vcpu0.vcpu_init(&kvi).unwrap();
+        let mut kvi = vcpu1.create_vcpu_init();
+        vm.get_preferred_target(&mut kvi).unwrap();
+        vcpu1.vcpu_init(&kvi).unwrap();
+
+        let mpidrs = vec![
+            vcpu0.get_sys_reg(MPIDR_EL1).unwrap(),
+            vcpu1.get_sys_reg(MPIDR_EL1).unwrap(),
+        ];
+        let gicr_typers = get_gicr_typers(&mpidrs);
+        assert_eq!(gicr_typers.len(), 2);
+        let typer0 = vec![gicr_typers[0]];
+        let typer1 = vec![gicr_typers[1]];
+
+        let mut gic = KvmGicV3Its::new(&*vm, &create_test_multi_vcpu_vgic_config())
+            .expect("Cannot create gic");
+        gic.set_mpidrs(mpidrs);
+
+        // Give vCPU0 redistributor state that differs from vCPU1's.
+        let mut regs0 = get_redist_regs(&gic.device, &typer0).unwrap();
+        let last = regs0.len() - 1;
+        regs0[last] ^= 0xffff_ffff;
+        set_redist_regs(&gic.device, &typer0, &regs0).unwrap();
+
+        let expected0 = get_redist_regs(&gic.device, &typer0).unwrap();
+        let expected1 = get_redist_regs(&gic.device, &typer1).unwrap();
+        assert_ne!(expected0, expected1);
+
+        let snapshot = gic.state().unwrap();
+
+        // Swap the states to intentionally clobber the redist states
+        // Restore should set these back to values before the snapshot.
+        set_redist_regs(&gic.device, &typer0, &expected1).unwrap();
+        set_redist_regs(&gic.device, &typer1, &expected0).unwrap();
+
+        gic.set_state(&snapshot).unwrap();
+
+        assert_eq!(get_redist_regs(&gic.device, &typer0).unwrap(), expected0);
+        assert_eq!(get_redist_regs(&gic.device, &typer1).unwrap(), expected1);
     }
 }

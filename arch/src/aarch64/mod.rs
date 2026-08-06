@@ -17,7 +17,6 @@ use std::hash::BuildHasher;
 use std::sync::{Arc, Mutex};
 
 use hypervisor::arch::aarch64::gic::Vgic;
-use hypervisor::arch::aarch64::regs::MPIDR_EL1;
 use log::{Level, log_enabled};
 use thiserror::Error;
 use vm_memory::{Address, GuestAddress, GuestMemoryAtomic, GuestMemoryBackend};
@@ -72,7 +71,7 @@ pub fn configure_vcpu(
     vcpu: &dyn hypervisor::Vcpu,
     id: u32,
     boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
-) -> super::Result<u64> {
+) -> super::Result<()> {
     if let Some((kernel_entry_point, _guest_memory)) = boot_setup {
         vcpu.setup_regs(
             id,
@@ -81,9 +80,7 @@ pub fn configure_vcpu(
         )
         .map_err(Error::RegsConfiguration)?;
     }
-
-    let mpidr = vcpu.get_sys_reg(MPIDR_EL1).map_err(Error::VcpuRegMpidr)?;
-    Ok(mpidr)
+    Ok(())
 }
 
 pub fn arch_memory_regions() -> Vec<(GuestAddress, usize, RegionType)> {
