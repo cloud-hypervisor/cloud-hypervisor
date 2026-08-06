@@ -31,9 +31,32 @@ const EXTENTS: [&str; 6] = [
     "two-f002.vmdk",
 ];
 
+/// The `disk_vmdk_ops` template: two `RW` extents of different lengths, the
+/// second at a non-zero base offset, so spanning I/O and the offset
+/// arithmetic are under the model.
+const TEMPLATE: &str = "\
+# Disk DescriptorFile
+version=1
+CID=fffffffe
+parentCID=ffffffff
+createType=\"twoGbMaxExtentFlat\"
+
+# Extent description
+RW 2048 FLAT \"image-f001.vmdk\" 0
+RW 1024 FLAT \"image-f002.vmdk\" 1
+
+# The Disk Data Base
+ddb.virtualHWVersion = \"4\"
+";
+
+/// Virtual size of [`TEMPLATE`]: the sum of its extent lengths.
+pub const TEMPLATE_LOGICAL_SIZE: u64 = (2048 + 1024) * 512;
+
+/// Virtual offset where [`TEMPLATE`]'s first extent ends.
+pub const TEMPLATE_EXTENT_BOUNDARY: u64 = 2048 * 512;
+
 /// Flat VMDK images, as opened by [`VmdkDisk`]. The descriptor is written to
-/// a scratch directory holding the extent files it may name. There is no
-/// template: the `block` crate cannot write a descriptor.
+/// a scratch directory holding the extent files it may name.
 pub struct Vmdk;
 
 impl Vmdk {
@@ -117,12 +140,23 @@ impl DiskFormat for Vmdk {
         let disk = VmdkDisk::new(file, path, false, config.direct)?;
         Ok(Box::new(disk))
     }
+
+    fn template() -> Option<&'static [u8]> {
+        Some(TEMPLATE.as_bytes())
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use super::*;
     use crate::disk_engine::image::image_file;
+    use crate::disk_engine::selftest::assert_template_is_sound;
+    use crate::disk_engine::{Executor, Op, OpLen, OpOffset};
+
+    /// Serializes tests that reset the shared extent files.
+    static TEMPLATE_IO: Mutex<()> = Mutex::new(());
 
     fn descriptor(name: &str) -> String {
         format!("# Disk DescriptorFile\nversion=1\ncreateType=\"monolithicFlat\"\nRW 2048 FLAT \"{name}\" 0\n")
@@ -181,5 +215,114 @@ mod tests {
             !Path::new("/tmp/victim").exists(),
             "the harness must not have created /tmp/victim"
         );
+    }
+
+    /// See `disk_engine::selftest`.
+    #[test]
+    fn the_template_is_a_blank_one_and_a_half_mib_disk() {
+        let _guard = TEMPLATE_IO.lock().unwrap_or_else(|e| e.into_inner());
+        assert_template_is_sound::<Vmdk>(TEMPLATE_LOGICAL_SIZE);
+    }
+
+    /// Pins the template properties the operation target relies on.
+    #[test]
+    fn the_template_descriptor_is_the_pinned_layout() {
+        let text = std::str::from_utf8(Vmdk::template().expect("vmdk has a template"))
+            .expect("the template is ASCII");
+        assert!(Vmdk::magic_ok(text.as_bytes()));
+        assert!(text.lines().any(|line| line == "# Extent description"));
+
+        let extents: Vec<Vec<&str>> = text
+            .lines()
+            .filter(|line| line.starts_with("RW ") || line.starts_with("RDONLY "))
+            .map(|line| line.split_whitespace().collect())
+            .collect();
+        assert_eq!(extents.len(), 2, "a single extent never spans");
+
+        let mut virtual_start = 0u64;
+        for (index, parts) in extents.iter().enumerate() {
+            assert_eq!(parts.len(), 5, "an extent line without a base offset");
+            assert_eq!(parts[2], "FLAT");
+            let name = parts[3].trim_matches('"');
+            assert!(
+                !Path::new(name).is_absolute(),
+                "{name}: the template must use relative extent names only"
+            );
+            assert!(
+                EXTENTS.contains(&name),
+                "{name} is not created and reset by the harness"
+            );
+            let sectors: u64 = parts[1].parse().expect("a sector count");
+            let base: u64 = parts[4].parse().expect("a base offset");
+            assert!(
+                base * 512 + sectors * 512 <= EXTENT_LEN,
+                "{name} does not fit the {EXTENT_LEN} byte extent files"
+            );
+            if index == 1 {
+                assert!(base > 0, "a zero base offset hides the offset arithmetic");
+            }
+            virtual_start += sectors * 512;
+            if index == 0 {
+                assert_eq!(virtual_start, TEMPLATE_EXTENT_BOUNDARY);
+            }
+        }
+        assert_eq!(virtual_start, TEMPLATE_LOGICAL_SIZE);
+    }
+
+    /// The model must catch a misplaced spanning write. Each write is read back
+    /// through the other path, since an error both paths share cancels out.
+    /// Both cache modes.
+    #[test]
+    fn the_model_catches_a_misplaced_spanning_write() {
+        let _guard = TEMPLATE_IO.lock().unwrap_or_else(|e| e.into_inner());
+        let straddle = TEMPLATE_EXTENT_BOUNDARY - 512;
+        let tail = TEMPLATE_LOGICAL_SIZE - 4096;
+        let program = vec![
+            // Spanning: 512 bytes into extent 1, 1536 into extent 2.
+            Op::WriteVec {
+                offset: OpOffset::Byte(straddle as u32),
+                len: OpLen(2048),
+                seed: 0x27,
+            },
+            // The far side alone, through `single_extent_io`.
+            Op::ReadVec {
+                offset: OpOffset::Byte(TEMPLATE_EXTENT_BOUNDARY as u32),
+                len: OpLen(1536),
+            },
+            // The near side alone.
+            Op::ReadVec {
+                offset: OpOffset::Byte(straddle as u32),
+                len: OpLen(512),
+            },
+            // Both sides spanning.
+            Op::ReadVec {
+                offset: OpOffset::Byte(straddle as u32),
+                len: OpLen(2048),
+            },
+            // A tail write, read back spanning.
+            Op::WriteVec {
+                offset: OpOffset::Byte(tail as u32),
+                len: OpLen(4096),
+                seed: 0x93,
+            },
+            Op::ReadVec {
+                offset: OpOffset::Byte(straddle as u32),
+                len: OpLen(65535),
+            },
+        ];
+
+        let template = Vmdk::template().expect("vmdk has a template");
+        for direct in [false, true] {
+            let (file, path) =
+                crate::disk_engine::materialize_template::<Vmdk>(template).expect("template");
+            let config = OpenConfig {
+                direct,
+                ..OpenConfig::default()
+            };
+            let disk = Vmdk::open(file, path.as_deref(), &config).expect("the template opens");
+            let mut executor = Executor::<Vmdk>::new(disk, 1, true).expect("executor");
+            // Panics on a read back mismatch.
+            executor.run(&program);
+        }
     }
 }
