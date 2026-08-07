@@ -1855,6 +1855,49 @@ impl Guest {
             "guest MemTotal {total} kB is not greater than expected {memory} kB"
         );
     }
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn add_test_disk(&self, api_socket: &str) {
+        let test_disk_path = String::from(
+            self.tmp_dir
+                .as_path()
+                .join("hotplug_probe.img")
+                .to_str()
+                .unwrap(),
+        );
+        assert!(
+            exec_host_command_status(&format!(
+                "dd if=/dev/zero of={test_disk_path} bs=1M count=16 status=none"
+            ))
+            .success()
+        );
+        assert!(remote_command(
+            api_socket,
+            "add-disk",
+            Some(&format!("path={test_disk_path},id=test0")),
+        ));
+        assert!(wait_until(Duration::from_secs(10), || {
+            self.ssh_command("lsblk | grep -c vdc || true")
+                .is_ok_and(|s| s.trim().parse::<u32>().is_ok_and(|c| c == 1))
+        }));
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn remove_test_disk(&self, api_socket: &str) {
+        assert_eq!(
+            self.ssh_command("lsblk | grep -c vdc")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            1
+        );
+        assert!(remote_command(api_socket, "remove-device", Some("test0")));
+        assert!(wait_until(Duration::from_secs(10), || {
+            self.ssh_command("lsblk | grep -c vdc || true")
+                .is_ok_and(|s| s.trim().parse::<u32>().is_ok_and(|c| c == 0))
+        }));
+    }
 }
 
 // A factory for creating guests with different configurations. The factory is initialized

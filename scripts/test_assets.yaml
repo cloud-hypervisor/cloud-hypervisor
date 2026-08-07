@@ -90,3 +90,11 @@ assets:
     executable: true
     arch: [aarch64]
     test: [integration]
+
+  # MSHV only supports live upgrade from v50.2.
+  - filename: cloud-hypervisor-static-mshv
+    url: https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v50.2/cloud-hypervisor-static
+    sha1: b148aad169257e3c2eaab19bfb703379f0ac57a6
+    executable: true
+    arch: [x86_64]
+    test: [integration]
