@@ -567,10 +567,6 @@ pub enum DeviceManagerError {
     #[error("No support for device passthrough")]
     NoDevicePassthroughSupport,
 
-    /// No socket option support for console device
-    #[error("No socket option support for console device")]
-    NoSocketOptionSupportForConsoleDevice,
-
     /// Failed to resize virtio-balloon
     #[error("Failed to resize virtio-balloon")]
     VirtioBalloonResize(#[source] balloon::Error),
@@ -2464,8 +2460,8 @@ impl DeviceManager {
                     Endpoint::File(stdout)
                 }
             }
-            ConsoleTransport::Socket(_) => {
-                return Err(DeviceManagerError::NoSocketOptionSupportForConsoleDevice);
+            ConsoleTransport::Socket(listener) => {
+                Endpoint::Socket(listener, console_config.common.socket.clone())
             }
             ConsoleTransport::Null => Endpoint::Null,
             ConsoleTransport::Off => return Ok(None),
