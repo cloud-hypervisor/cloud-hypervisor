@@ -61,6 +61,7 @@ use crate::device_tree::DeviceTree;
 use crate::migration::transport::{
     MAX_MIGRATION_CONNECTIONS, TcpAddressParseError, tcp_address_to_server_name,
 };
+use crate::userfaultfd::UffdHandoffSpec;
 use crate::vm::{Error as VmError, VmState};
 use crate::vm_config::{
     DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
@@ -218,6 +219,10 @@ pub enum ApiError {
     /// Error triggering NMI
     #[error("Error triggering NMI")]
     VmNmi(#[source] VmError),
+
+    /// Error attaching external uffd manager
+    #[error("Error attaching external uffd manager")]
+    VmUffdAttach(#[source] VmError),
 }
 pub type ApiResult<T> = Result<T, ApiError>;
 
@@ -541,6 +546,19 @@ impl VmReceiveMigrationData {
 
         Ok(())
     }
+}
+
+/// Request body for the `vm.uffd-attach` endpoint.
+///
+/// `mode` is a `|`-separated set of UFFD-mode tokens, e.g.
+/// `"WP|WP_ASYNC"`. Register-mode tokens (`MISSING`, `WP`) drive
+/// `UFFDIO_REGISTER`; feature tokens (`WP_UNPOPULATED`, `WP_ASYNC`)
+/// drive `UFFDIO_API`'s features. Required — the manager has to
+/// pick what to track.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct UffdAttachData {
+    pub handoff_socket: String,
+    pub mode: UffdHandoffSpec,
 }
 
 #[derive(Copy, Clone, Default, Deserialize, Serialize, Debug, PartialEq, Eq)]
@@ -927,6 +945,8 @@ pub trait RequestHandler {
     ) -> Result<(), MigratableError>;
 
     fn vm_nmi(&mut self) -> Result<(), VmError>;
+
+    fn vm_uffd_attach(&mut self, data: UffdAttachData) -> Result<(), VmError>;
 }
 
 /// It would be nice if we could pass around an object like this:
@@ -2077,6 +2097,39 @@ impl ApiAction for VmNmi {
             let response = vmm
                 .vm_nmi()
                 .map_err(ApiError::VmNmi)
+                .map(|_| ApiResponsePayload::Empty);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
+}
+
+pub struct VmUffdAttach;
+
+impl ApiAction for VmUffdAttach {
+    type RequestBody = UffdAttachData;
+    type ResponseBody = Option<Body>;
+
+    fn request(&self, data: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmUffdAttach");
+
+            let response = vmm
+                .vm_uffd_attach(data)
+                .map_err(ApiError::VmUffdAttach)
                 .map(|_| ApiResponsePayload::Empty);
 
             response_sender

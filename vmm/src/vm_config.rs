@@ -22,6 +22,7 @@ use virtio_devices::RateLimiterConfig;
 
 use crate::Landlock;
 use crate::landlock::LandlockError;
+use crate::userfaultfd::UffdHandoffSpec;
 
 pub type LandlockResult<T> = result::Result<T, LandlockError>;
 
@@ -320,6 +321,24 @@ pub struct MemoryConfig {
     pub zones: Option<Vec<MemoryZoneConfig>>,
     #[serde(default = "default_memoryconfig_thp")]
     pub thp: bool,
+    /// Boot-time userfaultfd handoff. If set, the VMM creates a
+    /// userfaultfd registered per `mode`, then dials `socket` and
+    /// hands the fd (with region metadata) over before the VM boots.
+    #[serde(default)]
+    pub uffd_handoff: Option<UffdHandoffConfig>,
+}
+
+/// Both fields are required when this struct is present — there is no
+/// sensible default for the UFFD register mode, so the user has to
+/// pick what they want.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct UffdHandoffConfig {
+    /// Path to a Unix socket where the external uffd manager listens.
+    pub socket: String,
+    /// `|`-separated UFFD mode tokens, e.g. `"MISSING|WP|WP_ASYNC"`.
+    /// Tokens: `MISSING`, `WP` (register modes); `WP_UNPOPULATED`,
+    /// `WP_ASYNC` (features). Validated at deserialise time.
+    pub mode: UffdHandoffSpec,
 }
 
 pub const DEFAULT_MEMORY_MB: u64 = 512;
@@ -339,6 +358,7 @@ impl Default for MemoryConfig {
             reserve: false,
             zones: None,
             thp: true,
+            uffd_handoff: None,
         }
     }
 }
@@ -1223,6 +1243,15 @@ impl VmConfig {
             for zone in mem_zones.iter() {
                 zone.apply_landlock(&mut landlock)?;
             }
+        }
+
+        // Boot-time uffd handoff: CH connect()s to the manager's socket
+        // during boot, so it must be reachable under Landlock. A runtime
+        // `vm.uffd-attach` uses a socket not known at boot and is thus not
+        // covered here — with Landlock enabled the operator must
+        // pre-authorize that path via `landlock_rules`.
+        if let Some(handoff) = &self.memory.uffd_handoff {
+            landlock.add_rule_with_access(Path::new(&handoff.socket), "rw")?;
         }
 
         let disks = &self.disks;
