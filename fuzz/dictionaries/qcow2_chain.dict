@@ -1,0 +1,71 @@
+# Copyright © 2026 The Cloud Hypervisor Authors. All rights reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# libFuzzer dictionary for the qcow2 backing chain target, disk_qcow2_chain.
+# It is the qcow2 dictionary plus what this target's input adds: the backing
+# file names the harness materializes, and the header fields that point at
+# the name.
+
+# Backing file names the harness creates in its scratch directory. A name
+# that is not one of these opens nothing, and one that leaves the directory
+# is refused outright.
+backing_name_default="backing.img"
+backing_name_base="base.qcow2"
+backing_name_raw="base.raw"
+backing_name_self="image.qcow2-chain"
+backing_name_leaf="leaf.raw"
+
+# backing_file_offset and backing_file_size, the two header fields that say
+# where the name is (block/src/formats/qcow/header.rs:217). The offset has to
+# land inside the first cluster and past the header.
+backing_offset_512="\x00\x00\x00\x00\x00\x00\x02\x00"
+backing_offset_1024="\x00\x00\x00\x00\x00\x00\x04\x00"
+backing_size_10="\x00\x00\x00\x0a"
+backing_size_11="\x00\x00\x00\x0b"
+
+header_magic="QFI\xfb"
+header_version_2="\x00\x00\x00\x02"
+header_version_3="\x00\x00\x00\x03"
+
+# Header extension identifiers.
+ext_end="\x00\x00\x00\x00"
+ext_backing_format="\xe2\x79\x2a\xca"
+ext_feature_table="\x68\x03\xf8\x57"
+ext_crypto_header="\x05\x37\xbe\x77"
+ext_bitmaps="\x23\x85\x28\x75"
+ext_external_data="\x44\x41\x54\x41"
+
+# Backing file format names.
+backing_raw="raw"
+backing_qcow2="qcow2"
+
+# Encryption methods: none, AES, LUKS.
+crypt_none="\x00\x00\x00\x00"
+crypt_aes="\x00\x00\x00\x01"
+crypt_luks="\x00\x00\x00\x02"
+
+# Compatible, incompatible and autoclear feature bits.
+feature_dirty="\x00\x00\x00\x00\x00\x00\x00\x01"
+feature_corrupt="\x00\x00\x00\x00\x00\x00\x00\x02"
+feature_external_data="\x00\x00\x00\x00\x00\x00\x00\x04"
+feature_compression_type="\x00\x00\x00\x00\x00\x00\x00\x08"
+feature_extended_l2="\x00\x00\x00\x00\x00\x00\x00\x10"
+
+# Compression types: zlib and zstd.
+compression_zlib="\x00"
+compression_zstd="\x01"
+
+# Cluster and refcount sizing exponents.
+cluster_bits_9="\x00\x00\x00\x09"
+cluster_bits_12="\x00\x00\x00\x0c"
+cluster_bits_16="\x00\x00\x00\x10"
+cluster_bits_21="\x00\x00\x00\x15"
+refcount_order_0="\x00\x00\x00\x00"
+refcount_order_4="\x00\x00\x00\x04"
+refcount_order_6="\x00\x00\x00\x06"
+
+# L1, L2 and refcount entry flags.
+entry_copied="\x80\x00\x00\x00\x00\x00\x00\x00"
+entry_compressed="\x40\x00\x00\x00\x00\x00\x00\x00"
+entry_zero="\x00\x00\x00\x00\x00\x00\x00\x01"

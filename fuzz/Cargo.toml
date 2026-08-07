@@ -84,6 +84,12 @@ test = false
 
 [[bin]]
 doc = false
+name = "disk_qcow2_chain"
+path = "fuzz_targets/disk_qcow2_chain.rs"
+test = false
+
+[[bin]]
+doc = false
 name = "disk_qcow2_ops"
 path = "fuzz_targets/disk_qcow2_ops.rs"
 test = false

@@ -5,6 +5,7 @@
 //! Format adapters.
 
 pub mod qcow2;
+pub mod qcow2_chain;
 pub mod vhd;
 pub mod vhdx;
 pub mod vmdk;

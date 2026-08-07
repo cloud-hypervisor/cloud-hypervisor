@@ -72,6 +72,9 @@ The formats covered today:
 | qcow2 | `disk_qcow2` | `disk_qcow2_ops` |
 | fixed VHD | `disk_vhd` | none |
 
+The sniffer in front of them all is fuzzed by `disk_detect`, and qcow2 backing
+chains by `disk_qcow2_chain`.
+
 An operation target needs a valid image that the harness can build in process
 and that reads back as zeroes, which is what `DiskFormat::template` returns. A
 format without one gets no operation target and so no shadow model, which
@@ -138,6 +141,74 @@ cargo fuzz run disk_vmdk -j `nproc` -- -max_len=65536 \
 The same limit is why `DiskFormat::MAX_IMAGE_LEN` is a per format constant:
 the harness rejects anything larger, and a format whose metadata reaches far
 into the file needs a bigger budget than the 8 MiB default.
+
+### QCOW2 backing chains
+
+A qcow2 image may name a backing file, and `disk_qcow2` reaches none of the
+code that follows one: it opens every image with `backing_files: false`, which
+leaves `BackingFile::new`, the `Raw` versus `Qcow2` dispatch, all of
+`block/src/formats/qcow/backing.rs`, the `MAX_NESTING_DEPTH` recursion and the
+copy on write from backing arm of `deallocate_bytes` unreachable.
+`disk_qcow2_chain` covers them.
+
+Its input is two images, because a chain needs a backing image and that image
+has to be fuzzer controlled too, or the target would only ever see a valid
+backing file:
+
+```text
+[u32 LE top_len][top_len bytes: the image][the rest: the backing image]
+```
+
+The harness writes the backing half into its scratch directory, under the name
+the top image asks for and under `backing.img`, then writes the top image and
+opens it with backing files enabled. A backing image that itself names a
+backing file is what reaches the nested chain code, and one that names
+`backing.img`, the file it is itself written to, recurses until the nesting
+limit stops it. The directory also holds `leaf.raw`, a fixed empty file: two
+fuzzer images can only build a chain that closes on itself, which the nesting
+limit always refuses, so a chain that reads through three levels needs a third
+file, and any file is a valid raw backing.
+#### The sandbox
+
+The backing file is named by *path*, and the engine resolves a relative name
+against the directory of the image that stores it with a plain `Path::join`,
+which follows `..` straight out of that directory, then opens it. A corpus
+entry could therefore name any file the fuzzer can reach. That is why backing
+files were excluded from the framework until this target existed, and it is
+why the target needs two independent protections.
+
+The first is a name guard in the harness. It parses `backing_file_offset` and
+`backing_file_size` out of the raw input bytes itself, exactly as
+`QcowHeader::new` does, because the decision has to be made before the `block`
+crate opens anything, and it refuses the input unless the name is a single
+`Component::Normal`: no absolute path, no `..`, no `.`, no subdirectory, no
+embedded NUL. It is applied to *both* images, since the backing image's own
+header can name a further file. The policy is refusal rather than clamping the
+name to a safe value, for the same reason the VMDK extent guard refuses: this
+is a safety check, and a check that rewrites attacker controlled offsets in
+place is more code whose bugs fail open, while a refusal fails closed. The
+mutation budget is protected instead by materializing the backing image under
+whatever plain name the input asks for, so a mutation of the name field still
+opens something.
+
+The second is Landlock, applied once per process before the first iteration,
+allowing writes only under the scratch directory and the fuzzer's own corpus
+and artifact directories, and reads only under those, `/proc` and the system
+library directories. It fails closed: if the kernel has no Landlock, the
+target refuses every input rather than running unconfined. This second belt
+exists because, unlike the VMDK extent path, the engine takes no `openat2`
+`RESOLVE_BENEATH` precaution for a qcow2 backing file, deliberately, so the
+harness guard would otherwise be the only thing between a corpus entry and a
+
+#### Why it is a separate target
+
+`Qcow2` declares `PUNCH_HOLE_READS_ZEROES`, which is true only for an image
+without a backing file: with one, a discarded cluster reads *through* to the
+backing data, so the shadow model would report data corruption that is not
+there. `disk_qcow2_chain` therefore runs the fixed op program with the model
+off, and `OpenConfig::backing` is not fuzzer selectable, so `fuzz_program`
+cannot enable backing files under the model even for a format whose template
+changes. `disk_qcow2` and `disk_qcow2_ops` are untouched.
 
 ### Keeping the corpus openable
 
@@ -292,3 +363,8 @@ heavy, a dictionary in `fuzz/dictionaries/`. If the parser checksums part of
 the image, add a repair function next to the adapter and a `fuzz_mutator!`
 that restores the magic and calls it, as `disk_vhd` and `disk_vhdx` do.
 
+Backing files are no longer left out, but they are confined: a fuzzed image
+names its backing file by path, so `disk_qcow2_chain` parses the name out of
+the image itself, refuses anything but a plain file name in its scratch
+directory, and confines the process with Landlock on top. A format that
+resolves names out of the image needs both before it may open them.
