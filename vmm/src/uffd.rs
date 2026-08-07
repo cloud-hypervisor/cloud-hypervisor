@@ -48,6 +48,14 @@ pub(crate) struct UffdioCopy {
     pub copy: i64,
 }
 
+#[repr(C)]
+pub(crate) struct UffdioContinue {
+    pub range_start: u64,
+    pub range_len: u64,
+    pub mode: u64,
+    pub mapped: i64,
+}
+
 /// Flat representation of `struct uffd_msg` (32 bytes).
 ///
 /// The kernel struct contains an 8-byte header followed by a 24-byte
@@ -133,11 +141,22 @@ pub(crate) fn create(required_features: u64) -> Result<OwnedFd, Error> {
 }
 
 /// Register a memory range for missing-page fault handling.
-pub(crate) fn register(fd: BorrowedFd<'_>, addr: u64, len: u64) -> Result<u64, Error> {
+pub(crate) fn register(
+    fd: BorrowedFd<'_>,
+    addr: u64,
+    len: u64,
+    uffd_requires_minor_mode: bool,
+) -> Result<u64, Error> {
+    let mode = if uffd_requires_minor_mode {
+        userfaultfd::UFFDIO_REGISTER_MODE_MISSING | userfaultfd::UFFDIO_REGISTER_MODE_MINOR
+    } else {
+        userfaultfd::UFFDIO_REGISTER_MODE_MISSING
+    };
+
     let mut reg = UffdioRegister {
         range_start: addr,
         range_len: len,
-        mode: userfaultfd::UFFDIO_REGISTER_MODE_MISSING,
+        mode,
         ioctls: 0,
     };
     // SAFETY: `reg` is a valid, correctly-sized struct for this ioctl.
@@ -169,6 +188,28 @@ pub(crate) fn copy(fd: BorrowedFd<'_>, dst: u64, src: *const u8, len: u64) -> Re
             fd.as_raw_fd(),
             userfaultfd::UFFDIO_COPY as libc::Ioctl,
             &mut cp,
+        )
+    };
+    if ret < 0 {
+        return Err(Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// Resolves a minor page fault by installing PTEs for a range.
+pub(crate) fn uffd_continue(fd: BorrowedFd<'_>, dst: u64, len: u64) -> Result<(), Error> {
+    let mut cont = UffdioContinue {
+        range_start: dst,
+        range_len: len,
+        mode: 0,
+        mapped: 0,
+    };
+    // SAFETY: `cont` is a valid, correctly-sized struct for this ioctl.
+    let ret = unsafe {
+        libc::ioctl(
+            fd.as_raw_fd(),
+            userfaultfd::UFFDIO_CONTINUE as libc::Ioctl,
+            &mut cont,
         )
     };
     if ret < 0 {
@@ -228,6 +269,9 @@ pub(crate) trait UffdMemorySource: Send {
         range: &UffdRange,
         page_idx: u64,
     ) -> Result<FaultResolution, io::Error>;
+
+    /// Returns true if the memory source requires UFFD_REGISTER_MODE_MINOR
+    fn requires_uffd_minor_mode(&self) -> bool;
 }
 
 /// Source that reads pages from a local snapshot file.
@@ -274,6 +318,10 @@ impl UffdMemorySource for FileUffdMemorySource {
             Err(e) if e.raw_os_error() == Some(libc::EAGAIN) => Ok(FaultResolution::Retry),
             Err(e) => Err(e),
         }
+    }
+
+    fn requires_uffd_minor_mode(&self) -> bool {
+        false
     }
 }
 
@@ -332,8 +380,15 @@ impl UffdMemorySource for SocketUffdMemorySource {
                     "shared-backing PageFault response carried {resp_len} unexpected bytes",
                 )));
             }
-            match wake(uffd_fd, page_addr, page_size) {
+            match uffd_continue(uffd_fd, page_addr, page_size) {
                 Ok(()) => Ok(FaultResolution::Served),
+                // This is fine, someone mapped the page before us.
+                Err(e) if e.raw_os_error() == Some(libc::EEXIST) => {
+                    if let Err(e) = wake(uffd_fd, page_addr, page_size) {
+                        log::warn!("UFFDIO_WAKE failed at {page_addr:#x}: {e}");
+                    }
+                    Ok(FaultResolution::Served)
+                }
                 Err(e) if e.raw_os_error() == Some(libc::EAGAIN) => Ok(FaultResolution::Retry),
                 Err(e) => Err(e),
             }
@@ -360,6 +415,10 @@ impl UffdMemorySource for SocketUffdMemorySource {
                 Err(e) => Err(e),
             }
         }
+    }
+
+    fn requires_uffd_minor_mode(&self) -> bool {
+        self.shared_backing
     }
 }
 
