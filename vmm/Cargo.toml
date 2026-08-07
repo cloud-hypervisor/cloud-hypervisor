@@ -73,6 +73,7 @@ mshv-bindings = { workspace = true, features = [
   "with-serde",
 ], optional = true }
 net_util = { path = "../net_util" }
+ondemand-block = { git = "https://github.com/joy-allen/ondemand-block" }
 option_parser = { path = "../option_parser" }
 pci = { path = "../pci" }
 range_map_vec = { version = "0.2.0", optional = true }

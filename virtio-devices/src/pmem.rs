@@ -264,11 +264,16 @@ impl EpollHelperHandler for PmemEpollHandler {
     }
 }
 
+pub trait PmemRuntime: Send {}
+
+impl<T: Send> PmemRuntime for T {}
+
 pub struct Pmem {
     common: VirtioCommon,
     id: String,
     disk: Option<File>,
     config: VirtioPmemConfig,
+    runtime: Option<Box<dyn PmemRuntime>>,
     mapping: UserspaceMapping,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
@@ -289,6 +294,7 @@ impl Pmem {
         addr: GuestAddress,
         mapping: UserspaceMapping,
         access_platform_enabled: bool,
+        runtime: Option<Box<dyn PmemRuntime>>,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
         state: Option<PmemState>,
@@ -329,6 +335,7 @@ impl Pmem {
             id,
             disk: Some(disk),
             config,
+            runtime,
             mapping,
             seccomp_action,
             exit_evt,
@@ -346,6 +353,13 @@ impl Pmem {
     #[cfg(fuzzing)]
     pub fn wait_for_epoll_threads(&mut self) {
         self.common.wait_for_epoll_threads();
+    }
+}
+
+impl Drop for Pmem {
+    fn drop(&mut self) {
+        // Stop the backend before `common` drops the virtio queue workers.
+        self.runtime.take();
     }
 }
 

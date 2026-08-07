@@ -18,8 +18,16 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Error, Read};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::fs::FileExt;
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver};
+use std::thread::{self, JoinHandle};
 
+use ondemand_block::{HANDSHAKE_FLAG_MANAGED, UffdBlock, VmaRegion};
 use vm_migration::protocol::{MemoryRange, Request, Response, Status};
+use vmm_sys_util::eventfd::EventFd;
 
 use crate::migration::transport::SocketStream;
 use crate::userfaultfd;
@@ -367,6 +375,211 @@ impl Drop for SocketUffdMemorySource {
     fn drop(&mut self) {
         // SAFETY: the fd is valid for the duration of this borrow.
         unsafe { libc::shutdown(self.stream.as_fd().as_raw_fd(), libc::SHUT_RDWR) };
+    }
+}
+
+pub(crate) struct ExternalUffdConfig {
+    pub socket_path: PathBuf,
+    pub uffd: OwnedFd,
+    pub regions: Vec<VmaRegion>,
+    pub handshake_flags: u8,
+    pub uffd_modes: u8,
+    pub backing_fds: Vec<OwnedFd>,
+}
+
+pub(crate) struct ExternalUffdHandler {
+    block: Arc<UffdBlock>,
+    worker: Option<ExternalUffdWorker>,
+}
+
+struct ExternalUffdWorker {
+    stop_evt: EventFd,
+    result_rx: Receiver<io::Result<()>>,
+    stopping: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl ExternalUffdHandler {
+    pub(crate) fn new(
+        name: &str,
+        config: ExternalUffdConfig,
+        exit_evt: Option<EventFd>,
+    ) -> io::Result<Self> {
+        let mut block = UffdBlock::new(&config.socket_path)?;
+        let backing_fds = config
+            .backing_fds
+            .iter()
+            .map(AsRawFd::as_raw_fd)
+            .collect::<Vec<_>>();
+        block.handshake(
+            config.uffd,
+            config.regions,
+            config.handshake_flags,
+            config.uffd_modes,
+            &backing_fds,
+        )?;
+        let block = Arc::new(block);
+
+        let worker = if config.handshake_flags & HANDSHAKE_FLAG_MANAGED == 0 {
+            let exit_evt = exit_evt.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Customized external UFFD handler requires an exit event",
+                )
+            })?;
+            Some(ExternalUffdWorker::spawn(name, &block, exit_evt)?)
+        } else {
+            None
+        };
+
+        Ok(Self { block, worker })
+    }
+
+    /// Add or update a region in a managed external UFFD session.
+    #[allow(dead_code)]
+    pub(crate) fn add_region(
+        &mut self,
+        region: VmaRegion,
+        backing_fd: Option<RawFd>,
+    ) -> io::Result<()> {
+        self.block_mut()?.add_region(region, backing_fd)
+    }
+
+    /// Remove a region from a managed external UFFD session.
+    #[allow(dead_code)]
+    pub(crate) fn remove_region(&mut self, host_addr: u64, len: u64) -> io::Result<()> {
+        self.block_mut()?.remove_region(host_addr, len)
+    }
+
+    fn block_mut(&mut self) -> io::Result<&mut UffdBlock> {
+        Arc::get_mut(&mut self.block).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                "External UFFD block is in use by a response worker",
+            )
+        })
+    }
+}
+
+impl ExternalUffdWorker {
+    fn spawn(name: &str, block: &Arc<UffdBlock>, exit_evt: EventFd) -> io::Result<Self> {
+        let thread_block = Arc::clone(block);
+        let stop_evt = EventFd::new(libc::EFD_NONBLOCK)?;
+        let thread_stop_evt = stop_evt.try_clone()?;
+        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        let (result_tx, result_rx) = mpsc::sync_channel(1);
+        let stopping = Arc::new(AtomicBool::new(false));
+        let thread_stopping = Arc::clone(&stopping);
+        let thread_name = format!("external-uffd-{name}");
+        let thread = thread::Builder::new().name(thread_name).spawn(move || {
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                const STOP_EVENT: u64 = 0;
+                const SOCKET_EVENT: u64 = 1;
+
+                let epoll_fd = epoll::create(true).map_err(io::Error::other)?;
+                // SAFETY: epoll::create returned a fresh descriptor owned here.
+                let _epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
+                epoll::ctl(
+                    epoll_fd,
+                    epoll::ControlOptions::EPOLL_CTL_ADD,
+                    thread_stop_evt.as_raw_fd(),
+                    epoll::Event::new(epoll::Events::EPOLLIN, STOP_EVENT),
+                )
+                .map_err(io::Error::other)?;
+                epoll::ctl(
+                    epoll_fd,
+                    epoll::ControlOptions::EPOLL_CTL_ADD,
+                    thread_block.sock_fd(),
+                    epoll::Event::new(
+                        epoll::Events::EPOLLIN | epoll::Events::EPOLLHUP,
+                        SOCKET_EVENT,
+                    ),
+                )
+                .map_err(io::Error::other)?;
+
+                ready_tx.send(()).ok();
+
+                let mut events = [epoll::Event::new(epoll::Events::empty(), 0); 2];
+                loop {
+                    let count = epoll::wait(epoll_fd, -1, &mut events).map_err(io::Error::other)?;
+                    for event in events.iter().take(count) {
+                        match event.data {
+                            STOP_EVENT => {
+                                thread_stop_evt.read().ok();
+                                return Ok(());
+                            }
+                            SOCKET_EVENT => {
+                                if event.events & epoll::Events::EPOLLIN.bits() == 0 {
+                                    return Err(io::Error::new(
+                                        io::ErrorKind::UnexpectedEof,
+                                        "External UFFD server closed the socket",
+                                    ));
+                                }
+                                while thread_block.handle_response_zerocopy()? {}
+                            }
+                            _ => {
+                                return Err(io::Error::new(
+                                    io::ErrorKind::InvalidData,
+                                    "Unexpected external UFFD epoll event",
+                                ));
+                            }
+                        }
+                    }
+                }
+            }))
+            .unwrap_or_else(|_| Err(io::Error::other("External UFFD handler thread panicked")));
+
+            if let Err(error) = &result
+                && !thread_stopping.load(Ordering::Acquire)
+            {
+                log::error!("External UFFD backend failed: {error}");
+                exit_evt.write(1).ok();
+            }
+            result_tx.send(result).ok();
+        })?;
+
+        if ready_rx.recv().is_err() {
+            thread.join().ok();
+            return match result_rx.try_recv() {
+                Ok(Err(error)) => Err(error),
+                _ => Err(io::Error::other("External UFFD handler failed to start")),
+            };
+        }
+        if let Ok(Err(error)) = result_rx.try_recv() {
+            thread.join().ok();
+            return Err(error);
+        }
+
+        Ok(Self {
+            stop_evt,
+            result_rx,
+            stopping,
+            thread: Some(thread),
+        })
+    }
+}
+
+impl Drop for ExternalUffdHandler {
+    fn drop(&mut self) {
+        if let Some(worker) = self.worker.as_mut() {
+            worker.stopping.store(true, Ordering::Release);
+            worker.stop_evt.write(1).ok();
+            // Interrupt a partial response read before joining the handler.
+            // SAFETY: block owns a valid socket for the duration of this call.
+            unsafe { libc::shutdown(self.block.sock_fd(), libc::SHUT_RDWR) };
+            if let Some(thread) = worker.thread.take() {
+                thread.join().ok();
+            }
+            match worker.result_rx.try_recv() {
+                Ok(Err(error)) => {
+                    log::error!("External UFFD handler terminated with error: {error}");
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    log::warn!("External UFFD handler terminated without a result");
+                }
+                _ => {}
+            }
+        }
     }
 }
 

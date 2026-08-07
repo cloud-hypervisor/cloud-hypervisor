@@ -81,6 +81,9 @@ pub enum Error {
     /// Missing persistent memory file parameter.
     #[error("Error parsing --pmem: file missing")]
     ParsePmemFileMissing,
+    /// Invalid persistent memory backend type.
+    #[error("Error parsing --pmem: backend_type must be 'file' or 'uffd'")]
+    ParsePmemBackendType,
     /// Missing vsock socket path parameter.
     #[error("Error parsing --vsock: socket missing")]
     ParseVsockSockMissing,
@@ -429,6 +432,12 @@ pub enum ValidationError {
     /// Invalid NUMA Configuration
     #[error("Invalid NUMA configuration: {0}")]
     InvalidNumaConfig(String),
+    /// UFFD-backed persistent memory requires an explicit size.
+    #[error("UFFD-backed persistent memory requires size")]
+    PmemUffdSizeMissing,
+    /// UFFD-backed persistent memory is read-only.
+    #[error("UFFD-backed persistent memory requires readonly=on")]
+    PmemUffdRequiresReadonly,
     /// The supplied PCI ID was greater then the max. supported number
     /// of devices per Bus
     #[error("Given PCI device ID ({0}) is out of the supported range of 0..{NUM_DEVICE_IDS}")]
@@ -2295,25 +2304,37 @@ impl FwCfgItem {
 
 impl PmemConfig {
     pub const SYNTAX: &'static str = "Persistent memory parameters \
-    \"file=<backing_file_path>,size=<persistent_memory_size>,iommu=on|off,\
-    discard_writes=on|off,id=<device_id>,\
-    pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
+    \"file=<backing_file_or_socket_path>,size=<persistent_memory_size>,\
+    backend_type=file|uffd,iommu=on|off,readonly=on|off,discard_writes=on|off,\
+    id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 
     pub fn parse(pmem: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
             .add("size")
             .add("file")
+            .add("backend_type")
+            .add("readonly")
             .add("discard_writes")
             .add_all(PciDeviceCommonConfig::OPTIONS_IOMMU);
         parser.parse(pmem).map_err(Error::ParsePersistentMemory)?;
 
         let pci_common = PciDeviceCommonConfig::parse(pmem)?;
         let file = PathBuf::from(parser.get("file").ok_or(Error::ParsePmemFileMissing)?);
+        let backend_type = match parser.get("backend_type").as_deref() {
+            None | Some("file") => PmemBackendType::File,
+            Some("uffd") => PmemBackendType::Uffd,
+            Some(_) => return Err(Error::ParsePmemBackendType),
+        };
         let size = parser
             .convert::<ByteSized>("size")
             .map_err(Error::ParsePersistentMemory)?
             .map(|v| v.0);
+        let readonly = parser
+            .convert::<Toggle>("readonly")
+            .map_err(Error::ParsePersistentMemory)?
+            .unwrap_or(Toggle(false))
+            .0;
         let discard_writes = parser
             .convert::<Toggle>("discard_writes")
             .map_err(Error::ParsePersistentMemory)?
@@ -2323,13 +2344,24 @@ impl PmemConfig {
         Ok(PmemConfig {
             pci_common,
             file,
+            backend_type,
             size,
+            readonly,
             discard_writes,
         })
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        self.pci_common.validate(vm_config)
+        self.pci_common.validate(vm_config)?;
+        if self.backend_type == PmemBackendType::Uffd {
+            if self.size.is_none() {
+                return Err(ValidationError::PmemUffdSizeMissing);
+            }
+            if !self.readonly {
+                return Err(ValidationError::PmemUffdRequiresReadonly);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -4836,7 +4868,9 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         PmemConfig {
             pci_common: PciDeviceCommonConfig::default(),
             file: PathBuf::from("/tmp/pmem"),
+            backend_type: PmemBackendType::File,
             size: Some(128 << 20),
+            readonly: false,
             discard_writes: false,
         }
     }
@@ -4846,9 +4880,19 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         // Must always give a file and size
         PmemConfig::parse("").unwrap_err();
         PmemConfig::parse("size=128M").unwrap_err();
+        PmemConfig::parse("file=/tmp/pmem,backend_type=invalid").unwrap_err();
         assert_eq!(
             PmemConfig::parse("file=/tmp/pmem,size=128M")?,
             pmem_fixture()
+        );
+        assert_eq!(
+            PmemConfig::parse("file=/tmp/pmem.sock,size=128M,backend_type=uffd,readonly=on")?,
+            PmemConfig {
+                file: PathBuf::from("/tmp/pmem.sock"),
+                backend_type: PmemBackendType::Uffd,
+                readonly: true,
+                ..pmem_fixture()
+            }
         );
         assert_eq!(
             PmemConfig::parse("file=/tmp/pmem,size=128M,id=mypmem0")?,
