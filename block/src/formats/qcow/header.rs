@@ -511,12 +511,33 @@ impl QcowHeader {
         size: u64,
         backing_file: Option<&str>,
     ) -> Result<QcowHeader> {
+        Self::create_for_size_path_and_cluster_bits(
+            version,
+            size,
+            backing_file,
+            DEFAULT_CLUSTER_BITS,
+        )
+    }
+
+    /// Builds a header for an image with an explicit cluster size.
+    ///
+    /// Every derived field, the L1 size and the table offsets alike, follows
+    /// from `cluster_bits`, so this is the same computation the default
+    /// cluster size gets rather than a second layout.
+    pub fn create_for_size_path_and_cluster_bits(
+        version: u32,
+        size: u64,
+        backing_file: Option<&str>,
+        cluster_bits: u32,
+    ) -> Result<QcowHeader> {
+        if !(MIN_CLUSTER_BITS..=MAX_CLUSTER_BITS).contains(&cluster_bits) {
+            return Err(Error::InvalidClusterSize);
+        }
         let header_size = if version == 2 {
             V2_BARE_HEADER_SIZE
         } else {
             V3_BARE_HEADER_SIZE + QCOW_EMPTY_HEADER_EXTENSION_SIZE
         };
-        let cluster_bits: u32 = DEFAULT_CLUSTER_BITS;
         let cluster_size: u32 = 0x01 << cluster_bits;
         let max_length: usize = (cluster_size - header_size) as usize;
         if let Some(path) = backing_file
@@ -543,7 +564,7 @@ impl QcowHeader {
                     }
             }) as u64,
             backing_file_size: backing_file.map_or(0, |x| x.len()) as u32,
-            cluster_bits: DEFAULT_CLUSTER_BITS,
+            cluster_bits,
             size,
             crypt_method: 0,
             l1_size: num_l2_clusters,

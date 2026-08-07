@@ -1,0 +1,53 @@
+# Copyright © 2026 The Cloud Hypervisor Authors. All rights reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# libFuzzer dictionary for the qcow2 image format, used by the disk_qcow2
+# target. Tokens are the magic values and field encodings that a mutated
+# image has to reproduce to reach past a header check.
+
+header_magic="QFI\xfb"
+header_version_2="\x00\x00\x00\x02"
+header_version_3="\x00\x00\x00\x03"
+
+# Header extension identifiers.
+ext_end="\x00\x00\x00\x00"
+ext_backing_format="\xe2\x79\x2a\xca"
+ext_feature_table="\x68\x03\xf8\x57"
+ext_crypto_header="\x05\x37\xbe\x77"
+ext_bitmaps="\x23\x85\x28\x75"
+ext_external_data="\x44\x41\x54\x41"
+
+# Backing file format names.
+backing_raw="raw"
+backing_qcow2="qcow2"
+
+# Encryption methods: none, AES, LUKS.
+crypt_none="\x00\x00\x00\x00"
+crypt_aes="\x00\x00\x00\x01"
+crypt_luks="\x00\x00\x00\x02"
+
+# Compatible, incompatible and autoclear feature bits.
+feature_dirty="\x00\x00\x00\x00\x00\x00\x00\x01"
+feature_corrupt="\x00\x00\x00\x00\x00\x00\x00\x02"
+feature_external_data="\x00\x00\x00\x00\x00\x00\x00\x04"
+feature_compression_type="\x00\x00\x00\x00\x00\x00\x00\x08"
+feature_extended_l2="\x00\x00\x00\x00\x00\x00\x00\x10"
+
+# Compression types: zlib and zstd.
+compression_zlib="\x00"
+compression_zstd="\x01"
+
+# Cluster and refcount sizing exponents.
+cluster_bits_9="\x00\x00\x00\x09"
+cluster_bits_12="\x00\x00\x00\x0c"
+cluster_bits_16="\x00\x00\x00\x10"
+cluster_bits_21="\x00\x00\x00\x15"
+refcount_order_0="\x00\x00\x00\x00"
+refcount_order_4="\x00\x00\x00\x04"
+refcount_order_6="\x00\x00\x00\x06"
+
+# L1, L2 and refcount entry flags.
+entry_copied="\x80\x00\x00\x00\x00\x00\x00\x00"
+entry_compressed="\x40\x00\x00\x00\x00\x00\x00\x00"
+entry_zero="\x00\x00\x00\x00\x00\x00\x00\x01"

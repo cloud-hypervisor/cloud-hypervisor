@@ -160,15 +160,32 @@ impl QcowDisk {
 }
 
 /// Writes a fresh qcow2 layout into `file`
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(test)]
 pub(crate) fn create_image(
     file: &File,
     virtual_size: u64,
     backing_config: Option<&BackingFileConfig>,
 ) -> BlockResult<()> {
+    create_image_with_cluster_bits(
+        file,
+        virtual_size,
+        backing_config,
+        header::DEFAULT_CLUSTER_BITS,
+    )
+}
+
+/// Writes a fresh qcow2 layout with an explicit cluster size into `file`
+#[cfg(any(test, feature = "test-utils"))]
+pub(crate) fn create_image_with_cluster_bits(
+    file: &File,
+    virtual_size: u64,
+    backing_config: Option<&BackingFileConfig>,
+    cluster_bits: u32,
+) -> BlockResult<()> {
     let path = backing_config.map(|cfg| cfg.path.as_str());
-    let mut header = QcowHeader::create_for_size_and_path(3, virtual_size, path)
-        .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
+    let mut header =
+        QcowHeader::create_for_size_path_and_cluster_bits(3, virtual_size, path, cluster_bits)
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
     if let Some(cfg) = backing_config
         && let Some(backing_file) = &mut header.backing_file
     {
@@ -206,8 +223,31 @@ impl QcowTempDisk {
         sparse: bool,
         use_io_uring: bool,
     ) -> BlockResult<Self> {
+        Self::new_with_cluster_bits(
+            virtual_size,
+            backing_config,
+            direct_io,
+            sparse,
+            use_io_uring,
+            header::DEFAULT_CLUSTER_BITS,
+        )
+    }
+
+    /// Creates a new qcow2 image with an explicit cluster size.
+    ///
+    /// A smaller cluster means more L2 tables for the same virtual size,
+    /// which is the only way to reach the L2 cache eviction path with an
+    /// image small enough to model.
+    pub fn new_with_cluster_bits(
+        virtual_size: u64,
+        backing_config: Option<&BackingFileConfig>,
+        direct_io: bool,
+        sparse: bool,
+        use_io_uring: bool,
+        cluster_bits: u32,
+    ) -> BlockResult<Self> {
         let tmp = TempFile::new().map_err(io::Error::from)?;
-        create_image(tmp.as_file(), virtual_size, backing_config)?;
+        create_image_with_cluster_bits(tmp.as_file(), virtual_size, backing_config, cluster_bits)?;
         let file = tmp
             .as_file()
             .try_clone()

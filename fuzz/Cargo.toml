@@ -8,6 +8,11 @@ version = "0.0.0"
 [package.metadata]
 cargo-fuzz = true
 
+# `cargo fuzz` builds every crate with `--cfg fuzzing`, which the VMDK
+# adapter uses to select the extent opener's fallback walk.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
+
 [features]
 default = ["mshv_emulator"]
 igvm = []
@@ -16,8 +21,13 @@ mshv_emulator = ["hypervisor/mshv_emulator"]
 pvmemcontrol = []
 
 [dependencies]
-arbitrary = "1.4.2"
-block = { path = "../block" }
+arbitrary = { version = "1.4.2", features = ["derive"] }
+# test-utils provides the valid template images that the disk_*_ops targets
+# run their op programs against.
+block = { path = "../block", features = ["test-utils"] }
+# The disk_vhdx mutator recomputes the VHDX CRC-32C checksums, and must use
+# the same implementation the parser verifies them with.
+crc-any = "3.0.0"
 devices = { path = "../devices" }
 epoll = "4.4.0"
 hypervisor = { path = "../hypervisor", features = ["mshv_emulator"] }
@@ -63,6 +73,60 @@ test = false
 doc = false
 name = "console"
 path = "fuzz_targets/console.rs"
+test = false
+
+[[bin]]
+doc = false
+name = "disk_detect"
+path = "fuzz_targets/disk_detect.rs"
+test = false
+
+[[bin]]
+doc = false
+name = "disk_qcow2"
+path = "fuzz_targets/disk_qcow2.rs"
+test = false
+
+[[bin]]
+doc = false
+name = "disk_qcow2_chain"
+path = "fuzz_targets/disk_qcow2_chain.rs"
+test = false
+
+[[bin]]
+doc = false
+name = "disk_qcow2_ops"
+path = "fuzz_targets/disk_qcow2_ops.rs"
+test = false
+
+[[bin]]
+doc = false
+name = "disk_vhd"
+path = "fuzz_targets/disk_vhd.rs"
+test = false
+
+[[bin]]
+doc = false
+name = "disk_vhdx"
+path = "fuzz_targets/disk_vhdx.rs"
+test = false
+
+[[bin]]
+doc = false
+name = "disk_vhdx_ops"
+path = "fuzz_targets/disk_vhdx_ops.rs"
+test = false
+
+[[bin]]
+doc = false
+name = "disk_vmdk"
+path = "fuzz_targets/disk_vmdk.rs"
+test = false
+
+[[bin]]
+doc = false
+name = "disk_vmdk_ops"
+path = "fuzz_targets/disk_vmdk_ops.rs"
 test = false
 
 [[bin]]

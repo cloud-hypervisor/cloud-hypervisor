@@ -33,3 +33,588 @@ cargo fuzz add <new_fuzzer>
 ```
 
 Inspiration for fuzzers can be found in [crosvm](https://chromium.googlesource.com/chromiumos/platform/crosvm/+/refs/heads/master/fuzz/)
+
+## Fuzzing disk image formats
+
+The `disk_*` targets share a format agnostic framework in
+`fuzz/src/disk_engine`. It fuzzes the disk image engine of the `block`
+crate: everything between the point where untrusted image bytes are parsed
+(`factory::open_disk` and the per format constructors) and the trait contract
+the rest of the VMM consumes (`disk_file::AsyncFullDiskFile` and
+`async_io::AsyncIo`). Virtio request parsing sits above that boundary and is
+covered by the `block` target instead.
+
+Every format has two targets, because the two interesting input spaces do not
+mix well in a single one:
+
+| Target | Input | What it finds |
+| ------ | ----- | ------------- |
+| `disk_<format>` | the whole input is the disk image | parser bugs: headers, tables, region descriptors |
+| `disk_<format>_ops` | an operation program run against a valid image | engine bugs: offset translation, allocation, discard, resize |
+
+One target sits outside that scheme. `disk_detect` drives
+`block::detect_image_type`, the sniffer `factory::open_disk` runs before it
+chooses a parser. Its input space is every format at once, so it cannot live
+inside a per format target: an input that finds a new edge in the VHD sniffer
+says nothing about the VHDX parser, and keeping it in the `disk_vhdx` corpus
+only spends that target's budget on images it can never open. Its seed corpus
+is the union of the per format seeds, which
+`scripts/generate-fuzz-seeds.sh` writes to `fuzz/corpus/disk_detect`:
+
+```
+cargo fuzz run disk_detect -j `nproc` -- -max_len=16777216
+```
+
+The formats covered today:
+
+| Format | Image target | Operation target |
+| ------ | ------------ | ---------------- |
+| qcow2 | `disk_qcow2` | `disk_qcow2_ops` |
+| VHDX | `disk_vhdx` | `disk_vhdx_ops` |
+| fixed VHD | `disk_vhd` | none |
+| flat VMDK | `disk_vmdk` | `disk_vmdk_ops` |
+
+The sniffer in front of them all is fuzzed by `disk_detect`, and qcow2 backing
+chains by `disk_qcow2_chain`.
+
+An operation target needs a valid image that the harness can build in process
+and that reads back as zeroes, which is what `DiskFormat::template` returns. A
+format without one gets no operation target and so no shadow model, which
+means nothing anywhere can catch it returning the *wrong bytes*: an engine
+that loses or misplaces a guest write passes every other check the framework
+makes.
+
+Fixed VHD deliberately stays without one. `FixedVhdSync` is a bounds check in
+front of `preadv`/`pwritev` on the image file, so a shadow model over it would
+be asserting that the kernel implements `pwritev`, not that the `block` crate
+is correct.
+
+### Operation targets and the shadow model
+
+```
+cargo fuzz run disk_qcow2_ops -j `nproc`
+cargo fuzz run disk_vhdx_ops -j `nproc`
+cargo fuzz run disk_vmdk_ops -j `nproc`
+```
+
+None of them needs `-max_len` or a seed corpus: the input is an operation
+program, not an image.
+
+VHDX is the format that most needs this. It has the most involved write path
+in the tree - BAT lookup, block state transitions, allocation at the end of
+the file, and sector offset arithmetic within the allocated block - and until
+`disk_vhdx_ops` existed none of it had a data correctness oracle. That is not
+hypothetical: the block allocating arm of `vhdx::io::write` used to write the
+payload at the *block base* rather than at the sector's offset within the
+block, so a guest write to any sector but the first of an unallocated block
+was silently misplaced and the data lost. It was found by a hand written two
+operation probe rather than by the fuzzer, precisely because no VHDX operation
+target existed.
+
+VHDX also gets *better* oracle coverage per execution than qcow2 does. It does
+not support resize, so `Op::Resize` always fails and the model is never wiped
+mid program; in `disk_qcow2_ops` a successful resize drops everything the
+model knew and the rest of the program runs unchecked.
+
+Two pieces of the framework exist for these targets:
+
+- `DiskFormat::IO_ALIGNMENT`. The VHDX engine refuses an offset or a length
+  that is not a multiple of the logical sector size. A uniformly random `u16`
+  length is a multiple of 512 in 0.2% of cases, so an unshaped program would
+  be rejected at the door and the model would never see a byte. The executor
+  snaps in range offsets down and lengths up to this value; `OpOffset::Wild`
+  offsets are left alone so the bounds and overflow checks stay reachable.
+- A refused sparse op leaves the model alone. VHDX and VHD reject every
+  `punch_hole` and `write_zeroes` outright, and an op the engine refused
+  changed nothing, so marking its range unknown would let a program blank the
+  model out range by range and check nothing.
+
+A third piece is about throughput rather than correctness. An operation target
+rewrites its template every iteration, and the VHDX template is 8 MiB, so a
+plain `write_all` of it caps `disk_vhdx_ops` at 142 executions a second,
+measured on a loaded 96 way host. `template_memfd` and `template_file` instead
+size the file with `set_len`, which costs nothing and reads back as zeroes,
+and write only the pages that carry data - six of 2048. That is 560
+executions a second, four times as many.
+
+The obvious form of that does not work. Scanning the buffer for zero pages on
+every iteration takes 6.1 ms for 8 MiB where writing it takes 5.9 ms, and the
+target ran at 17 executions a second. What has to go is the scan, not the
+copy: a template is the same buffer every time, so its page map is computed
+once per format and reused. `image_memfd`, which materializes fuzzer input,
+keeps writing it whole - that input is dense and different every time.
+
+#### The VHDX template, and why it is a table
+
+The `block` crate parses VHDX but never writes one, so the template is the
+image `qemu-img create -f vhdx -o subformat=dynamic,block_size=1M t.vhdx 4M`
+produces, stored in `fuzz/src/disk_engine/formats/vhdx.rs` as the offsets and
+bytes of its non-zero runs. The file is 8,388,608 bytes of which 333 are
+non-zero, in eleven runs, so the table is eleven lines and the harness expands
+it into the full image once per process behind a `OnceLock`.
+
+The alternatives were worse. An 8 MiB binary blob is not something upstream
+takes into the tree. Calling `qemu-img` at build time makes the harness need
+`qemu-utils` under OSS-Fuzz and makes the template depend on the qemu version,
+so a crash would stop reproducing when the build host changed. Writing the
+format by hand means two 4 KiB headers, two 64 KiB region tables, a 1 MiB BAT
+and a metadata region: some three hundred lines that would fuzz the harness
+author's reading of the specification rather than the parser under test.
+
+#### The template self test
+
+Every templated format has a `#[test]` that asserts four things about its
+template, and it is a merge condition for adding one:
+
+1. the template opens through the format adapter;
+2. `logical_size()` equals an exact pinned constant;
+3. reading the whole disk returns nothing but zero bytes;
+4. the fixed operation program runs through the executor with the shadow model
+   enabled without panicking.
+
+The failure this guards against is not a template that fails to open, which
+`fuzz_program` panics on within one iteration. It is a template that *opens
+but is subtly wrong* - the wrong size, or one extracted from an image that had
+already been written to. The model is initialised to "all zeroes, this many
+bytes"; if the image disagrees, either every read trips the oracle, which is
+loud, or the disk is not the disk the program addresses and the target quietly
+checks nothing. It then reports a 100% pass rate forever, and neither the
+coverage report, nor the crash count, nor CI can tell that state from a
+healthy one.
+
+#### The flat VMDK template, and why it is two extents
+
+Flat VMDK is the third format with an operation target, and the last one with
+translation logic worth an oracle. `FlatVmdkSync` picks an extent for an
+offset, computes `file_base_offset + (offset - virtual_start)` inside it, and
+for a request that crosses an extent boundary splits it into per extent
+segments and counts the bytes each one moved. None of that is the kernel
+doing the work at the same offset the guest asked for, which is what rules
+fixed VHD out, and all of it is invisible to every check the framework makes
+other than reading the data back.
+
+The image file for a flat VMDK *is* its descriptor - the data lives in the
+extent files it names - so the template is two hundred bytes of ASCII rather
+than a binary run table, and there is nothing to expand and nothing to
+checksum:
+
+```
+# Disk DescriptorFile
+version=1
+CID=fffffffe
+parentCID=ffffffff
+createType="twoGbMaxExtentFlat"
+
+# Extent description
+RW 2048 FLAT "image-f001.vmdk" 0
+RW 1024 FLAT "image-f002.vmdk" 1
+
+# The Disk Data Base
+ddb.virtualHWVersion = "4"
+```
+
+That is 1,572,864 bytes of virtual disk, which is the pinned constant the self
+test checks, with the extent boundary at virtual offset 1,048,576. Each part
+of the shape earns its place:
+
+- **two extents**, so a request can straddle the boundary and take
+  `spanning_io`; a one extent descriptor leaves that path, where the byte
+  accounting lives, entirely unexercised;
+- **a non-zero base offset on the second extent**, one sector, because with a
+  zero base offset the `file_base_offset` term vanishes and an error in it
+  cannot be observed;
+- **different extent lengths**, so a bug that used the wrong extent's start or
+  length is not masked by the two being interchangeable;
+- **both extents `RW`**, because a `NOACCESS` extent cannot be read at all and
+  a template containing one could not satisfy the self test's "reads back as
+  zeroes" assertion. `check_access` under `RDONLY` and `NOACCESS` stays with
+  `disk_vmdk`, whose descriptors are fuzzer generated.
+
+Both extent names are relative and both are in the adapter's `EXTENTS` list,
+which is what makes the harness create them and truncate and zero fill them
+before every open - exactly the "reads back as all zeroes" precondition the
+shadow model starts from.
+
+One trap is worth stating, because it applies to any format whose engine
+translates offsets. Writing through a path and reading back through the *same*
+path does not test the translation: an offset error that both the write and
+the read make cancels out and the data comes back where the oracle expects it.
+The adapter's fixed probe therefore reads every write back both ways, once
+spanning and once as a plain single extent read of each side of the boundary,
+and a randomly generated program mixes the two by construction.
+
+There is no known VMDK data corruption bug to point at, and a prior run of ten
+thousand random operations against this shape found no mismatch, so this
+target is a regression net rather than a bug hunt. That it is an *armed* net
+was checked the only way available: a deliberate `+ 512` added to the file
+offset expression, in `single_extent_io` and in `spanning_io` in turn, is
+caught by the fixed probe immediately and by the fuzzer within 24,000 to
+134,000 executions from an empty corpus, or 326 executions when an existing
+corpus is replayed.
+
+The measured effect on `block/src/formats/vmdk/`, with `disk_vmdk` on a 1311
+entry campaign corpus before and the two targets' profiles merged after:
+
+| File | Regions before | after | Branches before | after |
+| ---- | -------------- | ----- | --------------- | ----- |
+| `engine_sync.rs` | 82.11% | 89.82% | 82.00% | 92.00% |
+| `flat.rs` | 88.92% | 89.24% | 73.33% | 76.67% |
+| `descriptor.rs` | 71.06% | 71.06% | 72.22% | 72.22% |
+
+`descriptor.rs` does not move and is not meant to: the operation target parses
+one fixed descriptor. The I/O engine is what it is for.
+
+Corpus entries for `disk_<format>` are ordinary disk images, so anything
+`qemu-img` can write is a usable seed. `scripts/generate-fuzz-seeds.sh` writes
+a set of them per format, covering header versions, compression, cluster sizes
+and preallocation:
+
+```
+scripts/generate-fuzz-seeds.sh
+cargo fuzz run disk_qcow2 -j `nproc` -- -max_len=2097152 \
+    -dict=fuzz/dictionaries/qcow2.dict
+```
+
+Seeds matter here: without them libFuzzer caps generated inputs at 4 KiB and
+the target rarely gets past the header check. On a short run of the qcow2
+target an empty corpus reached 479 edges, a single image reached 1605, and the
+generated seeds with the dictionary reached 2073.
+
+**Always pass `-max_len`.** Left to itself libFuzzer derives the limit from
+the corpus but never above 1 MiB, and it truncates larger corpus entries to
+that limit. A truncated image is a rejected image, so the target then fuzzes
+nothing but its own rejection path. It is not hypothetical: `disk_vhdx` covers
+268 edges without the flag and 1071 with it, because the VHDX layout places
+its BAT region at 2 MiB and its metadata region at 3 MiB, so a parseable image
+is 8 MiB when empty and 9 to 10 MiB once it holds data. A fixed VHD keeps its footer in the last 512
+bytes, so truncation removes exactly the part that identifies the format. Use
+at least the size of the largest seed:
+
+```
+cargo fuzz run disk_vhdx -j `nproc` -- -max_len=16777216 \
+    -dict=fuzz/dictionaries/vhdx.dict
+cargo fuzz run disk_vhd -j `nproc` -- -max_len=4194304 \
+    -dict=fuzz/dictionaries/vhd.dict
+```
+
+A VMDK image is the text descriptor, not the data: the extents it names are
+separate files that the harness provides in a scratch directory. Its inputs
+are therefore small, and the limit is set accordingly:
+
+```
+cargo fuzz run disk_vmdk -j `nproc` -- -max_len=65536 \
+    -dict=fuzz/dictionaries/vmdk.dict
+```
+
+The same limit is why `DiskFormat::MAX_IMAGE_LEN` is a per format constant:
+the harness rejects anything larger, and a format whose metadata reaches far
+into the file needs a bigger budget than the 8 MiB default.
+
+#### How a VMDK extent name is resolved
+
+The extent opener has two arms the harness has to reach on purpose, and both
+are security relevant.
+
+The first is the fallback walk. `open_extent` resolves a name with
+`openat2(2)` and `RESOLVE_BENEATH` and only walks the path component by
+component when the syscall is missing (`ENOSYS`, kernels before 5.6) or
+blocked (`EPERM`). On any kernel a fuzzer runs on the first call succeeds, so
+`open_extent_walk` and `extent_components` never run, and they are precisely
+where the fallback rejects a traversing name itself, without a kernel to do
+it. A `cfg(fuzzing)` switch in `block/src/formats/vmdk/flat.rs` lets the
+harness take the walk instead, and the VMDK adapter sets it from a hash of
+the descriptor, one input in two. Deriving it from the input rather than from
+an environment variable is what keeps a crash reproducible from its bytes
+alone; a seccomp filter could not do that, because a filter is process wide
+and cannot be lifted once installed.
+
+The second is the absolute name. An extent name may be absolute, and then the
+engine anchors resolution at the filesystem root and deliberately does not
+apply `RESOLVE_BENEATH`. A fuzzer may only open an absolute path inside its
+own scratch directory, whose name carries the process id, so no fixed corpus
+entry can name it. A descriptor therefore writes the placeholder
+`/@fuzz-scratch@`, which the harness expands into the scratch directory
+before the parser reads the file, and the name guard accepts an absolute name
+only when it starts with that directory and every component after it is a
+plain name. The expansion is a function of the input alone, and
+`scripts/generate-fuzz-seeds.sh` writes a seed that uses it.
+
+That name guard is lexical, and for an absolute name a lexical guard is not
+enough on its own. `<scratch>/link/victim` is all plain components and still
+leaves the directory when `link` is a symlink, because the absolute arm has no
+`RESOLVE_BENEATH` behind it and `O_NOFOLLOW` only guards the final component -
+and the extent is opened writable. `disk_vmdk` therefore confines the process
+with the same Landlock sandbox `disk_qcow2_chain` uses before the first
+iteration, and fails closed: with no confinement it refuses every absolute
+name and keeps fuzzing the relative arm, which the kernel still confines.
+
+### QCOW2 backing chains
+
+A qcow2 image may name a backing file, and `disk_qcow2` reaches none of the
+code that follows one: it opens every image with `backing_files: false`, which
+leaves `BackingFile::new`, the `Raw` versus `Qcow2` dispatch, all of
+`block/src/formats/qcow/backing.rs`, the `MAX_NESTING_DEPTH` recursion and the
+copy on write from backing arm of `deallocate_bytes` unreachable.
+`disk_qcow2_chain` covers them.
+
+Its input is two images, because a chain needs a backing image and that image
+has to be fuzzer controlled too, or the target would only ever see a valid
+backing file:
+
+```text
+[u32 LE top_len][top_len bytes: the image][the rest: the backing image]
+```
+
+The harness writes the backing half into its scratch directory, under the name
+the top image asks for and under `backing.img`, then writes the top image and
+opens it with backing files enabled. A backing image that itself names a
+backing file is what reaches the nested chain code, and one that names
+`backing.img`, the file it is itself written to, recurses until the nesting
+limit stops it. The directory also holds `leaf.raw`, a fixed empty file: two
+fuzzer images can only build a chain that closes on itself, which the nesting
+limit always refuses, so a chain that reads through three levels needs a third
+file, and any file is a valid raw backing.
+
+```
+scripts/generate-fuzz-seeds.sh
+cargo fuzz run disk_qcow2_chain -j `nproc` -- -max_len=4194312 \
+    -dict=fuzz/dictionaries/qcow2_chain.dict
+```
+
+#### The sandbox
+
+The backing file is named by *path*, and the engine resolves a relative name
+against the directory of the image that stores it with a plain `Path::join`,
+which follows `..` straight out of that directory, then opens it. A corpus
+entry could therefore name any file the fuzzer can reach. That is why backing
+files were excluded from the framework until this target existed, and it is
+why the target needs two independent protections.
+
+The first is a name guard in the harness. It parses `backing_file_offset` and
+`backing_file_size` out of the raw input bytes itself, exactly as
+`QcowHeader::new` does, because the decision has to be made before the `block`
+crate opens anything, and it refuses the input unless the name is a single
+`Component::Normal`: no absolute path, no `..`, no `.`, no subdirectory, no
+embedded NUL. It is applied to *both* images, since the backing image's own
+header can name a further file. The policy is refusal rather than clamping the
+name to a safe value, for the same reason the VMDK extent guard refuses: this
+is a safety check, and a check that rewrites attacker controlled offsets in
+place is more code whose bugs fail open, while a refusal fails closed. The
+mutation budget is protected instead by materializing the backing image under
+whatever plain name the input asks for, so a mutation of the name field still
+opens something.
+
+The second is Landlock, applied once per process before the first iteration,
+allowing writes only under the scratch directory and the fuzzer's own corpus
+and artifact directories, and reads only under those, `/proc` and the system
+library directories. It fails closed: if the kernel has no Landlock, the
+target refuses every input rather than running unconfined. This second belt
+exists because, unlike the VMDK extent path, the engine takes no `openat2`
+`RESOLVE_BENEATH` precaution for a qcow2 backing file, deliberately, so the
+harness guard would otherwise be the only thing between a corpus entry and a
+host path. The same sandbox is used by `disk_vmdk`, where the absolute extent
+arm gives up `RESOLVE_BENEATH` on a *writable* open; there the fail closed
+behaviour is to refuse absolute extent names rather than the whole input.
+
+#### Why it is a separate target
+
+`Qcow2` declares `PUNCH_HOLE_READS_ZEROES`, which is true only for an image
+without a backing file: with one, a discarded cluster reads *through* to the
+backing data, so the shadow model would report data corruption that is not
+there. `disk_qcow2_chain` therefore runs the fixed op program with the model
+off, and `OpenConfig::backing` is not fuzzer selectable, so `fuzz_program`
+cannot enable backing files under the model even for a format whose template
+changes. `disk_qcow2` and `disk_qcow2_ops` are untouched.
+
+### Keeping the corpus openable
+
+A seeded corpus is not enough on its own, because libFuzzer keeps every input
+that found a new edge, including the ones that only found new edges in the
+rejection path. Measured on a campaign corpus, that is what the disk targets
+had become: 6 of 764 `disk_vhd` entries opened (0.8%), 17 of 872 `disk_vhdx`
+(1.9%) and 131 of 1198 `disk_vmdk` (10.9%). For VHD, 634 of the 666 rejections
+were the `conectix` cookie alone, so nearly the whole mutation budget was
+spent on byte strings that could never reach the parser.
+
+`DiskFormat::magic_ok` is the harness side mirror of the first check the
+parser makes, and `fuzz_image` uses it to decide what to retain:
+
+| Format | Magic | Parser check it mirrors |
+| ------ | ----- | ----------------------- |
+| qcow2 | `QFI\xfb` at offset 0 | `QcowHeader::new` |
+| VHDX | `vhdxfile` at offset 0 | `FileTypeIdentifier::new` |
+| fixed VHD | `conectix` at the start of the last 512 bytes | `VhdFooter::validate_fixed` |
+| flat VMDK | a first line of `# Disk DescriptorFile` | `parse_header` |
+
+An input that fails it is still opened, so the parser's own rejection path is
+still fuzzed, but it is returned as `Corpus::Reject` and never retained. It
+cannot be a blanket rejection, because a parser does real work before it looks
+at the magic: `VhdFooter::new` queries the device size, does the length
+arithmetic that finds the footer and computes the footer checksum, and
+`VhdxHeader::new` reads and checksums both headers, all before their signature
+tests. Those paths are reached by exactly the inputs that then fail the magic,
+and the cost of dropping them was measured per region on the campaign
+corpora: 7 `block` regions lost for `disk_vhd`, 3 for `disk_vhdx`, 9 for
+`disk_vmdk` and 2 for `disk_qcow2`.
+
+So the harness keeps a bounded number of them instead: 8 distinct inputs per
+length class, per process, where the class is the binary magnitude of the
+input length. The budget is per class rather than flat because what the code
+in front of a magic check branches on is the length, and the shortest inputs
+are the rarest: a flat budget of 64 still lost the eight byte read failure in
+`FileTypeIdentifier::new` and the four byte length check in the VMDK
+descriptor reader. With the per class budget the retained subsets of the
+campaign corpora, 110 of 764 entries for `disk_vhd`, 265 of 872 for
+`disk_vhdx`, 1056 of 1198 for `disk_vmdk` and 1633 of 2129 for `disk_qcow2`,
+cover every region the full corpora cover.
+
+A checksum protected format needs one more thing: a custom mutator. `disk_vhd`
+and `disk_vhdx` both have one, because their parsers verify a signature and a
+checksum before they look at anything else, so a plain byte mutation is
+rejected at open and the fuzzer never reaches the structure it changed. Each
+target runs `libfuzzer_sys::fuzzer_mutate` and then restores the identifying
+bytes and recomputes the checksums over the result:
+
+| Target | What it restores | What it repairs | Why |
+| ------ | ---------------- | --------------- | --- |
+| `disk_vhdx` | the `vhdxfile` file type identifier and the `head` and `regi` signatures | the CRC-32C of both headers and both region tables | `VhdxHeader::new` refuses an image whose signatures or four checksums do not match |
+| `disk_vhd` | the `conectix` cookie in the last 512 bytes | the fixed VHD footer checksum, big endian | `VhdFooter::validate_fixed` refuses an image whose cookie or footer checksum does not match |
+
+The order matters: the identifying bytes sit inside the checksummed areas, so
+they are written first and the checksum is computed over them.
+
+The offsets and the algorithms are taken from the parser under test rather
+than from the specification, so the mutator and the code it feeds cannot
+disagree. Repair is necessary but not sufficient: the other validated fields
+still reject a mutation on their own merits. Neither repair is unconditional,
+so both rejection branches stay reachable and stay separable. One mutation in
+eight keeps its mutated magic with the checksums repaired, which is the only
+way to reach the signature branch with otherwise valid structures, and a
+different one in eight keeps its mutated checksum with the magic restored,
+which is the only way to reach the checksum branch at all, since the magic is
+tested first. Both targets still take arbitrary bytes, since the corpus
+holds images the mutator never produced.
+
+`disk_<format>_ops` builds its own valid image, so it needs no corpus:
+
+```
+cargo fuzz run disk_qcow2_ops -j `nproc`
+```
+
+#### Templates and the L2 cache
+
+A format may build more than one template image, and the program picks one by
+index, because some engine behaviour follows from the image layout rather
+than from the operations. qcow2 is the case in point: the number of L2 tables
+an image has follows from its cluster size, the engine caches 100 of them and
+writes a dirty table back when it evicts it, and with the default 64 KiB
+cluster one L2 table covers 512 MiB of the disk. No image small enough for
+the shadow model can then hold more tables than the cache does, so nothing
+ever evicted. The second qcow2 template is 4 MiB with 512 byte clusters,
+which is 128 L2 tables and still under the model's 8 MiB limit.
+
+A template alone is not enough either: with `MAX_OPS` at 64, no program of
+ordinary operations can keep 101 tables live however its offsets fall. The
+`Sweep` operation writes one sector into each of up to 192 consecutive L2
+tables and then reads every one of them back. The write pass outruns the
+cache; the read back pass is what makes the eviction testable rather than
+merely reachable, since a table written back to the wrong place, or dropped
+without a write back, only shows up when the data behind it is read after the
+cache has moved on. Because the sweep runs under the shadow model, that shows
+up as a read back mismatch.
+
+A sweep only walks its full run against a template that can actually evict.
+The stride is one L2 table of the small cluster image, 32 KiB, but the
+program picks the template by index and an even index selects the default
+one, whose single L2 table maps the whole disk: half of all programs were
+paying up to 384 I/Os per `Sweep` to write and read back the same table,
+which cannot evict anything. A format now declares which of its templates has
+more tables than the engine caches, and a sweep against any other walks a
+single table, so the operation stays live on both layouts and only the
+repeats go. Measured on `disk_qcow2_ops`, replaying a fixed 1080 entry corpus
+fell from 11.1s to 10.6s, and dirty evictions over that corpus were identical
+at 7000, so the saving costs no eviction coverage at all.
+
+Because that image is valid and starts out reading as zeroes, the framework
+keeps a shadow model of the disk contents and compares every read against it,
+which turns a silent offset translation bug into a crash. Both target families
+also check the trait contract itself: an accepted operation completes exactly
+once and carries its own user data, a rejected operation does not complete at
+all, a completion never reports more bytes than were requested, and a format
+with a fixed capacity neither changes its reported size without a successful
+resize nor transfers bytes beyond it. Two more invariants are opt in, because
+they follow from a format's layout rather than from the trait contract: a
+format whose data sits in the image file never advertises more capacity than
+the file holds, and a format whose read path is all or nothing never completes
+a read successfully with fewer bytes than were asked for.
+
+### Running in OSS-Fuzz
+
+Cloud Hypervisor is an [OSS-Fuzz](https://github.com/google/oss-fuzz) project,
+which builds every target in `fuzz/fuzz_targets` and runs it continuously.
+Staging these targets there - the `$OUT` layout, the seed corpora and the
+dictionaries - is left to a later change. Two properties matter for a target
+that runs there, and both are worth preserving when adding a format:
+
+- A target must be self contained at run time. It may read nothing from the
+  source tree, because only `$OUT` is shipped to the fuzzing machines. Images
+  live in a memfd, or, for a format that has to be opened from a directory,
+  in a scratch directory the target creates, and an `_ops` target builds its
+  template once per process through a temporary file and keeps it in memory
+  afterwards.
+- A crash must reproduce in a fresh process from its input alone. A template
+  image therefore has to be byte identical on every run, which rules out
+  timestamps, random identifiers and anything else that varies per process.
+
+Seed generation needs `qemu-img`, so an OSS-Fuzz build would have to install
+`qemu-utils`; without it the targets still build and run, just unseeded.
+
+### Adding a disk format
+
+Implement `DiskFormat` in `fuzz/src/disk_engine/formats/`:
+
+```rust
+impl DiskFormat for MyFormat {
+    const NAME: &'static str = "myformat";
+
+    fn open(
+        file: File,
+        path: Option<&Path>,
+        config: &OpenConfig,
+    ) -> BlockResult<Box<dyn AsyncFullDiskFile>> {
+        Ok(Box::new(MyDisk::new(file, config.direct)?))
+    }
+
+    fn template() -> Option<&'static [u8]> {
+        // A freshly created image of this format, built once per process,
+        // or None for a format the `block` crate cannot write.
+    }
+}
+```
+
+`path` is `Some` only when the format sets `NEEDS_PATH`, and a format whose
+`template` returns `None` gets no operation target.
+
+Set the associated constants that decide how the framework drives the format
+and which invariants hold for it: `NEEDS_PATH`, `MAX_IMAGE_LEN`,
+`COMPLETES_INLINE`, `PUNCH_HOLE_READS_ZEROES`, `FIXED_CAPACITY`,
+`CAPACITY_FILE_TAIL` and `NO_SHORT_READS`. Each defaults to the value that
+checks nothing, so a format only gains an invariant it can actually keep.
+Override `magic_ok` with the format's identifying bytes, mirroring the first
+check the parser makes, so the image target does not retain inputs that can
+never reach it. Then
+add the targets, the image target always and the operation target when there
+is a template, each a single call into the framework, and register them in
+`fuzz/Cargo.toml`.
+
+Finally give the image target something to start from: a `seed_<format>`
+function in `scripts/generate-fuzz-seeds.sh` and, when the format is magic
+heavy, a dictionary in `fuzz/dictionaries/`. If the parser checksums part of
+the image, add a repair function next to the adapter and a `fuzz_mutator!`
+that restores the magic and calls it, as `disk_vhd` and `disk_vhdx` do.
+
+Backing files are no longer left out, but they are confined: a fuzzed image
+names its backing file by path, so `disk_qcow2_chain` parses the name out of
+the image itself, refuses anything but a plain file name in its scratch
+directory, and confines the process with Landlock on top. A format that
+resolves names out of the image needs both before it may open them.

@@ -138,4 +138,9 @@ unnecessary_semicolon = "deny"
 
 [workspace.lints.rust]
 # `level = warn` is irrelevant here but mandatory for rustc/cargo
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(devcli_testenv)'] }
+# `fuzzing` is set by `cargo fuzz`; `block` gates the VMDK extent walk switch
+# on it (block/src/formats/vmdk/flat.rs).
+unexpected_cfgs = { level = "warn", check-cfg = [
+  'cfg(devcli_testenv)',
+  'cfg(fuzzing)',
+] }

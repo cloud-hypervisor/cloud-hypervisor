@@ -1,0 +1,50 @@
+# Copyright © 2026 The Cloud Hypervisor Authors. All rights reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# libFuzzer dictionary for the VHDX image format, used by the disk_vhdx
+# target. The signatures and GUIDs are the ones the parser in the block crate
+# looks for; GUIDs are in the little-endian byte order VHDX stores them in.
+
+file_identifier="vhdxfile"
+header_signature="head"
+region_signature="regi"
+metadata_signature="metadata"
+
+# Log entry signatures.
+log_entry="loge"
+log_zero="zero"
+log_descriptor="desc"
+log_data="data"
+
+# Region table entries.
+region_bat_guid="\x66\x77\xc2\x2d\x23\xf6\x00\x42\x9d\x64\x11\x5e\x9b\xfd\x4a\x08"
+region_metadata_guid="\x06\xa2\x7c\x8b\x90\x47\x9a\x4b\xb8\xfe\x57\x5f\x05\x0f\x88\x6e"
+region_required="\x01\x00\x00\x00"
+
+# Metadata table item identifiers.
+meta_file_parameters="\x37\x67\xa1\xca\x36\xfa\x43\x4d\xb3\xb6\x33\xf0\xaa\x44\xe7\x6b"
+meta_virtual_disk_size="\x24\x42\xa5\x2f\x1b\xcd\x76\x48\xb2\x11\x5d\xbe\xd8\x3b\xf4\xb8"
+meta_virtual_disk_id="\xab\x12\xca\xbe\xe6\xb2\x23\x45\x93\xef\xc3\x09\xe0\x00\xc7\x46"
+meta_logical_sector_size="\x1d\xbf\x41\x81\x6f\xa9\x09\x47\xba\x47\xf2\x33\xa8\xfa\xab\x5f"
+meta_physical_sector_size="\xc7\x48\xa3\xcd\x5d\x44\x71\x44\x9c\xc9\xe9\x88\x52\x51\xc5\x56"
+meta_parent_locator="\x2d\x5f\xd3\xa8\x0b\xb3\x4d\x45\xab\xf7\xd3\xd8\x48\x34\xab\x0c"
+
+# Metadata entry flags: is_required, and the file parameter bits.
+meta_flag_required="\x04\x00\x00\x00"
+meta_has_parent="\x02\x00\x00\x00"
+
+# Block sizes the metadata parser bounds against: 1 MiB and 256 MiB.
+block_size_min="\x00\x00\x10\x00"
+block_size_max="\x00\x00\x00\x10"
+
+# Sector sizes.
+sector_size_512="\x00\x02\x00\x00"
+sector_size_4k="\x00\x10\x00\x00"
+
+# BAT entry states: not present, undefined, zero, unmapped, fully present.
+bat_state_present="\x06"
+bat_state_partially_present="\x07"
+bat_state_undefined="\x01"
+bat_state_zero="\x02"
+bat_state_unmapped="\x03"
