@@ -16,6 +16,7 @@ pub mod formats;
 mod image;
 mod model;
 mod program;
+pub mod sandbox;
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
