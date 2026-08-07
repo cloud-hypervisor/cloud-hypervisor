@@ -6,21 +6,20 @@
 
 //! Thread safe backing file readers for QCOW2 images.
 
-use std::fs::File;
 use std::io;
-use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::os::unix::fs::FileExt;
 use std::sync::Arc;
 
 use super::decoder::Decoder;
 use super::metadata::{BackingRead, ClusterReadMapping, QcowMetadata};
 use super::parser::{BackingFile, BackingKind, Error as QcowError};
-use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
+use crate::aligned_file::AlignedFile;
+use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::formats::qcow::common::decompress_cluster;
 
-/// Raw backing file using position-independent reads on a duplicated fd.
+/// Raw backing file using position-independent reads.
 pub(crate) struct RawBacking {
-    pub(crate) file: File,
+    pub(crate) file: AlignedFile,
     pub(crate) virtual_size: u64,
 }
 
@@ -53,7 +52,7 @@ impl BackingRead for RawBacking {
 /// are handled recursively via the optional `backing_file` field.
 pub(crate) struct Qcow2Backing {
     pub(crate) metadata: Arc<QcowMetadata>,
-    pub(crate) data_file: File,
+    pub(crate) data_file: AlignedFile,
     pub(crate) backing_file: Option<Arc<dyn BackingRead>>,
     pub(crate) cluster_size: u64,
     pub(crate) decoder: Arc<dyn Decoder>,
@@ -143,23 +142,13 @@ impl Qcow2Backing {
 pub(super) fn shared_backing_from(bf: BackingFile) -> BlockResult<Arc<dyn BackingRead>> {
     let (kind, virtual_size) = bf.into_kind();
 
-    let dup_fd = |fd: BorrowedFd<'_>| -> BlockResult<OwnedFd> {
-        fd.try_clone_to_owned().map_err(|e| {
-            BlockError::new(
-                BlockErrorKind::Io,
-                QcowError::BackingFileIo(String::new(), e),
-            )
-            .with_op(ErrorOp::DupBackingFd)
-        })
-    };
-
     match kind {
-        BackingKind::Raw(raw_file) => {
-            let file = File::from(dup_fd(raw_file.as_fd())?);
-            Ok(Arc::new(RawBacking { file, virtual_size }))
-        }
+        BackingKind::Raw(file) => Ok(Arc::new(RawBacking { file, virtual_size })),
         BackingKind::Qcow { inner, backing } => {
-            let data_file = File::from(dup_fd(inner.raw_file.as_fd())?);
+            let data_file =
+                inner.raw_file.file().try_clone().map_err(|e| {
+                    BlockError::new(BlockErrorKind::Io, QcowError::CloneBackingFile(e))
+                })?;
             let metadata = Arc::new(QcowMetadata::new(*inner));
             Ok(Arc::new(Qcow2Backing {
                 cluster_size: metadata.cluster_size(),

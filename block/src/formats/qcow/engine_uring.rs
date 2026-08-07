@@ -296,6 +296,7 @@ mod unit_tests {
     use crate::disk_file::AsyncDiskFile;
     use crate::formats::qcow::common::unit_tests::compress_allocated_clusters;
     use crate::formats::qcow::{BackingFileConfig, ImageType, QcowDisk, QcowTempDisk};
+    use crate::test_util::require_direct_io;
 
     fn create_disk_with_data(
         file_size: u64,
@@ -814,26 +815,16 @@ mod unit_tests {
 
     #[test]
     fn test_qcow_async_alignment_with_direct_io() {
-        let tmp_disk = match QcowTempDisk::new(100 * 1024 * 1024, None, true, true, true) {
-            Ok(d) => d,
-            Err(_) => {
-                eprintln!("skipping: O_DIRECT not supported on this filesystem");
-                return;
-            }
-        };
+        require_direct_io!();
+        let tmp_disk = QcowTempDisk::new(100 * 1024 * 1024, None, true, true, true).unwrap();
         let async_io = tmp_disk.disk().create_async_io(1).unwrap();
         assert!(async_io.alignment() >= SECTOR_SIZE);
     }
 
     #[test]
     fn test_qcow_async_sub_sector_read_with_direct_io() {
-        let tmp_disk = match QcowTempDisk::new(100 * 1024 * 1024, None, true, true, true) {
-            Ok(d) => d,
-            Err(_) => {
-                eprintln!("skipping: O_DIRECT not supported on this filesystem");
-                return;
-            }
-        };
+        require_direct_io!();
+        let tmp_disk = QcowTempDisk::new(100 * 1024 * 1024, None, true, true, true).unwrap();
 
         let pattern = vec![0xAB; 65536];
         async_write(tmp_disk.disk(), 0, &pattern);
@@ -847,13 +838,8 @@ mod unit_tests {
 
     #[test]
     fn test_qcow_async_direct_io_write_read_roundtrip() {
-        let tmp_disk = match QcowTempDisk::new(100 * 1024 * 1024, None, true, true, true) {
-            Ok(d) => d,
-            Err(_) => {
-                eprintln!("skipping: O_DIRECT not supported on this filesystem");
-                return;
-            }
-        };
+        require_direct_io!();
+        let tmp_disk = QcowTempDisk::new(100 * 1024 * 1024, None, true, true, true).unwrap();
 
         let pattern: Vec<u8> = (0..128 * 1024).map(|i| (i % 251) as u8).collect();
         async_write(tmp_disk.disk(), 0, &pattern);

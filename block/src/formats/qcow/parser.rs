@@ -8,7 +8,7 @@ use std::cmp::{max, min};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::fs::{OpenOptions, read_link};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::FileExt;
+use std::os::unix::fs::{FileExt, OpenOptionsExt};
 use std::path::Path;
 use std::{io, result, str};
 
@@ -56,6 +56,8 @@ pub enum Error {
     BackingFilesDisabled,
     #[error("Backing file name is too long: {0} bytes over")]
     BackingFileTooLong(usize),
+    #[error("Failed to clone backing file")]
+    CloneBackingFile(#[source] io::Error),
     #[error("Image is marked corrupt and cannot be opened for writing")]
     CorruptImage,
     #[error("Failed to evict cache")]
@@ -189,15 +191,17 @@ impl BackingFile {
             ));
         }
 
-        let backing_raw_file = OpenOptions::new()
-            .read(true)
-            .open(&config.path)
-            .map_err(|e| {
-                BlockError::new(
-                    BlockErrorKind::Io,
-                    Error::BackingFileIo(config.path.clone(), e),
-                )
-            })?;
+        let mut options = OpenOptions::new();
+        options.read(true);
+        if direct_io {
+            options.custom_flags(libc::O_DIRECT);
+        }
+        let backing_raw_file = options.open(&config.path).map_err(|e| {
+            BlockError::new(
+                BlockErrorKind::Io,
+                Error::BackingFileIo(config.path.clone(), e),
+            )
+        })?;
 
         let mut raw_file = AlignedFile::new(backing_raw_file, direct_io);
 
@@ -913,6 +917,7 @@ mod unit_tests {
     use super::super::util::{self, ZERO_FLAG};
     use super::*;
     use crate::formats::qcow::{QcowDisk, QcowTempDisk};
+    use crate::test_util::require_direct_io;
 
     fn valid_header_v3() -> Vec<u8> {
         vec![
@@ -955,6 +960,29 @@ mod unit_tests {
         ]
     }
 
+    #[test]
+    fn raw_backing_file_uses_direct_io() {
+        require_direct_io!();
+        let tmp = TempFile::new().unwrap();
+        tmp.as_file().write_all(&[0u8; 4096]).unwrap();
+        let config = BackingFileConfig {
+            path: tmp.as_path().to_string_lossy().into_owned(),
+            format: Some(ImageType::Raw),
+        };
+
+        let backing = BackingFile::new(Some(&config), true, 1, false)
+            .unwrap()
+            .unwrap();
+        let (kind, _) = backing.into_kind();
+        let BackingKind::Raw(file) = kind else {
+            panic!("Expected raw backing file");
+        };
+
+        // SAFETY: file owns a valid descriptor for the duration of this call.
+        let flags = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFL) };
+        assert!(flags >= 0);
+        assert_ne!(flags & libc::O_DIRECT, 0);
+    }
     // Test case found by clusterfuzz to allocate excessive memory.
     fn test_huge_header() -> Vec<u8> {
         vec![
