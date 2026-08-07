@@ -160,6 +160,26 @@ pub(super) fn cow_write_sync(
     Ok(())
 }
 
+fn advance_iovecs(iovecs: &mut Vec<libc::iovec>, mut n: usize) {
+    let mut consumed = 0;
+    for iov in iovecs.iter_mut() {
+        if n == 0 {
+            break;
+        }
+        if n >= iov.iov_len {
+            n -= iov.iov_len;
+            consumed += 1;
+        } else {
+            // SAFETY: n is within this iovec, so the base stays inside the
+            // same buffer.
+            iov.iov_base = unsafe { (iov.iov_base as *mut u8).add(n) as *mut libc::c_void };
+            iov.iov_len -= n;
+            n = 0;
+        }
+    }
+    iovecs.drain(..consumed);
+}
+
 /// Reads cluster mappings synchronously into an owned operation, filling
 /// holes, decompressing, and reading from the backing file as each
 /// mapping requires.
@@ -171,6 +191,36 @@ pub(super) fn scatter_read_sync(
     cluster_size: u64,
     decoder: &dyn Decoder,
 ) -> AsyncIoResult<()> {
+    if let [ClusterReadMapping::Allocated { offset, length }] = mappings.as_slice()
+        && *length as usize == op.total_len()
+        && op.iovecs().len() <= libc::UIO_MAXIOV as usize
+    {
+        let total = op.total_len();
+        let mut iovs = op.iovecs().to_vec();
+        let mut filled = 0usize;
+        while filled < total {
+            // SAFETY: iovs describes valid writable memory for the
+            // remaining total - filled bytes.
+            let n = match unsafe {
+                data_file
+                    .file()
+                    .read_vectored_at(&iovs, *offset + filled as u64)
+            } {
+                Ok(0) => {
+                    return Err(AsyncIoError::ReadVectored(io::Error::from(
+                        io::ErrorKind::UnexpectedEof,
+                    )));
+                }
+                Ok(n) => n,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(AsyncIoError::ReadVectored(e)),
+            };
+            filled += n;
+            advance_iovecs(&mut iovs, n);
+        }
+        return Ok(());
+    }
+
     let mut buf_offset = 0usize;
     for mapping in mappings {
         match mapping {
@@ -240,9 +290,14 @@ pub(crate) mod unit_tests {
 
     use flate2::Compression;
     use flate2::write::DeflateEncoder;
+    use vmm_sys_util::tempfile::TempFile;
 
     use super::super::decoder::ZlibDecoder;
-    use super::decompress_cluster;
+    use super::super::metadata::ClusterReadMapping;
+    use super::super::qcow_raw_file::QcowRawFile;
+    use super::{decompress_cluster, scatter_read_sync};
+    use crate::aligned_file::AlignedFile;
+    use crate::async_io::{AsyncIoOperation, OwnedIoBuffer};
 
     const COMPRESSED_FLAG: u64 = 1 << 62;
     const CLUSTER_USED_FLAG: u64 = 1 << 63;
@@ -357,5 +412,60 @@ pub(crate) mod unit_tests {
         let corrupt = vec![0xffu8; 64];
         let err = decompress_cluster(&corrupt, 65536, &ZlibDecoder {}).unwrap_err();
         assert_eq!(err.raw_os_error(), Some(libc::EIO));
+    }
+
+    #[test]
+    fn single_full_mapping_short_read_errors() {
+        // The mapping claims 200 bytes but the file holds only 100.
+        let src: Vec<u8> = (0..100u8).collect();
+        let tmp = TempFile::new().unwrap();
+        tmp.as_file().write_all(&src).unwrap();
+        tmp.as_file().sync_all().unwrap();
+
+        let aligned = AlignedFile::new(tmp.as_file().try_clone().unwrap(), false);
+        let data_file = QcowRawFile::from(aligned, 65536, 16).unwrap();
+
+        let mut op = AsyncIoOperation::read_to_vec(0, OwnedIoBuffer::from_vec(vec![0u8; 200]), 1);
+        let mappings = vec![ClusterReadMapping::Allocated {
+            offset: 0,
+            length: 200,
+        }];
+
+        assert!(
+            scatter_read_sync(mappings, &mut op, &data_file, &None, 65536, &ZlibDecoder {})
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn single_full_mapping_reads_fast_path() {
+        let cluster = 65536usize;
+        let src: Vec<u8> = (0..cluster).map(|i| (i % 251) as u8).collect();
+        let tmp = TempFile::new().unwrap();
+        tmp.as_file().write_all(&src).unwrap();
+        tmp.as_file().sync_all().unwrap();
+
+        let aligned = AlignedFile::new(tmp.as_file().try_clone().unwrap(), false);
+        let data_file = QcowRawFile::from(aligned, cluster as u64, 16).unwrap();
+
+        let mut op =
+            AsyncIoOperation::read_to_vec(0, OwnedIoBuffer::from_vec(vec![0u8; cluster]), 1);
+        let mappings = vec![ClusterReadMapping::Allocated {
+            offset: 0,
+            length: cluster as u64,
+        }];
+
+        scatter_read_sync(
+            mappings,
+            &mut op,
+            &data_file,
+            &None,
+            cluster as u64,
+            &ZlibDecoder {},
+        )
+        .unwrap();
+
+        let buffer = op.into_completion_buffer().unwrap();
+        assert_eq!(buffer.as_slice(), src.as_slice());
     }
 }
