@@ -578,18 +578,21 @@ impl VirtioPciDevice {
                 queue
                     .try_set_used_ring_address(GuestAddress(state.queues[i].used_ring))
                     .unwrap();
-                queue.set_next_avail(
-                    queue
+                // A queue the guest never set up has zeroed ring addresses, so
+                // reading its used index would access guest address 0x2, which
+                // no guest backs with RAM.
+                if state.device_activated && state.queues[i].used_ring != 0 {
+                    let used_idx = queue
                         .used_idx(memory.memory().deref(), Ordering::Acquire)
-                        .unwrap()
-                        .0,
-                );
-                queue.set_next_used(
-                    queue
-                        .used_idx(memory.memory().deref(), Ordering::Acquire)
-                        .unwrap()
-                        .0,
-                );
+                        .map_err(|e| {
+                            VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
+                                "Failed to read the used index of queue {i}: {e}"
+                            ))
+                        })?
+                        .0;
+                    queue.set_next_avail(used_idx);
+                    queue.set_next_used(used_idx);
+                }
             }
 
             (
@@ -1372,6 +1375,7 @@ mod unit_tests {
     use std::thread;
 
     use vm_device::interrupt::InterruptSourceConfig;
+    use vm_memory::Bytes;
 
     use super::*;
     use crate::{ActivateError, DEVICE_NEEDS_RESET};
@@ -1787,5 +1791,95 @@ mod unit_tests {
 
         assert_eq!(dev.queue_evts()[0].read().unwrap(), 1);
         dev.queue_evts()[1].read().unwrap_err();
+    }
+
+    // Unlike the helpers above, guest RAM does not start at zero here, so a read
+    // of the low addresses fails instead of returning whatever lives there.
+    const RAM_BASE: u64 = 0x4000_0000;
+    const QUEUE_SIZE: u16 = 256;
+
+    fn restored_queue_state(used_ring: u64) -> QueueState {
+        let activated = used_ring != 0;
+        QueueState {
+            max_size: QUEUE_SIZE,
+            size: QUEUE_SIZE,
+            ready: activated,
+            desc_table: if activated { RAM_BASE } else { 0 },
+            avail_ring: if activated { RAM_BASE + 0x1000 } else { 0 },
+            used_ring,
+        }
+    }
+
+    fn restore_virtio_pci_device(
+        memory: GuestMemoryAtomic<GuestMemoryMmap>,
+        state: &VirtioPciDeviceState,
+    ) -> Result<VirtioPciDevice> {
+        let device = Arc::new(Mutex::new(QueuedTestDevice {
+            queue_sizes: vec![QUEUE_SIZE; state.queues.len()],
+        }));
+        let snapshot = Snapshot::new_from_state(state).unwrap();
+        VirtioPciDevice::new(
+            "test-dev".to_string(),
+            memory,
+            device,
+            None,
+            &TestInterruptManager,
+            0,
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+            false,
+            None,
+            Arc::new(Mutex::new(Vec::new())),
+            Some(&snapshot),
+        )
+    }
+
+    // An inactive device is snapshotted with zeroed ring addresses, so reading
+    // its used index would target guest address 0x2 and fail.
+    #[test]
+    fn restore_inactive_device_skips_ring_index_restore() {
+        let memory = GuestMemoryAtomic::new(
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(RAM_BASE), 0x3000)]).unwrap(),
+        );
+        let state = VirtioPciDeviceState {
+            device_activated: false,
+            queues: vec![restored_queue_state(0)],
+            interrupt_status: 0,
+            cap_pci_cfg_offset: 0,
+            cap_pci_cfg: VirtioPciCfgCap::new().as_slice().to_vec(),
+        };
+
+        let dev = restore_virtio_pci_device(memory, &state).unwrap();
+
+        assert!(!dev.device_activated.load(Ordering::SeqCst));
+        assert_eq!(dev.queues[0].next_avail(), 0);
+        assert_eq!(dev.queues[0].next_used(), 0);
+    }
+
+    // The activated path is unchanged: both indexes still come from used_idx.
+    #[test]
+    fn restore_activated_device_restores_ring_indexes_from_used_idx() {
+        let memory = GuestMemoryAtomic::new(
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(RAM_BASE), 0x3000)]).unwrap(),
+        );
+        let used_ring = RAM_BASE + 0x2000;
+        // virtq_used.idx sits at used_ring + 2, after the 2-byte flags field.
+        memory
+            .memory()
+            .write_obj(7u16.to_le(), GuestAddress(used_ring + 2))
+            .unwrap();
+
+        let state = VirtioPciDeviceState {
+            device_activated: true,
+            queues: vec![restored_queue_state(used_ring)],
+            interrupt_status: 0,
+            cap_pci_cfg_offset: 0,
+            cap_pci_cfg: VirtioPciCfgCap::new().as_slice().to_vec(),
+        };
+
+        let dev = restore_virtio_pci_device(memory, &state).unwrap();
+
+        assert!(dev.device_activated.load(Ordering::SeqCst));
+        assert_eq!(dev.queues[0].next_avail(), 7);
+        assert_eq!(dev.queues[0].next_used(), 7);
     }
 }
