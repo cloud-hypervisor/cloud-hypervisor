@@ -411,7 +411,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
             test_disk_arg.push_str(",backing_files=on");
         }
     } else if test_file == BLK_IO_TEST_IMG {
-        test_disk_arg.push_str(",image_type=raw");
+        test_disk_arg.push_str(&format!(",image_type={}", control.test_image_format));
     }
     guest.num_cpu = num_queues;
     let mut child = GuestCommand::new(&guest)

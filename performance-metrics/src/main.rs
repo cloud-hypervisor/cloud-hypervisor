@@ -221,6 +221,7 @@ pub struct PerformanceTestControl {
     num_boot_vcpus: Option<u8>,
     num_ops: Option<u32>, // Workload size for micro benchmarks
     vm_type: GuestVmType,
+    test_image_format: ImageFormat,
 }
 
 impl fmt::Display for PerformanceTestControl {
@@ -268,6 +269,7 @@ impl PerformanceTestControl {
             num_boot_vcpus: Some(1),
             num_ops: None,
             vm_type: GuestVmType::Regular,
+            test_image_format: ImageFormat::Raw,
         }
     }
 }
@@ -297,6 +299,9 @@ impl PerformanceTest {
                 control.test_timeout = test_timeout;
             }
             control.vm_type = overrides.vm_type;
+            if let Some(test_image_format) = overrides.test_image_format {
+                control.test_image_format = test_image_format;
+            }
             control
         };
 
