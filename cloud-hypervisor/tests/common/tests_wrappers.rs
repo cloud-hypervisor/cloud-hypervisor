@@ -764,20 +764,8 @@ pub(crate) fn test_vhost_user_blk(
         .args(["--memory", "size=512M,hotplug_size=2048M,shared=on"])
         .args(["--kernel", kernel_path.to_str().unwrap()])
         .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-        .args([
-            "--disk",
-            format!(
-                "path={}",
-                guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-            )
-            .as_str(),
-            format!(
-                "path={}",
-                guest.disk_config.disk(DiskType::CloudInit).unwrap()
-            )
-            .as_str(),
-            blk_params.as_str(),
-        ])
+        .default_disks()
+        .args(["--disk", blk_params.as_str()])
         .default_net()
         .args(["--api-socket", &api_socket])
         .capture_output()
@@ -1911,18 +1899,9 @@ pub(crate) fn _test_pci_multiple_segments(
         .default_kernel_cmdline_with_platform(Some(&format!(
             "num_pci_segments={max_num_pci_segments}"
         )))
+        .default_disks()
         .args([
             "--disk",
-            format!(
-                "path={}",
-                guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-            )
-            .as_str(),
-            format!(
-                "path={}",
-                guest.disk_config.disk(DiskType::CloudInit).unwrap()
-            )
-            .as_str(),
             format!("path={test_disk_path},pci_segment={pci_segments_for_disk},image_type=raw")
                 .as_str(),
         ])
@@ -2157,20 +2136,8 @@ pub fn _test_virtio_block_dynamic_vhdx_expand(guest: &Guest) {
         .default_cpus()
         .default_memory()
         .default_kernel_cmdline()
-        .args([
-            "--disk",
-            format!(
-                "path={}",
-                guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-            )
-            .as_str(),
-            format!(
-                "path={}",
-                guest.disk_config.disk(DiskType::CloudInit).unwrap()
-            )
-            .as_str(),
-            format!("path={vhdx_path}").as_str(),
-        ])
+        .default_disks()
+        .args(["--disk", format!("path={vhdx_path}").as_str()])
         .default_net()
         .capture_output()
         .spawn()
@@ -2303,18 +2270,9 @@ pub(crate) fn _test_virtio_block_vmdk_enospc(guest: &Guest, subformat: &str) {
         .default_cpus()
         .default_memory()
         .default_kernel_cmdline()
+        .default_disks()
         .args([
             "--disk",
-            format!(
-                "path={}",
-                guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-            )
-            .as_str(),
-            format!(
-                "path={}",
-                guest.disk_config.disk(DiskType::CloudInit).unwrap()
-            )
-            .as_str(),
             // Force the flat VMDK backend explicitly.
             format!("path={vmdk_path_str},image_type=vmdk").as_str(),
         ])
@@ -2450,20 +2408,8 @@ pub(crate) fn _test_virtio_block_vmdk_extent_spanning(guest: &Guest, direct: boo
         .default_cpus()
         .default_memory()
         .default_kernel_cmdline()
-        .args([
-            "--disk",
-            format!(
-                "path={}",
-                guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-            )
-            .as_str(),
-            format!(
-                "path={}",
-                guest.disk_config.disk(DiskType::CloudInit).unwrap()
-            )
-            .as_str(),
-            data_disk.as_str(),
-        ])
+        .default_disks()
+        .args(["--disk", data_disk.as_str()])
         .default_net()
         .capture_output()
         .spawn()
@@ -3208,20 +3154,8 @@ pub(crate) fn _test_virtio_block_topology(guest: &Guest, loop_dev: &str) {
         .default_cpus()
         .default_memory()
         .default_kernel_cmdline()
-        .args([
-            "--disk",
-            format!(
-                "path={}",
-                guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-            )
-            .as_str(),
-            format!(
-                "path={}",
-                guest.disk_config.disk(DiskType::CloudInit).unwrap()
-            )
-            .as_str(),
-            format!("path={loop_dev}").as_str(),
-        ])
+        .default_disks()
+        .args(["--disk", format!("path={loop_dev}").as_str()])
         .default_net()
         .capture_output()
         .spawn()

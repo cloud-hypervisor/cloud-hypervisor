@@ -418,20 +418,8 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
         .default_cpus()
         .args(["--memory", "size=4G"])
         .default_kernel_cmdline()
-        .args([
-            "--disk",
-            format!(
-                "path={}",
-                guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-            )
-            .as_str(),
-            format!(
-                "path={}",
-                guest.disk_config.disk(DiskType::CloudInit).unwrap()
-            )
-            .as_str(),
-            test_disk_arg.as_str(),
-        ])
+        .default_disks()
+        .args(["--disk", test_disk_arg.as_str()])
         .default_net()
         .args(["--api-socket", &api_socket])
         .capture_output()
