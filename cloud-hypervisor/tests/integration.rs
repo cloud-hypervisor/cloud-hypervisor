@@ -8551,7 +8551,7 @@ mod snapshot_restore_common {
         }
 
         let cloudinit_params = format!(
-            "path={},iommu=on",
+            "path={},iommu=on,image_type=raw",
             guest.disk_config.disk(DiskType::CloudInit).unwrap()
         );
 
@@ -9710,7 +9710,7 @@ mod common_sequential {
         );
 
         let cloudinit_params = format!(
-            "path={},iommu=on",
+            "path={},iommu=on,image_type=raw",
             guest.disk_config.disk(DiskType::CloudInit).unwrap()
         );
 
