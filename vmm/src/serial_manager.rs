@@ -70,6 +70,10 @@ pub enum Error {
     #[error("Error accepting connection")]
     AcceptConnection(#[source] io::Error),
 
+    /// Cannot shutdown the connection
+    #[error("Error shutting the connection down")]
+    ShutdownConnection(#[source] io::Error),
+
     /// Cannot duplicate file descriptor
     #[error("Error duplicating file descriptor")]
     DupFd(#[source] io::Error),
@@ -335,6 +339,21 @@ impl SerialManager {
                                         unreachable!();
                                     };
                                     if let Some(console) = socket_console.as_mut() {
+                                        if console.connected() {
+                                            epoll::ctl(
+                                                epoll_fd.as_raw_fd(),
+                                                epoll::ControlOptions::EPOLL_CTL_DEL,
+                                                console.as_raw_fd(),
+                                                epoll::Event::new(
+                                                    epoll::Events::EPOLLIN,
+                                                    EpollDispatch::File as u64,
+                                                ),
+                                            )
+                                            .map_err(Error::Epoll)?;
+                                            console
+                                                .shutdown()
+                                                .map_err(Error::ShutdownConnection)?;
+                                        }
                                         console
                                             .accept(listener)
                                             .map_err(Error::AcceptConnection)?;

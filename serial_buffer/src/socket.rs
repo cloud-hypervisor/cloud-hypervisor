@@ -55,11 +55,20 @@ impl SocketConsole {
         Box::new(SharedSerialBuffer(self.buffer.clone()))
     }
 
-    /// Accept a client, replacing any currently connected one.
-    pub fn accept(&mut self, listener: &UnixListener) -> io::Result<()> {
-        if let Some(previous) = self.reader.take() {
-            previous.shutdown(Shutdown::Both)?;
+    pub fn connected(&self) -> bool {
+        self.reader.is_some()
+    }
+
+    pub fn shutdown(&mut self) -> io::Result<()> {
+        if let Some(stream) = self.reader.take() {
+            let res = stream.shutdown(Shutdown::Both);
+            self.detach();
+            res?;
         }
+        Ok(())
+    }
+
+    pub fn accept(&mut self, listener: &UnixListener) -> io::Result<()> {
         let (stream, _) = listener.accept()?;
         stream.set_nonblocking(true)?;
         let writer = stream.try_clone()?;

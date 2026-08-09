@@ -461,6 +461,14 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                 if let (Some(console), Endpoint::Socket(listener)) =
                     (self.socket_console.as_mut(), &self.endpoint)
                 {
+                    if console.connected() {
+                        helper.del_event_custom(
+                            console.as_raw_fd(),
+                            FILE_EVENT,
+                            epoll::Events::EPOLLIN,
+                        )?;
+                        console.shutdown().map_err(EpollHelperError::IoError)?;
+                    }
                     console
                         .accept(listener)
                         .map_err(EpollHelperError::IoError)?;
