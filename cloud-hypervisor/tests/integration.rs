@@ -6654,13 +6654,17 @@ mod common_parallel {
             .args(memory_param)
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .default_disks()
             .args(["--net", net_params.as_str()])
             .args(["--api-socket", &src_api_socket])
             .args([
                 "--pmem",
                 format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
             ]);
+        if upgrade_test {
+            src_vm_cmd.legacy_default_disks();
+        } else {
+            src_vm_cmd.default_disks();
+        }
         let mut src_child = src_vm_cmd.capture_output().spawn().unwrap();
 
         // Start the destination VM
@@ -10156,13 +10160,17 @@ mod common_sequential {
             .args(memory_param)
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .default_disks()
             .args(["--net", net_params.as_str()])
             .args(["--api-socket", &src_api_socket])
             .args([
                 "--pmem",
                 format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
             ]);
+        if upgrade_test {
+            src_vm_cmd.legacy_default_disks();
+        } else {
+            src_vm_cmd.default_disks();
+        }
         let mut src_child = src_vm_cmd.capture_output().spawn().unwrap();
 
         // Start the destination VM
@@ -10372,13 +10380,17 @@ mod common_sequential {
             .args(memory_param)
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .default_disks()
             .args(["--net", net_params.as_str()])
             .args(["--api-socket", &src_api_socket])
             .args([
                 "--pmem",
                 format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
             ]);
+        if upgrade_test {
+            src_vm_cmd.legacy_default_disks();
+        } else {
+            src_vm_cmd.default_disks();
+        }
         let mut src_child = src_vm_cmd.capture_output().spawn().unwrap();
 
         // Start the destination VM
@@ -10796,7 +10808,6 @@ mod common_sequential {
             .args(memory_param)
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .default_disks()
             .args(["--net", net_params.as_str()])
             .args(["--api-socket", &src_api_socket])
             .args([
@@ -10804,6 +10815,11 @@ mod common_sequential {
                 format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
             ])
             .args(["--watchdog"]);
+        if upgrade_test {
+            src_vm_cmd.legacy_default_disks();
+        } else {
+            src_vm_cmd.default_disks();
+        }
         let mut src_child = src_vm_cmd.capture_output().spawn().unwrap();
 
         // Start the destination VM

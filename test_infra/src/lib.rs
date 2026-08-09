@@ -2040,6 +2040,24 @@ impl<'a> GuestCommand<'a> {
         self.default_cloudinit_disk()
     }
 
+    // Needed for when running old version as part of live upgrade
+    pub fn legacy_default_disks(&mut self) -> &mut Self {
+        let mut disks = vec![
+            "--disk".to_string(),
+            format!(
+                "path={}",
+                self.guest
+                    .disk_config
+                    .disk(DiskType::OperatingSystem)
+                    .unwrap(),
+            ),
+        ];
+        if let Some(cloud_init) = self.guest.disk_config.disk(DiskType::CloudInit) {
+            disks.push(format!("path={cloud_init}"));
+        }
+        self.args(disks)
+    }
+
     pub fn default_cloudinit_disk(&mut self) -> &mut Self {
         if let Some(cloud_init) = self.guest.disk_config.disk(DiskType::CloudInit) {
             self.args([
