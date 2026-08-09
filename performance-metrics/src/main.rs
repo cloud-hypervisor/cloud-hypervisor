@@ -1847,7 +1847,8 @@ fn main() {
                     "Override the image format used for block tests, supported values: qcow2, raw, vhd, vhdx. \
                      Default is 'raw'.",
                 )
-                .num_args(1),
+                .num_args(1)
+                .value_parser(["raw", "qcow2", "vhd", "vhdx"]),
         )
         .arg(
             Arg::new("vm-type")
