@@ -386,7 +386,7 @@ mod common_parallel {
                 "add-disk",
                 Some(
                     format!(
-                        "path={},id=test0,pci_segment=1,iommu=on",
+                        "path={},id=test0,pci_segment=1,iommu=on,image_type=raw",
                         test_disk_path.as_str()
                     )
                     .as_str(),
@@ -478,7 +478,8 @@ mod common_parallel {
             .default_disks()
             .args([
                 "--disk",
-                format!("path={test_disk_path},pci_segment={TEST_DISK_NODE}").as_str(),
+                format!("path={test_disk_path},pci_segment={TEST_DISK_NODE},image_type=raw")
+                    .as_str(),
             ])
             .default_net()
             .spawn()
@@ -2878,7 +2879,11 @@ mod common_parallel {
             .args([
                 "--disk",
                 format!("path={},image_type=raw", vfio_disk_path.to_str().unwrap()).as_str(),
-                format!("path={},iommu=on,readonly=true", blk_file_path.to_str().unwrap()).as_str(),
+                format!(
+                    "path={},iommu=on,readonly=true,image_type=raw",
+                    blk_file_path.to_str().unwrap()
+                )
+                .as_str(),
             ])
             .args([
                 "--cmdline",
@@ -3602,7 +3607,7 @@ mod common_parallel {
             let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
-                Some("path=/tmp/resize.img,id=test0"),
+                Some("path=/tmp/resize.img,id=test0,image_type=raw"),
             );
 
             assert!(cmd_success);
@@ -5084,7 +5089,7 @@ mod common_parallel {
             .default_disks()
             .args([
                 "--disk",
-                format!("path={test_disk_path},sparse=off").as_str(),
+                format!("path={test_disk_path},sparse=off,image_type=raw").as_str(),
             ])
             .default_net()
             .capture_output()
@@ -6840,7 +6845,13 @@ mod common_parallel {
             assert!(!remote_command(
                 &src_api_socket,
                 "add-disk",
-                Some(format!("path={},id=test0", blk_file_path.to_str().unwrap()).as_str()),
+                Some(
+                    format!(
+                        "path={},id=test0,image_type=raw",
+                        blk_file_path.to_str().unwrap()
+                    )
+                    .as_str()
+                ),
             ));
 
             // Start the live-migration
@@ -6898,7 +6909,13 @@ mod common_parallel {
         assert!(!remote_command(
             &dest_api_socket,
             "add-disk",
-            Some(format!("path={},id=test0", blk_file_path.to_str().unwrap()).as_str()),
+            Some(
+                format!(
+                    "path={},id=test0,image_type=raw",
+                    blk_file_path.to_str().unwrap()
+                )
+                .as_str()
+            ),
         ));
 
         // Clean-up the destination VM and make sure it terminated correctly
@@ -11950,7 +11967,7 @@ mod windows {
             let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
-                Some(format!("path={disk},readonly=off").as_str()),
+                Some(format!("path={disk},readonly=off,image_type=raw").as_str()),
             );
             assert!(cmd_success);
             assert!(String::from_utf8_lossy(&cmd_output).contains("\"id\":\"_disk2\""));
@@ -11988,7 +12005,7 @@ mod windows {
             let (cmd_success, _cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
-                Some(format!("path={disk},readonly=off").as_str()),
+                Some(format!("path={disk},readonly=off,image_type=raw").as_str()),
             );
             assert!(cmd_success);
             // Wait for Windows to mount the re-added disk again.
@@ -12079,7 +12096,7 @@ mod windows {
                 let (cmd_success, cmd_output, _) = remote_command_w_output(
                     &api_socket,
                     "add-disk",
-                    Some(format!("path={disk},readonly=off").as_str()),
+                    Some(format!("path={disk},readonly=off,image_type=raw").as_str()),
                 );
                 assert!(cmd_success);
                 assert!(
@@ -12132,7 +12149,7 @@ mod windows {
                 let (cmd_success, _cmd_output, _) = remote_command_w_output(
                     &api_socket,
                     "add-disk",
-                    Some(format!("path={disk},readonly=off").as_str()),
+                    Some(format!("path={disk},readonly=off,image_type=raw").as_str()),
                 );
                 assert!(cmd_success);
             }
