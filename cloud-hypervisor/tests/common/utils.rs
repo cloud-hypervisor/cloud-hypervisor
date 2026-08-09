@@ -383,8 +383,8 @@ pub(crate) fn setup_ovs_dpdk_guests(
         clh_command("cloud-hypervisor")
     };
 
-    let mut child1 = GuestCommand::new_with_binary_path(guest1, &clh_path)
-        .args(["--cpus", "boot=2"])
+    let mut cmd1 = GuestCommand::new_with_binary_path(guest1, &clh_path);
+    cmd1.args(["--cpus", "boot=2"])
         .args(["--memory", "size=0,shared=on"])
         .args([
             "--memory-zone",
@@ -392,11 +392,14 @@ pub(crate) fn setup_ovs_dpdk_guests(
         ])
         .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
         .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-        .default_disks()
         .args(["--net", guest1.default_net_string().as_str(), OVS_DPDK_NET1])
-        .capture_output()
-        .spawn()
-        .unwrap();
+        .capture_output();
+    if release_binary {
+        cmd1.legacy_default_disks();
+    } else {
+        cmd1.default_disks();
+    }
+    let mut child1 = cmd1.spawn().unwrap();
 
     #[cfg(target_arch = "x86_64")]
     let guest_net_iface = "ens5";
@@ -435,8 +438,8 @@ pub(crate) fn setup_ovs_dpdk_guests(
         panic!("Test should already be failed/panicked"); // To explicitly mark this block never return
     }
 
-    let mut child2 = GuestCommand::new_with_binary_path(guest2, &clh_path)
-        .args(["--api-socket", api_socket])
+    let mut cmd2 = GuestCommand::new_with_binary_path(guest2, &clh_path);
+    cmd2.args(["--api-socket", api_socket])
         .args(["--cpus", "boot=2"])
         .args(["--memory", "size=0,shared=on"])
         .args([
@@ -445,11 +448,14 @@ pub(crate) fn setup_ovs_dpdk_guests(
         ])
         .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
         .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-        .default_disks()
         .args(["--net", guest2.default_net_string().as_str(), OVS_DPDK_NET2])
-        .capture_output()
-        .spawn()
-        .unwrap();
+        .capture_output();
+    if release_binary {
+        cmd2.legacy_default_disks();
+    } else {
+        cmd2.default_disks();
+    }
+    let mut child2 = cmd2.spawn().unwrap();
 
     let r = panic::catch_unwind(|| {
         guest2.wait_vm_boot().unwrap();
