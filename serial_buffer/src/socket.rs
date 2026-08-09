@@ -5,7 +5,6 @@
 
 use std::io::{self, Write};
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -26,7 +25,6 @@ impl Write for SharedSerialBuffer {
 
 #[derive(Clone)]
 pub struct SocketConsole {
-    pub path: PathBuf,
     /// Persistent ring buffer: captures serial output while no client is
     /// connected and replays it on connect. Shared with the serial device's
     /// `out` sink and retargeted by the epoll thread.

@@ -80,10 +80,6 @@ pub enum Error {
     #[error("Error shutting down a connection")]
     ShutdownConnection(#[source] io::Error),
 
-    /// Cannot remove the serial socket
-    #[error("Error removing serial socket")]
-    RemoveUnixSocket(#[source] io::Error),
-
     /// Cannot duplicate file descriptor
     #[error("Error duplicating file descriptor")]
     DupFd(#[source] io::Error),
@@ -131,6 +127,7 @@ pub struct SerialManager {
     handle: Option<thread::JoinHandle<()>>,
     pty_write_out: Option<Arc<AtomicBool>>,
     socket_console: Option<SocketConsole>,
+    socket_path: Option<PathBuf>,
 }
 
 impl SerialManager {
@@ -150,8 +147,6 @@ impl SerialManager {
             epoll::Event::new(epoll::Events::EPOLLIN, EpollDispatch::Kill as u64),
         )
         .map_err(Error::Epoll)?;
-
-        let mut socket_path: Option<PathBuf> = None;
 
         let in_fd = match transport {
             ConsoleTransport::Pty(ref fd) => fd.as_raw_fd(),
@@ -184,12 +179,7 @@ impl SerialManager {
             ConsoleTransport::Tty(_) => {
                 return Ok(None);
             }
-            ConsoleTransport::Socket(ref listener) => {
-                if let Some(path_in_socket) = socket {
-                    socket_path = Some(path_in_socket.clone());
-                }
-                listener.as_raw_fd()
-            }
+            ConsoleTransport::Socket(ref listener) => listener.as_raw_fd(),
             _ => return Ok(None),
         };
 
@@ -223,9 +213,7 @@ impl SerialManager {
         // Install the persistent buffer as the device's sink so output produced
         // before the first client connects is captured rather than dropped.
         let mut socket_console = None;
-        if let ConsoleTransport::Socket(_) = transport
-            && let Some(path) = socket_path
-        {
+        if let ConsoleTransport::Socket(_) = transport {
             let write_out = Arc::new(AtomicBool::new(false));
             let buffer = Arc::new(Mutex::new(SerialBuffer::new(
                 Box::new(io::sink()),
@@ -236,11 +224,7 @@ impl SerialManager {
                 .lock()
                 .unwrap()
                 .set_out(Some(Box::new(SharedSerialBuffer(buffer.clone()))));
-            socket_console = Some(SocketConsole {
-                path,
-                buffer,
-                write_out,
-            });
+            socket_console = Some(SocketConsole { buffer, write_out });
         }
 
         // Use 'OwnedFd' to manage lifetime
@@ -255,6 +239,7 @@ impl SerialManager {
             handle: None,
             pty_write_out,
             socket_console,
+            socket_path: socket,
         }))
     }
 
@@ -503,10 +488,10 @@ impl Drop for SerialManager {
         if let Some(handle) = self.handle.take() {
             handle.join().ok();
         }
-        if let Some(socket_console) = self.socket_console.as_ref() {
-            fs::remove_file(&socket_console.path)
-                .map_err(Error::RemoveUnixSocket)
-                .ok();
+        if matches!(self.transport, ConsoleTransport::Socket(_))
+            && let Some(path) = self.socket_path.as_ref()
+        {
+            let _ = fs::remove_file(path);
         }
     }
 }
