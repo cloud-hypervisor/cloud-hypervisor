@@ -2031,7 +2031,8 @@ pub(crate) fn _test_virtio_block(
         .args([
             "--disk",
             format!(
-                "path={},readonly=on,direct=on,num_queues=4,_disable_io_uring={},_disable_aio={}",
+                "path={},readonly=on,direct=on,num_queues=4,image_type=raw,\
+                 _disable_io_uring={},_disable_aio={}",
                 blk_file_path.to_str().unwrap(),
                 disable_io_uring,
                 disable_aio,
@@ -2977,7 +2978,7 @@ pub(crate) fn _test_landlock(guest: &Guest) {
             "add-disk",
             Some(
                 format!(
-                    "path={},id=test0,readonly=true",
+                    "path={},id=test0,readonly=true,image_type=raw",
                     blk_file_path.to_str().unwrap()
                 )
                 .as_str()
@@ -3036,7 +3037,7 @@ pub(crate) fn _test_disk_hotplug(guest: &Guest, landlock_enabled: bool) {
             "add-disk",
             Some(
                 format!(
-                    "path={},id=test0,readonly=true",
+                    "path={},id=test0,readonly=true,image_type=raw",
                     blk_file_path.to_str().unwrap()
                 )
                 .as_str(),
@@ -3072,7 +3073,7 @@ pub(crate) fn _test_disk_hotplug(guest: &Guest, landlock_enabled: bool) {
             "add-disk",
             Some(
                 format!(
-                    "path={},id=test0,readonly=true",
+                    "path={},id=test0,readonly=true,image_type=raw",
                     blk_file_path.to_str().unwrap()
                 )
                 .as_str(),
@@ -3142,7 +3143,7 @@ pub(crate) fn _test_virtio_block_topology(guest: &Guest, loop_dev: &str) {
         .default_memory()
         .default_kernel_cmdline()
         .default_disks()
-        .args(["--disk", format!("path={loop_dev}").as_str()])
+        .args(["--disk", format!("path={loop_dev},image_type=raw").as_str()])
         .default_net()
         .capture_output()
         .spawn()
