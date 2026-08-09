@@ -1408,7 +1408,7 @@ pub(crate) fn _test_virtio_iommu(_acpi: bool /* not needed on x86_64 */) {
             )
             .as_str(),
             format!(
-                "path={},iommu=on",
+                "path={},iommu=on,image_type=raw",
                 guest.disk_config.disk(DiskType::CloudInit).unwrap()
             )
             .as_str(),

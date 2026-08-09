@@ -2040,7 +2040,10 @@ impl<'a> GuestCommand<'a> {
 
     pub fn default_cloudinit_disk(&mut self) -> &mut Self {
         if let Some(cloud_init) = self.guest.disk_config.disk(DiskType::CloudInit) {
-            self.args(["--disk", format!("path={cloud_init}").as_str()]);
+            self.args([
+                "--disk",
+                format!("path={cloud_init},image_type=raw").as_str(),
+            ]);
         }
         self
     }
