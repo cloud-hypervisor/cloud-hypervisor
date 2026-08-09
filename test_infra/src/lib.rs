@@ -2027,22 +2027,12 @@ impl<'a> GuestCommand<'a> {
     }
 
     pub fn default_disks(&mut self) -> &mut Self {
-        self.default_disks_inner(true)
-    }
-
-    pub fn default_disks_sparse_off(&mut self) -> &mut Self {
-        self.default_disks_inner(false)
-    }
-
-    fn default_disks_inner(&mut self, sparse: bool) -> &mut Self {
-        let sparse_opt = if sparse { "" } else { ",sparse=off" };
         let os_disk = format!(
-            "path={}{}",
+            "path={}",
             self.guest
                 .disk_config
                 .disk(DiskType::OperatingSystem)
                 .unwrap(),
-            sparse_opt
         );
         if let Some(cloud_init) = self.guest.disk_config.disk(DiskType::CloudInit) {
             self.args([
