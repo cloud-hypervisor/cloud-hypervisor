@@ -3,17 +3,15 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::Read;
-use std::net::Shutdown;
 use std::os::fd::OwnedFd;
 use std::os::unix::io::{AsRawFd, FromRawFd};
-use std::os::unix::net::UnixStream;
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::{fs, io, panic, result, thread, time};
+use std::{io, panic, result, thread, time};
 
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
@@ -22,7 +20,7 @@ use devices::legacy::Serial;
 use libc::EFD_NONBLOCK;
 use log::{error, info, warn};
 use seccompiler::{SeccompAction, apply_filter};
-use serial_buffer::{SerialBuffer, SharedSerialBuffer, SocketConsole};
+use serial_buffer::{SerialBuffer, SocketConsole};
 use thiserror::Error;
 use vmm_sys_util::errno;
 use vmm_sys_util::eventfd::EventFd;
@@ -71,14 +69,6 @@ pub enum Error {
     /// Cannot accept connection from Unix socket
     #[error("Error accepting connection")]
     AcceptConnection(#[source] io::Error),
-
-    /// Cannot clone the UnixStream
-    #[error("Error cloning UnixStream")]
-    CloneUnixStream(#[source] io::Error),
-
-    /// Cannot shutdown the connection
-    #[error("Error shutting down a connection")]
-    ShutdownConnection(#[source] io::Error),
 
     /// Cannot duplicate file descriptor
     #[error("Error duplicating file descriptor")]
@@ -214,17 +204,13 @@ impl SerialManager {
         // before the first client connects is captured rather than dropped.
         let mut socket_console = None;
         if let ConsoleTransport::Socket(_) = transport {
-            let write_out = Arc::new(AtomicBool::new(false));
-            let buffer = Arc::new(Mutex::new(SerialBuffer::new(
-                Box::new(io::sink()),
-                write_out.clone(),
-            )));
+            let console = SocketConsole::new();
             serial
                 .as_ref()
                 .lock()
                 .unwrap()
-                .set_out(Some(Box::new(SharedSerialBuffer(buffer.clone()))));
-            socket_console = Some(SocketConsole { buffer, write_out });
+                .set_out(Some(console.out_sink()));
+            socket_console = Some(console);
         }
 
         // Use 'OwnedFd' to manage lifetime
@@ -287,8 +273,7 @@ impl SerialManager {
         let transport = self.transport.clone();
         let serial = self.serial.clone();
         let pty_write_out = self.pty_write_out.clone();
-        let socket_console = self.socket_console.clone();
-        let mut reader: Option<UnixStream> = None;
+        let mut socket_console = self.socket_console.take();
 
         // In case of PTY, we want to be able to detect a connection on the
         // other end of the PTY. This is done by detecting there's no event
@@ -346,47 +331,23 @@ impl SerialManager {
                                     warn!("Unknown serial manager loop event: {event}");
                                 }
                                 EpollDispatch::Socket => {
-                                    // New connection request arrived.
-                                    // Shutdown the previous connection, if any
-                                    if let Some(previous_reader) = reader {
-                                        previous_reader
-                                            .shutdown(Shutdown::Both)
-                                            .map_err(Error::AcceptConnection)?;
-                                    }
-
                                     let ConsoleTransport::Socket(ref listener) = transport else {
                                         unreachable!();
                                     };
-
-                                    // Events on the listening socket will be connection requests.
-                                    // Accept them, create a reader and a writer.
-                                    let (unix_stream, _) =
-                                        listener.accept().map_err(Error::AcceptConnection)?;
-                                    // Non-blocking so a slow client can't stall
-                                    // the vCPU (SerialBuffer re-buffers on WouldBlock).
-                                    unix_stream
-                                        .set_nonblocking(true)
-                                        .map_err(Error::SetNonBlocking)?;
-                                    let writer =
-                                        unix_stream.try_clone().map_err(Error::CloneUnixStream)?;
-
-                                    epoll::ctl(
-                                        epoll_fd.as_raw_fd(),
-                                        epoll::ControlOptions::EPOLL_CTL_ADD,
-                                        unix_stream.as_raw_fd(),
-                                        epoll::Event::new(
-                                            epoll::Events::EPOLLIN,
-                                            EpollDispatch::File as u64,
-                                        ),
-                                    )
-                                    .map_err(Error::Epoll)?;
-
-                                    reader = Some(unix_stream);
-
-                                    if let Some(ref socket_console) = socket_console {
-                                        socket_console
-                                            .attach_client(writer)
-                                            .map_err(Error::FlushOutput)?;
+                                    if let Some(console) = socket_console.as_mut() {
+                                        console
+                                            .accept(listener)
+                                            .map_err(Error::AcceptConnection)?;
+                                        epoll::ctl(
+                                            epoll_fd.as_raw_fd(),
+                                            epoll::ControlOptions::EPOLL_CTL_ADD,
+                                            console.as_raw_fd(),
+                                            epoll::Event::new(
+                                                epoll::Events::EPOLLIN,
+                                                EpollDispatch::File as u64,
+                                            ),
+                                        )
+                                        .map_err(Error::Epoll)?;
                                     }
                                 }
                                 EpollDispatch::File => {
@@ -394,35 +355,15 @@ impl SerialManager {
                                         let mut input = [0u8; 64];
                                         let count = match &transport {
                                             ConsoleTransport::Socket(_) => {
-                                                if let Some(mut serial_reader) = reader.as_ref() {
-                                                    match serial_reader.read(&mut input) {
-                                                        Ok(0) => {
-                                                            info!(
-                                                                "Remote end closed serial socket"
-                                                            );
-                                                            serial_reader
-                                                                .shutdown(Shutdown::Both)
-                                                                .map_err(
-                                                                    Error::ShutdownConnection,
-                                                                )?;
-                                                            reader = None;
-                                                            if let Some(ref socket_console) =
-                                                                socket_console
-                                                            {
-                                                                socket_console.detach_client();
-                                                            }
-                                                            0
-                                                        }
+                                                if let Some(console) = socket_console.as_mut() {
+                                                    match console.read(&mut input) {
                                                         Ok(count) => count,
-                                                        // Non-blocking socket with no pending
-                                                        // input on this wakeup: nothing to do.
-                                                        Err(e)
-                                                            if e.kind()
-                                                                == io::ErrorKind::WouldBlock =>
-                                                        {
+                                                        Err(e) => {
+                                                            warn!(
+                                                                "Failed to read serial socket input: {e}"
+                                                            );
                                                             0
                                                         }
-                                                        Err(e) => return Err(Error::ReadInput(e)),
                                                     }
                                                 } else {
                                                     0
