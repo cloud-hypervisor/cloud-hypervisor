@@ -7592,6 +7592,15 @@ mod common_parallel {
             // to reduce system load during post-migration checks.
             let _ = guest.ssh_command("pkill -f 'stress --vm'");
 
+            // Wait for the receive migration process to exit after the
+            // source-side migration has completed (either failed or finished).
+            let receive_exit_status = if let Some(status) = receive_status {
+                status
+            } else {
+                let _ = receive_migration.wait();
+                panic!("receive-migration process did not exit within timeout")
+            };
+
             match timeout_strategy {
                 TimeoutStrategy::Cancel => {
                     let expected_events = [
@@ -7618,6 +7627,14 @@ mod common_parallel {
 
                     // Confirm the source VM is still responsive over SSH
                     assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+
+                    // Verify that the receive-migration call on the destination
+                    // side returns an error, since the migration was cancelled
+                    // by the source.
+                    assert!(
+                        !receive_exit_status.success(),
+                        "receive-migration should have returned an error when the source cancelled the migration"
+                    );
                 }
                 TimeoutStrategy::Ignore => {
                     let expected_events = [
