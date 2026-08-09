@@ -475,18 +475,9 @@ mod common_parallel {
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args(["--api-socket", &api_socket])
             .capture_output()
+            .default_disks()
             .args([
                 "--disk",
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                )
-                .as_str(),
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-                .as_str(),
                 format!("path={test_disk_path},pci_segment={TEST_DISK_NODE}").as_str(),
             ])
             .default_net()
@@ -656,18 +647,9 @@ mod common_parallel {
             .args(["--memory", "size=512M"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
             .args([
                 "--disk",
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                )
-                .as_str(),
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-                .as_str(),
                 format!(
                     "path={},image_type=raw,num_queues=2,\
                      _disable_io_uring={},_disable_aio={}",
@@ -1652,18 +1634,9 @@ mod common_parallel {
             .args(["--memory", "size=512M"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
             .args([
                 "--disk",
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                )
-                .as_str(),
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-                .as_str(),
                 format!(
                     "path={},direct=on,image_type={image_type_str}",
                     test_disk.to_str().unwrap()
@@ -2911,18 +2884,9 @@ mod common_parallel {
             .args(["--cpus", "boot=4"])
             .args(["--memory", "size=2G,hugepages=on,shared=on"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
+            .default_disks()
             .args([
                 "--disk",
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                )
-                .as_str(),
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-                .as_str(),
                 format!("path={},image_type=raw", vfio_disk_path.to_str().unwrap()).as_str(),
                 format!("path={},iommu=on,readonly=true", blk_file_path.to_str().unwrap()).as_str(),
             ])
@@ -4031,18 +3995,9 @@ mod common_parallel {
             .args(["--memory", "size=512M"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
             .args([
                 "--disk",
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                )
-                .as_str(),
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-                .as_str(),
                 format!("path={loop_dev},direct=on,image_type=raw").as_str(),
             ])
             .default_net()
@@ -4143,18 +4098,9 @@ mod common_parallel {
             .args(["--memory", "size=512M"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
             .args([
                 "--disk",
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                )
-                .as_str(),
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-                .as_str(),
                 format!(
                     "path={},direct=on,image_type=raw",
                     test_disk_path.to_str().unwrap()
@@ -4357,18 +4303,9 @@ mod common_parallel {
             .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
             .args([
                 "--disk",
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                )
-                .as_str(),
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-                .as_str(),
                 format!(
                     "path={},num_queues=4,image_type={}{}",
                     test_disk_path.to_str().unwrap(),
@@ -4570,18 +4507,9 @@ mod common_parallel {
             .default_cpus()
             .default_memory()
             .default_kernel_cmdline()
+            .default_disks()
             .args([
                 "--disk",
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                )
-                .as_str(),
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-                .as_str(),
                 format!("path={},image_type=raw", test_disk_path.to_str().unwrap()).as_str(),
             ])
             .default_net()
@@ -4672,20 +4600,8 @@ mod common_parallel {
             .args(["--memory", "size=512M"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args([
-                "--disk",
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                )
-                .as_str(),
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-                .as_str(),
-                format!("path={loop_dev},image_type=raw").as_str(),
-            ])
+            .default_disks()
+            .args(["--disk", format!("path={loop_dev},image_type=raw").as_str()])
             .default_net()
             .capture_output()
             .spawn()
@@ -4848,20 +4764,8 @@ mod common_parallel {
             .args(["--memory", "size=512M"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args([
-                "--disk",
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                )
-                .as_str(),
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-                .as_str(),
-                format!("path={dm_dev},image_type=raw").as_str(),
-            ])
+            .default_disks()
+            .args(["--disk", format!("path={dm_dev},image_type=raw").as_str()])
             .default_net()
             .capture_output()
             .spawn()
@@ -4992,18 +4896,9 @@ mod common_parallel {
             .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
             .args([
                 "--disk",
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                )
-                .as_str(),
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-                .as_str(),
                 format!(
                     "path={},num_queues=4,image_type={}{}",
                     test_disk_path.to_str().unwrap(),
@@ -5196,18 +5091,9 @@ mod common_parallel {
             .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
             .args([
                 "--disk",
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                )
-                .as_str(),
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-                .as_str(),
                 format!("path={test_disk_path},sparse=off").as_str(),
             ])
             .default_net()
@@ -5303,18 +5189,9 @@ mod common_parallel {
             .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
             .args([
                 "--disk",
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                )
-                .as_str(),
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-                .as_str(),
                 format!("path={test_disk_path},sparse=off,num_queues=4").as_str(),
             ])
             .default_net()
@@ -9648,20 +9525,8 @@ mod snapshot_restore_common {
             .args(["--memory", "size=512M,shared=on"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args([
-                "--disk",
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                )
-                .as_str(),
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-                .as_str(),
-                blk_params.as_str(),
-            ])
+            .default_disks()
+            .args(["--disk", blk_params.as_str()])
             .default_net()
             .capture_output()
             .spawn()
@@ -13254,20 +13119,8 @@ mod rate_limiter {
             .args(["--memory", "size=1G"])
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args([
-                "--disk",
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                )
-                .as_str(),
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-                .as_str(),
-                test_blk_params.as_str(),
-            ])
+            .default_disks()
+            .args(["--disk", test_blk_params.as_str()])
             .default_net()
             .args(["--api-socket", &api_socket])
             .capture_output()
@@ -13325,17 +13178,7 @@ mod rate_limiter {
             )
         };
 
-        let mut disk_args = vec![
-            "--disk".to_string(),
-            format!(
-                "path={}",
-                guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-            ),
-            format!(
-                "path={}",
-                guest.disk_config.disk(DiskType::CloudInit).unwrap()
-            ),
-        ];
+        let mut test_disks = vec!["--disk".to_string()];
 
         for i in 0..num_disks {
             let test_img_path = String::from(
@@ -13354,7 +13197,7 @@ mod rate_limiter {
                 .success()
             );
 
-            disk_args.push(format!(
+            test_disks.push(format!(
                 "path={test_img_path},num_queues={num_queues},rate_limit_group=group0,image_type=raw"
             ));
         }
@@ -13365,7 +13208,8 @@ mod rate_limiter {
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args(["--rate-limit-group", &rate_limit_group_arg])
-            .args(disk_args)
+            .default_disks()
+            .args(test_disks)
             .default_net()
             .args(["--api-socket", &api_socket])
             .capture_output()
