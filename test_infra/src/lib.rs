@@ -1427,9 +1427,11 @@ impl Guest {
             "disks": [
             {
                 "path": self.disk_config.disk(DiskType::OperatingSystem).unwrap(),
+                "image_type": "Raw",
             },
             {
                 "path": self.disk_config.disk(DiskType::CloudInit).unwrap(),
+                "image_type": "Raw",
             }
             ]
         });
@@ -2028,7 +2030,7 @@ impl<'a> GuestCommand<'a> {
 
     pub fn default_disks(&mut self) -> &mut Self {
         let os_disk = format!(
-            "path={}",
+            "path={},image_type=raw",
             self.guest
                 .disk_config
                 .disk(DiskType::OperatingSystem)
