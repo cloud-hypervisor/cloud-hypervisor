@@ -350,7 +350,6 @@ pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> f64 {
         let jammy = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = performance_test_new_guest(Box::new(jammy), control);
         let mut cmd = GuestCommand::new(&guest);
-        let cloud_init = guest.disk_config.disk(DiskType::CloudInit).unwrap();
         let c = cmd
             .default_cpus()
             .args(["--memory", "size=1G,hugepages=on"])
@@ -358,7 +357,7 @@ pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> f64 {
             .args(["--cmdline", "root=/dev/pmem0p1 console=ttyS0 quiet rw"])
             .args(["--console", "off"])
             .default_net()
-            .args(["--disk", format!("path={cloud_init}").as_str()])
+            .default_cloudinit_disk()
             .args([
                 "--pmem",
                 format!(

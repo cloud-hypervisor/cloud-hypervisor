@@ -943,10 +943,10 @@ mod common_parallel {
                     "path={},num_queues=8",
                     guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
                 ),
-                &format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                ),
+            ])
+            .default_cloudinit_disk()
+            .args([
+                "--disk",
                 &format!(
                     "path={},num_queues=8,backing_files={},image_type=qcow2",
                     test_image_path.to_str().unwrap(),
@@ -1549,11 +1549,8 @@ mod common_parallel {
                     "path={},direct=on,image_type=qcow2",
                     dest_qcow2.to_str().unwrap()
                 ),
-                &format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                ),
             ])
+            .default_cloudinit_disk()
             .default_net()
             .capture_output()
             .spawn()
@@ -1737,11 +1734,8 @@ mod common_parallel {
             .args([
                 "--disk",
                 &format!("path={}", test_image_path.to_str().unwrap()),
-                &format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                ),
             ])
+            .default_cloudinit_disk()
             .default_net()
             .capture_output()
             .spawn()
@@ -1800,11 +1794,8 @@ mod common_parallel {
             .args([
                 "--disk",
                 &format!("path={}", test_image_path.to_str().unwrap()),
-                &format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                ),
             ])
+            .default_cloudinit_disk()
             .default_net()
             .capture_output()
             .spawn()
@@ -1867,11 +1858,8 @@ mod common_parallel {
             .args([
                 "--disk",
                 &format!("path={}", test_image_path.to_str().unwrap()),
-                &format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                ),
             ])
+            .default_cloudinit_disk()
             .default_net()
             .capture_output()
             .spawn()
@@ -1917,11 +1905,8 @@ mod common_parallel {
             .args([
                 "--disk",
                 &format!("path={},readonly=on", test_image_path.to_str().unwrap()),
-                &format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                ),
             ])
+            .default_cloudinit_disk()
             .default_net()
             .capture_output()
             .spawn()
@@ -2084,12 +2069,8 @@ mod common_parallel {
             .args([
                 "--disk",
                 format!("path={},direct=on", os_path.as_path().to_str().unwrap()).as_str(),
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-                .as_str(),
             ])
+            .default_cloudinit_disk()
             .default_net()
             .capture_output()
             .spawn()
@@ -2419,14 +2400,7 @@ mod common_parallel {
             .default_cpus()
             .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args([
-                "--disk",
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-                .as_str(),
-            ])
+            .default_cloudinit_disk()
             .default_net()
             .args([
                 "--pmem",
