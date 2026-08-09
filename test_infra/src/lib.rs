@@ -2034,15 +2034,15 @@ impl<'a> GuestCommand<'a> {
                 .disk(DiskType::OperatingSystem)
                 .unwrap(),
         );
+        self.args(["--disk", os_disk.as_str()]);
+        self.default_cloudinit_disk()
+    }
+
+    pub fn default_cloudinit_disk(&mut self) -> &mut Self {
         if let Some(cloud_init) = self.guest.disk_config.disk(DiskType::CloudInit) {
-            self.args([
-                "--disk",
-                os_disk.as_str(),
-                format!("path={cloud_init}").as_str(),
-            ])
-        } else {
-            self.args(["--disk", os_disk.as_str()])
+            self.args(["--disk", format!("path={cloud_init}").as_str()]);
         }
+        self
     }
 
     pub fn default_net(&mut self) -> &mut Self {

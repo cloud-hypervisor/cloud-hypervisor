@@ -900,15 +900,8 @@ pub(crate) fn test_boot_from_vhost_user_blk(
         .args(["--memory", "size=512M,shared=on"])
         .args(["--kernel", kernel_path.to_str().unwrap()])
         .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-        .args([
-            "--disk",
-            blk_boot_params.as_str(),
-            format!(
-                "path={}",
-                guest.disk_config.disk(DiskType::CloudInit).unwrap()
-            )
-            .as_str(),
-        ])
+        .args(["--disk", blk_boot_params.as_str()])
+        .default_cloudinit_disk()
         .default_net()
         .capture_output()
         .spawn()
@@ -2037,11 +2030,10 @@ pub(crate) fn _test_virtio_block(
                 if backing_files { "on" } else { "off" },
             )
             .as_str(),
-            format!(
-                "path={}",
-                guest.disk_config.disk(DiskType::CloudInit).unwrap()
-            )
-            .as_str(),
+        ])
+        .default_cloudinit_disk()
+        .args([
+            "--disk",
             format!(
                 "path={},readonly=on,direct=on,num_queues=4,_disable_io_uring={},_disable_aio={}",
                 blk_file_path.to_str().unwrap(),
@@ -2205,12 +2197,8 @@ pub(crate) fn _test_virtio_block_vmdk(guest: &Guest, subformat: &str) {
             // Force the flat VMDK backend explicitly instead of relying on
             // image-format auto-detection.
             format!("path={vmdk_path_str},image_type=vmdk").as_str(),
-            format!(
-                "path={}",
-                guest.disk_config.disk(DiskType::CloudInit).unwrap()
-            )
-            .as_str(),
         ])
+        .default_cloudinit_disk()
         .default_net()
         .capture_output()
         .spawn()
