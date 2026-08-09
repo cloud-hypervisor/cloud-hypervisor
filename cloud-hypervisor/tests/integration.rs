@@ -2080,7 +2080,11 @@ mod common_parallel {
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .args([
                 "--disk",
-                format!("path={},direct=on", os_path.as_path().to_str().unwrap()).as_str(),
+                format!(
+                    "path={},direct=on,image_type=raw",
+                    os_path.as_path().to_str().unwrap()
+                )
+                .as_str(),
             ])
             .default_cloudinit_disk()
             .default_net()
@@ -8589,7 +8593,7 @@ mod snapshot_restore_common {
             .args([
                 "--disk",
                 format!(
-                    "path={}",
+                    "path={},image_type=raw",
                     guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
                 )
                 .as_str(),
@@ -9738,7 +9742,7 @@ mod common_sequential {
             .args([
                 "--disk",
                 format!(
-                    "path={}",
+                    "path={},image_type=raw",
                     guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
                 )
                 .as_str(),
@@ -11517,7 +11521,7 @@ mod windows {
             .args([
                 "--disk",
                 format!(
-                    "path={},num_queues=4",
+                    "path={},num_queues=4,image_type=raw",
                     windows_guest
                         .guest()
                         .disk_config

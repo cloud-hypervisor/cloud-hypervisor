@@ -1403,7 +1403,7 @@ pub(crate) fn _test_virtio_iommu(_acpi: bool /* not needed on x86_64 */) {
         .args([
             "--disk",
             format!(
-                "path={},iommu=on",
+                "path={},iommu=on,image_type=raw",
                 guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
             )
             .as_str(),
@@ -1758,7 +1758,7 @@ pub(crate) fn _test_virtio_queue_affinity(guest: &Guest) {
         .args([
             "--disk",
             format!(
-                "path={},num_queues=4,queue_affinity=[0@[0,2],1@[1,3],2@[1],3@[3]]",
+                "path={},num_queues=4,queue_affinity=[0@[0,2],1@[1,3],2@[1],3@[3]],image_type=raw",
                 guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
             )
             .as_str(),
