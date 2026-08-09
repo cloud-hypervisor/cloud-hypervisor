@@ -363,6 +363,11 @@ pub(crate) fn cleanup_ovs_dpdk() {
     exec_host_command_status("rm -f ovs-vsctl /tmp/dpdkvhostclient1 /tmp/dpdkvhostclient2");
 }
 
+const OVS_DPDK_NET1: &str =
+    "vhost_user=true,socket=/tmp/dpdkvhostclient1,num_queues=2,queue_size=256,vhost_mode=server";
+const OVS_DPDK_NET2: &str =
+    "vhost_user=true,socket=/tmp/dpdkvhostclient2,num_queues=2,queue_size=256,vhost_mode=server";
+
 // Setup two guests and ensure they are connected through ovs-dpdk
 pub(crate) fn setup_ovs_dpdk_guests(
     guest1: &Guest,
@@ -379,16 +384,19 @@ pub(crate) fn setup_ovs_dpdk_guests(
     };
 
     let mut child1 = GuestCommand::new_with_binary_path(guest1, &clh_path)
-                    .args(["--cpus", "boot=2"])
-                    .args(["--memory", "size=0,shared=on"])
-                    .args(["--memory-zone", "id=mem0,size=1G,shared=on,host_numa_node=0"])
-                    .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-                    .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-                    .default_disks()
-                    .args(["--net", guest1.default_net_string().as_str(), "vhost_user=true,socket=/tmp/dpdkvhostclient1,num_queues=2,queue_size=256,vhost_mode=server"])
-                    .capture_output()
-                    .spawn()
-                    .unwrap();
+        .args(["--cpus", "boot=2"])
+        .args(["--memory", "size=0,shared=on"])
+        .args([
+            "--memory-zone",
+            "id=mem0,size=1G,shared=on,host_numa_node=0",
+        ])
+        .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .default_disks()
+        .args(["--net", guest1.default_net_string().as_str(), OVS_DPDK_NET1])
+        .capture_output()
+        .spawn()
+        .unwrap();
 
     #[cfg(target_arch = "x86_64")]
     let guest_net_iface = "ens5";
@@ -428,17 +436,20 @@ pub(crate) fn setup_ovs_dpdk_guests(
     }
 
     let mut child2 = GuestCommand::new_with_binary_path(guest2, &clh_path)
-                    .args(["--api-socket", api_socket])
-                    .args(["--cpus", "boot=2"])
-                    .args(["--memory", "size=0,shared=on"])
-                    .args(["--memory-zone", "id=mem0,size=1G,shared=on,host_numa_node=0"])
-                    .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-                    .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-                    .default_disks()
-                    .args(["--net", guest2.default_net_string().as_str(), "vhost_user=true,socket=/tmp/dpdkvhostclient2,num_queues=2,queue_size=256,vhost_mode=server"])
-                    .capture_output()
-                    .spawn()
-                    .unwrap();
+        .args(["--api-socket", api_socket])
+        .args(["--cpus", "boot=2"])
+        .args(["--memory", "size=0,shared=on"])
+        .args([
+            "--memory-zone",
+            "id=mem0,size=1G,shared=on,host_numa_node=0",
+        ])
+        .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .default_disks()
+        .args(["--net", guest2.default_net_string().as_str(), OVS_DPDK_NET2])
+        .capture_output()
+        .spawn()
+        .unwrap();
 
     let r = panic::catch_unwind(|| {
         guest2.wait_vm_boot().unwrap();
