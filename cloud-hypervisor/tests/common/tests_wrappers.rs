@@ -1758,16 +1758,12 @@ pub(crate) fn _test_virtio_queue_affinity(guest: &Guest) {
         .args([
             "--disk",
             format!(
-                "path={}",
+                "path={},num_queues=4,queue_affinity=[0@[0,2],1@[1,3],2@[1],3@[3]]",
                 guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
             )
             .as_str(),
-            format!(
-                "path={},num_queues=4,queue_affinity=[0@[0,2],1@[1,3],2@[1],3@[3]]",
-                guest.disk_config.disk(DiskType::CloudInit).unwrap()
-            )
-            .as_str(),
         ])
+        .default_cloudinit_disk()
         .default_net()
         .capture_output()
         .spawn()
@@ -1776,13 +1772,13 @@ pub(crate) fn _test_virtio_queue_affinity(guest: &Guest) {
     let r = panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
         let pid = child.id();
-        let taskset_q0 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep disk1_q0 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
+        let taskset_q0 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep disk0_q0 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
         assert_eq!(String::from_utf8_lossy(&taskset_q0.stdout).trim(), "0,2");
-        let taskset_q1 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep disk1_q1 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
+        let taskset_q1 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep disk0_q1 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
         assert_eq!(String::from_utf8_lossy(&taskset_q1.stdout).trim(), "1,3");
-        let taskset_q2 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep disk1_q2 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
+        let taskset_q2 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep disk0_q2 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
         assert_eq!(String::from_utf8_lossy(&taskset_q2.stdout).trim(), "1");
-        let taskset_q3 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep disk1_q3 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
+        let taskset_q3 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep disk0_q3 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
         assert_eq!(String::from_utf8_lossy(&taskset_q3.stdout).trim(), "3");
     });
 
