@@ -2125,7 +2125,10 @@ pub fn _test_virtio_block_dynamic_vhdx_expand(guest: &Guest) {
         .default_memory()
         .default_kernel_cmdline()
         .default_disks()
-        .args(["--disk", format!("path={vhdx_path}").as_str()])
+        .args([
+            "--disk",
+            format!("path={vhdx_path},image_type=vhdx").as_str(),
+        ])
         .default_net()
         .capture_output()
         .spawn()

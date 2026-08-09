@@ -940,7 +940,7 @@ mod common_parallel {
             .args([
                 "--disk",
                 &format!(
-                    "path={},num_queues=8",
+                    "path={},num_queues=8,image_type=qcow2",
                     guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
                 ),
             ])
@@ -1733,7 +1733,10 @@ mod common_parallel {
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
                 "--disk",
-                &format!("path={}", test_image_path.to_str().unwrap()),
+                &format!(
+                    "path={},image_type=qcow2",
+                    test_image_path.to_str().unwrap()
+                ),
             ])
             .default_cloudinit_disk()
             .default_net()
@@ -1793,7 +1796,10 @@ mod common_parallel {
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
                 "--disk",
-                &format!("path={}", test_image_path.to_str().unwrap()),
+                &format!(
+                    "path={},image_type=qcow2",
+                    test_image_path.to_str().unwrap()
+                ),
             ])
             .default_cloudinit_disk()
             .default_net()
@@ -1857,7 +1863,10 @@ mod common_parallel {
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
                 "--disk",
-                &format!("path={}", test_image_path.to_str().unwrap()),
+                &format!(
+                    "path={},image_type=qcow2",
+                    test_image_path.to_str().unwrap()
+                ),
             ])
             .default_cloudinit_disk()
             .default_net()
@@ -1904,7 +1913,10 @@ mod common_parallel {
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
                 "--disk",
-                &format!("path={},readonly=on", test_image_path.to_str().unwrap()),
+                &format!(
+                    "path={},readonly=on,image_type=qcow2",
+                    test_image_path.to_str().unwrap()
+                ),
             ])
             .default_cloudinit_disk()
             .default_net()
@@ -3702,7 +3714,7 @@ mod common_parallel {
                 &api_socket,
                 "add-disk",
                 Some(&format!(
-                    "path={},id=test0",
+                    "path={},id=test0,image_type=qcow2",
                     test_disk_path.to_str().unwrap()
                 )),
             );
@@ -5166,7 +5178,7 @@ mod common_parallel {
             .default_disks()
             .args([
                 "--disk",
-                format!("path={test_disk_path},sparse=off,num_queues=4").as_str(),
+                format!("path={test_disk_path},sparse=off,num_queues=4,image_type=qcow2").as_str(),
             ])
             .default_net()
             .capture_output()
