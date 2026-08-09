@@ -64,8 +64,11 @@ pub(crate) fn _test_api_create_boot(target_api: &TargetApi, guest: &Guest) {
 // From the API: Create a VM, boot it and check it can be shutdown and then
 // booted again
 pub(crate) fn _test_api_shutdown(target_api: &TargetApi, guest: &Guest) {
+    let event_path = temp_event_monitor_path(&guest.tmp_dir);
     let mut child = GuestCommand::new(guest)
         .args(target_api.guest_args())
+        .args(["--no-shutdown"])
+        .args(["--event-monitor", format!("path={event_path}").as_str()])
         .capture_output()
         .spawn()
         .unwrap();
@@ -93,16 +96,18 @@ pub(crate) fn _test_api_shutdown(target_api: &TargetApi, guest: &Guest) {
         guest.validate_cpu_count(None);
         guest.validate_memory(None);
 
-        // Sync and shutdown without powering off to prevent filesystem
-        // corruption.
-        guest.ssh_command("sync").unwrap();
-        guest.ssh_command("sudo shutdown -H now").unwrap();
+        guest.ssh_command("sudo poweroff").unwrap();
 
-        // Wait for the guest to be fully shutdown
-        assert!(guest.wait_for_ssh_unresponsive(Duration::from_secs(20)));
-
-        // Then shut it down
-        assert!(target_api.remote_command("shutdown", None));
+        // Wait for the VMM to report completed shutdown before reusing the VM.
+        let latest_events = [&MetaEvent {
+            event: "shutdown".to_string(),
+            device_id: None,
+        }];
+        assert!(wait_for_latest_events_exact(
+            Duration::from_secs(20),
+            &latest_events,
+            &event_path,
+        ));
 
         // Then boot it again
         assert!(target_api.remote_command("boot", None));
@@ -124,8 +129,11 @@ pub(crate) fn _test_api_shutdown(target_api: &TargetApi, guest: &Guest) {
 // From the API: Create a VM, boot it and check it can be deleted and then recreated
 // booted again.
 pub(crate) fn _test_api_delete(target_api: &TargetApi, guest: &Guest) {
+    let event_path = temp_event_monitor_path(&guest.tmp_dir);
     let mut child = GuestCommand::new(guest)
         .args(target_api.guest_args())
+        .args(["--no-shutdown"])
+        .args(["--event-monitor", format!("path={event_path}").as_str()])
         .capture_output()
         .spawn()
         .unwrap();
@@ -153,13 +161,18 @@ pub(crate) fn _test_api_delete(target_api: &TargetApi, guest: &Guest) {
         guest.validate_cpu_count(None);
         guest.validate_memory(None);
 
-        // Sync and shutdown without powering off to prevent filesystem
-        // corruption.
-        guest.ssh_command("sync").unwrap();
-        guest.ssh_command("sudo shutdown -H now").unwrap();
+        guest.ssh_command("sudo poweroff").unwrap();
 
-        // Wait for the guest to be fully shutdown
-        assert!(guest.wait_for_ssh_unresponsive(Duration::from_secs(20)));
+        // Wait for the VMM to report completed shutdown before deleting the VM.
+        let latest_events = [&MetaEvent {
+            event: "shutdown".to_string(),
+            device_id: None,
+        }];
+        assert!(wait_for_latest_events_exact(
+            Duration::from_secs(20),
+            &latest_events,
+            &event_path,
+        ));
 
         // Then delete it
         assert!(target_api.remote_command("delete", None));
