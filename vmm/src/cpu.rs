@@ -43,6 +43,10 @@ use hypervisor::HypervisorType;
 use hypervisor::StandardRegisters;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::arch::aarch64::gic::Vgic;
+#[cfg(target_arch = "aarch64")]
+use hypervisor::arch::aarch64::mpidr_from_vcpu_id;
+#[cfg(target_arch = "aarch64")]
+use hypervisor::arch::aarch64::regs::MPIDR_EL1;
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 use hypervisor::arch::aarch64::regs::{ID_AA64MMFR0_EL1, TCR_EL1, TTBR1_EL1};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -488,8 +492,6 @@ pub struct Vcpu {
     // The hypervisor abstracted CPU.
     vcpu: Box<dyn hypervisor::Vcpu>,
     id: u32,
-    #[cfg(target_arch = "aarch64")]
-    mpidr: u64,
     saved_state: Option<CpuState>,
     #[cfg(target_arch = "x86_64")]
     vendor: CpuVendor,
@@ -531,8 +533,6 @@ impl Vcpu {
         Ok(Vcpu {
             vcpu,
             id,
-            #[cfg(target_arch = "aarch64")]
-            mpidr: 0,
             saved_state: None,
             #[cfg(target_arch = "x86_64")]
             vendor: cpu_vendor,
@@ -560,7 +560,8 @@ impl Vcpu {
         {
             self.init(vm)?;
             self.finalize_sve()?;
-            self.mpidr = arch::configure_vcpu(self.vcpu.as_ref(), self.id, boot_setup)
+            self.verify_mpidr();
+            arch::configure_vcpu(self.vcpu.as_ref(), self.id, boot_setup)
                 .map_err(Error::VcpuConfiguration)?;
         }
         #[cfg(target_arch = "riscv64")]
@@ -598,12 +599,6 @@ impl Vcpu {
         Ok(())
     }
 
-    /// Gets the MPIDR register value.
-    #[cfg(target_arch = "aarch64")]
-    pub fn get_mpidr(&self) -> u64 {
-        self.mpidr
-    }
-
     /// Gets the saved vCPU state.
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     pub fn get_saved_state(&self) -> Option<CpuState> {
@@ -625,6 +620,21 @@ impl Vcpu {
         self.vcpu.vcpu_init(&kvi).map_err(Error::VcpuArmInit)?;
 
         Ok(())
+    }
+
+    /// Panics if the MPIDR derived from the vCPU id has drifted away from the
+    /// one the hypervisor actually gives the guest.
+    #[cfg(target_arch = "aarch64")]
+    fn verify_mpidr(&self) {
+        let id = self.id as u64;
+        let derived = mpidr_from_vcpu_id(id);
+        let actual = self.vcpu.get_sys_reg(MPIDR_EL1).unwrap();
+
+        assert_eq!(
+            derived, actual,
+            "vCPU {id} MPIDR mismatch: mpidr_from_vcpu_id() ({derived:#x}) no longer matches \
+             the hypervisor's affinity assignment ({actual:#x})"
+        );
     }
 
     /// Finalizes SVE on the vCPU if the host supports it.
@@ -1026,6 +1036,7 @@ impl CpuManager {
                         .map_err(Error::VcpuSetPreFinalizeRegs)?;
                 }
                 vcpu.finalize_sve()?;
+                vcpu.verify_mpidr();
             }
 
             vcpu.vcpu
@@ -1745,9 +1756,8 @@ impl CpuManager {
 
     #[cfg(target_arch = "aarch64")]
     pub fn get_mpidrs(&self) -> Vec<u64> {
-        self.vcpus
-            .iter()
-            .map(|cpu| cpu.lock().unwrap().get_mpidr())
+        (0..self.vcpus.len() as u64)
+            .map(mpidr_from_vcpu_id)
             .collect()
     }
 
@@ -1833,8 +1843,7 @@ impl CpuManager {
 
             // See section 5.2.12.14 GIC CPU Interface (GICC) Structure in ACPI spec.
             for cpu in 0..self.config.boot_vcpus {
-                let vcpu = &self.vcpus[cpu as usize];
-                let mpidr = vcpu.lock().unwrap().get_mpidr();
+                let mpidr = mpidr_from_vcpu_id(cpu as u64);
                 /* ARMv8 MPIDR format:
                      Bits [63:40] Must be zero
                      Bits [39:32] Aff3 : Match Aff3 of target processor MPIDR
@@ -3611,6 +3620,7 @@ mod unit_tests {
     use std::mem::offset_of;
 
     use arch::layout;
+    use hypervisor::arch::aarch64::mpidr_from_vcpu_id;
     use hypervisor::arch::aarch64::regs::MPIDR_EL1;
     #[cfg(feature = "kvm")]
     use hypervisor::arm64_core_reg_id;
@@ -3622,6 +3632,8 @@ mod unit_tests {
     };
     use hypervisor::{HypervisorCpuError, HypervisorVmConfig};
     use vmm_sys_util::errno;
+
+    use super::Vcpu;
 
     #[test]
     fn test_setup_regs() {
@@ -3652,6 +3664,31 @@ mod unit_tests {
 
         vcpu.vcpu_init(&kvi).unwrap();
         assert_eq!(vcpu.get_sys_reg(MPIDR_EL1).unwrap(), 0x80000000);
+    }
+
+    #[test]
+    fn test_get_mpidr() {
+        let hv = hypervisor::new().unwrap();
+        let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
+
+        // Bit 31 is RES1, Aff0 holds the low 4 bits of the vCPU id, and Aff1
+        // takes over past 16 vCPUs.
+        for (id, expected) in [
+            (0, 0x8000_0000),
+            (1, 0x8000_0001),
+            (15, 0x8000_000f),
+            (16, 0x8000_0100),
+            (17, 0x8000_0101),
+            (255, 0x8000_0f0f),
+        ] {
+            let vcpu = Vcpu::new(id, id, vm.as_ref(), None).unwrap();
+            assert_eq!(mpidr_from_vcpu_id(id as u64), expected, "vCPU {id}");
+
+            // Must be what the hypervisor itself calculates.
+            vcpu.init(vm.as_ref()).unwrap();
+            vcpu.finalize_sve().unwrap();
+            vcpu.verify_mpidr();
+        }
     }
 
     #[cfg(feature = "kvm")]
