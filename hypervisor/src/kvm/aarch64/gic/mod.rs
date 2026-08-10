@@ -11,13 +11,13 @@ use std::any::Any;
 use dist_regs::{get_dist_regs, read_ctlr, set_dist_regs, write_ctlr};
 use icc_regs::{get_icc_regs, set_icc_regs};
 use kvm_ioctls::DeviceFd;
-use redist_regs::{construct_gicr_typers, get_redist_regs, set_redist_regs};
+use redist_regs::{get_gicr_typers, get_redist_regs, set_redist_regs};
 use serde::{Deserialize, Serialize};
 
+use crate::Vm;
 use crate::arch::aarch64::gic::{Error, GicState, Result, Vgic, VgicConfig};
 use crate::device::HypervisorDeviceError;
 use crate::kvm::KvmVm;
-use crate::{CpuState, Vm};
 
 const GITS_CTLR: u32 = 0x0000;
 const GITS_IIDR: u32 = 0x0004;
@@ -84,9 +84,6 @@ pub struct KvmGicV3Its {
 
     /// The KVM device for the Its device
     its_device: Option<DeviceFd>,
-
-    /// Vector holding values of GICR_TYPER for each vCPU
-    gicr_typers: Vec<u64>,
 
     /// GIC distributor address
     dist_addr: u64,
@@ -271,7 +268,6 @@ impl KvmGicV3Its {
         let mut gic_device = KvmGicV3Its {
             device: vgic,
             its_device: None,
-            gicr_typers: vec![0; config.vcpu_count.try_into().unwrap()],
             dist_addr: config.dist_addr,
             dist_size: config.dist_size,
             redists_addr: config.redists_addr,
@@ -321,18 +317,13 @@ impl Vgic for KvmGicV3Its {
         [self.msi_addr, self.msi_size]
     }
 
-    fn set_gicr_typers(&mut self, vcpu_states: &[CpuState]) {
-        let gicr_typers = construct_gicr_typers(vcpu_states);
-        self.gicr_typers = gicr_typers;
-    }
-
     fn as_any_concrete_mut(&mut self) -> &mut dyn Any {
         self
     }
 
     /// Save the state of GICv3ITS.
     fn state(&self) -> Result<GicState> {
-        let gicr_typers = self.gicr_typers.clone();
+        let gicr_typers = get_gicr_typers(self.vcpu_count);
 
         let gicd_ctlr = read_ctlr(&self.device)?;
 
@@ -402,7 +393,7 @@ impl Vgic for KvmGicV3Its {
     fn set_state(&mut self, state: &GicState) -> Result<()> {
         let kvm_state: Gicv3ItsState = state.clone().into();
 
-        let gicr_typers = self.gicr_typers.clone();
+        let gicr_typers = get_gicr_typers(self.vcpu_count);
 
         write_ctlr(&self.device, kvm_state.gicd_ctlr)?;
 
