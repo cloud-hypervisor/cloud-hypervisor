@@ -384,9 +384,8 @@ pub enum Error {
     #[error("Error creating e820 map")]
     CreatingE820Map(#[source] io::Error),
 
-    #[cfg(feature = "fw_cfg")]
-    #[error("Error creating acpi tables")]
-    CreatingAcpiTables(#[source] io::Error),
+    #[error("Error creating ACPI tables")]
+    CreatingAcpiTables(#[source] acpi::Error),
 
     #[cfg(feature = "fw_cfg")]
     #[error("Error adding fw_cfg item")]
@@ -2713,10 +2712,10 @@ impl Vm {
     // created and passed when populating the HOB.
 
     #[cfg(not(target_arch = "riscv64"))]
-    fn create_acpi_tables(&self) -> Option<GuestAddress> {
+    fn create_acpi_tables(&self) -> Result<Option<GuestAddress>> {
         #[cfg(feature = "tdx")]
         if self.config.lock().unwrap().is_tdx_enabled() {
-            return None;
+            return Ok(None);
         }
         let mem = self.memory_manager.lock().unwrap().guest_memory().memory();
         let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
@@ -2727,10 +2726,11 @@ impl Vm {
             &self.memory_manager.lock().unwrap(),
             &self.numa_nodes,
             tpm_enabled,
-        );
+        )
+        .map_err(Error::CreatingAcpiTables)?;
         info!("Created ACPI tables: rsdp_addr = 0x{:x}", rsdp_addr.0);
 
-        Some(rsdp_addr)
+        Ok(Some(rsdp_addr))
     }
 
     fn entry_point(&mut self) -> Result<Option<EntryPoint>> {
@@ -2813,7 +2813,8 @@ impl Vm {
                         &self.memory_manager.lock().unwrap(),
                         &self.numa_nodes,
                         tpm_enabled,
-                    )?;
+                    )
+                    .map_err(Error::CreatingAcpiTables)?;
                 }
             }
         }
@@ -2829,10 +2830,10 @@ impl Vm {
                     // rsdp addr to None.
                     None
                 } else {
-                    self.create_acpi_tables()
+                    self.create_acpi_tables()?
                 };
             } else {
-                let rsdp_addr = self.create_acpi_tables();
+                let rsdp_addr = self.create_acpi_tables()?;
             }
         }
 
@@ -2903,7 +2904,7 @@ impl Vm {
         // On aarch64 the ACPI tables depend on the vCPU mpidr which is only
         // available after they are configured
         #[cfg(target_arch = "aarch64")]
-        let rsdp_addr = self.create_acpi_tables();
+        let rsdp_addr = self.create_acpi_tables()?;
 
         #[cfg(not(target_arch = "riscv64"))]
         // Configure shared state based on loaded kernel.
