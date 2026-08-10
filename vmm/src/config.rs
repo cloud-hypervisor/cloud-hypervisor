@@ -895,7 +895,9 @@ impl PlatformConfig {
                 .to_string();
 
             if cfg!(feature = "tdx") {
-                syntax.push_str(",tdx=on|off,quote_generation_socket=<qgs_unix_socket_path>");
+                syntax.push_str(
+                    ",tdx=on|off,quote_generation_socket=<[unix:]path|vsock:cid:port|tcp:host:port>",
+                );
                 syntax.push_str(",mrconfigid=<hex_sha384>,mrowner=<hex_sha384>");
                 syntax.push_str(",mrownerconfig=<hex_sha384>");
             }
@@ -1018,7 +1020,7 @@ impl PlatformConfig {
             .0;
         #[cfg(feature = "tdx")]
         let tdx_quote_generation_socket = parser
-            .convert::<PathBuf>("quote_generation_socket")
+            .convert::<TdxQuoteGenerationSocket>("quote_generation_socket")
             .map_err(Error::ParsePlatform)?;
         #[cfg(feature = "tdx")]
         let tdx_mrconfigid = parser

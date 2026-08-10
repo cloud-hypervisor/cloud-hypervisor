@@ -16,8 +16,6 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::mem::zeroed;
 use std::os::unix::thread::JoinHandleExt;
-#[cfg(feature = "tdx")]
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{any, cmp, hint, io, panic, result, thread, time};
@@ -100,6 +98,8 @@ use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::tdx_quote;
 #[cfg(target_arch = "x86_64")]
 use crate::vm::physical_bits;
+#[cfg(feature = "tdx")]
+use crate::vm_config::TdxQuoteGenerationSocket;
 use crate::vm_config::{CoreScheduling, CpusConfig};
 use crate::{CPU_MANAGER_SNAPSHOT_ID, GuestMemoryMmap};
 
@@ -762,9 +762,9 @@ pub struct CpuManager {
     // be skipped for TDs.
     #[cfg(feature = "tdx")]
     tdx_enabled: bool,
-    // QGS Unix socket used to answer TDX `GetQuote` requests, if configured.
+    // QGS endpoint used to answer TDX `GetQuote` requests, if configured.
     #[cfg(feature = "tdx")]
-    tdx_quote_generation_socket: Option<PathBuf>,
+    tdx_quote_generation_socket: Option<TdxQuoteGenerationSocket>,
     // State of the core scheduling group leader election (VM mode).
     core_scheduling_group_leader: Arc<AtomicI32>,
     #[cfg(feature = "igvm")]
@@ -897,7 +897,7 @@ impl CpuManager {
         seccomp_action: SeccompAction,
         vm_ops: Arc<dyn VmOps>,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
-        #[cfg(feature = "tdx")] tdx_quote_generation_socket: Option<PathBuf>,
+        #[cfg(feature = "tdx")] tdx_quote_generation_socket: Option<TdxQuoteGenerationSocket>,
         numa_nodes: &NumaNodes,
         #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
         #[cfg(feature = "igvm")] igvm_enabled: bool,
@@ -1519,7 +1519,7 @@ impl CpuManager {
                                                             tdx_vm_ops.as_ref(),
                                                             shared_gpa,
                                                             buf_len,
-                                                            tdx_quote_generation_socket.as_deref(),
+                                                            tdx_quote_generation_socket.as_ref(),
                                                         );
                                                         vcpu.vcpu.set_tdx_status(status);
                                                     }

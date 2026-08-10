@@ -3,9 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 use std::collections::HashSet;
+#[cfg(feature = "tdx")]
+use std::fmt;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
-#[cfg(feature = "fw_cfg")]
+#[cfg(any(feature = "fw_cfg", feature = "tdx"))]
 use std::str::FromStr;
 use std::{fs, result};
 
@@ -126,6 +128,97 @@ pub fn default_platformconfig_vfio_p2p_dma() -> bool {
     true
 }
 
+/// QGS endpoint used to answer TDX `TDG.VP.VMCALL<GetQuote>` requests,
+/// modeled after QEMU's `SocketAddress` so the same transports are expressible.
+///
+/// Accepted string forms (CLI and JSON):
+///   - `<path>` or `unix:<path>`                 -> host Unix socket
+///   - `vsock:<cid>:<port>`                       -> host AF_VSOCK socket
+///   - `tcp:<host>:<port>` / `inet:<host>:<port>` -> host TCP socket
+#[cfg(feature = "tdx")]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub enum TdxQuoteGenerationSocket {
+    Unix { path: PathBuf },
+    Vsock { cid: u32, port: u32 },
+    Inet { host: String, port: u16 },
+}
+
+#[cfg(feature = "tdx")]
+impl FromStr for TdxQuoteGenerationSocket {
+    type Err = String;
+
+    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
+        if let Some(rest) = s.strip_prefix("vsock:") {
+            let (cid, port) = rest.split_once(':').ok_or_else(|| {
+                format!("invalid vsock QGS address '{s}', expected vsock:<cid>:<port>")
+            })?;
+            let cid = cid
+                .parse::<u32>()
+                .map_err(|e| format!("invalid vsock CID '{cid}': {e}"))?;
+            let port = port
+                .parse::<u32>()
+                .map_err(|e| format!("invalid vsock port '{port}': {e}"))?;
+            return Ok(TdxQuoteGenerationSocket::Vsock { cid, port });
+        }
+        if let Some(rest) = s.strip_prefix("tcp:").or_else(|| s.strip_prefix("inet:")) {
+            // Split off the trailing `:port`; `rsplit_once` keeps IPv6 literals
+            // (whose host part contains embedded colons) intact.
+            let (host, port) = rest.rsplit_once(':').ok_or_else(|| {
+                format!("invalid tcp QGS address '{s}', expected tcp:<host>:<port>")
+            })?;
+            let host = host.trim_start_matches('[').trim_end_matches(']');
+            if host.is_empty() {
+                return Err(format!("invalid tcp QGS address '{s}', empty host"));
+            }
+            let port = port
+                .parse::<u16>()
+                .map_err(|e| format!("invalid tcp port '{port}': {e}"))?;
+            return Ok(TdxQuoteGenerationSocket::Inet {
+                host: host.to_string(),
+                port,
+            });
+        }
+        // No recognized scheme: treat the whole value as a Unix socket path,
+        // keeping backward compatibility with the historical path-only syntax.
+        let path = s.strip_prefix("unix:").unwrap_or(s);
+        if path.is_empty() {
+            return Err("empty QGS socket path".to_string());
+        }
+        Ok(TdxQuoteGenerationSocket::Unix {
+            path: PathBuf::from(path),
+        })
+    }
+}
+
+#[cfg(feature = "tdx")]
+impl fmt::Display for TdxQuoteGenerationSocket {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            // A bare path keeps the common case's serialized form unchanged.
+            TdxQuoteGenerationSocket::Unix { path } => write!(f, "{}", path.display()),
+            TdxQuoteGenerationSocket::Vsock { cid, port } => write!(f, "vsock:{cid}:{port}"),
+            TdxQuoteGenerationSocket::Inet { host, port } => write!(f, "tcp:{host}:{port}"),
+        }
+    }
+}
+
+#[cfg(feature = "tdx")]
+impl TryFrom<String> for TdxQuoteGenerationSocket {
+    type Error = String;
+
+    fn try_from(s: String) -> result::Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+#[cfg(feature = "tdx")]
+impl From<TdxQuoteGenerationSocket> for String {
+    fn from(s: TdxQuoteGenerationSocket) -> String {
+        s.to_string()
+    }
+}
+
 #[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PlatformConfig {
@@ -156,12 +249,13 @@ pub struct PlatformConfig {
     #[cfg(feature = "tdx")]
     #[serde(default)]
     pub tdx: bool,
-    // Unix socket path of the Quote Generation Service (QGS) used to answer
-    // `TDG.VP.VMCALL<GetQuote>` requests. When unset, GetQuote requests are
-    // completed with the GHCI `QGS_UNAVAILABLE` status.
+    // QGS endpoint of the Quote Generation Service (QGS) used to answer
+    // `TDG.VP.VMCALL<GetQuote>` requests. Supports Unix, AF_VSOCK and TCP
+    // transports (see `TdxQuoteGenerationSocket`). When unset, GetQuote
+    // requests are completed with the GHCI `QGS_UNAVAILABLE` status.
     #[cfg(feature = "tdx")]
     #[serde(default)]
-    pub tdx_quote_generation_socket: Option<PathBuf>,
+    pub tdx_quote_generation_socket: Option<TdxQuoteGenerationSocket>,
     // Optional SHA384 measurement-configuration digests, hex encoded (96 hex
     // characters = 48 bytes each), forwarded verbatim to `KVM_TDX_INIT_VM` as
     // the TD's `mrconfigid`, `mrowner` and `mrownerconfig` registers. When
@@ -1360,6 +1454,85 @@ impl VmConfig {
             ))
         } else {
             self.cpus.max_vcpus
+        }
+    }
+}
+
+#[cfg(all(test, feature = "tdx"))]
+mod tdx_tests {
+    use super::*;
+
+    #[test]
+    fn qgs_socket_parse_unix() {
+        assert_eq!(
+            "/var/run/tdx-qgs/qgs.socket"
+                .parse::<TdxQuoteGenerationSocket>()
+                .unwrap(),
+            TdxQuoteGenerationSocket::Unix {
+                path: PathBuf::from("/var/run/tdx-qgs/qgs.socket"),
+            }
+        );
+        // An explicit `unix:` scheme is stripped.
+        assert_eq!(
+            "unix:/run/qgs.sock"
+                .parse::<TdxQuoteGenerationSocket>()
+                .unwrap(),
+            TdxQuoteGenerationSocket::Unix {
+                path: PathBuf::from("/run/qgs.sock"),
+            }
+        );
+    }
+
+    #[test]
+    fn qgs_socket_parse_vsock() {
+        assert_eq!(
+            "vsock:2:4050".parse::<TdxQuoteGenerationSocket>().unwrap(),
+            TdxQuoteGenerationSocket::Vsock { cid: 2, port: 4050 }
+        );
+        assert!("vsock:2".parse::<TdxQuoteGenerationSocket>().is_err());
+        assert!("vsock:x:1".parse::<TdxQuoteGenerationSocket>().is_err());
+    }
+
+    #[test]
+    fn qgs_socket_parse_tcp() {
+        assert_eq!(
+            "tcp:127.0.0.1:4050"
+                .parse::<TdxQuoteGenerationSocket>()
+                .unwrap(),
+            TdxQuoteGenerationSocket::Inet {
+                host: "127.0.0.1".to_string(),
+                port: 4050,
+            }
+        );
+        // IPv6 literal in brackets keeps the embedded colons.
+        assert_eq!(
+            "inet:[::1]:4050"
+                .parse::<TdxQuoteGenerationSocket>()
+                .unwrap(),
+            TdxQuoteGenerationSocket::Inet {
+                host: "::1".to_string(),
+                port: 4050,
+            }
+        );
+        assert!("tcp:host".parse::<TdxQuoteGenerationSocket>().is_err());
+        assert!(
+            "tcp:host:99999"
+                .parse::<TdxQuoteGenerationSocket>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn qgs_socket_display_roundtrip() {
+        for s in ["/run/qgs.sock", "vsock:2:4050", "tcp:127.0.0.1:4050"] {
+            let parsed: TdxQuoteGenerationSocket = s.parse().unwrap();
+            assert_eq!(
+                parsed
+                    .to_string()
+                    .parse::<TdxQuoteGenerationSocket>()
+                    .unwrap(),
+                parsed
+            );
         }
     }
 }

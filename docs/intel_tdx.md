@@ -182,8 +182,13 @@ When a TD guest asks for a quote it issues the
 VMM forwards the embedded TD report to a Quote Generation Service (QGS) and
 writes the returned quote back into the guest's shared buffer.
 
-The QGS endpoint is a host Unix socket configured through the
-`quote_generation_socket` platform option:
+The QGS endpoint is configured through the `quote_generation_socket` platform
+option. Mirroring QEMU's `SocketAddress`-typed `quote-generation-socket`, it
+accepts a host Unix, `AF_VSOCK` or TCP socket using the following string forms:
+
+- `<path>` or `unix:<path>` — host Unix socket (default when no scheme is given)
+- `vsock:<cid>:<port>` — host `AF_VSOCK` socket
+- `tcp:<host>:<port>` (or `inet:<host>:<port>`) — host TCP socket
 
 ```bash
 ./cloud-hypervisor \
@@ -195,6 +200,9 @@ The QGS endpoint is a host Unix socket configured through the
     --memory size=1G \
     --disk path=tdx_guest_img
 ```
+
+For example, a QGS reachable over vsock on the host would be configured with
+`quote_generation_socket=vsock:2:4050`.
 
 If `quote_generation_socket` is not set, GetQuote requests complete with the
 GHCI `QGS_UNAVAILABLE` status. The transaction is handled synchronously on the
