@@ -475,9 +475,10 @@ impl Vgic for KvmGicV3Its {
 mod unit_tests {
     use crate::HypervisorVmConfig;
     use crate::aarch64::gic::{
-        get_dist_regs, get_icc_regs, get_redist_regs, set_dist_regs, set_icc_regs, set_redist_regs,
+        get_dist_regs, get_gicr_typers, get_icc_regs, get_redist_regs, set_dist_regs, set_icc_regs,
+        set_redist_regs,
     };
-    use crate::arch::aarch64::gic::VgicConfig;
+    use crate::arch::aarch64::gic::{Vgic, VgicConfig};
     use crate::kvm::KvmGicV3Its;
 
     fn create_test_vgic_config() -> VgicConfig {
@@ -555,5 +556,65 @@ mod unit_tests {
         let gic = vm.create_vgic(&vgic_config).expect("Cannot create gic");
 
         gic.lock().unwrap().save_data_tables().unwrap();
+    }
+
+    fn create_test_multi_vcpu_vgic_config() -> VgicConfig {
+        // Two redistributors (2 * GIC_V3_REDIST_SIZE = 2 * 0x02_0000).
+        VgicConfig {
+            vcpu_count: 2,
+            dist_addr: 0x0900_0000 - 0x01_0000,
+            dist_size: 0x01_0000,
+            redists_addr: 0x0900_0000 - 0x01_0000 - 0x04_0000,
+            redists_size: 0x04_0000,
+            msi_addr: 0x0900_0000 - 0x01_0000 - 0x04_0000 - 0x02_0000,
+            msi_size: 0x02_0000,
+            nr_irqs: 256,
+        }
+    }
+
+    #[test]
+    fn test_gic_state_save_restore_roundtrip() {
+        let hv = crate::new().unwrap();
+        let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
+        let vcpu0 = vm.create_vcpu(0, None).unwrap();
+        let vcpu1 = vm.create_vcpu(1, None).unwrap();
+
+        // Initialise vCPUs
+        let mut kvi = vcpu0.create_vcpu_init();
+        vm.get_preferred_target(&mut kvi).unwrap();
+        vcpu0.vcpu_init(&kvi).unwrap();
+        let mut kvi = vcpu1.create_vcpu_init();
+        vm.get_preferred_target(&mut kvi).unwrap();
+        vcpu1.vcpu_init(&kvi).unwrap();
+
+        let gicr_typers = get_gicr_typers(2);
+        assert_eq!(gicr_typers.len(), 2);
+        let typer0 = vec![gicr_typers[0]];
+        let typer1 = vec![gicr_typers[1]];
+
+        let mut gic = KvmGicV3Its::new(&*vm, &create_test_multi_vcpu_vgic_config())
+            .expect("Cannot create gic");
+
+        // Give vCPU0 redistributor state that differs from vCPU1's.
+        let mut regs0 = get_redist_regs(&gic.device, &typer0).unwrap();
+        let last = regs0.len() - 1;
+        regs0[last] ^= 0xffff_ffff;
+        set_redist_regs(&gic.device, &typer0, &regs0).unwrap();
+
+        let expected0 = get_redist_regs(&gic.device, &typer0).unwrap();
+        let expected1 = get_redist_regs(&gic.device, &typer1).unwrap();
+        assert_ne!(expected0, expected1);
+
+        let snapshot = gic.state().unwrap();
+
+        // Swap the states to intentionally clobber the redist states
+        // Restore should set these back to values before the snapshot.
+        set_redist_regs(&gic.device, &typer0, &expected1).unwrap();
+        set_redist_regs(&gic.device, &typer1, &expected0).unwrap();
+
+        gic.set_state(&snapshot).unwrap();
+
+        assert_eq!(get_redist_regs(&gic.device, &typer0).unwrap(), expected0);
+        assert_eq!(get_redist_regs(&gic.device, &typer1).unwrap(), expected1);
     }
 }
