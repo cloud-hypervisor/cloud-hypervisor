@@ -62,6 +62,12 @@ struct OpenHow {
     resolve: u64,
 }
 
+// open_how.resolve flags from openat2(2). The libc crate does not export
+// them, so they are defined here with the values from the kernel UAPI
+// (include/uapi/linux/openat2.h).
+const RESOLVE_NO_MAGICLINKS: u64 = 0x02;
+const RESOLVE_BENEATH: u64 = 0x08;
+
 // Splits an untrusted extent `filename` into its `Normal` path components for
 // the fallback walk, rejecting any `..`/`.` traversal.
 fn extent_components(filename: &str) -> io::Result<Vec<&OsStr>> {
@@ -133,7 +139,7 @@ fn open_extent(
         Ok(file) => AlignedFile::new(file, direct),
         Err(e) if matches!(e.raw_os_error(), Some(libc::ENOSYS) | Some(libc::EPERM)) => {
             let components = extent_components(filename)?;
-            open_extent_walk(dir, &components, writable, direct)?
+            open_extent_walk(dir, &components, writable, direct, !is_absolute)?
         }
         Err(e) => return Err(e),
     };
@@ -215,10 +221,19 @@ fn open_extent_openat2(
     if direct {
         flags |= libc::O_DIRECT;
     }
+
+    // Confine a relative extent name beneath the descriptor directory. An
+    // absolute name is anchored at the filesystem root by the caller and its
+    // policy is deliberately left unchanged here, so RESOLVE_BENEATH (which
+    // rejects absolute pathnames outright) is not applied to it.
+    let mut resolve = RESOLVE_NO_MAGICLINKS;
+    if !Path::new(filename).is_absolute() {
+        resolve |= RESOLVE_BENEATH;
+    }
     let how = OpenHow {
         flags: flags as u64,
         mode: 0,
-        resolve: 0,
+        resolve,
     };
 
     // SAFETY: FFI syscall. `cname` is NUL-terminated and outlives the call,
@@ -245,6 +260,7 @@ fn open_extent_walk(
     components: &[&OsStr],
     writable: bool,
     direct: bool,
+    forbid_intermediate_symlinks: bool,
 ) -> io::Result<AlignedFile> {
     let last = components.len() - 1;
     for (i, name) in components.iter().enumerate() {
@@ -256,7 +272,11 @@ fn open_extent_walk(
         })?;
 
         let flags = if i < last {
-            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC
+            let mut flags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC;
+            if forbid_intermediate_symlinks {
+                flags |= libc::O_NOFOLLOW;
+            }
+            flags
         } else {
             // Final component: the extent file, opened with the declared access
             // and cache mode, and O_NOFOLLOW so it may not be a symlink either.
@@ -527,8 +547,15 @@ mod tests {
         let openat2_res = open_extent_openat2(openat2_dir.as_raw_fd(), filename, writable, direct);
 
         let walk_dir = open_dir(anchor);
+        let forbid_intermediate_symlinks = !Path::new(filename).is_absolute();
         let walk_res = match extent_components(filename) {
-            Ok(components) => open_extent_walk(walk_dir, &components, writable, direct),
+            Ok(components) => open_extent_walk(
+                walk_dir,
+                &components,
+                writable,
+                direct,
+                forbid_intermediate_symlinks,
+            ),
             Err(e) => Err(e),
         };
 
@@ -652,23 +679,60 @@ mod tests {
     }
 
     #[test]
-    fn open_extent_follows_symlinked_intermediate_directory_relative() {
+    fn open_extent_relative_intermediate_symlink_openat2_follows_walk_rejects() {
         use std::os::unix::fs::symlink;
 
         use vmm_sys_util::tempdir::TempDir;
 
-        // A relative path may traverse a symlinked intermediate directory
-        // (only the final component is guarded).
-        let real = TempDir::new_with_prefix("/tmp/vmdk-rel-real-test").unwrap();
-        fs::write(real.as_path().join("s001.vmdk"), b"data").unwrap();
-
         let dir = TempDir::new_with_prefix("/tmp/vmdk-rel-symdir-test").unwrap();
         let base = dir.as_path();
-        symlink(real.as_path(), base.join("sub")).unwrap();
+        fs::create_dir(base.join("real")).unwrap();
+        fs::write(base.join("real").join("s001.vmdk"), b"data").unwrap();
+        symlink("real", base.join("sub")).unwrap();
 
         let (openat2_res, walk_res) = open_both(base, "sub/s001.vmdk", false, false);
         check_openat2(&openat2_res, true);
-        check_walk(&walk_res, true);
+        check_walk(&walk_res, false);
+    }
+
+    #[test]
+    fn open_extent_walk_allows_symlinked_base_directory() {
+        use std::os::unix::fs::symlink;
+
+        use vmm_sys_util::tempdir::TempDir;
+
+        let real = TempDir::new_with_prefix("/tmp/vmdk-realbase-test").unwrap();
+        fs::write(real.as_path().join("s001.vmdk"), b"data").unwrap();
+
+        let link_parent = TempDir::new_with_prefix("/tmp/vmdk-linkbase-test").unwrap();
+        let base_link = link_parent.as_path().join("base");
+        symlink(real.as_path(), &base_link).unwrap();
+
+        let walk_dir = open_dir(&base_link);
+        let components = extent_components("s001.vmdk").unwrap();
+        let res = open_extent_walk(walk_dir, &components, false, false, true);
+        assert!(
+            res.is_ok(),
+            "a symlinked base directory must still resolve its (real) extents"
+        );
+    }
+
+    #[test]
+    fn open_extent_openat2_rejects_relative_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        use vmm_sys_util::tempdir::TempDir;
+
+        let outside = TempDir::new_with_prefix("/tmp/vmdk-escape-outside").unwrap();
+        fs::write(outside.as_path().join("s001.vmdk"), b"secret").unwrap();
+
+        let dir = TempDir::new_with_prefix("/tmp/vmdk-escape-anchor").unwrap();
+        let base = dir.as_path();
+        symlink(outside.as_path(), base.join("sub")).unwrap();
+
+        let anchor = open_dir(base);
+        let res = open_extent_openat2(anchor.as_raw_fd(), "sub/s001.vmdk", false, false);
+        check_openat2(&res, false);
     }
 
     #[test]
@@ -690,5 +754,74 @@ mod tests {
         let (openat2_res, walk_res) = open_both(base, via_symlink.to_str().unwrap(), false, false);
         check_openat2(&openat2_res, true);
         check_walk(&walk_res, true);
+    }
+
+    #[test]
+    fn open_extent_rejects_parent_dir_traversal() {
+        use vmm_sys_util::tempdir::TempDir;
+
+        // Layout:
+        //   root/
+        //     secret     <- must NOT be reachable through the extent name
+        //     anchor/    <- the "descriptor directory" used as the open anchor
+        let root = TempDir::new_with_prefix("/tmp/vmdk-traversal-test").unwrap();
+        let anchor = root.as_path().join("anchor");
+        fs::create_dir(&anchor).unwrap();
+        fs::write(root.as_path().join("secret"), b"secret").unwrap();
+
+        // `..` climbs out of `anchor` back into `root` and reaches `secret`.
+        let (openat2_res, walk_res) = open_both(&anchor, "../secret", false, false);
+        check_openat2(&openat2_res, false);
+        check_walk(&walk_res, false);
+    }
+
+    #[test]
+    fn open_extent_rejects_relative_traversal() {
+        use vmm_sys_util::tempdir::TempDir;
+
+        let outer = TempDir::new_with_prefix("/tmp/vmdk-traversal-test").unwrap();
+        fs::write(outer.as_path().join("escape.vmdk"), b"secret").unwrap();
+        let base = outer.as_path().join("descriptor-dir");
+        fs::create_dir(&base).unwrap();
+
+        for name in [
+            "../escape.vmdk",
+            "./../escape.vmdk",
+            "sub/../../escape.vmdk",
+        ] {
+            let (openat2_res, walk_res) = open_both(&base, name, true, false);
+            check_openat2(&openat2_res, false);
+            check_walk(&walk_res, false);
+        }
+
+        let err =
+            open_extent(base.to_str().unwrap(), "../escape.vmdk", true, false, None).unwrap_err();
+        assert_eq!(
+            err.raw_os_error(),
+            Some(libc::EXDEV),
+            "extent traversal must fail with EXDEV, not fall back to the walk"
+        );
+    }
+
+    #[test]
+    fn open_extent_walk_rejects_intermediate_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        use vmm_sys_util::tempdir::TempDir;
+
+        let outside = TempDir::new_with_prefix("/tmp/vmdk-walk-escape-outside").unwrap();
+        fs::write(outside.as_path().join("s001.vmdk"), b"secret").unwrap();
+
+        let dir = TempDir::new_with_prefix("/tmp/vmdk-walk-escape-anchor").unwrap();
+        let base = dir.as_path();
+        symlink(outside.as_path(), base.join("sub")).unwrap();
+
+        let walk_dir = open_dir(base);
+        let components = extent_components("sub/s001.vmdk").unwrap();
+        let res = open_extent_walk(walk_dir, &components, false, false, true);
+        assert!(
+            res.is_err(),
+            "fallback walk must reject an intermediate symlink escaping the descriptor directory"
+        );
     }
 }
