@@ -1706,6 +1706,134 @@ mod common_parallel {
         _test_virtio_block_direct_io_data_disk_4k(ImageType::FlatVmdk);
     }
 
+    fn _test_virtio_block_size_override(image_type: ImageType, direct: bool) {
+        let (qemu_fmt, ext): (&str, &str) = match image_type {
+            ImageType::Raw => ("raw", "raw"),
+            ImageType::Qcow2 => ("qcow2", "qcow2"),
+            _ => panic!("unsupported image_type {image_type}"),
+        };
+        let image_type_str = image_type.to_string();
+
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+
+        // The advertised 4096 geometry comes entirely from the override and
+        // not from the backend. Direct I/O needs an O_DIRECT capable
+        // backing, so place it on the workloads filesystem rather than the
+        // default tmpfs.
+        let workloads_dir = direct.then(|| {
+            let mut workloads_path = dirs::home_dir().unwrap();
+            workloads_path.push("workloads");
+            TempDir::new_in(workloads_path.as_path()).unwrap()
+        });
+        let test_disk = match &workloads_dir {
+            Some(dir) => dir.as_path().join(format!("lbs-test.{ext}")),
+            None => guest.tmp_dir.as_path().join(format!("lbs-test.{ext}")),
+        };
+        let test_disk_path = test_disk.to_str().unwrap().to_owned();
+        let res = run_qemu_img(&test_disk, &["create", "-f", qemu_fmt], Some(&["64M"]));
+        assert!(res.status.success(), "qemu-img create failed: {res:?}");
+
+        let direct_opt = if direct { ",direct=on" } else { "" };
+
+        let mut child = GuestCommand::new(&guest)
+            .default_cpus()
+            .default_memory()
+            .default_kernel_cmdline()
+            .args([
+                "--disk",
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={test_disk_path},image_type={image_type_str},\
+                     x_override_virtio_block_size=4096{direct_opt}"
+                )
+                .as_str(),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            // LOG-SEC column
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk -t | grep vdc | awk '{print $6}'")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                4096
+            );
+
+            // MIN-IO column
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk -t | grep vdc | awk '{print $3}'")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                4096
+            );
+
+            // PHY-SEC column
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk -t | grep vdc | awk '{print $5}'")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                4096
+            );
+
+            // Guest direct I/O aligns to the advertised block size while
+            // the host side stays buffered.
+            guest
+                .ssh_command(
+                    "sudo dd if=/dev/urandom of=/tmp/pattern bs=4096 count=8 && \
+                     sudo dd if=/tmp/pattern of=/dev/vdc bs=4096 count=8 seek=1 \
+                         oflag=direct conv=fsync && \
+                     sudo dd if=/dev/vdc of=/tmp/readback bs=4096 count=8 skip=1 \
+                         iflag=direct && \
+                     cmp /tmp/pattern /tmp/readback",
+                )
+                .expect("4k logical block size round trip failed");
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_virtio_block_size_override_raw() {
+        _test_virtio_block_size_override(ImageType::Raw, false);
+    }
+
+    #[test]
+    fn test_virtio_block_size_override_qcow2() {
+        _test_virtio_block_size_override(ImageType::Qcow2, false);
+    }
+
+    #[test]
+    fn test_virtio_block_size_override_raw_direct() {
+        _test_virtio_block_size_override(ImageType::Raw, true);
+    }
+
     #[test]
     fn test_virtio_block_qcow2_dirty_bit_unclean_shutdown() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
