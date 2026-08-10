@@ -4,15 +4,10 @@
 
 use kvm_ioctls::DeviceFd;
 
-use crate::CpuState;
 use crate::arch::aarch64::gic::{Error, Result};
+use crate::arch::aarch64::mpidr_from_vcpu_id;
 use crate::device::HypervisorDeviceError;
-use crate::kvm::VcpuKvmState;
-use crate::kvm::kvm_bindings::{
-    KVM_DEV_ARM_VGIC_GRP_REDIST_REGS, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG,
-    KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP0_SHIFT, KVM_REG_ARM64_SYSREG_OP2_MASK,
-    KVM_REG_ARM64_SYSREG_OP2_SHIFT, KVM_REG_SIZE_U64, kvm_device_attr, kvm_one_reg,
-};
+use crate::kvm::kvm_bindings::{KVM_DEV_ARM_VGIC_GRP_REDIST_REGS, kvm_device_attr};
 
 // Relevant redistributor registers that we want to save/restore.
 const GICR_CTLR: u32 = 0x0000;
@@ -38,12 +33,6 @@ const GICR_ICFGR0: u32 = GICR_SGI_OFFSET + 0x0C00;
 
 const KVM_DEV_ARM_VGIC_V3_MPIDR_SHIFT: u32 = 32;
 const KVM_DEV_ARM_VGIC_V3_MPIDR_MASK: u64 = 0xffffffff << KVM_DEV_ARM_VGIC_V3_MPIDR_SHIFT as u64;
-
-const KVM_ARM64_SYSREG_MPIDR_EL1: u64 = KVM_REG_ARM64
-    | KVM_REG_SIZE_U64
-    | KVM_REG_ARM64_SYSREG as u64
-    | (((3_u64) << KVM_REG_ARM64_SYSREG_OP0_SHIFT) & KVM_REG_ARM64_SYSREG_OP0_MASK as u64)
-    | (((5_u64) << KVM_REG_ARM64_SYSREG_OP2_SHIFT) & KVM_REG_ARM64_SYSREG_OP2_MASK as u64);
 
 /// This is how we represent the registers of a distributor.
 /// It is relevant their offset from the base address of the
@@ -195,8 +184,8 @@ pub fn set_redist_regs(gic: &DeviceFd, gicr_typer: &[u64], state: &[u32]) -> Res
     )
 }
 
-pub fn construct_gicr_typers(vcpu_states: &[CpuState]) -> Vec<u64> {
-    /* Pre-construct the GICR_TYPER:
+pub fn get_gicr_typers(vcpu_count: u64) -> Vec<u64> {
+    /* Return a GICR_TYPER from the vCPU MPIDR affinities:
      * For our implementation:
      *  Top 32 bits are the affinity value of the associated CPU
      *  CommonLPIAff == 01 (redistributors with same Aff3 share LPI table)
@@ -209,19 +198,13 @@ pub fn construct_gicr_typers(vcpu_states: &[CpuState]) -> Vec<u64> {
      *  PLPIS == 0 (physical LPIs not supported)
      */
     let mut gicr_typers: Vec<u64> = Vec::new();
-    for (index, state) in vcpu_states.iter().enumerate() {
-        let state: VcpuKvmState = state.clone().into();
-        let last = (index == vcpu_states.len() - 1) as u64;
-        // state.sys_regs is a big collection of system registers, including MIPDR_EL1
-        let mpidr: Vec<kvm_one_reg> = state
-            .sys_regs
-            .into_iter()
-            .filter(|reg| reg.id == KVM_ARM64_SYSREG_MPIDR_EL1)
-            .collect();
-        //calculate affinity
-        let mut cpu_affid = mpidr[0].addr & 1095233437695;
+    for vcpu_id in 0..vcpu_count {
+        let mpidr = mpidr_from_vcpu_id(vcpu_id);
+        let last = (vcpu_id == vcpu_count - 1) as u64;
+        // Calculate affinity.
+        let mut cpu_affid = mpidr & 0xff_00ff_ffff;
         cpu_affid = ((cpu_affid & 0xFF00000000) >> 8) | (cpu_affid & 0xFFFFFF);
-        gicr_typers.push((cpu_affid << 32) | (1 << 24) | ((index as u64) << 8) | (last << 4));
+        gicr_typers.push((cpu_affid << 32) | (1 << 24) | (vcpu_id << 8) | (last << 4));
     }
 
     gicr_typers

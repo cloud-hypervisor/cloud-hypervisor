@@ -7,7 +7,6 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::anyhow;
 use arch::layout;
-use hypervisor::CpuState;
 use hypervisor::arch::aarch64::gic::{GicState, Vgic, VgicConfig};
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
@@ -63,19 +62,9 @@ impl Gic {
         Ok(gic)
     }
 
-    pub fn restore_vgic(
-        &mut self,
-        state: Option<GicState>,
-        saved_vcpu_states: &[CpuState],
-    ) -> Result<()> {
-        self.set_gicr_typers(saved_vcpu_states);
-        self.vgic
-            .clone()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .set_state(&state.unwrap())
-            .map_err(Error::RestoreGic)
+    pub fn restore_vgic(&self, state: Option<GicState>) -> Result<()> {
+        let mut vgic = self.vgic.as_ref().unwrap().lock().unwrap();
+        vgic.set_state(&state.unwrap()).map_err(Error::RestoreGic)
     }
 
     fn enable(&self) -> Result<()> {
@@ -126,11 +115,6 @@ impl Gic {
 
     pub fn get_vgic(&mut self) -> Result<Arc<Mutex<dyn Vgic>>> {
         Ok(self.vgic.clone().unwrap())
-    }
-
-    pub fn set_gicr_typers(&mut self, vcpu_states: &[CpuState]) {
-        let vgic = self.vgic.as_ref().unwrap().clone();
-        vgic.lock().unwrap().set_gicr_typers(vcpu_states);
     }
 }
 

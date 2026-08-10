@@ -1839,11 +1839,10 @@ impl DeviceManager {
             let vgic_state = vgic_snapshot
                 .to_state()
                 .map_err(DeviceManagerError::RestoreGetState)?;
-            let saved_vcpu_states = self.cpu_manager.lock().unwrap().get_saved_states();
             interrupt_controller
                 .lock()
                 .unwrap()
-                .restore_vgic(vgic_state, &saved_vcpu_states)
+                .restore_vgic(vgic_state)
                 .unwrap();
         }
 

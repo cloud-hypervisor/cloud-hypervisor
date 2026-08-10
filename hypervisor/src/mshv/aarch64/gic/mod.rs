@@ -6,8 +6,8 @@ use std::any::Any;
 
 use serde::{Deserialize, Serialize};
 
+use crate::Vm;
 use crate::arch::aarch64::gic::{GicState, Result, Vgic, VgicConfig};
-use crate::{CpuState, Vm};
 
 pub struct MshvGicV2M {
     /// GIC distributor address
@@ -102,10 +102,6 @@ impl Vgic for MshvGicV2M {
             self.redists_addr,
             self.redists_size,
         ]
-    }
-
-    fn set_gicr_typers(&mut self, _vcpu_states: &[CpuState]) {
-        unimplemented!()
     }
 
     fn state(&self) -> Result<GicState> {
