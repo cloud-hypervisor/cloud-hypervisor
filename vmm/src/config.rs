@@ -28,6 +28,7 @@ use virtio_devices::vhost_user::VIRTIO_FS_TAG_LEN;
 use virtio_devices::{RateLimiterConfig, TokenBucketConfig, net, vhost_user};
 
 use crate::landlock::LandlockAccess;
+use crate::userfaultfd::UffdHandoffSpec;
 use crate::vm_config::*;
 
 const MAX_NUM_PCI_SEGMENTS: u16 = 96;
@@ -1106,7 +1107,9 @@ impl MemoryConfig {
             .add("hugepage_size")
             .add("prefault")
             .add("reserve")
-            .add("thp");
+            .add("thp")
+            .add("uffd_handoff_socket")
+            .add("uffd_handoff_mode");
         parser.parse(memory).map_err(Error::ParseMemory)?;
 
         let size = parser
@@ -1160,6 +1163,22 @@ impl MemoryConfig {
             .map_err(Error::ParseMemory)?
             .unwrap_or(Toggle(true))
             .0;
+        let uffd_handoff = match (
+            parser.get("uffd_handoff_socket"),
+            parser
+                .convert::<UffdHandoffSpec>("uffd_handoff_mode")
+                .map_err(Error::ParseMemory)?,
+        ) {
+            (Some(socket), Some(mode)) => Some(UffdHandoffConfig { socket, mode }),
+            (None, None) => None,
+            (Some(_), None) | (None, Some(_)) => {
+                return Err(Error::ParseMemory(OptionParserError::InvalidValue(
+                    "uffd_handoff_socket and uffd_handoff_mode must both be set or \
+                     both omitted"
+                        .to_string(),
+                )));
+            }
+        };
 
         let zones: Option<Vec<MemoryZoneConfig>> = if let Some(memory_zones) = &memory_zones {
             let mut zones = Vec::new();
@@ -1262,6 +1281,7 @@ impl MemoryConfig {
             reserve,
             zones,
             thp,
+            uffd_handoff,
         })
     }
 
@@ -4024,6 +4044,9 @@ mod unit_tests {
     use net_util::MacAddr;
 
     use super::*;
+    use crate::userfaultfd::{
+        UFFD_FEATURE_WP_ASYNC, UFFDIO_REGISTER_MODE_MISSING, UFFDIO_REGISTER_MODE_WP,
+    };
 
     #[test]
     fn test_cpu_parsing() -> Result<()> {
@@ -4295,6 +4318,33 @@ mod unit_tests {
                 ..Default::default()
             }
         );
+        // uffd_handoff defaults to None
+        let bare = MemoryConfig::parse("size=1G", None)?;
+        assert!(bare.uffd_handoff.is_none());
+        // socket + mode together populate the sub-struct
+        assert_eq!(
+            MemoryConfig::parse(
+                "size=0,uffd_handoff_socket=/tmp/m.sock,\
+                 uffd_handoff_mode=MISSING|WP|WP_ASYNC",
+                None
+            )?,
+            MemoryConfig {
+                size: 0,
+                uffd_handoff: Some(UffdHandoffConfig {
+                    socket: "/tmp/m.sock".to_string(),
+                    mode: UffdHandoffSpec {
+                        register: UFFDIO_REGISTER_MODE_MISSING | UFFDIO_REGISTER_MODE_WP,
+                        features: UFFD_FEATURE_WP_ASYNC,
+                    },
+                }),
+                ..Default::default()
+            }
+        );
+        // Bad token surfaces at parse-time (not later at handoff).
+        MemoryConfig::parse("size=0,uffd_handoff_mode=BOGUS", None).unwrap_err();
+        // Socket without mode (or vice versa) is rejected.
+        MemoryConfig::parse("size=0,uffd_handoff_socket=/tmp/m.sock", None).unwrap_err();
+        MemoryConfig::parse("size=0,uffd_handoff_mode=WP", None).unwrap_err();
         Ok(())
     }
 
@@ -5797,6 +5847,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 reserve: false,
                 zones: None,
                 thp: true,
+                uffd_handoff: None,
             },
             payload: Some(PayloadConfig {
                 kernel: Some(PathBuf::from("/path/to/kernel")),
@@ -6860,6 +6911,26 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             invalid_config.validate(),
             Err(ValidationError::InvalidDeviceExcludeMmapBar(6))
         );
+
+        // --- uffd handoff validation tests ---
+
+        let handoff = || {
+            Some(UffdHandoffConfig {
+                socket: "/tmp/m.sock".to_string(),
+                mode: UffdHandoffSpec::parse("MISSING|WP").unwrap(),
+            })
+        };
+
+        // uffd handoff works with or without shared memory
+        let mut valid_uffd_config = valid_config.clone();
+        valid_uffd_config.memory.uffd_handoff = handoff();
+        valid_uffd_config.memory.shared = false;
+        valid_uffd_config.validate().unwrap();
+
+        let mut valid_uffd_shared = valid_config.clone();
+        valid_uffd_shared.memory.uffd_handoff = handoff();
+        valid_uffd_shared.memory.shared = true;
+        valid_uffd_shared.validate().unwrap();
 
         let mut still_valid_config = valid_config.clone();
         // SAFETY: Safe as the file was just opened

@@ -53,10 +53,11 @@ use crate::api::{
     VmAddGenericVhostUser, VmAddNet, VmAddPmem, VmAddUserDevice, VmAddVdpa, VmAddVsock, VmBoot,
     VmConfig, VmCounters, VmDelete, VmNmi, VmPause, VmPowerButton, VmReboot, VmReceiveMigration,
     VmReceiveMigrationData, VmRemoveDevice, VmResize, VmResizeDisk, VmResizeZone, VmRestore,
-    VmResume, VmSendMigration, VmShutdown, VmSnapshot,
+    VmResume, VmSendMigration, VmShutdown, VmSnapshot, VmUffdAttach,
 };
 use crate::config::RestoreConfig;
 use crate::cpu::Error as CpuError;
+use crate::memory_manager::Error as MemoryManagerError;
 use crate::vm::Error as VmError;
 
 /// Helper module for attaching externally opened FDs to config objects.
@@ -485,6 +486,41 @@ vm_action_put_handler_body!(VmResizeDisk);
 vm_action_put_handler_body!(VmResizeZone);
 vm_action_put_handler_body!(VmSnapshot);
 vm_action_put_handler_body!(VmSendMigration);
+
+// Custom handler (rather than vm_action_put_handler_body!) so a re-attach
+// with a different UFFD mode maps to 400 Bad Request instead of the
+// generic 500: it's a client error the caller can fix (don't change the
+// mode), not a server fault. micro_http has no 409 Conflict variant, so
+// 400 is the closest representable status. Every other handoff failure
+// still falls through to HttpError::ApiError (500).
+impl PutHandler for VmUffdAttach {
+    fn handle_request(
+        &'static self,
+        api_notifier: EventFd,
+        api_sender: Sender<ApiRequest>,
+        body: &Option<Body>,
+        _files: Vec<File>,
+    ) -> result::Result<Option<Body>, HttpError> {
+        if let Some(body) = body {
+            self.send(
+                api_notifier,
+                api_sender,
+                serde_json::from_slice(body.raw())?,
+            )
+            .map_err(|e| match e {
+                ApiError::VmUffdAttach(VmError::MemoryManager(
+                    MemoryManagerError::UffdHandoffModeMismatch { .. }
+                    | MemoryManagerError::UffdManagerStillAttached,
+                )) => HttpError::BadRequest,
+                _ => HttpError::ApiError(e),
+            })
+        } else {
+            Err(HttpError::BadRequest)
+        }
+    }
+}
+
+impl GetHandler for VmUffdAttach {}
 
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 vm_action_put_handler_body!(VmCoredump);

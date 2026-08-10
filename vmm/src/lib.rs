@@ -48,8 +48,8 @@ use vmm_sys_util::signal::unblock_signal;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
 use crate::api::{
-    ApiRequest, ApiResponse, MigrationMode, RequestHandler, TimeoutStrategy, VmInfoResponse,
-    VmReceiveMigrationData, VmSendMigrationData, VmmPingResponse,
+    ApiRequest, ApiResponse, MigrationMode, RequestHandler, TimeoutStrategy, UffdAttachData,
+    VmInfoResponse, VmReceiveMigrationData, VmSendMigrationData, VmmPingResponse,
 };
 use crate::config::{MemoryRestoreMode, RestoreConfig, VmMemoryZoneUpdateData, add_to_config};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -3151,6 +3151,28 @@ impl RequestHandler for Vmm {
         }
     }
 
+    fn vm_uffd_attach(&mut self, data: UffdAttachData) -> result::Result<(), VmError> {
+        let vm = match self.vm {
+            VmOwnership::Owned(ref vm) => vm,
+            VmOwnership::Migration { .. } => return Err(VmError::VmMigrating),
+            VmOwnership::None => return Err(VmError::VmNotCreated),
+        };
+        // Reject attach from Created/Shutdown/BreakPoint/Paused. The
+        // kernel-level UFFDIO_REGISTER would mostly survive these, but
+        // Shutdown can race the teardown of the very VMAs we'd be
+        // registering, and Created has no guest activity to track.
+        // Restrict to Running for clarity; loosen if a real caller
+        // needs Paused later.
+        if vm.get_state() != VmState::Running {
+            return Err(VmError::VmNotRunning);
+        }
+        vm.memory_manager()
+            .lock()
+            .unwrap()
+            .do_uffd_handoff(&data.handoff_socket, data.mode)
+            .map_err(VmError::MemoryManager)
+    }
+
     fn vm_receive_migration(
         &mut self,
         receive_data_migration: VmReceiveMigrationData,
@@ -3496,6 +3518,7 @@ mod unit_tests {
                 reserve: false,
                 zones: None,
                 thp: true,
+                uffd_handoff: None,
             },
             payload: Some(PayloadConfig {
                 kernel: Some(PathBuf::from("/path/to/kernel")),

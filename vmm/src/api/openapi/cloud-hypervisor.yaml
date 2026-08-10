@@ -508,6 +508,26 @@ paths:
         204:
           description: The NMI successfully injected.
 
+  /vm.uffd-attach:
+    put:
+      summary: Attach an external userfaultfd manager to a running VM.
+      requestBody:
+        description: The userfaultfd handoff configuration
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UffdAttachData"
+        required: true
+      responses:
+        204:
+          description: The userfaultfd manager was successfully attached.
+        400:
+          description: The request was invalid, or a manager is already attached with a different mode.
+        404:
+          description: The VM instance could not be found.
+        500:
+          description: The userfaultfd manager could not be attached.
+
   /vm.restore:
     put:
       summary: Restore a VM from a snapshot.
@@ -968,6 +988,40 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/MemoryZoneConfig"
+        uffd_handoff:
+          $ref: "#/components/schemas/UffdHandoffConfig"
+
+    UffdHandoffConfig:
+      required:
+        - socket
+        - mode
+      type: object
+      properties:
+        socket:
+          type: string
+          description: Path to a Unix socket where the external userfaultfd manager listens.
+        mode:
+          type: string
+          description: >-
+            "|"-separated userfaultfd mode tokens, e.g. "MISSING|WP|WP_ASYNC".
+            Register-mode tokens (MISSING, WP) drive UFFDIO_REGISTER; feature
+            tokens (WP_UNPOPULATED, WP_ASYNC) drive UFFDIO_API. Validated when
+            the configuration is parsed.
+
+    UffdAttachData:
+      required:
+        - handoff_socket
+        - mode
+      type: object
+      properties:
+        handoff_socket:
+          type: string
+          description: Path to a Unix socket where the external userfaultfd manager listens.
+        mode:
+          type: string
+          description: >-
+            "|"-separated userfaultfd mode tokens, e.g. "WP|WP_ASYNC". Same
+            grammar as MemoryConfig.uffd_handoff.mode.
 
     TokenBucket:
       required:

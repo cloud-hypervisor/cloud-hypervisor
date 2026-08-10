@@ -1129,6 +1129,7 @@ mod unit_tests {
                 reserve: false,
                 zones: None,
                 thp: true,
+                uffd_handoff: None,
             },
             payload: Some(PayloadConfig {
                 kernel: Some(PathBuf::from("/path/to/kernel")),

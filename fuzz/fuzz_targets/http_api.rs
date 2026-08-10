@@ -14,8 +14,8 @@ use micro_http::Request;
 use vm_migration::MigratableError;
 use vmm::api::http::*;
 use vmm::api::{
-    ApiRequest, RequestHandler, VmInfoResponse, VmReceiveMigrationData, VmSendMigrationData,
-    VmmPingResponse,
+    ApiRequest, RequestHandler, UffdAttachData, VmInfoResponse, VmReceiveMigrationData,
+    VmSendMigrationData, VmmPingResponse,
 };
 use vmm::config::RestoreConfig;
 use vmm::vm::{Error as VmError, VmState};
@@ -88,6 +88,10 @@ impl RequestHandler for StubApiRequestHandler {
         Ok(())
     }
 
+    fn vm_uffd_attach(&mut self, _: UffdAttachData) -> Result<(), VmError> {
+        Ok(())
+    }
+
     fn vm_boot(&mut self) -> Result<(), VmError> {
         Ok(())
     }
@@ -153,6 +157,7 @@ impl RequestHandler for StubApiRequestHandler {
                     reserve: false,
                     zones: None,
                     thp: true,
+                    uffd_handoff: None,
                 },
                 payload: Some(PayloadConfig {
                     kernel: Some(PathBuf::from("/path/to/kernel")),

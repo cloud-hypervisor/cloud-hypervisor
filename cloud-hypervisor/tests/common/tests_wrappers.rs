@@ -3,15 +3,17 @@
 // SPDX-License-Identifier: Apache-2.0
 use std::ffi::{CStr, CString};
 use std::fs::{self, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{self, Error, Read, Seek, SeekFrom, Write};
+use std::mem::{self, MaybeUninit};
 use std::net::{IpAddr, Ipv4Addr};
 use std::os::unix::io::AsRawFd;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::string::String;
 use std::sync::mpsc;
-use std::time::Duration;
-use std::{panic, thread};
+use std::time::{Duration, Instant};
+use std::{panic, ptr, thread};
 
 use block::ImageType;
 use net_util::MacAddr;
@@ -3902,5 +3904,1013 @@ pub(crate) fn _test_vdpa_block(guest: &Guest) {
     kill_child(&mut child);
     let output = child.wait_with_output().unwrap();
 
+    handle_child_output(r, &output);
+}
+
+/// Receive one framed handoff/notify message from the VMM. Returns
+/// (fds, body_bytes) where `body_bytes` is the JSON payload with the
+/// 4-byte length header stripped, and `fds` is the SCM_RIGHTS array.
+///
+/// Wire format: each message is `<u32 LE body length><JSON body>`,
+/// sent as two iovecs in one sendmsg so the ancillary fds attach to
+/// the right message. For the initial `handoff` message the fds are
+/// `[uffd, region0_memfd, region1_memfd, ...]`; for an `add_region`
+/// message it's just the new region's backing fd (or empty).
+fn recv_fds_with_body(stream: &UnixStream) -> (Vec<i32>, Vec<u8>) {
+    use std::os::unix::io::AsRawFd;
+
+    // 64KB body buffer; cmsg sized to hold up to 16 fds (plenty for
+    // any VM the integration tests construct).
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut iov = libc::iovec {
+        iov_base: buf.as_mut_ptr() as *mut libc::c_void,
+        iov_len: buf.len(),
+    };
+    const MAX_FDS: usize = 16;
+    let cmsg_space = unsafe { libc::CMSG_SPACE((mem::size_of::<i32>() * MAX_FDS) as u32) };
+    let mut cmsg_buf = vec![0u8; cmsg_space as usize];
+    let mut msg: libc::msghdr = unsafe { mem::zeroed() };
+    msg.msg_iov = &mut iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = cmsg_buf.as_mut_ptr() as *mut libc::c_void;
+    msg.msg_controllen = cmsg_space as _;
+
+    let n = unsafe { libc::recvmsg(stream.as_raw_fd(), &mut msg, 0) };
+    assert!(n > 0, "recvmsg failed: {}", Error::last_os_error());
+    let n = n as usize;
+    assert!(n >= 4, "framed message too short: {n} bytes");
+    let body_len = u32::from_le_bytes(buf[..4].try_into().unwrap()) as usize;
+    assert_eq!(
+        n,
+        4 + body_len,
+        "framed message size mismatch: recvmsg returned {n}, header says {body_len}"
+    );
+    // Drop the header; callers want only the JSON body.
+    buf.drain(..4);
+    buf.truncate(body_len);
+
+    // MSG_CTRUNC means the kernel silently dropped some of the
+    // ancillary data because our cmsg buffer was too small. For
+    // SCM_RIGHTS that's catastrophic: the dropped fds are leaked
+    // (never installed in this process) and the surviving fd array
+    // we'd decode is partial garbage. Better to fail loudly here
+    // than silently operate on the wrong fd.
+    assert_eq!(
+        msg.msg_flags & libc::MSG_CTRUNC,
+        0,
+        "ancillary data truncated — VMM sent more than {MAX_FDS} fds"
+    );
+
+    let cmsg = unsafe { libc::CMSG_FIRSTHDR(&msg) };
+    assert!(!cmsg.is_null(), "no cmsg received");
+    // Defensive: the helper only knows how to decode SCM_RIGHTS. If
+    // the VMM ever attaches credentials or other cmsg types the byte
+    // payload would be misinterpreted as fd integers, and the
+    // teardown `libc::close()` on a "received fd" would close an
+    // unrelated open file in this process.
+    assert_eq!(
+        unsafe { (*cmsg).cmsg_level },
+        libc::SOL_SOCKET,
+        "unexpected cmsg_level"
+    );
+    assert_eq!(
+        unsafe { (*cmsg).cmsg_type },
+        libc::SCM_RIGHTS,
+        "unexpected cmsg_type"
+    );
+    let cmsg_hdr_len = unsafe { libc::CMSG_LEN(0) } as usize;
+    let payload_len = unsafe { (*cmsg).cmsg_len as usize - cmsg_hdr_len };
+    let n_fds = payload_len / mem::size_of::<i32>();
+    assert!(n_fds > 0, "no fds in cmsg");
+    let mut fds = vec![-1i32; n_fds];
+    unsafe {
+        ptr::copy_nonoverlapping(
+            libc::CMSG_DATA(cmsg),
+            fds.as_mut_ptr() as *mut u8,
+            payload_len,
+        );
+    }
+    for fd in &fds {
+        assert!(*fd >= 0, "received invalid fd");
+    }
+    (fds, buf)
+}
+
+const UFFD_EVENT_PAGEFAULT: u8 = 0x12;
+const UFFDIO_API: u64 = 0xc018_aa3f;
+const UFFDIO_ZEROPAGE: u64 = 0xc020_aa04;
+const UFFD_API_VERSION: u64 = 0xAA;
+const PAGEMAP_SCAN: u64 = 0xc060_6610;
+// Documented PAGEMAP_SCAN categories and flags (uapi/linux/fs.h).
+const PAGE_IS_WRITTEN: u64 = 1 << 1;
+const PAGE_IS_PRESENT: u64 = 1 << 3;
+const PAGE_IS_HUGE: u64 = 1 << 6;
+const PM_SCAN_WP_MATCHING: u64 = 1 << 0;
+
+#[repr(C)]
+struct UffdioApi {
+    api: u64,
+    features: u64,
+    ioctls: u64,
+}
+
+#[repr(C)]
+struct UffdMsg {
+    event: u8,
+    _reserved1: u8,
+    _reserved2: u16,
+    _reserved3: u32,
+    pf_flags: u64,
+    pf_address: u64,
+    _pad: [u8; 8],
+}
+
+#[repr(C)]
+struct UffdioZeropage {
+    range_start: u64,
+    range_len: u64,
+    mode: u64,
+    zeropage: i64,
+}
+
+/// Create a blocking eventfd usable as a thread-stop signal. Writing
+/// any non-zero u64 to it makes a `poll(POLLIN)` on the fd return
+/// immediately; the test code uses this to unblock a fault handler
+/// thread *before* closing the uffd it was polling, so the handler
+/// never operates on a stale fd value (close-while-polling race).
+fn make_stop_fd() -> i32 {
+    let fd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC) };
+    assert!(fd >= 0, "eventfd: {}", Error::last_os_error());
+    fd
+}
+
+/// Signal the handler to exit via `stop_fd`. Caller must `join()` the
+/// handler before closing any fds the handler was polling.
+fn signal_stop(stop_fd: i32) {
+    let one: u64 = 1;
+    let n = unsafe {
+        libc::write(
+            stop_fd,
+            &one as *const u64 as *const libc::c_void,
+            mem::size_of::<u64>(),
+        )
+    };
+    assert_eq!(n, mem::size_of::<u64>() as isize);
+}
+
+/// Minimal fault handler: resolves MISSING faults with UFFDIO_ZEROPAGE.
+/// Exits when `stop_fd` becomes readable (caller writes to it during
+/// teardown) or when the uffd's `POLLHUP` fires. Returns the number
+/// of faults handled.
+fn run_fault_handler(uffd_fd: i32, stop_fd: i32) -> u64 {
+    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) as u64 };
+    let mut faults: u64 = 0;
+
+    loop {
+        let mut pfds = [
+            libc::pollfd {
+                fd: uffd_fd,
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: stop_fd,
+                events: libc::POLLIN,
+                revents: 0,
+            },
+        ];
+        let ret = unsafe { libc::poll(pfds.as_mut_ptr(), pfds.len() as libc::nfds_t, -1) };
+        if ret < 0 {
+            break;
+        }
+        if pfds[1].revents & libc::POLLIN != 0 {
+            break;
+        }
+        if pfds[0].revents & libc::POLLHUP != 0 {
+            break;
+        }
+        if pfds[0].revents & libc::POLLIN == 0 {
+            continue;
+        }
+
+        let mut msg = MaybeUninit::<UffdMsg>::uninit();
+        let n = unsafe {
+            libc::read(
+                uffd_fd,
+                msg.as_mut_ptr() as *mut libc::c_void,
+                mem::size_of::<UffdMsg>(),
+            )
+        };
+        if n != mem::size_of::<UffdMsg>() as isize {
+            break;
+        }
+        let msg = unsafe { msg.assume_init() };
+        if msg.event != UFFD_EVENT_PAGEFAULT {
+            continue;
+        }
+
+        let addr = msg.pf_address & !(page_size - 1);
+
+        // MISSING fault: allocate a zero page. The VMM's pending write
+        // (kernel data, ACPI tables, etc.) completes on the new page.
+        let mut zp = UffdioZeropage {
+            range_start: addr,
+            range_len: page_size,
+            mode: 0,
+            zeropage: 0,
+        };
+        unsafe {
+            libc::ioctl(uffd_fd, UFFDIO_ZEROPAGE as libc::Ioctl, &mut zp);
+        }
+        faults += 1;
+    }
+    faults
+}
+
+/// Wait for the VM to reach "Running" state by polling vm.info.
+fn wait_vm_running(api_socket: &str, timeout_secs: u64) {
+    let deadline = Instant::now() + Duration::from_secs(timeout_secs);
+    loop {
+        let (ok, output, _) = remote_command_w_output(api_socket, "info", None);
+        if ok {
+            let info: serde_json::Value = serde_json::from_slice(&output).unwrap_or_default();
+            if info["state"].as_str() == Some("Running") {
+                return;
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "VM did not reach Running state within {timeout_secs}s"
+        );
+        thread::sleep(Duration::from_millis(500));
+    }
+}
+
+/// Test the boot-time uffd-handoff flow:
+/// 1. Start cloud-hypervisor with only the API socket
+/// 2. Bind the handoff socket and create the VM with
+///    `uffd_handoff` set in the memory config
+/// 3. Trigger boot in a background thread; CH dials the handoff socket
+///    during MemoryManager construction
+/// 4. Accept the connection, recv the uffd + regions JSON, start a
+///    fault handler thread, send the ACK byte
+/// 5. Boot completes; verify VM running and fault handler saw faults
+pub(crate) fn _test_uffd_handoff(guest: &Guest) {
+    use std::io::Write;
+
+    let api_socket = temp_api_path(&guest.tmp_dir);
+    let kernel_path = direct_kernel_boot_path();
+    let handoff_sock_path = guest
+        .tmp_dir
+        .as_path()
+        .join("uffd-handoff.sock")
+        .to_str()
+        .unwrap()
+        .to_string();
+
+    let mut child = GuestCommand::new(guest)
+        .args(["--api-socket", &api_socket])
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    thread::sleep(Duration::new(1, 0));
+
+    let r = panic::catch_unwind(|| {
+        assert!(remote_command(&api_socket, "ping", None));
+
+        // 1. Bind the handoff socket BEFORE asking CH to boot.
+        let listener = UnixListener::bind(&handoff_sock_path).unwrap();
+
+        // 2. Create the VM with uffd_handoff set.
+        let config = serde_json::json!({
+            "payload": {
+                "kernel": kernel_path.to_str().unwrap(),
+                "cmdline": DIRECT_KERNEL_BOOT_CMDLINE,
+            },
+            "cpus": { "boot_vcpus": 1, "max_vcpus": 1 },
+            "memory": {
+                "size": 536_870_912u64,
+                "shared": true,
+                "uffd_handoff": {
+                    "socket": handoff_sock_path,
+                    "mode": "MISSING",
+                },
+            },
+            "disks": [
+                { "path": guest.disk_config.disk(DiskType::OperatingSystem).unwrap() },
+            ],
+            "serial": { "mode": "Null" },
+            "console": { "mode": "Tty" },
+        });
+        let config_path = guest.tmp_dir.as_path().join("vm-config.json");
+        fs::write(&config_path, config.to_string()).unwrap();
+        assert!(remote_command(
+            &api_socket,
+            "create",
+            Some(config_path.to_str().unwrap()),
+        ));
+
+        // 3. Boot runs in a background thread because it blocks on the
+        //    handoff socket — the manager (this thread) needs to accept
+        //    the connection and ACK before boot can proceed.
+        let api_sock_clone = api_socket.clone();
+        let boot_thread = thread::spawn(move || remote_command(&api_sock_clone, "boot", None));
+
+        // 4. Accept handoff: recv (fds, JSON body), spawn fault handler,
+        //    send ACK so CH can finish creating the VM. fds[0] is the
+        //    uffd; remaining fds are per-region backing memfds (we
+        //    don't use them here).
+        let (mut stream, _) = listener.accept().unwrap();
+        let (fds, body) = recv_fds_with_body(&stream);
+        let uffd_fd = fds[0];
+        for &extra in &fds[1..] {
+            unsafe { libc::close(extra) };
+        }
+        drop(listener);
+
+        let parsed: serde_json::Value = serde_json::from_slice(&body).expect("valid handoff JSON");
+        // Handshake is self-describing: it carries the protocol version
+        // and the register mode the fd was configured with, so a manager
+        // need not agree the mode out of band.
+        assert_eq!(parsed["type"].as_str(), Some("handoff"), "handoff type");
+        assert_eq!(parsed["version"].as_u64(), Some(0), "handoff version");
+        assert_eq!(
+            parsed["mode"].as_str(),
+            Some("MISSING"),
+            "handoff advertises the configured mode"
+        );
+        let regions = parsed["regions"].as_array().expect("regions array");
+        assert!(!regions.is_empty(), "handoff carried no regions");
+
+        let stop_fd = make_stop_fd();
+        let fault_handler = thread::spawn(move || run_fault_handler(uffd_fd, stop_fd));
+
+        stream.write_all(b"A").expect("send ACK");
+        drop(stream);
+
+        // 5. Boot must succeed and VM must reach Running.
+        assert!(boot_thread.join().unwrap(), "vm.boot failed");
+        wait_vm_running(&api_socket, 30);
+        thread::sleep(Duration::from_secs(5));
+
+        let (ok, output, _) = remote_command_w_output(&api_socket, "info", None);
+        assert!(ok, "vm.info failed");
+        let info: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(info["state"].as_str(), Some("Running"), "VM not running");
+
+        // Order matters: signal first, join the handler, *then* close
+        // the fds it was polling. Closing the uffd before the handler
+        // returns is racy — the fd integer could be reused for an
+        // unrelated open() between close and the next poll/read.
+        signal_stop(stop_fd);
+        let total_faults = fault_handler.join().unwrap();
+        unsafe { libc::close(uffd_fd) };
+        unsafe { libc::close(stop_fd) };
+        assert!(
+            total_faults > 0,
+            "fault handler saw no faults (expected faults during boot)"
+        );
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+}
+
+#[repr(C)]
+struct PmScanArg {
+    size: u64,
+    flags: u64,
+    start: u64,
+    end: u64,
+    walk_end: u64,
+    vec: u64,
+    vec_len: u64,
+    max_pages: u64,
+    category_inverted: u64,
+    category_mask: u64,
+    category_anyof_mask: u64,
+    return_mask: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct PageRegion {
+    start: u64,
+    end: u64,
+    categories: u64,
+}
+
+/// One PAGEMAP_SCAN pass over `[start, end)` on `/proc/<pid>/pagemap`,
+/// following `walk_end` continuations so the whole range is covered.
+/// Returns the number of pages the kernel reported as matching the
+/// filter. The mask / flag arguments map 1:1 onto `struct pm_scan_arg`
+/// (see uapi/linux/fs.h):
+///
+/// - `category_mask` page matches only if it has *all* these categories
+/// - `category_inverted` categories whose match sense is flipped: a bit
+///   listed here matches when its value is *0*. Lets a single scan
+///   express e.g. "present AND not written".
+/// - `category_anyof_mask` page matches if it has *any* of these
+/// - `flags` e.g. `PM_SCAN_WP_MATCHING` to (re-)write-protect every
+///   matched page in the same pass
+/// - `return_mask` categories reported back in `page_region.categories`
+///
+/// Page count is the sum of returned region lengths — i.e. the number
+/// of pages that matched the filter (not merely those with a given
+/// return bit).
+#[allow(clippy::too_many_arguments)]
+fn pagemap_scan_count(
+    pid: u32,
+    start: u64,
+    end: u64,
+    flags: u64,
+    category_mask: u64,
+    category_inverted: u64,
+    category_anyof_mask: u64,
+    return_mask: u64,
+) -> io::Result<u64> {
+    use std::os::fd::AsRawFd;
+
+    let f = OpenOptions::new()
+        .read(true)
+        .write(flags & PM_SCAN_WP_MATCHING != 0)
+        .open(format!("/proc/{pid}/pagemap"))?;
+    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) as u64 };
+    let mut vec_buf = vec![PageRegion::default(); 1024];
+    let mut matched: u64 = 0;
+    let mut cur = start;
+
+    while cur < end {
+        let mut arg = PmScanArg {
+            size: mem::size_of::<PmScanArg>() as u64,
+            flags,
+            start: cur,
+            end,
+            walk_end: 0,
+            vec: vec_buf.as_mut_ptr() as u64,
+            vec_len: vec_buf.len() as u64,
+            max_pages: 0,
+            category_inverted,
+            category_mask,
+            category_anyof_mask,
+            return_mask,
+        };
+        let ret = unsafe { libc::ioctl(f.as_raw_fd(), PAGEMAP_SCAN as libc::Ioctl, &mut arg) };
+        if ret < 0 {
+            return Err(Error::last_os_error());
+        }
+        for region in vec_buf.iter().take(ret as usize) {
+            matched += (region.end - region.start) / page_size;
+        }
+        if arg.walk_end <= cur || arg.walk_end >= end {
+            break;
+        }
+        cur = arg.walk_end;
+    }
+    Ok(matched)
+}
+
+/// Count resident pages (`PAGE_IS_PRESENT`) in `[start, end)`.
+fn pagemap_present_pages(pid: u32, start: u64, end: u64) -> io::Result<u64> {
+    pagemap_scan_count(pid, start, end, 0, PAGE_IS_PRESENT, 0, 0, PAGE_IS_PRESENT)
+}
+
+/// Arm write tracking: write-protect every resident page in the range
+/// via the documented WP-async engine (`PM_SCAN_WP_MATCHING`). After
+/// this, a guest write to any of these pages is resolved silently by
+/// the kernel and surfaces as `PAGE_IS_WRITTEN` on the next scan.
+/// Returns the number of pages armed.
+fn pagemap_arm_wp(pid: u32, start: u64, end: u64) -> io::Result<u64> {
+    pagemap_scan_count(
+        pid,
+        start,
+        end,
+        PM_SCAN_WP_MATCHING,
+        PAGE_IS_PRESENT,
+        0,
+        0,
+        PAGE_IS_PRESENT,
+    )
+}
+
+/// Hot set: pages written since the last arm (`PAGE_IS_WRITTEN`). When
+/// `rearm` is set, matched pages are re-write-protected in the same
+/// pass so the next interval starts clean — the documented WSS
+/// sampling loop.
+fn pagemap_hot_pages(pid: u32, start: u64, end: u64, rearm: bool) -> io::Result<u64> {
+    let flags = if rearm { PM_SCAN_WP_MATCHING } else { 0 };
+    pagemap_scan_count(
+        pid,
+        start,
+        end,
+        flags,
+        PAGE_IS_WRITTEN,
+        0,
+        0,
+        PAGE_IS_WRITTEN,
+    )
+}
+
+/// Reclaimable set: the complement of the hot set among *resident*
+/// pages — present but *not active* since the last arm, where "active"
+/// is the hot category `PAGE_IS_WRITTEN` (the WP write-set). This is
+/// the page set a
+/// memory manager would reclaim: track the hot set positively, then
+/// reclaim everything else. Unlike a positive "cold" classifier, this
+/// has no blind spot for pre-populated-but-unused pages (e.g. a
+/// pre-faulted tmpfs file) — they are present-and-not-hot, so they fall
+/// into the reclaimable set correctly. Matched directly in one pass via
+/// `category_inverted` (`PAGE_IS_PRESENT` set and `active` clear), so it
+/// never races a `present - hot` subtraction across two scans.
+fn pagemap_reclaimable_pages(pid: u32, start: u64, end: u64, active: u64) -> io::Result<u64> {
+    pagemap_scan_count(
+        pid,
+        start,
+        end,
+        0,
+        PAGE_IS_PRESENT | active, // both bits constrained
+        active,                   // ...but `active` matches when 0
+        0,
+        PAGE_IS_PRESENT | active,
+    )
+}
+
+/// Hole set: non-resident pages, matched directly via inverted
+/// `PAGE_IS_PRESENT` (the bit must be 0).
+fn pagemap_hole_pages(pid: u32, start: u64, end: u64) -> io::Result<u64> {
+    pagemap_scan_count(pid, start, end, 0, PAGE_IS_PRESENT, PAGE_IS_PRESENT, 0, 0)
+}
+
+/// Count pages that are part of a PMD-mapped transparent huge page
+/// (`PAGE_IS_HUGE`) in `[start, end)`. Used to confirm THP-backed
+/// guest RAM actually survives the uffd-WP handoff as huge pages.
+fn pagemap_huge_pages(pid: u32, start: u64, end: u64) -> io::Result<u64> {
+    pagemap_scan_count(pid, start, end, 0, PAGE_IS_HUGE, 0, 0, PAGE_IS_HUGE)
+}
+
+/// Validate the documented WP-async write-set-tracking interface end to
+/// end: attach with `mode=WP|WP_ASYNC`, then use `PAGEMAP_SCAN` on
+/// `/proc/<vmm>/pagemap` to classify guest region 0 pages into
+/// hot / cold / hole and assert all three are observable.
+///
+///   - hole = not `PAGE_IS_PRESENT`   (region tail the guest never populated)
+///   - cold = `PAGE_IS_PRESENT`, not written since the last arm
+///   - hot  = `PAGE_IS_WRITTEN`       (guest wrote it since the last arm)
+///
+/// Parameterised over the guest-RAM backing:
+///   - `shared`: `false` = MAP_PRIVATE memfd (writes land on anon COW
+///     pages); `true` = MAP_SHARED memfd / shmem — the representative
+///     uffd-handoff deployment, and the backing that needs
+///     `UFFD_FEATURE_WP_HUGETLBFS_SHMEM` for WP tracking (CH derives
+///     that feature from the shared backing in `do_uffd_handoff`).
+///   - `thp`: when `true`, guest RAM is MADV_HUGEPAGE'd; the test then
+///     asserts the handed-off region still contains PMD-mapped huge
+///     pages (`PAGE_IS_HUGE`) — i.e. THP survives uffd-WP registration
+///     and the pagemap machinery reports it. When `false`, asserts no
+///     huge pages (MADV_NOHUGEPAGE control).
+///
+/// This is exactly the interface an external memory manager uses to
+/// drive tiering / eviction, built on the standard uffd-WP primitives:
+/// `UFFDIO_REGISTER_MODE_WP`, `UFFD_FEATURE_WP_ASYNC`,
+/// `UFFD_FEATURE_WP_HUGETLBFS_SHMEM`, `PAGE_IS_WRITTEN`,
+/// `PAGE_IS_HUGE` and `PM_SCAN_WP_MATCHING`.
+/// Probe the running kernel for `UFFD_FEATURE_WP_ASYNC` (Linux 6.7+). The
+/// write-set / resume tests rely on WP-async plus `PAGEMAP_SCAN`, so they
+/// skip (rather than fail) on older kernels that lack it.
+fn kernel_has_uffd_wp_async() -> bool {
+    const UFFD_FEATURE_WP_ASYNC: u64 = 1 << 15;
+    let fd =
+        unsafe { libc::syscall(libc::SYS_userfaultfd, libc::O_CLOEXEC | libc::O_NONBLOCK) } as i32;
+    if fd < 0 {
+        return false;
+    }
+    let mut api = UffdioApi {
+        api: UFFD_API_VERSION,
+        features: 0,
+        ioctls: 0,
+    };
+    let ret = unsafe { libc::ioctl(fd, UFFDIO_API as libc::Ioctl, &mut api) };
+    unsafe { libc::close(fd) };
+    ret == 0 && api.features & UFFD_FEATURE_WP_ASYNC != 0
+}
+
+/// Return the active token (the one in `[brackets]`) of a THP sysfs knob,
+/// e.g. `"always"` from `"always [madvise] never"`.
+fn thp_sysfs_active(path: &str) -> Option<String> {
+    let s = fs::read_to_string(path).ok()?;
+    s.split_whitespace()
+        .find(|t| t.starts_with('[') && t.ends_with(']'))
+        .map(|t| t.trim_matches(['[', ']']).to_string())
+}
+
+/// Whether the host THP policy backs a freshly-faulted 512M guest region
+/// with PMD huge pages *without* CH opting in via `MADV_HUGEPAGE`.
+///
+/// The `thp=off` write-set variants need 4K mappings to exercise 4K-page
+/// write-set tracking, but CH's `thp=off` only declines `MADV_HUGEPAGE` —
+/// it never sets `MADV_NOHUGEPAGE` — so on a host that forces huge folios
+/// the 4K precondition can't hold and the test must skip, not fail.
+///
+/// - anon (`shared=off`): only `enabled=always` forms THP unadvised.
+/// - shmem (`shared=on`): `always`/`within_size`/`force` back a large
+///   mapping with huge folios; `advise`/`deny`/`never` stay 4K.
+fn host_thp_forces_huge(shared: bool) -> bool {
+    if shared {
+        matches!(
+            thp_sysfs_active("/sys/kernel/mm/transparent_hugepage/shmem_enabled").as_deref(),
+            Some("always") | Some("within_size") | Some("force")
+        )
+    } else {
+        thp_sysfs_active("/sys/kernel/mm/transparent_hugepage/enabled").as_deref() == Some("always")
+    }
+}
+
+fn run_uffd_writeset(guest: &Guest, shared: bool, thp: bool) {
+    use std::io::Write;
+
+    if !kernel_has_uffd_wp_async() {
+        eprintln!(
+            "skipping uffd write-set test: kernel lacks UFFD_FEATURE_WP_ASYNC \
+             (needs Linux 6.7+)"
+        );
+        return;
+    }
+
+    let tag = format!(
+        "writeset {}/{}",
+        if shared { "shmem" } else { "anon" },
+        if thp { "thp" } else { "4k" }
+    );
+
+    // The thp=off variants require guest RAM to be 4K-mapped. On a host
+    // whose THP policy forces huge folios (e.g. enabled=always, or
+    // shmem_enabled=within_size/always/force) that can't be guaranteed,
+    // so skip rather than fail (see host_thp_forces_huge).
+    if !thp && host_thp_forces_huge(shared) {
+        let knob = if shared { "shmem_enabled" } else { "enabled" };
+        eprintln!(
+            "[{tag}] skipping: host THP policy forces huge folios \
+             (transparent_hugepage/{knob}); thp=off cannot guarantee 4K \
+             mappings on this host"
+        );
+        return;
+    }
+    let api_socket = temp_api_path(&guest.tmp_dir);
+    let handoff_sock_path = guest
+        .tmp_dir
+        .as_path()
+        .join("uffd-writeset.sock")
+        .to_str()
+        .unwrap()
+        .to_string();
+
+    let mem = format!(
+        "size=512M,shared={},thp={}",
+        if shared { "on" } else { "off" },
+        if thp { "on" } else { "off" }
+    );
+    let mut cmd = GuestCommand::new(guest);
+    cmd.default_cpus()
+        .args(["--memory", &mem])
+        .default_kernel_cmdline()
+        .default_disks()
+        .default_net()
+        .args(["--api-socket", &api_socket])
+        .args(["--serial", "tty", "--console", "off"])
+        .capture_output();
+    if thp {
+        // Some hosts disable THP process-wide (PR_SET_THP_DISABLE);
+        // clear it in the VMM child so guest RAM can actually be backed
+        // by PMD-mapped huge pages.
+        cmd.enable_thp_in_child();
+    }
+    let mut child = cmd.spawn().unwrap();
+    let vmm_pid = child.id();
+
+    let r = panic::catch_unwind(|| {
+        eprintln!("[{tag}] waiting for VM boot");
+        guest.wait_vm_boot().unwrap();
+        eprintln!("[{tag}] VM booted");
+
+        // Attach with the documented WP-async mode.
+        let listener = UnixListener::bind(&handoff_sock_path).unwrap();
+        let api_sock_clone = api_socket.clone();
+        let handoff_sock_clone = handoff_sock_path.clone();
+        let attach_thread = thread::spawn(move || {
+            let body = serde_json::json!({
+                "handoff_socket": handoff_sock_clone,
+                "mode": "WP|WP_ASYNC",
+            })
+            .to_string();
+            let mut sock = UnixStream::connect(&api_sock_clone).unwrap();
+            api_client::simple_api_command(&mut sock, "PUT", "uffd-attach", Some(&body))
+        });
+
+        let (mut stream, _) = listener.accept().unwrap();
+        let (fds, body) = recv_fds_with_body(&stream);
+        let uffd_fd = fds[0];
+        for &extra in &fds[1..] {
+            unsafe { libc::close(extra) };
+        }
+        drop(listener);
+        let parsed: serde_json::Value = serde_json::from_slice(&body).expect("valid handoff JSON");
+        let regions = parsed["regions"].as_array().expect("regions array");
+        assert!(!regions.is_empty(), "handoff carried no regions");
+        let host_va = regions[0]["host_virt_addr"].as_u64().unwrap();
+        let size = regions[0]["size"].as_u64().unwrap();
+
+        // WP-async resolves writes in-kernel, so no fault messages are
+        // delivered — no handler thread needed. We still must ACK so CH
+        // returns from the attach call.
+        stream.write_all(b"A").unwrap();
+        drop(stream);
+        attach_thread
+            .join()
+            .unwrap()
+            .expect("uffd-attach API call failed");
+        eprintln!("[{tag}] attach API succeeded");
+
+        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) as u64 };
+        let total_pages = size / page_size;
+        let start = host_va;
+        let end = host_va + size;
+
+        // PMD validation: check the THP state of the handed-off region
+        // *before* arming (PM_SCAN_WP_MATCHING may split huge pages).
+        // This proves PMD-mapped guest RAM survives uffd-WP
+        // registration and that PAGEMAP_SCAN reports it.
+        let huge = pagemap_huge_pages(vmm_pid, start, end).expect("HUGE scan");
+        eprintln!("[{tag}] huge_pages={huge}");
+        if thp {
+            assert!(
+                huge > 0,
+                "thp=on but PAGEMAP_SCAN found no PMD-mapped (PAGE_IS_HUGE) \
+                 pages — THP did not survive the uffd-WP handoff"
+            );
+        } else {
+            assert_eq!(huge, 0, "thp=off but PAGEMAP_SCAN found {huge} PMD pages");
+        }
+
+        // Hole detection: a freshly-booted 512M guest never populates
+        // the whole region, so a chunk stays non-resident.
+        let present = pagemap_present_pages(vmm_pid, start, end).expect("PRESENT scan");
+        eprintln!("[{tag}] total_pages={total_pages} present={present}");
+        assert!(present > 0, "no resident pages");
+        assert!(
+            present < total_pages,
+            "expected hole pages but the whole region is resident \
+             (present={present}, total={total_pages})"
+        );
+
+        // Arm write tracking: WP every resident page, clearing its
+        // written state.
+        let armed = pagemap_arm_wp(vmm_pid, start, end).expect("arm WP");
+        eprintln!("[{tag}] armed={armed}");
+        assert!(armed > 0, "armed no pages");
+
+        // Drive a bounded amount of guest writes so some armed pages
+        // flip to written (hot) while others stay untouched (and thus
+        // fall into the reclaimable set).
+        guest
+            .ssh_command("dd if=/dev/zero of=/tmp/wss bs=1M count=32 conv=fsync 2>/dev/null; sync")
+            .unwrap();
+
+        // Poll the hot set — guest activity plus our dd dirty armed
+        // resident pages.
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut hot = 0;
+        while Instant::now() < deadline {
+            hot = pagemap_hot_pages(vmm_pid, start, end, false).expect("WRITTEN scan");
+            if hot > 0 {
+                break;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+
+        // Hot-tracking model: positively track the hot (written) set,
+        // then the reclaim policy is "reclaim everything not hot". The
+        // reclaimable-resident set is present-and-not-written, matched
+        // directly via category_inverted (no present-minus-hot race);
+        // `hole` is non-resident (already reclaimed / never populated).
+        let reclaimable = pagemap_reclaimable_pages(vmm_pid, start, end, PAGE_IS_WRITTEN)
+            .expect("reclaimable scan");
+        let hole = pagemap_hole_pages(vmm_pid, start, end).expect("hole scan");
+        eprintln!("[{tag}] hot={hot} reclaimable={reclaimable} hole={hole} total={total_pages}");
+
+        assert!(hot > 0, "expected written (hot) pages within 15s, got 0");
+        assert!(
+            reclaimable > 0,
+            "expected resident-but-unwritten (reclaimable) pages, got 0"
+        );
+        assert!(hole > 0, "expected non-resident (hole) pages, got 0");
+
+        unsafe { libc::close(uffd_fd) };
+        eprintln!("[{tag}] hot/reclaimable/hole all observed, shutting down VM");
+
+        guest.ssh_command("sudo poweroff").unwrap();
+        thread::sleep(Duration::new(20, 0));
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+    handle_child_output(r, &output);
+}
+
+pub(crate) fn _test_uffd_writeset_anon(guest: &Guest) {
+    run_uffd_writeset(guest, false, false);
+}
+
+pub(crate) fn _test_uffd_writeset_shmem(guest: &Guest) {
+    run_uffd_writeset(guest, true, false);
+}
+
+pub(crate) fn _test_uffd_writeset_anon_thp(guest: &Guest) {
+    run_uffd_writeset(guest, false, true);
+}
+
+pub(crate) fn _test_uffd_writeset_shmem_thp(guest: &Guest) {
+    run_uffd_writeset(guest, true, true);
+}
+
+/// Manager-restart resilience. CH retains its own dup of the uffd for
+/// the VM's lifetime, so a manager crash leaves the registrations alive
+/// and any guest fault simply blocks (CH never resolves faults itself —
+/// no zero-fill, no data loss). `do_uffd_handoff` is idempotent: a
+/// second attach re-sends the *same* uffd fd + current region set
+/// (resume) instead of creating a new uffd or re-registering.
+///
+/// This attaches a manager, simulates its death (closes the manager's
+/// uffd dup and the socket), re-attaches over a *fresh* socket, and
+/// proves the resumed handoff carries a live uffd by running a WP-async
+/// write-set cycle against the still-registered region — which only
+/// works because CH kept the registration alive across the restart.
+pub(crate) fn _test_uffd_resume(guest: &Guest) {
+    use std::io::Write;
+
+    if !kernel_has_uffd_wp_async() {
+        eprintln!(
+            "skipping uffd resume test: kernel lacks UFFD_FEATURE_WP_ASYNC \
+             (needs Linux 6.7+)"
+        );
+        return;
+    }
+
+    let tag = "uffd/resume";
+    let api_socket = temp_api_path(&guest.tmp_dir);
+    let sock_a = guest
+        .tmp_dir
+        .as_path()
+        .join("uffd-resume-a.sock")
+        .to_str()
+        .unwrap()
+        .to_string();
+    let sock_b = guest
+        .tmp_dir
+        .as_path()
+        .join("uffd-resume-b.sock")
+        .to_str()
+        .unwrap()
+        .to_string();
+
+    // anon 4k keeps WP-async deterministic (no huge-folio granularity).
+    let mem = "size=512M,shared=off,thp=off";
+    let mut cmd = GuestCommand::new(guest);
+    cmd.default_cpus()
+        .args(["--memory", mem])
+        .default_kernel_cmdline()
+        .default_disks()
+        .default_net()
+        .args(["--api-socket", &api_socket])
+        .args(["--serial", "tty", "--console", "off"])
+        .capture_output();
+    let mut child = cmd.spawn().unwrap();
+    let vmm_pid = child.id();
+
+    let r = panic::catch_unwind(|| {
+        eprintln!("[{tag}] waiting for VM boot");
+        guest.wait_vm_boot().unwrap();
+        eprintln!("[{tag}] VM booted");
+
+        // Trigger a uffd-attach API call against `handoff` in a
+        // background thread (the call blocks on the handshake).
+        let attach = |handoff: &str| {
+            let api = api_socket.clone();
+            let handoff = handoff.to_string();
+            thread::spawn(move || {
+                let body = serde_json::json!({
+                    "handoff_socket": handoff,
+                    "mode": "WP|WP_ASYNC",
+                })
+                .to_string();
+                let mut sock = UnixStream::connect(&api).unwrap();
+                api_client::simple_api_command(&mut sock, "PUT", "uffd-attach", Some(&body))
+            })
+        };
+
+        // ---- Manager 1: initial attach ----
+        let listener_a = UnixListener::bind(&sock_a).unwrap();
+        let attach_a = attach(&sock_a);
+        let (mut stream_a, _) = listener_a.accept().unwrap();
+        let (fds_a, body_a) = recv_fds_with_body(&stream_a);
+        let uffd_a = fds_a[0];
+        for &extra in &fds_a[1..] {
+            unsafe { libc::close(extra) };
+        }
+        drop(listener_a);
+        let parsed_a: serde_json::Value =
+            serde_json::from_slice(&body_a).expect("valid handoff JSON");
+        let regions_a = parsed_a["regions"]
+            .as_array()
+            .expect("regions array")
+            .clone();
+        assert!(!regions_a.is_empty(), "initial handoff carried no regions");
+        let host_va = regions_a[0]["host_virt_addr"].as_u64().unwrap();
+        let size = regions_a[0]["size"].as_u64().unwrap();
+        stream_a.write_all(b"A").unwrap();
+        attach_a
+            .join()
+            .unwrap()
+            .expect("initial uffd-attach failed");
+        eprintln!("[{tag}] manager 1 attached ({} regions)", regions_a.len());
+
+        // ---- Simulate manager 1 death ----
+        // Drop the manager's uffd dup and its socket. CH still holds its
+        // own dup, so the uffd and its registrations stay alive.
+        unsafe { libc::close(uffd_a) };
+        drop(stream_a);
+        eprintln!("[{tag}] manager 1 gone; CH retains the uffd");
+
+        // ---- Manager 2: resume over a fresh socket ----
+        let listener_b = UnixListener::bind(&sock_b).unwrap();
+        let attach_b = attach(&sock_b);
+        let (mut stream_b, _) = listener_b.accept().unwrap();
+        let (fds_b, body_b) = recv_fds_with_body(&stream_b);
+        let uffd_b = fds_b[0];
+        for &extra in &fds_b[1..] {
+            unsafe { libc::close(extra) };
+        }
+        drop(listener_b);
+        let parsed_b: serde_json::Value =
+            serde_json::from_slice(&body_b).expect("valid resume JSON");
+        let regions_b = parsed_b["regions"].as_array().expect("regions array");
+        assert!(!regions_b.is_empty(), "resume carried no regions");
+        assert!(uffd_b >= 0, "resume delivered no uffd fd");
+        // Resume must re-send the identical region layout.
+        assert_eq!(
+            regions_b.len(),
+            regions_a.len(),
+            "resume region count changed"
+        );
+        assert_eq!(
+            regions_b[0]["host_virt_addr"].as_u64().unwrap(),
+            host_va,
+            "resume region host_virt_addr changed"
+        );
+        assert_eq!(
+            regions_b[0]["size"].as_u64().unwrap(),
+            size,
+            "resume region size changed"
+        );
+        stream_b.write_all(b"A").unwrap();
+        attach_b.join().unwrap().expect("resume uffd-attach failed");
+        eprintln!("[{tag}] manager 2 resumed ({} regions)", regions_b.len());
+
+        // ---- Prove the resumed uffd is live ----
+        // The WP-async write-set only tracks if the VMA is still
+        // registered with uffd-WP, which survives only because CH kept
+        // its dup across the restart. Arm, drive guest writes, confirm.
+        let start = host_va;
+        let end = host_va + size;
+        let armed = pagemap_arm_wp(vmm_pid, start, end).expect("arm WP");
+        assert!(armed > 0, "armed no pages after resume");
+        guest
+            .ssh_command("dd if=/dev/zero of=/tmp/wss bs=1M count=32 conv=fsync 2>/dev/null; sync")
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut hot = 0;
+        while Instant::now() < deadline {
+            hot = pagemap_hot_pages(vmm_pid, start, end, false).expect("WRITTEN scan");
+            if hot > 0 {
+                break;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        eprintln!("[{tag}] post-resume armed={armed} hot={hot}");
+        assert!(
+            hot > 0,
+            "no written pages after resume — registration lost?"
+        );
+
+        unsafe { libc::close(uffd_b) };
+        eprintln!("[{tag}] resume verified, shutting down VM");
+        guest.ssh_command("sudo poweroff").unwrap();
+        thread::sleep(Duration::new(20, 0));
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
     handle_child_output(r, &output);
 }
