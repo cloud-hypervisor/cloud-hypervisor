@@ -1043,7 +1043,7 @@ mod tests {
 
     use virtio_queue::QueueOwnedT;
 
-    use super::super::super::csm::defs as csm_defs;
+    use super::super::super::csm::{SeqPacketStream, defs as csm_defs};
     use super::super::super::tests::TestContext as VsockTestContext;
     use super::*;
 
@@ -1258,18 +1258,20 @@ mod tests {
     fn test_bad_peer_pkt() {
         const LOCAL_PORT: u32 = 1026;
         const PEER_PORT: u32 = 1025;
-        const SOCK_DGRAM: u16 = 2;
+        // Neither VSOCK_TYPE_STREAM (1) nor VSOCK_TYPE_SEQPACKET (2).
+        const BAD_SOCK_TYPE: u16 = 3;
 
         let mut ctx = MuxerTestContext::new("bad_peer_pkt");
         ctx.init_pkt(LOCAL_PORT, PEER_PORT, uapi::VSOCK_OP_REQUEST)
-            .set_type(SOCK_DGRAM);
+            .set_type(BAD_SOCK_TYPE);
         ctx.send();
 
-        // The guest sent a SOCK_DGRAM packet. Per the vsock spec, we need to reply with an RST
-        // packet, since vsock only supports stream sockets.
+        // The guest sent a packet of an unsupported socket type. Per the vsock spec, we need to
+        // reply with an RST packet, echoing the offending type back.
         assert!(ctx.muxer.has_pending_rx());
         ctx.recv();
         assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RST);
+        assert_eq!(ctx.pkt.type_(), BAD_SOCK_TYPE);
         assert_eq!(ctx.pkt.src_cid(), uapi::VSOCK_HOST_CID);
         assert_eq!(ctx.pkt.dst_cid(), PEER_CID as u64);
         assert_eq!(ctx.pkt.src_port(), LOCAL_PORT);
@@ -1290,6 +1292,7 @@ mod tests {
             assert!(ctx.muxer.has_pending_rx());
             ctx.recv();
             assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RST);
+            assert_eq!(ctx.pkt.type_(), uapi::VSOCK_TYPE_STREAM);
             assert_eq!(ctx.pkt.src_port(), LOCAL_PORT);
             assert_eq!(ctx.pkt.dst_port(), PEER_PORT);
         }
@@ -1953,5 +1956,168 @@ mod tests {
             )),
             Ok(1337)
         ));
+    }
+
+    // ---- Seqpacket integration tests, exercising real SOCK_SEQPACKET host sockets ----
+
+    impl MuxerTestContext {
+        fn init_seq_pkt(&mut self, local_port: u32, peer_port: u32, op: u16) -> &mut VsockPacket {
+            self.init_pkt(local_port, peer_port, op)
+                .set_type(uapi::VSOCK_TYPE_SEQPACKET)
+        }
+
+        fn init_seq_data_pkt(
+            &mut self,
+            local_port: u32,
+            peer_port: u32,
+            data: &[u8],
+            eom: bool,
+        ) -> &mut VsockPacket {
+            assert!(data.len() <= self.pkt.buf_capacity().unwrap());
+            self.init_seq_pkt(local_port, peer_port, uapi::VSOCK_OP_RW)
+                .set_len(data.len() as u32);
+            self.pkt.copy_buf_from_slice(0, data).unwrap();
+            let flags = if eom { uapi::VSOCK_SEQ_EOM } else { 0 };
+            self.pkt.set_flags(flags);
+            &mut self.pkt
+        }
+
+        fn create_seq_local_listener(&self, port: u32) -> UnixListener {
+            bind_seqpacket_listener(&format!("{}_{}", self.muxer.host_sock_path, port)).unwrap()
+        }
+    }
+
+    #[test]
+    fn test_seqpacket_peer_connection() {
+        const LOCAL_PORT: u32 = 2026;
+        const PEER_PORT: u32 = 2025;
+        let mut ctx = MuxerTestContext::new("seqpacket_peer_connection");
+
+        // The host listens on a SOCK_SEQPACKET socket at the per-port path.
+        let listener = ctx.create_seq_local_listener(LOCAL_PORT);
+
+        // The guest initiates a seqpacket connection.
+        ctx.init_seq_pkt(LOCAL_PORT, PEER_PORT, uapi::VSOCK_OP_REQUEST);
+        ctx.send();
+        assert_eq!(ctx.muxer.conn_map.len(), 1);
+        let (mut host, _) = listener.accept().unwrap();
+        host.set_nonblocking(true).unwrap();
+
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RESPONSE);
+        assert_eq!(ctx.pkt.type_(), uapi::VSOCK_TYPE_SEQPACKET);
+
+        // Guest -> host: two messages must arrive as two distinct datagrams, boundaries intact.
+        ctx.init_seq_data_pkt(LOCAL_PORT, PEER_PORT, &[1, 2, 3], true);
+        ctx.send();
+        ctx.init_seq_data_pkt(LOCAL_PORT, PEER_PORT, &[4, 5, 6, 7], true);
+        ctx.send();
+
+        let mut buf = [0u8; 64];
+        let n = host.recv_datagram(&mut buf).unwrap();
+        assert_eq!(&buf[..n], &[1, 2, 3]);
+        let n = host.recv_datagram(&mut buf).unwrap();
+        assert_eq!(&buf[..n], &[4, 5, 6, 7]);
+
+        // Host -> guest: one datagram becomes one RW packet flagged EOM.
+        host.send_datagram(&[8, 9]).unwrap();
+        ctx.notify_muxer();
+        assert!(ctx.muxer.has_pending_rx());
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RW);
+        assert_eq!(ctx.pkt_data(), vec![8, 9]);
+        assert_ne!(ctx.pkt.flags() & uapi::VSOCK_SEQ_EOM, 0);
+    }
+
+    #[test]
+    fn test_seqpacket_rst_type() {
+        const LOCAL_PORT: u32 = 2028;
+        const PEER_PORT: u32 = 2027;
+
+        // Every RST produced for a seqpacket connection must itself be typed seqpacket.
+        let mut ctx = MuxerTestContext::new("seqpacket_rst_type");
+
+        // Connection refused: no host listener at the per-port path.
+        ctx.init_seq_pkt(LOCAL_PORT, PEER_PORT, uapi::VSOCK_OP_REQUEST);
+        ctx.send();
+        assert!(ctx.muxer.has_pending_rx());
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RST);
+        assert_eq!(ctx.pkt.type_(), uapi::VSOCK_TYPE_SEQPACKET);
+        assert_eq!(ctx.pkt.src_port(), LOCAL_PORT);
+        assert_eq!(ctx.pkt.dst_port(), PEER_PORT);
+
+        // An orphan (connection-less) seqpacket packet also gets a seqpacket RST.
+        ctx.init_seq_pkt(LOCAL_PORT, PEER_PORT, uapi::VSOCK_OP_RW);
+        ctx.send();
+        assert!(ctx.muxer.has_pending_rx());
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RST);
+        assert_eq!(ctx.pkt.type_(), uapi::VSOCK_TYPE_SEQPACKET);
+
+        // And so does a bulk reset of live connections (the restore path).
+        let _listener = ctx.create_seq_local_listener(LOCAL_PORT);
+        ctx.init_seq_pkt(LOCAL_PORT, PEER_PORT, uapi::VSOCK_OP_REQUEST);
+        ctx.send();
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RESPONSE);
+
+        let conns = ctx.muxer.connections();
+        assert_eq!(conns, vec![(LOCAL_PORT, PEER_PORT)]);
+        ctx.muxer.queue_rst_for_connections(conns);
+        assert!(ctx.muxer.has_pending_rx());
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RST);
+        assert_eq!(ctx.pkt.type_(), uapi::VSOCK_TYPE_SEQPACKET);
+        assert_eq!(ctx.pkt.src_port(), LOCAL_PORT);
+        assert_eq!(ctx.pkt.dst_port(), PEER_PORT);
+    }
+
+    #[test]
+    fn test_seqpacket_local_connection() {
+        const PEER_PORT: u32 = 2025;
+        let mut ctx = MuxerTestContext::new("seqpacket_local_connection");
+
+        // The host connects to the muxer's SOCK_SEQPACKET listener and sends the CONNECT command
+        // as a single datagram.
+        let mut host = connect_seqpacket(&format!(
+            "{}{SEQPACKET_PATH_SUFFIX}",
+            ctx.muxer.host_sock_path
+        ))
+        .unwrap();
+        ctx.notify_muxer();
+        host.send_datagram(format!("CONNECT {PEER_PORT}\n").as_bytes())
+            .unwrap();
+        ctx.notify_muxer();
+
+        // The muxer should now emit a seqpacket connection request to the guest.
+        let local_port = ctx.muxer.local_port_last;
+        assert!(ctx.muxer.has_pending_rx());
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_REQUEST);
+        assert_eq!(ctx.pkt.type_(), uapi::VSOCK_TYPE_SEQPACKET);
+        assert_eq!(ctx.pkt.dst_port(), PEER_PORT);
+        assert_eq!(ctx.pkt.src_port(), local_port);
+
+        // The guest accepts; the host should read "OK <port>" as a single datagram.
+        ctx.init_seq_pkt(local_port, PEER_PORT, uapi::VSOCK_OP_RESPONSE);
+        ctx.send();
+        let mut buf = [0u8; 64];
+        let n = host.recv_datagram(&mut buf).unwrap();
+        assert_eq!(&buf[..n], format!("OK {local_port}\n").as_bytes());
+
+        // Guest -> host message boundary.
+        ctx.init_seq_data_pkt(local_port, PEER_PORT, &[10, 11, 12], true);
+        ctx.send();
+        let n = host.recv_datagram(&mut buf).unwrap();
+        assert_eq!(&buf[..n], &[10, 11, 12]);
+
+        // Host -> guest: the message boundary is preserved.
+        host.send_datagram(&[20, 21]).unwrap();
+        ctx.notify_muxer();
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RW);
+        assert_eq!(ctx.pkt_data(), vec![20, 21]);
+        assert_ne!(ctx.pkt.flags() & uapi::VSOCK_SEQ_EOM, 0);
     }
 }
