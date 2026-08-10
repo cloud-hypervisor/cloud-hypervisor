@@ -3309,6 +3309,12 @@ mod common_parallel {
     }
 
     #[test]
+    fn test_virtio_vsock_seqpacket() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        _test_virtio_vsock_seqpacket(&guest);
+    }
+
+    #[test]
     fn test_virtio_vsock_hotplug() {
         #[cfg(target_arch = "x86_64")]
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);

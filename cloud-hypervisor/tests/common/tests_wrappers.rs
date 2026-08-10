@@ -1312,6 +1312,43 @@ pub(crate) fn _test_virtio_vsock(guest: &Guest, hotplug: bool) {
     handle_child_output(r, &output);
 }
 
+pub(crate) fn _test_virtio_vsock_seqpacket(guest: &Guest) {
+    let socket = temp_vsock_path(&guest.tmp_dir);
+    let api_socket = temp_api_path(&guest.tmp_dir);
+
+    let mut cmd = GuestCommand::new(guest);
+    cmd.args(["--api-socket", &api_socket]);
+    cmd.default_cpus();
+    cmd.default_memory();
+    cmd.default_kernel_cmdline();
+    cmd.default_disks();
+    cmd.default_net();
+    cmd.args(["--vsock", format!("cid=3,socket={socket}").as_str()]);
+
+    let mut child = cmd.capture_output().spawn().unwrap();
+
+    let r = panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
+        // Host -> guest, over the "_seqpacket" listener.
+        guest.check_vsock_seqpacket(socket.as_str());
+        // Guest -> host, where the muxer connects out to "<socket>_<port>".
+        guest.check_vsock_seqpacket_guest_initiated(socket.as_str());
+
+        // Both still work after a reboot.
+        guest.reboot_linux(0);
+        guest.check_vsock_seqpacket(socket.as_str());
+
+        // Stream connections keep working on the same device.
+        guest.check_vsock(socket.as_str());
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+}
+
 pub(crate) fn test_memory_mergeable(mergeable: bool) {
     let memory_param = if mergeable {
         "mergeable=on"
