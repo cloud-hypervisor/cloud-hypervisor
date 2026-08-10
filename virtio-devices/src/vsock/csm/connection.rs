@@ -1252,6 +1252,9 @@ mod tests {
             stream.read_buf = buf.to_vec();
             stream
         }
+        fn push_recv_msg(&mut self, data: &[u8]) {
+            self.recv_msgs.push_back(data.to_vec());
+        }
     }
 
     impl SeqPacketStream for TestStream {
@@ -1398,7 +1401,15 @@ mod tests {
             Self::new(ConnState::Established)
         }
 
+        fn new_established_seqpacket() -> Self {
+            Self::new_with_type(ConnState::Established, uapi::VSOCK_TYPE_SEQPACKET)
+        }
+
         fn new(conn_state: ConnState) -> Self {
+            Self::new_with_type(conn_state, uapi::VSOCK_TYPE_STREAM)
+        }
+
+        fn new_with_type(conn_state: ConnState, sock_type: u16) -> Self {
             let vsock_test_ctx = TestContext::new();
             let mut handler_ctx = vsock_test_ctx.create_epoll_handler_context();
             let stream = TestStream::new();
@@ -1419,15 +1430,10 @@ mod tests {
                     LOCAL_PORT,
                     PEER_PORT,
                     PEER_BUF_ALLOC,
-                    uapi::VSOCK_TYPE_STREAM,
+                    sock_type,
                 ),
                 ConnState::LocalInit => VsockConnection::<TestStream>::new_local_init(
-                    stream,
-                    LOCAL_CID,
-                    PEER_CID,
-                    LOCAL_PORT,
-                    PEER_PORT,
-                    uapi::VSOCK_TYPE_STREAM,
+                    stream, LOCAL_CID, PEER_CID, LOCAL_PORT, PEER_PORT, sock_type,
                 ),
                 ConnState::Established => {
                     let mut conn = VsockConnection::<TestStream>::new_peer_init(
@@ -1437,7 +1443,7 @@ mod tests {
                         LOCAL_PORT,
                         PEER_PORT,
                         PEER_BUF_ALLOC,
-                        uapi::VSOCK_TYPE_STREAM,
+                        sock_type,
                     );
                     assert!(conn.has_pending_rx());
                     conn.recv_pkt(&mut pkt).unwrap();
@@ -1478,6 +1484,14 @@ mod tests {
             assert!(self.conn.has_pending_rx());
         }
 
+        /// What a real host close looks like on a seqpacket connection: readable *and* the peer's
+        /// send side gone.
+        fn notify_epollin_rdhup(&mut self) {
+            self.conn
+                .notify(epoll::Events::EPOLLIN | epoll::Events::EPOLLRDHUP);
+            assert!(self.conn.has_pending_rx());
+        }
+
         fn notify_epollin_hup(&mut self) {
             self.conn
                 .notify(epoll::Events::EPOLLIN | epoll::Events::EPOLLHUP);
@@ -1496,6 +1510,18 @@ mod tests {
             assert!(data.len() <= self.pkt.buf_capacity().unwrap());
             self.init_pkt(uapi::VSOCK_OP_RW, data.len() as u32);
             self.pkt.copy_buf_from_slice(0, data).unwrap();
+            &self.pkt
+        }
+
+        /// Build a seqpacket RW packet carrying `data`, optionally flagged as end-of-message.
+        fn init_seq_data_pkt(&mut self, data: &[u8], eom: bool) -> &VsockPacket {
+            assert!(data.len() <= self.pkt.buf_capacity().unwrap());
+            self.init_pkt(uapi::VSOCK_OP_RW, data.len() as u32);
+            if !data.is_empty() {
+                self.pkt.copy_buf_from_slice(0, data).unwrap();
+            }
+            let flags = if eom { uapi::VSOCK_SEQ_EOM } else { 0 };
+            self.pkt.set_flags(flags);
             &self.pkt
         }
 
@@ -1555,6 +1581,442 @@ mod tests {
         assert!(!ctx.conn.has_expired());
         thread::sleep(Duration::from_millis(defs::CONN_REQUEST_TIMEOUT_MS));
         assert!(ctx.conn.has_expired());
+    }
+
+    #[test]
+    fn test_seqpacket_tx_message_boundaries() {
+        // Guest->host: RW payloads are accumulated until the packet carrying VSOCK_SEQ_EOM, then
+        // emitted as one host datagram. Each message becomes exactly one datagram.
+        let mut ctx = CsmTestContext::new_established_seqpacket();
+
+        // First message spans two RW packets; the datagram must not be sent until EOM arrives.
+        ctx.init_seq_data_pkt(&[1, 2, 3], false);
+        ctx.send();
+        assert!(ctx.conn.stream.sent_msgs.is_empty());
+
+        ctx.init_seq_data_pkt(&[4, 5], true);
+        ctx.send();
+        assert_eq!(ctx.conn.stream.sent_msgs, vec![vec![1, 2, 3, 4, 5]]);
+
+        // A second, single-packet message is a datagram of its own.
+        ctx.init_seq_data_pkt(&[9], true);
+        ctx.send();
+        assert_eq!(
+            ctx.conn.stream.sent_msgs,
+            vec![vec![1, 2, 3, 4, 5], vec![9]]
+        );
+    }
+
+    #[test]
+    fn test_seqpacket_rx_message_boundaries() {
+        // Host->guest: each host datagram is delivered as RW packet(s) whose last packet carries
+        // VSOCK_SEQ_EOM.
+        let mut ctx = CsmTestContext::new_established_seqpacket();
+        ctx.conn.stream.push_recv_msg(&[1, 2, 3, 4]);
+        ctx.conn.stream.push_recv_msg(&[5, 6]);
+
+        ctx.notify_epollin();
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RW);
+        assert_eq!(ctx.pkt_data(), vec![1, 2, 3, 4]);
+        assert_ne!(ctx.pkt.flags() & uapi::VSOCK_SEQ_EOM, 0);
+
+        // A level-triggered EPOLLIN re-arms RX for the next queued datagram.
+        ctx.notify_epollin();
+        ctx.recv();
+        assert_eq!(ctx.pkt_data(), vec![5, 6]);
+        assert_ne!(ctx.pkt.flags() & uapi::VSOCK_SEQ_EOM, 0);
+    }
+
+    #[test]
+    fn test_seqpacket_rx_chunks_large_datagram() {
+        // A datagram larger than the guest RX buffer is split across multiple RW packets; only the
+        // final chunk carries EOM, preserving the single message boundary.
+        let mut ctx = CsmTestContext::new_established_seqpacket();
+        let big = vec![7u8; 5000];
+        ctx.conn.stream.push_recv_msg(&big);
+
+        ctx.notify_epollin();
+        ctx.recv();
+        let cap = ctx.pkt.buf_capacity().unwrap();
+        assert_eq!(ctx.pkt.len() as usize, cap);
+        assert_eq!(ctx.pkt.flags() & uapi::VSOCK_SEQ_EOM, 0);
+        assert!(ctx.conn.has_pending_rx());
+
+        ctx.recv();
+        assert_eq!(ctx.pkt.len() as usize, 5000 - cap);
+        assert_ne!(ctx.pkt.flags() & uapi::VSOCK_SEQ_EOM, 0);
+    }
+
+    #[test]
+    fn test_seqpacket_rx_eof_shuts_down() {
+        // An orderly host close surfaces a full bidirectional shutdown, kill timer armed.
+        let mut ctx = CsmTestContext::new_established_seqpacket();
+        let mut stream = TestStream::new();
+        stream.read_state = StreamState::Closed;
+        ctx.set_stream(stream);
+
+        ctx.notify_epollin_rdhup();
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_SHUTDOWN);
+        assert_ne!(ctx.pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_SEND, 0);
+        assert_ne!(ctx.pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_RCV, 0);
+        assert!(ctx.conn.will_expire());
+    }
+
+    #[test]
+    fn test_seqpacket_rx_empty_datagram_is_a_message() {
+        // A zero-length datagram without EPOLLRDHUP is an empty message, not a shutdown.
+        let mut ctx = CsmTestContext::new_established_seqpacket();
+        ctx.conn.stream.push_recv_msg(&[]);
+
+        ctx.notify_epollin();
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RW);
+        assert_eq!(ctx.pkt.len(), 0);
+        assert_ne!(ctx.pkt.flags() & uapi::VSOCK_SEQ_EOM, 0);
+        assert_eq!(ctx.conn.state, ConnState::Established);
+        assert!(!ctx.conn.will_expire());
+
+        ctx.conn.stream.push_recv_msg(&[1, 2, 3]);
+        ctx.notify_epollin();
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RW);
+        assert_eq!(ctx.pkt_data(), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_seqpacket_rx_watches_rdhup() {
+        // The EOF/empty-datagram distinction is only available if we actually ask for EPOLLRDHUP.
+        let ctx = CsmTestContext::new_established_seqpacket();
+        assert!(
+            ctx.conn
+                .get_polled_evset()
+                .contains(epoll::Events::EPOLLRDHUP)
+        );
+        let sctx = CsmTestContext::new_established();
+        assert!(
+            !sctx
+                .conn
+                .get_polled_evset()
+                .contains(epoll::Events::EPOLLRDHUP)
+        );
+    }
+
+    #[test]
+    fn test_seqpacket_rx_requests_credit_once_when_peer_full() {
+        // With no peer credit the RX path asks for a credit update exactly once, then defers.
+        let mut ctx = CsmTestContext::new_established_seqpacket();
+        ctx.conn.stream.push_recv_msg(&[1, 2, 3]);
+        ctx.set_peer_credit(0);
+
+        ctx.notify_epollin();
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_CREDIT_REQUEST);
+        assert!(!ctx.conn.has_pending_rx());
+
+        ctx.set_peer_credit(1000);
+        ctx.notify_epollin();
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RW);
+        assert_eq!(ctx.pkt_data(), vec![1, 2, 3]);
+        assert_ne!(ctx.pkt.flags() & uapi::VSOCK_SEQ_EOM, 0);
+    }
+
+    #[test]
+    fn test_seqpacket_rx_partial_datagram_resumes_on_credit() {
+        // A partially delivered datagram is not in the host socket, so the guest packet that
+        // restores credit has to re-arm RX.
+        let mut ctx = CsmTestContext::new_established_seqpacket();
+        let cap = ctx.pkt.buf_capacity().unwrap();
+        let msg = vec![0x5au8; cap + 16];
+        ctx.conn.stream.push_recv_msg(&msg);
+
+        ctx.notify_epollin();
+        ctx.recv();
+        assert_eq!(ctx.pkt.len() as usize, cap);
+        assert_eq!(ctx.pkt.flags() & uapi::VSOCK_SEQ_EOM, 0);
+
+        ctx.set_peer_credit(0);
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_CREDIT_REQUEST);
+        assert!(!ctx.conn.has_pending_rx());
+
+        let rx_cnt = ctx.conn.rx_cnt.0;
+        ctx.init_pkt(uapi::VSOCK_OP_CREDIT_UPDATE, 0)
+            .set_fwd_cnt(rx_cnt);
+        ctx.send();
+        assert!(ctx.conn.has_pending_rx());
+
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RW);
+        assert_eq!(ctx.pkt.len() as usize, 16);
+        assert_ne!(ctx.pkt.flags() & uapi::VSOCK_SEQ_EOM, 0);
+    }
+
+    #[test]
+    fn test_seqpacket_tx_backpressure_flushes_on_epollout() {
+        // If the host socket is not writable, the completed datagram is queued (EPOLLOUT requested)
+        // and flushed once EPOLLOUT fires.
+        let mut ctx = CsmTestContext::new_established_seqpacket();
+        let mut stream = TestStream::new();
+        stream.write_state = StreamState::WouldBlock;
+        ctx.set_stream(stream);
+
+        ctx.init_seq_data_pkt(&[1, 2, 3], true);
+        ctx.send();
+        assert!(ctx.conn.stream.sent_msgs.is_empty());
+        assert!(
+            ctx.conn
+                .get_polled_evset()
+                .contains(epoll::Events::EPOLLOUT)
+        );
+
+        ctx.conn.stream.write_state = StreamState::Ready;
+        ctx.notify_epollout();
+        assert_eq!(ctx.conn.stream.sent_msgs, vec![vec![1, 2, 3]]);
+        assert!(
+            !ctx.conn
+                .get_polled_evset()
+                .contains(epoll::Events::EPOLLOUT)
+        );
+    }
+
+    #[test]
+    fn test_seqpacket_tx_window_overflow_kills_connection() {
+        // A guest ignoring flow control must not make us buffer without bound.
+        let mut ctx = CsmTestContext::new_established_seqpacket();
+        let cap = ctx.pkt.buf_capacity().unwrap();
+        let chunk = vec![0xabu8; cap];
+
+        for _ in 0..(4 * defs::CONN_TX_BUF_SIZE as usize / cap) {
+            ctx.init_seq_data_pkt(&chunk, false);
+            ctx.send();
+        }
+
+        assert_eq!(ctx.conn.state, ConnState::Killed);
+        assert!(ctx.conn.stream.sent_msgs.is_empty());
+        assert!(ctx.conn.seq_tx_cur.len() <= defs::CONN_TX_BUF_SIZE as usize);
+        assert!(!ctx.conn.has_pending_tx());
+    }
+
+    #[test]
+    fn test_seqpacket_tx_message_filling_window_succeeds() {
+        // Boundary case: a message exactly filling the window still completes.
+        let mut ctx = CsmTestContext::new_established_seqpacket();
+        let cap = ctx.pkt.buf_capacity().unwrap();
+        let chunk = vec![0xabu8; cap];
+        let pkts = defs::CONN_TX_BUF_SIZE as usize / cap;
+
+        for i in 0..pkts {
+            ctx.init_seq_data_pkt(&chunk, i == pkts - 1);
+            ctx.send();
+        }
+
+        assert_eq!(ctx.conn.state, ConnState::Established);
+        assert_eq!(
+            ctx.conn.stream.sent_msgs,
+            vec![vec![0xabu8; defs::CONN_TX_BUF_SIZE as usize]]
+        );
+    }
+
+    #[test]
+    fn test_seqpacket_tx_message_larger_than_window_resets() {
+        // A well-behaved guest sending a message larger than the window must not be left
+        // blocked with the connection still up.
+        const MSG_LEN: usize = 2 * defs::CONN_TX_BUF_SIZE as usize;
+
+        let mut ctx = CsmTestContext::new_established_seqpacket();
+        let cap = ctx.pkt.buf_capacity().unwrap();
+        let chunk = vec![0xabu8; cap];
+
+        // The guest's view of our receive window, as it computes it from our packet headers:
+        // free = buf_alloc - (tx_cnt - fwd_cnt).
+        let mut guest_tx_cnt = 0usize;
+        let mut our_buf_alloc = defs::CONN_TX_BUF_SIZE as usize;
+        let mut our_fwd_cnt = 0usize;
+
+        while guest_tx_cnt < MSG_LEN {
+            for _ in 0..16 {
+                if !ctx.conn.has_pending_rx() || ctx.conn.recv_pkt(&mut ctx.pkt).is_err() {
+                    break;
+                }
+                our_buf_alloc = ctx.pkt.buf_alloc() as usize;
+                our_fwd_cnt = ctx.pkt.fwd_cnt() as usize;
+            }
+
+            if our_buf_alloc - (guest_tx_cnt - our_fwd_cnt) == 0 {
+                // Out of credit mid-message with no way to earn any: must not stay up.
+                assert_ne!(
+                    ctx.conn.state(),
+                    ConnState::Established,
+                    "guest blocked {guest_tx_cnt} bytes into a {MSG_LEN}-byte message with the \
+                     connection still established: buf_alloc={our_buf_alloc}, \
+                     fwd_cnt={our_fwd_cnt}"
+                );
+                return;
+            }
+
+            let n = cmp::min(our_buf_alloc - (guest_tx_cnt - our_fwd_cnt), cap);
+            let eom = guest_tx_cnt + n == MSG_LEN;
+            ctx.init_seq_data_pkt(&chunk[..n], eom);
+            ctx.send();
+            guest_tx_cnt += n;
+        }
+
+        // If the whole message got through, it must have arrived as exactly one datagram.
+        assert_eq!(ctx.conn.stream.sent_msgs, vec![vec![0xabu8; MSG_LEN]]);
+    }
+
+    /// Drive the RX path as a Linux seqpacket guest would: credit is only released once a
+    /// complete (EOM-terminated) message has been read. Returns the bytes delivered and the op
+    /// that ended the exchange, or `None` if it stalled.
+    fn drive_seq_rx(ctx: &mut CsmTestContext, guest_buf_alloc: u32) -> (usize, Option<u16>) {
+        let mut delivered = 0usize;
+        let mut unread = 0u32;
+        for _ in 0..1024 {
+            if !ctx.conn.has_pending_rx() {
+                return (delivered, None);
+            }
+            if ctx.conn.recv_pkt(&mut ctx.pkt).is_err() {
+                return (delivered, None);
+            }
+            match ctx.pkt.op() {
+                uapi::VSOCK_OP_RST => return (delivered, Some(uapi::VSOCK_OP_RST)),
+                uapi::VSOCK_OP_RW => {
+                    delivered += ctx.pkt.len() as usize;
+                    unread += ctx.pkt.len();
+                    if ctx.pkt.flags() & uapi::VSOCK_SEQ_EOM != 0 {
+                        ctx.conn.peer_fwd_cnt += Wrapping(unread);
+                        return (delivered, Some(uapi::VSOCK_OP_RW));
+                    }
+                }
+                uapi::VSOCK_OP_CREDIT_REQUEST => {
+                    let fwd_cnt = ctx.conn.peer_fwd_cnt.0;
+                    ctx.init_pkt(uapi::VSOCK_OP_CREDIT_UPDATE, 0)
+                        .set_buf_alloc(guest_buf_alloc)
+                        .set_fwd_cnt(fwd_cnt);
+                    ctx.send();
+                }
+                op => panic!("unexpected op {op}"),
+            }
+        }
+        panic!("RX loop did not settle");
+    }
+
+    #[test]
+    fn test_seqpacket_rx_datagram_fits_peer_window() {
+        // A datagram that fits the guest's window is chunked out and completed.
+        let mut ctx = CsmTestContext::new_established_seqpacket();
+        let cap = ctx.pkt.buf_capacity().unwrap();
+        let guest_buf_alloc = 4 * cap as u32;
+        ctx.conn.peer_buf_alloc = guest_buf_alloc;
+        ctx.conn.rx_cnt = Wrapping(0);
+        ctx.conn.peer_fwd_cnt = Wrapping(0);
+
+        let msg = vec![0x11u8; guest_buf_alloc as usize];
+        ctx.conn.stream.push_recv_msg(&msg);
+        ctx.notify_epollin();
+
+        let (delivered, end) = drive_seq_rx(&mut ctx, guest_buf_alloc);
+        assert_eq!(
+            end,
+            Some(uapi::VSOCK_OP_RW),
+            "control case stalled at {delivered}/{}",
+            msg.len()
+        );
+        assert_eq!(delivered, msg.len());
+        assert_eq!(ctx.conn.state, ConnState::Established);
+    }
+
+    #[test]
+    fn test_seqpacket_rx_datagram_larger_than_peer_window() {
+        // A datagram bigger than the guest's whole window can never be completed, so it must
+        // be refused outright rather than chunked out until the credit runs dry.
+        let mut ctx = CsmTestContext::new_established_seqpacket();
+        let cap = ctx.pkt.buf_capacity().unwrap();
+        let guest_buf_alloc = 2 * cap as u32;
+        ctx.conn.peer_buf_alloc = guest_buf_alloc;
+        ctx.conn.rx_cnt = Wrapping(0);
+        ctx.conn.peer_fwd_cnt = Wrapping(0);
+
+        let msg = vec![0x22u8; guest_buf_alloc as usize + 1];
+        ctx.conn.stream.push_recv_msg(&msg);
+        ctx.notify_epollin();
+
+        let (delivered, end) = drive_seq_rx(&mut ctx, guest_buf_alloc);
+        assert_eq!(
+            end,
+            Some(uapi::VSOCK_OP_RST),
+            "expected a reset; got {delivered}/{} bytes delivered, state={:?}, pending_rx={}, \
+             will_expire={}, evset={:?}",
+            msg.len(),
+            ctx.conn.state,
+            ctx.conn.has_pending_rx(),
+            ctx.conn.will_expire(),
+            ctx.conn.get_polled_evset(),
+        );
+        assert_eq!(
+            delivered, 0,
+            "no part of the message should reach the guest"
+        );
+    }
+
+    #[test]
+    fn test_seqpacket_rx_peer_window_shrinks_mid_message() {
+        // A peer that shrinks its window below an in-flight message: caught on the drain
+        // path, not just at admission.
+        let mut ctx = CsmTestContext::new_established_seqpacket();
+        let cap = ctx.pkt.buf_capacity().unwrap();
+        let guest_buf_alloc = 4 * cap as u32;
+        ctx.conn.peer_buf_alloc = guest_buf_alloc;
+        ctx.conn.rx_cnt = Wrapping(0);
+        ctx.conn.peer_fwd_cnt = Wrapping(0);
+
+        let msg = vec![0x33u8; 3 * cap];
+        ctx.conn.stream.push_recv_msg(&msg);
+        ctx.notify_epollin();
+
+        ctx.recv();
+        assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RW);
+        assert_eq!(ctx.pkt.len() as usize, cap);
+        assert_eq!(ctx.pkt.flags() & uapi::VSOCK_SEQ_EOM, 0);
+        assert!(ctx.conn.has_pending_rx());
+
+        ctx.init_pkt(uapi::VSOCK_OP_CREDIT_UPDATE, 0)
+            .set_buf_alloc(2 * cap as u32)
+            .set_fwd_cnt(0);
+        ctx.send();
+
+        ctx.recv();
+        assert_eq!(
+            ctx.pkt.op(),
+            uapi::VSOCK_OP_RST,
+            "expected a reset; state={:?}, pending_rx={}, will_expire={}, evset={:?}",
+            ctx.conn.state,
+            ctx.conn.has_pending_rx(),
+            ctx.conn.will_expire(),
+            ctx.conn.get_polled_evset(),
+        );
+    }
+
+    #[test]
+    fn test_stream_tx_buf_overflow_kills_connection() {
+        // The stream-side invariant that the two seqpacket tests above mirror: a guest that
+        // pushes more unflushed data than the window we advertise gets the connection killed.
+        let mut ctx = CsmTestContext::new_established();
+        let cap = ctx.pkt.buf_capacity().unwrap();
+        let chunk = vec![0xabu8; cap];
+        let mut stream = TestStream::new();
+        stream.write_state = StreamState::WouldBlock;
+        ctx.set_stream(stream);
+
+        let pkts = 4 * defs::CONN_TX_BUF_SIZE as usize / cap;
+        for _ in 0..pkts {
+            ctx.init_data_pkt(&chunk);
+            ctx.send();
+        }
+        assert_eq!(ctx.conn.state, ConnState::Killed);
     }
 
     #[test]
