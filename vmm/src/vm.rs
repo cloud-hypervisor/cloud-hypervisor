@@ -634,6 +634,7 @@ impl Vm {
             &config,
             vm.clone(),
             exit_evt.try_clone().map_err(Error::EventFdClone)?,
+            guest_exit_evt.try_clone().map_err(Error::EventFdClone)?,
             reset_evt.try_clone().map_err(Error::EventFdClone)?,
             #[cfg(feature = "guest_debug")]
             vm_debug_evt,
@@ -778,6 +779,7 @@ impl Vm {
         config: &Arc<Mutex<VmConfig>>,
         vm: Arc<dyn hypervisor::Vm>,
         exit_evt: EventFd,
+        guest_exit_evt: EventFd,
         reset_evt: EventFd,
         #[cfg(feature = "guest_debug")] vm_debug_evt: EventFd,
         hypervisor: &Arc<dyn hypervisor::Hypervisor>,
@@ -803,6 +805,7 @@ impl Vm {
             &cpus_config,
             vm,
             exit_evt,
+            guest_exit_evt,
             reset_evt,
             #[cfg(feature = "guest_debug")]
             vm_debug_evt,
