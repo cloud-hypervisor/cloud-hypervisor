@@ -62,6 +62,12 @@ struct OpenHow {
     resolve: u64,
 }
 
+// open_how.resolve flags from openat2(2). The libc crate does not export
+// them, so they are defined here with the values from the kernel UAPI
+// (include/uapi/linux/openat2.h).
+const RESOLVE_NO_MAGICLINKS: u64 = 0x02;
+const RESOLVE_BENEATH: u64 = 0x08;
+
 // Splits an untrusted extent `filename` into its `Normal` path components for
 // the fallback walk, rejecting any `..`/`.` traversal.
 fn extent_components(filename: &str) -> io::Result<Vec<&OsStr>> {
@@ -215,10 +221,19 @@ fn open_extent_openat2(
     if direct {
         flags |= libc::O_DIRECT;
     }
+
+    // Confine a relative extent name beneath the descriptor directory. An
+    // absolute name is anchored at the filesystem root by the caller and its
+    // policy is deliberately left unchanged here, so RESOLVE_BENEATH (which
+    // rejects absolute pathnames outright) is not applied to it.
+    let mut resolve = RESOLVE_NO_MAGICLINKS;
+    if !Path::new(filename).is_absolute() {
+        resolve |= RESOLVE_BENEATH;
+    }
     let how = OpenHow {
         flags: flags as u64,
         mode: 0,
-        resolve: 0,
+        resolve,
     };
 
     // SAFETY: FFI syscall. `cname` is NUL-terminated and outlives the call,
@@ -657,18 +672,33 @@ mod tests {
 
         use vmm_sys_util::tempdir::TempDir;
 
-        // A relative path may traverse a symlinked intermediate directory
-        // (only the final component is guarded).
-        let real = TempDir::new_with_prefix("/tmp/vmdk-rel-real-test").unwrap();
-        fs::write(real.as_path().join("s001.vmdk"), b"data").unwrap();
-
         let dir = TempDir::new_with_prefix("/tmp/vmdk-rel-symdir-test").unwrap();
         let base = dir.as_path();
-        symlink(real.as_path(), base.join("sub")).unwrap();
+        fs::create_dir(base.join("real")).unwrap();
+        fs::write(base.join("real").join("s001.vmdk"), b"data").unwrap();
+        symlink("real", base.join("sub")).unwrap();
 
         let (openat2_res, walk_res) = open_both(base, "sub/s001.vmdk", false, false);
         check_openat2(&openat2_res, true);
         check_walk(&walk_res, true);
+    }
+
+    #[test]
+    fn open_extent_openat2_rejects_relative_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        use vmm_sys_util::tempdir::TempDir;
+
+        let outside = TempDir::new_with_prefix("/tmp/vmdk-escape-outside").unwrap();
+        fs::write(outside.as_path().join("s001.vmdk"), b"secret").unwrap();
+
+        let dir = TempDir::new_with_prefix("/tmp/vmdk-escape-anchor").unwrap();
+        let base = dir.as_path();
+        symlink(outside.as_path(), base.join("sub")).unwrap();
+
+        let anchor = open_dir(base);
+        let res = open_extent_openat2(anchor.as_raw_fd(), "sub/s001.vmdk", false, false);
+        check_openat2(&res, false);
     }
 
     #[test]
@@ -690,5 +720,52 @@ mod tests {
         let (openat2_res, walk_res) = open_both(base, via_symlink.to_str().unwrap(), false, false);
         check_openat2(&openat2_res, true);
         check_walk(&walk_res, true);
+    }
+
+    #[test]
+    fn open_extent_rejects_parent_dir_traversal() {
+        use vmm_sys_util::tempdir::TempDir;
+
+        // Layout:
+        //   root/
+        //     secret     <- must NOT be reachable through the extent name
+        //     anchor/    <- the "descriptor directory" used as the open anchor
+        let root = TempDir::new_with_prefix("/tmp/vmdk-traversal-test").unwrap();
+        let anchor = root.as_path().join("anchor");
+        fs::create_dir(&anchor).unwrap();
+        fs::write(root.as_path().join("secret"), b"secret").unwrap();
+
+        // `..` climbs out of `anchor` back into `root` and reaches `secret`.
+        let (openat2_res, walk_res) = open_both(&anchor, "../secret", false, false);
+        check_openat2(&openat2_res, false);
+        check_walk(&walk_res, false);
+    }
+
+    #[test]
+    fn open_extent_rejects_relative_traversal() {
+        use vmm_sys_util::tempdir::TempDir;
+
+        let outer = TempDir::new_with_prefix("/tmp/vmdk-traversal-test").unwrap();
+        fs::write(outer.as_path().join("escape.vmdk"), b"secret").unwrap();
+        let base = outer.as_path().join("descriptor-dir");
+        fs::create_dir(&base).unwrap();
+
+        for name in [
+            "../escape.vmdk",
+            "./../escape.vmdk",
+            "sub/../../escape.vmdk",
+        ] {
+            let (openat2_res, walk_res) = open_both(&base, name, true, false);
+            check_openat2(&openat2_res, false);
+            check_walk(&walk_res, false);
+        }
+
+        let err =
+            open_extent(base.to_str().unwrap(), "../escape.vmdk", true, false, None).unwrap_err();
+        assert_eq!(
+            err.raw_os_error(),
+            Some(libc::EXDEV),
+            "extent traversal must fail with EXDEV, not fall back to the walk"
+        );
     }
 }
