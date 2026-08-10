@@ -27,7 +27,7 @@ use block::disk_file::AsyncFullDiskFile;
 use block::error::BlockError;
 use block::fcntl::{LockError, LockGranularity, LockGranularityChoice, LockType, get_lock_state};
 use block::{
-    ExecuteAsync, ExecuteError, MAX_DISCARD_WRITE_ZEROES_SEG, Request, RequestType,
+    DiskTopology, ExecuteAsync, ExecuteError, MAX_DISCARD_WRITE_ZEROES_SEG, Request, RequestType,
     VirtioBlockConfig, build_serial, fcntl,
 };
 use event_monitor::event;
@@ -69,6 +69,23 @@ const RATE_LIMITER_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
 const LATENCY_SCALE: u64 = 10000;
 
 pub const MINIMUM_BLOCK_QUEUE_SIZE: u16 = 2;
+
+/// Overrides the logical block size advertised to the guest.
+///
+/// The physical block size and minimum I/O size are raised alongside it,
+/// since a disk cannot have either below one logical block. The backend
+/// I/O path is unchanged, only the advertised geometry differs.
+fn override_block_size(
+    mut topology: DiskTopology,
+    block_size_override: Option<u64>,
+) -> DiskTopology {
+    if let Some(block_size_override) = block_size_override {
+        topology.logical_block_size = block_size_override;
+        topology.physical_block_size = topology.physical_block_size.max(block_size_override);
+        topology.minimum_io_size = topology.minimum_io_size.max(block_size_override);
+    }
+    topology
+}
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -812,6 +829,7 @@ impl Block {
         sparse: bool,
         disable_sector0_writes: bool,
         lock_granularity: LockGranularityChoice,
+        block_size_override: Option<u64>,
     ) -> io::Result<Self> {
         let (disk_nsectors, avail_features, acked_features, config, paused) =
             if let Some(state) = state {
@@ -867,7 +885,7 @@ impl Block {
                     avail_features |= 1u64 << VIRTIO_BLK_F_RO;
                 }
 
-                let topology = disk_image.topology();
+                let topology = override_block_size(disk_image.topology(), block_size_override);
                 info!("Disk topology: {topology:?}");
 
                 let logical_block_size = if topology.logical_block_size > 512 {
@@ -1370,6 +1388,52 @@ mod unit_tests {
     use vmm_sys_util::eventfd::EFD_NONBLOCK;
 
     use super::*;
+
+    #[test]
+    fn override_block_size_raises_physical_and_min_io() {
+        let probed = DiskTopology {
+            logical_block_size: 512,
+            physical_block_size: 512,
+            minimum_io_size: 512,
+            optimal_io_size: 0,
+        };
+        let overridden = override_block_size(probed, Some(4096));
+        assert_eq!(overridden.logical_block_size, 4096);
+        // Neither can sit below one logical block.
+        assert_eq!(overridden.physical_block_size, 4096);
+        assert_eq!(overridden.minimum_io_size, 4096);
+        // optimal_io_size is a hint and left untouched.
+        assert_eq!(overridden.optimal_io_size, 0);
+    }
+
+    #[test]
+    fn override_block_size_keeps_larger_probed_fields() {
+        let probed = DiskTopology {
+            logical_block_size: 512,
+            physical_block_size: 8192,
+            minimum_io_size: 8192,
+            optimal_io_size: 65536,
+        };
+        let overridden = override_block_size(probed, Some(4096));
+        assert_eq!(overridden.logical_block_size, 4096);
+        assert_eq!(overridden.physical_block_size, 8192);
+        assert_eq!(overridden.minimum_io_size, 8192);
+        assert_eq!(overridden.optimal_io_size, 65536);
+    }
+
+    #[test]
+    fn override_block_size_none_is_passthrough() {
+        let probed = DiskTopology {
+            logical_block_size: 4096,
+            physical_block_size: 4096,
+            minimum_io_size: 4096,
+            optimal_io_size: 0,
+        };
+        let out = override_block_size(probed, None);
+        assert_eq!(out.logical_block_size, 4096);
+        assert_eq!(out.physical_block_size, 4096);
+        assert_eq!(out.minimum_io_size, 4096);
+    }
 
     struct Noop(EventFd);
     impl VirtioInterrupt for Noop {

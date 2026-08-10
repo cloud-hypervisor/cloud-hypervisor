@@ -1097,6 +1097,8 @@ components:
           $ref: "#/components/schemas/ImageType"
         lock_granularity:
           $ref: "#/components/schemas/LockGranularity"
+        x_override_virtio_block_size:
+          type: integer
 
     NetConfig:
       type: object

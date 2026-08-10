@@ -2750,6 +2750,7 @@ impl DeviceManager {
                 backing_files: disk_cfg.backing_files,
                 disable_io_uring: disk_cfg.disable_io_uring,
                 disable_aio: disk_cfg.disable_aio,
+                block_size_override: disk_cfg.x_override_virtio_block_size,
             })
             .map_err(DeviceManagerError::Disk)?;
 
@@ -2863,6 +2864,7 @@ impl DeviceManager {
                 disk_cfg.sparse,
                 disable_sector0_writes,
                 disk_cfg.lock_granularity,
+                disk_cfg.x_override_virtio_block_size,
             )
             .map_err(DeviceManagerError::CreateVirtioBlock)?;
 

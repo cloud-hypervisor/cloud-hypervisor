@@ -14,7 +14,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 use std::{fmt, fs};
 
-use log::info;
+use log::{info, warn};
 
 #[cfg(feature = "io_uring")]
 use crate::block_io_uring_is_supported;
@@ -38,6 +38,7 @@ pub struct DiskOpenOptions<'a> {
     pub backing_files: bool,
     pub disable_io_uring: bool,
     pub disable_aio: bool,
+    pub block_size_override: Option<u64>,
 }
 
 /// Result of [`open_disk`], carrying the detected image type alongside
@@ -107,7 +108,37 @@ pub fn open_disk(options: &DiskOpenOptions<'_>) -> BlockResult<OpenedDisk> {
         }
     };
 
+    // Non raw backends report a fixed 512 topology, so they can only be
+    // overridden upward and never reach this check.
+    if let Some(block_size_override) = options.block_size_override
+        && options.direct
+    {
+        let probed = disk.topology().logical_block_size;
+        if !direct_block_size_override_supported(block_size_override, probed) {
+            warn!(
+                "block size override {block_size_override} is below the backend logical \
+                block size {probed} and cannot be emulated with direct I/O"
+            );
+            return Err(
+                BlockError::from_kind(BlockErrorKind::UnsupportedFeature).with_path(options.path)
+            );
+        }
+    }
+
     Ok(OpenedDisk { image_type, disk })
+}
+
+/// Whether a block size override is serviceable under direct I/O.
+///
+/// The guest addresses I/O in units of the advertised block size, so an
+/// override below the backend block size makes it issue writes smaller
+/// than one backend block, which need a read modify write. Buffered I/O
+/// gets that from the page cache. Direct I/O does not, and AlignedFile
+/// cannot serialize concurrent writes into the same backend block, so
+/// they could race and lose an update. Only an override at or above the
+/// backend block size, where guest I/O stays aligned, is supported.
+fn direct_block_size_override_supported(requested: u64, probed: u64) -> bool {
+    requested >= probed
 }
 
 fn open_vhdx(
@@ -246,6 +277,7 @@ mod unit_tests {
             backing_files: false,
             disable_io_uring: true,
             disable_aio: true,
+            block_size_override: None,
         }
     }
 
@@ -281,6 +313,16 @@ mod unit_tests {
     }
 
     #[test]
+    fn direct_override_below_backend_block_size_is_unsupported() {
+        // Override down needs a read modify write path direct I/O lacks.
+        assert!(!direct_block_size_override_supported(512, 4096));
+        // At or above the backend block size, guest I/O stays aligned.
+        assert!(direct_block_size_override_supported(4096, 4096));
+        assert!(direct_block_size_override_supported(4096, 512));
+        assert!(direct_block_size_override_supported(8192, 4096));
+    }
+
+    #[test]
     fn open_readonly() {
         let tmp = TempFile::new().unwrap();
         tmp.as_file().set_len(1 << 20).unwrap();
@@ -305,6 +347,7 @@ mod unit_tests {
             backing_files: false,
             disable_io_uring: true,
             disable_aio: true,
+            block_size_override: None,
         };
         let opened = open_disk(&options).unwrap();
         assert_eq!(opened.image_type, ImageType::Raw);
