@@ -626,7 +626,7 @@ impl cpu::Vcpu for MshvVcpu {
                 }
                 hv_message_type_HVMSG_UNRECOVERABLE_EXCEPTION => {
                     warn!("TRIPLE FAULT");
-                    Ok(cpu::VmExit::Shutdown)
+                    Ok(cpu::VmExit::Reset)
                 }
                 #[cfg(target_arch = "x86_64")]
                 hv_message_type_HVMSG_X64_IO_PORT_INTERCEPT => {
