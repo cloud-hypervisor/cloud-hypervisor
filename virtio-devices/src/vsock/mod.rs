@@ -70,6 +70,10 @@ mod defs {
         /// Seqpacket / connection-oriented, message-oriented packet.
         pub(crate) const VSOCK_TYPE_SEQPACKET: u16 = 2;
 
+        /// Vsock device feature bit: SOCK_SEQPACKET support.
+        /// Defined in `/include/uapi/linux/virtio_vsock.h`.
+        pub(crate) const VIRTIO_VSOCK_F_SEQPACKET: u64 = 1;
+
         pub(crate) const VSOCK_HOST_CID: u64 = 2;
     }
 }

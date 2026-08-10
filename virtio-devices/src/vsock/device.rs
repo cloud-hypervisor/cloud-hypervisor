@@ -412,7 +412,9 @@ where
             backend.queue_rst_for_connections(state.connections.clone());
             (state.avail_features, state.acked_features, true)
         } else {
-            let mut avail_features = (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_F_IN_ORDER);
+            let mut avail_features = (1u64 << VIRTIO_F_VERSION_1)
+                | (1u64 << VIRTIO_F_IN_ORDER)
+                | (1u64 << uapi::VIRTIO_VSOCK_F_SEQPACKET);
 
             if access_platform_enabled {
                 avail_features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
@@ -599,7 +601,9 @@ mod tests {
     #[test]
     fn test_virtio_device() {
         let mut ctx = TestContext::new();
-        let avail_features = (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_F_IN_ORDER);
+        let avail_features = (1u64 << VIRTIO_F_VERSION_1)
+            | (1u64 << VIRTIO_F_IN_ORDER)
+            | (1u64 << uapi::VIRTIO_VSOCK_F_SEQPACKET);
         let device_features = avail_features;
         let driver_features: u64 = avail_features | 1 | (1 << 32);
         let device_pages = [
@@ -692,6 +696,18 @@ mod tests {
                 device_status: Arc::new(AtomicU8::new(0)),
             })
             .unwrap();
+    }
+
+    #[test]
+    fn test_seqpacket_feature_advertised() {
+        // Test case: the device offers VIRTIO_VSOCK_F_SEQPACKET, without which the guest
+        // driver refuses to create SOCK_SEQPACKET sockets.
+        let ctx = TestContext::new();
+        assert_ne!(
+            ctx.device.features() & (1u64 << uapi::VIRTIO_VSOCK_F_SEQPACKET),
+            0,
+            "vsock device should advertise VIRTIO_VSOCK_F_SEQPACKET"
+        );
     }
 
     #[test]
