@@ -71,7 +71,7 @@ For a Flat VMDK, its `path=` points at a small text descriptor whose
 data lives in one or more separate extent files. Granting only the descriptor
 currently leaves those extents unreachable under landlock.
 
-The process launching Cloud-Hypervisor must grant these extent paths explicitly
+The process launching Cloud Hypervisor must grant these extent paths explicitly
 via `--landlock-rules` (or the `landlock_rules` API field). The descriptor file's
 extent section mentions the extent file path which can be either:
 
