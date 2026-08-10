@@ -166,7 +166,6 @@ impl PacketBuffer {
         Ok(())
     }
 
-    #[cfg(test)]
     fn copy_from_slice(&mut self, offset: usize, src: &[u8]) -> Result<()> {
         self.check_range(offset, src.len())?;
         if src.is_empty() {
@@ -543,7 +542,6 @@ impl VsockPacket {
             .copy_to_slice(offset, dst)
     }
 
-    #[cfg(test)]
     pub fn copy_buf_from_slice(&mut self, offset: usize, src: &[u8]) -> Result<()> {
         self.buf
             .as_mut()
