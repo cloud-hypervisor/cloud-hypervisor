@@ -723,6 +723,7 @@ pub struct CpuManager {
     vcpus_pause_signalled: Arc<AtomicBool>,
     vcpus_kick_signalled: Arc<AtomicBool>,
     exit_evt: EventFd,
+    guest_exit_evt: EventFd,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     reset_evt: EventFd,
     #[cfg(feature = "guest_debug")]
@@ -865,6 +866,7 @@ impl CpuManager {
         config: &CpusConfig,
         vm: Arc<dyn hypervisor::Vm>,
         exit_evt: EventFd,
+        guest_exit_evt: EventFd,
         reset_evt: EventFd,
         #[cfg(feature = "guest_debug")] vm_debug_evt: EventFd,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
@@ -962,6 +964,7 @@ impl CpuManager {
             vcpus_kick_signalled: Arc::new(AtomicBool::new(false)),
             vcpu_states,
             exit_evt,
+            guest_exit_evt,
             reset_evt,
             #[cfg(feature = "guest_debug")]
             vm_debug_evt,
@@ -1201,6 +1204,11 @@ impl CpuManager {
     ) -> Result<()> {
         let reset_evt = self.reset_evt.try_clone().map_err(Error::EventFdClone)?;
         let exit_evt = self.exit_evt.try_clone().map_err(Error::EventFdClone)?;
+        let guest_exit_evt = self
+            .guest_exit_evt
+            .try_clone()
+            .map_err(Error::EventFdClone)?;
+
         #[cfg(feature = "kvm")]
         let hypervisor_type = self.hypervisor.hypervisor_type();
         #[cfg(feature = "guest_debug")]
@@ -1458,7 +1466,7 @@ impl CpuManager {
                                     VmExit::Shutdown => {
                                         info!("VmExit::Shutdown");
                                         vcpu_run_interrupted.store(true, Ordering::SeqCst);
-                                        exit_evt.write(1).unwrap();
+                                        guest_exit_evt.write(1).unwrap();
                                         break;
                                     }
                                     #[cfg(feature = "tdx")]
