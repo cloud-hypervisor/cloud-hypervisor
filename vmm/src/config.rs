@@ -387,6 +387,22 @@ pub enum ValidationError {
     #[cfg(feature = "sev_snp")]
     #[error("SEV-SNP requires an IGVM payload (--payload igvm=<path>)")]
     SevSnpRequiresIgvm,
+    /// Memory hotplug is not supported with SEV-SNP
+    #[cfg(feature = "sev_snp")]
+    #[error("Memory hotplug is not supported with SEV-SNP")]
+    SevSnpNoMemoryHotplug,
+    /// CPU hotplug is not supported with SEV-SNP
+    #[cfg(feature = "sev_snp")]
+    #[error("CPU hotplug is not supported with SEV-SNP")]
+    SevSnpNoCpuHotplug,
+    /// Huge pages are not supported with SEV-SNP
+    #[cfg(feature = "sev_snp")]
+    #[error("Huge pages are not supported with SEV-SNP")]
+    SevSnpNoHugePages,
+    /// A virtual IOMMU is not supported with SEV-SNP
+    #[cfg(feature = "sev_snp")]
+    #[error("Virtual IOMMU is not supported with SEV-SNP")]
+    SevSnpNoViommu,
     /// Restore expects all net ids that have fds
     #[error("Net id {0} is associated with FDs and is required")]
     RestoreMissingRequiredNetId(String),
@@ -1285,6 +1301,26 @@ impl MemoryConfig {
                 .flatten()
                 .filter_map(|zone| zone.hotplugged_size)
                 .sum::<u64>()
+    }
+
+    pub fn hotplug_size(&self) -> u64 {
+        self.hotplug_size.unwrap_or(0)
+            + self
+                .zones
+                .iter()
+                .flatten()
+                .filter_map(|zone| zone.hotplug_size)
+                .sum::<u64>()
+    }
+
+    pub fn hugepages_enabled(&self) -> bool {
+        self.hugepages
+            || self.hugepage_size.is_some()
+            || self
+                .zones
+                .iter()
+                .flatten()
+                .any(|zone| zone.hugepages || zone.hugepage_size.is_some())
     }
 }
 
@@ -3268,6 +3304,18 @@ impl VmConfig {
                 {
                     return Err(ValidationError::SevSnpRequiresIgvm);
                 }
+
+                if self.memory.hotplug_size() > 0 || self.memory.hotplugged_size() > 0 {
+                    return Err(ValidationError::SevSnpNoMemoryHotplug);
+                }
+
+                if self.cpus.max_vcpus != self.cpus.boot_vcpus {
+                    return Err(ValidationError::SevSnpNoCpuHotplug);
+                }
+
+                if self.memory.hugepages_enabled() {
+                    return Err(ValidationError::SevSnpNoHugePages);
+                }
             }
         }
         // The 'conflict' check is introduced in commit 24438e0390d3
@@ -3619,6 +3667,12 @@ impl VmConfig {
             .as_ref()
             .map(|p| p.iommu_segments.is_some())
             .unwrap_or_default();
+
+        // Checked after self.iommu changes, so it sees devices and iommu_segments
+        #[cfg(feature = "sev_snp")]
+        if self.iommu && self.platform.as_ref().is_some_and(|p| p.sev_snp) {
+            return Err(ValidationError::SevSnpNoViommu);
+        }
 
         if let Some(landlock_rules) = &self.landlock_rules {
             for landlock_rule in landlock_rules {
@@ -6860,6 +6914,82 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 fw_cfg_config: None,
             });
             config_with_invalid_host_data.validate().unwrap_err();
+
+            let payload = sev_snp_config.payload.as_mut().unwrap();
+            payload.kernel = None;
+            payload.igvm = Some(PathBuf::from("/path/to/igvm"));
+            sev_snp_config.validate().unwrap();
+
+            let mut invalid_config = sev_snp_config.clone();
+            invalid_config.memory.hotplug_size = Some(1);
+            assert_eq!(
+                invalid_config.validate(),
+                Err(ValidationError::SevSnpNoMemoryHotplug)
+            );
+
+            let mut invalid_config = sev_snp_config.clone();
+            invalid_config.memory.hotplugged_size = Some(1);
+            assert_eq!(
+                invalid_config.validate(),
+                Err(ValidationError::SevSnpNoMemoryHotplug)
+            );
+
+            let mut invalid_config = sev_snp_config.clone();
+            invalid_config.cpus.max_vcpus = 2;
+            assert_eq!(
+                invalid_config.validate(),
+                Err(ValidationError::SevSnpNoCpuHotplug)
+            );
+
+            let mut invalid_config = sev_snp_config.clone();
+            invalid_config.memory.hugepages = true;
+            assert_eq!(
+                invalid_config.validate(),
+                Err(ValidationError::SevSnpNoHugePages)
+            );
+
+            let iommu_pci_common = PciDeviceCommonConfig {
+                iommu: true,
+                ..Default::default()
+            };
+
+            let mut invalid_config = sev_snp_config.clone();
+            invalid_config.disks = Some(vec![DiskConfig {
+                pci_common: iommu_pci_common.clone(),
+                ..raw_disk_fixture()
+            }]);
+            assert_eq!(
+                invalid_config.validate(),
+                Err(ValidationError::SevSnpNoViommu)
+            );
+
+            let mut invalid_config = sev_snp_config.clone();
+            invalid_config.devices = Some(vec![DeviceConfig {
+                pci_common: iommu_pci_common.clone(),
+                ..device_fixture()
+            }]);
+            assert_eq!(
+                invalid_config.validate(),
+                Err(ValidationError::SevSnpNoViommu)
+            );
+
+            let mut invalid_config = sev_snp_config.clone();
+            invalid_config.platform = Some(PlatformConfig {
+                sev_snp: true,
+                iommu_segments: Some(Box::new([1])),
+                ..platform_fixture()
+            });
+            assert_eq!(
+                invalid_config.validate(),
+                Err(ValidationError::SevSnpNoViommu)
+            );
+
+            let mut invalid_config = sev_snp_config.clone();
+            invalid_config.iommu = true;
+            assert_eq!(
+                invalid_config.validate(),
+                Err(ValidationError::SevSnpNoViommu)
+            );
         }
 
         // x_nv_gpudirect_clique with vfio_p2p_dma=off should fail

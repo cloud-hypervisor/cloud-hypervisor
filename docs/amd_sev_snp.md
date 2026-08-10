@@ -44,3 +44,9 @@ You can run a SEV-SNP VM using the following command:
 ```
 
 For more information related to Microsoft Hypervisor, please see [mshv.md](mshv.md).
+
+**Limitations**
+Note that Cloud Hypervisor does not support the following features with SEV-SNP:
+- Memory & CPU hotplug
+- Huge Pages (HugeTLB)
+- Virtual IOMMU
