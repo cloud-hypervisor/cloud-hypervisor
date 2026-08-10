@@ -237,6 +237,9 @@ pub enum Error {
 
     #[error("Error generating MSR configuration update")]
     MsrConfigurationUpdate(#[source] arch::Error),
+
+    #[error("Cannot clone EventFd")]
+    EventFdClone(#[source] io::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -1196,13 +1199,13 @@ impl CpuManager {
         vcpu_thread_barrier: Arc<Barrier>,
         inserting: bool,
     ) -> Result<()> {
-        let reset_evt = self.reset_evt.try_clone().unwrap();
-        let exit_evt = self.exit_evt.try_clone().unwrap();
+        let reset_evt = self.reset_evt.try_clone().map_err(Error::EventFdClone)?;
+        let exit_evt = self.exit_evt.try_clone().map_err(Error::EventFdClone)?;
         #[cfg(feature = "kvm")]
         let hypervisor_type = self.hypervisor.hypervisor_type();
         #[cfg(feature = "guest_debug")]
-        let vm_debug_evt = self.vm_debug_evt.try_clone().unwrap();
-        let panic_exit_evt = self.exit_evt.try_clone().unwrap();
+        let vm_debug_evt = self.vm_debug_evt.try_clone().map_err(Error::EventFdClone)?;
+        let panic_exit_evt = self.exit_evt.try_clone().map_err(Error::EventFdClone)?;
         let vcpus_kill_signalled = self.vcpus_kill_signalled.clone();
         let vcpus_pause_signalled = self.vcpus_pause_signalled.clone();
         let vcpus_kick_signalled = self.vcpus_kick_signalled.clone();
