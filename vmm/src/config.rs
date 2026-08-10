@@ -384,6 +384,18 @@ pub enum ValidationError {
     #[cfg(feature = "sev_snp")]
     #[error("SEV-SNP requires an IGVM payload (--payload igvm=<path>)")]
     SevSnpRequiresIgvm,
+    /// Memory hotplug is not supported with SEV-SNP
+    #[cfg(feature = "sev_snp")]
+    #[error("Memory hotplug is not supported with SEV-SNP")]
+    SevSnpNoMemoryHotplug,
+    /// CPU hotplug is not supported with SEV-SNP
+    #[cfg(feature = "sev_snp")]
+    #[error("CPU hotplug is not supported with SEV-SNP")]
+    SevSnpNoCpuHotplug,
+    /// Huge pages are not supported with SEV-SNP
+    #[cfg(feature = "sev_snp")]
+    #[error("Huge pages are not supported with SEV-SNP")]
+    SevSnpNoHugePages,
     /// Restore expects all net ids that have fds
     #[error("Net id {0} is associated with FDs and is required")]
     RestoreMissingRequiredNetId(String),
@@ -1284,6 +1296,26 @@ impl MemoryConfig {
                 .flatten()
                 .filter_map(|zone| zone.hotplugged_size)
                 .sum::<u64>()
+    }
+
+    pub fn hotplug_size(&self) -> u64 {
+        self.hotplug_size.unwrap_or(0)
+            + self
+                .zones
+                .iter()
+                .flatten()
+                .filter_map(|zone| zone.hotplug_size)
+                .sum::<u64>()
+    }
+
+    pub fn hugepages_enabled(&self) -> bool {
+        self.hugepages
+            || self.hugepage_size.is_some()
+            || self
+                .zones
+                .iter()
+                .flatten()
+                .any(|zone| zone.hugepages || zone.hugepage_size.is_some())
     }
 }
 
@@ -3258,6 +3290,18 @@ impl VmConfig {
                     .is_none()
                 {
                     return Err(ValidationError::SevSnpRequiresIgvm);
+                }
+
+                if self.memory.hotplug_size() > 0 || self.memory.hotplugged_size() > 0 {
+                    return Err(ValidationError::SevSnpNoMemoryHotplug);
+                }
+
+                if self.cpus.max_vcpus != self.cpus.boot_vcpus {
+                    return Err(ValidationError::SevSnpNoCpuHotplug);
+                }
+
+                if self.memory.hugepages_enabled() {
+                    return Err(ValidationError::SevSnpNoHugePages);
                 }
             }
         }
@@ -6988,6 +7032,47 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             invalid_config.validate(),
             Err(ValidationError::IdentifierNotUnique("test0".to_string()))
         );
+
+        #[cfg(feature = "sev_snp")]
+        {
+            let mut sev_snp_config = valid_config.clone();
+            sev_snp_config.platform = Some(PlatformConfig {
+                sev_snp: true,
+                ..platform_fixture()
+            });
+            let payload = sev_snp_config.payload.as_mut().unwrap();
+            payload.kernel = None;
+            payload.igvm = Some(PathBuf::from("/path/to/igvm"));
+            sev_snp_config.validate().unwrap();
+
+            let mut invalid_config = sev_snp_config.clone();
+            invalid_config.memory.hotplug_size = Some(1);
+            assert_eq!(
+                invalid_config.validate(),
+                Err(ValidationError::SevSnpNoMemoryHotplug)
+            );
+
+            let mut invalid_config = sev_snp_config.clone();
+            invalid_config.memory.hotplugged_size = Some(1);
+            assert_eq!(
+                invalid_config.validate(),
+                Err(ValidationError::SevSnpNoMemoryHotplug)
+            );
+
+            let mut invalid_config = sev_snp_config.clone();
+            invalid_config.cpus.max_vcpus = 2;
+            assert_eq!(
+                invalid_config.validate(),
+                Err(ValidationError::SevSnpNoCpuHotplug)
+            );
+
+            let mut invalid_config = sev_snp_config.clone();
+            invalid_config.memory.hugepages = true;
+            assert_eq!(
+                invalid_config.validate(),
+                Err(ValidationError::SevSnpNoHugePages)
+            );
+        }
     }
     #[test]
     fn test_landlock_parsing() -> Result<()> {
