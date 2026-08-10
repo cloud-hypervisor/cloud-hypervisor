@@ -226,6 +226,9 @@ pub enum ValidationError {
     /// Missing socket path for console
     #[error("Path missing when using socket console mode")]
     ConsoleSocketPathMissing,
+    /// Socket path provided without socket console mode
+    #[error("Socket path is only valid with socket console mode")]
+    ConsoleSocketPathUnexpected,
     /// Max is less than boot
     #[error("Max CPUs ({0}) lower than boot CPUs ({1})")]
     CpusMaxLowerThanBoot(u32 /* max vCPUs */, u32 /* boot vCPUs */),
@@ -2372,6 +2375,16 @@ impl CommonConsoleConfig {
 
         Ok(Self { mode, file, socket })
     }
+
+    pub fn validate(&self) -> ValidationResult<()> {
+        if self.mode == ConsoleOutputMode::Socket && self.socket.is_none() {
+            return Err(ValidationError::ConsoleSocketPathMissing);
+        }
+        if self.socket.is_some() && self.mode != ConsoleOutputMode::Socket {
+            return Err(ValidationError::ConsoleSocketPathUnexpected);
+        }
+        Ok(())
+    }
 }
 
 impl ConsoleConfig {
@@ -2390,6 +2403,7 @@ impl ConsoleConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        self.common.validate()?;
         self.pci_common.validate(vm_config)
     }
 }
@@ -2404,6 +2418,10 @@ impl SerialConfig {
 
         let common = CommonConsoleConfig::parse(serial, Error::ParseSerial)?;
         Ok(Self { common })
+    }
+
+    pub fn validate(&self) -> ValidationResult<()> {
+        self.common.validate()
     }
 }
 
@@ -3417,6 +3435,8 @@ impl VmConfig {
         self.console.validate(self)?;
         Self::validate_identifier(&mut id_list, &self.console.pci_common.id)?;
         self.iommu |= self.console.pci_common.iommu;
+
+        self.serial.validate()?;
 
         if let Some(t) = &self.cpus.topology {
             if t.threads_per_core == 0
@@ -5912,6 +5932,22 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             invalid_config.validate(),
             Err(ValidationError::ConsoleFileMissing)
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.serial.common.mode = ConsoleOutputMode::Socket;
+        invalid_config.serial.common.socket = None;
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::ConsoleSocketPathMissing)
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.console.common.mode = ConsoleOutputMode::Tty;
+        invalid_config.console.common.socket = Some(PathBuf::from("/tmp/console.sock"));
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::ConsoleSocketPathUnexpected)
         );
 
         let mut invalid_config = valid_config.clone();
