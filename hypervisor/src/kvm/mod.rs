@@ -633,6 +633,8 @@ struct KvmMemorySlot {
 /// Wrapper over KVM VM ioctls.
 pub struct KvmVm {
     fd: Arc<VmFd>,
+    #[cfg(target_arch = "aarch64")]
+    nested: bool,
     #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
     #[cfg(feature = "sev_snp")]
@@ -1817,6 +1819,10 @@ impl hypervisor::Hypervisor for KvmHypervisor {
         {
             Ok(Arc::new(KvmVm {
                 fd: Arc::new(fd),
+                #[cfg(target_arch = "aarch64")]
+                // KVM_CAP_ARM_EL2 is not yet included in the generated
+                // kvm-bindings.
+                nested: _config.nested && self.kvm.check_extension_raw(240) > 0,
                 dirty_log_slots: RwLock::new(HashMap::new()),
                 memory_slots: None,
             }))
@@ -2819,26 +2825,20 @@ impl cpu::Vcpu for KvmVcpu {
             is_aarch64_feature_detected!("sve") || is_aarch64_feature_detected!("sve2");
 
         let mut kvm_kvi: kvm_bindings::kvm_vcpu_init = (*kvi).into();
+        let vm = vm.as_any().downcast_ref::<KvmVm>().unwrap();
 
         // We already checked that the capability is supported.
         kvm_kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PSCI_0_2;
-        if vm
-            .as_any()
-            .downcast_ref::<KvmVm>()
-            .unwrap()
-            .check_extension(Cap::ArmPmuV3)
-        {
+        if vm.check_extension(Cap::ArmPmuV3) {
             kvm_kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PMU_V3;
         }
 
-        if sve_supported
-            && vm
-                .as_any()
-                .downcast_ref::<KvmVm>()
-                .unwrap()
-                .check_extension(Cap::ArmSve)
-        {
+        if sve_supported && vm.check_extension(Cap::ArmSve) {
             kvm_kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_SVE;
+        }
+
+        if vm.nested {
+            kvm_kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_HAS_EL2;
         }
 
         // Non-boot cpus are powered off initially.
