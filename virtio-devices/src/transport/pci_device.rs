@@ -578,18 +578,14 @@ impl VirtioPciDevice {
                 queue
                     .try_set_used_ring_address(GuestAddress(state.queues[i].used_ring))
                     .unwrap();
-                queue.set_next_avail(
-                    queue
+                if queue.ready() && queue.is_valid(memory.memory().deref()) {
+                    let used_idx = queue
                         .used_idx(memory.memory().deref(), Ordering::Acquire)
                         .unwrap()
-                        .0,
-                );
-                queue.set_next_used(
-                    queue
-                        .used_idx(memory.memory().deref(), Ordering::Acquire)
-                        .unwrap()
-                        .0,
-                );
+                        .0;
+                    queue.set_next_avail(used_idx);
+                    queue.set_next_used(used_idx);
+                }
             }
 
             (
