@@ -787,6 +787,27 @@ fn vmm_thread_rules(
         (libc::SYS_userfaultfd, vec![]),
         (libc::SYS_wait4, vec![]),
         (libc::SYS_writev, vec![]),
+        (
+            libc::SYS_getsockopt,
+            or![
+                and![
+                    Cond::new(1, ArgLen::Dword, Eq, libc::SOL_SOCKET as u64).unwrap(),
+                    Cond::new(2, ArgLen::Dword, Eq, libc::SO_DOMAIN as u64).unwrap()
+                ],
+                and![
+                    Cond::new(1, ArgLen::Dword, Eq, libc::SOL_SOCKET as u64).unwrap(),
+                    Cond::new(2, ArgLen::Dword, Eq, libc::SO_TYPE as u64).unwrap()
+                ],
+                and![
+                    Cond::new(1, ArgLen::Dword, Eq, libc::SOL_SOCKET as u64).unwrap(),
+                    Cond::new(2, ArgLen::Dword, Eq, libc::SO_PROTOCOL as u64).unwrap()
+                ],
+                and![
+                    Cond::new(1, ArgLen::Dword, Eq, libc::SOL_SOCKET as u64).unwrap(),
+                    Cond::new(2, ArgLen::Dword, Eq, libc::SO_ACCEPTCONN as u64).unwrap()
+                ]
+            ],
+        ),
     ])
 }
 

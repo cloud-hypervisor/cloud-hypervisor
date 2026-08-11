@@ -3528,9 +3528,12 @@ impl DeviceManager {
             .socket
             .to_str()
             .ok_or(DeviceManagerError::CreateVsockConvertPath)?;
-        let backend = vsock::VsockUnixBackend::new(vsock_cfg.cid, socket_path.to_string())
-            .map_err(DeviceManagerError::CreateVsockBackend)?;
-
+        let backend = vsock::VsockUnixBackend::new(
+            vsock_cfg.cid,
+            vsock_cfg.listen_fd.clone(),
+            socket_path.to_string(),
+        )
+        .map_err(DeviceManagerError::CreateVsockBackend)?;
         let vsock_device = Arc::new(Mutex::new(
             virtio_devices::Vsock::new(
                 id.clone(),

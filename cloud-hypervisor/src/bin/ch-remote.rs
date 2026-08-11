@@ -9,7 +9,9 @@ mod test_util;
 
 use std::io::{self, Read};
 use std::marker::PhantomData;
+use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::net::UnixStream;
+use std::sync::Arc;
 use std::{error, fs, iter, num, process};
 
 use api_client::{
@@ -76,6 +78,9 @@ enum Error {
     ReceiveMigrationConfig(#[from] api::VmReceiveMigrationConfigError),
     #[error("Error parsing send migration configuration")]
     SendMigrationConfig(#[from] api::VmSendMigrationConfigError),
+    #[cfg(feature = "dbus_api")]
+    #[error("Passing FD over D-Bus not supported")]
+    FdOverDbusNotSupported,
 }
 
 enum TargetApi<'a> {
@@ -476,15 +481,22 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
                 .map_err(Error::HttpApiClient)
         }
         Some("add-vsock") => {
-            let vsock_config = add_vsock_config(
+            let (vsock_config, fd) = add_vsock_config(
                 matches
                     .subcommand_matches("add-vsock")
                     .unwrap()
                     .get_one::<String>("vsock_config")
                     .unwrap(),
             )?;
-            simple_api_command(socket, "PUT", "add-vsock", Some(&vsock_config))
-                .map_err(Error::HttpApiClient)
+            let fds = [fd.as_ref().map_or(-1, |a| a.as_raw_fd())];
+            simple_api_command_with_fds(
+                socket,
+                "PUT",
+                "add-vsock",
+                Some(&vsock_config),
+                if fd.is_none() { &[] } else { &fds },
+            )
+            .map_err(Error::HttpApiClient)
         }
         Some("snapshot") => {
             let snapshot_config = snapshot_config(
@@ -701,13 +713,16 @@ fn dbus_api_do_command(matches: &ArgMatches, proxy: &DBusApi1ProxyBlocking<'_>) 
             proxy.api_vm_add_vdpa(&vdpa_config)
         }
         Some("add-vsock") => {
-            let vsock_config = add_vsock_config(
+            let (vsock_config, fd) = add_vsock_config(
                 matches
                     .subcommand_matches("add-vsock")
                     .unwrap()
                     .get_one::<String>("vsock_config")
                     .unwrap(),
             )?;
+            if fd.is_some() {
+                return Err(Error::FdOverDbusNotSupported);
+            }
             proxy.api_vm_add_vsock(&vsock_config)
         }
         Some("snapshot") => {
@@ -916,11 +931,15 @@ fn add_vdpa_config(config: &str) -> Result<String, Error> {
     Ok(vdpa_config)
 }
 
-fn add_vsock_config(config: &str) -> Result<String, Error> {
-    let vsock_config = VsockConfig::parse(config).map_err(Error::AddVsockConfig)?;
+fn add_vsock_config(config: &str) -> Result<(String, Option<OwnedFd>), Error> {
+    let mut vsock_config = VsockConfig::parse(config).map_err(Error::AddVsockConfig)?;
+    let fd = vsock_config
+        .listen_fd
+        .take()
+        .map(|f| Arc::into_inner(f).unwrap());
     let vsock_config = serde_json::to_string(&vsock_config).unwrap();
 
-    Ok(vsock_config)
+    Ok((vsock_config, fd))
 }
 
 fn snapshot_config(url: &str) -> String {

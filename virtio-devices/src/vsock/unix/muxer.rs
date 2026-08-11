@@ -41,11 +41,14 @@
 use std::cmp::max;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::ffi::c_int;
 use std::fs::File;
 use std::io::{self, ErrorKind, Read};
+use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::str;
+use std::sync::Arc;
 
 use log::{debug, error, info, warn};
 
@@ -367,7 +370,7 @@ impl VsockBackend for VsockMuxer {
 impl VsockMuxer {
     /// Muxer constructor.
     ///
-    pub fn new(cid: u32, host_sock_path: String) -> Result<Self> {
+    pub fn new(cid: u32, host_sock: Option<Arc<OwnedFd>>, host_sock_path: String) -> Result<Self> {
         // Create the nested epoll FD. This FD will be added to the VMM `EpollContext`, at
         // device activation time.
         let epoll_fd = epoll::create(true).map_err(Error::EpollFdCreate)?;
@@ -377,9 +380,16 @@ impl VsockMuxer {
 
         // Open/bind/listen on the host Unix socket, so we can accept host-initiated
         // connections.
-        let host_sock = UnixListener::bind(&host_sock_path)
-            .and_then(|sock| sock.set_nonblocking(true).map(|_| sock))
-            .map_err(Error::UnixBind)?;
+        let host_sock = match host_sock {
+            None => UnixListener::bind(&host_sock_path),
+            Some(fd) => match check_unix_listening_socket(fd.as_fd()) {
+                Err(e) => return Err(Error::CannotCheckIfUnixListeningSocket(e)),
+                Ok(false) => return Err(Error::NotUnixListeningStreamSocket),
+                Ok(true) => Ok(UnixListener::from(fd.try_clone().expect("cannot dup fd"))),
+            },
+        }
+        .and_then(|sock| sock.set_nonblocking(true).map(|_| sock))
+        .map_err(Error::UnixBind)?;
 
         let mut muxer = Self {
             cid: cid.into(),
@@ -887,6 +897,43 @@ impl VsockMuxer {
     }
 }
 
+unsafe fn check_int_sockopt(fd: BorrowedFd, name: c_int, expected: c_int) -> io::Result<bool> {
+    let mut opt = !expected;
+    let mut len: libc::socklen_t = size_of_val(&opt) as _;
+    // SAFETY: FFI call with valid parameters.
+    // Caller promises that the socket option is correct.
+    match unsafe {
+        libc::getsockopt(
+            fd.as_raw_fd(),
+            libc::SOL_SOCKET,
+            name,
+            (&raw mut opt).cast(),
+            &raw mut len,
+        )
+    } {
+        0 if len == size_of_val(&opt) as libc::socklen_t => Ok(opt == expected),
+        -1 => {
+            let e = io::Error::last_os_error();
+            if e.raw_os_error().unwrap() == libc::ENOTSOCK {
+                Ok(false)
+            } else {
+                Err(e)
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn check_unix_listening_socket(fd: BorrowedFd) -> io::Result<bool> {
+    // SAFETY: all of the socket option values are valid
+    Ok(unsafe {
+        check_int_sockopt(fd, libc::SO_DOMAIN, libc::AF_UNIX)?
+            && check_int_sockopt(fd, libc::SO_TYPE, libc::SOCK_STREAM)?
+            && check_int_sockopt(fd, libc::SO_PROTOCOL, 0)?
+            && check_int_sockopt(fd, libc::SO_ACCEPTCONN, 1)?
+    })
+}
+
 #[cfg(test)]
 mod unit_tests {
     use std::cmp::min;
@@ -945,7 +992,7 @@ mod unit_tests {
             let uds_path = format!("test_vsock_{name}.sock");
             // Clear in case it is still there from a previous run
             let _ = fs::remove_file(&uds_path);
-            let muxer = VsockMuxer::new(PEER_CID, uds_path).unwrap();
+            let muxer = VsockMuxer::new(PEER_CID, None, uds_path).unwrap();
 
             Self {
                 _vsock_test_ctx: vsock_test_ctx,

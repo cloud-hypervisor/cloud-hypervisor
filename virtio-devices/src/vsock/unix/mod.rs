@@ -66,6 +66,10 @@ pub enum Error {
     /// Muxer connection limit reached.
     #[error("Muxer connection limit reached")]
     TooManyConnections,
+    #[error("Listening FD is not an AF_UNIX listening stream socket")]
+    NotUnixListeningStreamSocket,
+    #[error("Error checking if FD is an AF_UNIX listening stream socket")]
+    CannotCheckIfUnixListeningSocket(#[source] io::Error),
 }
 
 type Result<T> = result::Result<T, Error>;

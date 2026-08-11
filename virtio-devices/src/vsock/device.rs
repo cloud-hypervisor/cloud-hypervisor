@@ -8,6 +8,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
+use std::os::fd::OwnedFd;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -349,6 +350,7 @@ pub struct Vsock<B: VsockBackend> {
     cid: u64,
     backend: Arc<RwLock<B>>,
     path: PathBuf,
+    fd: Option<OwnedFd>,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
 }
@@ -405,6 +407,7 @@ where
                 ..Default::default()
             },
             id,
+            fd: None,
             cid: cid.into(),
             backend: Arc::new(RwLock::new(backend)),
             path,
@@ -513,7 +516,9 @@ where
     }
 
     fn shutdown(&mut self) {
-        fs::remove_file(&self.path).ok();
+        if self.fd.is_none() {
+            fs::remove_file(&self.path).ok();
+        }
     }
 
     fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {

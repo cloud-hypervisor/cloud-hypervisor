@@ -6,10 +6,11 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 #[cfg(feature = "ivshmem")]
 use std::fs;
+use std::os::fd::{FromRawFd as _, OwnedFd, RawFd};
 use std::path::PathBuf;
 use std::result;
 use std::str::FromStr;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use arch::CpuProfile;
 use block::ImageType;
@@ -2599,13 +2600,14 @@ impl VdpaConfig {
 impl VsockConfig {
     pub const SYNTAX: &'static str = "Virtio VSOCK parameters \
         \"cid=<context_id>,socket=<socket_path>,iommu=on|off,id=<device_id>,\
-        pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
+        pci_segment=<segment_id>,pci_device_id=<pci_slot>,listen_fd=<file descriptor>\"";
 
     pub fn parse(vsock: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
             .add("socket")
             .add("cid")
+            .add("listen_fd")
             .add_all(PciDeviceCommonConfig::OPTIONS_IOMMU);
         parser.parse(vsock).map_err(Error::ParseVsock)?;
 
@@ -2618,11 +2620,22 @@ impl VsockConfig {
             .convert("cid")
             .map_err(Error::ParseVsock)?
             .ok_or(Error::ParseVsockCidMissing)?;
-
+        let listen_fd = match parser.convert("listen_fd").map_err(Error::ParseVsock)? {
+            None => None,
+            Some(fd) => {
+                let fd = <RawFd as TryFrom<u64>>::try_from(fd).map_err(|e| {
+                    Error::ParseVsock(OptionParserError::InvalidValue(e.to_string()))
+                })?;
+                // SAFETY: This is unsound.  CLI assumed to provide
+                // valid FD.
+                Some(Arc::new(unsafe { OwnedFd::from_raw_fd(fd) }))
+            }
+        };
         Ok(VsockConfig {
             pci_common,
             cid,
             socket,
+            listen_fd,
         })
     }
 
@@ -4019,7 +4032,7 @@ impl Drop for VmConfig {
 #[cfg(test)]
 mod unit_tests {
     use std::fs::File;
-    use std::os::unix::io::AsRawFd;
+    use std::os::fd::AsRawFd;
 
     use net_util::MacAddr;
 
@@ -5103,6 +5116,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 pci_common: PciDeviceCommonConfig::default(),
                 cid: 3,
                 socket: PathBuf::from("/tmp/sock"),
+                listen_fd: None,
             }
         );
         assert_eq!(
@@ -5114,6 +5128,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 },
                 cid: 3,
                 socket: PathBuf::from("/tmp/sock"),
+                listen_fd: None,
             }
         );
         Ok(())
@@ -6387,6 +6402,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             },
             cid: 3,
             socket: PathBuf::new(),
+            listen_fd: None,
         });
         still_valid_config.validate().unwrap();
 
@@ -6474,6 +6490,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             },
             cid: 3,
             socket: PathBuf::new(),
+            listen_fd: None,
         });
         assert_eq!(
             invalid_config.validate(),
