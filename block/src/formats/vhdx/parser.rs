@@ -4,9 +4,7 @@
 
 use std::collections::btree_map::BTreeMap;
 use std::fs::File;
-use std::io::{
-    Error as IoError, ErrorKind as IoErrorKind, Read, Result as IoResult, Seek, SeekFrom, Write,
-};
+use std::io::{Error as IoError, ErrorKind as IoErrorKind, Result as IoResult, Write};
 use std::os::fd::{AsRawFd, RawFd};
 use std::result;
 
@@ -49,7 +47,6 @@ pub struct Vhdx {
     mdr_entry: RegionTableEntry,
     disk_spec: DiskSpec,
     bat_entries: Vec<BatEntry>,
-    current_offset: u64,
     first_write: bool,
 }
 
@@ -84,7 +81,6 @@ impl Vhdx {
             mdr_entry,
             disk_spec,
             bat_entries,
-            current_offset: 0,
             first_write: true,
         })
     }
@@ -94,33 +90,35 @@ impl Vhdx {
     }
 }
 
-impl Read for Vhdx {
-    /// Wrapper function to satisfy Read trait implementation for VHDx disk.
-    /// Convert the offset to sector index and buffer length to sector count.
-    fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
+impl Vhdx {
+    /// Convert `offset` and `buf_len` to a sector index and count, rejecting
+    /// unaligned I/O.
+    fn sector_range(&self, buf_len: usize, offset: u64, op: &str) -> IoResult<(u64, u64)> {
         let sector_size = self.disk_spec.logical_sector_size as u64;
-        if !(buf.len() as u64).is_multiple_of(sector_size) {
+        if !(buf_len as u64).is_multiple_of(sector_size) {
             return Err(IoError::new(
                 IoErrorKind::InvalidInput,
                 format!(
-                    "Read buffer length {} is not a multiple of the {sector_size}-byte logical sector size",
-                    buf.len()
+                    "{op} buffer length {buf_len} is not a multiple of the {sector_size}-byte logical sector size"
                 ),
             ));
         }
-        if !self.current_offset.is_multiple_of(sector_size) {
+        if !offset.is_multiple_of(sector_size) {
             return Err(IoError::new(
                 IoErrorKind::InvalidInput,
                 format!(
-                    "Read offset {} is not a multiple of the {sector_size}-byte logical sector size",
-                    self.current_offset
+                    "{op} offset {offset} is not a multiple of the {sector_size}-byte logical sector size"
                 ),
             ));
         }
-        let sector_count = buf.len() as u64 / sector_size;
-        let sector_index = self.current_offset / sector_size;
+        Ok((offset / sector_size, buf_len as u64 / sector_size))
+    }
 
-        let result = io::read(
+    /// Read into `buf` at byte `offset`. The offset and length must be
+    /// sector aligned.
+    pub fn read_at(&self, buf: &mut [u8], offset: u64) -> IoResult<usize> {
+        let (sector_index, sector_count) = self.sector_range(buf.len(), offset, "Read")?;
+        io::read(
             &self.aligned,
             buf,
             &self.disk_spec,
@@ -132,43 +130,13 @@ impl Read for Vhdx {
             IoError::other(format!(
                 "Failed reading {sector_count} sectors from VHDx at index {sector_index}: {e}"
             ))
-        })?;
-
-        self.current_offset = self.current_offset.checked_add(result as u64).unwrap();
-
-        Ok(result)
-    }
-}
-
-impl Write for Vhdx {
-    fn flush(&mut self) -> IoResult<()> {
-        self.aligned.file_mut().flush()
+        })
     }
 
-    /// Wrapper function to satisfy Write trait implementation for VHDx disk.
-    /// Convert the offset to sector index and buffer length to sector count.
-    fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
-        let sector_size = self.disk_spec.logical_sector_size as u64;
-        if !(buf.len() as u64).is_multiple_of(sector_size) {
-            return Err(IoError::new(
-                IoErrorKind::InvalidInput,
-                format!(
-                    "Write buffer length {} is not a multiple of the {sector_size}-byte logical sector size",
-                    buf.len()
-                ),
-            ));
-        }
-        if !self.current_offset.is_multiple_of(sector_size) {
-            return Err(IoError::new(
-                IoErrorKind::InvalidInput,
-                format!(
-                    "Write offset {} is not a multiple of the {sector_size}-byte logical sector size",
-                    self.current_offset
-                ),
-            ));
-        }
-        let sector_count = buf.len() as u64 / sector_size;
-        let sector_index = self.current_offset / sector_size;
+    /// Write all of `buf` at byte `offset`. The offset and length must be
+    /// sector aligned.
+    pub fn write_all_at(&mut self, buf: &[u8], offset: u64) -> IoResult<()> {
+        let (sector_index, sector_count) = self.sector_range(buf.len(), offset, "Write")?;
 
         if self.first_write {
             self.first_write = false;
@@ -177,7 +145,7 @@ impl Write for Vhdx {
                 .map_err(|e| IoError::other(format!("Failed to update VHDx header: {e}")))?;
         }
 
-        let result = io::write(
+        io::write(
             &self.aligned,
             buf,
             &mut self.disk_spec,
@@ -192,48 +160,11 @@ impl Write for Vhdx {
             ))
         })?;
 
-        self.current_offset = self.current_offset.checked_add(result as u64).unwrap();
-
-        Ok(result)
+        Ok(())
     }
-}
 
-impl Seek for Vhdx {
-    /// Wrapper function to satisfy Seek trait implementation for VHDx disk.
-    /// Updates the offset field in the Vhdx struct.
-    fn seek(&mut self, pos: SeekFrom) -> IoResult<u64> {
-        let new_offset: Option<u64> = match pos {
-            SeekFrom::Start(off) => Some(off),
-            SeekFrom::End(off) => {
-                if off < 0 {
-                    0i64.checked_sub(off).and_then(|increment| {
-                        self.virtual_disk_size().checked_sub(increment as u64)
-                    })
-                } else {
-                    self.virtual_disk_size().checked_add(off as u64)
-                }
-            }
-            SeekFrom::Current(off) => {
-                if off < 0 {
-                    0i64.checked_sub(off)
-                        .and_then(|increment| self.current_offset.checked_sub(increment as u64))
-                } else {
-                    self.current_offset.checked_add(off as u64)
-                }
-            }
-        };
-
-        if let Some(o) = new_offset
-            && o <= self.virtual_disk_size()
-        {
-            self.current_offset = o;
-            return Ok(o);
-        }
-
-        Err(IoError::new(
-            IoErrorKind::InvalidData,
-            "Failed seek operation",
-        ))
+    pub fn flush(&mut self) -> IoResult<()> {
+        self.aligned.file_mut().flush()
     }
 }
 
@@ -257,7 +188,6 @@ impl Vhdx {
             mdr_entry: self.mdr_entry,
             disk_spec: self.disk_spec.clone(),
             bat_entries: self.bat_entries.clone(),
-            current_offset: self.current_offset,
             first_write: self.first_write,
         })
     }
@@ -310,14 +240,12 @@ mod tests {
         let data: Vec<u8> = (0..sector).map(|i| ((i + 1) % 251) as u8).collect();
 
         // Write at virtual offset 0 (allocates a new data block + rewrites BAT).
-        vhdx.seek(SeekFrom::Start(0)).unwrap();
-        assert_eq!(vhdx.write(&data).unwrap(), data.len());
+        vhdx.write_all_at(&data, 0).unwrap();
         vhdx.flush().unwrap();
 
-        // Read it back through a fresh, forced-alignment handle.
+        // Read it back through the forced-alignment handle.
         let mut readback = vec![0u8; sector];
-        vhdx.seek(SeekFrom::Start(0)).unwrap();
-        assert_eq!(vhdx.read(&mut readback).unwrap(), readback.len());
+        assert_eq!(vhdx.read_at(&mut readback, 0).unwrap(), readback.len());
         assert_eq!(readback, data);
     }
 
@@ -331,15 +259,13 @@ mod tests {
         let data = [0xa5u8; 512];
         {
             let mut vhdx = open_vhdx(tf.as_path());
-            vhdx.seek(SeekFrom::Start(0)).unwrap();
-            assert_eq!(vhdx.write(&data).unwrap(), data.len());
+            vhdx.write_all_at(&data, 0).unwrap();
             vhdx.flush().unwrap();
         }
 
-        let mut vhdx = open_vhdx(tf.as_path());
+        let vhdx = open_vhdx(tf.as_path());
         let mut readback = [0u8; 512];
-        vhdx.seek(SeekFrom::Start(0)).unwrap();
-        assert_eq!(vhdx.read(&mut readback).unwrap(), readback.len());
+        assert_eq!(vhdx.read_at(&mut readback, 0).unwrap(), readback.len());
         assert_eq!(readback, data);
     }
 
@@ -350,10 +276,10 @@ mod tests {
             return;
         };
 
-        let mut vhdx = open_vhdx(tf.as_path());
+        let vhdx = open_vhdx(tf.as_path());
 
         let mut buf = vec![0u8; vhdx.disk_spec.logical_sector_size as usize - 1];
-        let err = vhdx.read(&mut buf).unwrap_err();
+        let err = vhdx.read_at(&mut buf, 0).unwrap_err();
         assert_eq!(err.kind(), IoErrorKind::InvalidInput);
     }
 
@@ -367,7 +293,7 @@ mod tests {
         let mut vhdx = open_vhdx(tf.as_path());
 
         let buf = vec![0u8; vhdx.disk_spec.logical_sector_size as usize - 1];
-        let err = vhdx.write(&buf).unwrap_err();
+        let err = vhdx.write_all_at(&buf, 0).unwrap_err();
         assert_eq!(err.kind(), IoErrorKind::InvalidInput);
     }
 
@@ -387,8 +313,7 @@ mod tests {
         vhdx.bat_entries[0] = BatEntry(PAYLOAD_BLOCK_FULLY_PRESENT);
 
         let data = [0x33u8; 512];
-        vhdx.seek(SeekFrom::Start(0)).unwrap();
-        let err = vhdx.write(&data).unwrap_err();
+        let err = vhdx.write_all_at(&data, 0).unwrap_err();
         assert!(
             err.to_string().contains("BAT entry file offset"),
             "unexpected error: {err}"
@@ -410,12 +335,11 @@ mod tests {
             return;
         };
 
-        let mut vhdx = open_vhdx(tf.as_path());
+        let vhdx = open_vhdx(tf.as_path());
         let sector = vhdx.disk_spec.logical_sector_size as usize;
 
-        vhdx.seek(SeekFrom::Start(100)).unwrap();
         let mut buf = vec![0u8; sector];
-        let err = vhdx.read(&mut buf).unwrap_err();
+        let err = vhdx.read_at(&mut buf, 100).unwrap_err();
         assert_eq!(err.kind(), IoErrorKind::InvalidInput);
     }
 
@@ -430,22 +354,18 @@ mod tests {
         let sector = vhdx.disk_spec.logical_sector_size as usize;
 
         // Establish known content in sector 0 and sector 1.
-        vhdx.seek(SeekFrom::Start(0)).unwrap();
-        assert_eq!(vhdx.write(&vec![0xAAu8; sector]).unwrap(), sector);
-        vhdx.seek(SeekFrom::Start(sector as u64)).unwrap();
-        assert_eq!(vhdx.write(&vec![0xBBu8; sector]).unwrap(), sector);
+        vhdx.write_all_at(&vec![0xAAu8; sector], 0).unwrap();
+        vhdx.write_all_at(&vec![0xBBu8; sector], sector as u64)
+            .unwrap();
 
-        vhdx.seek(SeekFrom::Start(100)).unwrap();
-        let err = vhdx.write(&vec![0xCCu8; sector]).unwrap_err();
+        let err = vhdx.write_all_at(&vec![0xCCu8; sector], 100).unwrap_err();
         assert_eq!(err.kind(), IoErrorKind::InvalidInput);
 
         // Neither sector may have been touched by the rejected write.
         let mut buf = vec![0u8; sector];
-        vhdx.seek(SeekFrom::Start(0)).unwrap();
-        assert_eq!(vhdx.read(&mut buf).unwrap(), sector);
+        assert_eq!(vhdx.read_at(&mut buf, 0).unwrap(), sector);
         assert!(buf.iter().all(|&b| b == 0xAA), "sector 0 was modified");
-        vhdx.seek(SeekFrom::Start(sector as u64)).unwrap();
-        assert_eq!(vhdx.read(&mut buf).unwrap(), sector);
+        assert_eq!(vhdx.read_at(&mut buf, sector as u64).unwrap(), sector);
         assert!(buf.iter().all(|&b| b == 0xBB), "sector 1 was modified");
     }
 }
