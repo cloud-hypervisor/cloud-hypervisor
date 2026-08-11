@@ -5,11 +5,15 @@
 #![no_main]
 use std::ffi;
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io::{self, Write};
 use std::os::unix::io::{FromRawFd, RawFd};
+use std::sync::Arc;
 
-use block::formats::vhdx::Vhdx;
+use block::async_io::GuestMemoryTarget;
+use block::disk_file::AsyncDiskFile;
+use block::formats::vhdx::VhdxDisk;
 use libfuzzer_sys::{fuzz_target, Corpus};
+use vm_memory::{GuestAddress, GuestMemoryMmap};
 
 // Populate the corpus directory with a test file:
 // truncate -s 16M /tmp/source
@@ -19,35 +23,42 @@ use libfuzzer_sys::{fuzz_target, Corpus};
 fuzz_target!(|bytes: &[u8]| -> Corpus {
     let shm = memfd_create(&ffi::CString::new("fuzz").unwrap(), 0).unwrap();
     let mut disk_file: File = unsafe { File::from_raw_fd(shm) };
-    disk_file.write_all(&bytes[..]).unwrap();
-    disk_file.seek(SeekFrom::Start(0)).unwrap();
+    disk_file.write_all(bytes).unwrap();
 
-    let mut vhdx = match Vhdx::new(disk_file, false) {
-        Ok(vhdx) => vhdx,
-        Err(_) => return Corpus::Reject,
-    };
-
-    if matches!(vhdx.seek(SeekFrom::Start(0)).is_err(), true) {
+    let Ok(disk) = VhdxDisk::new(disk_file, false) else {
         return Corpus::Reject;
     };
+    let Ok(mut async_io) = disk.create_async_io(1) else {
+        return Corpus::Keep;
+    };
 
-    let mut offset = 0;
-    while offset < bytes.len() {
-        let mut data = vec![0; 8192];
-        vhdx.read_exact(&mut data).ok();
-        offset += data.len();
+    let len = 8192usize;
+    let Ok(mem) = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), len)]) else {
+        return Corpus::Keep;
+    };
+    let mem = Arc::new(mem);
+    let range = [(GuestAddress(0), len as u32)];
+
+    let mut offset: libc::off_t = 0;
+    while (offset as usize) < bytes.len() {
+        if let Ok(target) = GuestMemoryTarget::new(Arc::clone(&mem), &range) {
+            let _ = async_io.read_to_memory(offset, target, 0);
+            while async_io.next_completed_request().is_some() {}
+        }
+        offset += len as libc::off_t;
     }
-
-    if matches!(vhdx.seek(SeekFrom::Start(0)).is_err(), true) {
-        return Corpus::Reject;
-    };
 
     offset = 0;
-    while offset < bytes.len() {
-        let data = vec![0; 8192];
-        vhdx.write_all(&data).ok();
-        offset += data.len();
+    while (offset as usize) < bytes.len() {
+        if let Ok(target) = GuestMemoryTarget::new(Arc::clone(&mem), &range) {
+            let _ = async_io.write_from_memory(offset, target, 1);
+            while async_io.next_completed_request().is_some() {}
+        }
+        offset += len as libc::off_t;
     }
+
+    let _ = async_io.fsync(Some(2));
+    while async_io.next_completed_request().is_some() {}
 
     Corpus::Keep
 });
