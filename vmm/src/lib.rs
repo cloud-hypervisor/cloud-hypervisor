@@ -2494,7 +2494,7 @@ impl RequestHandler for Vmm {
                     recv_vm_config(source_url).map_err(VmError::Restore)?,
                 ));
                 restore_cfg
-                    .validate(&vm_config.lock().unwrap().clone())
+                    .validate(&vm_config.lock().unwrap())
                     .map_err(VmError::ConfigValidation)?;
 
                 // Update VM's net configurations with new fds received for restore operation
