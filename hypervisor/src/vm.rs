@@ -357,6 +357,9 @@ pub trait Vm: Send + Sync + Any {
     ) -> Result<Box<dyn Vcpu>>;
     #[cfg(target_arch = "aarch64")]
     fn create_vgic(&self, config: &VgicConfig) -> Result<Arc<Mutex<dyn Vgic>>>;
+    #[cfg(target_arch = "aarch64")]
+    /// Returns whether nested virtualization is enabled for the VM.
+    fn nested_enabled(&self) -> bool;
     #[cfg(target_arch = "riscv64")]
     fn create_vaia(&self, config: &VaiaConfig) -> Result<Arc<Mutex<dyn Vaia>>>;
 

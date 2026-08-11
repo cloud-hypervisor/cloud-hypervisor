@@ -104,6 +104,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
     numa_nodes: &NumaNodes,
     virtio_iommu_bdf: Option<u32>,
     pmu_supported: bool,
+    nested: bool,
 ) -> FdtWriterResult<Vec<u8>> {
     // Allocate stuff necessary for the holding the blob.
     let mut fdt = FdtWriter::new().unwrap();
@@ -131,7 +132,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
         create_pmu_node(&mut fdt)?;
     }
     create_clock_node(&mut fdt)?;
-    create_psci_node(&mut fdt)?;
+    create_psci_node(&mut fdt, nested)?;
     create_devices_node(&mut fdt, device_info)?;
     create_pci_nodes(&mut fdt, pci_space_info, virtio_iommu_bdf)?;
     if numa_nodes.len() > 1 {
@@ -596,14 +597,13 @@ fn create_timer_node(fdt: &mut FdtWriter) -> FdtWriterResult<()> {
     Ok(())
 }
 
-fn create_psci_node(fdt: &mut FdtWriter) -> FdtWriterResult<()> {
+fn create_psci_node(fdt: &mut FdtWriter, nested: bool) -> FdtWriterResult<()> {
     let compatible = "arm,psci-0.2";
     let psci_node = fdt.begin_node("psci")?;
     fdt.property_string("compatible", compatible)?;
-    // Two methods available: hvc and smc.
-    // As per documentation, PSCI calls between a guest and hypervisor may use the HVC conduit instead of SMC.
-    // So, since we are using kvm, we need to use hvc.
-    fdt.property_string("method", "hvc")?;
+    // An EL2 guest cannot use HVC to reach the host hypervisor, so nested
+    // guests must use the SMC conduit for PSCI.
+    fdt.property_string("method", if nested { "smc" } else { "hvc" })?;
     fdt.end_node(psci_node)?;
 
     Ok(())
@@ -1052,6 +1052,39 @@ fn print_node(node: FdtNode<'_, '_>, n_spaces: usize) {
     // Print children nodes if there is any
     for child in node.children() {
         print_node(child, n_spaces + 2);
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use std::ffi::CStr;
+
+    use super::*;
+
+    fn psci_method(nested: bool) -> String {
+        let mut fdt = FdtWriter::new().unwrap();
+        let root_node = fdt.begin_node("").unwrap();
+        create_psci_node(&mut fdt, nested).unwrap();
+        fdt.end_node(root_node).unwrap();
+        let dtb = fdt.finish().unwrap();
+        let fdt = fdt_parser::Fdt::new(&dtb).unwrap();
+        let psci = fdt.find_node("/psci").unwrap();
+        let method = psci
+            .properties()
+            .find(|property| property.name == "method")
+            .unwrap();
+
+        CStr::from_bytes_with_nul(method.value)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    #[test]
+    fn test_psci_method() {
+        assert_eq!(psci_method(false), "hvc");
+        assert_eq!(psci_method(true), "smc");
     }
 }
 

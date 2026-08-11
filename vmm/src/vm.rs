@@ -1924,6 +1924,7 @@ impl Vm {
                     arch::aarch64::Error::VcpuInitPmu,
                 ))
             })?;
+        let nested = self.vm.nested_enabled();
 
         arch::configure_system(
             &mem,
@@ -1937,6 +1938,7 @@ impl Vm {
             &vgic,
             &self.numa_nodes,
             pmu_supported,
+            nested,
         )
         .map_err(Error::ConfigureSystem)?;
 
@@ -4032,6 +4034,7 @@ mod unit_tests {
             &BTreeMap::new(),
             None,
             true,
+            false,
         )
         .unwrap();
     }
