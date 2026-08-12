@@ -7360,14 +7360,9 @@ mod common_parallel {
                 .stdout(Stdio::piped())
                 .spawn()
                 .unwrap();
-
             let send_status = send_migration
                 .wait_timeout(Duration::from_secs(60))
                 .unwrap();
-            let receive_status = receive_migration
-                .wait_timeout(Duration::from_secs(60))
-                .unwrap();
-
             let send_dispatched = match send_status {
                 Some(status) => status.success(),
                 None => {
@@ -7380,7 +7375,12 @@ mod common_parallel {
                 "send-migration should have dispatched successfully"
             );
 
-            // Clean up receive-migration regardless of its outcome
+            let receive_status = receive_migration
+                .wait_timeout(Duration::from_secs(60))
+                .unwrap()
+                .map(|status| status.success());
+
+            // Clean up receive-migration if it gets stuck for some reason.
             if receive_status.is_none() {
                 let _ = receive_migration.kill();
             }
@@ -7391,6 +7391,11 @@ mod common_parallel {
 
             match timeout_strategy {
                 TimeoutStrategy::Cancel => {
+                    assert!(
+                        receive_status == Some(false),
+                        "receive-migration should have failed because the migration was aborted: is {receive_status:?}"
+                    );
+
                     let expected_events = [
                         &MetaEvent {
                             event: "migration-started".to_string(),
@@ -7417,6 +7422,11 @@ mod common_parallel {
                     assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
                 }
                 TimeoutStrategy::Ignore => {
+                    assert!(
+                        receive_status == Some(true),
+                        "receive-migration should have succeeded because the migration succeeded: is {receive_status:?}"
+                    );
+
                     let expected_events = [
                         &MetaEvent {
                             event: "migration-started".to_string(),
