@@ -17,6 +17,7 @@ pub mod gic;
 pub mod interrupt_controller;
 #[cfg(target_arch = "x86_64")]
 pub mod ioapic;
+pub mod iommu;
 #[cfg(feature = "ivshmem")]
 pub mod ivshmem;
 pub mod legacy;
