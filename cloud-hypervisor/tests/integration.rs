@@ -7269,8 +7269,9 @@ mod common_parallel {
             "id={},tap=,mac={},ip={},mask=255.255.255.128",
             net_id, guest.network.guest_mac0, guest.network.host_ip0
         );
-        let memory_param: &[&str] = &["--memory", "size=1500M,shared=on"];
-        let boot_vcpus = 2;
+        let memory_size_mb = 1600;
+        let memory_param: &[&str] = &["--memory", &format!("size={memory_size_mb}M,shared=on")];
+        let boot_vcpus = 4;
 
         let src_vm_path = clh_command("cloud-hypervisor");
         let src_api_socket = temp_api_path(&guest.tmp_dir);
@@ -7307,13 +7308,17 @@ mod common_parallel {
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
 
+            let stress_worker = boot_vcpus - 1;
+            let stress_mem_per_worker =
+                (memory_size_mb as f64 * 0.75 / stress_worker as f64) as u64;
             // Start a memory stressor in the background to keep pages dirty,
             // ensuring the precopy loop cannot converge within the 1s timeout.
-            guest
-                .ssh_command("nohup stress --vm 2 --vm-bytes 220M --vm-keep &>/dev/null &")
-                .unwrap();
+            let stress_cmd = format!(
+                "nohup stress --vm {stress_worker} --vm-bytes {stress_mem_per_worker}M --vm-keep &>/dev/null &"
+            );
+            guest.ssh_command(&stress_cmd).unwrap();
             // Give stress a moment to actually start dirtying memory
-            thread::sleep(Duration::from_secs(3));
+            thread::sleep(Duration::from_secs(4));
 
             let migration_port = get_available_port();
             let host_ip = "127.0.0.1";
@@ -7402,13 +7407,13 @@ mod common_parallel {
                         &src_event_path
                     ));
 
+                    // Check that even after a few seconds, the VMM is still
+                    // running and the VM responsive over SSH.
                     thread::sleep(Duration::from_secs(2));
                     assert!(
                         src_child.try_wait().unwrap().is_none(),
-                        "Source VM should still be running after a cancelled migration"
+                        "VM should still be running on the source after a cancelled migration"
                     );
-
-                    // Confirm the source VM is still responsive over SSH
                     assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
                 }
                 TimeoutStrategy::Ignore => {
@@ -7487,7 +7492,6 @@ mod common_parallel {
     }
 
     #[test]
-    #[ignore = "See #8651"]
     fn test_live_migration_tcp_timeout_cancel() {
         _test_live_migration_tcp_timeout(TimeoutStrategy::Cancel);
     }
