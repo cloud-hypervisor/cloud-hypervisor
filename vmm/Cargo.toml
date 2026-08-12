@@ -17,6 +17,7 @@ ivshmem = ["devices/ivshmem"]
 kvm = [
   "arch/kvm",
   "hypervisor/kvm",
+  "iommufd-bindings",
   "iommufd-ioctls",
   "pci/kvm",
   "vfio-ioctls/kvm",
@@ -63,6 +64,7 @@ hex = { version = "0.4.3", optional = true }
 hypervisor = { path = "../hypervisor" }
 igvm = { workspace = true, optional = true }
 igvm_defs = { workspace = true, optional = true }
+iommufd-bindings = { workspace = true, optional = true }
 iommufd-ioctls = { workspace = true, optional = true }
 landlock = "0.4.5"
 libc = { workspace = true }
