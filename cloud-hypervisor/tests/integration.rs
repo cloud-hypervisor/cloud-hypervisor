@@ -7367,6 +7367,7 @@ mod common_parallel {
                 Some(status) => status.success(),
                 None => {
                     let _ = send_migration.kill();
+                    let _ = send_migration.wait();
                     false
                 }
             };
@@ -7383,6 +7384,7 @@ mod common_parallel {
             // Clean up receive-migration if it gets stuck for some reason.
             if receive_status.is_none() {
                 let _ = receive_migration.kill();
+                let _ = receive_migration.wait();
             }
 
             // Kill the stressor now that migration has completed or aborted,
@@ -7443,12 +7445,11 @@ mod common_parallel {
                         &src_event_path
                     ));
 
-                    thread::sleep(Duration::from_secs(3));
                     assert!(
                         wait_until(Duration::from_secs(30), || {
                             matches!(src_child.try_wait(), Ok(Some(_)))
                         }),
-                        "Source VM should have terminated after a forced migration"
+                        "Source VMM should have terminated after a forced migration"
                     );
 
                     // Confirm the VM is still responsive over SSH on the new host
@@ -7458,8 +7459,10 @@ mod common_parallel {
         }));
 
         let _ = src_child.kill();
+        let _ = src_child.wait();
         let src_output = src_child.wait_with_output().unwrap();
         let _ = dest_child.kill();
+        let _ = dest_child.wait();
         let _dest_output = dest_child.wait_with_output().unwrap();
 
         handle_child_output(r, &src_output);
