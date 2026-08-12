@@ -4,7 +4,7 @@
 
 use std::collections::btree_map::BTreeMap;
 use std::fs::File;
-use std::io::{Error as IoError, ErrorKind as IoErrorKind, Result as IoResult, Write};
+use std::io::{Error as IoError, ErrorKind as IoErrorKind, Result as IoResult};
 use std::os::fd::{AsRawFd, RawFd};
 use std::result;
 
@@ -163,8 +163,8 @@ impl Vhdx {
         Ok(())
     }
 
-    pub fn flush(&mut self) -> IoResult<()> {
-        self.aligned.file_mut().flush()
+    pub fn flush(&self) -> IoResult<()> {
+        self.aligned.sync_all()
     }
 }
 
