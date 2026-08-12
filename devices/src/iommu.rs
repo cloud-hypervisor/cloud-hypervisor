@@ -13,10 +13,16 @@ pub enum Error {
 }
 
 /// Table entry type related to a specific IOMMU
-pub enum TableEntry {}
+pub enum TableEntry {
+    #[cfg(target_arch = "aarch64")]
+    Smmuv3Ste([u64; 8]),
+}
 
 /// Invalidation command type related to a specific IOMMU
-pub enum Invalidation {}
+pub enum Invalidation {
+    #[cfg(target_arch = "aarch64")]
+    Smmuv3Cmd([u64; 2]),
+}
 
 /// Abstraction of the common mechanisms shared across physical IOMMUs
 pub trait PhysicalIommu: Send + Sync {
