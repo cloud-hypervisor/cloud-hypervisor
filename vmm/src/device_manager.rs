@@ -9,6 +9,8 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
+#[cfg(feature = "kvm")]
+use std::any::Any;
 #[cfg(target_arch = "x86_64")]
 use std::cmp;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -343,6 +345,10 @@ pub enum DeviceManagerError {
     /// iommufd is not supported
     #[error("iommufd is not supported without the kvm feature")]
     IommufdNotSupported,
+
+    /// The operation requires the iommufd VFIO backend
+    #[error("The VFIO backend in use is not iommufd")]
+    ExpectedIommufdBackend,
 
     /// Cannot create a VFIO device
     #[error("Cannot create a VFIO device")]
@@ -3879,7 +3885,8 @@ impl DeviceManager {
     fn create_vfio_device_from_fd(
         &self,
         fd: i32,
-        vfio_ops: Arc<dyn VfioOps>,
+        vfio_ops: &Arc<dyn VfioOps>,
+        attach_ioas: bool,
     ) -> DeviceManagerResult<(VfioDevice, PathBuf)> {
         let already_bound = {
             let config = self.config.lock().unwrap();
@@ -3909,10 +3916,15 @@ impl DeviceManager {
         }
         // SAFETY: dup_fd is a freshly-opened fd owned by this File.
         let file = unsafe { File::from_raw_fd(dup_fd) };
+        let vfio_iommufd = (Arc::clone(vfio_ops) as Arc<dyn Any + Send + Sync>)
+            .downcast::<VfioIommufd>()
+            .map_err(|_| DeviceManagerError::ExpectedIommufdBackend)?;
         let vfio_device = if already_bound {
-            VfioDevice::new_from_bound_fd(file, vfio_ops).map_err(DeviceManagerError::VfioCreate)?
+            VfioDevice::new_from_bound_fd(file, vfio_iommufd, attach_ioas)
+                .map_err(DeviceManagerError::VfioCreate)?
         } else {
-            VfioDevice::new_from_fd(file, vfio_ops).map_err(DeviceManagerError::VfioCreate)?
+            VfioDevice::new_from_fd(file, vfio_iommufd, attach_ioas)
+                .map_err(DeviceManagerError::VfioCreate)?
         };
 
         // SAFETY: fd is a valid open vfio cdev FD; the VfioDevice only
@@ -4001,14 +4013,19 @@ impl DeviceManager {
 
         let (vfio_device, device_path) = match (&device_cfg.path, device_cfg.fd) {
             (Some(path), None) => {
-                let vfio_device = VfioDevice::new(path, Arc::clone(&vfio_ops) as Arc<dyn VfioOps>)
-                    .map_err(DeviceManagerError::VfioCreate)?;
+                let vfio_device =
+                    VfioDevice::new(path, Arc::clone(&vfio_ops) as Arc<dyn VfioOps>, true)
+                        .map_err(DeviceManagerError::VfioCreate)?;
                 (vfio_device, path.clone())
             }
             (None, Some(fd)) => {
                 #[cfg(feature = "kvm")]
                 {
-                    self.create_vfio_device_from_fd(fd, Arc::clone(&vfio_ops) as Arc<dyn VfioOps>)?
+                    self.create_vfio_device_from_fd(
+                        fd,
+                        &(Arc::clone(&vfio_ops) as Arc<dyn VfioOps>),
+                        true,
+                    )?
                 }
                 #[cfg(not(feature = "kvm"))]
                 {

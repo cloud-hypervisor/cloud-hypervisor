@@ -1203,17 +1203,19 @@ dependencies = [
 
 [[package]]
 name = "iommufd-bindings"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd7de3a04f6fd55f171a6682852f7aa360bb848a85e0c610513349e006b3c139"
+checksum = "ccb1839dadf7e92244d8ae02a6b60f8d120c5674341dc18d401b715809641667"
 
 [[package]]
 name = "iommufd-ioctls"
-version = "0.2.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8050f03ef0c6979597140b6d20da076931fb7a06389b8b0eb971b8f65b271748"
+checksum = "1554a76cd851e90d53dadf754044a0d7c99797d7b9375fdb04e9cd60064320bb"
 dependencies = [
  "iommufd-bindings",
+ "libc",
+ "log",
  "thiserror",
  "vmm-sys-util",
 ]
@@ -2402,7 +2404,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -2604,18 +2606,18 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "vfio-bindings"
-version = "0.6.2"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "188dac3057a0cbc94470085204c84b82ff7ec5dac629a514323cd133d1f9abe0"
+checksum = "92982da90461a5808f78d9eb9b0c116da94bf52fbb0791784b64fc300f274c2a"
 dependencies = [
  "vmm-sys-util",
 ]
 
 [[package]]
 name = "vfio-ioctls"
-version = "0.8.1"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e811560df37de4b473137c849f7b1f00a66d94ffb6abc3b03e6e3f555a56d79b"
+checksum = "e2396defd43c9024f798c272fd9ad2cc4278e71a1121597c2facb2c7a5fad667"
 dependencies = [
  "byteorder",
  "iommufd-bindings",
@@ -2634,9 +2636,9 @@ dependencies = [
 
 [[package]]
 name = "vfio_user"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "785d6f8ae8a88643cdd66f1ff82110292f1192f4b5e9549dff3e3410f3d3d8b2"
+checksum = "ea835ab081b29468de55d5066532fc19c99a3ed04b57ea66dfea40559b651070"
 dependencies = [
  "bitflags 2.13.2",
  "enumn",
@@ -2859,6 +2861,7 @@ dependencies = [
  "hypervisor",
  "igvm",
  "igvm_defs",
+ "iommufd-bindings",
  "iommufd-ioctls",
  "landlock",
  "libc",
