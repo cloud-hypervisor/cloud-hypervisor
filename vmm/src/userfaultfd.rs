@@ -38,6 +38,7 @@ pub(crate) const UFFD_API: u64 = 0xAA;
 pub(crate) const UFFDIO_REGISTER_MODE_MISSING: u64 = 1;
 pub(crate) const UFFDIO_REGISTER_MODE_MINOR: u64 = 1 << 2;
 pub(crate) const UFFD_EVENT_PAGEFAULT: u8 = 0x12;
+pub(crate) const UFFD_PAGEFAULT_FLAG_MINOR: u64 = 1 << 2;
 pub(crate) const UFFD_FEATURE_MISSING_HUGETLBFS: u64 = 1 << 4;
 pub(crate) const UFFD_FEATURE_MISSING_SHMEM: u64 = 1 << 5;
 pub(crate) const UFFD_FEATURE_MINOR_HUGETLBFS: u64 = 1 << 9;

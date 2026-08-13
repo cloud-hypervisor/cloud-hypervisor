@@ -5,7 +5,7 @@
 
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use std::collections::BTreeMap;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom};
 use std::mem::{MaybeUninit, zeroed};
@@ -1265,6 +1265,8 @@ impl MemoryManager {
             })
             .collect();
 
+        let pages_loading: Mutex<HashSet<(usize, u64)>> = Mutex::new(HashSet::new());
+
         let mut prefault_active = !ranges.is_empty();
         let mut range_idx = 0;
         let mut page_idx = 0;
@@ -1370,6 +1372,7 @@ impl MemoryManager {
                 }
 
                 let fault_addr = msg.pf_address;
+                let minor_fault = msg.pf_flags & userfaultfd::UFFD_PAGEFAULT_FLAG_MINOR != 0;
 
                 let mut served = false;
                 for (range_idx, range) in ranges.iter().enumerate() {
@@ -1377,9 +1380,60 @@ impl MemoryManager {
                         continue;
                     };
 
-                    source.resolve(uffd_fd.as_fd(), range, page_idx)?;
-                    pages_served += 1;
-                    served_bitmap[range_idx].set_bit(page_idx as usize);
+                    let key = (range_idx, page_idx);
+                    let bitmap_idx = page_idx as usize;
+
+                    let served_minor = {
+                        let mut loading = pages_loading.lock().expect("failed to lock mutex");
+                        let served = served_bitmap[range_idx].is_bit_set(bitmap_idx);
+
+                        if served && minor_fault {
+                            true
+                        } else if !loading.insert(key) {
+                            // Another worker owns this page. The thread that's
+                            // handling this page will call UFFDIO_COPY or
+                            // UFFDIO_CONTINUE on the page range. The kernel
+                            // guarantees us that it will wake all the threads
+                            // waiting on this range, so we don't need to do
+                            // anything here.
+                            continue;
+                        } else {
+                            if served {
+                                // The page has been discarded (ie. virtio-balloon)
+                                served_bitmap[range_idx].reset_bit(bitmap_idx);
+                            }
+                            false
+                        }
+                    };
+
+                    if served_minor {
+                        // The backing page is already in the page cache. A
+                        // minor fault only needs the page mapped into this VMA.
+                        if let Err(e) = uffd::uffd_continue(
+                            uffd_fd.as_fd(),
+                            range.page_addr(page_idx),
+                            range.page_size,
+                        ) && e.raw_os_error() != Some(libc::EEXIST)
+                        {
+                            return Err(e);
+                        }
+                    } else {
+                        let result = source.resolve(uffd_fd.as_fd(), range, page_idx);
+
+                        {
+                            let mut loading = pages_loading.lock().expect("failed to lock mutex");
+
+                            if result.is_ok() {
+                                served_bitmap[range_idx].set_bit(bitmap_idx);
+                            }
+
+                            loading.remove(&key);
+                        }
+
+                        result?;
+                        pages_served += 1;
+                    }
+
                     served = true;
                     break;
                 }
@@ -1404,6 +1458,7 @@ impl MemoryManager {
                 ranges,
                 &mut source,
                 &served_bitmap,
+                &pages_loading,
             ) {
                 Ok(0) => {
                     let elapsed = prefault_start.elapsed();
@@ -1432,6 +1487,7 @@ impl MemoryManager {
         ranges: &[UffdRange],
         source: &mut Box<dyn UffdMemorySource>,
         served_bitmap: &[AtomicBitmap],
+        pages_loading: &Mutex<HashSet<(usize, u64)>>,
     ) -> Result<u64, io::Error> {
         let mut current_page_idx = *page_idx;
         let mut current_range_idx = *range_idx;
@@ -1452,16 +1508,40 @@ impl MemoryManager {
                 break 'find_range;
             }
 
-            if served_bitmap[current_range_idx].is_bit_set(current_page_idx as usize) {
-                current_page_idx += 1;
+            let range = &ranges[current_range_idx];
+            let key = (current_range_idx, current_page_idx);
+            let claimed = {
+                let mut loading = pages_loading.lock().unwrap();
+
+                if served_bitmap[current_range_idx].is_bit_set(current_page_idx as usize) {
+                    current_page_idx += 1;
+                    continue 'outer;
+                }
+
+                loading.insert(key)
+            };
+
+            if !claimed {
+                // Do not advance the cursor until the page's owner publishes
+                // completion or makes the page available for another attempt.
+                thread::yield_now();
                 continue 'outer;
             }
 
-            let range = &ranges[current_range_idx];
+            let result = source.resolve(uffd_fd, range, current_page_idx);
 
-            match source.resolve(uffd_fd, range, current_page_idx) {
-                Ok(()) => {
+            {
+                let mut loading = pages_loading.lock().unwrap();
+
+                if result.is_ok() {
                     served_bitmap[current_range_idx].set_bit(current_page_idx as usize);
+                }
+
+                loading.remove(&key);
+            }
+
+            match result {
+                Ok(()) => {
                     current_page_idx += 1;
 
                     *range_idx = current_range_idx;
@@ -3737,6 +3817,7 @@ mod tests {
         ];
         let served_bitmap = new_served_bitmap(&ranges);
         served_bitmap[0].set_bit(0);
+        let pages_loading = Mutex::new(HashSet::new());
 
         let attempts = Arc::new(Mutex::new(Vec::new()));
         let mut source: Box<dyn UffdMemorySource> = Box::new(RecordingUffdMemorySource {
@@ -3755,6 +3836,7 @@ mod tests {
                 &ranges,
                 &mut source,
                 &served_bitmap,
+                &pages_loading,
             )
             .unwrap(),
             1
@@ -3769,6 +3851,7 @@ mod tests {
                 &ranges,
                 &mut source,
                 &served_bitmap,
+                &pages_loading,
             )
             .unwrap(),
             1
@@ -3783,6 +3866,7 @@ mod tests {
                 &ranges,
                 &mut source,
                 &served_bitmap,
+                &pages_loading,
             )
             .unwrap(),
             0
@@ -3804,6 +3888,7 @@ mod tests {
             page_size: page,
         }];
         let served_bitmap = new_served_bitmap(&ranges);
+        let pages_loading = Mutex::new(HashSet::new());
         let attempts = Arc::new(Mutex::new(Vec::new()));
         let mut source: Box<dyn UffdMemorySource> = Box::new(RecordingUffdMemorySource {
             attempts: Arc::clone(&attempts),
@@ -3820,10 +3905,12 @@ mod tests {
             &ranges,
             &mut source,
             &served_bitmap,
+            &pages_loading,
         )
         .unwrap_err();
         assert_eq!(error.to_string(), "test source failure");
         assert_eq!((range_idx, page_idx), (0, 0));
+        assert!(pages_loading.lock().unwrap().is_empty());
         assert!(!served_bitmap[0].is_bit_set(0));
 
         assert_eq!(
@@ -3834,11 +3921,13 @@ mod tests {
                 &ranges,
                 &mut source,
                 &served_bitmap,
+                &pages_loading,
             )
             .unwrap(),
             1
         );
         assert_eq!((range_idx, page_idx), (0, 1));
+        assert!(pages_loading.lock().unwrap().is_empty());
         assert!(served_bitmap[0].is_bit_set(0));
         assert_eq!(
             *attempts.lock().unwrap(),
