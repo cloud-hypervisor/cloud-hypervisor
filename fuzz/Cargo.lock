@@ -838,9 +838,9 @@ dependencies = [
 
 [[package]]
 name = "mshv-bindings"
-version = "0.6.9"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83303108160c2b7a7bdd25000ee679384e19471386d23e501ed832574c9229ef"
+checksum = "edab7a942dd5a9976cb30d316948ede2c3d0117ee4addf3404b48cb6a8666046"
 dependencies = [
  "libc",
  "num_enum",

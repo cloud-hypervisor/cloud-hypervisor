@@ -1121,8 +1121,8 @@ dependencies = [
  "kvm-ioctls",
  "libc",
  "log",
- "mshv-bindings",
- "mshv-ioctls",
+ "mshv-bindings 0.7.0",
+ "mshv-ioctls 0.7.0",
  "open-enum",
  "serde",
  "serde_json",
@@ -1476,13 +1476,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "mshv-bindings"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edab7a942dd5a9976cb30d316948ede2c3d0117ee4addf3404b48cb6a8666046"
+dependencies = [
+ "libc",
+ "num_enum",
+ "serde",
+ "serde_derive",
+ "vmm-sys-util",
+ "zerocopy",
+]
+
+[[package]]
 name = "mshv-ioctls"
 version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1db4449ac7012237b133da366f5b32ce4af1f8caf770486e5a9d54f7f6b73c4c"
 dependencies = [
  "libc",
- "mshv-bindings",
+ "mshv-bindings 0.6.9",
+ "thiserror",
+ "vmm-sys-util",
+]
+
+[[package]]
+name = "mshv-ioctls"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b7d71f039b096bdbb772f2181b0a62c28b9d9a0682ceec1839537b1375c1cd6"
+dependencies = [
+ "libc",
+ "mshv-bindings 0.7.0",
  "thiserror",
  "vmm-sys-util",
 ]
@@ -2387,7 +2413,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -2608,8 +2634,8 @@ dependencies = [
  "kvm-ioctls",
  "libc",
  "log",
- "mshv-bindings",
- "mshv-ioctls",
+ "mshv-bindings 0.6.9",
+ "mshv-ioctls 0.6.9",
  "thiserror",
  "vfio-bindings",
  "vm-memory",
@@ -2719,7 +2745,7 @@ dependencies = [
  "hypervisor",
  "libc",
  "log",
- "mshv-ioctls",
+ "mshv-ioctls 0.7.0",
  "net_util",
  "pci",
  "rate_limiter",
@@ -2848,7 +2874,7 @@ dependencies = [
  "linux-loader",
  "log",
  "micro_http",
- "mshv-bindings",
+ "mshv-bindings 0.7.0",
  "net_util",
  "option_parser",
  "pci",

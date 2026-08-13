@@ -58,7 +58,7 @@ iommufd-ioctls = "0.2.0"
 kvm-bindings = "0.14.1"
 kvm-ioctls = "0.25.0"
 linux-loader = "0.14.0"
-mshv-bindings = "0.6.9"
+mshv-bindings = "0.7.0"
 mshv-ioctls = "0.6.9"
 seccompiler = "0.5.0"
 vfio-bindings = { version = "0.6.2", default-features = false }
