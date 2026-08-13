@@ -469,6 +469,12 @@ impl CpuidFeatureEntry {
                 feature_reg: CpuidReg::EDX,
                 compatible_check: CpuidCompatibleCheck::BitwiseSubset,
             },
+            CpuidFeatureEntry {
+                function: 0x1d,
+                index: 0,
+                feature_reg: CpuidReg::EAX,
+                compatible_check: CpuidCompatibleCheck::NumNotGreater,
+            },
             // Leaf 0x8000_0001, ECX/EDX, CPUID features bits
             CpuidFeatureEntry {
                 function: 0x8000_0001,
