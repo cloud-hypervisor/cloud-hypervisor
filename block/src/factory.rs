@@ -9,10 +9,10 @@
 //! support, and constructs the appropriate backend. Callers receive
 //! a trait object that is ready for use by virtio queue workers.
 
-use std::fs;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::sync::OnceLock;
+use std::{fs, io};
 
 use log::info;
 
@@ -206,6 +206,18 @@ fn open_flat_vmdk(
     file: fs::File,
     options: &DiskOpenOptions<'_>,
 ) -> BlockResult<Box<dyn AsyncFullDiskFile>> {
+    // VMDK requires backing_files to be set.
+    if !options.backing_files {
+        return Err(BlockError::new(
+            BlockErrorKind::UnsupportedFeature,
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                "VMDK images require backing_files=true",
+            ),
+        )
+        .with_path(options.path));
+    }
+
     info!("Opening VMDK disk file with synchronous backend");
     Ok(Box::new(
         VmdkDisk::new(file, options.path, options.readonly, options.direct)

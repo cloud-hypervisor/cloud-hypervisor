@@ -1624,6 +1624,13 @@ mod common_parallel {
         let res = run_qemu_img(&test_disk, &create_args, Some(&["64M"]));
         assert!(res.status.success(), "qemu-img create failed: {res:?}");
 
+        // VMDK is only supported for trusted images, which requires backing_files=on.
+        let vmdk_backing = if matches!(image_type, ImageType::FlatVmdk) {
+            ",backing_files=on"
+        } else {
+            ""
+        };
+
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
             .args(["--memory", "size=512M"])
@@ -1633,7 +1640,7 @@ mod common_parallel {
             .args([
                 "--disk",
                 format!(
-                    "path={},direct=on,image_type={image_type_str}",
+                    "path={},direct=on,image_type={image_type_str}{vmdk_backing}",
                     test_disk.to_str().unwrap()
                 )
                 .as_str(),

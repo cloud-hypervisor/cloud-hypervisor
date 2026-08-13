@@ -2213,7 +2213,7 @@ pub(crate) fn _test_virtio_block_vmdk(guest: &Guest, subformat: &str) {
             "--disk",
             // Force the flat VMDK backend explicitly instead of relying on
             // image-format auto-detection.
-            format!("path={vmdk_path_str},image_type=vmdk").as_str(),
+            format!("path={vmdk_path_str},image_type=vmdk,backing_files=on").as_str(),
         ])
         .default_cloudinit_disk()
         .default_net()
@@ -2279,7 +2279,7 @@ pub(crate) fn _test_virtio_block_vmdk_enospc(guest: &Guest, subformat: &str) {
         .args([
             "--disk",
             // Force the flat VMDK backend explicitly.
-            format!("path={vmdk_path_str},image_type=vmdk").as_str(),
+            format!("path={vmdk_path_str},image_type=vmdk,backing_files=on").as_str(),
         ])
         .default_net()
         .capture_output()
@@ -2404,9 +2404,9 @@ pub(crate) fn _test_virtio_block_vmdk_extent_spanning(guest: &Guest, direct: boo
     // Force the flat VMDK backend explicitly, and honor the requested cache
     // mode. `direct=on` opens the extents with `O_DIRECT` on the host.
     let data_disk = if direct {
-        format!("path={vmdk_path_str},image_type=vmdk,direct=on")
+        format!("path={vmdk_path_str},image_type=vmdk,backing_files=on,direct=on")
     } else {
-        format!("path={vmdk_path_str},image_type=vmdk")
+        format!("path={vmdk_path_str},image_type=vmdk,backing_files=on")
     };
 
     let mut cloud_child = GuestCommand::new(guest)
