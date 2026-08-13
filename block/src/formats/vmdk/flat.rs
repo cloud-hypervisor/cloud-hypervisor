@@ -6,10 +6,10 @@
 //! descriptor and maps the virtual disk onto them.
 
 use std::ffi::{CString, OsStr};
-use std::fs::{File, OpenOptions};
+use std::fs::{File, OpenOptions, canonicalize, read_link};
 use std::io;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::{Component, Path};
 use std::sync::Arc;
@@ -107,25 +107,88 @@ fn open_extent(
     filename: &str,
     writable: bool,
     direct: bool,
+    extent_anchor_path: Option<&Path>,
 ) -> io::Result<AlignedFile> {
-    let anchor = if Path::new(filename).is_absolute() {
-        "/"
-    } else {
-        base_path
-    };
+    let is_absolute = Path::new(filename).is_absolute();
+
+    // absolute paths need an extent anchor to resolve against
+    if is_absolute && extent_anchor_path.is_none() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "VMDK absolute extent '{filename}' is not permitted: no extent anchor path is \
+                 configured (relative extents only)"
+            ),
+        ));
+    }
+
+    let anchor = if is_absolute { "/" } else { base_path };
 
     let dir = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_DIRECTORY | libc::O_CLOEXEC)
         .open(anchor)?;
 
-    match open_extent_openat2(dir.as_raw_fd(), filename, writable, direct) {
-        Ok(file) => Ok(AlignedFile::new(file, direct)),
+    let aligned = match open_extent_openat2(dir.as_raw_fd(), filename, writable, direct) {
+        Ok(file) => AlignedFile::new(file, direct),
         Err(e) if matches!(e.raw_os_error(), Some(libc::ENOSYS) | Some(libc::EPERM)) => {
             let components = extent_components(filename)?;
-            open_extent_walk(dir, &components, writable, direct)
+            open_extent_walk(dir, &components, writable, direct)?
         }
-        Err(e) => Err(e),
+        Err(e) => return Err(e),
+    };
+
+    if let Some(anchor_path) = extent_anchor_path.filter(|_| is_absolute) {
+        verify_within_extent_anchor(aligned.file(), anchor_path)?;
+    }
+
+    Ok(aligned)
+}
+
+fn verify_within_extent_anchor(file: &File, extent_anchor_path: &Path) -> io::Result<()> {
+    // /proc/self/fd reports '<path> (deleted)' if the file path has been deleted, while still
+    // holding the fd.
+    if file.metadata()?.nlink() == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "VMDK absolute extent backing file was deleted; cannot verify containment",
+        ));
+    }
+
+    let proc_path = format!("/proc/self/fd/{}", file.as_raw_fd());
+    let resolved = read_link(&proc_path).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "cannot verify VMDK absolute extent: reading '{proc_path}' failed ({e}); is /proc \
+                 mounted?"
+            ),
+        )
+    })?;
+
+    // canonicalize the anchor so a symlinked anchor path
+    // still matches the kernel-resolved extent path
+    let anchor = canonicalize(extent_anchor_path).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "cannot verify VMDK absolute extent: extent anchor path '{}' is unusable ({e})",
+                extent_anchor_path.display()
+            ),
+        )
+    })?;
+
+    if resolved.starts_with(&anchor) {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "VMDK absolute extent resolves to '{}', outside the extent anchor path '{}'",
+                resolved.display(),
+                anchor.display()
+            ),
+        ))
     }
 }
 
@@ -240,7 +303,13 @@ fn overflow_error(what: &str) -> io::Error {
 
 impl FlatVmdk {
     /// Opens a flat VMDK image from its already-open descriptor file.
-    pub fn new(file: File, path: &Path, readonly: bool, direct: bool) -> io::Result<Self> {
+    pub fn new(
+        file: File,
+        path: &Path,
+        readonly: bool,
+        direct: bool,
+        extent_anchor_path: Option<&Path>,
+    ) -> io::Result<Self> {
         let descriptor = VmdkDescriptor::new(&file, path)?;
 
         if descriptor.extents_list.extents.is_empty() {
@@ -291,12 +360,14 @@ impl FlatVmdk {
                     &extent.filename,
                     true,
                     direct,
+                    extent_anchor_path,
                 )?),
                 ExtentAccess::ReadOnly => Some(open_extent(
                     &descriptor.base_path,
                     &extent.filename,
                     false,
                     direct,
+                    extent_anchor_path,
                 )?),
                 ExtentAccess::NoAccess => None,
             };

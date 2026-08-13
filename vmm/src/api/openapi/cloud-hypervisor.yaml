@@ -1097,6 +1097,8 @@ components:
           $ref: "#/components/schemas/ImageType"
         lock_granularity:
           $ref: "#/components/schemas/LockGranularity"
+        extent_anchor_path:
+          type: string
 
     NetConfig:
       type: object

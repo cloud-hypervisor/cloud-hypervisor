@@ -38,6 +38,7 @@ pub struct DiskOpenOptions<'a> {
     pub backing_files: bool,
     pub disable_io_uring: bool,
     pub disable_aio: bool,
+    pub extent_anchor_path: Option<&'a Path>,
 }
 
 /// Result of [`open_disk`], carrying the detected image type alongside
@@ -223,8 +224,14 @@ fn open_flat_vmdk(
 ) -> BlockResult<Box<dyn AsyncFullDiskFile>> {
     info!("Opening VMDK disk file with synchronous backend");
     Ok(Box::new(
-        VmdkDisk::new(file, options.path, options.readonly, options.direct)
-            .map_err(|e| e.with_path(options.path))?,
+        VmdkDisk::new(
+            file,
+            options.path,
+            options.readonly,
+            options.direct,
+            options.extent_anchor_path,
+        )
+        .map_err(|e| e.with_path(options.path))?,
     ))
 }
 
@@ -246,6 +253,7 @@ mod unit_tests {
             backing_files: false,
             disable_io_uring: true,
             disable_aio: true,
+            extent_anchor_path: None,
         }
     }
 
@@ -305,6 +313,7 @@ mod unit_tests {
             backing_files: false,
             disable_io_uring: true,
             disable_aio: true,
+            extent_anchor_path: None,
         };
         let opened = open_disk(&options).unwrap();
         assert_eq!(opened.image_type, ImageType::Raw);
