@@ -416,6 +416,8 @@ pub struct DiskConfig {
     pub image_type: ImageType,
     #[serde(default)]
     pub lock_granularity: LockGranularityChoice,
+    #[serde(default)]
+    pub extent_anchor_path: Option<PathBuf>,
 }
 
 impl ApplyLandlock for DiskConfig {

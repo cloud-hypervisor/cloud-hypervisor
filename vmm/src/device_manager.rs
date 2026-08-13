@@ -2665,6 +2665,7 @@ impl DeviceManager {
                     backing_files: disk_cfg.backing_files,
                     disable_io_uring: disk_cfg.disable_io_uring,
                     disable_aio: disk_cfg.disable_aio,
+                    extent_anchor_path: disk_cfg.extent_anchor_path.as_deref(),
                 },
                 disk_cfg.image_type,
             )
