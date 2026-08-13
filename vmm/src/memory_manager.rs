@@ -9,12 +9,11 @@ use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom};
 use std::mem::{MaybeUninit, zeroed};
-use std::num::NonZeroUsize;
 use std::ops::{BitAnd, Not, Sub};
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, ffi, panic, result, thread, time};
@@ -70,6 +69,102 @@ struct UffdHandler {
     handle: thread::JoinHandle<()>,
     fault_socket_fd: Option<OwnedFd>,
     prefault_complete: Arc<AtomicBool>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum UffdPageState {
+    Missing = 0,
+    Processing = 1,
+    Present = 2,
+}
+
+impl UffdPageState {
+    fn from_u8(state: u8) -> Self {
+        match state {
+            0 => Self::Missing,
+            1 => Self::Processing,
+            2 => Self::Present,
+            other => unreachable!("invalid UFFD page state {other}"),
+        }
+    }
+}
+
+struct AtomicUffdPageState(AtomicU8);
+
+impl AtomicUffdPageState {
+    fn new() -> Self {
+        Self(AtomicU8::new(UffdPageState::Missing as u8))
+    }
+
+    /// Take ownership of a [`UffdPageState::Missing`] page, or report the
+    /// state that prevented it.
+    fn claim(&self) -> Result<(), UffdPageState> {
+        self.0
+            .compare_exchange(
+                UffdPageState::Missing as u8,
+                UffdPageState::Processing as u8,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .map(|_| ())
+            .map_err(UffdPageState::from_u8)
+    }
+
+    fn store(&self, state: UffdPageState) {
+        self.0.store(state as u8, Ordering::Release);
+    }
+}
+
+struct UffdPageTracker {
+    states: Vec<Vec<AtomicUffdPageState>>,
+}
+
+impl UffdPageTracker {
+    fn new(ranges: &[UffdRange]) -> Self {
+        Self {
+            states: ranges
+                .iter()
+                .map(|range| {
+                    (0..range.num_pages())
+                        .map(|_| AtomicUffdPageState::new())
+                        .collect()
+                })
+                .collect(),
+        }
+    }
+
+    fn claim(&self, range_idx: usize, page_idx: u64) -> Result<UffdPageClaim<'_>, UffdPageState> {
+        let state = &self.states[range_idx][page_idx as usize];
+
+        state.claim().map(|()| UffdPageClaim {
+            state,
+            resolved: false,
+        })
+    }
+}
+
+struct UffdPageClaim<'a> {
+    state: &'a AtomicUffdPageState,
+    resolved: bool,
+}
+
+impl UffdPageClaim<'_> {
+    fn mark_present(mut self) {
+        self.resolved = true;
+        // Publish the completed source side effects before another worker
+        // observes that it no longer needs to resolve this page.
+        self.state.store(UffdPageState::Present);
+    }
+}
+
+impl Drop for UffdPageClaim<'_> {
+    fn drop(&mut self) {
+        if !self.resolved {
+            // Errors and unwinding make the page available to another worker.
+            self.state.store(UffdPageState::Missing);
+        }
+    }
 }
 
 pub const MEMORY_MANAGER_ACPI_SIZE: usize = 0x18;
@@ -1255,18 +1350,7 @@ impl MemoryManager {
         let mut pages_served: u64 = 0;
         let mut pages_prefaulted: u64 = 0;
 
-        // Per-range bitmap tracking which pages have been populated by the
-        // on-demand fault handler. Lets the prefault cursor skip them without
-        // doing a wasted file read + UFFDIO_COPY.
-        let served_bitmap: Vec<AtomicBitmap> = ranges
-            .iter()
-            .map(|r| {
-                AtomicBitmap::new(
-                    r.length as usize,
-                    NonZeroUsize::new(r.page_size as usize).unwrap(),
-                )
-            })
-            .collect();
+        let page_tracker = UffdPageTracker::new(ranges);
 
         let mut prefault_active = !ranges.is_empty();
         let mut range_idx = 0;
@@ -1380,9 +1464,26 @@ impl MemoryManager {
                         continue;
                     };
 
-                    source.resolve(uffd_fd.as_fd(), range, page_idx)?;
-                    pages_served += 1;
-                    served_bitmap[range_idx].set_bit(page_idx as usize);
+                    let claim = loop {
+                        match page_tracker.claim(range_idx, page_idx) {
+                            Ok(claim) => break Some(claim),
+                            Err(UffdPageState::Processing) => {
+                                thread::yield_now();
+                            }
+                            Err(UffdPageState::Present) => break None,
+                            // A failed claim observed something other than
+                            // Missing, else we would have claimed it.
+                            Err(UffdPageState::Missing) => {
+                                unreachable!("claim() cannot fail on a Missing page")
+                            }
+                        }
+                    };
+
+                    if let Some(claim) = claim {
+                        source.resolve(uffd_fd.as_fd(), range, page_idx)?;
+                        pages_served += 1;
+                        claim.mark_present();
+                    }
                     served = true;
                     break;
                 }
@@ -1406,7 +1507,7 @@ impl MemoryManager {
                 &mut page_idx,
                 ranges,
                 &mut source,
-                &served_bitmap,
+                &page_tracker,
             ) {
                 Ok(0) => {
                     let elapsed = prefault_start.elapsed();
@@ -1434,7 +1535,7 @@ impl MemoryManager {
         page_idx: &mut u64,
         ranges: &[UffdRange],
         source: &mut Box<dyn UffdMemorySource>,
-        served_bitmap: &[AtomicBitmap],
+        page_tracker: &UffdPageTracker,
     ) -> Result<u64, io::Error> {
         let mut current_page_idx = *page_idx;
         let mut current_range_idx = *range_idx;
@@ -1455,16 +1556,27 @@ impl MemoryManager {
                 break;
             }
 
-            if served_bitmap[current_range_idx].is_bit_set(current_page_idx as usize) {
-                current_page_idx += 1;
-                continue;
-            }
-
             let range = &ranges[current_range_idx];
+            let claim = match page_tracker.claim(current_range_idx, current_page_idx) {
+                Ok(claim) => claim,
+                Err(UffdPageState::Processing) => {
+                    thread::yield_now();
+                    continue;
+                }
+                Err(UffdPageState::Present) => {
+                    current_page_idx += 1;
+                    continue;
+                }
+                // A failed claim observed something other than Missing, else
+                // we would have claimed it.
+                Err(UffdPageState::Missing) => {
+                    unreachable!("claim() cannot fail on a Missing page")
+                }
+            };
 
             match source.resolve(uffd_fd, range, current_page_idx) {
                 Ok(()) => {
-                    served_bitmap[current_range_idx].set_bit(current_page_idx as usize);
+                    claim.mark_present();
                     current_page_idx += 1;
 
                     *range_idx = current_range_idx;
