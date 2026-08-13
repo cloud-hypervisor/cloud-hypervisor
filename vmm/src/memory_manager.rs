@@ -59,8 +59,7 @@ use crate::migration::transport::SocketStream;
 use crate::migration::url_to_path;
 use crate::sparse::{next_data_extent, write_region_sparse};
 use crate::uffd::{
-    self, FaultResolution, FileUffdMemorySource, SocketUffdMemorySource, UffdMemorySource,
-    UffdRange,
+    self, FileUffdMemorySource, SocketUffdMemorySource, UffdMemorySource, UffdRange,
 };
 use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
 use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID, userfaultfd};
@@ -1333,20 +1332,9 @@ impl MemoryManager {
                         continue;
                     };
 
-                    loop {
-                        match source.resolve(uffd_fd.as_fd(), range, page_idx)? {
-                            FaultResolution::Served => {
-                                pages_served += 1;
-                                served_bitmap[range_idx].set_bit(page_idx as usize);
-                                break;
-                            }
-                            FaultResolution::Retry => {
-                                // The kernel reported a transient state while the fault
-                                // is being resolved; yield and retry instead of aborting.
-                                thread::yield_now();
-                            }
-                        }
-                    }
+                    source.resolve(uffd_fd.as_fd(), range, page_idx)?;
+                    pages_served += 1;
+                    served_bitmap[range_idx].set_bit(page_idx as usize);
                     served = true;
                     break;
                 }
@@ -1398,16 +1386,9 @@ impl MemoryManager {
             let range = &ranges[range_idx];
 
             let advance = match source.resolve(uffd_fd.as_fd(), range, page_idx) {
-                Ok(FaultResolution::Served) => {
+                Ok(()) => {
                     pages_prefaulted += 1;
                     served_bitmap[range_idx].set_bit(page_idx as usize);
-                    true
-                }
-                Ok(FaultResolution::Retry) => {
-                    // Unlike the on demand handler (which must retry to wake
-                    // the faulting thread), prefault can safely skip: any
-                    // future guest access will simply page-fault and be
-                    // served by the on demand path.
                     true
                 }
                 Err(e) => {
