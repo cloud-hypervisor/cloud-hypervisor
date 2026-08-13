@@ -7,38 +7,43 @@ host platform. Here are some useful links:
 - [TDX Homepage](https://www.intel.com/content/www/us/en/developer/tools/trust-domain-extensions/overview.html):
   more information about TDX technical aspects, design and specification
 
-- [KVM TDX tree](https://github.com/intel/tdx/tree/kvm): the required
-  Linux kernel changes for the host side
+- [KVM TDX documentation](https://docs.kernel.org/virt/kvm/x86/intel-tdx.html):
+  the host-side KVM ABI for TDX, which is part of the upstream Linux kernel
+  (v6.16 and later)
 
-- [Guest TDX tree](https://github.com/intel/tdx/tree/guest): the Linux
-  kernel changes for the guest side
+- [TDX kernel documentation](https://docs.kernel.org/arch/x86/tdx.html): the
+  host and guest kernel support for TDX, which is part of the upstream Linux
+  kernel
 
 - [EDK2 project](https://github.com/tianocore/edk2): the TDVF firmware
 
 - [Confidential Containers project](https://github.com/confidential-containers/td-shim):
   the TDShim firmware
 
-- [TDX Linux](https://github.com/intel/tdx-linux): a collection of tools
-  and scripts to setup TDX environment for testing purpose (such as
-  installing required packages on the host, creating guest images, and
-  building the custom Linux kernel for TDX host and guest)
+- [Intel TDX Enabling Guide](https://cc-enabling.trustedservices.intel.com/intel-tdx-enabling-guide/01/introduction/):
+  Intel's official guide for enabling TDX, covering host and guest setup,
+  building images, and running TDX guests
 
 ## Cloud Hypervisor support
 
-It is required to use a machine with TDX enabled in hardware and
-with the host OS compiled from the [KVM TDX tree](https://github.com/intel/tdx/tree/kvm).
-The host environment can also be setup with the [TDX Linux](https://github.com/intel/tdx-linux).
+It is required to use a machine with TDX enabled in hardware, running a host
+kernel with TDX support. Host-side TDX support is part of the upstream Linux
+kernel (v6.16 and later), so a recent distribution kernel or an upstream kernel
+built with `CONFIG_INTEL_TDX_HOST=y` can be used. The host environment can also
+be setup by following the [Intel TDX Enabling Guide](https://cc-enabling.trustedservices.intel.com/intel-tdx-enabling-guide/01/introduction/).
 
-Cloud Hypervisor can run TDX VM (Trust Domain) by loading a TD firmware ([TDVF](https://github.com/tianocore/edk2)),
-which will then load the guest kernel from the image. The image must be custom
-as it must include a kernel built from the [Guest TDX tree](https://github.com/intel/tdx/tree/guest).
-Cloud Hypervisor can also boot a TDX VM with direct kernel boot using [TDshim](https://github.com/confidential-containers/td-shim).
-The custom Linux kernel for the guest can be built with the [TDX Linux](https://github.com/intel/tdx-linux).
+Cloud Hypervisor can run a TDX VM (Trust Domain) by loading a TD firmware ([TDVF](https://github.com/tianocore/edk2)),
+which then loads the guest kernel from the image. The guest kernel must have
+TDX guest support, which is also part of the upstream Linux kernel; recent
+distributions ship such kernels, so a custom guest kernel is no longer required.
+Cloud Hypervisor can also boot a TDX VM with direct kernel boot using [TDShim](https://github.com/confidential-containers/td-shim).
 
 ### TDVF
 
 > **Note**
-> The latest version of TDVF being tested is [_13b9773_](https://github.com/tianocore/edk2/commit/13b97736c876919b9786055829caaa4fa46984b7).
+> TDVF (`OvmfPkg/IntelTdx`) is maintained in upstream edk2, so any recent edk2
+> [stable release](https://github.com/tianocore/edk2/releases) can be used. The
+> commands below use `edk2-stable202605` as an example.
 
 The firmware can be built as follows:
 
@@ -48,7 +53,7 @@ sudo apt-get install uuid-dev nasm iasl build-essential python3-distutils git
 
 git clone https://github.com/tianocore/edk2.git
 cd edk2
-git checkout 13b97736c876919b9786055829caaa4fa46984b7
+git checkout edk2-stable202605
 source ./edksetup.sh
 git submodule update --init --recursive
 make -C BaseTools -j `nproc`
@@ -68,10 +73,11 @@ On the Cloud Hypervisor side, all you need is to build the project with the
 cargo build --features tdx
 ```
 
-And run a TDX VM by providing the firmware previously built, along with the
-guest image containing the TDX enlightened kernel. The latest image
-`td-guest-rhel8.5.raw` contains `console=hvc0` on the kernel boot parameters,
-meaning it will be printing guest kernel logs to the `virtio-console` device.
+And run a TDX VM by providing the firmware previously built, along with a guest
+image whose kernel has TDX guest support. Recent distribution cloud images
+(such as RHEL 9/10, Ubuntu, or Fedora) already ship such kernels. If the guest
+kernel is booted with `console=hvc0` in its boot parameters, it will print
+guest kernel logs to the `virtio-console` device.
 
 ```bash
 ./cloud-hypervisor \
@@ -102,10 +108,10 @@ firmware:
 > The latest version of TDShim being tested is [_v0.8.0_](https://github.com/confidential-containers/td-shim/releases/tag/v0.8.0).
 
 This is a lightweight version of the TDVF, written in Rust and designed for
-direct kernel boot, which is useful for containers use cases.
+direct kernel boot, which is useful for container use cases.
 
 To build TDShim from source, it is required to install `Rust`, `NASM`,
-and `LLVM` first. The TDshim can be built as follows:
+and `LLVM` first. The TDShim can be built as follows:
 
 ```bash
 git clone https://github.com/confidential-containers/td-shim
@@ -121,16 +127,16 @@ git submodule update --init --recursive
 cargo image --release
 ```
 
-If debug logs from the TDShim is needed, here are the alternative
-commands:
+If debug logs from the TDShim are needed, here is the alternative
+command:
 
 ```bash
 cargo image
 ```
 
 And run a TDX VM by providing the firmware previously built, along with a guest
-kernel built from the [Guest TDX tree](https://github.com/intel/tdx/tree/guest)
-or the [TDX Linux](https://github.com/intel/tdx-linux).
+kernel that has upstream TDX guest support (shipped by recent distributions, or
+built by following the [Intel TDX Enabling Guide](https://cc-enabling.trustedservices.intel.com/intel-tdx-enabling-guide/01/introduction/)).
 The appropriate kernel boot options must be provided through the `--cmdline`
 option as well.
 
@@ -158,22 +164,6 @@ TDShim:
     --memory size=1G \
     --disk path=tdx_guest_img
 ```
-
-### Guest kernel limitations
-
-#### Serial ports disabled
-
-The latest guest kernel that can be found in the latest image
-`td-guest-rhel8.5.raw` disabled the support for serial ports. This means adding
-`console=ttyS0` will have no effect and will not print any log from the guest.
-
-#### PCI hotplug through ACPI
-
-Unless you run the guest kernel with the parameter `tdx_disable_filter`, ACPI
-devices responsible for handling PCI hotplug (PCI hotplug controller, PCI
-Express Bus and Generic Event Device) will not be allowed, therefore the
-corresponding drivers will not be loaded and the PCI hotplug feature will not
-be supported.
 
 ### Remote attestation (GetQuote)
 
