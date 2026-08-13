@@ -138,6 +138,9 @@ impl TxVirtio {
                     if e.raw_os_error() == Some(libc::EINVAL) {
                         error!("net: tx: dropping malformed packet: {e}");
                         0
+                    } else if e.raw_os_error() == Some(libc::EIO) {
+                        error!("net: tx: dropping frame, tap I/O error: {e}");
+                        0
                     } else {
                         error!("net: tx: failed writing to tap: {e}");
                         return Err(NetQueuePairError::WriteTap(e));
