@@ -1266,16 +1266,22 @@ impl MemoryManager {
                 Err(e) => return Err(e),
             };
 
+            // Check the entire batch before handling UFFD events so a pending
+            // stop cannot be delayed by a blocking page resolution.
+            if events
+                .iter()
+                .take(num_events)
+                .any(|event| event.data == EVENT_STOP)
+            {
+                stop_event.read().ok();
+                info!("UFFD handler: received stop event, exiting");
+                return Ok(());
+            }
+
             let mut got_uffd_data = false;
             for event in events.iter().take(num_events) {
                 let token = event.data;
                 let evt_flags = event.events;
-
-                if token == EVENT_STOP {
-                    stop_event.read().ok();
-                    info!("UFFD handler: received stop event, exiting");
-                    return Ok(());
-                }
 
                 if token == EVENT_UFFD
                     && (evt_flags & epoll::Events::EPOLLHUP.bits()) != 0
@@ -1331,7 +1337,13 @@ impl MemoryManager {
                         continue;
                     };
 
-                    source.resolve(uffd_fd.as_fd(), range, page_idx)?;
+                    if let Err(e) = source.resolve(uffd_fd.as_fd(), range, page_idx) {
+                        if stop_event.read().is_ok() {
+                            info!("UFFD handler: stop received after source error, exiting");
+                            return Ok(());
+                        }
+                        return Err(e);
+                    }
                     pages_served += 1;
                     served_bitmap[range_idx].set_bit(page_idx as usize);
                     served = true;
@@ -1370,9 +1382,13 @@ impl MemoryManager {
                     return Ok(());
                 }
                 Ok(prefaulted) => pages_prefaulted += prefaulted,
-                Err(_) => {
+                Err(e) => {
+                    if stop_event.read().is_ok() {
+                        info!("UFFD handler: stop received after prefault error, exiting");
+                        return Ok(());
+                    }
                     // Give up prefaulting but continue serving demand faults.
-                    warn!("UFFD prefault: abandoning background prefault after error");
+                    warn!("UFFD prefault: abandoning background prefault after error: {e}");
                     prefault_active = false;
                 }
             }
