@@ -52,7 +52,6 @@ impl VhdxDisk {
                     | VhdxError::ParseVhdxMetadata(_)
                     | VhdxError::ParseVhdxRegionEntry(_) => BlockErrorKind::InvalidFormat,
                     VhdxError::ReadBatEntry(_) => BlockErrorKind::CorruptImage,
-                    VhdxError::ReadFailed(_) | VhdxError::WriteFailed(_) => BlockErrorKind::Io,
                 };
                 BlockError::new(kind, e).with_op(ErrorOp::Open)
             })?)),

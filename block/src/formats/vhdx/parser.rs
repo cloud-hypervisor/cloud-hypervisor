@@ -30,17 +30,13 @@ pub enum VhdxError {
     ParseVhdxRegionEntry(#[source] VhdxHeaderError),
     #[error("Failed reading metadata")]
     ReadBatEntry(#[source] VhdxBatError),
-    #[error("Failed reading sector from disk")]
-    ReadFailed(#[source] VhdxIoError),
-    #[error("Failed writing to sector on disk")]
-    WriteFailed(#[source] VhdxIoError),
 }
 
 pub(super) type Result<T> = result::Result<T, VhdxError>;
 
 #[sorted]
 #[derive(Error, Debug)]
-pub enum VhdxIoError {
+enum VhdxIoError {
     #[error("Invalid BAT entry state")]
     InvalidBatEntryState,
     #[error("Invalid BAT entry file offset: payload block inside the header area")]
