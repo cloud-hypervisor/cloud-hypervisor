@@ -4,17 +4,17 @@
 
 use std::collections::btree_map::BTreeMap;
 use std::fs::File;
-use std::io::{Error as IoError, ErrorKind as IoErrorKind, Result as IoResult};
+use std::io::{self, Error as IoError, ErrorKind as IoErrorKind, Result as IoResult};
 use std::os::fd::{AsRawFd, RawFd};
+use std::os::unix::fs::FileExt;
 use std::result;
 
 use remain::sorted;
 use thiserror::Error;
 
-use super::bat::{BatEntry, VhdxBatError};
+use super::bat::{self, BatEntry, VhdxBatError};
 use super::header::{self, RegionInfo, RegionTableEntry, VhdxHeader, VhdxHeaderError};
-use super::io::{self, VhdxIoError};
-use super::metadata::{DiskSpec, VhdxMetadataError};
+use super::metadata::{self, DiskSpec, VhdxMetadataError};
 use crate::aligned_file::AlignedFile;
 
 #[sorted]
@@ -37,6 +37,76 @@ pub enum VhdxError {
 }
 
 pub(super) type Result<T> = result::Result<T, VhdxError>;
+
+#[sorted]
+#[derive(Error, Debug)]
+pub enum VhdxIoError {
+    #[error("Invalid BAT entry state")]
+    InvalidBatEntryState,
+    #[error("Invalid BAT entry file offset: payload block inside the header area")]
+    InvalidBatFileOffset,
+    #[error("Invalid BAT entry count")]
+    InvalidBatIndex,
+    #[error("Buffer length does not match the requested sector count")]
+    InvalidBufferLength,
+    #[error("Invalid disk size")]
+    InvalidDiskSize,
+    #[error("Failed reading sector blocks from file {0}")]
+    ReadSectorBlock(#[source] io::Error),
+    #[error("Failed changing file length {0}")]
+    ResizeFile(#[source] io::Error),
+    #[error("Differencing mode is not supported yet")]
+    UnsupportedMode,
+    #[error("Failed writing BAT to file {0}")]
+    WriteBat(#[source] VhdxBatError),
+    #[error("Failed writing sector blocks from file {0}")]
+    WriteSectorBlock(#[source] io::Error),
+}
+
+/// Translation of a sector index and count into a BAT index and the file
+/// offsets of the sectors within the addressed payload block.
+#[derive(Default)]
+struct Sector {
+    bat_index: u64,
+    free_sectors: u64,
+    free_bytes: u64,
+    file_offset: u64,
+    block_offset: u64,
+}
+
+impl Sector {
+    fn new(
+        disk_spec: &DiskSpec,
+        bat: &[BatEntry],
+        sector_index: u64,
+        sector_count: u64,
+    ) -> result::Result<Sector, VhdxIoError> {
+        let mut sector = Sector::default();
+
+        sector.bat_index = sector_index / disk_spec.sectors_per_block as u64;
+        sector.block_offset = sector_index % disk_spec.sectors_per_block as u64;
+        sector.free_sectors = disk_spec.sectors_per_block as u64 - sector.block_offset;
+        if sector.free_sectors > sector_count {
+            sector.free_sectors = sector_count;
+        }
+
+        sector.free_bytes = sector.free_sectors * disk_spec.logical_sector_size as u64;
+        sector.block_offset *= disk_spec.logical_sector_size as u64;
+
+        let bat_entry = match bat.get(sector.bat_index as usize) {
+            Some(entry) => entry.0,
+            None => {
+                return Err(VhdxIoError::InvalidBatIndex);
+            }
+        };
+        sector.file_offset = bat_entry & bat::BAT_FILE_OFF_MASK;
+        if sector.file_offset != 0 {
+            sector.file_offset += sector.block_offset;
+        }
+
+        Ok(sector)
+    }
+}
 
 #[derive(Debug)]
 pub struct Vhdx {
@@ -118,19 +188,12 @@ impl Vhdx {
     /// sector aligned.
     pub fn read_at(&self, buf: &mut [u8], offset: u64) -> IoResult<usize> {
         let (sector_index, sector_count) = self.sector_range(buf.len(), offset, "Read")?;
-        io::read(
-            &self.aligned,
-            buf,
-            &self.disk_spec,
-            &self.bat_entries,
-            sector_index,
-            sector_count,
-        )
-        .map_err(|e| {
-            IoError::other(format!(
-                "Failed reading {sector_count} sectors from VHDx at index {sector_index}: {e}"
-            ))
-        })
+        self.read_sectors(buf, sector_index, sector_count)
+            .map_err(|e| {
+                IoError::other(format!(
+                    "Failed reading {sector_count} sectors from VHDx at index {sector_index}: {e}"
+                ))
+            })
     }
 
     /// Write all of `buf` at byte `offset`. The offset and length must be
@@ -145,22 +208,170 @@ impl Vhdx {
                 .map_err(|e| IoError::other(format!("Failed to update VHDx header: {e}")))?;
         }
 
-        io::write(
-            &self.aligned,
-            buf,
-            &mut self.disk_spec,
-            self.bat_entry.file_offset,
-            &mut self.bat_entries,
-            sector_index,
-            sector_count,
-        )
-        .map_err(|e| {
-            IoError::other(format!(
-                "Failed writing {sector_count} sectors on VHDx at index {sector_index}: {e}"
-            ))
-        })?;
+        self.write_sectors(buf, sector_index, sector_count)
+            .map_err(|e| {
+                IoError::other(format!(
+                    "Failed writing {sector_count} sectors on VHDx at index {sector_index}: {e}"
+                ))
+            })?;
 
         Ok(())
+    }
+
+    fn read_sectors(
+        &self,
+        buf: &mut [u8],
+        mut sector_index: u64,
+        mut sector_count: u64,
+    ) -> result::Result<usize, VhdxIoError> {
+        if self.disk_spec.has_parent {
+            return Err(VhdxIoError::UnsupportedMode);
+        }
+        let expected_len = sector_count
+            .checked_mul(self.disk_spec.logical_sector_size as u64)
+            .ok_or(VhdxIoError::InvalidBufferLength)?;
+        if buf.len() as u64 != expected_len {
+            return Err(VhdxIoError::InvalidBufferLength);
+        }
+
+        let mut read_count: usize = 0;
+        while sector_count > 0 {
+            let sector = Sector::new(
+                &self.disk_spec,
+                &self.bat_entries,
+                sector_index,
+                sector_count,
+            )?;
+
+            let bat_entry = match self.bat_entries.get(sector.bat_index as usize) {
+                Some(entry) => entry.0,
+                None => {
+                    return Err(VhdxIoError::InvalidBatIndex);
+                }
+            };
+
+            match bat_entry & bat::BAT_STATE_BIT_MASK {
+                bat::PAYLOAD_BLOCK_NOT_PRESENT
+                | bat::PAYLOAD_BLOCK_UNDEFINED
+                | bat::PAYLOAD_BLOCK_UNMAPPED
+                | bat::PAYLOAD_BLOCK_ZERO => {}
+                bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
+                    self.aligned
+                        .read_exact_at(
+                            &mut buf[read_count..(read_count + sector.free_bytes as usize)],
+                            sector.file_offset,
+                        )
+                        .map_err(VhdxIoError::ReadSectorBlock)?;
+                }
+                bat::PAYLOAD_BLOCK_PARTIALLY_PRESENT => {
+                    return Err(VhdxIoError::UnsupportedMode);
+                }
+                _ => {
+                    return Err(VhdxIoError::InvalidBatEntryState);
+                }
+            }
+            sector_count -= sector.free_sectors;
+            sector_index += sector.free_sectors;
+            read_count += sector.free_bytes as usize;
+        }
+        Ok(read_count)
+    }
+
+    fn write_sectors(
+        &mut self,
+        buf: &[u8],
+        mut sector_index: u64,
+        mut sector_count: u64,
+    ) -> result::Result<usize, VhdxIoError> {
+        if self.disk_spec.has_parent {
+            return Err(VhdxIoError::UnsupportedMode);
+        }
+        let expected_len = sector_count
+            .checked_mul(self.disk_spec.logical_sector_size as u64)
+            .ok_or(VhdxIoError::InvalidBufferLength)?;
+        if buf.len() as u64 != expected_len {
+            return Err(VhdxIoError::InvalidBufferLength);
+        }
+
+        let bat_offset = self.bat_entry.file_offset;
+        let mut write_count: usize = 0;
+        while sector_count > 0 {
+            let sector = Sector::new(
+                &self.disk_spec,
+                &self.bat_entries,
+                sector_index,
+                sector_count,
+            )?;
+
+            let bat_entry = match self.bat_entries.get(sector.bat_index as usize) {
+                Some(entry) => entry.0,
+                None => {
+                    return Err(VhdxIoError::InvalidBatIndex);
+                }
+            };
+
+            match bat_entry & bat::BAT_STATE_BIT_MASK {
+                bat::PAYLOAD_BLOCK_NOT_PRESENT
+                | bat::PAYLOAD_BLOCK_UNDEFINED
+                | bat::PAYLOAD_BLOCK_UNMAPPED
+                | bat::PAYLOAD_BLOCK_ZERO => {
+                    let block_size_min = metadata::BLOCK_SIZE_MIN as u64;
+                    let file_offset =
+                        self.disk_spec.image_size.div_ceil(block_size_min) * block_size_min;
+                    let new_size = file_offset
+                        .checked_add(self.disk_spec.block_size as u64)
+                        .ok_or(VhdxIoError::InvalidDiskSize)?;
+
+                    self.aligned
+                        .file()
+                        .set_len(new_size)
+                        .map_err(VhdxIoError::ResizeFile)?;
+                    self.disk_spec.image_size = new_size;
+
+                    let new_bat_entry =
+                        file_offset | (bat::PAYLOAD_BLOCK_FULLY_PRESENT & bat::BAT_STATE_BIT_MASK);
+                    self.bat_entries[sector.bat_index as usize] = BatEntry(new_bat_entry);
+                    BatEntry::write_bat_entries(&self.aligned, bat_offset, &self.bat_entries)
+                        .map_err(VhdxIoError::WriteBat)?;
+
+                    if file_offset < block_size_min {
+                        return Err(VhdxIoError::InvalidBatFileOffset);
+                    }
+
+                    // The BAT entry addresses the start of the payload block;
+                    // the sector's data lives at its own offset within that
+                    // block, not at the block base.
+                    self.aligned
+                        .write_all_at(
+                            &buf[write_count..(write_count + sector.free_bytes as usize)],
+                            file_offset + sector.block_offset,
+                        )
+                        .map_err(VhdxIoError::WriteSectorBlock)?;
+                }
+                bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
+                    if sector.file_offset < metadata::BLOCK_SIZE_MIN as u64 {
+                        return Err(VhdxIoError::InvalidBatFileOffset);
+                    }
+
+                    self.aligned
+                        .write_all_at(
+                            &buf[write_count..(write_count + sector.free_bytes as usize)],
+                            sector.file_offset,
+                        )
+                        .map_err(VhdxIoError::WriteSectorBlock)?;
+                }
+                bat::PAYLOAD_BLOCK_PARTIALLY_PRESENT => {
+                    return Err(VhdxIoError::UnsupportedMode);
+                }
+                _ => {
+                    return Err(VhdxIoError::InvalidBatEntryState);
+                }
+            }
+            sector_count -= sector.free_sectors;
+            sector_index += sector.free_sectors;
+            write_count += sector.free_bytes as usize;
+        }
+        Ok(write_count)
     }
 
     pub fn flush(&self) -> IoResult<()> {
@@ -367,5 +578,38 @@ mod tests {
         assert!(buf.iter().all(|&b| b == 0xAA), "sector 0 was modified");
         assert_eq!(vhdx.read_at(&mut buf, sector as u64).unwrap(), sector);
         assert!(buf.iter().all(|&b| b == 0xBB), "sector 1 was modified");
+    }
+
+    #[test]
+    fn write_allocating_a_block_honours_the_sector_offset() {
+        let Some(tf) = create_dynamic_vhdx(16) else {
+            eprintln!(
+                "skipping write_allocating_a_block_honours_the_sector_offset: qemu-img unavailable"
+            );
+            return;
+        };
+
+        let mut vhdx = open_vhdx(tf.as_path());
+        let sector = vhdx.disk_spec.logical_sector_size as usize;
+
+        // Sector 1 of a fresh image: its block is still unallocated, so the
+        // write has to allocate the block and place the data at the sector's
+        // offset within it.
+        let data: Vec<u8> = (0..sector).map(|i| ((i + 1) % 251) as u8).collect();
+        vhdx.write_all_at(&data, sector as u64).unwrap();
+        vhdx.flush().unwrap();
+
+        // The data must be readable from the sector it was written to...
+        let mut readback = vec![0u8; sector];
+        assert_eq!(vhdx.read_at(&mut readback, sector as u64).unwrap(), sector);
+        assert_eq!(readback, data, "data not readable at the offset written");
+
+        // ... and sector 0 of the same block must stay zeroed.
+        let mut first = vec![0xFFu8; sector];
+        assert_eq!(vhdx.read_at(&mut first, 0).unwrap(), sector);
+        assert!(
+            first.iter().all(|&b| b == 0),
+            "sector 0 of the block was overwritten"
+        );
     }
 }

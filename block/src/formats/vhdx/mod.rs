@@ -12,7 +12,6 @@
 mod bat;
 mod engine_sync;
 mod header;
-mod io;
 mod metadata;
 mod parser;
 #[cfg(test)]
