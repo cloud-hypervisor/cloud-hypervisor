@@ -11,7 +11,7 @@ use std::io::{self, Seek, SeekFrom};
 use std::mem::{MaybeUninit, zeroed};
 use std::num::NonZeroUsize;
 use std::ops::{BitAnd, Not, Sub};
-use std::os::fd::{AsFd, OwnedFd};
+use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -1267,10 +1267,9 @@ impl MemoryManager {
             })
             .collect();
 
-        // Prefault cursor: (range index, page index within range). `None`
-        // means prefault was given up due to an error (natural completion
-        // returns from the function instead).
-        let mut prefault_cursor: Option<(usize, u64)> = (!ranges.is_empty()).then_some((0, 0));
+        let mut prefault_active = !ranges.is_empty();
+        let mut range_idx = 0;
+        let mut page_idx = 0;
         let prefault_start = time::Instant::now();
 
         const EVENT_STOP: u64 = 0;
@@ -1302,7 +1301,7 @@ impl MemoryManager {
         loop {
             // Block only when prefault is done; otherwise poll non-blocking
             // so we can advance prefault between faults.
-            let timeout = if prefault_cursor.is_some() { 0 } else { -1 };
+            let timeout = if prefault_active { 0 } else { -1 };
             let num_events = match epoll::wait(epoll_fd, timeout, &mut events) {
                 Ok(n) => n,
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
@@ -1390,19 +1389,19 @@ impl MemoryManager {
                 continue;
             }
 
-            // No fault pending — advance the prefault cursor past served and
-            // end-of-range pages, then prefault one fresh page below.
-            let cursor = loop {
-                let Some((range_idx, page_idx)) = prefault_cursor else {
-                    break None;
-                };
-                if page_idx >= ranges[range_idx].num_pages() {
-                    if range_idx + 1 < ranges.len() {
-                        prefault_cursor = Some((range_idx + 1, 0));
-                        continue;
-                    }
-                    // Reached the end of the last range — every page is
-                    // mapped, so no future faults can occur. Exit.
+            if !prefault_active {
+                continue;
+            }
+
+            match Self::uffd_prefault(
+                uffd_fd.as_fd(),
+                &mut range_idx,
+                &mut page_idx,
+                ranges,
+                &mut source,
+                &served_bitmap,
+            ) {
+                Ok(0) => {
                     let elapsed = prefault_start.elapsed();
                     info!(
                         "UFFD handler: prefault done in {elapsed:.3?} — \
@@ -1412,43 +1411,65 @@ impl MemoryManager {
                     prefault_complete.store(true, Ordering::Release);
                     return Ok(());
                 }
-                if served_bitmap[range_idx].is_bit_set(page_idx as usize) {
-                    prefault_cursor = Some((range_idx, page_idx + 1));
-                    continue;
+                Ok(prefaulted) => pages_prefaulted += prefaulted,
+                Err(_) => {
+                    // Give up prefaulting but continue serving demand faults.
+                    warn!("UFFD prefault: abandoning background prefault after error");
+                    prefault_active = false;
                 }
-                break Some((range_idx, page_idx));
-            };
+            }
+        }
+    }
 
-            let Some((range_idx, page_idx)) = cursor else {
-                // Prefault was given up earlier (or the range list was
-                // empty). Keep serving on-demand faults.
-                continue;
-            };
+    fn uffd_prefault(
+        uffd_fd: BorrowedFd,
+        range_idx: &mut usize,
+        page_idx: &mut u64,
+        ranges: &[UffdRange],
+        source: &mut Box<dyn UffdMemorySource>,
+        served_bitmap: &[AtomicBitmap],
+    ) -> Result<u64, io::Error> {
+        let mut current_page_idx = *page_idx;
+        let mut current_range_idx = *range_idx;
 
-            let range = &ranges[range_idx];
+        loop {
+            loop {
+                if current_page_idx >= ranges[current_range_idx].num_pages() {
+                    if current_range_idx + 1 < ranges.len() {
+                        current_range_idx += 1;
+                        current_page_idx = 0;
+                        continue;
+                    }
 
-            let advance = match source.resolve(uffd_fd.as_fd(), range, page_idx) {
-                Ok(()) => {
-                    pages_prefaulted += 1;
-                    served_bitmap[range_idx].set_bit(page_idx as usize);
-                    true
+                    *range_idx = current_range_idx;
+                    *page_idx = current_page_idx;
+                    return Ok(0);
                 }
-                Err(e) => {
-                    let page_addr = range.page_addr(page_idx);
-                    warn!("UFFD prefault: source error at {page_addr:#x}: {e}");
-                    false
-                }
-            };
+                break;
+            }
 
-            if !advance {
-                // Prefault hit an unrecoverable error; give up but keep
-                // serving on-demand faults.
-                warn!("UFFD prefault: abandoning background prefault after error");
-                prefault_cursor = None;
+            if served_bitmap[current_range_idx].is_bit_set(current_page_idx as usize) {
+                current_page_idx += 1;
                 continue;
             }
 
-            prefault_cursor = Some((range_idx, page_idx + 1));
+            let range = &ranges[current_range_idx];
+
+            match source.resolve(uffd_fd, range, current_page_idx) {
+                Ok(()) => {
+                    served_bitmap[current_range_idx].set_bit(current_page_idx as usize);
+                    current_page_idx += 1;
+
+                    *range_idx = current_range_idx;
+                    *page_idx = current_page_idx;
+                    return Ok(1);
+                }
+                Err(e) => {
+                    let page_addr = range.page_addr(current_page_idx);
+                    warn!("UFFD prefault: source error at {page_addr:#x}: {e}");
+                    return Err(e);
+                }
+            }
         }
     }
 
