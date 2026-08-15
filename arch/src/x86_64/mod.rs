@@ -65,6 +65,14 @@ const AMX_COMPLEX: u8 = 8; // AMX tile computation on complex numbers
 const AMX_TILECFG_BIT: u8 = 17; // AMX tile cfg state component bit
 const AMX_TILEDATA_BIT: u8 = 18; // AMX tile data state component bit
 
+// Cache descriptor fields in EAX of the CPUID 0x4 (Intel) and
+// 0x8000001d (AMD) subleaves. The core IDs field exists on 0x4 only.
+const CACHE_TYPE_MASK: u32 = 0x1f;
+const CACHE_SHARING_SHIFT: u32 = 14;
+const CACHE_SHARING_MASK: u32 = 0xfff;
+const CACHE_CORE_IDS_SHIFT: u32 = 26;
+const CACHE_CORE_IDS_MASK: u32 = 0x3f;
+
 // KVM feature bits
 #[cfg(feature = "tdx")]
 const KVM_FEATURE_CLOCKSOURCE_BIT: u8 = 0;
@@ -1557,6 +1565,14 @@ pub fn get_host_cpu_phys_bits(_hypervisor: &dyn hypervisor::Hypervisor) -> u8 {
     }
 }
 
+// A topology ID field stores one less than a power of two ID count and
+// is capped at its field mask. The widths passed in are cumulative,
+// core_width includes the thread bits and spans a whole die, die_width
+// adds the die bits and spans a whole package.
+fn max_addressable_ids(width: u32, mask: u32) -> u32 {
+    ((1u64 << width) - 1).min(mask as u64) as u32
+}
+
 fn update_cpuid_topology(
     cpuid: &mut Vec<CpuIdEntry>,
     threads_per_core: u16,
@@ -1644,6 +1660,32 @@ fn update_cpuid_topology(
     );
     CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(2), CpuidReg::ECX, 5 << 8);
     CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(2), CpuidReg::EDX, x2apic_id);
+
+    // The cache topology in CPUID 0x4 (Intel) and 0x8000001d (AMD) comes
+    // from the host and its sharing widths are expressed in the host APIC
+    // numbering. A width beyond the guest die makes the guest kernel merge
+    // vCPUs across dies into one cache domain, which misleads scheduling
+    // decisions. Clamp the max addressable IDs sharing each cache to one
+    // die and never widen beyond what the host reports. The max
+    // addressable core IDs per package in leaf 0x4 (Intel) is rewritten
+    // with the guest value.
+    let die_ids = max_addressable_ids(core_width, CACHE_SHARING_MASK);
+    for entry in cpuid.iter_mut() {
+        if entry.function != 0x4 && entry.function != 0x8000_001d {
+            continue;
+        }
+        if entry.eax & CACHE_TYPE_MASK == 0 {
+            continue;
+        }
+        let sharing = ((entry.eax >> CACHE_SHARING_SHIFT) & CACHE_SHARING_MASK).min(die_ids);
+        entry.eax &= !(CACHE_SHARING_MASK << CACHE_SHARING_SHIFT);
+        entry.eax |= sharing << CACHE_SHARING_SHIFT;
+        if entry.function == 0x4 {
+            let core_ids = max_addressable_ids(die_width - thread_width, CACHE_CORE_IDS_MASK);
+            entry.eax &= !(CACHE_CORE_IDS_MASK << CACHE_CORE_IDS_SHIFT);
+            entry.eax |= core_ids << CACHE_CORE_IDS_SHIFT;
+        }
+    }
 
     if matches!(cpu_vendor, CpuVendor::AMD) {
         CpuidPatch::set_cpuid_reg(
@@ -1887,5 +1929,183 @@ mod unit_tests {
         assert_eq!(x2apic_id, 257);
 
         assert_eq!(255, get_max_x2apic_id((1, 256, 1, 1)));
+    }
+
+    // The cache level field of a cache subleaf, EAX bits 7:5
+    const CACHE_LEVEL_SHIFT: u32 = 5;
+    // The self initializing cache flag of a cache subleaf, EAX bit 8
+    const CACHE_SELF_INIT: u32 = 1 << 8;
+
+    // Builds a cache subleaf entry as the host would enumerate it
+    fn host_cache_subleaf(
+        function: u32,
+        index: u32,
+        level: u32,
+        cache_type: u32,
+        eax_rest: u32,
+    ) -> CpuIdEntry {
+        CpuIdEntry {
+            function,
+            index,
+            flags: CPUID_FLAG_VALID_INDEX,
+            eax: eax_rest | (level << CACHE_LEVEL_SHIFT) | cache_type,
+            ..Default::default()
+        }
+    }
+
+    fn sharing_field(cpuid: &[CpuIdEntry], function: u32, index: u32) -> u32 {
+        let eax = CpuidPatch::get_cpuid_reg(cpuid, function, Some(index), CpuidReg::EAX).unwrap();
+        (eax >> CACHE_SHARING_SHIFT) & CACHE_SHARING_MASK
+    }
+
+    #[test]
+    fn test_update_cpuid_cache_topology_intel() {
+        // Guest topology 2:60:1:2, one die spans 128 ID slots for its
+        // 120 vCPUs. The host leaf 0x4 declares a socket wide L3 of 256
+        // addressable IDs, wider than the die, so only the L3 is clamped
+        let mut cpuid = vec![
+            host_cache_subleaf(0x4, 0, 1, 1, (1 << CACHE_SHARING_SHIFT) | CACHE_SELF_INIT),
+            host_cache_subleaf(0x4, 1, 1, 2, (1 << CACHE_SHARING_SHIFT) | CACHE_SELF_INIT),
+            host_cache_subleaf(0x4, 2, 2, 3, (3 << CACHE_SHARING_SHIFT) | CACHE_SELF_INIT),
+            host_cache_subleaf(
+                0x4,
+                3,
+                3,
+                3,
+                (0xff << CACHE_SHARING_SHIFT) | (0x2b << 26) | CACHE_SELF_INIT,
+            ),
+            host_cache_subleaf(0x4, 4, 0, 0, 0),
+        ];
+        let host_l3 = cpuid[3].eax;
+        update_cpuid_topology(&mut cpuid, 2, 60, 1, 2, CpuVendor::Intel, 0);
+
+        // L1 and L2 fit inside the die, the host values are kept
+        assert_eq!(sharing_field(&cpuid, 0x4, 0), 1);
+        assert_eq!(sharing_field(&cpuid, 0x4, 1), 1);
+        assert_eq!(sharing_field(&cpuid, 0x4, 2), 3);
+        // L3 is clamped to one die, 1 << 7 addressable IDs
+        assert_eq!(sharing_field(&cpuid, 0x4, 3), 127);
+        let l3 = CpuidPatch::get_cpuid_reg(&cpuid, 0x4, Some(3), CpuidReg::EAX).unwrap();
+        // The core IDs field holds 64 core ID slots for the 60 cores
+        assert_eq!((l3 >> CACHE_CORE_IDS_SHIFT) & CACHE_CORE_IDS_MASK, 63);
+        // Every bit outside the two rewritten fields is untouched
+        let rewritten = (CACHE_SHARING_MASK << CACHE_SHARING_SHIFT)
+            | (CACHE_CORE_IDS_MASK << CACHE_CORE_IDS_SHIFT);
+        assert_eq!(l3 & !rewritten, host_l3 & !rewritten);
+        // The null subleaf stays untouched
+        assert_eq!(
+            CpuidPatch::get_cpuid_reg(&cpuid, 0x4, Some(4), CpuidReg::EAX).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn test_update_cpuid_cache_topology_amd() {
+        // Guest topology 2:96:1:2, one die spans 256 ID slots for its
+        // 192 vCPUs. The EPYC 9654 host L3 declares a 16 ID CCX, so the
+        // clamp has nothing to narrow and the host value is kept
+        let mut cpuid = vec![
+            host_cache_subleaf(
+                0x8000_001d,
+                0,
+                1,
+                1,
+                (1 << CACHE_SHARING_SHIFT) | CACHE_SELF_INIT,
+            ),
+            host_cache_subleaf(
+                0x8000_001d,
+                1,
+                1,
+                2,
+                (1 << CACHE_SHARING_SHIFT) | CACHE_SELF_INIT,
+            ),
+            host_cache_subleaf(
+                0x8000_001d,
+                2,
+                2,
+                3,
+                (1 << CACHE_SHARING_SHIFT) | CACHE_SELF_INIT,
+            ),
+            host_cache_subleaf(
+                0x8000_001d,
+                3,
+                3,
+                3,
+                (15 << CACHE_SHARING_SHIFT) | CACHE_SELF_INIT,
+            ),
+            host_cache_subleaf(0x8000_001d, 4, 0, 0, 0),
+        ];
+        let host_l3 = cpuid[3].eax;
+        update_cpuid_topology(&mut cpuid, 2, 96, 1, 2, CpuVendor::AMD, 0);
+
+        assert_eq!(sharing_field(&cpuid, 0x8000_001d, 0), 1);
+        assert_eq!(sharing_field(&cpuid, 0x8000_001d, 1), 1);
+        assert_eq!(sharing_field(&cpuid, 0x8000_001d, 2), 1);
+        // The 16 ID CCX L3 stays intact
+        assert_eq!(sharing_field(&cpuid, 0x8000_001d, 3), 15);
+        // The whole descriptor is untouched, the sharing width is kept
+        // and the core IDs field is reserved on AMD
+        assert_eq!(
+            CpuidPatch::get_cpuid_reg(&cpuid, 0x8000_001d, Some(3), CpuidReg::EAX).unwrap(),
+            host_l3
+        );
+        assert_eq!(
+            CpuidPatch::get_cpuid_reg(&cpuid, 0x8000_001d, Some(4), CpuidReg::EAX).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn test_update_cpuid_cache_topology_amd_dies() {
+        // Guest topology 2:8:12:1, dies model CCXs of 8 cores and one
+        // die spans 16 ID slots. A host L3 declaring 64 IDs exceeds the
+        // die and is clamped to it, a package sized clamp would read 255
+        let mut cpuid = vec![
+            host_cache_subleaf(
+                0x8000_001d,
+                0,
+                1,
+                1,
+                (1 << CACHE_SHARING_SHIFT) | CACHE_SELF_INIT,
+            ),
+            host_cache_subleaf(
+                0x8000_001d,
+                2,
+                2,
+                3,
+                (1 << CACHE_SHARING_SHIFT) | CACHE_SELF_INIT,
+            ),
+            host_cache_subleaf(
+                0x8000_001d,
+                3,
+                3,
+                3,
+                (63 << CACHE_SHARING_SHIFT) | CACHE_SELF_INIT,
+            ),
+        ];
+        update_cpuid_topology(&mut cpuid, 2, 8, 12, 1, CpuVendor::AMD, 0);
+
+        // L1 and L2 stay per core even with multiple dies
+        assert_eq!(sharing_field(&cpuid, 0x8000_001d, 0), 1);
+        assert_eq!(sharing_field(&cpuid, 0x8000_001d, 2), 1);
+        // L3 is clamped to one die, 1 << 4 addressable IDs
+        assert_eq!(sharing_field(&cpuid, 0x8000_001d, 3), 15);
+    }
+
+    #[test]
+    fn test_update_cpuid_cache_topology_sharing_max() {
+        // Guest topology 2:3000:1:1, one die spans 8192 ID slots. The
+        // clamp ceiling caps at the field maximum of 4095, so a host L3
+        // declaring 4095 sharing IDs stays unchanged
+        let mut cpuid = vec![host_cache_subleaf(
+            0x4,
+            3,
+            3,
+            3,
+            (0xfff << CACHE_SHARING_SHIFT) | CACHE_SELF_INIT,
+        )];
+        update_cpuid_topology(&mut cpuid, 2, 3000, 1, 1, CpuVendor::Intel, 0);
+
+        assert_eq!(sharing_field(&cpuid, 0x4, 3), 0xfff);
     }
 }
