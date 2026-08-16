@@ -61,6 +61,7 @@ linux-loader = "0.14.0"
 mshv-bindings = "0.6.9"
 mshv-ioctls = "0.6.9"
 seccompiler = "0.5.0"
+sendfd = "0.4.4"
 vfio-bindings = { version = "0.6.2", default-features = false }
 vfio-ioctls = { version = "0.8.0", default-features = false }
 vfio_user = { version = "0.1.4", default-features = false }

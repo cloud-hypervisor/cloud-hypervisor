@@ -2175,6 +2175,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sendfd"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b183bfd5b1bc64ab0c1ef3ee06b008a9ef1b68a7d3a99ba566fbfe7a7c6d745b"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2768,6 +2777,7 @@ name = "vm-device"
 version = "0.1.0"
 dependencies = [
  "hypervisor",
+ "sendfd",
  "serde",
  "thiserror",
  "vfio-ioctls",
