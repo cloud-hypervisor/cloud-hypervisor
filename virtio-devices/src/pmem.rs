@@ -7,8 +7,8 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::fs::File;
-use std::os::unix::io::AsRawFd;
-use std::sync::atomic::AtomicBool;
+use std::os::fd::{AsRawFd, OwnedFd, RawFd};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
 use std::{io, result};
 
@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
 use vm_device::UserspaceMapping;
+use vm_device::uffd::{Response as UffdResponse, UffdBlock, VmaRegion};
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryLoadGuard,
@@ -47,6 +48,120 @@ const VIRTIO_PMEM_RESP_TYPE_EIO: u32 = 1;
 
 // New descriptors are pending on the virtio queue.
 const QUEUE_AVAIL_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
+const UFFD_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
+
+const UFFDIO_WAKE: u64 = 0x8010_aa02;
+
+#[repr(C)]
+struct UffdioRange {
+    start: u64,
+    len: u64,
+}
+
+pub struct MmapUffdHandler {
+    block: UffdBlock,
+    uffd: OwnedFd,
+    regions: Vec<VmaRegion>,
+}
+
+impl MmapUffdHandler {
+    pub fn new(block: UffdBlock, uffd: OwnedFd, regions: Vec<VmaRegion>) -> Self {
+        Self {
+            block,
+            uffd,
+            regions,
+        }
+    }
+
+    fn handle_event(&self) -> io::Result<bool> {
+        match self.block.recv_response()? {
+            None => Ok(false),
+            Some(UffdResponse::Ack) => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Unexpected UFFD acknowledgement",
+            )),
+            Some(UffdResponse::FdRanges {
+                more: _,
+                ranges,
+                fds,
+            }) => {
+                for (range, fd) in ranges.iter().zip(fds) {
+                    let range_end = range
+                        .device_offset
+                        .checked_add(range.len)
+                        .ok_or_else(|| io::Error::other("UFFD range overflow"))?;
+                    let region = self
+                        .regions
+                        .iter()
+                        .find(|region| {
+                            range.device_offset >= region.offset
+                                && region
+                                    .offset
+                                    .checked_add(region.size)
+                                    .is_some_and(|region_end| range_end <= region_end)
+                        })
+                        .ok_or_else(|| {
+                            io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "UFFD range is outside registered regions",
+                            )
+                        })?;
+                    let target_addr = region
+                        .virt_addr
+                        .checked_add(range.device_offset - region.offset)
+                        .ok_or_else(|| io::Error::other("UFFD address overflow"))?;
+                    let len = usize::try_from(range.len)
+                        .map_err(|_| io::Error::other("UFFD range is too large"))?;
+
+                    // SAFETY: the range is checked against the VMA metadata sent in
+                    // the handshake and the received file descriptor remains valid.
+                    let mapped = unsafe {
+                        libc::mmap(
+                            target_addr as *mut libc::c_void,
+                            len,
+                            region.prot,
+                            region.flags | libc::MAP_FIXED,
+                            fd.as_raw_fd(),
+                            range.blob_offset as libc::off_t,
+                        )
+                    };
+                    if mapped == libc::MAP_FAILED {
+                        // If a large number of mappings exhausts the process VMA
+                        // limit, this can later fall back to UFFDIO_COPY.
+                        return Err(io::Error::last_os_error());
+                    }
+                    self.wake(target_addr, range.len)?;
+                }
+                Ok(true)
+            }
+        }
+    }
+
+    fn wake(&self, addr: u64, len: u64) -> io::Result<()> {
+        let mut range = UffdioRange { start: addr, len };
+        // SAFETY: range is valid for the UFFDIO_WAKE ioctl.
+        if unsafe {
+            libc::ioctl(
+                self.uffd.as_raw_fd(),
+                UFFDIO_WAKE as libc::Ioctl,
+                &mut range,
+            )
+        } < 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    fn socket_fd(&self) -> RawFd {
+        self.block.socket_fd()
+    }
+
+    fn shutdown(&self) {
+        // SAFETY: block owns a valid socket for the duration of this call.
+        unsafe { libc::shutdown(self.block.socket_fd(), libc::SHUT_RDWR) };
+    }
+}
 
 #[derive(Copy, Clone, Debug, Default, Serialize, Deserialize)]
 #[repr(C)]
@@ -163,6 +278,8 @@ struct PmemEpollHandler {
     kill_evt: EventFd,
     pause_evt: EventFd,
     access_platform: Option<Arc<dyn AccessPlatform>>,
+    uffd: Option<Arc<MmapUffdHandler>>,
+    shutting_down: Arc<AtomicBool>,
 }
 
 impl PmemEpollHandler {
@@ -225,6 +342,13 @@ impl PmemEpollHandler {
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evt.as_raw_fd(), QUEUE_AVAIL_EVENT)?;
+        if let Some(uffd) = self.uffd.as_ref() {
+            helper.add_event_custom(
+                uffd.socket_fd(),
+                UFFD_EVENT,
+                epoll::Events::EPOLLIN | epoll::Events::EPOLLHUP,
+            )?;
+        }
         helper.run(paused, paused_sync, self)?;
 
         Ok(())
@@ -254,6 +378,33 @@ impl EpollHelperHandler for PmemEpollHandler {
                     })?;
                 }
             }
+            UFFD_EVENT => {
+                if event.events & epoll::Events::EPOLLIN.bits() == 0 {
+                    if self.shutting_down.load(Ordering::Acquire) {
+                        return Ok(());
+                    }
+                    return Err(EpollHelperError::HandleEvent(anyhow!(
+                        "UFFD server closed the socket"
+                    )));
+                }
+                let uffd = self.uffd.as_ref().ok_or_else(|| {
+                    EpollHelperError::HandleEvent(anyhow!(
+                        "UFFD event without a configured handler"
+                    ))
+                })?;
+                loop {
+                    let handled = match uffd.handle_event() {
+                        Ok(handled) => handled,
+                        Err(_) if self.shutting_down.load(Ordering::Acquire) => return Ok(()),
+                        Err(error) => {
+                            return Err(EpollHelperError::HandleEvent(anyhow!(error)));
+                        }
+                    };
+                    if !handled {
+                        break;
+                    }
+                }
+            }
             _ => {
                 return Err(EpollHelperError::HandleEvent(anyhow!(
                     "Unexpected event: {ev_type}"
@@ -269,6 +420,8 @@ pub struct Pmem {
     id: String,
     disk: Option<File>,
     config: VirtioPmemConfig,
+    uffd: Option<Arc<MmapUffdHandler>>,
+    shutting_down: Arc<AtomicBool>,
     mapping: UserspaceMapping,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
@@ -289,6 +442,7 @@ impl Pmem {
         addr: GuestAddress,
         mapping: UserspaceMapping,
         access_platform_enabled: bool,
+        uffd: Option<Arc<MmapUffdHandler>>,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
         state: Option<PmemState>,
@@ -329,6 +483,8 @@ impl Pmem {
             id,
             disk: Some(disk),
             config,
+            uffd,
+            shutting_down: Arc::new(AtomicBool::new(false)),
             mapping,
             seccomp_action,
             exit_evt,
@@ -345,6 +501,19 @@ impl Pmem {
 
     #[cfg(fuzzing)]
     pub fn wait_for_epoll_threads(&mut self) {
+        self.common.wait_for_epoll_threads();
+    }
+}
+
+impl Drop for Pmem {
+    fn drop(&mut self) {
+        if let Some(uffd) = self.uffd.as_ref() {
+            self.shutting_down.store(true, Ordering::Release);
+            if let Some(workers) = self.common.workers.as_ref() {
+                workers.signal_exit().ok();
+            }
+            uffd.shutdown();
+        }
         self.common.wait_for_epoll_threads();
     }
 }
@@ -396,15 +565,22 @@ impl VirtioDevice for Pmem {
                 kill_evt,
                 pause_evt,
                 access_platform: self.common.access_platform(),
+                uffd: self.uffd.clone(),
+                shutting_down: Arc::clone(&self.shutting_down),
             };
 
             let paused = self.common.paused.clone();
             let paused_sync = self.common.paused_sync.clone();
 
+            let thread_type = if self.uffd.is_some() {
+                Thread::VirtioPmemUffd
+            } else {
+                Thread::VirtioPmem
+            };
             self.common.spawn_worker(
                 &self.id,
                 &self.seccomp_action,
-                Thread::VirtioPmem,
+                thread_type,
                 &self.exit_evt,
                 device_status.clone(),
                 interrupt_cb.clone(),
