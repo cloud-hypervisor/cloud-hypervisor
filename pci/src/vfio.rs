@@ -358,25 +358,23 @@ unsafe impl MmioRegionRange for Vec<MmioRegion> {
                 if offset_from_start >= len {
                     continue;
                 }
-                // Check that the size is in bounds.
-                // This enforces the invariant promised by implementing MmioRegionRange.
-                assert!(
-                    size <= len - offset_from_start,
-                    "Attempt to read {size} bytes at offset {offset_from_start} into \
-a region of size {len}"
-                );
+                // A VFIO MMIO region may be backed by multiple separately mmap'd areas,
+                // which may be non-contiguous. The requested range must fit within one mapping.
+                if size > len - offset_from_start {
+                    continue;
+                }
                 // SAFETY: MmapRegion guarantees that mapping.addr points to at least
-                // mapping.len() bytes of valid memory.  offset_from_start is equal
-                // to guest_addr - start, which was checked to be less than mapping.len().
-                // Therefore, the returned pointer is still in the range of valid memory.
-                // Also, since mapping.len() fit in usize, offset_from_start must as well,
-                // so the cast is safe.
+                // mapping.len() bytes of valid memory. The checks above ensure that
+                // offset_from_start + size stays within that mapping. Also, since
+                // mapping.len() fit in usize, offset_from_start must as well, so the
+                // cast is safe.
                 return Ok(unsafe { mapping.addr().add(offset_from_start as usize) });
             }
         }
 
         Err(io::Error::other(format!(
-            "unable to find user address: 0x{guest_addr:x}"
+            "unable to find user mapping for DMA range \
+             (gpa 0x{guest_addr:x}, size 0x{size:x})"
         )))
     }
 }
@@ -2671,6 +2669,82 @@ where
                      iova 0x{iova:x}, size 0x{size:x}: {e:?}"
                 ))
             })
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use std::env::temp_dir;
+    use std::os::fd::AsFd;
+
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::*;
+
+    fn sparse_mmio_regions() -> Vec<MmioRegion> {
+        let page_size = get_page_size();
+        let file =
+            TempFile::new_with_prefix(temp_dir().join("cloud-hypervisor-vfio-sparse-")).unwrap();
+        file.as_file().set_len(2 * page_size).unwrap();
+
+        let mapping_a = Arc::new(
+            MmapRegion::mmap(
+                page_size,
+                libc::PROT_READ | libc::PROT_WRITE,
+                file.as_file().as_fd(),
+                0,
+                0,
+            )
+            .unwrap(),
+        );
+        let mapping_b = Arc::new(
+            MmapRegion::mmap(
+                page_size,
+                libc::PROT_READ | libc::PROT_WRITE,
+                file.as_file().as_fd(),
+                page_size,
+                0,
+            )
+            .unwrap(),
+        );
+
+        vec![MmioRegion {
+            start: GuestAddress(page_size),
+            length: 4 * page_size,
+            type_: PciBarRegionType::Memory32BitRegion,
+            index: 0,
+            user_memory_regions: vec![
+                UserMemoryRegion {
+                    slot: 0,
+                    start: page_size,
+                    mapping: mapping_a,
+                },
+                UserMemoryRegion {
+                    slot: 1,
+                    start: 3 * page_size,
+                    mapping: mapping_b,
+                },
+            ],
+        }]
+    }
+
+    #[test]
+    fn dma_range_must_fit_single_mmap_area() {
+        let page_size = get_page_size();
+        let regions = sparse_mmio_regions();
+        let guest_addr = page_size + page_size / 2;
+
+        // The BAR spans [P, 5P), but the mmap-backed areas [P, 2P) and [3P, 4P)
+        // are non-contiguous. [1.5P, 2.5P) fits the BAR but crosses the unmapped gap.
+        let pointer = regions
+            .find_user_address(guest_addr, page_size / 2)
+            .unwrap();
+        assert!(!pointer.is_null());
+
+        assert!(regions.check_range(guest_addr, page_size));
+        regions
+            .find_user_address(guest_addr, page_size)
+            .unwrap_err();
     }
 }
 
