@@ -9,10 +9,10 @@ use std::sync::{Arc, Mutex};
 
 use vmm_sys_util::eventfd::EventFd;
 
+use super::dynamic::Vhdx;
 use crate::async_io::{
     AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, CompletionCommon,
 };
-use crate::formats::vhdx::Vhdx;
 
 pub(super) struct VhdxSync {
     vhdx_file: Arc<Mutex<Vhdx>>,
@@ -115,7 +115,7 @@ mod tests {
 
     use super::*;
     use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoOperation, OwnedIoBuffer};
-    use crate::formats::vhdx::Vhdx;
+    use crate::formats::vhdx::dynamic::Vhdx;
     use crate::formats::vhdx::test_util::create_dynamic_vhdx;
 
     fn make_vhdx_sync(tf: &TempFile) -> (VhdxSync, u64) {

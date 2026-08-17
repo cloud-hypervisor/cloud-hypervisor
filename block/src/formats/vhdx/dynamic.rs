@@ -104,7 +104,7 @@ impl Sector {
 }
 
 #[derive(Debug)]
-pub struct Vhdx {
+pub(super) struct Vhdx {
     aligned: AlignedFile,
     vhdx_header: VhdxHeader,
     bat_entry: RegionTableEntry,
@@ -116,7 +116,7 @@ pub struct Vhdx {
 impl Vhdx {
     /// Parse the Vhdx header, BAT, and metadata from a file and store info
     // in Vhdx structure.
-    pub fn new(file: File, direct_io: bool) -> Result<Vhdx> {
+    pub(super) fn new(file: File, direct_io: bool) -> Result<Vhdx> {
         let aligned = AlignedFile::new(file, direct_io);
 
         let vhdx_header = VhdxHeader::new(&aligned).map_err(VhdxError::ParseVhdxHeader)?;
@@ -146,7 +146,7 @@ impl Vhdx {
         })
     }
 
-    pub fn virtual_disk_size(&self) -> u64 {
+    pub(super) fn virtual_disk_size(&self) -> u64 {
         self.disk_spec.virtual_disk_size
     }
 
@@ -175,7 +175,7 @@ impl Vhdx {
 
     /// Read into `buf` at byte `offset`. The offset and length must be
     /// sector aligned.
-    pub fn read_at(&self, buf: &mut [u8], offset: u64) -> IoResult<usize> {
+    pub(super) fn read_at(&self, buf: &mut [u8], offset: u64) -> IoResult<usize> {
         let (sector_index, sector_count) = self.sector_range(buf.len(), offset, "Read")?;
         self.read_sectors(buf, sector_index, sector_count)
             .map_err(|e| {
@@ -187,7 +187,7 @@ impl Vhdx {
 
     /// Write all of `buf` at byte `offset`. The offset and length must be
     /// sector aligned.
-    pub fn write_all_at(&mut self, buf: &[u8], offset: u64) -> IoResult<()> {
+    pub(super) fn write_all_at(&mut self, buf: &[u8], offset: u64) -> IoResult<()> {
         let (sector_index, sector_count) = self.sector_range(buf.len(), offset, "Write")?;
 
         if self.first_write {
@@ -363,11 +363,11 @@ impl Vhdx {
         Ok(write_count)
     }
 
-    pub fn flush(&self) -> IoResult<()> {
+    pub(super) fn flush(&self) -> IoResult<()> {
         self.aligned.sync_all()
     }
 
-    pub(crate) fn physical_size(&self) -> result::Result<u64, crate::Error> {
+    pub(super) fn physical_size(&self) -> result::Result<u64, crate::Error> {
         self.aligned
             .file()
             .metadata()
