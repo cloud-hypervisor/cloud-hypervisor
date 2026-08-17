@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::btree_map::BTreeMap;
 use std::fs::File;
 use std::io::{self, Error as IoError, ErrorKind as IoErrorKind, Result as IoResult};
 use std::os::fd::{AsRawFd, RawFd};
@@ -108,9 +107,7 @@ impl Sector {
 pub struct Vhdx {
     aligned: AlignedFile,
     vhdx_header: VhdxHeader,
-    region_entries: BTreeMap<u64, u64>,
     bat_entry: RegionTableEntry,
-    mdr_entry: RegionTableEntry,
     disk_spec: DiskSpec,
     bat_entries: Vec<BatEntry>,
     first_write: bool,
@@ -142,9 +139,7 @@ impl Vhdx {
         Ok(Vhdx {
             aligned,
             vhdx_header,
-            region_entries: collected_entries.region_entries,
             bat_entry,
-            mdr_entry,
             disk_spec,
             bat_entries,
             first_write: true,
@@ -154,9 +149,7 @@ impl Vhdx {
     pub fn virtual_disk_size(&self) -> u64 {
         self.disk_spec.virtual_disk_size
     }
-}
 
-impl Vhdx {
     /// Convert `offset` and `buf_len` to a sector index and count, rejecting
     /// unaligned I/O.
     fn sector_range(&self, buf_len: usize, offset: u64, op: &str) -> IoResult<(u64, u64)> {
@@ -373,30 +366,13 @@ impl Vhdx {
     pub fn flush(&self) -> IoResult<()> {
         self.aligned.sync_all()
     }
-}
 
-impl Vhdx {
     pub(crate) fn physical_size(&self) -> result::Result<u64, crate::Error> {
         self.aligned
             .file()
             .metadata()
             .map(|m| m.len())
             .map_err(crate::Error::GetFileMetadata)
-    }
-}
-
-impl Vhdx {
-    pub fn try_clone(&self) -> IoResult<Vhdx> {
-        Ok(Vhdx {
-            aligned: self.aligned.try_clone()?,
-            vhdx_header: self.vhdx_header.clone(),
-            region_entries: self.region_entries.clone(),
-            bat_entry: self.bat_entry,
-            mdr_entry: self.mdr_entry,
-            disk_spec: self.disk_spec.clone(),
-            bat_entries: self.bat_entries.clone(),
-            first_write: self.first_write,
-        })
     }
 }
 
