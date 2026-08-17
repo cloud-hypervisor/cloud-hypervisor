@@ -237,7 +237,6 @@ fn ranges_overlap(a_start: u64, a_end: u64, b_start: u64, b_end: u64) -> bool {
 pub(super) struct RegionInfo {
     pub bat_entry: RegionTableEntry,
     pub mdr_entry: RegionTableEntry,
-    pub region_entries: BTreeMap<u64, u64>,
 }
 
 impl RegionInfo {
@@ -314,7 +313,6 @@ impl RegionInfo {
         Ok(RegionInfo {
             bat_entry,
             mdr_entry,
-            region_entries,
         })
     }
 }
