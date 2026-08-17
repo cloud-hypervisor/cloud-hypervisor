@@ -22,8 +22,9 @@ use std::io::Error as IoError;
 use std::os::fd::AsRawFd;
 use std::sync::{Arc, Mutex};
 
-pub use dynamic::{Vhdx, VhdxError};
+pub use dynamic::VhdxError;
 
+use self::dynamic::Vhdx;
 use self::engine_sync::VhdxSync;
 use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError};
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
