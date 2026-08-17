@@ -2007,8 +2007,6 @@ impl ApiAction for VmmPing {
 
     fn request(&self, _: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: VmmPing");
-
             let response = ApiResponsePayload::VmmPing(vmm.vmm_ping());
 
             response_sender
