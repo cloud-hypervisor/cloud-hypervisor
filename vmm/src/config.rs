@@ -6764,15 +6764,21 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         ));
         #[cfg(feature = "sev_snp")]
         {
+            let mut sev_snp_config = valid_config.clone();
+            sev_snp_config.platform = Some(PlatformConfig {
+                sev_snp: true,
+                ..platform_fixture()
+            });
+
             // Payload with empty host data
-            let mut config_with_no_host_data = valid_config.clone();
+            let mut config_with_no_host_data = sev_snp_config.clone();
             config_with_no_host_data.payload = Some(PayloadConfig {
                 kernel: Some(PathBuf::from("/path/to/kernel")),
                 firmware: None,
                 cmdline: None,
                 initramfs: None,
                 #[cfg(feature = "igvm")]
-                igvm: None,
+                igvm: Some(PathBuf::from("/path/to/igvm")),
                 #[cfg(feature = "sev_snp")]
                 host_data: Some(String::new()),
                 #[cfg(feature = "fw_cfg")]
@@ -6781,14 +6787,14 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             config_with_no_host_data.validate().unwrap_err();
 
             // Payload with no host data provided
-            let mut valid_config_with_no_host_data = valid_config.clone();
+            let mut valid_config_with_no_host_data = sev_snp_config.clone();
             valid_config_with_no_host_data.payload = Some(PayloadConfig {
                 kernel: Some(PathBuf::from("/path/to/kernel")),
                 firmware: None,
                 cmdline: None,
                 initramfs: None,
                 #[cfg(feature = "igvm")]
-                igvm: None,
+                igvm: Some(PathBuf::from("/path/to/igvm")),
                 #[cfg(feature = "sev_snp")]
                 host_data: None,
                 #[cfg(feature = "fw_cfg")]
@@ -6797,14 +6803,14 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             valid_config_with_no_host_data.validate().unwrap();
 
             // Payload with invalid host data length i.e less than 64
-            let mut config_with_invalid_host_data = valid_config.clone();
+            let mut config_with_invalid_host_data = sev_snp_config.clone();
             config_with_invalid_host_data.payload = Some(PayloadConfig {
                 kernel: Some(PathBuf::from("/path/to/kernel")),
                 firmware: None,
                 cmdline: None,
                 initramfs: None,
                 #[cfg(feature = "igvm")]
-                igvm: None,
+                igvm: Some(PathBuf::from("/path/to/igvm")),
                 #[cfg(feature = "sev_snp")]
                 host_data: Some(
                     "243eb7dc1a21129caa91dcbb794922b933baecb5823a377eb43118867328".to_string(),
