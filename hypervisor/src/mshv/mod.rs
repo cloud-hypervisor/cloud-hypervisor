@@ -25,9 +25,7 @@ use log::{debug, warn};
 use mshv_bindings::*;
 #[cfg(target_arch = "x86_64")]
 use mshv_ioctls::InterruptRequest;
-use mshv_ioctls::{
-    Mshv, NoDatamatch, VcpuFd, VmFd, VmType, make_default_synthetic_features_mask, set_registers_64,
-};
+use mshv_ioctls::{Mshv, NoDatamatch, VcpuFd, VmFd, VmType, set_registers_64};
 use vfio_ioctls::VfioDeviceFd;
 use vm::DataMatch;
 #[cfg(feature = "sev_snp")]
@@ -332,7 +330,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
                 create_args.pt_cpu_fbanks[i as usize] = disable_proc_features.as_uint64[i as usize];
             }
         }
-        let synthetic_features_mask = make_default_synthetic_features_mask();
+        let synthetic_features_mask = self.mshv.make_default_synthetic_features_mask();
         let fd: VmFd;
         loop {
             match self.mshv.create_vm_with_args(&create_args) {
