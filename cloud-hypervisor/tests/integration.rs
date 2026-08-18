@@ -2831,8 +2831,8 @@ mod common_parallel {
 
         let kernel_path = direct_kernel_boot_path();
 
-        let mut vfio_path = workload_path.clone();
-        vfio_path.push("vfio");
+        let temp_dir = TempDir::new_with_prefix("/tmp/ch-vfio-test").unwrap();
+        let vfio_path = temp_dir.as_path().to_path_buf();
 
         let mut cloud_init_vfio_base_path = vfio_path.clone();
         cloud_init_vfio_base_path.push("cloudinit.img");
