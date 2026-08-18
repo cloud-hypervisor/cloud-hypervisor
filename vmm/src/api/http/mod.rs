@@ -45,6 +45,8 @@ pub mod http_endpoint;
 
 pub type HttpApiHandle = (thread::JoinHandle<Result<()>>, EventFd);
 
+const HTTP_PAYLOAD_MAX_SIZE: usize = 4 << 20;
+
 /// Errors associated with VMM management
 #[derive(Error, Debug)]
 pub enum HttpError {
@@ -359,6 +361,7 @@ fn start_http_thread(
     let api_shutdown_fd = EventFd::new(libc::EFD_NONBLOCK).map_err(VmmError::EventFdCreate)?;
     let api_shutdown_fd_clone = api_shutdown_fd.try_clone().unwrap();
 
+    server.set_payload_max_size(HTTP_PAYLOAD_MAX_SIZE);
     server
         .add_kill_switch(api_shutdown_fd_clone)
         .map_err(VmmError::CreateApiServer)?;
