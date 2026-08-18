@@ -450,7 +450,7 @@ pub(crate) fn setup_ovs_dpdk_guests(
         .args(["--net", guest2.default_net_string().as_str(), OVS_DPDK_NET2])
         .capture_output();
     if release_binary {
-        cmd2.legacy_default_disks();
+        cmd2.args(["--seccomp", "false"]).legacy_default_disks();
     } else {
         cmd2.default_disks();
     }
