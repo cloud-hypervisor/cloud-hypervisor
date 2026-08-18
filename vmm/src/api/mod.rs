@@ -41,7 +41,7 @@ use std::str::FromStr;
 use std::sync::mpsc::{RecvError, SendError, Sender, channel};
 use std::time::Duration;
 
-use log::info;
+use log::{debug, info};
 use micro_http::Body;
 use option_parser::{OptionParser, OptionParserError, Toggle, Tuple, TupleList};
 use serde::{Deserialize, Serialize};
@@ -2007,7 +2007,7 @@ impl ApiAction for VmmPing {
 
     fn request(&self, _: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: VmmPing");
+            debug!("API request event: VmmPing");
 
             let response = ApiResponsePayload::VmmPing(vmm.vmm_ping());
 
