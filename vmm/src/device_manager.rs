@@ -5097,9 +5097,7 @@ impl DeviceManager {
             }
         }
 
-        if !self.config.lock().unwrap().remove_device(id) {
-            return Err(DeviceManagerError::UnknownDeviceId(id.to_string()));
-        }
+        self.config.lock().unwrap().remove_device(id);
 
         // Update the PCID bitmap
         self.pci_segments[pci_segment_id as usize].pci_devices_down |= 1 << pci_device_bdf.device();
