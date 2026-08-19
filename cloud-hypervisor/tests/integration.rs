@@ -391,7 +391,7 @@ mod common_parallel {
             assert!(cmd_success);
             assert!(
                 String::from_utf8_lossy(&cmd_output)
-                    .contains("{\"id\":\"test0\",\"bdf\":\"0001:00:01.0\"}")
+                    .contains("{\"id\":\"test0\",\"bdf\":\"0001:00:00.0\"}")
             );
 
             // Check IOMMU setup
@@ -404,7 +404,7 @@ mod common_parallel {
                 guest
                     .ssh_command("ls /sys/kernel/iommu_groups/*/devices")
                     .unwrap()
-                    .contains("0001:00:01.0")
+                    .contains("0001:00:00.0")
             );
         });
 
@@ -5449,7 +5449,7 @@ mod common_parallel {
             assert!(cmd_success);
             if let Some(pci_segment) = pci_segment {
                 assert!(String::from_utf8_lossy(&cmd_output).contains(&format!(
-                    "{{\"id\":\"test0\",\"bdf\":\"{pci_segment:04x}:00:01.0\"}}"
+                    "{{\"id\":\"test0\",\"bdf\":\"{pci_segment:04x}:00:00.0\"}}"
                 )));
             } else {
                 assert!(

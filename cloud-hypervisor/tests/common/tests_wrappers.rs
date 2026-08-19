@@ -1028,7 +1028,7 @@ pub(crate) fn _test_virtio_fs(
 
             if let Some(pci_segment) = pci_segment {
                 assert!(String::from_utf8_lossy(&cmd_output).contains(&format!(
-                    "{{\"id\":\"myfs0\",\"bdf\":\"{pci_segment:04x}:00:01.0\"}}"
+                    "{{\"id\":\"myfs0\",\"bdf\":\"{pci_segment:04x}:00:00.0\"}}"
                 )));
             } else {
                 assert!(
@@ -1138,7 +1138,7 @@ pub(crate) fn _test_virtio_fs(
             assert!(cmd_success);
             if let Some(pci_segment) = pci_segment {
                 assert!(String::from_utf8_lossy(&cmd_output).contains(&format!(
-                    "{{\"id\":\"myfs0\",\"bdf\":\"{pci_segment:04x}:00:01.0\"}}"
+                    "{{\"id\":\"myfs0\",\"bdf\":\"{pci_segment:04x}:00:00.0\"}}"
                 )));
             } else {
                 assert!(
@@ -1914,10 +1914,9 @@ pub(crate) fn _test_pci_multiple_segments(
 
     guest.wait_vm_boot().unwrap();
 
-    let grep_cmd = "lspci | grep \"Host bridge\" | wc -l";
+    let grep_cmd = "ls /sys/class/pci_bus | grep -c ':00$'";
 
     let r = panic::catch_unwind(|| {
-        // There should be MAX_NUM_PCI_SEGMENTS PCI host bridges in the guest.
         assert_eq!(
             guest
                 .ssh_command(grep_cmd)
@@ -3255,7 +3254,7 @@ pub(crate) fn _test_net_hotplug(
 
         if let Some(pci_segment) = pci_segment {
             assert!(String::from_utf8_lossy(&cmd_output).contains(&format!(
-                "{{\"id\":\"test0\",\"bdf\":\"{pci_segment:04x}:00:01.0\"}}"
+                "{{\"id\":\"test0\",\"bdf\":\"{pci_segment:04x}:00:00.0\"}}"
             )));
         } else {
             assert!(
@@ -3316,7 +3315,7 @@ pub(crate) fn _test_net_hotplug(
 
         if let Some(pci_segment) = pci_segment {
             assert!(String::from_utf8_lossy(&cmd_output).contains(&format!(
-                "{{\"id\":\"test1\",\"bdf\":\"{pci_segment:04x}:00:01.0\"}}"
+                "{{\"id\":\"test1\",\"bdf\":\"{pci_segment:04x}:00:00.0\"}}"
             )));
         } else {
             assert!(
@@ -3788,7 +3787,7 @@ pub(crate) fn _test_vdpa_block(guest: &Guest) {
         assert!(cmd_success);
         assert!(
             String::from_utf8_lossy(&cmd_output)
-                .contains("{\"id\":\"myvdpa0\",\"bdf\":\"0001:00:01.0\"}")
+                .contains("{\"id\":\"myvdpa0\",\"bdf\":\"0001:00:00.0\"}")
         );
 
         // Wait for the hotplugged device to appear
@@ -3799,7 +3798,7 @@ pub(crate) fn _test_vdpa_block(guest: &Guest) {
             guest
                 .ssh_command("ls /sys/kernel/iommu_groups/*/devices")
                 .unwrap()
-                .contains("0001:00:01.0")
+                .contains("0001:00:00.0")
         );
 
         // Check both if /dev/vdd exists and if the block size is 128M.

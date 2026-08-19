@@ -104,7 +104,8 @@ PCI device ID to assign to the vDPA device on its PCI bus.
 This parameter is optional. If not specified, a device ID is automatically
 allocated.
 
-Value is an unsigned integer in the range 1-31.
+Value is an unsigned integer in the range 1-31 on PCI segment 0, and it is
+an unsigned integer in the range 0-31 for all other PCI segments.
 
 _Example_
 
