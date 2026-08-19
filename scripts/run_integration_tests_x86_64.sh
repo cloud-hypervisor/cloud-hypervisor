@@ -33,13 +33,7 @@ required_files=(
     "$WORKLOADS_DIR/vmlinux-x86_64"
     "$WORKLOADS_DIR/bzImage-x86_64"
     "$WORKLOADS_DIR/alpine-minirootfs-x86_64.tar.gz"
-)
-# MSHV support in that baseline stabilised on v50.2
-if [ "$hypervisor" = "mshv" ]; then
-    required_files+=("$WORKLOADS_DIR/cloud-hypervisor-static-mshv")
-else
-    required_files+=("$WORKLOADS_DIR/cloud-hypervisor-static")
-fi
+    "$WORKLOADS_DIR/cloud-hypervisor-static")
 
 for required in "${required_files[@]}"; do
     if [ ! -f "$required" ]; then
