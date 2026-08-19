@@ -78,23 +78,15 @@ assets:
 
   # Previous release binaries for live-upgrade tests
   - filename: cloud-hypervisor-static
-    url: https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v39.0/cloud-hypervisor-static
-    sha1: 8516a22620021f2b39abff1836f2f2a8a025cbf9
+    url: https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v52.0/cloud-hypervisor-static
+    sha256: 829af01ff075bb96c4f183905134c453a88d68cbabdc6b87df21098842581ee9
     executable: true
     arch: [x86_64]
     test: [integration]
 
   - filename: cloud-hypervisor-static-aarch64
-    url: https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v39.0/cloud-hypervisor-static-aarch64
-    sha1: 588d0a12f38d87560b4a4cf95a43478064481aa2
+    url: https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v52.0/cloud-hypervisor-static-aarch64
+    sha256: bf004ddc1a148f47caa87ac49a783b8dbd6bf9bc27abe522ed197df7b982d3b1
     executable: true
     arch: [aarch64]
-    test: [integration]
-
-  # MSHV only supports live upgrade from v50.2.
-  - filename: cloud-hypervisor-static-mshv
-    url: https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v50.2/cloud-hypervisor-static
-    sha1: b148aad169257e3c2eaab19bfb703379f0ac57a6
-    executable: true
-    arch: [x86_64]
     test: [integration]
