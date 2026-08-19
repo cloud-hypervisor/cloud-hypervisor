@@ -25,7 +25,6 @@ use seccompiler::SeccompAction;
 use signal_hook::consts::SIGSYS;
 use signal_hook::low_level;
 use thiserror::Error;
-use vm_migration::protocol;
 #[cfg(feature = "dbus_api")]
 use vmm::api::dbus::{DBusApiOptions, dbus_api_graceful_shutdown};
 use vmm::api::http::http_api_graceful_shutdown;
@@ -969,12 +968,6 @@ fn main() {
 
     if cmd_arguments.get_flag("version") {
         println!("{} {}", env!("CARGO_BIN_NAME"), env!("BUILD_VERSION"));
-        let migration_protocol_versions = protocol::supported_protocol_versions()
-            .map(|version| version.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        println!("Migration Protocol Versions: {migration_protocol_versions}");
-
         if cmd_arguments.get_count("v") != 0 {
             println!("Enabled features: {:?}", vmm::feature_list());
         }

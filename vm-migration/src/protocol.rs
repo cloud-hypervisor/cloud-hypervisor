@@ -192,7 +192,7 @@ impl TryFrom<u16> for ConnectionRole {
 pub const CURRENT_PROTOCOL_VERSION: u16 = 0;
 
 /// Returns the current migration protocol version and the previous version, if any.
-pub fn supported_protocol_versions() -> RangeInclusive<u16> {
+fn supported_protocol_versions() -> RangeInclusive<u16> {
     CURRENT_PROTOCOL_VERSION.saturating_sub(1)..=CURRENT_PROTOCOL_VERSION
 }
 
