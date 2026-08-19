@@ -459,11 +459,11 @@ pub fn add_to_config<T>(items: &mut Option<Vec<T>>, item: T) {
 
 /// Check that the PCI device supplied is neither out of range nor does
 /// it use any reserved device ID.
-fn validate_pci_device_id(device_id: u8) -> ValidationResult<()> {
+fn validate_pci_device_id(device_id: u8, segment_id: u16) -> ValidationResult<()> {
     if device_id >= pci::NUM_DEVICE_IDS {
         // Check the given ID is not out of range
         return Err(ValidationError::InvalidPciDeviceId(device_id));
-    } else if device_id == pci::PCI_ROOT_DEVICE_ID {
+    } else if device_id == pci::PCI_ROOT_DEVICE_ID && segment_id == 0 {
         // Check the ID isn't any reserved one. Currently, only the device ID
         // for the root device is reserved.
         return Err(ValidationError::ReservedPciDeviceId(device_id));
@@ -1430,7 +1430,7 @@ impl PciDeviceCommonConfig {
         }
 
         if let Some(device_id) = self.pci_device_id {
-            validate_pci_device_id(device_id)?;
+            validate_pci_device_id(device_id, self.pci_segment)?;
         }
 
         Ok(())
