@@ -60,7 +60,7 @@ impl PciSegment {
         mem64_allocator: Arc<Mutex<AddressAllocator>>,
         pci_irq_slots: &[u8; 32],
     ) -> DeviceManagerResult<PciSegment> {
-        let pci_root = PciRoot::new(None);
+        let pci_root = (id == 0).then(|| PciRoot::new(None));
         let pci_bus = Arc::new(Mutex::new(PciBus::new(
             pci_root,
             Arc::clone(address_manager) as Arc<dyn DeviceRelocation>,
@@ -236,7 +236,7 @@ impl PciSegment {
         pci_irq_slots: &[u8; 32],
         device_reloc: &Arc<dyn DeviceRelocation>,
     ) -> DeviceManagerResult<Self> {
-        let pci_root = PciRoot::new(None);
+        let pci_root = (id == 0).then(|| PciRoot::new(None));
         let pci_bus = Arc::new(Mutex::new(PciBus::new(pci_root, device_reloc.clone())));
 
         let pci_config_mmio = Arc::new(Mutex::new(PciConfigMmio::new(Arc::clone(&pci_bus))));
@@ -577,6 +577,10 @@ mod unit_tests {
     }
 
     fn setup() -> PciSegment {
+        setup_segment(0)
+    }
+
+    fn setup_segment(id: u16) -> PciSegment {
         let guest_addr = 0_u64;
         let guest_size = 0x1000_usize;
         let allocator_1 = Arc::new(Mutex::new(
@@ -589,7 +593,7 @@ mod unit_tests {
         let arr = [0_u8; 32];
 
         PciSegment::new_without_address_manager(
-            0,
+            id,
             0,
             allocator_1,
             allocator_2,
@@ -608,6 +612,16 @@ mod unit_tests {
         assert_eq!(bdf.segment(), segment.id);
         assert_eq!(bdf.bus(), 0);
         assert_eq!(bdf.device(), 1);
+        assert_eq!(bdf.function(), 0);
+    }
+
+    #[test]
+    fn allocate_device_id_default_secondary_segment() {
+        let segment = setup_segment(1);
+        let bdf = segment.allocate_device_id(None).unwrap();
+        assert_eq!(bdf.segment(), segment.id);
+        assert_eq!(bdf.bus(), 0);
+        assert_eq!(bdf.device(), 0);
         assert_eq!(bdf.function(), 0);
     }
 

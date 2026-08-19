@@ -115,19 +115,20 @@ enum DeviceIdState {
 
 pub struct PciBus {
     /// Devices attached to this bus.
-    /// Device 0 is host bridge.
     devices: HashMap<u8, Arc<Mutex<dyn PciDevice>>>,
     device_reloc: Arc<dyn DeviceRelocation>,
     device_ids: [DeviceIdState; NUM_DEVICE_IDS as usize],
 }
 
 impl PciBus {
-    pub fn new(pci_root: PciRoot, device_reloc: Arc<dyn DeviceRelocation>) -> Self {
+    pub fn new(pci_root: Option<PciRoot>, device_reloc: Arc<dyn DeviceRelocation>) -> Self {
         let mut devices: HashMap<u8, Arc<Mutex<dyn PciDevice>>> = HashMap::new();
         let mut device_ids = [DeviceIdState::Free; NUM_DEVICE_IDS as usize];
 
-        devices.insert(PCI_ROOT_DEVICE_ID, Arc::new(Mutex::new(pci_root)));
-        device_ids[PCI_ROOT_DEVICE_ID as usize] = DeviceIdState::Allocated;
+        if let Some(pci_root) = pci_root {
+            devices.insert(PCI_ROOT_DEVICE_ID, Arc::new(Mutex::new(pci_root)));
+            device_ids[PCI_ROOT_DEVICE_ID as usize] = DeviceIdState::Allocated;
+        }
 
         PciBus {
             devices,
@@ -547,7 +548,11 @@ mod unit_tests {
     fn setup_bus() -> PciBus {
         let pci_root = PciRoot::new(None);
         let mock_device_reloc = Arc::new(MockDeviceRelocation {});
-        PciBus::new(pci_root, mock_device_reloc)
+        PciBus::new(Some(pci_root), mock_device_reloc)
+    }
+
+    fn setup_bus_without_host_bridge() -> PciBus {
+        PciBus::new(None, Arc::new(MockDeviceRelocation {}))
     }
 
     #[test]
@@ -570,6 +575,39 @@ mod unit_tests {
         assert_eq!(0x10_u8, bus.allocate_device_id(Some(0x10))?);
         assert_eq!(max_id, bus.allocate_device_id(Some(max_id))?);
         Ok(())
+    }
+
+    #[test]
+    fn allocate_device_id_zero_is_taken_by_the_host_bridge() {
+        let mut bus = setup_bus();
+        assert!(matches!(
+            bus.allocate_device_id(Some(PCI_ROOT_DEVICE_ID)),
+            Err(PciRootError::AlreadyInUsePciDeviceSlot(0))
+        ));
+    }
+
+    #[test]
+    fn allocate_device_id_zero_without_host_bridge() -> Result<(), Box<dyn Error>> {
+        let mut bus = setup_bus_without_host_bridge();
+        assert!(bus.devices.is_empty());
+
+        assert_eq!(
+            PCI_ROOT_DEVICE_ID,
+            bus.allocate_device_id(Some(PCI_ROOT_DEVICE_ID))?
+        );
+        assert!(matches!(
+            bus.allocate_device_id(Some(PCI_ROOT_DEVICE_ID)),
+            Err(PciRootError::AlreadyInUsePciDeviceSlot(0))
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn allocate_device_id_next_free_without_host_bridge() {
+        let mut bus = setup_bus_without_host_bridge();
+        for expected_id in 0..NUM_DEVICE_IDS {
+            assert_eq!(expected_id, bus.allocate_device_id(None).unwrap());
+        }
     }
 
     #[test]
