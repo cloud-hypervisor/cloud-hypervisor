@@ -7,7 +7,7 @@
 """Download workload assets for Cloud Hypervisor integration tests.
 
 Reads scripts/test_assets.yaml, downloads missing files, and verifies
-SHA-1 checksums.  Uses only the Python 3 standard library.
+SHA-1 and/or SHA-256 checksums.  Uses only the Python 3 standard library.
 
 Usage:
     fetch_workloads.py [--arch ARCH] [--test TEST] [--workloads-dir DIR]
@@ -81,15 +81,25 @@ def parse_yaml(path: Path) -> list[dict]:
     return assets
 
 
-def sha1_file(path: Path) -> str:
-    h = hashlib.sha1()
+def verify_checksums(path: Path, expected: dict[str, str]) -> list[str]:
+    """Return descriptions of any checksum mismatches for *path*."""
+    hashers = {algorithm: hashlib.new(algorithm) for algorithm in expected}
     with open(path, "rb") as f:
         while True:
             chunk = f.read(1 << 20)
             if not chunk:
                 break
-            h.update(chunk)
-    return h.hexdigest()
+            for hasher in hashers.values():
+                hasher.update(chunk)
+
+    mismatches = []
+    for algorithm, expected_digest in expected.items():
+        actual_digest = hashers[algorithm].hexdigest()
+        if actual_digest != expected_digest:
+            mismatches.append(
+                f"{algorithm}: expected {expected_digest}, got {actual_digest}"
+            )
+    return mismatches
 
 
 def _fmt_size(n: int) -> str:
@@ -173,22 +183,26 @@ def process_asset(asset: dict, workloads: Path, auth_token: str | None,
         _log(f"SKIPPED  {filename}: path traversal in filename")
         return False
     url = asset.get("url")
-    expected_sha1 = asset.get("sha1")
+    expected_checksums = {
+        algorithm: asset[algorithm]
+        for algorithm in ("sha1", "sha256")
+        if asset.get(algorithm)
+    }
     dest = workloads / filename
 
+    if not expected_checksums:
+        _log(f"INVALID  {filename}: sha1 or sha256 checksum required")
+        return False
+
     if dest.exists():
-        if expected_sha1:
-            actual = sha1_file(dest)
-            if actual != expected_sha1:
-                _log(f"MISMATCH {filename}: expected {expected_sha1}, got {actual}")
-                if verify_only:
-                    return False
-                dest.unlink()
-            else:
-                _log(f"OK       {filename}")
-                return True
+        mismatches = verify_checksums(dest, expected_checksums)
+        if mismatches:
+            _log(f"MISMATCH {filename}: {'; '.join(mismatches)}")
+            if verify_only:
+                return False
+            dest.unlink()
         else:
-            _log(f"OK       {filename} (no checksum)")
+            _log(f"OK       {filename}")
             return True
 
     if verify_only:
@@ -203,12 +217,11 @@ def process_asset(asset: dict, workloads: Path, auth_token: str | None,
         _log(f"FAILED   {filename}")
         return False
 
-    if expected_sha1:
-        actual = sha1_file(dest)
-        if actual != expected_sha1:
-            _log(f"CORRUPT  {filename}: expected {expected_sha1}, got {actual}")
-            dest.unlink()
-            return False
+    mismatches = verify_checksums(dest, expected_checksums)
+    if mismatches:
+        _log(f"CORRUPT  {filename}: {'; '.join(mismatches)}")
+        dest.unlink()
+        return False
 
     if (asset.get("executable") or "").lower() == "true":
         dest.chmod(0o755)
