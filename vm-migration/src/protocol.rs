@@ -76,15 +76,23 @@
 //!
 //! ## Protocol Versioning
 //!
-//! `Start` carries the sender's migration protocol version.
-//! A zeroed version field is treated as legacy protocol `v0`.
+//! Versionizes the mechanism to transport the VM state from A to B, with only
+//! minimal knowledge about the data that is transmitted. This is not meant to
+//! versionize VMM state or device model state! The protocol version number is
+//! an internal implementation detail.
 //!
-//! The destination validates that version and replies with a plain `OK` or
-//! `Error`.
+//! The [`Start`][start-command] carries the sender's migration protocol
+//! version, which is also the current migration protocol version of the given
+//! Cloud Hypervisor release. The destination validates that version and
+//! - if supported - receives the migration accordingly.
 //!
-//! Only the current and immediately previous protocol versions are
-//! supported. Compatibility is one-way, from older protocol versions
-//! to newer ones.
+//! A Cloud Hypervisor release must support at least the current and immediately
+//! previous protocol version.
+//!
+//! Bumping the protocol version is required for breaking changes to the
+//! migration protocol, but not for additive ones.
+//!
+//! [start-command]: [`Command::Start`]
 
 use std::io::{Read, Write};
 use std::ops::RangeInclusive;
@@ -288,7 +296,7 @@ impl Request {
         if !supported_protocol_versions().any(|version| version == sender_version) {
             let supported_versions = supported_protocol_versions().join(", ");
             return Err(MigratableError::MigrateReceive(anyhow!(
-                "Migration protocol version {sender_version} doesn't match supported versions: {supported_versions}"
+                "Migration protocol version {sender_version} of sender doesn't match any supported version: {supported_versions}"
             )));
         }
 
