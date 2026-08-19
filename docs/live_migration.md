@@ -399,18 +399,17 @@ for the requirements, the dirty tracking behavior, and an example.
 
 ## Version Compatibility
 
-Cloud Hypervisor live migration compatibility has two dimensions: the
-Cloud Hypervisor version and the migration protocol version.
+Starting with `v54`, Cloud Hypervisor guarantees migration compatibility from
+the previous two versions ("n-2"), e.g. `v54` accepts migrations from `v52` and
+`v53`. Upgrades spanning more major versions might work. It is, however,
+strongly recommended to do incremental upgrades, e.g., `v54 -> v56 -> v58`.
 
-Cloud Hypervisor uses a versioned migration protocol for the messages exchanged
-between source and destination. Each Cloud Hypervisor release sends its current
-migration protocol version and accepts that version plus the immediately
-previous protocol version.
-
-This means migration is supported from an older protocol version to the same or
-next protocol version. If the source and destination are more than one migration
-protocol version apart, the VM must be migrated through an intermediate
-Cloud Hypervisor version first.
+New VMM functionality is designed in a way that it does not cause any
+incompatibility for VMs coming from older versions of Cloud Hypervisor. If new
+features are added to existing device models or the VMM, the corresponding
+device-specific config falls back to safe false/disabled values. Hence, only
+newly spawned VMs will be able to use new functionality, while being able to run
+VMs first spawned in older versions of Cloud Hypervisor.
 
 ### Technical Details
 
