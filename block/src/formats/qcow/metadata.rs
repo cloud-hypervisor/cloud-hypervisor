@@ -567,12 +567,20 @@ impl QcowState {
         let cluster_addr = if l2_entry_is_compressed(l2_entry) {
             let decompressed_cluster = self.decompress_l2_cluster(l2_entry)?;
             let cluster_addr = self.append_data_cluster(None)?;
-            let nwritten = self
+            let nwritten = match self
                 .raw_file
                 .file_mut()
-                .write_at(&decompressed_cluster, cluster_addr)?;
+                .write_at(&decompressed_cluster, cluster_addr)
+            {
+                Ok(nwritten) => nwritten,
+                Err(e) => {
+                    self.release_unreferenced_cluster(cluster_addr);
+                    return Err(e);
+                }
+            };
             if nwritten != decompressed_cluster.len() {
                 self.set_corrupt_bit_best_effort();
+                self.release_unreferenced_cluster(cluster_addr);
                 return Err(io::Error::from_raw_os_error(EIO));
             }
             self.update_cluster_addr(l1_index, l2_index, cluster_addr)?;
@@ -645,8 +653,7 @@ impl QcowState {
         if !self.l2_cache.contains_key(l1_index) {
             let l2_table = if l2_addr_disk == 0 {
                 // Set the new L2 table's refcount to 1 before the L1 entry points at it.
-                let new_addr = self.get_new_cluster(None)?;
-                self.set_cluster_refcount_track_freed(new_addr, 1)?;
+                let new_addr = self.append_data_cluster(None)?;
                 self.l1_table[l1_index] = new_addr;
                 VecCache::new(self.l2_entries as usize)
             } else {
@@ -693,10 +700,29 @@ impl QcowState {
         }
     }
 
-    /// Allocates a data cluster and sets its refcount to 1.
+    /// Hands a cluster allocated for an operation that then failed back to the
+    /// allocator. The refcount is cleared first because a failed
+    /// set_cluster_refcount() may still have raised it: the target refcount is
+    /// written before the refcount blocks it needed are accounted for, and that
+    /// second step is what returns ENOSPC. A cluster whose refcount cannot be
+    /// cleared stays allocated rather than being handed out twice.
+    fn release_unreferenced_cluster(&mut self, cluster_addr: u64) {
+        if self
+            .set_cluster_refcount_track_freed(cluster_addr, 0)
+            .is_ok()
+        {
+            self.unref_clusters.push(cluster_addr);
+        }
+    }
+
+    /// Allocates a cluster and sets its refcount to 1. A cluster this fails
+    /// to claim goes back to the allocator.
     fn append_data_cluster(&mut self, initial_data: Option<Vec<u8>>) -> io::Result<u64> {
         let new_addr = self.get_new_cluster(initial_data)?;
-        self.set_cluster_refcount_track_freed(new_addr, 1)?;
+        if let Err(e) = self.set_cluster_refcount_track_freed(new_addr, 1) {
+            self.release_unreferenced_cluster(new_addr);
+            return Err(e);
+        }
         Ok(new_addr)
     }
 
@@ -704,14 +730,23 @@ impl QcowState {
     fn append_zeroed_data_cluster(&mut self) -> io::Result<u64> {
         let new_addr = self.get_new_cluster(None)?;
         let cluster_size = self.raw_file.cluster_size() as usize;
-        self.raw_file
+        let claimed = self
+            .raw_file
             .file_mut()
-            .write_zeroes_at(new_addr, cluster_size)?;
-        self.set_cluster_refcount_track_freed(new_addr, 1)?;
+            .write_zeroes_at(new_addr, cluster_size)
+            .and_then(|_| self.set_cluster_refcount_track_freed(new_addr, 1));
+        if let Err(e) = claimed {
+            self.release_unreferenced_cluster(new_addr);
+            return Err(e);
+        }
         Ok(new_addr)
     }
 
     /// Updates the L1 and L2 tables to point to a new cluster address.
+    // Publishes cluster_addr in the L2 table, relocating the table first when
+    // it is not already dirty. A failure before the entry is published returns
+    // cluster_addr to the allocator; after publication the entry owns it and
+    // only the old table is left allocated.
     fn update_cluster_addr(
         &mut self,
         l1_index: usize,
@@ -727,8 +762,13 @@ impl QcowState {
             // lists, or a later allocation would hand it out and overwrite a
             // live L2 table (issue #8606). The cluster will be written when
             // the cache is flushed.
-            let new_addr = self.get_new_cluster(None)?;
-            self.set_cluster_refcount_track_freed(new_addr, 1)?;
+            let new_addr = match self.append_data_cluster(None) {
+                Ok(new_addr) => new_addr,
+                Err(e) => {
+                    self.release_unreferenced_cluster(cluster_addr);
+                    return Err(e);
+                }
+            };
             Some((self.l1_table[l1_index], new_addr))
         };
 
@@ -1203,6 +1243,146 @@ mod tests {
         assert!(
             !inner.unref_clusters.contains(&live_l2) && !inner.avail_clusters.contains(&live_l2),
             "a still-referenced L2 table must never enter the free lists"
+        );
+    }
+
+    // An L1 entry left pointing at a refcount-zero table is handed to the next
+    // writer by the free list scan on open.
+    #[test]
+    fn failed_data_alloc_leaves_no_unaccounted_l2_table() {
+        let cluster_size: u64 = 1 << 16;
+        // One L2 table's guest span, so the second write needs a new table.
+        let l2_span = cluster_size * (cluster_size / 8);
+        let temp = super::super::QcowTempDisk::new(2 * l2_span, None, false, true, false)
+            .unwrap()
+            .into_tempfile();
+        let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+        let (mut inner, _backing, _sparse) =
+            super::super::parser::parse_qcow(raw, 0, true).unwrap();
+
+        inner.map_write(0, None).expect("initial write");
+        inner.sync_caches().expect("flush");
+
+        // One reusable cluster: enough for the L2 table, none for the data
+        // cluster the same write needs right after.
+        let file_clusters = inner
+            .raw_file
+            .file_mut()
+            .metadata()
+            .unwrap()
+            .len()
+            .div_ceil(cluster_size)
+            + 1;
+        inner.refcounts = super::super::refcount::RefCount::new(
+            &mut inner.raw_file,
+            inner.header.refcount_table_offset,
+            1,
+            file_clusters,
+            cluster_size,
+            16,
+        )
+        .unwrap();
+        let mut freed = super::mem::take(&mut inner.unref_clusters);
+        freed.retain(|&c| c != 0);
+        assert!(
+            !freed.is_empty(),
+            "the first write must have relocated the refcount block, freeing its old cluster"
+        );
+        // The L2 table must be allocatable so the write reaches the data
+        // cluster and fails there; a single cluster stops it one step earlier.
+        inner.avail_clusters.clear();
+        inner.avail_clusters.push(freed[0]);
+        inner.avail_clusters.extend(freed.iter().skip(1).copied());
+
+        let err = inner
+            .map_write(l2_span, None)
+            .expect_err("the write must fail with the allocator exhausted");
+        assert_eq!(err.raw_os_error(), Some(libc::ENOSPC));
+
+        // Without this the loop below can pass on the first write's entry alone,
+        // never reaching the slot the failed write had to allocate.
+        let target_l1 = (l2_span / (cluster_size * (cluster_size / 8))) as usize;
+        assert_ne!(
+            inner.l1_table[target_l1], 0,
+            "the failed write must have published its L2 table in L1[{target_l1}]"
+        );
+
+        let published: Vec<(usize, u64)> = inner
+            .l1_table
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|&(_, addr)| addr != 0)
+            .collect();
+        for (index, addr) in published {
+            let refcount = inner
+                .refcounts
+                .get_cluster_refcount(&mut inner.raw_file, addr)
+                .unwrap();
+            assert_ne!(
+                refcount, 0,
+                "L1[{index}] points at cluster {addr:#x} that the free list scan reclaims"
+            );
+        }
+    }
+
+    // A write that fails at the L2 relocation must not keep the data cluster
+    // it already allocated.
+    #[test]
+    fn failed_l2_relocate_returns_the_data_cluster() {
+        let cluster_size: u64 = 1 << 16;
+        let temp = super::super::QcowTempDisk::new(64 * cluster_size, None, false, true, false)
+            .unwrap()
+            .into_tempfile();
+        let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+        let (mut inner, _backing, _sparse) =
+            super::super::parser::parse_qcow(raw, 0, true).unwrap();
+
+        inner.map_write(0, None).expect("initial write");
+        inner.sync_caches().expect("flush");
+
+        // Let the file grow by exactly two clusters: the data cluster of the
+        // next write and the refcount block its accounting relocates. The L2
+        // relocation that same write needs then hits the wall.
+        let file_clusters = inner
+            .raw_file
+            .file_mut()
+            .metadata()
+            .unwrap()
+            .len()
+            .div_ceil(cluster_size);
+        inner.refcounts = super::super::refcount::RefCount::new(
+            &mut inner.raw_file,
+            inner.header.refcount_table_offset,
+            1,
+            file_clusters + 2,
+            cluster_size,
+            16,
+        )
+        .unwrap();
+        inner.avail_clusters.clear();
+        inner.unref_clusters.clear();
+
+        // add_cluster_end() appends at the aligned end of the file.
+        let data_cluster = file_clusters * cluster_size;
+
+        let err = inner
+            .map_write(cluster_size, None)
+            .expect_err("the L2 relocation must fail with the allocator exhausted");
+        assert_eq!(err.raw_os_error(), Some(libc::ENOSPC));
+
+        let refcount = inner
+            .refcounts
+            .get_cluster_refcount(&mut inner.raw_file, data_cluster)
+            .unwrap();
+        assert_eq!(
+            refcount, 0,
+            "the data cluster of a failed write must not stay allocated"
+        );
+        assert!(
+            inner.unref_clusters.contains(&data_cluster)
+                || inner.avail_clusters.contains(&data_cluster),
+            "the data cluster of a failed write must return to the allocator"
         );
     }
 
