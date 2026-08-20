@@ -838,9 +838,9 @@ dependencies = [
 
 [[package]]
 name = "mshv-bindings"
-version = "0.6.9"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83303108160c2b7a7bdd25000ee679384e19471386d23e501ed832574c9229ef"
+checksum = "edab7a942dd5a9976cb30d316948ede2c3d0117ee4addf3404b48cb6a8666046"
 dependencies = [
  "libc",
  "num_enum",
@@ -1415,9 +1415,9 @@ dependencies = [
 
 [[package]]
 name = "vfio-ioctls"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a22f93a7f6cc51b8671b9282ed6487b0c905890be20ffa4a26835d2652a7c638"
+checksum = "e811560df37de4b473137c849f7b1f00a66d94ffb6abc3b03e6e3f555a56d79b"
 dependencies = [
  "byteorder",
  "iommufd-bindings",
@@ -1434,9 +1434,9 @@ dependencies = [
 
 [[package]]
 name = "vfio_user"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d39bb422ac00cd1d670dc0135c7b32f0a17125b47317d26e442931908c8dbf4a"
+checksum = "785d6f8ae8a88643cdd66f1ff82110292f1192f4b5e9549dff3e3410f3d3d8b2"
 dependencies = [
  "bitflags 2.13.1",
  "enumn",
