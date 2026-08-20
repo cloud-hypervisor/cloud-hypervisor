@@ -89,6 +89,22 @@ pub struct MsiIrqGroupConfig {
     pub count: InterruptIndex,
 }
 
+/// Trait to resolve the address/data of MSI/MSI-X interrupts into a meaningful
+/// set when the device is attached to a virtual IOMMU.
+///
+/// When a PCI device (virtio or vfio) sits behind a virtual IOMMU, the address
+/// and data set from the guest through the vector table is an IOVA. Given the
+/// hypervisor doesn't know about this layer of indirection, the VMM is
+/// responsible for translating the IOVA into a GPA that can be understood by
+/// the hypervisor.
+///
+/// This trait is meant to be implemented by virtual IOMMU implementations so
+/// they can perform the IOVA translation based on the mappings the guest has
+/// been setting up.
+pub trait InterruptRemapping: Send + Sync {
+    fn translate_msi(&self, dev_id: u32, cfg: MsiIrqSourceConfig) -> Option<MsiIrqSourceConfig>;
+}
+
 /// Trait to manage interrupt sources for virtual device backends.
 ///
 /// The InterruptManager implementations should protect itself from concurrent accesses internally,
