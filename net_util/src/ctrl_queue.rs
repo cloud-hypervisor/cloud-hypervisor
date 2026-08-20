@@ -83,13 +83,19 @@ fn is_tolerated_ctrl_command(ctrl_hdr: ControlHeader) -> bool {
 pub struct CtrlQueue {
     pub taps: Vec<Tap>,
     pub announce_pending: Arc<AtomicBool>,
+    pub max_virtqueue_pairs: u16,
 }
 
 impl CtrlQueue {
-    pub fn new(taps: Vec<Tap>, announce_pending: Arc<AtomicBool>) -> Self {
+    pub fn new(
+        taps: Vec<Tap>,
+        announce_pending: Arc<AtomicBool>,
+        max_virtqueue_pairs: u16,
+    ) -> Self {
         CtrlQueue {
             taps,
             announce_pending,
+            max_virtqueue_pairs,
         }
     }
 
@@ -131,6 +137,7 @@ impl CtrlQueue {
                         false
                     } else if (queue_pairs < VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN as u16)
                         || (queue_pairs > VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX as u16)
+                        || queue_pairs > self.max_virtqueue_pairs
                     {
                         warn!("Number of MQ pairs out of range: {queue_pairs}");
                         false
@@ -286,7 +293,7 @@ mod unit_tests {
         mem.write_obj(0xff_u8, GuestAddress(STATUS_ADDR)).unwrap();
 
         let announce_pending = Arc::new(AtomicBool::new(true));
-        let mut ctrl_q = CtrlQueue::new(Vec::new(), Arc::clone(&announce_pending));
+        let mut ctrl_q = CtrlQueue::new(Vec::new(), Arc::clone(&announce_pending), 1);
 
         ctrl_q.process(&mem, &mut queue, None).unwrap();
 
@@ -295,6 +302,75 @@ mod unit_tests {
             mem.read_obj::<u8>(GuestAddress(STATUS_ADDR)).unwrap(),
             VIRTIO_NET_OK as u8
         );
+    }
+
+    /// Build a three-descriptor VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET request
+    /// (readable header, readable le16 payload, writable status) and return the
+    /// status byte the device wrote.
+    fn run_mq_vq_pairs_set(requested: u16, max_virtqueue_pairs: u16) -> u8 {
+        const MEM_SIZE: usize = 0x20_0000;
+        const QSIZE: u16 = 4;
+        const QUEUE_ADDR: u64 = 0x0014_0000;
+        const HEADER_ADDR: u64 = 0x0015_0000;
+        const DATA_ADDR: u64 = 0x0015_1000;
+        const STATUS_ADDR: u64 = 0x0015_2000;
+
+        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap();
+        let guest_q = GuestQ::new(GuestAddress(QUEUE_ADDR), &mem, QSIZE);
+        let mut queue = guest_q.create_queue();
+
+        guest_q.dtable[0].set(
+            HEADER_ADDR,
+            size_of::<ControlHeader>() as u32,
+            VRING_DESC_F_NEXT.try_into().unwrap(),
+            1,
+        );
+        guest_q.dtable[1].set(
+            DATA_ADDR,
+            size_of::<u16>() as u32,
+            VRING_DESC_F_NEXT.try_into().unwrap(),
+            2,
+        );
+        guest_q.dtable[2].set(STATUS_ADDR, 1, VRING_DESC_F_WRITE.try_into().unwrap(), 0);
+        guest_q.avail.ring[0].set(0);
+        guest_q.avail.idx.set(1);
+
+        mem.write_obj(
+            ControlHeader {
+                class: VIRTIO_NET_CTRL_MQ as u8,
+                cmd: VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET as u8,
+            },
+            GuestAddress(HEADER_ADDR),
+        )
+        .unwrap();
+        mem.write_obj(requested, GuestAddress(DATA_ADDR)).unwrap();
+        mem.write_obj(0xff_u8, GuestAddress(STATUS_ADDR)).unwrap();
+
+        let mut ctrl_q = CtrlQueue::new(
+            Vec::new(),
+            Arc::new(AtomicBool::new(false)),
+            max_virtqueue_pairs,
+        );
+        ctrl_q.process(&mem, &mut queue, None).unwrap();
+
+        mem.read_obj::<u8>(GuestAddress(STATUS_ADDR)).unwrap()
+    }
+
+    #[test]
+    fn test_process_mq_vq_pairs_set_within_max_is_accepted() {
+        // The spec permits any value up to max_virtqueue_pairs, so a request
+        // for exactly that many pairs must be acknowledged.
+        assert_eq!(run_mq_vq_pairs_set(4, 4), VIRTIO_NET_OK as u8);
+        assert_eq!(run_mq_vq_pairs_set(1, 4), VIRTIO_NET_OK as u8);
+    }
+
+    #[test]
+    fn test_process_mq_vq_pairs_set_above_max_is_rejected() {
+        // "The driver MUST NOT request a virtqueue_pairs of 0 or greater than
+        // max_virtqueue_pairs in the device configuration space."
+        // Such a request must not be acknowledged as successful.
+        assert_eq!(run_mq_vq_pairs_set(5, 4), VIRTIO_NET_ERR as u8);
+        assert_eq!(run_mq_vq_pairs_set(0, 4), VIRTIO_NET_ERR as u8);
     }
 
     #[test]
@@ -328,7 +404,7 @@ mod unit_tests {
         )
         .unwrap();
 
-        let mut ctrl_q = CtrlQueue::new(Vec::new(), Arc::new(AtomicBool::new(false)));
+        let mut ctrl_q = CtrlQueue::new(Vec::new(), Arc::new(AtomicBool::new(false)), 1);
 
         assert!(matches!(
             ctrl_q.process(&mem, &mut queue, None),
