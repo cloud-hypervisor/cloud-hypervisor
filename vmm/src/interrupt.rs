@@ -13,8 +13,8 @@ use hypervisor::IrqRoutingEntry;
 use vm_allocator::SystemAllocator;
 use vm_device::interrupt;
 use vm_device::interrupt::{
-    InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
-    LegacyIrqGroupConfig, MsiIrqGroupConfig,
+    InterruptIndex, InterruptManager, InterruptRemapping, InterruptSourceConfig,
+    InterruptSourceGroup, LegacyIrqGroupConfig, MsiIrqGroupConfig, MsiIrqSourceConfig,
 };
 use vmm_sys_util::eventfd::EventFd;
 
@@ -168,10 +168,35 @@ struct RoutingEntry {
     masked: bool,
 }
 
+#[derive(Default)]
+struct InterruptRemapper {
+    remappings: Mutex<HashMap<u32, Arc<dyn InterruptRemapping>>>,
+}
+
+impl InterruptRemapper {
+    fn register(&self, dev_id: u32, remapping: Arc<dyn InterruptRemapping>) {
+        self.remappings.lock().unwrap().insert(dev_id, remapping);
+    }
+
+    fn unregister(&self, dev_id: u32) {
+        self.remappings.lock().unwrap().remove(&dev_id);
+    }
+
+    fn resolve(&self, cfg: MsiIrqSourceConfig) -> MsiIrqSourceConfig {
+        self.remappings
+            .lock()
+            .unwrap()
+            .get(&cfg.devid)
+            .and_then(|remapping| remapping.translate(cfg.devid, cfg))
+            .unwrap_or(cfg)
+    }
+}
+
 struct MsiInterruptGroup {
     vm: Arc<dyn hypervisor::Vm>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry>>>,
     irq_routes: HashMap<InterruptIndex, Mutex<InterruptRoute>>,
+    interrupt_remapper: Arc<InterruptRemapper>,
 }
 
 impl MsiInterruptGroup {
@@ -179,11 +204,13 @@ impl MsiInterruptGroup {
         vm: Arc<dyn hypervisor::Vm>,
         gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry>>>,
         irq_routes: HashMap<InterruptIndex, Mutex<InterruptRoute>>,
+        interrupt_remapper: Arc<InterruptRemapper>,
     ) -> Self {
         MsiInterruptGroup {
             vm,
             gsi_msi_routes,
             irq_routes,
+            interrupt_remapper,
         }
     }
 
@@ -241,10 +268,14 @@ impl InterruptSourceGroup for MsiInterruptGroup {
     fn update(
         &self,
         index: InterruptIndex,
-        config: InterruptSourceConfig,
+        mut config: InterruptSourceConfig,
         masked: bool,
         set_gsi: bool,
     ) -> Result<()> {
+        if let InterruptSourceConfig::MsiIrq(cfg) = &mut config {
+            *cfg = self.interrupt_remapper.resolve(*cfg);
+        }
+
         if let Some(route) = self.irq_routes.get(&index) {
             let mut route = route.lock().unwrap();
             let gsi = if masked {
@@ -358,6 +389,7 @@ pub struct MsiInterruptManager {
     allocator: Arc<Mutex<SystemAllocator>>,
     vm: Arc<dyn hypervisor::Vm>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry>>>,
+    interrupt_remapper: Arc<InterruptRemapper>,
 }
 
 impl LegacyUserspaceInterruptManager {
@@ -378,7 +410,16 @@ impl MsiInterruptManager {
             allocator,
             vm,
             gsi_msi_routes,
+            interrupt_remapper: Arc::new(InterruptRemapper::default()),
         }
+    }
+
+    pub fn register_remapping(&self, dev_id: u32, remapping: Arc<dyn InterruptRemapping>) {
+        self.interrupt_remapper.register(dev_id, remapping);
+    }
+
+    pub fn unregister_remapping(&self, dev_id: u32) {
+        self.interrupt_remapper.unregister(dev_id);
     }
 }
 
@@ -412,6 +453,7 @@ impl MsiInterruptManager {
             self.vm.clone(),
             self.gsi_msi_routes.clone(),
             irq_routes,
+            self.interrupt_remapper.clone(),
         ))
     }
 }
@@ -430,6 +472,7 @@ impl InterruptManager for MsiInterruptManager {
             self.vm.clone(),
             self.gsi_msi_routes.clone(),
             irq_routes,
+            self.interrupt_remapper.clone(),
         )))
     }
 
