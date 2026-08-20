@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
 use vm_device::dma_mapping::ExternalDmaMapping;
+use vm_device::interrupt::{InterruptRemapping, MsiIrqSourceConfig};
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
     GuestMemoryBackend, GuestMemoryError, GuestMemoryLoadGuard,
@@ -974,6 +975,7 @@ pub struct IommuMapping {
     // Global flag indicating if endpoints that are not attached to any domain
     // are in bypass mode.
     bypass: AtomicBool,
+    msi_iova_space: (u64, u64),
 }
 
 // Inclusive end of `[addr, addr+size)`. Returns None for zero size or
@@ -1087,6 +1089,25 @@ impl DmaRemapping for IommuMapping {
     }
 }
 
+impl InterruptRemapping for IommuMapping {
+    fn translate_msi(&self, dev_id: u32, cfg: MsiIrqSourceConfig) -> Option<MsiIrqSourceConfig> {
+        let addr = (u64::from(cfg.high_addr) << 32) | u64::from(cfg.low_addr);
+        let (start, end) = self.msi_iova_space;
+        let gpa = if (start..=end).contains(&addr) {
+            addr
+        } else {
+            self.translate_gva(dev_id, addr, size_of::<u32>() as u64)
+                .ok()?
+        };
+
+        Some(MsiIrqSourceConfig {
+            high_addr: (gpa >> 32) as u32,
+            low_addr: gpa as u32,
+            ..cfg
+        })
+    }
+}
+
 #[derive(Debug)]
 pub struct AccessPlatformMapping {
     id: u32,
@@ -1195,6 +1216,7 @@ impl Iommu {
             endpoints: Arc::new(RwLock::new(endpoints)),
             domains: Arc::new(RwLock::new(domains)),
             bypass: AtomicBool::new(true),
+            msi_iova_space,
         });
 
         Ok((
@@ -1484,6 +1506,7 @@ mod tests {
             endpoints: Arc::new(RwLock::new(endpoints)),
             domains: Arc::new(RwLock::new(domains)),
             bypass: AtomicBool::new(false),
+            msi_iova_space: (0, 0),
         }
     }
 
