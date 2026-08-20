@@ -4059,6 +4059,11 @@ impl DeviceManager {
                 return Err(DeviceManagerError::MissingVirtualIommu);
             }
 
+            if let Some(mapping) = &self.iommu_mapping {
+                self.msi_interrupt_manager
+                    .register_remapping(pci_device_bdf.into(), mapping.clone());
+            }
+
             vfio_ops
         } else if let Some(vfio_ops) = &self.vfio_ops {
             Arc::clone(vfio_ops)
@@ -4503,6 +4508,8 @@ impl DeviceManager {
                 pci_device_bdf.into(),
                 mapping.clone(),
             )));
+            self.msi_interrupt_manager
+                .register_remapping(pci_device_bdf.into(), mapping.clone());
         }
 
         // If SEV-SNP is enabled create the AccessPlatform from SevSnpPageAccessProxy
@@ -5242,6 +5249,9 @@ impl DeviceManager {
                 .unwrap()
                 .remove_external_mapping(pci_device_bdf.into());
         }
+
+        self.msi_interrupt_manager
+            .unregister_remapping(pci_device_bdf.into());
 
         if remove_dma_handler {
             for virtio_mem_device in self.virtio_mem_devices.iter() {
