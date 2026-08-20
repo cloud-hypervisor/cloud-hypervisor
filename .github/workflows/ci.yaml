@@ -10,6 +10,7 @@ jobs:
   preflight:
     name: preflight
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       full: ${{ steps.classify.outputs.full }}
       rust: ${{ steps.changes.outputs.rust }}
@@ -68,6 +69,7 @@ jobs:
     name: dco
     needs: [preflight]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - name: Set up Python 3.x
@@ -88,6 +90,7 @@ jobs:
     # PR-only: gitlint needs GITHUB_BASE_REF, unset on merge_group.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -111,6 +114,7 @@ jobs:
     needs: [preflight]
     if: needs.preflight.outputs.docs == 'true' || needs.preflight.outputs.full == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Code checkout
         uses: actions/checkout@v7
@@ -149,6 +153,7 @@ jobs:
     needs: [preflight]
     if: needs.preflight.outputs.cargo == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Code checkout
         uses: actions/checkout@v7
@@ -165,6 +170,7 @@ jobs:
     needs: [preflight]
     if: needs.preflight.outputs.cargo == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions-rust-lang/audit@v1
@@ -175,6 +181,7 @@ jobs:
     needs: [preflight]
     if: needs.preflight.outputs.shell == 'true' || needs.preflight.outputs.ci == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -188,6 +195,7 @@ jobs:
     needs: [preflight]
     if: needs.preflight.outputs.dockerfile == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -204,6 +212,7 @@ jobs:
     needs: [preflight]
     if: needs.preflight.outputs.full == 'true' || needs.preflight.outputs.cargo == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - name: REUSE Compliance Check
@@ -213,6 +222,7 @@ jobs:
     needs: [preflight]
     if: needs.preflight.outputs.full == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       matrix:
         rust: [nightly]
@@ -239,6 +249,7 @@ jobs:
     needs: [preflight]
     if: needs.preflight.outputs.full == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Code checkout
         uses: actions/checkout@v7
@@ -263,6 +274,7 @@ jobs:
     needs: [preflight]
     if: needs.preflight.outputs.full == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       matrix:
         rust: [nightly]
@@ -288,6 +300,7 @@ jobs:
     needs: [preflight]
     if: needs.preflight.outputs.openapi == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     container: openapitools/openapi-generator-cli
     steps:
       - uses: actions/checkout@v7
@@ -299,6 +312,7 @@ jobs:
     needs: [preflight]
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: crate-ci/typos@8a48f81b6c64dcfea44b3633223084c4be58ac5f # v1.49.0
@@ -307,6 +321,7 @@ jobs:
     needs: [preflight]
     if: needs.preflight.outputs.full == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # Beta clippy is non-blocking; continue-on-error below keeps the
     # aggregated needs.quality.result green when only beta fails.
     continue-on-error: ${{ matrix.experimental }}
@@ -473,6 +488,7 @@ jobs:
     needs: [preflight]
     if: needs.preflight.outputs.full == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -535,6 +551,7 @@ jobs:
     needs: [preflight]
     if: needs.preflight.outputs.full == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -704,6 +721,7 @@ jobs:
     if: >-
       github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
     runs-on: vfio-nvidia
+    timeout-minutes: 40
     env:
       AUTH_DOWNLOAD_TOKEN: ${{ secrets.AUTH_DOWNLOAD_TOKEN }}
     steps:
@@ -727,6 +745,7 @@ jobs:
     if: >-
       github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
     runs-on: garm-noble-16
+    timeout-minutes: 50
     steps:
       - name: Code checkout
         uses: actions/checkout@v7
