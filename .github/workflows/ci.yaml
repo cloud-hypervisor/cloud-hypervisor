@@ -559,7 +559,7 @@ jobs:
         run: cargo build --locked --package cloud-hypervisor --no-default-features --features "kvm" --target riscv64gc-unknown-linux-gnu
       - name: Check build did not modify any files
         run: test -z "$(git status --porcelain)"
-  # garm-jammy + gnu: runs on PR and MQ. Other 3 matrix entries are in
+  # garm-noble + gnu: runs on PR and MQ. Other 3 matrix entries are in
   # integration-x86-64-mq (sibling, MQ-only, runs in parallel).
   integration-x86-64-pr:
     name: integration-x86-64-pr
@@ -572,7 +572,7 @@ jobs:
       # We limit parallelism only to avoid exhausting disk space and memory
       # resources, not to save CPU resources.
       PARALLEL_INTEGRATION_TESTS_NUM: 12
-    runs-on: garm-jammy-16
+    runs-on: garm-noble-16
     steps:
       - name: Code checkout
         uses: actions/checkout@v7
@@ -613,9 +613,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {runner: garm-jammy, libc: musl}
-          - {runner: garm-jammy-amd, libc: gnu}
-          - {runner: garm-jammy-amd, libc: musl}
+          - {runner: garm-noble, libc: musl}
+          - {runner: garm-noble-amd, libc: gnu}
+          - {runner: garm-noble-amd, libc: musl}
     # format() because `${{ matrix.runner }}-16` is not valid in runs-on.
     runs-on: ${{ format('{0}-16', matrix.runner) }}
     steps:
@@ -726,7 +726,7 @@ jobs:
     needs: [preflight, dco, quality, build]
     if: >-
       github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
-    runs-on: garm-jammy-16
+    runs-on: garm-noble-16
     steps:
       - name: Code checkout
         uses: actions/checkout@v7
