@@ -363,29 +363,23 @@ impl VhostUserHandle {
     ) -> Result<()> {
         self.set_protocol_features_vhost_user(acked_features, acked_protocol_features)?;
 
-        let (vring_bases, notification_needed) =
-            if inflight.is_none() && acked_features & (1u64 << VIRTIO_F_IN_ORDER) != 0 {
-                // With in-order processing, used_idx is a contiguous completion
-                // boundary. Replay descriptors after it when inflight tracking is
-                // not available to recover them more precisely.
-                let mut vring_bases = Vec::with_capacity(queues.len());
-                let mut notification_needed = Vec::with_capacity(queues.len());
-                for (_, queue, _) in queues {
-                    let used_idx = queue
-                        .used_idx(mem, Ordering::Acquire)
-                        .map_err(Error::GetUsedIndex)?
-                        .0;
-                    let avail_idx = queue
-                        .avail_idx(mem, Ordering::Acquire)
-                        .map_err(Error::GetAvailableIndex)?
-                        .0;
-                    vring_bases.push(u64::from(used_idx));
-                    notification_needed.push(used_idx != avail_idx);
-                }
-                (Some(vring_bases), notification_needed)
-            } else {
-                (None, vec![false; queues.len()])
-            };
+        // With in-order processing, used_idx is a contiguous completion boundary.
+        // Replay descriptors after it when inflight tracking is not available to
+        // recover them more precisely.
+        let vring_bases = if inflight.is_none() && acked_features & (1u64 << VIRTIO_F_IN_ORDER) != 0
+        {
+            let mut vring_bases = Vec::with_capacity(queues.len());
+            for (_, queue, _) in queues {
+                let used_idx = queue
+                    .used_idx(mem, Ordering::Acquire)
+                    .map_err(Error::GetUsedIndex)?
+                    .0;
+                vring_bases.push(u64::from(used_idx));
+            }
+            Some(vring_bases)
+        } else {
+            None
+        };
 
         self.setup_vhost_user(
             mem,
@@ -397,10 +391,11 @@ impl VhostUserHandle {
             vring_bases.as_deref(),
         )?;
 
-        for ((_, _, queue_evt), notification_needed) in queues.iter().zip(notification_needed) {
-            if notification_needed {
-                queue_evt.write(1).map_err(Error::VhostUserKickVring)?;
-            }
+        // Kick every reconnected queue, not just queues with pending work: the
+        // replacement backend has not seen any of them, and the guest will not
+        // ring a doorbell it already rang.
+        for (_, _, queue_evt) in queues {
+            queue_evt.write(1).map_err(Error::VhostUserKickVring)?;
         }
 
         Ok(())
