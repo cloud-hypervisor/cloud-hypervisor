@@ -675,11 +675,11 @@ const IORESOURCE_PREFETCH: u64 = 0x2000;
 
 type FixedBarAddrs = [Option<GuestAddress>; VFIO_PCI_CONFIG_REGION_INDEX as usize];
 
-fn discover_fixed_bars(device_path: Option<&Path>) -> Result<FixedBarAddrs, VfioPciError> {
-    let mut addrs: FixedBarAddrs = [None; VFIO_PCI_CONFIG_REGION_INDEX as usize];
-
+fn discover_fixed_bars(
+    device_path: Option<&Path>,
+) -> Result<Option<Box<FixedBarAddrs>>, VfioPciError> {
     let Some(device_path) = device_path else {
-        return Ok(addrs);
+        return Ok(None);
     };
 
     let parse_hex = |value: &str| u64::from_str_radix(value.trim_start_matches("0x"), 16).ok();
@@ -690,8 +690,10 @@ fn discover_fixed_bars(device_path: Option<&Path>) -> Result<FixedBarAddrs, Vfio
     if read_hex("vendor") != Some(NVIDIA_VENDOR_ID)
         || !read_hex("device").is_some_and(|id| NVIDIA_COHERENT_DEVICE_IDS.contains(&id))
     {
-        return Ok(addrs);
+        return Ok(None);
     }
+
+    let mut addrs: FixedBarAddrs = [None; VFIO_PCI_CONFIG_REGION_INDEX as usize];
 
     // Line N is "<start> <end> <flags>" in hex for BAR N.
     let resource = read_to_string(device_path.join("resource"))
@@ -708,7 +710,7 @@ fn discover_fixed_bars(device_path: Option<&Path>) -> Result<FixedBarAddrs, Vfio
         }
     }
 
-    Ok(addrs)
+    Ok(Some(Box::new(addrs)))
 }
 
 pub(crate) struct VfioCommon {
@@ -721,7 +723,7 @@ pub(crate) struct VfioCommon {
     pub(crate) patches: HashMap<usize, ConfigPatch>,
     x_nv_gpudirect_clique: Option<u8>,
     x_exclude_mmap_bars: Vec<u8>,
-    fixed_bar_addrs: FixedBarAddrs,
+    fixed_bar_addrs: Option<Box<FixedBarAddrs>>,
     pub(crate) migration_flags: Option<u64>,
     // Negotiated dirty bitmap granularity while DMA logging is active.
     dma_logging_page_size: Option<u64>,
@@ -1028,8 +1030,10 @@ impl VfioCommon {
                         region_size,
                     );
 
-                    let requested_addr =
-                        restored_bar_addr.or(self.fixed_bar_addrs[bar_id as usize]);
+                    let requested_addr = restored_bar_addr.or(self
+                        .fixed_bar_addrs
+                        .as_ref()
+                        .and_then(|addrs| addrs[bar_id as usize]));
 
                     mmio64_allocator
                         .allocate(requested_addr, region_size, Some(align))
@@ -3053,7 +3057,7 @@ mod tests {
             patches: HashMap::new(),
             x_nv_gpudirect_clique: None,
             x_exclude_mmap_bars: Vec::new(),
-            fixed_bar_addrs: [None; VFIO_PCI_CONFIG_REGION_INDEX as usize],
+            fixed_bar_addrs: None,
             migration_flags,
             dma_logging_page_size: None,
         }
@@ -3061,21 +3065,19 @@ mod tests {
 
     #[test]
     fn discover_fixed_bars_detects_gb_gpus() {
-        let count = |addrs: FixedBarAddrs| addrs.iter().flatten().count();
-
-        assert_eq!(count(discover_fixed_bars(None).unwrap()), 0);
+        assert!(discover_fixed_bars(None).unwrap().is_none());
 
         let dir = env::temp_dir().join(format!("ch-idbar-test-{}", process::id()));
         let _ = fs::create_dir_all(&dir);
-        assert_eq!(count(discover_fixed_bars(Some(&dir)).unwrap()), 0);
+        assert!(discover_fixed_bars(Some(&dir)).unwrap().is_none());
 
         fs::write(dir.join("vendor"), "0x10de\n").unwrap();
         fs::write(dir.join("device"), "0x1234\n").unwrap();
-        assert_eq!(count(discover_fixed_bars(Some(&dir)).unwrap()), 0);
+        assert!(discover_fixed_bars(Some(&dir)).unwrap().is_none());
 
         fs::write(dir.join("vendor"), "0x8086\n").unwrap();
         fs::write(dir.join("device"), "0x2941\n").unwrap();
-        assert_eq!(count(discover_fixed_bars(Some(&dir)).unwrap()), 0);
+        assert!(discover_fixed_bars(Some(&dir)).unwrap().is_none());
 
         fs::write(dir.join("vendor"), "0x10de\n").unwrap();
         let err = discover_fixed_bars(Some(&dir)).unwrap_err();
@@ -3090,14 +3092,22 @@ mod tests {
              0x0000664000000000 0x0000667fffffffff 0x000000000014220c\n",
         )
         .unwrap();
-        let addrs = discover_fixed_bars(Some(&dir)).unwrap();
-        assert_eq!(count(addrs), 2);
+        let addrs = discover_fixed_bars(Some(&dir)).unwrap().unwrap();
+        assert_eq!(addrs.iter().flatten().count(), 2);
         assert!(addrs[0].is_none());
         assert_eq!(addrs[2], Some(GuestAddress(0x0000_663f_fc00_0000)));
         assert_eq!(addrs[4], Some(GuestAddress(0x0000_6640_0000_0000)));
 
         fs::write(dir.join("device"), "0x31c2\n").unwrap();
-        assert_eq!(count(discover_fixed_bars(Some(&dir)).unwrap()), 2);
+        assert_eq!(
+            discover_fixed_bars(Some(&dir))
+                .unwrap()
+                .unwrap()
+                .iter()
+                .flatten()
+                .count(),
+            2
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
