@@ -1330,12 +1330,28 @@ impl MemoryManager {
                 }
 
                 let fault_addr = msg.pf_address;
+                let minor_fault = msg.pf_flags & userfaultfd::UFFD_PAGEFAULT_FLAG_MINOR != 0;
 
                 let mut served = false;
                 for (range_idx, range) in ranges.iter().enumerate() {
                     let Some(page_idx) = range.page_index_of(fault_addr) else {
                         continue;
                     };
+
+                    if minor_fault {
+                        match uffd::uffd_continue(
+                            uffd_fd.as_fd(),
+                            range.page_addr(page_idx),
+                            range.page_size,
+                        ) {
+                            Ok(()) => {}
+                            Err(e) if e.raw_os_error() == Some(libc::EEXIST) => {}
+                            Err(e) => return Err(e),
+                        }
+                        served_bitmap[range_idx].set_bit(page_idx as usize);
+                        served = true;
+                        break;
+                    }
 
                     if let Err(e) = source.resolve(uffd_fd.as_fd(), range, page_idx) {
                         if stop_event.read().is_ok() {
