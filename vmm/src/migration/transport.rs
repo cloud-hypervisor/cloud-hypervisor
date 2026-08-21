@@ -687,7 +687,7 @@ impl SendAdditionalConnections {
         tls_dir: Option<&Path>,
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         seccomp_filter: &BpfProgram,
-        cancel_ctx: Arc<CancelContextMigration>
+        cancel_ctx: Arc<CancelContextMigration>,
     ) -> Result<Self, MigratableError> {
         let mut threads = Vec::new();
         let configured_connections = connections.get();
@@ -705,7 +705,7 @@ impl SendAdditionalConnections {
                 message_tx,
                 worker_error,
                 notify_rx,
-                cancel_ctx
+                cancel_ctx,
             });
         }
 
@@ -738,7 +738,7 @@ impl SendAdditionalConnections {
                         &message_rx,
                         &worker_error,
                         &notify_tx,
-                        &cancel_ctx
+                        &cancel_ctx,
                     )
                 })
                 .inspect_err(|_| {
@@ -761,7 +761,7 @@ impl SendAdditionalConnections {
             message_tx,
             worker_error,
             notify_rx,
-            cancel_ctx
+            cancel_ctx,
         })
     }
 
@@ -809,7 +809,8 @@ impl SendAdditionalConnections {
                         .map_err(|e| match e {
                             MigratableError::Canceled => MigratableError::Canceled,
                             e => MigratableError::MigrateSend(
-                                anyhow::Error::new(e).context("Error sending memory to receiver side"),
+                                anyhow::Error::new(e)
+                                    .context("Error sending memory to receiver side"),
                             ),
                         })?;
                 }
@@ -895,11 +896,7 @@ impl SendAdditionalConnections {
     }
 
     /// Wait until all data that is in-flight has actually been sent and acknowledged.
-    fn wait_for_pending_data(
-        &mut self,
-        socket: &mut SocketStream,
-        cancel_ctx: &CancelContextMigration,
-    ) -> Result<(), MigratableError> {
+    fn wait_for_pending_data(&mut self) -> Result<(), MigratableError> {
         let gate = Arc::new(Gate::new());
         for _ in 0..self.threads.len() {
             self.message_tx
@@ -908,32 +905,30 @@ impl SendAdditionalConnections {
                 .map_err(MigratableError::MigrateSend)?;
         }
 
-        // Wait until all worker threads report back (Gate or Error),
-        // periodically checking for cancellation.
+        // We cannot simply wait at the gate, otherwise we might miss it when a sender
+        // thread encounters an error. Thus we wait for the workers to notify us that
+        // they arrived at the gate.
         let mut seen_threads = 0;
         loop {
-            match self.notify_rx.recv_timeout(Duration::from_millis(5)) {
-                Ok(SendMemoryThreadNotify::Gate) => {
+            match self
+                .notify_rx
+                .recv()
+                .context("Error receiving message from workers")
+                .map_err(MigratableError::MigrateSend)?
+            {
+                SendMemoryThreadNotify::Gate => {
                     seen_threads += 1;
                     if seen_threads == self.threads.len() {
                         gate.open();
                         return Ok(());
                     }
                 }
-                Ok(SendMemoryThreadNotify::Error) => {
+                SendMemoryThreadNotify::Error => {
+                    // If an error occurred in one of the worker threads, we open
+                    // the gate to make sure that no thread hangs. After that, we
+                    // receive the error from Self::cleanup() and return it.
                     gate.open();
                     return self.cleanup();
-                }
-                Err(RecvTimeoutError::Timeout) => {
-                    cancel_ctx.ok_or_cancelled(socket).inspect_err(|_| {
-                        gate.open();
-                        self.external_cancel.store(true, Ordering::Release);
-                    })?;
-                }
-                Err(RecvTimeoutError::Disconnected) => {
-                    return Err(MigratableError::MigrateSend(anyhow!(
-                        "All senders died unexpectedly."
-                    )));
                 }
             }
         }
@@ -1250,7 +1245,6 @@ pub(crate) fn send_memory_ranges(
     // And then the memory itself
     let mem = guest_memory.memory();
     for range in ranges.regions() {
-
         let mut offset: u64 = 0;
         // Here we are manually handling the retry in case we can't read the
         // whole region at once because we can't use the implementation
