@@ -12,6 +12,7 @@ use vm_memory::{GuestAddress, MmapRegion};
 mod bus;
 pub mod dma_mapping;
 pub mod interrupt;
+pub mod uffd;
 
 pub use self::bus::{Bus, BusDevice, BusDeviceSync, Error as BusError};
 

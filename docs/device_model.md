@@ -142,6 +142,23 @@ allows bypassing the guest page cache and improve the guest memory footprint.
 This device is always built-in, and it is enabled based on the presence of the
 flag `--pmem`.
 
+`readonly=on` exposes a read-only PMEM range and uses a shared, read-only host
+mapping. In this mode, `discard_writes` has no effect.
+
+An external userfaultfd backend can supply a read-only PMEM image on demand:
+
+```bash
+--pmem file=/run/external-uffd.sock,size=4G,backend_type=uffd,readonly=on
+```
+
+For this backend, `file` names the server's Unix socket and `size` is required.
+Cloud Hypervisor registers an empty PMEM mapping with userfaultfd and sends a
+stateful customized Handshake with the effective `MISSING` mode to the server.
+The server returns file-backed ranges that Cloud Hypervisor maps into the PMEM
+address space. Writable external PMEM is not currently supported. See
+[External userfaultfd backend](external-uffd-backend.md) for the protocol
+overview, operation, and current limitations.
+
 ### virtio-rng
 
 A VM does not generate entropy like a real machine would, which is an issue
