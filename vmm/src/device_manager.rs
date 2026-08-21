@@ -104,9 +104,7 @@ use virtio_devices::{
 };
 use vm_allocator::{AddressAllocator, InterruptAllocError, SystemAllocator};
 use vm_device::dma_mapping::ExternalDmaMapping;
-use vm_device::interrupt::{
-    InterruptIndex, InterruptManager, LegacyIrqGroupConfig, MsiIrqGroupConfig,
-};
+use vm_device::interrupt::{InterruptIndex, InterruptManager, LegacyIrqGroupConfig};
 use vm_device::{Bus, BusDevice, BusDeviceSync, Resource, UserspaceMapping};
 #[cfg(feature = "ivshmem")]
 use vm_memory::bitmap::AtomicBitmap;
@@ -1081,7 +1079,7 @@ pub struct DeviceManager {
 
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     // MSI Interrupt Manager
-    msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+    msi_interrupt_manager: Arc<MsiInterruptManager>,
 
     #[cfg_attr(feature = "mshv", allow(dead_code))]
     // Legacy Interrupt Manager
@@ -1322,11 +1320,10 @@ impl DeviceManager {
         // and then the legacy interrupt manager needs an IOAPIC. So we're
         // handling a linear dependency chain:
         // msi_interrupt_manager <- IOAPIC <- legacy_interrupt_manager.
-        let msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>> =
-            Arc::new(MsiInterruptManager::new(
-                Arc::clone(&address_manager.allocator),
-                vm,
-            ));
+        let msi_interrupt_manager = Arc::new(MsiInterruptManager::new(
+            Arc::clone(&address_manager.allocator),
+            vm,
+        ));
 
         let acpi_address = address_manager
             .allocator
@@ -1814,7 +1811,7 @@ impl DeviceManager {
         let interrupt_controller: Arc<Mutex<gic::Gic>> = Arc::new(Mutex::new(
             gic::Gic::new(
                 self.config.lock().unwrap().cpus.boot_vcpus,
-                Arc::clone(&self.msi_interrupt_manager),
+                self.msi_interrupt_manager.clone(),
                 self.address_manager.vm.clone(),
             )
             .map_err(DeviceManagerError::CreateInterruptController)?,
@@ -1867,7 +1864,7 @@ impl DeviceManager {
         let interrupt_controller: Arc<Mutex<aia::Aia>> = Arc::new(Mutex::new(
             aia::Aia::new(
                 self.config.lock().unwrap().cpus.boot_vcpus,
-                Arc::clone(&self.msi_interrupt_manager),
+                self.msi_interrupt_manager.clone(),
                 self.address_manager.vm.clone(),
             )
             .map_err(DeviceManagerError::CreateInterruptController)?,
@@ -4062,6 +4059,11 @@ impl DeviceManager {
                 return Err(DeviceManagerError::MissingVirtualIommu);
             }
 
+            if let Some(mapping) = &self.iommu_mapping {
+                self.msi_interrupt_manager
+                    .register_remapping(pci_device_bdf.into(), mapping.clone());
+            }
+
             vfio_ops
         } else if let Some(vfio_ops) = &self.vfio_ops {
             Arc::clone(vfio_ops)
@@ -4506,6 +4508,8 @@ impl DeviceManager {
                 pci_device_bdf.into(),
                 mapping.clone(),
             )));
+            self.msi_interrupt_manager
+                .register_remapping(pci_device_bdf.into(), mapping.clone());
         }
 
         // If SEV-SNP is enabled create the AccessPlatform from SevSnpPageAccessProxy
@@ -5245,6 +5249,9 @@ impl DeviceManager {
                 .unwrap()
                 .remove_external_mapping(pci_device_bdf.into());
         }
+
+        self.msi_interrupt_manager
+            .unregister_remapping(pci_device_bdf.into());
 
         if remove_dma_handler {
             for virtio_mem_device in self.virtio_mem_devices.iter() {
