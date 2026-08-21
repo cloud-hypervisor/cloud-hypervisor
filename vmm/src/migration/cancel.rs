@@ -60,6 +60,9 @@ impl CancelContextMigration {
     pub fn ok_or_cancelled(&self, socket: &mut SocketStream) -> Result<(), MigratableError> {
         if self.cancel.load(Ordering::Acquire) {
             info!("Cancelling migration now");
+            // The receiver may not be waiting for the next command (e.g. while
+            // receiving memory), so abandonment is best effort. It will observe
+            // the failed migration once the sender closes all connections.
             Request::abandon().write_to(socket)?;
             Err(MigratableError::Canceled)
         } else {

@@ -649,13 +649,11 @@ pub(crate) struct SendAdditionalConnections {
     /// this using this flag. Only the main thread checks this variable, the worker
     /// threads will be stopped during cleanup.
     worker_error: Arc<AtomicBool>,
-    /// Externally triggered cancellation. Workers drain queued memory messages
-    /// after this is set and wait for the disconnect message.
-    external_cancel: Arc<AtomicBool>,
     /// After the main thread sent all memory chunks to the sender threads, it waits
     /// until one of the workers notifies it. Either because an error occurred, or
     /// because they arrived at the gate.
     notify_rx: Receiver<SendMemoryThreadNotify>,
+    cancel_ctx: Arc<CancelContextMigration>,
 }
 
 impl SendAdditionalConnections {
@@ -689,13 +687,13 @@ impl SendAdditionalConnections {
         tls_dir: Option<&Path>,
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         seccomp_filter: &BpfProgram,
+        cancel_ctx: Arc<CancelContextMigration>
     ) -> Result<Self, MigratableError> {
         let mut threads = Vec::new();
         let configured_connections = connections.get();
         let buffer_size = Self::BUFFERED_REQUESTS_PER_THREAD * configured_connections as usize;
         let (message_tx, message_rx) = sync_channel::<SendMemoryThreadMessage>(buffer_size);
         let worker_error = Arc::new(AtomicBool::new(false));
-        let external_cancel = Arc::new(AtomicBool::new(false));
         let (notify_tx, notify_rx) = channel::<SendMemoryThreadNotify>();
 
         // If one connection is configured, we don't have to create any additional threads.
@@ -706,8 +704,8 @@ impl SendAdditionalConnections {
                 threads,
                 message_tx,
                 worker_error,
-                external_cancel,
                 notify_rx,
+                cancel_ctx
             });
         }
 
@@ -721,9 +719,9 @@ impl SendAdditionalConnections {
             let guest_memory = guest_memory.clone();
             let message_rx = message_rx.clone();
             let worker_error = worker_error.clone();
-            let external_cancel = external_cancel.clone();
             let notify_tx = notify_tx.clone();
             let seccomp_filter = seccomp_filter.clone();
+            let cancel_ctx = cancel_ctx.clone();
 
             let thread = thread::Builder::new()
                 .name(format!("migrate-send-memory-{n}"))
@@ -739,8 +737,8 @@ impl SendAdditionalConnections {
                         &guest_memory,
                         &message_rx,
                         &worker_error,
-                        &external_cancel,
                         &notify_tx,
+                        &cancel_ctx
                     )
                 })
                 .inspect_err(|_| {
@@ -762,18 +760,20 @@ impl SendAdditionalConnections {
             threads,
             message_tx,
             worker_error,
-            external_cancel,
             notify_rx,
+            cancel_ctx
         })
     }
 
+    /// The loop every send worker executes that takes memory range tables out
+    /// of the channel and sends the corresponding memory over the wire.
     fn worker_send_memory(
         socket: &mut SocketStream,
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         message_rx: &Mutex<Receiver<SendMemoryThreadMessage>>,
         worker_error: &AtomicBool,
-        external_cancel: &AtomicBool,
         notify_tx: &Sender<SendMemoryThreadNotify>,
+        cancel_ctx: &CancelContextMigration,
     ) -> Result<(), MigratableError> {
         loop {
             // Every memory sending thread receives messages from the main thread through this
@@ -796,17 +796,22 @@ impl SendAdditionalConnections {
                 })?;
             match message {
                 SendMemoryThreadMessage::Memory(table) => {
-                    if external_cancel.load(Ordering::Acquire) {
+                    let ignore_sending = worker_error.load(Ordering::Relaxed);
+                    if ignore_sending {
                         continue;
                     }
 
-                    send_memory_ranges(guest_memory, &table, socket)
+                    send_memory_ranges(guest_memory, &table, socket, cancel_ctx)
                         .inspect_err(|_| {
                             worker_error.store(true, Ordering::Relaxed);
                             notify_tx.send(SendMemoryThreadNotify::Error).ok();
                         })
-                        .context("Error sending memory to receiver side")
-                        .map_err(MigratableError::MigrateSend)?;
+                        .map_err(|e| match e {
+                            MigratableError::Canceled => MigratableError::Canceled,
+                            e => MigratableError::MigrateSend(
+                                anyhow::Error::new(e).context("Error sending memory to receiver side"),
+                            ),
+                        })?;
                 }
                 SendMemoryThreadMessage::Gate(gate) => {
                     notify_tx
@@ -844,25 +849,22 @@ impl SendAdditionalConnections {
 
         // If we use only one connection, we send the memory directly.
         if self.threads.is_empty() {
-            send_memory_ranges(&self.guest_memory, &table, socket)?;
+            send_memory_ranges(&self.guest_memory, &table, socket, cancel_ctx)?;
             return Ok(true);
         }
 
         // The chunk size is chosen to be big enough so that even very fast links need some
         // milliseconds to send it.
         for chunk in table.partition(Self::CHUNK_SIZE) {
-            cancel_ctx.ok_or_cancelled(socket).inspect_err(|_| {
-                debug!("Cancelling migration during memory iteration");
-                self.external_cancel.store(true, Ordering::Release);
-            })?;
-            self.send_chunk(chunk)?;
+            self.enqueue_chunk(chunk)?;
         }
 
         self.wait_for_pending_data(socket, cancel_ctx)?;
         Ok(true)
     }
 
-    fn send_chunk(&mut self, chunk: MemoryRangeTable) -> Result<(), MigratableError> {
+    /// Enqueues a request to send a memory range table for the send workers.
+    fn enqueue_chunk(&mut self, chunk: MemoryRangeTable) -> Result<(), MigratableError> {
         let mut chunk = SendMemoryThreadMessage::Memory(chunk);
         // [`Self::message_tx`] has a limited size, so we may have to retry sending the chunk
         loop {
@@ -1228,10 +1230,14 @@ pub(crate) fn send_state(
 /// Sends a memory migration request, the range table, and the corresponding
 /// guest memory range over the given socket. Waits for acknowledgment
 /// from the destination.
+///
+/// /// Cancels transmission when requested by the corresponding
+/// [`CancelContextMigration`] to avoid unnecessary network transfers.
 pub(crate) fn send_memory_ranges(
     guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
     ranges: &MemoryRangeTable,
     socket: &mut SocketStream,
+    cancel_ctx: &CancelContextMigration,
 ) -> Result<(), MigratableError> {
     if ranges.regions().is_empty() {
         return Ok(());
@@ -1244,7 +1250,6 @@ pub(crate) fn send_memory_ranges(
     // And then the memory itself
     let mem = guest_memory.memory();
     for range in ranges.regions() {
-        //cancel_ctx.ok_or_cancelled(socket)?;
 
         let mut offset: u64 = 0;
         // Here we are manually handling the retry in case we can't read the
@@ -1253,6 +1258,9 @@ pub(crate) fn send_memory_ranges(
         // following the correct behavior. For more info about this issue
         // see: https://github.com/rust-vmm/vm-memory/issues/174
         loop {
+            // Return if there is a pending cancellation request.
+            cancel_ctx.ok_or_cancelled(socket)?;
+
             let bytes_written = mem
                 .write_volatile_to(
                     GuestAddress(range.gpa + offset),

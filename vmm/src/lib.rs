@@ -1727,8 +1727,8 @@ impl Vmm {
         // point, they currently cannot be reacquired.
         //
         // Cancellation is checked repeatedly during memory transmission, which
-        // may take minutes. The remaining steps are short, so this final check
-        // is sufficient.
+        // may take minutes. The other steps are short, so this single final
+        // check is sufficient.
         cancel_ctx.ok_or_cancelled(&mut socket)?;
 
         // We release the locks early to enable locking them on the destination host.
@@ -1775,7 +1775,7 @@ impl Vmm {
                 && !matches!(send_data_migration.memory_mode, MigrationMode::Postcopy)
             {
                 let memory_ranges = vm.dirty_log()?;
-                transport::send_memory_ranges(&vm.guest_memory(), &memory_ranges, &mut socket)?;
+                transport::send_memory_ranges(&vm.guest_memory(), &memory_ranges, &mut socket, &cancel_ctx)?;
             }
             Ok(snapshot)
         })?;
