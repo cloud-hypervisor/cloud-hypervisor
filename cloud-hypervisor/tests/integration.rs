@@ -7310,17 +7310,7 @@ mod common_parallel {
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
 
-            let stress_worker = boot_vcpus - 1;
-            let stress_mem_per_worker =
-                (memory_size_mb as f64 * 0.75 / stress_worker as f64) as u64;
-            // Start a memory stressor in the background to keep pages dirty,
-            // ensuring the precopy loop cannot converge within the 1s timeout.
-            let stress_cmd = format!(
-                "nohup stress --vm {stress_worker} --vm-bytes {stress_mem_per_worker}M --vm-keep &>/dev/null &"
-            );
-            guest.ssh_command(&stress_cmd).unwrap();
-            // Give stress a moment to actually start dirtying memory
-            thread::sleep(Duration::from_secs(4));
+            start_stress_in_vm(&guest);
 
             let migration_port = get_available_port();
             let host_ip = "127.0.0.1";

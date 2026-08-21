@@ -1485,6 +1485,7 @@ impl Guest {
             .map_err(Error::Parsing)
     }
 
+    /// Returns the guest memory size in kb.
     pub fn get_total_memory(&self) -> Result<u32, Error> {
         self.ssh_command("grep MemTotal /proc/meminfo | grep -o \"[0-9]*\"")?
             .trim()
@@ -2723,6 +2724,34 @@ pub fn edk2_path() -> PathBuf {
     edk2_path.push(OVMF_NAME);
 
     edk2_path
+}
+
+/// Starts a memory-intensive stress workload in the VM.
+///
+/// This is useful for example to slow down migrations, i.e., enforce multiple
+/// precopy iterations. Keeps one vCPU idle to ensure liveliness and
+/// responsiveness.
+pub fn start_stress_in_vm(guest: &Guest) {
+    let memory_size_mb = guest
+        .get_total_memory()
+        .expect("guest should be responsive via SSH")
+        / 1024;
+    let stress_worker = guest
+        .get_cpu_count()
+        .expect("guest should be responsive via SSH")
+        .saturating_sub(1)
+        .max(1);
+    // Maximize memory usage (thus memory writes) but leave some headroom to
+    // prevent OOM.
+    let stress_mem_per_worker = (memory_size_mb as f64 * 0.75 / stress_worker as f64) as u64;
+    // Start a memory stressor in the background to keep pages dirty,
+    // ensuring the precopy loop cannot converge within the 1s timeout.
+    let stress_cmd = format!(
+        "nohup stress --vm {stress_worker} --vm-bytes {stress_mem_per_worker}M --vm-keep &>/dev/null &"
+    );
+    guest.ssh_command(&stress_cmd).unwrap();
+    // Give stress a moment to actually start dirtying memory
+    thread::sleep(Duration::from_secs(4));
 }
 
 pub const DIRECT_KERNEL_BOOT_CMDLINE: &str =
