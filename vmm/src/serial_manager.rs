@@ -13,7 +13,7 @@ use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::{fs, io, panic, result, thread, time};
+use std::{io, panic, result, thread, time};
 
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
@@ -80,10 +80,6 @@ pub enum Error {
     #[error("Error shutting down a connection")]
     ShutdownConnection(#[source] io::Error),
 
-    /// Cannot remove the serial socket
-    #[error("Error removing serial socket")]
-    RemoveUnixSocket(#[source] io::Error),
-
     /// Cannot duplicate file descriptor
     #[error("Error duplicating file descriptor")]
     DupFd(#[source] io::Error),
@@ -148,7 +144,6 @@ impl Write for SharedSerialBuffer {
 
 #[derive(Clone)]
 struct SocketConsole {
-    path: PathBuf,
     /// Persistent ring buffer: captures serial output while no client is
     /// connected and replays it on connect. Shared with the serial device's
     /// `out` sink and retargeted by the epoll thread.
@@ -261,7 +256,7 @@ impl SerialManager {
         // before the first client connects is captured rather than dropped.
         let mut socket_console = None;
         if let ConsoleTransport::Socket(_) = transport
-            && let Some(path) = socket_path
+            && socket_path.is_some()
         {
             let write_out = Arc::new(AtomicBool::new(false));
             let buffer = Arc::new(Mutex::new(SerialBuffer::new(
@@ -273,11 +268,7 @@ impl SerialManager {
                 .lock()
                 .unwrap()
                 .set_out(Some(Box::new(SharedSerialBuffer(buffer.clone()))));
-            socket_console = Some(SocketConsole {
-                path,
-                buffer,
-                write_out,
-            });
+            socket_console = Some(SocketConsole { buffer, write_out });
         }
 
         // Use 'OwnedFd' to manage lifetime
@@ -406,14 +397,16 @@ impl SerialManager {
                                             .map_err(Error::AcceptConnection)?;
                                     }
 
-                                    let ConsoleTransport::Socket(ref listener) = transport else {
+                                    let ConsoleTransport::Socket(ref socket) = transport else {
                                         unreachable!();
                                     };
 
                                     // Events on the listening socket will be connection requests.
                                     // Accept them, create a reader and a writer.
-                                    let (unix_stream, _) =
-                                        listener.accept().map_err(Error::AcceptConnection)?;
+                                    let (unix_stream, _) = socket
+                                        .listener()
+                                        .accept()
+                                        .map_err(Error::AcceptConnection)?;
                                     // Non-blocking so a slow client can't stall
                                     // the vCPU (SerialBuffer re-buffers on WouldBlock).
                                     unix_stream
@@ -537,11 +530,6 @@ impl Drop for SerialManager {
         self.kill_evt.write(1).ok();
         if let Some(handle) = self.handle.take() {
             handle.join().ok();
-        }
-        if let Some(socket_console) = self.socket_console.as_ref() {
-            fs::remove_file(&socket_console.path)
-                .map_err(Error::RemoveUnixSocket)
-                .ok();
         }
     }
 }
