@@ -15,6 +15,7 @@ use crate::coredump::GuestDebuggableError;
 use crate::vm::VmSnapshot;
 use crate::vm_config::VmConfig;
 
+pub(crate) mod cancel;
 pub(crate) mod transport;
 pub(crate) mod worker;
 

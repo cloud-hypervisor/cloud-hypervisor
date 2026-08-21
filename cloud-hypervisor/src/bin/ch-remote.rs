@@ -35,10 +35,10 @@ type ApiResult = Result<(), Error>;
 
 #[derive(Error, Debug)]
 enum Error {
-    #[error("http client error")]
+    #[error("Http Client Error")]
     HttpApiClient(#[source] ApiClientError),
     #[cfg(feature = "dbus_api")]
-    #[error("dbus api client error")]
+    #[error("D-Bus API Client Error")]
     DBusApiClient(#[source] zbus::Error),
     #[error("Error parsing CPU count")]
     InvalidCpuCount(#[source] num::ParseIntError),
@@ -557,6 +557,8 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
             )?;
             simple_api_command(socket, "PUT", "create", Some(&data)).map_err(Error::HttpApiClient)
         }
+        Some("cancel-migration") => simple_api_command(socket, "PUT", "cancel-migration", None)
+            .map_err(Error::HttpApiClient),
         _ => unreachable!(),
     }
 }
@@ -1073,6 +1075,7 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
             .about("Add vsock device")
             .arg(Arg::new("vsock_config").index(1).help(VsockConfig::SYNTAX)),
         Command::new("boot").about("Boot a created VM"),
+        Command::new("cancel-migration").about("Cancel any ongoing migration"),
         Command::new("coredump")
             .about("Create a coredump from VM")
             .arg(Arg::new("coredump_config").index(1).help("<file_path>")),
