@@ -20,6 +20,7 @@ use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 #[cfg(not(target_arch = "riscv64"))]
 use std::time::Instant;
 use std::{any, cmp, result, str, thread};
@@ -2987,6 +2988,21 @@ impl Vm {
     /// Gets the actual size of the balloon.
     pub fn balloon_size(&self) -> u64 {
         self.device_manager.lock().unwrap().balloon_size()
+    }
+
+    pub fn balloon_stats(&self) -> Result<virtio_devices::BalloonStats> {
+        // Keep a non-responsive guest from blocking the VMM API loop indefinitely.
+        const STATS_TIMEOUT: Duration = Duration::from_secs(1);
+
+        let request = {
+            self.device_manager
+                .lock()
+                .unwrap()
+                .request_balloon_stats()
+                .map_err(Error::DeviceManager)?
+        };
+
+        request.wait(STATS_TIMEOUT).map_err(Error::DeviceManager)
     }
 
     /// Get the actual size of the virtio_mem regions
