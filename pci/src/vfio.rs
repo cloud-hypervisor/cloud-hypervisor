@@ -696,7 +696,7 @@ fn discover_fixed_bars(device_path: Option<&Path>) -> Result<FixedBarAddrs, Vfio
     // Line N is "<start> <end> <flags>" in hex for BAR N.
     let resource = read_to_string(device_path.join("resource"))
         .map_err(|_| VfioPciError::DiscoverFixedBars(device_path.to_path_buf()))?;
-    for (addr, line) in addrs.iter_mut().zip(resource.lines()) {
+    for (bar_id, line) in resource.lines().enumerate().take(addrs.len()) {
         let mut fields = line.split_whitespace();
 
         if let Some(base) = fields.next().and_then(parse_hex)
@@ -704,7 +704,7 @@ fn discover_fixed_bars(device_path: Option<&Path>) -> Result<FixedBarAddrs, Vfio
             && base != 0
             && flags & IORESOURCE_PREFETCH != 0
         {
-            *addr = Some(GuestAddress(base));
+            addrs[bar_id] = Some(GuestAddress(base));
         }
     }
 
