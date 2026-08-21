@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::result::Result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{
-    Receiver, RecvTimeoutError, Sender, SyncSender, TrySendError, channel, sync_channel,
+    Receiver, Sender, SyncSender, TrySendError, channel, sync_channel,
 };
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -653,7 +653,6 @@ pub(crate) struct SendAdditionalConnections {
     /// until one of the workers notifies it. Either because an error occurred, or
     /// because they arrived at the gate.
     notify_rx: Receiver<SendMemoryThreadNotify>,
-    cancel_ctx: Arc<CancelContextMigration>,
 }
 
 impl SendAdditionalConnections {
@@ -687,7 +686,7 @@ impl SendAdditionalConnections {
         tls_dir: Option<&Path>,
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         seccomp_filter: &BpfProgram,
-        cancel_ctx: Arc<CancelContextMigration>,
+        cancel_ctx: &Arc<CancelContextMigration>,
     ) -> Result<Self, MigratableError> {
         let mut threads = Vec::new();
         let configured_connections = connections.get();
@@ -705,7 +704,6 @@ impl SendAdditionalConnections {
                 message_tx,
                 worker_error,
                 notify_rx,
-                cancel_ctx,
             });
         }
 
@@ -761,7 +759,6 @@ impl SendAdditionalConnections {
             message_tx,
             worker_error,
             notify_rx,
-            cancel_ctx,
         })
     }
 
@@ -838,6 +835,14 @@ impl SendAdditionalConnections {
     /// sent, Ok(false) if the given table was empty.
     ///
     /// When this function returns, all memory has been sent and acknowledged.
+    ///
+    /// # Cancellation
+    ///
+    /// The cancellation is either handled via the provided
+    /// [`CancelContextMigration`] in case there is only a single connection.
+    ///
+    /// Otherwise, a shared copy of [`CancelContextMigration`] living in each
+    /// send worker takes care of the cancellation.
     pub(crate) fn send_memory(
         &mut self,
         table: MemoryRangeTable,
@@ -860,7 +865,7 @@ impl SendAdditionalConnections {
             self.enqueue_chunk(chunk)?;
         }
 
-        self.wait_for_pending_data(socket, cancel_ctx)?;
+        self.wait_for_pending_data()?;
         Ok(true)
     }
 

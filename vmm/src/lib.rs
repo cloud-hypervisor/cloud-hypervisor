@@ -1596,10 +1596,11 @@ impl Vmm {
         send_data_migration: &VmSendMigrationData,
         initial_vm_state: VmState,
         seccomp_filters: &MigrationSeccompFilters,
-        cancel_ctx: &CancelContextMigration,
+        cancel_ctx: CancelContextMigration,
     ) -> result::Result<(), MigratableError> {
         // State machine that is updated with more context as we progress.
         let mut ctx = OngoingMigrationContext::new();
+        let cancel_ctx = Arc::new(cancel_ctx);
 
         // Set up the socket connection
         let mut socket = transport::send_migration_socket(
@@ -1702,6 +1703,7 @@ impl Vmm {
                 send_data_migration.tls_dir.as_deref(),
                 &vm.guest_memory(),
                 &seccomp_filters.tcp_worker,
+                &cancel_ctx
             )?;
 
             Self::do_memory_migration(
@@ -1710,7 +1712,7 @@ impl Vmm {
                 send_data_migration,
                 &mut mem_send,
                 &mut ctx,
-                cancel_ctx,
+                &cancel_ctx,
             )
             .inspect_err(|_| {
                 // Calling cleanup multiple times is fine, thus here we just make sure
@@ -1775,7 +1777,12 @@ impl Vmm {
                 && !matches!(send_data_migration.memory_mode, MigrationMode::Postcopy)
             {
                 let memory_ranges = vm.dirty_log()?;
-                transport::send_memory_ranges(&vm.guest_memory(), &memory_ranges, &mut socket, &cancel_ctx)?;
+                transport::send_memory_ranges(
+                    &vm.guest_memory(),
+                    &memory_ranges,
+                    &mut socket,
+                    &cancel_ctx,
+                )?;
             }
             Ok(snapshot)
         })?;

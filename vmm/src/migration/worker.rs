@@ -122,7 +122,7 @@ impl MigrationWorker {
                     &self.config,
                     self.initial_vm_state,
                     &self.seccomp_filters,
-                    &self.cancel_ctx,
+                    self.cancel_ctx,
                 )
             })
             .inspect(|_| {
