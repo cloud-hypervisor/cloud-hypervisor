@@ -25,7 +25,7 @@ use virtio_queue::DescriptorChain;
 use vm_memory::bitmap::Bitmap;
 use vm_memory::{
     Address as _, Bytes as _, GuestAddress, GuestMemoryBackend as _, GuestMemoryError,
-    GuestMemoryLoadGuard,
+    GuestMemoryLoadGuard, GuestMemoryRegion as _,
 };
 use vm_virtio::AccessPlatform;
 use vm_virtio::checked_descriptor::DescriptorChainExt;
@@ -62,6 +62,34 @@ pub enum RequestType {
 }
 
 pub const DEFAULT_DESCRIPTOR_VEC_SIZE: usize = 32;
+
+// Splits guest ranges at memory-region boundaries so that every returned
+// range lies within a single region. A guest-physically-contiguous buffer
+// can span two RAM regions that are adjacent in guest address space (e.g.
+// boot RAM followed by hotplugged RAM) but map to unrelated host addresses,
+// so a single `get_slice` over the whole range fails even though every byte
+// of it is valid guest memory.
+fn split_descriptors_by_region<B: Bitmap + 'static>(
+    mem: &vm_memory::GuestMemoryMmap<B>,
+    descriptors: &[(GuestAddress, u32)],
+) -> Result<SmallVec<[(GuestAddress, u32); DEFAULT_DESCRIPTOR_VEC_SIZE]>, ExecuteError> {
+    let mut split = SmallVec::new();
+    for &(addr, len) in descriptors {
+        let mut addr = addr;
+        let mut remaining = u64::from(len);
+        while remaining > 0 {
+            let region = mem.find_region(addr).ok_or(ExecuteError::GetHostAddress(
+                GuestMemoryError::InvalidGuestAddress(addr),
+            ))?;
+            let in_region = region.len() - (addr.raw_value() - region.start_addr().raw_value());
+            let take = remaining.min(in_region);
+            split.push((addr, take as u32));
+            addr = GuestAddress(addr.raw_value() + take);
+            remaining -= take;
+        }
+    }
+    Ok(split)
+}
 
 pub struct ExecuteAsync {
     // `true` if the execution will complete asynchronously
@@ -470,8 +498,9 @@ impl Request {
         alignment: u64,
         user_data: u64,
     ) -> Result<AsyncIoOperation, ExecuteError> {
-        if self.guest_memory_is_aligned(&mem, alignment)? {
-            let target = GuestMemoryTarget::new(mem, &self.data_descriptors)
+        let descriptors = split_descriptors_by_region(&mem, &self.data_descriptors)?;
+        if Self::guest_memory_is_aligned(&mem, alignment, &descriptors)? {
+            let target = GuestMemoryTarget::new(mem, &descriptors)
                 .map_err(ExecuteError::GetHostAddress)?;
             return Ok(match self.request_type {
                 RequestType::In => AsyncIoOperation::read_to_memory(offset, target, user_data),
@@ -495,17 +524,17 @@ impl Request {
         })
     }
 
-    // Checks whether `self.data_descriptors` are aligned to `alignment`.
+    // Checks whether the given region-contained ranges are aligned to `alignment`.
     fn guest_memory_is_aligned<B: Bitmap + 'static>(
-        &self,
         mem: &vm_memory::GuestMemoryMmap<B>,
         alignment: u64,
+        descriptors: &[(GuestAddress, u32)],
     ) -> Result<bool, ExecuteError> {
         if alignment <= 1 {
             return Ok(true);
         }
 
-        for &(data_addr, data_len) in &self.data_descriptors {
+        for &(data_addr, data_len) in descriptors {
             let _: u32 = data_len;
             const _: () = assert!(
                 size_of::<u32>() <= size_of::<usize>(),
@@ -542,11 +571,11 @@ impl Request {
         &self,
         mem: &vm_memory::GuestMemoryMmap<B>,
     ) -> Result<(), ExecuteError> {
-        for (data_addr, data_len) in &self.data_descriptors {
-            mem.get_slice(*data_addr, *data_len as usize)
+        for (data_addr, data_len) in split_descriptors_by_region(mem, &self.data_descriptors)? {
+            mem.get_slice(data_addr, data_len as usize)
                 .map_err(ExecuteError::GetHostAddress)?
                 .bitmap()
-                .mark_dirty(0, *data_len as usize);
+                .mark_dirty(0, data_len as usize);
         }
         Ok(())
     }
@@ -690,6 +719,67 @@ mod unit_tests {
         fn next_completed_request(&mut self) -> Option<AsyncIoCompletion> {
             None
         }
+    }
+
+    struct RecordingAsyncIo {
+        notifier: EventFd,
+        iovec_counts: Vec<usize>,
+    }
+
+    impl AsyncIo for RecordingAsyncIo {
+        fn notifier(&self) -> &EventFd {
+            &self.notifier
+        }
+        fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
+            self.iovec_counts.push(op.iovecs().len());
+            Ok(())
+        }
+        fn fsync(&mut self, _: Option<u64>) -> AsyncIoResult<()> {
+            unreachable!()
+        }
+        fn punch_hole(&mut self, _: u64, _: u64, _: u64) -> AsyncIoResult<()> {
+            unreachable!()
+        }
+        fn write_zeroes(&mut self, _: u64, _: u64, _: u64) -> AsyncIoResult<()> {
+            unreachable!()
+        }
+        fn next_completed_request(&mut self) -> Option<AsyncIoCompletion> {
+            None
+        }
+    }
+
+    // A guest buffer that is contiguous in guest physical address space but
+    // spans two separate memory regions (e.g. boot RAM + hotplugged RAM) must
+    // be split into one iovec per region rather than fail with
+    // GetHostAddress(InvalidBackendAddress).
+    #[test]
+    fn data_descriptor_crossing_region_boundary_is_split() {
+        let mem = Arc::new(
+            GuestMemoryMmap::<()>::from_ranges(&[
+                (GuestAddress(0), 0x1000),
+                (GuestAddress(0x1000), 0x1000),
+            ])
+            .unwrap(),
+        );
+
+        let mut request = Request {
+            request_type: RequestType::In,
+            sector: 0,
+            data_descriptors: SmallVec::from_slice(&[(GuestAddress(0x800), 0x1000)]),
+            status_addr: GuestAddress(0),
+            writeback: true,
+            start: Instant::now(),
+        };
+        let mut disk = RecordingAsyncIo {
+            notifier: EventFd::new(0).unwrap(),
+            iovec_counts: Vec::new(),
+        };
+
+        let ret = request
+            .execute_async(mem, 1024, &mut disk, &[], false, 0)
+            .unwrap();
+        assert!(ret.async_complete);
+        assert_eq!(disk.iovec_counts, vec![2]);
     }
 
     #[test]
