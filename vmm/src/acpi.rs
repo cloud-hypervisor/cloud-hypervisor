@@ -157,7 +157,7 @@ impl GenericInitiatorAffinity {
     #[cfg(test)]
     fn from_acpi_device(hid: u64, uid: u32, proximity_domain: u32) -> Self {
         let mut device_handle = [0u8; 16];
-        // ACPI 6.6 Table 5-66: ACPI device handle
+        // ACPI 6.6 Section 5.2.16.6: ACPI device handle
         // Bytes 0-7: Hardware ID (HID) as 64-bit value
         // Bytes 8-11: Unique ID (UID) as 32-bit value
         device_handle[0..8].copy_from_slice(&hid.to_le_bytes());
@@ -182,7 +182,7 @@ impl GenericInitiatorAffinity {
         let device = bdf.device();
         let function = bdf.function();
 
-        // ACPI 6.6 Table 5-66: PCI Device Handle
+        // ACPI 6.6 Section 5.2.16.6: PCI device handle
         device_handle[0] = (segment & 0xff) as u8;
         device_handle[1] = ((segment >> 8) & 0xff) as u8;
         device_handle[2] = bus;
@@ -1295,7 +1295,7 @@ mod tests {
         assert_eq!(gi_reserved2, 0, "Reserved field must be 0");
 
         // Verify PCI BDF encoding in device_handle
-        // ACPI 6.6 Table 5-66 format:
+        // ACPI 6.6 Section 5.2.16.6 format:
         // Bytes 0-1: PCI Segment (little-endian)
         // Byte 2: Start Bus Number
         // Byte 3: End Bus Number
@@ -1309,7 +1309,7 @@ mod tests {
         ];
         assert_eq!(
             gi.device_handle, expected_handle,
-            "Device handle must encode PCI BDF correctly per ACPI 6.6 Table 5-66"
+            "Device handle must encode PCI BDF correctly per ACPI 6.6 Section 5.2.16.6"
         );
     }
 
@@ -1380,7 +1380,7 @@ mod tests {
     #[test]
     fn test_generic_initiator_acpi_device_handle() {
         // Test ACPI device handle (device_handle_type=0) for completeness
-        // This validates HID and UID encoding per ACPI 6.6 spec (Table 5.65)
+        // This validates HID and UID encoding per ACPI 6.6 Section 5.2.16.6
         let hid: u64 = 0x0123456789ABCDEF;
         let uid: u32 = 0x12345678;
         let proximity_domain = 2;
@@ -1407,7 +1407,7 @@ mod tests {
         assert_eq!(gi_reserved2, 0, "Reserved field must be 0");
 
         // Verify ACPI device handle encoding
-        // Expected format per ACPI 6.6 Table 5.65:
+        // Expected format per ACPI 6.6 Section 5.2.16.6:
         // Bytes 0-7: HID (64-bit, little-endian)
         // Bytes 8-11: UID (32-bit, little-endian)
         // Bytes 12-15: Reserved
