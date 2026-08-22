@@ -41,6 +41,10 @@ pub enum ConsoleDeviceError {
     #[error("No socket option support for console device")]
     NoSocketOptionSupportForConsoleDevice,
 
+    /// Socket path missing for socket console mode
+    #[error("Socket path missing for socket console mode")]
+    MissingSocketPath,
+
     /// Error setting pty raw mode
     #[error("Error setting pty raw mode")]
     SetPtyRaw(#[source] errno::Error),
@@ -221,7 +225,15 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                 ConsoleTransport::Tty(Arc::new(stdout))
             }
             ConsoleOutputMode::Socket => {
-                return Err(ConsoleDeviceError::NoSocketOptionSupportForConsoleDevice);
+                let path = vmconfig
+                    .console
+                    .common
+                    .socket
+                    .as_ref()
+                    .ok_or(ConsoleDeviceError::MissingSocketPath)?;
+                let listener =
+                    UnixListener::bind(path).map_err(ConsoleDeviceError::CreateConsoleDevice)?;
+                ConsoleTransport::Socket(Arc::new(listener))
             }
             ConsoleOutputMode::Null => ConsoleTransport::Null,
             ConsoleOutputMode::Off => ConsoleTransport::Off,

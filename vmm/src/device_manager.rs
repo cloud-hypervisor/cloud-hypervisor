@@ -567,10 +567,6 @@ pub enum DeviceManagerError {
     #[error("No support for device passthrough")]
     NoDevicePassthroughSupport,
 
-    /// No socket option support for console device
-    #[error("No socket option support for console device")]
-    NoSocketOptionSupportForConsoleDevice,
-
     /// Failed to resize virtio-balloon
     #[error("Failed to resize virtio-balloon")]
     VirtioBalloonResize(#[source] balloon::Error),
@@ -2437,11 +2433,14 @@ impl DeviceManager {
         snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<Option<Arc<virtio_devices::ConsoleResizer>>> {
         let mut console_config = self.config.lock().unwrap().console.clone();
-        let endpoint = match transport {
-            ConsoleTransport::File(file) => Endpoint::File(file),
+        let (endpoint, socket_path) = match transport {
+            ConsoleTransport::File(file) => (Endpoint::File(file), None),
             ConsoleTransport::Pty(file) => {
                 self.console_resize_pipe = resize_pipe;
-                Endpoint::PtyPair(Arc::new(file.try_clone().unwrap()), file)
+                (
+                    Endpoint::PtyPair(Arc::new(file.try_clone().unwrap()), file),
+                    None,
+                )
             }
             ConsoleTransport::Tty(stdout) => {
                 if stdout.is_terminal() {
@@ -2450,7 +2449,7 @@ impl DeviceManager {
 
                 // If an interactive TTY then we can accept input
                 // SAFETY: FFI call. Trivially safe.
-                if unsafe { libc::isatty(libc::STDIN_FILENO) == 1 } {
+                let endpoint = if unsafe { libc::isatty(libc::STDIN_FILENO) == 1 } {
                     // SAFETY: FFI call to dup. Trivially safe.
                     let stdin = unsafe { libc::dup(libc::STDIN_FILENO) };
                     if stdin == -1 {
@@ -2461,12 +2460,14 @@ impl DeviceManager {
                     Endpoint::FilePair(stdout, Arc::new(stdin))
                 } else {
                     Endpoint::File(stdout)
-                }
+                };
+                (endpoint, None)
             }
-            ConsoleTransport::Socket(_) => {
-                return Err(DeviceManagerError::NoSocketOptionSupportForConsoleDevice);
-            }
-            ConsoleTransport::Null => Endpoint::Null,
+            ConsoleTransport::Socket(listener) => (
+                Endpoint::Socket(listener),
+                console_config.common.socket.clone(),
+            ),
+            ConsoleTransport::Null => (Endpoint::Null, None),
             ConsoleTransport::Off => return Ok(None),
         };
 
@@ -2482,6 +2483,7 @@ impl DeviceManager {
         let (virtio_console_device, console_resizer) = virtio_devices::Console::new(
             id.clone(),
             endpoint,
+            socket_path,
             self.console_resize_pipe
                 .as_ref()
                 .map(|p| p.try_clone().unwrap()),

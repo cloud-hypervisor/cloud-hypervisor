@@ -8,6 +8,9 @@ use std::io::{self, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+mod socket;
+pub use socket::SocketConsole;
+
 const MAX_BUFFER_SIZE: usize = 1 << 20;
 
 // Circular buffer implementation for serial output.
