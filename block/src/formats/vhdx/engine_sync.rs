@@ -4,15 +4,15 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io;
 use std::sync::{Arc, Mutex};
 
 use vmm_sys_util::eventfd::EventFd;
 
+use super::dynamic::Vhdx;
 use crate::async_io::{
     AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, CompletionCommon,
 };
-use crate::formats::vhdx::Vhdx;
 
 pub(super) struct VhdxSync {
     vhdx_file: Arc<Mutex<Vhdx>>,
@@ -32,10 +32,10 @@ impl VhdxSync {
     fn read_operation(&mut self, op: &mut AsyncIoOperation) -> AsyncIoResult<usize> {
         let offset = op.offset();
         let mut buf = vec![0u8; op.total_len()];
-        let mut vhdx = self.vhdx_file.lock().unwrap();
-        vhdx.seek(SeekFrom::Start(offset as u64))
+        let vhdx = self.vhdx_file.lock().unwrap();
+        let result = vhdx
+            .read_at(&mut buf, offset as u64)
             .map_err(AsyncIoError::ReadVectored)?;
-        let result = vhdx.read(&mut buf).map_err(AsyncIoError::ReadVectored)?;
         drop(vhdx);
 
         op.write_bytes_at(0, &buf[..result])
@@ -50,9 +50,8 @@ impl VhdxSync {
             .map_err(AsyncIoError::WriteVectored)?;
 
         let mut vhdx = self.vhdx_file.lock().unwrap();
-        vhdx.seek(SeekFrom::Start(offset as u64))
+        vhdx.write_all_at(&buf, offset as u64)
             .map_err(AsyncIoError::WriteVectored)?;
-        vhdx.write_all(&buf).map_err(AsyncIoError::WriteVectored)?;
         Ok(buf.len())
     }
 }
@@ -116,7 +115,7 @@ mod tests {
 
     use super::*;
     use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoOperation, OwnedIoBuffer};
-    use crate::formats::vhdx::Vhdx;
+    use crate::formats::vhdx::dynamic::Vhdx;
     use crate::formats::vhdx::test_util::create_dynamic_vhdx;
 
     fn make_vhdx_sync(tf: &TempFile) -> (VhdxSync, u64) {

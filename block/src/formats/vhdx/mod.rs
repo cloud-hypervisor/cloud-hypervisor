@@ -10,11 +10,10 @@
 //! images.
 
 mod bat;
+mod dynamic;
 mod engine_sync;
 mod header;
-mod io;
 mod metadata;
-mod parser;
 #[cfg(test)]
 mod test_util;
 
@@ -23,8 +22,9 @@ use std::io::Error as IoError;
 use std::os::fd::AsRawFd;
 use std::sync::{Arc, Mutex};
 
-pub use parser::{Vhdx, VhdxError};
+pub use dynamic::VhdxError;
 
+use self::dynamic::Vhdx;
 use self::engine_sync::VhdxSync;
 use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError};
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
@@ -53,7 +53,6 @@ impl VhdxDisk {
                     | VhdxError::ParseVhdxMetadata(_)
                     | VhdxError::ParseVhdxRegionEntry(_) => BlockErrorKind::InvalidFormat,
                     VhdxError::ReadBatEntry(_) => BlockErrorKind::CorruptImage,
-                    VhdxError::ReadFailed(_) | VhdxError::WriteFailed(_) => BlockErrorKind::Io,
                 };
                 BlockError::new(kind, e).with_op(ErrorOp::Open)
             })?)),
