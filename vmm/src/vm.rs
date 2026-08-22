@@ -550,7 +550,7 @@ fn is_restore_cow_supported(config: &VmConfig) -> bool {
             z.host_numa_node.is_some()
                 || z.hotplug_size.is_some()
                 || z.hotplugged_size.is_some()
-                || z.reserve
+                || z.reserve.unwrap_or(false)
                 || z.mergeable
         })
     });
