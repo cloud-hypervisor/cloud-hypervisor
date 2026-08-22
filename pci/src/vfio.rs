@@ -2260,6 +2260,7 @@ impl VfioPciDevice {
                             user_memory_region.mapping.addr(),
                             false,
                             false,
+                            hypervisor::MemoryVisibility::Shared,
                         )
                     }
                     .map_err(VfioPciError::CreateUserMemoryRegion)?;
@@ -2520,6 +2521,7 @@ iova 0x{:x}, size 0x{:x}: {}, ",
                             host_addr,
                             false,
                             false,
+                            hypervisor::MemoryVisibility::Shared,
                         )
                     }
                     .map_err(io::Error::other)?;

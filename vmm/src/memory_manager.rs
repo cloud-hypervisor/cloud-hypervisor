@@ -1583,6 +1583,7 @@ impl MemoryManager {
                         zone_mergeable,
                         false,
                         self.log_dirty,
+                        hypervisor::MemoryVisibility::Private,
                     )
                 }?;
 
@@ -1647,6 +1648,7 @@ impl MemoryManager {
                     uefi_region.as_ptr(),
                     false,
                     false,
+                    hypervisor::MemoryVisibility::Private,
                 )
                 .map_err(Error::CreateUefiFlash)?;
         }
@@ -2358,6 +2360,7 @@ impl MemoryManager {
                     .map_or(self.mergeable, |z| z.mergeable),
                 false,
                 self.log_dirty,
+                hypervisor::MemoryVisibility::Private,
             )
         }?;
         self.guest_ram_mappings.push(GuestRamMapping {
@@ -2456,6 +2459,7 @@ impl MemoryManager {
     ///
     /// `userspace_addr` and `memory_size` must be and remain valid
     /// until `remove_userspace_mapping` is called.
+    #[expect(clippy::too_many_arguments)]
     pub unsafe fn create_userspace_mapping(
         &mut self,
         guest_phys_addr: u64,
@@ -2464,6 +2468,7 @@ impl MemoryManager {
         mergeable: bool,
         readonly: bool,
         log_dirty: bool,
+        visibility: hypervisor::MemoryVisibility,
     ) -> Result<u32, Error> {
         let slot = self.allocate_memory_slot();
 
@@ -2482,6 +2487,7 @@ impl MemoryManager {
                     userspace_addr,
                     readonly,
                     log_dirty,
+                    visibility,
                 )
                 .map_err(Error::CreateUserMemoryRegion)?;
         }
