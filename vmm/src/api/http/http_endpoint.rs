@@ -49,7 +49,7 @@ use crate::api::VmCoredump;
 use crate::api::http::http_endpoint::fds_helper::{attach_fds_to_cfg, attach_fds_to_cfgs};
 use crate::api::http::{EndpointHandler, HttpError, error_response};
 use crate::api::{
-    AddDisk, ApiAction, ApiError, ApiRequest, DeviceConfig, NetConfig, VmAddDevice, VmAddFs,
+    AddDisk, ApiAction, ApiError, ApiRequest, DeviceConfig, VmAddDevice, VmAddFs,
     VmAddGenericVhostUser, VmAddNet, VmAddPmem, VmAddUserDevice, VmAddVdpa, VmAddVsock, VmBoot,
     VmConfig, VmCounters, VmDelete, VmNmi, VmPause, VmPowerButton, VmReboot, VmReceiveMigration,
     VmReceiveMigrationData, VmRemoveDevice, VmResize, VmResizeDisk, VmResizeZone, VmRestore,
@@ -118,12 +118,13 @@ mod fds_helper {
     }
 
     mod config_with_fds_impls {
-        use std::os::fd::RawFd;
+        use std::os::fd::{FromRawFd, OwnedFd, RawFd};
         use std::slice::from_ref;
+        use std::sync::Arc;
 
         use super::{ConfigWithFDs, ConfigWithVariableFDs};
         use crate::config::{RestoredNetConfig, RestoredVfioConfig};
-        use crate::vm_config::{DeviceConfig, NetConfig};
+        use crate::vm_config::{DeviceConfig, NetConfig, VsockConfig};
 
         impl ConfigWithFDs for NetConfig {
             fn id(&self) -> Option<&str> {
@@ -154,6 +155,24 @@ mod fds_helper {
                 // before calling into this trait, so `pop()` yields the
                 // single FD when present.
                 self.fd = fds.and_then(|mut v| v.pop());
+            }
+        }
+
+        impl ConfigWithFDs for VsockConfig {
+            fn id(&self) -> Option<&str> {
+                self.pci_common.id.as_deref()
+            }
+
+            fn fds_from_http_body(&self) -> Option<&[RawFd]> {
+                // This is wrong, but doing it right is too hard
+                None
+            }
+
+            fn set_fds(&mut self, fds: Option<Vec<RawFd>>) {
+                // SAFETY: FD is valid (but the function is unsound!)
+                self.listen_fd = fds
+                    .and_then(|mut v| v.pop())
+                    .map(|e| Arc::new(unsafe { OwnedFd::from_raw_fd(e) }));
             }
         }
 
@@ -478,7 +497,6 @@ vm_action_put_handler_body!(VmAddFs);
 vm_action_put_handler_body!(VmAddGenericVhostUser);
 vm_action_put_handler_body!(VmAddPmem);
 vm_action_put_handler_body!(VmAddVdpa);
-vm_action_put_handler_body!(VmAddVsock);
 vm_action_put_handler_body!(VmAddUserDevice);
 vm_action_put_handler_body!(VmRemoveDevice);
 vm_action_put_handler_body!(VmResizeDisk);
@@ -517,29 +535,37 @@ impl PutHandler for VmAddDevice {
 
 impl GetHandler for VmAddDevice {}
 
-// Special handling for virtio-net devices backed by network FDs.
-// See module description for more info.
-impl PutHandler for VmAddNet {
-    fn handle_request(
-        &'static self,
-        api_notifier: EventFd,
-        api_sender: Sender<ApiRequest>,
-        body: &Option<Body>,
-        files: Vec<File>,
-    ) -> result::Result<Option<Body>, HttpError> {
-        if let Some(body) = body {
-            let mut net_cfg: NetConfig = serde_json::from_slice(body.raw())?;
-            attach_fds_to_cfg(files, &mut net_cfg)?;
+macro_rules! vm_action_put_handler_fds {
+    // Special handling for virtio-net devices backed by network FDs.
+    // See module description for more info.
+    ($ty:ty) => {
+        impl PutHandler for $ty {
+            fn handle_request(
+                &'static self,
+                api_notifier: EventFd,
+                api_sender: Sender<ApiRequest>,
+                body: &Option<Body>,
+                files: Vec<File>,
+            ) -> result::Result<Option<Body>, HttpError> {
+                if let Some(body) = body {
+                    let mut net_cfg: <Self as ApiAction>::RequestBody =
+                        serde_json::from_slice(body.raw())?;
+                    attach_fds_to_cfg(files, &mut net_cfg)?;
 
-            self.send(api_notifier, api_sender, net_cfg)
-                .map_err(HttpError::ApiError)
-        } else {
-            Err(HttpError::BadRequest)
+                    self.send(api_notifier, api_sender, net_cfg)
+                        .map_err(HttpError::ApiError)
+                } else {
+                    Err(HttpError::BadRequest)
+                }
+            }
         }
-    }
+
+        impl GetHandler for $ty {}
+    };
 }
 
-impl GetHandler for VmAddNet {}
+vm_action_put_handler_fds!(VmAddVsock);
+vm_action_put_handler_fds!(VmAddNet);
 
 impl PutHandler for VmResize {
     fn handle_request(

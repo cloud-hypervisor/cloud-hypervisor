@@ -4,9 +4,11 @@
 //
 use std::collections::HashSet;
 use std::net::IpAddr;
+use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::path::{Path, PathBuf};
 #[cfg(feature = "fw_cfg")]
 use std::str::FromStr;
+use std::sync::Arc;
 use std::{fs, result};
 
 use arch::CpuProfile;
@@ -856,22 +858,47 @@ impl ApplyLandlock for VdpaConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PathOrFd {
+    Path(PathBuf),
+    Fd(RawFd),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VsockConfig {
     #[serde(flatten)]
     pub pci_common: PciDeviceCommonConfig,
     pub cid: u32,
     pub socket: PathBuf,
+    #[serde(skip)]
+    pub listen_fd: Option<Arc<OwnedFd>>,
 }
+
+impl PartialEq for VsockConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.pci_common == other.pci_common
+            && self.cid == other.cid
+            && self.socket == other.socket
+            && self.listen_fd.as_deref().map(AsRawFd::as_raw_fd)
+                == other.listen_fd.as_deref().map(AsRawFd::as_raw_fd)
+    }
+}
+
+impl Eq for VsockConfig {}
 
 impl ApplyLandlock for VsockConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        if let Some(parent) = self.socket.parent() {
-            landlock.add_rule_with_access(parent, "w")?;
+        if self.listen_fd.is_none() {
+            if let Some(parent) = self.socket.parent() {
+                landlock.add_rule_with_access(parent, "w")?;
+            }
+            landlock.add_rule_with_access(&self.socket, "rw")?;
+        } else {
+            if let Some(parent) = self.socket.parent() {
+                landlock.add_rule_with_access(parent, "r")?;
+            }
         }
-
-        landlock.add_rule_with_access(&self.socket, "rw")?;
-
         Ok(())
     }
 }
