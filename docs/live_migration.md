@@ -399,37 +399,17 @@ for the requirements, the dirty tracking behavior, and an example.
 
 ## Version Compatibility
 
-Cloud Hypervisor live migration compatibility has two dimensions: the
-Cloud Hypervisor version and the migration protocol version.
+Starting with `v54`, Cloud Hypervisor guarantees migration compatibility from
+the previous two versions ("n-2"), .e.g. `v52/v53 -> v54`. Upgrades spanning
+more major versions might work. It is however strongly recommended to do
+incremental upgrades, e.g., `v54 -> v55 -> v56` or `v52 -> v54 -> v56`.
 
-Cloud Hypervisor uses a versioned migration protocol for the messages exchanged
-between source and destination. Each Cloud Hypervisor release sends its current
-migration protocol version and accepts that version plus the immediately
-previous protocol version.
+New VMM functionality is designed in a way that it does not cause any
+incompatibility for VMs coming from older versions of Cloud Hypervisor. If new
+features are added to existing device models or the VMM, the corresponding
+device-specific config falls back to safe false/disabled values. Hence, only
+newly spawned VMs will be able to use new functionality, while being able to run
+VMs first spawned in older versions of Cloud Hypervisor.
 
-This means migration is supported from an older protocol version to the same or
-next protocol version. If the source and destination are more than one migration
-protocol version apart, the VM must be migrated through an intermediate
-Cloud Hypervisor version first.
-
-### Technical Details
-
-The source sends its migration protocol version in the initial `Start` request.
-The destination accepts the migration only if that protocol version is supported.
-A zeroed `Start` command header is handled as protocol `v0`, so older
-deployments that do not explicitly send a protocol version remain compatible.
-
-The migration protocol version covers the protocol spoken after a migration
-connection has been established. Examples include adding a mandatory migration
-command, changing the order of migration protocol messages, or changing the
-framing or encoding of protocol command payloads.
-
-The migration protocol version does not cover migration transport setup. For
-example, choosing TCP vs. UNIX sockets or opening the initial connection needs
-separate compatibility handling.
-
-Migration protocol versioning is separate from snapshot state compatibility.
-Device and VM state changes still need to be handled by the respective snapshot
-serialization/deserialization code. That compatibility is Cloud Hypervisor
-version dependent, but it is not the responsibility of migration protocol
-versioning.
+The Cloud Hypervisor project may decide to change or remove certain
+functionality if there are valid reasons, although we aim to minimize this.
