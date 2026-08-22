@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::result;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 
 use log::{error, info};
@@ -408,6 +408,8 @@ impl VirtioDevice for Net {
                     Arc::new(Mutex::new(TapQueuePairs::new(Vec::new()))),
                     self.announce.pending.clone(),
                     self.config.max_virtqueue_pairs,
+                    self.config.max_virtqueue_pairs,
+                    Arc::new(AtomicU16::new(1)),
                 ),
                 queue: ctrl_queue,
                 queue_evt: ctrl_queue_evt,

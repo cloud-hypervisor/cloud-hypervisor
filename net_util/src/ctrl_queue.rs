@@ -4,7 +4,7 @@
 
 use std::cmp::min;
 use std::result;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 
 use log::{debug, error, info, warn};
@@ -146,6 +146,8 @@ pub struct CtrlQueue {
     pub queue_pairs: Arc<Mutex<TapQueuePairs>>,
     pub announce_pending: Arc<AtomicBool>,
     pub max_virtqueue_pairs: u16,
+    pub activated_pairs: u16,
+    pub curr_queue_pairs: Arc<AtomicU16>,
 }
 
 impl CtrlQueue {
@@ -153,11 +155,15 @@ impl CtrlQueue {
         queue_pairs: Arc<Mutex<TapQueuePairs>>,
         announce_pending: Arc<AtomicBool>,
         max_virtqueue_pairs: u16,
+        activated_pairs: u16,
+        curr_queue_pairs: Arc<AtomicU16>,
     ) -> Self {
         CtrlQueue {
             queue_pairs,
             announce_pending,
             max_virtqueue_pairs,
+            activated_pairs,
+            curr_queue_pairs,
         }
     }
 
@@ -361,7 +367,13 @@ mod unit_tests {
         mem.write_obj(0xff_u8, GuestAddress(STATUS_ADDR)).unwrap();
 
         let announce_pending = Arc::new(AtomicBool::new(true));
-        let mut ctrl_q = CtrlQueue::new(no_taps(), Arc::clone(&announce_pending), 1);
+        let mut ctrl_q = CtrlQueue::new(
+            no_taps(),
+            Arc::clone(&announce_pending),
+            1,
+            1,
+            Arc::new(AtomicU16::new(1)),
+        );
 
         ctrl_q.process(&mem, &mut queue, None).unwrap();
 
@@ -375,7 +387,7 @@ mod unit_tests {
     /// Build a three-descriptor VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET request
     /// (readable header, readable le16 payload, writable status) and return the
     /// status byte the device wrote.
-    fn run_mq_vq_pairs_set(requested: u16, max_virtqueue_pairs: u16) -> u8 {
+    fn run_mq_vq_pairs_set(requested: u16, max_virtqueue_pairs: u16, activated_pairs: u16) -> u8 {
         const MEM_SIZE: usize = 0x20_0000;
         const QSIZE: u16 = 4;
         const QUEUE_ADDR: u64 = 0x0014_0000;
@@ -414,10 +426,13 @@ mod unit_tests {
         mem.write_obj(requested, GuestAddress(DATA_ADDR)).unwrap();
         mem.write_obj(0xff_u8, GuestAddress(STATUS_ADDR)).unwrap();
 
+        let curr_queue_pairs = Arc::new(AtomicU16::new(1));
         let mut ctrl_q = CtrlQueue::new(
             no_taps(),
             Arc::new(AtomicBool::new(false)),
             max_virtqueue_pairs,
+            activated_pairs,
+            Arc::clone(&curr_queue_pairs),
         );
         ctrl_q.process(&mem, &mut queue, None).unwrap();
 
@@ -429,8 +444,8 @@ mod unit_tests {
         // The spec permits any value up to max_virtqueue_pairs, so a request
         // for exactly that many pairs must be acknowledged, and the negotiated
         // count must follow it.
-        assert_eq!(run_mq_vq_pairs_set(4, 4), VIRTIO_NET_OK as u8);
-        assert_eq!(run_mq_vq_pairs_set(1, 4), VIRTIO_NET_OK as u8);
+        assert_eq!(run_mq_vq_pairs_set(4, 4, 4), VIRTIO_NET_OK as u8);
+        assert_eq!(run_mq_vq_pairs_set(1, 4, 4), VIRTIO_NET_OK as u8);
     }
 
     #[test]
@@ -439,8 +454,24 @@ mod unit_tests {
         // max_virtqueue_pairs in the device configuration space."
         // Such a request must not be acknowledged as successful, and it must
         // leave the negotiated count alone.
-        assert_eq!(run_mq_vq_pairs_set(5, 4), VIRTIO_NET_ERR as u8);
-        assert_eq!(run_mq_vq_pairs_set(0, 4), VIRTIO_NET_ERR as u8);
+        assert_eq!(run_mq_vq_pairs_set(5, 4, 4), VIRTIO_NET_ERR as u8);
+        assert_eq!(run_mq_vq_pairs_set(0, 4, 4), VIRTIO_NET_ERR as u8);
+    }
+
+    #[test]
+    fn test_curr_queue_pairs_starts_at_one() {
+        // "After initialization of reset, the device MUST queue packets only
+        // on receiveq1", whatever the device advertises as its maximum.
+        let curr_queue_pairs = Arc::new(AtomicU16::new(1));
+        let _ctrl_q = CtrlQueue::new(
+            no_taps(),
+            Arc::new(AtomicBool::new(false)),
+            8,
+            8,
+            Arc::clone(&curr_queue_pairs),
+        );
+
+        assert_eq!(curr_queue_pairs.load(Ordering::Acquire), 1);
     }
 
     #[test]
@@ -484,7 +515,13 @@ mod unit_tests {
         )
         .unwrap();
 
-        let mut ctrl_q = CtrlQueue::new(no_taps(), Arc::new(AtomicBool::new(false)), 1);
+        let mut ctrl_q = CtrlQueue::new(
+            no_taps(),
+            Arc::new(AtomicBool::new(false)),
+            1,
+            1,
+            Arc::new(AtomicU16::new(1)),
+        );
 
         assert!(matches!(
             ctrl_q.process(&mem, &mut queue, None),
