@@ -884,7 +884,32 @@ impl VirtioDevice for Net {
         let qp_threads = (num_queues - ctrl_threads) / 2;
         self.common.paused_sync = Some(Arc::new(Barrier::new(1 + qp_threads + ctrl_threads)));
 
+        // Only the queue pairs the driver made ready get a worker, and only a
+        // queue with a worker has anything draining its tap queue. Bring the
+        // tap backend down to the active count before the workers start, so the
+        // device never steers frames at a queue nobody is reading. On a fresh
+        // activation the active count is one, as the specification requires; on
+        // a restore it is whatever the guest had negotiated.
         let activated_pairs = qp_threads as u16;
+        let curr_queue_pairs = self.curr_queue_pairs.load(Ordering::Acquire);
+        let active_pairs = min(curr_queue_pairs, activated_pairs);
+        if active_pairs != curr_queue_pairs {
+            // Not reachable from a request, which is rejected outright: this is
+            // a restored count that the driver has not backed with ready queues.
+            warn!(
+                "Restored queue pair count {curr_queue_pairs} exceeds the {activated_pairs} \
+                 activated; using {active_pairs}"
+            );
+        }
+        self.queue_pairs
+            .lock()
+            .unwrap()
+            .resync(active_pairs.into())
+            .map_err(|e| {
+                error!("Error setting the number of tap queue pairs: {e:?}");
+                ActivateError::BadActivate
+            })?;
+        self.curr_queue_pairs.store(active_pairs, Ordering::Release);
 
         if has_ctrl_queue {
             let ctrl_queue_index = num_queues - 1;
@@ -1044,6 +1069,11 @@ impl VirtioDevice for Net {
     fn reset(&mut self) {
         self.common.reset();
         self.announce.reset();
+        // Back to the specification's default of a single active pair. The tap
+        // queues are deliberately left as they are: nothing is draining them
+        // while the device is inactive, and the next activation resyncs them.
+        self.curr_queue_pairs
+            .store(default_curr_queue_pairs(), Ordering::Release);
         event!("virtio-device", "reset", "id", &self.id);
     }
 
