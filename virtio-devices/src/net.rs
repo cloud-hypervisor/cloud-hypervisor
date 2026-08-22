@@ -5,6 +5,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
+use std::cmp::min;
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::net::IpAddr;
@@ -12,8 +13,8 @@ use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
-use std::sync::{Arc, Barrier};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU64, Ordering};
+use std::sync::{Arc, Barrier, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
@@ -23,7 +24,7 @@ use log::{debug, error, info, warn};
 use net_util::virtio_features_to_tap_offload;
 use net_util::{
     CtrlQueue, MAC_ADDR_LEN, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap,
-    TapError, TxVirtio, VirtioNetConfig, open_tap, vnet_hdr_len,
+    TapError, TapQueuePairs, TxVirtio, VirtioNetConfig, open_tap, vnet_hdr_len,
 };
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
@@ -504,7 +505,12 @@ impl AnnouncementState {
 pub struct Net {
     common: VirtioCommon,
     id: String,
-    taps: Vec<Tap>,
+    /// Tap queues and how many of them are attached. Shared with the control
+    /// queue handler, which changes the attached set on the driver's request.
+    queue_pairs: Arc<Mutex<TapQueuePairs>>,
+    /// Negotiated active queue-pair count. The virtio specification requires
+    /// this to start at one, whatever the device advertises as the maximum.
+    curr_queue_pairs: Arc<AtomicU16>,
     config: VirtioNetConfig,
     counters: NetCounters,
     seccomp_action: SeccompAction,
@@ -514,12 +520,21 @@ pub struct Net {
     announce: AnnouncementState,
 }
 
+/// The virtio specification puts the active queue-pair count at one until the
+/// driver raises it, so a state blob written before this field existed restores
+/// to one rather than to zero.
+fn default_curr_queue_pairs() -> u16 {
+    1
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct NetState {
     pub avail_features: u64,
     pub acked_features: u64,
     pub config: VirtioNetConfig,
     pub queue_size: Vec<u16>,
+    #[serde(default = "default_curr_queue_pairs")]
+    pub curr_queue_pairs: u16,
 }
 
 impl Net {
@@ -551,71 +566,79 @@ impl Net {
             }
         };
 
-        let (avail_features, acked_features, config, queue_sizes, paused, announce_pending) =
-            if let Some(state) = state {
-                info!("Restoring virtio-net {id}");
-                // Always mark the announcement pending if the device was restored
-                // so the device announces itself.
-                (
-                    state.avail_features,
-                    state.acked_features,
-                    state.config,
-                    state.queue_size,
-                    true,
-                    true,
-                )
-            } else {
-                let mut avail_features = (1 << VIRTIO_RING_F_EVENT_IDX) | (1 << VIRTIO_F_VERSION_1);
+        let (
+            avail_features,
+            acked_features,
+            config,
+            queue_sizes,
+            paused,
+            announce_pending,
+            curr_queue_pairs,
+        ) = if let Some(state) = state {
+            info!("Restoring virtio-net {id}");
+            // Always mark the announcement pending if the device was restored
+            // so the device announces itself.
+            (
+                state.avail_features,
+                state.acked_features,
+                state.config,
+                state.queue_size,
+                true,
+                true,
+                state.curr_queue_pairs,
+            )
+        } else {
+            let mut avail_features = (1 << VIRTIO_RING_F_EVENT_IDX) | (1 << VIRTIO_F_VERSION_1);
 
-                if mtu.is_some() {
-                    avail_features |= 1 << VIRTIO_NET_F_MTU;
+            if mtu.is_some() {
+                avail_features |= 1 << VIRTIO_NET_F_MTU;
+            }
+
+            if access_platform_enabled {
+                avail_features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
+            }
+
+            // Configure TSO/UFO features when hardware checksum offload is enabled.
+            if offload_csum {
+                avail_features |= (1 << VIRTIO_NET_F_CSUM)
+                    | (1 << VIRTIO_NET_F_GUEST_CSUM)
+                    | (1 << VIRTIO_NET_F_CTRL_GUEST_OFFLOADS);
+
+                if offload_tso {
+                    avail_features |= (1 << VIRTIO_NET_F_HOST_ECN)
+                        | (1 << VIRTIO_NET_F_HOST_TSO4)
+                        | (1 << VIRTIO_NET_F_HOST_TSO6)
+                        | (1 << VIRTIO_NET_F_GUEST_ECN)
+                        | (1 << VIRTIO_NET_F_GUEST_TSO4)
+                        | (1 << VIRTIO_NET_F_GUEST_TSO6);
                 }
 
-                if access_platform_enabled {
-                    avail_features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
+                if offload_ufo {
+                    avail_features |= (1 << VIRTIO_NET_F_HOST_UFO) | (1 << VIRTIO_NET_F_GUEST_UFO);
                 }
+            }
 
-                // Configure TSO/UFO features when hardware checksum offload is enabled.
-                if offload_csum {
-                    avail_features |= (1 << VIRTIO_NET_F_CSUM)
-                        | (1 << VIRTIO_NET_F_GUEST_CSUM)
-                        | (1 << VIRTIO_NET_F_CTRL_GUEST_OFFLOADS);
+            avail_features |= 1 << VIRTIO_NET_F_CTRL_VQ;
+            avail_features |= 1 << VIRTIO_NET_F_STATUS;
+            avail_features |= 1 << VIRTIO_NET_F_GUEST_ANNOUNCE;
+            avail_features |= 1 << VIRTIO_NET_F_MAC;
+            avail_features |= 1 << VIRTIO_NET_F_MQ;
 
-                    if offload_tso {
-                        avail_features |= (1 << VIRTIO_NET_F_HOST_ECN)
-                            | (1 << VIRTIO_NET_F_HOST_TSO4)
-                            | (1 << VIRTIO_NET_F_HOST_TSO6)
-                            | (1 << VIRTIO_NET_F_GUEST_ECN)
-                            | (1 << VIRTIO_NET_F_GUEST_TSO4)
-                            | (1 << VIRTIO_NET_F_GUEST_TSO6);
-                    }
+            let queue_num = num_queues + 1;
 
-                    if offload_ufo {
-                        avail_features |=
-                            (1 << VIRTIO_NET_F_HOST_UFO) | (1 << VIRTIO_NET_F_GUEST_UFO);
-                    }
-                }
+            let mut config = VirtioNetConfig::default();
+            config.populate(Some(guest_mac), num_queues, mtu);
 
-                avail_features |= 1 << VIRTIO_NET_F_CTRL_VQ;
-                avail_features |= 1 << VIRTIO_NET_F_STATUS;
-                avail_features |= 1 << VIRTIO_NET_F_GUEST_ANNOUNCE;
-                avail_features |= 1 << VIRTIO_NET_F_MAC;
-                avail_features |= 1 << VIRTIO_NET_F_MQ;
-
-                let queue_num = num_queues + 1;
-
-                let mut config = VirtioNetConfig::default();
-                config.populate(Some(guest_mac), num_queues, mtu);
-
-                (
-                    avail_features,
-                    0,
-                    config,
-                    vec![queue_size; queue_num],
-                    false,
-                    false,
-                )
-            };
+            (
+                avail_features,
+                0,
+                config,
+                vec![queue_size; queue_num],
+                false,
+                false,
+                default_curr_queue_pairs(),
+            )
+        };
 
         Ok(Net {
             common: VirtioCommon {
@@ -629,7 +652,8 @@ impl Net {
                 ..Default::default()
             },
             id,
-            taps,
+            queue_pairs: Arc::new(Mutex::new(TapQueuePairs::new(taps))),
+            curr_queue_pairs: Arc::new(AtomicU16::new(curr_queue_pairs)),
             config,
             counters: NetCounters::default(),
             seccomp_action,
@@ -749,6 +773,7 @@ impl Net {
             acked_features: self.common.acked_features,
             config: self.config,
             queue_size: self.common.queue_sizes.clone(),
+            curr_queue_pairs: self.curr_queue_pairs.load(Ordering::Acquire),
         }
     }
 
@@ -859,6 +884,33 @@ impl VirtioDevice for Net {
         let qp_threads = (num_queues - ctrl_threads) / 2;
         self.common.paused_sync = Some(Arc::new(Barrier::new(1 + qp_threads + ctrl_threads)));
 
+        // Only the queue pairs the driver made ready get a worker, and only a
+        // queue with a worker has anything draining its tap queue. Bring the
+        // tap backend down to the active count before the workers start, so the
+        // device never steers frames at a queue nobody is reading. On a fresh
+        // activation the active count is one, as the specification requires; on
+        // a restore it is whatever the guest had negotiated.
+        let activated_pairs = qp_threads as u16;
+        let curr_queue_pairs = self.curr_queue_pairs.load(Ordering::Acquire);
+        let active_pairs = min(curr_queue_pairs, activated_pairs);
+        if active_pairs != curr_queue_pairs {
+            // Not reachable from a request, which is rejected outright: this is
+            // a restored count that the driver has not backed with ready queues.
+            warn!(
+                "Restored queue pair count {curr_queue_pairs} exceeds the {activated_pairs} \
+                 activated; using {active_pairs}"
+            );
+        }
+        self.queue_pairs
+            .lock()
+            .unwrap()
+            .resync(active_pairs.into())
+            .map_err(|e| {
+                error!("Error setting the number of tap queue pairs: {e:?}");
+                ActivateError::BadActivate
+            })?;
+        self.curr_queue_pairs.store(active_pairs, Ordering::Release);
+
         if has_ctrl_queue {
             let ctrl_queue_index = num_queues - 1;
             let (_, mut ctrl_queue, ctrl_queue_evt) = queues.remove(ctrl_queue_index);
@@ -876,7 +928,12 @@ impl VirtioDevice for Net {
 
             let host_announce_ops = VirtioNetHostAnnounceOps::new(
                 self.build_rarp_announce(),
-                self.taps.clone().into_boxed_slice(),
+                self.queue_pairs
+                    .lock()
+                    .unwrap()
+                    .taps()
+                    .to_vec()
+                    .into_boxed_slice(),
             );
 
             let announcer = Announcer::new(
@@ -893,9 +950,11 @@ impl VirtioDevice for Net {
                 kill_evt,
                 pause_evt,
                 ctrl_q: CtrlQueue::new(
-                    self.taps.clone(),
+                    self.queue_pairs.clone(),
                     self.announce.pending.clone(),
                     self.config.max_virtqueue_pairs,
+                    activated_pairs,
+                    self.curr_queue_pairs.clone(),
                 ),
                 queue: ctrl_queue,
                 queue_evt: ctrl_queue_evt,
@@ -925,7 +984,7 @@ impl VirtioDevice for Net {
             )?;
         }
 
-        let mut taps = self.taps.clone();
+        let mut taps = self.queue_pairs.lock().unwrap().taps().to_vec();
         for i in 0..queues.len() / 2 {
             let rx = RxVirtio::new();
             let tx = TxVirtio::new();
@@ -1010,6 +1069,11 @@ impl VirtioDevice for Net {
     fn reset(&mut self) {
         self.common.reset();
         self.announce.reset();
+        // Back to the specification's default of a single active pair. The tap
+        // queues are deliberately left as they are: nothing is draining them
+        // while the device is inactive, and the next activation resyncs them.
+        self.curr_queue_pairs
+            .store(default_curr_queue_pairs(), Ordering::Release);
         event!("virtio-device", "reset", "id", &self.id);
     }
 
@@ -1247,7 +1311,8 @@ mod unit_tests {
                 ..Default::default()
             },
             id: "test-net".to_string(),
-            taps: Vec::new(),
+            queue_pairs: Arc::new(Mutex::new(TapQueuePairs::new(Vec::new()))),
+            curr_queue_pairs: Arc::new(AtomicU16::new(default_curr_queue_pairs())),
             config: VirtioNetConfig::default(),
             counters: NetCounters::default(),
             seccomp_action: SeccompAction::Allow,
@@ -1318,7 +1383,12 @@ mod unit_tests {
 
         let host_announce_ops = VirtioNetHostAnnounceOps::new(
             dev.build_rarp_announce(),
-            dev.taps.clone().into_boxed_slice(),
+            dev.queue_pairs
+                .lock()
+                .unwrap()
+                .taps()
+                .to_vec()
+                .into_boxed_slice(),
         );
 
         let announcer = Announcer::new(
@@ -1517,5 +1587,51 @@ mod unit_tests {
         announcer.initialize();
         assert!(matches!(announcer.send_announce(), AnnounceOutcome::Retry));
         assert_eq!(val.load(Ordering::Acquire), 2);
+    }
+
+    /// The shape of `NetState` before `curr_queue_pairs` existed.
+    #[derive(Serialize)]
+    struct LegacyNetState {
+        avail_features: u64,
+        acked_features: u64,
+        config: VirtioNetConfig,
+        queue_size: Vec<u16>,
+    }
+
+    #[test]
+    fn test_restore_state_without_curr_queue_pairs_defaults_to_one() {
+        // A snapshot taken before this field existed carries no value for it.
+        // Deriving Deserialize without a default would restore zero active
+        // queue pairs, which is not a state the specification allows.
+        let legacy = LegacyNetState {
+            avail_features: 0,
+            acked_features: 0,
+            config: VirtioNetConfig::default(),
+            queue_size: vec![256; 3],
+        };
+        let snapshot = Snapshot::new_from_state(&legacy).unwrap();
+
+        let state: NetState = snapshot.to_state().unwrap();
+
+        assert_eq!(state.curr_queue_pairs, 1);
+    }
+
+    #[test]
+    fn test_state_round_trip_preserves_curr_queue_pairs() {
+        // A count negotiated before the snapshot has to survive it, otherwise
+        // the restored device would disagree with the driver about how many
+        // queue pairs are live.
+        let state = NetState {
+            avail_features: 0,
+            acked_features: 0,
+            config: VirtioNetConfig::default(),
+            queue_size: vec![256; 9],
+            curr_queue_pairs: 4,
+        };
+        let snapshot = Snapshot::new_from_state(&state).unwrap();
+
+        let restored: NetState = snapshot.to_state().unwrap();
+
+        assert_eq!(restored.curr_queue_pairs, 4);
     }
 }

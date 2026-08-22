@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::result;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 
 use log::{error, info};
-use net_util::{CtrlQueue, MacAddr, VirtioNetConfig};
+use net_util::{CtrlQueue, MacAddr, TapQueuePairs, VirtioNetConfig};
 use seccompiler::SeccompAction;
 use vhost::vhost_user::message::{
     VhostUserConfigFlags, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
@@ -400,10 +400,16 @@ impl VirtioDevice for Net {
                 mem: mem.clone(),
                 kill_evt,
                 pause_evt,
+                // The backend owns the queues on this path, so there are no
+                // taps here to attach or detach and the queue-pair count is
+                // not ours to enforce. An empty set makes every tap operation
+                // in the control queue handler a no-op.
                 ctrl_q: CtrlQueue::new(
-                    Vec::new(),
+                    Arc::new(Mutex::new(TapQueuePairs::new(Vec::new()))),
                     self.announce.pending.clone(),
                     self.config.max_virtqueue_pairs,
+                    self.config.max_virtqueue_pairs,
+                    Arc::new(AtomicU16::new(1)),
                 ),
                 queue: ctrl_queue,
                 queue_evt: ctrl_queue_evt,

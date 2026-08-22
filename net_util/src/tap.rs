@@ -475,6 +475,29 @@ impl Tap {
         unsafe { Self::ioctl_with_ref(&sock, libc::SIOCSIFFLAGS as c_ulong, &ifreq) }
     }
 
+    /// Attach or detach this queue of a multiqueue tap.
+    ///
+    /// A tap opened with `IFF_MULTI_QUEUE` steers received frames across every
+    /// *attached* queue without regard for whether anything is reading them, so
+    /// a queue that has no reader silently accumulates frames until its ring
+    /// fills. Detaching such a queue takes it out of the steering set.
+    ///
+    /// This is not idempotent: the kernel rejects attaching an already attached
+    /// queue, and detaching an already detached one, with `EINVAL`. Callers must
+    /// track which queues they have attached and issue only the transitions.
+    pub fn set_queue(&self, enable: bool) -> Result<()> {
+        let mut ifreq = self.get_ifreq();
+
+        ifreq.ifr_ifru.ifru_flags = if enable {
+            libc::IFF_ATTACH_QUEUE as c_short
+        } else {
+            libc::IFF_DETACH_QUEUE as c_short
+        };
+
+        // SAFETY: ioctl is safe. Called with a valid tap fd, and we check the return.
+        unsafe { Self::ioctl_with_ref(&self.tap_file, libc::TUNSETQUEUE as c_ulong, &ifreq) }
+    }
+
     /// Set the size of the vnet hdr.
     pub fn set_vnet_hdr_size(&self, size: c_int) -> Result<()> {
         // SAFETY: ioctl is safe. Called with a valid tap fd, and we check the return.
@@ -704,6 +727,28 @@ mod unit_tests {
 
         let t = Tap::new(1).unwrap();
         println!("created tap: {t:?}");
+    }
+
+    #[test]
+    fn test_tap_set_queue() {
+        let _tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
+
+        // Two queues on one multiqueue tap; both are attached when opened.
+        let tap0 = Tap::new(2).unwrap();
+        let tap1 = Tap::open_named(tap0.if_name_as_str(), 2, None).unwrap();
+
+        // Detaching takes the second queue out of the steering set, and
+        // attaching puts it back.
+        tap1.set_queue(false).unwrap();
+        tap1.set_queue(true).unwrap();
+
+        // The operation is not idempotent: the kernel rejects a transition
+        // that has already happened. Callers rely on this being an error
+        // rather than a silent success, so that a lost transition cannot go
+        // unnoticed.
+        tap1.set_queue(true).unwrap_err();
+        tap1.set_queue(false).unwrap();
+        tap1.set_queue(false).unwrap_err();
     }
 
     #[test]
