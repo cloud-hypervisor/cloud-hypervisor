@@ -167,6 +167,26 @@ impl CtrlQueue {
         }
     }
 
+    /// Commit a negotiated queue-pair count and make the tap backend match it.
+    ///
+    /// Returns whether the request could be honoured; the caller turns that
+    /// into VIRTIO_NET_OK or VIRTIO_NET_ERR. `curr_queue_pairs` is only
+    /// published once the backend agrees with it, and both happen under the
+    /// same lock so the two cannot be observed disagreeing by a later
+    /// activation.
+    fn set_queue_pairs(&mut self, queue_pairs: u16) -> bool {
+        let mut tap_queue_pairs = self.queue_pairs.lock().unwrap();
+
+        if let Err(e) = tap_queue_pairs.resync(queue_pairs.into()) {
+            error!("Failed setting the number of tap queue pairs: {e:?}");
+            return false;
+        }
+
+        self.curr_queue_pairs.store(queue_pairs, Ordering::Release);
+
+        true
+    }
+
     pub fn process(
         &mut self,
         mem: &GuestMemoryMmap,
@@ -209,9 +229,21 @@ impl CtrlQueue {
                     {
                         warn!("Number of MQ pairs out of range: {queue_pairs}");
                         false
+                    } else if queue_pairs > self.activated_pairs {
+                        // The driver is asking for more pairs than it made
+                        // ready at activation, so some of them have no worker.
+                        // Attaching their tap queues would put frames where
+                        // nothing reads them, and acknowledging without
+                        // attaching would leave the driver transmitting into
+                        // queues that are never serviced.
+                        warn!(
+                            "Number of MQ pairs above the activated count: {queue_pairs} > {}",
+                            self.activated_pairs
+                        );
+                        false
                     } else {
                         info!("Number of MQ pairs requested: {queue_pairs}");
-                        true
+                        self.set_queue_pairs(queue_pairs)
                     };
                     (ok, status_desc)
                 }
@@ -387,7 +419,11 @@ mod unit_tests {
     /// Build a three-descriptor VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET request
     /// (readable header, readable le16 payload, writable status) and return the
     /// status byte the device wrote.
-    fn run_mq_vq_pairs_set(requested: u16, max_virtqueue_pairs: u16, activated_pairs: u16) -> u8 {
+    fn run_mq_vq_pairs_set(
+        requested: u16,
+        max_virtqueue_pairs: u16,
+        activated_pairs: u16,
+    ) -> (u8, u16) {
         const MEM_SIZE: usize = 0x20_0000;
         const QSIZE: u16 = 4;
         const QUEUE_ADDR: u64 = 0x0014_0000;
@@ -436,7 +472,10 @@ mod unit_tests {
         );
         ctrl_q.process(&mem, &mut queue, None).unwrap();
 
-        mem.read_obj::<u8>(GuestAddress(STATUS_ADDR)).unwrap()
+        (
+            mem.read_obj::<u8>(GuestAddress(STATUS_ADDR)).unwrap(),
+            curr_queue_pairs.load(Ordering::Acquire),
+        )
     }
 
     #[test]
@@ -444,8 +483,8 @@ mod unit_tests {
         // The spec permits any value up to max_virtqueue_pairs, so a request
         // for exactly that many pairs must be acknowledged, and the negotiated
         // count must follow it.
-        assert_eq!(run_mq_vq_pairs_set(4, 4, 4), VIRTIO_NET_OK as u8);
-        assert_eq!(run_mq_vq_pairs_set(1, 4, 4), VIRTIO_NET_OK as u8);
+        assert_eq!(run_mq_vq_pairs_set(4, 4, 4), (VIRTIO_NET_OK as u8, 4));
+        assert_eq!(run_mq_vq_pairs_set(1, 4, 4), (VIRTIO_NET_OK as u8, 1));
     }
 
     #[test]
@@ -454,8 +493,18 @@ mod unit_tests {
         // max_virtqueue_pairs in the device configuration space."
         // Such a request must not be acknowledged as successful, and it must
         // leave the negotiated count alone.
-        assert_eq!(run_mq_vq_pairs_set(5, 4, 4), VIRTIO_NET_ERR as u8);
-        assert_eq!(run_mq_vq_pairs_set(0, 4, 4), VIRTIO_NET_ERR as u8);
+        assert_eq!(run_mq_vq_pairs_set(5, 4, 4), (VIRTIO_NET_ERR as u8, 1));
+        assert_eq!(run_mq_vq_pairs_set(0, 4, 4), (VIRTIO_NET_ERR as u8, 1));
+    }
+
+    #[test]
+    fn test_process_mq_vq_pairs_set_above_activated_is_rejected() {
+        // Only an activated queue pair has a worker draining its tap queue, so
+        // a request beyond that count cannot be honoured even though it is
+        // within the advertised maximum.
+        assert_eq!(run_mq_vq_pairs_set(4, 4, 2), (VIRTIO_NET_ERR as u8, 1));
+        // At the activated count it is fine.
+        assert_eq!(run_mq_vq_pairs_set(2, 4, 2), (VIRTIO_NET_OK as u8, 2));
     }
 
     #[test]
