@@ -3493,7 +3493,7 @@ mod unit_tests {
                 hugepages: false,
                 hugepage_size: None,
                 prefault: false,
-                reserve: false,
+                reserve: None,
                 zones: None,
                 thp: true,
             },

@@ -1153,8 +1153,7 @@ impl MemoryConfig {
         let reserve = parser
             .convert::<Toggle>("reserve")
             .map_err(Error::ParseMemory)?
-            .unwrap_or(Toggle(false))
-            .0;
+            .map(|t| t.0);
         let thp = parser
             .convert::<Toggle>("thp")
             .map_err(Error::ParseMemory)?
@@ -1221,8 +1220,7 @@ impl MemoryConfig {
                 let reserve = parser
                     .convert::<Toggle>("reserve")
                     .map_err(Error::ParseMemoryZone)?
-                    .unwrap_or(Toggle(false))
-                    .0;
+                    .map(|t| t.0);
                 let mergeable = parser
                     .convert::<Toggle>("mergeable")
                     .map_err(Error::ParseMemoryZone)?
@@ -4219,7 +4217,7 @@ mod unit_tests {
                 zones: Some(vec![MemoryZoneConfig {
                     id: "mem0".to_string(),
                     size: 1 << 30,
-                    reserve: true,
+                    reserve: Some(true),
                     ..Default::default()
                 }]),
                 ..Default::default()
@@ -4295,7 +4293,7 @@ mod unit_tests {
             MemoryConfig {
                 size: 1 << 30,
                 hugepages: true,
-                reserve: true,
+                reserve: Some(true),
                 ..Default::default()
             }
         );
@@ -5813,7 +5811,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 hugepages: false,
                 hugepage_size: None,
                 prefault: false,
-                reserve: false,
+                reserve: None,
                 zones: None,
                 thp: true,
             },
