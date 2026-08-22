@@ -143,6 +143,47 @@ Setting `vm.unprivileged_userfaultfd=1` also works, but it enables
 `userfaultfd(2)` for every process on the host, whereas the ACL grants access
 to one user.
 
+### Copy-on-write restore
+
+With `memory_restore_mode=copyonwrite`, guest RAM is created by mapping the snapshot
+memory file copy-on-write before any KVM memslot or device consumes the
+mapping: nothing is copied up front, pages fault in from the page cache — so
+many VMs restored from the same snapshot share it — and guest writes stay
+private to each VM.
+
+Current constraints for `memory_restore_mode=copyonwrite`:
+
+- Plain private guest RAM only. Anything else falls back to the eager copy
+  (logged): `shared=on` or hugepages (global or per-zone), zones with
+  `host_numa_node`, `reserve`, `mergeable` or hotplug fields (a purely static
+  `id`+`size` zone is fine), resizable RAM (`hotplug_size`, virtio-mem), KSM
+  (`mergeable=on`), `--pvmemcontrol`, device passthrough
+  (`--device`/`--user-device`/`--vdpa`), and snapshot ranges that are not
+  page-aligned single-region extents. Each region's `reserve` policy and the
+  THP policy are re-applied to the mapped region.
+- A snapshot memory file shorter than the saved ranges is rejected up front (it
+  would otherwise fault `SIGBUS` at run time).
+- `prefault` is rejected.
+- The snapshot memory file must remain on disk **and unchanged** for the
+  entire lifetime of the VM. This is stronger than `ondemand`: UFFD copies each
+  page into the original anonymous mapping and stops needing the file once every
+  page is populated, and a read error there is a controlled VM exit; the
+  copy-on-write region stays file-backed forever, so truncating it delivers a
+  synchronous `SIGBUS` and any in-place edit corrupts the guest. The length
+  check only rejects a file that is already short at restore time.
+- `virtio-balloon` operates normally. Balloon inflation uses `MADV_DONTNEED`,
+  which is valid on the private file mapping: the kernel releases the private
+  page copies and the host reclaims the memory. A released page reads from the
+  snapshot file again on the next access. The guest must not expect specific
+  content in a page that returns from the balloon, so this is correct.
+  (`pvmemcontrol` differs: it issues operations that are only valid on
+  anonymous memory, which is why it is on the fallback list above.)
+- A device that is hot-plugged after the restore and that pins guest memory
+  (VFIO, vfio-user, vDPA) write-faults every guest page when its IOMMU mapping
+  is created. Every page becomes a private copy: the VM stays correct, but the
+  page-cache sharing is lost for that VM and host memory use grows to the
+  eager-copy level. The same applies to `ondemand` restores.
+
 ## Restore a VM with new Net FDs
 For a VM created with FDs explicitly passed to NetConfig, a set of valid FDs
 need to be provided along with the VM restore command in the following syntax:
