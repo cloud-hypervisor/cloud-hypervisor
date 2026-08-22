@@ -2,9 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use std::cmp::min;
 use std::result;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use log::{debug, error, info, warn};
 use thiserror::Error;
@@ -47,6 +48,9 @@ pub enum Error {
     /// Failed enabling notification for the queue
     #[error("Failed enabling notification for the queue")]
     QueueEnableNotification(#[source] virtio_queue::Error),
+    /// Failed attaching or detaching a tap queue
+    #[error("Failed attaching or detaching a tap queue")]
+    TapSetQueue(#[source] crate::TapError),
 }
 
 type Result<T> = result::Result<T, Error>;
@@ -80,20 +84,78 @@ fn is_tolerated_ctrl_command(ctrl_hdr: ControlHeader) -> bool {
     }
 }
 
+/// The tap queues backing a virtio-net device and how many of them are
+/// attached. `open_tap()` attaches every queue as it opens it, so the backend
+/// starts out sized from configuration rather than from what the driver
+/// negotiated. The vhost-user path holds an empty instance.
+pub struct TapQueuePairs {
+    taps: Vec<Tap>,
+    attached_pairs: usize,
+}
+
+impl TapQueuePairs {
+    /// `taps` are attached, since that is how `open_tap()` leaves them.
+    pub fn new(taps: Vec<Tap>) -> Self {
+        let attached_pairs = taps.len();
+        TapQueuePairs {
+            taps,
+            attached_pairs,
+        }
+    }
+
+    pub fn taps(&self) -> &[Tap] {
+        &self.taps
+    }
+
+    pub fn attached_pairs(&self) -> usize {
+        self.attached_pairs
+    }
+
+    /// Make the attached queue set match `target` leading queue pairs.
+    ///
+    /// Grows by attaching in ascending order and shrinks by detaching in
+    /// descending order. That ordering matters: the kernel appends a
+    /// re-attached queue at the tail and, when detaching, swaps the tail queue
+    /// into the vacated slot, so releasing the highest index first leaves every
+    /// remaining `taps[i]` on tun queue index `i`.
+    ///
+    /// `attached_pairs` is updated after each individual transition, so if one
+    /// fails midway the count still describes what the kernel actually holds.
+    pub fn resync(&mut self, target: usize) -> Result<()> {
+        let target = min(target, self.taps.len());
+
+        while self.attached_pairs < target {
+            self.taps[self.attached_pairs]
+                .set_queue(true)
+                .map_err(Error::TapSetQueue)?;
+            self.attached_pairs += 1;
+        }
+
+        while self.attached_pairs > target {
+            self.taps[self.attached_pairs - 1]
+                .set_queue(false)
+                .map_err(Error::TapSetQueue)?;
+            self.attached_pairs -= 1;
+        }
+
+        Ok(())
+    }
+}
+
 pub struct CtrlQueue {
-    pub taps: Vec<Tap>,
+    pub queue_pairs: Arc<Mutex<TapQueuePairs>>,
     pub announce_pending: Arc<AtomicBool>,
     pub max_virtqueue_pairs: u16,
 }
 
 impl CtrlQueue {
     pub fn new(
-        taps: Vec<Tap>,
+        queue_pairs: Arc<Mutex<TapQueuePairs>>,
         announce_pending: Arc<AtomicBool>,
         max_virtqueue_pairs: u16,
     ) -> Self {
         CtrlQueue {
-            taps,
+            queue_pairs,
             announce_pending,
             max_virtqueue_pairs,
         }
@@ -162,7 +224,8 @@ impl CtrlQueue {
                         .map_err(Error::GuestMemory)?;
                     let ok = if u32::from(ctrl_hdr.cmd) == VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET {
                         let mut ok = true;
-                        for tap in self.taps.iter_mut() {
+                        let queue_pairs = self.queue_pairs.lock().unwrap();
+                        for tap in queue_pairs.taps() {
                             info!("Reprogramming tap offload with features: {features}");
                             tap.set_offload(virtio_features_to_tap_offload(features))
                                 .map_err(|e| {
@@ -244,6 +307,11 @@ mod unit_tests {
     use super::*;
     use crate::GuestMemoryMmap;
 
+    /// A control queue with no taps behind it, as on the vhost-user path.
+    fn no_taps() -> Arc<Mutex<TapQueuePairs>> {
+        Arc::new(Mutex::new(TapQueuePairs::new(Vec::new())))
+    }
+
     #[test]
     fn test_process_announce_ack_without_data_descriptor() {
         // Build a minimal control virtqueue with one available request.
@@ -293,7 +361,7 @@ mod unit_tests {
         mem.write_obj(0xff_u8, GuestAddress(STATUS_ADDR)).unwrap();
 
         let announce_pending = Arc::new(AtomicBool::new(true));
-        let mut ctrl_q = CtrlQueue::new(Vec::new(), Arc::clone(&announce_pending), 1);
+        let mut ctrl_q = CtrlQueue::new(no_taps(), Arc::clone(&announce_pending), 1);
 
         ctrl_q.process(&mem, &mut queue, None).unwrap();
 
@@ -347,7 +415,7 @@ mod unit_tests {
         mem.write_obj(0xff_u8, GuestAddress(STATUS_ADDR)).unwrap();
 
         let mut ctrl_q = CtrlQueue::new(
-            Vec::new(),
+            no_taps(),
             Arc::new(AtomicBool::new(false)),
             max_virtqueue_pairs,
         );
@@ -359,7 +427,8 @@ mod unit_tests {
     #[test]
     fn test_process_mq_vq_pairs_set_within_max_is_accepted() {
         // The spec permits any value up to max_virtqueue_pairs, so a request
-        // for exactly that many pairs must be acknowledged.
+        // for exactly that many pairs must be acknowledged, and the negotiated
+        // count must follow it.
         assert_eq!(run_mq_vq_pairs_set(4, 4), VIRTIO_NET_OK as u8);
         assert_eq!(run_mq_vq_pairs_set(1, 4), VIRTIO_NET_OK as u8);
     }
@@ -368,9 +437,20 @@ mod unit_tests {
     fn test_process_mq_vq_pairs_set_above_max_is_rejected() {
         // "The driver MUST NOT request a virtqueue_pairs of 0 or greater than
         // max_virtqueue_pairs in the device configuration space."
-        // Such a request must not be acknowledged as successful.
+        // Such a request must not be acknowledged as successful, and it must
+        // leave the negotiated count alone.
         assert_eq!(run_mq_vq_pairs_set(5, 4), VIRTIO_NET_ERR as u8);
         assert_eq!(run_mq_vq_pairs_set(0, 4), VIRTIO_NET_ERR as u8);
+    }
+
+    #[test]
+    fn test_resync_without_taps_is_a_noop() {
+        // The vhost-user path holds no taps; the backend owns its queues.
+        let mut queue_pairs = TapQueuePairs::new(Vec::new());
+
+        queue_pairs.resync(4).unwrap();
+
+        assert_eq!(queue_pairs.attached_pairs(), 0);
     }
 
     #[test]
@@ -404,7 +484,7 @@ mod unit_tests {
         )
         .unwrap();
 
-        let mut ctrl_q = CtrlQueue::new(Vec::new(), Arc::new(AtomicBool::new(false)), 1);
+        let mut ctrl_q = CtrlQueue::new(no_taps(), Arc::new(AtomicBool::new(false)), 1);
 
         assert!(matches!(
             ctrl_q.process(&mem, &mut queue, None),

@@ -13,7 +13,7 @@ use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
@@ -23,7 +23,7 @@ use log::{debug, error, info, warn};
 use net_util::virtio_features_to_tap_offload;
 use net_util::{
     CtrlQueue, MAC_ADDR_LEN, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap,
-    TapError, TxVirtio, VirtioNetConfig, open_tap, vnet_hdr_len,
+    TapError, TapQueuePairs, TxVirtio, VirtioNetConfig, open_tap, vnet_hdr_len,
 };
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
@@ -504,7 +504,9 @@ impl AnnouncementState {
 pub struct Net {
     common: VirtioCommon,
     id: String,
-    taps: Vec<Tap>,
+    /// Tap queues and how many of them are attached. Shared with the control
+    /// queue handler, which changes the attached set on the driver's request.
+    queue_pairs: Arc<Mutex<TapQueuePairs>>,
     config: VirtioNetConfig,
     counters: NetCounters,
     seccomp_action: SeccompAction,
@@ -629,7 +631,7 @@ impl Net {
                 ..Default::default()
             },
             id,
-            taps,
+            queue_pairs: Arc::new(Mutex::new(TapQueuePairs::new(taps))),
             config,
             counters: NetCounters::default(),
             seccomp_action,
@@ -876,7 +878,12 @@ impl VirtioDevice for Net {
 
             let host_announce_ops = VirtioNetHostAnnounceOps::new(
                 self.build_rarp_announce(),
-                self.taps.clone().into_boxed_slice(),
+                self.queue_pairs
+                    .lock()
+                    .unwrap()
+                    .taps()
+                    .to_vec()
+                    .into_boxed_slice(),
             );
 
             let announcer = Announcer::new(
@@ -893,7 +900,7 @@ impl VirtioDevice for Net {
                 kill_evt,
                 pause_evt,
                 ctrl_q: CtrlQueue::new(
-                    self.taps.clone(),
+                    self.queue_pairs.clone(),
                     self.announce.pending.clone(),
                     self.config.max_virtqueue_pairs,
                 ),
@@ -925,7 +932,7 @@ impl VirtioDevice for Net {
             )?;
         }
 
-        let mut taps = self.taps.clone();
+        let mut taps = self.queue_pairs.lock().unwrap().taps().to_vec();
         for i in 0..queues.len() / 2 {
             let rx = RxVirtio::new();
             let tx = TxVirtio::new();
@@ -1247,7 +1254,7 @@ mod unit_tests {
                 ..Default::default()
             },
             id: "test-net".to_string(),
-            taps: Vec::new(),
+            queue_pairs: Arc::new(Mutex::new(TapQueuePairs::new(Vec::new()))),
             config: VirtioNetConfig::default(),
             counters: NetCounters::default(),
             seccomp_action: SeccompAction::Allow,
@@ -1318,7 +1325,12 @@ mod unit_tests {
 
         let host_announce_ops = VirtioNetHostAnnounceOps::new(
             dev.build_rarp_announce(),
-            dev.taps.clone().into_boxed_slice(),
+            dev.queue_pairs
+                .lock()
+                .unwrap()
+                .taps()
+                .to_vec()
+                .into_boxed_slice(),
         );
 
         let announcer = Announcer::new(

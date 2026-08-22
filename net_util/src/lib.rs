@@ -29,7 +29,7 @@ use vm_memory::bitmap::AtomicBitmap;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
-pub use ctrl_queue::{CtrlQueue, Error as CtrlQueueError};
+pub use ctrl_queue::{CtrlQueue, Error as CtrlQueueError, TapQueuePairs};
 pub use mac::{MAC_ADDR_LEN, MacAddr};
 pub use open_tap::{Error as OpenTapError, open_tap};
 pub use queue_pair::{NetCounters, NetQueuePair, NetQueuePairError, RxVirtio, TxVirtio};
