@@ -2016,8 +2016,6 @@ impl GenericVhostUserConfig {
         let mut parser = OptionParser::new();
         parser
             .add("device_type")
-            // TODO: Remove 'virtio_id' as a deprecated alias for 'device_type'
-            .add("virtio_id")
             .add("queue_sizes")
             .add("socket")
             .add_all(PciDeviceCommonConfig::OPTIONS);
@@ -2033,16 +2031,9 @@ impl GenericVhostUserConfig {
             .convert::<IntegerList<u16>>("queue_sizes")
             .map_err(Error::ParseGenericVhostUser)?
             .ok_or(Error::ParseGenericVhostUserQueueSizeMissing)?;
-        let legacy_virtio_id = parser
-            .convert::<String>("virtio_id")
-            .map_err(Error::ParseGenericVhostUser)?;
-        if legacy_virtio_id.is_some() {
-            warn!("'virtio_id' in --generic-vhost-user is deprecated; use 'device_type'.");
-        }
         let device_type_str = parser
             .convert::<String>("device_type")
             .map_err(Error::ParseGenericVhostUser)?
-            .or(legacy_virtio_id)
             .ok_or(Error::ParseGenericVhostUserVirtioIdMissing)?;
         let device_type = match device_type_str.as_bytes() {
             b"net" => VIRTIO_ID_NET,
@@ -4781,7 +4772,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
     fn test_parse_vhost_user() -> Result<()> {
         // all parameters must be supplied, except pci_segment
         GenericVhostUserConfig::parse("").unwrap_err();
-        GenericVhostUserConfig::parse("virtio_id=1").unwrap_err();
+        GenericVhostUserConfig::parse("device_type=1").unwrap_err();
         GenericVhostUserConfig::parse("queue_size=1").unwrap_err();
         GenericVhostUserConfig::parse("socket=/tmp/sock").unwrap_err();
         GenericVhostUserConfig::parse("id=1").unwrap_err();
@@ -4819,15 +4810,6 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             "Something",
             10,
             &IntegerList(vec![20u64]),
-        );
-
-        // The deprecated 'virtio_id' key is an alias for 'device_type' and must
-        // parse to an identical configuration.
-        assert_eq!(
-            GenericVhostUserConfig::parse("virtio_id=26,socket=/tmp/sock,queue_sizes=[1024]")
-                .unwrap(),
-            GenericVhostUserConfig::parse("device_type=26,socket=/tmp/sock,queue_sizes=[1024]")
-                .unwrap(),
         );
         Ok(())
     }
