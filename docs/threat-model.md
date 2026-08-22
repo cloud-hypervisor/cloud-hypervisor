@@ -138,12 +138,20 @@ descriptor.
 
 ### Disk Images
 
-With one exception, Cloud Hypervisor assumes that disk images provided
-to it are untrusted. The exception is that qcow2 images are assumed
-trusted if the `backing_files` option is enabled. It is disabled by
-default. If a backing file must be used with an untrusted image, the
-management stack must validate that the backing file is the expected
-value and resides in sector 0.
+With two exceptions, Cloud Hypervisor assumes that disk images provided
+to it are untrusted.
+
+- The first exception is that qcow2 images are assumed trusted if the
+`backing_files` option is enabled. It is disabled by default. If a
+backing file must be used with an untrusted image, the management stack
+must validate that the backing file is the expected value and resides in
+sector 0.
+- The second exception is that vmdk extent images provided using
+`absolute paths` in extent section of descriptor text file are assumed
+trusted. It is disabled by default. If absolute paths must be used with
+an untrusted image, the management stack must setup its own sandboxing to
+use such images to validate that the path is expected value and pass that
+single anchored directory containing all images in Disk Configuration.
 
 Cloud Hypervisor does not protect against decompression bombs.
 This means that malicious compressed data in a qcow2 image can cause
