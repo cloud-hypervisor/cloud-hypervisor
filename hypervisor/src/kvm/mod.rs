@@ -112,6 +112,10 @@ pub mod aarch64;
 #[cfg(target_arch = "riscv64")]
 pub mod riscv64;
 
+#[cfg(target_arch = "aarch64")]
+// KVM_CAP_ARM_EL2 is not yet included in the generated kvm-bindings.
+const KVM_CAP_ARM_EL2: u32 = 240;
+
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::KVM_X86_DEFAULT_VM;
 ///
@@ -633,6 +637,8 @@ struct KvmMemorySlot {
 /// Wrapper over KVM VM ioctls.
 pub struct KvmVm {
     fd: Arc<VmFd>,
+    #[cfg(target_arch = "aarch64")]
+    nested: bool,
     #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
     #[cfg(feature = "sev_snp")]
@@ -759,6 +765,11 @@ impl KvmVm {
 /// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
 /// ```
 impl vm::Vm for KvmVm {
+    #[cfg(target_arch = "aarch64")]
+    fn nested_enabled(&self) -> bool {
+        self.nested
+    }
+
     #[cfg(feature = "sev_snp")]
     fn sev_snp_init(&self, guest_policy: igvm_defs::SnpPolicy) -> vm::Result<()> {
         self.sev_fd
@@ -939,6 +950,8 @@ impl vm::Vm for KvmVm {
         let xsave_size = self.fd.check_extension_int(Cap::Xsave2);
         let vcpu = KvmVcpu {
             fd,
+            #[cfg(target_arch = "aarch64")]
+            nested: self.nested,
             #[cfg(target_arch = "x86_64")]
             msrs,
             #[cfg(target_arch = "x86_64")]
@@ -1817,6 +1830,8 @@ impl hypervisor::Hypervisor for KvmHypervisor {
         {
             Ok(Arc::new(KvmVm {
                 fd: Arc::new(fd),
+                #[cfg(target_arch = "aarch64")]
+                nested: _config.nested && self.kvm.check_extension_raw(KVM_CAP_ARM_EL2.into()) > 0,
                 dirty_log_slots: RwLock::new(HashMap::new()),
                 memory_slots: None,
             }))
@@ -1937,6 +1952,8 @@ impl hypervisor::Hypervisor for KvmHypervisor {
 /// Vcpu struct for KVM
 pub struct KvmVcpu {
     fd: VcpuFd,
+    #[cfg(target_arch = "aarch64")]
+    nested: bool,
     #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
     #[cfg(target_arch = "x86_64")]
@@ -1952,6 +1969,11 @@ pub struct KvmVcpu {
     vm_fd: Arc<VmFd>,
     #[cfg(feature = "sev_snp")]
     memory_slots: Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
+}
+
+#[cfg(target_arch = "aarch64")]
+fn initial_pstate(nested: bool) -> Option<u64> {
+    (!nested).then_some(regs::PSTATE_FAULT_BITS_64)
 }
 
 #[cfg(feature = "sev_snp")]
@@ -2819,26 +2841,20 @@ impl cpu::Vcpu for KvmVcpu {
             is_aarch64_feature_detected!("sve") || is_aarch64_feature_detected!("sve2");
 
         let mut kvm_kvi: kvm_bindings::kvm_vcpu_init = (*kvi).into();
+        let vm = vm.as_any().downcast_ref::<KvmVm>().unwrap();
 
         // We already checked that the capability is supported.
         kvm_kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PSCI_0_2;
-        if vm
-            .as_any()
-            .downcast_ref::<KvmVm>()
-            .unwrap()
-            .check_extension(Cap::ArmPmuV3)
-        {
+        if vm.check_extension(Cap::ArmPmuV3) {
             kvm_kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PMU_V3;
         }
 
-        if sve_supported
-            && vm
-                .as_any()
-                .downcast_ref::<KvmVm>()
-                .unwrap()
-                .check_extension(Cap::ArmSve)
-        {
+        if sve_supported && vm.check_extension(Cap::ArmSve) {
             kvm_kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_SVE;
+        }
+
+        if vm.nested {
+            kvm_kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_HAS_EL2;
         }
 
         // Non-boot cpus are powered off initially.
@@ -2979,14 +2995,18 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     #[cfg(target_arch = "aarch64")]
     fn setup_regs(&self, cpu_id: u32, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
-        // Get the register index of the PSTATE (Processor State) register.
-        let pstate = offset_of!(kvm_regs, regs.pstate);
-        self.fd
-            .set_one_reg(
-                arm64_core_reg_id!(KVM_REG_SIZE_U64, pstate),
-                &regs::PSTATE_FAULT_BITS_64.to_le_bytes(),
-            )
-            .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
+        // KVM initializes an EL2-capable vCPU with the PSTATE required to
+        // enter the nested hypervisor. Preserve that reset state instead of
+        // forcing the EL1 state used by ordinary guests.
+        if let Some(initial_pstate) = initial_pstate(self.nested) {
+            let pstate = offset_of!(kvm_regs, regs.pstate);
+            self.fd
+                .set_one_reg(
+                    arm64_core_reg_id!(KVM_REG_SIZE_U64, pstate),
+                    &initial_pstate.to_le_bytes(),
+                )
+                .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
+        }
 
         // Other vCPUs are powered off initially awaiting PSCI wakeup.
         if cpu_id == 0 {
@@ -4003,6 +4023,16 @@ impl KvmVcpu {
 
 #[cfg(test)]
 mod unit_tests {
+    #[test]
+    #[cfg(target_arch = "aarch64")]
+    fn test_initial_pstate() {
+        assert_eq!(
+            super::initial_pstate(false),
+            Some(super::regs::PSTATE_FAULT_BITS_64)
+        );
+        assert_eq!(super::initial_pstate(true), None);
+    }
+
     #[test]
     #[cfg(target_arch = "riscv64")]
     fn test_get_and_set_regs() {
