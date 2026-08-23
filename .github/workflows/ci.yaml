@@ -15,6 +15,7 @@ jobs:
       full: ${{ steps.classify.outputs.full }}
       rust: ${{ steps.changes.outputs.rust }}
       cargo: ${{ steps.changes.outputs.cargo }}
+      fuzz: ${{ steps.changes.outputs.fuzz }}
       openapi: ${{ steps.changes.outputs.openapi }}
       dockerfile: ${{ steps.changes.outputs.dockerfile }}
       shell: ${{ steps.changes.outputs.shell }}
@@ -30,6 +31,7 @@ jobs:
           filters: |
             rust:
               - '**/*.rs'
+              - '!fuzz/**'
               - 'build.rs'
               - '**/Cargo.toml'
               - '**/Cargo.lock'
@@ -37,6 +39,10 @@ jobs:
             cargo:
               - '**/Cargo.toml'
               - '**/Cargo.lock'
+              - '!fuzz/Cargo.toml'
+              - '!fuzz/Cargo.lock'
+            fuzz:
+              - 'fuzz/**'
             openapi:
               - 'vmm/src/api/openapi/**'
             dockerfile:
@@ -220,7 +226,7 @@ jobs:
   formatting:
     name: formatting
     needs: [preflight]
-    if: needs.preflight.outputs.full == 'true'
+    if: needs.preflight.outputs.full == 'true' || needs.preflight.outputs.fuzz == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -247,7 +253,7 @@ jobs:
   package-consistency:
     name: package-consistency
     needs: [preflight]
-    if: needs.preflight.outputs.full == 'true'
+    if: needs.preflight.outputs.full == 'true' || needs.preflight.outputs.fuzz == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -272,7 +278,7 @@ jobs:
   fuzz-build:
     name: fuzz-build
     needs: [preflight]
-    if: needs.preflight.outputs.full == 'true'
+    if: needs.preflight.outputs.full == 'true' || needs.preflight.outputs.fuzz == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
