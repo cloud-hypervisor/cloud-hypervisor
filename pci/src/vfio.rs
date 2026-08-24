@@ -669,6 +669,23 @@ struct VfioMigrationData {
 pub(crate) struct ConfigPatch {
     mask: u32,
     patch: u32,
+    write_mask: u32,
+}
+
+impl ConfigPatch {
+    fn write(&mut self, offset: u64, data: &[u8]) {
+        let mut bytes = self.patch.to_le_bytes();
+
+        for (i, byte) in data.iter().enumerate() {
+            let Some(slot) = bytes.get_mut(offset as usize + i) else {
+                break;
+            };
+            *slot = *byte;
+        }
+
+        let written = u32::from_le_bytes(bytes);
+        self.patch = (self.patch & !self.write_mask) | (written & self.write_mask);
+    }
 }
 
 const NVIDIA_VENDOR_ID: u64 = 0x10de;
@@ -1282,6 +1299,7 @@ impl VfioCommon {
             ConfigPatch {
                 mask: 0x0000_ff00,
                 patch: cap_offset << 8,
+                write_mask: 0,
             },
         );
 
@@ -1291,6 +1309,7 @@ impl VfioCommon {
             ConfigPatch {
                 mask: 0xffff_ffff,
                 patch: 0x50080009u32,
+                write_mask: 0,
             },
         );
         self.patches.insert(
@@ -1298,6 +1317,7 @@ impl VfioCommon {
             ConfigPatch {
                 mask: 0xffff_ffff,
                 patch: (u32::from(clique_id) << 19) | 0x5032,
+                write_mask: 0,
             },
         );
     }
@@ -1308,6 +1328,7 @@ impl VfioCommon {
             ConfigPatch {
                 mask: PCI_EXT_CAP_NEXT_MASK,
                 patch: next << PCI_EXT_CAP_NEXT_SHIFT,
+                write_mask: 0,
             },
         );
     }
@@ -1335,6 +1356,7 @@ impl VfioCommon {
                                 mask: 0xffff_ffff,
                                 patch: (PciExpressCapabilityId::NullCapability as u32)
                                     | (u32::from(cap_next) << PCI_EXT_CAP_NEXT_SHIFT),
+                                write_mask: 0,
                             },
                         );
                     }
@@ -1570,6 +1592,14 @@ impl VfioCommon {
                     .write_config_register(reg_idx, offset, data),
                 None,
             );
+        }
+
+        // Update patches if they're writable
+        if let Some(patch) = self.patches.get_mut(&reg_idx)
+            && patch.write_mask != 0
+        {
+            patch.write(offset, data);
+            return (Vec::new(), None);
         }
 
         let reg = (reg_idx * PCI_CONFIG_REGISTER_SIZE) as u64;
@@ -2977,6 +3007,7 @@ mod tests {
         dma_logging_ranges: Vec<DmaLoggingRange>,
         dma_logging_bitmap: Vec<u64>,
         dma_logging_negotiated: Option<u64>,
+        region_writes: Vec<(u32, u64, Vec<u8>)>,
         config_dwords: HashMap<u64, u32>,
     }
 
@@ -2985,6 +3016,17 @@ mod tests {
     }
 
     impl MockVfio {
+        fn config_writes(&self) -> Vec<(u64, Vec<u8>)> {
+            self.state
+                .lock()
+                .unwrap()
+                .region_writes
+                .iter()
+                .filter(|(index, _, _)| *index == VFIO_PCI_CONFIG_REGION_INDEX)
+                .map(|(_, offset, data)| (*offset, data.clone()))
+                .collect()
+        }
+
         fn with_state(state: MockVfioState) -> Arc<Self> {
             Arc::new(Self {
                 state: Mutex::new(state),
@@ -3104,7 +3146,13 @@ mod tests {
             ))
         }
 
-        fn region_write(&self, _index: u32, _offset: u64, _data: &[u8]) {}
+        fn region_write(&self, index: u32, offset: u64, data: &[u8]) {
+            self.state
+                .lock()
+                .unwrap()
+                .region_writes
+                .push((index, offset, data.to_vec()));
+        }
 
         fn region_read(&self, index: u32, offset: u64, data: &mut [u8]) {
             data.fill(0);
@@ -3210,6 +3258,46 @@ mod tests {
             2
         );
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn writable_patch_keeps_the_write_local() {
+        let mock = MockVfio::for_save(Vec::new());
+        let mut common = test_vfio_common(mock.clone(), None);
+        let reg_idx = 0x40;
+
+        common.patches.insert(
+            reg_idx,
+            ConfigPatch {
+                mask: 0xffff_ffff,
+                patch: 0,
+                write_mask: 0x00ff_0000,
+            },
+        );
+        common.write_config_register(reg_idx, 2, &[0xff, 0xff]);
+
+        assert_eq!(common.read_config_register(reg_idx), 0x00ff_0000);
+        assert!(mock.config_writes().is_empty());
+    }
+
+    #[test]
+    fn read_only_patch_forwards_the_write() {
+        let mock = MockVfio::for_save(Vec::new());
+        let mut common = test_vfio_common(mock.clone(), None);
+        let reg_idx = 0x40;
+
+        common.patches.insert(
+            reg_idx,
+            ConfigPatch {
+                mask: 0xffff_ffff,
+                patch: 0x1234_5678,
+                write_mask: 0,
+            },
+        );
+        common.write_config_register(reg_idx, 0, &[0xff; 4]);
+
+        assert_eq!(common.read_config_register(reg_idx), 0x1234_5678);
+        assert_eq!(mock.config_writes().len(), 1);
     }
 
     #[test]
