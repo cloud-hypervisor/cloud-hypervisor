@@ -989,6 +989,7 @@ fn http_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
         (libc::SYS_madvise, vec![]),
         (libc::SYS_mmap, vec![]),
         (libc::SYS_mprotect, vec![]),
+        (libc::SYS_mremap, vec![]),
         (libc::SYS_munmap, vec![]),
         (libc::SYS_prctl, vec![]),
         (libc::SYS_recvfrom, vec![]),
