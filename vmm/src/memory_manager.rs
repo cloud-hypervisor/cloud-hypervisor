@@ -220,6 +220,7 @@ pub struct MemoryManager {
     hotplug_method: HotplugMethod,
     boot_ram: u64,
     current_ram: u64,
+    hotplug_size: u64,
     next_hotplug_slot: usize,
     shared: bool,
     hugepages: bool,
@@ -277,8 +278,8 @@ pub enum Error {
     NoSlotAvailable,
 
     /// Not enough space in the hotplug RAM region
-    #[error("Not enough space in the hotplug RAM region")]
-    InsufficientHotplugRam,
+    #[error("Not enough space in the hotplug RAM region: {0} exceeds {1}")]
+    InsufficientHotplugRam(u64, u64),
 
     /// The requested hotplug memory addition is not a valid size
     #[error("The requested hotplug memory addition is not a valid size")]
@@ -1895,6 +1896,7 @@ impl MemoryManager {
             hotplug_method: config.hotplug_method,
             boot_ram,
             current_ram,
+            hotplug_size: config.hotplug_size.unwrap_or_default(),
             next_hotplug_slot,
             shared: config.shared,
             hugepages: config.hugepages,
@@ -2401,6 +2403,20 @@ impl MemoryManager {
             return Err(Error::InvalidSize);
         }
 
+        let total_hotplug_ram = self
+            .hotplug_slots
+            .iter()
+            .filter(|slot| slot.active)
+            .map(|slot| slot.length)
+            .sum::<u64>()
+            + size as u64;
+        if total_hotplug_ram > self.hotplug_size {
+            return Err(Error::InsufficientHotplugRam(
+                total_hotplug_ram,
+                self.hotplug_size,
+            ));
+        }
+
         let start_addr = MemoryManager::start_addr(self.guest_memory.memory().last_addr(), true)?;
 
         if start_addr
@@ -2408,7 +2424,10 @@ impl MemoryManager {
             .unwrap()
             > self.end_of_ram_area
         {
-            return Err(Error::InsufficientHotplugRam);
+            return Err(Error::InsufficientHotplugRam(
+                total_hotplug_ram,
+                self.hotplug_size,
+            ));
         }
 
         let region = self.add_ram_region(start_addr, size)?;
