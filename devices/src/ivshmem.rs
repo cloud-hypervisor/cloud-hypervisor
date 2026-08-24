@@ -26,7 +26,7 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 
 const IVSHMEM_BAR0_IDX: usize = 0;
 const IVSHMEM_BAR1_IDX: usize = 1;
-const IVSHMEM_BAR2_IDX: usize = 2;
+const IVSHMEM_DATA_BAR_IDX: usize = 2;
 
 const IVSHMEM_VENDOR_ID: u16 = 0x1af4;
 const IVSHMEM_DEVICE_ID: u16 = 0x1110;
@@ -194,7 +194,7 @@ impl IvshmemDevice {
     }
 
     pub fn data_bar_addr(&self) -> u64 {
-        self.configuration.get_bar_addr(IVSHMEM_BAR2_IDX)
+        self.configuration.get_bar_addr(IVSHMEM_DATA_BAR_IDX)
     }
 
     fn state(&self) -> IvshmemDeviceState {
@@ -238,7 +238,7 @@ impl PciDevice for IvshmemDevice {
                             bar0_addr = Some(GuestAddress(base));
                         }
                         IVSHMEM_BAR1_IDX => {}
-                        IVSHMEM_BAR2_IDX => {
+                        IVSHMEM_DATA_BAR_IDX => {
                             bar2_addr = Some(GuestAddress(base));
                         }
                         _ => {
@@ -278,7 +278,7 @@ impl PciDevice for IvshmemDevice {
         debug!("ivshmem bar2 address 0x{:x}", bar2_addr.0);
 
         let bar2 = PciBarConfiguration::default()
-            .set_index(IVSHMEM_BAR2_IDX)
+            .set_index(IVSHMEM_DATA_BAR_IDX)
             .set_address(bar2_addr.raw_value())
             .set_size(bar2_size)
             .set_region_type(PciBarRegionType::Memory64BitRegion)
