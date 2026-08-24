@@ -83,6 +83,7 @@ const SNAPSHOT_FILENAME: &str = "memory-ranges";
 const X86_64_IRQ_BASE: u32 = 5;
 
 const HOTPLUG_COUNT: usize = 8;
+const HOTPLUG_RAM_ALIGN_SIZE: u64 = 128 << 20;
 
 // Memory policy constants
 const MPOL_BIND: u32 = 2;
@@ -2308,7 +2309,7 @@ impl MemoryManager {
     // And it must also start at the 64bit start.
     fn start_addr(mem_end: GuestAddress, allow_mem_hotplug: bool) -> Result<GuestAddress, Error> {
         let mut start_addr = if allow_mem_hotplug {
-            GuestAddress(mem_end.0 | ((128 << 20) - 1))
+            GuestAddress(mem_end.0 | (HOTPLUG_RAM_ALIGN_SIZE - 1))
         } else {
             mem_end
         };
@@ -2383,7 +2384,7 @@ impl MemoryManager {
         }
 
         // "Inserted" DIMM must have a size that is a multiple of 128MiB
-        if !size.is_multiple_of(128 << 20) {
+        if !size.is_multiple_of(HOTPLUG_RAM_ALIGN_SIZE as usize) {
             return Err(Error::InvalidSize);
         }
 
