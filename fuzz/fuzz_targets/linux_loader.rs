@@ -27,7 +27,7 @@ const HIGH_RAM_START: GuestAddress = GuestAddress(0x100000);
 fuzz_target!(|bytes| {
     let shm = memfd_create(&ffi::CString::new("fuzz_load_kernel").unwrap(), 0).unwrap();
     let mut kernel_file: File = unsafe { File::from_raw_fd(shm) };
-    kernel_file.write_all(&bytes).unwrap();
+    kernel_file.write_all(bytes).unwrap();
     kernel_file.seek(SeekFrom::Start(0)).unwrap();
 
     let guest_memory = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap();

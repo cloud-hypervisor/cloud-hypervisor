@@ -24,8 +24,13 @@ use vmm::{EpollContext, EpollDispatch};
 use vmm_sys_util::eventfd::EventFd;
 
 // Need to be ordered for test case reproducibility
-static ROUTES: LazyLock<Vec<&Box<dyn EndpointHandler + Sync + Send>>> =
-    LazyLock::new(|| HTTP_ROUTES.routes.values().collect());
+static ROUTES: LazyLock<Vec<&'static (dyn EndpointHandler + Sync + Send)>> = LazyLock::new(|| {
+    HTTP_ROUTES
+        .routes
+        .values()
+        .map(|route| route.as_ref())
+        .collect()
+});
 
 fuzz_target!(|bytes: &[u8]| -> Corpus {
     if bytes.len() < 2 {
@@ -68,7 +73,7 @@ fn generate_request(bytes: &[u8]) -> Option<Request> {
     let request_line = format!("{} http://localhost/home HTTP/1.1\r\n", req_method);
 
     let req_body = &bytes[1..];
-    let request = if req_body.len() > 0 {
+    let request = if !req_body.is_empty() {
         [
             format!("{}Content-Length: {}\r\n", request_line, req_body.len()).as_bytes(),
             req_body,
@@ -312,7 +317,7 @@ fn http_receiver_stub(exit_evt: EventFd, api_evt: EventFd, api_receiver: Receive
     epoll.add_event(&api_evt, EpollDispatch::Api).unwrap();
 
     let epoll_fd = epoll.as_raw_fd();
-    let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); 2];
+    let mut events = [epoll::Event::new(epoll::Events::empty(), 0); 2];
     let num_events;
     loop {
         num_events = match epoll::wait(epoll_fd, -1, &mut events[..]) {

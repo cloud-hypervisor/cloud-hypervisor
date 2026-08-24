@@ -31,7 +31,7 @@ const TAP_INPUT_SIZE: usize = 128;
 const QUEUE_DATA_SIZE: usize = 4;
 const MEM_SIZE: usize = 32 * 1024 * 1024;
 // Guest memory gap
-const GUEST_MEM_GAP: u64 = 1 * 1024 * 1024;
+const GUEST_MEM_GAP: u64 = 1024 * 1024;
 // Guest physical address for the first virt queue
 const BASE_VIRT_QUEUE_ADDR: u64 = MEM_SIZE as u64 + GUEST_MEM_GAP;
 // Number of queues
@@ -114,7 +114,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     {
         return Corpus::Reject;
     }
-    if mem.write_slice(mem_bytes, GuestAddress(0 as u64)).is_err() {
+    if mem.write_slice(mem_bytes, GuestAddress(0)).is_err() {
         return Corpus::Reject;
     }
     let guest_memory = GuestMemoryAtomic::new(mem);
@@ -266,7 +266,7 @@ fn tap_backend_stub(
         .unwrap();
 
     let epoll_fd = epoll.as_raw_fd();
-    let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); 3];
+    let mut events = [epoll::Event::new(epoll::Events::empty(), 0); 3];
     loop {
         let num_events = match epoll::wait(epoll_fd, -1, &mut events[..]) {
             Ok(num_events) => num_events,
@@ -276,24 +276,16 @@ fn tap_backend_stub(
             },
         };
 
-        for event in events.iter().take(num_events) {
+        if let Some(event) = events.iter().take(num_events).next() {
             let dispatch_event: EpollEvent = event.data.into();
             match dispatch_event {
-                EpollEvent::Exit => {
-                    return;
-                }
-                EpollEvent::Rx => {
-                    dummy_tap.write_all(tap_input_bytes).unwrap();
-                    break;
-                }
+                EpollEvent::Exit => return,
+                EpollEvent::Rx => dummy_tap.write_all(tap_input_bytes).unwrap(),
                 EpollEvent::Tx => {
                     let mut buffer = Vec::new();
                     dummy_tap.read_to_end(&mut buffer).ok();
-                    break;
                 }
-                _ => {
-                    panic!("Unexpected Epoll event");
-                }
+                _ => panic!("Unexpected Epoll event"),
             }
         }
     }

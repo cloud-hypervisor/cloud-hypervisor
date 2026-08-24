@@ -61,7 +61,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
 
     // Setup the guest memory with the input bytes
     let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap();
-    if mem.write_slice(mem_bytes, GuestAddress(0 as u64)).is_err() {
+    if mem.write_slice(mem_bytes, GuestAddress(0)).is_err() {
         return Corpus::Reject;
     }
     let guest_memory = GuestMemoryAtomic::new(mem);

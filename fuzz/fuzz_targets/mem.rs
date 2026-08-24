@@ -47,7 +47,7 @@ const AVAIL_RING_SIZE: u64 = 6_u64 + 2 * QUEUE_SIZE as u64;
 const USED_RING_SIZE: u64 = 6_u64 + 8 * QUEUE_SIZE as u64;
 
 // Guest memory gap
-const GUEST_MEM_GAP: u64 = 1 * 1024 * 1024;
+const GUEST_MEM_GAP: u64 = 1024 * 1024;
 // Guest physical address for descriptor table.
 const DESC_TABLE_ADDR: u64 = align!(MEM_SIZE as u64 + GUEST_MEM_GAP, DESC_TABLE_ALIGN_SIZE);
 // Guest physical address for available ring
@@ -138,7 +138,11 @@ impl VirtioInterrupt for NoopVirtioInterrupt {
 
 // Create a dummy virtio-mem device for fuzzing purpose only
 fn create_dummy_virtio_mem(bytes: &[u8; VIRTIO_MEM_DATA_SIZE]) -> (Mem, Arc<GuestRegionMmap>) {
-    let numa_id = if bytes[0] % 2 != 0 { Some(0) } else { None };
+    let numa_id = if !bytes[0].is_multiple_of(2) {
+        Some(0)
+    } else {
+        None
+    };
 
     let region = vmm::memory_manager::MemoryManager::create_ram_region(
         &None,
@@ -179,7 +183,7 @@ fn setup_virt_queue(bytes: &[u8; QUEUE_DATA_SIZE]) -> Queue {
     let mut q = Queue::new(QUEUE_SIZE).unwrap();
     q.set_next_avail(bytes[0] as u16); // 'u8' is enough given the 'QUEUE_SIZE' is small
     q.set_next_used(bytes[1] as u16);
-    q.set_event_idx(bytes[2] % 2 != 0);
+    q.set_event_idx(!bytes[2].is_multiple_of(2));
     q.set_size(bytes[3] as u16 % QUEUE_SIZE);
 
     q.try_set_desc_table_address(GuestAddress(DESC_TABLE_ADDR))

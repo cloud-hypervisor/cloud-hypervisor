@@ -53,7 +53,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
 
     // Setup the guest memory with the input bytes
     let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap();
-    if mem.write_slice(mem_bytes, GuestAddress(0 as u64)).is_err() {
+    if mem.write_slice(mem_bytes, GuestAddress(0)).is_err() {
         return Corpus::Reject;
     }
     let guest_memory = GuestMemoryAtomic::new(mem);
@@ -100,7 +100,7 @@ fn setup_virt_queue(bytes: &[u8; QUEUE_DATA_SIZE]) -> Queue {
     let mut q = Queue::new(QUEUE_SIZE).unwrap();
     q.set_next_avail(bytes[0] as u16); // 'u8' is enough given the 'QUEUE_SIZE' is small
     q.set_next_used(bytes[1] as u16);
-    q.set_event_idx(bytes[2] % 2 != 0);
+    q.set_event_idx(!bytes[2].is_multiple_of(2));
     q.set_size(bytes[3] as u16 % QUEUE_SIZE);
 
     q.try_set_desc_table_address(GuestAddress(DESC_TABLE_ADDR))

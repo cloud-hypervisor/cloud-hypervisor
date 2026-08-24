@@ -22,7 +22,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     let payload_config = vmm::vm_config::PayloadConfig {
         firmware: None,
         kernel: None,
-        cmdline: Some(String::from_utf8_lossy(&bytes).to_string()),
+        cmdline: Some(String::from_utf8_lossy(bytes).to_string()),
         initramfs: None,
         #[cfg(feature = "igvm")]
         igvm: None,
