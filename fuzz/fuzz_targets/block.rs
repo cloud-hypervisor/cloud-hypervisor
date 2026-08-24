@@ -216,6 +216,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
         queue_affinity,
         false,
         LockGranularityChoice::default(),
+        None,
     )
     .unwrap();
 
