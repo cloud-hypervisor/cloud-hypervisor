@@ -290,7 +290,7 @@ const MSIX_PBA_SIZE: u64 = 0x800;
 const CAPABILITY_BAR_SIZE: u64 = (MSIX_PBA_BAR_OFFSET + MSIX_PBA_SIZE).next_power_of_two();
 // Align larger than natural alignment to work around Windows driver issues
 const VIRTIO_PCI_BAR_ALIGN: u64 = 0x80_0000;
-const VIRTIO_COMMON_BAR_INDEX: u8 = 0;
+const VIRTIO_CONFIG_BAR_INDEX: usize = 0;
 const VIRTIO_SHM_BAR_INDEX: usize = 2;
 
 const NOTIFY_OFF_MULTIPLIER: u32 = 4; // A dword per notification address.
@@ -698,8 +698,7 @@ impl VirtioPciDevice {
     }
 
     pub fn config_bar_addr(&self) -> u64 {
-        self.configuration
-            .get_bar_addr(VIRTIO_COMMON_BAR_INDEX.into())
+        self.configuration.get_bar_addr(VIRTIO_CONFIG_BAR_INDEX)
     }
 
     fn add_pci_capabilities(
@@ -709,7 +708,7 @@ impl VirtioPciDevice {
         // Add pointers to the different configuration structures from the PCI capabilities.
         let common_cap = VirtioPciCap::new(
             PciCapabilityType::Common,
-            VIRTIO_COMMON_BAR_INDEX,
+            VIRTIO_CONFIG_BAR_INDEX as u8,
             COMMON_CONFIG_BAR_OFFSET as u32,
             COMMON_CONFIG_SIZE as u32,
         );
@@ -719,7 +718,7 @@ impl VirtioPciDevice {
 
         let isr_cap = VirtioPciCap::new(
             PciCapabilityType::Isr,
-            VIRTIO_COMMON_BAR_INDEX,
+            VIRTIO_CONFIG_BAR_INDEX as u8,
             ISR_CONFIG_BAR_OFFSET as u32,
             ISR_CONFIG_SIZE as u32,
         );
@@ -730,7 +729,7 @@ impl VirtioPciDevice {
         if device_config_size > 0 {
             let device_cap = VirtioPciCap::new(
                 PciCapabilityType::Device,
-                VIRTIO_COMMON_BAR_INDEX,
+                VIRTIO_CONFIG_BAR_INDEX as u8,
                 DEVICE_CONFIG_BAR_OFFSET as u32,
                 device_config_size as u32,
             );
@@ -741,7 +740,7 @@ impl VirtioPciDevice {
 
         let notify_cap = VirtioPciNotifyCap::new(
             PciCapabilityType::Notify,
-            VIRTIO_COMMON_BAR_INDEX,
+            VIRTIO_CONFIG_BAR_INDEX as u8,
             NOTIFICATION_BAR_OFFSET as u32,
             NOTIFICATION_SIZE as u32,
             Le32::from(NOTIFY_OFF_MULTIPLIER),
@@ -759,10 +758,10 @@ impl VirtioPciDevice {
         self.cap_pci_cfg_info.cap = configuration_cap;
 
         let msix_cap = MsixCap::new(
-            VIRTIO_COMMON_BAR_INDEX,
+            VIRTIO_CONFIG_BAR_INDEX as u8,
             self.msix_num,
             MSIX_TABLE_BAR_OFFSET as u32,
-            VIRTIO_COMMON_BAR_INDEX,
+            VIRTIO_CONFIG_BAR_INDEX as u8,
             MSIX_PBA_BAR_OFFSET as u32,
         );
         self.configuration
@@ -1042,7 +1041,7 @@ impl PciDevice for VirtioPciDevice {
                 if let Resource::PciBar {
                     index, base, type_, ..
                 } = resource
-                    && index == usize::from(VIRTIO_COMMON_BAR_INDEX)
+                    && index == VIRTIO_CONFIG_BAR_INDEX
                 {
                     settings_bar_addr = Some(GuestAddress(base));
                     use_64bit_bar = match type_ {
@@ -1087,7 +1086,7 @@ impl PciDevice for VirtioPciDevice {
         };
 
         let bar = PciBarConfiguration::default()
-            .set_index(VIRTIO_COMMON_BAR_INDEX.into())
+            .set_index(VIRTIO_CONFIG_BAR_INDEX)
             .set_address(virtio_pci_bar_addr.raw_value())
             .set_size(CAPABILITY_BAR_SIZE)
             .set_region_type(region_type);
