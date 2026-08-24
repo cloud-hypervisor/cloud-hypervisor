@@ -328,10 +328,21 @@ impl PerformanceTest {
 
     // Calculate the timeout for each test
     // Note: To cover the setup/cleanup time, 20s is added for each iteration of the test
-    pub fn calc_timeout(&self, test_iterations: &Option<u32>, test_timeout: &Option<u32>) -> u64 {
+    // Confidential VMS can take up to DEFAULT_CVM_TCP_LISTENER_TIMEOUT
+    pub fn calc_timeout(
+        &self,
+        test_iterations: &Option<u32>,
+        test_timeout: &Option<u32>,
+        vm_type: GuestVmType,
+    ) -> u64 {
         let total_iterations = test_iterations.unwrap_or(self.control.test_iterations)
             + self.control.warmup_iterations;
-        ((test_timeout.unwrap_or(self.control.test_timeout) + 20) * total_iterations) as u64
+        let per_iter_overhead = match vm_type {
+            GuestVmType::Confidential => test_infra::DEFAULT_CVM_TCP_LISTENER_TIMEOUT,
+            _ => 20,
+        };
+        ((test_timeout.unwrap_or(self.control.test_timeout) + per_iter_overhead) * total_iterations)
+            as u64
     }
 }
 
@@ -1728,6 +1739,7 @@ fn run_test_with_timeout(
     let (sender, receiver) = channel::<Result<PerformanceTestResult, Error>>();
     let test_iterations = overrides.test_iterations;
     let test_timeout = overrides.test_timeout;
+    let vm_type = overrides.vm_type;
     let overrides = overrides.clone();
     thread::Builder::new()
         .name(test.name.into())
@@ -1752,7 +1764,7 @@ fn run_test_with_timeout(
         })
         .unwrap();
 
-    let test_timeout = test.calc_timeout(&test_iterations, &test_timeout);
+    let test_timeout = test.calc_timeout(&test_iterations, &test_timeout, vm_type);
     let result = receiver
         .recv_timeout(Duration::from_secs(test_timeout))
         .map_err(|_| {
