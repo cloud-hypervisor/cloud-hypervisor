@@ -1762,8 +1762,11 @@ impl MemoryManager {
                         }
 
                         if !user_provided_zones && config.hotplug_method == HotplugMethod::Acpi {
+                            let hotplug_address_space_size = hotplug_size
+                                .checked_add(HOTPLUG_RAM_GAP_SIZE * (HOTPLUG_COUNT as u64 - 1))
+                                .ok_or(Error::GuestAddressOverFlow)?;
                             start_of_device_area = start_of_device_area
-                                .checked_add(hotplug_size)
+                                .checked_add(hotplug_address_space_size)
                                 .ok_or(Error::GuestAddressOverFlow)?;
                         } else {
                             // Alignment must be "natural" i.e. same as size of block
