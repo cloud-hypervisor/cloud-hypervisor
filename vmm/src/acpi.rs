@@ -153,11 +153,28 @@ struct GenericInitiatorAffinity {
 // ACPI fixes this SRAT structure at 32 bytes.
 const _: () = assert!(size_of::<GenericInitiatorAffinity>() == 32);
 
+// ACPI 6.6 Section 5.2.16.6 - PCI device handle
+// Bytes 0-1: PCI Segment (little-endian)
+// Byte 2: Bus Number
+// Byte 3: Device Number (bits 7:3) and Function Number (bits 2:0)
+// Bytes 4-15: Reserved
+#[repr(C, packed)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
+struct PciDeviceHandle {
+    segment: u16,
+    bus: u8,
+    device_function: u8,
+    _reserved: [u8; 12],
+}
+
+// ACPI defines a PCI device handle structure as 16 bytes long.
+const _: () = assert!(size_of::<PciDeviceHandle>() == 16);
+
 impl GenericInitiatorAffinity {
     #[cfg(test)]
     fn from_acpi_device(hid: u64, uid: u32, proximity_domain: u32) -> Self {
         let mut device_handle = [0u8; 16];
-        // ACPI 6.6 Table 5-66: ACPI device handle
+        // ACPI 6.6 Section 5.2.16.6: ACPI device handle
         // Bytes 0-7: Hardware ID (HID) as 64-bit value
         // Bytes 8-11: Unique ID (UID) as 32-bit value
         device_handle[0..8].copy_from_slice(&hid.to_le_bytes());
@@ -176,22 +193,15 @@ impl GenericInitiatorAffinity {
     }
 
     fn from_pci_bdf(bdf: PciBdf, proximity_domain: u32) -> Self {
-        let mut device_handle = [0u8; 16];
-        let segment = bdf.segment();
-        let bus = bdf.bus();
-        let device = bdf.device();
-        let function = bdf.function();
+        let handle = PciDeviceHandle {
+            segment: bdf.segment(),
+            bus: bdf.bus(),
+            device_function: (bdf.device() << 3) | bdf.function(),
+            _reserved: [0; 12],
+        };
 
-        // ACPI 6.6 Table 5-66: PCI Device Handle
-        device_handle[0] = (segment & 0xff) as u8;
-        device_handle[1] = ((segment >> 8) & 0xff) as u8;
-        device_handle[2] = bus;
-        device_handle[3] = bus;
-        device_handle[4] = device;
-        device_handle[5] = device;
-        device_handle[6] = function;
-        device_handle[7] = function;
-        // Bytes 8-15 remain 0 (Reserved)
+        let mut device_handle = [0u8; 16];
+        device_handle.copy_from_slice(handle.as_bytes());
 
         GenericInitiatorAffinity {
             type_: 5,
@@ -1295,21 +1305,17 @@ mod tests {
         assert_eq!(gi_reserved2, 0, "Reserved field must be 0");
 
         // Verify PCI BDF encoding in device_handle
-        // ACPI 6.6 Table 5-66 format:
+        // ACPI 6.6 Section 5.2.16.6 format:
         // Bytes 0-1: PCI Segment (little-endian)
-        // Byte 2: Start Bus Number
-        // Byte 3: End Bus Number
-        // Byte 4: Start Device Number
-        // Byte 5: End Device Number
-        // Byte 6: Start Function
-        // Byte 7: End Function
-        // Bytes 8-15: Reserved
-        let expected_handle: [u8; 16] = [
-            0, 0, 0, 0, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // Reserved
-        ];
+        // Byte 2: Bus Number
+        // Byte 3: Device Number (bits 7:3) and Function Number (bits 2:0)
+        // Bytes 4-15: Reserved
+        //
+        // 0000:00:05.0 -> device_function = (5 << 3) | 0 = 0x28.
+        let expected_handle: [u8; 16] = [0, 0, 0, 0x28, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         assert_eq!(
             gi.device_handle, expected_handle,
-            "Device handle must encode PCI BDF correctly per ACPI 6.6 Table 5-66"
+            "Device handle must encode PCI BDF correctly per ACPI 6.6 Section 5.2.16.6"
         );
     }
 
@@ -1380,7 +1386,7 @@ mod tests {
     #[test]
     fn test_generic_initiator_acpi_device_handle() {
         // Test ACPI device handle (device_handle_type=0) for completeness
-        // This validates HID and UID encoding per ACPI 6.6 spec (Table 5.65)
+        // This validates HID and UID encoding per ACPI 6.6 Section 5.2.16.6
         let hid: u64 = 0x0123456789ABCDEF;
         let uid: u32 = 0x12345678;
         let proximity_domain = 2;
@@ -1407,7 +1413,7 @@ mod tests {
         assert_eq!(gi_reserved2, 0, "Reserved field must be 0");
 
         // Verify ACPI device handle encoding
-        // Expected format per ACPI 6.6 Table 5.65:
+        // Expected format per ACPI 6.6 Section 5.2.16.6:
         // Bytes 0-7: HID (64-bit, little-endian)
         // Bytes 8-11: UID (32-bit, little-endian)
         // Bytes 12-15: Reserved
