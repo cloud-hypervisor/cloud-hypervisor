@@ -169,9 +169,11 @@ fn create_cpu_nodes(
     let num_cpus = vcpu_mpidr.len();
     let (threads_per_core, cores_per_die, dies_per_package, packages) =
         vcpu_topology.unwrap_or((1, 1, 1, 1));
-    let cores_per_package = cores_per_die * dies_per_package;
-    let max_cpus: u32 =
-        threads_per_core as u32 * cores_per_die as u32 * dies_per_package as u32 * packages as u32;
+    let cores_per_package = cmp::max(1, cores_per_die * dies_per_package);
+    let max_cpus: u32 = cmp::max(
+        1,
+        threads_per_core as u32 * cores_per_die as u32 * dies_per_package as u32 * packages as u32,
+    );
 
     // Add cache info.
     let cache_info = read_cache_topology();
