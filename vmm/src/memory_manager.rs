@@ -84,6 +84,8 @@ const X86_64_IRQ_BASE: u32 = 5;
 
 const HOTPLUG_COUNT: usize = 8;
 const HOTPLUG_RAM_ALIGN_SIZE: u64 = 128 << 20;
+// Gap needed to ensure regions are not contiguous in guest physical address space
+const HOTPLUG_RAM_GAP_SIZE: u64 = 256 << 20;
 
 // Memory policy constants
 const MPOL_BIND: u32 = 2;
@@ -2304,7 +2306,9 @@ impl MemoryManager {
     // Calculate the start address of an area next to RAM.
     //
     // If memory hotplug is allowed, the start address needs to be aligned
-    // (rounded-up) to 128MiB boundary.
+    // (rounded-up) to 128MiB boundary and separated from the previous RAM
+    // region by a 256MiB gap. This prevents the guest from accessing memory
+    // across two separate mappings with a single access.
     // If memory hotplug is not allowed, there is no alignment required.
     // And it must also start at the 64bit start.
     fn start_addr(mem_end: GuestAddress, allow_mem_hotplug: bool) -> Result<GuestAddress, Error> {
@@ -2321,6 +2325,12 @@ impl MemoryManager {
         #[cfg(not(target_arch = "riscv64"))]
         if mem_end < layout::MEM_32BIT_RESERVED_START {
             return Ok(layout::RAM_64BIT_START);
+        }
+
+        if allow_mem_hotplug {
+            start_addr = start_addr
+                .checked_add(HOTPLUG_RAM_GAP_SIZE)
+                .ok_or(Error::GuestAddressOverFlow)?;
         }
 
         Ok(start_addr)
