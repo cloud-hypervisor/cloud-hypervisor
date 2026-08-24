@@ -29,7 +29,7 @@ const CONSOLE_INPUT_SIZE: usize = 128;
 const QUEUE_DATA_SIZE: usize = 4;
 const MEM_SIZE: usize = 32 * 1024 * 1024;
 // Guest memory gap
-const GUEST_MEM_GAP: u64 = 1 * 1024 * 1024;
+const GUEST_MEM_GAP: u64 = 1024 * 1024;
 // Guest physical address for the first virt queue
 const BASE_VIRT_QUEUE_ADDR: u64 = MEM_SIZE as u64 + GUEST_MEM_GAP;
 // Number of queues
@@ -110,7 +110,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     {
         return Corpus::Reject;
     }
-    if mem.write_slice(mem_bytes, GuestAddress(0 as u64)).is_err() {
+    if mem.write_slice(mem_bytes, GuestAddress(0)).is_err() {
         return Corpus::Reject;
     }
     let guest_memory = GuestMemoryAtomic::new(mem);
