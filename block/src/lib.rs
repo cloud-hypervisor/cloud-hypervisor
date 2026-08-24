@@ -637,6 +637,18 @@ enum BlockSize {
 }
 
 impl DiskTopology {
+    /// Advertises `block_size` as the logical block size. The physical block
+    /// size and minimum I/O size are raised to it, since neither can be
+    /// below one logical block, and a larger probed value is kept.
+    pub fn with_block_size(self, block_size: u64) -> Self {
+        Self {
+            logical_block_size: block_size,
+            physical_block_size: self.physical_block_size.max(block_size),
+            minimum_io_size: self.minimum_io_size.max(block_size),
+            ..self
+        }
+    }
+
     // libc::ioctl() takes different types on different architectures
     fn query_block_size(f: &File, block_size_type: BlockSize) -> io::Result<u64> {
         let mut block_size = 0;
@@ -696,6 +708,38 @@ mod tests {
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
+
+    #[test]
+    fn with_block_size_raises_physical_and_min_io() {
+        let topology = DiskTopology {
+            logical_block_size: 512,
+            physical_block_size: 512,
+            minimum_io_size: 512,
+            optimal_io_size: 0,
+        }
+        .with_block_size(4096);
+        assert_eq!(topology.logical_block_size, 4096);
+        // Neither can sit below one logical block.
+        assert_eq!(topology.physical_block_size, 4096);
+        assert_eq!(topology.minimum_io_size, 4096);
+        // optimal_io_size is a hint and left untouched.
+        assert_eq!(topology.optimal_io_size, 0);
+    }
+
+    #[test]
+    fn with_block_size_keeps_larger_probed_fields() {
+        let topology = DiskTopology {
+            logical_block_size: 512,
+            physical_block_size: 8192,
+            minimum_io_size: 8192,
+            optimal_io_size: 65536,
+        }
+        .with_block_size(4096);
+        assert_eq!(topology.logical_block_size, 4096);
+        assert_eq!(topology.physical_block_size, 8192);
+        assert_eq!(topology.minimum_io_size, 8192);
+        assert_eq!(topology.optimal_io_size, 65536);
+    }
 
     #[test]
     fn validate_short_file_is_not_eof_error() {
