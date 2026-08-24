@@ -295,12 +295,17 @@ jobs:
         with:
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
+          components: clippy
       - name: Install Cargo fuzz
         run: cargo install cargo-fuzz
       - name: Fuzz Build
         run: cargo fuzz build
       - name: Fuzz Check
         run: cargo fuzz check
+      - name: Clippy
+        env:
+          RUSTFLAGS: --cfg fuzzing
+        run: cargo clippy --locked --bins --manifest-path fuzz/Cargo.toml -- -D warnings
   openapi:
     name: openapi
     needs: [preflight]
