@@ -1117,10 +1117,6 @@ impl vm::Vm for KvmVm {
         if readonly {
             flags |= KVM_MEM_READONLY;
         }
-        if log_dirty_pages {
-            flags |= KVM_MEM_LOG_DIRTY_PAGES;
-        }
-
         const _: () = assert!(size_of::<usize>() <= size_of::<u64>());
 
         // Create a per-region guest_memfd when supported.
@@ -1154,7 +1150,7 @@ impl vm::Vm for KvmVm {
         #[cfg(not(feature = "sev_snp"))]
         let guest_memfd = 0;
 
-        let mut region = kvm_userspace_memory_region2 {
+        let region = kvm_userspace_memory_region2 {
             slot,
             flags: self.get_kvm_userspace_memory_region_flag(flags),
             guest_phys_addr,
@@ -1167,7 +1163,7 @@ impl vm::Vm for KvmVm {
             guest_memfd_offset: 0,
             ..Default::default()
         };
-        if (region.flags & KVM_MEM_LOG_DIRTY_PAGES) != 0 {
+        if log_dirty_pages {
             if (region.flags & KVM_MEM_READONLY) != 0 {
                 return Err(vm::HypervisorVmError::CreateUserMemory(anyhow!(
                     "Error creating regions with both 'dirty-pages-log' and 'read-only'."
@@ -1186,10 +1182,6 @@ impl vm::Vm for KvmVm {
                     guest_memfd: region.guest_memfd,
                 },
             );
-
-            // Always create guest physical memory region without `KVM_MEM_LOG_DIRTY_PAGES`.
-            // For regions that need this flag, dirty pages log will be turned on in `start_dirty_log`.
-            region.flags = self.get_kvm_userspace_memory_region_flag(0);
         }
 
         // SAFETY: Safe because caller promised this is safe.
