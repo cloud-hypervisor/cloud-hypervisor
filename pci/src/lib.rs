@@ -25,10 +25,10 @@ pub use self::bus::{
     NUM_DEVICE_IDS, PCI_ROOT_DEVICE_ID, PciBus, PciConfigIo, PciConfigMmio, PciRoot, PciRootError,
 };
 pub use self::configuration::{
-    PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciCapability,
-    PciCapabilityId, PciClassCode, PciConfiguration, PciExpressCapability, PciExpressCapabilityId,
-    PciHeaderType, PciMassStorageSubclass, PciNetworkControllerSubclass, PciProgrammingInterface,
-    PciSerialBusSubClass, PciSubclass,
+    PCI_CONFIGURATION_ID, PasidCap, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType,
+    PciCapability, PciCapabilityId, PciClassCode, PciConfiguration, PciExpressCapability,
+    PciExpressCapabilityId, PciHeaderType, PciMassStorageSubclass, PciNetworkControllerSubclass,
+    PciProgrammingInterface, PciSerialBusSubClass, PciSubclass,
 };
 pub use self::device::{
     BarReprogrammingParams, DeviceRelocation, Error as PciDeviceError, PciDevice,

@@ -41,6 +41,13 @@ const PCI_EXT_CAP_HEADER_SIZE: u32 = 4;
 pub(crate) const PCI_EXT_CAP_NEXT_SHIFT: u32 = 20;
 pub(crate) const PCI_EXT_CAP_NEXT_MASK: u32 = 0xfff0_0000;
 
+const PASID_CAP_VERSION: u32 = 1;
+const PASID_CAP_CONTROL_WRITE_MASK: u32 = 0x0007_0000;
+const PASID_CAP_EXEC_PERM: u32 = 0x0000_0002;
+const PASID_CAP_PRIV_MODE: u32 = 0x0000_0004;
+const PASID_CAP_MAX_WIDTH_SHIFT: u32 = 8;
+const PASID_CAP_MAX_WIDTH_MASK: u32 = 0x0000_1f00;
+
 const INTERRUPT_LINE_PIN_REG: usize = 15;
 
 pub const PCI_CONFIGURATION_ID: &str = "pci_configuration";
@@ -372,6 +379,45 @@ pub trait PciExpressCapability {
     fn write_masks(&self) -> &[u32];
     fn size(&self) -> u32 {
         PCI_EXT_CAP_HEADER_SIZE + 4 * self.dwords().len() as u32
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct PasidCap {
+    dwords: [u32; 1],
+}
+
+impl PasidCap {
+    pub fn new(max_width: u8, exec_perm: bool, priv_mode: bool) -> Self {
+        let mut value =
+            (u32::from(max_width) << PASID_CAP_MAX_WIDTH_SHIFT) & PASID_CAP_MAX_WIDTH_MASK;
+
+        if exec_perm {
+            value |= PASID_CAP_EXEC_PERM;
+        }
+        if priv_mode {
+            value |= PASID_CAP_PRIV_MODE;
+        }
+
+        PasidCap { dwords: [value] }
+    }
+}
+
+impl PciExpressCapability for PasidCap {
+    fn id(&self) -> PciExpressCapabilityId {
+        PciExpressCapabilityId::ProcessAddressSpaceId
+    }
+
+    fn version(&self) -> u32 {
+        PASID_CAP_VERSION
+    }
+
+    fn dwords(&self) -> &[u32] {
+        &self.dwords
+    }
+
+    fn write_masks(&self) -> &[u32] {
+        &[PASID_CAP_CONTROL_WRITE_MASK]
     }
 }
 
@@ -1278,6 +1324,18 @@ mod tests {
 
     // SAFETY: All members are simple numbers and any value is valid.
     unsafe impl ByteValued for TestCap {}
+
+    #[test]
+    fn pasid_cap_encoding() {
+        let cap = PasidCap::new(16, true, false);
+
+        assert_eq!(cap.id(), PciExpressCapabilityId::ProcessAddressSpaceId);
+        assert_eq!(cap.version(), 1);
+        assert_eq!(cap.size(), 8);
+        assert_eq!(cap.dwords(), [0x1002]);
+        assert_eq!(cap.write_masks(), [0x0007_0000]);
+        assert_eq!(PasidCap::new(0, false, true).dwords(), [0x0004]);
+    }
 
     impl PciCapability for TestCap {
         fn bytes(&self) -> &[u8] {
