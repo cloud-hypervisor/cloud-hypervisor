@@ -38,6 +38,7 @@ const CAPABILITY_LIST_HEAD_OFFSET: usize = 0x34;
 const FIRST_CAPABILITY_OFFSET: usize = 0x40;
 const CAPABILITY_MAX_OFFSET: usize = 192;
 const PCI_EXT_CAP_HEADER_SIZE: u32 = 4;
+pub(crate) const PCIE_CONFIG_SPACE_SIZE: u32 = 0x1000;
 pub(crate) const PCI_EXT_CAP_NEXT_SHIFT: u32 = 20;
 pub(crate) const PCI_EXT_CAP_NEXT_MASK: u32 = 0xfff0_0000;
 
