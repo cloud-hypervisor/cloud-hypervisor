@@ -714,4 +714,20 @@ mod tests {
         let err = setup_smbios(&mem, None, SMBIOS_START, SMBIOS_MAX_SIZE).unwrap_err();
         assert!(matches!(err, Error::WriteData(_)));
     }
+
+    #[test]
+    fn smbios_type0_is_virtual_machine_bit_set() {
+        let mem = GuestMemoryMmap::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
+
+        setup_smbios(&mem, None, SMBIOS_START, SMBIOS_MAX_SIZE).unwrap();
+
+        let smbios_ep: Smbios30Entrypoint = mem.read_obj(SMBIOS_START).unwrap();
+        let type0_addr = GuestAddress(smbios_ep.physptr);
+
+        let characteristics_ext2: u8 = mem.read_obj(type0_addr.checked_add(0x13).unwrap()).unwrap();
+        assert_eq!(
+            characteristics_ext2 & IS_VIRTUAL_MACHINE,
+            IS_VIRTUAL_MACHINE
+        );
+    }
 }
