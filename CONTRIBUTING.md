@@ -165,6 +165,13 @@ removed in the next commit).
 > your fix and aid reviewers. _This is not required for opening a pull request
 > nor is any agreement required before implementation._
 
+We aim for small, reviewable, and short-lived PRs that follow the commit
+style described above. PR cover letters are optional but can be helpful for
+larger changes. Keep them short and focused to prepare reviewers for a
+commit-by-commit review. For example, include a brief motivation and, where
+useful, benchmark results or testing notes. Include links to issues and other
+discussions, if relevant.
+
 Cloud Hypervisor uses the “fork-and-pull” development model. Follow these steps if
 you want to merge your changes to `cloud-hypervisor`:
 
