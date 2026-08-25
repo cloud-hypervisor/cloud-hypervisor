@@ -37,6 +37,7 @@ const NUM_BAR_REGS: usize = 6;
 const CAPABILITY_LIST_HEAD_OFFSET: usize = 0x34;
 const FIRST_CAPABILITY_OFFSET: usize = 0x40;
 const CAPABILITY_MAX_OFFSET: usize = 192;
+const PCI_EXT_CAP_HEADER_SIZE: u32 = 4;
 pub(crate) const PCI_EXT_CAP_NEXT_SHIFT: u32 = 20;
 pub(crate) const PCI_EXT_CAP_NEXT_MASK: u32 = 0xfff0_0000;
 
@@ -360,6 +361,17 @@ impl From<u16> for PciExpressCapabilityId {
             0xffff => PciExpressCapabilityId::ExtendedCapabilitiesAbsence,
             _ => PciExpressCapabilityId::Reserved,
         }
+    }
+}
+
+/// A PCI Express extended capability
+pub trait PciExpressCapability {
+    fn id(&self) -> PciExpressCapabilityId;
+    fn version(&self) -> u32;
+    fn dwords(&self) -> &[u32];
+    fn write_masks(&self) -> &[u32];
+    fn size(&self) -> u32 {
+        PCI_EXT_CAP_HEADER_SIZE + 4 * self.dwords().len() as u32
     }
 }
 
