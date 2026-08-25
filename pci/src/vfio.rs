@@ -56,8 +56,8 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::configuration::{
-    COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK, PCI_EXT_CAP_NEXT_MASK, PCI_EXT_CAP_NEXT_SHIFT,
-    PCIE_CONFIG_SPACE_SIZE,
+    COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK, PCI_EXP_FLAGS_TYPE_MASK, PCI_EXP_TYPE_RC_END,
+    PCI_EXT_CAP_NEXT_MASK, PCI_EXT_CAP_NEXT_SHIFT, PCIE_CONFIG_SPACE_SIZE,
 };
 use crate::mmap::MmapRegion;
 use crate::msi::{MSI_CONFIG_ID, MsiConfigState};
@@ -1265,7 +1265,26 @@ impl VfioCommon {
                         self.initialize_msix(msix_cap, cap_iter as u32, bdf, None);
                     }
                 }
-                PciCapabilityId::PciExpress => pci_express_cap_found = true,
+                PciCapabilityId::PciExpress => {
+                    pci_express_cap_found = true;
+
+                    // Advertise the device as a PCIe integrated endpoint if the
+                    // PASID capability is enabled.
+                    if self
+                        .extended_caps
+                        .iter()
+                        .any(|cap| cap.id() == PciExpressCapabilityId::ProcessAddressSpaceId)
+                    {
+                        self.patches.insert(
+                            (cap_iter / 4) as usize,
+                            ConfigPatch {
+                                mask: PCI_EXP_FLAGS_TYPE_MASK,
+                                patch: PCI_EXP_TYPE_RC_END,
+                                write_mask: 0,
+                            },
+                        );
+                    }
+                }
                 PciCapabilityId::PowerManagement => power_management_cap_found = true,
                 _ => {}
             }
