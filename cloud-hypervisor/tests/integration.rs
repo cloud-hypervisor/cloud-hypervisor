@@ -3558,7 +3558,7 @@ mod common_parallel {
             .args(["--memory", "size=0"])
             .args([
                 "--memory-zone",
-                "id=mem0,size=128M,prefault=on",
+                "id=mem0,size=128M,prefault=on,host_numa_node=0",
                 "id=mem1,size=128M,prefault=on",
             ])
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
@@ -8369,6 +8369,16 @@ mod ivshmem {
     }
 
     #[test]
+    fn test_snapshot_restore_prefault() {
+        snapshot_restore_common::_test_snapshot_restore(
+            snapshot_restore_common::SnapshotRestoreTest {
+                use_prefault: true,
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
     fn test_snapshot_restore_with_resume() {
         snapshot_restore_common::_test_snapshot_restore(
             snapshot_restore_common::SnapshotRestoreTest {
@@ -8575,6 +8585,7 @@ mod snapshot_restore_common {
         pub use_resume_option: bool,
         pub check_clock: bool,
         pub memory_restore_mode: Option<&'static str>,
+        pub use_prefault: bool,
     }
 
     pub(crate) fn _test_snapshot_restore(cfg: SnapshotRestoreTest) {
@@ -8583,6 +8594,7 @@ mod snapshot_restore_common {
             use_resume_option,
             check_clock,
             memory_restore_mode,
+            use_prefault,
         } = cfg;
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -8721,6 +8733,15 @@ mod snapshot_restore_common {
         let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
         let event_path_restored = format!("{}.2", temp_event_monitor_path(&guest.tmp_dir));
 
+        let mut restore_params =
+            format!("source_url=file://{snapshot_dir},resume={use_resume_option}");
+        if let Some(mode) = memory_restore_mode {
+            restore_params.push_str(&format!(",memory_restore_mode={mode}"));
+        }
+        if use_prefault {
+            restore_params.push_str(",prefault=on");
+        }
+
         // Restore the VM from the snapshot
         let mut child = GuestCommand::new(&guest)
             .args(["--api-socket", &api_socket_restored])
@@ -8728,16 +8749,7 @@ mod snapshot_restore_common {
                 "--event-monitor",
                 format!("path={event_path_restored}").as_str(),
             ])
-            .args([
-                "--restore",
-                format!(
-                    "source_url=file://{snapshot_dir},resume={use_resume_option}{}",
-                    memory_restore_mode
-                        .map(|m| format!(",memory_restore_mode={m}"))
-                        .unwrap_or_default()
-                )
-                .as_str(),
-            ])
+            .args(["--restore", restore_params.as_str()])
             .capture_output()
             .spawn()
             .unwrap();
@@ -8902,6 +8914,12 @@ mod snapshot_restore_common {
 
         let r = panic::catch_unwind(|| {
             assert!(String::from_utf8_lossy(&output.stdout).contains(&console_text));
+            if use_prefault {
+                assert!(
+                    String::from_utf8_lossy(&output.stderr).contains("prefaulted 1 memory regions"),
+                    "restore did not report prefault completion"
+                );
+            }
         });
 
         handle_child_output(r, &output);
