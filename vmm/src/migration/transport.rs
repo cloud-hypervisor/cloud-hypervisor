@@ -784,6 +784,10 @@ impl SendAdditionalConnections {
                 })?;
             match message {
                 SendMemoryThreadMessage::Memory(table) => {
+                    if worker_error.load(Ordering::Acquire) {
+                        continue;
+                    }
+
                     send_memory_ranges(guest_memory, &table, socket)
                         .inspect_err(|_| {
                             worker_error.store(true, Ordering::Relaxed);
