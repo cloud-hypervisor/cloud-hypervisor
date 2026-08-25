@@ -157,7 +157,13 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
 
     fdt::write_fdt_to_memory(&fdt_final, guest_mem).map_err(Error::WriteFdtToMemory)?;
 
-    smbios::setup_smbios(guest_mem, smbios, layout::SMBIOS_START).map_err(Error::SmbiosSetup)?;
+    smbios::setup_smbios(
+        guest_mem,
+        smbios,
+        layout::SMBIOS_START,
+        layout::SMBIOS_MAX_SIZE,
+    )
+    .map_err(Error::SmbiosSetup)?;
 
     Ok(())
 }
