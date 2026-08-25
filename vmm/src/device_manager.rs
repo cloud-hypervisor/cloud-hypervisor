@@ -893,7 +893,6 @@ impl DeviceRelocation for AddressManager {
                                 shm_regions.mapping.len(),
                                 shm_regions.mapping.as_ptr(),
                                 false,
-                                false,
                             )
                             .map_err(|e| {
                                 io::Error::other(format!(

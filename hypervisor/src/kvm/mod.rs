@@ -1216,17 +1216,8 @@ impl vm::Vm for KvmVm {
         guest_phys_addr: u64,
         memory_size: usize,
         userspace_addr: *mut u8,
-        readonly: bool,
-        log_dirty_pages: bool,
+        _readonly: bool,
     ) -> vm::Result<()> {
-        let mut flags = 0;
-        if readonly {
-            flags |= KVM_MEM_READONLY;
-        }
-        if log_dirty_pages {
-            flags |= KVM_MEM_LOG_DIRTY_PAGES;
-        }
-
         const _: () = assert!(size_of::<usize>() <= size_of::<u64>());
 
         let mut region = kvm_userspace_memory_region2 {
@@ -1234,7 +1225,7 @@ impl vm::Vm for KvmVm {
             guest_phys_addr,
             memory_size: memory_size as u64,
             userspace_addr: userspace_addr as usize as u64,
-            flags,
+            flags: 0,
             ..Default::default()
         };
 
