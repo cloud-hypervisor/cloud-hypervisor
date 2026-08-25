@@ -1208,7 +1208,7 @@ pub fn configure_system(
     let size = smbios::setup_smbios(guest_mem, smbios).map_err(Error::SmbiosSetup)?;
 
     // Place the MP table after the SMIOS table aligned to 16 bytes
-    let offset = GuestAddress(layout::SMBIOS_START).unchecked_add(size);
+    let offset = layout::SMBIOS_START.unchecked_add(size);
     let offset = GuestAddress((offset.0 + 16) & !0xf);
     mptable::setup_mptable(offset, guest_mem, _num_cpus, topology).map_err(Error::MpTableSetup)?;
 
