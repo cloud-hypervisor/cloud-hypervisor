@@ -223,7 +223,6 @@ impl VfioUserPciDevice {
                         user_memory_region.mapping.len(),
                         user_memory_region.mapping.addr(),
                         false,
-                        false,
                     )
                 } {
                     error!("Could not remove the userspace memory region: {e}");
@@ -446,7 +445,6 @@ impl PciDevice for VfioUserPciDevice {
                             user_memory_region.start,
                             user_memory_region.mapping.len(),
                             user_memory_region.mapping.addr(),
-                            false,
                             false,
                         )
                     }

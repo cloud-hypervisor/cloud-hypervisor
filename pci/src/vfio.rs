@@ -2321,7 +2321,6 @@ impl VfioPciDevice {
                         len,
                         host_addr,
                         false,
-                        false,
                     )
                 } {
                     error!("Could not remove the userspace memory region: {e}");
@@ -2495,7 +2494,6 @@ iova 0x{:x}, size 0x{:x}: {}, ",
                             user_memory_region.start,
                             len,
                             host_addr,
-                            false,
                             false,
                         )
                     }

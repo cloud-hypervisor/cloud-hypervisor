@@ -400,7 +400,6 @@ pub trait Vm: Send + Sync + Any {
         memory_size: usize,
         userspace_addr: *mut u8,
         readonly: bool,
-        log_dirty_pages: bool,
     ) -> Result<()>;
     /// Returns the preferred CPU target type which can be emulated by KVM on underlying host.
     #[cfg(target_arch = "aarch64")]

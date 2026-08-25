@@ -2559,7 +2559,6 @@ impl MemoryManager {
                     memory_size,
                     userspace_addr,
                     false, /* readonly -- don't care */
-                    false, /* log dirty */
                 )
                 .map_err(Error::RemoveUserMemoryRegion)?;
         }
