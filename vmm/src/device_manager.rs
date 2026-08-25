@@ -12,6 +12,7 @@
 #[cfg(target_arch = "x86_64")]
 use std::cmp;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::ffi::CString;
 #[cfg(feature = "sev_snp")]
 use std::fmt;
 #[cfg(feature = "kvm")]
@@ -19,6 +20,7 @@ use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{self, IsTerminal, Seek, SeekFrom, stdout};
 use std::num::Wrapping;
+use std::os::fd::AsFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 #[cfg(not(target_arch = "riscv64"))]
@@ -107,6 +109,7 @@ use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, LegacyIrqGroupConfig, MsiIrqGroupConfig,
 };
+use vm_device::uffd::{UffdBlock, VmaRegion};
 use vm_device::{Bus, BusDevice, BusDeviceSync, Resource, UserspaceMapping};
 #[cfg(feature = "ivshmem")]
 use vm_memory::bitmap::AtomicBitmap;
@@ -137,9 +140,11 @@ use crate::vm_config::IvshmemConfig;
 use crate::vm_config::{
     ConsoleOutputMode, DEFAULT_IOMMU_ADDRESS_WIDTH_BITS, DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT,
     DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PciDeviceCommonConfig,
-    PmemConfig, UserDeviceConfig, VdpaConfig, VhostMode, VmConfig, VsockConfig,
+    PmemBackendType, PmemConfig, UserDeviceConfig, VdpaConfig, VhostMode, VmConfig, VsockConfig,
 };
-use crate::{DEVICE_MANAGER_SNAPSHOT_ID, GuestRegionMmap, PciDeviceInfo, device_node};
+use crate::{
+    DEVICE_MANAGER_SNAPSHOT_ID, GuestRegionMmap, PciDeviceInfo, device_node, uffd, userfaultfd,
+};
 
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 const MMIO_LEN: u64 = 0x1000;
@@ -170,6 +175,7 @@ const FS_DEVICE_NAME_PREFIX: &str = "_fs";
 const NET_DEVICE_NAME_PREFIX: &str = "_net";
 const GENERIC_VHOST_USER_DEVICE_NAME_PREFIX: &str = "_generic_vhost_user";
 const PMEM_DEVICE_NAME_PREFIX: &str = "_pmem";
+const PMD_SIZE: u64 = 0x20_0000;
 const VDPA_DEVICE_NAME_PREFIX: &str = "_vdpa";
 const VSOCK_DEVICE_NAME_PREFIX: &str = "_vsock";
 const WATCHDOG_DEVICE_NAME: &str = "__watchdog";
@@ -336,6 +342,10 @@ pub enum DeviceManagerError {
     /// Cannot set persistent memory file size
     #[error("Cannot set persistent memory file size")]
     PmemFileSetLen(#[source] io::Error),
+
+    /// Cannot create UFFD-backed persistent memory
+    #[error("Cannot create UFFD-backed persistent memory")]
+    PmemUffdCreate(#[source] io::Error),
 
     /// Cannot find a memory range for persistent memory
     #[error("Cannot find a memory range for persistent memory")]
@@ -3369,31 +3379,60 @@ impl DeviceManager {
             None
         };
 
-        let (custom_flags, set_len) = if pmem_cfg.file.is_dir() {
-            if pmem_cfg.size.is_none() {
-                return Err(DeviceManagerError::PmemWithDirectorySizeMissing);
+        let (file, size) = if pmem_cfg.backend_type == PmemBackendType::Uffd {
+            let size = pmem_cfg
+                .size
+                .ok_or(DeviceManagerError::PmemUffdCreate(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "UFFD-backed persistent memory requires size",
+                )))?;
+            let name = CString::new(format!("ch_pmem_{id}")).map_err(|_| {
+                DeviceManagerError::PmemUffdCreate(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "PMEM device ID contains a NUL byte",
+                ))
+            })?;
+            // SAFETY: memfd_create is a self-contained syscall and the return
+            // value is checked below.
+            let raw_fd = unsafe { libc::memfd_create(name.as_ptr(), libc::MFD_CLOEXEC) };
+            if raw_fd < 0 {
+                return Err(DeviceManagerError::PmemUffdCreate(
+                    io::Error::last_os_error(),
+                ));
             }
-            (O_TMPFILE, true)
+            // SAFETY: memfd_create returned a fresh descriptor owned here.
+            let file = unsafe { File::from_raw_fd(raw_fd) };
+            file.set_len(size)
+                .map_err(DeviceManagerError::PmemUffdCreate)?;
+            (file, size)
         } else {
-            (0, false)
-        };
+            let (custom_flags, set_len) = if pmem_cfg.file.is_dir() {
+                if pmem_cfg.size.is_none() {
+                    return Err(DeviceManagerError::PmemWithDirectorySizeMissing);
+                }
+                (O_TMPFILE, true)
+            } else {
+                (0, false)
+            };
 
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(!pmem_cfg.discard_writes)
-            .custom_flags(custom_flags)
-            .open(&pmem_cfg.file)
-            .map_err(DeviceManagerError::PmemFileOpen)?;
+            let mut file = OpenOptions::new()
+                .read(true)
+                .write(!pmem_cfg.readonly && !pmem_cfg.discard_writes)
+                .custom_flags(custom_flags)
+                .open(&pmem_cfg.file)
+                .map_err(DeviceManagerError::PmemFileOpen)?;
 
-        let size = if let Some(size) = pmem_cfg.size {
-            if set_len {
-                file.set_len(size)
-                    .map_err(DeviceManagerError::PmemFileSetLen)?;
-            }
-            size
-        } else {
-            file.seek(SeekFrom::End(0))
-                .map_err(DeviceManagerError::PmemFileSetLen)?
+            let size = if let Some(size) = pmem_cfg.size {
+                if set_len {
+                    file.set_len(size)
+                        .map_err(DeviceManagerError::PmemFileSetLen)?;
+                }
+                size
+            } else {
+                file.seek(SeekFrom::End(0))
+                    .map_err(DeviceManagerError::PmemFileSetLen)?
+            };
+            (file, size)
         };
 
         if size % 0x20_0000 != 0 {
@@ -3429,16 +3468,24 @@ impl DeviceManager {
         };
 
         let cloned_file = file.try_clone().map_err(DeviceManagerError::CloneFile)?;
+        let mmap_prot = if pmem_cfg.readonly {
+            PROT_READ
+        } else {
+            PROT_READ | PROT_WRITE
+        };
+        let mmap_flags = MAP_NORESERVE
+            | if pmem_cfg.readonly {
+                MAP_SHARED
+            } else if pmem_cfg.discard_writes {
+                MAP_PRIVATE
+            } else {
+                MAP_SHARED
+            };
         let mmap_region = MmapRegion::build(
             Some(FileOffset::new(cloned_file, 0)),
             region_size as usize,
-            PROT_READ | PROT_WRITE,
-            MAP_NORESERVE
-                | if pmem_cfg.discard_writes {
-                    MAP_PRIVATE
-                } else {
-                    MAP_SHARED
-                },
+            mmap_prot,
+            mmap_flags,
         )
         .map_err(DeviceManagerError::NewMmapRegion)?;
         let host_addr = mmap_region.as_ptr();
@@ -3449,7 +3496,14 @@ impl DeviceManager {
             self.memory_manager
                 .lock()
                 .unwrap()
-                .create_userspace_mapping(region_base, region_size, host_addr, false, false, false)
+                .create_userspace_mapping(
+                    region_base,
+                    region_size,
+                    host_addr,
+                    false,
+                    pmem_cfg.readonly,
+                    false,
+                )
                 .map_err(DeviceManagerError::MemoryManager)
         }?;
 
@@ -3459,6 +3513,45 @@ impl DeviceManager {
             mapping: Arc::new(mmap_region),
             mergeable: false,
         };
+        let pmem_uffd: Option<Arc<virtio_devices::MmapUffdHandler>> =
+            if pmem_cfg.backend_type == PmemBackendType::Uffd {
+                let uffd_fd = uffd::create(0).map_err(DeviceManagerError::PmemUffdCreate)?;
+                let ioctls = uffd::register(uffd_fd.as_fd(), host_addr as u64, region_size, false)
+                    .map_err(DeviceManagerError::PmemUffdCreate)?;
+                if ioctls & userfaultfd::UFFD_API_RANGE_IOCTLS_BASIC
+                    != userfaultfd::UFFD_API_RANGE_IOCTLS_BASIC
+                {
+                    return Err(DeviceManagerError::PmemUffdCreate(io::Error::new(
+                        io::ErrorKind::Unsupported,
+                        "UFFD-backed PMEM mapping does not support the required ioctls",
+                    )));
+                }
+                let regions = vec![VmaRegion {
+                    virt_addr: host_addr as u64,
+                    size: region_size,
+                    offset: 0,
+                    fault_size: PMD_SIZE,
+                    prot: mmap_prot,
+                    flags: mmap_flags,
+                    backing_offset: 0,
+                }];
+                let block = UffdBlock::new(&pmem_cfg.file, false)
+                    .map_err(DeviceManagerError::PmemUffdCreate)?;
+                block
+                    .handshake(
+                        uffd_fd.as_raw_fd(),
+                        userfaultfd::UFFDIO_REGISTER_MODE_MISSING,
+                        0,
+                        &regions,
+                        &[],
+                    )
+                    .map_err(DeviceManagerError::PmemUffdCreate)?;
+                Some(Arc::new(virtio_devices::MmapUffdHandler::new(
+                    block, uffd_fd, regions,
+                )))
+            } else {
+                None
+            };
 
         let virtio_pmem_device = Arc::new(Mutex::new(
             virtio_devices::Pmem::new(
@@ -3467,6 +3560,7 @@ impl DeviceManager {
                 GuestAddress(region_base),
                 mapping,
                 self.force_access_platform | pmem_cfg.pci_common.iommu,
+                pmem_uffd,
                 self.seccomp_action.clone(),
                 self.exit_evt
                     .try_clone()

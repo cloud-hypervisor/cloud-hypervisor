@@ -24,6 +24,7 @@ pub enum Thread {
     VirtioNet,
     VirtioNetCtl,
     VirtioPmem,
+    VirtioPmemUffd,
     VirtioRng,
     VirtioRtc,
     VirtioVhostBlock,
@@ -60,6 +61,8 @@ const VFIO_IOMMU_UNMAP_DMA: u64 = 0x3b72;
 // See include/uapi/linux/iommufd.h in the kernel code.
 const IOMMU_IOAS_MAP: u64 = 0x3b85;
 const IOMMU_IOAS_UNMAP: u64 = 0x3b86;
+
+const UFFDIO_WAKE: u64 = 0x8010_aa02;
 
 #[cfg(feature = "sev_snp")]
 fn mshv_sev_snp_ioctl_seccomp_rule() -> SeccompRule {
@@ -197,6 +200,18 @@ fn virtio_pmem_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     vec![(libc::SYS_fsync, vec![])]
 }
 
+fn virtio_pmem_uffd_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
+    vec![
+        (libc::SYS_fsync, vec![]),
+        (libc::SYS_mmap, vec![]),
+        (libc::SYS_recvmsg, vec![]),
+        (
+            libc::SYS_ioctl,
+            vec![and![Cond::new(1, ArgLen::Dword, Eq, UFFDIO_WAKE).unwrap()]],
+        ),
+    ]
+}
+
 fn virtio_rng_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     vec![
         (libc::SYS_sched_getaffinity, vec![]),
@@ -331,6 +346,7 @@ fn get_seccomp_rules(thread_type: Thread) -> Vec<(i64, Vec<SeccompRule>)> {
         Thread::VirtioNet => virtio_net_thread_rules(),
         Thread::VirtioNetCtl => virtio_net_ctl_thread_rules(),
         Thread::VirtioPmem => virtio_pmem_thread_rules(),
+        Thread::VirtioPmemUffd => virtio_pmem_uffd_thread_rules(),
         Thread::VirtioRng => virtio_rng_thread_rules(),
         Thread::VirtioRtc => virtio_rtc_thread_rules(),
         Thread::VirtioVhostBlock => virtio_vhost_block_thread_rules(),

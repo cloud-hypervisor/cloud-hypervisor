@@ -137,6 +137,7 @@ fn create_dummy_pmem() -> Pmem {
         guest_addr,
         dummy_user_mapping,
         false,
+        None,
         SeccompAction::Allow,
         EventFd::new(EFD_NONBLOCK).unwrap(),
         None,

@@ -1276,10 +1276,17 @@ components:
       properties:
         file:
           type: string
+        backend_type:
+          type: string
+          enum: ["file", "uffd"]
+          default: "file"
         size:
           type: integer
           format: int64
         iommu:
+          type: boolean
+          default: false
+        readonly:
           type: boolean
           default: false
         discard_writes:
