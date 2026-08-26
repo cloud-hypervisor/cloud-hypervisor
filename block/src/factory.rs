@@ -9,10 +9,10 @@
 //! support, and constructs the appropriate backend. Callers receive
 //! a trait object that is ready for use by virtio queue workers.
 
+use std::fs;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::sync::OnceLock;
-use std::{fmt, fs};
 
 use log::info;
 
@@ -40,21 +40,6 @@ pub struct DiskOpenOptions<'a> {
     pub disable_aio: bool,
 }
 
-/// Result of [`open_disk`], carrying the detected image type alongside
-/// the constructed backend.
-pub struct OpenedDisk {
-    pub image_type: ImageType,
-    pub disk: Box<dyn AsyncFullDiskFile>,
-}
-
-impl fmt::Debug for OpenedDisk {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("OpenedDisk")
-            .field("image_type", &self.image_type)
-            .finish_non_exhaustive()
-    }
-}
-
 /// Returns true when io_uring is supported on the running kernel.
 ///
 /// The result is cached so the probe runs at most once per process.
@@ -79,11 +64,10 @@ fn aio_supported() -> bool {
 /// - Probes io_uring and Linux AIO support on the running kernel.
 /// - Constructs the most capable backend available for the format,
 ///   preferring io_uring over AIO over synchronous fallback.
-///
-/// The returned [`OpenedDisk`] exposes the detected [`ImageType`] so
-/// callers can perform post construction validation (e.g. type mismatch
-/// checks, configuration warnings).
-pub fn open_disk(options: &DiskOpenOptions<'_>, image_type: ImageType) -> BlockResult<OpenedDisk> {
+pub fn open_disk(
+    options: &DiskOpenOptions<'_>,
+    image_type: ImageType,
+) -> BlockResult<Box<dyn AsyncFullDiskFile>> {
     let mut fs_options = fs::OpenOptions::new();
     fs_options.read(true);
     fs_options.write(!options.readonly);
@@ -111,7 +95,7 @@ pub fn open_disk(options: &DiskOpenOptions<'_>, image_type: ImageType) -> BlockR
         ImageType::Unknown => unreachable!(),
     };
 
-    Ok(OpenedDisk { image_type, disk })
+    Ok(disk)
 }
 
 fn open_vhdx(
@@ -269,8 +253,7 @@ mod unit_tests {
         tmp.as_file().set_len(1 << 20).unwrap();
         let path = tmp.as_path().to_owned();
         let options = default_options(&path);
-        let opened = open_disk(&options, ImageType::Raw).unwrap();
-        assert_eq!(opened.image_type, ImageType::Raw);
+        open_disk(&options, ImageType::Raw).unwrap();
     }
 
     #[test]
@@ -280,8 +263,7 @@ mod unit_tests {
             .into_tempfile();
         let path = tmp.as_path().to_owned();
         let options = default_options(&path);
-        let opened = open_disk(&options, ImageType::Qcow2).unwrap();
-        assert_eq!(opened.image_type, ImageType::Qcow2);
+        open_disk(&options, ImageType::Qcow2).unwrap();
     }
 
     #[test]
@@ -309,8 +291,7 @@ mod unit_tests {
         let path = tmp.as_path().to_owned();
         let mut options = default_options(&path);
         options.readonly = true;
-        let opened = open_disk(&options, ImageType::Raw).unwrap();
-        assert_eq!(opened.image_type, ImageType::Raw);
+        open_disk(&options, ImageType::Raw).unwrap();
     }
 
     #[test]
@@ -328,8 +309,7 @@ mod unit_tests {
             disable_io_uring: true,
             disable_aio: true,
         };
-        let opened = open_disk(&options, ImageType::Raw).unwrap();
-        assert_eq!(opened.image_type, ImageType::Raw);
-        assert_eq!(opened.disk.logical_size().unwrap(), size);
+        let disk = open_disk(&options, ImageType::Raw).unwrap();
+        assert_eq!(disk.logical_size().unwrap(), size);
     }
 }
