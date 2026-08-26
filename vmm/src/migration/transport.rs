@@ -489,15 +489,15 @@ impl ReceiveAdditionalConnections {
             .spawn(move || {
                 if !seccomp_filter_t.is_empty() {
                     apply_filter(&seccomp_filter_t)
-                        .context("Error applying migration TCP worker seccomp filter")
+                        .context("Error applying migration receive-memory seccomp filter")
                         .map_err(MigratableError::MigrateReceive)?;
                 }
                 Self::worker_receive_memory(&mut socket, &kill_evt, &guest_memory)
             })
             .map_err(|e| {
-                error!("Error spawning receive-memory thread: {e}");
+                error!("Error spawning receive-memory worker: {e}");
                 MigratableError::MigrateReceive(
-                    anyhow!(e).context("Error spawning receive-memory thread"),
+                    anyhow!(e).context("Error spawning receive-memory worker"),
                 )
             })
     }
@@ -511,12 +511,12 @@ impl ReceiveAdditionalConnections {
                 Ok(Ok(())) => None,
                 Ok(Err(e)) => Some(e),
                 Err(panic) => Some(MigratableError::MigrateReceive(anyhow!(
-                    "receive-memory thread panicked: {panic:?}"
+                    "receive-memory worker panicked: {panic:?}"
                 ))),
             };
 
             if let Some(e) = err {
-                warn!("Error in receive-memory thread: {e}");
+                warn!("Error in receive-memory worker: {e}");
 
                 if first_err.is_ok() {
                     first_err = Err(e);
@@ -1287,6 +1287,14 @@ pub(crate) fn receive_memory_ranges(
                 )
                 .context("Error receiving memory from socket")
                 .map_err(MigratableError::MigrateReceive)?;
+
+            // EOF: Don't spin forever on closed connection
+            if bytes_read == 0 {
+                return Err(MigratableError::MigrateReceive(anyhow!(
+                    "Connection closed while receiving memory: EOF"
+                )));
+            }
+
             offset += bytes_read as u64;
 
             if offset == range.length {
