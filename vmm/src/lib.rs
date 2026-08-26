@@ -67,6 +67,7 @@ use crate::migration::worker::{
 };
 use crate::migration::{recv_vm_config, recv_vm_state};
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
+use crate::util::flatten_error_chain_to_string;
 use crate::vm::{Error as VmError, Vm, VmState};
 use crate::vm_config::{
     DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
@@ -1707,14 +1708,13 @@ impl Vmm {
                 &mut ctx,
             )
             .inspect_err(|_| {
-                // Calling cleanup multiple times is fine, thus here we just make sure
-                // that it is called.
-                if let Err(e) = mem_send.cleanup() {
-                    warn!("Error cleaning up migration connections: {e}");
+                if let Err(e) = mem_send.cleanup_workers() {
+                    let msg = flatten_error_chain_to_string(&e);
+                    warn!("Error cleaning up migration connections: {msg}");
                 }
             })?;
 
-            mem_send.cleanup()?;
+            mem_send.cleanup_workers()?;
         }
 
         // We release the locks early to enable locking them on the destination host.

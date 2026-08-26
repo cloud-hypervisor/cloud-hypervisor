@@ -13,7 +13,7 @@ use std::result::Result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, SyncSender, TrySendError, channel, sync_channel};
 use std::sync::{Arc, Mutex};
-use std::thread;
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
@@ -34,6 +34,7 @@ use vmm_sys_util::eventfd::EventFd;
 
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::sync_utils::Gate;
+use crate::util::flatten_error_chain_to_string;
 use crate::{GuestMemoryMmap, VmMigrationConfig};
 
 /// Hard upper bound for migration worker connections on both the sender and
@@ -734,13 +735,7 @@ impl SendAdditionalConnections {
                     )
                 })
                 .inspect_err(|_| {
-                    // If an error occurs here, we still do some light cleanup.
-                    for _ in 0..threads.len() {
-                        message_tx.send(SendMemoryThreadMessage::Disconnect).ok();
-                    }
-                    threads.drain(..).for_each(|thread| {
-                        thread.join().ok();
-                    });
+                    Self::cleanup_workers_internal(&mut threads, &message_tx).ok();
                 })
                 .context("Error spawning send-memory worker")
                 .map_err(MigratableError::MigrateSend)?;
@@ -852,7 +847,7 @@ impl SendAdditionalConnections {
         // `message_tx` has a limited size, so we may have to retry sending the chunk
         loop {
             if self.worker_error.load(Ordering::Acquire) {
-                return self.cleanup();
+                return self.cleanup_workers();
             }
 
             // Use try_send() so we can keep checking worker_error while the
@@ -869,9 +864,11 @@ impl SendAdditionalConnections {
                 }
                 Err(TrySendError::Disconnected(_)) => {
                     // The workers didn't disconnect for no reason, thus we do a cleanup.
-                    return Err(self.cleanup().err().unwrap_or(MigratableError::MigrateSend(
-                        anyhow!("All sending threads disconnected, but none returned an error?"),
-                    )));
+                    return Err(self.cleanup_workers().err().unwrap_or(
+                        MigratableError::MigrateSend(anyhow!(
+                            "All sending threads disconnected, but none returned an error?"
+                        )),
+                    ));
                 }
             }
         }
@@ -906,24 +903,24 @@ impl SendAdditionalConnections {
                     }
                 }
                 SendMemoryThreadNotify::Error => {
-                    // If an error occurred in one of the worker threads, we open
-                    // the gate to make sure that no thread hangs. After that, we
-                    // receive the error from Self::cleanup() and return it.
+                    // On worker error, open the gate to unblock all threads.
+                    // cleanup_workers() propagates the error.
                     gate.open();
-                    return self.cleanup();
+                    return self.cleanup_workers();
                 }
             }
         }
     }
 
-    /// Sends disconnect messages to all workers and joins them.
-    pub(crate) fn cleanup(&mut self) -> Result<(), MigratableError> {
+    fn cleanup_workers_internal(
+        threads: &mut Vec<JoinHandle<Result<(), MigratableError>>>,
+        message_tx: &SyncSender<SendMemoryThreadMessage>,
+    ) -> Result<(), MigratableError> {
         // Send disconnect messages to all workers.
-        for _ in 0..self.threads.len() {
+        for _ in 0..threads.len() {
             // Use send() over try_send() as the bounded queue may be still
             // fully populated with enqueued chunks.
-            if self
-                .message_tx
+            if message_tx
                 .send(SendMemoryThreadMessage::Disconnect)
                 .is_err()
             {
@@ -931,26 +928,32 @@ impl SendAdditionalConnections {
             }
         }
 
-        let mut first_err = Ok(());
-        self.threads.drain(..).for_each(|thread| {
+        let mut first_err = None;
+        for (idx, thread) in threads.drain(..).enumerate() {
             let err = match thread.join() {
-                Ok(Ok(())) => None,
-                Ok(Err(e)) => Some(e),
-                Err(panic) => Some(MigratableError::MigrateSend(anyhow!(
-                    "send-memory worker panicked: {panic:?}"
-                ))),
+                Ok(Ok(())) => continue,
+                Ok(Err(e)) => e,
+                Err(panic) => MigratableError::MigrateSend(anyhow!(
+                    "send-memory worker #{idx} panicked: {panic:?}"
+                )),
             };
 
-            if let Some(e) = err {
-                warn!("Error in send-memory worker: {e}");
+            let err_msg = flatten_error_chain_to_string(&err);
+            // The first error will also be logged higher up, but log all errors
+            // here for better debuggability, accepting a possible duplicate.
+            error!("Error in send-memory worker #{idx}: {err_msg}");
 
-                if first_err.is_ok() {
-                    first_err = Err(e);
-                }
-            }
-        });
+            first_err.get_or_insert(err);
+        }
+        first_err.map_or(Ok(()), Err)
+    }
 
-        first_err
+    /// Sends disconnect messages to all workers and joins them.
+    ///
+    /// Returns the first error that any worker encounters. Calling this is
+    /// idempotent.
+    pub(crate) fn cleanup_workers(&mut self) -> Result<(), MigratableError> {
+        Self::cleanup_workers_internal(&mut self.threads, &self.message_tx)
     }
 }
 
@@ -958,7 +961,7 @@ impl Drop for SendAdditionalConnections {
     fn drop(&mut self) {
         if !self.threads.is_empty() {
             warn!(
-                "SendAdditionalConnections was not cleaned up! Either cleanup() was never called (programming error) or it failed before completing."
+                "SendAdditionalConnections was not cleaned up! Either cleanup_workers() was never called (programming error) or it failed before completing."
             );
         }
     }
