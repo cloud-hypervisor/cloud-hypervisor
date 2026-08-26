@@ -2411,6 +2411,7 @@ dependencies = [
  "epoll",
  "libc",
  "rand 0.10.2",
+ "regex",
  "serde_json",
  "ssh2",
  "thiserror",

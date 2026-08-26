@@ -2532,11 +2532,9 @@ pub fn parse_ethr_latency_output(output: &[u8]) -> Result<Vec<f64>, Error> {
             let v: Value = serde_json::from_str(l).expect("'ethr' parse error: invalid json line");
             // Skip header/summary lines
             if let Some(avg) = v["Avg"].as_str() {
-                // Assume the latency unit is always "us"
+                // Normalize latency measurements to microseconds.
                 latency.push(
-                    avg.split("us").collect::<Vec<&str>>()[0]
-                        .parse::<f64>()
-                        .expect("'ethr' parse error: invalid 'Avg' entry"),
+                    parse_ethr_duration_us(avg).expect("'ethr' parse error: invalid 'Avg' entry"),
                 );
             }
         }
@@ -2555,6 +2553,20 @@ pub fn parse_ethr_latency_output(output: &[u8]) -> Result<Vec<f64>, Error> {
         );
         Error::EthrLogParse
     })
+}
+
+fn parse_ethr_duration_us(s: &str) -> Option<f64> {
+    let re = regex::Regex::new(r"^\s*([0-9]+(?:\.[0-9]+)?)\s*(µs|us|ns|ms|s)\s*$").unwrap();
+    let caps = re.captures(s)?;
+    let value: f64 = caps.get(1)?.as_str().parse().ok()?;
+    let mult_us = match caps.get(2)?.as_str() {
+        "µs" | "us" => 1.0,
+        "ns" => 1.0 / 1_000.0,
+        "ms" => 1_000.0,
+        "s" => 1_000_000.0,
+        _ => return None,
+    };
+    Some(value * mult_us)
 }
 
 pub fn measure_virtio_net_latency(guest: &Guest, test_timeout: u32) -> Result<Vec<f64>, Error> {

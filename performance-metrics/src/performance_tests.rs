@@ -655,6 +655,18 @@ mod unit_tests {
     }
 
     #[test]
+    fn test_parse_ethr_latency_output_mixed_units() {
+        let output = r#"{"Time":"2026-08-26T00:40:37Z","Title":"","Type":"INFO","Message":"Using destination: 172.19.0.2, ip: 172.19.0.2, port: 8888"}
+{"Time":"2026-08-26T00:40:38Z","Title":"","Type":"LatencyResult","RemoteAddr":"172.19.0.2","Protocol":"TCP","Avg":"971.230us","Min":"452.887us","P50":"43.396ms","Max":"42.165ms"}
+{"Time":"2026-08-26T00:40:40Z","Title":"","Type":"LatencyResult","RemoteAddr":"172.19.0.2","Protocol":"TCP","Avg":"1.619ms","Min":"430.866us","P50":"99.767ms","Max":"60.616ms"}
+{"Time":"2026-08-26T00:40:42Z","Title":"","Type":"LatencyResult","RemoteAddr":"172.19.0.2","Protocol":"TCP","Avg":"1.5s","Min":"430.866us","P50":"99.767ms","Max":"60.616ms"}"#;
+
+        let ret = parse_ethr_latency_output(output.as_bytes()).unwrap();
+        let reference = vec![971.230_f64, 1_619.0_f64, 1_500_000.0_f64];
+        assert_eq!(ret, reference);
+    }
+
+    #[test]
     fn test_parse_boot_time_output() {
         let output = r#"
 cloud-hypervisor: 161.167103ms: <vcpu0> INFO:vmm/src/vm.rs:392 -- [Debug I/O port: Kernel code 0x40] 0.132 seconds

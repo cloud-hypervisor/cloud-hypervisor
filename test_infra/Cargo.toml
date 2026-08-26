@@ -10,6 +10,7 @@ dirs = { workspace = true }
 epoll = { workspace = true }
 libc = { workspace = true }
 rand = "0.10.1"
+regex = "1.13.1"
 serde_json = { workspace = true }
 ssh2 = { version = "0.9.5", features = ["vendored-openssl"] }
 thiserror = { workspace = true }
