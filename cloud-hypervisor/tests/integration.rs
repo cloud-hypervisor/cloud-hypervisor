@@ -12,6 +12,7 @@ use std::fs::{File, OpenOptions, copy};
 use std::io::{BufRead, BufReader, Read, Seek, Write};
 use std::net::TcpListener;
 use std::os::unix::io::AsRawFd;
+use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::string::String;
@@ -2775,6 +2776,64 @@ mod common_parallel {
         let _ = socat_child.wait();
 
         let r = panic::catch_unwind(|| {
+            guest.ssh_command("sudo shutdown -h now").unwrap();
+        });
+
+        let _ = child.wait_timeout(Duration::from_secs(20));
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        let r = panic::catch_unwind(|| {
+            // Check that the cloud-hypervisor binary actually terminated
+            if !output.status.success() {
+                panic!(
+                    "Cloud Hypervisor process failed to terminate gracefully: {:?}",
+                    output.status
+                );
+            }
+        });
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_serial_socket_stale_cleanup() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let serial_socket = guest.tmp_dir.as_path().join("serial.socket");
+        let serial_option = if cfg!(target_arch = "x86_64") {
+            " console=ttyS0"
+        } else {
+            " console=ttyAMA0"
+        };
+        let cmdline = DIRECT_KERNEL_BOOT_CMDLINE.to_owned() + serial_option;
+
+        // Leave a socket behind on the path, as a crashed instance would:
+        // binding and dropping a UnixListener closes the fd but keeps the file.
+        {
+            let _stale = UnixListener::bind(&serial_socket).unwrap();
+        }
+        assert!(serial_socket.exists());
+
+        // The VM must remove the stale socket under the lock and bind anew;
+        // without the cleanup this would fail with EADDRINUSE.
+        let mut child = GuestCommand::new(&guest)
+            .default_cpus()
+            .default_memory()
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", &cmdline])
+            .default_disks()
+            .default_net()
+            .args(["--console", "null"])
+            .args([
+                "--serial",
+                format!("socket={}", serial_socket.to_str().unwrap()).as_str(),
+            ])
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
             guest.ssh_command("sudo shutdown -h now").unwrap();
         });
 
