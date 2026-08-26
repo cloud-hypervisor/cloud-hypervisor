@@ -26,7 +26,7 @@ use crate::formats::vhd::VhdDisk;
 use crate::formats::vhdx::VhdxDisk;
 use crate::formats::vmdk::VmdkDisk;
 use crate::{
-    ImageType, block_aio_is_supported, detect_image_type, open_disk_image, preallocate_disk,
+    ImageType, block_aio_is_supported, open_disk_image, preallocate_disk, validate_image_type,
 };
 
 /// Options for opening a disk image via [`open_disk`].
@@ -76,12 +76,9 @@ pub fn open_disk(
     }
 
     let mut file = open_disk_image(options.path, &fs_options)?;
-    let detected_image_type = detect_image_type(&mut file)?;
-
-    if image_type != detected_image_type {
+    if !validate_image_type(&mut file, image_type)? {
         return Err(BlockError::from_kind(BlockErrorKind::ImageTypeMismatch {
             specified: image_type,
-            detected: detected_image_type,
         })
         .with_path(options.path));
     }
@@ -277,7 +274,6 @@ mod unit_tests {
                 e.kind(),
                 BlockErrorKind::ImageTypeMismatch {
                     specified: ImageType::Qcow2,
-                    detected: ImageType::Raw,
                 }
             ),
             Ok(_) => panic!("expected error for mismatched image type"),
