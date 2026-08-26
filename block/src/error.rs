@@ -21,6 +21,8 @@ use std::fmt::{self, Display, Formatter};
 use std::io;
 use std::path::PathBuf;
 
+use crate::ImageType;
+
 /// Small, stable classification of block errors.
 ///
 /// Callers match on this for control flow. Adding new format specific
@@ -42,6 +44,11 @@ pub enum BlockErrorKind {
     NotFound,
     /// An internal counter or limit was exceeded.
     Overflow,
+    /// Image type mismatch
+    ImageTypeMismatch {
+        specified: ImageType,
+        detected: ImageType,
+    },
 }
 
 impl Display for BlockErrorKind {
@@ -54,6 +61,15 @@ impl Display for BlockErrorKind {
             Self::OutOfBounds => write!(f, "Out of bounds"),
             Self::NotFound => write!(f, "Not found"),
             Self::Overflow => write!(f, "Overflow"),
+            Self::ImageTypeMismatch {
+                specified,
+                detected,
+            } => {
+                write!(
+                    f,
+                    "Image type mismatch: specified = {specified}, detected = {detected}"
+                )
+            }
         }
     }
 }

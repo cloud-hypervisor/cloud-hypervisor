@@ -5,7 +5,7 @@
 //! Disk image factory.
 //!
 //! [`open_disk`] is the single entry point for opening a disk image.
-//! It opens the file, detects the image format, probes async I/O
+//! It opens the file, validates the image type, probes async I/O
 //! support, and constructs the appropriate backend. Callers receive
 //! a trait object that is ready for use by virtio queue workers.
 
@@ -75,15 +75,15 @@ fn aio_supported() -> bool {
 /// Open a disk image and construct the appropriate async backend.
 ///
 /// - Opens the file with the requested access mode and flags.
-/// - Detects the image format from the file header.
+/// - Checks specified format against detected format.
 /// - Probes io_uring and Linux AIO support on the running kernel.
-/// - Constructs the most capable backend available for the detected
-///   format, preferring io_uring over AIO over synchronous fallback.
+/// - Constructs the most capable backend available for the format,
+///   preferring io_uring over AIO over synchronous fallback.
 ///
 /// The returned [`OpenedDisk`] exposes the detected [`ImageType`] so
 /// callers can perform post construction validation (e.g. type mismatch
 /// checks, configuration warnings).
-pub fn open_disk(options: &DiskOpenOptions<'_>) -> BlockResult<OpenedDisk> {
+pub fn open_disk(options: &DiskOpenOptions<'_>, image_type: ImageType) -> BlockResult<OpenedDisk> {
     let mut fs_options = fs::OpenOptions::new();
     fs_options.read(true);
     fs_options.write(!options.readonly);
@@ -92,7 +92,15 @@ pub fn open_disk(options: &DiskOpenOptions<'_>) -> BlockResult<OpenedDisk> {
     }
 
     let mut file = open_disk_image(options.path, &fs_options)?;
-    let image_type = detect_image_type(&mut file)?;
+    let detected_image_type = detect_image_type(&mut file)?;
+
+    if image_type != detected_image_type {
+        return Err(BlockError::from_kind(BlockErrorKind::ImageTypeMismatch {
+            specified: image_type,
+            detected: detected_image_type,
+        })
+        .with_path(options.path));
+    }
 
     let disk: Box<dyn AsyncFullDiskFile> = match image_type {
         ImageType::FixedVhd => open_fixed_vhd(file, options)?,
@@ -100,11 +108,7 @@ pub fn open_disk(options: &DiskOpenOptions<'_>) -> BlockResult<OpenedDisk> {
         ImageType::Qcow2 => open_qcow2(file, options)?,
         ImageType::Vhdx => open_vhdx(file, options)?,
         ImageType::FlatVmdk => open_flat_vmdk(file, options)?,
-        ImageType::Unknown => {
-            return Err(
-                BlockError::from_kind(BlockErrorKind::UnsupportedFeature).with_path(options.path)
-            );
-        }
+        ImageType::Unknown => unreachable!(),
     };
 
     Ok(OpenedDisk { image_type, disk })
@@ -253,7 +257,7 @@ mod unit_tests {
     fn nonexistent_path_returns_error() {
         let path = Path::new("/tmp/no_such_disk_image.raw");
         let options = default_options(path);
-        match open_disk(&options) {
+        match open_disk(&options, ImageType::Raw) {
             Err(e) => assert_eq!(e.kind(), BlockErrorKind::Io),
             Ok(_) => panic!("expected error for nonexistent path"),
         }
@@ -265,7 +269,7 @@ mod unit_tests {
         tmp.as_file().set_len(1 << 20).unwrap();
         let path = tmp.as_path().to_owned();
         let options = default_options(&path);
-        let opened = open_disk(&options).unwrap();
+        let opened = open_disk(&options, ImageType::Raw).unwrap();
         assert_eq!(opened.image_type, ImageType::Raw);
     }
 
@@ -276,8 +280,26 @@ mod unit_tests {
             .into_tempfile();
         let path = tmp.as_path().to_owned();
         let options = default_options(&path);
-        let opened = open_disk(&options).unwrap();
+        let opened = open_disk(&options, ImageType::Qcow2).unwrap();
         assert_eq!(opened.image_type, ImageType::Qcow2);
+    }
+
+    #[test]
+    fn mismatched_image_type_returns_error() {
+        let tmp = TempFile::new().unwrap();
+        tmp.as_file().set_len(1 << 20).unwrap();
+        let path = tmp.as_path().to_owned();
+        let options = default_options(&path);
+        match open_disk(&options, ImageType::Qcow2) {
+            Err(e) => assert_eq!(
+                e.kind(),
+                BlockErrorKind::ImageTypeMismatch {
+                    specified: ImageType::Qcow2,
+                    detected: ImageType::Raw,
+                }
+            ),
+            Ok(_) => panic!("expected error for mismatched image type"),
+        }
     }
 
     #[test]
@@ -287,7 +309,7 @@ mod unit_tests {
         let path = tmp.as_path().to_owned();
         let mut options = default_options(&path);
         options.readonly = true;
-        let opened = open_disk(&options).unwrap();
+        let opened = open_disk(&options, ImageType::Raw).unwrap();
         assert_eq!(opened.image_type, ImageType::Raw);
     }
 
@@ -306,7 +328,7 @@ mod unit_tests {
             disable_io_uring: true,
             disable_aio: true,
         };
-        let opened = open_disk(&options).unwrap();
+        let opened = open_disk(&options, ImageType::Raw).unwrap();
         assert_eq!(opened.image_type, ImageType::Raw);
         assert_eq!(opened.disk.logical_size().unwrap(), size);
     }
