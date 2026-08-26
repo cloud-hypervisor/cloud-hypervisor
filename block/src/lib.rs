@@ -542,24 +542,19 @@ pub fn open_disk_image(path: &Path, options: &OpenOptions) -> BlockResult<File> 
 
 /// Determine image type through file parsing.
 pub fn detect_image_type(f: &mut File) -> BlockResult<ImageType> {
-    let aligned = AlignedFile::new(f.try_clone()?, true);
-    // A VMDK descriptor file is small few hundred bytes of text. Read
-    // best-effort so a short file yields a zero-padded partial block instead
-    // of an UnexpectedEof, and let the per-format probes below decide.
-    let mut block = vec![0u8; aligned.alignment()];
-    let mut filled = 0;
-    while filled < block.len() {
-        match aligned.read_at(&mut block[filled..], filled as u64) {
-            Ok(0) => break,
-            Ok(n) => filled += n,
-            Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
-            Err(e) => {
-                return Err(
-                    BlockError::new(BlockErrorKind::Io, e).with_op(ErrorOp::DetectImageType)
-                );
-            }
-        }
+    // Detect VMDK first to avoid "failed to fill whole buffer" errors reading
+    // with AlignedFile's read_exact_at.
+    if formats::vmdk::is_flat_vmdk(f)
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, e).with_op(ErrorOp::DetectImageType))?
+    {
+        return Ok(ImageType::FlatVmdk);
     }
+
+    let aligned = AlignedFile::new(f.try_clone()?, true);
+    let mut block = vec![0u8; aligned.alignment()];
+    aligned
+        .read_exact_at(&mut block, 0)
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, e).with_op(ErrorOp::DetectImageType))?;
 
     // Check 4 first bytes to get the header value and determine the image type
     let image_type = if u32::from_be_bytes(block[0..4].try_into().unwrap()) == QCOW_MAGIC {
@@ -570,11 +565,6 @@ pub fn detect_image_type(f: &mut File) -> BlockResult<ImageType> {
         ImageType::FixedVhd
     } else if u64::from_le_bytes(block[0..8].try_into().unwrap()) == VHDX_SIGN {
         ImageType::Vhdx
-    } else if formats::vmdk::has_descriptor_header(&block)
-        && formats::vmdk::is_flat_vmdk(f)
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, e).with_op(ErrorOp::DetectImageType))?
-    {
-        ImageType::FlatVmdk
     } else {
         ImageType::Raw
     };
@@ -706,15 +696,22 @@ mod unit_tests {
     use super::*;
 
     #[test]
-    fn detect_short_file_is_not_eof_error() {
+    fn detects_small_vmdk_descriptor() {
         let tmp = TempFile::new().unwrap();
         let mut f = tmp.into_file();
-        f.write_all(b"not-a-disk-magic-just-some-short-text\n")
-            .unwrap();
+        f.write_all(
+            b"# Disk DescriptorFile\n\
+              version=1\n\
+              createType=\"monolithicFlat\"\n\
+              # Extent description\n\
+              RW 2048 FLAT \"disk-flat.vmdk\"\n\
+              # The Disk Data Base\n\
+              ddb.adapterType = \"ide\"\n",
+        )
+        .unwrap();
         f.sync_all().unwrap();
 
-        let image_type = detect_image_type(&mut f).unwrap();
-        assert_eq!(image_type, ImageType::Raw);
+        assert_eq!(detect_image_type(&mut f).unwrap(), ImageType::FlatVmdk);
     }
 
     #[test]

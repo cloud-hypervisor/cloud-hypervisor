@@ -21,6 +21,10 @@ const VMDK_DESCRIPTOR_EXTENTS: &str = "# Extent description";
 const VMDK_DESCRIPTOR_DDB: &str = "# The Disk Data Base";
 const VMDK_DESCRIPTOR_DDB_2: &str = "#DDB";
 
+// Cap the descriptor read to avoid unbounded allocation.
+// Similar to Qemu's vmdk.c cap.
+const MAX_DESCRIPTOR_LEN: u64 = 1 << 20; // 1 MiB
+
 /// Flat VMDK create types.
 #[derive(Debug, Default)]
 pub enum VMDKDiskType {
@@ -125,21 +129,35 @@ impl VmdkDescriptor {
     }
 }
 
-// Read the whole descriptor into memory through an `AlignedFile` and return it
-// as a `String`.
-fn read_descriptor(file: &File) -> io::Result<String> {
-    let aligned = AlignedFile::new(file.try_clone()?, true);
-    let len = file.metadata()?.len() as usize;
-    let mut buf = vec![0u8; len];
+fn read_filled(aligned: &AlignedFile, buf: &mut [u8], offset: u64) -> io::Result<usize> {
     let mut filled = 0;
     while filled < buf.len() {
-        match aligned.read_at(&mut buf[filled..], filled as u64) {
+        match aligned.read_at(&mut buf[filled..], offset + filled as u64) {
             Ok(0) => break,
             Ok(n) => filled += n,
             Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
             Err(e) => return Err(e),
         }
     }
+    Ok(filled)
+}
+
+fn read_descriptor(file: &File) -> io::Result<String> {
+    let aligned = AlignedFile::new(file.try_clone()?, true);
+
+    // Confirm the descriptor header from a small prefix
+    let mut head = [0u8; VMDK_DESCRIPTOR_HEADER.len()];
+    let got = read_filled(&aligned, &mut head, 0)?;
+    if !has_descriptor_header(&head[..got]) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "not a VMDK descriptor: missing header",
+        ));
+    }
+
+    let len = file.metadata()?.len().min(MAX_DESCRIPTOR_LEN) as usize;
+    let mut buf = vec![0u8; len];
+    let filled = read_filled(&aligned, &mut buf, 0)?;
     buf.truncate(filled);
     // A descriptor is ASCII text, so invalid UTF-8 means "not a descriptor".
     String::from_utf8(buf).map_err(|_| {
