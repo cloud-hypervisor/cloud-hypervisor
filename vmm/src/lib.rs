@@ -3675,7 +3675,7 @@ mod unit_tests {
     #[test]
     fn test_vmm_vm_cold_add_disk() {
         let mut vmm = create_dummy_vmm();
-        let disk_config = DiskConfig::parse("path=/path/to_file").unwrap();
+        let disk_config = DiskConfig::parse("path=/path/to_file,image_type=raw").unwrap();
 
         assert!(matches!(
             vmm.vm_add_disk(disk_config.clone()),
