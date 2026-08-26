@@ -239,6 +239,9 @@ pub enum ValidationError {
     /// Both socket and path specified
     #[error("Disk path and vhost socket both provided")]
     DiskSocketAndPath,
+    /// No image type specified for virtio-block
+    #[error("Image type required for disk")]
+    ImageTypeRequired,
     /// Using vhost user requires shared memory
     #[error("Using vhost-user requires using shared memory or huge pages")]
     VhostUserRequiresSharedMemory,
@@ -1666,6 +1669,10 @@ impl DiskConfig {
                 serial.len(),
                 VIRTIO_BLK_ID_BYTES as usize,
             ));
+        }
+
+        if !self.vhost_user && self.image_type == ImageType::Unknown {
+            return Err(ValidationError::ImageTypeRequired);
         }
 
         Ok(())
@@ -4396,6 +4403,13 @@ mod unit_tests {
         }
     }
 
+    fn raw_disk_fixture() -> DiskConfig {
+        DiskConfig {
+            image_type: ImageType::Raw,
+            ..disk_fixture()
+        }
+    }
+
     #[test]
     fn test_disk_parsing() -> Result<()> {
         assert_eq!(
@@ -5883,6 +5897,16 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         valid_config.validate().unwrap();
 
         let mut invalid_config = valid_config.clone();
+        invalid_config.disks = Some(vec![DiskConfig {
+            image_type: ImageType::Unknown,
+            ..raw_disk_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::ImageTypeRequired)
+        );
+
+        let mut invalid_config = valid_config.clone();
         invalid_config.serial.common.mode = ConsoleOutputMode::Tty;
         invalid_config.console.common.mode = ConsoleOutputMode::Tty;
         valid_config.validate().unwrap();
@@ -5996,7 +6020,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         invalid_config.disks = Some(vec![DiskConfig {
             vhost_socket: Some("/path/to/sock".to_owned()),
             path: Some(PathBuf::from("/path/to/image")),
-            ..disk_fixture()
+            ..raw_disk_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
@@ -6041,7 +6065,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let mut invalid_config = valid_config.clone();
         invalid_config.disks = Some(vec![DiskConfig {
             queue_size: 100,
-            ..disk_fixture()
+            ..raw_disk_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
@@ -6053,7 +6077,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let mut invalid_config = valid_config.clone();
         invalid_config.disks = Some(vec![DiskConfig {
             queue_size: MINIMUM_BLOCK_QUEUE_SIZE,
-            ..disk_fixture()
+            ..raw_disk_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
@@ -6342,7 +6366,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 pci_segment: 1,
                 ..Default::default()
             },
-            ..disk_fixture()
+            ..raw_disk_fixture()
         }]);
         still_valid_config.validate().unwrap();
 
@@ -6418,7 +6442,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 pci_segment: 1,
                 ..Default::default()
             },
-            ..disk_fixture()
+            ..raw_disk_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
@@ -6638,7 +6662,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let mut invalid_config = valid_config.clone();
         invalid_config.disks = Some(vec![DiskConfig {
             rate_limit_group: Some("foo".into()),
-            ..disk_fixture()
+            ..raw_disk_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
@@ -6649,7 +6673,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let mut valid_serial_config = valid_config.clone();
         valid_serial_config.disks = Some(vec![DiskConfig {
             serial: Some("valid_serial".to_string()),
-            ..disk_fixture()
+            ..raw_disk_fixture()
         }]);
         valid_serial_config.validate().unwrap();
 
@@ -6657,7 +6681,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let mut empty_serial_config = valid_config.clone();
         empty_serial_config.disks = Some(vec![DiskConfig {
             serial: Some(String::new()),
-            ..disk_fixture()
+            ..raw_disk_fixture()
         }]);
         empty_serial_config.validate().unwrap();
 
@@ -6665,7 +6689,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let mut none_serial_config = valid_config.clone();
         none_serial_config.disks = Some(vec![DiskConfig {
             serial: None,
-            ..disk_fixture()
+            ..raw_disk_fixture()
         }]);
         none_serial_config.validate().unwrap();
 
@@ -6674,7 +6698,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let mut max_serial_config = valid_config.clone();
         max_serial_config.disks = Some(vec![DiskConfig {
             serial: Some(max_serial),
-            ..disk_fixture()
+            ..raw_disk_fixture()
         }]);
         max_serial_config.validate().unwrap();
 
@@ -6683,7 +6707,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let mut invalid_serial_config = valid_config.clone();
         invalid_serial_config.disks = Some(vec![DiskConfig {
             serial: Some(long_serial.clone()),
-            ..disk_fixture()
+            ..raw_disk_fixture()
         }]);
         assert_eq!(
             invalid_serial_config.validate(),
@@ -6902,7 +6926,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 pci_device_id: Some(8),
                 ..Default::default()
             },
-            ..disk_fixture()
+            ..raw_disk_fixture()
         }]);
         still_valid_config.validate().unwrap();
         // Invalid BDF - Same ID as Root device
@@ -6912,7 +6936,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 pci_device_id: Some(pci::PCI_ROOT_DEVICE_ID),
                 ..Default::default()
             },
-            ..disk_fixture()
+            ..raw_disk_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
@@ -6927,7 +6951,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 pci_device_id: Some(pci::NUM_DEVICE_IDS + 1),
                 ..Default::default()
             },
-            ..disk_fixture()
+            ..raw_disk_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
@@ -6968,7 +6992,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 id: Some("test0".to_string()),
                 ..Default::default()
             },
-            ..disk_fixture()
+            ..raw_disk_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
@@ -6999,7 +7023,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 id: Some("test0".to_string()),
                 ..Default::default()
             },
-            ..disk_fixture()
+            ..raw_disk_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),

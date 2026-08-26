@@ -1351,13 +1351,13 @@ mod unit_tests {
                     "/path/to/kernel",
                     "--disk",
                     "path=/path/to/disk/1,image_type=raw",
-                    "path=/path/to/disk/2",
+                    "path=/path/to/disk/2,image_type=raw",
                 ],
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
                     "disks": [
                         {"path": "/path/to/disk/1", "image_type": "Raw"},
-                        {"path": "/path/to/disk/2", "image_type": "Unknown"}
+                        {"path": "/path/to/disk/2", "image_type": "Raw"}
                     ]
                 }"#,
                 true,
@@ -1423,16 +1423,16 @@ mod unit_tests {
                     "--kernel",
                     "/path/to/kernel",
                     "--disk",
-                    "path=/path/to/disk/1,rate_limit_group=group0",
-                    "path=/path/to/disk/2,rate_limit_group=group0",
+                    "path=/path/to/disk/1,rate_limit_group=group0,image_type=raw",
+                    "path=/path/to/disk/2,rate_limit_group=group0,image_type=raw",
                     "--rate-limit-group",
                     "id=group0,bw_size=1000,bw_refill_time=100",
                 ],
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
                     "disks": [
-                        {"path": "/path/to/disk/1", "rate_limit_group": "group0", "image_type": "Unknown"},
-                        {"path": "/path/to/disk/2", "rate_limit_group": "group0", "image_type": "Unknown"}
+                        {"path": "/path/to/disk/1", "rate_limit_group": "group0", "image_type": "Raw"},
+                        {"path": "/path/to/disk/2", "rate_limit_group": "group0", "image_type": "Raw"}
                     ],
                     "rate_limit_groups": [
                         {"id": "group0", "rate_limiter_config": {"bandwidth": {"size": 1000, "one_time_burst": 0, "refill_time": 100}}}
