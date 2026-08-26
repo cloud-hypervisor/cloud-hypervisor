@@ -2810,7 +2810,6 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::RestoreGetState)?,
                 queue_affinity,
                 disk_cfg.sparse,
-                false,
                 disk_cfg.lock_granularity,
             )
             .map_err(DeviceManagerError::CreateVirtioBlock)?;
