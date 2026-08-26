@@ -44,7 +44,7 @@ mod common_parallel {
     use std::sync::mpsc;
 
     use test_infra::GuestFactory;
-    use vmm::api::TimeoutStrategy;
+    use vmm::api::{BalloonStatsResponse, TimeoutStrategy};
 
     use crate::*;
 
@@ -5305,6 +5305,68 @@ mod common_parallel {
             println!("After deflating, balloon memory size is {deflated_balloon} bytes");
             // Verify the balloon size deflated
             assert!(deflated_balloon < 2147483648);
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_virtio_balloon_stats() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket])
+            .default_cpus()
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--balloon", "size=0,free_page_reporting=on"])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            let balloon_stats = || -> Option<BalloonStatsResponse> {
+                let (success, output, _) =
+                    remote_command_w_output(&api_socket, "balloon-stats", None);
+                if !success {
+                    return None;
+                }
+
+                serde_json::from_slice(&output).ok()
+            };
+
+            let initial_last_update = Cell::new(0);
+            assert!(wait_until(Duration::from_secs(20), || {
+                let Some(response) = balloon_stats() else {
+                    return false;
+                };
+                if response.balloon_actual != 0
+                    || response.last_update == 0
+                    || response.stats.total_memory.unwrap_or_default() == 0
+                {
+                    return false;
+                }
+
+                initial_last_update.set(response.last_update);
+                true
+            }));
+
+            // The API returns the cached sample and requests a refresh for the
+            // next call.
+            assert!(wait_until(Duration::from_secs(20), || {
+                balloon_stats()
+                    .is_some_and(|response| response.last_update > initial_last_update.get())
+            }));
         });
 
         kill_child(&mut child);
