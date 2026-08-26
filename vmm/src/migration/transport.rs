@@ -756,6 +756,7 @@ impl SendAdditionalConnections {
         })
     }
 
+    /// The lifecycle loop a TCP worker thread executes.
     fn worker_send_memory(
         socket: &mut SocketStream,
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
@@ -838,16 +839,17 @@ impl SendAdditionalConnections {
         // The chunk size is chosen to be big enough so that even very fast links need some
         // milliseconds to send it.
         for chunk in table.partition(Self::CHUNK_SIZE) {
-            self.send_chunk(chunk)?;
+            self.enqueue_chunk(chunk)?;
         }
 
         self.wait_for_pending_data()?;
         Ok(true)
     }
 
-    fn send_chunk(&mut self, chunk: MemoryRangeTable) -> Result<(), MigratableError> {
+    /// Enqueues a request to send a memory range table for the send workers.
+    fn enqueue_chunk(&mut self, chunk: MemoryRangeTable) -> Result<(), MigratableError> {
         let mut chunk = SendMemoryThreadMessage::Memory(chunk);
-        // [`Self::message_tx`] has a limited size, so we may have to retry sending the chunk
+        // `message_tx` has a limited size, so we may have to retry sending the chunk
         loop {
             if self.worker_error.load(Ordering::Acquire) {
                 return self.cleanup();
