@@ -903,10 +903,7 @@ pub(crate) fn compute_backing_checksum(
     let path = resolve_disk_path(path_or_image_name);
 
     let mut file = File::open(&path).ok()?;
-    if !matches!(
-        block::detect_image_type(&mut file).ok()?,
-        block::ImageType::Qcow2
-    ) {
+    if !block::validate_image_type(&mut file, block::ImageType::Qcow2).ok()? {
         return None;
     }
 

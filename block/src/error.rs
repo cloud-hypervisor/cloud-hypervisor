@@ -45,10 +45,7 @@ pub enum BlockErrorKind {
     /// An internal counter or limit was exceeded.
     Overflow,
     /// Image type mismatch
-    ImageTypeMismatch {
-        specified: ImageType,
-        detected: ImageType,
-    },
+    ImageTypeMismatch { specified: ImageType },
 }
 
 impl Display for BlockErrorKind {
@@ -61,14 +58,8 @@ impl Display for BlockErrorKind {
             Self::OutOfBounds => write!(f, "Out of bounds"),
             Self::NotFound => write!(f, "Not found"),
             Self::Overflow => write!(f, "Overflow"),
-            Self::ImageTypeMismatch {
-                specified,
-                detected,
-            } => {
-                write!(
-                    f,
-                    "Image type mismatch: specified = {specified}, detected = {detected}"
-                )
+            Self::ImageTypeMismatch { specified } => {
+                write!(f, "Image type mismatch: specified = {specified}")
             }
         }
     }
@@ -80,8 +71,8 @@ impl Display for BlockErrorKind {
 pub enum ErrorOp {
     /// Opening a disk image file.
     Open,
-    /// Detecting the image format.
-    DetectImageType,
+    /// Validating the image format.
+    ValidateImageType,
     /// Duplicating a backing-file descriptor.
     DupBackingFd,
     /// Resizing a disk image.
@@ -92,7 +83,7 @@ impl Display for ErrorOp {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Open => write!(f, "open"),
-            Self::DetectImageType => write!(f, "detect_image_type"),
+            Self::ValidateImageType => write!(f, "validate_image_type"),
             Self::DupBackingFd => write!(f, "dup_backing_fd"),
             Self::Resize => write!(f, "resize"),
         }

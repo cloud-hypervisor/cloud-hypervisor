@@ -207,7 +207,7 @@ impl VhdFooter {
     }
 }
 
-/// Determine image type through file parsing.
+/// Returns true when the file contains a fixed VHD footer.
 pub fn is_fixed_vhd(f: &mut File) -> io::Result<bool> {
     let footer = match VhdFooter::new(f) {
         Ok(footer) => footer,

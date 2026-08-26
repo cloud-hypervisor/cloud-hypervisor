@@ -65,8 +65,8 @@ pub enum Error {
     DescriptorChainTooShort,
     #[error("Guest gave us a descriptor that was too short to use")]
     DescriptorLengthTooSmall,
-    #[error("Failed to detect image type")]
-    DetectImageType(#[source] io::Error),
+    #[error("Failed to validate image type")]
+    ValidateImageType(#[source] io::Error),
     #[error("Failure in fixed vhd")]
     FixedVhdError(#[source] io::Error),
     #[error("Getting a block's metadata failed")]
@@ -540,8 +540,8 @@ pub fn open_disk_image(path: &Path, options: &OpenOptions) -> BlockResult<File> 
     })
 }
 
-/// Determine image type through file parsing.
-pub fn detect_image_type(f: &mut File) -> BlockResult<ImageType> {
+/// Validate image type through file parsing.
+pub fn validate_image_type(f: &mut File, image_type: ImageType) -> BlockResult<bool> {
     let aligned = AlignedFile::new(f.try_clone()?, true);
     // A VMDK descriptor file is small few hundred bytes of text. Read
     // best-effort so a short file yields a zero-padded partial block instead
@@ -555,31 +555,30 @@ pub fn detect_image_type(f: &mut File) -> BlockResult<ImageType> {
             Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
             Err(e) => {
                 return Err(
-                    BlockError::new(BlockErrorKind::Io, e).with_op(ErrorOp::DetectImageType)
+                    BlockError::new(BlockErrorKind::Io, e).with_op(ErrorOp::ValidateImageType)
                 );
             }
         }
     }
 
-    // Check 4 first bytes to get the header value and determine the image type
-    let image_type = if u32::from_be_bytes(block[0..4].try_into().unwrap()) == QCOW_MAGIC {
-        ImageType::Qcow2
-    } else if formats::vhd::is_fixed_vhd(f)
-        .map_err(|e| BlockError::new(BlockErrorKind::Io, e).with_op(ErrorOp::DetectImageType))?
-    {
-        ImageType::FixedVhd
-    } else if u64::from_le_bytes(block[0..8].try_into().unwrap()) == VHDX_SIGN {
-        ImageType::Vhdx
-    } else if formats::vmdk::has_descriptor_header(&block)
-        && formats::vmdk::is_flat_vmdk(f)
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, e).with_op(ErrorOp::DetectImageType))?
-    {
-        ImageType::FlatVmdk
-    } else {
-        ImageType::Raw
-    };
-
-    Ok(image_type)
+    match image_type {
+        ImageType::Qcow2 => Ok(u32::from_be_bytes(block[0..4].try_into().unwrap()) == QCOW_MAGIC),
+        ImageType::FixedVhd => formats::vhd::is_fixed_vhd(f).map_err(|e| {
+            BlockError::new(BlockErrorKind::Io, e).with_op(ErrorOp::ValidateImageType)
+        }),
+        ImageType::Vhdx => Ok(u64::from_le_bytes(block[0..8].try_into().unwrap()) == VHDX_SIGN),
+        ImageType::FlatVmdk => {
+            if formats::vmdk::has_descriptor_header(&block) {
+                formats::vmdk::is_flat_vmdk(f).map_err(|e| {
+                    BlockError::new(BlockErrorKind::Io, e).with_op(ErrorOp::ValidateImageType)
+                })
+            } else {
+                Ok(false)
+            }
+        }
+        ImageType::Raw => Ok(true),
+        ImageType::Unknown => Ok(false),
+    }
 }
 
 #[derive(Debug)]
@@ -706,15 +705,15 @@ mod unit_tests {
     use super::*;
 
     #[test]
-    fn detect_short_file_is_not_eof_error() {
+    fn validate_short_file_is_not_eof_error() {
         let tmp = TempFile::new().unwrap();
         let mut f = tmp.into_file();
         f.write_all(b"not-a-disk-magic-just-some-short-text\n")
             .unwrap();
         f.sync_all().unwrap();
 
-        let image_type = detect_image_type(&mut f).unwrap();
-        assert_eq!(image_type, ImageType::Raw);
+        assert!(validate_image_type(&mut f, ImageType::Raw).unwrap());
+        assert!(!validate_image_type(&mut f, ImageType::Qcow2).unwrap());
     }
 
     #[test]
