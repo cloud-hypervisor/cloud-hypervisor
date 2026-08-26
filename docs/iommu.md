@@ -85,7 +85,7 @@ virtual IOMMU:
 ./cloud-hypervisor \
     --cpus boot=1 \
     --memory size=512M \
-    --disk path=focal-server-cloudimg-amd64.raw,iommu=on \
+    --disk path=focal-server-cloudimg-amd64.raw,iommu=on,image_type=raw \
     --kernel custom-vmlinux \
     --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
 ```
@@ -185,7 +185,7 @@ be consumed.
 ./cloud-hypervisor \
     --cpus boot=1 \
     --memory size=8G,hugepages=on \
-    --disk path=focal-server-cloudimg-amd64.raw \
+    --disk path=focal-server-cloudimg-amd64.raw,image_type=raw \
     --kernel custom-vmlinux \
     --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw hugepagesz=2M hugepages=2048" \
     --net tap=,mac=,iommu=on
@@ -202,7 +202,7 @@ passing through is `0000:00:01.0`.
 ./cloud-hypervisor \
     --cpus boot=1 \
     --memory size=8G,hugepages=on \
-    --disk path=focal-server-cloudimg-amd64.raw \
+    --disk path=focal-server-cloudimg-amd64.raw,image_type=raw \
     --kernel custom-vmlinux \
     --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw kvm-intel.nested=1 vfio_iommu_type1.allow_unsafe_interrupts rw hugepagesz=2M hugepages=2048" \
     --device path=/sys/bus/pci/devices/0000:00:01.0,iommu=on
@@ -223,7 +223,7 @@ Last thing is to start the L2 guest with the huge pages memory backend.
 ./cloud-hypervisor \
     --cpus boot=1 \
     --memory size=4G,hugepages=on \
-    --disk path=focal-server-cloudimg-amd64.raw \
+    --disk path=focal-server-cloudimg-amd64.raw,image_type=raw \
     --kernel custom-vmlinux \
     --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
     --device path=/sys/bus/pci/devices/0000:00:04.0
@@ -245,7 +245,7 @@ e.g.
     --api-socket=/tmp/api \
     --cpus boot=1 \
     --memory size=4G,hugepages=on \
-    --disk path=focal-server-cloudimg-amd64.raw \
+    --disk path=focal-server-cloudimg-amd64.raw,image_type=raw \
     --kernel custom-vmlinux \
     --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
     --platform num_pci_segments=2,iommu_segments=1

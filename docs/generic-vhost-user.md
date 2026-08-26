@@ -40,7 +40,7 @@ similar to this:
 /path/to/cloud-hypervisor \
     --cpus boot=1 \
     --memory size=1G,shared=on \
-    --disk path=your-linux-image.iso \
+    --disk path=your-linux-image.iso,image_type=raw \
     --kernel vmlinux \
     --cmdline "console=hvc0 root=/dev/vda1 rw" \
     --generic-vhost-user "socket=\"${path_to_virtiofsd_socket//\"/\"\"}\",device_type=26,queue_sizes=[512,512]" \

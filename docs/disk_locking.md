@@ -24,8 +24,8 @@ The `lock_granularity` parameter controls how the lock is placed on the
 disk image:
 
 ```
---disk path=/foo.img,lock_granularity=byte-range
---disk path=/bar.img,lock_granularity=full
+--disk path=/foo.img,lock_granularity=byte-range,image_type=raw
+--disk path=/bar.img,lock_granularity=full,image_type=raw
 ```
 
 ### `byte-range` (default)

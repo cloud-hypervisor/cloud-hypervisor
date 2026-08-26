@@ -40,7 +40,7 @@ You can run a SEV-SNP VM using the following command:
      --platform sev_snp=on \
      --cpus boot=1 \
      --memory size=1G \
-     --disk path=ubuntu.img
+     --disk path=ubuntu.img,image_type=raw
 ```
 
 For more information related to Microsoft Hypervisor, please see [mshv.md](mshv.md).

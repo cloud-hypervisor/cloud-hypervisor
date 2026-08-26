@@ -71,7 +71,7 @@ popd
 pushd $CLOUDH
 sudo $CLOUDH/cloud-hypervisor/target/debug/cloud-hypervisor \
            --kernel $CLOUDH/linux/arch/riscv64/boot/Image \
-           --disk path=jammy-server-cloudimg-riscv64.raw \
+           --disk path=jammy-server-cloudimg-riscv64.raw,image_type=raw \
            --cmdline "console=hvc0 root=/dev/vda rw" \
            --cpus boot=1 \
            --memory size=1024M \
