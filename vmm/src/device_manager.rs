@@ -698,15 +698,6 @@ pub enum DeviceManagerError {
     /// Disk resizing failed.
     #[error("Disk resize error")]
     DiskResize(#[source] VirtioBlockError),
-
-    /// Disk image type does not match expected type.
-    #[error(
-        "Disk image type does not match expected type: specified = {specified}, detected = {detected}"
-    )]
-    DiskImageTypeMismatch {
-        specified: ImageType,
-        detected: ImageType,
-    },
 }
 
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
@@ -2739,57 +2730,19 @@ impl DeviceManager {
                 .as_ref()
                 .ok_or(DeviceManagerError::NoDiskPath)?;
 
-            let opened = open_disk(&DiskOpenOptions {
-                path: disk_path,
-                readonly: disk_cfg.readonly,
-                direct: disk_cfg.direct,
-                sparse: disk_cfg.sparse,
-                backing_files: disk_cfg.backing_files,
-                disable_io_uring: disk_cfg.disable_io_uring,
-                disable_aio: disk_cfg.disable_aio,
-            })
+            let opened = open_disk(
+                &DiskOpenOptions {
+                    path: disk_path,
+                    readonly: disk_cfg.readonly,
+                    direct: disk_cfg.direct,
+                    sparse: disk_cfg.sparse,
+                    backing_files: disk_cfg.backing_files,
+                    disable_io_uring: disk_cfg.disable_io_uring,
+                    disable_aio: disk_cfg.disable_aio,
+                },
+                disk_cfg.image_type,
+            )
             .map_err(DeviceManagerError::Disk)?;
-
-            let detected_image_type = opened.image_type;
-            let mut disable_sector0_writes = false;
-
-            if disk_cfg.image_type == ImageType::Unknown {
-                warn!(
-                    "DEPRECATION: auto-detection of disk image type is deprecated and will be \
-                    removed in a future release. Please specify image type explicitly."
-                );
-
-                warn!(
-                    "No image_type specified - detected as {detected_image_type}. \
-                    Configuration updated to persist type across reboots and migrations."
-                );
-
-                if detected_image_type == ImageType::Raw
-                    || detected_image_type == ImageType::FixedVhd
-                {
-                    warn!(
-                        "Autodetected {detected_image_type} image type. Disabling sector 0 writes."
-                    );
-                    disable_sector0_writes = true;
-                } else {
-                    warn!(
-                        "Non-raw image type detected. In the future it will be necessary \
-                        to specify image_type for non-raw files."
-                    );
-                }
-
-                if detected_image_type == ImageType::Qcow2 && disk_cfg.backing_files {
-                    warn!("QCOW2 image type autodetected. Disabling backing files");
-                    disk_cfg.backing_files = false;
-                }
-
-                disk_cfg.image_type = detected_image_type;
-            } else if disk_cfg.image_type != detected_image_type {
-                return Err(DeviceManagerError::DiskImageTypeMismatch {
-                    specified: disk_cfg.image_type,
-                    detected: detected_image_type,
-                });
-            }
 
             if disk_cfg.image_type != ImageType::Qcow2 && disk_cfg.backing_files {
                 warn!("Enabling backing_files option only applies for QCOW2 files");
@@ -2858,7 +2811,7 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::RestoreGetState)?,
                 queue_affinity,
                 disk_cfg.sparse,
-                disable_sector0_writes,
+                false,
                 disk_cfg.lock_granularity,
             )
             .map_err(DeviceManagerError::CreateVirtioBlock)?;
