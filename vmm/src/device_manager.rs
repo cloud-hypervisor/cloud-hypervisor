@@ -2729,7 +2729,7 @@ impl DeviceManager {
                 .as_ref()
                 .ok_or(DeviceManagerError::NoDiskPath)?;
 
-            let opened = open_disk(
+            let disk = open_disk(
                 &DiskOpenOptions {
                     path: disk_path,
                     readonly: disk_cfg.readonly,
@@ -2790,7 +2790,7 @@ impl DeviceManager {
 
             let mut virtio_block = virtio_devices::Block::new(
                 id.clone(),
-                opened.disk,
+                disk,
                 disk_cfg
                     .path
                     .as_ref()
