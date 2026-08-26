@@ -1037,7 +1037,8 @@ components:
 
     ImageType:
       type: string
-      enum: ["FixedVhd", "Qcow2", "Raw", "Vhdx", "Unknown"]
+      description: Unknown is only valid for vhost-user disks.
+      enum: ["FlatVmdk", "FixedVhd", "Qcow2", "Raw", "Vhdx", "Unknown"]
 
     LockGranularity:
       type: string
