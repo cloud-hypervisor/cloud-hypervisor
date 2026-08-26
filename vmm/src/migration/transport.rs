@@ -918,11 +918,15 @@ impl SendAdditionalConnections {
     pub(crate) fn cleanup(&mut self) -> Result<(), MigratableError> {
         // Send disconnect messages to all workers.
         for _ in 0..self.threads.len() {
-            // All threads may have terminated, leading to a dropped receiver. Thus we ignore
-            // errors here.
-            self.message_tx
-                .try_send(SendMemoryThreadMessage::Disconnect)
-                .ok();
+            // Use send() over try_send() as the bounded queue may be still
+            // fully populated with enqueued chunks.
+            if self
+                .message_tx
+                .send(SendMemoryThreadMessage::Disconnect)
+                .is_err()
+            {
+                debug!("Failed to send disconnect message to send-memory worker");
+            }
         }
 
         let mut first_err = Ok(());
