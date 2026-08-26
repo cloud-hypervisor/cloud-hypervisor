@@ -721,8 +721,8 @@ impl SendAdditionalConnections {
                 .spawn(move || {
                     if !seccomp_filter.is_empty() {
                         apply_filter(&seccomp_filter)
-                            .context("Error applying migration TCP worker seccomp filter")
-                            .map_err(MigratableError::MigrateReceive)?;
+                            .context("Error applying send-memory worker seccomp filter")
+                            .map_err(MigratableError::MigrateSend)?;
                     }
 
                     Self::worker_send_memory(
@@ -742,7 +742,7 @@ impl SendAdditionalConnections {
                         thread.join().ok();
                     });
                 })
-                .context("Error spawning send-memory thread")
+                .context("Error spawning send-memory worker")
                 .map_err(MigratableError::MigrateSend)?;
             threads.push(thread);
         }
@@ -777,7 +777,7 @@ impl SendAdditionalConnections {
                     notify_tx.send(SendMemoryThreadNotify::Error).ok();
                 })?
                 .recv()
-                .context("Error receiving message from main thread")
+                .context("Error receiving message from coordination thread")
                 .map_err(MigratableError::MigrateSend)
                 .inspect_err(|_| {
                     worker_error.store(true, Ordering::Release);
@@ -800,7 +800,7 @@ impl SendAdditionalConnections {
                 SendMemoryThreadMessage::Gate(gate) => {
                     notify_tx
                         .send(SendMemoryThreadNotify::Gate)
-                        .context("Error sending gate notification to main thread")
+                        .context("Error sending gate notification to coordination thread")
                         .map_err(MigratableError::MigrateSend)
                         .inspect_err(|_| {
                             // Sending via `notify_tx` just failed, so we don't try to send another
@@ -937,12 +937,12 @@ impl SendAdditionalConnections {
                 Ok(Ok(())) => None,
                 Ok(Err(e)) => Some(e),
                 Err(panic) => Some(MigratableError::MigrateSend(anyhow!(
-                    "send-memory thread panicked: {panic:?}"
+                    "send-memory worker panicked: {panic:?}"
                 ))),
             };
 
             if let Some(e) = err {
-                warn!("Error in send-memory thread: {e}");
+                warn!("Error in send-memory worker: {e}");
 
                 if first_err.is_ok() {
                     first_err = Err(e);
