@@ -105,7 +105,7 @@ impl Default for CpusConfig {
             max_phys_bits: DEFAULT_MAX_PHYS_BITS,
             affinity: None,
             features: CpuFeatures::default(),
-            nested: true,
+            nested: default_cpusconfig_nested(),
             core_scheduling: CoreScheduling::default(),
             profile: CpuProfile::default(),
         }
@@ -291,7 +291,7 @@ fn default_memoryconfig_thp() -> bool {
 }
 
 fn default_cpusconfig_nested() -> bool {
-    true
+    !cfg!(target_arch = "aarch64")
 }
 
 #[serde_with::skip_serializing_none]

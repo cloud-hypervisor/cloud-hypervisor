@@ -243,6 +243,10 @@ pub enum Error {
     #[error("Cannot restore VM")]
     Restore(#[source] MigratableError),
 
+    #[cfg(target_arch = "aarch64")]
+    #[error("AArch64 nested virtualization does not support snapshot restore or migration")]
+    NestedVirtualizationRestoreUnsupported,
+
     #[error("Cannot send VM snapshot")]
     SnapshotSend(#[source] MigratableError),
 
@@ -1389,6 +1393,11 @@ impl Vm {
     ) -> Result<Self> {
         trace_scoped!("Vm::new");
 
+        #[cfg(target_arch = "aarch64")]
+        if snapshot.is_some() && vm_config.lock().unwrap().cpus.nested {
+            return Err(Error::NestedVirtualizationRestoreUnsupported);
+        }
+
         #[cfg(not(target_arch = "riscv64"))]
         let timestamp = Instant::now();
 
@@ -1966,6 +1975,7 @@ impl Vm {
                     arch::aarch64::Error::VcpuInitPmu,
                 ))
             })?;
+        let nested = self.vm.nested_enabled();
 
         arch::configure_system(
             &mem,
@@ -1979,6 +1989,7 @@ impl Vm {
             &vgic,
             &self.numa_nodes,
             pmu_supported,
+            nested,
         )
         .map_err(Error::ConfigureSystem)?;
 
@@ -2764,6 +2775,10 @@ impl Vm {
         }
         let mem = self.memory_manager.lock().unwrap().guest_memory().memory();
         let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
+        #[cfg(target_arch = "aarch64")]
+        let nested = self.vm.nested_enabled();
+        #[cfg(not(target_arch = "aarch64"))]
+        let nested = false;
         let rsdp_addr = acpi::create_acpi_tables(
             &mem,
             &self.device_manager.lock().unwrap(),
@@ -2771,6 +2786,7 @@ impl Vm {
             &self.memory_manager.lock().unwrap(),
             &self.numa_nodes,
             tpm_enabled,
+            nested,
         )
         .map_err(Error::CreatingAcpiTables)?;
         info!("Created ACPI tables: rsdp_addr = 0x{:x}", rsdp_addr.0);
@@ -3362,6 +3378,13 @@ impl Snapshottable for Vm {
                     "Snapshot not possible with TDX VM"
                 )));
             }
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        if self.config.lock().unwrap().cpus.nested {
+            return Err(MigratableError::Snapshot(anyhow!(
+                "Snapshot and migration are not supported with AArch64 nested virtualization"
+            )));
         }
 
         if self.get_state() != VmState::Paused {
@@ -4074,6 +4097,7 @@ mod unit_tests {
             &BTreeMap::new(),
             None,
             true,
+            false,
         )
         .unwrap();
     }
