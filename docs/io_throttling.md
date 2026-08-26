@@ -51,7 +51,7 @@ dynamically added and removed from a `rate_limit_group`. The following example
 demonstrates how to throttle the aggregate bandwidth of two disks to 10 MiB/s.
 
 ```
---disk path=disk0.raw,rate_limit_group=group0 \
-       path=disk1.raw,rate_limit_group=group0 \
+--disk path=disk0.raw,rate_limit_group=group0,image_type=raw \
+       path=disk1.raw,rate_limit_group=group0,image_type=raw \
 --rate-limit-group bw_size=1048576,bw_refill_time=100
 ```

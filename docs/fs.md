@@ -73,7 +73,7 @@ system, here is the Cloud Hypervisor command you need to run:
 ./cloud-hypervisor \
     --cpus boot=1 \
     --memory size=1G,shared=on \
-    --disk path=focal-server-cloudimg-amd64.raw \
+    --disk path=focal-server-cloudimg-amd64.raw,image_type=raw \
     --kernel vmlinux \
     --cmdline "console=hvc0 root=/dev/vda1 rw" \
     --fs tag=myfs,socket=/tmp/virtiofs,num_queues=1,queue_size=512

@@ -79,7 +79,7 @@ meaning it will be printing guest kernel logs to the `virtio-console` device.
     --firmware edk2/Build/IntelTdx/RELEASE_GCC5/FV/OVMF.fd \
     --cpus boot=1 \
     --memory size=1G \
-    --disk path=tdx_guest_img
+    --disk path=tdx_guest_img,image_type=raw
 ```
 
 And here is the alternative command when looking for debug logs from the
@@ -91,7 +91,7 @@ firmware:
     --firmware edk2/Build/IntelTdx/DEBUG_GCC5/FV/OVMF.fd \
     --cpus boot=1 \
     --memory size=1G \
-    --disk path=tdx_guest_img \
+    --disk path=tdx_guest_img,image_type=raw \
     --serial file=/tmp/ch_serial \
     --console tty
 ```
@@ -142,7 +142,7 @@ option as well.
     --cmdline "root=/dev/vda3 console=hvc0 rw" \
     --cpus boot=1 \
     --memory size=1G \
-    --disk path=tdx_guest_img
+    --disk path=tdx_guest_img,image_type=raw
 ```
 
 And here is the alternative command when looking for debug logs from the
@@ -156,7 +156,7 @@ TDShim:
     --cmdline "root=/dev/vda3 console=hvc0 rw" \
     --cpus boot=1 \
     --memory size=1G \
-    --disk path=tdx_guest_img
+    --disk path=tdx_guest_img,image_type=raw
 ```
 
 ### Guest kernel limitations

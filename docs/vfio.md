@@ -81,7 +81,7 @@ takes the device's sysfs path as an argument. In our example it is
 ```
 ./target/debug/cloud-hypervisor \
     --kernel ~/vmlinux \
-    --disk path=~/focal-server-cloudimg-amd64.raw \
+    --disk path=~/focal-server-cloudimg-amd64.raw,image_type=raw \
     --console off \
     --serial tty \
     --cmdline "console=ttyS0 root=/dev/vda1 rw" \

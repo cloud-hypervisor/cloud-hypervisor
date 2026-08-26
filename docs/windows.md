@@ -118,7 +118,7 @@ The basic command to boot a Windows image is shown in the next code snippet. The
 ```shell
 cloud-hypervisor \
 	--kernel ./$OVMF_DIR/CLOUDHV.fd \
-	--disk path=./$IMG_FILE \
+	--disk path=./$IMG_FILE,image_type=raw \
 	--cpus boot=1,kvm_hyperv=on \
 	--memory size=4G \
 	--serial tty \

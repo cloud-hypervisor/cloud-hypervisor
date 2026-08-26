@@ -17,7 +17,7 @@ An Example invocation with `--tpm` argument:
 ```
  ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--kernel ./hypervisor-fw \
-	--disk path=focal-server-cloudimg-amd64.raw \
+	--disk path=focal-server-cloudimg-amd64.raw,image_type=raw \
 	--cpus boot=4 \
 	--memory size=1024M \
 	--net "tap=,mac=,ip=,mask=" \

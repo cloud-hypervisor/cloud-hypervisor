@@ -42,7 +42,7 @@ cloud-hypervisor \
 	--cpus boot=1 \
 	--memory size=4G \
 	--firmware CLOUDHV.fd \
-	--disk path=jammy-server-cloudimg.raw \
+	--disk path=jammy-server-cloudimg.raw,image_type=raw \
 	--vsock cid=3,socket=/tmp/ch.vsock
 ```
 

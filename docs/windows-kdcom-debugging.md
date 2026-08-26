@@ -66,7 +66,7 @@ sudo ./target/release/cloud-hypervisor \
 	--cpus boot=4 \
 	--memory size=8192M \
 	--kernel ./$OVMF_DIR/CLOUDHV.fd \
-	--disk path=./$IMG_FILE \
+	--disk path=./$IMG_FILE,image_type=raw \
 	--console off \
 	--serial socket=/tmp/serial.sock \
 	--net tap=tap0

@@ -36,7 +36,7 @@ Start application to mmap the file data to a memory region:
 ./cloud-hypervisor \
     --api-socket /tmp/cloud-hypervisor.sock \
     --kernel vmlinux \
-    --disk path=focal-server-cloudimg-amd64.raw \
+    --disk path=focal-server-cloudimg-amd64.raw,image_type=raw \
     --cpus boot=4 \
     --memory size=1024M \
     --ivshmem path=/tmp/ivshmem.data,size=1M

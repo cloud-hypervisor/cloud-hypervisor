@@ -23,7 +23,7 @@ sudo chown "$UID:$UID" "$tapdevice"
 # Use --net fd=3 to point to fd 3 which the shell has opened to point to the /dev/tapN device
 target/debug/cloud-hypervisor \
 	--kernel ~/src/linux/vmlinux \
-	--disk path=~/workloads/focal.raw \
+	--disk path=~/workloads/focal.raw,image_type=raw \
 	--cpus boot=1 --memory size=512M \
 	--cmdline "root=/dev/vda1 console=hvc0" \
     --net fd=3,mac=$mac 3<>"$tapdevice"

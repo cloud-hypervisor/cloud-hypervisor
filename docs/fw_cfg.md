@@ -52,7 +52,7 @@ The `fw_cfg` device is configured using the `--fw-cfg-config` command-line optio
     cloud-hypervisor \
         --kernel /path/to/vmlinux \
         --cmdline "console=hvc0 root=/dev/vda1" \
-        --disk path=/path/to/rootfs.img \
+        --disk path=/path/to/rootfs.img,image_type=raw \
         --fw-cfg-config initramfs=off,items=[name=opt/org.mycorp/setup_info,file=/tmp/guest_setup.txt] \
         ...
     ```
@@ -63,7 +63,7 @@ The `fw_cfg` device is configured using the `--fw-cfg-config` command-line optio
     ```bash
     cloud-hypervisor \
         --firmware /path/to/OVMF.fd \
-        --disk path=/path/to/rootfs.img \
+        --disk path=/path/to/rootfs.img,image_type=raw \
         --device path=/sys/bus/pci/devices/0000:41:00.0 \
         --fw-cfg-config items=[name=opt/ovmf/X-PciMmio64Mb,string=262144] \
         ...
