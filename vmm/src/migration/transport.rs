@@ -771,7 +771,7 @@ impl SendAdditionalConnections {
                 .lock()
                 .map_err(|_| MigratableError::MigrateSend(anyhow!("message_rx mutex is poisoned")))
                 .inspect_err(|_| {
-                    worker_error.store(true, Ordering::Relaxed);
+                    worker_error.store(true, Ordering::Release);
                     // We ignore errors during error handling.
                     notify_tx.send(SendMemoryThreadNotify::Error).ok();
                 })?
@@ -779,7 +779,7 @@ impl SendAdditionalConnections {
                 .context("Error receiving message from main thread")
                 .map_err(MigratableError::MigrateSend)
                 .inspect_err(|_| {
-                    worker_error.store(true, Ordering::Relaxed);
+                    worker_error.store(true, Ordering::Release);
                     notify_tx.send(SendMemoryThreadNotify::Error).ok();
                 })?;
             match message {
@@ -790,7 +790,7 @@ impl SendAdditionalConnections {
 
                     send_memory_ranges(guest_memory, &table, socket)
                         .inspect_err(|_| {
-                            worker_error.store(true, Ordering::Relaxed);
+                            worker_error.store(true, Ordering::Release);
                             notify_tx.send(SendMemoryThreadNotify::Error).ok();
                         })
                         .context("Error sending memory to receiver side")
@@ -804,7 +804,7 @@ impl SendAdditionalConnections {
                         .inspect_err(|_| {
                             // Sending via `notify_tx` just failed, so we don't try to send another
                             // message via it.
-                            worker_error.store(true, Ordering::Relaxed);
+                            worker_error.store(true, Ordering::Release);
                         })?;
                     gate.wait();
                 }
@@ -849,7 +849,7 @@ impl SendAdditionalConnections {
         let mut chunk = SendMemoryThreadMessage::Memory(chunk);
         // [`Self::message_tx`] has a limited size, so we may have to retry sending the chunk
         loop {
-            if self.worker_error.load(Ordering::Relaxed) {
+            if self.worker_error.load(Ordering::Acquire) {
                 return self.cleanup();
             }
 
