@@ -299,7 +299,7 @@ impl Default for GsiAllocator {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use super::*;
 
     mod interrupt_allocator {

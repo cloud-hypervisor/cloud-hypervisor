@@ -2725,7 +2725,7 @@ where
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::env::temp_dir;
     use std::os::fd::AsFd;
     use std::sync::Mutex;

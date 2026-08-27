@@ -1250,7 +1250,7 @@ impl PciBarConfiguration {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use vm_memory::ByteValued;
 
     use super::*;

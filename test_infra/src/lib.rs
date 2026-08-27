@@ -2810,7 +2810,7 @@ pub mod aarch64 {
 pub use aarch64::*;
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use super::*;
 
     fn is_alive(pid: u32) -> bool {

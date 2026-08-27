@@ -453,7 +453,7 @@ pub fn setup_smbios(mem: &GuestMemoryMmap, smbios: Option<&SmbiosConfig>) -> Res
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use super::*;
 
     /// Collects all strings after a SMBIOS structure, stopping at the double-NUL terminator and returns next addr.

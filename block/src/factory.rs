@@ -214,7 +214,7 @@ fn open_flat_vmdk(
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::path::Path;
 
     use vmm_sys_util::tempfile::TempFile;

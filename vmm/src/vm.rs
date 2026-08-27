@@ -3675,7 +3675,7 @@ impl GuestDebuggable for Vm {
 
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use super::*;
 
     fn test_vm_state_transitions(state: VmState) {
@@ -4020,7 +4020,7 @@ mod unit_tests {
 
 #[cfg(target_arch = "aarch64")]
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use arch::{DeviceType, MmioDeviceInfo};
     use devices::gic::Gic;
 

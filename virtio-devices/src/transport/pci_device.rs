@@ -1364,7 +1364,7 @@ impl Transportable for VirtioPciDevice {}
 impl Migratable for VirtioPciDevice {}
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::thread;
 
     use vm_device::interrupt::InterruptSourceConfig;

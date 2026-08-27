@@ -553,7 +553,7 @@ impl Aml for PciSegment {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::io;
     use std::result::Result;
 

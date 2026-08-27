@@ -342,7 +342,7 @@ impl disk_file::AsyncDiskFile for QcowDisk {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::os::unix::fs::FileExt;
 
     use super::*;

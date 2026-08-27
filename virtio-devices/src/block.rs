@@ -1342,7 +1342,7 @@ impl Transportable for Block {}
 impl Migratable for Block {}
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::io::Result as IoResult;
 
     use block::async_io::{AsyncIoCompletion, AsyncIoOperation, AsyncIoResult};

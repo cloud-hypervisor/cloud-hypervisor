@@ -515,7 +515,7 @@ impl Pausable for VirtioCommon {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 

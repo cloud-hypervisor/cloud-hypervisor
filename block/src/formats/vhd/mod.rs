@@ -145,7 +145,7 @@ impl disk_file::AsyncDiskFile for VhdDisk {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::fs::File;
     use std::io::{Seek, SeekFrom, Write};
 

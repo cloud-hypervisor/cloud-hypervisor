@@ -244,7 +244,7 @@ fn required_msr_updates(
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use hypervisor::arch::x86::MsrEntry;
     use hypervisor::arch::x86::msr_index::{MSR_IA32_UCODE_REV, MSR_IA32_VMX_MISC};
     use proptest::prelude::*;

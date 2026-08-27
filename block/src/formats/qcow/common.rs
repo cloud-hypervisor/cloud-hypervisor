@@ -245,7 +245,7 @@ pub(super) fn scatter_read_sync(
 }
 
 #[cfg(test)]
-pub(crate) mod unit_tests {
+pub(crate) mod tests {
     use std::fs::File;
     use std::io::Write;
     use std::os::unix::fs::FileExt;

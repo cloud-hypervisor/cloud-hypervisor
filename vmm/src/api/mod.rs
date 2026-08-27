@@ -2151,7 +2151,7 @@ impl ApiAction for VmNmi {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
     use std::{env, fs, process};

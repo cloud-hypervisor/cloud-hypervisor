@@ -150,7 +150,7 @@ pub fn copy_region(
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::io::Write;
     use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd};
     use std::os::unix::fs::FileExt;

@@ -45,7 +45,7 @@ pub(crate) fn deserialize_u64_hex<'de, D: Deserializer<'de>>(
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::fmt::Debug;
 
     use proptest::prelude::*;

@@ -554,12 +554,12 @@ impl<B> Transportable for Vsock<B> where B: VsockBackend + Sync + 'static {}
 impl<B> Migratable for Vsock<B> where B: VsockBackend + Sync + 'static {}
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::sync::atomic::AtomicU8;
 
     use libc::EFD_NONBLOCK;
 
-    use super::super::unit_tests::{NoopVirtioInterrupt, TestContext};
+    use super::super::tests::{NoopVirtioInterrupt, TestContext};
     use super::super::*;
     use super::*;
     use crate::ActivateError;

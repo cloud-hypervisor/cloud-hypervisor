@@ -452,7 +452,7 @@ impl Display for MemoryMigrationContext {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use super::*;
 
     /// Tests for [`CompletedMigrationContext`] and [`OngoingMigrationContext`].

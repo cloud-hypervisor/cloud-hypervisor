@@ -162,7 +162,7 @@ fn debug_log_features_only_in(mut only_in: u64, id: &str) {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use super::arch_capabilities_compatible;
 
     #[test]

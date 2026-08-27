@@ -784,7 +784,7 @@ mod mock_vmm {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use super::*;
     use crate::arch::x86::emulator::mock_vmm::*;
 

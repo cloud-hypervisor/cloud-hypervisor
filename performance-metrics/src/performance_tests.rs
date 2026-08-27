@@ -574,7 +574,7 @@ pub fn performance_restore_latency(control: &PerformanceTestControl) -> f64 {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use super::*;
 
     #[test]

@@ -546,7 +546,7 @@ impl Migratable for Net {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::mem::{offset_of, size_of};
 
     use seccompiler::SeccompAction;
