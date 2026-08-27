@@ -1324,7 +1324,7 @@ fn main() {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::cmp::Ordering;
 
     use super::*;

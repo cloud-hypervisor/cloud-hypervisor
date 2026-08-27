@@ -651,7 +651,7 @@ impl Request {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::sync::Arc;
 
     use vm_memory::GuestMemoryMmap;

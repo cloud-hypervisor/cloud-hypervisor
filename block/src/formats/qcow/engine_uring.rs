@@ -282,7 +282,7 @@ impl QcowAsync {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::io::Write;
     use std::sync::Arc;
     use std::{mem, thread};
@@ -294,7 +294,7 @@ mod unit_tests {
     use crate::SECTOR_SIZE;
     use crate::async_io::{AsyncIoCompletion, AsyncIoOperation, GuestMemoryTarget, OwnedIoBuffer};
     use crate::disk_file::AsyncDiskFile;
-    use crate::formats::qcow::common::unit_tests::compress_allocated_clusters;
+    use crate::formats::qcow::common::tests::compress_allocated_clusters;
     use crate::formats::qcow::{BackingFileConfig, ImageType, QcowDisk, QcowTempDisk};
     use crate::test_util::require_direct_io;
 

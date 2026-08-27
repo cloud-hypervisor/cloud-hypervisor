@@ -202,7 +202,7 @@ fn run_unaligned_operation(
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::fs::File;
 
     use vmm_sys_util::tempfile::TempFile;

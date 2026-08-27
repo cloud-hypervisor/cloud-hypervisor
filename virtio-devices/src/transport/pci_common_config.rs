@@ -442,7 +442,7 @@ impl Snapshottable for VirtioPciCommonConfig {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use super::*;
     use crate::{ActivateResult, ActivationContext};
 

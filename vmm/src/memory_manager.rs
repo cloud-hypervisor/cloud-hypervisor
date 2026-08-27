@@ -3633,7 +3633,7 @@ fn do_mmap_cow_saved_regions(
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::io::{Read, Seek, SeekFrom, Write};
 
     use vm_migration::protocol::{MemoryRange, MemoryRangeTable};

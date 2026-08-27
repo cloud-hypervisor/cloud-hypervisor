@@ -222,7 +222,7 @@ pub fn configure_segments_and_sregs(
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use vm_memory::GuestAddress;
 
     use super::*;

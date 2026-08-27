@@ -137,7 +137,7 @@ impl FromStr for MacAddr {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use super::*;
 
     #[test]

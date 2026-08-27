@@ -158,7 +158,7 @@ pub trait VsockBackend: VsockChannel + VsockEpollListener + Send {
 }
 
 #[cfg(any(test, fuzzing))]
-pub mod unit_tests {
+pub mod tests {
     use std::io;
     use std::os::unix::io::AsRawFd;
     use std::path::PathBuf;

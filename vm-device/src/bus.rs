@@ -262,7 +262,7 @@ impl Bus {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use super::*;
 
     struct DummyDevice;

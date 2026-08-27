@@ -520,7 +520,7 @@ fn parse_io_config_address(config_address: u32) -> (usize, usize, usize, usize) 
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::error::Error;
     use std::io;
     use std::result::Result;

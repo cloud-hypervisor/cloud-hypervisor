@@ -553,7 +553,7 @@ impl Drop for Emulator {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use super::*;
 
     #[test]

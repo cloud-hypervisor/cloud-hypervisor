@@ -899,7 +899,7 @@ pub(super) fn detect_image_type(file: &mut AlignedFile) -> BlockResult<ImageType
     Ok(image_type)
 }
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::error::Error as StdError;
     use std::fs::{File, OpenOptions};
     use std::io::Write;

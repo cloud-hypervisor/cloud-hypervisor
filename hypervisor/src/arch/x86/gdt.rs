@@ -114,7 +114,7 @@ pub fn segment_from_gdt(entry: u64, table_index: u8) -> SegmentRegister {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use super::*;
 
     #[test]

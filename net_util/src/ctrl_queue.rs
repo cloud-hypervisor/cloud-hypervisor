@@ -232,7 +232,7 @@ impl CtrlQueue {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::mem::size_of;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};

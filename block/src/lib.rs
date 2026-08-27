@@ -693,7 +693,7 @@ impl DiskTopology {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::alloc::{Layout, alloc_zeroed, dealloc};
     use std::fs::OpenOptions;
     use std::io::Write;

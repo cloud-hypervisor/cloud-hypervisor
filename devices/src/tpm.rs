@@ -580,7 +580,7 @@ impl BusDevice for Tpm {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use super::*;
 
     #[test]

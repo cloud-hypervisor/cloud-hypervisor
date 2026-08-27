@@ -6151,7 +6151,7 @@ impl Drop for DeviceManager {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use super::*;
 
     #[test]

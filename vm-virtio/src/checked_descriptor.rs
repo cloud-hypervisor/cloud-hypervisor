@@ -178,7 +178,7 @@ where
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::io;
 
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};

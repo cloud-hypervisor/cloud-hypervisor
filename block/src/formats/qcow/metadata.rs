@@ -1135,7 +1135,7 @@ impl QcowState {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     // Regression for the ENOSPC unwind on the relocate-on-write path: when
     // the allocation for the relocated table fails, the still-referenced old
     // L2 table must not be left on the free lists (issue #8606).
@@ -1231,7 +1231,7 @@ mod unit_tests {
                 .expect("seed write");
             inner.sync_caches().expect("flush");
         }
-        super::super::common::unit_tests::compress_allocated_clusters(
+        super::super::common::tests::compress_allocated_clusters(
             &mut temp.as_file().try_clone().unwrap(),
         );
 

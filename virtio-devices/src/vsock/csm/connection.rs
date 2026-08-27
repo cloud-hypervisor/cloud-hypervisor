@@ -789,7 +789,7 @@ where
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::io::{Error as IoError, Result as IoResult};
     use std::{result, thread};
 
@@ -799,7 +799,7 @@ mod unit_tests {
     use vm_memory::{VolatileMemoryError, VolatileSlice};
     use vmm_sys_util::eventfd::EventFd;
 
-    use super::super::super::unit_tests::TestContext;
+    use super::super::super::tests::TestContext;
     use super::super::defs as csm_defs;
     use super::*;
 

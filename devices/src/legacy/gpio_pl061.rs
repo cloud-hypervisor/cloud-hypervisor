@@ -323,7 +323,7 @@ impl Transportable for Gpio {}
 impl Migratable for Gpio {}
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};
     use vmm_sys_util::eventfd::EventFd;
 

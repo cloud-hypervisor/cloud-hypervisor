@@ -408,7 +408,7 @@ impl AsFd for QcowRawFile {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::io::Read;
     use std::os::unix::fs::FileExt;
 

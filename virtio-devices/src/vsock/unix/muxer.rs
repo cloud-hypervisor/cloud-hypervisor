@@ -888,7 +888,7 @@ impl VsockMuxer {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::cmp::min;
     use std::io::Write;
     use std::net::Shutdown;
@@ -899,7 +899,7 @@ mod unit_tests {
     use virtio_queue::QueueOwnedT;
 
     use super::super::super::csm::defs as csm_defs;
-    use super::super::super::unit_tests::TestContext as VsockTestContext;
+    use super::super::super::tests::TestContext as VsockTestContext;
     use super::*;
 
     impl PartiallyReadCommand {

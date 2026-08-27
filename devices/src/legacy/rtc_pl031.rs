@@ -216,7 +216,7 @@ impl BusDevice for Rtc {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::{fmt, ptr};
 
     use super::*;

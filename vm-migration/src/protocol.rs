@@ -619,7 +619,7 @@ impl MemoryRangeTable {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::io::Cursor;
 
     use crate::protocol::{

@@ -188,7 +188,7 @@ pub fn get_host_cpu_phys_bits(hypervisor: &dyn hypervisor::Hypervisor) -> u8 {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use super::*;
 
     #[test]

@@ -1223,7 +1223,7 @@ impl AnnounceOps for VirtioNetHostAnnounceOps {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::mem::{offset_of, size_of};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};

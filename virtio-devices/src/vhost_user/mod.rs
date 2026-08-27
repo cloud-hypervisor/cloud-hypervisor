@@ -896,7 +896,7 @@ impl VhostUserCommon {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::io::{Read, Write};
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::thread;

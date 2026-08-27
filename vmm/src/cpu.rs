@@ -3446,7 +3446,7 @@ impl BusDevice for AcpiCpuHotplugController {
 
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use arch::layout;
     use arch::layout::{BOOT_STACK_POINTER, ZERO_PAGE_START};
     use arch::x86_64::interrupts::*;
@@ -3595,7 +3595,7 @@ mod unit_tests {
 
 #[cfg(target_arch = "aarch64")]
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     #[cfg(feature = "kvm")]
     use std::mem::offset_of;
 

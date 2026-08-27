@@ -114,7 +114,7 @@ impl AsyncIo for RawAio {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;

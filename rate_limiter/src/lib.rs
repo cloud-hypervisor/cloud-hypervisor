@@ -521,7 +521,7 @@ impl Default for RateLimiter {
 }
 
 #[cfg(test)]
-pub(crate) mod unit_tests {
+pub(crate) mod tests {
     use std::{fmt, thread};
 
     use super::*;

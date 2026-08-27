@@ -3453,7 +3453,7 @@ mod util {
     }
 }
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::path::PathBuf;
 
     use arch::CpuProfile;

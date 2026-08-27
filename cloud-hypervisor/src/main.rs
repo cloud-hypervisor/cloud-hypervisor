@@ -1017,7 +1017,7 @@ fn main() {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::mem::zeroed;
     use std::path::PathBuf;
     use std::ptr::from_mut;
