@@ -7,7 +7,7 @@ windows = { max-threads = 4 }
 
 [profile.integration]
 fail-fast = false
-retries = 3
+retries = 2
 
 [profile.common_tests]
 inherits = "integration"
