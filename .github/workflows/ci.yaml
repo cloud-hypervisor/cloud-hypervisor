@@ -587,50 +587,12 @@ jobs:
         run: cargo build --locked --package cloud-hypervisor --no-default-features --features "kvm" --target riscv64gc-unknown-linux-gnu
       - name: Check build did not modify any files
         run: test -z "$(git status --porcelain)"
-  # garm-noble + gnu: runs on PR and MQ. Other 3 matrix entries are in
-  # integration-x86-64-mq (sibling, MQ-only, runs in parallel).
+  # PR-only: delay integration testing until the build and quality gates pass.
   integration-x86-64-pr:
     name: integration-x86-64-pr
     needs: [preflight, dco, quality, build]
     if: >-
-      needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
-    timeout-minutes: 80
-    env:
-      # Our runner has 16 cores (nproc).
-      # We limit parallelism only to avoid exhausting disk space and memory
-      # resources, not to save CPU resources.
-      PARALLEL_INTEGRATION_TESTS_NUM: 12
-    runs-on: garm-noble-16
-    steps:
-      - name: Code checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - name: Install Docker
-        run: |
-          set -eufo pipefail
-          sudo apt-get update
-          sudo apt-get -y install ca-certificates curl gnupg
-          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-          sudo chmod a+r /usr/share/keyrings/docker-archive-keyring.gpg
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-          sudo apt-get update
-          sudo apt install -y docker-ce docker-ce-cli
-      - name: Prepare for VDPA
-        run: scripts/prepare_vdpa.sh
-      - name: Run unit tests
-        run: scripts/dev_cli.sh tests --unit --libc gnu
-      - name: Load openvswitch module
-        run: sudo modprobe openvswitch
-      - name: Run integration tests
-        timeout-minutes: 60
-        run: scripts/dev_cli.sh tests --integration --libc gnu
-  # MQ-only: the 3 matrix entries that integration-x86-64-pr does not cover.
-  integration-x86-64-mq:
-    name: integration-x86-64-mq
-    needs: [preflight, dco, quality, build]
-    if: >-
-      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
+      github.event_name == 'pull_request' && needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
     timeout-minutes: 80
     env:
       # Our runner has 16 cores (nproc).
@@ -641,12 +603,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {runner: garm-noble, libc: musl}
-          - {runner: garm-noble-amd, libc: gnu}
-          - {runner: garm-noble-amd, libc: musl}
+          - {runner: garm-noble, libc: gnu}
     # format() because `${{ matrix.runner }}-16` is not valid in runs-on.
     runs-on: ${{ format('{0}-16', matrix.runner) }}
-    steps:
+    steps: &integration-x86-64-steps
       - name: Code checkout
         uses: actions/checkout@v7
         with:
@@ -670,11 +630,35 @@ jobs:
       - name: Run integration tests
         timeout-minutes: 60
         run: scripts/dev_cli.sh tests --integration --libc ${{ matrix.libc }}
+  # MQ-only: start all four matrix entries after preflight, in parallel with
+  # the build and quality jobs. The PR job above keeps the existing gates.
+  integration-x86-64-mq:
+    name: integration-x86-64-mq
+    needs: [preflight]
+    if: >-
+      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true'
+    timeout-minutes: 80
+    env:
+      # Our runner has 16 cores (nproc).
+      # We limit parallelism only to avoid exhausting disk space and memory
+      # resources, not to save CPU resources.
+      PARALLEL_INTEGRATION_TESTS_NUM: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: garm-noble, libc: gnu}
+          - {runner: garm-noble, libc: musl}
+          - {runner: garm-noble-amd, libc: gnu}
+          - {runner: garm-noble-amd, libc: musl}
+    # format() because `${{ matrix.runner }}-16` is not valid in runs-on.
+    runs-on: ${{ format('{0}-16', matrix.runner) }}
+    steps: *integration-x86-64-steps
   integration-arm64:
     name: integration-arm64
-    needs: [preflight, dco, quality, build]
+    needs: [preflight]
     if: >-
-      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
+      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true'
     timeout-minutes: 120
     env:
       # Our runner has 80 cores (nproc).
@@ -728,9 +712,9 @@ jobs:
         run: scripts/dev_cli.sh tests --integration-windows --libc musl
   integration-vfio:
     name: integration-vfio
-    needs: [preflight, dco, quality, build]
+    needs: [preflight]
     if: >-
-      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
+      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true'
     runs-on: vfio-nvidia
     timeout-minutes: 40
     env:
@@ -752,9 +736,9 @@ jobs:
     #   run: scripts/dev_cli.sh tests --integration-vfio --libc musl
   integration-windows:
     name: integration-windows
-    needs: [preflight, dco, quality, build]
+    needs: [preflight]
     if: >-
-      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
+      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true'
     runs-on: garm-noble-16
     timeout-minutes: 50
     steps:
@@ -793,9 +777,9 @@ jobs:
         run: scripts/dev_cli.sh tests --integration-windows --libc musl
   integration-mshv-x86-64:
     name: integration-mshv-x86-64
-    needs: [preflight, dco, quality, build]
+    needs: [preflight]
     if: >-
-      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
+      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true'
     timeout-minutes: 50
     runs-on: mshv
     steps:
@@ -832,9 +816,9 @@ jobs:
   #       run: scripts/dev_cli.sh tests --integration-rate-limiter
   integration-sev-snp:
     name: integration-sev-snp
-    needs: [preflight, dco, quality, build]
+    needs: [preflight]
     if: >-
-      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
+      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true'
     timeout-minutes: 30
     runs-on: noble-sevsnp
     steps:
