@@ -2918,7 +2918,12 @@ mod common_parallel {
             GuestNetworkConfig::wait_vm_boot_from(
                 guest.network.l2_tcp_listener_port,
                 &guest.network.l2_guest_ip2,
-                DEFAULT_TCP_LISTENER_TIMEOUT,
+                // The nested L2 guest regularly misses the default 120s
+                // window on a loaded host, e.g. when its disk preparation
+                // stalled in the low-disk-space backoff. The listener
+                // returns as soon as the guest reports in, so the larger
+                // timeout only costs time when the boot really failed.
+                300,
             )
             .unwrap();
 
