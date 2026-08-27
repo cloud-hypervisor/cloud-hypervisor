@@ -740,7 +740,11 @@ jobs:
     if: >-
       github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true'
     runs-on: garm-noble-16
-    timeout-minutes: 50
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        libc: [gnu, musl]
     steps:
       - name: Code checkout
         uses: actions/checkout@v7
@@ -771,10 +775,7 @@ jobs:
           az storage blob download --container-name private-images --file "$HOME/workloads/windows-server-2025-amd64-1.raw" --name windows-server-2025-amd64-1.raw --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
       - name: Run Windows guest integration tests
         timeout-minutes: 15
-        run: scripts/dev_cli.sh tests --integration-windows
-      - name: Run Windows guest integration tests for musl
-        timeout-minutes: 15
-        run: scripts/dev_cli.sh tests --integration-windows --libc musl
+        run: scripts/dev_cli.sh tests --integration-windows --libc ${{ matrix.libc }}
   integration-mshv-x86-64:
     name: integration-mshv-x86-64
     needs: [preflight]
