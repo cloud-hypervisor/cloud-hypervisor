@@ -1142,14 +1142,19 @@ impl MemoryManager {
             .name("uffd-handler".to_string())
             .spawn(move || {
                 panic::catch_unwind(panic::AssertUnwindSafe(move || {
-                    let result = Self::uffd_handler_loop(
+                    let mut result = Self::uffd_handler_loop(
                         uffd_fd,
-                        thread_stop_event,
+                        &thread_stop_event,
                         source,
                         &handler_ranges,
                         &ready_tx,
                         &thread_prefault_complete,
                     );
+
+                    if result.is_err() && thread_stop_event.read().is_ok() {
+                        // Error during shutdown is expected
+                        result = Ok(());
+                    }
 
                     if let Err(e) = &result {
                         error!("UFFD handler exited with error: {e}");
@@ -1235,7 +1240,7 @@ impl MemoryManager {
     #[expect(clippy::needless_pass_by_value)]
     fn uffd_handler_loop(
         uffd_fd: OwnedFd,
-        stop_event: EventFd,
+        stop_event: &EventFd,
         mut source: Box<dyn UffdMemorySource>,
         ranges: &[UffdRange],
         ready_tx: &SyncSender<()>,
@@ -1301,22 +1306,28 @@ impl MemoryManager {
                 Err(e) => return Err(e),
             };
 
+            // Check the entire batch before handling UFFD events so a pending
+            // stop cannot be delayed by a blocking page resolution.
+            if events
+                .iter()
+                .take(num_events)
+                .any(|event| event.data == EVENT_STOP)
+            {
+                stop_event.read().ok();
+                info!("UFFD handler: received stop event, exiting");
+                return Ok(());
+            }
+
             let mut got_uffd_data = false;
             for event in events.iter().take(num_events) {
                 let token = event.data;
                 let evt_flags = event.events;
 
-                if token == EVENT_STOP {
-                    stop_event.read().ok();
-                    info!("UFFD handler: received stop event, exiting");
-                    return Ok(());
-                }
-
                 if token == EVENT_UFFD
                     && (evt_flags & epoll::Events::EPOLLHUP.bits()) != 0
                     && (evt_flags & epoll::Events::EPOLLIN.bits()) == 0
                 {
-                    info!("UFFD handler: fd closed (EPOLLHUP), exiting");
+                    debug!("UFFD handler: fd closed (EPOLLHUP), exiting");
                     return Ok(());
                 }
 
@@ -1344,7 +1355,7 @@ impl MemoryManager {
                     return Err(err);
                 }
                 if n == 0 {
-                    info!("UFFD handler: EOF on fd, exiting");
+                    debug!("UFFD handler: EOF on fd, exiting");
                     return Ok(());
                 }
                 if n as usize != size_of::<uffd::UffdMsg>() {
@@ -1405,9 +1416,9 @@ impl MemoryManager {
                     return Ok(());
                 }
                 Ok(prefaulted) => pages_prefaulted += prefaulted,
-                Err(_) => {
+                Err(e) => {
                     // Give up prefaulting but continue serving demand faults.
-                    warn!("UFFD prefault: abandoning background prefault after error");
+                    warn!("UFFD prefault: abandoning background prefault after error: {e}");
                     prefault_active = false;
                 }
             }
