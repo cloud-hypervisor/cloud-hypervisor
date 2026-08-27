@@ -198,20 +198,20 @@ RES=$?
 if [ $RES -eq 0 ]; then
     cargo build --features "mshv,dbus_api" --all --release --target "$BUILD_TARGET"
     # integration tests now do not reply on build feature "dbus_api"
-    time cargo nextest run -p cloud-hypervisor $test_features --profile dbus --no-tests=pass --test-threads="$TEST_THREADS_DEFAULT" "$test_filter" -- ${test_binary_args[*]}
+    time cargo nextest run -p cloud-hypervisor $test_features --profile dbus --no-tests=pass --test-threads="${PARALLEL_INTEGRATION_TESTS_NUM}" "$test_filter" -- ${test_binary_args[*]}
     RES=$?
 fi
 
 # Run tests on fw_cfg
 if [ $RES -eq 0 ]; then
     cargo build --features "mshv,fw_cfg" --all --release --target "$BUILD_TARGET"
-    time cargo nextest run -p cloud-hypervisor $test_features --profile fw_cfg --no-tests=pass --test-threads="$TEST_THREADS_DEFAULT" "$test_filter" -- ${test_binary_args[*]}
+    time cargo nextest run -p cloud-hypervisor $test_features --profile fw_cfg --no-tests=pass --test-threads="${PARALLEL_INTEGRATION_TESTS_NUM}" "$test_filter" -- ${test_binary_args[*]}
     RES=$?
 fi
 
 if [ $RES -eq 0 ]; then
     cargo build --features "mshv,ivshmem" --all --release --target "$BUILD_TARGET"
-    time cargo nextest run -p cloud-hypervisor $test_features --profile ivshmem --no-tests=pass --test-threads="$TEST_THREADS_DEFAULT" "$test_filter" -- ${test_binary_args[*]}
+    time cargo nextest run -p cloud-hypervisor $test_features --profile ivshmem --no-tests=pass --test-threads="${PARALLEL_INTEGRATION_TESTS_NUM}" "$test_filter" -- ${test_binary_args[*]}
     RES=$?
 fi
 
