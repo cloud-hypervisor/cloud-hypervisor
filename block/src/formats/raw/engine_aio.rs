@@ -118,7 +118,7 @@ mod unit_tests {
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
-    use crate::formats::raw::tests;
+    use crate::formats::raw::test_helpers;
 
     #[test]
     fn test_punch_hole() {
@@ -126,7 +126,7 @@ mod unit_tests {
         let mut file = temp_file.into_file();
         let mut async_io =
             RawAio::new(AlignedFile::new(file.try_clone().unwrap(), false), 128).unwrap();
-        tests::test_punch_hole(&mut async_io, &mut file);
+        test_helpers::test_punch_hole(&mut async_io, &mut file);
     }
 
     #[test]
@@ -135,7 +135,7 @@ mod unit_tests {
         let mut file = temp_file.into_file();
         let mut async_io =
             RawAio::new(AlignedFile::new(file.try_clone().unwrap(), false), 128).unwrap();
-        tests::test_write_zeroes(&mut async_io, &mut file);
+        test_helpers::test_write_zeroes(&mut async_io, &mut file);
     }
 
     #[test]
@@ -144,6 +144,6 @@ mod unit_tests {
         let mut file = temp_file.into_file();
         let mut async_io =
             RawAio::new(AlignedFile::new(file.try_clone().unwrap(), false), 128).unwrap();
-        tests::test_punch_hole_multiple_operations(&mut async_io, &mut file);
+        test_helpers::test_punch_hole_multiple_operations(&mut async_io, &mut file);
     }
 }
