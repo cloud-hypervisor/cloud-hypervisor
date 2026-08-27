@@ -587,6 +587,29 @@ jobs:
         run: cargo build --locked --package cloud-hypervisor --no-default-features --features "kvm" --target riscv64gc-unknown-linux-gnu
       - name: Check build did not modify any files
         run: test -z "$(git status --porcelain)"
+  # Run x86 unit tests on GitHub-hosted runners to save self-hosted capacity.
+  # aarch64 stays self-hosted because hosted arm64 runners do not provide KVM.
+  unit-tests-x86-64:
+    name: unit-tests-x86-64
+    needs: [preflight]
+    if: needs.preflight.outputs.full == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        libc: [gnu, musl]
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Verify KVM is available
+        run: |
+          set -eufo pipefail
+          test -e /dev/kvm || { echo "::error::/dev/kvm missing on runner"; exit 1; }
+      - name: Run unit tests
+        run: scripts/dev_cli.sh tests --unit --libc ${{ matrix.libc }}
   # PR-only: delay integration testing until the build and quality gates pass.
   integration-x86-64-pr:
     name: integration-x86-64-pr
@@ -623,8 +646,6 @@ jobs:
           sudo apt install -y docker-ce docker-ce-cli
       - name: Prepare for VDPA
         run: scripts/prepare_vdpa.sh
-      - name: Run unit tests
-        run: scripts/dev_cli.sh tests --unit --libc ${{ matrix.libc }}
       - name: Load openvswitch module
         run: sudo modprobe openvswitch
       - name: Run integration tests
@@ -966,6 +987,7 @@ jobs:
       - shlint
       - taplo
       - typos
+      - unit-tests-x86-64
     if: always()
     runs-on: ubuntu-latest
     steps:
