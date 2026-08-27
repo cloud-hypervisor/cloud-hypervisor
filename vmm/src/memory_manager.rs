@@ -1214,11 +1214,12 @@ impl MemoryManager {
     fn stop_uffd_handler(&mut self) {
         if let Some(uffd_handler) = self.uffd_handler.take() {
             uffd_handler.stop_event.write(1).ok();
+            uffd_handler.handle.join().ok();
+
             if let Some(fd) = &uffd_handler.fault_socket_fd {
                 // SAFETY: fd is a valid owned fd for the duration of this call.
                 unsafe { libc::shutdown(fd.as_raw_fd(), libc::SHUT_RDWR) };
             }
-            uffd_handler.handle.join().ok();
 
             match uffd_handler.result_rx.try_recv() {
                 Ok(Err(e)) => error!("UFFD handler terminated with error: {e}"),
@@ -1308,16 +1309,22 @@ impl MemoryManager {
                 Err(e) => return Err(e),
             };
 
+            // Check the entire batch before handling UFFD events so a pending
+            // stop cannot be delayed by a blocking page resolution.
+            if events
+                .iter()
+                .take(num_events)
+                .any(|event| event.data == EVENT_STOP)
+            {
+                stop_event.read().ok();
+                info!("UFFD handler: received stop event, exiting");
+                return Ok(());
+            }
+
             let mut got_uffd_data = false;
             for event in events.iter().take(num_events) {
                 let token = event.data;
                 let evt_flags = event.events;
-
-                if token == EVENT_STOP {
-                    stop_event.read().ok();
-                    info!("UFFD handler: received stop event, exiting");
-                    return Ok(());
-                }
 
                 if token == EVENT_UFFD
                     && (evt_flags & epoll::Events::EPOLLHUP.bits()) != 0
@@ -1412,9 +1419,9 @@ impl MemoryManager {
                     return Ok(());
                 }
                 Ok(prefaulted) => pages_prefaulted += prefaulted,
-                Err(_) => {
+                Err(e) => {
                     // Give up prefaulting but continue serving demand faults.
-                    warn!("UFFD prefault: abandoning background prefault after error");
+                    warn!("UFFD prefault: abandoning background prefault after error: {e}");
                     prefault_active = false;
                 }
             }
