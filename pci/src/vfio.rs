@@ -2728,6 +2728,8 @@ where
 mod unit_tests {
     use std::env::temp_dir;
     use std::os::fd::AsFd;
+    use std::sync::Mutex;
+    use std::{env, fs, process};
 
     use vmm_sys_util::tempfile::TempFile;
 
@@ -2798,14 +2800,6 @@ mod unit_tests {
             .find_user_address(guest_addr, page_size)
             .unwrap_err();
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Mutex;
-    use std::{env, fs, process};
-
-    use super::*;
 
     // Trait default behavior and state enum round trip.
 
