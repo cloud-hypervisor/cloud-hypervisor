@@ -1727,6 +1727,7 @@ impl Vmm {
         // Final cancellation check before releasing the disk locks. After this
         // point, they currently cannot be reacquired.
         cancel_ctx.ok_or_cancelled()?;
+        cancel_ctx.prevent_cancellation();
 
         // We release the locks early to enable locking them on the destination host.
         // The VM is already stopped.

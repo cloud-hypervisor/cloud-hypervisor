@@ -34,26 +34,36 @@ impl CancelContextSender {
 #[derive(Clone)]
 pub(crate) struct CancelContextReceiver {
     cancel: Arc<AtomicBool>,
+    cancel_blocked: Arc<AtomicBool>,
 }
 
 impl CancelContextReceiver {
     pub(crate) fn ok_or_cancelled(&self) -> Result<(), MigratableError> {
-        if self.cancel.load(Ordering::Acquire) {
+        if !self.cancel_blocked.load(Ordering::Acquire) && self.cancel.load(Ordering::Acquire) {
             info!("Migration cancelled");
             Err(MigratableError::Cancelled)
         } else {
             Ok(())
         }
     }
+
+    /// Blocks cancellation when it is too late to cancel
+    pub(crate) fn prevent_cancellation(&self) {
+        self.cancel_blocked.store(true, Ordering::Release);
+    }
 }
 
 pub(crate) fn new_cancel_context() -> (CancelContextSender, CancelContextReceiver) {
     let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_blocked = Arc::new(AtomicBool::new(false));
 
     let ctx_vmm = CancelContextSender {
         cancel: cancel.clone(),
     };
-    let ctx_migration = CancelContextReceiver { cancel };
+    let ctx_migration = CancelContextReceiver {
+        cancel,
+        cancel_blocked,
+    };
     (ctx_vmm, ctx_migration)
 }
 
@@ -71,5 +81,10 @@ mod tests {
             ctx_migration.ok_or_cancelled(),
             Err(MigratableError::Cancelled)
         ));
+
+        let (ctx_vmm, ctx_migration) = new_cancel_context();
+        ctx_migration.prevent_cancellation();
+        ctx_vmm.try_cancel_migration();
+        assert!(matches!(ctx_migration.ok_or_cancelled(), Ok(())));
     }
 }
