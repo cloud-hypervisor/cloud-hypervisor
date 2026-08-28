@@ -940,6 +940,8 @@ fn vcpu_thread_rules(
         (libc::SYS_newfstatat, vec![]),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_open, vec![]),
+        (libc::SYS_openat, vec![]),
+        (libc::SYS_openat2, vec![]),
         (libc::SYS_pread64, vec![]),
         (libc::SYS_pwrite64, vec![]),
         (libc::SYS_pwritev2, vec![]),
