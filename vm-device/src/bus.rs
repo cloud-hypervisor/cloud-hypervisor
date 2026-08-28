@@ -236,9 +236,9 @@ impl Bus {
     }
 
     /// Reads data from the device that owns the range containing `addr` and puts it into `data`.
-    ///
-    /// Returns true on success, otherwise `data` is untouched.
     pub fn read(&self, addr: u64, data: &mut [u8]) -> Result<()> {
+        // The Linux kernel, quite reasonably, doesn't zero the memory it gives us.
+        data.fill(0);
         if let Some((base, offset, dev)) = self.resolve(addr) {
             // OK to unwrap as lock() failing is a serious error condition and should panic.
             dev.read(base, offset, data);
@@ -354,7 +354,7 @@ mod tests {
         bus.insert(device.clone(), 0x10, 0x10).unwrap();
         bus.write(0x10, &data).unwrap();
         bus.read(0x10, &mut data).unwrap();
-        assert_eq!(data, [1, 2, 3, 4]);
+        assert_eq!(data, [0, 0, 0, 0]);
     }
 
     #[test]

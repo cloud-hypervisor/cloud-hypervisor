@@ -3338,8 +3338,6 @@ impl AcpiCpuHotplugController {
 
 impl BusDevice for AcpiCpuHotplugController {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
-        // The Linux kernel, quite reasonably, doesn't zero the memory it gives us.
-        data.fill(0);
         let vcpu_states = self.vcpu_states.lock().unwrap();
 
         match offset {
