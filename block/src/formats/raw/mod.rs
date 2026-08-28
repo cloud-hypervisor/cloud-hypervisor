@@ -51,24 +51,22 @@ pub enum RawBackend {
 /// backend selected at construction time via [`RawBackend`].
 #[derive(Debug)]
 pub struct RawDisk {
-    file: File,
+    file: AlignedFile,
     backend: RawBackend,
-    direct: bool,
 }
 
 impl RawDisk {
     pub fn new(file: File, backend: RawBackend, direct: bool) -> Self {
         Self {
-            file,
+            file: AlignedFile::new(file, direct),
             backend,
-            direct,
         }
     }
 }
 
 impl disk_file::DiskSize for RawDisk {
     fn logical_size(&self) -> BlockResult<u64> {
-        query_device_size(&self.file)
+        query_device_size(self.file.file())
             .map(|(logical_size, _)| logical_size)
             .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::Size(e)))
     }
@@ -76,7 +74,7 @@ impl disk_file::DiskSize for RawDisk {
 
 impl disk_file::PhysicalSize for RawDisk {
     fn physical_size(&self) -> BlockResult<u64> {
-        query_device_size(&self.file)
+        query_device_size(self.file.file())
             .map(|(_, physical_size)| physical_size)
             .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::Size(e)))
     }
@@ -90,7 +88,7 @@ impl disk_file::DiskFd for RawDisk {
 
 impl disk_file::Geometry for RawDisk {
     fn topology(&self) -> DiskTopology {
-        DiskTopology::probe(&self.file).unwrap_or_else(|_| {
+        DiskTopology::probe(self.file.file()).unwrap_or_else(|_| {
             warn!("Unable to get device topology. Using default topology");
             DiskTopology::default()
         })
@@ -99,7 +97,7 @@ impl disk_file::Geometry for RawDisk {
 
 impl disk_file::SparseCapable for RawDisk {
     fn supports_sparse_operations(&self) -> bool {
-        probe_sparse_support(&self.file)
+        probe_sparse_support(self.file.file())
     }
 }
 
@@ -113,7 +111,7 @@ impl disk_file::Resizable for RawDisk {
         if fd_metadata.file_type().is_block_device() {
             // Block devices cannot be resized via ftruncate; they are resized
             // externally (LVM, losetup, etc.). Verify the size matches.
-            let (actual_size, _) = query_device_size(&self.file)
+            let (actual_size, _) = query_device_size(self.file.file())
                 .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::ResizeError(e)))?;
             if actual_size != size {
                 return Err(BlockError::new(
@@ -145,16 +143,14 @@ impl disk_file::AsyncDiskFile for RawDisk {
         Ok(Box::new(RawDisk {
             file,
             backend: self.backend,
-            direct: self.direct,
         }))
     }
 
     fn create_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
-        let file = self
+        let raw_file = self
             .file
             .try_clone()
             .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::Clone(e)))?;
-        let raw_file = AlignedFile::new(file, self.direct);
         match self.backend {
             RawBackend::Sync => Ok(Box::new(RawSync::new(raw_file))),
             #[cfg(feature = "io_uring")]
