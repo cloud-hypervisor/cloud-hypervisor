@@ -39,7 +39,7 @@ $ target/release/ch-remote --api-socket=/tmp/api2 receive-migration receiver_url
 Start to send migration for the source VM (on the host machine):
 
 ```console
-$ target/release/ch-remote --api-socket=/tmp/api1 send-migration destination_url=unix:/tmp/sock,local=on
+$ target/release/ch-remote --api-socket=/tmp/api1 send-migration destination_url=unix:/tmp/sock,memory_mode=memfds
 ```
 
 When the above commands completed, the source VM should be successfully
@@ -378,9 +378,11 @@ migration process. Via the API or `ch-remote`, you may specify:
   The number of parallel TCP connections to use for migration.
   Must be between `1` and `128`. Defaults to `1`.
   Multiple connections are not supported with local UNIX-socket migration.
-- `memory_mode <precopy|postcopy>`: \
-  Memory transfer mode. `postcopy` resumes the destination first and faults
-  guest pages in on demand over a dedicated connection. Defaults to `precopy`.
+- `memory_mode <memfds|precopy|postcopy>`: \
+  Memory transfer mode. `memfds` passes guest memory as file descriptors
+  over a UNIX socket (send side only). `postcopy` resumes the destination
+  first and faults guest pages in on demand over a dedicated connection.
+  Defaults to `precopy`.
 - `zone_updates <list of zone updates>`: \
   A list of updates to apply to memory zones on the receiver side. For example,
   this can be used to remap memory zones to another NUMA node. Each zone update

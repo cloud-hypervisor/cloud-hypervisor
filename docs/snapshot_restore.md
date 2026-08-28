@@ -229,8 +229,8 @@ peer role:
   storage, and CH uses those memfds directly as guest RAM backing.
 
 In practice, this means offload is driven through the existing
-`vm.send-migration` / `vm.receive-migration` endpoints (with `local=on`
-and a `unix:<path>` URL). The daemon is just another peer of these
+`vm.send-migration` / `vm.receive-migration` endpoints (with
+`memory_mode=memfds` and a `unix:<path>` URL). The daemon is just another peer of these
 endpoints. This requires the VM to be configured with shared-memory
 backing, which is the same precondition that applies to local live
 migration today.
@@ -257,19 +257,19 @@ migration today.
 #    /tmp/offload.sock, streams the snapshot, and exits on success.
 ./ch-remote --api-socket /tmp/cloud-hypervisor.sock pause
 ./ch-remote --api-socket /tmp/cloud-hypervisor.sock \
-    send-migration destination_url=unix:/tmp/offload.sock,local=on
+    send-migration destination_url=unix:/tmp/offload.sock,memory_mode=memfds
 ```
 
 ### Preserve the source VM
 
 By default an offload snapshot destroys the source VM on success. If you want
 to preserve the source VM, add `preserve_source=on` (only valid together
-with `local=on`) to the `send-migration` command:
+with `memory_mode=memfds`) to the `send-migration` command:
 
 ```bash
 ./ch-remote --api-socket /tmp/cloud-hypervisor.sock pause
 ./ch-remote --api-socket /tmp/cloud-hypervisor.sock \
-    send-migration destination_url=unix:/tmp/offload.sock,local=on,preserve_source=on
+    send-migration destination_url=unix:/tmp/offload.sock,memory_mode=memfds,preserve_source=on
 # The source VMM keeps running, the VM is left paused. Resume it when ready:
 ./ch-remote --api-socket /tmp/cloud-hypervisor.sock resume
 ```

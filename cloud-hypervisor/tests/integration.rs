@@ -9234,8 +9234,8 @@ mod snapshot_restore_common {
     }
 
     // Round-trip via the reference offload daemon over the existing
-    // `vm.send-migration local=on` / `vm.receive-migration` endpoints,
-    // proving parity with `vm.snapshot`/`vm.restore`.
+    // `vm.send-migration memory_mode=memfds` / `vm.receive-migration`
+    // endpoints, proving parity with `vm.snapshot`/`vm.restore`.
     pub(crate) fn _test_snapshot_restore_offload(virtio_mem: bool, ondemand: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -9327,7 +9327,7 @@ mod snapshot_restore_common {
             assert!(remote_command(
                 &api_socket_source,
                 "send-migration",
-                Some(format!("destination_url=unix:{snapshot_socket},local=on").as_str(),),
+                Some(format!("destination_url=unix:{snapshot_socket},memory_mode=memfds").as_str(),),
             ));
 
             // The daemon should exit cleanly after persisting the snapshot.
@@ -9584,6 +9584,8 @@ mod snapshot_restore_common {
 
                 // Pause, then snapshot while asking to preserve the source.
                 assert!(remote_command(&api_socket, "pause", None));
+                // Deliberately uses the deprecated `local=on` flag so the
+                // compatibility layer stays covered end-to-end.
                 assert!(remote_command(
                     &api_socket,
                     "send-migration",
