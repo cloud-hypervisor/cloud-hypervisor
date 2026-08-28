@@ -91,6 +91,7 @@ The Cloud Hypervisor API exposes the following actions through its endpoints:
 | Add/remove memory from a zone           | `/vm.resize-zone`            | `/schemas/VmResizeZone`           | N/A                             | The VM is booted                                         |
 | Dump the VM information                 | `/vm.info`                   | N/A                               | `/schemas/VmInfo`               | The VM is created                                        |
 | Get virtio-balloon statistics           | `/vm.balloon-stats`          | N/A                               | `/schemas/BalloonStatsResponse` | The VM is running and balloon statistics were negotiated |
+| Cancel an ongoing VM migration           | `/vm.cancel-migration`       | N/A                               | N/A                             | The VM is migrating                                      |
 | Add VFIO PCI device to the VM           | `/vm.add-device`             | `/schemas/VmAddDevice`            | `/schemas/PciDeviceInfo`        | The VM is booted                                         |
 | Add disk device to the VM               | `/vm.add-disk`               | `/schemas/DiskConfig`             | `/schemas/PciDeviceInfo`        | The VM is booted                                         |
 | Add fs device to the VM                 | `/vm.add-fs`                 | `/schemas/FsConfig`               | `/schemas/PciDeviceInfo`        | The VM is booted                                         |
