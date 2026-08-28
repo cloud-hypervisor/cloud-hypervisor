@@ -94,6 +94,7 @@ An event identifier combines its `source` and `event` fields, written below as
 - `vm.device-removed`: PCI device was removed.
   - Property `id`: Device identifier.
   - Property `bdf`: Device PCI BDF.
+- `vm.migration-cancelled`: Migration was cancelled.
 - `vm.migration-failed`: Sending migration failed.
 - `vm.migration-finished`: Sending migration completed.
 - `vm.migration-memory-iteration`: Precopy iteration completed.
