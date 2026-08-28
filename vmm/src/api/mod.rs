@@ -584,7 +584,8 @@ pub struct VmSendMigrationData {
     #[serde(default)]
     pub local: bool,
     /// Keep the source VM alive in a paused state once the migration is
-    /// complete. Only valid with [`MigrationMode::MemFDs`].
+    /// complete. Only valid when [`Self::effective_memory_mode`] is
+    /// [`MigrationMode::MemFDs`].
     #[serde(default)]
     pub preserve_source: bool,
     /// The maximum downtime the migration aims for.
@@ -611,7 +612,7 @@ pub struct VmSendMigrationData {
     /// If this is `Some`, the migration is instructed to use mTLS.
     #[serde(default)]
     pub tls_dir: Option<PathBuf>,
-    /// Memory transfer mode.
+    /// Requested memory transfer mode.
     #[serde(default)]
     pub memory_mode: MigrationMode,
 }
@@ -739,10 +740,14 @@ impl VmSendMigrationData {
         Ok(data)
     }
 
-    pub fn local(&self) -> bool {
-        #[allow(deprecated)]
-        let deprecated_local_flag = self.local;
-        matches!(self.memory_mode, MigrationMode::MemFDs) || deprecated_local_flag
+    /// The memory transfer mode with the deprecated `local` flag folded in.
+    pub fn effective_memory_mode(&self) -> MigrationMode {
+        #[expect(deprecated)]
+        if self.local {
+            MigrationMode::MemFDs
+        } else {
+            self.memory_mode
+        }
     }
 
     pub fn downtime(&self) -> Duration {
@@ -785,7 +790,7 @@ impl VmSendMigrationData {
             )));
         }
 
-        if self.local() {
+        if self.effective_memory_mode() == MigrationMode::MemFDs {
             if !self.destination_url.starts_with("unix:") {
                 return Err(VmSendMigrationConfigError::ValidationError(
                     "Memory FD migration is only supported with UNIX sockets.".to_string(),
@@ -800,9 +805,9 @@ impl VmSendMigrationData {
             }
         }
 
-        if self.preserve_source && !self.local() {
+        if self.preserve_source && self.effective_memory_mode() != MigrationMode::MemFDs {
             return Err(VmSendMigrationConfigError::ValidationError(
-                "preserve_source option is only supported with local migration.".to_string(),
+                "preserve_source option is only supported with memory_mode=memfds.".to_string(),
             ));
         }
 
@@ -2375,7 +2380,7 @@ mod tests {
             "destination_url=unix:/tmp/migrate.sock,local=on,downtime_ms=200,timeout_s=3600,timeout_strategy=cancel"
         ).expect("valid migration string should parse");
         assert_eq!(data.destination_url, "unix:/tmp/migrate.sock");
-        assert!(data.local());
+        assert_eq!(data.effective_memory_mode(), MigrationMode::MemFDs);
         assert_eq!(data.downtime_ms.get(), 200);
         assert_eq!(data.timeout_s.get(), 3600);
         assert_eq!(data.timeout_strategy, TimeoutStrategy::Cancel);
@@ -2385,7 +2390,7 @@ mod tests {
         let data = VmSendMigrationData::parse("destination_url=tcp:192.168.1.1:8080")
             .expect("minimal migration string should parse");
         assert_eq!(data.destination_url, "tcp:192.168.1.1:8080");
-        assert!(!data.local());
+        assert_eq!(data.effective_memory_mode(), MigrationMode::Precopy);
         assert_eq!(data.downtime_ms, VmSendMigrationData::default_downtime_ms());
         assert_eq!(data.timeout_s, VmSendMigrationData::default_timeout_s());
         assert_eq!(data.timeout_strategy, TimeoutStrategy::default());
@@ -2516,7 +2521,7 @@ mod tests {
         )
         .unwrap();
         assert!(data.preserve_source);
-        assert!(data.local());
+        assert_eq!(data.effective_memory_mode(), MigrationMode::MemFDs);
 
         // preserve_source defaults to false when unspecified.
         let data = VmSendMigrationData::parse("destination_url=unix:/tmp/sock,local=on").unwrap();
@@ -2534,18 +2539,18 @@ mod tests {
         let data = VmSendMigrationData::parse("destination_url=unix:/tmp/sock,memory_mode=memfds")
             .unwrap();
         assert_eq!(data.memory_mode, MigrationMode::MemFDs);
-        assert!(data.local());
+        assert_eq!(data.effective_memory_mode(), MigrationMode::MemFDs);
 
         // Without either setting, the migration is not local.
         let data = VmSendMigrationData::parse("destination_url=unix:/tmp/sock").unwrap();
-        assert!(!data.local());
+        assert_eq!(data.effective_memory_mode(), MigrationMode::Precopy);
 
         // The deprecated flag and the new mode may be combined.
         let data = VmSendMigrationData::parse(
             "destination_url=unix:/tmp/sock,local=on,memory_mode=memfds",
         )
         .unwrap();
-        assert!(data.local());
+        assert_eq!(data.effective_memory_mode(), MigrationMode::MemFDs);
 
         // Local migration requires a UNIX socket destination.
         VmSendMigrationData::parse("destination_url=tcp:192.168.1.1:8080,memory_mode=memfds")
@@ -2563,7 +2568,7 @@ mod tests {
         )
         .unwrap();
         assert!(data.preserve_source);
-        assert!(data.local());
+        assert_eq!(data.effective_memory_mode(), MigrationMode::MemFDs);
     }
 
     #[test]
@@ -2574,17 +2579,17 @@ mod tests {
             serde_json::from_str(r#"{"destination_url": "unix:/tmp/sock", "local": true}"#)
                 .unwrap();
         assert_eq!(data.memory_mode, MigrationMode::Precopy);
-        assert!(data.local());
+        assert_eq!(data.effective_memory_mode(), MigrationMode::MemFDs);
         data.validate().unwrap();
 
         let data: VmSendMigrationData =
             serde_json::from_str(r#"{"destination_url": "unix:/tmp/sock"}"#).unwrap();
-        assert!(!data.local());
+        assert_eq!(data.effective_memory_mode(), MigrationMode::Precopy);
 
         let data: VmSendMigrationData = serde_json::from_str(
             r#"{"destination_url": "unix:/tmp/sock", "memory_mode": "MemFDs"}"#,
         )
         .unwrap();
-        assert!(data.local());
+        assert_eq!(data.effective_memory_mode(), MigrationMode::MemFDs);
     }
 }
