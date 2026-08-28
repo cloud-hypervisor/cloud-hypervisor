@@ -334,8 +334,8 @@ impl PciConfigIo {
                 u32::from(data[0]) << (offset * 8),
             ),
             2 => (
-                0x0000_ffff << (offset * 16),
-                ((u32::from(data[1]) << 8) | u32::from(data[0])) << (offset * 16),
+                0x0000_ffff << (offset * 8),
+                ((u32::from(data[1]) << 8) | u32::from(data[0])) << (offset * 8),
             ),
             4 => (0xffff_ffff, LittleEndian::read_u32(data)),
             _ => return,
@@ -553,6 +553,30 @@ mod tests {
 
     fn setup_bus_without_host_bridge() -> PciBus {
         PciBus::new(None, Arc::new(MockDeviceRelocation {}))
+    }
+
+    #[test]
+    fn set_config_address() {
+        let test_cases: &[(u64, &[u8], u32)] = &[
+            (0, &[0xaa], 0x1122_33aa),
+            (1, &[0xaa], 0x1122_aa44),
+            (2, &[0xaa], 0x11aa_3344),
+            (3, &[0xaa], 0xaa22_3344),
+            (0, &[0xaa, 0x55], 0x1122_55aa),
+            (1, &[0xaa, 0x55], 0x1155_aa44),
+            (2, &[0xaa, 0x55], 0x55aa_3344),
+            (0, &[0xaa, 0x55, 0xcc, 0x77], 0x77cc_55aa),
+        ];
+
+        for (offset, data, expected) in test_cases {
+            let pci_bus = Arc::new(Mutex::new(setup_bus()));
+            let mut config_io = PciConfigIo::new(pci_bus);
+            config_io.config_address = 0x1122_3344;
+
+            config_io.write(0, *offset, data);
+
+            assert_eq!(config_io.config_address, *expected);
+        }
     }
 
     #[test]
