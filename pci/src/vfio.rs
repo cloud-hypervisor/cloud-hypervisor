@@ -55,7 +55,9 @@ use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::configuration::{COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK};
+use crate::configuration::{
+    COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK, PCI_EXT_CAP_NEXT_MASK, PCI_EXT_CAP_NEXT_SHIFT,
+};
 use crate::mmap::MmapRegion;
 use crate::msi::{MSI_CONFIG_ID, MsiConfigState};
 use crate::msix::{MaybeMutInterruptSourceGroup, MsixConfigState};
@@ -1300,8 +1302,19 @@ impl VfioCommon {
         );
     }
 
+    fn override_next_extended_cap(&mut self, offset: u32, next: u32) {
+        self.patches.insert(
+            (offset / 4) as usize,
+            ConfigPatch {
+                mask: PCI_EXT_CAP_NEXT_MASK,
+                patch: next << PCI_EXT_CAP_NEXT_SHIFT,
+            },
+        );
+    }
+
     fn parse_extended_capabilities(&mut self) {
         let mut current_offset = PCI_CONFIG_EXTENDED_CAPABILITY_OFFSET;
+        let mut last_kept: Option<u32> = None;
 
         loop {
             let ext_cap_hdr = self.vfio_wrapper.read_config_dword(current_offset);
@@ -1312,17 +1325,21 @@ impl VfioCommon {
             match PciExpressCapabilityId::from(cap_id) {
                 PciExpressCapabilityId::AlternativeRoutingIdentificationInterpretation
                 | PciExpressCapabilityId::ResizeableBar
-                | PciExpressCapabilityId::SingleRootIoVirtualization => {
-                    let reg_idx = (current_offset / 4) as usize;
-                    self.patches.insert(
-                        reg_idx,
-                        ConfigPatch {
-                            mask: 0x0000_ffff,
-                            patch: PciExpressCapabilityId::NullCapability as u32,
-                        },
-                    );
-                }
-                _ => {}
+                | PciExpressCapabilityId::SingleRootIoVirtualization => match last_kept {
+                    Some(offset) => self.override_next_extended_cap(offset, cap_next.into()),
+                    None => {
+                        let reg_idx = (current_offset / 4) as usize;
+                        self.patches.insert(
+                            reg_idx,
+                            ConfigPatch {
+                                mask: 0xffff_ffff,
+                                patch: (PciExpressCapabilityId::NullCapability as u32)
+                                    | (u32::from(cap_next) << PCI_EXT_CAP_NEXT_SHIFT),
+                            },
+                        );
+                    }
+                },
+                _ => last_kept = Some(current_offset),
             }
 
             if cap_next == 0 {
@@ -2803,6 +2820,85 @@ mod tests {
 
     // Trait default behavior and state enum round trip.
 
+    const CAP_VC: u16 =
+        PciExpressCapabilityId::VirtualChannelMultiFunctionVirtualChannelNotPresent as u16;
+    const CAP_AER: u16 = PciExpressCapabilityId::AdvancedErrorReporting as u16;
+    const CAP_SRIOV: u16 = PciExpressCapabilityId::SingleRootIoVirtualization as u16;
+    const CAP_ARI: u16 =
+        PciExpressCapabilityId::AlternativeRoutingIdentificationInterpretation as u16;
+
+    fn mock_with_ext_caps(caps: &[(u32, u16, u32)]) -> Arc<MockVfio> {
+        let mut state = MockVfioState::default();
+
+        for (offset, cap_id, next) in caps {
+            state.config_dwords.insert(
+                u64::from(*offset),
+                u32::from(*cap_id) | (1 << 16) | (next << PCI_EXT_CAP_NEXT_SHIFT),
+            );
+        }
+
+        MockVfio::with_state(state)
+    }
+
+    fn next_of(common: &mut VfioCommon, offset: u32) -> u32 {
+        (common.read_config_register((offset / 4) as usize) & PCI_EXT_CAP_NEXT_MASK)
+            >> PCI_EXT_CAP_NEXT_SHIFT
+    }
+
+    #[test]
+    fn hidden_extended_cap_is_unlinked_from_the_chain() {
+        let mock = mock_with_ext_caps(&[
+            (0x100, CAP_VC, 0x150),
+            (0x150, CAP_SRIOV, 0x200),
+            (0x200, CAP_AER, 0),
+        ]);
+        let mut common = test_vfio_common(mock, None);
+        common.parse_extended_capabilities();
+
+        assert_eq!(next_of(&mut common, 0x100), 0x200);
+        assert_eq!(
+            common.read_config_register(0x150 / 4) & 0xffff,
+            u32::from(CAP_SRIOV)
+        );
+    }
+
+    #[test]
+    fn consecutive_hidden_extended_caps_collapse() {
+        let mock = mock_with_ext_caps(&[
+            (0x100, CAP_VC, 0x150),
+            (0x150, CAP_SRIOV, 0x200),
+            (0x200, CAP_ARI, 0x250),
+            (0x250, CAP_AER, 0),
+        ]);
+        let mut common = test_vfio_common(mock, None);
+        common.parse_extended_capabilities();
+
+        assert_eq!(next_of(&mut common, 0x100), 0x250);
+    }
+
+    #[test]
+    fn trailing_hidden_extended_cap_terminates_the_chain() {
+        let mock = mock_with_ext_caps(&[(0x100, CAP_VC, 0x150), (0x150, CAP_SRIOV, 0)]);
+        let mut common = test_vfio_common(mock, None);
+        common.parse_extended_capabilities();
+
+        assert_eq!(next_of(&mut common, 0x100), 0);
+    }
+
+    #[test]
+    fn hidden_head_extended_cap_becomes_null() {
+        let mock = mock_with_ext_caps(&[(0x100, CAP_SRIOV, 0x150), (0x150, CAP_AER, 0)]);
+        let mut common = test_vfio_common(mock, None);
+        common.parse_extended_capabilities();
+
+        let header = common.read_config_register(0x100 / 4);
+        assert_eq!(
+            header & 0xffff,
+            PciExpressCapabilityId::NullCapability as u32
+        );
+        assert_eq!(next_of(&mut common, 0x100), 0x150);
+    }
+
     #[test]
     fn vfio_migration_state_round_trips() {
         for state in [
@@ -2881,6 +2977,7 @@ mod tests {
         dma_logging_ranges: Vec<DmaLoggingRange>,
         dma_logging_bitmap: Vec<u64>,
         dma_logging_negotiated: Option<u64>,
+        config_dwords: HashMap<u64, u32>,
     }
 
     struct MockVfio {
@@ -3008,6 +3105,18 @@ mod tests {
         }
 
         fn region_write(&self, _index: u32, _offset: u64, _data: &[u8]) {}
+
+        fn region_read(&self, index: u32, offset: u64, data: &mut [u8]) {
+            data.fill(0);
+
+            if index != VFIO_PCI_CONFIG_REGION_INDEX || data.len() != 4 {
+                return;
+            }
+
+            if let Some(value) = self.state.lock().unwrap().config_dwords.get(&offset) {
+                data.copy_from_slice(&value.to_le_bytes());
+            }
+        }
     }
 
     struct MockMsiInterruptManager;
