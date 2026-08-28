@@ -29,13 +29,12 @@ use self::fixed::FixedVhd;
 use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError};
 use crate::disk_file::DiskSize;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
-use crate::{AlignedFile, DiskTopology, Error, disk_file};
+use crate::{DiskTopology, Error, disk_file};
 
 #[derive(Debug)]
 pub struct VhdDisk {
     inner: FixedVhd,
     use_io_uring: bool,
-    direct: bool,
 }
 
 impl VhdDisk {
@@ -51,9 +50,9 @@ impl VhdDisk {
         }
 
         Ok(Self {
-            inner: FixedVhd::new(file).map_err(|e| BlockError::from(e).with_op(ErrorOp::Open))?,
+            inner: FixedVhd::new(file, direct)
+                .map_err(|e| BlockError::from(e).with_op(ErrorOp::Open))?,
             use_io_uring,
-            direct,
         })
     }
 }
@@ -118,16 +117,14 @@ impl disk_file::AsyncDiskFile for VhdDisk {
         Ok(Box::new(VhdDisk {
             inner,
             use_io_uring: self.use_io_uring,
-            direct: self.direct,
         }))
     }
 
     fn create_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
         let size = self.logical_size()?;
-        let file = self.inner.file().try_clone().map_err(|e| {
+        let raw_file = self.inner.aligned_file().try_clone().map_err(|e| {
             BlockError::new(BlockErrorKind::Io, DiskFileError::NewAsyncIo(e)).with_op(ErrorOp::Open)
         })?;
-        let raw_file = AlignedFile::new(file, self.direct);
 
         if self.use_io_uring {
             #[cfg(feature = "io_uring")]
@@ -153,6 +150,7 @@ mod tests {
 
     use super::footer::checksummed_footer;
     use super::*;
+    use crate::AlignedFile;
     use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoOperation, OwnedIoBuffer};
     use crate::disk_file::{AsyncDiskFile, DiskSize, PhysicalSize, Resizable};
 

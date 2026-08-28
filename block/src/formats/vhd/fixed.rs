@@ -7,15 +7,16 @@ use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
 
 use super::footer::{VHD_FOOTER_LEN, VhdFooter};
+use crate::AlignedFile;
 
 #[derive(Debug)]
 pub(super) struct FixedVhd {
-    file: File,
+    file: AlignedFile,
     size: u64,
 }
 
 impl FixedVhd {
-    pub(super) fn new(mut file: File) -> io::Result<Self> {
+    pub(super) fn new(mut file: File, direct: bool) -> io::Result<Self> {
         let footer = VhdFooter::new(&mut file)?;
         footer.validate_fixed()?;
         let size = footer.current_size();
@@ -32,10 +33,17 @@ impl FixedVhd {
             ));
         }
 
-        Ok(Self { file, size })
+        Ok(Self {
+            file: AlignedFile::new(file, direct),
+            size,
+        })
     }
 
     pub(crate) fn file(&self) -> &File {
+        self.file.file()
+    }
+
+    pub(super) fn aligned_file(&self) -> &AlignedFile {
         &self.file
     }
 }
