@@ -308,13 +308,14 @@ you might end up in an undefined state leading to possible bugs.
 For speeding up a VM restore, the daemon's `--ondemand` mode hands CH
 empty memfds and serves page contents on demand via userfaultfd.
 
-This requires `memory_mode=postcopy` on the receive-migration call so CH
+The daemon announces postcopy mode through the migration protocol, so CH
 registers userfaultfd on the memfds before resuming vCPUs and keeps
-the daemon's socket open for `PageFault` requests:
+the daemon's socket open for `PageFault` requests. The receive-migration
+call is the same as for a regular restore:
 
 ```bash
 ./ch-remote --api-socket /tmp/cloud-hypervisor.sock \
-    receive-migration receiver_url=unix:/tmp/restore.sock,memory_mode=postcopy &
+    receive-migration receiver_url=unix:/tmp/restore.sock &
 
 ./offload_daemon restore \
     --socket /tmp/restore.sock \
