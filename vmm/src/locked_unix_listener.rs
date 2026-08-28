@@ -112,7 +112,7 @@ impl Drop for LockedUnixListener {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod tests {
     use std::os::unix::net::UnixStream;
 
     use vmm_sys_util::tempdir::TempDir;
