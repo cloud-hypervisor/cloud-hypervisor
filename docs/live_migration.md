@@ -384,6 +384,7 @@ migration:
   - `vm.migration-started`: Receiver acknowledged the migration start request.
   - `vm.migration-memory-iteration`: A precopy iteration finished. Can appear
     multiple times and solely signals forward progress.
+  - `vm.migration-cancelled`: Migration was cancelled.
   - `vm.migration-finished`: Migration completed successfully.
   - `vm.migration-failed`: Migration worker returned an error.
 - Receiver

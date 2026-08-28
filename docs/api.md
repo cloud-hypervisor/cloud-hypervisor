@@ -85,6 +85,7 @@ The Cloud Hypervisor API exposes the following actions through its endpoints:
 | Add vsock device to the VM              | `/vm.add-vsock`              | `/schemas/VsockConfig`            | `/schemas/PciDeviceInfo`        | The VM is booted                                         |
 | Get virtio-balloon statistics           | `/vm.balloon-stats`          | N/A                               | `/schemas/BalloonStatsResponse` | The VM is running and balloon statistics were negotiated |
 | Boot the VM                             | `/vm.boot`                   | N/A                               | N/A                             | The VM is created but not booted                         |
+| Cancel an ongoing VM migration          | `/vm.cancel-migration`       | N/A                               | N/A                             | The VM is migrating                                      |
 | Perform a coredump of the VM*           | `/vm.coredump`               | `/schemas/VmCoredumpData`         | N/A                             | The VM is paused                                         |
 | Dump the VM counters                    | `/vm.counters`               | N/A                               | `/schemas/VmCounters`           | The VM is booted                                         |
 | Create the VM                           | `/vm.create`                 | `/schemas/VmConfig`               | N/A                             | The VM is not created yet                                |
