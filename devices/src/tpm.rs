@@ -397,17 +397,18 @@ impl BusDevice for Tpm {
         } else {
             offset &= 0xff;
             let reg_offset = offset & !0x3;
-            let mut val = self.regs[reg_offset as usize];
 
-            // Per the TCG PC Client Platform TPM Profile (PTP) spec, bit 0
-            // of TPM_LOC_STATE_x is `tpmEstablished`. Reflect the live value
-            // from the backend rather than the (zero-initialised) shadow.
-            if reg_offset == CRB_LOC_STATE && self.emulator.get_established_bit() {
-                val |= 0x1;
-            }
-            val = read_reg_value(val, offset);
+            if data.len() <= 4 && (reg_offset as usize) < TPM_CRB_R_MAX {
+                let mut val = self.regs[reg_offset as usize];
 
-            if data.len() <= 4 {
+                // Per the TCG PC Client Platform TPM Profile (PTP) spec, bit 0
+                // of TPM_LOC_STATE_x is `tpmEstablished`. Reflect the live value
+                // from the backend rather than the (zero-initialised) shadow.
+                if reg_offset == CRB_LOC_STATE && self.emulator.get_established_bit() {
+                    val |= 0x1;
+                }
+                val = read_reg_value(val, offset);
+
                 data.clone_from_slice(val.to_ne_bytes()[0..read_len].as_ref());
             } else {
                 error!(
