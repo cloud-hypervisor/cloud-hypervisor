@@ -71,6 +71,7 @@ pub(crate) fn punch_hole(
     length: u64,
 ) -> io::Result<()> {
     if is_blkdev {
+        let _guard = file.partial_mutation_lock.lock().unwrap();
         return match blkdiscard(file.as_raw_fd(), offset, length) {
             Ok(()) => Ok(()),
             Err(e) if e.raw_os_error() == Some(libc::EOPNOTSUPP) => Ok(()),
@@ -99,6 +100,7 @@ pub(crate) fn write_zeroes(
     length: u64,
 ) -> io::Result<()> {
     if is_blkdev {
+        let _guard = file.partial_mutation_lock.lock().unwrap();
         return blkzeroout(file.as_raw_fd(), offset, length);
     }
     file.write_all_zeroes_at(offset, length as usize)?;

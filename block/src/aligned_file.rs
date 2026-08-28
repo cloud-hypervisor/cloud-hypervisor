@@ -6,6 +6,7 @@ use std::fs::{File, Metadata};
 use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::fs::FileExt;
 use std::os::unix::io::{AsRawFd, RawFd};
+use std::sync::{Arc, Mutex};
 use std::{io, slice};
 
 use vmm_sys_util::file_traits::FileSync;
@@ -44,6 +45,9 @@ fn iovecs_are_aligned(alignment: usize, iovecs: &[libc::iovec], offset: u64) -> 
 pub struct AlignedFile {
     file: File,
     alignment: usize,
+    // Shared by all clones (and so queues) to prevent stale data from a
+    // bounce buffer causing corruption.
+    pub(crate) partial_mutation_lock: Arc<Mutex<()>>,
 }
 
 impl AlignedFile {
@@ -54,7 +58,11 @@ impl AlignedFile {
         } else {
             0
         };
-        AlignedFile { file, alignment }
+        AlignedFile {
+            file,
+            alignment,
+            partial_mutation_lock: Arc::new(Mutex::new(())),
+        }
     }
 
     pub fn alignment(&self) -> usize {
@@ -73,6 +81,7 @@ impl AlignedFile {
         Ok(AlignedFile {
             file: self.file.try_clone()?,
             alignment: self.alignment,
+            partial_mutation_lock: Arc::clone(&self.partial_mutation_lock),
         })
     }
 
@@ -110,7 +119,11 @@ impl AlignedFile {
     /// tests to force the bounce/RMW path without a real O_DIRECT fd.
     #[cfg(test)]
     pub fn with_alignment(file: File, alignment: usize) -> Self {
-        AlignedFile { file, alignment }
+        AlignedFile {
+            file,
+            alignment,
+            partial_mutation_lock: Arc::new(Mutex::new(())),
+        }
     }
 
     /// Read `len` bytes at `offset` through an aligned bounce buffer.
@@ -133,6 +146,7 @@ impl AlignedFile {
         len: usize,
         gather: impl FnOnce(&mut [u8]) -> io::Result<()>,
     ) -> io::Result<usize> {
+        let _guard = self.partial_mutation_lock.lock().unwrap();
         let mut abuf = AlignedBuffer::new(offset, len, self.alignment)?;
         abuf.read_from(&self.file)?; // RMW: preserve head/tail padding
         gather(abuf.as_mut_slice())?;
@@ -257,12 +271,18 @@ impl FileExt for AlignedFile {
 
 impl WriteZeroesAt for AlignedFile {
     fn write_zeroes_at(&mut self, offset: u64, length: usize) -> io::Result<usize> {
+        let _guard = self
+            .is_direct()
+            .then(|| self.partial_mutation_lock.lock().unwrap());
         self.file.write_zeroes_at(offset, length)
     }
 }
 
 impl PunchHole for AlignedFile {
     fn punch_hole(&mut self, offset: u64, length: u64) -> io::Result<()> {
+        let _guard = self
+            .is_direct()
+            .then(|| self.partial_mutation_lock.lock().unwrap());
         self.file.punch_hole(offset, length)
     }
 }
@@ -305,6 +325,7 @@ impl AsFd for AlignedFile {
 mod tests {
     use std::io::Write;
     use std::os::unix::fs::FileExt;
+    use std::sync::TryLockError;
 
     use vmm_sys_util::tempfile::TempFile;
 
@@ -319,7 +340,7 @@ mod tests {
     }
 
     fn forced(file: File, alignment: usize) -> AlignedFile {
-        AlignedFile { file, alignment }
+        AlignedFile::with_alignment(file, alignment)
     }
 
     #[test]
@@ -471,6 +492,24 @@ mod tests {
         assert_eq!(&whole[100..300], &data[..]);
         let after: Vec<u8> = (300..8192).map(|i| (i % 251) as u8).collect();
         assert_eq!(&whole[300..], &after[..]);
+    }
+
+    #[test]
+    fn write_unaligned_holds_shared_partial_mutation_lock() {
+        let file = pattern_file(8192);
+        let aligned_file = forced(file.as_file().try_clone().unwrap(), 512);
+        let cloned_file = aligned_file.try_clone().unwrap();
+
+        aligned_file
+            .write_unaligned(100, 200, |buf| {
+                assert!(matches!(
+                    cloned_file.partial_mutation_lock.try_lock(),
+                    Err(TryLockError::WouldBlock)
+                ));
+                buf.fill(0xAA);
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]
