@@ -322,9 +322,6 @@ pub struct VmReceiveMigrationData {
     /// If this is `Some`, the migration is instructed to use mTLS.
     #[serde(default)]
     pub tls_dir: Option<PathBuf>,
-    /// Memory transfer mode.
-    #[serde(default)]
-    pub memory_mode: MigrationMode,
     /// Optional VFIO device id to cdev FD pairs, used to substitute each
     /// device's saved path or stale FD in the received VmConfig.
     #[serde(default)]
@@ -384,7 +381,7 @@ pub enum VmReceiveMigrationConfigError {
 
 impl VmReceiveMigrationData {
     pub const SYNTAX: &'static str = "VM receive migration parameters \
-        \"<receiver_url>\" or \"receiver_url=<url>[,tls_dir=<path>][,memory_mode=precopy|postcopy]\
+        \"<receiver_url>\" or \"receiver_url=<url>[,tls_dir=<path>]\
         [,vfio_fds=<list_of_vfio_ids_with_their_associated_fd>][,iommufd_fd=<fd>]\
         [,zone_updates=[<id@host_numa_node>]]\"";
 
@@ -393,7 +390,6 @@ impl VmReceiveMigrationData {
         parser
             .add("receiver_url")
             .add("tls_dir")
-            .add("memory_mode")
             .add("vfio_fds")
             .add("iommufd_fd")
             .add("zone_updates");
@@ -410,10 +406,6 @@ impl VmReceiveMigrationData {
             .convert::<String>("tls_dir")
             .map_err(VmReceiveMigrationConfigError::ParseError)?
             .map(|path| PathBuf::from(&path));
-        let memory_mode = parser
-            .convert::<MigrationMode>("memory_mode")
-            .map_err(VmReceiveMigrationConfigError::ParseError)?
-            .unwrap_or_default();
         let vfio_fds = parser
             .convert::<TupleList<String, u64>>("vfio_fds")
             .map_err(VmReceiveMigrationConfigError::ParseError)?
@@ -444,7 +436,6 @@ impl VmReceiveMigrationData {
         let data = Self {
             receiver_url,
             tls_dir,
-            memory_mode,
             vfio_fds,
             iommufd_fd,
             zone_updates,
@@ -2225,7 +2216,6 @@ mod tests {
             VmReceiveMigrationData {
                 receiver_url: "tcp:192.168.1.1:8080".to_string(),
                 tls_dir: None,
-                memory_mode: MigrationMode::Precopy,
                 vfio_fds: None,
                 iommufd_fd: None,
                 zone_updates: vec![],
@@ -2255,7 +2245,6 @@ mod tests {
             VmReceiveMigrationData {
                 receiver_url: "tcp:192.168.1.1:8080".to_string(),
                 tls_dir: Some(tls_dir_path),
-                memory_mode: MigrationMode::Precopy,
                 vfio_fds: None,
                 iommufd_fd: None,
                 zone_updates: vec![],
@@ -2310,38 +2299,11 @@ mod tests {
             VmReceiveMigrationConfigError::TlsEncryptionUsedForUnixSocket,
         );
 
-        // memory_mode defaults to precopy when not specified.
-        let data = VmReceiveMigrationData::parse("receiver_url=tcp:127.0.0.1:1234").unwrap();
-        assert_eq!(
-            data,
-            VmReceiveMigrationData {
-                receiver_url: "tcp:127.0.0.1:1234".to_string(),
-                tls_dir: None,
-                memory_mode: MigrationMode::Precopy,
-                vfio_fds: None,
-                iommufd_fd: None,
-                ..Default::default()
-            }
-        );
-
-        // Explicit receiver_url with memory_mode=postcopy.
-        let data =
-            VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,memory_mode=postcopy")
-                .unwrap();
-        assert_eq!(
-            data,
-            VmReceiveMigrationData {
-                receiver_url: "unix:/tmp/sock".to_string(),
-                tls_dir: None,
-                memory_mode: MigrationMode::Postcopy,
-                vfio_fds: None,
-                iommufd_fd: None,
-                ..Default::default()
-            }
-        );
+        VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,memory_mode=postcopy")
+            .unwrap_err();
 
         // Missing receiver_url in keyed form must fail.
-        let e = VmReceiveMigrationData::parse("memory_mode=postcopy").unwrap_err();
+        let e = VmReceiveMigrationData::parse("tls_dir=/tmp/certs").unwrap_err();
         assert!(
             matches!(e, VmReceiveMigrationConfigError::ParseError(_)),
             "Expected \"ParseError\"; got \"{e:?}\"",

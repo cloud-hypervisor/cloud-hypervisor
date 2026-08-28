@@ -7066,11 +7066,7 @@ mod common_parallel {
         let migration_port = get_available_port();
         let host_ip = "127.0.0.1";
 
-        let receive_arg = if postcopy {
-            format!("receiver_url=tcp:0.0.0.0:{migration_port},memory_mode=postcopy")
-        } else {
-            format!("receiver_url=tcp:0.0.0.0:{migration_port}")
-        };
+        let receive_arg = format!("receiver_url=tcp:0.0.0.0:{migration_port}");
 
         // Start the 'receive-migration' command on the destination
         let receive_migration = Command::new(clh_command("ch-remote"))
@@ -9391,17 +9387,13 @@ mod snapshot_restore_common {
             )));
 
             // receive-migration blocks until done. Run it in a thread so
-            // we can start the daemon as the sender in parallel. On demand
-            // mode adds `memory_mode=postcopy`.
+            // we can start the daemon as the sender in parallel. The daemon
+            // announces on-demand (postcopy) mode through the migration
+            // protocol, so the receive call is identical in both modes.
             let api_socket_restored_clone = api_socket_restored.clone();
             let restore_socket_clone = restore_socket.clone();
-            let ondemand_for_thread = ondemand;
             let restore_thread = thread::spawn(move || {
-                let arg = if ondemand_for_thread {
-                    format!("receiver_url=unix:{restore_socket_clone},memory_mode=postcopy")
-                } else {
-                    format!("receiver_url=unix:{restore_socket_clone}")
-                };
+                let arg = format!("receiver_url=unix:{restore_socket_clone}");
                 remote_command(&api_socket_restored_clone, "receive-migration", Some(&arg))
             });
 

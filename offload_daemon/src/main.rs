@@ -37,6 +37,7 @@ use vm_memory::{
 use vm_migration::MigratableError;
 use vm_migration::protocol::{Command, ConnectionRole, MemoryRange, Request, Response, Status};
 use vmm::VmMigrationConfig;
+use vmm::api::MigrationMode;
 use vmm::migration::SNAPSHOT_STATE_FILE;
 use vmm::sparse::copy_region;
 use vmm_sys_util::errno;
@@ -397,8 +398,16 @@ fn parse_guest_ram_mappings(value: &serde_json::Value) -> Result<Vec<(u32, u64, 
 fn run_restore(socket_path: &Path, input_dir: &Path, resume: bool, ondemand: bool) -> Result<()> {
     let migration_config_bytes =
         fs::read(input_dir.join(MIGRATION_CONFIG_FILENAME)).map_err(Error::ReadFile)?;
-    let migration_config: VmMigrationConfig = serde_json::from_slice(&migration_config_bytes)?;
+    let mut migration_config: VmMigrationConfig = serde_json::from_slice(&migration_config_bytes)?;
     let state_bytes = fs::read(input_dir.join(SNAPSHOT_STATE_FILE)).map_err(Error::ReadFile)?;
+
+    migration_config.set_memory_mode(if ondemand {
+        MigrationMode::Postcopy
+    } else {
+        // Ignored
+        MigrationMode::default()
+    });
+    let migration_config_bytes = serde_json::to_vec(&migration_config)?;
 
     let mut stream = UnixStream::connect(socket_path).map_err(Error::Connect)?;
     info!("Offload daemon connected to {socket_path:?} (ondemand={ondemand})");

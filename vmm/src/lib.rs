@@ -620,11 +620,26 @@ pub struct VmMigrationConfig {
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     common_cpuid: Vec<x86::CpuIdEntry>,
     memory_manager_data: MemoryManagerSnapshotData,
+    /// The memory transfer mode the sender uses. The receiver derives its
+    /// behavior (e.g., serving page faults for postcopy).
+    #[serde(default)]
+    memory_mode: MigrationMode,
 }
 
 impl VmMigrationConfig {
     pub fn memory_manager_data(&self) -> &MemoryManagerSnapshotData {
         &self.memory_manager_data
+    }
+
+    pub fn memory_mode(&self) -> MigrationMode {
+        self.memory_mode
+    }
+
+    /// Override the memory transfer mode. Used by senders that replay a
+    /// persisted config, e.g. an offload daemon restoring a snapshot in
+    /// on-demand (postcopy) mode.
+    pub fn set_memory_mode(&mut self, memory_mode: MigrationMode) {
+        self.memory_mode = memory_mode;
     }
 }
 
@@ -726,6 +741,9 @@ struct ReceiveMigrationConfiguredData {
     connections: ReceiveAdditionalConnections,
     shared_backing: bool,
     fault_rx: Receiver<SocketStream>,
+    /// The memory transfer mode announced by the sender in the received
+    /// [`VmMigrationConfig`].
+    memory_mode: MigrationMode,
 }
 
 /// The receiver's state machine behind the migration protocol.
@@ -990,7 +1008,7 @@ impl Vmm {
              memory_files: HashMap<u32, File>|
              -> result::Result<ReceiveMigrationConfiguredData, MigratableError> {
                 let shared_backing = !memory_files.is_empty();
-                let memory_manager =
+                let (memory_manager, memory_mode) =
                     self.vm_receive_config(req, socket, memory_files, receive_data_migration)?;
                 let guest_memory = memory_manager.lock().unwrap().guest_memory();
                 // Create the additional-connection receiver even in the single-connection case.
@@ -1013,6 +1031,7 @@ impl Vmm {
                     connections,
                     shared_backing,
                     fault_rx,
+                    memory_mode,
                 })
             };
 
@@ -1071,9 +1090,7 @@ impl Vmm {
                     })?;
                     Ok(Configured(config_data))
                 }
-                Command::State => {
-                    self.vm_receive_state_command(req, socket, config_data, receive_data_migration)
-                }
+                Command::State => self.vm_receive_state_command(req, socket, config_data),
                 c => invalid_command(state_name, c),
             },
             StateReceived {
@@ -1118,12 +1135,11 @@ impl Vmm {
         req: &Request,
         socket: &mut SocketStream,
         mut config_data: ReceiveMigrationConfiguredData,
-        receive_data_migration: &VmReceiveMigrationData,
     ) -> result::Result<ReceiveMigrationState, MigratableError> {
         let state_receive_begin = Instant::now();
 
         // Serve faults before restore so accesses during restore resolve on demand.
-        if matches!(receive_data_migration.memory_mode, MigrationMode::Postcopy) {
+        if matches!(config_data.memory_mode, MigrationMode::Postcopy) {
             let shared_backing = config_data.shared_backing;
             let fault_stream = config_data
                 .fault_rx
@@ -1175,11 +1191,10 @@ impl Vmm {
         socket: &mut T,
         existing_memory_files: HashMap<u32, File>,
         receive_data_migration: &VmReceiveMigrationData,
-    ) -> result::Result<Arc<Mutex<MemoryManager>>, MigratableError>
+    ) -> result::Result<(Arc<Mutex<MemoryManager>>, MigrationMode), MigratableError>
     where
         T: Read,
     {
-        let mode = receive_data_migration.memory_mode;
         let zone_updates = &receive_data_migration.zone_updates;
 
         // Read in config data along with memory manager data
@@ -1192,6 +1207,8 @@ impl Vmm {
         let vm_migration_config: VmMigrationConfig = serde_json::from_slice(&data)
             .context("Error deserialising config")
             .map_err(MigratableError::MigrateReceive)?;
+
+        let mode = vm_migration_config.memory_mode();
 
         // Mirrors the vm_restore handling of RestoreConfig.vfio_fds. The
         // received VmConfig carries the source's device paths or stale FDs,
@@ -1284,7 +1301,7 @@ impl Vmm {
         .context("Error creating MemoryManager from snapshot")
         .map_err(MigratableError::MigrateReceive)?;
 
-        Ok(memory_manager)
+        Ok((memory_manager, mode))
     }
 
     /// Receives the final VM state (devices, vCPUs) and restores the VM.
@@ -1669,6 +1686,7 @@ impl Vmm {
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             common_cpuid,
             memory_manager_data: vm.memory_manager_data(),
+            memory_mode: send_data_migration.memory_mode,
         };
         transport::send_config(&mut socket, &vm_migration_config)?;
 
@@ -4034,7 +4052,6 @@ mod tests {
         VmReceiveMigrationData {
             receiver_url: "tcp:127.0.0.1:4321".to_string(),
             tls_dir: None,
-            memory_mode: MigrationMode::default(),
             vfio_fds,
             iommufd_fd,
             zone_updates: vec![],
