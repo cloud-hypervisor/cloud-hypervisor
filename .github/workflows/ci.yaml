@@ -240,12 +240,25 @@ jobs:
     steps:
       - name: Code checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - name: Install Rust toolchain (${{ matrix.rust }})
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           components: rustfmt
+      - name: Bisectability Check (rustfmt)
+        if: ${{ github.event_name == 'pull_request' && matrix.target == 'x86_64-unknown-linux-gnu' }}
+        run: |
+          set -eufo pipefail
+          commits=$(git rev-list origin/${{ github.base_ref }}..${{ github.sha }})
+          for commit in $commits; do
+            git checkout $commit
+            cargo fmt --all -- --check
+            cargo fmt --all --manifest-path fuzz/Cargo.toml -- --check
+          done
+          git checkout ${{ github.sha }}
       - name: Formatting (rustfmt)
         run: cargo fmt --all -- --check
       - name: Formatting (fuzz) (rustfmt)
