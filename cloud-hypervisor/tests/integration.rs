@@ -2796,8 +2796,7 @@ mod common_parallel {
         handle_child_output(r, &output);
     }
 
-    #[test]
-    fn test_serial_socket_stale_cleanup() {
+    fn _test_serial_socket_stale_cleanup(reboot: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let serial_socket = guest.tmp_dir.as_path().join("serial.socket");
@@ -2817,13 +2816,17 @@ mod common_parallel {
 
         // The VM must remove the stale socket under the lock and bind anew;
         // without the cleanup this would fail with EADDRINUSE.
-        let mut child = GuestCommand::new(&guest)
-            .default_cpus()
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.default_cpus()
             .default_memory()
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", &cmdline])
             .default_disks()
-            .default_net()
+            .default_net();
+        // The arm64 runner does not support the required Landlock ABI V3 yet.
+        #[cfg(not(target_arch = "aarch64"))]
+        cmd.args(["--landlock"]);
+        let mut child = cmd
             .args(["--console", "null"])
             .args([
                 "--serial",
@@ -2834,6 +2837,9 @@ mod common_parallel {
 
         let r = panic::catch_unwind(|| {
             guest.wait_vm_boot().unwrap();
+            if reboot {
+                guest.reboot_linux(0);
+            }
             guest.ssh_command("sudo shutdown -h now").unwrap();
         });
 
@@ -2852,6 +2858,16 @@ mod common_parallel {
             }
         });
         handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_serial_socket_stale_cleanup() {
+        _test_serial_socket_stale_cleanup(false);
+    }
+
+    #[test]
+    fn test_serial_socket_landlock_reboot() {
+        _test_serial_socket_stale_cleanup(true);
     }
 
     #[test]

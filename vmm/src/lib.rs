@@ -56,6 +56,7 @@ use crate::config::{MemoryRestoreMode, RestoreConfig, VmMemoryZoneUpdateData, ad
 use crate::coredump::GuestDebuggable;
 use crate::device_manager::DeviceManager;
 use crate::landlock::Landlock;
+use crate::locked_unix_listener::LockedUnixListener;
 use crate::memory_manager::{MemoryManager, MemoryRangePolicy};
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::migration::get_vm_snapshot;
@@ -726,6 +727,7 @@ pub struct Vmm {
     original_termios_opt: Arc<Mutex<Option<termios>>>,
     console_resize_pipe: Option<Arc<File>>,
     console_info: Option<ConsoleInfo>,
+    serial_socket_listener: Option<Arc<LockedUnixListener>>,
     no_shutdown: bool,
     check_migration_evt: EventFd,
 }
@@ -958,6 +960,7 @@ impl Vmm {
             original_termios_opt: Arc::new(Mutex::new(None)),
             console_resize_pipe: None,
             console_info: None,
+            serial_socket_listener: None,
             no_shutdown,
             check_migration_evt,
         })
@@ -2768,6 +2771,8 @@ impl RequestHandler for Vmm {
             VmOwnership::None => {}
         }
 
+        self.console_info = None;
+        self.serial_socket_listener = None;
         self.vm_config = None;
         event!("vm", "deleted");
 
