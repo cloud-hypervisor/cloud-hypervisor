@@ -2796,8 +2796,7 @@ mod common_parallel {
         handle_child_output(r, &output);
     }
 
-    #[test]
-    fn test_serial_socket_stale_cleanup() {
+    fn _test_serial_socket_stale_cleanup(landlock_reboot: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let serial_socket = guest.tmp_dir.as_path().join("serial.socket");
@@ -2817,8 +2816,8 @@ mod common_parallel {
 
         // The VM must remove the stale socket under the lock and bind anew;
         // without the cleanup this would fail with EADDRINUSE.
-        let mut child = GuestCommand::new(&guest)
-            .default_cpus()
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.default_cpus()
             .default_memory()
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", &cmdline])
@@ -2828,12 +2827,18 @@ mod common_parallel {
             .args([
                 "--serial",
                 format!("socket={}", serial_socket.to_str().unwrap()).as_str(),
-            ])
-            .spawn()
-            .unwrap();
+            ]);
+        if landlock_reboot {
+            cmd.args(["--landlock"]);
+        }
+        let mut child = cmd.spawn().unwrap();
 
         let r = panic::catch_unwind(|| {
             guest.wait_vm_boot().unwrap();
+            if landlock_reboot {
+                // Reboot reuses the listener after Landlock has been applied.
+                guest.reboot_linux(0);
+            }
             guest.ssh_command("sudo shutdown -h now").unwrap();
         });
 
@@ -2852,6 +2857,17 @@ mod common_parallel {
             }
         });
         handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_serial_socket_stale_cleanup() {
+        _test_serial_socket_stale_cleanup(false);
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_serial_socket_landlock_reboot() {
+        _test_serial_socket_stale_cleanup(true);
     }
 
     #[test]

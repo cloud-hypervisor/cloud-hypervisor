@@ -666,9 +666,8 @@ impl ApplyLandlock for CommonConsoleConfig {
         if let Some(file) = &self.file {
             landlock.add_rule_with_access(file, "rw")?;
         }
-        if let Some(socket) = &self.socket {
-            landlock.add_rule_with_access(socket, "rw")?;
-        }
+        // Socket listeners are created before Landlock is applied and retained
+        // by the VMM, so serial I/O does not need path-based access.
         Ok(())
     }
 }

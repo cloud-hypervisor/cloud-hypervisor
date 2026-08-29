@@ -14,7 +14,7 @@ use std::fs::{File, OpenOptions, read_link};
 use std::mem::zeroed;
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{io, result};
 
@@ -180,9 +180,27 @@ fn dup_stdout() -> errno::Result<File> {
     Ok(unsafe { File::from_raw_fd(stdout) })
 }
 
+fn get_or_create_serial_socket(
+    existing_listener: Option<&Arc<LockedUnixListener>>,
+    socket_path: &Path,
+) -> ConsoleDeviceResult<Arc<LockedUnixListener>> {
+    if let Some(listener) = existing_listener
+        && listener.path() == socket_path
+    {
+        return Ok(Arc::clone(listener));
+    }
+
+    LockedUnixListener::bind(socket_path)
+        .map(Arc::new)
+        .map_err(|e| match e {
+            LockedUnixListenerError::InUse(path) => ConsoleDeviceError::SerialSocketInUse(path),
+            LockedUnixListenerError::Io(e) => ConsoleDeviceError::CreateConsoleDevice(e),
+        })
+}
+
 pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<ConsoleInfo> {
-    // Drop the previous VM's console devices so a reboot can rebind the serial
-    // socket (its OFD lock is held until they drop).
+    // Drop per-VM console handles. The VMM-owned serial socket listener remains
+    // available for reuse across reboot and shutdown followed by boot.
     vmm.console_info = None;
 
     let vm_config = vmm.vm_config.as_mut().unwrap().clone();
@@ -264,17 +282,11 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                 ConsoleTransport::Tty(Arc::new(stdout))
             }
             ConsoleOutputMode::Socket => {
-                let socket =
-                    LockedUnixListener::bind(vmconfig.serial.common.socket.as_ref().unwrap())
-                        .map_err(|e| match e {
-                            LockedUnixListenerError::InUse(path) => {
-                                ConsoleDeviceError::SerialSocketInUse(path)
-                            }
-                            LockedUnixListenerError::Io(e) => {
-                                ConsoleDeviceError::CreateConsoleDevice(e)
-                            }
-                        })?;
-                ConsoleTransport::Socket(Arc::new(socket))
+                let socket_path = vmconfig.serial.common.socket.as_ref().unwrap();
+                ConsoleTransport::Socket(get_or_create_serial_socket(
+                    vmm.serial_socket_listener.as_ref(),
+                    socket_path,
+                )?)
             }
             ConsoleOutputMode::Null => ConsoleTransport::Null,
             ConsoleOutputMode::Off => ConsoleTransport::Off,
@@ -307,5 +319,31 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
         },
     };
 
+    vmm.serial_socket_listener = match &console_info.serial {
+        ConsoleTransport::Socket(listener) => Some(Arc::clone(listener)),
+        _ => None,
+    };
+
     Ok(console_info)
+}
+
+#[cfg(test)]
+mod tests {
+    use vmm_sys_util::tempdir::TempDir;
+
+    use super::*;
+
+    #[test]
+    fn test_reuse_serial_socket_listener() {
+        let temp_dir = TempDir::new_with_prefix("/tmp/vmm-serial-socket").unwrap();
+        let socket_path = temp_dir.as_path().join("serial.socket");
+        let listener = get_or_create_serial_socket(None, &socket_path).unwrap();
+
+        let reused = get_or_create_serial_socket(Some(&listener), &socket_path).unwrap();
+        assert!(Arc::ptr_eq(&listener, &reused));
+
+        let other_path = temp_dir.as_path().join("other.socket");
+        let other = get_or_create_serial_socket(Some(&listener), &other_path).unwrap();
+        assert!(!Arc::ptr_eq(&listener, &other));
+    }
 }

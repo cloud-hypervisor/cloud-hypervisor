@@ -89,6 +89,10 @@ impl LockedUnixListener {
     pub(crate) fn listener(&self) -> &UnixListener {
         &self.listener
     }
+
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
 }
 
 impl AsFd for LockedUnixListener {
