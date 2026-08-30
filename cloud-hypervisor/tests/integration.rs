@@ -2726,18 +2726,32 @@ mod common_parallel {
         handle_child_output(r, &output);
     }
 
-    #[test]
-    fn test_serial_socket_interaction() {
+    #[derive(Clone, Copy)]
+    enum ConsoleKind {
+        Serial,
+        Console,
+    }
+
+    fn _test_socket_interaction(kind: ConsoleKind) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let serial_socket = guest.tmp_dir.as_path().join("serial.socket");
-        let serial_socket_pty = guest.tmp_dir.as_path().join("serial.pty");
-        let serial_option = if cfg!(target_arch = "x86_64") {
-            " console=ttyS0"
-        } else {
-            " console=ttyAMA0"
+        let socket = guest.tmp_dir.as_path().join("socket");
+        let socket_pty = guest.tmp_dir.as_path().join("socket.pty");
+
+        let mut cmdline = DIRECT_KERNEL_BOOT_CMDLINE.to_owned();
+        if let ConsoleKind::Serial = kind {
+            cmdline += if cfg!(target_arch = "x86_64") {
+                " console=ttyS0"
+            } else {
+                " console=ttyAMA0"
+            };
+        }
+
+        let socket_arg = format!("socket={}", socket.to_str().unwrap());
+        let (serial, console) = match kind {
+            ConsoleKind::Serial => (socket_arg.as_str(), "null"),
+            ConsoleKind::Console => ("null", socket_arg.as_str()),
         };
-        let cmdline = DIRECT_KERNEL_BOOT_CMDLINE.to_owned() + serial_option;
 
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
@@ -2746,43 +2760,40 @@ mod common_parallel {
             .args(["--cmdline", &cmdline])
             .default_disks()
             .default_net()
-            .args(["--console", "null"])
-            .args([
-                "--serial",
-                format!("socket={}", serial_socket.to_str().unwrap()).as_str(),
-            ])
+            .args(["--serial", serial])
+            .args(["--console", console])
             .spawn()
             .unwrap();
 
-        let _ = panic::catch_unwind(|| {
+        let boot = panic::catch_unwind(|| {
             guest.wait_vm_boot().unwrap();
         });
 
         let mut socat_command = Command::new("socat");
         let socat_args = [
-            &format!("pty,link={},raw,echo=0", serial_socket_pty.display()),
-            &format!("UNIX-CONNECT:{}", serial_socket.display()),
+            &format!("pty,link={},raw,echo=0", socket_pty.display()),
+            &format!("UNIX-CONNECT:{}", socket.display()),
         ];
         socat_command.args(socat_args);
 
         let mut socat_child = socat_command.spawn().unwrap();
         thread::sleep(Duration::new(1, 0));
 
-        let _ = panic::catch_unwind(|| {
-            _test_pty_interaction(serial_socket_pty);
+        let interaction = panic::catch_unwind(|| {
+            _test_pty_interaction(socket_pty);
         });
 
         let _ = socat_child.kill();
         let _ = socat_child.wait();
 
-        let r = panic::catch_unwind(|| {
+        let shutdown = panic::catch_unwind(|| {
             guest.ssh_command("sudo shutdown -h now").unwrap();
         });
 
         let _ = child.wait_timeout(Duration::from_secs(20));
         kill_child(&mut child);
         let output = child.wait_with_output().unwrap();
-        handle_child_output(r, &output);
+        handle_child_output(boot.and(interaction).and(shutdown), &output);
 
         let r = panic::catch_unwind(|| {
             // Check that the cloud-hypervisor binary actually terminated
@@ -2794,6 +2805,16 @@ mod common_parallel {
             }
         });
         handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_serial_socket_interaction() {
+        _test_socket_interaction(ConsoleKind::Serial);
+    }
+
+    #[test]
+    fn test_console_socket_interaction() {
+        _test_socket_interaction(ConsoleKind::Console);
     }
 
     fn _test_serial_socket_stale_cleanup(reboot: bool) {
