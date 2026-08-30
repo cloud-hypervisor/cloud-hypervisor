@@ -2263,6 +2263,9 @@ dependencies = [
 [[package]]
 name = "serial_buffer"
 version = "0.1.0"
+dependencies = [
+ "vmm-sys-util",
+]
 
 [[package]]
 name = "sha2"
