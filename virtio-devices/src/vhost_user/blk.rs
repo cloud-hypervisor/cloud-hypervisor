@@ -1,9 +1,10 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::result;
+use std::mem::offset_of;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
+use std::{io, result};
 
 use block::VirtioBlockConfig;
 use log::{error, info};
@@ -28,19 +29,62 @@ use super::{DEFAULT_VIRTIO_FEATURES, Error, Result};
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
 use crate::vhost_user::{VhostUserCommon, VhostUserState};
-use crate::{GuestRegionMmap, VIRTIO_F_ACCESS_PLATFORM};
+use crate::{GuestRegionMmap, VIRTIO_F_ACCESS_PLATFORM, VirtioInterrupt, VirtioInterruptType};
 
 const DEFAULT_QUEUE_NUMBER: usize = 1;
 
 pub type State = VhostUserState<VirtioBlockConfig>;
 
-struct BackendReqHandler {}
-impl VhostUserFrontendReqHandler for BackendReqHandler {}
+fn get_block_config(vu: &mut VhostUserHandle, num_queues: usize) -> Result<VirtioBlockConfig> {
+    let config_len = size_of::<VirtioBlockConfig>();
+    let config_space = vec![0u8; config_len];
+    let (_, config_space) = vu
+        .socket_handle()
+        .get_config(
+            0,
+            config_len as u32,
+            VhostUserConfigFlags::WRITABLE,
+            config_space.as_slice(),
+        )
+        .map_err(Error::VhostUserGetConfig)?;
+    let mut config = VirtioBlockConfig::default();
+    if let Some(backend_config) = VirtioBlockConfig::from_slice(config_space.as_slice()) {
+        config = *backend_config;
+        config.num_queues = num_queues as u16;
+    }
+
+    Ok(config)
+}
+
+struct BackendReqHandler {
+    vu: Arc<Mutex<VhostUserHandle>>,
+    config: Arc<Mutex<VirtioBlockConfig>>,
+    num_queues: usize,
+    interrupt_cb: Arc<dyn VirtioInterrupt>,
+}
+
+impl VhostUserFrontendReqHandler for BackendReqHandler {
+    fn handle_config_change(&self) -> io::Result<u64> {
+        let mut vu = self.vu.lock().unwrap();
+        let config = get_block_config(&mut vu, self.num_queues).map_err(|e| {
+            error!("Failed to refresh vhost-user-blk configuration: {e:?}");
+            io::Error::other(e)
+        })?;
+        *self.config.lock().unwrap() = config;
+        self.interrupt_cb
+            .trigger(VirtioInterruptType::Config)
+            .map_err(|e| {
+                error!("Failed to signal vhost-user-blk config change: {e:?}");
+                io::Error::other(e)
+            })?;
+        Ok(0)
+    }
+}
 
 pub struct Blk {
     vu_common: VhostUserCommon,
     id: String,
-    config: VirtioBlockConfig,
+    config: Arc<Mutex<VirtioBlockConfig>>,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
     access_platform_enabled: bool,
@@ -118,7 +162,8 @@ impl Blk {
                 | VhostUserProtocolFeatures::REPLY_ACK
                 | VhostUserProtocolFeatures::INFLIGHT_SHMFD
                 | VhostUserProtocolFeatures::LOG_SHMFD
-                | VhostUserProtocolFeatures::DEVICE_STATE;
+                | VhostUserProtocolFeatures::DEVICE_STATE
+                | VhostUserProtocolFeatures::BACKEND_REQ;
 
             let (acked_features, acked_protocol_features) =
                 vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
@@ -139,22 +184,7 @@ impl Blk {
                 return Err(Error::BadQueueNum);
             }
 
-            let config_len = size_of::<VirtioBlockConfig>();
-            let config_space: Vec<u8> = vec![0u8; config_len];
-            let (_, config_space) = vu
-                .socket_handle()
-                .get_config(
-                    0,
-                    config_len as u32,
-                    VhostUserConfigFlags::WRITABLE,
-                    config_space.as_slice(),
-                )
-                .map_err(Error::VhostUserGetConfig)?;
-            let mut config = VirtioBlockConfig::default();
-            if let Some(backend_config) = VirtioBlockConfig::from_slice(config_space.as_slice()) {
-                config = *backend_config;
-                config.num_queues = num_queues as u16;
-            }
+            let config = get_block_config(&mut vu, num_queues)?;
 
             (
                 acked_features,
@@ -191,7 +221,7 @@ impl Blk {
                 ..Default::default()
             },
             id,
-            config,
+            config: Arc::new(Mutex::new(config)),
             seccomp_action,
             exit_evt,
             access_platform_enabled,
@@ -199,7 +229,7 @@ impl Blk {
     }
 
     fn state(&self) -> result::Result<State, MigratableError> {
-        self.vu_common.state(self.config)
+        self.vu_common.state(*self.config.lock().unwrap())
     }
 }
 
@@ -231,14 +261,13 @@ impl VirtioDevice for Blk {
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
-        self.read_config_from_slice(self.config.as_slice(), offset, data);
+        self.read_config_from_slice(self.config.lock().unwrap().as_slice(), offset, data);
     }
 
     fn write_config(&mut self, offset: u64, data: &[u8]) {
         // The "writeback" field is the only mutable field
-        let writeback_offset =
-            (&raw const self.config.writeback as u64) - (&raw const self.config as u64);
-        if offset != writeback_offset || data.len() != size_of_val(&self.config.writeback) {
+        let writeback_offset = offset_of!(VirtioBlockConfig, writeback) as u64;
+        if offset != writeback_offset || data.len() != size_of::<u8>() {
             error!(
                 "Attempt to write to read-only field: offset {:x} length {}",
                 offset,
@@ -247,20 +276,23 @@ impl VirtioDevice for Blk {
             return;
         }
 
-        self.config.writeback = data[0];
-        if let Some(vu) = &self.vu_common.vu
-            && let Err(e) = vu
-                .lock()
-                .unwrap()
+        if let Some(vu) = &self.vu_common.vu {
+            let mut vu = vu.lock().unwrap();
+            let result = vu
                 .socket_handle()
                 .set_config(offset as u32, VhostUserConfigFlags::WRITABLE, data)
-                .map_err(Error::VhostUserSetConfig)
-        {
-            error!(
-                "Failed setting vhost-user-blk configuration for socket {} at offset 0x{offset:x} with length {}: {e:?}",
-                self.vu_common.socket_path,
-                data.len()
-            );
+                .map_err(Error::VhostUserSetConfig);
+            self.config.lock().unwrap().writeback = data[0];
+
+            if let Err(e) = result {
+                error!(
+                    "Failed setting vhost-user-blk configuration for socket {} at offset 0x{offset:x} with length {}: {e:?}",
+                    self.vu_common.socket_path,
+                    data.len()
+                );
+            }
+        } else {
+            self.config.lock().unwrap().writeback = data[0];
         }
     }
 
@@ -275,7 +307,30 @@ impl VirtioDevice for Blk {
             .virtio_common
             .activate(&queues, interrupt_cb.clone())?;
 
-        let backend_req_handler: Option<FrontendReqHandler<BackendReqHandler>> = None;
+        let backend_req_handler = if self.vu_common.acked_protocol_features
+            & VhostUserProtocolFeatures::BACKEND_REQ.bits()
+            != 0
+        {
+            let mut handler = FrontendReqHandler::new(Arc::new(BackendReqHandler {
+                vu: self.vu_common.vu.as_ref().unwrap().clone(),
+                config: self.config.clone(),
+                num_queues: self.vu_common.virtio_common.queue_sizes.len(),
+                interrupt_cb: interrupt_cb.clone(),
+            }))
+            .map_err(|e| {
+                crate::ActivateError::VhostUserSetup(Error::FrontendReqHandlerCreation(e))
+            })?;
+
+            if self.vu_common.acked_protocol_features & VhostUserProtocolFeatures::REPLY_ACK.bits()
+                != 0
+            {
+                handler.set_reply_ack_flag(true);
+            }
+
+            Some(handler)
+        } else {
+            None
+        };
 
         // Run a dedicated thread for handling potential reconnections with
         // the backend.
