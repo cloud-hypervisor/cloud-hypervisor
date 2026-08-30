@@ -2445,7 +2445,6 @@ impl DeviceManager {
         console_resize_pipe: Option<Arc<File>>,
         snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<Arc<Console>> {
-        let serial_config = self.config.lock().unwrap().serial.clone();
         let Some(console_info) = console_info else {
             return Err(DeviceManagerError::InvalidConsoleInfo);
         };
@@ -2466,12 +2465,8 @@ impl DeviceManager {
                 ConsoleTransport::Pty(_)
                 | ConsoleTransport::Tty(_)
                 | ConsoleTransport::Socket(_) => {
-                    let serial_manager = SerialManager::new(
-                        serial,
-                        console_info.serial,
-                        serial_config.common.socket,
-                    )
-                    .map_err(DeviceManagerError::CreateSerialManager)?;
+                    let serial_manager = SerialManager::new(serial, console_info.serial)
+                        .map_err(DeviceManagerError::CreateSerialManager)?;
                     if let Some(mut serial_manager) = serial_manager {
                         serial_manager
                             .start_thread(
