@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 mod socket;
-pub use socket::{SharedSerialBuffer, SocketConsole};
+pub use socket::SocketConsole;
 
 const MAX_BUFFER_SIZE: usize = 1 << 20;
 
