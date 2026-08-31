@@ -1137,7 +1137,7 @@ pub(crate) fn start_live_migration(
     migration_socket: &str,
     src_api_socket: &str,
     dest_api_socket: &str,
-    local: bool,
+    memfds: bool,
     paused: bool,
 ) -> bool {
     // Start to receive migration from the destination VM
@@ -1168,8 +1168,8 @@ pub(crate) fn start_live_migration(
         format!("--api-socket={src_api_socket}"),
         "send-migration".to_string(),
         format!(
-            "destination_url=unix:{migration_socket},local={}",
-            if local { "on" } else { "off" }
+            "destination_url=unix:{migration_socket},memory_mode={}",
+            if memfds { "memfds" } else { "precopy" }
         ),
     ]
     .to_vec();
