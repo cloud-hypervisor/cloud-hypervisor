@@ -223,16 +223,17 @@ peer role:
   would for a local live migration. Passing `preserve_source=on` instead
   leaves the source VM paused and owned by the VMM once the snapshot
   completes, so it can be resumed afterwards. Memory is transferred via
-  `SCM_RIGHTS`, CH handing off the daemon one memfd per guest-memory slot.
+  `SCM_RIGHTS`, with CH handing the daemon one guest memory backing FD per
+  slot.
 - On restore, CH acts as the migration receiver and the daemon acts as the
-  sender. The daemon provides one memfd per slot, populated from its
-  storage, and CH uses those memfds directly as guest RAM backing.
+  sender. The daemon provides one populated guest memory backing FD per slot,
+  and CH uses those files directly as guest RAM backing.
 
 In practice, this means offload is driven through the existing
 `vm.send-migration` / `vm.receive-migration` endpoints (with
-`memory_mode=memfds` and a `unix:<path>` URL). The daemon is just another peer of these
-endpoints. This requires the VM to be configured with shared-memory
-backing, which is the same precondition that applies to local live
+`memory_mode=memfds` and a `unix:<path>` URL). The daemon is just another peer
+of these endpoints. Every guest memory region must use shared memory or
+hugepage backing, which is the same precondition that applies to local live
 migration today.
 
 ### Snapshot offload usage
@@ -333,9 +334,10 @@ The daemon implements the local live-migration wire protocol defined in
   `MemoryFd` command, receive a guest-memory fd via SCM_RIGHTS on the
   same UNIX socket.
 - Restore mode (migration sender): walk the same sequence in reverse,
-  emitting one `MemoryFd` per slot (with the memfd attached via SCM_RIGHTS)
-  before sending `Config` and `State`. Finish with either `CompletePaused`
-  (restored VM remains paused) or `Complete` (restored VM resumes).
+  emitting one `MemoryFd` per slot (with the guest memory backing FD attached
+  via SCM_RIGHTS) before sending `Config` and `State`. Finish with either
+  `CompletePaused` (restored VM remains paused) or `Complete` (restored VM
+  resumes).
 
 ### Critical invariant on snapshot
 
@@ -358,8 +360,8 @@ production backend.
 
 ### Limitations
 
-- The VM must use shared-memory backing (`shared=on` or file-backed).
-  Anonymous memory is rejected with the same error message that local
+- Every guest memory region must use shared memory (`shared=on`) or hugepage
+  backing. Anonymous memory is rejected with the same error message that local
   live migration produces.
 - Orchestrator-supplied network FDs (today carried by `vm.restore`'s
   `net_fds` field) are not plumbed through `vm.receive-migration`,
