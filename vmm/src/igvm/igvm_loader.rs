@@ -88,19 +88,19 @@ pub struct SnpCpuidInfo {
 }
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("command line is not a valid C string")]
+    #[error("Command line is not a valid C string")]
     InvalidCommandLine(#[source] ffi::NulError),
-    #[error("failed to read igvm file")]
+    #[error("Failed to read IGVM file")]
     Igvm(#[source] io::Error),
-    #[error("invalid igvm file")]
+    #[error("Invalid IGVM file")]
     InvalidIgvmFile(#[source] igvm::Error),
-    #[error("multiple SNP ID blocks in IGVM file")]
+    #[error("Multiple SNP ID blocks in IGVM file")]
     DuplicateSnpIdBlock,
-    #[error("invalid guest memory map")]
+    #[error("Invalid guest memory map")]
     InvalidGuestMemmap(#[source] arch::Error),
-    #[error("loader error")]
+    #[error("Loader error")]
     Loader(#[source] loader::Error),
-    #[error("parameter too large for parameter area")]
+    #[error("Parameter too large for parameter area")]
     ParameterTooLarge,
     #[error("Error importing isolated pages")]
     ImportIsolatedPages(#[source] hypervisor::HypervisorVmError),
