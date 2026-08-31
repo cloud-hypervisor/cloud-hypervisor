@@ -166,11 +166,11 @@ impl ProcessRegistry {
 
 #[derive(Error, Debug)]
 pub enum WaitTimeoutError {
-    #[error("timeout")]
+    #[error("Timeout")]
     Timedout,
-    #[error("exit status indicates failure")]
+    #[error("Exit status indicates failure")]
     ExitStatus,
-    #[error("general failure")]
+    #[error("General failure")]
     General(#[source] io::Error),
 }
 
@@ -178,21 +178,21 @@ pub enum WaitTimeoutError {
 pub enum Error {
     #[error("Failed to parse")]
     Parsing(#[source] num::ParseIntError),
-    #[error("ssh command failed")]
+    #[error("SSH command failed")]
     SshCommand(#[from] SshCommandError),
-    #[error("waiting for boot failed")]
+    #[error("Waiting for boot failed")]
     WaitForBoot(#[source] WaitForBootError),
-    #[error("reading log file failed")]
+    #[error("Reading log file failed")]
     EthrLogFile(#[source] io::Error),
-    #[error("parsing log file failed")]
+    #[error("Parsing log file failed")]
     EthrLogParse,
-    #[error("parsing fio output failed")]
+    #[error("Parsing fio output failed")]
     FioOutputParse,
-    #[error("parsing iperf3 output failed")]
+    #[error("Parsing iperf3 output failed")]
     Iperf3Parse,
-    #[error("spawning process failed")]
+    #[error("Spawning process failed")]
     Spawn(#[source] io::Error),
-    #[error("waiting for timeout failed")]
+    #[error("Waiting for timeout failed")]
     WaitTimeout(#[source] WaitTimeoutError),
 }
 
@@ -266,7 +266,7 @@ pub enum WaitForBootError {
     Listen(#[source] io::Error),
     #[error("Epoll wait timeout")]
     EpollWaitTimeout,
-    #[error("wrong guest address")]
+    #[error("Wrong guest address")]
     WrongGuestAddr,
     #[error("Failed to accept a TCP request")]
     Accept(#[source] io::Error),
@@ -816,37 +816,37 @@ pub const DEFAULT_SSH_TIMEOUT: u8 = 10;
 
 #[derive(Error, Debug)]
 pub enum SshCommandError {
-    #[error("ssh connection failed")]
+    #[error("SSH connection failed")]
     Connection(#[source] io::Error),
-    #[error("ssh handshake failed")]
+    #[error("SSH handshake failed")]
     Handshake(#[source] ssh2::Error),
-    #[error("ssh authentication failed")]
+    #[error("SSH authentication failed")]
     Authentication(#[source] ssh2::Error),
-    #[error("ssh channel session failed")]
+    #[error("SSH channel session failed")]
     ChannelSession(#[source] ssh2::Error),
-    #[error("ssh command failed")]
+    #[error("SSH command failed")]
     Command(#[source] ssh2::Error),
-    #[error("retrieving exit status from ssh command failed")]
+    #[error("Retrieving exit status from SSH command failed")]
     ExitStatus(#[source] ssh2::Error),
-    #[error("the exit code indicates failure: {0}")]
+    #[error("The exit code indicates failure: {0}")]
     NonZeroExitStatus(i32),
-    #[error("failed to read file")]
+    #[error("Failed to read file")]
     FileRead(#[source] io::Error),
-    #[error("failed to read metadata")]
+    #[error("Failed to read metadata")]
     FileMetadata(#[source] io::Error),
-    #[error("scp send failed")]
+    #[error("SCP send failed")]
     ScpSend(#[source] ssh2::Error),
-    #[error("scp write failed")]
+    #[error("SCP write failed")]
     WriteAll(#[source] io::Error),
-    #[error("scp send EOF failed")]
+    #[error("SCP send EOF failed")]
     SendEof(#[source] ssh2::Error),
-    #[error("scp wait EOF failed")]
+    #[error("SCP wait EOF failed")]
     WaitEof(#[source] ssh2::Error),
 }
 
 #[derive(Error, Debug)]
 pub enum WaitForSshError {
-    #[error("timed out after {timeout:?} waiting for ssh command {command:?} on {ip}: {source}")]
+    #[error("Timed out after {timeout:?} waiting for SSH command {command:?} on {ip}: {source}")]
     Timeout {
         command: String,
         ip: String,
