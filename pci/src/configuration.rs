@@ -494,39 +494,39 @@ pub struct PciBarConfiguration {
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("address {0} size {1} too big")]
+    #[error("Address {0} size {1} too big")]
     BarAddressInvalid(u64, u64),
-    #[error("bar {0} already used")]
+    #[error("BAR {0} already used")]
     BarInUse(usize),
-    #[error("64bit bar {0} already used (requires two regs)")]
+    #[error("64-bit BAR {0} already used (requires two regs)")]
     BarInUse64(usize),
-    #[error("bar {0} invalid, max {max}", max = NUM_BAR_REGS - 1)]
+    #[error("BAR {0} invalid, max {max}", max = NUM_BAR_REGS - 1)]
     BarInvalid(usize),
-    #[error("64bitbar {0} invalid, requires two regs, max {max}", max = NUM_BAR_REGS - 1)]
+    #[error("64-bit BAR {0} invalid, requires two regs, max {max}", max = NUM_BAR_REGS - 1)]
     BarInvalid64(usize),
-    #[error("bar address {0} not a power of two")]
+    #[error("BAR address {0} not a power of two")]
     BarSizeInvalid(u64),
-    #[error("empty capabilities are invalid")]
+    #[error("Empty capabilities are invalid")]
     CapabilityEmpty,
     #[error("Invalid capability length {0}")]
     CapabilityLengthInvalid(usize),
-    #[error("capability of size {0} doesn't fit")]
+    #[error("Capability of size {0} doesn't fit")]
     CapabilitySpaceFull(usize),
-    #[error("failed to decode 32 bits BAR size")]
+    #[error("Failed to decode 32-bit BAR size")]
     Decode32BarSize,
-    #[error("failed to decode 64 bits BAR size")]
+    #[error("Failed to decode 64-bit BAR size")]
     Decode64BarSize,
-    #[error("failed to encode 32 bits BAR size")]
+    #[error("Failed to encode 32-bit BAR size")]
     Encode32BarSize,
-    #[error("failed to encode 64 bits BAR size")]
+    #[error("Failed to encode 64-bit BAR size")]
     Encode64BarSize,
-    #[error("address {0} size {1} too big")]
+    #[error("Address {0} size {1} too big")]
     RomBarAddressInvalid(u64, u64),
-    #[error("rom bar {0} already used")]
+    #[error("ROM BAR {0} already used")]
     RomBarInUse(usize),
-    #[error("rom bar {0} invalid, max {max}", max = NUM_BAR_REGS - 1)]
+    #[error("ROM BAR {0} invalid, max {max}", max = NUM_BAR_REGS - 1)]
     RomBarInvalid(usize),
-    #[error("rom bar address {0} not a power of two")]
+    #[error("ROM BAR address {0} not a power of two")]
     RomBarSizeInvalid(u64),
 }
 pub type Result<T> = result::Result<T, Error>;
