@@ -1687,12 +1687,14 @@ components:
 
     MigrationMode:
       type: string
-      enum: ["Precopy", "Postcopy"]
+      enum: ["MemFDs", "Precopy", "Postcopy"]
       default: "Precopy"
       description: >
-        Memory transfer mode. Precopy transfers all guest memory before the
-        destination resumes. Postcopy resumes the destination first and faults
-        guest pages in on demand.
+        Memory transfer mode. MemFDs passes the guest memory backing file
+        descriptors to the destination over a UNIX socket. MemFDs requires every
+        guest memory region to use shared memory or hugepage backing. Precopy
+        transfers all guest memory before the destination resumes. Postcopy
+        resumes the destination first and faults guest pages in on demand.
 
     VmMemoryZoneUpdateData:
       type: object
@@ -1724,6 +1726,18 @@ components:
           type: string
         local:
           type: boolean
+          default: false
+          deprecated: true
+          description: >
+            Deprecated: set memory_mode to "MemFDs" instead. If true, the
+            request is treated as if memory_mode were "MemFDs".
+        preserve_source:
+          type: boolean
+          default: false
+          description: >
+            Keep the source VM alive in a paused state after migration
+            completes. This is only supported when memory_mode is "MemFDs" or
+            the deprecated local property is true.
         downtime_ms:
           type: integer
           format: int64
