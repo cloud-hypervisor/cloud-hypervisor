@@ -31,13 +31,13 @@ pub struct ImportRegion {
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("overlaps with existing import region {0:?}")]
+    #[error("Overlaps with existing import region {0:?}")]
     OverlapsExistingRegion(ImportRegion),
-    #[error("memory unavailable")]
+    #[error("Memory unavailable")]
     MemoryUnavailable,
-    #[error("failed to import pages")]
+    #[error("Failed to import pages")]
     ImportPagesFailed,
-    #[error("data larger than imported region")]
+    #[error("Data larger than imported region")]
     DataTooLarge,
 }
 
