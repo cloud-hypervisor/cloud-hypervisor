@@ -145,7 +145,7 @@ pub enum ExecuteError {
     AsyncRead(#[source] AsyncIoError),
     #[error("Failed to async write")]
     AsyncWrite(#[source] AsyncIoError),
-    #[error("failed to async flush")]
+    #[error("Failed to async flush")]
     AsyncFlush(#[source] AsyncIoError),
     #[error("Failed to async punch hole")]
     AsyncPunchHole(#[source] AsyncIoError),
