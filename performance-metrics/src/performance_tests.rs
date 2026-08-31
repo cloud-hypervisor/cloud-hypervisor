@@ -15,11 +15,11 @@ use crate::{ImageFormat, PerformanceTestControl, PerformanceTestOverrides, mean}
 
 #[derive(Error, Debug)]
 enum Error {
-    #[error("boot time could not be parsed")]
+    #[error("Boot time could not be parsed")]
     BootTimeParse,
-    #[error("infrastructure failure")]
+    #[error("Infrastructure failure")]
     Infra(#[from] InfraError),
-    #[error("restore time could not be parsed")]
+    #[error("Restore time could not be parsed")]
     RestoreTimeParse,
 }
 
