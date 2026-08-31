@@ -37,9 +37,9 @@ pub struct DumpState {
 
 #[derive(Error, Debug)]
 pub enum GuestDebuggableError {
-    #[error("coredump")]
+    #[error("Coredump")]
     Coredump(#[source] anyhow::Error),
-    #[error("coredump file")]
+    #[error("Coredump file")]
     CoredumpFile(#[source] io::Error),
     #[error("Failed to pause")]
     Pause(#[source] vm_migration::MigratableError),
