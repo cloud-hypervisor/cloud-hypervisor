@@ -207,7 +207,7 @@ pub enum Error {
     #[error("Cannot clone EventFd")]
     EventFdClone(#[source] io::Error),
 
-    #[error("invalid VM state transition: {0:?} to {1:?}")]
+    #[error("Invalid VM state transition: {0:?} to {1:?}")]
     InvalidStateTransition(VmState, VmState),
 
     #[error("Error from CPU manager")]
@@ -345,7 +345,7 @@ pub enum Error {
     #[error("Error spawning kernel loading thread")]
     KernelLoadThreadSpawn(#[source] io::Error),
 
-    #[error("Error joining kernel loading thread")]
+    #[error("Error joining kernel loading thread: {0:?}")]
     KernelLoadThreadJoin(Box<dyn any::Any + Send>),
 
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
