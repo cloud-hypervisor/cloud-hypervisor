@@ -1,16 +1,27 @@
 # Live Migration
 
-This document gives examples of how to use the live migration support
-in Cloud Hypervisor:
+Cloud Hypervisor supports live migration over two transport channels:
 
-1. **Local Migration**: Migrating a VM from one Cloud Hypervisor instance to another on the same machine; also called
-  UNIX socket migration.
-1. **Remote Migration** (TCP Migration): migrating a VM between two TCP/IP hosts.
+| Transport          | When to use it                                                                  |
+|--------------------|---------------------------------------------------------------------------------|
+| TCP stream         | Migration between hosts. It also works on one host for development and testing. |
+| UNIX domain socket | Migration between VMMs on the same host.                                        |
 
-> :warning: These examples place sockets in /tmp. This is done for
+See [Migration Parameters](#migration-parameters) for the full definitions of
+these parameters.
+
+> :warning: The following examples place sockets in /tmp. This is done for
 > simplicity and should not be done in production.
 
-## Local Migration (Suitable for Live Upgrade of VMM)
+## UNIX Domain Socket Migration
+
+UNIX domain sockets are suited for same host migrations, especially when
+combined with `memory_mode=memfds`. This is particularly useful for VMM
+live upgrades with minimal VM downtime. We call this mode "local migration".
+
+If `memory_mode=memfds` is omitted, the migration defaults to copying guest
+memory instead. UNIX domain socket transport may be proxied via a socket proxy
+(e.g. `socat` fur advanced custom use cases).
 
 Launch the source VM (on the host machine):
 
@@ -46,13 +57,12 @@ When the above commands completed, the source VM should be successfully
 migrated to the destination VM. Now the destination VM is running while
 the source VM is terminated gracefully.
 
-## Remote Migration (TCP Migration)
+## TCP Migration
 
-_Hint: For developing purposes, same-host TCP migrations are also supported._
-
-In this example, we will migrate a VM from one machine (`src`) to
+TCP is intended for migration from one machine (`src`) to
 another (`dst`) across the network. To keep it simple, we will use a
-minimal VM setup without storage.
+minimal VM setup without storage. Same host TCP migration is also supported
+for development and testing.
 
 ### Preparation
 
@@ -76,65 +86,6 @@ src $ curl $DEBIAN/initrd.gz > /var/images/initrd
 
 Repeat the above steps on the destination host.
 
-### Unix Socket Migration
-
-If Unix socket is selected for migration, we can tunnel traffic through "socat".
-
-#### Starting the Receiver VM
-
-On the receiver side, we prepare an empty VM:
-
-```console
-dst $ cloud-hypervisor --api-socket /tmp/api
-```
-
-In a different terminal, configure the VM as a migration target:
-
-```console
-dst $ ch-remote --api-socket=/tmp/api receive-migration receiver_url=unix:/tmp/sock
-```
-
-In yet another terminal, forward TCP connections to the Unix domain socket:
-
-```console
-dst $ socat TCP-LISTEN:{port},reuseaddr UNIX-CLIENT:/tmp/sock
-```
-
-#### Starting the Sender VM
-
-Let's start the VM on the source machine:
-
-```console
-src $ cloud-hypervisor \
-        --serial tty --console off \
-        --cpus boot=2 --memory size=4G \
-        --kernel /var/images/linux \
-        --initramfs /var/images/initrd \
-        --cmdline "console=ttyS0" \
-        --api-socket /tmp/api
-```
-
-After a few seconds the VM should be up and you can interact with it.
-
-#### Performing the Migration
-
-First, we start `socat`:
-
-```console
-src $ socat UNIX-LISTEN:/tmp/sock,reuseaddr TCP:{dst}:{port}
-```
-
-> Replace {dst}:{port} with the actual IP address and port of your destination host.
-
-Then we kick-off the migration itself:
-
-```console
-src $ ch-remote --api-socket=/tmp/api send-migration destination_url=unix:/tmp/sock
-```
-
-When the above commands completed, the VM should be successfully
-migrated to the destination machine without interrupting the workload.
-
 ### Network Announcements After Resume
 
 After a VM resumes from migration, snapshot restore, or any other path
@@ -147,10 +98,10 @@ re-announcement therefore only happens when the guest negotiated
 `VIRTIO_NET_F_GUEST_ANNOUNCE`. For `vhost-user-net`, the current implementation
 only uses the guest announcement path.
 
-### TCP Socket Migration
+### Performing a TCP Migration
 
-If TCP socket is selected for migration, we need to consider migrating
-in a trusted network.
+Use TCP migration only in a trusted network or configure TLS as described
+below.
 
 #### Starting the Receiver VM
 
@@ -249,7 +200,7 @@ src $ ch-remote --api-socket=/tmp/api send-migration destination_url=tcp:{dst}:{
 ```
 
 TLS encryption is only supported with `tcp:<host>:<port>` migration
-URLs, not with local UNIX-socket migration.
+URLs, not with UNIX domain socket migration.
 
 The commands below describe how to create the encryption material necessary
 to perform a same-host TCP migration with TLS.
@@ -377,7 +328,7 @@ migration process. Via the API or `ch-remote`, you may specify:
 - `connections <amount>`: \
   The number of parallel TCP connections to use for migration.
   Must be between `1` and `128`. Defaults to `1`.
-  Multiple connections are not supported with local UNIX-socket migration.
+  Multiple connections are not supported with UNIX domain socket migration.
 - `memory_mode <memfds|precopy|postcopy>`: \
   Memory transfer mode. `memfds` passes the guest memory backing file
   descriptors over a UNIX socket. It requires every guest memory region to use

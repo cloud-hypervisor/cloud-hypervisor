@@ -5,16 +5,14 @@
 
 //! # Migration Protocol
 //!
-//! ## Cross-Host Migration
+//! ## TCP Migration
 //!
-//! A traditional network-based live migration where all resources are
-//! transmitted over the wire. Externally-provided FDs must be opened and
-//! managed by the management software on the destination side.
+//! TCP is the normal transport for cross-host migration. It can also be used
+//! between VMs on the same host for development and testing. Guest memory is
+//! copied over the stream. Externally provided FDs must be opened and managed
+//! by the management software on the destination side.
 //!
-//! **Supported migration modes**:
-//! - TCP (currently one single connection)
-//!
-//! The following mermaid sequence diagram shows a brief overview:
+//! The following sequence diagram shows precopy migration over a stream:
 //!
 //! <!-- Best viewed and edited here: https://mermaid.live/edit -->
 //! ```mermaid
@@ -44,13 +42,14 @@
 //!    Destination-->>Source: OK
 //! ```
 //!
-//! ## Local Migration
+//! ## UNIX Domain Socket Migration
 //!
-//! A simplified migration taking a few shortcuts and only working on the
-//! same host. The VM memory is not transferred over the wire but instead
-//! passed as memory FD.
+//! UNIX domain sockets connect two Cloud Hypervisor instances on the same
+//! host. They can transfer guest memory normally, as TCP does, or use
+//! `memory_mode=memfds` to pass the guest memory backing FDs instead of
+//! copying memory ("local migration").
 //!
-//! The following mermaid sequence diagram shows a brief overview:
+//! The following sequence diagram shows the MemFD mode:
 //!
 //! <!-- Best viewed and edited here: https://mermaid.live/edit -->
 //! ```mermaid
