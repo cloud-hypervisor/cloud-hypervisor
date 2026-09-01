@@ -716,6 +716,7 @@ pub struct Vmm {
     console_resize_pipe: Option<Arc<File>>,
     console_info: Option<ConsoleInfo>,
     serial_socket_listener: Option<Arc<LockedUnixListener>>,
+    console_socket_listener: Option<Arc<LockedUnixListener>>,
     no_shutdown: bool,
     check_migration_evt: EventFd,
 }
@@ -949,6 +950,7 @@ impl Vmm {
             console_resize_pipe: None,
             console_info: None,
             serial_socket_listener: None,
+            console_socket_listener: None,
             no_shutdown,
             check_migration_evt,
         })
@@ -2839,6 +2841,7 @@ impl RequestHandler for Vmm {
 
         self.console_info = None;
         self.serial_socket_listener = None;
+        self.console_socket_listener = None;
         self.vm_config = None;
         event!("vm", "deleted");
 
