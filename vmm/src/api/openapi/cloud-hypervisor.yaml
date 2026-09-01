@@ -1765,7 +1765,7 @@ components:
           description: >
             The number of parallel TCP connections to use for migration.
             Must be between 1 and 128. Multiple connections are not supported
-            with local UNIX-socket migration.
+            with UNIX domain socket migration.
         tls_dir:
           type: string
           description: >
