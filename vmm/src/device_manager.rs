@@ -127,6 +127,7 @@ use crate::console_devices::{ConsoleInfo, ConsoleTransport};
 use crate::cpu::{AcpiCpuHotplugController, CPU_MANAGER_ACPI_SIZE, CpuManager};
 use crate::device_tree::{DeviceNode, DeviceTree};
 use crate::interrupt::{LegacyUserspaceInterruptManager, MsiInterruptManager};
+use crate::locked_unix_listener::LockedUnixListener;
 use crate::memory_manager::{Error as MemoryManagerError, MEMORY_MANAGER_ACPI_SIZE, MemoryManager};
 use crate::pci_segment::PciSegment;
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
@@ -481,10 +482,6 @@ pub enum DeviceManagerError {
     #[error("No support for device passthrough")]
     NoDevicePassthroughSupport,
 
-    /// No socket option support for console device
-    #[error("No socket option support for console device")]
-    NoSocketOptionSupportForConsoleDevice,
-
     /// Failed to resize virtio-balloon
     #[error("Failed to resize virtio-balloon")]
     VirtioBalloonResize(#[source] balloon::Error),
@@ -622,6 +619,7 @@ const DEVICE_MANAGER_ACPI_SIZE: usize = 0x10;
 pub struct Console {
     console_resizer: Option<Arc<virtio_devices::ConsoleResizer>>,
     resize_pipe: Option<Arc<File>>,
+    socket: Option<Arc<LockedUnixListener>>,
 }
 
 impl Console {
@@ -2374,8 +2372,13 @@ impl DeviceManager {
                     Endpoint::File(stdout)
                 }
             }
-            ConsoleTransport::Socket(_) => {
-                return Err(DeviceManagerError::NoSocketOptionSupportForConsoleDevice);
+            ConsoleTransport::Socket(listener) => {
+                let inner = listener
+                    .listener()
+                    .try_clone()
+                    .map_err(DeviceManagerError::CreateVirtioConsole)?;
+                self.console.socket = Some(listener);
+                Endpoint::Socket(Arc::new(inner))
             }
             ConsoleTransport::Null => Endpoint::Null,
             ConsoleTransport::Off => return Ok(None),
