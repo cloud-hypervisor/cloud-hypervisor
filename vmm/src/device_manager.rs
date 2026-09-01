@@ -127,6 +127,7 @@ use crate::console_devices::{ConsoleInfo, ConsoleTransport};
 use crate::cpu::{AcpiCpuHotplugController, CPU_MANAGER_ACPI_SIZE, CpuManager};
 use crate::device_tree::{DeviceNode, DeviceTree};
 use crate::interrupt::{LegacyUserspaceInterruptManager, MsiInterruptManager};
+use crate::locked_unix_listener::LockedUnixListener;
 use crate::memory_manager::{Error as MemoryManagerError, MEMORY_MANAGER_ACPI_SIZE, MemoryManager};
 use crate::pci_segment::PciSegment;
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
@@ -480,10 +481,6 @@ pub enum DeviceManagerError {
     /// No support for device passthrough
     #[error("No support for device passthrough")]
     NoDevicePassthroughSupport,
-
-    /// No socket option support for console device
-    #[error("No socket option support for console device")]
-    NoSocketOptionSupportForConsoleDevice,
 
     /// Failed to resize virtio-balloon
     #[error("Failed to resize virtio-balloon")]
@@ -919,6 +916,9 @@ struct VirtioConsole {
 
     // pty foreground status
     resize_pipe: Option<Arc<File>>,
+
+    // Lock for the console listening socket.
+    socket: Option<Arc<LockedUnixListener>>,
 }
 
 pub struct DeviceManager {
@@ -1328,6 +1328,7 @@ impl DeviceManager {
             console: VirtioConsole {
                 device: Arc::new(Console::default()),
                 resize_pipe: None,
+                socket: None,
             },
             interrupt_controller: None,
             #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
@@ -2384,8 +2385,13 @@ impl DeviceManager {
                     Endpoint::File(stdout)
                 }
             }
-            ConsoleTransport::Socket(_) => {
-                return Err(DeviceManagerError::NoSocketOptionSupportForConsoleDevice);
+            ConsoleTransport::Socket(listener) => {
+                let inner = listener
+                    .listener()
+                    .try_clone()
+                    .map_err(DeviceManagerError::CreateVirtioConsole)?;
+                self.console.socket = Some(listener);
+                Endpoint::Socket(Arc::new(inner))
             }
             ConsoleTransport::Null => Endpoint::Null,
             ConsoleTransport::Off => return Ok(None),
