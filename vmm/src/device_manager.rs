@@ -913,18 +913,23 @@ impl AccessPlatform for SevSnpPageAccessProxy {
     }
 }
 
+// virtio-console device and the host resources tied to it.
+struct VirtioConsole {
+    device: Arc<Console>,
+
+    // pty foreground status
+    resize_pipe: Option<Arc<File>>,
+}
+
 pub struct DeviceManager {
     // Manage address space related to devices
     address_manager: Arc<AddressManager>,
 
-    // Console abstraction
-    console: Arc<Console>,
+    // Console device and its host resources
+    console: VirtioConsole,
 
     // Serial Manager
     serial_manager: Option<Arc<SerialManager>>,
-
-    // pty foreground status,
-    console_resize_pipe: Option<Arc<File>>,
 
     // To restore on exit.
     original_termios_opt: Arc<Mutex<Option<termios>>>,
@@ -1320,7 +1325,10 @@ impl DeviceManager {
 
         let device_manager = DeviceManager {
             address_manager: Arc::clone(&address_manager),
-            console: Arc::new(Console::default()),
+            console: VirtioConsole {
+                device: Arc::new(Console::default()),
+                resize_pipe: None,
+            },
             interrupt_controller: None,
             #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
             cmdline_additions: Vec::new(),
@@ -1358,7 +1366,6 @@ impl DeviceManager {
             acpi_address,
             selected_segment: 0,
             serial_manager: None,
-            console_resize_pipe: None,
             original_termios_opt: Arc::new(Mutex::new(None)),
             virtio_mem_devices: Vec::new(),
             #[cfg(target_arch = "aarch64")]
@@ -1398,7 +1405,7 @@ impl DeviceManager {
     }
 
     pub fn console_resize_pipe(&self) -> Option<Arc<File>> {
-        self.console_resize_pipe.clone()
+        self.console.resize_pipe.clone()
     }
 
     pub fn create_interrupt_controller(
@@ -1469,7 +1476,7 @@ impl DeviceManager {
 
         self.original_termios_opt = original_termios_opt;
 
-        self.console = self.add_console_devices(
+        self.console.device = self.add_console_devices(
             legacy_interrupt_manager.as_ref(),
             console_info,
             console_resize_pipe,
@@ -2354,12 +2361,12 @@ impl DeviceManager {
         let endpoint = match transport {
             ConsoleTransport::File(file) => Endpoint::File(file),
             ConsoleTransport::Pty(file) => {
-                self.console_resize_pipe = resize_pipe;
+                self.console.resize_pipe = resize_pipe;
                 Endpoint::PtyPair(Arc::new(file.try_clone().unwrap()), file)
             }
             ConsoleTransport::Tty(stdout) => {
                 if stdout.is_terminal() {
-                    self.console_resize_pipe = resize_pipe;
+                    self.console.resize_pipe = resize_pipe;
                 }
 
                 // If an interactive TTY then we can accept input
@@ -2396,7 +2403,8 @@ impl DeviceManager {
         let (virtio_console_device, console_resizer) = virtio_devices::Console::new(
             id.clone(),
             endpoint,
-            self.console_resize_pipe
+            self.console
+                .resize_pipe
                 .as_ref()
                 .map(|p| p.try_clone().unwrap()),
             self.force_access_platform | console_config.pci_common.iommu,
