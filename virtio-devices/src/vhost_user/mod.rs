@@ -804,7 +804,7 @@ impl VhostUserCommon {
         let snapshot = Snapshot::new_from_state(state)?;
 
         if self.migration_started {
-            // Local migration does not enable dirty logging.
+            // Precopy migration may enable dirty logging.
             if self.dirty_logging {
                 self.saved_dirty_log = Some(self.dirty_log()?);
             }

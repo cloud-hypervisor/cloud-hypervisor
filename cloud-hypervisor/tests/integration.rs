@@ -6721,8 +6721,8 @@ mod common_parallel {
         handle_child_output(r, &output);
     }
 
-    // This test exercises the local live-migration between two Cloud Hypervisor VMs on the
-    // same host. It ensures the following behaviors:
+    // This helper exercises migration between two Cloud Hypervisor VMs on the
+    // same host:
     // 1. The source VM is up and functional (including various virtio-devices are working properly);
     // 2. The 'send-migration' and 'receive-migration' command finished successfully;
     // 3. The source VM terminated gracefully after live migration;
