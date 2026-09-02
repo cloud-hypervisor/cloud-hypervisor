@@ -5,8 +5,6 @@
 
 //! External file descriptor handling.
 
-#![allow(unused, reason = "Will be used in later commits")]
-
 use std::collections::BTreeSet;
 use std::fs::File;
 use std::mem;
