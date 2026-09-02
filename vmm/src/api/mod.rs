@@ -60,7 +60,7 @@ use crate::config::{
     VmMemoryZoneUpdateData, take_inherited_fd, validate_inherited_fds,
 };
 use crate::device_tree::DeviceTree;
-use crate::external_fds::ExternalFds;
+use crate::external_fds::{ExternalFds, Target};
 use crate::migration::transport::{
     MAX_MIGRATION_CONNECTIONS, TcpAddressParseError, tcp_address_to_server_name,
 };
@@ -410,7 +410,8 @@ impl VmReceiveMigrationData {
             .add("vfio_fds")
             .add("iommufd_fd")
             .add("zone_updates")
-            .add("background_fetch_pages");
+            .add("background_fetch_pages")
+            .add("external_fds");
         parser
             .parse(migration)
             .map_err(VmReceiveMigrationConfigError::ParseError)?;
@@ -424,7 +425,7 @@ impl VmReceiveMigrationData {
             .convert::<String>("tls_dir")
             .map_err(VmReceiveMigrationConfigError::ParseError)?
             .map(|path| PathBuf::from(&path));
-        let vfio_fds = parser
+        let mut vfio_fds = parser
             .convert::<TupleList<String, u64>>("vfio_fds")
             .map_err(VmReceiveMigrationConfigError::ParseError)?
             .map(|v| {
@@ -439,7 +440,7 @@ impl VmReceiveMigrationData {
                     .collect::<ConfigResult<Vec<_>>>()
             })
             .transpose()?;
-        let iommufd_fd = parser
+        let mut iommufd_fd = parser
             .convert::<RawFd>("iommufd_fd")
             .map_err(VmReceiveMigrationConfigError::ParseError)?
             // SAFETY: The caller transfers ownership of the inherited CLI descriptors.
@@ -455,6 +456,18 @@ impl VmReceiveMigrationData {
                     .map(|Tuple(id, host_numa_node)| VmMemoryZoneUpdateData { id, host_numa_node })
                     .collect()
             });
+        let mut external_fds: ExternalFds = parser
+            .convert::<TupleList<Target, Vec<u64>>>("external_fds")
+            .map_err(VmReceiveMigrationConfigError::ParseError)?
+            .map(|v| {
+                // SAFETY: The caller transfers ownership of the inherited CLI descriptors.
+                unsafe { ExternalFds::from_cli(v) }
+            })
+            .transpose()?
+            .unwrap_or_default();
+        // TODO(fd): Remove after `vfio_fds` and `iommufd_fd` are deprecated and removed.
+        external_fds.import_restored_iommufd_fd(&mut iommufd_fd, false);
+        external_fds.import_restored_vfio_configs(&mut vfio_fds);
 
         let background_fetch_pages = parser
             .convert::<Toggle>("background_fetch_pages")
@@ -469,7 +482,7 @@ impl VmReceiveMigrationData {
             iommufd_fd,
             zone_updates,
             background_fetch_pages,
-            external_fds: Default::default(),
+            external_fds,
         };
 
         data.validate()?;
@@ -508,68 +521,6 @@ impl VmReceiveMigrationData {
         }
         if unique_zones.contains("") {
             return Err(VmReceiveMigrationConfigError::MemoryZoneUpdatesEmptyId);
-        }
-
-        Ok(())
-    }
-
-    pub fn validate_vfio_fds(
-        &self,
-        vm_config: &VmConfig,
-    ) -> Result<(), VmReceiveMigrationConfigError> {
-        let vfio_fds = self.vfio_fds.as_deref().unwrap_or_default();
-
-        // A migrated VFIO device cannot reuse its source handle. Its fd is
-        // invalid across the migration and its path names the source host's
-        // topology, so every device needs a replacement in vfio_fds. This
-        // holds even when no vfio_fds are supplied at all.
-        let substituted: HashSet<&str> = vfio_fds.iter().map(|v| v.id.as_str()).collect();
-        for d in vm_config.devices.iter().flatten() {
-            if !d
-                .pci_common
-                .id
-                .as_deref()
-                .is_some_and(|id| substituted.contains(id))
-            {
-                return Err(VmReceiveMigrationConfigError::VfioDeviceNoReplacementFd(
-                    d.pci_common.id.as_deref().unwrap_or_default().to_owned(),
-                ));
-            }
-        }
-
-        if vfio_fds.is_empty() {
-            return Ok(());
-        }
-
-        // The supplied vfio_fds must be usable against the received VmConfig.
-        if self.iommufd_fd.is_none() {
-            return Err(VmReceiveMigrationConfigError::VfioFdRequiresIommufdFd);
-        }
-        if !vm_config.platform.as_ref().is_some_and(|p| p.iommufd) {
-            return Err(VmReceiveMigrationConfigError::IommufdFdRequiresIommufd);
-        }
-
-        let mut seen = HashSet::new();
-        for v in vfio_fds {
-            if !seen.insert(v.id.as_str()) {
-                return Err(VmReceiveMigrationConfigError::VfioFdMultipleReplacements(
-                    v.id.to_owned(),
-                ));
-            }
-        }
-
-        let known_ids: HashSet<&str> = vm_config
-            .devices
-            .iter()
-            .flatten()
-            .filter_map(|d| d.pci_common.id.as_deref())
-            .collect();
-        for v in vfio_fds {
-            if !known_ids.contains(v.id.as_str()) {
-                return Err(
-                    VmReceiveMigrationConfigError::VfioFdReplacementWithoutTarget(v.id.to_owned()),
-                );
-            }
         }
 
         Ok(())
@@ -2233,6 +2184,7 @@ mod tests {
     use std::{env, fs, process};
 
     use super::*;
+    use crate::external_fds::tests::vfio_target;
     use crate::tests::test_fd;
 
     struct TestDir {
@@ -2487,13 +2439,28 @@ mod tests {
             ))
         }
         .unwrap();
-        let fds = data.vfio_fds.as_ref().unwrap();
-        assert_eq!(fds.len(), 2);
-        assert_eq!(fds[0].id, "vfio0");
-        assert_eq!(fds[1].id, "vfio1");
-        assert_eq!(fds[0].fd.as_ref().unwrap().as_raw_fd(), raw_fds[0]);
-        assert_eq!(fds[1].fd.as_ref().unwrap().as_raw_fd(), raw_fds[1]);
-        assert_eq!(data.iommufd_fd.as_ref().unwrap().as_raw_fd(), raw_fds[2]);
+        assert_eq!(data.external_fds.entries().len(), 3);
+
+        assert!(data.vfio_fds.is_none());
+        assert!(data.iommufd_fd.is_none());
+        assert_eq!(
+            data.external_fds
+                .entries()
+                .into_iter()
+                .map(|(target, count, fds)| (
+                    target,
+                    count,
+                    fds.iter()
+                        .map(|fd| fd.as_ref().unwrap().as_raw_fd())
+                        .collect::<Vec<_>>()
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (&vfio_target("vfio0"), 1, vec![raw_fds[0]]),
+                (&vfio_target("vfio1"), 1, vec![raw_fds[1]]),
+                (&Target::Iommu, 1, vec![raw_fds[2]]),
+            ]
+        );
 
         // zone update tests
         let e =

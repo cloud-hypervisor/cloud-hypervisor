@@ -5,8 +5,6 @@
 
 //! External file descriptor handling.
 
-#![allow(unused, reason = "Will be used in later commits")]
-
 use std::collections::BTreeSet;
 use std::fs::File;
 use std::mem;
@@ -232,11 +230,21 @@ impl ExternalFds {
 
     // TODO(fd): Remove after `RestoreConfig::iommufd_fd` is deprecated and removed.
     /// Imports [`RestoreConfig::iommufd_fd`] into `Self`.
-    pub(crate) fn import_restored_iommufd_fd(&mut self, iommufd_fd: &mut ExternalFd) {
+    ///
+    /// `required` reserves a slot for SCM_RIGHTS even when deserialization
+    /// left the descriptor empty.
+    pub(crate) fn import_restored_iommufd_fd(
+        &mut self,
+        iommufd_fd: &mut ExternalFd,
+        required: bool,
+    ) {
+        if iommufd_fd.is_none() && !required {
+            return;
+        }
         let entry = Entry {
             target: Target::Iommu,
             expected_fds: 1,
-            received_fds: vec![iommufd_fd.clone()],
+            received_fds: vec![mem::take(iommufd_fd)],
         };
         self.external_fds.insert(0, entry);
     }
@@ -244,7 +252,9 @@ impl ExternalFds {
     /// # Safety
     ///
     /// A live fd must be exclusively owned by the caller, which transfers it here.
-    unsafe fn from_cli(value: TupleList<Target, Vec<u64>>) -> Result<Self, config::Error> {
+    pub(crate) unsafe fn from_cli(
+        value: TupleList<Target, Vec<u64>>,
+    ) -> Result<Self, config::Error> {
         Ok(Self {
             external_fds: value
                 .0
@@ -345,7 +355,7 @@ impl ScmRights for VmReceiveMigrationData {
     fn consume_fds(&mut self, files: Vec<File>) -> Result<(), ScmRightsError> {
         // TODO(fd): Remove after `vfio_fds` is deprecated and removed.
         self.external_fds
-            .import_restored_iommufd_fd(&mut self.iommufd_fd);
+            .import_restored_iommufd_fd(&mut self.iommufd_fd, self.vfio_fds.is_some());
 
         // TODO(fd): Remove after `vfio_fds` is deprecated and removed.
         self.external_fds
@@ -363,7 +373,7 @@ impl ScmRights for RestoreConfig {
     fn consume_fds(&mut self, files: Vec<File>) -> Result<(), ScmRightsError> {
         // TODO(fd): Remove after `iommufd_fd` is deprecated and removed.
         self.external_fds
-            .import_restored_iommufd_fd(&mut self.iommufd_fd);
+            .import_restored_iommufd_fd(&mut self.iommufd_fd, self.vfio_fds.is_some());
 
         // TODO(fd): Remove after `vfio_fds` is deprecated and removed.
         self.external_fds
@@ -534,7 +544,7 @@ impl VmConfig {
 /// Helper trait for updating file descriptors in [`VmConfig`].
 ///
 /// Should be implemented for members of [`VmConfig`] that carry file descriptors.
-trait UpdateFdsComponent {
+pub(crate) trait UpdateFdsComponent {
     /// Checks whether all required file descriptors for this component are present and no more.
     fn validate_fds(
         &self,
@@ -812,7 +822,7 @@ pub(crate) mod tests {
 
         // Transfer ownership to the parsed configuration.
         for file in files {
-            file.into_raw_fd();
+            let _ = file.into_raw_fd();
         }
         let external_fds =
             // SAFETY: We transferred ownership of the fds to the parsed config.
@@ -1152,15 +1162,19 @@ pub(crate) mod tests {
     #[test]
     fn external_fds_import_restored_iommufd_fd() {
         let mut external_fds = ExternalFds::default();
-        external_fds.import_restored_iommufd_fd(&mut ExternalFd::default());
+        external_fds.import_restored_iommufd_fd(&mut ExternalFd::default(), false);
+        assert!(external_fds.is_empty());
+        external_fds.import_restored_iommufd_fd(&mut ExternalFd::default(), true);
         assert_eq!(
             external_fds.entries(),
             vec![(&Target::Iommu, 1, &vec![ExternalFd::default()])]
         );
 
         let fd: ExternalFd = test_fd().into();
+        let mut imported_fd = fd.clone();
         let mut external_fds = ExternalFds::default();
-        external_fds.import_restored_iommufd_fd(&mut fd.clone());
+        external_fds.import_restored_iommufd_fd(&mut imported_fd, false);
+        assert!(imported_fd.is_none());
         assert_eq!(external_fds.entries(), vec![(&Target::Iommu, 1, &vec![fd])]);
     }
 
@@ -1242,10 +1256,42 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn scm_rights_legacy_vfio_json() {
+        for iommufd_fd in [None, Some(8)] {
+            let mut body = serde_json::json!({
+                "source_url": "/tmp/snapshot",
+                "receiver_url": "tcp:127.0.0.1:1234",
+                "vfio_fds": [{"id": "vfio0", "fd": 7}],
+            });
+            if let Some(fd) = iommufd_fd {
+                body["iommufd_fd"] = fd.into();
+            }
+
+            let mut restore: RestoreConfig = serde_json::from_value(body.clone()).unwrap();
+            let mut receive: VmReceiveMigrationData = serde_json::from_value(body).unwrap();
+            for config in [&mut restore as &mut dyn ScmRights, &mut receive] {
+                let files = vec![test_fd(), test_fd()];
+                let expected: Vec<_> = files.iter().map(AsRawFd::as_raw_fd).collect();
+                config.consume_fds(files).unwrap();
+                let actual: Vec<_> = config
+                    .take_fds()
+                    .iter()
+                    .map(|fd| fd.as_ref().unwrap().as_raw_fd())
+                    .collect();
+                assert_eq!(actual, expected);
+            }
+            assert_eq!(restore.external_fds.entries()[0].0, &vfio_target("vfio0"));
+            assert_eq!(restore.external_fds.entries()[1].0, &Target::Iommu);
+            assert_eq!(receive.external_fds.entries()[0].0, &vfio_target("vfio0"));
+            assert_eq!(receive.external_fds.entries()[1].0, &Target::Iommu);
+        }
+    }
+
+    #[test]
     fn scm_rights_vm_receive_migration_data() {
         {
             let mut vm_receive_migration_data = VmReceiveMigrationData::default();
-            let files = vec![test_fd(), test_fd()];
+            let files = vec![test_fd()];
             assert_eq!(
                 vm_receive_migration_data.consume_fds(files),
                 Err(ScmRightsError::TooManyFds)
@@ -1263,7 +1309,7 @@ pub(crate) mod tests {
                     fd: test_fd().into(),
                 },
             ]),
-            iommufd_fd: ExternalFd::default(),
+            iommufd_fd: test_fd().into(),
             ..Default::default()
         };
 
@@ -1325,7 +1371,7 @@ pub(crate) mod tests {
     fn scm_rights_restore_config() {
         {
             let mut restore_config = RestoreConfig::default();
-            let files = vec![test_fd(), test_fd()];
+            let files = vec![test_fd()];
             assert_eq!(
                 restore_config.consume_fds(files),
                 Err(ScmRightsError::TooManyFds)
@@ -1355,7 +1401,7 @@ pub(crate) mod tests {
                     fd: test_fd().into(),
                 },
             ]),
-            iommufd_fd: ExternalFd::default(),
+            iommufd_fd: test_fd().into(),
             ..Default::default()
         };
 
