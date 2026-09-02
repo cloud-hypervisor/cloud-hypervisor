@@ -5801,7 +5801,7 @@ pub(crate) mod tests {
         Ok(())
     }
 
-    fn net_fixture() -> NetConfig {
+    pub(crate) fn net_fixture() -> NetConfig {
         NetConfig {
             pci_common: PciDeviceCommonConfig::default(),
             tap: None,
