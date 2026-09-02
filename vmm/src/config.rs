@@ -4048,7 +4048,7 @@ impl Drop for VmConfig {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::fs::File;
     use std::os::unix::io::AsRawFd;
 
@@ -5794,7 +5794,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         );
     }
 
-    fn platform_fixture() -> PlatformConfig {
+    pub(crate) fn platform_fixture() -> PlatformConfig {
         PlatformConfig {
             num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: None,

@@ -85,6 +85,7 @@ mod coredump;
 pub mod cpu;
 pub mod device_manager;
 pub mod device_tree;
+pub mod external_fds;
 #[cfg(feature = "guest_debug")]
 mod gdb;
 #[cfg(feature = "igvm")]
@@ -3465,7 +3466,7 @@ mod util {
     }
 }
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::path::PathBuf;
 
     use arch::CpuProfile;
@@ -3496,7 +3497,7 @@ mod tests {
         .unwrap()
     }
 
-    fn create_dummy_vm_config() -> Box<VmConfig> {
+    pub(crate) fn create_dummy_vm_config() -> Box<VmConfig> {
         Box::new(VmConfig {
             cpus: CpusConfig {
                 boot_vcpus: 1,
