@@ -17,6 +17,8 @@ use option_parser::{Tuple, TupleList};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::api::VmReceiveMigrationData;
+use crate::config::{RestoreConfig, RestoredNetConfig, RestoredVfioConfig};
 use crate::vm_config::{DeviceConfig, NetConfig, PlatformConfig, VmConfig};
 
 /// Defines which operation caused the external file descriptor processing.
@@ -131,6 +133,37 @@ impl ExternalFdsEntry {
     }
 }
 
+// TODO(fd): Remove after `RestoredNetConfig` is deprecated and removed.
+impl From<RestoredNetConfig> for ExternalFdsEntry {
+    fn from(value: RestoredNetConfig) -> Self {
+        ExternalFdsEntry {
+            target: ExternalFdTarget::Net { id: value.id },
+            expected_fds: value.num_fds,
+            // `RestoredNetConfig` may contain valid file descriptors if passed via CLI.
+            received_fds: value
+                .fds
+                .map(|fds| fds.iter().filter(|fd| **fd != -1).copied().collect())
+                .unwrap_or_default(),
+        }
+    }
+}
+
+// TODO(fd): Remove after `RestoredVfioConfig` is deprecated and removed.
+impl From<RestoredVfioConfig> for ExternalFdsEntry {
+    fn from(value: RestoredVfioConfig) -> Self {
+        ExternalFdsEntry {
+            target: ExternalFdTarget::Vfio { id: value.id },
+            expected_fds: 1,
+            // `RestoredVfioConfig` may contain valid file descriptors if passed via CLI.
+            received_fds: value
+                .fd
+                .filter(|fd: &RawFd| *fd != -1)
+                .map(|fd| vec![fd])
+                .unwrap_or_default(),
+        }
+    }
+}
+
 impl Clone for ExternalFdsEntry {
     fn clone(&self) -> Self {
         // In tests, we're often not using actual file descriptors, so duplicating can either fail or
@@ -230,6 +263,48 @@ impl ExternalFds {
             acc
         })
     }
+
+    // TODO(fd): Remove after `RestoredNetConfig` is deprecated and removed.
+    /// Imports [`RestoredNetConfig`] into `Self`.
+    pub(crate) fn import_restored_net_configs(
+        &mut self,
+        restored_net_configs: &mut Option<Vec<RestoredNetConfig>>,
+    ) {
+        if let Some(restored_net_configs) = mem::take(restored_net_configs) {
+            self.external_fds
+                .splice(0..0, restored_net_configs.into_iter().map(Into::into));
+        }
+    }
+
+    // TODO(fd): Remove after `RestoredVfioConfig` is deprecated and removed.
+    /// Imports [`RestoredVfioConfig`] into `Self`.
+    pub(crate) fn import_restored_vfio_configs(
+        &mut self,
+        restored_vfio_configs: &mut Option<Vec<RestoredVfioConfig>>,
+    ) {
+        if let Some(restored_vfio_configs) = mem::take(restored_vfio_configs) {
+            self.external_fds
+                .splice(0..0, restored_vfio_configs.into_iter().map(Into::into));
+        }
+    }
+
+    // TODO(fd): Remove after `RestoreConfig::iommufd_fd` is deprecated and removed.
+    /// Imports [`RestoreConfig::iommufd_fd`] into `Self`.
+    pub(crate) fn import_restored_iommufd_fd(&mut self, iommufd_fd: &mut Option<i32>) {
+        if let Some(iommufd_fd) = mem::take(iommufd_fd) {
+            let entry = ExternalFdsEntry {
+                target: ExternalFdTarget::Iommu,
+                expected_fds: 1,
+                // May contain valid file descriptors if passed via CLI.
+                received_fds: if iommufd_fd == -1 {
+                    vec![]
+                } else {
+                    vec![iommufd_fd]
+                },
+            };
+            self.external_fds.insert(0, entry);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -315,6 +390,46 @@ impl ScmRights for DeviceConfig {
     }
     fn take_raw_fds(&mut self) -> Vec<RawFd> {
         self.fd.take().map(|fd| vec![fd]).unwrap_or_default()
+    }
+}
+
+impl ScmRights for VmReceiveMigrationData {
+    fn consume_fds(&mut self, files: Vec<File>) -> Result<(), ScmRightsError> {
+        // TODO(fd): Remove after `vfio_fds` is deprecated and removed.
+        self.external_fds
+            .import_restored_iommufd_fd(&mut self.iommufd_fd);
+
+        // TODO(fd): Remove after `vfio_fds` is deprecated and removed.
+        self.external_fds
+            .import_restored_vfio_configs(&mut self.vfio_fds);
+
+        self.external_fds.consume_fds(files)
+    }
+
+    fn take_raw_fds(&mut self) -> Vec<RawFd> {
+        self.external_fds.take_raw_fds()
+    }
+}
+
+impl ScmRights for RestoreConfig {
+    fn consume_fds(&mut self, files: Vec<File>) -> Result<(), ScmRightsError> {
+        // TODO(fd): Remove after `iommufd_fd` is deprecated and removed.
+        self.external_fds
+            .import_restored_iommufd_fd(&mut self.iommufd_fd);
+
+        // TODO(fd): Remove after `vfio_fds` is deprecated and removed.
+        self.external_fds
+            .import_restored_vfio_configs(&mut self.vfio_fds);
+
+        // TODO(fd): Remove after `net_fds` is deprecated and removed.
+        self.external_fds
+            .import_restored_net_configs(&mut self.net_fds);
+
+        self.external_fds.consume_fds(files)
+    }
+
+    fn take_raw_fds(&mut self) -> Vec<RawFd> {
+        self.external_fds.take_raw_fds()
     }
 }
 
@@ -718,7 +833,9 @@ pub(crate) mod tests {
     use option_parser::{OptionParser, TupleList};
     use serde::{Deserialize, Serialize};
 
+    use crate::api::VmReceiveMigrationData;
     use crate::config::tests::{net_fixture, platform_fixture};
+    use crate::config::{RestoreConfig, RestoredNetConfig, RestoredVfioConfig};
     use crate::external_fds::{
         ExternalFdOperation, ExternalFdTarget, ExternalFds, ExternalFdsEntry,
         ParseExternalFdTargetError, ScmRights, ScmRightsError, UpdateFds, UpdateFdsError,
@@ -965,6 +1082,99 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn restored_net_config_to_external_fds_entry() {
+        assert_eq!(
+            ExternalFdsEntry::from(RestoredNetConfig {
+                id: "net1".to_string(),
+                num_fds: 3,
+                fds: Some(vec![-1, 2, 3]),
+            }),
+            ExternalFdsEntry {
+                target: ExternalFdTarget::Net {
+                    id: "net1".to_owned()
+                },
+                expected_fds: 3,
+                received_fds: vec![2, 3],
+            }
+        );
+
+        assert_eq!(
+            ExternalFdsEntry::from(RestoredNetConfig {
+                id: "net1".to_string(),
+                num_fds: 3,
+                fds: None,
+            }),
+            ExternalFdsEntry {
+                target: ExternalFdTarget::Net {
+                    id: "net1".to_owned()
+                },
+                expected_fds: 3,
+                received_fds: vec![],
+            }
+        );
+
+        assert_eq!(
+            ExternalFdsEntry::from(RestoredNetConfig {
+                id: "net1".to_string(),
+                num_fds: 0,
+                fds: None,
+            }),
+            ExternalFdsEntry {
+                target: ExternalFdTarget::Net {
+                    id: "net1".to_owned()
+                },
+                expected_fds: 0,
+                received_fds: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn restored_vfio_config_to_external_fds_entry() {
+        assert_eq!(
+            ExternalFdsEntry::from(RestoredVfioConfig {
+                id: "vfio1".to_string(),
+                fd: Some(1),
+            }),
+            ExternalFdsEntry {
+                target: ExternalFdTarget::Vfio {
+                    id: "vfio1".to_owned()
+                },
+                expected_fds: 1,
+                received_fds: vec![1],
+            }
+        );
+
+        assert_eq!(
+            ExternalFdsEntry::from(RestoredVfioConfig {
+                id: "vfio1".to_string(),
+                fd: Some(-1),
+            }),
+            ExternalFdsEntry {
+                target: ExternalFdTarget::Vfio {
+                    id: "vfio1".to_owned()
+                },
+                expected_fds: 1,
+                received_fds: vec![],
+            }
+        );
+
+        assert_eq!(
+            ExternalFdsEntry::from(RestoredVfioConfig {
+                id: "vfio1".to_string(),
+                fd: None,
+            }),
+            ExternalFdsEntry {
+                target: ExternalFdTarget::Vfio {
+                    id: "vfio1".to_owned()
+                },
+                expected_fds: 1,
+                received_fds: vec![],
+            }
+        );
+    }
+
+    #[test]
     fn external_fds_take_entry() {
         let target = net_target("net1");
         let mut external_fds: ExternalFds = vec![(target.clone(), vec![1, 2, 3])].into();
@@ -1102,6 +1312,89 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn external_fds_import_restored_net_configs() {
+        let restored_net_config1 = RestoredNetConfig {
+            id: "net1".to_owned(),
+            num_fds: 1,
+            fds: None,
+        };
+        let restored_net_config2 = RestoredNetConfig {
+            id: "net2".to_owned(),
+            num_fds: 1,
+            fds: Some(vec![-1, 1]),
+        };
+        let restored_net_config3 = RestoredNetConfig {
+            id: "net3".to_owned(),
+            num_fds: 10,
+            fds: Some(vec![1, -1]),
+        };
+        let mut external_fds = ExternalFds::default();
+        external_fds.import_restored_net_configs(&mut Some(vec![
+            restored_net_config1,
+            restored_net_config2,
+            restored_net_config3,
+        ]));
+        assert_eq!(
+            external_fds.entries(),
+            vec![
+                (&net_target("net1"), 1, &vec![]),
+                (&net_target("net2"), 1, &vec![1]),
+                (&net_target("net3"), 10, &vec![1]),
+            ]
+        );
+    }
+
+    #[test]
+    fn external_fds_import_restored_vfio_configs() {
+        let restored_vfio_config1 = RestoredVfioConfig {
+            id: "vfio1".to_owned(),
+            fd: None,
+        };
+        let restored_vfio_config2 = RestoredVfioConfig {
+            id: "vfio2".to_owned(),
+            fd: Some(1),
+        };
+        let restored_vfio_config3 = RestoredVfioConfig {
+            id: "vfio3".to_owned(),
+            fd: Some(-1),
+        };
+        let mut external_fds = ExternalFds::default();
+        external_fds.import_restored_vfio_configs(&mut Some(vec![
+            restored_vfio_config1,
+            restored_vfio_config2,
+            restored_vfio_config3,
+        ]));
+        assert_eq!(
+            external_fds.entries(),
+            vec![
+                (&vfio_target("vfio1"), 1, &vec![]),
+                (&vfio_target("vfio2"), 1, &vec![1]),
+                (&vfio_target("vfio3"), 1, &vec![]),
+            ]
+        );
+    }
+
+    #[test]
+    fn external_fds_import_restored_iommufd_fd() {
+        let mut external_fds = ExternalFds::default();
+        external_fds.import_restored_iommufd_fd(&mut None);
+        assert_eq!(external_fds.entries(), vec![]);
+        let mut external_fds = ExternalFds::default();
+        external_fds.import_restored_iommufd_fd(&mut Some(-1));
+        assert_eq!(
+            external_fds.entries(),
+            vec![(&ExternalFdTarget::Iommu, 1, &vec![]),]
+        );
+
+        let mut external_fds = ExternalFds::default();
+        external_fds.import_restored_iommufd_fd(&mut Some(1));
+        assert_eq!(
+            external_fds.entries(),
+            vec![(&ExternalFdTarget::Iommu, 1, &vec![1]),]
+        );
+    }
+
+    #[test]
     fn scm_rights_net_config() {
         let net_config = NetConfig {
             pci_common: Default::default(),
@@ -1169,6 +1462,186 @@ pub(crate) mod tests {
             let mut device_config = device_config.clone();
             device_config.consume_fds(vec![]).unwrap();
             assert_eq!(device_config.fd, None);
+        }
+    }
+
+    #[test]
+    fn scm_rights_vm_receive_migration_data() {
+        {
+            let mut vm_receive_migration_data = VmReceiveMigrationData::default();
+            let files = vec![dev_null_file()];
+            assert_eq!(
+                vm_receive_migration_data.consume_fds(files),
+                Err(ScmRightsError::TooManyFds)
+            );
+        }
+
+        let vm_receive_migration_data = VmReceiveMigrationData {
+            vfio_fds: Some(vec![
+                RestoredVfioConfig {
+                    id: "vfio1".to_owned(),
+                    fd: Some(1),
+                },
+                RestoredVfioConfig {
+                    id: "vfio2".to_owned(),
+                    fd: Some(1),
+                },
+            ]),
+            iommufd_fd: Some(-1),
+            ..Default::default()
+        };
+
+        {
+            let mut vm_receive_migration_data = vm_receive_migration_data.clone();
+            let files = vec![dev_null_file()];
+            assert_eq!(
+                vm_receive_migration_data.consume_fds(files),
+                Err(ScmRightsError::TooFewFds)
+            );
+        }
+
+        {
+            let mut vm_receive_migration_data = vm_receive_migration_data.clone();
+            let files = vec![dev_null_file(), dev_null_file(), dev_null_file()];
+            let raw_fds: Vec<_> = files.iter().map(AsRawFd::as_raw_fd).collect();
+
+            vm_receive_migration_data.consume_fds(files).unwrap();
+            assert_eq!(
+                vm_receive_migration_data.external_fds.entries(),
+                vec![
+                    (&vfio_target("vfio1"), 1, &vec![raw_fds[0]]),
+                    (&vfio_target("vfio2"), 1, &vec![raw_fds[1]]),
+                    (&ExternalFdTarget::Iommu, 1, &vec![raw_fds[2]]),
+                ],
+            );
+
+            //SAFETY: FDs in `ExternalFds` are not dropped in tests.
+            unsafe { drop_fds(raw_fds) };
+        }
+
+        {
+            let mut vm_receive_migration_data = vm_receive_migration_data.clone();
+            let files = vec![
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+            ];
+            assert_eq!(
+                vm_receive_migration_data.consume_fds(files),
+                Err(ScmRightsError::TooManyFds)
+            );
+        }
+    }
+
+    #[test]
+    fn scm_rights_restore_config() {
+        {
+            let mut restore_config = RestoreConfig::default();
+            let files = vec![dev_null_file()];
+            assert_eq!(
+                restore_config.consume_fds(files),
+                Err(ScmRightsError::TooManyFds)
+            );
+        }
+
+        let restore_config = RestoreConfig {
+            net_fds: Some(vec![
+                RestoredNetConfig {
+                    id: "net1".to_string(),
+                    num_fds: 1,
+                    fds: Some(vec![-1]),
+                },
+                RestoredNetConfig {
+                    id: "net2".to_string(),
+                    num_fds: 5,
+                    fds: Some(vec![1]),
+                },
+            ]),
+            vfio_fds: Some(vec![
+                RestoredVfioConfig {
+                    id: "vfio1".to_owned(),
+                    fd: Some(1),
+                },
+                RestoredVfioConfig {
+                    id: "vfio2".to_owned(),
+                    fd: Some(1),
+                },
+            ]),
+            iommufd_fd: Some(-1),
+            ..Default::default()
+        };
+
+        {
+            let mut restore_config = restore_config.clone();
+            let files = vec![dev_null_file()];
+            assert_eq!(
+                restore_config.consume_fds(files),
+                Err(ScmRightsError::TooFewFds)
+            );
+        }
+
+        {
+            let mut restore_config = restore_config.clone();
+            let files = vec![
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+            ];
+            let raw_fds: Vec<_> = files.iter().map(AsRawFd::as_raw_fd).collect();
+
+            restore_config.consume_fds(files).unwrap();
+            assert_eq!(
+                restore_config.external_fds.entries(),
+                vec![
+                    (&net_target("net1"), 1, &vec![raw_fds[0]]),
+                    (
+                        &net_target("net2"),
+                        5,
+                        &vec![raw_fds[1], raw_fds[2], raw_fds[3], raw_fds[4], raw_fds[5]]
+                    ),
+                    (&vfio_target("vfio1"), 1, &vec![raw_fds[6]]),
+                    (&vfio_target("vfio2"), 1, &vec![raw_fds[7]]),
+                    (&ExternalFdTarget::Iommu, 1, &vec![raw_fds[8]]),
+                ],
+            );
+
+            //SAFETY: FDs in `ExternalFds` are not dropped in tests.
+            unsafe { drop_fds(raw_fds) };
+        }
+
+        {
+            let mut restore_config = restore_config.clone();
+            let files = vec![
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+                dev_null_file(),
+            ];
+            assert_eq!(
+                restore_config.consume_fds(files),
+                Err(ScmRightsError::TooManyFds)
+            );
         }
     }
 

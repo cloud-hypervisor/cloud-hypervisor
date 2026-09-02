@@ -4049,6 +4049,7 @@ pub(crate) mod tests {
             vfio_fds,
             iommufd_fd,
             zone_updates: vec![],
+            external_fds: Default::default(),
         }
     }
 
