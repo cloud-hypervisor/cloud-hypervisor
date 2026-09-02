@@ -58,6 +58,7 @@ use crate::config::{
     RestoreConfig, RestoredVfioConfig, VmMemoryZoneUpdateData, deserialize_restored_fd,
 };
 use crate::device_tree::DeviceTree;
+use crate::external_fds::ExternalFds;
 use crate::migration::transport::{
     MAX_MIGRATION_CONNECTIONS, TcpAddressParseError, tcp_address_to_server_name,
 };
@@ -334,6 +335,8 @@ pub struct VmReceiveMigrationData {
     /// Enable the background thread for faulting all remaining pages.
     #[serde(default = "default_receive_migration_background_fetch_pages")]
     pub background_fetch_pages: bool,
+    #[serde(default, flatten)]
+    pub(crate) external_fds: ExternalFds,
 }
 
 fn default_receive_migration_background_fetch_pages() -> bool {
@@ -453,6 +456,7 @@ impl VmReceiveMigrationData {
             iommufd_fd,
             zone_updates,
             background_fetch_pages,
+            external_fds: Default::default(),
         };
 
         data.validate()?;
@@ -2311,6 +2315,7 @@ mod tests {
                 iommufd_fd: None,
                 zone_updates: vec![],
                 background_fetch_pages: true,
+                external_fds: Default::default(),
             }
         );
 
@@ -2341,6 +2346,7 @@ mod tests {
                 iommufd_fd: None,
                 zone_updates: vec![],
                 background_fetch_pages: true,
+                external_fds: Default::default(),
             }
         );
 
