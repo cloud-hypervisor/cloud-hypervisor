@@ -27,6 +27,7 @@ use virtio_devices::block::MINIMUM_BLOCK_QUEUE_SIZE;
 use virtio_devices::vhost_user::VIRTIO_FS_TAG_LEN;
 use virtio_devices::{RateLimiterConfig, TokenBucketConfig, net, vhost_user};
 
+use crate::external_fds::ExternalFds;
 use crate::landlock::LandlockAccess;
 use crate::vm_config::*;
 
@@ -2943,6 +2944,8 @@ pub struct RestoreConfig {
     pub resume: bool,
     #[serde(default)]
     pub zone_updates: Vec<VmMemoryZoneUpdateData>,
+    #[serde(default, flatten)]
+    pub(crate) external_fds: ExternalFds,
 }
 
 impl RestoreConfig {
@@ -3043,6 +3046,7 @@ impl RestoreConfig {
             iommufd_fd,
             resume,
             zone_updates,
+            external_fds: Default::default(),
         })
     }
 
@@ -5381,6 +5385,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 iommufd_fd: None,
                 resume: false,
                 zone_updates: vec![],
+                external_fds: Default::default(),
             }
         );
         assert_eq!(
@@ -5407,6 +5412,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 iommufd_fd: None,
                 resume: false,
                 zone_updates: vec![],
+                external_fds: Default::default(),
             }
         );
         assert_eq!(
@@ -5420,6 +5426,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 iommufd_fd: None,
                 resume: false,
                 zone_updates: vec![],
+                external_fds: Default::default(),
             }
         );
         assert_eq!(
@@ -5436,6 +5443,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                     host_numa_node: 1,
                     id: "zone1".to_string(),
                 }],
+                external_fds: Default::default(),
             }
         );
         assert_eq!(
@@ -5460,6 +5468,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 iommufd_fd: Some(7),
                 resume: false,
                 zone_updates: vec![],
+                external_fds: Default::default(),
             }
         );
         assert_eq!(
@@ -5484,6 +5493,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 iommufd_fd: Some(7),
                 resume: false,
                 zone_updates: vec![],
+                external_fds: Default::default(),
             }
         );
         // Parsing should fail as source_url is a required field
@@ -5622,6 +5632,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             iommufd_fd: None,
             resume: false,
             zone_updates: vec![],
+            external_fds: Default::default(),
         };
         valid_config.validate(&snapshot_vm_config).unwrap();
 
@@ -5690,6 +5701,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             iommufd_fd: None,
             resume: false,
             zone_updates: vec![],
+            external_fds: Default::default(),
         };
         snapshot_vm_config.net = Some(vec![NetConfig {
             pci_common: PciDeviceCommonConfig {
@@ -5710,6 +5722,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             iommufd_fd: None,
             resume: false,
             zone_updates: vec![],
+            external_fds: Default::default(),
         };
         assert_eq!(
             invalid_restore_mode.validate(&snapshot_vm_config),
@@ -5753,6 +5766,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             iommufd_fd: None,
             resume: false,
             zone_updates: vec![],
+            external_fds: Default::default(),
         };
         assert_eq!(
             invalid_cow_prefault.validate(&snapshot_vm_config),
@@ -5827,6 +5841,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             iommufd_fd: Some(6),
             resume: false,
             zone_updates: vec![],
+            external_fds: Default::default(),
         };
         valid_config.validate(&snapshot_vm_config).unwrap();
 

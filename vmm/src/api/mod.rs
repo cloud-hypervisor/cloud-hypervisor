@@ -58,6 +58,7 @@ use crate::config::{
     RestoreConfig, RestoredVfioConfig, VmMemoryZoneUpdateData, deserialize_restored_fd,
 };
 use crate::device_tree::DeviceTree;
+use crate::external_fds::ExternalFds;
 use crate::migration::transport::{
     MAX_MIGRATION_CONNECTIONS, TcpAddressParseError, tcp_address_to_server_name,
 };
@@ -331,6 +332,8 @@ pub struct VmReceiveMigrationData {
     /// Optional memory zone update data
     #[serde(default)]
     pub zone_updates: Vec<VmMemoryZoneUpdateData>,
+    #[serde(default, flatten)]
+    pub(crate) external_fds: ExternalFds,
 }
 
 #[derive(Debug, Error)]
@@ -438,6 +441,7 @@ impl VmReceiveMigrationData {
             vfio_fds,
             iommufd_fd,
             zone_updates,
+            external_fds: Default::default(),
         };
 
         data.validate()?;
@@ -2272,6 +2276,7 @@ mod tests {
                 vfio_fds: None,
                 iommufd_fd: None,
                 zone_updates: vec![],
+                external_fds: Default::default(),
             }
         );
 
@@ -2301,6 +2306,7 @@ mod tests {
                 vfio_fds: None,
                 iommufd_fd: None,
                 zone_updates: vec![],
+                external_fds: Default::default(),
             }
         );
 
