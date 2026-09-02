@@ -60,6 +60,7 @@ use crate::config::{
     VmMemoryZoneUpdateData, take_inherited_fd, validate_inherited_fds,
 };
 use crate::device_tree::DeviceTree;
+use crate::external_fds::ExternalFds;
 use crate::migration::transport::{
     MAX_MIGRATION_CONNECTIONS, TcpAddressParseError, tcp_address_to_server_name,
 };
@@ -342,6 +343,8 @@ pub struct VmReceiveMigrationData {
     /// New output of the virtio console, in the mode of the source VM.
     #[serde(default)]
     pub console: Option<ConsoleOutput>,
+    #[serde(default, flatten)]
+    pub(crate) external_fds: ExternalFds,
 }
 
 fn default_receive_migration_background_fetch_pages() -> bool {
@@ -484,6 +487,7 @@ impl VmReceiveMigrationData {
             background_fetch_pages,
             serial,
             console,
+            external_fds: Default::default(),
         };
 
         data.validate()?;
@@ -2375,6 +2379,7 @@ mod tests {
                 background_fetch_pages: true,
                 serial: None,
                 console: None,
+                external_fds: Default::default(),
             }
         );
 
@@ -2424,6 +2429,7 @@ mod tests {
                 console: Some(ConsoleOutput::File {
                     file: PathBuf::from("/tmp/c"),
                 }),
+                external_fds: Default::default(),
             }
         );
 

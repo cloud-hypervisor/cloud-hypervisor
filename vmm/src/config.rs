@@ -31,6 +31,7 @@ use virtio_devices::block::MINIMUM_BLOCK_QUEUE_SIZE;
 use virtio_devices::vhost_user::VIRTIO_FS_TAG_LEN;
 use virtio_devices::{RateLimiterConfig, TokenBucketConfig, net, vhost_user};
 
+use crate::external_fds::ExternalFds;
 use crate::landlock::LandlockAccess;
 use crate::vm_config::*;
 
@@ -3129,6 +3130,8 @@ pub struct RestoreConfig {
     pub serial: Option<ConsoleOutput>,
     #[serde(default)]
     pub console: Option<ConsoleOutput>,
+    #[serde(default, flatten)]
+    pub(crate) external_fds: ExternalFds,
 }
 
 impl RestoreConfig {
@@ -3262,6 +3265,7 @@ impl RestoreConfig {
             zone_updates,
             serial,
             console,
+            external_fds: Default::default(),
         })
     }
 
