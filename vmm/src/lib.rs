@@ -4171,6 +4171,7 @@ pub(crate) mod tests {
             iommufd_fd,
             zone_updates: vec![],
             background_fetch_pages: true,
+            external_fds: Default::default(),
         }
     }
 
