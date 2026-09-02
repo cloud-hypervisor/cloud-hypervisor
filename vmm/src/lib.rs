@@ -55,6 +55,7 @@ use crate::config::{MemoryRestoreMode, RestoreConfig, VmMemoryZoneUpdateData, ad
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::GuestDebuggable;
 use crate::device_manager::DeviceManager;
+use crate::external_fds::{ExternalFdOperation, UpdateFds};
 use crate::landlock::Landlock;
 use crate::locked_unix_listener::LockedUnixListener;
 use crate::memory_manager::{MemoryManager, MemoryRangePolicy};
@@ -985,7 +986,7 @@ impl Vmm {
         listener: &ReceiveListener,
         state: ReceiveMigrationState,
         req: &Request,
-        receive_data_migration: &VmReceiveMigrationData,
+        receive_data_migration: &mut VmReceiveMigrationData,
     ) -> result::Result<ReceiveMigrationState, MigratableError> {
         use ReceiveMigrationState::*;
 
@@ -1182,7 +1183,7 @@ impl Vmm {
         req: &Request,
         socket: &mut T,
         existing_memory_files: HashMap<u32, File>,
-        receive_data_migration: &VmReceiveMigrationData,
+        receive_data_migration: &mut VmReceiveMigrationData,
     ) -> result::Result<(Arc<Mutex<MemoryManager>>, MigrationMode), MigratableError>
     where
         T: Read,
@@ -1202,13 +1203,15 @@ impl Vmm {
 
         let mode = vm_migration_config.memory_mode();
 
-        // Mirrors the vm_restore handling of RestoreConfig.vfio_fds. The
-        // received VmConfig carries the source's device paths or stale FDs,
-        // neither of which is usable on this host.
-        receive_data_migration
-            .validate_vfio_fds(&vm_migration_config.vm_config.lock().unwrap())
+        vm_migration_config
+            .vm_config
+            .lock()
+            .unwrap()
+            .update_fds(
+                mem::take(&mut receive_data_migration.external_fds),
+                ExternalFdOperation::ReceiveMigration,
+            )
             .map_err(|e| MigratableError::MigrateReceive(e.into()))?;
-        apply_vfio_fds_to_vm_config(receive_data_migration, &vm_migration_config.vm_config);
 
         // Eager prefault populates memory before UFFD is registered, so those
         // pages never fault and are never served. Reject postcopy+prefault
@@ -2259,44 +2262,6 @@ fn apply_landlock(vm_config: &mut VmConfig) -> result::Result<(), LandlockError>
     Ok(())
 }
 
-// For each matched DeviceConfig.id, swap the saved path or stale FD for the
-// cdev FD received with the request, and install the fresh iommufd FD backing
-// them. The values in the migrated VmConfig are stale. validate_vfio_fds has
-// already confirmed the ids match and the iommufd FD is present.
-fn apply_vfio_fds_to_vm_config(
-    receive_data_migration: &VmReceiveMigrationData,
-    vm_config: &Arc<Mutex<VmConfig>>,
-) {
-    let vfio_fds = receive_data_migration
-        .vfio_fds
-        .as_deref()
-        .unwrap_or_default();
-    if vfio_fds.is_empty() {
-        return;
-    }
-
-    let mut config = vm_config.lock().unwrap();
-    if let Some(devices) = config.devices.as_mut() {
-        for v in vfio_fds {
-            for device in devices.iter_mut() {
-                if device.pci_common.id.as_deref() == Some(v.id.as_str()) {
-                    device.path = None;
-                    device.fd = v.fd;
-                }
-            }
-        }
-    }
-
-    let iommufd_fd = receive_data_migration
-        .iommufd_fd
-        .expect("receive-migration validated an iommufd FD accompanies vfio_fds");
-    config
-        .platform
-        .as_mut()
-        .expect("receive-migration validated iommufd=on, so a platform exists")
-        .iommufd_fd = Some(iommufd_fd);
-}
-
 #[allow(unused)]
 fn update_memory_zones(
     zone_updates: &[VmMemoryZoneUpdateData],
@@ -2485,7 +2450,7 @@ impl RequestHandler for Vmm {
         }
     }
 
-    fn vm_restore(&mut self, restore_cfg: RestoreConfig) -> result::Result<(), VmError> {
+    fn vm_restore(&mut self, mut restore_cfg: RestoreConfig) -> result::Result<(), VmError> {
         match &self.vm {
             VmOwnership::Owned(_) => Err(VmError::VmAlreadyCreated),
             VmOwnership::Migration { .. } => Err(VmError::VmMigrating),
@@ -2509,45 +2474,12 @@ impl RequestHandler for Vmm {
                     .map_err(VmError::ConfigValidation)?;
 
                 // Update VM's net configurations with new fds received for restore operation
-                if let (Some(restored_nets), Some(vm_net_configs)) =
-                    (restore_cfg.net_fds, &mut vm_config.lock().unwrap().net)
-                {
-                    for net in restored_nets.iter() {
-                        for net_config in vm_net_configs.iter_mut() {
-                            // update only if the net dev is backed by FDs
-                            if net_config.pci_common.id.as_ref() == Some(&net.id)
-                                && net_config.fds.is_some()
-                            {
-                                net_config.fds.clone_from(&net.fds);
-                            }
-                        }
-                    }
-                }
-
-                // Swap each VFIO device's saved path or stale FD for the cdev
-                // FD received with the restore request, and install the fresh
-                // iommufd FD backing them. The one saved in the snapshot is
-                // stale, and validate() has confirmed both accompany vfio_fds.
-                if let Some(restored_vfios) = restore_cfg.vfio_fds {
-                    let mut config = vm_config.lock().unwrap();
-                    if let Some(vm_device_configs) = config.devices.as_mut() {
-                        for v in restored_vfios.iter() {
-                            for device_config in vm_device_configs.iter_mut() {
-                                if device_config.pci_common.id.as_ref() == Some(&v.id) {
-                                    device_config.path = None;
-                                    device_config.fd = v.fd;
-                                }
-                            }
-                        }
-                    }
-                    let iommufd_fd = restore_cfg
-                        .iommufd_fd
-                        .expect("restore validated an iommufd FD accompanies vfio_fds");
-                    config
-                        .platform
-                        .as_mut()
-                        .expect("restore validated iommufd=on, so a platform exists")
-                        .iommufd_fd = Some(iommufd_fd);
+                if !restore_cfg.external_fds.is_empty() {
+                    let external_fds = mem::take(&mut restore_cfg.external_fds);
+                    vm_config
+                        .lock()
+                        .unwrap()
+                        .update_fds(external_fds, ExternalFdOperation::Restore)?;
                 }
 
                 update_memory_zones(&restore_cfg.zone_updates, &vm_config).map_err(|e| {
@@ -3181,7 +3113,7 @@ impl RequestHandler for Vmm {
 
     fn vm_receive_migration(
         &mut self,
-        receive_data_migration: VmReceiveMigrationData,
+        mut receive_data_migration: VmReceiveMigrationData,
     ) -> result::Result<(), MigratableError> {
         match &self.vm {
             VmOwnership::Owned(_vm) => {
@@ -3246,7 +3178,7 @@ impl RequestHandler for Vmm {
                 &listener,
                 state,
                 &req,
-                &receive_data_migration,
+                &mut receive_data_migration,
             ) {
                 Ok(next_state) => (Response::ok(), next_state),
                 Err(err) => {
@@ -3472,13 +3404,12 @@ pub(crate) mod tests {
     use arch::CpuProfile;
 
     use super::*;
-    use crate::config::RestoredVfioConfig;
     #[cfg(target_arch = "x86_64")]
     use crate::vm_config::DebugConsoleConfig;
     use crate::vm_config::{
         CommonConsoleConfig, ConsoleConfig, ConsoleOutputMode, CoreScheduling, CpuFeatures,
         CpusConfig, DeviceConfig, HotplugMethod, MemoryConfig, MemoryZoneConfig, PayloadConfig,
-        PciDeviceCommonConfig, PlatformConfig, RngConfig, SerialConfig,
+        PciDeviceCommonConfig, RngConfig, SerialConfig,
     };
 
     fn create_dummy_vmm() -> Vmm {
@@ -4016,143 +3947,6 @@ pub(crate) mod tests {
                 .unwrap(),
             vsock_config
         );
-    }
-
-    fn vm_config_with_vfio_devices(ids: &[&str], iommufd: bool) -> Arc<Mutex<VmConfig>> {
-        let mut config = *create_dummy_vm_config();
-        let platform = if iommufd { "iommufd=on" } else { "iommufd=off" };
-        config.platform = Some(PlatformConfig::parse(platform).unwrap());
-        config.devices = Some(
-            ids.iter()
-                .map(|id| DeviceConfig {
-                    pci_common: PciDeviceCommonConfig {
-                        id: Some((*id).to_owned()),
-                        ..Default::default()
-                    },
-                    path: Some(PathBuf::from(format!("/sys/bus/pci/devices/{id}"))),
-                    fd: None,
-                    x_nv_gpudirect_clique: None,
-                    x_exclude_mmap_bars: Vec::new(),
-                })
-                .collect(),
-        );
-        Arc::new(Mutex::new(config))
-    }
-
-    fn receive_data(
-        vfio_fds: Option<Vec<RestoredVfioConfig>>,
-        iommufd_fd: Option<i32>,
-    ) -> VmReceiveMigrationData {
-        VmReceiveMigrationData {
-            receiver_url: "tcp:127.0.0.1:4321".to_string(),
-            tls_dir: None,
-            vfio_fds,
-            iommufd_fd,
-            zone_updates: vec![],
-            external_fds: Default::default(),
-        }
-    }
-
-    fn vfio_fd(id: &str, fd: i32) -> RestoredVfioConfig {
-        RestoredVfioConfig {
-            id: id.to_owned(),
-            fd: Some(fd),
-        }
-    }
-
-    #[test]
-    fn test_apply_vfio_fds_empty_is_noop() {
-        let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
-        apply_vfio_fds_to_vm_config(&receive_data(None, None), &vm_config);
-        let config = vm_config.lock().unwrap();
-        let device = &config.devices.as_ref().unwrap()[0];
-        assert!(device.path.is_some());
-        assert!(device.fd.is_none());
-    }
-
-    #[test]
-    fn test_apply_vfio_fds_swaps_path_for_fd() {
-        let vm_config = vm_config_with_vfio_devices(&["vfio0", "vfio1"], true);
-        let data = receive_data(Some(vec![vfio_fd("vfio1", 5)]), Some(6));
-        apply_vfio_fds_to_vm_config(&data, &vm_config);
-        let config = vm_config.lock().unwrap();
-        let devices = config.devices.as_ref().unwrap();
-        assert!(devices[0].path.is_some());
-        assert!(devices[0].fd.is_none());
-        assert!(devices[1].path.is_none());
-        assert_eq!(devices[1].fd, Some(5));
-        assert_eq!(config.platform.as_ref().unwrap().iommufd_fd, Some(6));
-    }
-
-    #[test]
-    fn test_validate_vfio_fds_requires_iommufd_fd() {
-        let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
-        let data = receive_data(Some(vec![vfio_fd("vfio0", 5)]), None);
-        data.validate_vfio_fds(&vm_config.lock().unwrap())
-            .unwrap_err();
-    }
-
-    #[test]
-    fn test_validate_vfio_fds_unknown_id_fails() {
-        // vfio0 is covered so coverage passes, the extra bogus id is what the
-        // id match must reject.
-        let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
-        let data = receive_data(
-            Some(vec![vfio_fd("vfio0", 5), vfio_fd("missing", 6)]),
-            Some(7),
-        );
-        data.validate_vfio_fds(&vm_config.lock().unwrap())
-            .unwrap_err();
-    }
-
-    #[test]
-    fn test_validate_vfio_fds_duplicate_id_fails() {
-        let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
-        let data = receive_data(
-            Some(vec![vfio_fd("vfio0", 5), vfio_fd("vfio0", 6)]),
-            Some(7),
-        );
-        data.validate_vfio_fds(&vm_config.lock().unwrap())
-            .unwrap_err();
-    }
-
-    #[test]
-    fn test_validate_vfio_fds_requires_iommufd_backend() {
-        let vm_config = vm_config_with_vfio_devices(&["vfio0"], false);
-        let data = receive_data(Some(vec![vfio_fd("vfio0", 5)]), Some(6));
-        data.validate_vfio_fds(&vm_config.lock().unwrap())
-            .unwrap_err();
-    }
-
-    #[test]
-    fn test_validate_vfio_fds_stale_fd_needs_replacement() {
-        let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
-        {
-            let mut config = vm_config.lock().unwrap();
-            let device = &mut config.devices.as_mut().unwrap()[0];
-            device.path = None;
-            device.fd = Some(-1);
-        }
-        receive_data(None, None)
-            .validate_vfio_fds(&vm_config.lock().unwrap())
-            .unwrap_err();
-    }
-
-    #[test]
-    fn test_validate_vfio_fds_path_based_needs_replacement() {
-        // A path based device carries its source path, which is unusable on
-        // the destination, so it must be replaced in vfio_fds as well.
-        let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
-        receive_data(None, None)
-            .validate_vfio_fds(&vm_config.lock().unwrap())
-            .unwrap_err();
-    }
-
-    #[test]
-    fn test_validate_vfio_fds_all_substituted_ok() {
-        let vm_config = vm_config_with_vfio_devices(&["vfio0"], true);
-        let data = receive_data(Some(vec![vfio_fd("vfio0", 5)]), Some(6));
-        data.validate_vfio_fds(&vm_config.lock().unwrap()).unwrap();
     }
 
     #[test]

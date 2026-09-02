@@ -95,6 +95,7 @@ use crate::coredump::{
 };
 use crate::device_manager::{DeviceManager, DeviceManagerError};
 use crate::device_tree::DeviceTree;
+use crate::external_fds::UpdateFdsError;
 #[cfg(feature = "guest_debug")]
 use crate::gdb::{Debuggable, DebuggableError, GdbRequestPayload, GdbResponsePayload};
 #[cfg(feature = "igvm")]
@@ -368,6 +369,10 @@ pub enum Error {
     /// Cannot apply NUMA memory zone updates
     #[error("Error applying memory zone updates")]
     ApplyMemoryZoneUpdate(#[source] MemoryZoneUpdateError),
+
+    /// Error updating file descriptors.
+    #[error("Error updating file descriptors")]
+    FdUpdate(#[from] UpdateFdsError),
 }
 pub type Result<T> = result::Result<T, Error>;
 

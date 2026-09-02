@@ -24,6 +24,7 @@ use option_parser::{ByteSized, ByteSizedParseError};
 use thiserror::Error;
 use vmm::api;
 use vmm::config::{self, RestoreConfig};
+use vmm::external_fds::ScmRights;
 use vmm::vm_config::{
     DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
     UserDeviceConfig, VdpaConfig, VsockConfig,
@@ -944,23 +945,9 @@ fn snapshot_config(url: &str) -> String {
 
 fn restore_config(config: &str) -> Result<(String, Vec<i32>), Error> {
     let mut restore_config = RestoreConfig::parse(config).map_err(Error::Restore)?;
-    // RestoreConfig is modified on purpose to take out the file descriptors.
-    // These fds are passed to the server side process via SCM_RIGHTS, in the
-    // order net_fds, then vfio_fds, then the iommufd FD, matching the
-    // server's split.
-    let mut fds: Vec<i32> = match &mut restore_config.net_fds {
-        Some(net_fds) => net_fds
-            .iter_mut()
-            .flat_map(|net| net.fds.take().unwrap_or_default())
-            .collect(),
-        None => Vec::new(),
-    };
-    if let Some(vfio_fds) = restore_config.vfio_fds.as_mut() {
-        fds.extend(vfio_fds.iter_mut().filter_map(|v| v.fd.take()));
-    }
-    if let Some(iommufd_fd) = restore_config.iommufd_fd.take() {
-        fds.push(iommufd_fd);
-    }
+
+    let fds = restore_config.take_raw_fds();
+
     let restore_config = serde_json::to_string(&restore_config).unwrap();
 
     Ok((restore_config, fds))
@@ -978,16 +965,7 @@ fn receive_migration_data(config: &str) -> Result<(String, Vec<i32>), Error> {
     let mut data =
         api::VmReceiveMigrationData::parse(config).map_err(Error::ReceiveMigrationConfig)?;
 
-    // The FDs are passed to the server side process via SCM_RIGHTS, in the
-    // order vfio_fds then the iommufd FD, matching the server's split.
-    let mut fds: Vec<i32> = match data.vfio_fds.as_mut() {
-        Some(vfio_fds) => vfio_fds.iter_mut().filter_map(|v| v.fd.take()).collect(),
-        None => Vec::new(),
-    };
-    if let Some(iommufd_fd) = data.iommufd_fd.take() {
-        fds.push(iommufd_fd);
-    }
-
+    let fds = data.take_raw_fds();
     Ok((serde_json::to_string(&data).unwrap(), fds))
 }
 
