@@ -88,6 +88,7 @@ mod coredump;
 pub mod cpu;
 pub mod device_manager;
 pub mod device_tree;
+pub mod external_fds;
 #[cfg(feature = "guest_debug")]
 mod gdb;
 #[cfg(feature = "igvm")]
@@ -3657,7 +3658,7 @@ mod util {
     }
 }
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::path::PathBuf;
 
     use arch::CpuProfileConfig;
