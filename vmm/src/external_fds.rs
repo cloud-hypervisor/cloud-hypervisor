@@ -7,6 +7,7 @@
 
 #![allow(unused, reason = "Will be used in later commits")]
 
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::mem;
 use std::os::fd::{IntoRawFd, RawFd};
@@ -15,6 +16,8 @@ use std::str::FromStr;
 use option_parser::{Tuple, TupleList};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+use crate::vm_config::{DeviceConfig, NetConfig, PlatformConfig, VmConfig};
 
 /// Defines which operation caused the external file descriptor processing.
 #[derive(Copy, Clone, Debug, Eq, Ord, PartialOrd, PartialEq)]
@@ -264,6 +267,446 @@ pub enum ScmRightsError {
     /// More file descriptors provided than expected.
     #[error("More file descriptors provided than expected")]
     TooManyFds,
+    /// `SCM_RIGHTS` is not supported.
+    #[error("SCM_RIGHTS is not supported")]
+    Unsupported,
+}
+
+/// Trait to process file descriptors provided by `SCM_RIGHTS`.
+///
+/// After deserialization in the API, internal file descriptors are invalid.
+/// The trait allows updating those stale file descriptors with valid ones provided by `SCM_RIGHTS`.
+pub trait ScmRights {
+    /// Consumes `files` and updates all internal file descriptors.
+    fn consume_fds(&mut self, files: Vec<File>) -> Result<(), ScmRightsError>;
+
+    /// Takes all file descriptors out of `Self`.
+    ///
+    /// Preserves the order to allow ingesting the file descriptors again.
+    fn take_raw_fds(&mut self) -> Vec<RawFd>;
+}
+
+impl ScmRights for NetConfig {
+    fn consume_fds(&mut self, files: Vec<File>) -> Result<(), ScmRightsError> {
+        let fds: Vec<_> = files.into_iter().map(IntoRawFd::into_raw_fd).collect();
+
+        if fds.is_empty() {
+            self.fds = None;
+        } else {
+            self.fds = Some(fds);
+        }
+
+        Ok(())
+    }
+
+    fn take_raw_fds(&mut self) -> Vec<RawFd> {
+        self.fds.take().unwrap_or_default()
+    }
+}
+
+impl ScmRights for DeviceConfig {
+    fn consume_fds(&mut self, files: Vec<File>) -> Result<(), ScmRightsError> {
+        if files.len() > 1 {
+            Err(ScmRightsError::TooManyFds)
+        } else {
+            self.fd = files.into_iter().map(IntoRawFd::into_raw_fd).next();
+            Ok(())
+        }
+    }
+    fn take_raw_fds(&mut self) -> Vec<RawFd> {
+        self.fd.take().map(|fd| vec![fd]).unwrap_or_default()
+    }
+}
+
+impl ScmRights for VmConfig {
+    fn consume_fds(&mut self, files: Vec<File>) -> Result<(), ScmRightsError> {
+        if files.is_empty() {
+            Ok(())
+        } else {
+            Err(ScmRightsError::Unsupported)
+        }
+    }
+
+    fn take_raw_fds(&mut self) -> Vec<RawFd> {
+        Vec::new()
+    }
+}
+
+impl ScmRights for ExternalFds {
+    fn consume_fds(&mut self, mut files: Vec<File>) -> Result<(), ScmRightsError> {
+        // Check supplied and expected FD amount match before applying to prevent leaking FDs on failure.
+        let expected_fds = self.expected_fds();
+        let supplied_fds = files.len();
+
+        if expected_fds < supplied_fds {
+            return Err(ScmRightsError::TooManyFds);
+        }
+
+        if expected_fds > supplied_fds {
+            return Err(ScmRightsError::TooFewFds);
+        }
+
+        self.external_fds
+            .iter_mut()
+            .try_for_each(|entry| entry.update_from_scm_rights(&mut files))
+    }
+
+    fn take_raw_fds(&mut self) -> Vec<RawFd> {
+        self.take_raw_fds()
+    }
+}
+
+/// Errors that can occur when updating file descriptors via [`UpdateFds`].
+#[derive(Error, Debug, Eq, PartialEq)]
+pub enum UpdateFdsError {
+    /// Mismatch between number of expected and actual file descriptor.
+    #[error(
+        "Mismatch between number of expected and actual file descriptor for \"{target:?}\": actual: {actual}, expected: {expected}"
+    )]
+    FdAmountMismatch {
+        target: ExternalFdTarget,
+        expected: usize,
+        actual: usize,
+    },
+    /// Target didn't expect file descriptors.
+    #[error("{0:?} didn't expect file descriptors")]
+    UnexpectedFds(ExternalFdTarget),
+    /// Target without id expected file descriptors.
+    #[error("Target without id expected file descriptors")]
+    MissingId,
+    /// Missing file descriptors for target.
+    #[error("Missing file descriptors for {0:?}")]
+    MissingFds(ExternalFdTarget),
+    /// Unused file descriptors.
+    #[error("File descriptors were unused for: {0:?}")]
+    SuperfluousFds(Vec<ExternalFdTarget>),
+    /// Duplicate entry.
+    #[error("Duplicate entry for {0:?}")]
+    DuplicatedTargetEntry(ExternalFdTarget),
+    /// VFIO file descriptors require an IOMMU file descriptor.
+    #[error("VFIO file descriptors require an IOMMU file descriptor")]
+    VfioFdsWithoutIommuFd,
+    /// IOMMU file descriptor requires VFIO file descriptors.
+    #[error("IOMMU file descriptor requires VFIO file descriptors")]
+    IommuFdWithoutVfioFds,
+    /// `iommufd_fd` was provided without also enabling the iommufd backend.
+    #[error("IOMMU file descriptor was provided without enalbing the iommufd backend")]
+    IommufdFdRequiresIommufd,
+}
+
+/// Trait to update file descriptors after restore/migration.
+///
+/// During restore or migration, previously used file descriptors become invalid.
+/// The trait allows updating those file descriptors with valid ones.
+pub(crate) trait UpdateFds {
+    /// Checks whether all required file descriptors are present and no more.
+    fn validate_fds(
+        &self,
+        external_fds: &ExternalFds,
+        operation: ExternalFdOperation,
+    ) -> Result<(), UpdateFdsError>;
+
+    /// Updates all file descriptors.
+    fn update_fds(
+        &mut self,
+        external_fds: ExternalFds,
+        operation: ExternalFdOperation,
+    ) -> Result<(), UpdateFdsError>;
+}
+
+impl UpdateFds for VmConfig {
+    fn validate_fds(
+        &self,
+        external_fds: &ExternalFds,
+        operation: ExternalFdOperation,
+    ) -> Result<(), UpdateFdsError> {
+        let mut to_validate = BTreeSet::new();
+        external_fds.external_fds.iter().try_for_each(|entry| {
+            if to_validate.insert(entry.target.clone()) {
+                Ok(())
+            } else {
+                Err(UpdateFdsError::DuplicatedTargetEntry(entry.target.clone()))
+            }
+        })?;
+
+        let iommu_fd = to_validate.contains(&ExternalFdTarget::Iommu);
+        let vfio_fd = to_validate
+            .iter()
+            .any(|target| matches!(target, ExternalFdTarget::Vfio { .. }));
+
+        self.net.iter().try_for_each(|net_configs| {
+            net_configs.iter().try_for_each(|net_config| {
+                net_config.validate_fds(external_fds, &mut to_validate, operation)
+            })
+        })?;
+
+        self.devices.iter().try_for_each(|device_configs| {
+            device_configs.iter().try_for_each(|device_config| {
+                device_config.validate_fds(external_fds, &mut to_validate, operation)
+            })
+        })?;
+
+        self.platform.iter().try_for_each(|platform_config| {
+            platform_config.validate_fds(external_fds, &mut to_validate, operation)
+        })?;
+
+        if vfio_fd && !iommu_fd {
+            return Err(UpdateFdsError::VfioFdsWithoutIommuFd);
+        }
+
+        if iommu_fd && !vfio_fd {
+            return Err(UpdateFdsError::IommuFdWithoutVfioFds);
+        }
+
+        if to_validate.is_empty() {
+            Ok(())
+        } else {
+            Err(UpdateFdsError::SuperfluousFds(
+                to_validate.into_iter().collect(),
+            ))
+        }
+    }
+
+    fn update_fds(
+        &mut self,
+        mut external_fds: ExternalFds,
+        operation: ExternalFdOperation,
+    ) -> Result<(), UpdateFdsError> {
+        // Validate before updating to avoid TOCTOU issues.
+        self.validate_fds(&external_fds, operation)?;
+
+        self.net.iter_mut().try_for_each(|net_configs| {
+            net_configs
+                .iter_mut()
+                .try_for_each(|net_config| net_config.update_fds(&mut external_fds, operation))
+        })?;
+
+        self.devices.iter_mut().try_for_each(|device_configs| {
+            device_configs.iter_mut().try_for_each(|device_config| {
+                device_config.update_fds(&mut external_fds, operation)
+            })
+        })?;
+
+        self.platform.iter_mut().try_for_each(|platform_config| {
+            platform_config.update_fds(&mut external_fds, operation)
+        })
+    }
+}
+
+/// Helper trait for [`UpdateFds`].
+///
+/// Should be implemented for members of [`VmConfig`] that carry file descriptors.
+trait UpdateFdsComponent {
+    /// Checks whether all required file descriptors for this component are present and no more.
+    fn validate_fds(
+        &self,
+        external_fds: &ExternalFds,
+        to_validate: &mut BTreeSet<ExternalFdTarget>,
+        operation: ExternalFdOperation,
+    ) -> Result<(), UpdateFdsError>;
+
+    /// Updates all file descriptors of this component.
+    fn update_fds(
+        &mut self,
+        external_fds: &mut ExternalFds,
+        operation: ExternalFdOperation,
+    ) -> Result<(), UpdateFdsError>;
+}
+
+impl UpdateFdsComponent for NetConfig {
+    fn validate_fds(
+        &self,
+        external_fds: &ExternalFds,
+        to_validate: &mut BTreeSet<ExternalFdTarget>,
+        _operation: ExternalFdOperation,
+    ) -> Result<(), UpdateFdsError> {
+        let Some(id) = &self.pci_common.id else {
+            return if self.fds.is_some() {
+                Err(UpdateFdsError::MissingId)
+            } else {
+                Ok(())
+            };
+        };
+
+        let target = ExternalFdTarget::Net { id: id.clone() };
+
+        let Some(net_fds) = &self.fds else {
+            return if external_fds.entry(&target).is_some() {
+                Err(UpdateFdsError::UnexpectedFds(target))
+            } else {
+                Ok(())
+            };
+        };
+
+        let Some(received_fds) = external_fds.entry(&target) else {
+            return Err(UpdateFdsError::MissingFds(target));
+        };
+
+        if net_fds.len() != received_fds.fds().len() {
+            return Err(UpdateFdsError::FdAmountMismatch {
+                target,
+                expected: net_fds.len(),
+                actual: received_fds.fds().len(),
+            });
+        }
+
+        to_validate.remove(&target);
+
+        Ok(())
+    }
+
+    fn update_fds(
+        &mut self,
+        external_fds: &mut ExternalFds,
+        _operation: ExternalFdOperation,
+    ) -> Result<(), UpdateFdsError> {
+        let Some(id) = self.pci_common.id.as_ref() else {
+            return Ok(());
+        };
+
+        let target = ExternalFdTarget::Net { id: id.clone() };
+
+        let Some(mut received_fds) = external_fds.take_entry(&target) else {
+            return Ok(());
+        };
+
+        self.fds = Some(received_fds.take_fds());
+
+        Ok(())
+    }
+}
+
+impl UpdateFdsComponent for DeviceConfig {
+    fn validate_fds(
+        &self,
+        external_fds: &ExternalFds,
+        to_validate: &mut BTreeSet<ExternalFdTarget>,
+        operation: ExternalFdOperation,
+    ) -> Result<(), UpdateFdsError> {
+        let Some(id) = &self.pci_common.id else {
+            return if self.fd.is_some() {
+                Err(UpdateFdsError::MissingId)
+            } else {
+                Ok(())
+            };
+        };
+
+        let target = ExternalFdTarget::Vfio { id: id.clone() };
+
+        let received_fds = match operation {
+            ExternalFdOperation::Restore => {
+                match (self.fd.is_some(), external_fds.entry(&target)) {
+                    (true | false, Some(received_fds)) => received_fds,
+                    (true, None) => return Err(UpdateFdsError::MissingFds(target)),
+                    (false, None) => return Ok(()),
+                }
+            }
+            ExternalFdOperation::ReceiveMigration => {
+                let Some(received_fds) = external_fds.entry(&target) else {
+                    return Err(UpdateFdsError::MissingFds(target));
+                };
+                received_fds
+            }
+            ExternalFdOperation::VmCreate => {
+                match (self.fd.is_some(), external_fds.entry(&target)) {
+                    (true, Some(received_fds)) => received_fds,
+                    (false, Some(_)) => {
+                        return Err(UpdateFdsError::SuperfluousFds(vec![target]));
+                    }
+                    (true, None) => return Err(UpdateFdsError::MissingFds(target)),
+                    (false, None) => return Ok(()),
+                }
+            }
+        };
+
+        if received_fds.fds().len() != 1 {
+            return Err(UpdateFdsError::FdAmountMismatch {
+                target,
+                expected: 1,
+                actual: received_fds.fds().len(),
+            });
+        }
+
+        to_validate.remove(&target);
+
+        Ok(())
+    }
+
+    fn update_fds(
+        &mut self,
+        external_fds: &mut ExternalFds,
+        _operation: ExternalFdOperation,
+    ) -> Result<(), UpdateFdsError> {
+        let Some(id) = self.pci_common.id.as_ref() else {
+            return Ok(());
+        };
+
+        let target = ExternalFdTarget::Vfio { id: id.clone() };
+
+        let Some(mut received_fds) = external_fds.take_entry(&target) else {
+            return Ok(());
+        };
+
+        self.fd = Some(
+            received_fds
+                .take_fds()
+                .pop()
+                .expect("Should be checked during validation"),
+        );
+        self.path = None;
+
+        Ok(())
+    }
+}
+
+impl UpdateFdsComponent for PlatformConfig {
+    fn validate_fds(
+        &self,
+        external_fds: &ExternalFds,
+        to_validate: &mut BTreeSet<ExternalFdTarget>,
+        _operation: ExternalFdOperation,
+    ) -> Result<(), UpdateFdsError> {
+        let target = ExternalFdTarget::Iommu;
+        let Some(received_fds) = external_fds.entry(&target) else {
+            return Ok(());
+        };
+
+        if !self.iommufd {
+            return Err(UpdateFdsError::IommufdFdRequiresIommufd);
+        }
+
+        match received_fds.fds().len() {
+            1 => {
+                to_validate.remove(&target);
+            }
+            len => {
+                return Err(UpdateFdsError::FdAmountMismatch {
+                    target,
+                    expected: 1,
+                    actual: len,
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    fn update_fds(
+        &mut self,
+        external_fds: &mut ExternalFds,
+        _operation: ExternalFdOperation,
+    ) -> Result<(), UpdateFdsError> {
+        if let Some(mut received_fds) = external_fds.take_entry(&ExternalFdTarget::Iommu) {
+            self.iommufd_fd = Some(
+                received_fds
+                    .take_fds()
+                    .pop()
+                    .expect("Should be checked during validation"),
+            );
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -275,12 +718,15 @@ pub(crate) mod tests {
     use option_parser::{OptionParser, TupleList};
     use serde::{Deserialize, Serialize};
 
-    use crate::config::tests::platform_fixture;
+    use crate::config::tests::{net_fixture, platform_fixture};
     use crate::external_fds::{
-        ExternalFdTarget, ExternalFds, ExternalFdsEntry, ParseExternalFdTargetError, ScmRightsError,
+        ExternalFdOperation, ExternalFdTarget, ExternalFds, ExternalFdsEntry,
+        ParseExternalFdTargetError, ScmRights, ScmRightsError, UpdateFds, UpdateFdsError,
     };
     use crate::tests::create_dummy_vm_config;
-    use crate::vm_config::{DeviceConfig, PciDeviceCommonConfig, PlatformConfig, VmConfig};
+    use crate::vm_config::{
+        DeviceConfig, NetConfig, PciDeviceCommonConfig, PlatformConfig, VmConfig,
+    };
 
     pub(crate) fn net_target(id: &str) -> ExternalFdTarget {
         ExternalFdTarget::Net { id: id.to_owned() }
@@ -589,5 +1035,550 @@ pub(crate) mod tests {
         assert!(!external_fds.is_empty());
         let _ = external_fds.take_entry(&target);
         assert!(external_fds.is_empty());
+    }
+
+    #[test]
+    fn scm_rights_external_fds() {
+        let mut external_fds = ExternalFds {
+            external_fds: vec![
+                ExternalFdsEntry::new(ExternalFdTarget::Iommu, vec![0]),
+                ExternalFdsEntry::new(net_target("net1"), vec![0, 0]),
+            ],
+        };
+        let files = vec![dev_null_file(), dev_null_file(), dev_null_file()];
+        let raw_fds: Vec<_> = files.iter().map(AsRawFd::as_raw_fd).collect();
+
+        external_fds.consume_fds(files).unwrap();
+        assert_eq!(
+            external_fds.entries(),
+            vec![
+                (&ExternalFdTarget::Iommu, 1, &vec![raw_fds[0]]),
+                (&net_target("net1"), 2, &vec![raw_fds[1], raw_fds[2]]),
+            ]
+        );
+        // SAFETY: FDs in `ExternalFds` are not dropped in tests.
+        unsafe { drop_fds(raw_fds) };
+
+        let mut external_fds = ExternalFds {
+            external_fds: vec![
+                ExternalFdsEntry::new(net_target("net1"), vec![0, 0, 0]),
+                ExternalFdsEntry::new(net_target("net2"), vec![]),
+                ExternalFdsEntry::new(net_target("net3"), vec![0, 0]),
+            ],
+        };
+        let files = vec![
+            dev_null_file(),
+            dev_null_file(),
+            dev_null_file(),
+            dev_null_file(),
+            dev_null_file(),
+        ];
+        let raw_fds: Vec<_> = files.iter().map(AsRawFd::as_raw_fd).collect();
+
+        external_fds.consume_fds(files).unwrap();
+        assert_eq!(
+            external_fds.entries(),
+            vec![
+                (
+                    &net_target("net1"),
+                    3,
+                    &vec![raw_fds[0], raw_fds[1], raw_fds[2]]
+                ),
+                (&net_target("net2"), 0, &vec![]),
+                (&net_target("net3"), 2, &vec![raw_fds[3], raw_fds[4]]),
+            ]
+        );
+        // SAFETY: FDs in `ExternalFds` are not dropped in tests.
+        unsafe { drop_fds(raw_fds) };
+
+        let mut external_fds = ExternalFds {
+            external_fds: vec![ExternalFdsEntry::new(ExternalFdTarget::Iommu, vec![0])],
+        };
+        let files = vec![dev_null_file(), dev_null_file()];
+        assert_eq!(
+            external_fds.consume_fds(files),
+            Err(ScmRightsError::TooManyFds)
+        );
+    }
+
+    #[test]
+    fn scm_rights_net_config() {
+        let net_config = NetConfig {
+            pci_common: Default::default(),
+            tap: None,
+            ip: None,
+            mask: None,
+            mac: None,
+            host_mac: None,
+            mtu: None,
+            num_queues: 0,
+            queue_size: 0,
+            vhost_user: false,
+            vhost_socket: None,
+            vhost_mode: Default::default(),
+            fds: None,
+            rate_limiter_config: None,
+            offload_tso: false,
+            offload_ufo: false,
+            offload_csum: false,
+        };
+        {
+            let mut net_config = net_config.clone();
+            let files = vec![dev_null_file(), dev_null_file(), dev_null_file()];
+            let raw_fds = files.iter().map(AsRawFd::as_raw_fd).collect();
+            net_config.consume_fds(files).unwrap();
+            assert_eq!(net_config.fds.as_ref(), Some(&raw_fds));
+            //SAFETY: FDs in `ExternalFds` are not dropped in tests.
+            unsafe { drop_fds(raw_fds) };
+        }
+        {
+            let mut net_config = net_config.clone();
+            net_config.consume_fds(vec![]).unwrap();
+            assert_eq!(net_config.fds, None);
+        }
+    }
+
+    #[test]
+    fn scm_rights_device_config() {
+        let device_config = DeviceConfig {
+            pci_common: Default::default(),
+            path: None,
+            fd: None,
+            x_nv_gpudirect_clique: None,
+            x_exclude_mmap_bars: vec![],
+        };
+
+        {
+            let mut device_config = device_config.clone();
+            let files = vec![dev_null_file()];
+            let raw_fds: Vec<_> = files.iter().map(AsRawFd::as_raw_fd).collect();
+            device_config.consume_fds(files).unwrap();
+            assert_eq!(device_config.fd.as_ref(), Some(&raw_fds[0]));
+            //SAFETY: FDs in `ExternalFds` are not dropped in tests.
+            unsafe { drop_fds(raw_fds) };
+        }
+        {
+            let mut device_config = device_config.clone();
+            let files = vec![dev_null_file(), dev_null_file(), dev_null_file()];
+            assert_eq!(
+                device_config.consume_fds(files),
+                Err(ScmRightsError::TooManyFds)
+            );
+        }
+        {
+            let mut device_config = device_config.clone();
+            device_config.consume_fds(vec![]).unwrap();
+            assert_eq!(device_config.fd, None);
+        }
+    }
+
+    #[test]
+    fn scm_rights_vm_config() {
+        let mut vm_config = create_dummy_vm_config();
+
+        let files = vec![dev_null_file()];
+        assert_eq!(
+            vm_config.consume_fds(files),
+            Err(ScmRightsError::Unsupported)
+        );
+        let files = vec![];
+        assert_eq!(vm_config.consume_fds(files), Ok(()));
+    }
+
+    #[test]
+    fn update_fds_vm_config() {
+        {
+            let mut vm_config = create_dummy_vm_config();
+            let external_fds = ExternalFds::default();
+            vm_config
+                .update_fds(external_fds, ExternalFdOperation::VmCreate)
+                .unwrap();
+            assert_eq!(vm_config, create_dummy_vm_config());
+            let external_fds = ExternalFds::default();
+            vm_config
+                .update_fds(external_fds, ExternalFdOperation::ReceiveMigration)
+                .unwrap();
+            assert_eq!(vm_config, create_dummy_vm_config());
+            let external_fds = ExternalFds::default();
+            vm_config
+                .update_fds(external_fds, ExternalFdOperation::Restore)
+                .unwrap();
+            assert_eq!(vm_config, create_dummy_vm_config());
+        }
+
+        {
+            let mut vm_config = create_dummy_vm_config();
+            vm_config.net = Some(vec![NetConfig {
+                pci_common: PciDeviceCommonConfig {
+                    id: Some("net1".to_owned()),
+                    ..Default::default()
+                },
+                fds: Some(vec![-1]),
+                ..net_fixture()
+            }]);
+
+            let external_fds = vec![(net_target("net1"), vec![1])].into();
+            vm_config
+                .update_fds(external_fds, ExternalFdOperation::VmCreate)
+                .unwrap();
+            assert_eq!(
+                vm_config
+                    .net
+                    .as_ref()
+                    .unwrap()
+                    .first()
+                    .as_ref()
+                    .unwrap()
+                    .fds
+                    .as_ref()
+                    .unwrap(),
+                &[1]
+            );
+        }
+
+        {
+            let mut vm_config = create_dummy_vm_config();
+            vm_config.net = Some(vec![NetConfig {
+                pci_common: PciDeviceCommonConfig {
+                    id: Some("net1".to_owned()),
+                    ..Default::default()
+                },
+                fds: Some(vec![-1]),
+                ..net_fixture()
+            }]);
+
+            let external_fds =
+                vec![(net_target("net1"), vec![1]), (net_target("net1"), vec![1])].into();
+            assert_eq!(
+                vm_config.update_fds(external_fds, ExternalFdOperation::VmCreate),
+                Err(UpdateFdsError::DuplicatedTargetEntry(net_target("net1")))
+            );
+        }
+
+        {
+            let mut vm_config = create_dummy_vm_config();
+            vm_config.net = Some(vec![NetConfig {
+                pci_common: PciDeviceCommonConfig {
+                    id: None,
+                    ..Default::default()
+                },
+                fds: Some(vec![-1]),
+                ..net_fixture()
+            }]);
+
+            let external_fds = vec![(net_target("net1"), vec![1])].into();
+            assert_eq!(
+                vm_config.update_fds(external_fds, ExternalFdOperation::VmCreate),
+                Err(UpdateFdsError::MissingId)
+            );
+        }
+
+        {
+            let mut vm_config = create_dummy_vm_config();
+            vm_config.net = Some(vec![NetConfig {
+                pci_common: PciDeviceCommonConfig {
+                    id: Some("net1".to_owned()),
+                    ..Default::default()
+                },
+                fds: None,
+                ..net_fixture()
+            }]);
+
+            let external_fds = vec![(net_target("net1"), vec![1])].into();
+            assert_eq!(
+                vm_config.update_fds(external_fds, ExternalFdOperation::VmCreate),
+                Err(UpdateFdsError::UnexpectedFds(net_target("net1")))
+            );
+        }
+
+        {
+            let mut vm_config = create_dummy_vm_config();
+            vm_config.net = Some(vec![NetConfig {
+                pci_common: PciDeviceCommonConfig {
+                    id: Some("net1".to_owned()),
+                    ..Default::default()
+                },
+                fds: None,
+                ..net_fixture()
+            }]);
+
+            let external_fds = ExternalFds::default();
+            let vm_config_expected = vm_config.clone();
+
+            vm_config
+                .update_fds(external_fds, ExternalFdOperation::VmCreate)
+                .unwrap();
+
+            assert_eq!(vm_config, vm_config_expected);
+        }
+
+        {
+            let mut vm_config = create_dummy_vm_config();
+            vm_config.net = Some(vec![NetConfig {
+                pci_common: PciDeviceCommonConfig {
+                    id: Some("net1".to_owned()),
+                    ..Default::default()
+                },
+                fds: Some(vec![-1, -1]),
+                ..net_fixture()
+            }]);
+            let vm_config_expected = vm_config.clone();
+
+            assert_eq!(
+                vm_config.update_fds(ExternalFds::default(), ExternalFdOperation::VmCreate),
+                Err(UpdateFdsError::MissingFds(net_target("net1")))
+            );
+            assert_eq!(vm_config, vm_config_expected);
+
+            let external_fds = vec![(net_target("net1"), vec![1])].into();
+            assert_eq!(
+                vm_config.update_fds(external_fds, ExternalFdOperation::VmCreate),
+                Err(UpdateFdsError::FdAmountMismatch {
+                    target: net_target("net1"),
+                    expected: 2,
+                    actual: 1,
+                })
+            );
+            assert_eq!(vm_config, vm_config_expected);
+        }
+
+        {
+            let mut vm_config = create_dummy_vm_config();
+            vm_config.net = Some(vec![NetConfig {
+                pci_common: PciDeviceCommonConfig {
+                    id: None,
+                    ..Default::default()
+                },
+                fds: None,
+                ..net_fixture()
+            }]);
+            let vm_config_expected = vm_config.clone();
+
+            vm_config
+                .update_fds(ExternalFds::default(), ExternalFdOperation::VmCreate)
+                .unwrap();
+
+            assert_eq!(vm_config, vm_config_expected);
+        }
+
+        {
+            let mut vm_config = create_dummy_vm_config();
+            let external_fds = vec![(net_target("net1"), vec![1])].into();
+
+            assert_eq!(
+                vm_config.update_fds(external_fds, ExternalFdOperation::VmCreate),
+                Err(UpdateFdsError::SuperfluousFds(vec![net_target("net1")]))
+            );
+        }
+    }
+
+    #[test]
+    fn update_fds_vm_config_vfio_and_iommu() {
+        {
+            for operation in [
+                ExternalFdOperation::Restore,
+                ExternalFdOperation::ReceiveMigration,
+                ExternalFdOperation::VmCreate,
+            ] {
+                let mut vm_config = vfio_vm_config(
+                    (operation == ExternalFdOperation::VmCreate).then_some(-1),
+                    true,
+                );
+                let external_fds = vec![
+                    (vfio_target("vfio1"), vec![1]),
+                    (ExternalFdTarget::Iommu, vec![2]),
+                ]
+                .into();
+
+                vm_config.update_fds(external_fds, operation).unwrap();
+                let device_config = &vm_config.devices.as_ref().unwrap()[0];
+                assert_eq!(device_config.fd, Some(1));
+                assert_eq!(device_config.path, None);
+                assert_eq!(vm_config.platform.as_ref().unwrap().iommufd_fd, Some(2));
+            }
+        }
+
+        {
+            let mut vm_config = vfio_vm_config(None, true);
+            vm_config.devices.as_mut().unwrap().insert(
+                0,
+                DeviceConfig {
+                    pci_common: PciDeviceCommonConfig {
+                        id: Some("vfio0".to_owned()),
+                        ..Default::default()
+                    },
+                    path: Some("/dev/vfio/0".into()),
+                    fd: None,
+                    x_nv_gpudirect_clique: None,
+                    x_exclude_mmap_bars: vec![],
+                },
+            );
+            let external_fds = vec![
+                (vfio_target("vfio1"), vec![1]),
+                (ExternalFdTarget::Iommu, vec![2]),
+            ]
+            .into();
+
+            vm_config
+                .update_fds(external_fds, ExternalFdOperation::Restore)
+                .unwrap();
+            let devices = vm_config.devices.as_ref().unwrap();
+            assert_eq!(devices[0].path, Some("/dev/vfio/0".into()));
+            assert_eq!(devices[0].fd, None);
+            assert_eq!(devices[1].path, None);
+            assert_eq!(devices[1].fd, Some(1));
+            assert_eq!(vm_config.platform.as_ref().unwrap().iommufd_fd, Some(2));
+        }
+
+        {
+            let mut vm_config = vfio_vm_config(Some(-1), true);
+            vm_config.devices.as_mut().unwrap()[0].pci_common.id = None;
+            assert_eq!(
+                vm_config.update_fds(ExternalFds::default(), ExternalFdOperation::VmCreate),
+                Err(UpdateFdsError::MissingId)
+            );
+        }
+
+        {
+            let mut vm_config = vfio_vm_config(None, true);
+            vm_config.devices.as_mut().unwrap()[0].pci_common.id = None;
+            let vm_config_expected = vm_config.clone();
+
+            vm_config
+                .update_fds(ExternalFds::default(), ExternalFdOperation::VmCreate)
+                .unwrap();
+
+            assert_eq!(vm_config, vm_config_expected);
+        }
+
+        {
+            let mut vm_config = vfio_vm_config(Some(-1), true);
+            let external_fds = vec![
+                (vfio_target("vfio1"), vec![1, 2]),
+                (ExternalFdTarget::Iommu, vec![3]),
+            ]
+            .into();
+            assert_eq!(
+                vm_config.update_fds(external_fds, ExternalFdOperation::VmCreate),
+                Err(UpdateFdsError::FdAmountMismatch {
+                    target: vfio_target("vfio1"),
+                    expected: 1,
+                    actual: 2,
+                })
+            );
+        }
+
+        {
+            let mut vm_config = vfio_vm_config(None, true);
+            let external_fds = vec![
+                (vfio_target("vfio1"), vec![1]),
+                (ExternalFdTarget::Iommu, vec![2]),
+            ]
+            .into();
+            assert_eq!(
+                vm_config.update_fds(external_fds, ExternalFdOperation::VmCreate),
+                Err(UpdateFdsError::SuperfluousFds(vec![vfio_target("vfio1")]))
+            );
+        }
+
+        {
+            let mut vm_config = vfio_vm_config(Some(-1), true);
+            assert_eq!(
+                vm_config.update_fds(ExternalFds::default(), ExternalFdOperation::VmCreate),
+                Err(UpdateFdsError::MissingFds(vfio_target("vfio1")))
+            );
+        }
+
+        {
+            let mut vm_config = vfio_vm_config(None, true);
+            let vm_config_expected = vm_config.clone();
+
+            vm_config
+                .update_fds(ExternalFds::default(), ExternalFdOperation::VmCreate)
+                .unwrap();
+
+            assert_eq!(vm_config, vm_config_expected);
+        }
+
+        {
+            let mut vm_config = vfio_vm_config(None, true);
+            let vm_config_expected = vm_config.clone();
+
+            vm_config
+                .update_fds(ExternalFds::default(), ExternalFdOperation::Restore)
+                .unwrap();
+
+            assert_eq!(vm_config, vm_config_expected);
+        }
+
+        {
+            let mut vm_config = vfio_vm_config(Some(-1), true);
+            let external_fds = vec![(ExternalFdTarget::Iommu, vec![2])].into();
+            assert_eq!(
+                vm_config.update_fds(external_fds, ExternalFdOperation::Restore),
+                Err(UpdateFdsError::MissingFds(vfio_target("vfio1")))
+            );
+        }
+
+        {
+            let mut vm_config = vfio_vm_config(None, true);
+            let external_fds = vec![(ExternalFdTarget::Iommu, vec![2])].into();
+            assert_eq!(
+                vm_config.update_fds(external_fds, ExternalFdOperation::ReceiveMigration),
+                Err(UpdateFdsError::MissingFds(vfio_target("vfio1")))
+            );
+        }
+
+        {
+            let mut vm_config = create_dummy_vm_config();
+            vm_config.platform = Some(PlatformConfig {
+                iommufd: true,
+                ..platform_fixture()
+            });
+            let external_fds = vec![(ExternalFdTarget::Iommu, vec![1])].into();
+            assert_eq!(
+                vm_config.update_fds(external_fds, ExternalFdOperation::VmCreate),
+                Err(UpdateFdsError::IommuFdWithoutVfioFds)
+            );
+        }
+
+        {
+            let mut vm_config = vfio_vm_config(Some(-1), true);
+            let external_fds = vec![(vfio_target("vfio1"), vec![1])].into();
+            assert_eq!(
+                vm_config.update_fds(external_fds, ExternalFdOperation::VmCreate),
+                Err(UpdateFdsError::VfioFdsWithoutIommuFd)
+            );
+        }
+
+        {
+            let mut vm_config = vfio_vm_config(Some(-1), false);
+            let external_fds = vec![
+                (vfio_target("vfio1"), vec![1]),
+                (ExternalFdTarget::Iommu, vec![2]),
+            ]
+            .into();
+            assert_eq!(
+                vm_config.update_fds(external_fds, ExternalFdOperation::VmCreate),
+                Err(UpdateFdsError::IommufdFdRequiresIommufd)
+            );
+        }
+
+        {
+            let mut vm_config = vfio_vm_config(Some(-1), true);
+            let external_fds = vec![
+                (vfio_target("vfio1"), vec![1]),
+                (ExternalFdTarget::Iommu, vec![]),
+            ]
+            .into();
+            assert_eq!(
+                vm_config.update_fds(external_fds, ExternalFdOperation::VmCreate),
+                Err(UpdateFdsError::FdAmountMismatch {
+                    target: ExternalFdTarget::Iommu,
+                    expected: 1,
+                    actual: 0,
+                })
+            );
+        }
     }
 }
