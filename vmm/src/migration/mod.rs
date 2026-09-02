@@ -65,9 +65,14 @@ pub fn recv_vm_config(source_url: &str) -> result::Result<VmConfig, MigratableEr
         .with_context(|| format!("Error reading VM config snapshot file {vm_config_path:?}"))
         .map_err(MigratableError::MigrateReceive)?;
 
-    serde_json::from_slice(&bytes)
+    let mut config: VmConfig = serde_json::from_slice(&bytes)
         .context("Error deserialising VM config snapshot")
-        .map_err(MigratableError::MigrateReceive)
+        .map_err(MigratableError::MigrateReceive)?;
+    // Device paths are invalid on the target host.
+    if let Some(devices) = config.devices.as_mut() {
+        devices.iter_mut().for_each(|device| device.path = None);
+    }
+    Ok(config)
 }
 
 pub fn recv_vm_state(source_url: &str) -> result::Result<Snapshot, MigratableError> {
@@ -98,4 +103,49 @@ pub fn get_vm_snapshot(snapshot: &Snapshot) -> result::Result<VmSnapshot, Migrat
     Err(MigratableError::Restore(anyhow!(
         "Could not find VM config snapshot section"
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use crate::tests::create_dummy_vm_config;
+    use crate::vm_config::{DeviceConfig, PciDeviceCommonConfig};
+
+    #[test]
+    fn recv_vm_config_removes_vfio_paths() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = create_dummy_vm_config();
+        config.devices = Some(
+            ["vfio0", "vfio1"]
+                .into_iter()
+                .map(|id| DeviceConfig {
+                    pci_common: PciDeviceCommonConfig {
+                        id: Some(id.to_owned()),
+                        ..Default::default()
+                    },
+                    path: Some(format!("/sys/bus/pci/devices/{id}").into()),
+                    fd: Default::default(),
+                    x_nv_gpudirect_clique: None,
+                    x_exclude_mmap_bars: vec![],
+                    iommufd_dev_id: None,
+                })
+                .collect(),
+        );
+        fs::write(
+            directory.path().join(super::SNAPSHOT_CONFIG_FILE),
+            serde_json::to_vec(&config).unwrap(),
+        )
+        .unwrap();
+
+        let received =
+            super::recv_vm_config(&format!("file://{}", directory.path().display())).unwrap();
+        let devices = received.devices.as_ref().unwrap();
+        assert_eq!(devices.len(), 2);
+        for (device, original) in devices.iter().zip(config.devices.as_ref().unwrap()) {
+            let mut expected = original.clone();
+            expected.path = None;
+            assert_eq!(device, &expected);
+        }
+    }
 }
