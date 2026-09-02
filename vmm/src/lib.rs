@@ -1297,6 +1297,17 @@ impl Vmm {
             .context("Error deserialising config")
             .map_err(MigratableError::MigrateReceive)?;
 
+        // Device paths are invalid on the target host.
+        if let Some(devices) = vm_migration_config
+            .vm_config
+            .lock()
+            .unwrap()
+            .devices
+            .as_mut()
+        {
+            devices.iter_mut().for_each(|device| device.path = None);
+        }
+
         let mode = vm_migration_config.memory_mode();
 
         // Mirrors the vm_restore handling of RestoreConfig.vfio_fds. The
@@ -3679,7 +3690,7 @@ mod tests {
         .unwrap()
     }
 
-    fn create_dummy_vm_config() -> Box<VmConfig> {
+    pub(crate) fn create_dummy_vm_config() -> Box<VmConfig> {
         Box::new(VmConfig {
             cpus: CpusConfig {
                 boot_vcpus: 1,
