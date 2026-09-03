@@ -398,8 +398,9 @@ impl From<kvm_userspace_memory_region2> for UserMemoryRegion {
 
 impl From<UserMemoryRegion> for kvm_userspace_memory_region2 {
     fn from(region: UserMemoryRegion) -> Self {
-        assert!(
-            region.flags & USER_MEMORY_REGION_READ != 0,
+        assert_ne!(
+            region.flags & USER_MEMORY_REGION_READ,
+            0,
             "KVM mapped memory is always readable"
         );
 
