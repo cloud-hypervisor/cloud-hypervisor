@@ -50,6 +50,14 @@ pub enum VfioUserPciDeviceError {
     Client(#[source] VfioUserError),
     #[error("Failed to map VFIO PCI region into guest")]
     MapRegionGuest(#[source] HypervisorVmError),
+    #[error(
+        "Sparse mmap area [0x{offset:x}, +0x{size:x}) outside the 0x{region_size:x} byte region"
+    )]
+    SparseAreaOutsideRegion {
+        offset: u64,
+        size: u64,
+        region_size: u64,
+    },
     #[error("Failed to DMA map")]
     DmaMap(#[source] VfioUserError),
     #[error("Failed to DMA unmap")]
@@ -167,6 +175,19 @@ impl VfioUserPciDevice {
                 let file_offset = file_offset.as_ref().unwrap();
 
                 for s in mmaps.iter() {
+                    // The area layout comes from the untrusted backend. Never
+                    // mmap or create a memory slot outside the BAR window.
+                    if s.offset
+                        .checked_add(s.size)
+                        .is_none_or(|end| end > mmio_region.length)
+                    {
+                        return Err(VfioUserPciDeviceError::SparseAreaOutsideRegion {
+                            offset: s.offset,
+                            size: s.size,
+                            region_size: mmio_region.length,
+                        });
+                    }
+
                     let mapping = match MmapRegion::mmap(
                         s.size,
                         prot,
