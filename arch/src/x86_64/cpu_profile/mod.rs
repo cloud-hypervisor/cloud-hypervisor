@@ -483,9 +483,9 @@ mod tests {
             let leaf2 = transform_leaf(leaf2);
 
             // The leaves should still be distinct
-            assert!(leaf0 != leaf1);
-            assert!(leaf0 != leaf2);
-            assert!(leaf1 != leaf2);
+            assert_ne!(leaf0, leaf1);
+            assert_ne!(leaf0, leaf2);
+            assert_ne!(leaf1, leaf2);
             // We have now setup leaves to be used in this test
 
             // Let's now construct some simple adjustments
