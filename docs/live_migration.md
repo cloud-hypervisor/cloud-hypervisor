@@ -314,9 +314,10 @@ following parameters. Unless marked otherwise, they apply to
   A list of updates to apply to memory zones on the receiver side. For example,
   this can be used to remap memory zones to another NUMA node. Each zone update
   has the form `zone_id@host_numa_node`.
-- `vfio_fds <list of id@fd>` and `iommufd_fd <fd>` (`receive-migration`): \
-  File descriptors opened on the destination for migratable VFIO devices, see
-  [Destination File Descriptors](vfio.md#destination-file-descriptors).
+- `external_fds <list of target@[fd,...]>` (`receive-migration`): \
+  Replacement file descriptors opened on the destination. Use `net(<id>)`
+  for network FDs, `vfio(<id>)` for VFIO cdev FDs, and `iommu` for the
+  iommufd FD. For migratable VFIO devices, see [Destination File Descriptors](vfio.md#destination-file-descriptors).
 - `background_fetch_pages <on|off>` (`receive-migration`): \
   For postcopy migration and on-demand restore, keep fetching the remaining
   guest pages in the background after the VM resumed. With `off`, only the
@@ -357,8 +358,7 @@ only uses the guest announcement path.
 VMs with migratable VFIO devices, for example NIC VFs bound to
 `mlx5_vfio_pci`, can be live migrated. The opaque device state is captured
 during the downtime window and the destination receives new device file
-descriptors through the `vfio_fds` and `iommufd_fd` options of
-`receive-migration`.
+descriptors through the `external_fds` option of `receive-migration`.
 
 See [Live Migration of VFIO Devices](vfio.md#live-migration-of-vfio-devices)
 for the requirements, the dirty tracking behavior, and an example.

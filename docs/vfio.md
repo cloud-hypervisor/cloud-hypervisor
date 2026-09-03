@@ -276,9 +276,9 @@ are out of scope, see the requirement above.
 
 The device paths and file descriptors in the source configuration are
 meaningless on the destination host. The receive migration request therefore
-carries replacements. Each `vfio_fds` entry pairs a device id with a cdev
-file descriptor opened on the destination, and `iommufd_fd` carries a freshly
-opened iommufd. Both travel over the ch-remote UNIX socket via SCM_RIGHTS.
+carries replacements in `external_fds`. The iommufd file descriptor and cdev
+file descriptors, both opened on the destination, travel over the ch-remote
+UNIX socket via SCM_RIGHTS.
 
 The destination VF can live at a different BDF than the source's, and the
 kernel assigns its cdev name independently of the device id. The `vfio-dev`
@@ -290,14 +290,15 @@ vfio12
 dst $ exec 5<>/dev/vfio/devices/vfio12
 dst $ exec 6<>/dev/iommu
 dst $ ch-remote --api-socket=/tmp/api receive-migration \
-          receiver_url=tcp:0.0.0.0:{port},tls_dir=/path/to/dst-tls,vfio_fds=[vfio0@5],iommufd_fd=6
+          'receiver_url=tcp:0.0.0.0:{port},tls_dir=/path/to/dst-tls,external_fds=[vfio(vfio0)@[5],iommu@[6]]'
 ```
 
-The id in each `vfio_fds` entry must match the `id` of the corresponding
-device in the source VM configuration. Snapshot restore requires a
-replacement FD for every VFIO device, including devices
+The id in each `vfio(<id>)` entry must match the `id` of the corresponding
+device in the source VM configuration. The `iommu` entry supplies the iommufd
+FD.
+Snapshot restore requires a replacement FD for every VFIO device, including devices
 saved with a sysfs path and restores on the same host. For snapshot restore,
-supply `vfio_fds` and `iommufd_fd` in the restore request. The saved VM
+supply `vfio(<id>)` and `iommu` entries in `external_fds`. The saved VM
 configuration must have `iommufd=on`.
 
 ### Failure Recovery
