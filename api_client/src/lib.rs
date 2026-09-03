@@ -206,15 +206,6 @@ pub fn simple_api_full_command<T: Read + Write + ScmSocket>(
     simple_api_full_command_with_fds(socket, method, full_command, request_body, &[])
 }
 
-pub fn simple_api_full_command_and_response<T: Read + Write + ScmSocket>(
-    socket: &mut T,
-    method: &str,
-    full_command: &str,
-    request_body: Option<&str>,
-) -> Result<Option<String>, Error> {
-    simple_api_full_command_with_fds_and_response(socket, method, full_command, request_body, &[])
-}
-
 pub fn simple_api_command_with_fds<T: Read + Write + ScmSocket>(
     socket: &mut T,
     method: &str,
