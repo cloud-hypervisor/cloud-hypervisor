@@ -123,7 +123,7 @@ use vm_virtio::{AccessPlatform, VirtioDeviceType};
 use vmm_sys_util::errno;
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::console_devices::{ConsoleDeviceError, ConsoleInfo, ConsoleTransport};
+use crate::console_devices::{ConsoleInfo, ConsoleTransport};
 use crate::cpu::{AcpiCpuHotplugController, CPU_MANAGER_ACPI_SIZE, CpuManager};
 use crate::device_tree::{DeviceNode, DeviceTree};
 use crate::interrupt::{LegacyUserspaceInterruptManager, MsiInterruptManager};
@@ -268,11 +268,6 @@ pub enum DeviceManagerError {
     #[error("Cannot create virtio-balloon device")]
     CreateVirtioBalloon(#[source] io::Error),
 
-    /// Cannot create pvmemcontrol device
-    #[cfg(feature = "pvmemcontrol")]
-    #[error("Cannot create pvmemcontrol device")]
-    CreatePvmemcontrol(#[source] io::Error),
-
     /// Cannot create virtio-watchdog device
     #[error("Cannot create virtio-watchdog device")]
     CreateVirtioWatchdog(#[source] io::Error),
@@ -285,17 +280,9 @@ pub enum DeviceManagerError {
     #[error("Cannot spawn serial manager thread")]
     SpawnSerialManager(#[source] SerialManagerError),
 
-    /// Cannot open tap interface
-    #[error("Cannot open tap interface")]
-    OpenTap(#[source] net_util::TapError),
-
     /// Cannot allocate IRQ.
     #[error("Cannot allocate IRQ")]
     AllocateIrq(#[from] InterruptAllocError),
-
-    /// Cannot configure the IRQ.
-    #[error("Cannot configure the IRQ")]
-    Irq(#[source] errno::Error),
 
     /// Cannot allocate PCI BARs
     #[error("Cannot allocate PCI BARs")]
@@ -341,43 +328,6 @@ pub enum DeviceManagerError {
     #[error("Cannot find a memory range for persistent memory")]
     PmemRangeAllocation,
 
-    /// Cannot find a memory range for virtio-fs
-    #[error("Cannot find a memory range for virtio-fs")]
-    FsRangeAllocation,
-
-    /// Error creating serial output file
-    #[error("Error creating serial output file")]
-    SerialOutputFileOpen(#[source] io::Error),
-
-    /// Error creating debug-console output file
-    #[cfg(target_arch = "x86_64")]
-    #[error("Error creating debug-console output file")]
-    DebugconOutputFileOpen(#[source] io::Error),
-
-    /// Error creating console output file
-    #[error("Error creating console output file")]
-    ConsoleOutputFileOpen(#[source] io::Error),
-
-    /// Error creating serial pty
-    #[error("Error creating serial pty")]
-    SerialPtyOpen(#[source] io::Error),
-
-    /// Error creating console pty
-    #[error("Error creating console pty")]
-    ConsolePtyOpen(#[source] io::Error),
-
-    /// Error creating debugcon pty
-    #[error("Error creating console pty")]
-    DebugconPtyOpen(#[source] io::Error),
-
-    /// Error setting pty raw mode
-    #[error("Error setting pty raw mode")]
-    SetPtyRaw(#[source] ConsoleDeviceError),
-
-    /// Error getting pty peer
-    #[error("Error getting pty peer")]
-    GetPtyPeer(#[source] errno::Error),
-
     /// Cannot create iommufd
     #[cfg(feature = "kvm")]
     #[error("Cannot create iommufd")]
@@ -407,17 +357,9 @@ pub enum DeviceManagerError {
     #[error("Failed to DMA map VFIO device")]
     VfioDmaMap(#[source] vfio_ioctls::VfioError),
 
-    /// Failed to DMA unmap VFIO device.
-    #[error("Failed to DMA unmap VFIO device")]
-    VfioDmaUnmap(#[source] pci::VfioPciError),
-
     /// Failed to create the passthrough device.
     #[error("Failed to create the passthrough device")]
     CreatePassthroughDevice(#[source] anyhow::Error),
-
-    /// Failed to memory map.
-    #[error("Failed to memory map")]
-    Mmap(#[source] io::Error),
 
     /// Cannot add legacy device to Bus.
     #[error("Cannot add legacy device to Bus")]
@@ -443,10 +385,6 @@ pub enum DeviceManagerError {
     #[error("Failed to create new interrupt source group")]
     CreateInterruptGroup(#[source] io::Error),
 
-    /// Failed to update interrupt source group.
-    #[error("Failed to update interrupt source group")]
-    UpdateInterruptGroup(#[source] io::Error),
-
     /// Failed to create interrupt controller.
     #[error("Failed to create interrupt controller")]
     CreateInterruptController(#[source] interrupt_controller::Error),
@@ -458,22 +396,6 @@ pub enum DeviceManagerError {
     /// Failed to clone a File.
     #[error("Failed to clone a File")]
     CloneFile(#[source] io::Error),
-
-    /// Failed to create socket file
-    #[error("Failed to create socket file")]
-    CreateSocketFile(#[source] io::Error),
-
-    /// Failed to spawn the network backend
-    #[error("Failed to spawn the network backend")]
-    SpawnNetBackend(#[source] io::Error),
-
-    /// Failed to spawn the block backend
-    #[error("Failed to spawn the block backend")]
-    SpawnBlockBackend(#[source] io::Error),
-
-    /// Missing PCI bus.
-    #[error("Missing PCI bus")]
-    NoPciBus,
 
     /// Could not find an available device name.
     #[error("Could not find an available device name")]
@@ -494,10 +416,6 @@ pub enum DeviceManagerError {
     /// Failed to remove a bus device from the MMIO bus.
     #[error("Failed to remove a bus device from the MMIO bus")]
     RemoveDeviceFromMmioBus(#[source] vm_device::BusError),
-
-    /// Failed to find the device corresponding to a specific PCI b/d/f.
-    #[error("Failed to find the device corresponding to a specific PCI b/d/f: {0:#x}")]
-    UnknownPciBdf(u32),
 
     /// Not allowed to remove this type of device from the VM.
     #[error("Not allowed to remove this type of device from the VM: {0}")]
@@ -530,10 +448,6 @@ pub enum DeviceManagerError {
     /// Cannot create virtio-mem device
     #[error("Cannot create virtio-mem device")]
     CreateVirtioMem(#[source] io::Error),
-
-    /// Cannot find a memory range for virtio-mem memory
-    #[error("Cannot find a memory range for virtio-mem memory")]
-    VirtioMemRangeAllocation,
 
     /// Failed to update guest memory for VFIO PCI device.
     #[error("Failed to update guest memory for VFIO PCI device")]
@@ -595,10 +509,6 @@ pub enum DeviceManagerError {
     #[cfg(target_arch = "aarch64")]
     #[error("Failed to do AArch64 GPIO power button notification")]
     AArch64PowerButtonNotification(#[source] legacy::GpioDeviceError),
-
-    /// Failed to set O_DIRECT flag to file descriptor
-    #[error("Failed to set O_DIRECT flag to file descriptor")]
-    SetDirectIo,
     /// Failed to add DMA mapping handler to virtio-mem device.
     #[error("Failed to add DMA mapping handler to virtio-mem device")]
     AddDmaMappingHandlerVirtioMem(#[source] mem::Error),
@@ -627,10 +537,6 @@ pub enum DeviceManagerError {
     /// Failed to DMA map VFIO user device.
     #[error("Failed to DMA map VFIO user device")]
     VfioUserDmaMap(#[source] VfioUserPciDeviceError),
-
-    /// Failed to DMA unmap VFIO user device.
-    #[error("Failed to DMA unmap VFIO user device")]
-    VfioUserDmaUnmap(#[source] VfioUserPciDeviceError),
 
     /// Failed to update memory mappings for VFIO user device
     #[error("Failed to update memory mappings for VFIO user device")]
@@ -690,17 +596,9 @@ pub enum DeviceManagerError {
     #[error("Cannot create a RateLimiterGroup")]
     RateLimiterGroupCreate(#[source] group::Error),
 
-    /// Cannot start sigwinch listener
-    #[error("Cannot start sigwinch listener")]
-    StartSigwinchListener(#[source] io::Error),
-
     // Invalid console info
     #[error("Invalid console info")]
     InvalidConsoleInfo,
-
-    // Invalid console fd
-    #[error("Invalid console fd")]
-    InvalidConsoleFd,
 
     /// Cannot lock images of all block devices.
     #[error("Cannot lock images of all block devices")]

@@ -192,12 +192,6 @@ pub enum Error {
     #[error("Error starting vCPU after restore")]
     StartRestoreVcpu(#[source] anyhow::Error),
 
-    #[error("Unexpected VmExit")]
-    UnexpectedVmExit,
-
-    #[error("Failed to allocate MMIO address for CpuManager")]
-    AllocateMmmioAddress,
-
     #[cfg(feature = "tdx")]
     #[error("Error initializing TDX")]
     InitializeTdx(#[source] hypervisor::HypervisorCpuError),
@@ -227,10 +221,6 @@ pub enum Error {
     #[cfg(feature = "sev_snp")]
     #[error("Failed to set up SEV-SNP vCPU registers")]
     SetupSevSnpRegs(#[source] hypervisor::HypervisorCpuError),
-
-    #[cfg(target_arch = "x86_64")]
-    #[error("Failed to inject NMI")]
-    NmiError(#[source] hypervisor::HypervisorCpuError),
 
     #[cfg(feature = "mshv")]
     #[error("Failed to set partition property")]

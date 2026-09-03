@@ -121,10 +121,6 @@ pub enum Error {
     #[error("Error sending API request")]
     ApiResponseSend(#[source] SendError<ApiResponse>),
 
-    /// Cannot bind to the UNIX domain socket path
-    #[error("Error binding to UNIX domain socket")]
-    Bind(#[source] io::Error),
-
     /// Cannot clone EventFd.
     #[error("Error cloning EventFd")]
     EventFdClone(#[source] io::Error),
@@ -158,14 +154,6 @@ pub enum Error {
     /// Cannot create `event-monitor` thread
     #[error("Error spawning `event-monitor` thread")]
     EventMonitorThreadSpawn(#[source] io::Error),
-
-    /// Cannot handle the VM STDIN stream
-    #[error("Error handling VM stdin")]
-    Stdin(#[source] VmError),
-
-    /// Cannot handle the VM pty stream
-    #[error("Error handling VM pty")]
-    Pty(#[source] VmError),
 
     /// Cannot reboot the VM
     #[error("Error rebooting VM")]
