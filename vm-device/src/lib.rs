@@ -15,17 +15,6 @@ pub mod interrupt;
 
 pub use self::bus::{Bus, BusDevice, BusDeviceSync, Error as BusError};
 
-/// Type of Message Signalled Interrupt
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum MsiIrqType {
-    /// PCI MSI IRQ numbers.
-    PciMsi,
-    /// PCI MSIx IRQ numbers.
-    PciMsix,
-    /// Generic MSI IRQ numbers.
-    GenericMsi,
-}
-
 #[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
 pub enum PciBarType {
     Io,
@@ -37,8 +26,6 @@ pub enum PciBarType {
 #[expect(missing_docs)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Resource {
-    /// IO Port address range.
-    PioAddressRange { base: u16, size: u16 },
     /// Memory Mapped IO address range.
     MmioAddressRange { base: u64, size: u64 },
     /// PCI BAR
@@ -49,18 +36,6 @@ pub enum Resource {
         type_: PciBarType,
         prefetchable: bool,
     },
-    /// Legacy IRQ number.
-    LegacyIrq(u32),
-    /// Message Signaled Interrupt
-    MsiIrq {
-        ty: MsiIrqType,
-        base: u32,
-        size: u32,
-    },
-    /// Network Interface Card MAC address.
-    MacAddress(String),
-    /// KVM memslot index.
-    KvmMemSlot(u32),
 }
 
 #[derive(Clone)]
