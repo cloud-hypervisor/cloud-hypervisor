@@ -14,7 +14,7 @@ mod muxer_killq;
 mod muxer_rxq;
 
 use std::os::unix::net::UnixStream;
-use std::{io, num, result, str};
+use std::{io, result};
 
 pub use Error as VsockUnixError;
 pub use muxer::VsockMuxer as VsockUnixBackend;
@@ -33,9 +33,6 @@ mod defs {
 
 #[derive(Error, Debug)]
 pub enum Error {
-    /// Error converting from UTF-8
-    #[error("Error converting from UTF-8")]
-    ConvertFromUtf8(#[source] str::Utf8Error),
     /// Error registering a new epoll-listening FD.
     #[error("Error registering a new epoll-listening FD")]
     EpollAdd(#[source] io::Error),
@@ -45,12 +42,6 @@ pub enum Error {
     /// The host made an invalid vsock port connection request.
     #[error("The host made an invalid vsock port connection request")]
     InvalidPortRequest,
-    /// Error parsing integer.
-    #[error("Error parsing integer")]
-    ParseInteger(#[source] num::ParseIntError),
-    /// Error reading stream port.
-    #[error("Error reading stream port")]
-    ReadStreamPort(#[source] Box<Error>),
     /// Error accepting a new connection from the host-side Unix socket.
     #[error("Error accepting a new connection from the host-side Unix socket")]
     UnixAccept(#[source] io::Error),

@@ -222,8 +222,6 @@ pub enum Error {
     DuplicateTapFd(#[source] io::Error),
     #[error("Error creating EventFd")]
     CreateEventFd(#[source] io::Error),
-    #[error("Error cloning EventFd")]
-    CloneEventFd(#[source] io::Error),
 }
 
 pub type Result<T> = result::Result<T, Error>;

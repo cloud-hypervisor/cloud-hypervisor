@@ -72,16 +72,10 @@ pub const MINIMUM_BLOCK_QUEUE_SIZE: u16 = 2;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Failed to parse the request")]
-    RequestParsing(#[source] block::Error),
-    #[error("Failed to execute the request")]
-    RequestExecuting(#[source] block::ExecuteError),
     #[error("Failed to complete the request")]
     RequestCompleting(#[source] block::Error),
     #[error("Missing the expected entry in the list of requests")]
     MissingEntryRequestList,
-    #[error("The asynchronous request returned with failure")]
-    AsyncRequestFailure,
     #[error("Failed synchronizing the file")]
     Fsync(#[source] AsyncIoError),
     #[error("Failed adding used index")]
