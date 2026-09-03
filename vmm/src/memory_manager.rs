@@ -257,6 +257,10 @@ pub enum Error {
     #[error("Failed to set shared file length")]
     SharedFileSetLen(#[source] io::Error),
 
+    /// Failed to seal shared file.
+    #[error("Failed to seal shared file")]
+    SharedFileSeal(#[source] io::Error),
+
     /// Mmap backed guest memory error
     #[error("Mmap backed guest memory error")]
     GuestMemory(#[source] MmapError),
@@ -2055,6 +2059,7 @@ impl MemoryManager {
         let fd = Self::memfd_create(
             &ffi::CString::new("ch_ram").unwrap(),
             libc::MFD_CLOEXEC
+                | libc::MFD_ALLOW_SEALING
                 | if hugepages {
                     libc::MFD_HUGETLB
                         | if let Some(hugepage_size) = hugepage_size {
@@ -2082,6 +2087,22 @@ impl MemoryManager {
         // SAFETY: fd is valid
         let f = unsafe { File::from_raw_fd(fd) };
         f.set_len(size as u64).map_err(Error::SharedFileSetLen)?;
+
+        // Seal the FD to prevent truncate changing the size (and triggering
+        // SIGBUS in the VMM) as it may be shared with an external process.
+        //
+        // SAFETY: `f` provides a valid file descriptor, and `F_ADD_SEALS` takes
+        // no pointer arguments.
+        let res = unsafe {
+            libc::fcntl(
+                f.as_raw_fd(),
+                libc::F_ADD_SEALS,
+                libc::F_SEAL_SHRINK | libc::F_SEAL_GROW | libc::F_SEAL_SEAL,
+            )
+        };
+        if res < 0 {
+            return Err(Error::SharedFileSeal(io::Error::last_os_error()));
+        }
 
         Ok(FileOffset::new(f, 0))
     }
