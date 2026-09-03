@@ -50,18 +50,6 @@ pub enum Error {
     /// Writing the IDT to RAM failed.
     #[error("Writing the IDT to RAM failed")]
     WriteIdt(#[source] GuestMemoryError),
-    /// Writing PDPTE to RAM failed.
-    #[error("Writing PDPTE to RAM failed")]
-    WritePdpteAddress(#[source] GuestMemoryError),
-    /// Writing PDE to RAM failed.
-    #[error("Writing PDE to RAM failed")]
-    WritePdeAddress(#[source] GuestMemoryError),
-    /// Writing PML4 to RAM failed.
-    #[error("Writing PML4 to RAM failed")]
-    WritePml4Address(#[source] GuestMemoryError),
-    /// Writing PML5 to RAM failed.
-    #[error("Writing PML5 to RAM failed")]
-    WritePml5Address(#[source] GuestMemoryError),
 }
 
 pub type Result<T> = result::Result<T, Error>;
