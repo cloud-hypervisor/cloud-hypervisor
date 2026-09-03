@@ -97,6 +97,13 @@ const PLATFORM_DEVICE_AREA_SIZE: u64 = 1 << 20;
 
 const MAX_PREFAULT_THREAD_COUNT: usize = 16;
 
+// A guest memory region to prefault
+struct PrefaultRegion {
+    addr: usize,
+    size: usize,
+    page_size: usize,
+}
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 struct HotPlugState {
     base: u64,
@@ -770,6 +777,68 @@ impl MemoryManager {
         }
 
         Ok((mem_regions, memory_zones))
+    }
+
+    fn prefault_regions(regions: &[PrefaultRegion]) -> Result<(), Error> {
+        for region in regions {
+            if !is_aligned(region.size, region.page_size) {
+                warn!(
+                    "Prefaulting memory size {} misaligned with page size {}",
+                    region.size, region.page_size
+                );
+            }
+
+            let num_pages = region.size / region.page_size;
+            let num_threads = Self::get_prefault_num_threads(region.page_size, num_pages);
+            let pages_per_thread = num_pages / num_threads;
+            let remainder = num_pages % num_threads;
+
+            let barrier = Arc::new(Barrier::new(num_threads));
+            thread::scope(|s| -> Result<(), Error> {
+                let mut handles = Vec::new();
+                for i in 0..num_threads {
+                    let barrier = Arc::clone(&barrier);
+                    let handle = s.spawn(move || {
+                        // Wait until all threads have been spawned to avoid contention
+                        // over mmap_sem between thread stack allocation and page faulting.
+                        barrier.wait();
+                        let pages = pages_per_thread + if i < remainder { 1 } else { 0 };
+                        let offset =
+                            region.page_size * ((i * pages_per_thread) + cmp::min(i, remainder));
+                        // SAFETY: the caller keeps the region mappings alive for the
+                        // duration of this call
+                        let ret = unsafe {
+                            libc::madvise(
+                                (region.addr + offset) as *mut libc::c_void,
+                                pages * region.page_size,
+                                libc::MADV_POPULATE_WRITE,
+                            )
+                        };
+                        if ret != 0 {
+                            let e = io::Error::last_os_error();
+                            return Err(e);
+                        }
+                        Ok(())
+                    });
+                    handles.push(handle);
+                }
+
+                for handle in handles {
+                    handle
+                        .join()
+                        .map_err(|e| {
+                            Error::PrefaultMemory(io::Error::other(format!(
+                                "Prefault thread panicked: {e:?}"
+                            )))
+                        })?
+                        .map_err(Error::PrefaultMemory)?;
+                }
+
+                Ok(())
+            })?;
+        }
+
+        Ok(())
     }
 
     // Restore both GuestMemoryBackend regions along with MemoryZone zones.
@@ -2183,57 +2252,11 @@ impl MemoryManager {
         if prefault {
             let page_size =
                 Self::get_prefault_align_size(backing_file, hugepages, hugepage_size)? as usize;
-
-            if !is_aligned(size, page_size) {
-                warn!("Prefaulting memory size {size} misaligned with page size {page_size}");
-            }
-
-            let num_pages = size / page_size;
-
-            let num_threads = Self::get_prefault_num_threads(page_size, num_pages);
-
-            let pages_per_thread = num_pages / num_threads;
-            let remainder = num_pages % num_threads;
-
-            let barrier = Arc::new(Barrier::new(num_threads));
-            thread::scope(|s| -> Result<(), Error> {
-                let r = &region;
-                let mut handles = Vec::new();
-                for i in 0..num_threads {
-                    let barrier = Arc::clone(&barrier);
-                    let handle = s.spawn(move || {
-                        // Wait until all threads have been spawned to avoid contention
-                        // over mmap_sem between thread stack allocation and page faulting.
-                        barrier.wait();
-                        let pages = pages_per_thread + if i < remainder { 1 } else { 0 };
-                        let offset = page_size * ((i * pages_per_thread) + cmp::min(i, remainder));
-                        // SAFETY: FFI call with correct arguments
-                        let ret = unsafe {
-                            let addr = r.as_ptr().add(offset);
-                            libc::madvise(addr.cast(), pages * page_size, libc::MADV_POPULATE_WRITE)
-                        };
-                        if ret != 0 {
-                            let e = io::Error::last_os_error();
-                            return Err(e);
-                        }
-                        Ok(())
-                    });
-                    handles.push(handle);
-                }
-
-                for handle in handles {
-                    handle
-                        .join()
-                        .map_err(|e| {
-                            Error::PrefaultMemory(io::Error::other(format!(
-                                "Prefault thread panicked: {e:?}"
-                            )))
-                        })?
-                        .map_err(Error::PrefaultMemory)?;
-                }
-
-                Ok(())
-            })?;
+            Self::prefault_regions(&[PrefaultRegion {
+                addr: region.as_ptr() as usize,
+                size,
+                page_size,
+            }])?;
         }
 
         info!(
