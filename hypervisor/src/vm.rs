@@ -179,45 +179,15 @@ pub enum HypervisorVmError {
     #[error("Failed to read guest memory")]
     GuestMemRead(#[source] anyhow::Error),
     ///
-    /// Read from MMIO Bus
-    ///
-    #[error("Failed to read from MMIO Bus")]
-    MmioBusRead(#[source] anyhow::Error),
-    ///
-    /// Write to MMIO Bus
-    ///
-    #[error("Failed to write to MMIO Bus")]
-    MmioBusWrite(#[source] anyhow::Error),
-    ///
-    /// Read from IO Bus
-    ///
-    #[error("Failed to read from IO Bus")]
-    IoBusRead(#[source] anyhow::Error),
-    ///
-    /// Write to IO Bus
-    ///
-    #[error("Failed to write to IO Bus")]
-    IoBusWrite(#[source] anyhow::Error),
-    ///
     /// Start dirty log error
     ///
     #[error("Failed to get dirty log")]
     StartDirtyLog(#[source] anyhow::Error),
     ///
-    /// Stop dirty log error
-    ///
-    #[error("Failed to get dirty log")]
-    StopDirtyLog(#[source] anyhow::Error),
-    ///
     /// Get dirty log error
     ///
     #[error("Failed to get dirty log")]
     GetDirtyLog(#[source] anyhow::Error),
-    ///
-    /// Assert virtual interrupt error
-    ///
-    #[error("Failed to assert virtual Interrupt")]
-    AssertVirtualInterrupt(#[source] anyhow::Error),
 
     #[cfg(feature = "sev_snp")]
     ///

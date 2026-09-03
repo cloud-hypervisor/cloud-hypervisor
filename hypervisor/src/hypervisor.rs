@@ -43,16 +43,6 @@ pub enum HypervisorError {
     #[error("Failed to create Vm")]
     VmCreate(#[source] anyhow::Error),
     ///
-    /// Vm setup failure
-    ///
-    #[error("Failed to setup Vm")]
-    VmSetup(#[source] anyhow::Error),
-    ///
-    /// API version error
-    ///
-    #[error("Failed to get API Version")]
-    GetApiVersion(#[source] anyhow::Error),
-    ///
     /// CpuId error
     ///
     #[error("Failed to get cpuid")]
@@ -82,16 +72,6 @@ pub enum HypervisorError {
     ///
     #[error("Failed to set partition property")]
     SetPartitionProperty(#[source] anyhow::Error),
-    ///
-    /// Running on an unsupported CPU
-    ///
-    #[error("Unsupported CPU")]
-    UnsupportedCpu(#[source] anyhow::Error),
-    ///
-    /// Launching a VM with unsupported VM Type
-    ///
-    #[error("Unsupported VmType")]
-    UnsupportedVmType(),
 
     ///
     /// The attempt to enable AMX tile state components failed
