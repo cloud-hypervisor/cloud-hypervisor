@@ -475,6 +475,47 @@ impl Tap {
         unsafe { Self::ioctl_with_ref(&sock, libc::SIOCSIFFLAGS as c_ulong, &ifreq) }
     }
 
+    /// Attach this TAP queue
+    pub fn attach_queue(&self) -> Result<()> {
+        if self.is_attached()? {
+            return Ok(());
+        }
+
+        self.set_queue(libc::IFF_ATTACH_QUEUE as c_short)
+    }
+
+    /// Detach this TAP queue
+    pub fn detach_queue(&self) -> Result<()> {
+        if !self.is_attached()? {
+            return Ok(());
+        }
+
+        self.set_queue(libc::IFF_DETACH_QUEUE as c_short)
+    }
+
+    /// Whether this TAP queue is currently attached
+    pub fn is_attached(&self) -> Result<bool> {
+        let mut ifreq = self.get_ifreq();
+
+        // SAFETY: IOCTL with correct arguments
+        unsafe {
+            Self::ioctl_with_mut_ref(&self.tap_file, libc::TUNGETIFF as c_ulong, &mut ifreq)?;
+        }
+
+        // SAFETY: access a union field
+        let ifru_flags = unsafe { ifreq.ifr_ifru.ifru_flags };
+
+        Ok(ifru_flags & libc::IFF_DETACH_QUEUE as c_short == 0)
+    }
+
+    fn set_queue(&self, flag: c_short) -> Result<()> {
+        let mut ifreq = self.get_ifreq();
+        ifreq.ifr_ifru.ifru_flags = flag;
+
+        // SAFETY: ioctl is safe. Called with a valid tap fd, and we check the return.
+        unsafe { Self::ioctl_with_ref(&self.tap_file, libc::TUNSETQUEUE as c_ulong, &ifreq) }
+    }
+
     /// Set the size of the vnet hdr.
     pub fn set_vnet_hdr_size(&self, size: c_int) -> Result<()> {
         // SAFETY: ioctl is safe. Called with a valid tap fd, and we check the return.
@@ -525,6 +566,19 @@ impl Tap {
             .unwrap();
         Tap { tap_file, if_name }
     }
+}
+
+/// Attach the first `n` TAP queues and detach the rest
+pub fn attach_n_first_taps(taps: &[Tap], n: usize) -> Result<()> {
+    for (index, tap) in taps.iter().enumerate() {
+        if index < n {
+            tap.attach_queue()?;
+        } else {
+            tap.detach_queue()?;
+        }
+    }
+
+    Ok(())
 }
 
 impl Read for Tap {
@@ -886,5 +940,42 @@ mod unit_tests {
         }
 
         assert!(found_test_packet);
+    }
+
+    #[test]
+    fn test_tap_attach_detach_queue() {
+        let _tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
+
+        let tap0 = Tap::new(2).unwrap();
+        let tap1 = Tap::open_named(tap0.if_name_as_str(), 2, None).unwrap();
+
+        assert!(tap1.is_attached().unwrap());
+
+        tap1.detach_queue().unwrap();
+        assert!(!tap1.is_attached().unwrap());
+        tap1.detach_queue().unwrap();
+        assert!(!tap1.is_attached().unwrap());
+
+        tap1.attach_queue().unwrap();
+        assert!(tap1.is_attached().unwrap());
+        tap1.attach_queue().unwrap();
+        assert!(tap1.is_attached().unwrap());
+    }
+
+    #[test]
+    fn test_attach_n_first_taps() {
+        let _tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
+
+        let tap0 = Tap::new(2).unwrap();
+        let tap1 = Tap::open_named(tap0.if_name_as_str(), 2, None).unwrap();
+        let taps = [tap0, tap1];
+
+        attach_n_first_taps(&taps, 1).unwrap();
+        assert!(taps[0].is_attached().unwrap());
+        assert!(!taps[1].is_attached().unwrap());
+
+        attach_n_first_taps(&taps, 2).unwrap();
+        assert!(taps[0].is_attached().unwrap());
+        assert!(taps[1].is_attached().unwrap());
     }
 }
