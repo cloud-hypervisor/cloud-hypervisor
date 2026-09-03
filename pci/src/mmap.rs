@@ -227,8 +227,9 @@ in both isize and libc::size_t";
             return Err(Error::new(ErrorKind::InvalidInput, BAD_LENGTH));
         };
 
-        assert!(
-            (prot & !(libc::PROT_READ | libc::PROT_WRITE | libc::PROT_EXEC)) == 0,
+        assert_eq!(
+            (prot & !(libc::PROT_READ | libc::PROT_WRITE | libc::PROT_EXEC)),
+            0,
             "bad protection"
         );
 
