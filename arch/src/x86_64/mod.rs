@@ -38,7 +38,6 @@ use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend,
     GuestMemoryRegion,
 };
-use vmm_sys_util::fam;
 
 use crate::x86_64::cpu_profile::cpuid_adjustments::MissingCpuidEntriesError;
 use crate::{CpuProfile, GuestMemoryMmap, InitramfsConfig, RegionType};
@@ -151,14 +150,6 @@ pub enum Error {
     /// Error getting supported CPUID through the hypervisor (kvm/mshv) API
     #[error("Error getting supported CPUID through the hypervisor API")]
     CpuidGetSupported(#[source] HypervisorError),
-
-    /// Error populating CPUID with KVM HyperV emulation details
-    #[error("Error populating CPUID with KVM HyperV emulation details")]
-    CpuidKvmHyperV(#[source] fam::Error),
-
-    /// Error populating CPUID with CPU identification
-    #[error("Error populating CPUID with CPU identification")]
-    CpuidIdentification(#[source] fam::Error),
 
     /// Error checking CPUID compatibility
     #[error("Error checking CPUID compatibility")]
