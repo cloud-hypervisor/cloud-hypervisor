@@ -67,14 +67,8 @@ pub enum Error {
     FailedSignalingUsedQueue(#[source] io::Error),
     #[error("Failed removing socket path")]
     RemoveSocketPath(#[source] io::Error),
-    #[error("Failed to create frontend")]
-    VhostUserCreateFrontend(#[source] VhostError),
-    #[error("Failed to open vhost device")]
-    VhostUserOpen(#[source] VhostError),
     #[error("Connection to socket failed")]
     VhostUserConnect(#[source] VhostError),
-    #[error("Backend disconnected for socket {0}")]
-    BackendDisconnected(String),
     #[error("Get features failed")]
     VhostUserGetFeatures(#[source] VhostError),
     #[error("Get queue max number failed")]
@@ -85,8 +79,6 @@ pub enum Error {
     VhostUserGetVringBase(#[source] VhostError),
     #[error("Set owner failed")]
     VhostUserSetOwner(#[source] VhostError),
-    #[error("Reset owner failed")]
-    VhostUserResetOwner(#[source] VhostError),
     #[error("Set features failed")]
     VhostUserSetFeatures(#[source] VhostError),
     #[error("Set protocol features failed")]
@@ -207,15 +199,12 @@ fn vhost_error_is_transport_lost(error: &VhostError) -> bool {
 impl Error {
     fn is_transport_lost(&self) -> bool {
         match self {
-            Error::VhostUserConnect(_) | Error::BackendDisconnected(_) => true,
-            Error::VhostUserCreateFrontend(e)
-            | Error::VhostUserOpen(e)
-            | Error::VhostUserGetFeatures(e)
+            Error::VhostUserConnect(_) => true,
+            Error::VhostUserGetFeatures(e)
             | Error::VhostUserGetQueueMaxNum(e)
             | Error::VhostUserGetProtocolFeatures(e)
             | Error::VhostUserGetVringBase(e)
             | Error::VhostUserSetOwner(e)
-            | Error::VhostUserResetOwner(e)
             | Error::VhostUserSetFeatures(e)
             | Error::VhostUserSetProtocolFeatures(e)
             | Error::VhostUserSetMemTable(e)
