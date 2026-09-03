@@ -475,6 +475,29 @@ impl Tap {
         unsafe { Self::ioctl_with_ref(&sock, libc::SIOCSIFFLAGS as c_ulong, &ifreq) }
     }
 
+    /// Attach this TAP queue, or leave it attached.
+    pub fn attach_queue(&self) -> Result<()> {
+        self.set_queue(libc::IFF_ATTACH_QUEUE as c_short)
+    }
+
+    /// Detach this TAP queue, or leave it detached.
+    pub fn detach_queue(&self) -> Result<()> {
+        self.set_queue(libc::IFF_DETACH_QUEUE as c_short)
+    }
+
+    // Both tun and macvtap answer EINVAL for a queue already in the requested state.
+    fn set_queue(&self, flag: c_short) -> Result<()> {
+        let mut ifreq = self.get_ifreq();
+        ifreq.ifr_ifru.ifru_flags = flag;
+
+        // SAFETY: ioctl is safe. Called with a valid tap fd, and we check the return.
+        match unsafe { Self::ioctl_with_ref(&self.tap_file, libc::TUNSETQUEUE as c_ulong, &ifreq) }
+        {
+            Err(Error::IoctlError(_, e)) if e.raw_os_error() == Some(libc::EINVAL) => Ok(()),
+            result => result,
+        }
+    }
+
     /// Set the size of the vnet hdr.
     pub fn set_vnet_hdr_size(&self, size: c_int) -> Result<()> {
         // SAFETY: ioctl is safe. Called with a valid tap fd, and we check the return.
@@ -527,6 +550,20 @@ impl Tap {
     }
 }
 
+/// Attach the first `n` TAP queues and detach the rest, whatever state they
+/// are in, so the kernel only steers received frames to queues being read.
+pub fn associate_taps(taps: &[Tap], n: usize) -> Result<()> {
+    for (index, tap) in taps.iter().enumerate() {
+        if index < n {
+            tap.attach_queue()?;
+        } else {
+            tap.detach_queue()?;
+        }
+    }
+
+    Ok(())
+}
+
 impl Read for Tap {
     fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
         self.tap_file.read(buf)
@@ -555,7 +592,7 @@ mod tests {
     use std::net::Ipv4Addr;
     use std::sync::{LazyLock, Mutex, mpsc};
     use std::time::Duration;
-    use std::{str, thread};
+    use std::{fs, str, thread};
 
     use pnet::packet::ethernet::{EtherTypes, EthernetPacket, MutableEthernetPacket};
     use pnet::packet::ip::IpNextHeaderProtocols;
@@ -886,5 +923,64 @@ mod tests {
         }
 
         assert!(found_test_packet);
+    }
+
+    // One rx-* entry per attached TAP queue.
+    fn rx_queues(if_name: &str) -> usize {
+        fs::read_dir(format!("/sys/class/net/{if_name}/queues"))
+            .unwrap()
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("rx-")
+            })
+            .count()
+    }
+
+    #[test]
+    fn test_tap_attach_detach_queue() {
+        let _tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
+
+        let tap0 = Tap::new(2).unwrap();
+        let tap1 = Tap::open_named(tap0.if_name_as_str(), 2, None).unwrap();
+        let if_name = tap0.if_name_as_str();
+
+        assert_eq!(rx_queues(if_name), 2);
+
+        tap1.detach_queue().unwrap();
+        assert_eq!(rx_queues(if_name), 1);
+        tap1.detach_queue().unwrap();
+        assert_eq!(rx_queues(if_name), 1);
+
+        tap1.attach_queue().unwrap();
+        assert_eq!(rx_queues(if_name), 2);
+        tap1.attach_queue().unwrap();
+        assert_eq!(rx_queues(if_name), 2);
+    }
+
+    #[test]
+    fn test_associate_taps() {
+        let _tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
+
+        let tap0 = Tap::new(3).unwrap();
+        let tap1 = Tap::open_named(tap0.if_name_as_str(), 3, None).unwrap();
+        let tap2 = Tap::open_named(tap0.if_name_as_str(), 3, None).unwrap();
+        let if_name = tap0.if_name_as_str().to_string();
+        let taps = [tap0, tap1, tap2];
+
+        associate_taps(&taps, 1).unwrap();
+        assert_eq!(rx_queues(&if_name), 1);
+
+        associate_taps(&taps, 1).unwrap();
+        assert_eq!(rx_queues(&if_name), 1);
+
+        associate_taps(&taps, 3).unwrap();
+        assert_eq!(rx_queues(&if_name), 3);
+
+        associate_taps(&taps, 2).unwrap();
+        assert_eq!(rx_queues(&if_name), 2);
     }
 }
