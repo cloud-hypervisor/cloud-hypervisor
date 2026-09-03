@@ -133,8 +133,6 @@ pub enum ExecuteError {
     Unsupported(u32),
     #[error("Unsupported flags {flags:#x} for request type {request_type}")]
     UnsupportedFlags { request_type: u32, flags: u32 },
-    #[error("Failed to submit io uring")]
-    SubmitIoUring(#[source] io::Error),
     #[error("Failed to get guest address")]
     GetHostAddress(#[source] GuestMemoryError),
     #[error("Failed to async read")]
@@ -163,7 +161,6 @@ impl ExecuteError {
             ExecuteError::WriteAll(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::Unsupported(_) => VIRTIO_BLK_S_UNSUPP,
             ExecuteError::UnsupportedFlags { .. } => VIRTIO_BLK_S_UNSUPP,
-            ExecuteError::SubmitIoUring(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::GetHostAddress(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::AsyncRead(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::AsyncWrite(_) => VIRTIO_BLK_S_IOERR,
