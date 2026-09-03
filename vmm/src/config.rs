@@ -2871,19 +2871,13 @@ pub struct RestoreConfig {
 impl RestoreConfig {
     pub const SYNTAX: &'static str = "Restore from a VM snapshot. \
         \nRestore parameters \"source_url=<source_url>,prefault=on|off,memory_restore_mode=copy|ondemand|copyonwrite,\
-        net_fds=<list_of_net_ids_with_their_associated_fds>,\
-        vfio_fds=<list_of_vfio_ids_with_their_associated_fd>,iommufd_fd=<fd>,resume=true|false,\
+        external_fds=[net(<id>)@[<fd>,...],vfio(<id>)@[<fd>],iommu@[<fd>]],resume=true|false,\
         zone_updates=<list_of_updates>\"
         \n`source_url` should be a valid URL (e.g file:///foo/bar or tcp://192.168.1.10/foo) \
         \n`prefault` controls eager prefaulting for the copy-based restore path (disabled by default) \
         \n`memory_restore_mode=copy` preserves the existing eager read-copy restore behavior, `memory_restore_mode=ondemand` enables lazy demand paging and fails restore if userfaultfd support is unavailable, and `memory_restore_mode=copyonwrite` maps the snapshot file copy-on-write (plain private RAM only; falls back to copy otherwise) \
-        \n`net_fds` is a list of net ids with new file descriptors. \
-        Only net devices backed by FDs directly are needed as input.\
-        \n`vfio_fds` is a list of VFIO device ids each paired with a new cdev file descriptor, \
-        e.g. vfio_fds=[vfio0@5,vfio1@6]. Use this to restore a VFIO device onto a different \
-        sysfs path or host. Requires `iommufd_fd`.\
-        \n`iommufd_fd` is a new iommufd file descriptor for the restored VM. \
-        The one saved in the snapshot does not survive serialization.\
+        \n`external_fds` provides replacement file descriptors. `net(<id>)` entries replace the FDs of network devices, `vfio(<id>)` entries replace VFIO cdev FDs, and `iommu` provides the iommufd FD. \
+        The listed FDs are passed to the VMM via SCM_RIGHTS.\
         \n `resume` controls whether the VM will be directly resumed after restore \
         \n `zone_updates` can be used to update NUMA memory zones. Expects a list of elements in the form `id@host_numa_node`";
 
