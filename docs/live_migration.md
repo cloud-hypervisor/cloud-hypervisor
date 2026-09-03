@@ -152,6 +152,11 @@ only uses the guest announcement path.
 If TCP socket is selected for migration, we need to consider migrating
 in a trusted network.
 
+**Warning**: without TLS, the listener accepts data from anyone who can
+connect to it. Use plaintext `tcp:` only on networks where every host is
+trusted. On any other network, use the TLS support described below, or a
+UNIX socket combined with filesystem permissions.
+
 #### Starting the Receiver VM
 
 On the receiver side, we prepare an empty VM:

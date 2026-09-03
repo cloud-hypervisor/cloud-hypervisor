@@ -51,6 +51,23 @@ on behalf of untrusted parties. For instance, a cloud service may allow
 users to upload arbitrary files and attach them to their VMs as block
 devices.
 
+## Live Migration and Snapshots
+
+The source and the destination of a live migration fully trust each
+other. The migration data defines the entire VM, including host
+resources the destination opens on behalf of the source, such as disk
+paths and console files. Whoever can connect to a migration listener
+therefore has the same power as management software.
+
+The listener used by `receive-migration` must only be reachable by
+trusted peers. Plaintext TCP provides no authentication and must only
+be used on networks where every host is trusted. On any other network,
+TLS support must be used, or the UNIX socket transport combined with
+filesystem permissions. This also covers the additional migration
+connections that a TCP migration accepts on the same listener.
+
+Snapshot files are trusted input for restore operations.
+
 ## Guest Virtual Machine
 
 Cloud Hypervisor considers the guest VM to be untrusted. This means that
