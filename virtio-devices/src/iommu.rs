@@ -302,6 +302,8 @@ enum Error {
     InvalidAttachRequest,
     #[error("Guest sent us invalid DETACH request")]
     InvalidDetachRequest,
+    #[error("Invalid to detach because the endpoint is not attached to the domain")]
+    InvalidDetachRequestWrongDomain,
     #[error("Guest sent us invalid MAP request")]
     InvalidMapRequest,
     #[error("Invalid to map because the domain is in bypass mode")]
@@ -501,6 +503,12 @@ impl Request {
                     // Copy the value to use it as a proper reference.
                     let domain_id = req.domain;
                     let endpoint = req.endpoint;
+
+                    // The endpoint must be attached to this very domain.
+                    if mapping.endpoints.read().unwrap().get(&endpoint) != Some(&domain_id) {
+                        status = VIRTIO_IOMMU_S_INVAL;
+                        return Err(Error::InvalidDetachRequestWrongDomain);
+                    }
 
                     // Remove endpoint associated with specific domain
                     detach_endpoint_from_domain(endpoint, domain_id, mapping, ext_mapping)?;
