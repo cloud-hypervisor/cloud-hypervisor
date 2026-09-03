@@ -21,9 +21,9 @@ use zerocopy::{FromZeros, Immutable, IntoBytes};
 
 pub(crate) type Result<T> = result::Result<T, errno::Error>;
 
-// See AMD Spec Section 8.17 — SNP_LAUNCH_UPDATE
+// See AMD Spec Section 8.18 — SNP_LAUNCH_UPDATE
 // The last 12 bits are metadata about the guest context
-// https://docs.amd.com/v/u/en-US/56860_PUB_1.58_SEV_SNP
+// https://docs.amd.com/v/u/en-US/56860_PUB_SEV_SNP
 pub const GPA_METADATA_SHIFT_OFFSET: u32 = 12;
 
 // SNP in VMSA - linux/arch/x86/include/asm/svm.h
@@ -93,8 +93,8 @@ pub(crate) struct KvmSevSnpLaunchFinish {
     pub pad1: [u64; 4],
 }
 
-// See AMD Spec Section 8.18 — Structure of the ID Block
-// https://docs.amd.com/v/u/en-US/56860_PUB_1.58_SEV_SNP
+// See AMD Spec Section 8.19 — Structure of the ID Block
+// https://docs.amd.com/v/u/en-US/56860_PUB_SEV_SNP
 #[repr(C)]
 #[derive(Debug, Copy, Clone, IntoBytes, Immutable)]
 pub(crate) struct KvmSevSnpIdBlock {
@@ -106,8 +106,8 @@ pub(crate) struct KvmSevSnpIdBlock {
     pub policy: u64,
 }
 
-// See AMD Spec Section 8.18 — Layout of the ID Authentication Information Structure
-// https://docs.amd.com/v/u/en-US/56860_PUB_1.58_SEV_SNP
+// See AMD Spec Section 8.19 — Layout of the ID Authentication Information Structure
+// https://docs.amd.com/v/u/en-US/56860_PUB_SEV_SNP
 #[repr(C)]
 #[derive(Clone, FromZeros, IntoBytes, Immutable)]
 pub(crate) struct KvmSevSnpIdAuth {
@@ -123,8 +123,8 @@ pub(crate) struct KvmSevSnpIdAuth {
 }
 
 // Must be 1
-// AMD SEV-SNP Firmware ABI, Section 8.18 — Structure of the ID Block
-// https://docs.amd.com/v/u/en-US/56860_PUB_1.58_SEV_SNP
+// AMD SEV-SNP Firmware ABI, Section 8.19 — Structure of the ID Block
+// https://docs.amd.com/v/u/en-US/56860_PUB_SEV_SNP
 const IGVM_SEV_ID_BLOCK_VERSION: u32 = 1;
 
 fn build_id_block(snp_id_block: &IGVM_VHS_SNP_ID_BLOCK, guest_policy: u64) -> KvmSevSnpIdBlock {
@@ -138,8 +138,8 @@ fn build_id_block(snp_id_block: &IGVM_VHS_SNP_ID_BLOCK, guest_policy: u64) -> Kv
     }
 }
 
-// SEV-SNP Firmware ABI Spec Chapter 10: Format for an ECDSA P-384 Public Key
-// https://docs.amd.com/v/u/en-US/56860_PUB_1.58_SEV_SNP
+// SEV-SNP Firmware ABI Spec Appendix B: Format for an ECDSA P-384 Public Key
+// https://docs.amd.com/v/u/en-US/56860_PUB_SEV_SNP
 fn serialize_public_key(curve: u32, qx: &[u8; 72], qy: &[u8; 72]) -> [u8; 1028] {
     let mut key = [0u8; 0x404];
     key[..0x004].copy_from_slice(&curve.to_le_bytes());
