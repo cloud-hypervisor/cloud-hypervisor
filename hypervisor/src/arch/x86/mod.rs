@@ -108,64 +108,33 @@ impl SegmentRegister {
     pub fn segment_type(&self) -> u8 {
         self.type_
     }
-    pub fn set_segment_type(&mut self, val: u8) {
-        self.type_ = val;
-    }
 
     pub fn dpl(&self) -> u8 {
         self.dpl
-    }
-
-    pub fn set_dpl(&mut self, val: u8) {
-        self.dpl = val;
     }
 
     pub fn present(&self) -> u8 {
         self.present
     }
 
-    pub fn set_present(&mut self, val: u8) {
-        self.present = val;
-    }
-
     pub fn long(&self) -> u8 {
         self.l
-    }
-
-    pub fn set_long(&mut self, val: u8) {
-        self.l = val;
     }
 
     pub fn avl(&self) -> u8 {
         self.avl
     }
 
-    pub fn set_avl(&mut self, val: u8) {
-        self.avl = val;
-    }
-
     pub fn desc_type(&self) -> u8 {
         self.s
-    }
-
-    pub fn set_desc_type(&mut self, val: u8) {
-        self.s = val;
     }
 
     pub fn granularity(&self) -> u8 {
         self.g
     }
 
-    pub fn set_granularity(&mut self, val: u8) {
-        self.g = val;
-    }
-
     pub fn db(&self) -> u8 {
         self.db
-    }
-
-    pub fn set_db(&mut self, val: u8) {
-        self.db = val;
     }
 }
 
