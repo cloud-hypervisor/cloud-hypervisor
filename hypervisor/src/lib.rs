@@ -438,17 +438,6 @@ get_aarch64_reg!(pc, u64);
 get_aarch64_reg!(pstate, u64);
 
 macro_rules! set_riscv64_reg {
-    (mode) => {
-        #[cfg(target_arch = "riscv64")]
-        impl StandardRegisters {
-            pub fn set_mode(&mut self, val: u64) {
-                match self {
-                    #[cfg(feature = "kvm")]
-                    StandardRegisters::Kvm(s) => s.mode = val,
-                }
-            }
-        }
-    };
     ($reg_name:ident) => {
         concat_idents!(method_name = "set_", $reg_name {
             #[cfg(target_arch = "riscv64")]
@@ -465,17 +454,6 @@ macro_rules! set_riscv64_reg {
 }
 
 macro_rules! get_riscv64_reg {
-    (mode) => {
-        #[cfg(target_arch = "riscv64")]
-        impl StandardRegisters {
-            pub fn get_mode(&self) -> u64 {
-                match self {
-                    #[cfg(feature = "kvm")]
-                    StandardRegisters::Kvm(s) => s.mode,
-                }
-            }
-        }
-    };
     ($reg_name:ident) => {
         concat_idents!(method_name = "get_", $reg_name {
             #[cfg(target_arch = "riscv64")]
@@ -523,7 +501,6 @@ set_riscv64_reg!(t3);
 set_riscv64_reg!(t4);
 set_riscv64_reg!(t5);
 set_riscv64_reg!(t6);
-set_riscv64_reg!(mode);
 
 get_riscv64_reg!(pc);
 get_riscv64_reg!(ra);
@@ -557,4 +534,3 @@ get_riscv64_reg!(t3);
 get_riscv64_reg!(t4);
 get_riscv64_reg!(t5);
 get_riscv64_reg!(t6);
-get_riscv64_reg!(mode);
