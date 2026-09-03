@@ -577,36 +577,6 @@ fn check_sequential_events_with_options(
     ret
 }
 
-// Return true if all events from the input 'expected_events' are matched exactly
-// with events from the 'event_file'
-pub(crate) fn check_sequential_events_exact(
-    expected_events: &[&MetaEvent],
-    event_file: &str,
-) -> bool {
-    if !Path::new(event_file).exists() {
-        return false;
-    }
-    let json_events = parse_event_file(event_file);
-    if expected_events.len() > json_events.len() {
-        return false;
-    }
-    let json_events = &json_events[..expected_events.len()];
-
-    for (idx, e) in json_events.iter().enumerate() {
-        if !expected_events[idx].match_with_json_event(e) {
-            eprintln!(
-                "\n\n==== Start 'check_sequential_events_exact' failed ==== \
-                 \n\nexpected_events={expected_events:?}\nactual_events={json_events:?} \
-                 \n\n==== End 'check_sequential_events_exact' failed ====",
-            );
-
-            return false;
-        }
-    }
-
-    true
-}
-
 /// Return true if events from the input 'latest_events' are matched exactly
 /// with the most recent events from the 'event_file'
 pub(crate) fn check_latest_events_exact(latest_events: &[&MetaEvent], event_file: &str) -> bool {
