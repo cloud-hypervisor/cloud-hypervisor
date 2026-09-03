@@ -7,7 +7,7 @@
 use std::env;
 
 use block::{BLKDISCARD, BLKZEROOUT};
-use libc::{FIONBIO, TIOCGWINSZ, TUNSETOFFLOAD};
+use libc::{FIONBIO, TIOCGWINSZ, TUNGETIFF, TUNSETOFFLOAD, TUNSETQUEUE};
 use seccompiler::SeccompCmpOp::{Eq, MaskedEq};
 use seccompiler::{
     BpfProgram, Error, SeccompAction, SeccompCmpArgLen as ArgLen, SeccompCondition as Cond,
@@ -180,7 +180,9 @@ fn virtio_net_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
 
 fn create_virtio_net_ctl_ioctl_seccomp_rule() -> Vec<SeccompRule> {
     or![
+        and![Cond::new(1, ArgLen::Dword, Eq, TUNGETIFF as _).unwrap()],
         and![Cond::new(1, ArgLen::Dword, Eq, TUNSETOFFLOAD as _).unwrap()],
+        and![Cond::new(1, ArgLen::Dword, Eq, TUNSETQUEUE as _).unwrap()],
         #[cfg(feature = "sev_snp")]
         mshv_sev_snp_ioctl_seccomp_rule(),
     ]
