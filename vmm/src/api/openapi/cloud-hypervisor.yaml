@@ -1649,6 +1649,33 @@ components:
       enum: [Copy, OnDemand, CopyOnWrite]
       default: Copy
 
+    ExternalFdTarget:
+      oneOf:
+        - type: object
+          required:
+            - Net
+          properties:
+            Net:
+              type: object
+              required:
+                - id
+              properties:
+                id:
+                  type: string
+        - type: object
+          required:
+            - Vfio
+          properties:
+            Vfio:
+              type: object
+              required:
+                - id
+              properties:
+                id:
+                  type: string
+        - type: string
+          enum: [Iommu]
+
     RestoreConfig:
       required:
         - source_url
@@ -1666,6 +1693,23 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/VmMemoryZoneUpdateData"
+        external_fds:
+          type: array
+          description: >
+            File descriptor entries and counts. The corresponding descriptors
+            must be supplied out of band via SCM_RIGHTS on the API UNIX socket.
+          items:
+            required:
+              - target
+              - expected_fds
+            type: object
+            properties:
+              target:
+                $ref: "#/components/schemas/ExternalFdTarget"
+              expected_fds:
+                type: integer
+                format: uint64
+                description: Number of file descriptors expected for this entry.
 
     ReceiveMigrationData:
       required:
@@ -1684,6 +1728,23 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/VmMemoryZoneUpdateData"
+        external_fds:
+          type: array
+          description: >
+            File descriptor entries and counts. The corresponding descriptors
+            must be supplied out of band via SCM_RIGHTS on the API UNIX socket.
+          items:
+            required:
+              - target
+              - expected_fds
+            type: object
+            properties:
+              target:
+                $ref: "#/components/schemas/ExternalFdTarget"
+              expected_fds:
+                type: integer
+                format: uint64
+                description: Number of file descriptors expected for this entry.
 
     MigrationMode:
       type: string
