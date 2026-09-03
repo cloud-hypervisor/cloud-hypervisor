@@ -73,14 +73,8 @@ pub enum EmulationError<T: Debug> {
     #[error("Unsupported instruction")]
     UnsupportedInstruction(#[source] anyhow::Error),
 
-    #[error("Unsupported memory size")]
-    UnsupportedMemorySize(#[source] anyhow::Error),
-
     #[error("Invalid operand")]
     InvalidOperand(#[source] anyhow::Error),
-
-    #[error("Wrong number of operands")]
-    WrongNumberOperands(#[source] anyhow::Error),
 
     #[error("Instruction Exception")]
     InstructionException(#[source] Exception<T>),

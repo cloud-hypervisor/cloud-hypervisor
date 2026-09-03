@@ -214,11 +214,6 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to get misc registers")]
     GetMiscRegs(#[source] anyhow::Error),
-    ///
-    /// Write to Guest Mem
-    ///
-    #[error("Failed to write to Guest Mem at")]
-    GuestMemWrite(#[source] anyhow::Error),
     /// Enabling HyperV SynIC error
     ///
     #[error("Failed to enable HyperV SynIC")]
@@ -274,25 +269,10 @@ pub enum HypervisorCpuError {
     #[error("Failed to get non-core register")]
     GetNonCoreRegister(#[source] anyhow::Error),
     ///
-    /// Setting RISC-V 64-bit non-core register error
-    ///
-    #[error("Failed to set non-core register")]
-    SetNonCoreRegister(#[source] anyhow::Error),
-    ///
     /// GVA translation error
     ///
     #[error("Failed to translate GVA")]
     TranslateVirtualAddress(#[source] anyhow::Error),
-    ///
-    /// Set cpu attribute error
-    ///
-    #[error("Failed to set vcpu attribute")]
-    SetVcpuAttribute(#[source] anyhow::Error),
-    ///
-    /// Check if cpu has a certain attribute error
-    ///
-    #[error("Failed to check if vcpu has attribute")]
-    HasVcpuAttribute(#[source] anyhow::Error),
     ///
     /// Failed to initialize TDX on CPU
     ///
@@ -335,11 +315,6 @@ pub enum HypervisorCpuError {
     #[error("Failed to set TSC offset")]
     SetTscOffset(#[source] anyhow::Error),
     ///
-    /// Error reading value at given GPA
-    ///
-    #[error("Failed to read from GPA")]
-    GpaRead(#[source] anyhow::Error),
-    ///
     /// Error writing value at given GPA
     ///
     #[error("Failed to write to GPA")]
@@ -368,8 +343,6 @@ pub enum HypervisorCpuError {
     Nmi(#[source] anyhow::Error),
     #[error("Failed to get nested guest state")]
     GetNestedState(#[source] anyhow::Error),
-    #[error("Failed to set nested guest state")]
-    SetNestedState(#[source] anyhow::Error),
 }
 
 #[derive(Debug)]
