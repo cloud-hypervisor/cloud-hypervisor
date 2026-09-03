@@ -10,19 +10,16 @@ use std::path::Path;
 use std::result;
 
 use igvm_defs::{IGVM_VHS_SNP_ID_BLOCK, SnpPolicy};
-use kvm_bindings::kvm_sev_cmd;
+use kvm_bindings::{
+    kvm_sev_cmd, sev_cmd_id_KVM_SEV_INIT2, sev_cmd_id_KVM_SEV_SNP_LAUNCH_FINISH,
+    sev_cmd_id_KVM_SEV_SNP_LAUNCH_START, sev_cmd_id_KVM_SEV_SNP_LAUNCH_UPDATE,
+};
 use kvm_ioctls::VmFd;
 use log::{debug, error, info};
 use vmm_sys_util::errno;
 use zerocopy::{FromZeros, Immutable, IntoBytes};
 
 pub(crate) type Result<T> = result::Result<T, errno::Error>;
-
-// KVM SEV command IDs — linux/include/uapi/linux/kvm.h
-const KVM_SEV_INIT2: u32 = 22;
-const KVM_SEV_SNP_LAUNCH_START: u32 = 100;
-const KVM_SEV_SNP_LAUNCH_UPDATE: u32 = 101;
-const KVM_SEV_SNP_LAUNCH_FINISH: u32 = 102;
 
 // See AMD Spec Section 8.17 — SNP_LAUNCH_UPDATE
 // The last 12 bits are metadata about the guest context
@@ -205,7 +202,7 @@ impl SevFd {
             ..Default::default()
         };
         let mut sev_cmd = kvm_sev_cmd {
-            id: KVM_SEV_INIT2,
+            id: sev_cmd_id_KVM_SEV_INIT2,
             data: &raw mut init as u64,
             sev_fd: self.fd.as_raw_fd() as _,
             ..Default::default()
@@ -219,7 +216,7 @@ impl SevFd {
             ..Default::default()
         };
         let mut sev_cmd = kvm_sev_cmd {
-            id: KVM_SEV_SNP_LAUNCH_START,
+            id: sev_cmd_id_KVM_SEV_SNP_LAUNCH_START,
             data: &raw mut start as u64,
             sev_fd: self.fd.as_raw_fd() as _,
             ..Default::default()
@@ -245,7 +242,7 @@ impl SevFd {
             ..Default::default()
         };
         let mut sev_cmd = kvm_sev_cmd {
-            id: KVM_SEV_SNP_LAUNCH_UPDATE,
+            id: sev_cmd_id_KVM_SEV_SNP_LAUNCH_UPDATE,
             data: &raw mut update as u64,
             sev_fd: self.fd.as_raw_fd() as _,
             ..Default::default()
@@ -274,7 +271,7 @@ impl SevFd {
             ..Default::default()
         };
         let mut sev_cmd = kvm_sev_cmd {
-            id: KVM_SEV_SNP_LAUNCH_FINISH,
+            id: sev_cmd_id_KVM_SEV_SNP_LAUNCH_FINISH,
             data: &raw mut finish as u64,
             sev_fd: self.fd.as_raw_fd() as _,
             ..Default::default()
