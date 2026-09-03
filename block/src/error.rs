@@ -153,21 +153,6 @@ impl BlockError {
         }
     }
 
-    /// Attach or replace the source error (builder-style).
-    pub fn with_source<E>(mut self, source: E) -> Self
-    where
-        E: StdError + Send + Sync + 'static,
-    {
-        self.source = Some(Box::new(source));
-        self
-    }
-
-    /// Attach diagnostic context.
-    pub fn with_ctx(mut self, ctx: ErrorContext) -> Self {
-        self.ctx = Some(ctx);
-        self
-    }
-
     /// Replace the error classification (builder-style).
     pub fn with_kind(mut self, kind: BlockErrorKind) -> Self {
         self.kind = kind;
@@ -183,12 +168,6 @@ impl BlockError {
     /// Shorthand: attach a file path.
     pub fn with_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.ctx.get_or_insert_with(ErrorContext::default).path = Some(path.into());
-        self
-    }
-
-    /// Shorthand: attach a byte offset.
-    pub fn with_offset(mut self, offset: u64) -> Self {
-        self.ctx.get_or_insert_with(ErrorContext::default).offset = Some(offset);
         self
     }
 
