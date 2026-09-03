@@ -3506,8 +3506,8 @@ impl Migratable for MemoryManager {
             let vmm_dirty_bitmap = match self.guest_memory.memory().find_region(GuestAddress(r.gpa))
             {
                 Some(region) => {
-                    assert!(region.start_addr().raw_value() == r.gpa);
-                    assert!(region.len() == r.size);
+                    assert_eq!(region.start_addr().raw_value(), r.gpa);
+                    assert_eq!(region.len(), r.size);
                     (**region).bitmap().get_and_reset()
                 }
                 None => {

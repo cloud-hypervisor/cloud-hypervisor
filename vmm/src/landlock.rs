@@ -145,13 +145,13 @@ fn test_try_from_access() {
         | Truncate
     });
     let landlock_access = LandlockAccess::try_from("rw").unwrap();
-    assert!(landlock_access.access == read_access | write_access);
+    assert_eq!(landlock_access.access, read_access | write_access);
 
     let landlock_access = LandlockAccess::try_from("r").unwrap();
-    assert!(landlock_access.access == read_access);
+    assert_eq!(landlock_access.access, read_access);
 
     let landlock_access = LandlockAccess::try_from("w").unwrap();
-    assert!(landlock_access.access == write_access);
+    assert_eq!(landlock_access.access, write_access);
 
     LandlockAccess::try_from("").unwrap_err();
 }
