@@ -440,8 +440,6 @@ pub struct NetCounters {
 
 #[derive(Error, Debug)]
 pub enum NetQueuePairError {
-    #[error("No memory configured")]
-    NoMemoryConfigured,
     #[error("Error registering listener")]
     RegisterListener(#[source] io::Error),
     #[error("Error unregistering listener")]
