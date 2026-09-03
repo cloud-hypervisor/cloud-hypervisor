@@ -42,10 +42,6 @@ pub enum Error {
     /// Failed creating AIA device.
     #[error("Failed creating AIA device")]
     CreateAia(#[source] hypervisor::HypervisorVmError),
-    #[cfg(target_arch = "riscv64")]
-    /// Failed restoring AIA device.
-    #[error("Failed restoring AIA device")]
-    RestoreAia(#[source] hypervisor::arch::riscv64::aia::Error),
 }
 
 type Result<T> = result::Result<T, Error>;
