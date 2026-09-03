@@ -46,8 +46,6 @@ pub enum Error {
     InvalidConnection(u32),
 
     // pvmemcontrol errors
-    #[error("Request contains invalid arguments: {0}")]
-    InvalidArgument(u64),
     #[error("Unknown function code: {0}")]
     UnknownFunctionCode(u64),
     #[error("Libc call fail")]
@@ -562,11 +560,6 @@ impl PvmemcontrolBusDevice {
         let resp = match resp_or_err {
             Ok(resp) => resp,
             Err(e) => match e {
-                Error::InvalidArgument(arg) => PvmemcontrolResp {
-                    ret_errno: (libc::EINVAL as u32).into(),
-                    ret_code: (arg as u32).into(),
-                    ..Default::default()
-                },
                 Error::LibcFail(err) => PvmemcontrolResp {
                     ret_errno: (err.raw_os_error().unwrap_or(libc::EFAULT) as u32).into(),
                     ret_code: 0u32.into(),
