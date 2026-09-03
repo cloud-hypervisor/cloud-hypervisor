@@ -16,7 +16,7 @@ use thiserror::Error;
 use vm_device::BusDevice;
 
 use crate::configuration::{PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType};
-use crate::device::{BarReprogrammingParams, DeviceRelocation, Error as PciDeviceError, PciDevice};
+use crate::device::{BarReprogrammingParams, DeviceRelocation, PciDevice};
 
 /// Denotes the PCI device ID of a bus' root bridge device.
 pub const PCI_ROOT_DEVICE_ID: u8 = 0;
@@ -29,12 +29,6 @@ const DEVICE_ID_INTEL_VIRT_PCIE_HOST: u16 = 0x0d57;
 /// Errors for device manager.
 #[derive(Error, Debug)]
 pub enum PciRootError {
-    /// Could not allocate device address space for the device.
-    #[error("Could not allocate device address space for the device")]
-    AllocateDeviceAddrs(#[source] PciDeviceError),
-    /// Could not allocate an IRQ number.
-    #[error("Could not allocate an IRQ number")]
-    AllocateIrq,
     /// Could not find an available device slot on the PCI bus.
     #[error("Could not find an available device slot on the PCI bus")]
     NoPciDeviceSlotAvailable,

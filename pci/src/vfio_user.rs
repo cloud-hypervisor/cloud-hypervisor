@@ -54,8 +54,6 @@ pub enum VfioUserPciDeviceError {
     DmaMap(#[source] VfioUserError),
     #[error("Failed to DMA unmap")]
     DmaUnmap(#[source] VfioUserError),
-    #[error("Failed to initialize legacy interrupts")]
-    InitializeLegacyInterrupts(#[source] VfioPciError),
     #[error("Failed to create VfioCommon")]
     CreateVfioCommon(#[source] VfioPciError),
     #[error("Other OS error")]

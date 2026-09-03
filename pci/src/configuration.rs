@@ -508,8 +508,6 @@ pub enum Error {
     BarSizeInvalid(u64),
     #[error("Empty capabilities are invalid")]
     CapabilityEmpty,
-    #[error("Invalid capability length {0}")]
-    CapabilityLengthInvalid(usize),
     #[error("Capability of size {0} doesn't fit")]
     CapabilitySpaceFull(usize),
     #[error("Failed to decode 32-bit BAR size")]
