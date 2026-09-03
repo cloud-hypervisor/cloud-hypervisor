@@ -245,7 +245,7 @@ prepare_linux() {
 }
 
 download_amd64_ovmf() {
-    OVMF_FW_TAG="ch-1e1b96f126"
+    OVMF_FW_TAG="ch-811ce5ea35"
     OVMF_FW_URL="https://github.com/cloud-hypervisor/edk2/releases/download/$OVMF_FW_TAG/CLOUDHV.fd"
     OVMF_FW="$WORKLOADS_DIR/CLOUDHV.fd"
     pushd "$WORKLOADS_DIR" || exit
@@ -255,7 +255,7 @@ download_amd64_ovmf() {
 }
 
 download_aarch64_ovmf() {
-    OVMF_FW_TAG="ch-1e1b96f126"
+    OVMF_FW_TAG="ch-811ce5ea35"
     OVMF_FW_URL="https://github.com/cloud-hypervisor/edk2/releases/download/$OVMF_FW_TAG/CLOUDHV_EFI.fd"
     OVMF_FW="$WORKLOADS_DIR/CLOUDHV_EFI.fd"
     pushd "$WORKLOADS_DIR" || exit
