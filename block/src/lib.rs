@@ -65,10 +65,6 @@ pub enum Error {
     DescriptorChainTooShort,
     #[error("Guest gave us a descriptor that was too short to use")]
     DescriptorLengthTooSmall,
-    #[error("Failed to validate image type")]
-    ValidateImageType(#[source] io::Error),
-    #[error("Failure in fixed vhd")]
-    FixedVhdError(#[source] io::Error),
     #[error("Getting a block's metadata failed")]
     GetFileMetadata(#[source] io::Error),
     #[error("The requested operation would cause a seek beyond disk end")]

@@ -40,8 +40,6 @@ const MDR_GUID: [u8; 16] = [
 #[sorted]
 #[derive(Error, Debug)]
 pub enum VhdxHeaderError {
-    #[error("Failed to calculate checksum")]
-    CalculateChecksum,
     #[error("BAT entry is not unique")]
     DuplicateBATEntry,
     #[error("Metadata region entry is not unique")]
@@ -58,14 +56,10 @@ pub enum VhdxHeaderError {
     InvalidVHDXSign,
     #[error("No valid header found")]
     NoValidHeader,
-    #[error("Cannot read checksum")]
-    ReadChecksum,
     #[error("Failed to read File Type Identifier {0}")]
     ReadFileTypeIdentifier(#[source] io::Error),
     #[error("Failed to read headers {0}")]
     ReadHeader(#[source] io::Error),
-    #[error("Failed to read metadata {0}")]
-    ReadMetadata(#[source] io::Error),
     #[error("Failed to read region table entries {0}")]
     ReadRegionTableEntries(#[source] io::Error),
     #[error("Failed to read region table header {0}")]

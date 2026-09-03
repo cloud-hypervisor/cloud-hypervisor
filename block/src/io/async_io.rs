@@ -36,9 +36,6 @@ pub enum DiskFileError {
     /// Failed creating a new AsyncIo.
     #[error("Failed creating a new AsyncIo")]
     NewAsyncIo(#[source] io::Error),
-    /// Unsupported operation.
-    #[error("Unsupported operation")]
-    Unsupported,
     /// Resize failed
     #[error("Resize failed")]
     ResizeError(#[source] io::Error),

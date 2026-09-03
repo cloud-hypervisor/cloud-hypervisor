@@ -52,16 +52,12 @@ pub enum Error {
     BackingFileOverlapsHeader(u64, u32, u32),
     #[error("Backing file size {0:#x} with zero offset")]
     BackingFileSizeWithoutOffset(u32),
-    #[error("Backing file support is disabled")]
-    BackingFilesDisabled,
     #[error("Backing file name is too long: {0} bytes over")]
     BackingFileTooLong(usize),
     #[error("Failed to clone backing file")]
     CloneBackingFile(#[source] io::Error),
     #[error("Image is marked corrupt and cannot be opened for writing")]
     CorruptImage,
-    #[error("Failed to evict cache")]
-    EvictingCache(#[source] io::Error),
     #[error("File larger than max of {MAX_QCOW_FILE_SIZE}: {0}")]
     FileTooBig(u64),
     #[error("Failed to get file size")]
@@ -94,44 +90,22 @@ pub enum Error {
     InvalidRefcountTableSize(u64),
     #[error("Maximum disk nesting depth exceeded")]
     MaxNestingDepthExceeded,
-    #[error("No free clusters")]
-    NoFreeClusters,
     #[error("No refcount clusters")]
     NoRefcountClusters,
     #[error("Not enough space for refcounts")]
     NotEnoughSpaceForRefcounts,
-    #[error("Failed to open file {0}")]
-    OpeningFile(#[source] io::Error),
-    #[error("Failed to read data")]
-    ReadingData(#[source] io::Error),
     #[error("Failed to read header")]
     ReadingHeader(#[source] io::Error),
     #[error("Failed to read pointers")]
     ReadingPointers(#[source] io::Error),
-    #[error("Failed to read ref count block")]
-    ReadingRefCountBlock(#[source] refcount::Error),
     #[error("Failed to read ref counts")]
     ReadingRefCounts(#[source] io::Error),
-    #[error("Failed to rebuild ref counts")]
-    RebuildingRefCounts(#[source] io::Error),
     #[error("Refcount overflow")]
     RefcountOverflow(#[source] refcount::Error),
     #[error("Refcount table offset past file end")]
     RefcountTableOffEnd,
     #[error("Too many clusters specified for refcount")]
     RefcountTableTooLarge,
-    #[error("Failed to resize")]
-    ResizeIo(#[source] io::Error),
-    #[error("Resize not supported with backing file")]
-    ResizeWithBackingFile,
-    #[error("Failed to set file size")]
-    SettingFileSize(#[source] io::Error),
-    #[error("Failed to set refcount refcount")]
-    SettingRefcountRefcount(#[source] io::Error),
-    #[error("Shrinking QCOW images is not supported")]
-    ShrinkNotSupported,
-    #[error("Size too small for number of clusters")]
-    SizeTooSmallForNumberOfClusters,
     #[error("Failed to sync header")]
     SyncingHeader(#[source] io::Error),
     #[error("L1 entry table too large: {0}")]
@@ -148,8 +122,6 @@ pub enum Error {
     UnsupportedRefcountOrder,
     #[error("Unsupported version: {0}")]
     UnsupportedVersion(u32),
-    #[error("Failed to write data")]
-    WritingData(#[source] io::Error),
     #[error("Failed to write header")]
     WritingHeader(#[source] io::Error),
 }

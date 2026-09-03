@@ -38,10 +38,6 @@ pub enum BlockErrorKind {
     UnsupportedFeature,
     /// The image is marked or detected as corrupt.
     CorruptImage,
-    /// An address, offset, or index is outside the valid range.
-    OutOfBounds,
-    /// A file or required internal structure could not be found.
-    NotFound,
     /// An internal counter or limit was exceeded.
     Overflow,
     /// Image type mismatch
@@ -55,8 +51,6 @@ impl Display for BlockErrorKind {
             Self::InvalidFormat => write!(f, "Invalid format"),
             Self::UnsupportedFeature => write!(f, "Unsupported feature"),
             Self::CorruptImage => write!(f, "Corrupt image"),
-            Self::OutOfBounds => write!(f, "Out of bounds"),
-            Self::NotFound => write!(f, "Not found"),
             Self::Overflow => write!(f, "Overflow"),
             Self::ImageTypeMismatch { specified } => {
                 write!(f, "Image type mismatch: specified = {specified}")
