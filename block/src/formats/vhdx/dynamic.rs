@@ -19,8 +19,6 @@ use crate::aligned_file::AlignedFile;
 #[sorted]
 #[derive(Error, Debug)]
 pub enum VhdxError {
-    #[error("Not a VHDx file")]
-    NotVhdx(#[source] VhdxHeaderError),
     #[error("Failed to parse VHDx header")]
     ParseVhdxHeader(#[source] VhdxHeaderError),
     #[error("Failed to parse VHDx metadata")]

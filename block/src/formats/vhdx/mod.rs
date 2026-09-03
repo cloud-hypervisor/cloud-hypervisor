@@ -48,8 +48,7 @@ impl VhdxDisk {
         Ok(VhdxDisk {
             vhdx_file: Arc::new(Mutex::new(Vhdx::new(f, direct_io).map_err(|e| {
                 let kind = match &e {
-                    VhdxError::NotVhdx(_)
-                    | VhdxError::ParseVhdxHeader(_)
+                    VhdxError::ParseVhdxHeader(_)
                     | VhdxError::ParseVhdxMetadata(_)
                     | VhdxError::ParseVhdxRegionEntry(_) => BlockErrorKind::InvalidFormat,
                     VhdxError::ReadBatEntry(_) => BlockErrorKind::CorruptImage,
