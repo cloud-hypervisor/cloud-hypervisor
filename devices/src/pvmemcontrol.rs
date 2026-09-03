@@ -42,9 +42,6 @@ pub enum Error {
     GuestMemory(#[source] GuestMemoryError),
     #[error("Guest sent us invalid request")]
     InvalidRequest,
-
-    #[error("Guest sent us invalid command: {0}")]
-    InvalidCommand(u32),
     #[error("Guest sent us invalid connection: {0}")]
     InvalidConnection(u32),
 

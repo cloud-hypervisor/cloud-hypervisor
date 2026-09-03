@@ -24,12 +24,6 @@ pub enum Error {
     /// Failed triggering the interrupt.
     #[error("Failed triggering the interrupt")]
     TriggerInterrupt(#[source] io::Error),
-    /// Failed masking the interrupt.
-    #[error("Failed masking the interrupt")]
-    MaskInterrupt(#[source] io::Error),
-    /// Failed unmasking the interrupt.
-    #[error("Failed unmasking the interrupt")]
-    UnmaskInterrupt(#[source] io::Error),
     /// Failed updating the interrupt.
     #[error("Failed updating the interrupt")]
     UpdateInterrupt(#[source] io::Error),

@@ -41,8 +41,6 @@ pub enum IvshmemError {
     RetrievePciConfigurationState(#[source] anyhow::Error),
     #[error("Failed to retrieve IvshmemDeviceState: {0}")]
     RetrieveIvshmemDeviceStateState(#[source] anyhow::Error),
-    #[error("Failed to remove user memory region")]
-    RemoveUserMemoryRegion,
     #[error("Failed to create user memory region.")]
     CreateUserMemoryRegion(#[source] anyhow::Error),
     #[error("Failed to create userspace mapping.")]
