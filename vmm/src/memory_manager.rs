@@ -297,10 +297,6 @@ pub enum Error {
     #[error("Failed to EventFd")]
     EventFdFail(#[source] io::Error),
 
-    /// Eventfd write error
-    #[error("Eventfd write error")]
-    EventfdError(#[source] io::Error),
-
     /// Failed to virtio-mem resize
     #[error("Failed to virtio-mem resize")]
     VirtioMemResizeFail(#[source] VirtioMemError),

@@ -66,15 +66,9 @@ pub enum Error {
     /// Generic vhost-user socket is missing
     #[error("Error parsing --generic-vhost-user: socket missing")]
     ParseGenericVhostUserSockMissing,
-    /// Generic vhost-user number of queues is missing
-    #[error("Error parsing --generic-vhost-user: number of queues missing")]
-    ParseGenericVhostUserNumResponseQueuesMissing,
     /// Generic vhost-user device type is missing
     #[error("Error parsing --generic-vhost-user: device_type missing")]
     ParseGenericVhostUserVirtioIdMissing,
-    /// Generic vhost-user available features is missing
-    #[error("Error parsing --generic-vhost-user: available features missing")]
-    ParseGenericVhostUserAvailFeaturesMissing,
     /// Generic vhost-user queue size missing
     #[error("Error parsing --generic-vhost-user: queue size missing")]
     ParseGenericVhostUserQueueSizeMissing,
@@ -138,10 +132,6 @@ pub enum Error {
     /// Failed parsing serial parameters
     #[error("Error parsing --serial")]
     ParseSerial(#[source] OptionParserError),
-    #[cfg(target_arch = "x86_64")]
-    /// Failed parsing debug-console
-    #[error("Error parsing --debug-console")]
-    ParseDebugConsole(#[source] OptionParserError),
     /// No mode given for console
     #[error("Error parsing --console: invalid console mode given")]
     ParseConsoleInvalidModeGiven,
@@ -160,18 +150,6 @@ pub enum Error {
     /// Failed validating configuration
     #[error("Error validating configuration")]
     Validation(#[source] ValidationError),
-    #[cfg(feature = "sev_snp")]
-    #[error("Error parsing --sev_snp")]
-    /// Failed parsing SEV-SNP config
-    ParseSevSnp(#[source] OptionParserError),
-    #[cfg(feature = "tdx")]
-    #[error("Error parsing --tdx")]
-    /// Failed parsing TDX config
-    ParseTdx(#[source] OptionParserError),
-    #[cfg(feature = "tdx")]
-    #[error("TDX firmware missing")]
-    /// No TDX firmware
-    FirmwarePathMissing,
     /// Failed parsing userspace device
     #[error("Error parsing --user-device")]
     ParseUserDevice(#[source] OptionParserError),
@@ -232,10 +210,6 @@ pub enum ValidationError {
     /// Too many CPUs.
     #[error("Too many CPUs: specified {0} but {MAX_SUPPORTED_CPUS} is the limit")]
     TooManyCpus(u32 /* specified CPUs */),
-    /// Missing file value for debug-console
-    #[cfg(target_arch = "x86_64")]
-    #[error("Path missing when using file mode for debug console")]
-    DebugconFileMissing,
     /// Both socket and path specified
     #[error("Disk path and vhost socket both provided")]
     DiskSocketAndPath,
@@ -248,12 +222,6 @@ pub enum ValidationError {
     /// No socket provided for vhost_use
     #[error("No socket provided when using vhost-user")]
     VhostUserMissingSocket,
-    /// Trying to use IOMMU without PCI
-    #[error("Using an IOMMU without PCI support is unsupported")]
-    IommuUnsupported,
-    /// Trying to use VFIO without PCI
-    #[error("Using VFIO without PCI support is unsupported")]
-    VfioUnsupported,
     /// CPU topology count doesn't match max
     #[error("Product of CPU topology parts does not match maximum vCPU")]
     CpuTopologyCount,

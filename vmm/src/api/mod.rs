@@ -114,14 +114,6 @@ pub enum ApiError {
     #[error("The VM could not resume")]
     VmResume(#[source] VmError),
 
-    /// The VM is not booted.
-    #[error("The VM is not booted")]
-    VmNotBooted,
-
-    /// The VM is not created.
-    #[error("The VM is not created")]
-    VmNotCreated,
-
     /// The VM could not shutdown.
     #[error("The VM could not shutdown")]
     VmShutdown(#[source] VmError),
@@ -169,14 +161,6 @@ pub enum ApiError {
     /// The device could not be removed from the VM.
     #[error("The device could not be removed from the VM")]
     VmRemoveDevice(#[source] VmError),
-
-    /// Cannot create seccomp filter
-    #[error("Cannot create seccomp filter")]
-    CreateSeccompFilter(#[source] seccompiler::Error),
-
-    /// Cannot apply seccomp filter
-    #[error("Cannot apply seccomp filter")]
-    ApplySeccompFilter(#[source] seccompiler::Error),
 
     /// The disk could not be added to the VM.
     #[error("The disk could not be added to the VM")]

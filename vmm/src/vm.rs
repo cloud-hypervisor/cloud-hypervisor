@@ -33,8 +33,6 @@ use arch::layout::{KVM_IDENTITY_MAP_START, KVM_TSS_START};
 use arch::uefi;
 use arch::{EntryPoint, NumaNode, NumaNodes, get_host_cpu_phys_bits, layout};
 use devices::AcpiNotificationFlags;
-#[cfg(target_arch = "aarch64")]
-use devices::interrupt_controller;
 #[cfg(feature = "fw_cfg")]
 use devices::legacy::fw_cfg;
 #[cfg(feature = "fw_cfg")]
@@ -167,10 +165,6 @@ pub enum Error {
     #[error("Cannot configure system")]
     ConfigureSystem(#[source] arch::Error),
 
-    #[cfg(target_arch = "aarch64")]
-    #[error("Cannot enable interrupt controller")]
-    EnableInterruptController(#[source] interrupt_controller::Error),
-
     #[error("Error from device manager")]
     DeviceManager(#[source] DeviceManagerError),
 
@@ -213,18 +207,6 @@ pub enum Error {
     #[error("Error from CPU manager")]
     CpuManager(#[source] cpu::Error),
 
-    #[error("Cannot pause devices")]
-    PauseDevices(#[source] MigratableError),
-
-    #[error("Cannot resume devices")]
-    ResumeDevices(#[source] MigratableError),
-
-    #[error("Cannot pause CPUs")]
-    PauseCpus(#[source] MigratableError),
-
-    #[error("Cannot resume cpus")]
-    ResumeCpus(#[source] MigratableError),
-
     #[error("Cannot pause VM")]
     Pause(#[source] MigratableError),
 
@@ -233,9 +215,6 @@ pub enum Error {
 
     #[error("Memory manager error")]
     MemoryManager(#[source] MemoryManagerError),
-
-    #[error("Eventfd write error")]
-    EventfdError(#[source] io::Error),
 
     #[error("Cannot snapshot VM")]
     Snapshot(#[source] MigratableError),
@@ -282,17 +261,8 @@ pub enum Error {
     #[error("Kernel lacks PVH header")]
     KernelMissingPvhHeader,
 
-    #[error("Failed to allocate firmware RAM")]
-    AllocateFirmwareMemory(#[source] MemoryManagerError),
-
     #[error("Error manipulating firmware file")]
     FirmwareFile(#[source] io::Error),
-
-    #[error("Firmware too big")]
-    FirmwareTooLarge,
-
-    #[error("Failed to copy firmware to memory")]
-    FirmwareLoad(#[source] vm_memory::GuestMemoryError),
 
     #[cfg(feature = "sev_snp")]
     #[error("Error enabling SEV-SNP VM")]
@@ -379,10 +349,6 @@ pub enum Error {
     #[cfg(feature = "fw_cfg")]
     #[error("Fw Cfg missing kernel cmdline")]
     MissingFwCfgCmdline,
-
-    #[cfg(feature = "fw_cfg")]
-    #[error("Error creating e820 map")]
-    CreatingE820Map(#[source] io::Error),
 
     #[error("Error creating ACPI tables")]
     CreatingAcpiTables(#[source] acpi::Error),

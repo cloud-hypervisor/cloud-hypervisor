@@ -57,8 +57,6 @@ pub enum DebuggableError {
     WriteMem(#[source] GuestMemoryError),
     #[error("Translating GVA failed")]
     TranslateGva(#[source] cpu::Error),
-    #[error("The lock is poisened")]
-    PoisonedState,
 }
 
 pub trait Debuggable: vm_migration::Pausable {
@@ -99,8 +97,6 @@ pub enum Error {
     GdbResponseNotify(#[source] io::Error),
     #[error("GDB response failed")]
     GdbResponse(#[source] mpsc::RecvError),
-    #[error("GDB response timeout")]
-    GdbResponseTimeout(#[source] mpsc::RecvTimeoutError),
 }
 type GdbResult<T> = result::Result<T, Error>;
 

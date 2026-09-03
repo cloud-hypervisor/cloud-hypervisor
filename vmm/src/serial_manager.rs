@@ -64,10 +64,6 @@ pub enum Error {
     #[error("Error spawning SerialManager thread")]
     SpawnSerialManager(#[source] io::Error),
 
-    /// Cannot bind to Unix socket
-    #[error("Error binding to socket")]
-    BindUnixSocket(#[source] io::Error),
-
     /// Cannot accept connection from Unix socket
     #[error("Error accepting connection")]
     AcceptConnection(#[source] io::Error),
