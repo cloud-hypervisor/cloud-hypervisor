@@ -79,9 +79,6 @@ pub enum VsockError {
     /// Chained GuestMemory access error.
     #[error("Guest memory access error")]
     GuestMemoryAccess(#[source] vm_memory::GuestMemoryError),
-    /// Bounds check failed on guest memory pointer.
-    #[error("Bounds check failed on guest memory pointer")]
-    GuestMemoryBounds,
     /// The vsock header descriptor length is too small.
     #[error("The vsock header descriptor length is too small: {0}")]
     HdrDescTooSmall(u32),

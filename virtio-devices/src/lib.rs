@@ -115,8 +115,6 @@ pub enum ActivateError {
     CreateEventFd(#[source] io::Error),
     #[error("Failed to spawn thread")]
     ThreadSpawn(#[source] io::Error),
-    #[error("Failed to setup vhost-user-fs daemon")]
-    VhostUserFsSetup(#[source] vhost_user::Error),
     #[error("Failed to setup vhost-user daemon")]
     VhostUserSetup(#[source] vhost_user::Error),
     #[error("Failed to create seccomp filter")]

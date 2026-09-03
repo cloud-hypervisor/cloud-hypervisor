@@ -61,14 +61,10 @@ pub enum Error {
     BindSocket(#[source] io::Error),
     #[error("Creating eventfd failed")]
     CreateEventFd(#[source] io::Error),
-    #[error("Cloning kill eventfd failed")]
-    CloneKillEventFd(#[source] io::Error),
     #[error("Invalid descriptor table address")]
     DescriptorTableAddress,
     #[error("Signal used queue failed")]
     FailedSignalingUsedQueue(#[source] io::Error),
-    #[error("Failed to read vhost eventfd")]
-    MemoryRegions(#[source] MmapError),
     #[error("Failed removing socket path")]
     RemoveSocketPath(#[source] io::Error),
     #[error("Failed to create frontend")]
@@ -87,8 +83,6 @@ pub enum Error {
     VhostUserGetProtocolFeatures(#[source] VhostError),
     #[error("Get vring base failed")]
     VhostUserGetVringBase(#[source] VhostError),
-    #[error("Vhost-user Backend not support vhost-user protocol")]
-    VhostUserProtocolNotSupport,
     #[error("Set owner failed")]
     VhostUserSetOwner(#[source] VhostError),
     #[error("Reset owner failed")]
@@ -111,10 +105,6 @@ pub enum Error {
     VhostUserSetVringKick(#[source] VhostError),
     #[error("Set vring enable failed")]
     VhostUserSetVringEnable(#[source] VhostError),
-    #[error("Failed to create vhost eventfd")]
-    VhostIrqCreate(#[source] io::Error),
-    #[error("Failed to read vhost eventfd")]
-    VhostIrqRead(#[source] io::Error),
     #[error("Failed to read vhost eventfd")]
     VhostUserMemoryRegion(#[source] MmapError),
     #[error("Failed to create the frontend request handler from backend")]
@@ -135,12 +125,8 @@ pub enum Error {
     VhostUserSetLogBase(#[source] VhostError),
     #[error("Invalid used address")]
     UsedAddress,
-    #[error("Invalid features provided from vhost-user backend")]
-    InvalidFeatures,
     #[error("Missing file descriptor for the region")]
     MissingRegionFd,
-    #[error("Missing IrqFd")]
-    MissingIrqFd,
     #[error("Failed getting the available index")]
     GetAvailableIndex(#[source] QueueError),
     #[error("Failed getting the used index")]

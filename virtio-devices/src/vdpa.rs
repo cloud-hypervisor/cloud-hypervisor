@@ -41,8 +41,6 @@ pub enum Error {
     DmaMap(#[source] vhost::Error),
     #[error("Failed to unmap DMA range")]
     DmaUnmap(#[source] vhost::Error),
-    #[error("Failed to get address range")]
-    GetAddressRange,
     #[error("Failed to get the available index from the virtio queue")]
     GetAvailableIndex(#[source] virtio_queue::Error),
     #[error("Get virtio configuration size")]
@@ -61,8 +59,6 @@ pub enum Error {
     InvalidIovaRange(u64, u64),
     #[error("Missing VIRTIO_F_ACCESS_PLATFORM feature")]
     MissingAccessPlatformVirtioFeature,
-    #[error("Failed to reset owner")]
-    ResetOwner(#[source] vhost::Error),
     #[error("Failed to set backend specific features")]
     SetBackendFeatures(#[source] vhost::Error),
     #[error("Failed to set backend configuration")]
@@ -71,8 +67,6 @@ pub enum Error {
     SetConfigCall(#[source] vhost::Error),
     #[error("Failed to set virtio features")]
     SetFeatures(#[source] vhost::Error),
-    #[error("Failed to set memory table")]
-    SetMemTable(#[source] vhost::Error),
     #[error("Failed to set owner")]
     SetOwner(#[source] vhost::Error),
     #[error("Failed to set virtio status")]
