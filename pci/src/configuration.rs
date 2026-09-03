@@ -14,8 +14,8 @@ use thiserror::Error;
 use vm_device::PciBarType;
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
 
+use crate::MsixConfig;
 use crate::device::BarReprogrammingParams;
-use crate::{MsixConfig, PciInterruptPin};
 
 // The number of 32bit registers in the config space, 4096 bytes.
 const NUM_CONFIGURATION_REGISTERS: usize = 1024;
@@ -37,8 +37,6 @@ const NUM_BAR_REGS: usize = 6;
 const CAPABILITY_LIST_HEAD_OFFSET: usize = 0x34;
 const FIRST_CAPABILITY_OFFSET: usize = 0x40;
 const CAPABILITY_MAX_OFFSET: usize = 192;
-
-const INTERRUPT_LINE_PIN_REG: usize = 15;
 
 pub const PCI_CONFIGURATION_ID: &str = "pci_configuration";
 
@@ -834,16 +832,6 @@ impl PciConfiguration {
         }
 
         addr
-    }
-
-    /// Configures the IRQ line and pin used by this device.
-    pub fn set_irq(&mut self, line: u8, pin: PciInterruptPin) {
-        // `pin` is 1-based in the pci config space.
-        let pin_idx = (pin as u32) + 1;
-        self.registers[INTERRUPT_LINE_PIN_REG] = (self.registers[INTERRUPT_LINE_PIN_REG]
-            & 0xffff_0000)
-            | (pin_idx << 8)
-            | u32::from(line);
     }
 
     /// Adds the capability `cap_data` to the list of capabilities.

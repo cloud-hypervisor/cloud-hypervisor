@@ -50,12 +50,6 @@ pub enum PciInterruptPin {
     IntD,
 }
 
-impl PciInterruptPin {
-    pub fn to_mask(self) -> u32 {
-        self as u32
-    }
-}
-
 #[cfg(target_arch = "x86_64")]
 pub const PCI_CONFIG_IO_PORT: u64 = 0xcf8;
 #[cfg(target_arch = "x86_64")]
