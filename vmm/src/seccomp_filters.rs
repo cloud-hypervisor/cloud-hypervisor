@@ -1080,6 +1080,7 @@ fn migration_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError
         (libc::SYS_mremap, vec![]),
         (libc::SYS_munmap, vec![]),
         (libc::SYS_nanosleep, vec![]),
+        (libc::SYS_newfstatat, vec![]),
         (libc::SYS_openat, vec![]),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_poll, vec![]),
