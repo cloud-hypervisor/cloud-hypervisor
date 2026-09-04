@@ -66,7 +66,7 @@ pub enum Error {
     MissingAddressRange,
 }
 
-pub type Result<T> = result::Result<T, Error>;
+pub(crate) type Result<T> = result::Result<T, Error>;
 
 impl convert::From<Error> for io::Error {
     fn from(e: Error) -> Self {
@@ -79,14 +79,14 @@ impl convert::From<Error> for io::Error {
 /// * base - The address at which the range start.
 /// * len - The length of the range in bytes.
 #[derive(Debug, Copy, Clone)]
-pub struct BusRange {
+struct BusRange {
     pub base: u64,
     pub len: u64,
 }
 
 impl BusRange {
     /// Returns true if there is overlap with the given range.
-    pub fn overlaps(&self, base: u64, len: u64) -> bool {
+    pub(crate) fn overlaps(&self, base: u64, len: u64) -> bool {
         self.base < (base + len) && base < self.base + self.len
     }
 }
