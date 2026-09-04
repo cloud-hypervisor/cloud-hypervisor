@@ -1610,6 +1610,10 @@ impl Vmm {
             Request::start(),
             MigratableError::MigrateSend(anyhow!("Error starting migration")),
         )?;
+
+        // Connection established
+        event!("vm", "migration-started");
+
         debug!("Using migration protocol {CURRENT_PROTOCOL_VERSION}");
 
         // Send config

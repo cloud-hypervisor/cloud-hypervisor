@@ -7501,6 +7501,10 @@ mod common_parallel {
 
                     let expected_events = [
                         &MetaEvent {
+                            event: "migration-starting".to_string(),
+                            device_id: None,
+                        },
+                        &MetaEvent {
                             event: "migration-started".to_string(),
                             device_id: None,
                         },
@@ -7531,6 +7535,10 @@ mod common_parallel {
                     );
 
                     let expected_events = [
+                        &MetaEvent {
+                            event: "migration-starting".to_string(),
+                            device_id: None,
+                        },
                         &MetaEvent {
                             event: "migration-started".to_string(),
                             device_id: None,
