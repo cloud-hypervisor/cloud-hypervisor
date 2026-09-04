@@ -49,7 +49,7 @@ pub enum Error {
     InvalidNetmask,
 }
 
-pub type Result<T> = result::Result<T, Error>;
+pub(crate) type Result<T> = result::Result<T, Error>;
 
 /// Handle for a network tap interface.
 ///

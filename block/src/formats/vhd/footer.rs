@@ -107,50 +107,50 @@ impl VhdFooter {
     }
 
     #[cfg(test)]
-    pub fn cookie(&self) -> u64 {
+    pub(super) fn cookie(&self) -> u64 {
         self.cookie
     }
     #[cfg(test)]
-    pub fn features(&self) -> u32 {
+    pub(super) fn features(&self) -> u32 {
         self.features
     }
     #[cfg(test)]
-    pub fn file_format_version(&self) -> u32 {
+    fn file_format_version(&self) -> u32 {
         self.file_format_version
     }
     #[cfg(test)]
-    pub fn data_offset(&self) -> u64 {
+    pub(super) fn data_offset(&self) -> u64 {
         self.data_offset
     }
     #[cfg(test)]
-    pub fn time_stamp(&self) -> u32 {
+    fn time_stamp(&self) -> u32 {
         self.time_stamp
     }
     #[cfg(test)]
-    pub fn creator_application(&self) -> u32 {
+    fn creator_application(&self) -> u32 {
         self.creator_application
     }
     #[cfg(test)]
-    pub fn creator_version(&self) -> u32 {
+    fn creator_version(&self) -> u32 {
         self.creator_version
     }
     #[cfg(test)]
-    pub fn creator_host_os(&self) -> u32 {
+    fn creator_host_os(&self) -> u32 {
         self.creator_host_os
     }
     #[cfg(test)]
-    pub fn original_size(&self) -> u64 {
+    pub(super) fn original_size(&self) -> u64 {
         self.original_size
     }
     pub(super) fn current_size(&self) -> u64 {
         self.current_size
     }
     #[cfg(test)]
-    pub fn disk_geometry(&self) -> u32 {
+    fn disk_geometry(&self) -> u32 {
         self.disk_geometry
     }
     #[cfg(test)]
-    pub fn disk_type(&self) -> u32 {
+    pub(super) fn disk_type(&self) -> u32 {
         self.disk_type
     }
 
@@ -194,15 +194,15 @@ impl VhdFooter {
     }
 
     #[cfg(test)]
-    pub fn checksum(&self) -> u32 {
+    pub(super) fn checksum(&self) -> u32 {
         self.checksum
     }
     #[cfg(test)]
-    pub fn unique_id(&self) -> u128 {
+    fn unique_id(&self) -> u128 {
         self.unique_id
     }
     #[cfg(test)]
-    pub fn saved_state(&self) -> u8 {
+    pub(super) fn saved_state(&self) -> u8 {
         self.saved_state
     }
 }

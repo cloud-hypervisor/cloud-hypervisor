@@ -63,7 +63,7 @@ use super::{Error, MuxerConnection, Result, defs};
 /// keyed by a `ConnMapKey` object.
 ///
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct ConnMapKey {
+pub(super) struct ConnMapKey {
     local_port: u32,
     peer_port: u32,
 }
@@ -71,7 +71,7 @@ pub struct ConnMapKey {
 /// A muxer RX queue item.
 ///
 #[derive(Clone, Copy, Debug)]
-pub enum MuxerRx {
+pub(super) enum MuxerRx {
     /// The packet must be fetched from the connection identified by `ConnMapKey`.
     ConnRx(ConnMapKey),
     /// The muxer must produce an RST packet.

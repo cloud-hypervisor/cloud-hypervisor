@@ -294,7 +294,7 @@ impl Interrupt {
 }
 
 #[derive(Clone)]
-pub struct UserMemoryRegion {
+pub(crate) struct UserMemoryRegion {
     pub slot: u32,
     pub start: u64,
     pub mapping: Arc<MmapRegion>,

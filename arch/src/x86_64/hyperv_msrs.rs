@@ -64,7 +64,7 @@ const HV_X64_MSR_SYNDBG_PENDING_BUFFER: u32 = 0x400000F5;
 const HV_X64_MSR_SYNDBG_OPTIONS: u32 = 0x400000FF;
 
 // All Hyper-V MSRs extracted from https://elixir.bootlin.com/linux/v7.1.1/source/tools/testing/selftests/kvm/include/x86/hyperv.h#L23
-pub const HYPERV_MSRS: [u32; 59] = [
+pub(super) const HYPERV_MSRS: [u32; 59] = [
     HV_X64_MSR_GUEST_OS_ID,
     HV_X64_MSR_HYPERCALL,
     HV_X64_MSR_VP_INDEX,

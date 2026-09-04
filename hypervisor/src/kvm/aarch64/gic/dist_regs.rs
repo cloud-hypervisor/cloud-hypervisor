@@ -112,12 +112,12 @@ fn dist_attr_get(gic: &DeviceFd, offset: u32) -> Result<u32> {
 }
 
 /// Get the distributor control register.
-pub fn read_ctlr(gic: &DeviceFd) -> Result<u32> {
+pub(super) fn read_ctlr(gic: &DeviceFd) -> Result<u32> {
     dist_attr_get(gic, GICD_CTLR)
 }
 
 /// Set the distributor control register.
-pub fn write_ctlr(gic: &DeviceFd, val: u32) -> Result<()> {
+pub(super) fn write_ctlr(gic: &DeviceFd, val: u32) -> Result<()> {
     dist_attr_set(gic, GICD_CTLR, val)
 }
 
@@ -164,7 +164,7 @@ fn compute_reg_len(gic: &DeviceFd, reg: &DistReg, base: u32) -> Result<u32> {
 }
 
 /// Set distributor registers of the GIC.
-pub fn set_dist_regs(gic: &DeviceFd, state: &[u32]) -> Result<()> {
+pub(super) fn set_dist_regs(gic: &DeviceFd, state: &[u32]) -> Result<()> {
     let mut idx = 0;
 
     for dreg in VGIC_DIST_REGS {
@@ -180,7 +180,7 @@ pub fn set_dist_regs(gic: &DeviceFd, state: &[u32]) -> Result<()> {
     Ok(())
 }
 /// Get distributor registers of the GIC.
-pub fn get_dist_regs(gic: &DeviceFd) -> Result<Vec<u32>> {
+pub(super) fn get_dist_regs(gic: &DeviceFd) -> Result<Vec<u32>> {
     let mut state = Vec::new();
 
     for dreg in VGIC_DIST_REGS {

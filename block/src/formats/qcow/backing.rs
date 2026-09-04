@@ -18,7 +18,7 @@ use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::formats::qcow::common::decompress_cluster;
 
 /// Raw backing file using position-independent reads.
-pub(crate) struct RawBacking {
+struct RawBacking {
     pub(crate) file: AlignedFile,
     pub(crate) virtual_size: u64,
 }

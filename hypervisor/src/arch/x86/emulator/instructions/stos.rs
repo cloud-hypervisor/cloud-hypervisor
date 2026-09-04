@@ -67,22 +67,22 @@ macro_rules! stos {
     };
 }
 
-pub struct Stosq_m64_RAX;
+pub(crate) struct Stosq_m64_RAX;
 impl<T: CpuStateManager> InstructionHandler<T> for Stosq_m64_RAX {
     stos!(u64);
 }
 
-pub struct Stosd_m32_EAX;
+pub(crate) struct Stosd_m32_EAX;
 impl<T: CpuStateManager> InstructionHandler<T> for Stosd_m32_EAX {
     stos!(u32);
 }
 
-pub struct Stosw_m16_AX;
+pub(crate) struct Stosw_m16_AX;
 impl<T: CpuStateManager> InstructionHandler<T> for Stosw_m16_AX {
     stos!(u16);
 }
 
-pub struct Stosb_m8_AL;
+pub(crate) struct Stosb_m8_AL;
 impl<T: CpuStateManager> InstructionHandler<T> for Stosb_m8_AL {
     stos!(u8);
 }

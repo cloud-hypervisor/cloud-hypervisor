@@ -365,18 +365,18 @@ impl QcowMetadata {
     }
 
     #[cfg(test)]
-    pub fn header(&self) -> QcowHeader {
+    pub(super) fn header(&self) -> QcowHeader {
         self.inner.read().unwrap().header.clone()
     }
 
     #[cfg(test)]
-    pub fn free_list_len(&self) -> usize {
+    pub(super) fn free_list_len(&self) -> usize {
         let inner = self.inner.read().unwrap();
         inner.avail_clusters.len() + inner.unref_clusters.len()
     }
 
     #[cfg(test)]
-    pub fn cluster_refcount(&self, address: u64) -> io::Result<u64> {
+    pub(super) fn cluster_refcount(&self, address: u64) -> io::Result<u64> {
         let mut inner = self.inner.write().unwrap();
         let QcowState {
             refcounts,
@@ -858,7 +858,7 @@ impl QcowState {
     /// logical-zero entries so reads do not fall through to backing data.
     ///
     /// Returns None if no host punch_hole is needed.
-    pub(super) fn deallocate_cluster(
+    fn deallocate_cluster(
         &mut self,
         address: u64,
         sparse: bool,
@@ -1017,7 +1017,7 @@ impl QcowState {
     }
 
     /// Flushes all dirty metadata to disk.
-    pub(super) fn sync_caches(&mut self) -> io::Result<()> {
+    fn sync_caches(&mut self) -> io::Result<()> {
         // Write out all dirty L2 tables.
         for (l1_index, l2_table) in self.l2_cache.iter_mut().filter(|(_k, v)| v.dirty()) {
             let addr = self.l1_table[*l1_index];

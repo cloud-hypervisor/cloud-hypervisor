@@ -89,56 +89,56 @@ const VFIO_DEVICE_FEATURE: u64 = 0x3b75;
 // See include/uapi/linux/kvm.h in the kernel code.
 #[cfg(feature = "kvm")]
 mod kvm {
-    pub const KVM_GET_API_VERSION: u64 = 0xae00;
-    pub const KVM_CREATE_VM: u64 = 0xae01;
-    pub const KVM_CHECK_EXTENSION: u64 = 0xae03;
-    pub const KVM_GET_VCPU_MMAP_SIZE: u64 = 0xae04;
-    pub const KVM_CREATE_VCPU: u64 = 0xae41;
-    pub const KVM_CREATE_IRQCHIP: u64 = 0xae60;
-    pub const KVM_RUN: u64 = 0xae80;
-    pub const KVM_SET_MP_STATE: u64 = 0x4004_ae99;
-    pub const KVM_SET_GSI_ROUTING: u64 = 0x4008_ae6a;
-    pub const KVM_SET_DEVICE_ATTR: u64 = 0x4018_aee1;
-    pub const KVM_HAS_DEVICE_ATTR: u64 = 0x4018_aee3;
-    pub const KVM_SET_ONE_REG: u64 = 0x4010_aeac;
-    pub const KVM_SET_USER_MEMORY_REGION: u64 = 0x4020_ae46;
-    pub const KVM_SET_USER_MEMORY_REGION2: u64 = 0x40a0_ae49;
-    pub const KVM_SET_MEMORY_ATTRIBUTES: u64 = 0x4020_aed2;
-    pub const KVM_CREATE_GUEST_MEMFD: u64 = 0xc040_aed4;
-    pub const KVM_IRQFD: u64 = 0x4020_ae76;
-    pub const KVM_IOEVENTFD: u64 = 0x4040_ae79;
-    pub const KVM_SET_VCPU_EVENTS: u64 = 0x4040_aea0;
-    pub const KVM_ENABLE_CAP: u64 = 0x4068_aea3;
-    pub const KVM_SET_REGS: u64 = 0x4090_ae82;
-    pub const KVM_GET_MP_STATE: u64 = 0x8004_ae98;
-    pub const KVM_GET_DEVICE_ATTR: u64 = 0x4018_aee2;
-    pub const KVM_GET_DIRTY_LOG: u64 = 0x4010_ae42;
-    pub const KVM_GET_VCPU_EVENTS: u64 = 0x8040_ae9f;
-    pub const KVM_GET_ONE_REG: u64 = 0x4010_aeab;
-    pub const KVM_GET_REGS: u64 = 0x8090_ae81;
-    pub const KVM_GET_SUPPORTED_CPUID: u64 = 0xc008_ae05;
-    pub const KVM_CREATE_DEVICE: u64 = 0xc00c_aee0;
-    pub const KVM_GET_REG_LIST: u64 = 0xc008_aeb0;
-    pub const KVM_MEMORY_ENCRYPT_OP: u64 = 0xc008_aeba;
-    pub const KVM_NMI: u64 = 0xae9a;
-    pub const KVM_GET_NESTED_STATE: u64 = 3229658814;
-    pub const KVM_SET_NESTED_STATE: u64 = 1082175167;
-    pub const KVM_SEV_SNP_LAUNCH_START: u64 = 0x4018_aeb4;
-    pub const KVM_SEV_SNP_LAUNCH_UPDATE: u64 = 0x8018_aeb5;
-    pub const KVM_SEV_SNP_LAUNCH_FINISH: u64 = 0x4008_aeb7;
+    pub(super) const KVM_GET_API_VERSION: u64 = 0xae00;
+    pub(super) const KVM_CREATE_VM: u64 = 0xae01;
+    pub(super) const KVM_CHECK_EXTENSION: u64 = 0xae03;
+    pub(super) const KVM_GET_VCPU_MMAP_SIZE: u64 = 0xae04;
+    pub(super) const KVM_CREATE_VCPU: u64 = 0xae41;
+    pub(super) const KVM_CREATE_IRQCHIP: u64 = 0xae60;
+    pub(super) const KVM_RUN: u64 = 0xae80;
+    pub(super) const KVM_SET_MP_STATE: u64 = 0x4004_ae99;
+    pub(super) const KVM_SET_GSI_ROUTING: u64 = 0x4008_ae6a;
+    pub(super) const KVM_SET_DEVICE_ATTR: u64 = 0x4018_aee1;
+    pub(super) const KVM_HAS_DEVICE_ATTR: u64 = 0x4018_aee3;
+    pub(super) const KVM_SET_ONE_REG: u64 = 0x4010_aeac;
+    pub(super) const KVM_SET_USER_MEMORY_REGION: u64 = 0x4020_ae46;
+    pub(super) const KVM_SET_USER_MEMORY_REGION2: u64 = 0x40a0_ae49;
+    pub(super) const KVM_SET_MEMORY_ATTRIBUTES: u64 = 0x4020_aed2;
+    pub(super) const KVM_CREATE_GUEST_MEMFD: u64 = 0xc040_aed4;
+    pub(super) const KVM_IRQFD: u64 = 0x4020_ae76;
+    pub(super) const KVM_IOEVENTFD: u64 = 0x4040_ae79;
+    pub(super) const KVM_SET_VCPU_EVENTS: u64 = 0x4040_aea0;
+    pub(super) const KVM_ENABLE_CAP: u64 = 0x4068_aea3;
+    pub(super) const KVM_SET_REGS: u64 = 0x4090_ae82;
+    pub(super) const KVM_GET_MP_STATE: u64 = 0x8004_ae98;
+    pub(super) const KVM_GET_DEVICE_ATTR: u64 = 0x4018_aee2;
+    pub(super) const KVM_GET_DIRTY_LOG: u64 = 0x4010_ae42;
+    pub(super) const KVM_GET_VCPU_EVENTS: u64 = 0x8040_ae9f;
+    pub(super) const KVM_GET_ONE_REG: u64 = 0x4010_aeab;
+    pub(super) const KVM_GET_REGS: u64 = 0x8090_ae81;
+    pub(super) const KVM_GET_SUPPORTED_CPUID: u64 = 0xc008_ae05;
+    pub(super) const KVM_CREATE_DEVICE: u64 = 0xc00c_aee0;
+    pub(super) const KVM_GET_REG_LIST: u64 = 0xc008_aeb0;
+    pub(super) const KVM_MEMORY_ENCRYPT_OP: u64 = 0xc008_aeba;
+    pub(super) const KVM_NMI: u64 = 0xae9a;
+    pub(super) const KVM_GET_NESTED_STATE: u64 = 3229658814;
+    pub(super) const KVM_SET_NESTED_STATE: u64 = 1082175167;
+    pub(super) const KVM_SEV_SNP_LAUNCH_START: u64 = 0x4018_aeb4;
+    pub(super) const KVM_SEV_SNP_LAUNCH_UPDATE: u64 = 0x8018_aeb5;
+    pub(super) const KVM_SEV_SNP_LAUNCH_FINISH: u64 = 0x4008_aeb7;
 }
 
 mod iommufd {
     // See include/uapi/linux/iommufd.h in the kernel code.
-    pub const IOMMU_DESTROY: u64 = 0x3b80;
-    pub const IOMMU_IOAS_ALLOC: u64 = 0x3b81;
-    pub const IOMMU_IOAS_MAP: u64 = 0x3b85;
-    pub const IOMMU_IOAS_UNMAP: u64 = 0x3b86;
+    pub(super) const IOMMU_DESTROY: u64 = 0x3b80;
+    pub(super) const IOMMU_IOAS_ALLOC: u64 = 0x3b81;
+    pub(super) const IOMMU_IOAS_MAP: u64 = 0x3b85;
+    pub(super) const IOMMU_IOAS_UNMAP: u64 = 0x3b86;
 
     // See include/uapi/linux/vfio.h in the kernel code.
-    pub const VFIO_DEVICE_BIND_IOMMUFD: u64 = 0x3b76;
-    pub const VFIO_DEVICE_ATTACH_IOMMUFD_PT: u64 = 0x3b77;
-    pub const VFIO_DEVICE_DETACH_IOMMUFD_PT: u64 = 0x3b78;
+    pub(super) const VFIO_DEVICE_BIND_IOMMUFD: u64 = 0x3b76;
+    pub(super) const VFIO_DEVICE_ATTACH_IOMMUFD_PT: u64 = 0x3b77;
+    pub(super) const VFIO_DEVICE_DETACH_IOMMUFD_PT: u64 = 0x3b78;
 }
 
 // Block device ioctls (not exported by libc)

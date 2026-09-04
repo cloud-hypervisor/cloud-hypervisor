@@ -46,7 +46,7 @@ pub enum Error {
     UpdateInterruptRoute(#[source] io::Error),
 }
 
-pub const MSI_CONFIG_ID: &str = "msi_config";
+pub(crate) const MSI_CONFIG_ID: &str = "msi_config";
 
 #[derive(Clone, Copy, Default, Serialize, Deserialize)]
 pub struct MsiCap {

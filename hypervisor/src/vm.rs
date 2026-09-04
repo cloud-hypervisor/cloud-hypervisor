@@ -264,7 +264,7 @@ pub enum HypervisorVmError {
 ///
 /// Result type for returning from a function
 ///
-pub type Result<T> = result::Result<T, HypervisorVmError>;
+pub(crate) type Result<T> = result::Result<T, HypervisorVmError>;
 
 /// Configuration data for legacy interrupts.
 ///

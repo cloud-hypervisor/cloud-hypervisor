@@ -482,7 +482,7 @@ pub(crate) fn setup_ovs_dpdk_guests(
     (child1, child2)
 }
 
-pub enum FwType {
+pub(crate) enum FwType {
     Ovmf,
     RustHypervisorFirmware,
 }
@@ -724,7 +724,7 @@ pub(crate) fn process_rss_kib(pid: u32) -> usize {
 }
 
 #[derive(PartialEq, Eq, PartialOrd)]
-pub struct Counters {
+pub(crate) struct Counters {
     rx_bytes: u64,
     rx_frames: u64,
     tx_bytes: u64,

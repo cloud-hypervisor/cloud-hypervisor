@@ -11,25 +11,25 @@ use thiserror::Error;
 mod connection;
 mod txbuf;
 
-pub use connection::VsockConnection;
+pub(super) use connection::VsockConnection;
 
-pub mod defs {
+pub(super) mod defs {
     /// Vsock connection TX buffer capacity.
-    pub const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
+    pub(crate) const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
 
     /// When the guest thinks we have less than this amount of free buffer space,
     /// we will send them a credit update packet.
-    pub const CONN_CREDIT_UPDATE_THRESHOLD: u32 = 4 * 1024;
+    pub(crate) const CONN_CREDIT_UPDATE_THRESHOLD: u32 = 4 * 1024;
 
     /// Connection request timeout, in millis.
-    pub const CONN_REQUEST_TIMEOUT_MS: u64 = 2000;
+    pub(crate) const CONN_REQUEST_TIMEOUT_MS: u64 = 2000;
 
     /// Connection graceful shutdown timeout, in millis.
-    pub const CONN_SHUTDOWN_TIMEOUT_MS: u64 = 2000;
+    pub(crate) const CONN_SHUTDOWN_TIMEOUT_MS: u64 = 2000;
 }
 
 #[derive(Debug, Error)]
-pub enum Error {
+pub(super) enum Error {
     /// Attempted to push data to a full TX buffer.
     #[error("TX buffer full")]
     TxBufFull,
@@ -49,7 +49,7 @@ type Result<T> = result::Result<T, Error>;
 /// A vsock connection state.
 ///
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ConnState {
+pub(super) enum ConnState {
     /// The connection has been initiated by the host end, but is yet to be confirmed by the guest.
     LocalInit,
     /// The connection has been initiated by the guest, but we are yet to confirm it, by sending

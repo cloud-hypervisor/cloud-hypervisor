@@ -59,7 +59,7 @@ pub enum DebuggableError {
     TranslateGva(#[source] cpu::Error),
 }
 
-pub trait Debuggable: vm_migration::Pausable {
+pub(crate) trait Debuggable: vm_migration::Pausable {
     fn set_guest_debug(
         &self,
         cpu_id: usize,
@@ -101,7 +101,7 @@ pub enum Error {
 type GdbResult<T> = result::Result<T, Error>;
 
 #[derive(Debug)]
-pub struct GdbRequest {
+pub(crate) struct GdbRequest {
     pub sender: mpsc::Sender<GdbResponse>,
     pub payload: GdbRequestPayload,
     pub cpu_id: usize,
@@ -120,7 +120,7 @@ pub enum GdbRequestPayload {
     ActiveVcpus,
 }
 
-pub type GdbResponse = result::Result<GdbResponsePayload, Error>;
+pub(crate) type GdbResponse = result::Result<GdbResponsePayload, Error>;
 
 #[derive(Debug)]
 pub enum GdbResponsePayload {
@@ -130,7 +130,7 @@ pub enum GdbResponsePayload {
     ActiveVcpus(usize),
 }
 
-pub struct GdbStub {
+pub(crate) struct GdbStub {
     gdb_sender: mpsc::Sender<GdbRequest>,
     gdb_event: eventfd::EventFd,
     vm_event: eventfd::EventFd,
@@ -139,7 +139,7 @@ pub struct GdbStub {
 }
 
 impl GdbStub {
-    pub fn new(
+    pub(crate) fn new(
         gdb_sender: mpsc::Sender<GdbRequest>,
         gdb_event: eventfd::EventFd,
         vm_event: eventfd::EventFd,
@@ -202,7 +202,7 @@ fn cpuid_to_tid(cpu_id: usize) -> Tid {
     Tid::new(get_raw_tid(cpu_id)).unwrap()
 }
 
-pub fn get_raw_tid(cpu_id: usize) -> usize {
+pub(crate) fn get_raw_tid(cpu_id: usize) -> usize {
     cpu_id + 1
 }
 
@@ -500,7 +500,7 @@ impl run_blocking::BlockingEventLoop for GdbEventLoop {
     }
 }
 
-pub fn gdb_thread(mut gdbstub: GdbStub, path: &path::Path) {
+pub(crate) fn gdb_thread(mut gdbstub: GdbStub, path: &path::Path) {
     let listener = match UnixListener::bind(path) {
         Ok(s) => s,
         Err(e) => {

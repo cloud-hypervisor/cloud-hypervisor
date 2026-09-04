@@ -858,7 +858,7 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
 }
 
 /// Detect the type of an image file by checking for a valid qcow2 header.
-pub(super) fn detect_image_type(file: &mut AlignedFile) -> BlockResult<ImageType> {
+fn detect_image_type(file: &mut AlignedFile) -> BlockResult<ImageType> {
     let mut magic_bytes = [0u8; 4];
     file.read_exact_at(&mut magic_bytes, 0)
         .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ReadingHeader(e)))?;

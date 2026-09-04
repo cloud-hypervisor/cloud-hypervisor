@@ -105,7 +105,7 @@ impl TxBufSource for VsockPacket {
 /// A self-managing connection object, that handles communication between a guest-side AF_VSOCK
 /// socket and a host-side `Read + Write + AsRawFd` stream.
 ///
-pub struct VsockConnection<S: Read + ReadVolatile + Write + WriteVolatile + AsRawFd> {
+pub(crate) struct VsockConnection<S: Read + ReadVolatile + Write + WriteVolatile + AsRawFd> {
     /// The current connection state.
     state: ConnState,
     /// The local CID. Most of the time this will be the constant `2` (the vsock host CID).
@@ -572,7 +572,7 @@ where
 {
     /// Create a new guest-initiated connection object.
     ///
-    pub fn new_peer_init(
+    pub(crate) fn new_peer_init(
         stream: S,
         local_cid: u64,
         peer_cid: u64,
@@ -602,7 +602,7 @@ where
 
     /// Create a new host-initiated connection object.
     ///
-    pub fn new_local_init(
+    pub(crate) fn new_local_init(
         stream: S,
         local_cid: u64,
         peer_cid: u64,
@@ -632,7 +632,7 @@ where
     /// Check if there is an expiry (kill) timer set for this connection, sometime in the
     /// future.
     ///
-    pub fn will_expire(&self) -> bool {
+    pub(crate) fn will_expire(&self) -> bool {
         match self.expiry {
             None => false,
             Some(t) => t > Instant::now(),
@@ -642,7 +642,7 @@ where
     /// Check if this connection needs to be scheduled for forceful termination, due to its
     /// kill timer having expired.
     ///
-    pub fn has_expired(&self) -> bool {
+    pub(crate) fn has_expired(&self) -> bool {
         match self.expiry {
             None => false,
             Some(t) => t <= Instant::now(),
@@ -651,21 +651,21 @@ where
 
     /// Get the kill timer value, if one is set.
     ///
-    pub fn expiry(&self) -> Option<Instant> {
+    pub(crate) fn expiry(&self) -> Option<Instant> {
         self.expiry
     }
 
     /// Schedule the connection to be forcefully terminated ASAP (i.e. the next time the
     /// connection is asked to yield a packet, via `recv_pkt()`).
     ///
-    pub fn kill(&mut self) {
+    pub(crate) fn kill(&mut self) {
         self.state = ConnState::Killed;
         self.pending_rx.insert(PendingRx::Rst);
     }
 
     /// Return the connections state.
     ///
-    pub fn state(&self) -> ConnState {
+    pub(crate) fn state(&self) -> ConnState {
         self.state
     }
 
@@ -676,7 +676,7 @@ where
     /// underlying stream. No account of this write is kept, which includes bypassing
     /// vsock flow control.
     ///
-    pub fn send_bytes_raw(&mut self, buf: &[u8]) -> Result<usize> {
+    pub(crate) fn send_bytes_raw(&mut self, buf: &[u8]) -> Result<usize> {
         self.stream.write(buf).map_err(Error::StreamWrite)
     }
 

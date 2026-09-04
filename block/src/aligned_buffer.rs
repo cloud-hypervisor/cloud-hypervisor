@@ -28,7 +28,7 @@ impl AlignedBuffer {
     ///
     /// When offset and length are already aligned, `head_pad == 0` and the
     /// full buffer equals the user's logical portion (no overhead).
-    pub fn new(offset: u64, len: usize, alignment: usize) -> io::Result<Self> {
+    pub(crate) fn new(offset: u64, len: usize, alignment: usize) -> io::Result<Self> {
         if alignment == 0 || !alignment.is_power_of_two() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -80,13 +80,13 @@ impl AlignedBuffer {
     }
 
     /// The caller's logical portion of the buffer (read-only).
-    pub fn as_slice(&self) -> &[u8] {
+    pub(crate) fn as_slice(&self) -> &[u8] {
         // SAFETY: ptr is valid for layout.size() bytes; head_pad + user_len <= layout.size().
         unsafe { slice::from_raw_parts(self.ptr.add(self.head_pad), self.user_len) }
     }
 
     /// The caller's logical portion of the buffer (mutable).
-    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+    pub(crate) fn as_mut_slice(&mut self) -> &mut [u8] {
         // SAFETY: ptr is valid for layout.size() bytes; head_pad + user_len <= layout.size().
         unsafe { slice::from_raw_parts_mut(self.ptr.add(self.head_pad), self.user_len) }
     }
@@ -105,7 +105,7 @@ impl AlignedBuffer {
     ///
     /// Returns the number of caller-logical bytes now valid in `as_slice()`,
     /// accounting for head padding and any short read.
-    pub fn read_from(&mut self, f: &impl FileExt) -> io::Result<usize> {
+    pub(crate) fn read_from(&mut self, f: &impl FileExt) -> io::Result<usize> {
         let mut total = 0usize;
         while total < self.aligned_len {
             let offset = self
@@ -123,7 +123,7 @@ impl AlignedBuffer {
     }
 
     /// Write the full aligned region from this buffer to `f`.
-    pub fn write_to(&self, f: &impl FileExt) -> io::Result<()> {
+    pub(crate) fn write_to(&self, f: &impl FileExt) -> io::Result<()> {
         f.write_all_at(self.full_slice(), self.aligned_offset)
     }
 }

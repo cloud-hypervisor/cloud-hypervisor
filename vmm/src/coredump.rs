@@ -47,7 +47,7 @@ pub enum GuestDebuggableError {
     Resume(#[source] vm_migration::MigratableError),
 }
 
-pub trait GuestDebuggable: vm_migration::Pausable {
+pub(crate) trait GuestDebuggable: vm_migration::Pausable {
     fn coredump(&mut self, _destination_url: &str) -> result::Result<(), GuestDebuggableError> {
         Ok(())
     }
@@ -55,7 +55,7 @@ pub trait GuestDebuggable: vm_migration::Pausable {
 
 #[repr(C)]
 #[derive(Default, Copy, Clone)]
-pub struct X86_64UserRegs {
+pub(crate) struct X86_64UserRegs {
     /// r15, r14, r13, r12, rbp, rbx, r11, r10;
     pub regs1: [u64; 8],
     /// r9, r8, rax, rcx, rdx, rsi, rdi, orig_rax;
@@ -77,7 +77,7 @@ pub struct X86_64UserRegs {
 unsafe impl ByteValued for X86_64UserRegs {}
 
 #[repr(C)]
-pub struct X86_64ElfPrStatus {
+pub(crate) struct X86_64ElfPrStatus {
     pub pad1: [u8; 32],
     pub pid: u32,
     pub pads2: [u8; 76],
@@ -87,7 +87,7 @@ pub struct X86_64ElfPrStatus {
 
 #[repr(C)]
 #[derive(Default, Copy, Clone)]
-pub struct CpuSegment {
+pub(crate) struct CpuSegment {
     pub selector: u32,
     pub limit: u32,
     pub flags: u32,
@@ -109,7 +109,7 @@ const DESC_G_SHIFT: u32 = 23;
 const DESC_G_MASK: u32 = 1 << DESC_G_SHIFT;
 
 impl CpuSegment {
-    pub fn new(reg: SegmentRegister) -> Self {
+    pub(crate) fn new(reg: SegmentRegister) -> Self {
         let p_mask = if (reg.present > 0) && (reg.unusable == 0) {
             DESC_P_MASK
         } else {
@@ -133,7 +133,7 @@ impl CpuSegment {
         }
     }
 
-    pub fn new_from_table(reg: DescriptorTable) -> Self {
+    pub(crate) fn new_from_table(reg: DescriptorTable) -> Self {
         CpuSegment {
             selector: 0,
             limit: reg.limit as u32,
@@ -146,7 +146,7 @@ impl CpuSegment {
 
 #[repr(C)]
 #[derive(Default, Copy, Clone)]
-pub struct CpuState {
+pub(crate) struct CpuState {
     pub version: u32,
     pub size: u32,
     /// rax, rbx, rcx, rdx, rsi, rdi, rsp, rbp
@@ -172,15 +172,15 @@ pub struct CpuState {
 // SAFETY: This is just a series of bytes
 unsafe impl ByteValued for CpuState {}
 
-pub enum NoteDescType {
+pub(crate) enum NoteDescType {
     Elf = 0,
     Vmm = 1,
     ElfAndVmm = 2,
 }
 
 // "CORE" or "QEMU"
-pub const COREDUMP_NAME_SIZE: u32 = 5;
-pub const NT_PRSTATUS: u32 = 1;
+pub(crate) const COREDUMP_NAME_SIZE: u32 = 5;
+pub(crate) const NT_PRSTATUS: u32 = 1;
 
 /// Core file.
 const ET_CORE: u16 = 4;
@@ -191,7 +191,7 @@ const EV_CURRENT: u8 = 1;
 /// AMD x86-64 architecture
 const EM_X86_64: u16 = 62;
 
-pub trait Elf64Writable {
+pub(crate) trait Elf64Writable {
     fn write_header(&mut self, dump_state: &DumpState) -> result::Result<(), GuestDebuggableError> {
         let e_ident = [
             elf::ELFMAG0, // magic
@@ -321,7 +321,7 @@ pub trait Elf64Writable {
     }
 }
 
-pub trait CpuElf64Writable {
+pub(crate) trait CpuElf64Writable {
     fn cpu_write_elf64_note(
         &mut self,
         _dump_state: &DumpState,

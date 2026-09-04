@@ -39,7 +39,7 @@ pub enum PciRootError {
     #[error("Valid PCI device identifier but already used: {0}")]
     AlreadyInUsePciDeviceSlot(usize),
 }
-pub type Result<T> = result::Result<T, PciRootError>;
+pub(crate) type Result<T> = result::Result<T, PciRootError>;
 
 /// Emulates the PCI Root bridge device.
 pub struct PciRoot {

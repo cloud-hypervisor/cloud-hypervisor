@@ -112,97 +112,97 @@ macro_rules! cmp_rm_imm {
     };
 }
 
-pub struct Cmp_rm64_r64;
+pub(crate) struct Cmp_rm64_r64;
 impl<T: CpuStateManager> InstructionHandler<T> for Cmp_rm64_r64 {
     cmp_rm_r!(u64);
 }
 
-pub struct Cmp_rm32_r32;
+pub(crate) struct Cmp_rm32_r32;
 impl<T: CpuStateManager> InstructionHandler<T> for Cmp_rm32_r32 {
     cmp_rm_r!(u32);
 }
 
-pub struct Cmp_rm16_r16;
+struct Cmp_rm16_r16;
 impl<T: CpuStateManager> InstructionHandler<T> for Cmp_rm16_r16 {
     cmp_rm_r!(u16);
 }
 
-pub struct Cmp_rm8_r8;
+pub(crate) struct Cmp_rm8_r8;
 impl<T: CpuStateManager> InstructionHandler<T> for Cmp_rm8_r8 {
     cmp_rm_r!(u8);
 }
 
-pub struct Cmp_r64_rm64;
+struct Cmp_r64_rm64;
 impl<T: CpuStateManager> InstructionHandler<T> for Cmp_r64_rm64 {
     cmp_r_rm!(u64);
 }
 
-pub struct Cmp_r32_rm32;
+struct Cmp_r32_rm32;
 impl<T: CpuStateManager> InstructionHandler<T> for Cmp_r32_rm32 {
     cmp_r_rm!(u32);
 }
 
-pub struct Cmp_r16_rm16;
+struct Cmp_r16_rm16;
 impl<T: CpuStateManager> InstructionHandler<T> for Cmp_r16_rm16 {
     cmp_r_rm!(u16);
 }
 
-pub struct Cmp_r8_rm8;
+struct Cmp_r8_rm8;
 impl<T: CpuStateManager> InstructionHandler<T> for Cmp_r8_rm8 {
     cmp_r_rm!(u8);
 }
 
-pub struct Cmp_AL_imm8;
+struct Cmp_AL_imm8;
 impl<T: CpuStateManager> InstructionHandler<T> for Cmp_AL_imm8 {
     cmp_rm_imm!(u8, u8);
 }
 
-pub struct Cmp_AX_imm16;
+struct Cmp_AX_imm16;
 impl<T: CpuStateManager> InstructionHandler<T> for Cmp_AX_imm16 {
     cmp_rm_imm!(u16, u16);
 }
 
-pub struct Cmp_EAX_imm32;
+struct Cmp_EAX_imm32;
 impl<T: CpuStateManager> InstructionHandler<T> for Cmp_EAX_imm32 {
     cmp_rm_imm!(u32, u32);
 }
 
-pub struct Cmp_RAX_imm32;
+struct Cmp_RAX_imm32;
 impl<T: CpuStateManager> InstructionHandler<T> for Cmp_RAX_imm32 {
     cmp_rm_imm!(u32, u64);
 }
 
-pub struct Cmp_rm8_imm8;
+struct Cmp_rm8_imm8;
 impl<T: CpuStateManager> InstructionHandler<T> for Cmp_rm8_imm8 {
     cmp_rm_imm!(u8, u8);
 }
 
-pub struct Cmp_rm16_imm16;
+struct Cmp_rm16_imm16;
 impl<T: CpuStateManager> InstructionHandler<T> for Cmp_rm16_imm16 {
     cmp_rm_imm!(u16, u16);
 }
 
-pub struct Cmp_rm32_imm32;
+struct Cmp_rm32_imm32;
 impl<T: CpuStateManager> InstructionHandler<T> for Cmp_rm32_imm32 {
     cmp_rm_imm!(u32, u32);
 }
 
-pub struct Cmp_rm64_imm32;
+struct Cmp_rm64_imm32;
 impl<T: CpuStateManager> InstructionHandler<T> for Cmp_rm64_imm32 {
     cmp_rm_imm!(u32, u64);
 }
 
-pub struct Cmp_rm16_imm8;
+struct Cmp_rm16_imm8;
 impl<T: CpuStateManager> InstructionHandler<T> for Cmp_rm16_imm8 {
     cmp_rm_imm!(u8, u16);
 }
 
-pub struct Cmp_rm32_imm8;
+pub(crate) struct Cmp_rm32_imm8;
 impl<T: CpuStateManager> InstructionHandler<T> for Cmp_rm32_imm8 {
     cmp_rm_imm!(u8, u32);
 }
 
-pub struct Cmp_rm64_imm8;
+struct Cmp_rm64_imm8;
 impl<T: CpuStateManager> InstructionHandler<T> for Cmp_rm64_imm8 {
     cmp_rm_imm!(u8, u64);
 }

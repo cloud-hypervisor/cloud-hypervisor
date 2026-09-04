@@ -32,7 +32,7 @@ use crate::vm::{Vm, VmState};
 
 #[derive(thiserror::Error)]
 #[error("Migration worker could not be spawned: {spawn_error}")]
-pub struct MigrationWorkerSpawnError {
+pub(crate) struct MigrationWorkerSpawnError {
     pub spawn_error: io::Error,
     pub vm: Vm,
 }
@@ -46,12 +46,12 @@ impl Debug for MigrationWorkerSpawnError {
     }
 }
 
-pub struct MigrationWorkerHandle {
+pub(crate) struct MigrationWorkerHandle {
     handle: Option<JoinHandle<MigrationWorkerResult>>,
 }
 
 impl MigrationWorkerHandle {
-    pub fn join(mut self) -> MigrationWorkerResult {
+    pub(crate) fn join(mut self) -> MigrationWorkerResult {
         self.handle
             .take()
             .expect("should have thread")
@@ -70,13 +70,13 @@ impl Drop for MigrationWorkerHandle {
 }
 
 #[derive(Clone, Debug)]
-pub struct MigrationSeccompFilters {
+pub(crate) struct MigrationSeccompFilters {
     pub worker: BpfProgram,
     pub tcp_worker: BpfProgram,
     pub postcopy_server: BpfProgram,
 }
 
-pub struct MigrationWorker {
+pub(crate) struct MigrationWorker {
     // Keep the VM out of the thread closure until spawning succeeds.
     vm_receiver: Receiver<Vm>,
     check_migration_evt: EventFd,
@@ -135,7 +135,7 @@ impl MigrationWorker {
     // All code paths need special care to prevent any panic and thus losing the
     // VM in case of failure.
     #[expect(clippy::result_large_err)]
-    pub fn spawn(
+    pub(crate) fn spawn(
         vm: Vm,
         check_migration_evt: EventFd,
         config: VmSendMigrationData,
@@ -178,7 +178,7 @@ impl MigrationWorker {
 }
 
 /// Return value of [`MigrationWorker`].
-pub struct MigrationWorkerResult {
+pub(crate) struct MigrationWorkerResult {
     /// The VM that was migrated.
     ///
     /// If `migration_result` is `Ok`, the VM is paused and can be deleted

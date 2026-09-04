@@ -50,7 +50,7 @@ const AMBA_ID_LOW: u64 = 0x3f8;
 const AMBA_ID_HIGH: u64 = 0x401;
 
 #[derive(Debug, Error)]
-pub enum Error {
+pub(super) enum Error {
     #[error("PL011 write: Bad write offset: {0}")]
     BadWriteOffset(u64),
     #[error("PL011: DMA not implemented")]
