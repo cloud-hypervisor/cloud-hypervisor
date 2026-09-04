@@ -282,7 +282,7 @@ pub(crate) mod tests {
     }
 
     /// Compress every allocated cluster in a QCOW2 image file in place.
-    pub fn compress_allocated_clusters(file: &mut File) {
+    pub(crate) fn compress_allocated_clusters(file: &mut File) {
         let mut buf4 = [0u8; 4];
         file.read_exact_at(&mut buf4, HEADER_CLUSTER_BITS_OFFSET)
             .unwrap();

@@ -22,7 +22,7 @@ fn next_completion(async_io: &mut dyn AsyncIo) -> (u64, i32) {
 
 /// Tests punching a hole in the middle of a 4 MB file and verifying data
 /// integrity around the hole.
-pub fn test_punch_hole(async_io: &mut dyn AsyncIo, file: &mut File) {
+pub(crate) fn test_punch_hole(async_io: &mut dyn AsyncIo, file: &mut File) {
     // Write 4MB of data
     let data = vec![0xAA; 4 * 1024 * 1024];
     file.write_all(&data).unwrap();
@@ -68,7 +68,7 @@ pub fn test_punch_hole(async_io: &mut dyn AsyncIo, file: &mut File) {
 
 /// Tests writing zeroes to a 512 KB region inside a 4 MB file and verifying
 /// surrounding data is preserved.
-pub fn test_write_zeroes(async_io: &mut dyn AsyncIo, file: &mut File) {
+pub(crate) fn test_write_zeroes(async_io: &mut dyn AsyncIo, file: &mut File) {
     // Write 4MB of data
     let data = vec![0xBB; 4 * 1024 * 1024];
     file.write_all(&data).unwrap();
@@ -114,7 +114,7 @@ pub fn test_write_zeroes(async_io: &mut dyn AsyncIo, file: &mut File) {
 
 /// Tests punching multiple holes in an 8 MB file and verifying each hole
 /// independently reads as zeroes.
-pub fn test_punch_hole_multiple_operations(async_io: &mut dyn AsyncIo, file: &mut File) {
+pub(crate) fn test_punch_hole_multiple_operations(async_io: &mut dyn AsyncIo, file: &mut File) {
     // Write 8MB of data
     let data = vec![0xCC; 8 * 1024 * 1024];
     file.write_all(&data).unwrap();

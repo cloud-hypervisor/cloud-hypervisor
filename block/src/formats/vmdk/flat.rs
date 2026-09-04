@@ -46,7 +46,7 @@ pub(crate) struct VmdkExtent {
 }
 
 #[derive(Debug)]
-pub struct FlatVmdk {
+pub(super) struct FlatVmdk {
     descriptor: Arc<VmdkDescriptor>,
     // Open handle to the VMDK descriptor file.
     descriptor_file: Arc<File>,
@@ -240,7 +240,7 @@ fn overflow_error(what: &str) -> io::Error {
 
 impl FlatVmdk {
     /// Opens a flat VMDK image from its already-open descriptor file.
-    pub fn new(file: File, path: &Path, readonly: bool, direct: bool) -> io::Result<Self> {
+    pub(super) fn new(file: File, path: &Path, readonly: bool, direct: bool) -> io::Result<Self> {
         let descriptor = VmdkDescriptor::new(&file, path)?;
 
         if descriptor.extents_list.extents.is_empty() {
@@ -325,12 +325,12 @@ impl FlatVmdk {
         })
     }
 
-    pub fn virtual_block_size(&self) -> u64 {
+    pub(super) fn virtual_block_size(&self) -> u64 {
         self.size
     }
 
     /// Shared handle to the opened data extents, used to build the I/O worker.
-    pub fn extents(&self) -> Arc<Vec<VmdkExtent>> {
+    pub(super) fn extents(&self) -> Arc<Vec<VmdkExtent>> {
         Arc::clone(&self.extents)
     }
 
@@ -339,7 +339,7 @@ impl FlatVmdk {
     /// block devices), so sparse extents are reported correctly. `NoAccess`
     /// extents (no open file) contribute 0, as does any extent whose size
     /// cannot be queried.
-    pub fn physical_block_size(&self) -> u64 {
+    pub(super) fn physical_block_size(&self) -> u64 {
         self.extents
             .iter()
             .filter_map(|extent| extent.file.as_ref())
@@ -348,7 +348,7 @@ impl FlatVmdk {
     }
 
     /// Sector/cluster geometry reported to the guest.
-    pub fn topology(&self) -> DiskTopology {
+    pub(super) fn topology(&self) -> DiskTopology {
         self.extents
             .iter()
             .find_map(|extent| extent.file.as_ref())

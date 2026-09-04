@@ -27,7 +27,7 @@ pub(crate) struct FlatVmdkSync {
 }
 
 impl FlatVmdkSync {
-    pub fn new(extents: Arc<Vec<VmdkExtent>>, size: u64) -> Self {
+    pub(super) fn new(extents: Arc<Vec<VmdkExtent>>, size: u64) -> Self {
         FlatVmdkSync {
             extents,
             size,
