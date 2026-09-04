@@ -40,7 +40,7 @@ pub enum Error {
     TooManyStrings,
 }
 
-pub type Result<T> = result::Result<T, Error>;
+type Result<T> = result::Result<T, Error>;
 
 // Constants sourced from SMBIOS Spec 3.9.0.
 const SM3_MAGIC_IDENT: &[u8; 5usize] = b"_SM3_";
@@ -55,8 +55,8 @@ const CHASSIS_STATE_UNKNOWN: u8 = 0x02;
 const CHASSIS_SECURITY_STATUS_NONE: u8 = 0x03;
 const PCI_SUPPORTED: u64 = 1 << 7;
 const IS_VIRTUAL_MACHINE: u8 = 1 << 4;
-pub const DEFAULT_SYSTEM_MANUFACTURER: &str = "Cloud Hypervisor";
-pub const DEFAULT_SYSTEM_PRODUCT_NAME: &str = "cloud-hypervisor";
+const DEFAULT_SYSTEM_MANUFACTURER: &str = "Cloud Hypervisor";
+const DEFAULT_SYSTEM_PRODUCT_NAME: &str = "cloud-hypervisor";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SmbiosConfig {
@@ -366,7 +366,7 @@ fn write_type3_chassis(
     Ok(())
 }
 
-pub fn setup_smbios(mem: &GuestMemoryMmap, smbios: Option<&SmbiosConfig>) -> Result<u64> {
+pub(crate) fn setup_smbios(mem: &GuestMemoryMmap, smbios: Option<&SmbiosConfig>) -> Result<u64> {
     let system = smbios.and_then(|cfg| cfg.system.as_ref());
     let chassis = smbios.and_then(|cfg| cfg.chassis.as_ref());
     let oem_strings: &[String] = smbios.map_or(&[], |cfg| &cfg.oem_strings);
