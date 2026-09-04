@@ -25,7 +25,7 @@
  *  booting a legacy VM, as well as SNP based isolated VM.
  */
 
-pub mod igvm_loader;
+pub(crate) mod igvm_loader;
 mod loader;
 use std::fs;
 use std::path::Path;
@@ -35,14 +35,14 @@ use igvm::{IgvmFile, IsolationType};
 use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
 use zerocopy::FromZeros;
 
-pub fn parse_igvm(igvm_path: &Path) -> Result<IgvmFile, igvm_loader::Error> {
+pub(crate) fn parse_igvm(igvm_path: &Path) -> Result<IgvmFile, igvm_loader::Error> {
     let file_contents = fs::read(igvm_path).map_err(igvm_loader::Error::Igvm)?;
     IgvmFile::new_from_binary(&file_contents, Some(IsolationType::Snp))
         .map_err(igvm_loader::Error::InvalidIgvmFile)
 }
 
 #[derive(Debug, Clone)]
-pub struct IgvmLoadedInfo {
+pub(crate) struct IgvmLoadedInfo {
     pub gpas: Vec<u64>,
     pub vmsa_gpa: u64,
     pub snp_id_block: IGVM_VHS_SNP_ID_BLOCK,
@@ -62,7 +62,7 @@ impl Default for IgvmLoadedInfo {
     }
 }
 
-pub const HV_PAGE_SIZE: u64 = 4096;
+pub(crate) const HV_PAGE_SIZE: u64 = 4096;
 
 /// The page acceptance used for importing pages into the initial launch context of the guest.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -86,7 +86,7 @@ pub enum BootPageAcceptance {
 /// The startup memory type used to notify a well behaved host that memory should be present before attempting to
 /// start the guest.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum StartupMemoryType {
+pub(crate) enum StartupMemoryType {
     /// The range is normal memory.
     Ram,
 }

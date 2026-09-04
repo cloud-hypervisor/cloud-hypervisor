@@ -1006,7 +1006,7 @@ pub enum TcpAddressParseError {
 /// The expected format is `<host>:<port>` for hostnames and IPv4 addresses, or
 /// `[<ipv6-address>]:<port>` for IPv6 addresses. The host and port must both be
 /// present, and the port must parse as a `u16`.
-pub fn tcp_address_to_server_name(address: &str) -> Result<&str, TcpAddressParseError> {
+pub(crate) fn tcp_address_to_server_name(address: &str) -> Result<&str, TcpAddressParseError> {
     let (host, port) = if let Some(rest) = address.strip_prefix('[') {
         let (host, rest) = rest
             .split_once(']')

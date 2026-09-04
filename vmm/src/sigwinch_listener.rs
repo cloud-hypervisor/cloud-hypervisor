@@ -241,7 +241,7 @@ unsafe fn clone_clear_sighand() -> io::Result<u64> {
     Ok(r.try_into().unwrap())
 }
 
-pub fn start_sigwinch_listener(seccomp_filter: BpfProgramRef, tty_sub: File) -> io::Result<File> {
+fn start_sigwinch_listener(seccomp_filter: BpfProgramRef, tty_sub: File) -> io::Result<File> {
     let mut pipe = [-1; 2];
     // SAFETY: FFI call with valid arguments
     if unsafe { pipe2(pipe.as_mut_ptr(), O_CLOEXEC) } == -1 {
@@ -266,7 +266,7 @@ pub fn start_sigwinch_listener(seccomp_filter: BpfProgramRef, tty_sub: File) -> 
     Ok(rx)
 }
 
-pub fn listen_for_sigwinch_on_tty(
+pub(crate) fn listen_for_sigwinch_on_tty(
     pty_sub: File,
     seccomp_action: &SeccompAction,
 ) -> io::Result<File> {

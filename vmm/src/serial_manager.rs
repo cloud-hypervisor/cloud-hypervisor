@@ -88,11 +88,11 @@ pub enum Error {
     #[error("Error applying seccomp filter")]
     ApplySeccompFilter(#[source] seccompiler::Error),
 }
-pub type Result<T> = result::Result<T, Error>;
+pub(crate) type Result<T> = result::Result<T, Error>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u64)]
-pub enum EpollDispatch {
+pub(crate) enum EpollDispatch {
     File = 0,
     Kill = 1,
     Socket = 2,
@@ -112,7 +112,7 @@ impl From<u64> for EpollDispatch {
     }
 }
 
-pub struct SerialManager {
+pub(crate) struct SerialManager {
     #[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))]
     serial: Arc<Mutex<Serial>>,
     #[cfg(target_arch = "aarch64")]
@@ -162,7 +162,7 @@ impl SocketConsole {
 }
 
 impl SerialManager {
-    pub fn new(
+    pub(crate) fn new(
         #[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))] serial: Arc<Mutex<Serial>>,
         #[cfg(target_arch = "aarch64")] serial: Arc<Mutex<Pl011>>,
         mut transport: ConsoleTransport,
@@ -308,7 +308,7 @@ impl SerialManager {
         Ok(())
     }
 
-    pub fn start_thread(
+    pub(crate) fn start_thread(
         &mut self,
         exit_evt: EventFd,
         seccomp_action: &SeccompAction,

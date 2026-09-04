@@ -23,8 +23,8 @@ use zerocopy::{Immutable, IntoBytes};
 pub(crate) type Result<T> = result::Result<T, errno::Error>;
 
 // https://github.com/tianocore/edk2/blob/f98662c5e35b6ab60f46ee4350fa0e6eab0497cf/OvmfPkg/Include/Fdf/MemFd.fdf.inc#L89-L93
-pub const SEV_HASH_BLOCK_ADDRESS: u64 = 0x10c00;
-pub const SEV_HASH_BLOCK_SIZE: usize = 0x400;
+pub(crate) const SEV_HASH_BLOCK_ADDRESS: u64 = 0x10c00;
+pub(crate) const SEV_HASH_BLOCK_SIZE: usize = 0x400;
 const SHA256_HASH_SIZE: usize = 32;
 
 // Measured hashes table definitions. These match the definitions found in
@@ -51,7 +51,7 @@ const SEV_HASH_TABLE_PADDING: usize =
     size_of::<SevHashTable>().next_multiple_of(16) - size_of::<SevHashTable>();
 
 #[derive(IntoBytes, Immutable)]
-pub struct PaddedSevHashTable {
+struct PaddedSevHashTable {
     #[expect(dead_code)]
     hash_table: SevHashTable,
     #[expect(dead_code)]
@@ -66,7 +66,7 @@ const SEV_KERNEL_HASH_GUID: Uuid = uuid!("4de79437-abd2-427f-b835-d5b172d2045b")
 const SEV_INITRD_HASH_GUID: Uuid = uuid!("44baf731-3a2f-4bd7-9af1-41e29169781d");
 const SEV_CMDLINE_HASH_GUID: Uuid = uuid!("97d02dd8-bd20-4c94-aa78-e7714d36ab2a");
 
-pub struct MeasuredBootInfo {
+pub(crate) struct MeasuredBootInfo {
     pub kernel: File,
     // QEMU also makes initrd optional in the hash table
     pub initramfs: Option<File>,
@@ -94,7 +94,7 @@ impl MeasuredBootInfo {
         Ok(hasher.finalize().into())
     }
 
-    pub fn build_hash_block(&self) -> Result<[u8; SEV_HASH_BLOCK_SIZE]> {
+    pub(crate) fn build_hash_block(&self) -> Result<[u8; SEV_HASH_BLOCK_SIZE]> {
         // Current tooling appends a NUL byte at the end of cmdlines:
         // https://github.com/virtee/sev-snp-measure/blob/main/sevsnpmeasure/sev_hashes.py#L71-L74
         let cmdline_digest: [u8; 32] = Sha256::digest(self.cmdline.as_bytes_with_nul()).into();
@@ -231,17 +231,17 @@ struct Inner {
 /// Tracks which confidential guest pages are shared and keeps the device
 /// IOMMU mapping exactly those pages.
 #[derive(Default)]
-pub struct SevSnpSharedPageTracker {
+pub(crate) struct SevSnpSharedPageTracker {
     inner: Mutex<Inner>,
 }
 
 impl SevSnpSharedPageTracker {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
     /// Register a confidential RAM region `[base, base + size)`.
-    pub fn register_region(&self, base: u64, size: u64) {
+    pub(crate) fn register_region(&self, base: u64, size: u64) {
         self.inner
             .lock()
             .unwrap()
@@ -252,7 +252,7 @@ impl SevSnpSharedPageTracker {
     /// Register a VFIO DMA handler, replaying the currently shared pages into it.
     /// A partial replay is rolled back, so a failed registration leaves nothing
     /// mapped in the IOMMU.
-    pub fn add_dma_mapping_handler(
+    pub(crate) fn add_dma_mapping_handler(
         &self,
         handler: Arc<dyn ExternalDmaMapping>,
     ) -> anyhow::Result<()> {
@@ -286,7 +286,7 @@ impl SevSnpSharedPageTracker {
     }
 
     /// Drop the registered DMA handler.
-    pub fn clear_dma_mapping_handler(&self) {
+    pub(crate) fn clear_dma_mapping_handler(&self) {
         self.inner.lock().unwrap().handler = None;
     }
 

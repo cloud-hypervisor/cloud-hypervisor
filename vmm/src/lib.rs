@@ -3445,7 +3445,7 @@ mod util {
     ///
     /// This mimics the error chain that we print on exit in CH or ch-remote for
     /// situations where we do not exit the program.
-    pub fn error_chain_messages(top_error: &dyn StdError) -> Vec<String> {
+    pub(crate) fn error_chain_messages(top_error: &dyn StdError) -> Vec<String> {
         iter::successors(Some(top_error), |sub_error| {
             // Dereference necessary to mitigate rustc compiler bug.
             // See <https://github.com/rust-lang/rust/issues/141673>
@@ -3459,7 +3459,7 @@ mod util {
 
     /// Flattens the chain of errors of a [`StdError`] into a single printable
     /// line.
-    pub fn flatten_error_chain_to_string(top_error: &dyn StdError) -> String {
+    pub(crate) fn flatten_error_chain_to_string(top_error: &dyn StdError) -> String {
         // Separator discussed here: https://github.com/cloud-hypervisor/cloud-hypervisor/issues/8510
         error_chain_messages(top_error).join(": ")
     }

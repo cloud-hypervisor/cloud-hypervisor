@@ -84,7 +84,7 @@ mod fds_helper {
 
     /// Abstraction over configuration types received via the HTTP API that
     /// have associated externally opened FDs.
-    pub trait ConfigWithFDs {
+    pub(super) trait ConfigWithFDs {
         /// Returns the ID of the device.
         ///
         /// Used for logging.
@@ -111,7 +111,7 @@ mod fds_helper {
     /// Extension of [`ConfigWithFDs`] for config objects that know how many
     /// FDs they want (e.g., a restore configuration that is aware of the
     /// previous state).
-    pub trait ConfigWithVariableFDs: ConfigWithFDs {
+    pub(super) trait ConfigWithVariableFDs: ConfigWithFDs {
         /// Returns how many FDs this type wants to have from the pool of
         /// available FDs.
         fn expected_num_fds(&self) -> usize;
@@ -239,7 +239,7 @@ mod fds_helper {
     /// - `cfgs`: List of network configurations where each network can have up to `n` FDs.
     ///
     /// [module description]: self
-    pub fn attach_fds_to_cfgs<T: ConfigWithVariableFDs>(
+    pub(super) fn attach_fds_to_cfgs<T: ConfigWithVariableFDs>(
         device_fds: Vec<File>,
         cfgs: &mut [&mut T],
     ) -> Result<(), HttpError> {
@@ -283,7 +283,7 @@ mod fds_helper {
     /// - `cfg`: The config object that wants to take ownership of all available FDs.
     ///
     /// [module description]: self
-    pub fn attach_fds_to_cfg<T: ConfigWithFDs>(
+    pub(super) fn attach_fds_to_cfg<T: ConfigWithFDs>(
         device_fds: Vec<File>,
         cfg: &mut T,
     ) -> Result<(), HttpError> {
