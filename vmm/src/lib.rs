@@ -1606,6 +1606,8 @@ impl Vmm {
         // State machine that is updated with more context as we progress.
         let mut ctx = OngoingMigrationContext::new();
 
+        let memory_mode = send_data_migration.effective_memory_mode();
+
         // Set up the socket connection
         let mut socket = transport::send_migration_socket(
             &send_data_migration.destination_url,
@@ -1658,7 +1660,7 @@ impl Vmm {
             .map_err(MigratableError::MigrateSend)?
         };
 
-        if send_data_migration.local {
+        if matches!(memory_mode, MigrationMode::MemFDs) {
             match &mut socket {
                 SocketStream::Unix(unix_socket) => {
                     // Proceed with sending memory file descriptors over UNIX socket
@@ -1666,7 +1668,7 @@ impl Vmm {
                 }
                 _ => {
                     return Err(MigratableError::MigrateSend(anyhow!(
-                        "--local option is only supported with UNIX sockets",
+                        "Memory FD migration is only supported with UNIX sockets",
                     )));
                 }
             }
@@ -1677,7 +1679,7 @@ impl Vmm {
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             common_cpuid,
             memory_manager_data: vm.memory_manager_data(),
-            memory_mode: send_data_migration.memory_mode,
+            memory_mode,
         };
         transport::send_config(&mut socket, &vm_migration_config)?;
 
@@ -1687,9 +1689,7 @@ impl Vmm {
             vm.start_migration()?;
         }
 
-        if send_data_migration.local
-            || matches!(send_data_migration.memory_mode, MigrationMode::Postcopy)
-        {
+        if matches!(memory_mode, MigrationMode::MemFDs | MigrationMode::Postcopy) {
             // Now pause VM (skip if already paused, e.g. migrating a paused VM)
             let downtime_begin = Instant::now();
             if vm.get_state() != VmState::Paused {
@@ -1700,7 +1700,9 @@ impl Vmm {
                 // No memory was transferred
                 MemoryMigrationContext::empty_finalized(),
             )
-            .expect("migration context should transition to VmPaused for local/postcopy migration");
+            .expect(
+                "migration context should transition to VmPaused for memfds/postcopy migration",
+            );
         } else {
             let mut mem_send = transport::SendAdditionalConnections::new(
                 &send_data_migration.destination_url,
@@ -1737,8 +1739,7 @@ impl Vmm {
 
         // For postcopy, serve faults before sending State so the destination
         // can fault pages in during restore.
-        let postcopy_handle = if matches!(send_data_migration.memory_mode, MigrationMode::Postcopy)
-        {
+        let postcopy_handle = if matches!(memory_mode, MigrationMode::Postcopy) {
             let fault_stream = transport::open_fault_connection(
                 &send_data_migration.destination_url,
                 send_data_migration.tls_dir.as_deref(),
@@ -1767,9 +1768,7 @@ impl Vmm {
             let snapshot = vm.snapshot()?;
 
             // One final memory iteration to handle side effects from snapshot.
-            if !send_data_migration.local
-                && !matches!(send_data_migration.memory_mode, MigrationMode::Postcopy)
-            {
+            if matches!(memory_mode, MigrationMode::Precopy) {
                 let memory_ranges = vm.dirty_log()?;
                 transport::send_memory_ranges(&vm.guest_memory(), &memory_ranges, &mut socket)?;
             }
@@ -1809,9 +1808,7 @@ impl Vmm {
         debug!("Downtime breakdown: {}", ctx.downtime_ctx);
 
         // Stop logging dirty pages
-        if !send_data_migration.local
-            && !matches!(send_data_migration.memory_mode, MigrationMode::Postcopy)
-        {
+        if matches!(memory_mode, MigrationMode::Precopy) {
             vm.stop_dirty_log()?;
         }
 
@@ -3315,9 +3312,9 @@ impl RequestHandler for Vmm {
             .map_err(MigratableError::MigrateSend)?;
 
         info!(
-            "Sending migration: destination_url={},local={},tls={},downtime={}ms,timeout={}s,timeout_strategy={:?}",
+            "Sending migration: destination_url={},memory_mode={:?},tls={},downtime={}ms,timeout={}s,timeout_strategy={:?}",
             send_data_migration.destination_url,
-            send_data_migration.local,
+            send_data_migration.effective_memory_mode(),
             send_data_migration.tls_dir.is_some(),
             send_data_migration.downtime().as_millis(),
             send_data_migration.timeout().as_secs(),
@@ -3331,10 +3328,10 @@ impl RequestHandler for Vmm {
             .lock()
             .unwrap()
             .backed_by_shared_memory()
-            && send_data_migration.local
+            && send_data_migration.effective_memory_mode() == MigrationMode::MemFDs
         {
             return Err(MigratableError::MigrateSend(anyhow!(
-                "Local migration requires shared memory or hugepages enabled"
+                "Memory FD migration requires shared memory or hugepages enabled"
             )));
         }
 

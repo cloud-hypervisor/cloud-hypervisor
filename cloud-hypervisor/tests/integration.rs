@@ -6737,15 +6737,15 @@ mod common_parallel {
         handle_child_output(r, &output);
     }
 
-    // This test exercises the local live-migration between two Cloud Hypervisor VMs on the
-    // same host. It ensures the following behaviors:
+    // This helper exercises migration between two Cloud Hypervisor VMs on the
+    // same host:
     // 1. The source VM is up and functional (including various virtio-devices are working properly);
     // 2. The 'send-migration' and 'receive-migration' command finished successfully;
     // 3. The source VM terminated gracefully after live migration;
     // 4. The destination VM is functional (including various virtio-devices are working properly) after
     //    live migration;
     // Note: This test does not use vsock as we can't create two identical vsock on the same host.
-    fn _test_live_migration(upgrade_test: bool, local: bool, paused: bool) {
+    fn _test_live_migration(upgrade_test: bool, memfds: bool, paused: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
@@ -6756,7 +6756,7 @@ mod common_parallel {
             net_id, guest.network.guest_mac0, guest.network.host_ip0
         );
 
-        let memory_param: &[&str] = if local {
+        let memory_param: &[&str] = if memfds {
             &["--memory", "size=1500M,shared=on"]
         } else {
             &["--memory", "size=1500M"]
@@ -6844,7 +6844,7 @@ mod common_parallel {
                     &migration_socket,
                     &src_api_socket,
                     &dest_api_socket,
-                    local,
+                    memfds,
                     paused
                 ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
@@ -7587,7 +7587,7 @@ mod common_parallel {
     }
 
     #[test]
-    fn test_live_migration_local() {
+    fn test_live_migration_memfds() {
         _test_live_migration(false, true, false);
     }
 
@@ -7597,7 +7597,7 @@ mod common_parallel {
     }
 
     #[test]
-    fn test_live_migration_local_paused() {
+    fn test_live_migration_memfds_paused() {
         _test_live_migration(false, true, true);
     }
 
@@ -7635,7 +7635,7 @@ mod common_parallel {
     }
 
     #[test]
-    fn test_live_upgrade_local() {
+    fn test_live_upgrade_memfds() {
         _test_live_migration(true, true, false);
     }
 
@@ -7645,7 +7645,7 @@ mod common_parallel {
         _test_live_migration_with_landlock();
     }
 
-    fn _test_live_migration_virtio_fs(local: bool) {
+    fn _test_live_migration_virtio_fs(memfds: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
@@ -7756,7 +7756,7 @@ mod common_parallel {
                     &migration_socket,
                     &src_api_socket,
                     &dest_api_socket,
-                    local,
+                    memfds,
                     false
                 ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
@@ -7831,7 +7831,7 @@ mod common_parallel {
     }
 
     #[test]
-    fn test_live_migration_virtio_fs_local() {
+    fn test_live_migration_virtio_fs_memfds() {
         _test_live_migration_virtio_fs(true);
     }
 }
@@ -7961,7 +7961,7 @@ mod ivshmem {
 
     use crate::*;
 
-    fn _test_live_migration_ivshmem(local: bool) {
+    fn _test_live_migration_ivshmem(memfds: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
@@ -7972,7 +7972,7 @@ mod ivshmem {
             net_id, guest.network.guest_mac0, guest.network.host_ip0
         );
 
-        let memory_param: &[&str] = if local {
+        let memory_param: &[&str] = if memfds {
             &["--memory", "size=4G,shared=on"]
         } else {
             &["--memory", "size=4G"]
@@ -8078,7 +8078,7 @@ mod ivshmem {
                     &migration_socket,
                     &src_api_socket,
                     &dest_api_socket,
-                    local,
+                    memfds,
                     false
                 ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
@@ -8347,7 +8347,7 @@ mod ivshmem {
     }
 
     #[test]
-    fn test_live_migration_ivshmem_local() {
+    fn test_live_migration_ivshmem_memfds() {
         _test_live_migration_ivshmem(true);
     }
 
@@ -9250,8 +9250,8 @@ mod snapshot_restore_common {
     }
 
     // Round-trip via the reference offload daemon over the existing
-    // `vm.send-migration local=on` / `vm.receive-migration` endpoints,
-    // proving parity with `vm.snapshot`/`vm.restore`.
+    // `vm.send-migration memory_mode=memfds` / `vm.receive-migration`
+    // endpoints, proving parity with `vm.snapshot`/`vm.restore`.
     pub(crate) fn _test_snapshot_restore_offload(virtio_mem: bool, ondemand: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -9343,7 +9343,7 @@ mod snapshot_restore_common {
             assert!(remote_command(
                 &api_socket_source,
                 "send-migration",
-                Some(format!("destination_url=unix:{snapshot_socket},local=on").as_str(),),
+                Some(format!("destination_url=unix:{snapshot_socket},memory_mode=memfds").as_str(),),
             ));
 
             // The daemon should exit cleanly after persisting the snapshot.
@@ -9600,6 +9600,8 @@ mod snapshot_restore_common {
 
                 // Pause, then snapshot while asking to preserve the source.
                 assert!(remote_command(&api_socket, "pause", None));
+                // Deliberately uses the deprecated `local=on` flag so the
+                // compatibility layer stays covered end-to-end.
                 assert!(remote_command(
                     &api_socket,
                     "send-migration",
@@ -10099,7 +10101,7 @@ mod common_sequential {
         let _ = fs::remove_file(shared_dir.join("post_restore_file"));
     }
 
-    fn _test_live_migration_balloon(upgrade_test: bool, local: bool) {
+    fn _test_live_migration_balloon(upgrade_test: bool, memfds: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
@@ -10110,7 +10112,7 @@ mod common_sequential {
             net_id, guest.network.guest_mac0, guest.network.host_ip0
         );
 
-        let memory_param: &[&str] = if local {
+        let memory_param: &[&str] = if memfds {
             &[
                 "--memory",
                 "size=4G,hotplug_method=virtio-mem,hotplug_size=8G,shared=on",
@@ -10223,7 +10225,7 @@ mod common_sequential {
                     &migration_socket,
                     &src_api_socket,
                     &dest_api_socket,
-                    local,
+                    memfds,
                     false
                 ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
@@ -10291,7 +10293,7 @@ mod common_sequential {
         handle_child_output(r, &dest_output);
     }
 
-    fn _test_live_migration_numa(upgrade_test: bool, local: bool) {
+    fn _test_live_migration_numa(upgrade_test: bool, memfds: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
@@ -10302,7 +10304,7 @@ mod common_sequential {
             net_id, guest.network.guest_mac0, guest.network.host_ip0
         );
 
-        let memory_param: &[&str] = if local {
+        let memory_param: &[&str] = if memfds {
             &[
                 "--memory",
                 "size=0,hotplug_method=virtio-mem,shared=on",
@@ -10439,7 +10441,7 @@ mod common_sequential {
                     &migration_socket,
                     &src_api_socket,
                     &dest_api_socket,
-                    local,
+                    memfds,
                     false
                 ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
@@ -10537,7 +10539,7 @@ mod common_sequential {
     }
 
     #[cfg(not(feature = "mshv"))]
-    fn _test_live_migration_ovs_dpdk(upgrade_test: bool, local: bool) {
+    fn _test_live_migration_ovs_dpdk(upgrade_test: bool, memfds: bool) {
         let ovs_disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let ovs_guest = Guest::new(Box::new(ovs_disk_config));
 
@@ -10577,7 +10579,7 @@ mod common_sequential {
                     &migration_socket,
                     &src_api_socket,
                     &dest_api_socket,
-                    local,
+                    memfds,
                     false
                 ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
@@ -10650,7 +10652,7 @@ mod common_sequential {
     }
 
     #[test]
-    fn test_live_migration_balloon_local() {
+    fn test_live_migration_balloon_memfds() {
         _test_live_migration_balloon(false, true);
     }
 
@@ -10660,7 +10662,7 @@ mod common_sequential {
     }
 
     #[test]
-    fn test_live_upgrade_balloon_local() {
+    fn test_live_upgrade_balloon_memfds() {
         _test_live_migration_balloon(true, true);
     }
 
@@ -10670,7 +10672,7 @@ mod common_sequential {
     }
 
     #[test]
-    fn test_live_migration_numa_local() {
+    fn test_live_migration_numa_memfds() {
         _test_live_migration_numa(false, true);
     }
 
@@ -10680,7 +10682,7 @@ mod common_sequential {
     }
 
     #[test]
-    fn test_live_upgrade_numa_local() {
+    fn test_live_upgrade_numa_memfds() {
         _test_live_migration_numa(true, true);
     }
 
@@ -10697,7 +10699,7 @@ mod common_sequential {
     #[ignore = "See #5532 and #7689"]
     #[cfg(target_arch = "x86_64")]
     #[cfg(not(feature = "mshv"))]
-    fn test_live_migration_ovs_dpdk_local() {
+    fn test_live_migration_ovs_dpdk_memfds() {
         _test_live_migration_ovs_dpdk(false, true);
     }
 
@@ -10713,11 +10715,11 @@ mod common_sequential {
     #[ignore = "See #5532"]
     #[cfg(target_arch = "x86_64")]
     #[cfg(not(feature = "mshv"))]
-    fn test_live_upgrade_ovs_dpdk_local() {
+    fn test_live_upgrade_ovs_dpdk_memfds() {
         _test_live_migration_ovs_dpdk(true, true);
     }
 
-    fn _test_live_migration_watchdog(upgrade_test: bool, local: bool) {
+    fn _test_live_migration_watchdog(upgrade_test: bool, memfds: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
@@ -10728,7 +10730,7 @@ mod common_sequential {
             net_id, guest.network.guest_mac0, guest.network.host_ip0
         );
 
-        let memory_param: &[&str] = if local {
+        let memory_param: &[&str] = if memfds {
             &["--memory", "size=1500M,shared=on"]
         } else {
             &["--memory", "size=1500M"]
@@ -10832,7 +10834,7 @@ mod common_sequential {
                     &migration_socket,
                     &src_api_socket,
                     &dest_api_socket,
-                    local,
+                    memfds,
                     false
                 ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."

@@ -288,7 +288,8 @@ impl MemoryMigrationContext {
 
     /// Returns an empty finalized block.
     ///
-    /// This can be used if no memory was transferred (e.g., local migration).
+    /// This can be used if no memory was transferred eagerly (e.g., local or
+    /// postcopy migration).
     pub fn empty_finalized() -> Self {
         let mut this = Self::new();
         this.finalize();
