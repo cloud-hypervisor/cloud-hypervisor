@@ -146,6 +146,7 @@ pub enum Command {
     /// Finalizes the migration and resumes the VM on the destination.
     /// Sent when the source VM was running at migration time.
     Complete = 5,
+    #[deprecated = "we rely on cutting the connection and proper timeout handling on the destination"]
     Abandon = 6,
     MemoryFd = 7,
     /// Finalizes the migration without resuming the VM on the destination.
@@ -263,10 +264,6 @@ impl Request {
     /// Finalizes the migration without resuming the VM on the destination.
     pub fn complete_paused() -> Self {
         Self::new(Command::CompletePaused, 0)
-    }
-
-    pub fn abandon() -> Self {
-        Self::new(Command::Abandon, 0)
     }
 
     /// PageFault request always carries a single `MemoryRange`.

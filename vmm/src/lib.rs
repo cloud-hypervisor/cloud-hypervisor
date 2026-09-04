@@ -1025,11 +1025,6 @@ impl Vmm {
             Ok(memory_files)
         };
 
-        if req.command() == Command::Abandon {
-            info!("Abandon Command Received");
-            return Ok(Aborted);
-        }
-
         let state_name = state.variant_name();
         match state {
             Established => match req.command() {
@@ -1890,11 +1885,6 @@ impl Vmm {
                     socket
                         .write_all(&buf[..len])
                         .map_err(MigratableError::MigrateSocket)?;
-                }
-                Command::Abandon => {
-                    Response::ok().write_to(&mut socket)?;
-                    info!("Postcopy: received Abandon, exiting serve loop");
-                    return Ok(());
                 }
                 c => {
                     return Err(MigratableError::MigrateSend(anyhow!(

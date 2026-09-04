@@ -80,8 +80,6 @@ enum Error {
     Config(#[from] serde_json::Error),
     #[error("Unexpected command {0:?} while expecting {1}")]
     UnexpectedCommand(Command, &'static str),
-    #[error("CH abandoned the snapshot")]
-    Abandoned,
     #[error("CH rejected the {0} command")]
     Rejected(&'static str),
     #[error("Completion received before {0}")]
@@ -281,12 +279,6 @@ fn run_snapshot(socket_path: &Path, output_dir: &Path) -> Result<()> {
                     .map_err(Error::Protocol)?;
                 info!("Snapshot persisted to {output_dir:?}");
                 break;
-            }
-            Command::Abandon => {
-                // ACK before bailing so CH's ok_or_fatal_error() read returns
-                // cleanly instead of hitting EOF.
-                Response::ok().write_to(&mut stream).ok();
-                return Err(Error::Abandoned);
             }
             c => return Err(Error::UnexpectedCommand(c, "a snapshot command")),
         }
@@ -550,11 +542,6 @@ fn serve_page_faults(stream: &mut UnixStream, slots: &[OnDemandSlot]) -> Result<
                     .write_slice(&buf, MemoryRegionAddress(offset))
                     .map_err(Error::WriteGuestMemory)?;
                 Response::ok().write_to(stream).map_err(Error::Protocol)?;
-            }
-            Command::Abandon => {
-                info!("Serve loop: received Abandon, exiting");
-                Response::ok().write_to(stream).ok();
-                return Ok(());
             }
             c => return Err(Error::UnexpectedCommand(c, "a PageFault")),
         }
