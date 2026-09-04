@@ -86,7 +86,7 @@ pub trait PciSubclass {
 /// Subclasses of the MultimediaController class.
 #[expect(dead_code)]
 #[derive(Copy, Clone)]
-pub enum PciMultimediaSubclass {
+enum PciMultimediaSubclass {
     VideoController = 0x00,
     AudioController = 0x01,
     TelephonyDevice = 0x02,
@@ -103,7 +103,7 @@ impl PciSubclass for PciMultimediaSubclass {
 /// Subclasses of the BridgeDevice
 #[expect(dead_code)]
 #[derive(Copy, Clone)]
-pub enum PciBridgeSubclass {
+pub(crate) enum PciBridgeSubclass {
     HostBridge = 0x00,
     IsaBridge = 0x01,
     EisaBridge = 0x02,
@@ -525,7 +525,7 @@ pub enum Error {
     #[error("ROM BAR address {0} not a power of two")]
     RomBarSizeInvalid(u64),
 }
-pub type Result<T> = result::Result<T, Error>;
+pub(crate) type Result<T> = result::Result<T, Error>;
 
 impl PciConfiguration {
     #[expect(clippy::too_many_arguments)]
