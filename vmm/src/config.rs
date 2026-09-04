@@ -14,6 +14,7 @@ use std::sync::LazyLock;
 use arch::CpuProfile;
 use block::ImageType;
 use clap::ArgMatches;
+use libc::CPU_SETSIZE;
 use log::{debug, warn};
 use option_parser::{
     ByteSized, IntegerList, OptionParser, OptionParserError, StringList, Toggle, Tuple, TupleList,
@@ -210,6 +211,9 @@ pub enum ValidationError {
     /// Too many CPUs.
     #[error("Too many CPUs: specified {0} but {MAX_SUPPORTED_CPUS} is the limit")]
     TooManyCpus(u32 /* specified CPUs */),
+    /// Requested CPU affinity matches or exceeds `CPU_SETSIZE`.
+    #[error("Requested CPU affinity {0} must be below {CPU_SETSIZE}")]
+    CpuAffinityExceedsMax(usize /* specified affinity */),
     /// Both socket and path specified
     #[error("Disk path and vhost socket both provided")]
     DiskSocketAndPath,
@@ -3336,6 +3340,14 @@ impl VmConfig {
             return Err(ValidationError::TooManyCpus(self.cpus.max_vcpus));
         }
 
+        if let Some(affinity) = &self.cpus.affinity {
+            for affinity in affinity.iter().flat_map(|affinity| &affinity.host_cpus) {
+                if *affinity >= CPU_SETSIZE as usize {
+                    return Err(ValidationError::CpuAffinityExceedsMax(*affinity));
+                }
+            }
+        }
+
         if let Some(rate_limit_groups) = &self.rate_limit_groups {
             for rate_limit_group in rate_limit_groups {
                 rate_limit_group.validate(self)?;
@@ -6037,6 +6049,16 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 Err(ValidationError::CpuTopologyThreadsPerCore)
             );
         }
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.cpus.affinity = Some(Box::new([CpuAffinity {
+            vcpu: 0,
+            host_cpus: Box::new([1024]),
+        }]));
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::CpuAffinityExceedsMax(1024))
+        );
 
         let mut invalid_config = valid_config.clone();
         invalid_config.disks = Some(vec![DiskConfig {
