@@ -13,7 +13,7 @@ use std::path::PathBuf;
 #[cfg(feature = "guest_debug")]
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender, channel};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
 use std::{any, io, mem, panic, path, process, result, thread};
 
@@ -69,7 +69,7 @@ use crate::migration::worker::{
 use crate::migration::{recv_vm_config, recv_vm_state};
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::util::flatten_error_chain_to_string;
-use crate::vm::{Error as VmError, Vm, VmState};
+use crate::vm::{Error as VmError, PostponedLifecycleEvent, Vm, VmState};
 use crate::vm_config::{
     DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
     UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
@@ -668,11 +668,39 @@ enum VmOwnership {
         vm_info_response: VmInfoResponse,
         /// Access to VM state needed during migration.
         device_manager: Weak<Mutex<DeviceManager>>,
+        /// A guest induced lifecycle event (if any) for replay.
+        /// Shared between the VMM's event loop and the migration worker.
+        postponed_lifecycle_event: Arc<OnceLock<PostponedLifecycleEvent>>,
     },
     None,
 }
 
 impl VmOwnership {
+    /// Marks an event to be postponed and replayed on the destination when the
+    /// migration finishes.
+    ///
+    /// Returns whether a migration is ongoing.
+    fn postpone_lifecycle_event_if_needed(&self, event: PostponedLifecycleEvent) -> bool {
+        let VmOwnership::Migration {
+            postponed_lifecycle_event,
+            ..
+        } = self
+        else {
+            return false;
+        };
+
+        match postponed_lifecycle_event.set(event) {
+            Ok(_) => {
+                info!("Postponed lifecycle event: {event}");
+            }
+            Err(_) => {
+                warn!("Failed to postpone another (unexpected) lifecycle event: {event}");
+            }
+        }
+
+        true
+    }
+
     /// Returns a mutable reference to the underlying VM, if available.
     fn as_mut(&mut self) -> Option<&mut Vm> {
         match self {
@@ -1096,19 +1124,28 @@ impl Vmm {
                         .vm
                         .as_mut()
                         .expect("VM should have been created by now");
-                    let (_, resume_duration) = measure_ok(|| vm.resume())?;
-                    debug!(
-                        "Migration (incoming): resume:{}ms",
-                        resume_duration.as_millis()
-                    );
+
+                    let do_resume = !vm.has_postponed_lifecycle_event();
+                    if do_resume {
+                        let (_, resume_duration) = measure_ok(|| vm.resume())?;
+                        debug!(
+                            "Migration (incoming): resume:{}ms",
+                            resume_duration.as_millis()
+                        );
+                    } else {
+                        debug!(
+                            "Migration (incoming): skipping resume because of a postponed lifecycle event"
+                        );
+                    }
+
                     // This logs the downtime without the final memory delta, so
                     // it does not reflect the actual downtime. While we could
                     // pass along the timestamp from when the VM was paused,
                     // that would rely on both VM hosts having synchronized
-                    // clocks, which we cannot guarantee. For that reason, this
-                    // is logged as debug! rather than info!.
+                    // clocks, which we cannot guarantee.
                     debug!(
-                        "Migration (incoming): Receiving final state and resuming the VM took {}ms",
+                        "Migration (incoming): Receiving final state{}the VM took {}ms",
+                        if do_resume { " and resuming " } else { " " },
                         state_receive_begin.elapsed().as_millis()
                     );
                     Ok(Completed)
@@ -1455,10 +1492,11 @@ impl Vmm {
     ///
     /// 1. **No dirty pages remain** – the current iteration would transfer zero
     ///    bytes.
-    /// 2. **Downtime budget is met** – the estimated downtime for the final
+    /// 1. **Postponed lifecycle event** – no need to transfer memory anymore
+    /// 1. **Downtime budget is met** – the estimated downtime for the final
     ///    (paused) iteration is within the caller-specified
     ///    [`VmSendMigrationData::downtime`] budget.
-    /// 3. **Timeout** – the precopy phase has been running for at least
+    /// 1. **Timeout** – the precopy phase has been running for at least
     ///    [`VmSendMigrationData::timeout`]. The outcome depends on
     ///    [`VmSendMigrationData::timeout_strategy`]:
     ///    - [`TimeoutStrategy::Cancel`] – returns
@@ -1478,9 +1516,18 @@ impl Vmm {
     fn is_precopy_converged(
         ctx: &MemoryMigrationContext,
         send_data_migration: &VmSendMigrationData,
+        postponed_lifecycle_event: &OnceLock<PostponedLifecycleEvent>,
     ) -> result::Result<bool, MigratableError> {
         if ctx.current_iteration_total_bytes == 0 {
             debug!("Precopy: No more memory to transfer");
+            return Ok(true);
+        }
+
+        // Guest reboot or shutdown signaled? We do not need the memory anymore.
+        if let Some(event) = postponed_lifecycle_event.get() {
+            info!(
+                "Lifecycle event postponed during migration ({event:?}), switching to downtime phase early"
+            );
             return Ok(true);
         }
 
@@ -1552,21 +1599,28 @@ impl Vmm {
         send_data_migration: &VmSendMigrationData,
         mem_send: &mut SendAdditionalConnections,
         ctx: &mut OngoingMigrationContext,
+        postponed_lifecycle_event: &OnceLock<PostponedLifecycleEvent>,
     ) -> result::Result<(), MigratableError> {
         let mut mem_ctx = MemoryMigrationContext::new();
 
         vm.start_dirty_log()?;
-        let remaining = Self::do_memory_iterations(
+        let mut remaining = Self::do_memory_iterations(
             vm,
             socket,
             &mut mem_ctx,
-            // We bind send_data_migration to the callback
-            |ctx| Self::is_precopy_converged(ctx, send_data_migration),
+            // Bind parameters to not pass them to deeper levels.
+            |ctx| Self::is_precopy_converged(ctx, send_data_migration, postponed_lifecycle_event),
             mem_send,
         )?;
         let downtime_begin = Instant::now();
         if vm.get_state() != VmState::Paused {
             vm.pause()?;
+        }
+
+        // Performance shortcut: no need to send memory (drain dirty log)
+        if postponed_lifecycle_event.get().is_some() {
+            let _ = vm.dirty_log()?;
+            remaining = MemoryRangeTable::default();
         }
 
         // Send last batch of dirty pages: final iteration
@@ -1602,6 +1656,7 @@ impl Vmm {
         send_data_migration: &VmSendMigrationData,
         initial_vm_state: VmState,
         seccomp_filters: &MigrationSeccompFilters,
+        postponed_lifecycle_event: &OnceLock<PostponedLifecycleEvent>,
     ) -> result::Result<(), MigratableError> {
         // State machine that is updated with more context as we progress.
         let mut ctx = OngoingMigrationContext::new();
@@ -1716,6 +1771,7 @@ impl Vmm {
                 send_data_migration,
                 &mut mem_send,
                 &mut ctx,
+                postponed_lifecycle_event,
             )
             .inspect_err(|_| {
                 if let Err(e) = mem_send.cleanup_workers() {
@@ -1764,7 +1820,13 @@ impl Vmm {
 
         let (vm_snapshot, snapshot_duration) = measure_ok(|| {
             // Capture snapshot. This may have side effects, e.g. vhost-user backend inflight drain
-            let snapshot = vm.snapshot()?;
+            let snapshot = {
+                // Make sure a possible event is baked into the VM snapshot.
+                if let Some(&lifecycle_event) = postponed_lifecycle_event.get() {
+                    vm.set_postponed_lifecycle_event(lifecycle_event);
+                }
+                vm.snapshot()?
+            };
 
             // One final memory iteration to handle side effects from snapshot.
             if !send_data_migration.local
@@ -2043,6 +2105,7 @@ impl Vmm {
     fn check_migration(&mut self) {
         let VmOwnership::Migration {
             migration_worker_handle,
+            postponed_lifecycle_event,
             ..
         } = mem::replace(&mut self.vm, VmOwnership::None)
         else {
@@ -2075,6 +2138,10 @@ impl Vmm {
             });
 
             self.vm = VmOwnership::Owned(vm);
+
+            if let Some(event) = postponed_lifecycle_event.get() {
+                self.replay_lifecycle_event(*event);
+            }
         };
 
         match migration_res {
@@ -2142,10 +2209,9 @@ impl Vmm {
                         warn!("Unknown VMM loop event: {event}");
                     }
                     EpollDispatch::Exit => {
-                        info!("VM exit event");
+                        info!("VMM exit event");
                         // Consume the event.
                         self.exit_evt.read().map_err(Error::EventFdRead)?;
-                        // TODO: Future follow-up must resolve lifecycle handling while migrating.
                         self.vmm_shutdown().map_err(Error::VmmShutdown)?;
 
                         break 'outer;
@@ -2154,13 +2220,23 @@ impl Vmm {
                         info!("VM reset event");
                         // Consume the event.
                         self.reset_evt.read().map_err(Error::EventFdRead)?;
-                        // TODO: Future follow-up must resolve lifecycle handling while migrating.
+                        if self
+                            .vm
+                            .postpone_lifecycle_event_if_needed(PostponedLifecycleEvent::Reboot)
+                        {
+                            continue;
+                        }
                         self.vm_reboot().map_err(Error::VmReboot)?;
                     }
                     EpollDispatch::GuestExit => {
                         info!("VM guest exit event");
                         self.guest_exit_evt.read().map_err(Error::EventFdRead)?;
-                        // TODO: Future follow-up must resolve lifecycle handling while migrating.
+                        if self
+                            .vm
+                            .postpone_lifecycle_event_if_needed(PostponedLifecycleEvent::Shutdown)
+                        {
+                            continue;
+                        }
                         if self.no_shutdown {
                             self.vm_shutdown().map_err(Error::VmShutdown)?;
                         } else {
@@ -2250,6 +2326,20 @@ impl Vmm {
         }
 
         Ok(())
+    }
+
+    /// Replays a lifecycle event by triggering again the VMM event loop.
+    ///
+    /// This requires that events are only caught in the VMMs event loop.
+    fn replay_lifecycle_event(&mut self, event: PostponedLifecycleEvent) {
+        info!("VM requested a {event:?} during the migration: replaying now");
+        let result = match event {
+            PostponedLifecycleEvent::Reboot => self.reset_evt.write(1),
+            PostponedLifecycleEvent::Shutdown => self.guest_exit_evt.write(1),
+        };
+        if let Err(e) = result {
+            error!("Failed replaying lifecycle event {event:?} after migration: {e}");
+        }
     }
 }
 
@@ -3275,6 +3365,17 @@ impl RequestHandler for Vmm {
             ReceiveMigrationState::Completed => {
                 // Serving and resume already happened in the protocol loop.
                 event!("vm", "migration-receive-finished");
+
+                // now replay lifecycle event
+                let vm = self
+                    .vm
+                    .as_mut()
+                    .expect("VM should have been created by now");
+                let lifecycle_event = vm.take_postponed_lifecycle_event();
+
+                if let Some(event) = lifecycle_event {
+                    self.replay_lifecycle_event(event);
+                }
             }
             _ => unreachable!("loop only exits in Completed or Aborted"),
         }
@@ -3404,6 +3505,7 @@ impl RequestHandler for Vmm {
             .expect("should have VM ownership as we just checked it");
 
         let device_manager = Arc::downgrade(vm.device_manager());
+        let postponed_lifecycle_event = Arc::new(OnceLock::new());
 
         match MigrationWorker::spawn(
             vm,
@@ -3413,12 +3515,14 @@ impl RequestHandler for Vmm {
             self.hypervisor.clone(),
             initial_vm_state,
             seccomp_filters,
+            postponed_lifecycle_event.clone(),
         ) {
             Ok(handle) => {
                 self.vm = VmOwnership::Migration {
                     migration_worker_handle: handle,
                     vm_info_response: vm_info_snapshot,
                     device_manager,
+                    postponed_lifecycle_event,
                 };
                 Ok(())
             }
