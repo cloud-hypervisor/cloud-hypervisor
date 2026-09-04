@@ -42,7 +42,7 @@ struct MuxerKillQItem {
 /// The connection kill queue: a FIFO structure, storing the connections that are scheduled for
 /// termination.
 ///
-pub struct MuxerKillQ {
+pub(super) struct MuxerKillQ {
     /// The kill queue contents.
     q: VecDeque<MuxerKillQItem>,
 
@@ -59,7 +59,7 @@ impl MuxerKillQ {
 
     /// Trivial kill queue constructor.
     ///
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             q: VecDeque::with_capacity(Self::SIZE),
             synced: true,
@@ -71,7 +71,7 @@ impl MuxerKillQ {
     /// Note: if more than `Self::SIZE` connections are found, the queue will be created in an
     ///       out-of-sync state, and will be discarded after it is emptied.
     ///
-    pub fn from_conn_map(conn_map: &HashMap<ConnMapKey, MuxerConnection>) -> Self {
+    pub(super) fn from_conn_map(conn_map: &HashMap<ConnMapKey, MuxerConnection>) -> Self {
         let mut q_buf: Vec<MuxerKillQItem> = Vec::with_capacity(Self::SIZE);
         let mut synced = true;
         for (key, conn) in conn_map.iter() {
@@ -97,7 +97,7 @@ impl MuxerKillQ {
     /// Push a connection key to the queue, scheduling it for termination at
     /// `CONN_SHUTDOWN_TIMEOUT_MS` from now (the push time).
     ///
-    pub fn push(&mut self, key: ConnMapKey, kill_time: Instant) {
+    pub(super) fn push(&mut self, key: ConnMapKey, kill_time: Instant) {
         if !self.is_synced() || self.is_full() {
             self.synced = false;
             return;
@@ -110,7 +110,7 @@ impl MuxerKillQ {
     /// This will succeed and return a connection key, only if the connection at the front of
     /// the queue has expired. Otherwise, `None` is returned.
     ///
-    pub fn pop(&mut self) -> Option<ConnMapKey> {
+    pub(super) fn pop(&mut self) -> Option<ConnMapKey> {
         if let Some(item) = self.q.front()
             && Instant::now() > item.kill_time
         {
@@ -122,19 +122,19 @@ impl MuxerKillQ {
 
     /// Check if the kill queue is synchronized with the connection pool.
     ///
-    pub fn is_synced(&self) -> bool {
+    pub(super) fn is_synced(&self) -> bool {
         self.synced
     }
 
     /// Check if the kill queue is empty, obviously.
     ///
-    pub fn is_empty(&self) -> bool {
+    pub(super) fn is_empty(&self) -> bool {
         self.q.len() == 0
     }
 
     /// Check if the kill queue is full.
     ///
-    pub fn is_full(&self) -> bool {
+    pub(super) fn is_full(&self) -> bool {
         self.q.len() == Self::SIZE
     }
 }

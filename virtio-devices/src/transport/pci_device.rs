@@ -88,7 +88,7 @@ impl PciCapability for VirtioPciCap {
 const VIRTIO_PCI_CAP_LEN_OFFSET: u8 = 2;
 
 impl VirtioPciCap {
-    pub fn new(cfg_type: PciCapabilityType, pci_bar: u8, offset: u32, length: u32) -> Self {
+    pub(crate) fn new(cfg_type: PciCapabilityType, pci_bar: u8, offset: u32, length: u32) -> Self {
         VirtioPciCap {
             cap_len: (size_of::<VirtioPciCap>() as u8) + VIRTIO_PCI_CAP_LEN_OFFSET,
             cfg_type: cfg_type as u8,
@@ -121,7 +121,7 @@ impl PciCapability for VirtioPciNotifyCap {
 }
 
 impl VirtioPciNotifyCap {
-    pub fn new(
+    pub(crate) fn new(
         cfg_type: PciCapabilityType,
         pci_bar: u8,
         offset: u32,
@@ -164,7 +164,13 @@ impl PciCapability for VirtioPciCap64 {
 }
 
 impl VirtioPciCap64 {
-    pub fn new(cfg_type: PciCapabilityType, pci_bar: u8, id: u8, offset: u64, length: u64) -> Self {
+    pub(crate) fn new(
+        cfg_type: PciCapabilityType,
+        pci_bar: u8,
+        id: u8,
+        offset: u64,
+        length: u64,
+    ) -> Self {
         VirtioPciCap64 {
             cap: VirtioPciCap {
                 cap_len: (size_of::<VirtioPciCap64>() as u8) + VIRTIO_PCI_CAP_LEN_OFFSET,
@@ -232,7 +238,7 @@ struct VirtioPciCfgCapInfo {
 }
 
 #[derive(Copy, Clone)]
-pub enum PciVirtioSubclass {
+pub(super) enum PciVirtioSubclass {
     NonTransitionalBase = 0xff,
 }
 
@@ -303,7 +309,7 @@ struct QueueState {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct VirtioPciDeviceState {
+pub(super) struct VirtioPciDeviceState {
     device_activated: bool,
     queues: Vec<QueueState>,
     interrupt_status: usize,
@@ -358,7 +364,7 @@ pub enum VirtioPciDeviceError {
     #[error("Failed creating VirtioPciDevice")]
     CreateVirtioPciDevice(#[source] anyhow::Error),
 }
-pub type Result<T> = result::Result<T, VirtioPciDeviceError>;
+pub(super) type Result<T> = result::Result<T, VirtioPciDeviceError>;
 
 pub struct VirtioPciDevice {
     id: String,
@@ -875,7 +881,7 @@ impl VirtioTransport for VirtioPciDevice {
     }
 }
 
-pub struct VirtioInterruptMsix {
+pub(super) struct VirtioInterruptMsix {
     msix_config: Arc<Mutex<MsixConfig>>,
     config_vector: Arc<AtomicU16>,
     config_changed: Arc<AtomicBool>,
@@ -885,7 +891,7 @@ pub struct VirtioInterruptMsix {
 }
 
 impl VirtioInterruptMsix {
-    pub fn new(
+    pub(super) fn new(
         msix_config: Arc<Mutex<MsixConfig>>,
         config_vector: Arc<AtomicU16>,
         config_changed: Arc<AtomicBool>,

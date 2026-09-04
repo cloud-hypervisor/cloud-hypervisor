@@ -59,7 +59,7 @@ enum Error {
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 #[repr(C, packed)]
-pub struct VirtioConsoleConfig {
+struct VirtioConsoleConfig {
     cols: u16,
     rows: u16,
     max_nr_ports: u32,
@@ -559,7 +559,7 @@ impl ConsoleResizer {
 }
 
 impl VirtioConsoleConfig {
-    pub fn update_console_size(&mut self, cols: u16, rows: u16) {
+    pub(crate) fn update_console_size(&mut self, cols: u16, rows: u16) {
         self.cols = cols;
         self.rows = rows;
     }

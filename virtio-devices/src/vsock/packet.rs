@@ -56,7 +56,7 @@ use crate::GuestMemoryMmap;
 // endianness.
 
 /// The vsock packet header struct size (when packed).
-pub const VSOCK_PKT_HDR_SIZE: usize = 44;
+pub(super) const VSOCK_PKT_HDR_SIZE: usize = 44;
 
 // Source CID.
 const HDROFF_SRC_CID: usize = 0;

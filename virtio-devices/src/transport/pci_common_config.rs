@@ -85,13 +85,13 @@ const VRING_AVAIL_ELEMENT_SIZE: usize = 2;
 const VRING_USED_ELEMENT_SIZE: usize = 8;
 
 #[derive(Copy, Clone)]
-pub enum VringType {
+pub(super) enum VringType {
     Desc,
     Avail,
     Used,
 }
 
-pub fn get_vring_size(t: VringType, queue_size: u16) -> u64 {
+pub(super) fn get_vring_size(t: VringType, queue_size: u16) -> u64 {
     let (length_except_ring, element_size) = match t {
         VringType::Desc => (0, VRING_DESC_ELEMENT_SIZE),
         VringType::Avail => (6, VRING_AVAIL_ELEMENT_SIZE),
