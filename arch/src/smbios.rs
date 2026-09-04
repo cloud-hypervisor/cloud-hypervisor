@@ -13,7 +13,6 @@ use uuid::Uuid;
 use vm_memory::{Address, ByteValued, Bytes, GuestAddress};
 
 use crate::GuestMemoryMmap;
-use crate::layout::SMBIOS_START;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -366,11 +365,16 @@ fn write_type3_chassis(
     Ok(())
 }
 
-pub fn setup_smbios(mem: &GuestMemoryMmap, smbios: Option<&SmbiosConfig>) -> Result<u64> {
+pub fn setup_smbios(
+    mem: &GuestMemoryMmap,
+    smbios: Option<&SmbiosConfig>,
+    smbios_start: GuestAddress,
+    smbios_size: u64,
+) -> Result<u64> {
     let system = smbios.and_then(|cfg| cfg.system.as_ref());
     let chassis = smbios.and_then(|cfg| cfg.chassis.as_ref());
     let oem_strings: &[String] = smbios.map_or(&[], |cfg| &cfg.oem_strings);
-    let physptr = GuestAddress(SMBIOS_START)
+    let physptr = smbios_start
         .checked_add(size_of::<Smbios30Entrypoint>() as u64)
         .ok_or(Error::NotEnoughMemory)?;
     let mut curptr = physptr;
@@ -445,16 +449,26 @@ pub fn setup_smbios(mem: &GuestMemoryMmap, smbios: Option<&SmbiosConfig>) -> Res
             ..Default::default()
         };
         smbios_ep.checksum = compute_checksum(&smbios_ep);
-        mem.write_obj(smbios_ep, GuestAddress(SMBIOS_START))
+        mem.write_obj(smbios_ep, smbios_start)
             .map_err(Error::WriteSmbiosEp)?;
     }
 
-    Ok(curptr.unchecked_offset_from(physptr) + size_of::<Smbios30Entrypoint>() as u64)
+    let table_size = curptr.unchecked_offset_from(physptr) as u64;
+    let total_size = table_size
+        .checked_add(size_of::<Smbios30Entrypoint>() as u64)
+        .ok_or(Error::NotEnoughMemory)?;
+
+    if total_size > smbios_size {
+        return Err(Error::NotEnoughMemory);
+    }
+
+    Ok(total_size)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::layout::{SMBIOS_MAX_SIZE, SMBIOS_START};
 
     /// Collects all strings after a SMBIOS structure, stopping at the double-NUL terminator and returns next addr.
     fn read_string_set(mem: &GuestMemoryMmap, addr: GuestAddress) -> (Vec<String>, GuestAddress) {
@@ -494,11 +508,11 @@ mod tests {
 
     #[test]
     fn entrypoint_checksum() {
-        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(SMBIOS_START), 4096)]).unwrap();
+        let mem = GuestMemoryMmap::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
 
-        setup_smbios(&mem, None).unwrap();
+        setup_smbios(&mem, None, SMBIOS_START, SMBIOS_MAX_SIZE).unwrap();
 
-        let smbios_ep: Smbios30Entrypoint = mem.read_obj(GuestAddress(SMBIOS_START)).unwrap();
+        let smbios_ep: Smbios30Entrypoint = mem.read_obj(SMBIOS_START).unwrap();
 
         assert_eq!(compute_checksum(&smbios_ep), 0);
     }
@@ -524,15 +538,15 @@ mod tests {
 
     #[test]
     fn smbios_chassis_empty_string_set_has_double_null() {
-        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(SMBIOS_START), 4096)]).unwrap();
+        let mem = GuestMemoryMmap::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
         let smbios = SmbiosConfig {
             chassis: Some(SmbiosChassisConfig::default()),
             ..Default::default()
         };
 
-        setup_smbios(&mem, Some(&smbios)).unwrap();
+        setup_smbios(&mem, Some(&smbios), SMBIOS_START, SMBIOS_MAX_SIZE).unwrap();
 
-        let smbios_ep: Smbios30Entrypoint = mem.read_obj(GuestAddress(SMBIOS_START)).unwrap();
+        let smbios_ep: Smbios30Entrypoint = mem.read_obj(SMBIOS_START).unwrap();
         let mut cur = GuestAddress(smbios_ep.physptr);
 
         let bios: SmbiosBiosInfo = mem.read_obj(cur).unwrap();
@@ -560,7 +574,7 @@ mod tests {
 
     #[test]
     fn smbios_chassis_oem_strings_layout() {
-        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(SMBIOS_START), 4096)]).unwrap();
+        let mem = GuestMemoryMmap::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
 
         let smbios = SmbiosConfig {
             chassis: Some(SmbiosChassisConfig {
@@ -570,9 +584,9 @@ mod tests {
             ..Default::default()
         };
 
-        setup_smbios(&mem, Some(&smbios)).unwrap();
+        setup_smbios(&mem, Some(&smbios), SMBIOS_START, SMBIOS_MAX_SIZE).unwrap();
 
-        let smbios_ep: Smbios30Entrypoint = mem.read_obj(GuestAddress(SMBIOS_START)).unwrap();
+        let smbios_ep: Smbios30Entrypoint = mem.read_obj(SMBIOS_START).unwrap();
         let mut cur = GuestAddress(smbios_ep.physptr);
 
         let bios: SmbiosBiosInfo = mem.read_obj(cur).unwrap();
@@ -607,11 +621,11 @@ mod tests {
 
     #[test]
     fn smbios_strings_terminators_default() {
-        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(SMBIOS_START), 4096)]).unwrap();
+        let mem = GuestMemoryMmap::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
 
-        setup_smbios(&mem, None).unwrap();
+        setup_smbios(&mem, None, SMBIOS_START, SMBIOS_MAX_SIZE).unwrap();
 
-        let smbios_ep: Smbios30Entrypoint = mem.read_obj(GuestAddress(SMBIOS_START)).unwrap();
+        let smbios_ep: Smbios30Entrypoint = mem.read_obj(SMBIOS_START).unwrap();
         let mut cur = GuestAddress(smbios_ep.physptr);
 
         let bios: SmbiosBiosInfo = mem.read_obj(cur).unwrap();
@@ -653,7 +667,7 @@ mod tests {
 
     #[test]
     fn smbios_uuid_invalid_rejected() {
-        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(SMBIOS_START), 4096)]).unwrap();
+        let mem = GuestMemoryMmap::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
         let smbios = SmbiosConfig {
             system: Some(SmbiosSystem {
                 uuid: Some("not-a-uuid".to_string()),
@@ -662,13 +676,13 @@ mod tests {
             ..Default::default()
         };
 
-        let err = setup_smbios(&mem, Some(&smbios)).unwrap_err();
+        let err = setup_smbios(&mem, Some(&smbios), SMBIOS_START, SMBIOS_MAX_SIZE).unwrap_err();
         assert!(matches!(err, Error::ParseUuid(_, _)));
     }
 
     #[test]
     fn smbios_uuid_written_le() {
-        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(SMBIOS_START), 4096)]).unwrap();
+        let mem = GuestMemoryMmap::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
         let uuid_str = "00112233-4455-6677-8899-aabbccddeeff";
         let smbios = SmbiosConfig {
             system: Some(SmbiosSystem {
@@ -678,9 +692,9 @@ mod tests {
             ..Default::default()
         };
 
-        setup_smbios(&mem, Some(&smbios)).unwrap();
+        setup_smbios(&mem, Some(&smbios), SMBIOS_START, SMBIOS_MAX_SIZE).unwrap();
 
-        let smbios_ep: Smbios30Entrypoint = mem.read_obj(GuestAddress(SMBIOS_START)).unwrap();
+        let smbios_ep: Smbios30Entrypoint = mem.read_obj(SMBIOS_START).unwrap();
         let mut cur = GuestAddress(smbios_ep.physptr);
 
         let bios: SmbiosBiosInfo = mem.read_obj(cur).unwrap();
@@ -694,13 +708,26 @@ mod tests {
 
     #[test]
     fn smbios_write_fails_with_too_small_memory() {
-        let mem = GuestMemoryMmap::from_ranges(&[(
-            GuestAddress(SMBIOS_START),
-            size_of::<Smbios30Entrypoint>(),
-        )])
-        .unwrap();
+        let mem = GuestMemoryMmap::from_ranges(&[(SMBIOS_START, size_of::<Smbios30Entrypoint>())])
+            .unwrap();
 
-        let err = setup_smbios(&mem, None).unwrap_err();
+        let err = setup_smbios(&mem, None, SMBIOS_START, SMBIOS_MAX_SIZE).unwrap_err();
         assert!(matches!(err, Error::WriteData(_)));
+    }
+
+    #[test]
+    fn smbios_type0_is_virtual_machine_bit_set() {
+        let mem = GuestMemoryMmap::from_ranges(&[(SMBIOS_START, 4096)]).unwrap();
+
+        setup_smbios(&mem, None, SMBIOS_START, SMBIOS_MAX_SIZE).unwrap();
+
+        let smbios_ep: Smbios30Entrypoint = mem.read_obj(SMBIOS_START).unwrap();
+        let type0_addr = GuestAddress(smbios_ep.physptr);
+
+        let characteristics_ext2: u8 = mem.read_obj(type0_addr.checked_add(0x13).unwrap()).unwrap();
+        assert_eq!(
+            characteristics_ext2 & IS_VIRTUAL_MACHINE,
+            IS_VIRTUAL_MACHINE
+        );
     }
 }

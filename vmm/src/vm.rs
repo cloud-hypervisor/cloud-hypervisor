@@ -1967,6 +1967,14 @@ impl Vm {
                 ))
             })?;
 
+        let smbios = self
+            .config
+            .lock()
+            .unwrap()
+            .platform
+            .as_ref()
+            .and_then(|p| p.smbios_config());
+
         arch::configure_system(
             &mem,
             cmdline.as_cstring().unwrap().to_str().unwrap(),
@@ -1979,6 +1987,7 @@ impl Vm {
             &vgic,
             &self.numa_nodes,
             pmu_supported,
+            smbios.as_ref(),
         )
         .map_err(Error::ConfigureSystem)?;
 

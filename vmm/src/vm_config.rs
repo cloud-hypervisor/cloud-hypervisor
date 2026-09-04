@@ -168,11 +168,11 @@ pub struct PlatformConfig {
     pub vfio_p2p_dma: bool,
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 impl PlatformConfig {
     /// Returns `None` if no SMBIOS-relevant platform fields are set, otherwise
     /// `Some` with a [`SmbiosConfig`] built from the populated fields.
-    pub fn smbios_config(&self) -> Option<arch::x86_64::SmbiosConfig> {
+    pub fn smbios_config(&self) -> Option<arch::SmbiosConfig> {
         let has_system = [
             &self.system_serial_number,
             &self.system_uuid,
@@ -185,7 +185,7 @@ impl PlatformConfig {
         .iter()
         .any(|v| v.is_some());
 
-        let system = has_system.then_some(arch::x86_64::SmbiosSystem {
+        let system = has_system.then_some(arch::SmbiosSystem {
             manufacturer: self.system_manufacturer.clone(),
             product_name: self.system_product_name.clone(),
             version: self.system_version.clone(),
@@ -195,14 +195,14 @@ impl PlatformConfig {
             family: self.system_family.clone(),
         });
 
-        let chassis =
-            self.chassis_asset_tag
-                .clone()
-                .map(|asset_tag| arch::x86_64::SmbiosChassisConfig {
-                    asset_tag: Some(asset_tag),
-                });
+        let chassis = self
+            .chassis_asset_tag
+            .clone()
+            .map(|asset_tag| arch::SmbiosChassisConfig {
+                asset_tag: Some(asset_tag),
+            });
 
-        let smbios = arch::x86_64::SmbiosConfig {
+        let smbios = arch::SmbiosConfig {
             system,
             chassis,
             oem_strings: self.oem_strings.clone().unwrap_or_default(),

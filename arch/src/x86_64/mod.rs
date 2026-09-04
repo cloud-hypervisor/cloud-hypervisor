@@ -20,7 +20,6 @@ mod helpers;
 mod hyperv_msrs;
 mod mpspec;
 mod mptable;
-mod smbios;
 
 use std::arch::x86_64;
 
@@ -32,7 +31,6 @@ use linux_loader::loader::elf::start_info::{
     hvm_memmap_table_entry, hvm_modlist_entry, hvm_start_info,
 };
 use log::{debug, error, info};
-pub use smbios::{SmbiosChassisConfig, SmbiosConfig, SmbiosSystem};
 use thiserror::Error;
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend,
@@ -40,8 +38,9 @@ use vm_memory::{
 };
 use vmm_sys_util::fam;
 
+use crate::smbios::SmbiosConfig;
 use crate::x86_64::cpu_profile::cpuid_adjustments::MissingCpuidEntriesError;
-use crate::{CpuProfile, GuestMemoryMmap, InitramfsConfig, RegionType};
+use crate::{CpuProfile, GuestMemoryMmap, InitramfsConfig, RegionType, smbios};
 
 // While modern architectures support more than 255 CPUs via x2APIC,
 // legacy devices such as mptable support at most 254 CPUs.
@@ -1206,10 +1205,16 @@ pub fn configure_system(
         .write_obj((layout::EBDA_START.0 >> 4) as u16, layout::EBDA_POINTER)
         .map_err(Error::EbdaSetup)?;
 
-    let size = smbios::setup_smbios(guest_mem, smbios).map_err(Error::SmbiosSetup)?;
+    let size = smbios::setup_smbios(
+        guest_mem,
+        smbios,
+        layout::SMBIOS_START,
+        layout::SMBIOS_MAX_SIZE,
+    )
+    .map_err(Error::SmbiosSetup)?;
 
     // Place the MP table after the SMIOS table aligned to 16 bytes
-    let offset = GuestAddress(layout::SMBIOS_START).unchecked_add(size);
+    let offset = layout::SMBIOS_START.unchecked_add(size);
     let offset = GuestAddress((offset.0 + 16) & !0xf);
     mptable::setup_mptable(offset, guest_mem, _num_cpus, topology).map_err(Error::MpTableSetup)?;
 

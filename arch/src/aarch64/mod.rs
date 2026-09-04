@@ -22,7 +22,7 @@ use thiserror::Error;
 use vm_memory::{Address, GuestAddress, GuestMemoryAtomic, GuestMemoryBackend};
 
 pub use self::fdt::DeviceInfoForFdt;
-use crate::{DeviceType, GuestMemoryMmap, NumaNodes, PciSpaceInfo, RegionType};
+use crate::{DeviceType, GuestMemoryMmap, NumaNodes, PciSpaceInfo, RegionType, smbios};
 
 pub const _NSIG: i32 = 65;
 
@@ -36,6 +36,10 @@ pub enum Error {
     /// Failed to write FDT to memory.
     #[error("Failed to write FDT to memory")]
     WriteFdtToMemory(#[source] fdt::Error),
+
+    /// Error setting up SMBIOS table
+    #[error("Error setting up SMBIOS table")]
+    SmbiosSetup(#[source] smbios::Error),
 
     /// Failed to create a GIC.
     #[error("Failed to create a GIC")]
@@ -130,6 +134,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
     gic_device: &Arc<Mutex<dyn Vgic>>,
     numa_nodes: &NumaNodes,
     pmu_supported: bool,
+    smbios: Option<&smbios::SmbiosConfig>,
 ) -> super::Result<()> {
     let fdt_final = fdt::create_fdt(
         guest_mem,
@@ -151,6 +156,14 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
     }
 
     fdt::write_fdt_to_memory(&fdt_final, guest_mem).map_err(Error::WriteFdtToMemory)?;
+
+    smbios::setup_smbios(
+        guest_mem,
+        smbios,
+        layout::SMBIOS_START,
+        layout::SMBIOS_MAX_SIZE,
+    )
+    .map_err(Error::SmbiosSetup)?;
 
     Ok(())
 }
