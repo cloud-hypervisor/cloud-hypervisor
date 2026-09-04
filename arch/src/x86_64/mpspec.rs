@@ -7,19 +7,19 @@ use std::os::raw;
 
 use vm_memory::ByteValued;
 
-pub const MP_PROCESSOR: raw::c_uint = 0;
-pub const MP_BUS: raw::c_uint = 1;
-pub const MP_IOAPIC: raw::c_uint = 2;
-pub const MP_INTSRC: raw::c_uint = 3;
-pub const MP_LINTSRC: raw::c_uint = 4;
-pub const CPU_ENABLED: raw::c_uint = 1;
-pub const CPU_BOOTPROCESSOR: raw::c_uint = 2;
-pub const MPC_APIC_USABLE: raw::c_uint = 1;
-pub const MP_IRQDIR_DEFAULT: raw::c_uint = 0;
+pub(super) const MP_PROCESSOR: raw::c_uint = 0;
+pub(super) const MP_BUS: raw::c_uint = 1;
+pub(super) const MP_IOAPIC: raw::c_uint = 2;
+pub(super) const MP_INTSRC: raw::c_uint = 3;
+pub(super) const MP_LINTSRC: raw::c_uint = 4;
+pub(super) const CPU_ENABLED: raw::c_uint = 1;
+pub(super) const CPU_BOOTPROCESSOR: raw::c_uint = 2;
+pub(super) const MPC_APIC_USABLE: raw::c_uint = 1;
+pub(super) const MP_IRQDIR_DEFAULT: raw::c_uint = 0;
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
-pub struct mpf_intel {
+pub(super) struct mpf_intel {
     pub signature: [raw::c_uchar; 4usize],
     pub physptr: raw::c_uint,
     pub length: raw::c_uchar,
@@ -41,7 +41,7 @@ unsafe impl ByteValued for mpf_intel {}
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
-pub struct mpc_table {
+pub(super) struct mpc_table {
     pub signature: [raw::c_uchar; 4usize],
     pub length: raw::c_ushort,
     pub spec: raw::c_uchar,
@@ -70,7 +70,7 @@ unsafe impl ByteValued for mpc_table {}
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
-pub struct mpc_cpu {
+pub(super) struct mpc_cpu {
     pub type_: raw::c_uchar,
     pub apicid: raw::c_uchar,
     pub apicver: raw::c_uchar,
@@ -89,7 +89,7 @@ unsafe impl ByteValued for mpc_cpu {}
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
-pub struct mpc_bus {
+pub(super) struct mpc_bus {
     pub type_: raw::c_uchar,
     pub busid: raw::c_uchar,
     pub bustype: [raw::c_uchar; 6usize],
@@ -104,7 +104,7 @@ unsafe impl ByteValued for mpc_bus {}
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
-pub struct mpc_ioapic {
+pub(super) struct mpc_ioapic {
     pub type_: raw::c_uchar,
     pub apicid: raw::c_uchar,
     pub apicver: raw::c_uchar,
@@ -121,7 +121,7 @@ unsafe impl ByteValued for mpc_ioapic {}
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
-pub struct mpc_intsrc {
+pub(super) struct mpc_intsrc {
     pub type_: raw::c_uchar,
     pub irqtype: raw::c_uchar,
     pub irqflag: raw::c_ushort,
@@ -138,13 +138,13 @@ const _: () = assert!(size_of::<mpc_intsrc>() == 8);
 // would be nowhere for them to exist.
 unsafe impl ByteValued for mpc_intsrc {}
 
-pub const MP_IRQ_SOURCE_TYPES_MP_INT: raw::c_uint = 0;
-pub const MP_IRQ_SOURCE_TYPES_MP_NMI: raw::c_uint = 1;
-pub const MP_IRQ_SOURCE_TYPES_MP_EXT_INT: raw::c_uint = 3;
+pub(super) const MP_IRQ_SOURCE_TYPES_MP_INT: raw::c_uint = 0;
+pub(super) const MP_IRQ_SOURCE_TYPES_MP_NMI: raw::c_uint = 1;
+pub(super) const MP_IRQ_SOURCE_TYPES_MP_EXT_INT: raw::c_uint = 3;
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
-pub struct mpc_lintsrc {
+pub(super) struct mpc_lintsrc {
     pub type_: raw::c_uchar,
     pub irqtype: raw::c_uchar,
     pub irqflag: raw::c_ushort,
@@ -163,7 +163,7 @@ unsafe impl ByteValued for mpc_lintsrc {}
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
-pub struct mpc_oemtable {
+struct mpc_oemtable {
     pub signature: [raw::c_uchar; 4usize],
     pub length: raw::c_ushort,
     pub rev: raw::c_uchar,

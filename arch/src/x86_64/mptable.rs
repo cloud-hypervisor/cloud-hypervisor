@@ -86,7 +86,7 @@ pub enum Error {
     WriteMpcTable(#[source] GuestMemoryError),
 }
 
-pub type Result<T> = result::Result<T, Error>;
+pub(super) type Result<T> = result::Result<T, Error>;
 
 // Most of these variables are sourced from the Intel MP Spec 1.4.
 const SMP_MAGIC_IDENT: &[c_uchar; 4] = b"_MP_";
@@ -124,7 +124,7 @@ fn compute_mp_size(num_cpus: u32) -> usize {
 }
 
 /// Performs setup of the MP table for the given `num_cpus`.
-pub fn setup_mptable(
+pub(super) fn setup_mptable(
     offset: GuestAddress,
     mem: &GuestMemoryMmap,
     num_cpus: u32,
