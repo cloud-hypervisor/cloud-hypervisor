@@ -15,7 +15,7 @@ use vm_device::BusDevice;
 ///
 /// Since we're not a physical platform, we can freely assign code ranges for
 /// debugging specific parts of our virtual platform.
-pub enum DebugIoPortRange {
+pub(super) enum DebugIoPortRange {
     Firmware,
     Bootloader,
     Kernel,
