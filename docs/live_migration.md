@@ -391,8 +391,7 @@ migration process. Via the API or `ch-remote`, you may specify:
 VMs with migratable VFIO devices, for example NIC VFs bound to
 `mlx5_vfio_pci`, can be live migrated. The opaque device state is captured
 during the downtime window and the destination receives new device file
-descriptors through the `vfio_fds` and `iommufd_fd` options of
-`receive-migration`.
+descriptors through the `external_fds` option of `receive-migration`.
 
 See [Live Migration of VFIO Devices](vfio.md#live-migration-of-vfio-devices)
 for the requirements, the dirty tracking behavior, and an example.
