@@ -8103,6 +8103,225 @@ mod common_parallel {
         _test_live_migration(false, true, true);
     }
 
+    #[derive(Clone, Copy)]
+    enum GuestEventDuringMigration {
+        RebootImmediately,
+        RebootDuringPrecopy,
+        ShutdownImmediately,
+        ShutdownDuringPrecopy,
+        // TODO postcopy once postcopy is not experimental anymore
+    }
+
+    fn _test_live_migration_action(guest_event: GuestEventDuringMigration) {
+        // The guest must dirty memory faster than precopy can transfer it,
+        // otherwise the migration converges before the guest event lands.
+        // Hence more vCPUs and more RAM.
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME)
+            .with_cpu(4)
+            .with_memory("1600M");
+        let src_api_socket = temp_api_path(&guest.tmp_dir);
+        let src_event_path = temp_event_monitor_path(&guest.tmp_dir);
+
+        let mut src_child = GuestCommand::new(&guest)
+            .default_cpus()
+            .default_memory()
+            .default_kernel_cmdline()
+            .default_disks()
+            .default_net()
+            .args(["--api-socket", &src_api_socket])
+            .args(["--event-monitor", format!("path={src_event_path}").as_str()])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
+        dest_api_socket.push_str(".dest");
+        let dest_event_path = format!("{src_event_path}.dest");
+        let mut dest_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &dest_api_socket])
+            .args(["--no-shutdown"])
+            .args([
+                "--event-monitor",
+                format!("path={dest_event_path}").as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            guest.wait_vm_boot().unwrap();
+            let reboot_count = get_reboot_count(&guest);
+
+            // Keep precopy from converging until the guest event landed.
+            start_stress_in_vm(&guest);
+
+            let migration_port = get_available_port();
+            let receive_url = format!("receiver_url=tcp:0.0.0.0:{migration_port}");
+            let receive_api_socket = dest_api_socket.clone();
+            let receive_migration = thread::spawn(move || {
+                remote_command(&receive_api_socket, "receive-migration", Some(&receive_url))
+            });
+
+            wait_for_sequential_events_str(
+                Duration::from_secs(30),
+                &["migration-receive-ready"],
+                &dest_event_path,
+            );
+
+            assert!(remote_command(
+                &src_api_socket,
+                "send-migration",
+                Some(&format!(
+                    "destination_url=tcp:127.0.0.1:{migration_port},downtime_ms=1,timeout_s=30,timeout_strategy=cancel,memory_mode=precopy"
+                )),
+            ));
+
+            let wait_event = match guest_event {
+                GuestEventDuringMigration::RebootImmediately
+                | GuestEventDuringMigration::ShutdownImmediately => "migration-started",
+                GuestEventDuringMigration::RebootDuringPrecopy
+                | GuestEventDuringMigration::ShutdownDuringPrecopy => "migration-memory-iteration",
+            };
+
+            wait_for_sequential_events_str(Duration::from_secs(30), &[wait_event], &src_event_path);
+
+            // Use the immediate variants that call reboot(2) directly: an
+            // orderly shutdown would first stop the stress workload, let
+            // precopy converge and thus move the event past the migration.
+            let guest_command = match guest_event {
+                GuestEventDuringMigration::RebootImmediately
+                | GuestEventDuringMigration::RebootDuringPrecopy => "reboot -ff",
+                GuestEventDuringMigration::ShutdownImmediately
+                | GuestEventDuringMigration::ShutdownDuringPrecopy => "poweroff -ff",
+            };
+
+            // We tell the guest to perform the event immediately. This can
+            // race with openssh terminating the session. Hence we are accepting
+            // non zero exit codes.
+            match ssh_command_ip_with_auth(
+                &format!("nohup sudo {guest_command} >/dev/null 2>&1 &"),
+                &default_guest_auth(),
+                &guest.network.guest_ip0,
+                Some(Duration::from_secs(10)),
+            ) {
+                Ok(_)
+                | Err(SshCommandError::ExitStatus(_) | SshCommandError::NonZeroExitStatus(_)) => {}
+                Err(e) => panic!("Failed to send {guest_command:?} to the guest: {e}"),
+            }
+
+            wait_for_sequential_events_str(
+                Duration::from_secs(30),
+                &["migration-finished"],
+                &src_event_path,
+            );
+            assert!(receive_migration.join().unwrap());
+            assert!(wait_until(Duration::from_secs(30), || {
+                matches!(src_child.try_wait(), Ok(Some(status)) if status.success())
+            }));
+
+            // The event must be applied after the migration was finished.
+            wait_for_sequential_events_str(
+                Duration::from_secs(30),
+                &["migration-receive-finished"],
+                &dest_event_path,
+            );
+
+            match guest_event {
+                GuestEventDuringMigration::RebootImmediately
+                | GuestEventDuringMigration::RebootDuringPrecopy => {
+                    // Wait for the VM to be reachable again
+                    guest.wait_vm_boot().unwrap();
+                    assert_eq!(get_reboot_count(&guest), reboot_count + 1);
+                    wait_for_sequential_events_str(
+                        Duration::from_secs(30),
+                        &["rebooting", "rebooted"],
+                        &dest_event_path,
+                    );
+                }
+                GuestEventDuringMigration::ShutdownImmediately
+                | GuestEventDuringMigration::ShutdownDuringPrecopy => {
+                    wait_for_sequential_events_str(
+                        Duration::from_secs(30),
+                        &["shutdown"],
+                        &dest_event_path,
+                    );
+
+                    // check guest can be booted again
+                    assert!(remote_command(&dest_api_socket, "boot", None,));
+                    guest.wait_vm_boot().unwrap();
+                    assert_eq!(get_reboot_count(&guest), reboot_count + 1);
+                    wait_for_sequential_events_str(
+                        Duration::from_secs(30),
+                        &["booting", "booted"],
+                        &dest_event_path,
+                    );
+                }
+            }
+        }));
+
+        if r.is_err() {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Error handling a guest lifecycle event during live migration",
+            );
+        }
+
+        let _ = src_child.kill();
+        let src_output = src_child.wait_with_output().unwrap();
+        handle_child_output(Ok(()), &src_output);
+
+        let _ = dest_child.kill();
+        let dest_output = dest_child.wait_with_output().unwrap();
+        handle_child_output(Ok(()), &dest_output);
+
+        // The checks above can't tell a deferred event from one that happened
+        // on the destination after the migration: check the log for evidence.
+        let (src_marker, dest_marker) = match guest_event {
+            GuestEventDuringMigration::RebootImmediately
+            | GuestEventDuringMigration::RebootDuringPrecopy => (
+                "Deferring pending VM Reboot until migration finishes",
+                "Received pending VM action from the migration source: Reboot",
+            ),
+            GuestEventDuringMigration::ShutdownImmediately
+            | GuestEventDuringMigration::ShutdownDuringPrecopy => (
+                "Deferring pending VM Shutdown until migration finishes",
+                "Received pending VM action from the migration source: Shutdown",
+            ),
+        };
+        let src_stderr = String::from_utf8_lossy(&src_output.stderr);
+        assert!(
+            src_stderr.contains(src_marker),
+            "Expected source log line {src_marker:?}. stderr: {src_stderr}"
+        );
+        let dest_stderr = String::from_utf8_lossy(&dest_output.stderr);
+        assert!(
+            dest_stderr.contains(dest_marker),
+            "Expected destination log line {dest_marker:?}. stderr: {dest_stderr}"
+        );
+    }
+
+    #[test]
+    fn test_live_migration_action_reboot_immediately_tcp_precopy() {
+        _test_live_migration_action(GuestEventDuringMigration::RebootImmediately);
+    }
+
+    #[test]
+    fn test_live_migration_action_reboot_during_tcp_precopy() {
+        _test_live_migration_action(GuestEventDuringMigration::RebootDuringPrecopy);
+    }
+
+    #[test]
+    fn test_live_migration_action_shutdown_immediately_tcp_precopy() {
+        _test_live_migration_action(GuestEventDuringMigration::ShutdownImmediately);
+    }
+
+    #[test]
+    fn test_live_migration_action_shutdown_during_tcp_precopy() {
+        _test_live_migration_action(GuestEventDuringMigration::ShutdownDuringPrecopy);
+    }
+
     #[test]
     fn test_live_migration_tcp() {
         _test_live_migration_tcp(NonZeroU32::new(1).unwrap());
