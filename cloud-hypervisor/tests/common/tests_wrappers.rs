@@ -2117,7 +2117,7 @@ pub(crate) fn _test_virtio_block(
     }
 }
 
-pub fn _test_virtio_block_dynamic_vhdx_expand(guest: &Guest) {
+pub(crate) fn _test_virtio_block_dynamic_vhdx_expand(guest: &Guest) {
     const VIRTUAL_DISK_SIZE: u64 = 100 << 20;
     const EMPTY_VHDX_FILE_SIZE: u64 = 8 << 20;
     const FULL_VHDX_FILE_SIZE: u64 = 112 << 20;
@@ -2463,7 +2463,7 @@ fn vhdx_image_size(disk_name: &str) -> u64 {
 }
 
 #[cfg(target_arch = "x86_64")]
-pub fn _test_split_irqchip(guest: &Guest) {
+pub(crate) fn _test_split_irqchip(guest: &Guest) {
     let mut child = GuestCommand::new(guest)
         .default_cpus()
         .default_memory()
