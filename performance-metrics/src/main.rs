@@ -285,7 +285,7 @@ struct PerformanceTest {
 }
 
 impl PerformanceTest {
-    pub fn run(&self, overrides: &PerformanceTestOverrides) -> PerformanceTestResult {
+    pub(crate) fn run(&self, overrides: &PerformanceTestOverrides) -> PerformanceTestResult {
         if self.control.num_ops.is_some() && !self.name.starts_with("micro_") {
             eprintln!(
                 "Warning: num_ops is set on '{}' but has no effect on non micro benchmarks",
@@ -329,7 +329,7 @@ impl PerformanceTest {
     // Calculate the timeout for each test
     // Note: To cover the setup/cleanup time, 20s is added for each iteration of the test
     // Confidential VMS can take up to DEFAULT_CVM_TCP_LISTENER_TIMEOUT
-    pub fn calc_timeout(
+    fn calc_timeout(
         &self,
         test_iterations: &Option<u32>,
         test_timeout: &Option<u32>,
@@ -377,24 +377,24 @@ fn std_deviation(data: &[f64]) -> Option<f64> {
 }
 
 mod adjuster {
-    pub fn identity(v: f64) -> f64 {
+    pub(crate) fn identity(v: f64) -> f64 {
         v
     }
 
-    pub fn s_to_ms(v: f64) -> f64 {
+    pub(crate) fn s_to_ms(v: f64) -> f64 {
         v * 1000.0
     }
 
-    pub fn s_to_us(v: f64) -> f64 {
+    pub(crate) fn s_to_us(v: f64) -> f64 {
         v * 1_000_000.0
     }
 
-    pub fn bps_to_gbps(v: f64) -> f64 {
+    pub(crate) fn bps_to_gbps(v: f64) -> f64 {
         v / (1_000_000_000_f64)
     }
 
     #[expect(non_snake_case)]
-    pub fn Bps_to_MiBps(v: f64) -> f64 {
+    pub(crate) fn Bps_to_MiBps(v: f64) -> f64 {
         v / (1 << 20) as f64
     }
 }

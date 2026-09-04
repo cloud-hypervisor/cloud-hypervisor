@@ -25,7 +25,7 @@ use crate::util::{
 /// how long it takes to drain every completion via next_completed_request().
 ///
 /// Returns the drain wall clock time in seconds.
-pub fn micro_bench_aio_drain(control: &PerformanceTestControl) -> f64 {
+pub(crate) fn micro_bench_aio_drain(control: &PerformanceTestControl) -> f64 {
     let num_ops = control.num_ops.expect("num_ops required") as usize;
     let tmp = util::sized_tempfile(num_ops);
     let disk = RawDisk::new(tmp.as_file().try_clone().unwrap(), RawBackend::Aio, false);
@@ -64,7 +64,7 @@ pub fn micro_bench_aio_drain(control: &PerformanceTestControl) -> f64 {
 /// pread64 for allocated data, and iovec scatter.
 ///
 /// Returns the total read wall clock time in seconds.
-pub fn micro_bench_qcow_read(control: &PerformanceTestControl) -> f64 {
+pub(crate) fn micro_bench_qcow_read(control: &PerformanceTestControl) -> f64 {
     let num_ops = control.num_ops.expect("num_ops required") as usize;
     let (_tmp, disk) = util::qcow_tempfile(num_ops);
     let mut async_io = disk.create_async_io(1).expect("create_async_io failed");
@@ -93,7 +93,7 @@ pub fn micro_bench_qcow_read(control: &PerformanceTestControl) -> f64 {
 /// under random access patterns.
 ///
 /// Returns the total read wall clock time in seconds.
-pub fn micro_bench_qcow_random_read(control: &PerformanceTestControl) -> f64 {
+pub(crate) fn micro_bench_qcow_random_read(control: &PerformanceTestControl) -> f64 {
     let num_ops = control.num_ops.expect("num_ops required") as usize;
     let (_tmp, disk) = util::qcow_tempfile(num_ops);
     let mut async_io = disk.create_async_io(1).expect("create_async_io failed");
@@ -127,7 +127,7 @@ pub fn micro_bench_qcow_random_read(control: &PerformanceTestControl) -> f64 {
 /// the data.
 ///
 /// Returns the total write wall clock time in seconds.
-pub fn micro_bench_qcow_write(control: &PerformanceTestControl) -> f64 {
+pub(crate) fn micro_bench_qcow_write(control: &PerformanceTestControl) -> f64 {
     let num_ops = control.num_ops.expect("num_ops required") as usize;
     let (_tmp, disk) = util::empty_qcow_tempfile(num_ops);
     let mut async_io = disk.create_async_io(1).expect("create_async_io failed");
@@ -157,7 +157,7 @@ pub fn micro_bench_qcow_write(control: &PerformanceTestControl) -> f64 {
 /// frees clusters and issues fallocate punch_hole on the host file.
 ///
 /// Returns the total punch_hole wall clock time in seconds.
-pub fn micro_bench_qcow_punch_hole(control: &PerformanceTestControl) -> f64 {
+pub(crate) fn micro_bench_qcow_punch_hole(control: &PerformanceTestControl) -> f64 {
     let num_ops = control.num_ops.expect("num_ops required") as usize;
     let (_tmp, disk) = util::qcow_tempfile(num_ops);
     let mut async_io = disk.create_async_io(1).expect("create_async_io failed");
@@ -184,7 +184,7 @@ pub fn micro_bench_qcow_punch_hole(control: &PerformanceTestControl) -> f64 {
 /// of dirty L2 table entries and refcount blocks.
 ///
 /// Returns the fsync wall clock time in seconds.
-pub fn micro_bench_qcow_fsync(control: &PerformanceTestControl) -> f64 {
+pub(crate) fn micro_bench_qcow_fsync(control: &PerformanceTestControl) -> f64 {
     let num_ops = control.num_ops.expect("num_ops required") as usize;
     let (_tmp, disk) = util::empty_qcow_tempfile(num_ops);
     let mut async_io = disk.create_async_io(1).expect("create_async_io failed");
@@ -220,7 +220,7 @@ pub fn micro_bench_qcow_fsync(control: &PerformanceTestControl) -> f64 {
 /// read.
 ///
 /// Returns the total read wall clock time in seconds.
-pub fn micro_bench_qcow_backing_read(control: &PerformanceTestControl) -> f64 {
+pub(crate) fn micro_bench_qcow_backing_read(control: &PerformanceTestControl) -> f64 {
     let num_ops = control.num_ops.expect("num_ops required") as usize;
     let (_backing, _overlay, disk) = util::qcow_overlay_tempfile(num_ops);
     let mut async_io = disk.create_async_io(1).expect("create_async_io failed");
@@ -250,7 +250,7 @@ pub fn micro_bench_qcow_backing_read(control: &PerformanceTestControl) -> f64 {
 /// cluster).
 ///
 /// Returns the total write wall clock time in seconds.
-pub fn micro_bench_qcow_cow_write(control: &PerformanceTestControl) -> f64 {
+pub(crate) fn micro_bench_qcow_cow_write(control: &PerformanceTestControl) -> f64 {
     let num_ops = control.num_ops.expect("num_ops required") as usize;
     let (_backing, _overlay, disk) = util::qcow_overlay_tempfile(num_ops);
     let mut async_io = disk.create_async_io(1).expect("create_async_io failed");
@@ -279,7 +279,7 @@ pub fn micro_bench_qcow_cow_write(control: &PerformanceTestControl) -> f64 {
 /// the normal allocated-cluster read path.
 ///
 /// Returns the total read wall clock time in seconds.
-pub fn micro_bench_qcow_compressed_read(control: &PerformanceTestControl) -> f64 {
+pub(crate) fn micro_bench_qcow_compressed_read(control: &PerformanceTestControl) -> f64 {
     let num_ops = control.num_ops.expect("num_ops required") as usize;
     let (_tmp, disk) = util::compressed_qcow_tempfile(num_ops);
     let mut async_io = disk.create_async_io(1).expect("create_async_io failed");
@@ -309,7 +309,7 @@ pub fn micro_bench_qcow_compressed_read(control: &PerformanceTestControl) -> f64
 /// chunks of CLUSTERS_PER_READ.
 ///
 /// Returns the total read wall clock time in seconds.
-pub fn micro_bench_qcow_multi_cluster_read(control: &PerformanceTestControl) -> f64 {
+pub(crate) fn micro_bench_qcow_multi_cluster_read(control: &PerformanceTestControl) -> f64 {
     const CLUSTERS_PER_READ: usize = 8;
 
     let num_ops = control.num_ops.expect("num_ops required") as usize;
@@ -344,7 +344,7 @@ pub fn micro_bench_qcow_multi_cluster_read(control: &PerformanceTestControl) -> 
 /// and measures the cold L2 cache miss overhead.
 ///
 /// Returns the total read wall clock time in seconds.
-pub fn micro_bench_qcow_l2_cache_miss(control: &PerformanceTestControl) -> f64 {
+pub(crate) fn micro_bench_qcow_l2_cache_miss(control: &PerformanceTestControl) -> f64 {
     let num_ops = control.num_ops.expect("num_ops required") as usize;
     let (_tmp, disk) = util::sparse_qcow_tempfile(num_ops);
     let mut async_io = disk.create_async_io(1).expect("create_async_io failed");
@@ -374,7 +374,7 @@ pub fn micro_bench_qcow_l2_cache_miss(control: &PerformanceTestControl) -> f64 {
 /// through io_uring for true asynchronous completion.
 ///
 /// Returns the total read wall clock time in seconds.
-pub fn micro_bench_qcow_async_read(control: &PerformanceTestControl) -> f64 {
+pub(crate) fn micro_bench_qcow_async_read(control: &PerformanceTestControl) -> f64 {
     let num_ops = control.num_ops.expect("num_ops required") as usize;
     let (_tmp, disk) = util::qcow_async_tempfile(num_ops);
     let mut async_io = disk
@@ -401,7 +401,7 @@ pub fn micro_bench_qcow_async_read(control: &PerformanceTestControl) -> f64 {
 /// Builds a batch of `num_ops` read requests and submits them all at once
 /// through `submit_batch_requests`, which packs multiple SQEs into a single
 /// io_uring submission. Returns the total wall clock time in seconds.
-pub fn micro_bench_qcow_batch_read(control: &PerformanceTestControl) -> f64 {
+pub(crate) fn micro_bench_qcow_batch_read(control: &PerformanceTestControl) -> f64 {
     let num_ops = control.num_ops.expect("num_ops required") as usize;
     let (_tmp, disk) = util::qcow_async_tempfile(num_ops);
     let mut async_io = disk
@@ -433,7 +433,7 @@ pub fn micro_bench_qcow_batch_read(control: &PerformanceTestControl) -> f64 {
 /// through the QcowAsync io_uring path.
 ///
 /// Returns the total read wall clock time in seconds.
-pub fn micro_bench_qcow_async_random_read(control: &PerformanceTestControl) -> f64 {
+pub(crate) fn micro_bench_qcow_async_random_read(control: &PerformanceTestControl) -> f64 {
     let num_ops = control.num_ops.expect("num_ops required") as usize;
     let (_tmp, disk) = util::qcow_async_tempfile(num_ops);
     let mut async_io = disk
@@ -466,7 +466,7 @@ pub fn micro_bench_qcow_async_random_read(control: &PerformanceTestControl) -> f
 /// mappings, this can hit the io_uring fast path for a single Readv.
 ///
 /// Returns the total read wall clock time in seconds.
-pub fn micro_bench_qcow_async_multi_cluster_read(control: &PerformanceTestControl) -> f64 {
+pub(crate) fn micro_bench_qcow_async_multi_cluster_read(control: &PerformanceTestControl) -> f64 {
     const CLUSTERS_PER_READ: usize = 8;
 
     let num_ops = control.num_ops.expect("num_ops required") as usize;
@@ -499,7 +499,7 @@ pub fn micro_bench_qcow_async_multi_cluster_read(control: &PerformanceTestContro
 /// QcowAsync since the mapping is not a single allocated cluster).
 ///
 /// Returns the total read wall clock time in seconds.
-pub fn micro_bench_qcow_async_backing_read(control: &PerformanceTestControl) -> f64 {
+pub(crate) fn micro_bench_qcow_async_backing_read(control: &PerformanceTestControl) -> f64 {
     let num_ops = control.num_ops.expect("num_ops required") as usize;
     let (_backing, _overlay, disk) = util::qcow_async_overlay_tempfile(num_ops);
     let mut async_io = disk
@@ -525,7 +525,7 @@ pub fn micro_bench_qcow_async_backing_read(control: &PerformanceTestControl) -> 
 /// the async code path.
 ///
 /// Returns the total read wall clock time in seconds.
-pub fn micro_bench_qcow_async_compressed_read(control: &PerformanceTestControl) -> f64 {
+pub(crate) fn micro_bench_qcow_async_compressed_read(control: &PerformanceTestControl) -> f64 {
     let num_ops = control.num_ops.expect("num_ops required") as usize;
     let (_tmp, disk) = util::compressed_qcow_async_tempfile(num_ops);
     let mut async_io = disk
@@ -554,7 +554,7 @@ pub fn micro_bench_qcow_async_compressed_read(control: &PerformanceTestControl) 
 /// write path overhead through the async code path.
 ///
 /// Returns the total write wall clock time in seconds.
-pub fn micro_bench_qcow_async_write(control: &PerformanceTestControl) -> f64 {
+pub(crate) fn micro_bench_qcow_async_write(control: &PerformanceTestControl) -> f64 {
     let num_ops = control.num_ops.expect("num_ops required") as usize;
     let (_tmp, disk) = util::empty_qcow_async_tempfile(num_ops);
     let mut async_io = disk
@@ -580,7 +580,7 @@ pub fn micro_bench_qcow_async_write(control: &PerformanceTestControl) -> f64 {
 /// QCOW2 image through the QcowAsync io_uring path.
 ///
 /// Returns the total read wall clock time in seconds.
-pub fn micro_bench_qcow_async_l2_cache_miss(control: &PerformanceTestControl) -> f64 {
+pub(crate) fn micro_bench_qcow_async_l2_cache_miss(control: &PerformanceTestControl) -> f64 {
     let num_ops = control.num_ops.expect("num_ops required") as usize;
     let (_tmp, disk) = util::sparse_qcow_async_tempfile(num_ops);
     let mut async_io = disk
@@ -610,7 +610,7 @@ pub fn micro_bench_qcow_async_l2_cache_miss(control: &PerformanceTestControl) ->
 /// overhead compared to individual write calls.
 ///
 /// Returns the total wall clock time in seconds.
-pub fn micro_bench_qcow_batch_write(control: &PerformanceTestControl) -> f64 {
+pub(crate) fn micro_bench_qcow_batch_write(control: &PerformanceTestControl) -> f64 {
     let num_ops = control.num_ops.expect("num_ops required") as usize;
     let (_tmp, disk) = util::empty_qcow_async_tempfile(num_ops);
     let mut async_io = disk
