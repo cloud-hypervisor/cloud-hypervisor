@@ -23,7 +23,7 @@ const VMDK_DESCRIPTOR_DDB_2: &str = "#DDB";
 
 /// Flat VMDK create types.
 #[derive(Debug, Default)]
-pub enum VMDKDiskType {
+enum VMDKDiskType {
     #[default]
     CreateTypeUnsupported,
     MonolithicFlat,
@@ -61,7 +61,7 @@ impl FromStr for ExtentAccess {
 /// Format of each extent line:
 /// `<access> <sectors> <type> "<file>" [offset]`.
 #[derive(Debug)]
-pub struct VmdkExtentHeader {
+pub(super) struct VmdkExtentHeader {
     pub access: ExtentAccess,
     pub size_in_sectors: u64,
     pub extent_type: String,
@@ -71,13 +71,13 @@ pub struct VmdkExtentHeader {
 
 /// Descriptor header fields.
 #[derive(Debug, Default)]
-pub struct VmdkDescriptorHeader {
+struct VmdkDescriptorHeader {
     pub create_type: VMDKDiskType,
 }
 
 /// Ordered list of extents.
 #[derive(Debug, Default)]
-pub struct VmdkDescriptorExtents {
+pub(super) struct VmdkDescriptorExtents {
     pub extents: Vec<VmdkExtentHeader>,
 }
 
@@ -86,13 +86,13 @@ pub struct VmdkDescriptorExtents {
 /// extents_list: ordered extent list
 /// base_path: descriptor file's parent directory
 #[derive(Debug, Default)]
-pub struct VmdkDescriptor {
+pub(super) struct VmdkDescriptor {
     pub base_path: String,
     pub extents_list: VmdkDescriptorExtents,
 }
 
 impl VmdkDescriptor {
-    pub fn new(file: &File, path: &Path) -> io::Result<Self> {
+    pub(super) fn new(file: &File, path: &Path) -> io::Result<Self> {
         // The descriptor's directory anchors the relative extent filenames.
         let base_path = path
             .parent()
@@ -150,9 +150,7 @@ fn read_descriptor(file: &File) -> io::Result<String> {
     })
 }
 
-pub(crate) fn parse_header<'a>(
-    lines: &mut Lines<'a>,
-) -> io::Result<(VmdkDescriptorHeader, &'a str)> {
+fn parse_header<'a>(lines: &mut Lines<'a>) -> io::Result<(VmdkDescriptorHeader, &'a str)> {
     let header_line = lines.next().unwrap_or_default();
 
     // Reject actual disk data (or an embedded descriptor, which is
@@ -187,7 +185,7 @@ pub(crate) fn parse_header<'a>(
     Ok((header, last_comment_line))
 }
 
-pub(crate) fn parse_extents(
+fn parse_extents(
     lines: &mut Lines<'_>,
     last_comment_line: &str,
 ) -> io::Result<VmdkDescriptorExtents> {
