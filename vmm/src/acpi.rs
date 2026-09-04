@@ -45,7 +45,7 @@ pub enum Error {
     FwCfg(#[source] io::Error),
 }
 
-pub type Result<T> = result::Result<T, Error>;
+pub(crate) type Result<T> = result::Result<T, Error>;
 
 fn next_table_address(address: GuestAddress, length: u64) -> Result<GuestAddress> {
     address.checked_add(length).ok_or(Error::AddressOverflow)
@@ -53,25 +53,25 @@ fn next_table_address(address: GuestAddress, length: u64) -> Result<GuestAddress
 
 /* Values for Type in APIC sub-headers */
 #[cfg(target_arch = "x86_64")]
-pub const ACPI_X2APIC_PROCESSOR: u8 = 9;
+pub(crate) const ACPI_X2APIC_PROCESSOR: u8 = 9;
 #[cfg(target_arch = "x86_64")]
-pub const ACPI_APIC_IO: u8 = 1;
+pub(crate) const ACPI_APIC_IO: u8 = 1;
 #[cfg(target_arch = "x86_64")]
-pub const ACPI_APIC_XRUPT_OVERRIDE: u8 = 2;
+pub(crate) const ACPI_APIC_XRUPT_OVERRIDE: u8 = 2;
 #[cfg(target_arch = "aarch64")]
-pub const ACPI_APIC_GENERIC_CPU_INTERFACE: u8 = 11;
+pub(crate) const ACPI_APIC_GENERIC_CPU_INTERFACE: u8 = 11;
 #[cfg(target_arch = "aarch64")]
-pub const ACPI_APIC_GENERIC_DISTRIBUTOR: u8 = 12;
+pub(crate) const ACPI_APIC_GENERIC_DISTRIBUTOR: u8 = 12;
 #[cfg(target_arch = "aarch64")]
-pub const ACPI_APIC_GIC_MSI_FRAME: u8 = 13;
+pub(crate) const ACPI_APIC_GIC_MSI_FRAME: u8 = 13;
 #[cfg(target_arch = "aarch64")]
-pub const ACPI_APIC_GENERIC_REDISTRIBUTOR: u8 = 14;
+pub(crate) const ACPI_APIC_GENERIC_REDISTRIBUTOR: u8 = 14;
 #[cfg(target_arch = "aarch64")]
-pub const ACPI_APIC_GENERIC_TRANSLATOR: u8 = 15;
+pub(crate) const ACPI_APIC_GENERIC_TRANSLATOR: u8 = 15;
 #[cfg(target_arch = "riscv64")]
-pub const ACPI_RISC_V_IMSIC: u8 = 0x19;
+pub(crate) const ACPI_RISC_V_IMSIC: u8 = 0x19;
 #[cfg(target_arch = "riscv64")]
-pub const ACPI_RISC_V_APLIC: u8 = 0x1A;
+pub(crate) const ACPI_RISC_V_APLIC: u8 = 0x1A;
 
 #[repr(C, packed)]
 #[derive(Default, IntoBytes, Immutable, FromBytes)]
@@ -291,7 +291,7 @@ struct ViotPciRangeNode {
     _reserved2: [u8; 6],
 }
 
-pub fn create_dsdt_table(
+pub(crate) fn create_dsdt_table(
     device_manager: &DeviceManager,
     cpu_manager: &CpuManager,
     memory_manager: &MemoryManager,
@@ -1108,7 +1108,7 @@ fn create_acpi_tables_internal(
 }
 
 #[cfg(feature = "fw_cfg")]
-pub fn create_acpi_tables_for_fw_cfg(
+pub(crate) fn create_acpi_tables_for_fw_cfg(
     device_manager: &DeviceManager,
     cpu_manager: &CpuManager,
     memory_manager: &MemoryManager,
@@ -1164,7 +1164,7 @@ pub fn create_acpi_tables_for_fw_cfg(
         .map_err(Error::FwCfg)
 }
 
-pub fn create_acpi_tables(
+pub(crate) fn create_acpi_tables(
     guest_mem: &GuestMemoryMmap,
     device_manager: &DeviceManager,
     cpu_manager: &CpuManager,
@@ -1205,7 +1205,7 @@ pub fn create_acpi_tables(
 }
 
 #[cfg(feature = "tdx")]
-pub fn create_acpi_tables_tdx(
+pub(crate) fn create_acpi_tables_tdx(
     device_manager: &DeviceManager,
     cpu_manager: &CpuManager,
     memory_manager: &MemoryManager,

@@ -87,11 +87,7 @@ impl Landlock {
         Ok(Landlock { ruleset })
     }
 
-    pub(crate) fn add_rule(
-        &mut self,
-        path: &Path,
-        access: BitFlags<AccessFs>,
-    ) -> Result<(), LandlockError> {
+    fn add_rule(&mut self, path: &Path, access: BitFlags<AccessFs>) -> Result<(), LandlockError> {
         // path_beneath_rules in landlock crate handles file and directory access rules.
         // Incoming path/s are passed to path_beneath_rules, so that we don't
         // have to worry about the type of the path.

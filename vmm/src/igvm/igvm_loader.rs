@@ -65,7 +65,7 @@ const SNP_CPUID_LIMIT: u32 = 64;
 #[cfg(all(feature = "kvm", feature = "sev_snp"))]
 #[repr(C)]
 #[derive(Debug, Clone, PartialEq, Eq, IntoBytes, FromBytes)]
-pub struct SnpCpuidFunc {
+struct SnpCpuidFunc {
     pub eax_in: u32,
     pub ecx_in: u32,
     pub xcr0_in: u64,
@@ -80,7 +80,7 @@ pub struct SnpCpuidFunc {
 #[cfg(all(feature = "kvm", feature = "sev_snp"))]
 #[repr(C)]
 #[derive(Debug, Clone, FromBytes, IntoBytes)]
-pub struct SnpCpuidInfo {
+struct SnpCpuidInfo {
     pub count: u32,
     pub _reserved1: u32,
     pub _reserved2: u64,
@@ -221,7 +221,7 @@ fn import_parameter(
 ///
 /// Extract guest policy from the IGVM initialization headers.
 #[cfg(feature = "sev_snp")]
-pub fn extract_guest_policy(igvm_file: &IgvmFile) -> Option<igvm_defs::SnpPolicy> {
+pub(crate) fn extract_guest_policy(igvm_file: &IgvmFile) -> Option<igvm_defs::SnpPolicy> {
     for header in igvm_file.initializations() {
         if let IgvmInitializationHeader::GuestPolicy { policy, .. } = header
             && *policy != 0
@@ -236,7 +236,7 @@ pub fn extract_guest_policy(igvm_file: &IgvmFile) -> Option<igvm_defs::SnpPolicy
 /// Extract sev_features from the boot CPU (vp_index 0) VMSA.
 ///
 #[cfg(feature = "sev_snp")]
-pub fn extract_sev_features(igvm_file: &IgvmFile) -> u64 {
+pub(crate) fn extract_sev_features(igvm_file: &IgvmFile) -> u64 {
     for header in igvm_file.directives() {
         if let IgvmDirectiveHeader::SnpVpContext { vp_index, vmsa, .. } = header
             && *vp_index == 0
@@ -257,7 +257,7 @@ pub fn extract_sev_features(igvm_file: &IgvmFile) -> u64 {
 /// Hypervisor-specific code paths are gated by runtime type checks. A future
 /// refactor could split these into separate KVM/MSHV loader implementations.
 #[expect(clippy::needless_pass_by_value)]
-pub fn load_igvm(
+pub(crate) fn load_igvm(
     igvm_file: IgvmFile,
     memory_manager: Arc<Mutex<MemoryManager>>,
     cpu_manager: Arc<Mutex<CpuManager>>,

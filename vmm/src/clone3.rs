@@ -3,11 +3,11 @@
 
 use libc::{SYS_clone3, c_long, size_t, syscall};
 
-pub const CLONE_CLEAR_SIGHAND: u64 = 0x100000000;
+pub(crate) const CLONE_CLEAR_SIGHAND: u64 = 0x100000000;
 
 #[repr(C)]
 #[derive(Default)]
-pub struct clone_args {
+pub(crate) struct clone_args {
     pub flags: u64,
     pub pidfd: u64,
     pub child_tid: u64,
@@ -31,7 +31,7 @@ pub struct clone_args {
 ///   - Child: `0`
 /// - On error: `-1` and `errno` is set
 #[must_use]
-pub unsafe fn clone3(args: &mut clone_args, size: size_t) -> c_long {
+pub(crate) unsafe fn clone3(args: &mut clone_args, size: size_t) -> c_long {
     // SAFETY: parameters are assumed to be valid
     unsafe { syscall(SYS_clone3, args, size) }
 }

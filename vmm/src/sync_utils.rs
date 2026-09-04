@@ -11,7 +11,7 @@ use std::sync::{Condvar, Mutex};
 /// there, e.g. if one worker signals that an error occurred and thus cannot
 /// continue.
 #[derive(Debug)]
-pub struct Gate {
+pub(crate) struct Gate {
     /// True if the gate is open, false otherwise.
     open: Mutex<bool>,
     /// Used to notify waiting threads.
@@ -19,7 +19,7 @@ pub struct Gate {
 }
 
 impl Gate {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             open: Mutex::new(false),
             cv: Condvar::new(),
@@ -27,7 +27,7 @@ impl Gate {
     }
 
     /// Wait at the gate. Only blocks if the gate is not opened.
-    pub fn wait(&self) {
+    pub(crate) fn wait(&self) {
         let mut open = self.open.lock().unwrap();
         while !*open {
             open = self.cv.wait(open).unwrap();
@@ -35,7 +35,7 @@ impl Gate {
     }
 
     /// Open the gate, releasing all waiting threads.
-    pub fn open(&self) {
+    pub(crate) fn open(&self) {
         let mut open = self.open.lock().unwrap();
         *open = true;
         self.cv.notify_all();

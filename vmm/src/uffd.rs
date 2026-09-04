@@ -25,14 +25,14 @@ use crate::migration::transport::SocketStream;
 use crate::userfaultfd;
 
 #[repr(C)]
-pub(crate) struct UffdioApi {
+struct UffdioApi {
     pub api: u64,
     pub features: u64,
     pub ioctls: u64,
 }
 
 #[repr(C)]
-pub(crate) struct UffdioRegister {
+struct UffdioRegister {
     pub range_start: u64,
     pub range_len: u64,
     pub mode: u64,
@@ -40,7 +40,7 @@ pub(crate) struct UffdioRegister {
 }
 
 #[repr(C)]
-pub(crate) struct UffdioCopy {
+struct UffdioCopy {
     pub dst: u64,
     pub src: u64,
     pub len: u64,
@@ -49,7 +49,7 @@ pub(crate) struct UffdioCopy {
 }
 
 #[repr(C)]
-pub(crate) struct UffdioContinue {
+struct UffdioContinue {
     pub range_start: u64,
     pub range_len: u64,
     pub mode: u64,
@@ -234,19 +234,19 @@ pub(crate) struct UffdRange {
 }
 
 impl UffdRange {
-    pub fn num_pages(&self) -> u64 {
+    pub(crate) fn num_pages(&self) -> u64 {
         self.length.div_ceil(self.page_size)
     }
 
-    pub fn page_addr(&self, page_idx: u64) -> u64 {
+    pub(crate) fn page_addr(&self, page_idx: u64) -> u64 {
         self.host_addr + page_idx * self.page_size
     }
 
-    pub fn page_source_offset(&self, page_idx: u64) -> u64 {
+    pub(crate) fn page_source_offset(&self, page_idx: u64) -> u64 {
         self.source_offset + page_idx * self.page_size
     }
 
-    pub fn page_index_of(&self, addr: u64) -> Option<u64> {
+    pub(crate) fn page_index_of(&self, addr: u64) -> Option<u64> {
         let page_addr = addr & !(self.page_size - 1);
         (page_addr >= self.host_addr && page_addr < self.host_addr + self.length)
             .then(|| (page_addr - self.host_addr) / self.page_size)
@@ -280,7 +280,7 @@ pub(crate) struct FileUffdMemorySource {
 }
 
 impl FileUffdMemorySource {
-    pub fn new(file: File) -> Self {
+    pub(crate) fn new(file: File) -> Self {
         Self {
             file,
             buf: Vec::new(),
@@ -332,7 +332,7 @@ pub(crate) struct SocketUffdMemorySource {
 }
 
 impl SocketUffdMemorySource {
-    pub fn new(stream: SocketStream, shared_backing: bool) -> Self {
+    pub(crate) fn new(stream: SocketStream, shared_backing: bool) -> Self {
         Self {
             stream,
             shared_backing,

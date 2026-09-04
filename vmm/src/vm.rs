@@ -3915,7 +3915,7 @@ mod tests {
     }
 
     #[test]
-    pub fn test_vm() {
+    pub(crate) fn test_vm() {
         use hypervisor::VmExit;
         use vm_memory::{Address, GuestMemoryBackend, GuestMemoryRegion};
         // This example based on https://lwn.net/Articles/658511/
