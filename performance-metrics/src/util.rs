@@ -20,11 +20,11 @@ use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::tempfile::TempFile;
 
-pub const BLOCK_SIZE: u64 = 4096;
-pub const QCOW_CLUSTER_SIZE: u64 = 65536;
+pub(crate) const BLOCK_SIZE: u64 = 4096;
+pub(crate) const QCOW_CLUSTER_SIZE: u64 = 65536;
 
 /// Create a temporary file pre sized to hold `num_blocks` blocks.
-pub fn sized_tempfile(num_blocks: usize) -> TempFile {
+pub(crate) fn sized_tempfile(num_blocks: usize) -> TempFile {
     let tmp = TempFile::new().expect("failed to create tempfile");
     tmp.as_file()
         .set_len(BLOCK_SIZE * num_blocks as u64)
@@ -52,7 +52,7 @@ fn create_qcow_tempfile(num_clusters: usize) -> TempFile {
 
 /// Create a QCOW2 image with `num_clusters` allocated clusters opened
 /// via QcowDisk with synchronous backend.
-pub fn qcow_tempfile(num_clusters: usize) -> (TempFile, QcowDisk) {
+pub(crate) fn qcow_tempfile(num_clusters: usize) -> (TempFile, QcowDisk) {
     let tmp = create_qcow_tempfile(num_clusters);
     let disk = QcowDisk::new(
         tmp.as_file().try_clone().unwrap(),
@@ -67,7 +67,7 @@ pub fn qcow_tempfile(num_clusters: usize) -> (TempFile, QcowDisk) {
 
 /// Create a QCOW2 image with `num_clusters` allocated clusters opened
 /// via QcowDisk with io_uring backend.
-pub fn qcow_async_tempfile(num_clusters: usize) -> (TempFile, QcowDisk) {
+pub(crate) fn qcow_async_tempfile(num_clusters: usize) -> (TempFile, QcowDisk) {
     let tmp = create_qcow_tempfile(num_clusters);
     let disk = QcowDisk::new(tmp.as_file().try_clone().unwrap(), false, false, true, true)
         .expect("failed to open QCOW2 via QcowDisk");
@@ -75,7 +75,7 @@ pub fn qcow_async_tempfile(num_clusters: usize) -> (TempFile, QcowDisk) {
 }
 
 /// Drain `count` completions from a synchronous async_io backend.
-pub fn drain_completions(async_io: &mut dyn AsyncIo, count: usize) {
+pub(crate) fn drain_completions(async_io: &mut dyn AsyncIo, count: usize) {
     for _ in 0..count {
         async_io.next_completed_request();
     }
@@ -85,7 +85,7 @@ pub fn drain_completions(async_io: &mut dyn AsyncIo, count: usize) {
 ///
 /// Uses a Fisher-Yates shuffle seeded by `DefaultHasher` so the
 /// permutation is identical across runs.
-pub fn deterministic_permutation(n: usize) -> Vec<usize> {
+pub(crate) fn deterministic_permutation(n: usize) -> Vec<usize> {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 
@@ -103,7 +103,7 @@ pub fn deterministic_permutation(n: usize) -> Vec<usize> {
 ///
 /// The block microbenchmarks intentionally use this as a hot buffer to keep
 /// cache behavior close to the borrowed-iovec benchmarks they replaced.
-pub fn guest_memory_buffer(len: usize) -> Arc<GuestMemoryMmap> {
+pub(crate) fn guest_memory_buffer(len: usize) -> Arc<GuestMemoryMmap> {
     assert!(
         len <= u32::MAX as usize,
         "GuestMemoryTarget ranges are limited to u32 lengths"
@@ -128,7 +128,7 @@ fn prefault_guest_memory(mem: &Arc<GuestMemoryMmap>, total_len: usize) {
 }
 
 /// Create a target for the reusable benchmark guest-memory range.
-pub fn guest_memory_target(mem: &Arc<GuestMemoryMmap>, len: usize) -> GuestMemoryTarget {
+pub(crate) fn guest_memory_target(mem: &Arc<GuestMemoryMmap>, len: usize) -> GuestMemoryTarget {
     assert!(
         len <= u32::MAX as usize,
         "GuestMemoryTarget ranges are limited to u32 lengths"
@@ -139,14 +139,14 @@ pub fn guest_memory_target(mem: &Arc<GuestMemoryMmap>, len: usize) -> GuestMemor
 }
 
 /// Fill the reusable benchmark guest-memory range with one byte pattern.
-pub fn fill_guest_memory(mem: &Arc<GuestMemoryMmap>, len: usize, value: u8) {
+pub(crate) fn fill_guest_memory(mem: &Arc<GuestMemoryMmap>, len: usize, value: u8) {
     let buf = vec![value; len];
     mem.write_slice(&buf, GuestAddress(0))
         .expect("failed to initialize benchmark guest memory");
 }
 
 /// Submit `count` sequential read calls at `stride`-byte intervals.
-pub fn submit_reads(
+pub(crate) fn submit_reads(
     async_io: &mut dyn AsyncIo,
     mem: &Arc<GuestMemoryMmap>,
     count: usize,
@@ -162,7 +162,7 @@ pub fn submit_reads(
 }
 
 /// Submit `count` sequential write calls at `stride`-byte intervals.
-pub fn submit_writes(
+pub(crate) fn submit_writes(
     async_io: &mut dyn AsyncIo,
     mem: &Arc<GuestMemoryMmap>,
     count: usize,
@@ -179,7 +179,7 @@ pub fn submit_writes(
 
 /// Drain `count` completions from an asynchronous I/O backend that delivers
 /// results via eventfd notification (e.g. io_uring).
-pub fn drain_async_completions(async_io: &mut dyn AsyncIo, count: usize) {
+pub(crate) fn drain_async_completions(async_io: &mut dyn AsyncIo, count: usize) {
     let mut drained = 0usize;
     while drained < count {
         wait_for_eventfd(async_io.notifier());
@@ -199,7 +199,7 @@ fn create_empty_qcow_tempfile(num_clusters: usize) -> TempFile {
 }
 
 /// Empty QCOW2 opened via QcowDisk with synchronous backend.
-pub fn empty_qcow_tempfile(num_clusters: usize) -> (TempFile, QcowDisk) {
+pub(crate) fn empty_qcow_tempfile(num_clusters: usize) -> (TempFile, QcowDisk) {
     let tmp = create_empty_qcow_tempfile(num_clusters);
     let disk = QcowDisk::new(
         tmp.as_file().try_clone().unwrap(),
@@ -213,7 +213,7 @@ pub fn empty_qcow_tempfile(num_clusters: usize) -> (TempFile, QcowDisk) {
 }
 
 /// Empty QCOW2 opened via QcowDisk with io_uring backend.
-pub fn empty_qcow_async_tempfile(num_clusters: usize) -> (TempFile, QcowDisk) {
+pub(crate) fn empty_qcow_async_tempfile(num_clusters: usize) -> (TempFile, QcowDisk) {
     let tmp = create_empty_qcow_tempfile(num_clusters);
     let disk = QcowDisk::new(tmp.as_file().try_clone().unwrap(), false, false, true, true)
         .expect("failed to open QCOW2 via QcowDisk");
@@ -248,7 +248,7 @@ fn create_overlay_tempfiles(num_clusters: usize) -> (TempFile, TempFile) {
 }
 
 /// QCOW2 overlay with raw backing opened via QcowDisk with synchronous backend.
-pub fn qcow_overlay_tempfile(num_clusters: usize) -> (TempFile, TempFile, QcowDisk) {
+pub(crate) fn qcow_overlay_tempfile(num_clusters: usize) -> (TempFile, TempFile, QcowDisk) {
     let (backing, overlay) = create_overlay_tempfiles(num_clusters);
     let disk = QcowDisk::new(
         overlay.as_file().try_clone().unwrap(),
@@ -262,7 +262,7 @@ pub fn qcow_overlay_tempfile(num_clusters: usize) -> (TempFile, TempFile, QcowDi
 }
 
 /// QCOW2 overlay with raw backing opened via QcowDisk with io_uring backend.
-pub fn qcow_async_overlay_tempfile(num_clusters: usize) -> (TempFile, TempFile, QcowDisk) {
+pub(crate) fn qcow_async_overlay_tempfile(num_clusters: usize) -> (TempFile, TempFile, QcowDisk) {
     let (backing, overlay) = create_overlay_tempfiles(num_clusters);
     let disk = QcowDisk::new(
         overlay.as_file().try_clone().unwrap(),
@@ -315,7 +315,7 @@ fn create_compressed_qcow_tempfile(num_clusters: usize) -> TempFile {
 }
 
 /// Compressed QCOW2 opened via QcowDisk with synchronous backend.
-pub fn compressed_qcow_tempfile(num_clusters: usize) -> (TempFile, QcowDisk) {
+pub(crate) fn compressed_qcow_tempfile(num_clusters: usize) -> (TempFile, QcowDisk) {
     let tmp = create_compressed_qcow_tempfile(num_clusters);
     let path = tmp.as_path().to_str().unwrap().to_string();
     let disk = QcowDisk::new(
@@ -330,7 +330,7 @@ pub fn compressed_qcow_tempfile(num_clusters: usize) -> (TempFile, QcowDisk) {
 }
 
 /// Compressed QCOW2 opened via QcowDisk with io_uring backend.
-pub fn compressed_qcow_async_tempfile(num_clusters: usize) -> (TempFile, QcowDisk) {
+pub(crate) fn compressed_qcow_async_tempfile(num_clusters: usize) -> (TempFile, QcowDisk) {
     let tmp = create_compressed_qcow_tempfile(num_clusters);
     let path = tmp.as_path().to_str().unwrap().to_string();
     let disk = QcowDisk::new(
@@ -346,7 +346,7 @@ pub fn compressed_qcow_async_tempfile(num_clusters: usize) -> (TempFile, QcowDis
 
 /// Number of data clusters covered by a single L2 table (64 KiB cluster,
 /// 8-byte entries -> 8192 entries per L2 table).
-pub const L2_ENTRIES_PER_TABLE: usize = QCOW_CLUSTER_SIZE as usize / 8;
+pub(crate) const L2_ENTRIES_PER_TABLE: usize = QCOW_CLUSTER_SIZE as usize / 8;
 
 /// Create a sparse QCOW2 image with one allocated cluster per L2 table,
 /// spanning `num_l2_tables` L2 tables.
@@ -363,7 +363,7 @@ fn create_sparse_qcow_tempfile(num_l2_tables: usize) -> TempFile {
 }
 
 /// Sparse QCOW2 opened via QcowDisk with synchronous backend.
-pub fn sparse_qcow_tempfile(num_l2_tables: usize) -> (TempFile, QcowDisk) {
+pub(crate) fn sparse_qcow_tempfile(num_l2_tables: usize) -> (TempFile, QcowDisk) {
     let tmp = create_sparse_qcow_tempfile(num_l2_tables);
     let disk = QcowDisk::new(
         tmp.as_file().try_clone().unwrap(),
@@ -377,7 +377,7 @@ pub fn sparse_qcow_tempfile(num_l2_tables: usize) -> (TempFile, QcowDisk) {
 }
 
 /// Sparse QCOW2 opened via QcowDisk with io_uring backend.
-pub fn sparse_qcow_async_tempfile(num_l2_tables: usize) -> (TempFile, QcowDisk) {
+pub(crate) fn sparse_qcow_async_tempfile(num_l2_tables: usize) -> (TempFile, QcowDisk) {
     let tmp = create_sparse_qcow_tempfile(num_l2_tables);
     let disk = QcowDisk::new(tmp.as_file().try_clone().unwrap(), false, false, true, true)
         .expect("failed to open QCOW2 via QcowDisk");
@@ -385,7 +385,7 @@ pub fn sparse_qcow_async_tempfile(num_l2_tables: usize) -> (TempFile, QcowDisk) 
 }
 
 /// Spin and wait until the given eventfd becomes readable.
-pub fn wait_for_eventfd(notifier: &EventFd) {
+pub(crate) fn wait_for_eventfd(notifier: &EventFd) {
     loop {
         match notifier.read() {
             Ok(_) => return,
