@@ -42,10 +42,10 @@ const PL031_ID: [u8; 8] = [0x31, 0x10, 0x14, 0x00, 0x0d, 0xf0, 0x05, 0xb1];
 const AMBA_ID_LOW: u64 = 0xFE0;
 const AMBA_ID_HIGH: u64 = 0x1000;
 /// Constant to convert seconds to nanoseconds.
-pub const NANOS_PER_SECOND: u64 = 1_000_000_000;
+pub(super) const NANOS_PER_SECOND: u64 = 1_000_000_000;
 
 #[derive(Debug, Error)]
-pub enum Error {
+pub(super) enum Error {
     #[error("Bad Write Offset: {0}")]
     BadWriteOffset(u64),
 }
@@ -80,7 +80,7 @@ impl From<ClockType> for libc::clockid_t {
 /// # Arguments
 ///
 /// * `clock_type` - Identifier of the Linux Kernel clock on which to act.
-pub fn get_time(clock_type: ClockType) -> u64 {
+pub(super) fn get_time(clock_type: ClockType) -> u64 {
     let mut time_struct = libc::timespec {
         tv_sec: 0,
         tv_nsec: 0,
@@ -96,7 +96,7 @@ pub fn get_time(clock_type: ClockType) -> u64 {
 /// # Arguments
 ///
 /// * `value` - Timestamp in seconds.
-pub fn seconds_to_nanoseconds(value: i64) -> Option<i64> {
+pub(super) fn seconds_to_nanoseconds(value: i64) -> Option<i64> {
     value.checked_mul(NANOS_PER_SECOND as i64)
 }
 
