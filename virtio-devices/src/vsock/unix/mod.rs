@@ -22,13 +22,13 @@ use thiserror::Error;
 
 mod defs {
     /// Maximum number of established connections that we can handle.
-    pub const MAX_CONNECTIONS: usize = 1023;
+    pub(super) const MAX_CONNECTIONS: usize = 1023;
 
     /// Size of the muxer RX packet queue.
-    pub const MUXER_RXQ_SIZE: usize = 256;
+    pub(super) const MUXER_RXQ_SIZE: usize = 256;
 
     /// Size of the muxer connection kill queue.
-    pub const MUXER_KILLQ_SIZE: usize = 128;
+    pub(super) const MUXER_KILLQ_SIZE: usize = 128;
 }
 
 #[derive(Error, Debug)]

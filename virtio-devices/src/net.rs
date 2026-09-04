@@ -1147,7 +1147,7 @@ pub(crate) struct VirtioNetGuestAnnounceOps {
 }
 
 impl VirtioNetGuestAnnounceOps {
-    pub fn new(
+    pub(crate) fn new(
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         guest_announce_negotiated: bool,
         announce: &AnnouncementState,
@@ -1189,7 +1189,7 @@ struct VirtioNetHostAnnounceOps {
 }
 
 impl VirtioNetHostAnnounceOps {
-    pub fn new(rarp_announce: Option<[u8; ETH_FRAME_LEN]>, taps: Box<[Tap]>) -> Self {
+    pub(crate) fn new(rarp_announce: Option<[u8; ETH_FRAME_LEN]>, taps: Box<[Tap]>) -> Self {
         Self {
             rarp_announce,
             taps,
