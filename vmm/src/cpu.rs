@@ -68,7 +68,7 @@ use libc::{c_void, siginfo_t};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use linux_loader::elf::Elf64_Nhdr;
 use log::{debug, error, info, warn};
-use seccompiler::{SeccompAction, apply_filter};
+use seccompiler::{BpfProgram, SeccompAction, apply_filter};
 use thiserror::Error;
 use tracer::trace_scoped;
 use vm_device::BusDevice;
@@ -1189,6 +1189,7 @@ impl CpuManager {
         vcpu: Arc<Mutex<Vcpu>>,
         vcpu_id: u32,
         vcpu_thread_barrier: Arc<Barrier>,
+        vcpu_seccomp_filter: Arc<BpfProgram>,
         inserting: bool,
     ) -> Result<()> {
         let reset_evt = self.reset_evt.try_clone().map_err(Error::EventFdClone)?;
@@ -1233,14 +1234,6 @@ impl CpuManager {
 
         let core_scheduling = self.config.core_scheduling;
         let core_scheduling_group_leader = self.core_scheduling_group_leader.clone();
-
-        // Retrieve seccomp filter for vcpu thread
-        let vcpu_seccomp_filter = get_seccomp_filter(
-            &self.seccomp_action,
-            Thread::Vcpu,
-            Some(self.hypervisor.hypervisor_type()),
-        )
-        .map_err(Error::CreateSeccompFilter)?;
 
         #[cfg(target_arch = "x86_64")]
         let interrupt_controller_clone = self.interrupt_controller.as_ref().cloned();
@@ -1519,9 +1512,9 @@ impl CpuManager {
             return Err(Error::DesiredVCpuCountExceedsMax);
         }
 
-        let vcpu_thread_barrier = Arc::new(Barrier::new(
-            (desired_vcpus - self.present_vcpus() + 1) as usize,
-        ));
+        let present_vcpus = self.present_vcpus();
+        let vcpu_thread_barrier =
+            Arc::new(Barrier::new((desired_vcpus - present_vcpus + 1) as usize));
 
         if let Some(paused) = paused {
             self.vcpus_pause_signalled.store(paused, Ordering::SeqCst);
@@ -1531,14 +1524,31 @@ impl CpuManager {
             "Starting vCPUs: desired = {}, allocated = {}, present = {}, paused = {}",
             desired_vcpus,
             self.vcpus.len(),
-            self.present_vcpus(),
+            present_vcpus,
             self.vcpus_pause_signalled.load(Ordering::SeqCst)
         );
 
-        // This reuses any inactive vCPUs as well as any that were newly created
-        for vcpu_id in self.present_vcpus()..desired_vcpus {
-            let vcpu = Arc::clone(&self.vcpus[vcpu_id as usize]);
-            self.start_vcpu(vcpu, vcpu_id, vcpu_thread_barrier.clone(), inserting)?;
+        if present_vcpus < desired_vcpus {
+            let vcpu_seccomp_filter = Arc::new(
+                get_seccomp_filter(
+                    &self.seccomp_action,
+                    Thread::Vcpu,
+                    Some(self.hypervisor.hypervisor_type()),
+                )
+                .map_err(Error::CreateSeccompFilter)?,
+            );
+
+            // This reuses any inactive vCPUs as well as any that were newly created
+            for vcpu_id in present_vcpus..desired_vcpus {
+                let vcpu = Arc::clone(&self.vcpus[vcpu_id as usize]);
+                self.start_vcpu(
+                    vcpu,
+                    vcpu_id,
+                    vcpu_thread_barrier.clone(),
+                    Arc::clone(&vcpu_seccomp_filter),
+                    inserting,
+                )?;
+            }
         }
 
         // Unblock all CPU threads.
