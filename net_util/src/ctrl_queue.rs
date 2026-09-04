@@ -53,7 +53,7 @@ type Result<T> = result::Result<T, Error>;
 
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct ControlHeader {
+struct ControlHeader {
     pub class: u8,
     pub cmd: u8,
 }
