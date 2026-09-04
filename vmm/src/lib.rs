@@ -1610,6 +1610,10 @@ impl Vmm {
             Request::start(),
             MigratableError::MigrateSend(anyhow!("Error starting migration")),
         )?;
+
+        // Connection and handshake established
+        event!("vm", "migration-started");
+
         debug!("Using migration protocol {CURRENT_PROTOCOL_VERSION}");
 
         // Send config
@@ -3210,8 +3214,7 @@ impl RequestHandler for Vmm {
         // Accept the connection and get the socket
         let mut socket = listener.accept()?;
 
-        event!("vm", "migration-receive-started");
-
+        event!("vm", "migration-receive-starting");
         let mut state = ReceiveMigrationState::Established;
 
         while !state.finished() {
@@ -3250,6 +3253,11 @@ impl RequestHandler for Vmm {
             state = new_state;
             assert_eq!(response.length(), 0);
             response.write_to(&mut socket)?;
+
+            // Connection and handshake established
+            if matches!(state, ReceiveMigrationState::Started) {
+                event!("vm", "migration-receive-started");
+            }
         }
 
         match state {
