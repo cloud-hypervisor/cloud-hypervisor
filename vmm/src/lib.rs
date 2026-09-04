@@ -1492,10 +1492,11 @@ impl Vmm {
     ///
     /// 1. **No dirty pages remain** – the current iteration would transfer zero
     ///    bytes.
-    /// 2. **Downtime budget is met** – the estimated downtime for the final
+    /// 1. **Postponed lifecycle event** – no need to transfer memory anymore
+    /// 1. **Downtime budget is met** – the estimated downtime for the final
     ///    (paused) iteration is within the caller-specified
     ///    [`VmSendMigrationData::downtime`] budget.
-    /// 3. **Timeout** – the precopy phase has been running for at least
+    /// 1. **Timeout** – the precopy phase has been running for at least
     ///    [`VmSendMigrationData::timeout`]. The outcome depends on
     ///    [`VmSendMigrationData::timeout_strategy`]:
     ///    - [`TimeoutStrategy::Cancel`] – returns
@@ -1515,9 +1516,18 @@ impl Vmm {
     fn is_precopy_converged(
         ctx: &MemoryMigrationContext,
         send_data_migration: &VmSendMigrationData,
+        postponed_lifecycle_event: &OnceLock<PostponedLifecycleEvent>,
     ) -> result::Result<bool, MigratableError> {
         if ctx.current_iteration_total_bytes == 0 {
             debug!("Precopy: No more memory to transfer");
+            return Ok(true);
+        }
+
+        // Guest reboot or shutdown signaled? We do not need the memory anymore.
+        if let Some(event) = postponed_lifecycle_event.get() {
+            info!(
+                "Lifecycle event postponed during migration ({event:?}), switching to downtime phase early"
+            );
             return Ok(true);
         }
 
@@ -1589,21 +1599,28 @@ impl Vmm {
         send_data_migration: &VmSendMigrationData,
         mem_send: &mut SendAdditionalConnections,
         ctx: &mut OngoingMigrationContext,
+        postponed_lifecycle_event: &OnceLock<PostponedLifecycleEvent>,
     ) -> result::Result<(), MigratableError> {
         let mut mem_ctx = MemoryMigrationContext::new();
 
         vm.start_dirty_log()?;
-        let remaining = Self::do_memory_iterations(
+        let mut remaining = Self::do_memory_iterations(
             vm,
             socket,
             &mut mem_ctx,
             // Bind parameters to not pass them to deeper levels.
-            |ctx| Self::is_precopy_converged(ctx, send_data_migration),
+            |ctx| Self::is_precopy_converged(ctx, send_data_migration, postponed_lifecycle_event),
             mem_send,
         )?;
         let downtime_begin = Instant::now();
         if vm.get_state() != VmState::Paused {
             vm.pause()?;
+        }
+
+        // Performance shortcut: no need to send memory (drain dirty log)
+        if postponed_lifecycle_event.get().is_some() {
+            let _ = vm.dirty_log()?;
+            remaining = MemoryRangeTable::default();
         }
 
         // Send last batch of dirty pages: final iteration
@@ -1754,6 +1771,7 @@ impl Vmm {
                 send_data_migration,
                 &mut mem_send,
                 &mut ctx,
+                postponed_lifecycle_event,
             )
             .inspect_err(|_| {
                 if let Err(e) = mem_send.cleanup_workers() {
