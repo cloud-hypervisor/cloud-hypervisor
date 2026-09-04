@@ -14,7 +14,7 @@ use jiff::tz::TimeZone;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum Error {
+pub(crate) enum Error {
     #[error("Unterminated '{{' in format string")]
     UnterminatedBrace,
     #[error("Unmatched '}}' in format string")]
@@ -180,10 +180,10 @@ fn parse_format(fmt: &str) -> Result<Vec<Token>, Error> {
     Ok(tokens)
 }
 
-pub const DEFAULT_FORMAT: &str =
+pub(crate) const DEFAULT_FORMAT: &str =
     "cloud-hypervisor: {boottime}s: <{thread}> {level}:{location} -- {msg}";
 
-pub struct Logger {
+pub(crate) struct Logger {
     output: Mutex<Box<dyn Write + Send>>,
     start: Instant,
     pid: u32,
@@ -194,7 +194,7 @@ pub struct Logger {
 }
 
 impl Logger {
-    pub fn new(output: Box<dyn Write + Send>, format: &str) -> Result<Self, Error> {
+    pub(crate) fn new(output: Box<dyn Write + Send>, format: &str) -> Result<Self, Error> {
         Ok(Self {
             output: Mutex::new(output),
             start: Instant::now(),
