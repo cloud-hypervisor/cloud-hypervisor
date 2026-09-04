@@ -43,6 +43,7 @@ mod common_parallel {
     use std::num::NonZeroU32;
     use std::process::Command;
     use std::sync::mpsc;
+    use std::time::Instant;
 
     use test_infra::GuestFactory;
     use vmm::api::{BalloonStatsResponse, TimeoutStrategy};
@@ -7078,6 +7079,40 @@ mod common_parallel {
         connections: NonZeroU32,
         postcopy: bool,
     ) -> bool {
+        dispatch_live_migration_tcp_with_flags(
+            src_api_socket,
+            dest_api_socket,
+            dest_event_path,
+            connections,
+            postcopy,
+        )
+        .is_some_and(|receive_migration| {
+            wait_for_migration_command(receive_migration, "receive_migration")
+        })
+    }
+
+    fn dispatch_live_migration_tcp(
+        src_api_socket: &str,
+        dest_api_socket: &str,
+        dest_event_path: &str,
+        connections: NonZeroU32,
+    ) -> Option<Child> {
+        dispatch_live_migration_tcp_with_flags(
+            src_api_socket,
+            dest_api_socket,
+            dest_event_path,
+            connections,
+            false,
+        )
+    }
+
+    fn dispatch_live_migration_tcp_with_flags(
+        src_api_socket: &str,
+        dest_api_socket: &str,
+        dest_event_path: &str,
+        connections: NonZeroU32,
+        postcopy: bool,
+    ) -> Option<Child> {
         // Get an available TCP port
         let migration_port = get_available_port();
         let host_ip = "127.0.0.1";
@@ -7085,7 +7120,7 @@ mod common_parallel {
         let receive_arg = format!("receiver_url=tcp:0.0.0.0:{migration_port}");
 
         // Start the 'receive-migration' command on the destination
-        let receive_migration = Command::new(clh_command("ch-remote"))
+        let mut receive_migration = Command::new(clh_command("ch-remote"))
             .args([
                 &format!("--api-socket={dest_api_socket}"),
                 "receive-migration",
@@ -7097,13 +7132,13 @@ mod common_parallel {
             .spawn()
             .unwrap();
 
-        let expected_events = [&MetaEvent {
+        let latest_events = [&MetaEvent {
             event: "migration-receive-ready".to_string(),
             device_id: None,
         }];
-        assert!(wait_for_sequential_events(
+        assert!(wait_for_latest_events_exact(
             Duration::from_secs(30),
-            &expected_events,
+            &latest_events,
             dest_event_path
         ));
 
@@ -7129,9 +7164,14 @@ mod common_parallel {
             .unwrap();
 
         let send_success = wait_for_migration_command(send_migration, "send_migration");
-        let receive_success = wait_for_migration_command(receive_migration, "receive_migration");
 
-        send_success && receive_success
+        if send_success {
+            Some(receive_migration)
+        } else {
+            let _ = receive_migration.kill();
+            let _ = receive_migration.wait();
+            None
+        }
     }
 
     /// Helper to wait for `{send,receive}-migration` to exit.
@@ -7513,6 +7553,10 @@ mod common_parallel {
 
                     let expected_events = [
                         &MetaEvent {
+                            event: "migration-starting".to_string(),
+                            device_id: None,
+                        },
+                        &MetaEvent {
                             event: "migration-started".to_string(),
                             device_id: None,
                         },
@@ -7543,6 +7587,10 @@ mod common_parallel {
                     );
 
                     let expected_events = [
+                        &MetaEvent {
+                            event: "migration-starting".to_string(),
+                            device_id: None,
+                        },
                         &MetaEvent {
                             event: "migration-started".to_string(),
                             device_id: None,
@@ -7625,6 +7673,305 @@ mod common_parallel {
     #[test]
     fn test_live_migration_tcp_timeout_ignore() {
         _test_live_migration_tcp_timeout(TimeoutStrategy::Ignore);
+    }
+
+    #[derive(Clone, Copy)]
+    enum TestCancellationStrategy {
+        SingleConnectionImmediate,
+        SingleConnectionAfterPrecopy,
+        MultiConnectionImmediate,
+        MultiConnectionAfterPrecopy,
+    }
+
+    /// Starts a VM, starts a TCP migration, cancels it, and migrates again.
+    fn _test_live_migration_tcp_cancellation(strategy: TestCancellationStrategy) {
+        let connections = match strategy {
+            TestCancellationStrategy::SingleConnectionImmediate
+            | TestCancellationStrategy::SingleConnectionAfterPrecopy => NonZeroU32::new(1).unwrap(),
+            TestCancellationStrategy::MultiConnectionImmediate
+            | TestCancellationStrategy::MultiConnectionAfterPrecopy => NonZeroU32::new(4).unwrap(),
+        };
+
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+        let net_id = "net123";
+        let net_params = format!(
+            "id={},tap=,mac={},ip={},mask=255.255.255.128",
+            net_id, guest.network.guest_mac0, guest.network.host_ip0
+        );
+        let memory_param: &[&str] = &["--memory", "size=1500M,shared=on"];
+        let boot_vcpus = 4;
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
+        let src_event_path = format!("{event_path}.src");
+        let dest_event_path = format!("{event_path}.dst");
+
+        // Start the source VMM & boot the VM.
+        let src_vm_path = clh_command("cloud-hypervisor");
+        let src_api_socket = temp_api_path(&guest.tmp_dir);
+        let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
+
+        src_vm_cmd
+            .args(["--cpus", format!("boot={boot_vcpus}").as_str()])
+            .args(memory_param)
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .args(["--net", net_params.as_str()])
+            .args(["--api-socket", &src_api_socket])
+            .args(["--event-monitor", format!("path={src_event_path}").as_str()])
+            .capture_output();
+
+        let mut src_child = src_vm_cmd.spawn().unwrap();
+
+        // Start the destination VMM.
+        let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
+        dest_api_socket.push_str(".dest");
+
+        let mut dest_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &dest_api_socket])
+            .args([
+                "--event-monitor",
+                format!("path={dest_event_path}").as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        // Start TCP live migration.
+        let mut receive_migration = None;
+        let r = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            guest.wait_vm_boot().unwrap();
+
+            // Ensure the source VM is running normally before migration.
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
+
+            start_stress_in_vm(&guest);
+
+            receive_migration = Some(
+                dispatch_live_migration_tcp(
+                    &src_api_socket,
+                    &dest_api_socket,
+                    &dest_event_path,
+                    connections,
+                )
+                .expect("Unsuccessful command: 'send-migration'."),
+            );
+        }));
+
+        if r.is_err() {
+            if let Some(mut receive_migration) = receive_migration.take() {
+                let _ = receive_migration.kill();
+                let _ = receive_migration.wait();
+            }
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Error occurred during live-migration",
+            );
+        }
+
+        // Cancel the ongoing migration and verify the source recovers, then
+        // perform a follow-up migration that must succeed.
+        let r = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            let mut expected_events = vec![
+                // This event is guaranteed to be fired when the send-migration
+                // API call returned. It is the earliest time we can cancel.
+                MetaEvent {
+                    event: "migration-starting".to_string(),
+                    device_id: None,
+                },
+            ];
+
+            match strategy {
+                TestCancellationStrategy::SingleConnectionAfterPrecopy
+                | TestCancellationStrategy::MultiConnectionAfterPrecopy => {
+                    expected_events.push(MetaEvent {
+                        event: "migration-memory-iteration".to_string(),
+                        device_id: None,
+                    });
+                }
+                _ => {}
+            }
+
+            assert!(wait_for_sequential_events(
+                Duration::from_secs(30),
+                expected_events.iter().collect::<Vec<_>>().as_slice(),
+                &src_event_path,
+            ));
+
+            // Cancel the migration on the source side.
+            let cancel_begin = Instant::now();
+            assert!(remote_command(&src_api_socket, "cancel-migration", None));
+
+            let expected_events = [&MetaEvent {
+                event: "migration-cancelled".to_string(),
+                device_id: None,
+            }];
+            assert!(wait_for_sequential_events(
+                Duration::from_secs(30),
+                &expected_events,
+                &src_event_path,
+            ));
+            let cancel_ack_duration = cancel_begin.elapsed();
+            assert!(
+                cancel_ack_duration < Duration::from_secs(2),
+                "Migration cancellation was only acknowledged after {cancel_ack_duration:?}"
+            );
+
+            // The destination aborts once the source tears down the migration
+            // connections. Waiting for the failure also ensures the
+            // destination VMM is ready for another migration.
+            let receive_status = receive_migration
+                .take()
+                .unwrap()
+                .wait_timeout(Duration::from_secs(60))
+                .unwrap();
+            assert!(
+                receive_status.is_some_and(|status| !status.success()),
+                "'receive-migration' should have failed after the cancellation: {receive_status:?}"
+            );
+
+            // The source VMM must still be alive.
+            assert!(
+                src_child.try_wait().unwrap().is_none(),
+                "Source VMM exited after migration cancellation"
+            );
+
+            // The guest must still be reachable and healthy on the source side.
+            guest.wait_for_ssh(Duration::from_secs(10)).unwrap();
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
+
+            // Stop the stress workload so the follow-up migration converges.
+            guest.ssh_command("pkill -f 'stress --vm'").unwrap();
+
+            // The follow-up migration must succeed.
+            assert!(
+                start_live_migration_tcp(
+                    &src_api_socket,
+                    &dest_api_socket,
+                    &dest_event_path,
+                    connections,
+                ),
+                "Unsuccessful command: 'send-migration' or 'receive-migration'."
+            );
+
+            // The source event log must show the cancelled migration followed
+            // by the successful one.
+            let expected_events = [
+                &MetaEvent {
+                    event: "migration-started".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "migration-cancelled".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "migration-started".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "migration-finished".to_string(),
+                    device_id: None,
+                },
+            ];
+            assert!(wait_for_sequential_events(
+                Duration::from_secs(30),
+                &expected_events,
+                &src_event_path,
+            ));
+        }));
+
+        if let Some(mut receive_migration) = receive_migration.take() {
+            let _ = receive_migration.kill();
+            let _ = receive_migration.wait();
+        }
+
+        if r.is_err() {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Error occurred while cancelling live-migration",
+            );
+        }
+
+        // After the successful follow-up migration, the source VMM terminates
+        // on its own.
+        let src_exited_ok = wait_until(Duration::from_secs(30), || {
+            matches!(src_child.try_wait(), Ok(Some(_)))
+        }) && src_child.try_wait().unwrap().is_some_and(|s| s.success());
+        if !src_exited_ok {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Source VM was not terminated successfully.",
+            );
+        }
+
+        let src_output = src_child.wait_with_output().unwrap();
+
+        // "Migration cancelled" is logged exclusively when the migration
+        // worker fails with `MigratableError::Cancelled`.
+        let r = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            let expected_log = "Migration cancelled";
+            assert!(
+                String::from_utf8_lossy(&src_output.stderr).contains(expected_log),
+                "Source VMM log does not contain '{expected_log}'"
+            );
+            // This message is only permitted for migrations that really failed.
+            let unexpected_log = "Migration failed:";
+            assert!(
+                !String::from_utf8_lossy(&src_output.stderr).contains(unexpected_log),
+                "Source VMM log contains '{unexpected_log}'"
+            );
+        }));
+        if r.is_err() {
+            let _ = dest_child.kill();
+            let _ = dest_child.wait();
+        }
+        handle_child_output(r, &src_output);
+
+        // After the follow-up live migration, ensure the destination VM is
+        // running normally.
+        let r = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
+        }));
+
+        // Clean up the destination VM and ensure it terminates properly.
+        let _ = dest_child.kill();
+        let dest_output = dest_child.wait_with_output().unwrap();
+        handle_child_output(r, &dest_output);
+    }
+
+    #[test]
+    fn test_live_migration_tcp_cancel_immediately() {
+        _test_live_migration_tcp_cancellation(TestCancellationStrategy::SingleConnectionImmediate);
+    }
+
+    #[test]
+    fn test_live_migration_tcp_cancel_immediately_parallel_connections() {
+        _test_live_migration_tcp_cancellation(TestCancellationStrategy::MultiConnectionImmediate);
+    }
+
+    #[test]
+    fn test_live_migration_tcp_cancel_during_precopy() {
+        _test_live_migration_tcp_cancellation(
+            TestCancellationStrategy::SingleConnectionAfterPrecopy,
+        );
+    }
+
+    #[test]
+    fn test_live_migration_tcp_cancel_during_precopy_parallel_connections() {
+        _test_live_migration_tcp_cancellation(
+            TestCancellationStrategy::MultiConnectionAfterPrecopy,
+        );
     }
 
     // TODO: Add test of live upgrade paused vm after cloud-hypervisor-static

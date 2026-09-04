@@ -58,6 +58,7 @@ use crate::device_manager::DeviceManager;
 use crate::landlock::Landlock;
 use crate::locked_unix_listener::LockedUnixListener;
 use crate::memory_manager::{MemoryManager, MemoryRangePolicy};
+use crate::migration::cancel::CancelContextReceiver;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::migration::get_vm_snapshot;
 use crate::migration::transport::{
@@ -1047,11 +1048,6 @@ impl Vmm {
             Ok(memory_files)
         };
 
-        if req.command() == Command::Abandon {
-            info!("Abandon Command Received");
-            return Ok(Aborted);
-        }
-
         let state_name = state.variant_name();
         match state {
             Established => match req.command() {
@@ -1418,6 +1414,7 @@ impl Vmm {
         ctx: &mut MemoryMigrationContext,
         is_converged: impl Fn(&MemoryMigrationContext) -> result::Result<bool, MigratableError>,
         mem_send: &mut SendAdditionalConnections,
+        cancel_ctx: &CancelContextReceiver,
     ) -> result::Result<MemoryRangeTable /* remaining */, MigratableError> {
         loop {
             let iteration_begin = Instant::now();
@@ -1437,7 +1434,7 @@ impl Vmm {
 
             // Send the current dirty pages
             let transfer_begin = Instant::now();
-            mem_send.send_memory(iteration_table, socket)?;
+            mem_send.send_memory(iteration_table, socket, cancel_ctx)?;
             let transfer_duration = transfer_begin.elapsed();
             ctx.update_metrics_after_transfer(transfer_begin, transfer_duration);
 
@@ -1564,6 +1561,7 @@ impl Vmm {
         send_data_migration: &VmSendMigrationData,
         mem_send: &mut SendAdditionalConnections,
         ctx: &mut OngoingMigrationContext,
+        cancel_ctx: &CancelContextReceiver,
     ) -> result::Result<(), MigratableError> {
         let mut mem_ctx = MemoryMigrationContext::new();
 
@@ -1575,6 +1573,7 @@ impl Vmm {
             // We bind send_data_migration to the callback
             |ctx| Self::is_precopy_converged(ctx, send_data_migration),
             mem_send,
+            cancel_ctx,
         )?;
         let downtime_begin = Instant::now();
         if vm.get_state() != VmState::Paused {
@@ -1590,7 +1589,7 @@ impl Vmm {
 
             mem_ctx.update_metrics_before_transfer(iteration_begin, &final_table);
             let transfer_begin = Instant::now();
-            mem_send.send_memory(final_table, socket)?;
+            mem_send.send_memory(final_table, socket, cancel_ctx)?;
             let transfer_duration = transfer_begin.elapsed();
             mem_ctx.update_metrics_after_transfer(transfer_begin, transfer_duration);
             mem_ctx.iteration += 1;
@@ -1614,6 +1613,7 @@ impl Vmm {
         send_data_migration: &VmSendMigrationData,
         initial_vm_state: VmState,
         seccomp_filters: &MigrationSeccompFilters,
+        cancel_ctx: &CancelContextReceiver,
     ) -> result::Result<(), MigratableError> {
         // State machine that is updated with more context as we progress.
         let mut ctx = OngoingMigrationContext::new();
@@ -1630,6 +1630,10 @@ impl Vmm {
             Request::start(),
             MigratableError::MigrateSend(anyhow!("Error starting migration")),
         )?;
+
+        // Connection established
+        event!("vm", "migration-started");
+
         debug!("Using migration protocol {CURRENT_PROTOCOL_VERSION}");
 
         // Send config
@@ -1720,6 +1724,7 @@ impl Vmm {
                 send_data_migration.tls_dir.as_deref(),
                 &vm.guest_memory(),
                 &seccomp_filters.tcp_worker,
+                cancel_ctx,
             )?;
 
             Self::do_memory_migration(
@@ -1728,6 +1733,7 @@ impl Vmm {
                 send_data_migration,
                 &mut mem_send,
                 &mut ctx,
+                cancel_ctx,
             )
             .inspect_err(|_| {
                 if let Err(e) = mem_send.cleanup_workers() {
@@ -1738,6 +1744,11 @@ impl Vmm {
 
             mem_send.cleanup_workers()?;
         }
+
+        // Final cancellation check before releasing the disk locks. After this
+        // point, they currently cannot be reacquired.
+        cancel_ctx.ok_or_cancelled()?;
+        cancel_ctx.prevent_cancellation();
 
         // We release the locks early to enable locking them on the destination host.
         // The VM is already stopped.
@@ -1783,7 +1794,12 @@ impl Vmm {
                 && !matches!(send_data_migration.memory_mode, MigrationMode::Postcopy)
             {
                 let memory_ranges = vm.dirty_log()?;
-                transport::send_memory_ranges(&vm.guest_memory(), &memory_ranges, &mut socket)?;
+                transport::send_memory_ranges(
+                    &vm.guest_memory(),
+                    &memory_ranges,
+                    &mut socket,
+                    cancel_ctx,
+                )?;
             }
             Ok(snapshot)
         })?;
@@ -1907,11 +1923,6 @@ impl Vmm {
                     socket
                         .write_all(&buf[..len])
                         .map_err(MigratableError::MigrateSocket)?;
-                }
-                Command::Abandon => {
-                    Response::ok().write_to(&mut socket)?;
-                    info!("Postcopy: received Abandon, exiting serve loop");
-                    return Ok(());
                 }
                 c => {
                     return Err(MigratableError::MigrateSend(anyhow!(
@@ -2107,6 +2118,10 @@ impl Vmm {
                 if let Err(e) = self.exit_evt.write(1) {
                     error!("Failed exiting the VMM after migration: {e}");
                 }
+            }
+            Err(MigratableError::Cancelled) => {
+                error!("Migration cancelled");
+                try_resume_vm_after_failed_migration(vm);
             }
             Err(e) => {
                 error!(
@@ -3439,6 +3454,25 @@ impl RequestHandler for Vmm {
                 Err(MigratableError::MigrateSend(e.spawn_error.into()))
             }
         }
+    }
+
+    /// Tries to cancel the currently active migration.
+    ///
+    /// Determining the outcome requires external observation.
+    fn vm_cancel_migration(&mut self) -> result::Result<(), MigratableError> {
+        let VmOwnership::Migration {
+            migration_worker_handle,
+            ..
+        } = &self.vm
+        else {
+            return Err(MigratableError::CancelMigration(anyhow!(
+                "There is no ongoing migration"
+            )));
+        };
+
+        migration_worker_handle.try_cancel_migration();
+
+        Ok(())
     }
 }
 

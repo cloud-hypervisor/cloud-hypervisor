@@ -573,6 +573,21 @@ paths:
         500:
           description: The VM migration could not be sent.
 
+  /vm.cancel-migration:
+    put:
+      summary: Cancel an ongoing VM migration
+      description: >
+        Requests the cancellation of an ongoing migration on a best effort
+        basis. A successful response only indicates that the request was
+        accepted, not that the migration was actually cancelled: The migration
+        may have progressed too far to be stopped. The actual outcome must be
+        observed externally via the event monitor.
+      responses:
+        204:
+          description: The cancellation request was successfully submitted.
+        500:
+          description: The cancellation request could not be submitted because there is no ongoing migration.
+
 components:
   schemas:
     VmmPingResponse:
