@@ -453,7 +453,7 @@ struct MemoryRangeTableIterator {
 impl MemoryRangeTableIterator {
     /// Create an iterator that partitions `table` into chunks of at most
     /// `chunk_size` bytes.
-    pub fn new(table: MemoryRangeTable, chunk_size: u64) -> Self {
+    pub(crate) fn new(table: MemoryRangeTable, chunk_size: u64) -> Self {
         MemoryRangeTableIterator {
             chunk_size,
             data: table.data,

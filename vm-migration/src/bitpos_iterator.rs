@@ -58,7 +58,7 @@ where
     }
 }
 
-pub trait BitposIteratorExt: Iterator<Item = u64> + Sized {
+pub(crate) trait BitposIteratorExt: Iterator<Item = u64> + Sized {
     /// Turn an iterator over `u64` into an iterator over the bit positions of
     /// all 1s. We basically treat the incoming `u64` as one gigantic integer
     /// and just spit out which bits are set.
