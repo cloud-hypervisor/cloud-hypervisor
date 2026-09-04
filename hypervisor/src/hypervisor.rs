@@ -92,6 +92,12 @@ pub enum HypervisorError {
     ///
     #[error("Unsupported VmType")]
     UnsupportedVmType(),
+    ///
+    /// AArch64 nested virtualization was requested but is unavailable.
+    ///
+    #[cfg(target_arch = "aarch64")]
+    #[error("AArch64 nested virtualization is not supported by KVM")]
+    NestedVirtualizationUnsupported,
 
     ///
     /// The attempt to enable AMX tile state components failed

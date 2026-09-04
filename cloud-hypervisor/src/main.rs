@@ -1105,7 +1105,7 @@ mod tests {
                 max_phys_bits: 46,
                 affinity: None,
                 features: CpuFeatures::default(),
-                nested: true,
+                nested: !cfg!(target_arch = "aarch64"),
                 core_scheduling: CoreScheduling::Vm,
                 profile: Default::default(),
             },

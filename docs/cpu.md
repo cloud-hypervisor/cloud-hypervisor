@@ -215,7 +215,13 @@ In this example the amx CPU feature will be enabled for the VMM.
 
 ### `nested`
 
-Enable nested virtualization (default on). Nested virtualization is needed to access hardware virtualization by this guest. This option can only be changed on x86-64.
+Enable nested virtualization. Nested virtualization is needed to access hardware
+virtualization by this guest. It defaults to on for x86-64 and off for AArch64.
+On AArch64, this requires an Armv8.4 processor with `FEAT_NV2` and a Linux 6.16
+or newer host kernel booted with `kvm-arm.mode=nested`. The host KVM must
+advertise `KVM_CAP_ARM_EL2`; otherwise, the request fails. Snapshot, restore,
+and live migration are not supported for AArch64 guests with nested
+virtualization.
 
 _Example_
 
