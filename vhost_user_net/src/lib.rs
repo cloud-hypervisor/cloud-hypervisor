@@ -107,7 +107,7 @@ impl VhostUserNetThread {
         })
     }
 
-    pub fn set_epoll_fd(&mut self, fd: RawFd) {
+    fn set_epoll_fd(&mut self, fd: RawFd) {
         self.net.epoll_fd = Some(fd);
     }
 }
