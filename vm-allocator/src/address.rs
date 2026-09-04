@@ -13,13 +13,13 @@ use std::result;
 use vm_memory::{Address, GuestAddress, GuestUsize};
 
 #[derive(Debug)]
-pub enum Error {
+pub(crate) enum Error {
     Overflow,
     Overlap,
     UnalignedAddress,
 }
 
-pub type Result<T> = result::Result<T, Error>;
+pub(crate) type Result<T> = result::Result<T, Error>;
 
 /// Manages allocating address ranges.
 /// Use `AddressAllocator` whenever an address range needs to be allocated to different users.
