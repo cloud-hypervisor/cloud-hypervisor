@@ -36,7 +36,7 @@ macro_rules! or_rm_r {
     };
 }
 
-pub struct Or_rm8_r8;
+pub(crate) struct Or_rm8_r8;
 impl<T: CpuStateManager> InstructionHandler<T> for Or_rm8_r8 {
     or_rm_r!(u8);
 }

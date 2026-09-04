@@ -146,7 +146,7 @@ fn access_redists_aux(
 }
 
 /// Get redistributor registers.
-pub fn get_redist_regs(gic: &DeviceFd, gicr_typer: &[u64]) -> Result<Vec<u32>> {
+pub(super) fn get_redist_regs(gic: &DeviceFd, gicr_typer: &[u64]) -> Result<Vec<u32>> {
     let mut state = Vec::new();
     let mut idx: usize = 0;
     access_redists_aux(
@@ -163,7 +163,7 @@ pub fn get_redist_regs(gic: &DeviceFd, gicr_typer: &[u64]) -> Result<Vec<u32>> {
 }
 
 /// Set redistributor registers.
-pub fn set_redist_regs(gic: &DeviceFd, gicr_typer: &[u64], state: &[u32]) -> Result<()> {
+pub(super) fn set_redist_regs(gic: &DeviceFd, gicr_typer: &[u64], state: &[u32]) -> Result<()> {
     let mut idx: usize = 0;
     let mut mut_state = state.to_owned();
     access_redists_aux(
@@ -184,7 +184,7 @@ pub fn set_redist_regs(gic: &DeviceFd, gicr_typer: &[u64], state: &[u32]) -> Res
     )
 }
 
-pub fn get_gicr_typers(vcpu_count: u64) -> Vec<u64> {
+pub(super) fn get_gicr_typers(vcpu_count: u64) -> Vec<u64> {
     /* Return a GICR_TYPER from the vCPU MPIDR affinities:
      * For our implementation:
      *  Top 32 bits are the affinity value of the associated CPU

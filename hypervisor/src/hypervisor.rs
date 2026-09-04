@@ -99,7 +99,7 @@ pub enum HypervisorError {
 ///
 /// Result type for returning from a function
 ///
-pub type Result<T> = result::Result<T, HypervisorError>;
+pub(crate) type Result<T> = result::Result<T, HypervisorError>;
 
 ///
 /// Trait to represent a Hypervisor
