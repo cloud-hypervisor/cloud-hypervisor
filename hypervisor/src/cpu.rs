@@ -362,7 +362,7 @@ pub enum VmExit {
 ///
 /// Result type for returning from a function
 ///
-pub type Result<T> = anyhow::Result<T, HypervisorCpuError>;
+pub(crate) type Result<T> = anyhow::Result<T, HypervisorCpuError>;
 ///
 /// Trait to represent a generic Vcpu
 ///

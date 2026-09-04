@@ -660,15 +660,19 @@ mod mock_vmm {
     use crate::arch::x86::gdt::{gdt_entry, segment_from_gdt};
 
     #[derive(Debug, Clone)]
-    pub struct MockVmm {
+    pub(super) struct MockVmm {
         memory: Vec<u8>,
         state: Arc<Mutex<CpuState>>,
     }
 
-    pub type MockResult = Result<(), EmulationError<Exception>>;
+    pub(super) type MockResult = Result<(), EmulationError<Exception>>;
 
     impl MockVmm {
-        pub fn new(ip: u64, regs: Vec<(Register, u64)>, memory: Option<(u64, &[u8])>) -> MockVmm {
+        pub(super) fn new(
+            ip: u64,
+            regs: Vec<(Register, u64)>,
+            memory: Option<(u64, &[u8])>,
+        ) -> MockVmm {
             let _ = env_logger::try_init();
             let cs_reg = segment_from_gdt(gdt_entry(0xc09b, 0, 0xffffffff), 1);
             let ds_reg = segment_from_gdt(gdt_entry(0xc093, 0, 0xffffffff), 2);
@@ -706,7 +710,7 @@ mod mock_vmm {
             vmm
         }
 
-        pub fn emulate_insn(
+        pub(super) fn emulate_insn(
             &mut self,
             cpu_id: usize,
             insn: &[u8],
@@ -728,7 +732,7 @@ mod mock_vmm {
             Ok(())
         }
 
-        pub fn emulate_first_insn(&mut self, cpu_id: usize, insn: &[u8]) -> MockResult {
+        pub(super) fn emulate_first_insn(&mut self, cpu_id: usize, insn: &[u8]) -> MockResult {
             self.emulate_insn(cpu_id, insn, Some(1))
         }
     }

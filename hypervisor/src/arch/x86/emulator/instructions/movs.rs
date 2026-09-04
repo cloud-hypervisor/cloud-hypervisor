@@ -80,22 +80,22 @@ macro_rules! movs {
     };
 }
 
-pub struct Movsq_m64_m64;
+pub(crate) struct Movsq_m64_m64;
 impl<T: CpuStateManager> InstructionHandler<T> for Movsq_m64_m64 {
     movs!(u64);
 }
 
-pub struct Movsd_m32_m32;
+pub(crate) struct Movsd_m32_m32;
 impl<T: CpuStateManager> InstructionHandler<T> for Movsd_m32_m32 {
     movs!(u32);
 }
 
-pub struct Movsw_m16_m16;
+pub(crate) struct Movsw_m16_m16;
 impl<T: CpuStateManager> InstructionHandler<T> for Movsw_m16_m16 {
     movs!(u16);
 }
 
-pub struct Movsb_m8_m8;
+pub(crate) struct Movsb_m8_m8;
 impl<T: CpuStateManager> InstructionHandler<T> for Movsb_m8_m8 {
     movs!(u8);
 }

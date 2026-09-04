@@ -115,7 +115,7 @@ fn icc_attr_get(gic: &DeviceFd, offset: u64, typer: u64) -> Result<u32> {
 }
 
 /// Get ICC registers.
-pub fn get_icc_regs(gic: &DeviceFd, gicr_typer: &[u64]) -> Result<Vec<u32>> {
+pub(super) fn get_icc_regs(gic: &DeviceFd, gicr_typer: &[u64]) -> Result<Vec<u32>> {
     let mut state: Vec<u32> = Vec::new();
     // We need this for the ICC_AP<m>R<n>_EL1 registers.
     let mut num_priority_bits = 0;
@@ -164,7 +164,7 @@ pub fn get_icc_regs(gic: &DeviceFd, gicr_typer: &[u64]) -> Result<Vec<u32>> {
 }
 
 /// Set ICC registers.
-pub fn set_icc_regs(gic: &DeviceFd, gicr_typer: &[u64], state: &[u32]) -> Result<()> {
+pub(super) fn set_icc_regs(gic: &DeviceFd, gicr_typer: &[u64], state: &[u32]) -> Result<()> {
     let mut num_priority_bits = 0;
     let mut idx = 0;
     for ix in gicr_typer {

@@ -24,7 +24,7 @@ pub(crate) type Result<T> = result::Result<T, errno::Error>;
 // See AMD Spec Section 8.18 — SNP_LAUNCH_UPDATE
 // The last 12 bits are metadata about the guest context
 // https://docs.amd.com/v/u/en-US/56860_PUB_SEV_SNP
-pub const GPA_METADATA_SHIFT_OFFSET: u32 = 12;
+pub(crate) const GPA_METADATA_SHIFT_OFFSET: u32 = 12;
 
 // SNP in VMSA - linux/arch/x86/include/asm/svm.h
 const SVM_SEV_FEAT_SNP_ACTIVE: u64 = 1 << 0;
@@ -38,7 +38,7 @@ fn sev_op(vm: &VmFd, sev_cmd: &mut kvm_sev_cmd, name: &str) -> Result<()> {
 }
 
 #[derive(Debug)]
-pub struct SevFd {
+pub(crate) struct SevFd {
     pub fd: OwnedFd,
 }
 
@@ -47,7 +47,7 @@ pub struct SevFd {
 
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone, Default)]
-pub(crate) struct KvmSevInit {
+struct KvmSevInit {
     pub vmsa_features: u64,
     pub flags: u32,
     pub ghcb_version: u16,
@@ -57,7 +57,7 @@ pub(crate) struct KvmSevInit {
 
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone, Default)]
-pub(crate) struct KvmSevSnpLaunchStart {
+struct KvmSevSnpLaunchStart {
     pub policy: u64,
     pub gosvw: [u8; 16],
     pub flags: u16,
@@ -67,7 +67,7 @@ pub(crate) struct KvmSevSnpLaunchStart {
 
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone, Default)]
-pub(crate) struct KvmSevSnpLaunchUpdate {
+struct KvmSevSnpLaunchUpdate {
     pub gfn_start: u64,
     pub uaddr: u64,
     pub len: u64,
@@ -80,7 +80,7 @@ pub(crate) struct KvmSevSnpLaunchUpdate {
 
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone, Default)]
-pub(crate) struct KvmSevSnpLaunchFinish {
+struct KvmSevSnpLaunchFinish {
     pub id_block_uaddr: u64,
     pub id_auth_uaddr: u64,
     pub id_block_en: u8,
@@ -97,7 +97,7 @@ pub(crate) struct KvmSevSnpLaunchFinish {
 // https://docs.amd.com/v/u/en-US/56860_PUB_SEV_SNP
 #[repr(C)]
 #[derive(Debug, Copy, Clone, IntoBytes, Immutable)]
-pub(crate) struct KvmSevSnpIdBlock {
+struct KvmSevSnpIdBlock {
     pub ld: [u8; 48],
     pub family_id: [u8; 16],
     pub image_id: [u8; 16],
@@ -110,7 +110,7 @@ pub(crate) struct KvmSevSnpIdBlock {
 // https://docs.amd.com/v/u/en-US/56860_PUB_SEV_SNP
 #[repr(C)]
 #[derive(Clone, FromZeros, IntoBytes, Immutable)]
-pub(crate) struct KvmSevSnpIdAuth {
+struct KvmSevSnpIdAuth {
     pub id_key_alg: u32,
     pub auth_key_algo: u32,
     pub reserved: [u8; 56],
