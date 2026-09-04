@@ -11,7 +11,7 @@ use log::{error, warn};
 use vm_device::BusDevice;
 
 /// Debug I/O port, see:
-/// https://www.intel.com/content/www/us/en/support/articles/000005500/boards-and-kits.html
+/// https://web.archive.org/web/20211028033025/https://www.intel.com/content/www/us/en/support/articles/000005500/boards-and-kits.html
 ///
 /// Since we're not a physical platform, we can freely assign code ranges for
 /// debugging specific parts of our virtual platform.
