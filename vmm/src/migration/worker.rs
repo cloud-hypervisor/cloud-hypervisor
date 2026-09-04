@@ -107,7 +107,7 @@ impl MigrationWorker {
         // therefore we chain the results together.
         let migration_result = seccomp_res
             .and_then(|()| {
-                event!("vm", "migration-started");
+                event!("vm", "migration-starting");
                 Vmm::send_migration(
                     &mut vm,
                     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
