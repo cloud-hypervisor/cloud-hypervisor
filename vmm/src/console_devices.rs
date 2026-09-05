@@ -45,6 +45,14 @@ pub enum ConsoleDeviceError {
     #[error("Serial socket {0:?} is already in use by another running instance")]
     SerialSocketInUse(PathBuf),
 
+    /// The console socket is already in use by another running instance
+    #[error("Console socket {0:?} is already in use by another running instance")]
+    ConsoleSocketInUse(PathBuf),
+
+    /// Socket path missing for socket console mode
+    #[error("Socket path missing for socket console mode")]
+    MissingSocketPath,
+
     /// Error setting pty raw mode
     #[error("Error setting pty raw mode")]
     SetPtyRaw(#[source] errno::Error),
@@ -229,7 +237,19 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                 ConsoleTransport::Tty(Arc::new(stdout))
             }
             ConsoleOutputMode::Socket => {
-                return Err(ConsoleDeviceError::NoSocketOptionSupportForConsoleDevice);
+                let path = vmconfig
+                    .console
+                    .common
+                    .socket
+                    .as_ref()
+                    .ok_or(ConsoleDeviceError::MissingSocketPath)?;
+                let socket = LockedUnixListener::bind(path).map_err(|e| match e {
+                    LockedUnixListenerError::InUse(path) => {
+                        ConsoleDeviceError::ConsoleSocketInUse(path)
+                    }
+                    LockedUnixListenerError::Io(e) => ConsoleDeviceError::CreateConsoleDevice(e),
+                })?;
+                ConsoleTransport::Socket(Arc::new(socket))
             }
             ConsoleOutputMode::Null => ConsoleTransport::Null,
             ConsoleOutputMode::Off => ConsoleTransport::Off,

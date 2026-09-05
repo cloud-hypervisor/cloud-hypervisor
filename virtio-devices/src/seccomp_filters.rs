@@ -82,6 +82,7 @@ fn create_mshv_sev_snp_ioctl_seccomp_rule() -> Vec<SeccompRule> {
 fn create_virtio_console_ioctl_seccomp_rule() -> Vec<SeccompRule> {
     or![
         and![Cond::new(1, ArgLen::Dword, Eq, TIOCGWINSZ as _).unwrap()],
+        and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO as _).unwrap()],
         #[cfg(feature = "sev_snp")]
         mshv_sev_snp_ioctl_seccomp_rule(),
     ]
@@ -149,9 +150,13 @@ fn create_virtio_block_ioctl_seccomp_rule() -> Vec<SeccompRule> {
 
 fn virtio_console_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     vec![
+        (libc::SYS_accept4, vec![]),
         (libc::SYS_ioctl, create_virtio_console_ioctl_seccomp_rule()),
+        (libc::SYS_recvfrom, vec![]),
         (libc::SYS_sched_getaffinity, vec![]),
+        (libc::SYS_sendto, vec![]),
         (libc::SYS_set_robust_list, vec![]),
+        (libc::SYS_shutdown, vec![]),
     ]
 }
 
