@@ -33,7 +33,7 @@ pub use ctrl_queue::{CtrlQueue, Error as CtrlQueueError};
 pub use mac::{MAC_ADDR_LEN, MacAddr};
 pub use open_tap::{Error as OpenTapError, open_tap};
 pub use queue_pair::{NetCounters, NetQueuePair, NetQueuePairError, RxVirtio, TxVirtio};
-pub use tap::{Error as TapError, Tap};
+pub use tap::{Error as TapError, Tap, attach_n_first_taps};
 
 #[derive(Error, Debug)]
 pub enum Error {
