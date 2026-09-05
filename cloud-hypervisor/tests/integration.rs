@@ -12832,6 +12832,23 @@ mod vfio {
 mod aarch64_acpi {
     use crate::*;
 
+    fn kvm_exposes_split_l1_cache() -> bool {
+        const CTR_EL0_IDC: u64 = 1 << 28;
+        const CTR_EL0_DIC: u64 = 1 << 29;
+
+        let ctr_el0: u64;
+        // SAFETY: CTR_EL0 is read-only and this touches no memory or stack.
+        unsafe {
+            std::arch::asm!(
+                "mrs {}, ctr_el0",
+                out(reg) ctr_el0,
+                options(nomem, nostack, preserves_flags),
+            );
+        }
+
+        ctr_el0 & (CTR_EL0_IDC | CTR_EL0_DIC) == 0
+    }
+
     #[test]
     fn test_simple_launch_acpi() {
         let jammy = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -12902,6 +12919,11 @@ mod aarch64_acpi {
 
     #[test]
     fn test_cache_topology() {
+        if !kvm_exposes_split_l1_cache() {
+            println!("SKIPPED: KVM does not expose a split L1 data and instruction cache");
+            return;
+        }
+
         let jammy = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
 
         vec![Box::new(jammy)].drain(..).for_each(|disk_config| {

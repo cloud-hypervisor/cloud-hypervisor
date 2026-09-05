@@ -141,6 +141,9 @@ if [ $RES -ne 0 ]; then
     exit 1
 fi
 
+# Set number of open descriptors high enough for VFIO tests to run
+ulimit -n 4096
+
 # Common configuration for every test run
 export RUST_BACKTRACE=1
 export RUSTFLAGS="$RUSTFLAGS"

@@ -85,8 +85,8 @@ assets:
     test: [integration]
 
   - filename: cloud-hypervisor-static-aarch64
-    url: https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v52.0/cloud-hypervisor-static-aarch64
-    sha256: bf004ddc1a148f47caa87ac49a783b8dbd6bf9bc27abe522ed197df7b982d3b1
+    url: https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v53.0/cloud-hypervisor-static-aarch64
+    sha256: f192b510eea1c710cbc439d716bb0573c223fc463dbe3e6523788a2b7ef62850
     executable: true
     arch: [aarch64]
     test: [integration]
