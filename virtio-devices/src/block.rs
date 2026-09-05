@@ -790,6 +790,7 @@ impl Block {
         queue_affinity: BTreeMap<u16, Box<[usize]>>,
         sparse: bool,
         lock_granularity: LockGranularityChoice,
+        guest_block_size: Option<u32>,
     ) -> io::Result<Self> {
         let (disk_nsectors, avail_features, acked_features, config, paused) =
             if let Some(state) = state {
@@ -845,7 +846,10 @@ impl Block {
                     avail_features |= 1u64 << VIRTIO_BLK_F_RO;
                 }
 
-                let topology = disk_image.topology();
+                let mut topology = disk_image.topology();
+                if let Some(block_size) = guest_block_size {
+                    topology = topology.with_block_size(block_size as u64);
+                }
                 info!("Disk topology: {topology:?}");
 
                 let logical_block_size = if topology.logical_block_size > 512 {

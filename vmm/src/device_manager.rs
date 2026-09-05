@@ -196,6 +196,11 @@ pub enum DeviceManagerError {
     #[error("Cannot create virtio-blk device")]
     CreateVirtioBlock(#[source] io::Error),
 
+    /// guest_block_size below the backend block size needs a serialized read
+    /// modify write the block layer does not provide under direct I/O.
+    #[error("guest_block_size below the backend block size is not supported with direct=on")]
+    GuestBlockSizeBelowBackend,
+
     /// Cannot create virtio-net device
     #[error("Cannot create virtio-net device")]
     CreateVirtioNet(#[source] net::Error),
@@ -2670,6 +2675,16 @@ impl DeviceManager {
             )
             .map_err(DeviceManagerError::Disk)?;
 
+            // Under direct I/O a guest block size below the backend block
+            // size needs a read modify write serialized against concurrent
+            // requests, which the block layer does not do.
+            if let Some(guest_block_size) = disk_cfg.guest_block_size
+                && disk_cfg.direct
+                && u64::from(guest_block_size) < disk.topology().logical_block_size
+            {
+                return Err(DeviceManagerError::GuestBlockSizeBelowBackend);
+            }
+
             if disk_cfg.image_type != ImageType::Qcow2 && disk_cfg.backing_files {
                 warn!("Enabling backing_files option only applies for QCOW2 files");
             }
@@ -2738,6 +2753,7 @@ impl DeviceManager {
                 queue_affinity,
                 disk_cfg.sparse,
                 disk_cfg.lock_granularity,
+                disk_cfg.guest_block_size,
             )
             .map_err(DeviceManagerError::CreateVirtioBlock)?;
 

@@ -102,6 +102,16 @@ usually used to boot the operating system running in the VM.
 This device is always built-in, and it is enabled based on the presence of the
 flag `--disk`.
 
+The `guest_block_size` parameter of `--disk` overrides the logical block size
+advertised to the guest, so an image keeps the geometry it was built for
+regardless of the backing storage. It applies to every image format backend and
+must be a power of 2 between 512 and 2^31.
+
+With buffered I/O the host page cache absorbs any alignment difference. Under
+`direct=on` a value below the backing block size is not supported, because the
+sub block writes it produces need a read modify write serialized against
+concurrent requests, which the block layer does not do.
+
 ### virtio-console
 
 `cloud-hypervisor` exposes a `virtio-console` device to the guest. Although

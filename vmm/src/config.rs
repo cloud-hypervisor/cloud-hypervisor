@@ -274,6 +274,9 @@ pub enum ValidationError {
     /// Block queue size too small to advertise a usable seg_max
     #[error("Block queue size must be greater than {MINIMUM_BLOCK_QUEUE_SIZE}: {0}")]
     BlockQueueSizeTooSmall(u16),
+    /// Disk guest_block_size is not a power of 2 within the supported range
+    #[error("Disk guest_block_size must be a power of 2 between 512 and 2^31: {0}")]
+    InvalidGuestBlockSize(u32),
     /// Need shared memory for vfio-user
     #[error("Using user devices requires using shared memory or huge pages")]
     UserDevicesRequireSharedMemory,
@@ -349,6 +352,9 @@ pub enum ValidationError {
     /// Rate limiting is not supported with vhost-user
     #[error("Rate limiting is not supported with vhost-user")]
     VhostUserRateLimiterNotSupported,
+    /// The vhost-user backend provides the virtio config space
+    #[error("guest_block_size is not supported with vhost-user")]
+    VhostUserGuestBlockSizeNotSupported,
     /// The specified I/O port was invalid. It should be provided in hex, such as `0xe9`.
     #[cfg(target_arch = "x86_64")]
     #[error("The IO port was not properly provided in hex or a `0x` prefix is missing: {0}")]
@@ -1457,7 +1463,8 @@ impl DiskConfig {
          rate_limit_group=<group_id>,\
          queue_affinity=<list_of_queue_indices_with_their_associated_cpuset>,\
          serial=<serial_number>,backing_files=on|off,sparse=on|off,\
-         image_type=<raw,qcow2,vhd,vhdx,vmdk>,lock_granularity=byte-range|full";
+         image_type=<raw,qcow2,vhd,vhdx,vmdk>,lock_granularity=byte-range|full,\
+         guest_block_size=<size_in_bytes>";
 
     pub fn parse(disk: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -1484,6 +1491,7 @@ impl DiskConfig {
             .add("sparse")
             .add("image_type")
             .add("lock_granularity")
+            .add("guest_block_size")
             .add_all(PciDeviceCommonConfig::OPTIONS_IOMMU);
 
         parser.parse(disk).map_err(Error::ParseDisk)?;
@@ -1581,6 +1589,10 @@ impl DiskConfig {
             .map_err(Error::ParseDisk)?
             .unwrap_or_default();
 
+        let guest_block_size = parser
+            .convert::<u32>("guest_block_size")
+            .map_err(Error::ParseDisk)?;
+
         let bw_tb_config = if bw_size != 0 && bw_refill_time != 0 {
             Some(TokenBucketConfig {
                 size: bw_size,
@@ -1634,6 +1646,7 @@ impl DiskConfig {
             sparse,
             image_type,
             lock_granularity,
+            guest_block_size,
         })
     }
 
@@ -1665,6 +1678,10 @@ impl DiskConfig {
             return Err(ValidationError::VhostUserRateLimiterNotSupported);
         }
 
+        if self.vhost_user && self.guest_block_size.is_some() {
+            return Err(ValidationError::VhostUserGuestBlockSizeNotSupported);
+        }
+
         if self.rate_limiter_config.is_some() && self.rate_limit_group.is_some() {
             return Err(ValidationError::InvalidRateLimiterGroup);
         }
@@ -1681,6 +1698,12 @@ impl DiskConfig {
 
         if !self.vhost_user && self.image_type == ImageType::Unknown {
             return Err(ValidationError::ImageTypeRequired);
+        }
+
+        if let Some(guest_block_size) = self.guest_block_size
+            && (!guest_block_size.is_power_of_two() || guest_block_size < 512)
+        {
+            return Err(ValidationError::InvalidGuestBlockSize(guest_block_size));
         }
 
         Ok(())
@@ -4434,6 +4457,7 @@ mod tests {
             sparse: true,
             image_type: ImageType::Unknown,
             lock_granularity: LockGranularityChoice::default(),
+            guest_block_size: None,
         }
     }
 
@@ -4562,6 +4586,14 @@ mod tests {
                 ..disk_fixture()
             }
         );
+        assert_eq!(
+            DiskConfig::parse("path=/path/to_file,guest_block_size=4096")?,
+            DiskConfig {
+                guest_block_size: Some(4096),
+                ..disk_fixture()
+            }
+        );
+        DiskConfig::parse("path=/path/to_file,guest_block_size=abc").unwrap_err();
         Ok(())
     }
 
@@ -6105,6 +6137,22 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         still_valid_config.memory.shared = true;
         still_valid_config.validate().unwrap();
 
+        // guest_block_size cannot take effect when the vhost-user backend
+        // provides the virtio config space.
+        let mut invalid_config = valid_config.clone();
+        invalid_config.memory.shared = true;
+        invalid_config.disks = Some(vec![DiskConfig {
+            path: None,
+            vhost_user: true,
+            vhost_socket: Some("/path/to/sock".to_owned()),
+            guest_block_size: Some(4096),
+            ..disk_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::VhostUserGuestBlockSizeNotSupported)
+        );
+
         // A block queue size that is not a power of 2 is rejected.
         let mut invalid_config = valid_config.clone();
         invalid_config.disks = Some(vec![DiskConfig {
@@ -6129,6 +6177,44 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 MINIMUM_BLOCK_QUEUE_SIZE
             ))
         );
+
+        // A disk logical block size that is not a power of 2 is rejected.
+        let mut invalid_config = valid_config.clone();
+        invalid_config.disks = Some(vec![DiskConfig {
+            guest_block_size: Some(1000),
+            ..raw_disk_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::InvalidGuestBlockSize(1000))
+        );
+
+        // A disk logical block size below 512 is rejected.
+        let mut invalid_config = valid_config.clone();
+        invalid_config.disks = Some(vec![DiskConfig {
+            guest_block_size: Some(256),
+            ..raw_disk_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::InvalidGuestBlockSize(256))
+        );
+
+        let mut still_valid_config = valid_config.clone();
+        still_valid_config.disks = Some(vec![DiskConfig {
+            guest_block_size: Some(4096),
+            ..raw_disk_fixture()
+        }]);
+        still_valid_config.validate().unwrap();
+
+        // The override is backend agnostic and accepted for non raw images.
+        let mut still_valid_config = valid_config.clone();
+        still_valid_config.disks = Some(vec![DiskConfig {
+            image_type: ImageType::Qcow2,
+            guest_block_size: Some(4096),
+            ..disk_fixture()
+        }]);
+        still_valid_config.validate().unwrap();
 
         // A net queue size that is not a power of 2 is rejected.
         let mut invalid_config = valid_config.clone();
