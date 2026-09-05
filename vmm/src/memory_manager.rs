@@ -9,12 +9,11 @@ use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom};
 use std::mem::{MaybeUninit, zeroed};
-use std::num::NonZeroUsize;
 use std::ops::{BitAnd, Not, Sub};
-use std::os::fd::{AsFd, OwnedFd};
+use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, ffi, panic, result, thread, time};
@@ -59,8 +58,7 @@ use crate::migration::transport::SocketStream;
 use crate::migration::url_to_path;
 use crate::sparse::{next_data_extent, write_region_sparse};
 use crate::uffd::{
-    self, FaultResolution, FileUffdMemorySource, SocketUffdMemorySource, UffdMemorySource,
-    UffdRange,
+    self, FileUffdMemorySource, SocketUffdMemorySource, UffdMemorySource, UffdRange,
 };
 use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
 use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID, userfaultfd};
@@ -71,6 +69,102 @@ struct UffdHandler {
     handle: thread::JoinHandle<()>,
     fault_socket_fd: Option<OwnedFd>,
     prefault_complete: Arc<AtomicBool>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum UffdPageState {
+    Missing = 0,
+    Processing = 1,
+    Present = 2,
+}
+
+impl UffdPageState {
+    fn from_u8(state: u8) -> Self {
+        match state {
+            0 => Self::Missing,
+            1 => Self::Processing,
+            2 => Self::Present,
+            other => unreachable!("invalid UFFD page state {other}"),
+        }
+    }
+}
+
+struct AtomicUffdPageState(AtomicU8);
+
+impl AtomicUffdPageState {
+    fn new() -> Self {
+        Self(AtomicU8::new(UffdPageState::Missing as u8))
+    }
+
+    /// Take ownership of a [`UffdPageState::Missing`] page, or report the
+    /// state that prevented it.
+    fn claim(&self) -> Result<(), UffdPageState> {
+        self.0
+            .compare_exchange(
+                UffdPageState::Missing as u8,
+                UffdPageState::Processing as u8,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .map(|_| ())
+            .map_err(UffdPageState::from_u8)
+    }
+
+    fn store(&self, state: UffdPageState) {
+        self.0.store(state as u8, Ordering::Release);
+    }
+}
+
+struct UffdPageTracker {
+    states: Vec<Vec<AtomicUffdPageState>>,
+}
+
+impl UffdPageTracker {
+    fn new(ranges: &[UffdRange]) -> Self {
+        Self {
+            states: ranges
+                .iter()
+                .map(|range| {
+                    (0..range.num_pages())
+                        .map(|_| AtomicUffdPageState::new())
+                        .collect()
+                })
+                .collect(),
+        }
+    }
+
+    fn claim(&self, range_idx: usize, page_idx: u64) -> Result<UffdPageClaim<'_>, UffdPageState> {
+        let state = &self.states[range_idx][page_idx as usize];
+
+        state.claim().map(|()| UffdPageClaim {
+            state,
+            resolved: false,
+        })
+    }
+}
+
+struct UffdPageClaim<'a> {
+    state: &'a AtomicUffdPageState,
+    resolved: bool,
+}
+
+impl UffdPageClaim<'_> {
+    fn mark_present(mut self) {
+        self.resolved = true;
+        // Publish the completed source side effects before another worker
+        // observes that it no longer needs to resolve this page.
+        self.state.store(UffdPageState::Present);
+    }
+}
+
+impl Drop for UffdPageClaim<'_> {
+    fn drop(&mut self) {
+        if !self.resolved {
+            // Errors and unwinding make the page available to another worker.
+            self.state.store(UffdPageState::Missing);
+        }
+    }
 }
 
 pub const MEMORY_MANAGER_ACPI_SIZE: usize = 0x18;
@@ -1211,11 +1305,12 @@ impl MemoryManager {
     fn stop_uffd_handler(&mut self) {
         if let Some(uffd_handler) = self.uffd_handler.take() {
             uffd_handler.stop_event.write(1).ok();
+            uffd_handler.handle.join().ok();
+
             if let Some(fd) = &uffd_handler.fault_socket_fd {
                 // SAFETY: fd is a valid owned fd for the duration of this call.
                 unsafe { libc::shutdown(fd.as_raw_fd(), libc::SHUT_RDWR) };
             }
-            uffd_handler.handle.join().ok();
 
             match uffd_handler.result_rx.try_recv() {
                 Ok(Err(e)) => error!("UFFD handler terminated with error: {e}"),
@@ -1251,23 +1346,11 @@ impl MemoryManager {
         let mut pages_served: u64 = 0;
         let mut pages_prefaulted: u64 = 0;
 
-        // Per-range bitmap tracking which pages have been populated by the
-        // on-demand fault handler. Lets the prefault cursor skip them without
-        // doing a wasted file read + UFFDIO_COPY.
-        let served_bitmap: Vec<AtomicBitmap> = ranges
-            .iter()
-            .map(|r| {
-                AtomicBitmap::new(
-                    r.length as usize,
-                    NonZeroUsize::new(r.page_size as usize).unwrap(),
-                )
-            })
-            .collect();
+        let page_tracker = UffdPageTracker::new(ranges);
 
-        // Prefault cursor: (range index, page index within range). `None`
-        // means prefault was given up due to an error (natural completion
-        // returns from the function instead).
-        let mut prefault_cursor: Option<(usize, u64)> = (!ranges.is_empty()).then_some((0, 0));
+        let mut prefault_active = !ranges.is_empty();
+        let mut range_idx = 0;
+        let mut page_idx = 0;
         let prefault_start = time::Instant::now();
 
         const EVENT_STOP: u64 = 0;
@@ -1299,23 +1382,29 @@ impl MemoryManager {
         loop {
             // Block only when prefault is done; otherwise poll non-blocking
             // so we can advance prefault between faults.
-            let timeout = if prefault_cursor.is_some() { 0 } else { -1 };
+            let timeout = if prefault_active { 0 } else { -1 };
             let num_events = match epoll::wait(epoll_fd, timeout, &mut events) {
                 Ok(n) => n,
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                 Err(e) => return Err(e),
             };
 
+            // Check the entire batch before handling UFFD events so a pending
+            // stop cannot be delayed by a blocking page resolution.
+            if events
+                .iter()
+                .take(num_events)
+                .any(|event| event.data == EVENT_STOP)
+            {
+                stop_event.read().ok();
+                info!("UFFD handler: received stop event, exiting");
+                return Ok(());
+            }
+
             let mut got_uffd_data = false;
             for event in events.iter().take(num_events) {
                 let token = event.data;
                 let evt_flags = event.events;
-
-                if token == EVENT_STOP {
-                    stop_event.read().ok();
-                    info!("UFFD handler: received stop event, exiting");
-                    return Ok(());
-                }
 
                 if token == EVENT_UFFD
                     && (evt_flags & epoll::Events::EPOLLHUP.bits()) != 0
@@ -1364,6 +1453,7 @@ impl MemoryManager {
                 }
 
                 let fault_addr = msg.pf_address;
+                let minor_fault = msg.pf_flags & userfaultfd::UFFD_PAGEFAULT_FLAG_MINOR != 0;
 
                 let mut served = false;
                 for (range_idx, range) in ranges.iter().enumerate() {
@@ -1371,19 +1461,41 @@ impl MemoryManager {
                         continue;
                     };
 
-                    loop {
-                        match source.resolve(uffd_fd.as_fd(), range, page_idx)? {
-                            FaultResolution::Served => {
-                                pages_served += 1;
-                                served_bitmap[range_idx].set_bit(page_idx as usize);
-                                break;
-                            }
-                            FaultResolution::Retry => {
-                                // The kernel reported a transient state while the fault
-                                // is being resolved; yield and retry instead of aborting.
+                    let claim = loop {
+                        match page_tracker.claim(range_idx, page_idx) {
+                            Ok(claim) => break Some(claim),
+                            Err(UffdPageState::Processing) => {
                                 thread::yield_now();
                             }
+                            Err(UffdPageState::Present) => {
+                                // The source contents are already installed. A
+                                // minor fault only needs the existing backing
+                                // page mapped into this VMA.
+                                if minor_fault {
+                                    match uffd::uffd_continue(
+                                        uffd_fd.as_fd(),
+                                        range.page_addr(page_idx),
+                                        range.page_size,
+                                    ) {
+                                        Ok(()) => {}
+                                        Err(e) if e.raw_os_error() == Some(libc::EEXIST) => {}
+                                        Err(e) => return Err(e),
+                                    }
+                                }
+                                break None;
+                            }
+                            // A failed claim observed something other than
+                            // Missing, else we would have claimed it.
+                            Err(UffdPageState::Missing) => {
+                                unreachable!("claim() cannot fail on a Missing page")
+                            }
                         }
+                    };
+
+                    if let Some(claim) = claim {
+                        source.resolve(uffd_fd.as_fd(), range, page_idx)?;
+                        pages_served += 1;
+                        claim.mark_present();
                     }
                     served = true;
                     break;
@@ -1398,19 +1510,19 @@ impl MemoryManager {
                 continue;
             }
 
-            // No fault pending — advance the prefault cursor past served and
-            // end-of-range pages, then prefault one fresh page below.
-            let cursor = loop {
-                let Some((range_idx, page_idx)) = prefault_cursor else {
-                    break None;
-                };
-                if page_idx >= ranges[range_idx].num_pages() {
-                    if range_idx + 1 < ranges.len() {
-                        prefault_cursor = Some((range_idx + 1, 0));
-                        continue;
-                    }
-                    // Reached the end of the last range — every page is
-                    // mapped, so no future faults can occur. Exit.
+            if !prefault_active {
+                continue;
+            }
+
+            match Self::uffd_prefault(
+                uffd_fd.as_fd(),
+                &mut range_idx,
+                &mut page_idx,
+                ranges,
+                &mut source,
+                &page_tracker,
+            ) {
+                Ok(0) => {
                     let elapsed = prefault_start.elapsed();
                     info!(
                         "UFFD handler: prefault done in {elapsed:.3?} — \
@@ -1420,50 +1532,76 @@ impl MemoryManager {
                     prefault_complete.store(true, Ordering::Release);
                     return Ok(());
                 }
-                if served_bitmap[range_idx].is_bit_set(page_idx as usize) {
-                    prefault_cursor = Some((range_idx, page_idx + 1));
-                    continue;
-                }
-                break Some((range_idx, page_idx));
-            };
-
-            let Some((range_idx, page_idx)) = cursor else {
-                // Prefault was given up earlier (or the range list was
-                // empty). Keep serving on-demand faults.
-                continue;
-            };
-
-            let range = &ranges[range_idx];
-
-            let advance = match source.resolve(uffd_fd.as_fd(), range, page_idx) {
-                Ok(FaultResolution::Served) => {
-                    pages_prefaulted += 1;
-                    served_bitmap[range_idx].set_bit(page_idx as usize);
-                    true
-                }
-                Ok(FaultResolution::Retry) => {
-                    // Unlike the on demand handler (which must retry to wake
-                    // the faulting thread), prefault can safely skip: any
-                    // future guest access will simply page-fault and be
-                    // served by the on demand path.
-                    true
-                }
+                Ok(prefaulted) => pages_prefaulted += prefaulted,
                 Err(e) => {
-                    let page_addr = range.page_addr(page_idx);
-                    warn!("UFFD prefault: source error at {page_addr:#x}: {e}");
-                    false
+                    // Give up prefaulting but continue serving demand faults.
+                    warn!("UFFD prefault: abandoning background prefault after error: {e}");
+                    prefault_active = false;
                 }
-            };
+            }
+        }
+    }
 
-            if !advance {
-                // Prefault hit an unrecoverable error; give up but keep
-                // serving on-demand faults.
-                warn!("UFFD prefault: abandoning background prefault after error");
-                prefault_cursor = None;
-                continue;
+    fn uffd_prefault(
+        uffd_fd: BorrowedFd,
+        range_idx: &mut usize,
+        page_idx: &mut u64,
+        ranges: &[UffdRange],
+        source: &mut Box<dyn UffdMemorySource>,
+        page_tracker: &UffdPageTracker,
+    ) -> Result<u64, io::Error> {
+        let mut current_page_idx = *page_idx;
+        let mut current_range_idx = *range_idx;
+
+        loop {
+            loop {
+                if current_page_idx >= ranges[current_range_idx].num_pages() {
+                    if current_range_idx + 1 < ranges.len() {
+                        current_range_idx += 1;
+                        current_page_idx = 0;
+                        continue;
+                    }
+
+                    *range_idx = current_range_idx;
+                    *page_idx = current_page_idx;
+                    return Ok(0);
+                }
+                break;
             }
 
-            prefault_cursor = Some((range_idx, page_idx + 1));
+            let range = &ranges[current_range_idx];
+            let claim = match page_tracker.claim(current_range_idx, current_page_idx) {
+                Ok(claim) => claim,
+                Err(UffdPageState::Processing) => {
+                    thread::yield_now();
+                    continue;
+                }
+                Err(UffdPageState::Present) => {
+                    current_page_idx += 1;
+                    continue;
+                }
+                // A failed claim observed something other than Missing, else
+                // we would have claimed it.
+                Err(UffdPageState::Missing) => {
+                    unreachable!("claim() cannot fail on a Missing page")
+                }
+            };
+
+            match source.resolve(uffd_fd, range, current_page_idx) {
+                Ok(()) => {
+                    claim.mark_present();
+                    current_page_idx += 1;
+
+                    *range_idx = current_range_idx;
+                    *page_idx = current_page_idx;
+                    return Ok(1);
+                }
+                Err(e) => {
+                    let page_addr = range.page_addr(current_page_idx);
+                    warn!("UFFD prefault: source error at {page_addr:#x}: {e}");
+                    return Err(e);
+                }
+            }
         }
     }
 
