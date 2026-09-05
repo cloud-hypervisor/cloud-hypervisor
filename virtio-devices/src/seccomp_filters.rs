@@ -4,8 +4,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::env;
-
 use block::{BLKDISCARD, BLKZEROOUT};
 use libc::{FIONBIO, TIOCGWINSZ, TUNSETOFFLOAD};
 use seccompiler::SeccompCmpOp::{Eq, MaskedEq};
@@ -406,13 +404,20 @@ pub fn get_seccomp_filter(
     seccomp_action: &SeccompAction,
     thread_type: Thread,
 ) -> Result<BpfProgram, Error> {
+    #[cfg(target_arch = "x86_64")]
+    let target_arch = seccompiler::TargetArch::x86_64;
+    #[cfg(target_arch = "aarch64")]
+    let target_arch = seccompiler::TargetArch::aarch64;
+    #[cfg(target_arch = "riscv64")]
+    let target_arch = seccompiler::TargetArch::riscv64;
+
     match seccomp_action {
         SeccompAction::Allow => Ok(vec![]),
         _ => SeccompFilter::new(
             get_seccomp_rules(thread_type).into_iter().collect(),
             seccomp_action.clone(),
             SeccompAction::Allow,
-            env::consts::ARCH.try_into().unwrap(),
+            target_arch,
         )
         .and_then(|filter| filter.try_into())
         .map_err(Error::Backend),

@@ -4,8 +4,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::env::consts;
-
 use hypervisor::HypervisorType;
 use libc::{
     BLKIOMIN, BLKIOOPT, BLKPBSZGET, BLKSSZGET, FIOCLEX, FIONBIO, SIOCGIFFLAGS, SIOCGIFHWADDR,
@@ -1263,6 +1261,13 @@ pub fn get_seccomp_filter(
     thread_type: Thread,
     hypervisor_type: Option<HypervisorType>,
 ) -> Result<BpfProgram, Error> {
+    #[cfg(target_arch = "x86_64")]
+    let target_arch = seccompiler::TargetArch::x86_64;
+    #[cfg(target_arch = "aarch64")]
+    let target_arch = seccompiler::TargetArch::aarch64;
+    #[cfg(target_arch = "riscv64")]
+    let target_arch = seccompiler::TargetArch::riscv64;
+
     match seccomp_action {
         SeccompAction::Allow => Ok(vec![]),
         _ => SeccompFilter::new(
@@ -1272,7 +1277,7 @@ pub fn get_seccomp_filter(
                 .collect(),
             seccomp_action.clone(),
             SeccompAction::Allow,
-            consts::ARCH.try_into().unwrap(),
+            target_arch,
         )
         .and_then(|filter| filter.try_into())
         .map_err(Error::Backend),
