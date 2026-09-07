@@ -3184,13 +3184,13 @@ impl RequestHandler for Vmm {
     ) -> result::Result<(), MigratableError> {
         match &self.vm {
             VmOwnership::Owned(_vm) => {
-                return Err(MigratableError::MigrateReceive(anyhow!(
-                    "Can't receive a migration when a VM is already created"
+                return Err(MigratableError::Conflict(anyhow!(
+                    "There is already an existing VM"
                 )));
             }
             VmOwnership::Migration { .. } => {
-                return Err(MigratableError::MigrateReceive(anyhow!(
-                    "There is already an ongoing migration"
+                return Err(MigratableError::Conflict(anyhow!(
+                    "A migration is already in progress"
                 )));
             }
             VmOwnership::None => {}
@@ -3294,14 +3294,14 @@ impl RequestHandler for Vmm {
         match self.vm {
             VmOwnership::Owned(ref vm) => {
                 if vm.restoring() {
-                    return Err(MigratableError::MigrateSend(anyhow!(
-                        "Cannot migrate while on-demand memory restore is in progress"
+                    return Err(MigratableError::Conflict(anyhow!(
+                        "An on-demand memory restore is still in progress"
                     )));
                 }
             }
             VmOwnership::Migration { .. } => {
-                return Err(MigratableError::MigrateSend(anyhow!(
-                    "There is already an ongoing migration"
+                return Err(MigratableError::Conflict(anyhow!(
+                    "A migration is already in progress"
                 )));
             }
             VmOwnership::None => {
