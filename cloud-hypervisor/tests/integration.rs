@@ -7119,6 +7119,32 @@ mod common_parallel {
         let send_success = wait_for_migration_command(send_migration, "send_migration");
         let receive_success = wait_for_migration_command(receive_migration, "receive_migration");
 
+        if send_success && receive_success {
+            let expected_events = [
+                &MetaEvent {
+                    event: "migration-receive-ready".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "migration-receive-starting".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "migration-receive-started".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "migration-receive-finished".to_string(),
+                    device_id: None,
+                },
+            ];
+            assert!(wait_for_sequential_events(
+                Duration::from_secs(30),
+                &expected_events,
+                dest_event_path
+            ));
+        }
+
         send_success && receive_success
     }
 
@@ -7501,6 +7527,10 @@ mod common_parallel {
 
                     let expected_events = [
                         &MetaEvent {
+                            event: "migration-starting".to_string(),
+                            device_id: None,
+                        },
+                        &MetaEvent {
                             event: "migration-started".to_string(),
                             device_id: None,
                         },
@@ -7513,6 +7543,30 @@ mod common_parallel {
                         Duration::from_secs(30),
                         &expected_events,
                         &src_event_path
+                    ));
+
+                    let expected_events = [
+                        &MetaEvent {
+                            event: "migration-receive-ready".to_string(),
+                            device_id: None,
+                        },
+                        &MetaEvent {
+                            event: "migration-receive-starting".to_string(),
+                            device_id: None,
+                        },
+                        &MetaEvent {
+                            event: "migration-receive-started".to_string(),
+                            device_id: None,
+                        },
+                        &MetaEvent {
+                            event: "migration-receive-failed".to_string(),
+                            device_id: None,
+                        },
+                    ];
+                    assert!(wait_for_sequential_events(
+                        Duration::from_secs(30),
+                        &expected_events,
+                        &dest_event_path
                     ));
 
                     // Check that even after a few seconds, the VMM is still
@@ -7532,6 +7586,10 @@ mod common_parallel {
 
                     let expected_events = [
                         &MetaEvent {
+                            event: "migration-starting".to_string(),
+                            device_id: None,
+                        },
+                        &MetaEvent {
                             event: "migration-started".to_string(),
                             device_id: None,
                         },
@@ -7544,6 +7602,30 @@ mod common_parallel {
                         Duration::from_secs(30),
                         &expected_events,
                         &src_event_path
+                    ));
+
+                    let expected_events = [
+                        &MetaEvent {
+                            event: "migration-receive-ready".to_string(),
+                            device_id: None,
+                        },
+                        &MetaEvent {
+                            event: "migration-receive-starting".to_string(),
+                            device_id: None,
+                        },
+                        &MetaEvent {
+                            event: "migration-receive-started".to_string(),
+                            device_id: None,
+                        },
+                        &MetaEvent {
+                            event: "migration-receive-finished".to_string(),
+                            device_id: None,
+                        },
+                    ];
+                    assert!(wait_for_sequential_events(
+                        Duration::from_secs(30),
+                        &expected_events,
+                        &dest_event_path
                     ));
 
                     assert!(
