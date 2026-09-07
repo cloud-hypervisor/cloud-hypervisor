@@ -851,10 +851,6 @@ impl MemoryManager {
         file_path: PathBuf,
         saved_regions: &MemoryRangeTable,
     ) -> Result<(), Error> {
-        if saved_regions.is_empty() {
-            return Ok(());
-        }
-
         // Open (read only) the snapshot file.
         let mut memory_file = OpenOptions::new()
             .read(true)
@@ -939,9 +935,6 @@ impl MemoryManager {
         file_path: PathBuf,
         saved_regions: &MemoryRangeTable,
     ) -> Result<(), Error> {
-        if saved_regions.is_empty() {
-            return Ok(());
-        }
         let guest_memory = self.guest_memory.memory();
         if !is_restore_cow_compatible(&guest_memory, saved_regions) {
             info!("Restore (mode=copyonwrite): guest RAM unsuitable, falling back to copy");
@@ -1990,20 +1983,22 @@ impl MemoryManager {
                 Default::default(),
             )?;
 
-            match memory_restore_mode {
-                MemoryRestoreMode::OnDemand => mm.lock().unwrap().restore_by_uffd(
-                    &memory_file_path,
-                    &mem_snapshot.memory_ranges,
-                    exit_evt,
-                )?,
-                MemoryRestoreMode::CopyOnWrite => mm
-                    .lock()
-                    .unwrap()
-                    .mmap_cow_saved_regions(memory_file_path, &mem_snapshot.memory_ranges)?,
-                MemoryRestoreMode::Copy => mm
-                    .lock()
-                    .unwrap()
-                    .fill_saved_regions(memory_file_path, &mem_snapshot.memory_ranges)?,
+            if !mem_snapshot.memory_ranges.is_empty() {
+                match memory_restore_mode {
+                    MemoryRestoreMode::OnDemand => mm.lock().unwrap().restore_by_uffd(
+                        &memory_file_path,
+                        &mem_snapshot.memory_ranges,
+                        exit_evt,
+                    )?,
+                    MemoryRestoreMode::CopyOnWrite => mm
+                        .lock()
+                        .unwrap()
+                        .mmap_cow_saved_regions(memory_file_path, &mem_snapshot.memory_ranges)?,
+                    MemoryRestoreMode::Copy => mm
+                        .lock()
+                        .unwrap()
+                        .fill_saved_regions(memory_file_path, &mem_snapshot.memory_ranges)?,
+                }
             }
 
             Ok(mm)
