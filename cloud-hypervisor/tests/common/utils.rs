@@ -1048,7 +1048,7 @@ pub(crate) fn get_reboot_count(guest: &Guest) -> u32 {
         .unwrap_or_default()
 }
 
-pub(crate) fn enable_guest_watchdog(guest: &Guest, watchdog_sec: u32) {
+pub(crate) fn enable_guest_watchdog(guest: &Guest, keepalive_sec: u32) {
     // Check for PCI device
     assert!(
         guest
@@ -1056,13 +1056,32 @@ pub(crate) fn enable_guest_watchdog(guest: &Guest, watchdog_sec: u32) {
             .unwrap_or_default()
     );
 
+    let service = format!(
+        r#"[Unit]
+Description=Cloud Hypervisor watchdog keepalive
+
+[Service]
+ExecStart=/bin/sh -c 'exec 3>/dev/watchdog; while :; do printf . >&3; sleep {keepalive_sec}; done'
+Restart=on-failure
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target
+"#
+    );
     guest
         .ssh_command(&format!(
-            "echo RuntimeWatchdogSec={watchdog_sec}s | sudo tee -a /etc/systemd/system.conf"
+            "cat <<'EOF' | sudo tee /etc/systemd/system/watchdog-keepalive.service >/dev/null\n{service}EOF"
         ))
         .unwrap();
 
-    guest.ssh_command("sudo systemctl daemon-reexec").unwrap();
+    guest
+        .ssh_command(
+            "sudo systemctl daemon-reload && \
+             sudo systemctl enable --now watchdog-keepalive.service && \
+             sudo systemctl is-active --quiet watchdog-keepalive.service",
+        )
+        .unwrap();
 }
 
 pub(crate) fn make_guest_panic(guest: &Guest) {

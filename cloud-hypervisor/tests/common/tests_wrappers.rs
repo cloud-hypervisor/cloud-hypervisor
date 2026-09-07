@@ -3427,19 +3427,10 @@ pub(crate) fn _test_watchdog(guest: &Guest) {
 
         let mut expected_reboot_count = 1;
 
-        // Enable the watchdog with a 15s timeout
-        enable_guest_watchdog(guest, 15);
+        // Ping frequently enough to remain below the device's fixed timeout.
+        enable_guest_watchdog(guest, 5);
 
         assert_eq!(get_reboot_count(guest), expected_reboot_count);
-        assert_eq!(
-            guest
-                .ssh_command("sudo journalctl | grep -c -- \"Watchdog started\"")
-                .unwrap()
-                .trim()
-                .parse::<u32>()
-                .unwrap_or_default(),
-            1
-        );
 
         // Allow some normal time to elapse to check we don't get spurious reboots
         thread::sleep(Duration::new(40, 0));
