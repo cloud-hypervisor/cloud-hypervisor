@@ -382,6 +382,8 @@ migration:
 - Sender
   - `vm.migration-starting`: Migration worker is beginning the send attempt.
   - `vm.migration-started`: Receiver acknowledged the migration start request.
+  - `vm.migration-memory-iteration`: A precopy iteration finished. Can appear
+    multiple times and solely signals forward progress.
   - `vm.migration-finished`: Migration completed successfully.
   - `vm.migration-failed`: Migration worker returned an error.
 - Receiver
