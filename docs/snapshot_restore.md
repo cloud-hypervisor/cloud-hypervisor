@@ -337,6 +337,11 @@ The daemon implements the local live-migration wire protocol defined in
   before sending `Config` and `State`. Finish with either `CompletePaused`
   (restored VM remains paused) or `Complete` (restored VM resumes).
 
+This also means that we publish live-migration events: Cloud Hypervisor will
+emit the same events as it does as in the context of a live migration. Please
+refer to [live_migration.md](live_migration.md#events) for more more
+information.
+
 ### Critical invariant on snapshot
 
 On the snapshot path, the daemon must finish reading from every memory fd
