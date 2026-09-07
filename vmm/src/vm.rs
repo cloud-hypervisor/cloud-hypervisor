@@ -1921,12 +1921,11 @@ impl Vm {
                 ))
             })?;
 
-        // PMU interrupt sticks to PPI, so need to be added by 16 to get real irq number.
         let pmu_supported = self
             .cpu_manager
             .lock()
             .unwrap()
-            .init_pmu(AARCH64_PMU_IRQ + 16)
+            .init_pmu(AARCH64_PMU_IRQ)
             .map_err(|_| {
                 Error::ConfigureSystem(arch::Error::PlatformSpecific(
                     arch::aarch64::Error::VcpuInitPmu,

@@ -1744,7 +1744,7 @@ impl DeviceManager {
                 .cpu_manager
                 .lock()
                 .unwrap()
-                .init_pmu(AARCH64_PMU_IRQ + 16)
+                .init_pmu(AARCH64_PMU_IRQ)
                 .is_err()
             {
                 info!("Failed to initialize PMU");
