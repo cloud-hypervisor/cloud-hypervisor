@@ -184,20 +184,23 @@ Current constraints for `memory_restore_mode=copyonwrite`:
   page-cache sharing is lost for that VM and host memory use grows to the
   eager-copy level. The same applies to `ondemand` restores.
 
-## Restore a VM with new Net FDs
-For a VM created with FDs explicitly passed to NetConfig, a set of valid FDs
-need to be provided along with the VM restore command in the following syntax:
+## Restore a VM with new external FDs
+
+For a VM created with FDs explicitly passed to `NetConfig`, replacement FDs
+must be provided with the restore command through `external_fds`. Each entry
+identifies a network device, and `ch-remote` passes the listed FDs to the VMM
+over its API UNIX socket via SCM_RIGHTS:
 
 ```bash
 # First terminal
 ./cloud-hypervisor --api-socket /tmp/cloud-hypervisor.sock
 
 # Second terminal
-./ch-remote --api-socket=/tmp/cloud-hypervisor.sock restore source_url=file:///home/foo/snapshot net_fds=[net1@[23,24],net2@[25,26]]
+./ch-remote --api-socket=/tmp/cloud-hypervisor.sock restore source_url=file:///home/foo/snapshot external_fds=[net(net1)@[23,24],net(net2)@[25,26]]
 ```
-In the example above, the net device with id `net1` will be backed by FDs '23'
-and '24', and the net device with id `net2` will be backed by FDs '25' and '26'
-from the restored VM.
+
+In this example, the network device with id `net1` is backed by FDs `23` and
+`24`, and the device with id `net2` is backed by FDs `25` and `26`.
 
 ## VFIO devices
 
@@ -361,9 +364,5 @@ production backend.
 - The VM must use shared-memory backing (`shared=on` or file-backed).
   Anonymous memory is rejected with the same error message that local
   live migration produces.
-- Orchestrator-supplied network FDs (today carried by `vm.restore`'s
-  `net_fds` field) are not plumbed through `vm.receive-migration`,
-  so VMs whose configuration relies on externally-provided net FDs
-  cannot currently be restored via the offload path.
 - Confidential VMs (CVMs) inherit the live-migration restriction: offload
   is not supported for CVMs.
