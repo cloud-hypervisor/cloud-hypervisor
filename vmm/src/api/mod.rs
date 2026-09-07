@@ -2099,11 +2099,13 @@ impl ApiAction for VmmShutdown {
                 .map_err(ApiError::VmmShutdown)
                 .map(|_| ApiResponsePayload::Empty);
 
+            let shutdown = response.is_ok();
+
             response_sender
                 .send(response)
                 .map_err(VmmError::ApiResponseSend)?;
 
-            Ok(true)
+            Ok(shutdown)
         })
     }
 
