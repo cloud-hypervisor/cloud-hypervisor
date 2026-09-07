@@ -109,6 +109,9 @@ pub enum MigratableError {
 
     #[error("Error setting up a TLS-encrypted connection")]
     Tls(#[source] tls::TlsError),
+
+    #[error("The request conflicts with current state")]
+    Conflict(#[source] anyhow::Error),
 }
 
 /// A Pausable component can be paused and resumed.
