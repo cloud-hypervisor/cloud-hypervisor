@@ -20,6 +20,7 @@ use micro_http::{
 use seccompiler::{SeccompAction, apply_filter};
 use serde_json::Error as SerdeError;
 use thiserror::Error;
+use vm_migration::MigratableError;
 use vmm_sys_util::eventfd::EventFd;
 
 use self::http_endpoint::{
@@ -95,13 +96,24 @@ impl HttpError {
 
 /// Maps an [`ApiError`] to an HTTP [`StatusCode`].
 fn api_error_status_code(error: &ApiError) -> StatusCode {
-    match error.source().and_then(|e| e.downcast_ref::<VmError>()) {
+    let source = error.source();
+
+    // The migration endpoints report state conflicts with a `MigratableError`,
+    // which the `VmError` downcast below cannot see.
+    if let Some(MigratableError::Conflict(_)) =
+        source.and_then(|e| e.downcast_ref::<MigratableError>())
+    {
+        return StatusCode::Conflict;
+    }
+
+    match source.and_then(|e| e.downcast_ref::<VmError>()) {
         Some(
             VmError::VmNotCreated
             | VmError::VmMissingConfig
             | VmError::NoDeviceToRemove(_)
             | VmError::DeviceManager(DeviceManagerError::UnknownDeviceId(_)),
         ) => StatusCode::NotFound,
+        Some(VmError::VmMigrating | VmError::VmRestoring) => StatusCode::Conflict,
         Some(VmError::ConfigValidation(e)) => match e {
             ValidationError::IdentifierNotUnique(_) | ValidationError::DuplicateDevicePath(_) => {
                 StatusCode::Conflict
@@ -502,6 +514,10 @@ pub fn http_api_graceful_shutdown(http_handle: HttpApiHandle) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::io;
+
+    use anyhow::anyhow;
+
     use super::*;
 
     #[test]
@@ -575,9 +591,39 @@ mod tests {
     }
 
     #[test]
+    fn test_state_conflicts_map_to_conflict() {
+        assert_eq!(
+            api_error_status_code(&ApiError::VmmShutdown(VmError::VmMigrating)),
+            StatusCode::Conflict
+        );
+        assert_eq!(
+            api_error_status_code(&ApiError::VmAddNet(VmError::VmMigrating)),
+            StatusCode::Conflict
+        );
+        assert_eq!(
+            api_error_status_code(&ApiError::VmSnapshot(VmError::VmRestoring)),
+            StatusCode::Conflict
+        );
+        assert_eq!(
+            api_error_status_code(&ApiError::VmSendMigration(MigratableError::Conflict(
+                anyhow!("A migration is already in progress")
+            ))),
+            StatusCode::Conflict
+        );
+        assert_eq!(
+            api_error_status_code(&ApiError::VmReceiveMigration(MigratableError::Conflict(
+                anyhow!("A VM already exists on this VMM")
+            ))),
+            StatusCode::Conflict
+        );
+    }
+
+    #[test]
     fn test_other_errors_map_to_internal_server_error() {
         assert_eq!(
-            api_error_status_code(&ApiError::VmRemoveDevice(VmError::VmMigrating)),
+            api_error_status_code(&ApiError::VmBoot(VmError::EventFdClone(io::Error::other(
+                "test"
+            )))),
             StatusCode::InternalServerError
         );
     }
