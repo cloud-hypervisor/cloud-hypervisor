@@ -46,7 +46,7 @@ use hypervisor::arch::aarch64::gic::Vgic;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::arch::aarch64::mpidr_from_vcpu_id;
 #[cfg(target_arch = "aarch64")]
-use hypervisor::arch::aarch64::regs::MPIDR_EL1;
+use hypervisor::arch::aarch64::regs::{AARCH64_PMU_IRQ, MPIDR_EL1};
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 use hypervisor::arch::aarch64::regs::{ID_AA64MMFR0_EL1, TCR_EL1, TTBR1_EL1};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -1811,6 +1811,11 @@ impl CpuManager {
              * Ignore Local Interrupt Controller Address at byte offset 36 of MADT table.
              */
 
+            let pmu_supported = self
+                .vcpus
+                .iter()
+                .all(|vcpu| vcpu.lock().unwrap().vcpu.has_pmu_support());
+
             // See section 5.2.12.14 GIC CPU Interface (GICC) Structure in ACPI spec.
             for cpu in 0..self.config.boot_vcpus {
                 let mpidr = mpidr_from_vcpu_id(cpu as u64);
@@ -1831,7 +1836,7 @@ impl CpuManager {
                     uid: cpu,
                     flags: 1,
                     parking_version: 0,
-                    performance_interrupt: 0,
+                    performance_interrupt: if pmu_supported { AARCH64_PMU_IRQ } else { 0 },
                     parked_address: 0,
                     base_address: 0,
                     gicv_base_address: 0,
