@@ -1035,6 +1035,7 @@ impl Vmm {
             Ok(memory_files)
         };
 
+        #[expect(deprecated)] // last sent in v52
         if req.command() == Command::Abandon {
             info!("Abandon Command Received");
             return Ok(Aborted);
@@ -1977,11 +1978,6 @@ impl Vmm {
                     socket
                         .write_all(&buf[..len])
                         .map_err(MigratableError::MigrateSocket)?;
-                }
-                Command::Abandon => {
-                    Response::ok().write_to(&mut socket)?;
-                    info!("Postcopy: received Abandon, exiting serve loop");
-                    return Ok(());
                 }
                 c => {
                     return Err(MigratableError::MigrateSend(anyhow!(

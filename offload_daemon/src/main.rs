@@ -283,6 +283,7 @@ fn run_snapshot(socket_path: &Path, output_dir: &Path) -> Result<()> {
                 info!("Snapshot persisted to {output_dir:?}");
                 break;
             }
+            #[expect(deprecated)] // last sent in v52
             Command::Abandon => {
                 // ACK before bailing so CH's ok_or_fatal_error() read returns
                 // cleanly instead of hitting EOF.
@@ -560,6 +561,7 @@ fn serve_page_faults(stream: &mut UnixStream, slots: &[OnDemandSlot]) -> Result<
                     .map_err(Error::WriteGuestMemory)?;
                 Response::ok().write_to(stream).map_err(Error::Protocol)?;
             }
+            #[expect(deprecated)] // last sent in v52
             Command::Abandon => {
                 info!("Serve loop: received Abandon, exiting");
                 Response::ok().write_to(stream).ok();
