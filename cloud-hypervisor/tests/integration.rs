@@ -12950,6 +12950,41 @@ mod aarch64_acpi {
     }
 
     #[test]
+    fn test_pmu_on_acpi() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let mut child = GuestCommand::new(&guest)
+            .default_cpus()
+            .default_memory()
+            .args(["--kernel", edk2_path().to_str().unwrap()])
+            .default_disks()
+            .default_net()
+            .args(["--serial", "tty", "--console", "off"])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            assert_eq!(
+                guest
+                    .ssh_command(GREP_PMU_IRQ_CMD)
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
     fn test_guest_numa_nodes_acpi() {
         _test_guest_numa_nodes(true);
     }
