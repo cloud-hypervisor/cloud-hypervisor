@@ -18,7 +18,7 @@ use fdt_parser::node::FdtNode;
 use hypervisor::arch::aarch64::gic::Vgic;
 use hypervisor::arch::aarch64::regs::{
     AARCH64_ARCH_TIMER_HYP_IRQ, AARCH64_ARCH_TIMER_PHYS_NONSECURE_IRQ,
-    AARCH64_ARCH_TIMER_PHYS_SECURE_IRQ, AARCH64_ARCH_TIMER_VIRT_IRQ, AARCH64_PMU_IRQ,
+    AARCH64_ARCH_TIMER_PHYS_SECURE_IRQ, AARCH64_ARCH_TIMER_VIRT_IRQ, AARCH64_PMU_PPI_INDEX,
 };
 use log::{debug, info};
 use thiserror::Error;
@@ -762,7 +762,11 @@ fn create_devices_node<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
 
 fn create_pmu_node(fdt: &mut FdtWriter) -> FdtWriterResult<()> {
     let compatible = "arm,armv8-pmuv3";
-    let irq = [GIC_FDT_IRQ_TYPE_PPI, AARCH64_PMU_IRQ, IRQ_TYPE_LEVEL_HI];
+    let irq = [
+        GIC_FDT_IRQ_TYPE_PPI,
+        AARCH64_PMU_PPI_INDEX,
+        IRQ_TYPE_LEVEL_HI,
+    ];
 
     let pmu_node = fdt.begin_node("pmu")?;
     fdt.property_string("compatible", compatible)?;
