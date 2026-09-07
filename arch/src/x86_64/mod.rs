@@ -481,6 +481,12 @@ impl CpuidFeatureEntry {
                 compatible_check: CpuidCompatibleCheck::BitwiseSubset,
             },
             CpuidFeatureEntry {
+                function: 0xd,
+                index: 1,
+                feature_reg: CpuidReg::EAX,
+                compatible_check: CpuidCompatibleCheck::BitwiseSubset,
+            },
+            CpuidFeatureEntry {
                 function: 0x1d,
                 index: 0,
                 feature_reg: CpuidReg::EAX,
