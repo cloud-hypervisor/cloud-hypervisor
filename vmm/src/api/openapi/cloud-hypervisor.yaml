@@ -29,6 +29,8 @@ paths:
       responses:
         204:
           description: The VMM successfully shutdown.
+        409:
+          description: The operation conflicts with the current state of the VM.
 
   /vm.info:
     get:
@@ -53,6 +55,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/VmCounters"
+        409:
+          description: The operation conflicts with the current state of the VM.
 
   /vm.balloon-stats:
     get:
@@ -64,6 +68,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/BalloonStatsResponse"
+        409:
+          description: The operation conflicts with the current state of the VM.
         500:
           description: The statistics could not be retrieved, e.g. the statistics feature was not negotiated with the guest driver.
 
@@ -81,6 +87,8 @@ paths:
       responses:
         204:
           description: The VM instance was successfully created.
+        409:
+          description: The operation conflicts with the current state of the VM.
 
   /vm.delete:
     put:
@@ -89,6 +97,8 @@ paths:
       responses:
         204:
           description: The VM instance was successfully deleted.
+        409:
+          description: The operation conflicts with the current state of the VM.
 
   /vm.boot:
     put:
@@ -99,6 +109,8 @@ paths:
           description: The VM instance successfully booted.
         404:
           description: The VM instance could not boot because it is not created yet
+        409:
+          description: The operation conflicts with the current state of the VM.
 
   /vm.pause:
     put:
@@ -111,6 +123,8 @@ paths:
           description: The VM instance could not pause because it is not created yet
         405:
           description: The VM instance could not pause because it is not booted.
+        409:
+          description: The operation conflicts with the current state of the VM.
 
   /vm.resume:
     put:
@@ -123,6 +137,8 @@ paths:
           description: The VM instance could not resume because it is not booted yet
         405:
           description: The VM instance could not resume because it is not paused.
+        409:
+          description: The operation conflicts with the current state of the VM.
 
   /vm.shutdown:
     put:
@@ -135,6 +151,8 @@ paths:
           description: The VM instance could not shut down because is not created.
         405:
           description: The VM instance could not shut down because it is not started.
+        409:
+          description: The operation conflicts with the current state of the VM.
 
   /vm.reboot:
     put:
@@ -147,6 +165,8 @@ paths:
           description: The VM instance could not reboot because it is not created.
         405:
           description: The VM instance could not reboot because it is not booted.
+        409:
+          description: The operation conflicts with the current state of the VM.
 
   /vm.power-button:
     put:
@@ -159,6 +179,8 @@ paths:
           description: The button could not be triggered because it is not created yet
         405:
           description: The button could not be triggered because it is not booted.
+        409:
+          description: The operation conflicts with the current state of the VM.
 
   /vm.resize:
     put:
@@ -175,6 +197,8 @@ paths:
           description: The VM instance was successfully resized.
         404:
           description: The VM instance could not be resized because it is not created.
+        409:
+          description: The operation conflicts with the current state of the VM.
         429:
           description: The VM instance could not be resized because a cpu removal is still pending.
 
@@ -193,6 +217,8 @@ paths:
           description: The disk was successfully resized.
         404:
           description: The disk could not be resized because the VM is not created, or no disk with the given identifier exists.
+        409:
+          description: The operation conflicts with the current state of the VM.
         500:
           description: The disk could not be resized.
 
@@ -211,6 +237,8 @@ paths:
           description: The memory zone was successfully resized.
         404:
           description: The memory zone could not be resized because the VM is not created.
+        409:
+          description: The operation conflicts with the current state of the VM.
         500:
           description: The memory zone could not be resized.
 
@@ -238,7 +266,7 @@ paths:
         404:
           description: The new device could not be added to the VM instance.
         409:
-          description: The new device could not be added because a device with the same identifier or path already exists.
+          description: The new device could not be added because a device with the same identifier or path already exists, or because the operation conflicts with the current state of the VM.
 
   /vm.remove-device:
     put:
@@ -255,6 +283,8 @@ paths:
           description: The device was successfully removed from the VM instance.
         404:
           description: The device could not be removed because the VM is not created, or no device with the given identifier exists.
+        409:
+          description: The operation conflicts with the current state of the VM.
 
   /vm.add-disk:
     put:
@@ -280,7 +310,7 @@ paths:
         404:
           description: The new disk could not be added because the VM is not created.
         409:
-          description: The new disk could not be added because a device with the same identifier already exists.
+          description: The new disk could not be added because a device with the same identifier already exists, or because the operation conflicts with the current state of the VM.
         500:
           description: The new disk could not be added to the VM instance.
 
@@ -308,7 +338,7 @@ paths:
         404:
           description: The new device could not be added because the VM is not created.
         409:
-          description: The new device could not be added because a device with the same identifier already exists.
+          description: The new device could not be added because a device with the same identifier already exists, or because the operation conflicts with the current state of the VM.
         500:
           description: The new device could not be added to the VM instance.
 
@@ -336,7 +366,7 @@ paths:
         404:
           description: The new device could not be added because the VM is not created.
         409:
-          description: The new device could not be added because a device with the same identifier already exists.
+          description: The new device could not be added because a device with the same identifier already exists, or because the operation conflicts with the current state of the VM.
         500:
           description: The new device could not be added to the VM instance.
 
@@ -364,7 +394,7 @@ paths:
         404:
           description: The new device could not be added because the VM is not created.
         409:
-          description: The new device could not be added because a device with the same identifier already exists.
+          description: The new device could not be added because a device with the same identifier already exists, or because the operation conflicts with the current state of the VM.
         500:
           description: The new device could not be added to the VM instance.
 
@@ -392,7 +422,7 @@ paths:
         404:
           description: The new device could not be added because the VM is not created.
         409:
-          description: The new device could not be added because a device with the same identifier already exists.
+          description: The new device could not be added because a device with the same identifier already exists, or because the operation conflicts with the current state of the VM.
         500:
           description: The new device could not be added to the VM instance.
 
@@ -420,7 +450,7 @@ paths:
         404:
           description: The new device could not be added because the VM is not created.
         409:
-          description: The new device could not be added because a device with the same identifier already exists.
+          description: The new device could not be added because a device with the same identifier already exists, or because the operation conflicts with the current state of the VM.
         500:
           description: The new device could not be added to the VM instance.
 
@@ -448,7 +478,7 @@ paths:
         404:
           description: The new vDPA device could not be added because the VM is not created.
         409:
-          description: The new vDPA device could not be added because a device with the same identifier already exists.
+          description: The new vDPA device could not be added because a device with the same identifier already exists, or because the operation conflicts with the current state of the VM.
         500:
           description: The new vDPA device could not be added to the VM instance.
 
@@ -473,7 +503,7 @@ paths:
         "400":
           description: The new device could not be added because the configuration is not valid.
         "409":
-          description: The new device could not be added because a device with the same identifier already exists.
+          description: The new device could not be added because a device with the same identifier already exists, or because the operation conflicts with the current state of the VM.
         "404":
           description: The new device could not be added to the VM instance.
       summary: Add a new userspace device to the VM
@@ -495,6 +525,8 @@ paths:
           description: The VM instance could not be snapshotted because it is not created.
         405:
           description: The VM instance could not be snapshotted because it is not booted.
+        409:
+          description: The operation conflicts with the current state of the VM.
 
   /vm.coredump:
     put:
@@ -513,6 +545,8 @@ paths:
           description: The VM instance could not be coredumped because it is not created.
         405:
           description: The VM instance could not be coredumped because it is not booted.
+        409:
+          description: The operation conflicts with the current state of the VM.
 
   /vm.nmi:
     put:
@@ -520,6 +554,8 @@ paths:
       responses:
         204:
           description: The NMI successfully injected.
+        409:
+          description: The operation conflicts with the current state of the VM.
 
   /vm.restore:
     put:
@@ -539,7 +575,7 @@ paths:
         404:
           description: The VM instance could not be restored because it is already created.
         409:
-          description: The VM could not be restored because a device with the same identifier or path already exists.
+          description: The VM could not be restored because a device with the same identifier or path already exists, or because the operation conflicts with the current state of the VM.
 
   /vm.receive-migration:
     put:
@@ -554,6 +590,8 @@ paths:
       responses:
         204:
           description: The VM migration was successfully received.
+        409:
+          description: The operation conflicts with the current state of the VMM.
         500:
           description: The VM migration could not be received.
 
@@ -570,6 +608,8 @@ paths:
       responses:
         204:
           description: The VM migration was successfully sent.
+        409:
+          description: The operation conflicts with the current state of the VMM.
         500:
           description: The VM migration could not be sent.
 
