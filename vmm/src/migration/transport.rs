@@ -292,7 +292,7 @@ fn wait_for_readable(fd: &impl AsFd, abort_event: &impl AsRawFd) -> Result<bool,
 /// [`Self::cleanup`] is called.
 #[derive(Debug)]
 pub(crate) struct ReceiveAdditionalConnections {
-    accept_thread: Option<thread::JoinHandle<Result<(), MigratableError>>>,
+    accept_thread: Option<JoinHandle<Result<(), MigratableError>>>,
 
     /// Shared kill eventfd for the accept thread and memory workers.
     kill_evt: EventFd,
@@ -637,10 +637,9 @@ enum SendMemoryThreadNotify {
     Error,
 }
 
-/// This struct keeps track of additional threads we use to send VM memory.
+/// This struct keeps track of all workers sending VM memory.
 pub(crate) struct SendAdditionalConnections {
-    guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
-    threads: Vec<thread::JoinHandle<Result<(), MigratableError>>>,
+    threads: Vec<JoinHandle<Result<(), MigratableError>>>,
     /// Sender to all workers. The receiver is shared by all workers.
     message_tx: SyncSender<SendMemoryThreadMessage>,
     /// If an error occurs in one of the memory sending threads, the main thread signals
@@ -692,22 +691,8 @@ impl SendAdditionalConnections {
         let worker_error = Arc::new(AtomicBool::new(false));
         let (notify_tx, notify_rx) = channel::<SendMemoryThreadNotify>();
 
-        // If one connection is configured, we don't have to create any additional threads.
-        // In this case the main thread does the sending.
-        if configured_connections == 1 {
-            return Ok(Self {
-                guest_memory: guest_memory.clone(),
-                threads,
-                message_tx,
-                worker_error,
-                notify_rx,
-            });
-        }
-
         let message_rx = Arc::new(Mutex::new(message_rx));
-        // If we use multiple threads to send memory, the main thread only distributes
-        // the memory chunks to the workers, but does not send memory anymore. Thus in
-        // this case we create one additional thread for each connection.
+        // Main thread distributes writes, and workers take requests from it.
         for n in 0..configured_connections {
             let mut socket = send_migration_socket(destination, tls_dir)?;
             ConnectionRole::PrecopyMemory.write_to(&mut socket)?;
@@ -743,7 +728,6 @@ impl SendAdditionalConnections {
         }
 
         Ok(Self {
-            guest_memory: guest_memory.clone(),
             threads,
             message_tx,
             worker_error,
@@ -811,24 +795,13 @@ impl SendAdditionalConnections {
         }
     }
 
-    /// Send memory via all connections that we have. `socket` is the original socket
-    /// that was used to connect to the destination. Returns Ok(true) if memory was
-    /// sent, Ok(false) if the given table was empty.
+    /// Send memory via all connections that we have.
     ///
+    /// Returns Ok(true) if memory was sent, Ok(false) if the given table was empty.
     /// When this function returns, all memory has been sent and acknowledged.
-    pub(crate) fn send_memory(
-        &mut self,
-        table: MemoryRangeTable,
-        socket: &mut SocketStream,
-    ) -> Result<bool, MigratableError> {
+    pub(crate) fn send_memory(&mut self, table: MemoryRangeTable) -> Result<bool, MigratableError> {
         if table.regions().is_empty() {
             return Ok(false);
-        }
-
-        // If we use only one connection, we send the memory directly.
-        if self.threads.is_empty() {
-            send_memory_ranges(&self.guest_memory, &table, socket)?;
-            return Ok(true);
         }
 
         // The chunk size is chosen to be big enough so that even very fast links need some

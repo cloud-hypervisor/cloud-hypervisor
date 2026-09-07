@@ -1002,11 +1002,7 @@ impl Vmm {
                 let (memory_manager, memory_mode) =
                     self.vm_receive_config(req, socket, memory_files, receive_data_migration)?;
                 let guest_memory = memory_manager.lock().unwrap().guest_memory();
-                // Create the additional-connection receiver even in the single-connection case.
-                // At this point the receiver does not know whether the sender will use extra TCP
-                // connections. If it does not, no worker connections are accepted and memory
-                // requests continue to arrive on the main connection.
-                // The accept thread hands the page fault connection back via this channel.
+
                 let (fault_tx, fault_rx) = channel();
                 let connections = listener.try_clone().and_then(|l| {
                     ReceiveAdditionalConnections::new(
@@ -1063,9 +1059,9 @@ impl Vmm {
                 c => invalid_command(state_name, c),
             },
             Configured(mut config_data) => match req.command() {
-                // Memory commands use the main connection only in the single-connection case.
-                // When multiple TCP connections are configured, the worker connections carry
-                // all memory commands and the main connection is used only for control traffic.
+                // In v53 and before, in case of single connections memory was
+                // received here via the main connection. Since v54, this is
+                // only needed for the post snapshot flush of memory pages.
                 Command::Memory => {
                     transport::receive_memory_ranges(&config_data.guest_memory, req, socket)
                     .inspect_err(|_| {
@@ -1467,7 +1463,6 @@ impl Vmm {
     /// (e.g., reasonably small downtime) is reached.
     fn do_memory_iterations(
         vm: &mut Vm,
-        socket: &mut SocketStream,
         ctx: &mut MemoryMigrationContext,
         is_converged: impl Fn(&MemoryMigrationContext) -> result::Result<bool, MigratableError>,
         mem_send: &mut SendAdditionalConnections,
@@ -1490,7 +1485,7 @@ impl Vmm {
 
             // Send the current dirty pages
             let transfer_begin = Instant::now();
-            mem_send.send_memory(iteration_table, socket)?;
+            mem_send.send_memory(iteration_table)?;
             let transfer_duration = transfer_begin.elapsed();
             ctx.update_metrics_after_transfer(transfer_begin, transfer_duration);
 
@@ -1613,7 +1608,6 @@ impl Vmm {
     /// [finalized]: MemoryMigrationContext::finalize
     fn do_memory_migration(
         vm: &mut Vm,
-        socket: &mut SocketStream,
         send_data_migration: &VmSendMigrationData,
         mem_send: &mut SendAdditionalConnections,
         ctx: &mut OngoingMigrationContext,
@@ -1623,7 +1617,6 @@ impl Vmm {
         vm.start_dirty_log()?;
         let remaining = Self::do_memory_iterations(
             vm,
-            socket,
             &mut mem_ctx,
             // We bind send_data_migration to the callback
             |ctx| Self::is_precopy_converged(ctx, send_data_migration),
@@ -1643,7 +1636,7 @@ impl Vmm {
 
             mem_ctx.update_metrics_before_transfer(iteration_begin, &final_table);
             let transfer_begin = Instant::now();
-            mem_send.send_memory(final_table, socket)?;
+            mem_send.send_memory(final_table)?;
             let transfer_duration = transfer_begin.elapsed();
             mem_ctx.update_metrics_after_transfer(transfer_begin, transfer_duration);
             mem_ctx.iteration += 1;
@@ -1773,7 +1766,7 @@ impl Vmm {
                 "migration context should transition to VmPaused for memfds/postcopy migration",
             );
         } else {
-            let mut mem_send = transport::SendAdditionalConnections::new(
+            let mut mem_send = SendAdditionalConnections::new(
                 &send_data_migration.destination_url,
                 send_data_migration.connections,
                 send_data_migration.tls_dir.as_deref(),
@@ -1781,19 +1774,13 @@ impl Vmm {
                 &seccomp_filters.tcp_worker,
             )?;
 
-            Self::do_memory_migration(
-                vm,
-                &mut socket,
-                send_data_migration,
-                &mut mem_send,
-                &mut ctx,
-            )
-            .inspect_err(|_| {
-                if let Err(e) = mem_send.cleanup_workers() {
-                    let msg = flatten_error_chain_to_string(&e);
-                    warn!("Error cleaning up migration connections: {msg}");
-                }
-            })?;
+            Self::do_memory_migration(vm, send_data_migration, &mut mem_send, &mut ctx)
+                .inspect_err(|_| {
+                    if let Err(e) = mem_send.cleanup_workers() {
+                        let msg = flatten_error_chain_to_string(&e);
+                        warn!("Error cleaning up migration connections: {msg}");
+                    }
+                })?;
 
             mem_send.cleanup_workers()?;
         }
