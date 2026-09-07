@@ -1121,6 +1121,71 @@ impl Vmm {
         }
     }
 
+    /// Runs the receiver side of the migration protocol.
+    fn vm_receive_migration_protocol(
+        &mut self,
+        mut listener: ReceiveListener,
+        receive_data_migration: &VmReceiveMigrationData,
+    ) -> result::Result<(), MigratableError> {
+        event!("vm", "migration-receive-ready");
+        // Accept the connection and get the socket
+        let mut socket = listener.accept()?;
+
+        event!("vm", "migration-receive-starting");
+        let mut state = ReceiveMigrationState::Established;
+
+        while !state.finished() {
+            let req = Request::read_from(&mut socket).inspect_err(|error| {
+                if matches!(
+                    error,
+                    MigratableError::MigrateSocket(io_error)
+                        if io_error.kind() == io::ErrorKind::UnexpectedEof
+                ) {
+                    error!("Failed to read migration request: sender likely failed, aborting");
+                }
+            })?;
+            debug!("Command '{:?}' received", req.command());
+
+            // If sender-side migration causes any error propagated here, the
+            // next loop iteration logs a helpful error when reading the next
+            // request (which will fail as the sender closed the socket).
+            let (response, new_state) = match self.vm_receive_migration_step(
+                &mut socket,
+                &listener,
+                state,
+                &req,
+                receive_data_migration,
+            ) {
+                Ok(next_state) => (Response::ok(), next_state),
+                Err(err) => {
+                    warn!(
+                        "Migration aborted as migration command {:?} failed: {}",
+                        req.command(),
+                        err
+                    );
+                    (Response::error(), ReceiveMigrationState::Aborted)
+                }
+            };
+
+            state = new_state;
+            assert_eq!(response.length(), 0);
+            response.write_to(&mut socket)?;
+
+            // Connection and handshake established
+            if matches!(state, ReceiveMigrationState::Started) {
+                event!("vm", "migration-receive-started");
+            }
+        }
+
+        match state {
+            ReceiveMigrationState::Aborted => Err(MigratableError::CompleteMigration(anyhow!(
+                "Migration was aborted"
+            ))),
+            ReceiveMigrationState::Completed => Ok(()),
+            _ => unreachable!("loop only exits in Completed or Aborted"),
+        }
+    }
+
     fn vm_receive_state_command(
         &mut self,
         req: &Request,
@@ -3212,7 +3277,7 @@ impl RequestHandler for Vmm {
             receive_data_migration.zone_updates,
         );
 
-        let mut listener = transport::receive_migration_listener(
+        let listener = transport::receive_migration_listener(
             &receive_data_migration.receiver_url,
             receive_data_migration.tls_dir.as_deref(),
         )?;
@@ -3221,73 +3286,16 @@ impl RequestHandler for Vmm {
             warn!("The existing VM config will be overwritten");
         }
 
-        event!("vm", "migration-receive-ready");
-        // Accept the connection and get the socket
-        let mut socket = listener.accept()?;
-
-        event!("vm", "migration-receive-starting");
-        let mut state = ReceiveMigrationState::Established;
-
-        while !state.finished() {
-            let req = Request::read_from(&mut socket).inspect_err(|error| {
-                if matches!(
-                    error,
-                    MigratableError::MigrateSocket(io_error)
-                        if io_error.kind() == io::ErrorKind::UnexpectedEof
-                ) {
-                    error!("Failed to read migration request: sender likely failed, aborting");
-                }
-            })?;
-            debug!("Command '{:?}' received", req.command());
-
-            // If sender-side migration causes any error propagated here, the
-            // next loop iteration logs a helpful error when reading the next
-            // request (which will fail as the sender closed the socket).
-            let (response, new_state) = match self.vm_receive_migration_step(
-                &mut socket,
-                &listener,
-                state,
-                &req,
-                &receive_data_migration,
-            ) {
-                Ok(next_state) => (Response::ok(), next_state),
-                Err(err) => {
-                    warn!(
-                        "Migration aborted as migration command {:?} failed: {}",
-                        req.command(),
-                        err
-                    );
-                    (Response::error(), ReceiveMigrationState::Aborted)
-                }
-            };
-
-            state = new_state;
-            assert_eq!(response.length(), 0);
-            response.write_to(&mut socket)?;
-
-            // Connection and handshake established
-            if matches!(state, ReceiveMigrationState::Started) {
-                event!("vm", "migration-receive-started");
-            }
-        }
-
-        match state {
-            ReceiveMigrationState::Aborted => {
+        self.vm_receive_migration_protocol(listener, &receive_data_migration)
+            .inspect(|_| {
+                // Serving and resume already happened in the protocol loop.
+                event!("vm", "migration-receive-finished");
+            })
+            .inspect_err(|_| {
                 event!("vm", "migration-receive-failed");
                 self.vm = VmOwnership::None;
                 self.vm_config = None;
-                return Err(MigratableError::CompleteMigration(anyhow!(
-                    "Migration was aborted"
-                )));
-            }
-            ReceiveMigrationState::Completed => {
-                // Serving and resume already happened in the protocol loop.
-                event!("vm", "migration-receive-finished");
-            }
-            _ => unreachable!("loop only exits in Completed or Aborted"),
-        }
-
-        Ok(())
+            })
     }
 
     /// Dispatches a migration.
