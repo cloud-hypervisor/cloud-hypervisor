@@ -410,3 +410,24 @@ features are added to existing device models or the VMM, the corresponding
 device-specific config falls back to safe false/disabled values. Hence, only
 newly spawned VMs will be able to use new functionality, while being able to run
 VMs first spawned in older versions of Cloud Hypervisor.
+
+## Events
+
+The following events are emitted by Cloud Hypervisor in the context of
+migration:
+
+- Sender
+  - `vm.migration-starting`: Migration worker is beginning the send attempt.
+  - `vm.migration-started`: Receiver acknowledged the migration start request.
+  - `vm.migration-finished`: Migration completed successfully.
+  - `vm.migration-failed`: Migration worker returned an error.
+- Receiver
+  - `vm.migration-receive-ready`: Migration listener is ready to accept a
+    connection.
+  - `vm.migration-receive-starting`: Migration connection was accepted.
+  - `vm.migration-receive-started`: Sender's migration start request was
+    acknowledged.
+  - `vm.migration-receive-finished`: Migration was received and the VM resumed
+    successfully.
+  - `vm.migration-receive-failed`: The migration failed or the sender aborted
+    the migration.
