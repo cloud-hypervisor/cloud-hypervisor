@@ -3227,7 +3227,8 @@ impl Vm {
         Ok(self
             .vm
             .snapshot_clock(boot_vcpu.hypervisor_vcpu())
-            .map_err(|e| MigratableError::Pause(anyhow!("Could not capture guest clock: {e}")))?
+            .context("Could not capture guest clock")
+            .map_err(MigratableError::Pause)?
             .map(|state| SavedClock {
                 mode: hypervisor::ClockRestoreMode::SameHostResume,
                 state,
@@ -3245,7 +3246,8 @@ impl Vm {
             guards.iter().map(|g| g.hypervisor_vcpu()).collect();
         self.vm
             .restore_clock(&hv_vcpus, &saved.state, saved.mode)
-            .map_err(|e| MigratableError::Resume(anyhow!("Could not restore guest clock: {e}")))
+            .context("Could not restore guest clock")
+            .map_err(MigratableError::Resume)
     }
 
     pub fn device_manager(&self) -> &Arc<Mutex<DeviceManager>> {
@@ -3276,7 +3278,8 @@ impl Pausable for Vm {
 
         self.vm
             .pause()
-            .map_err(|e| MigratableError::Pause(anyhow!("Could not pause the VM: {e}")))?;
+            .context("Could not pause the VM")
+            .map_err(MigratableError::Pause)?;
 
         self.state = new_state;
 
@@ -3299,7 +3302,8 @@ impl Pausable for Vm {
         if current_state == VmState::Paused {
             self.vm
                 .resume()
-                .map_err(|e| MigratableError::Resume(anyhow!("Could not resume the VM: {e}")))?;
+                .context("Could not resume the VM")
+                .map_err(MigratableError::Resume)?;
         }
 
         self.device_manager.lock().unwrap().resume()?;
