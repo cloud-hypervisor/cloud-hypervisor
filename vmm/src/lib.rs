@@ -1729,18 +1729,17 @@ impl Vmm {
             .map_err(MigratableError::MigrateSend)?
         };
 
-        if matches!(memory_mode, MigrationMode::MemFDs) {
-            match &mut socket {
-                SocketStream::Unix(unix_socket) => {
-                    // Proceed with sending memory file descriptors over UNIX socket
-                    vm.send_memory_fds(unix_socket)?;
-                }
-                _ => {
-                    return Err(MigratableError::MigrateSend(anyhow!(
-                        "Memory FD migration is only supported with UNIX sockets",
-                    )));
-                }
+        // Send memory FDs
+        match (&mut socket, memory_mode) {
+            (SocketStream::Unix(unix_socket), MigrationMode::MemFDs) => {
+                vm.send_memory_fds(unix_socket)?;
             }
+            (_, MigrationMode::MemFDs) => {
+                return Err(MigratableError::MigrateSend(anyhow!(
+                    "Memory FD migration is only supported with UNIX sockets",
+                )));
+            }
+            (_, _) => (),
         }
 
         let vm_migration_config = VmMigrationConfig {
@@ -1758,44 +1757,55 @@ impl Vmm {
             vm.start_migration()?;
         }
 
-        if matches!(memory_mode, MigrationMode::MemFDs | MigrationMode::Postcopy) {
-            // Now pause VM (skip if already paused, e.g. migrating a paused VM)
-            let downtime_begin = Instant::now();
-            if vm.get_state() != VmState::Paused {
-                vm.pause()?;
+        // Memory transfer
+        match (memory_mode, &mut socket) {
+            (
+                MigrationMode::Precopy,
+                SocketStream::Unix(_) | SocketStream::Tcp(_) | SocketStream::Tls(_),
+            ) => {
+                let mut mem_send = SendAdditionalConnections::new(
+                    &send_data_migration.destination_url,
+                    send_data_migration.connections,
+                    send_data_migration.tls_dir.as_deref(),
+                    &vm.guest_memory(),
+                    &seccomp_filters.tcp_worker,
+                )?;
+
+                Self::do_memory_migration(
+                    vm,
+                    &mut socket,
+                    send_data_migration,
+                    &mut mem_send,
+                    &mut ctx,
+                )
+                .inspect_err(|_| {
+                    if let Err(e) = mem_send.cleanup_workers() {
+                        let msg = flatten_error_chain_to_string(&e);
+                        warn!("Error cleaning up migration connections: {msg}");
+                    }
+                })?;
+                mem_send.cleanup_workers()?;
             }
-            ctx.set_vm_paused(
-                downtime_begin,
-                // No memory was transferred
-                MemoryMigrationContext::empty_finalized(),
-            )
-            .expect(
-                "migration context should transition to VmPaused for memfds/postcopy migration",
-            );
-        } else {
-            let mut mem_send = transport::SendAdditionalConnections::new(
-                &send_data_migration.destination_url,
-                send_data_migration.connections,
-                send_data_migration.tls_dir.as_deref(),
-                &vm.guest_memory(),
-                &seccomp_filters.tcp_worker,
-            )?;
-
-            Self::do_memory_migration(
-                vm,
-                &mut socket,
-                send_data_migration,
-                &mut mem_send,
-                &mut ctx,
-            )
-            .inspect_err(|_| {
-                if let Err(e) = mem_send.cleanup_workers() {
-                    let msg = flatten_error_chain_to_string(&e);
-                    warn!("Error cleaning up migration connections: {msg}");
+            // No need for precopy: just pause VM
+            (MigrationMode::MemFDs, SocketStream::Unix(_)) | (MigrationMode::Postcopy, _) => {
+                let downtime_begin = Instant::now();
+                if vm.get_state() != VmState::Paused {
+                    vm.pause()?;
                 }
-            })?;
-
-            mem_send.cleanup_workers()?;
+                ctx.set_vm_paused(
+                    downtime_begin,
+                    // No memory was transferred
+                    MemoryMigrationContext::empty_finalized(),
+                )
+                .expect(
+                    "migration context should transition to VmPaused for memfds/postcopy migration",
+                );
+            }
+            (socket, mode) => {
+                return Err(MigratableError::MigrateSend(anyhow!(
+                    "Unexpected memory transfer configuration: socket:{socket:?}, mode:{mode:?}",
+                )));
+            }
         }
 
         // We release the locks early to enable locking them on the destination host.

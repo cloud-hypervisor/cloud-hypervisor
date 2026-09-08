@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::fmt;
+use std::fmt::{Debug, Formatter};
 use std::io::{self, ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::num::{NonZeroU32, ParseIntError};
@@ -144,6 +146,16 @@ pub(crate) enum SocketStream {
     Unix(UnixStream),
     Tcp(TcpStream),
     Tls(Box<TlsStream>),
+}
+
+impl Debug for SocketStream {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            SocketStream::Unix(_) => write!(f, "Unix"),
+            SocketStream::Tcp(_) => write!(f, "Tcp"),
+            SocketStream::Tls(_) => write!(f, "Tls"),
+        }
+    }
 }
 
 impl Read for SocketStream {
