@@ -1448,7 +1448,11 @@ impl Vmm {
 
             // Create VM
             vm.restore().map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Failed restoring the Vm: {e}"))
+                // Inner error cannot be wrapped in anyhow::Error => print it
+                MigratableError::MigrateReceive(anyhow!(
+                    "Failed restoring the VM: {}",
+                    flatten_error_chain_to_string(&e)
+                ))
             })?;
 
             Ok(vm)
@@ -1812,8 +1816,10 @@ impl Vmm {
         // The VM is already stopped.
         // Keep the locks held if the source VM must be preserved.
         if !send_data_migration.preserve_source {
-            vm.release_disk_locks()
-                .map_err(|e| MigratableError::UnlockError(anyhow!("{e}")))?;
+            // Inner error cannot be wrapped in anyhow::Error => print it
+            vm.release_disk_locks().map_err(|e| {
+                MigratableError::UnlockError(anyhow!("{}", flatten_error_chain_to_string(&e)))
+            })?;
         }
 
         // For postcopy, serve faults before sending State so the destination
@@ -1835,7 +1841,7 @@ impl Vmm {
                         guest_memory,
                     )
                 })
-                .context("spawning postcopy serve thread")
+                .context("Spawning postcopy serve thread")
                 .map_err(MigratableError::MigrateSend)?;
             Some(handle)
         } else {
