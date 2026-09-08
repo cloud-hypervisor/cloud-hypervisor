@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result};
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use byteorder::{ByteOrder, LittleEndian};
@@ -1736,7 +1736,8 @@ impl VfioCommon {
                 ))
             })?;
             self.load_migration_data(&blob)
-                .map_err(|e| VfioPciError::RestoreMigration(anyhow!("{e}")))?;
+                .context("Failed to load migration data for restoring VFIO device")
+                .map_err(VfioPciError::RestoreMigration)?;
         }
 
         self.sync_command_and_interrupts()?;
@@ -1773,7 +1774,7 @@ impl VfioCommon {
         debug!("VFIO migration transition -> {target:?}");
         self.vfio_wrapper
             .set_migration_state(target)
-            .map_err(|e| anyhow!("VFIO set_migration_state({target:?}) failed: {e}"))
+            .with_context(|| format!("VFIO set_migration_state({target:?}) failed"))
     }
 
     fn reset_and_rearm(&self) {
@@ -1825,9 +1826,9 @@ impl VfioCommon {
             .transition_migration_state_with_recovery(VfioMigrationState::Stop, None)
             .map_err(MigratableError::Snapshot);
 
-        let data = data.map_err(|e| {
-            MigratableError::Snapshot(anyhow!("VFIO migration data read failed: {e}"))
-        })?;
+        let data = data
+            .context("VFIO migration data read failed")
+            .map_err(MigratableError::Snapshot)?;
         stop?;
         Ok(data)
     }
@@ -1844,9 +1845,9 @@ impl VfioCommon {
         // only allows aborting with a reset, so reset directly.
         if let Err(e) = self.vfio_wrapper.write_migration_data(data) {
             self.reset_and_rearm();
-            return Err(MigratableError::Restore(anyhow!(
-                "VFIO migration data write failed: {e}"
-            )));
+            return Err(MigratableError::Restore(
+                anyhow::Error::new(e).context("VFIO migration data write failed"),
+            ));
         }
         Ok(())
     }
@@ -1864,7 +1865,8 @@ impl VfioCommon {
         let negotiated = self
             .vfio_wrapper
             .start_dma_logging(page_size, ranges)
-            .map_err(|e| MigratableError::StartDirtyLog(anyhow!("VFIO start_dma_logging: {e}")))?;
+            .context("VFIO start_dma_logging failed")
+            .map_err(MigratableError::StartDirtyLog)?;
         debug!(
             "VFIO DMA logging started over {} range(s), requested page size {page_size:#x}, device granularity {negotiated:#x}",
             ranges.len()
@@ -1879,7 +1881,8 @@ impl VfioCommon {
         }
         self.vfio_wrapper
             .stop_dma_logging()
-            .map_err(|e| MigratableError::StopDirtyLog(anyhow!("VFIO stop_dma_logging: {e}")))
+            .context("VFIO stop_dma_logging failed")
+            .map_err(MigratableError::StopDirtyLog)
     }
 
     // Reports per range dirty bitmaps from the kernel, merged into a single
@@ -1897,7 +1900,8 @@ impl VfioCommon {
             let table = self
                 .vfio_wrapper
                 .report_dma_logging(*range, page_size)
-                .map_err(|e| MigratableError::DirtyLog(anyhow!("VFIO report_dma_logging: {e}")))?;
+                .context("VFIO report_dma_logging failed")
+                .map_err(MigratableError::DirtyLog)?;
             tables.push(table);
         }
         Ok(MemoryRangeTable::new_from_tables(tables))
