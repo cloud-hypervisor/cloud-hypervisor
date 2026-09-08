@@ -365,6 +365,7 @@ Starting with `v54`, Cloud Hypervisor guarantees migration compatibility from
 the previous two versions ("n-2"), e.g. `v54` accepts migrations from `v52` and
 `v53`. Upgrades spanning more major versions might work. It is, however,
 strongly recommended to do incremental upgrades, e.g., `v54 -> v56 -> v58`.
+Backward migrations, such as `v54 -> v52`, are **not** supported.
 
 New VMM functionality is designed in a way that it does not cause any
 incompatibility for VMs coming from older versions of Cloud Hypervisor. If new
