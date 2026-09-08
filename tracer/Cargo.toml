@@ -6,13 +6,13 @@ rust-version.workspace = true
 version = "0.1.0"
 
 [dependencies]
-libc = { workspace = true }
-log = { workspace = true }
-serde = { workspace = true, features = ["derive", "rc"] }
-serde_json = { workspace = true }
+libc = { workspace = true, optional = true }
+log = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive", "rc"], optional = true }
+serde_json = { workspace = true, optional = true }
 
 [features]
-tracing = []
+tracing = ["dep:libc", "dep:log", "dep:serde", "dep:serde_json"]
 
 [lints]
 workspace = true

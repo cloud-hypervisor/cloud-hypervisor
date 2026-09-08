@@ -34,6 +34,7 @@ mshv = [
 pvmemcontrol = ["devices/pvmemcontrol"]
 sev_snp = [
   "arch/sev_snp",
+  "dep:sha2",
   "hypervisor/sev_snp",
   "igvm",
   "virtio-devices/sev_snp",
@@ -82,7 +83,7 @@ serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 serde_with = { workspace = true, features = ["macros"] }
 serial_buffer = { path = "../serial_buffer" }
-sha2 = { workspace = true }
+sha2 = { workspace = true, optional = true }
 signal-hook = { workspace = true }
 socket2 = { version = "0.6.5", features = ["all"] }
 thiserror = { workspace = true }
