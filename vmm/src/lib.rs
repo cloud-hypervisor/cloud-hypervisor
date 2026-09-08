@@ -1604,7 +1604,7 @@ impl Vmm {
         Ok(false)
     }
 
-    /// Performs the memory migration including multiple iterations.
+    /// Performs precopy memory migration including multiple iterations.
     ///
     /// This includes:
     /// - initial memory - VM is running
