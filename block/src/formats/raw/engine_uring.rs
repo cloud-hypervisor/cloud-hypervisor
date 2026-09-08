@@ -142,3 +142,69 @@ impl AsyncIo for RawAsync {
             .map_err(AsyncIoError::WriteZeroes)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::fs::FileExt;
+    use std::thread::sleep;
+    use std::time::Duration;
+
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::*;
+    use crate::async_io::OwnedIoBuffer;
+
+    // A sub block write under direct I/O must not drop a concurrent aligned write.
+    #[test]
+    fn sub_block_direct_write_preserves_concurrent_aligned_write() {
+        const BLK: usize = 4096;
+
+        let file = TempFile::new().unwrap().into_file();
+        file.set_len(BLK as u64).unwrap();
+
+        let aligned = AlignedFile::with_alignment(file.try_clone().unwrap(), BLK);
+        let mut eng = RawAsync::new(aligned, 128).unwrap();
+
+        let iters = 4000u64;
+        let mut lost = 0u64;
+        for i in 0..iters {
+            file.write_all_at(&[0xAA; BLK], 0).unwrap();
+
+            let mut w1buf = OwnedIoBuffer::new(BLK, BLK).unwrap();
+            w1buf.as_mut_slice().fill(0xBB);
+            eng.submit_data_operation(AsyncIoOperation::write_from_vec(0, w1buf, i * 2 + 1))
+                .unwrap();
+
+            eng.submit_data_operation(AsyncIoOperation::write_from_vec(
+                512,
+                OwnedIoBuffer::from_vec(vec![0xCC; 512]),
+                i * 2 + 2,
+            ))
+            .unwrap();
+
+            let mut done = 0;
+            let mut spins = 0;
+            while done < 2 {
+                if eng.next_completed_request().is_some() {
+                    done += 1;
+                } else {
+                    spins += 1;
+                    assert!(spins < 1_000_000, "timed out draining completions");
+                    sleep(Duration::from_micros(5));
+                }
+            }
+
+            let mut out = [0u8; BLK];
+            file.read_at(&mut out, 0).unwrap();
+            // 0xAA here means the whole block write was dropped.
+            if out[100] != 0xBB {
+                lost += 1;
+            }
+        }
+
+        assert_eq!(
+            lost, 0,
+            "sub block write dropped a concurrent aligned write"
+        );
+    }
+}
