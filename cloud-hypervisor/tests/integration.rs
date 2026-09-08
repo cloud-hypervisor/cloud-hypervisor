@@ -7056,21 +7056,6 @@ mod common_parallel {
             .port()
     }
 
-    fn start_live_migration_tcp(
-        src_api_socket: &str,
-        dest_api_socket: &str,
-        dest_event_path: &str,
-        connections: NonZeroU32,
-    ) -> bool {
-        start_live_migration_tcp_with_flags(
-            src_api_socket,
-            dest_api_socket,
-            dest_event_path,
-            connections,
-            false,
-        )
-    }
-
     fn start_live_migration_tcp_with_flags(
         src_api_socket: &str,
         dest_api_socket: &str,
@@ -7253,11 +7238,12 @@ mod common_parallel {
             guest.add_test_disk(&src_api_socket);
             // Start TCP live migration
             assert!(
-                start_live_migration_tcp(
+                start_live_migration_tcp_with_flags(
                     &src_api_socket,
                     &dest_api_socket,
                     &dest_event_path,
-                    connections
+                    connections,
+                    false
                 ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
