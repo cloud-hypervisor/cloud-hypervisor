@@ -304,7 +304,7 @@ fn wait_for_readable(fd: &impl AsFd, abort_event: &impl AsRawFd) -> Result<bool,
 /// [`Self::cleanup`] is called.
 #[derive(Debug)]
 pub(crate) struct ReceiveAdditionalConnections {
-    accept_thread: Option<thread::JoinHandle<Result<(), MigratableError>>>,
+    accept_thread: Option<JoinHandle<Result<(), MigratableError>>>,
 
     /// Shared kill eventfd for the accept thread and memory workers.
     kill_evt: EventFd,
@@ -409,7 +409,7 @@ impl ReceiveAdditionalConnections {
         kill_evt: &EventFd,
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         fault_tx: &Sender<SocketStream>,
-        threads: &mut Vec<thread::JoinHandle<Result<(), MigratableError>>>,
+        threads: &mut Vec<JoinHandle<Result<(), MigratableError>>>,
         seccomp_filter: &BpfProgram,
     ) -> Result<(), MigratableError> {
         loop {
@@ -489,7 +489,7 @@ impl ReceiveAdditionalConnections {
         kill_evt: &EventFd,
         guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
         seccomp_filter: &BpfProgram,
-    ) -> Result<thread::JoinHandle<Result<(), MigratableError>>, MigratableError> {
+    ) -> Result<JoinHandle<Result<(), MigratableError>>, MigratableError> {
         let kill_evt = kill_evt
             .try_clone()
             .context("Error cloning kill_evt fd")
@@ -515,7 +515,7 @@ impl ReceiveAdditionalConnections {
     }
 
     fn join_memory_threads(
-        threads: Vec<thread::JoinHandle<Result<(), MigratableError>>>,
+        threads: Vec<JoinHandle<Result<(), MigratableError>>>,
         mut first_err: Result<(), MigratableError>,
     ) -> Result<(), MigratableError> {
         for thread in threads {
@@ -652,7 +652,7 @@ enum SendMemoryThreadNotify {
 /// This struct keeps track of additional threads we use to send VM memory.
 pub(crate) struct SendAdditionalConnections {
     guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
-    threads: Vec<thread::JoinHandle<Result<(), MigratableError>>>,
+    threads: Vec<JoinHandle<Result<(), MigratableError>>>,
     /// Sender to all workers. The receiver is shared by all workers.
     message_tx: SyncSender<SendMemoryThreadMessage>,
     /// If an error occurs in one of the memory sending threads, the main thread signals
