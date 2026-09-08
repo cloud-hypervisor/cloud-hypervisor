@@ -53,15 +53,15 @@ impl AsyncIo for RawAsync {
 
         if operation_is_aligned(&op, self.alignment) {
             let fd = self.raw_file.as_raw_fd();
-            return self.data_io.submit_operation(fd, op).map_err(|e| {
-                if is_read {
-                    AsyncIoError::ReadVectored(e)
-                } else {
-                    AsyncIoError::WriteVectored(e)
-                }
-            });
+            return self
+                .data_io
+                .submit_operation(fd, op)
+                .map_err(|e| AsyncIoError::vectored(is_read, e));
         }
 
+        self.data_io
+            .wait_all_in_flight()
+            .map_err(|e| AsyncIoError::vectored(is_read, e))?;
         let result = run_unaligned_operation(&self.raw_file, &op)?;
         self.data_io
             .inject_completion(AsyncIoCompletion::from_operation(op, result));
@@ -98,6 +98,10 @@ impl AsyncIo for RawAsync {
                 if operation_is_aligned(&op, self.alignment) {
                     aligned_batch.push(op);
                 } else {
+                    let is_read = op.is_read();
+                    self.data_io
+                        .wait_all_in_flight()
+                        .map_err(|e| AsyncIoError::vectored(is_read, e))?;
                     let result = run_unaligned_operation(&self.raw_file, &op)?;
                     self.data_io
                         .inject_completion(AsyncIoCompletion::from_operation(op, result));

@@ -12,7 +12,10 @@ use io_uring::{IoUring, opcode, squeue, types};
 use log::{error, warn};
 use vmm_sys_util::eventfd::EventFd;
 
-use super::common::{duplicate_user_data_error, validate_batch};
+use super::common::{
+    KernelDataIo, drain_all_in_flight, duplicate_user_data_error, record_kernel_completion,
+    validate_batch,
+};
 use super::{AsyncIoCompletion, AsyncIoOperation, CompletionCommon};
 
 /// `io_uring` wrapper for async I/O.
@@ -240,6 +243,41 @@ impl UringDataIo {
         }
 
         self.completions.next_completed()
+    }
+
+    pub fn wait_all_in_flight(&mut self) -> io::Result<()> {
+        drain_all_in_flight(self)
+    }
+}
+
+impl KernelDataIo for UringDataIo {
+    fn in_flight_is_empty(&self) -> bool {
+        self.in_flight.is_empty()
+    }
+
+    fn reap_blocking(&mut self) -> io::Result<()> {
+        if self.needs_submit_retry {
+            self.io_uring.submitter().submit()?;
+            self.needs_submit_retry = false;
+        }
+
+        let ready = self
+            .io_uring
+            .completion()
+            .next()
+            .map(|e| (e.user_data(), e.result()));
+        if let Some((user_data, result)) = ready {
+            record_kernel_completion(
+                &mut self.in_flight,
+                &mut self.completions,
+                user_data,
+                result,
+            );
+            return Ok(());
+        }
+
+        self.io_uring.submitter().submit_and_wait(1)?;
+        Ok(())
     }
 }
 

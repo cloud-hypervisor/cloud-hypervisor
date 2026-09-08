@@ -98,6 +98,16 @@ pub enum AsyncIoError {
     SubmitBatchRequests(#[source] io::Error),
 }
 
+impl AsyncIoError {
+    pub(crate) fn vectored(is_read: bool, e: io::Error) -> Self {
+        if is_read {
+            Self::ReadVectored(e)
+        } else {
+            Self::WriteVectored(e)
+        }
+    }
+}
+
 pub type AsyncIoResult<T> = result::Result<T, AsyncIoError>;
 
 pub trait AsyncIo: Send {
