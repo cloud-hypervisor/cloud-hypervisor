@@ -43,6 +43,7 @@ mod common_parallel {
     use std::num::NonZeroU32;
     use std::process::Command;
     use std::sync::mpsc;
+    use std::time::Duration;
 
     use test_infra::GuestFactory;
     use vmm::api::{BalloonStatsResponse, TimeoutStrategy};
@@ -7201,6 +7202,50 @@ mod common_parallel {
         connections: NonZeroU32,
         postcopy: bool,
     ) -> bool {
+        dispatch_live_migration_tcp_with_flags(
+            src_api_socket,
+            dest_api_socket,
+            dest_event_path,
+            connections,
+            postcopy,
+        )
+        .is_some_and(|receive_migration| {
+            let receive_success =
+                wait_for_migration_command(receive_migration, "receive_migration");
+
+            if receive_success {
+                assert!(wait_for_sequential_events_str(
+                    Duration::from_secs(30),
+                    &[
+                        "migration-receive-ready",
+                        "migration-receive-starting",
+                        "migration-receive-started",
+                        "migration-receive-finished",
+                    ],
+                    dest_event_path
+                ));
+            }
+
+            receive_success
+        })
+    }
+
+    fn dispatch_live_migration_tcp_with_flags(
+        src_api_socket: &str,
+        dest_api_socket: &str,
+        dest_event_path: &str,
+        connections: NonZeroU32,
+        postcopy: bool,
+    ) -> Option<Child> {
+        // Wait for CH to start and to accept API requests
+        if !wait_for_sequential_events_str(
+            Duration::from_secs(10),
+            &["starting", "started"],
+            dest_event_path,
+        ) {
+            return None;
+        }
+
         // Get an available TCP port
         let migration_port = get_available_port();
         let host_ip = "127.0.0.1";
@@ -7208,7 +7253,7 @@ mod common_parallel {
         let receive_arg = format!("receiver_url=tcp:0.0.0.0:{migration_port}");
 
         // Start the 'receive-migration' command on the destination
-        let receive_migration = Command::new(clh_command("ch-remote"))
+        let mut receive_migration = Command::new(clh_command("ch-remote"))
             .args([
                 &format!("--api-socket={dest_api_socket}"),
                 "receive-migration",
@@ -7220,11 +7265,15 @@ mod common_parallel {
             .spawn()
             .unwrap();
 
-        assert!(wait_for_sequential_events_str(
+        if !wait_for_sequential_events_str(
             Duration::from_secs(30),
             &["migration-receive-ready"],
-            dest_event_path
-        ));
+            dest_event_path,
+        ) {
+            let _ = receive_migration.kill();
+            let _ = receive_migration.wait();
+            return None;
+        }
 
         // Start the 'send-migration' command on the source
         let connections = connections.get();
@@ -7247,23 +7296,72 @@ mod common_parallel {
             .spawn()
             .unwrap();
 
-        let send_success = wait_for_migration_command(send_migration, "send_migration");
-        let receive_success = wait_for_migration_command(receive_migration, "receive_migration");
+        if wait_for_migration_command(send_migration, "send_migration") {
+            Some(receive_migration)
+        } else {
+            let _ = receive_migration.kill();
+            let _ = receive_migration.wait();
+            None
+        }
+    }
 
-        if send_success && receive_success {
-            assert!(wait_for_sequential_events_str(
-                Duration::from_secs(30),
-                &[
-                    "migration-receive-ready",
-                    "migration-receive-starting",
-                    "migration-receive-started",
-                    "migration-receive-finished",
-                ],
-                dest_event_path
-            ));
+    fn dispatch_live_migration_unix(
+        src_api_socket: &str,
+        dest_api_socket: &str,
+        dest_event_path: &str,
+        migration_socket: &str,
+        memory_mode: &str,
+    ) -> Option<Child> {
+        // Wait for CH to start and to accept API requests
+        if !wait_for_sequential_events_str(
+            Duration::from_secs(10),
+            &["starting", "started"],
+            dest_event_path,
+        ) {
+            return None;
         }
 
-        send_success && receive_success
+        let mut receive_migration = Command::new(clh_command("ch-remote"))
+            .args([
+                &format!("--api-socket={dest_api_socket}"),
+                "receive-migration",
+                &format!("receiver_url=unix:{migration_socket}"),
+            ])
+            .stdin(Stdio::null())
+            .stderr(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+
+        if !wait_for_sequential_events_str(
+            Duration::from_secs(3),
+            &["migration-receive-ready"],
+            dest_event_path,
+        ) {
+            let _ = receive_migration.kill();
+            let _ = receive_migration.wait();
+            return None;
+        }
+
+        let send_migration = Command::new(clh_command("ch-remote"))
+            .args([
+                &format!("--api-socket={src_api_socket}"),
+                "send-migration",
+                &format!("destination_url=unix:{migration_socket},memory_mode={memory_mode}"),
+            ])
+            .stdin(Stdio::null())
+            .stderr(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+
+        if wait_for_migration_command(send_migration, "send_migration") {
+            Some(receive_migration)
+        } else {
+            let _ = receive_migration.kill();
+            let _ = receive_migration.wait();
+            None
+        }
     }
 
     /// Helper to wait for `{send,receive}-migration` to exit.
@@ -7631,7 +7729,7 @@ mod common_parallel {
 
             // Kill the stressor now that migration has completed or aborted,
             // to reduce system load during post-migration checks.
-            let _ = guest.ssh_command("pkill -f 'stress --vm'");
+            guest.ssh_command("pkill -f 'stress --vm'").unwrap();
 
             match timeout_strategy {
                 TimeoutStrategy::Cancel => {
@@ -7720,6 +7818,274 @@ mod common_parallel {
         handle_child_output(r, &src_output);
     }
 
+    #[derive(Clone, Copy)]
+    enum TestLiveMigrationFailure {
+        UnixPrecopy,
+        // UnixMemfds, // Near instant, currently not practical to write a failing test.
+        // UnixPostcopy, // Needs https://github.com/cloud-hypervisor/cloud-hypervisor/issues/8891 fixed first.
+        TcpPrecopy,
+        TcpPrecopyParallelConnections,
+        // TcpPostcopy, // Needs https://github.com/cloud-hypervisor/cloud-hypervisor/issues/8891 fixed first.
+    }
+
+    fn dispatch_live_migration_failure(
+        test: TestLiveMigrationFailure,
+        src_api_socket: &str,
+        dest_api_socket: &str,
+        dest_event_path: &str,
+        migration_socket: &str,
+    ) -> Option<Child> {
+        match test {
+            TestLiveMigrationFailure::UnixPrecopy => dispatch_live_migration_unix(
+                src_api_socket,
+                dest_api_socket,
+                dest_event_path,
+                migration_socket,
+                "precopy",
+            ),
+            TestLiveMigrationFailure::TcpPrecopy => dispatch_live_migration_tcp_with_flags(
+                src_api_socket,
+                dest_api_socket,
+                dest_event_path,
+                NonZeroU32::new(1).unwrap(),
+                false,
+            ),
+            TestLiveMigrationFailure::TcpPrecopyParallelConnections => {
+                dispatch_live_migration_tcp_with_flags(
+                    src_api_socket,
+                    dest_api_socket,
+                    dest_event_path,
+                    NonZeroU32::new(8).unwrap(),
+                    false,
+                )
+            }
+        }
+    }
+
+    /// Exercises a failed live migration followed by a successful retry.
+    ///
+    /// The receiver is killed while the first migration is in flight. The
+    /// source must keep running the VM and be able to migrate it to a fresh
+    /// receiver afterwards.
+    fn _test_live_migration_failure(test: TestLiveMigrationFailure) {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+        let net_params = guest.default_net_string();
+        // Enable enough stress worker to slow down migration.
+        let boot_vcpus = 4;
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
+        let src_event_path = format!("{event_path}.src");
+        let failed_dest_event_path = format!("{event_path}.failed-dest");
+        let retry_dest_event_path = format!("{event_path}.retry-dest");
+        let src_api_socket = temp_api_path(&guest.tmp_dir);
+        let failed_dest_api_socket = format!("{src_api_socket}.fd");
+        let retry_dest_api_socket = format!("{src_api_socket}.rd");
+        let failed_migration_socket = guest
+            .tmp_dir
+            .as_path()
+            .join("migration-f.sock")
+            .to_str()
+            .unwrap()
+            .to_string();
+        let retry_migration_socket = guest
+            .tmp_dir
+            .as_path()
+            .join("migration-r.sock")
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        let mut src_child = GuestCommand::new(&guest)
+            .args(["--cpus", format!("boot={boot_vcpus}").as_str()])
+            .args(["--memory", "size=1600M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .args(["--net", net_params.as_str()])
+            .args(["--api-socket", &src_api_socket])
+            .args(["--event-monitor", format!("path={src_event_path}").as_str()])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        // Start the dest VMM that will be killed during the first migration.
+        let mut failed_dest_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &failed_dest_api_socket])
+            .args([
+                "--event-monitor",
+                format!("path={failed_dest_event_path}").as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let mut receive_migration = None;
+        let r = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            guest.wait_vm_boot().unwrap();
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+
+            // Start stress so we have more time until the migration converges
+            start_stress_in_vm(&guest);
+
+            // send-migration dispatches in background and finishes directly.
+            // We keep the receive_migration API call handle (ch-remote).
+            receive_migration = Some(
+                dispatch_live_migration_failure(
+                    test,
+                    &src_api_socket,
+                    &failed_dest_api_socket,
+                    &failed_dest_event_path,
+                    &failed_migration_socket,
+                )
+                .expect("send-migration should have been dispatched"),
+            );
+
+            assert!(wait_for_sequential_events_str(
+                Duration::from_secs(30),
+                &["migration-starting", "migration-started"],
+                &src_event_path
+            ));
+
+            // Kill the dest VMM as the migration is ongoing.
+            failed_dest_child
+                .kill()
+                .expect("destination VMM should still be running");
+
+            let mut receive_migration = receive_migration.take().unwrap();
+            let receive_status = receive_migration
+                .wait_timeout(Duration::from_secs(10))
+                .unwrap();
+            if receive_status.is_none() {
+                let _ = receive_migration.kill();
+                let _ = receive_migration.wait();
+            }
+
+            assert!(
+                receive_status.is_some_and(|status| !status.success()),
+                "receive-migration should fail after its VMM was killed: {receive_status:?}"
+            );
+
+            assert!(wait_for_sequential_events_str(
+                Duration::from_secs(30),
+                &["migration-failed"],
+                &src_event_path
+            ));
+
+            assert!(
+                src_child.try_wait().unwrap().is_none(),
+                "Source VMM should continue running even if the receiver was killed"
+            );
+
+            // TODO once we add postcopy failures, we need a switch here:
+            // Reboot VM on postcopy, resume else.
+            assert_eq!(vm_state(&src_api_socket), "Running");
+            guest.ssh_command("pkill -f 'stress --vm'").unwrap();
+
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+        }));
+
+        if let Some(mut receive_migration) = receive_migration.take() {
+            let _ = receive_migration.kill();
+            let _ = receive_migration.wait();
+        }
+
+        if r.is_err() {
+            print_and_panic(
+                src_child,
+                failed_dest_child,
+                None,
+                "Error occurred while killing the live-migration receiver",
+            );
+        }
+
+        let _ = failed_dest_child.wait_with_output().unwrap();
+
+        // Restart the destination VMM with a fresh receiver for the retry.
+        let mut retry_dest_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &retry_dest_api_socket])
+            .args([
+                "--event-monitor",
+                format!("path={retry_dest_event_path}").as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        // Migrate again (expected to succeed)
+        let r = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            let receive_migration = dispatch_live_migration_failure(
+                test,
+                &src_api_socket,
+                &retry_dest_api_socket,
+                &retry_dest_event_path,
+                &retry_migration_socket,
+            )
+            .expect("follow-up send-migration should have been dispatched");
+            assert!(
+                wait_for_migration_command(receive_migration, "receive_migration"),
+                "follow-up receive-migration should succeed"
+            );
+
+            // Both attempts share the source's event file. Other events
+            // (pausing, shutdown, ...) are interleaved, so only match the
+            // subsequence.
+            assert!(wait_for_sequential_events_str(
+                Duration::from_secs(30),
+                &[
+                    "migration-starting",
+                    "migration-failed",
+                    "migration-starting",
+                    "migration-started",
+                    "migration-finished",
+                ],
+                &src_event_path
+            ));
+            assert!(wait_for_sequential_events_str(
+                Duration::from_secs(30),
+                &[
+                    "migration-receive-ready",
+                    "migration-receive-starting",
+                    "migration-receive-started",
+                    "migration-receive-finished",
+                ],
+                &retry_dest_event_path
+            ));
+        }));
+
+        if r.is_err() {
+            print_and_panic(
+                src_child,
+                retry_dest_child,
+                None,
+                "Follow-up live-migration failed",
+            );
+        }
+
+        let src_exited_ok = wait_until(Duration::from_secs(60), || {
+            matches!(src_child.try_wait(), Ok(Some(_)))
+        }) && src_child.try_wait().unwrap().is_some_and(|s| s.success());
+        if !src_exited_ok {
+            print_and_panic(
+                src_child,
+                retry_dest_child,
+                None,
+                "Source VMM was not terminated successfully after follow-up migration",
+            );
+        }
+
+        let _ = src_child.wait_with_output().unwrap();
+
+        let r = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            guest.wait_for_ssh(Duration::from_secs(10)).unwrap();
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+        }));
+
+        let _ = retry_dest_child.kill();
+        let retry_dest_output = retry_dest_child.wait_with_output().unwrap();
+        handle_child_output(r, &retry_dest_output);
+    }
+
     #[test]
     fn test_live_migration_basic() {
         _test_live_migration(false, false, false);
@@ -7764,6 +8130,21 @@ mod common_parallel {
     #[test]
     fn test_live_migration_tcp_timeout_ignore() {
         _test_live_migration_tcp_timeout(TimeoutStrategy::Ignore);
+    }
+
+    #[test]
+    fn test_live_migration_failure_unix_precopy() {
+        _test_live_migration_failure(TestLiveMigrationFailure::UnixPrecopy);
+    }
+
+    #[test]
+    fn test_live_migration_failure_tcp_precopy() {
+        _test_live_migration_failure(TestLiveMigrationFailure::TcpPrecopy);
+    }
+
+    #[test]
+    fn test_live_migration_failure_tcp_precopy_parallel_connections() {
+        _test_live_migration_failure(TestLiveMigrationFailure::TcpPrecopyParallelConnections);
     }
 
     // TODO: Add test of live upgrade paused vm after cloud-hypervisor-static
