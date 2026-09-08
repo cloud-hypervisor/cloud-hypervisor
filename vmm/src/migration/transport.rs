@@ -666,30 +666,24 @@ pub(crate) struct SendAdditionalConnections {
 }
 
 impl SendAdditionalConnections {
-    /// How many requests can be queued for each connection before the main
-    /// thread has to wait for workers to catch up. This bounded [`SyncChannel`]
-    /// provides backpressure, so send_chunk() re-checks worker_error promptly
-    /// instead of queueing all memory descriptors up front and only noticing
-    /// failures at the next gate synchronization point.
+    /// Number of queued memory send requests per thread in the bounded
+    /// [`sync_channel`]. This balances batching performance with timely
+    /// backpressure, allowing [Self::enqueue_chunk] to detect worker errors
+    /// promptly.
     const BUFFERED_REQUESTS_PER_THREAD: usize = 64;
 
     /// The size of each chunk of memory to send.
     ///
-    /// We want to make this large, because each chunk is acknowledged and we wait
-    /// for the ack before sending the next chunk. The challenge is that if it is
-    /// _too_ large, we become more sensitive to network issues, like packet drops
-    /// in individual connections, because large amounts of data can pool when
-    /// throughput on one connection is temporarily reduced.
+    /// Trade-off between high throughput and reliability as each chunk is
+    /// acknowledged.
     ///
-    /// We can consider making this configurable, but a better network protocol that
-    /// doesn't require ACKs would be more efficient.
-    ///
-    /// The best-case throughput per connection can be estimated via:
-    /// chunk_size / (chunk_size / throughput_per_connection + round_trip_time)
-    ///
-    /// This chunk size together with eight connections is sufficient to saturate a 100G link.
+    /// It should be set large enough so that even very fast links need some
+    /// milliseconds to send it. This chunk size together with eight connections
+    /// is sufficient to saturate a 100G link.
     const CHUNK_SIZE: u64 = 64 /* MiB */ << 20;
 
+    /// Returns a ready-to-use thread pool when multiple connections are
+    /// configured, or a threadless instance when only one connection is required.
     pub(crate) fn new(
         destination: &str,
         connections: NonZeroU32,
@@ -843,8 +837,6 @@ impl SendAdditionalConnections {
             return Ok(true);
         }
 
-        // The chunk size is chosen to be big enough so that even very fast links need some
-        // milliseconds to send it.
         for chunk in table.partition(Self::CHUNK_SIZE) {
             self.enqueue_chunk(chunk)?;
         }
