@@ -14,8 +14,14 @@ use log::warn;
 use vmm_sys_util::aio;
 use vmm_sys_util::eventfd::EventFd;
 
-use super::common::{duplicate_user_data_error, errno_result, validate_batch};
+use super::common::{
+    KernelDataIo, drain_all_in_flight, duplicate_user_data_error, errno_result,
+    record_kernel_completion, validate_batch,
+};
 use super::{AsyncIoCompletion, AsyncIoOperation, CompletionCommon};
+
+/// Completion events reaped per `get_events` call.
+const EVENT_BATCH: usize = 32;
 
 /// Retained Linux AIO queue for owned async data I/O operations.
 pub struct AioDataIo {
@@ -133,7 +139,7 @@ impl AioDataIo {
             return Some(completion);
         }
 
-        let mut events = [aio::IoEvent::default(); 32];
+        let mut events = [aio::IoEvent::default(); EVENT_BATCH];
         let rc = match self.ctx.get_events(0, &mut events, None) {
             Ok(rc) => rc,
             Err(e) => {
@@ -153,6 +159,31 @@ impl AioDataIo {
         }
 
         self.completions.next_completed()
+    }
+
+    pub fn wait_all_in_flight(&mut self) -> io::Result<()> {
+        drain_all_in_flight(self)
+    }
+}
+
+impl KernelDataIo for AioDataIo {
+    fn in_flight_is_empty(&self) -> bool {
+        self.in_flight.is_empty()
+    }
+
+    fn reap_blocking(&mut self) -> io::Result<()> {
+        let mut events = [aio::IoEvent::default(); EVENT_BATCH];
+        let rc = self.ctx.get_events(1, &mut events, None)?;
+        for event in &events[..rc] {
+            record_kernel_completion(
+                &mut self.in_flight,
+                &mut self.completions,
+                event.data,
+                event.res as i32,
+            );
+        }
+
+        Ok(())
     }
 }
 
