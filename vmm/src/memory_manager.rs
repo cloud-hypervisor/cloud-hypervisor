@@ -1374,75 +1374,76 @@ impl MemoryManager {
                 let fault_addr = msg.pf_address;
                 let minor_fault = msg.pf_flags & userfaultfd::UFFD_PAGEFAULT_FLAG_MINOR != 0;
 
-                let mut served = false;
-                for (range_idx, range) in ranges.iter().enumerate() {
-                    let Some(page_idx) = range.page_index_of(fault_addr) else {
+                // Find the corresponding page info from the fault address
+                let (range, range_idx, page_idx) = ranges
+                    .iter()
+                    .enumerate()
+                    .find_map(|(range_idx, uffd_range)| {
+                        uffd_range.page_index_of(fault_addr).map(|page_idx| (uffd_range, range_idx, page_idx))
+                    })
+                    .ok_or_else(|| io::Error::other(format!(
+                        "UFFD handler: fault at {fault_addr:#x} does not belong to any registered range",
+                    )))?;
+
+                let key = (range_idx, page_idx);
+
+                let served_minor = {
+                    let mut loading = pages_loading.lock().unwrap();
+                    let served = served_bitmap[range_idx].is_bit_set(page_idx as usize);
+
+                    if served && minor_fault {
+                        true
+                    } else if !loading.insert(key) {
+                        // Another worker owns this page. The thread that's
+                        // handling this page will call UFFDIO_COPY or
+                        // UFFDIO_CONTINUE on the page range. The kernel
+                        // guarantees us that it will wake all the threads
+                        // waiting on this range, so we don't need to do
+                        // anything here.
                         continue;
-                    };
-
-                    let key = (range_idx, page_idx);
-                    let bitmap_idx = page_idx as usize;
-
-                    let served_minor = {
-                        let mut loading = pages_loading.lock().expect("failed to lock mutex");
-                        let served = served_bitmap[range_idx].is_bit_set(bitmap_idx);
-
-                        if served && minor_fault {
-                            true
-                        } else if !loading.insert(key) {
-                            // Another worker owns this page. The thread that's
-                            // handling this page will call UFFDIO_COPY or
-                            // UFFDIO_CONTINUE on the page range. The kernel
-                            // guarantees us that it will wake all the threads
-                            // waiting on this range, so we don't need to do
-                            // anything here.
-                            continue;
-                        } else {
-                            if served {
-                                // The page has been discarded (ie. virtio-balloon)
-                                served_bitmap[range_idx].reset_bit(bitmap_idx);
-                            }
-                            false
-                        }
-                    };
-
-                    if served_minor {
-                        // The backing page is already in the page cache. A
-                        // minor fault only needs the page mapped into this VMA.
-                        if let Err(e) = uffd::uffd_continue(
-                            uffd_fd.as_fd(),
-                            range.page_addr(page_idx),
-                            range.page_size,
-                        ) && e.raw_os_error() != Some(libc::EEXIST)
-                        {
-                            return Err(e);
-                        }
                     } else {
-                        let result = source.resolve(uffd_fd.as_fd(), range, page_idx);
-
-                        {
-                            let mut loading = pages_loading.lock().expect("failed to lock mutex");
-
-                            if result.is_ok() {
-                                served_bitmap[range_idx].set_bit(bitmap_idx);
-                            }
-
-                            loading.remove(&key);
+                        if served {
+                            // The page has been discarded (ie. virtio-balloon)
+                            served_bitmap[range_idx].reset_bit(page_idx as usize);
                         }
+                        false
+                    }
+                };
 
-                        result?;
-                        pages_served += 1;
+                if served_minor {
+                    // The backing page is already in the page cache. A
+                    // minor fault only needs the page mapped into this VMA.
+                    uffd::uffd_continue(
+                        uffd_fd.as_fd(),
+                        range.page_addr(page_idx),
+                        range.page_size,
+                    )
+                    .or_else(|e| {
+                        if e.raw_os_error() == Some(libc::EEXIST) {
+                            Ok(())
+                        } else {
+                            Err(e)
+                        }
+                    })?;
+
+                    // Do not fall through and resolve an already present page.
+                    continue;
+                }
+
+                let result = source.resolve(uffd_fd.as_fd(), range, page_idx);
+
+                {
+                    let mut loading = pages_loading.lock().unwrap();
+
+                    if result.is_ok() {
+                        served_bitmap[range_idx].set_bit(page_idx as usize);
                     }
 
-                    served = true;
-                    break;
+                    loading.remove(&key);
                 }
 
-                if !served {
-                    return Err(io::Error::other(format!(
-                        "UFFD handler: fault at {fault_addr:#x} does not belong to any registered range",
-                    )));
-                }
+                result?;
+                pages_served += 1;
 
                 continue;
             }
