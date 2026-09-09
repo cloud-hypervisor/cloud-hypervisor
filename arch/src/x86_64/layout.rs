@@ -75,6 +75,7 @@ pub const RSDP_POINTER: GuestAddress = EBDA_START;
 
 // First possible location per the spec.
 pub const SMBIOS_START: GuestAddress = GuestAddress(0xf0000);
+pub const SMBIOS_MAX_SIZE: u64 = 0x1_0000;
 
 // == End of "EBDA" range ==
 
