@@ -73,7 +73,8 @@ pub const EBDA_START: GuestAddress = GuestAddress(0xa0000);
 // ACPI RSDP table
 pub const RSDP_POINTER: GuestAddress = EBDA_START;
 
-pub const SMBIOS_START: u64 = 0xf0000; // First possible location per the spec.
+// First possible location per the spec.
+pub const SMBIOS_START: GuestAddress = GuestAddress(0xf0000);
 
 // == End of "EBDA" range ==
 
