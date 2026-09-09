@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Code checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install musl-gcc
         if: contains(matrix.platform.target, 'musl')
         run: sudo apt install -y musl-tools
@@ -39,7 +39,7 @@ jobs:
           matrix.platform.target == 'x86_64-unknown-linux-gnu'
         run: rsync -rv --exclude=.git . ../cloud-hypervisor-${{ github.event.ref }}
       - name: Build ${{ matrix.platform.target }}
-        uses: houseabsolute/actions-rust-cross@v1
+        uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: build
           target: ${{ matrix.platform.target }}
@@ -54,7 +54,7 @@ jobs:
           cp target/${{ matrix.platform.target }}/release/ch-remote ./${{ matrix.platform.name_ch_remote }}
       - name: Upload Release Artifacts
         if: github.event_name == 'create' && github.event.ref_type == 'tag'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: Artifacts for ${{ matrix.platform.target }}
           path: |
@@ -80,13 +80,13 @@ jobs:
           github.event_name == 'create' && github.event.ref_type == 'tag' &&
           matrix.platform.target == 'x86_64-unknown-linux-gnu'
         id: upload-release-cloud-hypervisor-vendored-sources
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           path: cloud-hypervisor-${{ github.event.ref }}.tar.xz
           name: cloud-hypervisor-${{ github.event.ref }}.tar.xz
       - name: Create GitHub Release
         if: github.event_name == 'create' && github.event.ref_type == 'tag'
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           draft: true
           files: |

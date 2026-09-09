@@ -22,7 +22,7 @@ jobs:
       ci: ${{ steps.changes.outputs.ci }}
       docs: ${{ steps.changes.outputs.docs }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - id: changes
@@ -77,9 +77,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Python 3.x
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.x'
       - name: Check DCO
@@ -99,13 +99,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # PR head, not the merge ref, so gitlint sees the PR's commits.
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
       - name: Set up Python 3.10
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.10"
       - name: Install dependencies
@@ -123,7 +123,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Code checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Get changed files in PR
@@ -162,7 +162,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Code checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Install build dependencies
@@ -178,8 +178,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions-rust-lang/audit@v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions-rust-lang/audit@72c09e02f132669d52284a3323acdb503cfc1a24 # v1.2.7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
   shlint:
@@ -190,7 +190,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Run the shell script checkers
         uses: luizm/action-sh-checker@883217215b11c1fabbf00eb1a9a041f62d74c744 # v0.10.0
         env:
@@ -204,7 +204,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Lint Dockerfile
         uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
         with:
@@ -220,9 +220,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: REUSE Compliance Check
-        uses: fsfe/reuse-action@v6
+        uses: fsfe/reuse-action@676e2d560c9a403aa252096d99fcab3e1132b0f5 # v6.0.0
   formatting:
     name: formatting
     needs: [preflight]
@@ -239,7 +239,7 @@ jobs:
       RUSTFLAGS: -D warnings
     steps:
       - name: Code checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Install Rust toolchain (${{ matrix.rust }})
@@ -271,7 +271,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Code checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Install dependencies
@@ -302,7 +302,7 @@ jobs:
       RUSTFLAGS: -D warnings
     steps:
       - name: Code checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain (${{ matrix.rust }})
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -327,7 +327,7 @@ jobs:
     timeout-minutes: 10
     container: openapitools/openapi-generator-cli
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Validate OpenAPI
         run: |
           /usr/local/bin/docker-entrypoint.sh validate -i vmm/src/api/openapi/cloud-hypervisor.yaml
@@ -338,7 +338,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: crate-ci/typos@d43b6c087ac471e2ea7b8af622ff15f05c0c365b # v1.50.1
   quality:
     name: quality
@@ -367,7 +367,7 @@ jobs:
             experimental: false
     steps:
       - name: Code checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Install Rust toolchain (${{ matrix.rust }})
@@ -385,63 +385,63 @@ jobs:
           for commit in $commits; do git checkout $commit; cargo check --tests --examples --all --target=${{ matrix.target }}; done
           git checkout ${{ github.sha }}
       - name: Clippy (kvm)
-        uses: houseabsolute/actions-rust-cross@v1
+        uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --no-default-features --tests --examples --features "kvm" -- -D warnings
       - name: Clippy (mshv)
-        uses: houseabsolute/actions-rust-cross@v1
+        uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --no-default-features --tests --examples --features "mshv" -- -D warnings
       - name: Clippy (mshv + kvm)
-        uses: houseabsolute/actions-rust-cross@v1
+        uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --no-default-features --tests --examples --features "mshv,kvm" -- -D warnings
       - name: Clippy (default features)
-        uses: houseabsolute/actions-rust-cross@v1
+        uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --tests --examples -- -D warnings
       - name: Clippy (default features + guest_debug)
-        uses: houseabsolute/actions-rust-cross@v1
+        uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --tests --examples --features "guest_debug" -- -D warnings
       - name: Clippy (default features + pvmemcontrol)
-        uses: houseabsolute/actions-rust-cross@v1
+        uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --tests --examples --features "pvmemcontrol" -- -D warnings
       - name: Clippy (default features + tracing)
-        uses: houseabsolute/actions-rust-cross@v1
+        uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --tests --examples --features "tracing" -- -D warnings
       - name: Clippy (default features + fw_cfg)
-        uses: houseabsolute/actions-rust-cross@v1
+        uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --target=${{ matrix.target }} --locked --all --all-targets --tests --examples --features "fw_cfg" -- -D warnings
       - name: Clippy (default features + ivshmem)
-        uses: houseabsolute/actions-rust-cross@v1
+        uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
           toolchain: ${{ matrix.rust }}
@@ -449,7 +449,7 @@ jobs:
           args: --locked --all --all-targets --tests --examples --features "ivshmem" -- -D warnings
       - name: Clippy (kvm + sev_snp)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
-        uses: houseabsolute/actions-rust-cross@v1
+        uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
           toolchain: ${{ matrix.rust }}
@@ -457,7 +457,7 @@ jobs:
           args: --locked --all --all-targets --no-default-features --tests --examples --features "kvm,sev_snp" -- -D warnings
       - name: Clippy (mshv + sev_snp)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
-        uses: houseabsolute/actions-rust-cross@v1
+        uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
           toolchain: ${{ matrix.rust }}
@@ -465,7 +465,7 @@ jobs:
           args: --locked --all --all-targets --no-default-features --tests --examples --features "mshv,sev_snp" -- -D warnings
       - name: Clippy (mshv + igvm + sev_snp)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
-        uses: houseabsolute/actions-rust-cross@v1
+        uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
           toolchain: ${{ matrix.rust }}
@@ -473,7 +473,7 @@ jobs:
           args: --locked --all --all-targets --no-default-features --tests --examples --features "mshv,igvm,sev_snp" -- -D warnings
       - name: Clippy (kvm + igvm)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
-        uses: houseabsolute/actions-rust-cross@v1
+        uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
           toolchain: ${{ matrix.rust }}
@@ -481,7 +481,7 @@ jobs:
           args: --locked --all --all-targets --no-default-features --tests --examples --features "kvm,igvm" -- -D warnings
       - name: Clippy (mshv + igvm)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
-        uses: houseabsolute/actions-rust-cross@v1
+        uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
           toolchain: ${{ matrix.rust }}
@@ -489,7 +489,7 @@ jobs:
           args: --locked --all --all-targets --no-default-features --tests --examples --features "mshv,igvm" -- -D warnings
       - name: Clippy (kvm + igvm + sev_snp + fw_cfg)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
-        uses: houseabsolute/actions-rust-cross@v1
+        uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
           cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
@@ -498,7 +498,7 @@ jobs:
           args: --locked --all --all-targets --no-default-features --tests --examples --features "kvm,igvm,sev_snp,fw_cfg" -- -D warnings
       - name: Clippy (default features + sev_snp + igvm + fw_cfg)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
-        uses: houseabsolute/actions-rust-cross@v1
+        uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: clippy
           cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
@@ -526,7 +526,7 @@ jobs:
           - x86_64-unknown-linux-musl
     steps:
       - name: Code checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Install musl-gcc
@@ -586,7 +586,7 @@ jobs:
       CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
     steps:
       - name: Code checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Install riscv64 cross linker
@@ -614,7 +614,7 @@ jobs:
         libc: [gnu, musl]
     steps:
       - name: Code checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Verify KVM is available
@@ -644,7 +644,7 @@ jobs:
     runs-on: ${{ format('{0}-16', matrix.runner) }}
     steps: &integration-x86-64-steps
       - name: Code checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Install Docker
@@ -705,7 +705,7 @@ jobs:
       - name: Fix workspace permissions
         run: sudo chown -R runner:runner ${GITHUB_WORKSPACE}
       - name: Code checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Run unit tests (musl)
@@ -758,7 +758,7 @@ jobs:
       - name: Fix workspace permissions
         run: sudo chown -R github-runner:github-runner "${GITHUB_WORKSPACE}"
       - name: Code checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Run VFIO integration tests
@@ -781,7 +781,7 @@ jobs:
         libc: [gnu, musl]
     steps:
       - name: Code checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Install Docker
@@ -824,7 +824,7 @@ jobs:
           sudo chown -R lsgrunner:lsgrunner ${GITHUB_WORKSPACE}
           sudo chmod 666 /var/run/docker.sock
       - name: Code checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Prepare for VDPA
@@ -862,7 +862,7 @@ jobs:
       - name: Fix workspace permissions
         run: sudo chown -R "$(id -un):$(id -gn)" "${GITHUB_WORKSPACE}"
       - name: Code checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Sanity-check SEV-SNP prerequisites
@@ -906,7 +906,7 @@ jobs:
       VILLAIN_REF: v0.9.0
     steps:
       - name: Code checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Verify KVM is available
@@ -932,7 +932,7 @@ jobs:
           echo "sha=$(git -C virtio-villain rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Cache virtio-villain build
         id: villain-cache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: virtio-villain/target
           key: virtio-villain-${{ runner.os }}-${{ runner.arch }}-${{ steps.villain-src.outputs.sha }}
@@ -968,7 +968,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload virtio-villain logs
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: virtio-villain-logs
           path: virtio-villain/villain-logs
