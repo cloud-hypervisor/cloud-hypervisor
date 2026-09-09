@@ -7220,13 +7220,9 @@ mod common_parallel {
             .spawn()
             .unwrap();
 
-        let expected_events = [&MetaEvent {
-            event: "migration-receive-ready".to_string(),
-            device_id: None,
-        }];
-        assert!(wait_for_sequential_events(
+        assert!(wait_for_sequential_events_str(
             Duration::from_secs(30),
-            &expected_events,
+            &["migration-receive-ready"],
             dest_event_path
         ));
 
@@ -7255,27 +7251,14 @@ mod common_parallel {
         let receive_success = wait_for_migration_command(receive_migration, "receive_migration");
 
         if send_success && receive_success {
-            let expected_events = [
-                &MetaEvent {
-                    event: "migration-receive-ready".to_string(),
-                    device_id: None,
-                },
-                &MetaEvent {
-                    event: "migration-receive-starting".to_string(),
-                    device_id: None,
-                },
-                &MetaEvent {
-                    event: "migration-receive-started".to_string(),
-                    device_id: None,
-                },
-                &MetaEvent {
-                    event: "migration-receive-finished".to_string(),
-                    device_id: None,
-                },
-            ];
-            assert!(wait_for_sequential_events(
+            assert!(wait_for_sequential_events_str(
                 Duration::from_secs(30),
-                &expected_events,
+                &[
+                    "migration-receive-ready",
+                    "migration-receive-starting",
+                    "migration-receive-started",
+                    "migration-receive-finished",
+                ],
                 dest_event_path
             ));
         }
@@ -7598,13 +7581,9 @@ mod common_parallel {
                 .spawn()
                 .unwrap();
 
-            let expected_events = [&MetaEvent {
-                event: "migration-receive-ready".to_string(),
-                device_id: None,
-            }];
-            assert!(wait_for_sequential_events(
+            assert!(wait_for_sequential_events_str(
                 Duration::from_secs(30),
-                &expected_events,
+                &["migration-receive-ready"],
                 &dest_event_path
             ));
 
@@ -7661,47 +7640,24 @@ mod common_parallel {
                         "receive-migration should have failed because the migration was aborted: is {receive_status:?}"
                     );
 
-                    let expected_events = [
-                        &MetaEvent {
-                            event: "migration-starting".to_string(),
-                            device_id: None,
-                        },
-                        &MetaEvent {
-                            event: "migration-started".to_string(),
-                            device_id: None,
-                        },
-                        &MetaEvent {
-                            event: "migration-failed".to_string(),
-                            device_id: None,
-                        },
-                    ];
-                    assert!(wait_for_sequential_events(
+                    assert!(wait_for_sequential_events_str(
                         Duration::from_secs(30),
-                        &expected_events,
+                        &[
+                            "migration-starting",
+                            "migration-started",
+                            "migration-failed"
+                        ],
                         &src_event_path
                     ));
 
-                    let expected_events = [
-                        &MetaEvent {
-                            event: "migration-receive-ready".to_string(),
-                            device_id: None,
-                        },
-                        &MetaEvent {
-                            event: "migration-receive-starting".to_string(),
-                            device_id: None,
-                        },
-                        &MetaEvent {
-                            event: "migration-receive-started".to_string(),
-                            device_id: None,
-                        },
-                        &MetaEvent {
-                            event: "migration-receive-failed".to_string(),
-                            device_id: None,
-                        },
-                    ];
-                    assert!(wait_for_sequential_events(
+                    assert!(wait_for_sequential_events_str(
                         Duration::from_secs(30),
-                        &expected_events,
+                        &[
+                            "migration-receive-ready",
+                            "migration-receive-starting",
+                            "migration-receive-started",
+                            "migration-receive-failed",
+                        ],
                         &dest_event_path
                     ));
 
@@ -7720,47 +7676,24 @@ mod common_parallel {
                         "receive-migration should have succeeded because the migration succeeded: is {receive_status:?}"
                     );
 
-                    let expected_events = [
-                        &MetaEvent {
-                            event: "migration-starting".to_string(),
-                            device_id: None,
-                        },
-                        &MetaEvent {
-                            event: "migration-started".to_string(),
-                            device_id: None,
-                        },
-                        &MetaEvent {
-                            event: "migration-finished".to_string(),
-                            device_id: None,
-                        },
-                    ];
-                    assert!(wait_for_sequential_events(
+                    assert!(wait_for_sequential_events_str(
                         Duration::from_secs(30),
-                        &expected_events,
+                        &[
+                            "migration-starting",
+                            "migration-started",
+                            "migration-finished",
+                        ],
                         &src_event_path
                     ));
 
-                    let expected_events = [
-                        &MetaEvent {
-                            event: "migration-receive-ready".to_string(),
-                            device_id: None,
-                        },
-                        &MetaEvent {
-                            event: "migration-receive-starting".to_string(),
-                            device_id: None,
-                        },
-                        &MetaEvent {
-                            event: "migration-receive-started".to_string(),
-                            device_id: None,
-                        },
-                        &MetaEvent {
-                            event: "migration-receive-finished".to_string(),
-                            device_id: None,
-                        },
-                    ];
-                    assert!(wait_for_sequential_events(
+                    assert!(wait_for_sequential_events_str(
                         Duration::from_secs(30),
-                        &expected_events,
+                        &[
+                            "migration-receive-ready",
+                            "migration-receive-starting",
+                            "migration-receive-started",
+                            "migration-receive-finished",
+                        ],
                         &dest_event_path
                     ));
 
