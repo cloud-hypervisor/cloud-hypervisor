@@ -99,13 +99,9 @@ pub(crate) fn _test_api_shutdown(target_api: &TargetApi, guest: &Guest) {
         guest.ssh_command("sudo poweroff").unwrap();
 
         // Wait for the VMM to report completed shutdown before reusing the VM.
-        let latest_events = [&MetaEvent {
-            event: "shutdown".to_string(),
-            device_id: None,
-        }];
-        assert!(wait_for_latest_events_exact(
+        assert!(wait_for_latest_events_exact_str(
             Duration::from_secs(20),
-            &latest_events,
+            &["shutdown"],
             &event_path,
         ));
 
@@ -164,13 +160,9 @@ pub(crate) fn _test_api_delete(target_api: &TargetApi, guest: &Guest) {
         guest.ssh_command("sudo poweroff").unwrap();
 
         // Wait for the VMM to report completed shutdown before deleting the VM.
-        let latest_events = [&MetaEvent {
-            event: "shutdown".to_string(),
-            device_id: None,
-        }];
-        assert!(wait_for_latest_events_exact(
+        assert!(wait_for_latest_events_exact_str(
             Duration::from_secs(20),
-            &latest_events,
+            &["shutdown"],
             &event_path,
         ));
 
@@ -1658,23 +1650,9 @@ pub(crate) fn _test_simple_launch(guest: &Guest) {
         let _ = guest.ssh_command("sudo systemctl stop snapd");
 
         guest.ssh_command("sudo poweroff").unwrap();
-        let latest_events = [
-            &MetaEvent {
-                event: "shutdown".to_string(),
-                device_id: None,
-            },
-            &MetaEvent {
-                event: "deleted".to_string(),
-                device_id: None,
-            },
-            &MetaEvent {
-                event: "shutdown".to_string(),
-                device_id: None,
-            },
-        ];
-        assert!(wait_for_latest_events_exact(
+        assert!(wait_for_latest_events_exact_str(
             Duration::from_secs(20),
-            &latest_events,
+            &["shutdown", "deleted", "shutdown"],
             &event_path
         ));
     });
@@ -3506,13 +3484,9 @@ pub(crate) fn _test_pvpanic(guest: &Guest) {
         make_guest_panic(guest);
 
         // Wait for the panic event to be recorded
-        let expected_sequential_events = [&MetaEvent {
-            event: "panic".to_string(),
-            device_id: None,
-        }];
-        assert!(wait_for_latest_events_exact(
+        assert!(wait_for_latest_events_exact_str(
             Duration::from_secs(10),
-            &expected_sequential_events,
+            &["panic"],
             &event_path
         ));
     });

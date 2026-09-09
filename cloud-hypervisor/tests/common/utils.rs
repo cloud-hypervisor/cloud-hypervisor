@@ -639,6 +639,24 @@ pub(crate) fn wait_for_latest_events_exact(
     false
 }
 
+/// Convenient wrapper around [`wait_for_latest_events_exact`] that just takes `str`s.
+pub(crate) fn wait_for_latest_events_exact_str(
+    timeout: Duration,
+    latest_events: &[&str],
+    event_file: &str,
+) -> bool {
+    let latest_events = latest_events
+        .iter()
+        .map(|event| MetaEvent {
+            event: (*event).to_string(),
+            device_id: None,
+        })
+        .collect::<Vec<_>>();
+    let latest_events = latest_events.iter().collect::<Vec<_>>();
+
+    wait_for_latest_events_exact(timeout, &latest_events, event_file)
+}
+
 /// Check latest events with optional mismatch diagnostics.
 fn check_latest_events_exact_with_options(
     latest_events: &[&MetaEvent],
