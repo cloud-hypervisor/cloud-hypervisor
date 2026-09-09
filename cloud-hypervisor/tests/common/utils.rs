@@ -583,6 +583,24 @@ pub(crate) fn wait_for_sequential_events(
     false
 }
 
+/// Wait for a sequential event match using event names only.
+pub(crate) fn wait_for_sequential_events_str(
+    timeout: Duration,
+    expected_events: &[&str],
+    event_file: &str,
+) -> bool {
+    let expected_events = expected_events
+        .iter()
+        .map(|event| MetaEvent {
+            event: (*event).to_string(),
+            device_id: None,
+        })
+        .collect::<Vec<_>>();
+    let expected_events = expected_events.iter().collect::<Vec<_>>();
+
+    wait_for_sequential_events(timeout, &expected_events, event_file)
+}
+
 /// Check sequential events with optional mismatch diagnostics.
 fn check_sequential_events_with_options(
     expected_events: &[&MetaEvent],
