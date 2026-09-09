@@ -13,7 +13,7 @@ use uuid::Uuid;
 use vm_memory::{Address, ByteValued, Bytes, GuestAddress};
 
 use crate::GuestMemoryMmap;
-use crate::layout::SMBIOS_START;
+use crate::layout::{SMBIOS_MAX_SIZE, SMBIOS_START};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -449,7 +449,16 @@ pub(crate) fn setup_smbios(mem: &GuestMemoryMmap, smbios: Option<&SmbiosConfig>)
             .map_err(Error::WriteSmbiosEp)?;
     }
 
-    Ok(curptr.unchecked_offset_from(physptr) + size_of::<Smbios30Entrypoint>() as u64)
+    let table_size = curptr.unchecked_offset_from(physptr) as u64;
+    let total_size = table_size
+        .checked_add(size_of::<Smbios30Entrypoint>() as u64)
+        .ok_or(Error::NotEnoughMemory)?;
+
+    if total_size > SMBIOS_MAX_SIZE {
+        return Err(Error::NotEnoughMemory);
+    }
+
+    Ok(total_size)
 }
 
 #[cfg(test)]
@@ -690,6 +699,25 @@ mod tests {
 
         let sys: SmbiosSysInfo = mem.read_obj(cur).unwrap();
         assert_eq!(sys.uuid, Uuid::parse_str(uuid_str).unwrap().to_bytes_le());
+    }
+
+    #[test]
+    fn smbios_oversized_oem_strings_rejected() {
+        // The region is deliberately larger than SMBIOS_MAX_SIZE so that the
+        // rejection comes from the size check below, not from running out of
+        // guest memory.
+        let mem = GuestMemoryMmap::from_ranges(&[(SMBIOS_START, (SMBIOS_MAX_SIZE * 2) as usize)])
+            .unwrap();
+
+        // A single OEM string larger than the whole reservation. Reachable
+        // via `--platform oem_strings=...`, which places no bound on length.
+        let smbios = SmbiosConfig {
+            oem_strings: ["A".repeat(SMBIOS_MAX_SIZE as usize + 4096)].into(),
+            ..Default::default()
+        };
+
+        let err = setup_smbios(&mem, Some(&smbios)).unwrap_err();
+        assert!(matches!(err, Error::NotEnoughMemory));
     }
 
     #[test]
