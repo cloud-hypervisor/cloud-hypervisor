@@ -97,10 +97,10 @@ pub enum RegionType {
     Reserved,
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 pub mod smbios;
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 pub use smbios::{SmbiosChassisConfig, SmbiosConfig, SmbiosSystem};
 
 /// Module for aarch64 related functionality.
