@@ -168,7 +168,7 @@ pub struct PlatformConfig {
     pub vfio_p2p_dma: bool,
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 impl PlatformConfig {
     /// Returns `None` if no SMBIOS-relevant platform fields are set, otherwise
     /// `Some` with a [`SmbiosConfig`] built from the populated fields.
