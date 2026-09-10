@@ -41,7 +41,7 @@ use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::protocol::*;
 use vm_migration::{
     MemoryMigrationContext, Migratable, MigratableError, OngoingMigrationContext, Pausable,
-    Snapshot, Snapshottable, Transportable,
+    Snapshot, Snapshottable, Transportable, state_from_id,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::unblock_signal;
@@ -654,10 +654,15 @@ pub struct VmmThreadHandle {
     pub http_api_handle: Option<HttpApiHandle>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 enum PendingVmAction {
     Reboot,
     Shutdown,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+struct VmmSnapshot {
+    pending_action: Option<PendingVmAction>,
 }
 
 /// Models the current ownership and associated state of the VM from the
@@ -730,6 +735,7 @@ pub struct Vmm {
 
 /// Time before aborting on the page fault connection.
 const FAULT_CONNECTION_ACCEPT_TIMEOUT: Duration = Duration::from_secs(30);
+const VMM_SNAPSHOT_ID: &str = "vmm";
 
 /// Just a wrapper for the data that goes into
 /// [`ReceiveMigrationState::Configured`]
@@ -1399,6 +1405,8 @@ impl Vmm {
                 .context("Error deserialising snapshot")
                 .map_err(MigratableError::MigrateReceive)
         })?;
+        let vmm_snapshot: VmmSnapshot =
+            state_from_id(Some(&snapshot), VMM_SNAPSHOT_ID)?.unwrap_or_default();
 
         let exit_evt = self
             .exit_evt
@@ -1469,6 +1477,10 @@ impl Vmm {
             Ok(vm)
         })?;
 
+        if let Some(action) = vmm_snapshot.pending_action {
+            info!("Received pending VM action from the migration source: {action:?}");
+        }
+        *self.pending_action.lock().unwrap() = vmm_snapshot.pending_action;
         self.vm = VmOwnership::Owned(vm);
 
         Ok((receive_duration, restore_duration))
@@ -1683,6 +1695,7 @@ impl Vmm {
         initial_vm_state: VmState,
         seccomp_filters: &MigrationSeccompFilters,
         vm_moved_to_destination: &mut bool,
+        pending_action: &Mutex<Option<PendingVmAction>>,
     ) -> result::Result<(), MigratableError> {
         // State machine that is updated with more context as we progress.
         let mut ctx = OngoingMigrationContext::new();
@@ -1860,7 +1873,7 @@ impl Vmm {
             None
         };
 
-        let (vm_snapshot, snapshot_duration) = measure_ok(|| {
+        let (mut vm_snapshot, snapshot_duration) = measure_ok(|| {
             // Capture snapshot. This may have side effects, e.g. vhost-user backend inflight drain
             let snapshot = vm.snapshot()?;
 
@@ -1871,6 +1884,14 @@ impl Vmm {
             }
             Ok(snapshot)
         })?;
+
+        let vmm_snapshot = VmmSnapshot {
+            pending_action: *pending_action.lock().unwrap(),
+        };
+        vm_snapshot.add_snapshot(
+            VMM_SNAPSHOT_ID.to_string(),
+            Snapshot::new_from_state(&vmm_snapshot)?,
+        );
 
         let (_, send_snapshot_duration) =
             measure_ok(|| transport::send_state(&mut socket, &vm_snapshot))?;
@@ -2148,9 +2169,13 @@ impl Vmm {
             vm_moved_to_destination,
         } = migration_worker_handle.join();
 
+        let pending_action = self.pending_action.lock().unwrap().take();
         let mut try_resume_vm_after_failed_migration = |mut vm: Vm| {
-            // A late failure may leave the VM paused.
-            if initial_vm_state == VmState::Running && vm.get_state() == VmState::Paused {
+            // A late failure may leave the VM paused: Resume if applicable.
+            if initial_vm_state == VmState::Running
+                && vm.get_state() == VmState::Paused
+                && pending_action.is_none()
+            {
                 match vm.resume() {
                     Ok(_) => {
                         info!("Resumed VM successfully after failed migration");
@@ -2167,6 +2192,7 @@ impl Vmm {
                 warn!("Failed stopping dirty log after resuming VM: {e} - VM performance might be slower than usual");
             });
 
+            *self.pending_action.lock().unwrap() = pending_action;
             self.vm = VmOwnership::Owned(vm);
         };
 
@@ -3358,6 +3384,7 @@ impl RequestHandler for Vmm {
                 event!("vm", "migration-receive-failed");
                 self.vm = VmOwnership::None;
                 self.vm_config = None;
+                *self.pending_action.lock().unwrap() = None;
             })
     }
 
@@ -3486,6 +3513,7 @@ impl RequestHandler for Vmm {
 
         match MigrationWorker::spawn(
             vm,
+            Arc::clone(&self.pending_action),
             check_migration_evt,
             send_data_migration,
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
