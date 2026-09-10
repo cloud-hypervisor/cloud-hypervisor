@@ -2198,6 +2198,10 @@ impl Vmm {
     }
 
     fn apply_pending_action(&mut self) -> Result<bool> {
+        if matches!(&self.vm, VmOwnership::Migration { .. }) {
+            return Ok(false);
+        }
+
         let pending_action = mem::take(&mut *self.pending_action.lock().unwrap());
 
         match pending_action {
