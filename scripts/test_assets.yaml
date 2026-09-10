@@ -76,7 +76,8 @@ assets:
     arch: [aarch64]
     test: [integration, metrics]
 
-  # Previous release binaries for live-upgrade tests
+  # Previous release binaries for live-upgrade tests. Keep each ch-remote
+  # version in sync with its corresponding cloud-hypervisor version.
   - filename: cloud-hypervisor-static
     url: https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v52.0/cloud-hypervisor-static
     sha256: 829af01ff075bb96c4f183905134c453a88d68cbabdc6b87df21098842581ee9
@@ -84,9 +85,23 @@ assets:
     arch: [x86_64]
     test: [integration]
 
+  - filename: ch-remote-static
+    url: https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v52.0/ch-remote-static
+    sha256: d4e8709ed3ef8ba5c66d98770342a2d7c3c96174cfa9c5ae9e3e55de999869a3
+    executable: true
+    arch: [x86_64]
+    test: [integration]
+
   - filename: cloud-hypervisor-static-aarch64
     url: https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v52.0/cloud-hypervisor-static-aarch64
     sha256: bf004ddc1a148f47caa87ac49a783b8dbd6bf9bc27abe522ed197df7b982d3b1
+    executable: true
+    arch: [aarch64]
+    test: [integration]
+
+  - filename: ch-remote-static-aarch64
+    url: https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v52.0/ch-remote-static-aarch64
+    sha256: 94d1dbcae65df9be8e5a2ec6ded9c6f8cbc1b3a0b95f199450146cdb9fb1b5bb
     executable: true
     arch: [aarch64]
     test: [integration]

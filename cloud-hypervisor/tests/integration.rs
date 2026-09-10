@@ -6866,7 +6866,8 @@ mod common_parallel {
                     &src_api_socket,
                     &dest_api_socket,
                     memfds,
-                    paused
+                    paused,
+                    upgrade_test
                 ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
@@ -7014,6 +7015,7 @@ mod common_parallel {
                     &src_api_socket,
                     &dest_api_socket,
                     true,
+                    false,
                     false
                 ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
@@ -7846,6 +7848,7 @@ mod common_parallel {
                     &src_api_socket,
                     &dest_api_socket,
                     memfds,
+                    false,
                     false
                 ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
@@ -8168,6 +8171,7 @@ mod ivshmem {
                     &src_api_socket,
                     &dest_api_socket,
                     memfds,
+                    false,
                     false
                 ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
@@ -10315,7 +10319,8 @@ mod common_sequential {
                     &src_api_socket,
                     &dest_api_socket,
                     memfds,
-                    false
+                    false,
+                    upgrade_test
                 ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
@@ -10531,7 +10536,8 @@ mod common_sequential {
                     &src_api_socket,
                     &dest_api_socket,
                     memfds,
-                    false
+                    false,
+                    upgrade_test
                 ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
@@ -10669,7 +10675,8 @@ mod common_sequential {
                     &src_api_socket,
                     &dest_api_socket,
                     memfds,
-                    false
+                    false,
+                    upgrade_test
                 ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
@@ -10924,7 +10931,8 @@ mod common_sequential {
                     &src_api_socket,
                     &dest_api_socket,
                     memfds,
-                    false
+                    false,
+                    upgrade_test
                 ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );

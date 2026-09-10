@@ -33,7 +33,8 @@ required_files=(
     "$WORKLOADS_DIR/vmlinux-x86_64"
     "$WORKLOADS_DIR/bzImage-x86_64"
     "$WORKLOADS_DIR/alpine-minirootfs-x86_64.tar.gz"
-    "$WORKLOADS_DIR/cloud-hypervisor-static")
+    "$WORKLOADS_DIR/cloud-hypervisor-static"
+    "$WORKLOADS_DIR/ch-remote-static")
 
 for required in "${required_files[@]}"; do
     if [ ! -f "$required" ]; then

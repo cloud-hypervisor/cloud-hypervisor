@@ -19,6 +19,7 @@ update_workloads() {
     for required in "$JAMMY_OS_RAW_IMAGE" "$JAMMY_OS_QCOW2_UNCOMPRESSED_IMAGE" \
         "$WORKLOADS_DIR/CLOUDHV_EFI.fd" \
         "$WORKLOADS_DIR/cloud-hypervisor-static-aarch64" \
+        "$WORKLOADS_DIR/ch-remote-static-aarch64" \
         "$WORKLOADS_DIR/alpine-minirootfs-aarch64.tar.gz" \
         "$WORKLOADS_DIR/Image-arm64"; do
         if [ ! -f "$required" ]; then
