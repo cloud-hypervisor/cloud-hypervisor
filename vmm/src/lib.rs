@@ -654,6 +654,14 @@ pub struct VmmThreadHandle {
     pub http_api_handle: Option<HttpApiHandle>,
 }
 
+/// A guest-induced lifecycle action that the control loop applies at the
+/// start of its next iteration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PendingVmAction {
+    Reboot,
+    Shutdown,
+}
+
 /// Models the current ownership and associated state of the VM from the
 /// perspective of the VMM.
 enum VmOwnership {
@@ -719,6 +727,7 @@ pub struct Vmm {
     console_socket_listener: Option<Arc<LockedUnixListener>>,
     no_shutdown: bool,
     check_migration_evt: EventFd,
+    pending_action: Arc<Mutex<Option<PendingVmAction>>>,
 }
 
 /// Time before aborting on the page fault connection.
@@ -953,6 +962,7 @@ impl Vmm {
             console_socket_listener: None,
             no_shutdown,
             check_migration_evt,
+            pending_action: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -2186,6 +2196,31 @@ impl Vmm {
         }
     }
 
+    /// Applies the pending action, if any.
+    ///
+    /// Returns whether the control loop must exit.
+    fn apply_pending_action(&mut self) -> Result<bool> {
+        let Some(pending_action) = self.pending_action.lock().unwrap().take() else {
+            return Ok(false);
+        };
+        info!("Applying pending VM action: {pending_action:?}");
+
+        match pending_action {
+            PendingVmAction::Reboot => {
+                self.vm_reboot().map_err(Error::VmReboot)?;
+                Ok(false)
+            }
+            PendingVmAction::Shutdown if self.no_shutdown => {
+                self.vm_shutdown().map_err(Error::VmShutdown)?;
+                Ok(false)
+            }
+            PendingVmAction::Shutdown => {
+                self.vmm_shutdown().map_err(Error::VmmShutdown)?;
+                Ok(true)
+            }
+        }
+    }
+
     fn control_loop(
         &mut self,
         api_receiver: &Receiver<ApiRequest>,
@@ -2197,6 +2232,10 @@ impl Vmm {
         let epoll_fd = self.epoll.as_raw_fd();
 
         'outer: loop {
+            if self.apply_pending_action()? {
+                break 'outer;
+            }
+
             let num_events = match epoll::wait(epoll_fd, -1, &mut events[..]) {
                 Ok(res) => res,
                 Err(e) => {
@@ -2225,7 +2264,6 @@ impl Vmm {
                         info!("VM exit event");
                         // Consume the event.
                         self.exit_evt.read().map_err(Error::EventFdRead)?;
-                        // TODO: Future follow-up must resolve lifecycle handling while migrating.
                         self.vmm_shutdown().map_err(Error::VmmShutdown)?;
 
                         break 'outer;
@@ -2234,19 +2272,16 @@ impl Vmm {
                         info!("VM reset event");
                         // Consume the event.
                         self.reset_evt.read().map_err(Error::EventFdRead)?;
-                        // TODO: Future follow-up must resolve lifecycle handling while migrating.
-                        self.vm_reboot().map_err(Error::VmReboot)?;
+                        // A pending shutdown takes precedence.
+                        self.pending_action
+                            .lock()
+                            .unwrap()
+                            .get_or_insert(PendingVmAction::Reboot);
                     }
                     EpollDispatch::GuestExit => {
                         info!("VM guest exit event");
                         self.guest_exit_evt.read().map_err(Error::EventFdRead)?;
-                        // TODO: Future follow-up must resolve lifecycle handling while migrating.
-                        if self.no_shutdown {
-                            self.vm_shutdown().map_err(Error::VmShutdown)?;
-                        } else {
-                            self.vmm_shutdown().map_err(Error::VmmShutdown)?;
-                            break 'outer;
-                        }
+                        *self.pending_action.lock().unwrap() = Some(PendingVmAction::Shutdown);
                     }
                     EpollDispatch::ActivateVirtioDevices => {
                         let count = self.activate_evt.read().map_err(Error::EventFdRead)?;
