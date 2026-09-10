@@ -120,4 +120,5 @@ An event identifier combines its `source` and `event` fields, written below as
 - `vm.snapshotted`: VM snapshot completed.
 - `vm.snapshotting`: VM snapshot started.
 - `vmm.shutdown`: VMM shut down.
+- `vmm.started`: VMM startup completed and ready to serve API requests.
 - `vmm.starting`: VMM startup started.

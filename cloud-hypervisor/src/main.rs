@@ -802,6 +802,10 @@ fn start_vmm(
     )
     .map_err(Error::StartVmmThread)?;
 
+    // API endpoints (HTTP, D-Bus) are set up at this point (if API socket is
+    // configured)
+    event!("vmm", "started");
+
     let r: Result<(), Error> = (|| {
         #[cfg(feature = "igvm")]
         let payload_present = cmd_arguments.contains_id("kernel")
