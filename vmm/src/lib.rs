@@ -681,6 +681,10 @@ enum VmOwnership {
 }
 
 impl VmOwnership {
+    fn is_migrating(&self) -> bool {
+        matches!(self, VmOwnership::Migration { .. })
+    }
+
     /// Returns a mutable reference to the underlying VM, if available.
     fn as_mut(&mut self) -> Option<&mut Vm> {
         match self {
@@ -2200,6 +2204,10 @@ impl Vmm {
     ///
     /// Returns whether the control loop must exit.
     fn apply_pending_action(&mut self) -> Result<bool> {
+        if self.vm.is_migrating() {
+            return Ok(false);
+        }
+
         let Some(pending_action) = self.pending_action.lock().unwrap().take() else {
             return Ok(false);
         };
@@ -2272,6 +2280,9 @@ impl Vmm {
                         info!("VM reset event");
                         // Consume the event.
                         self.reset_evt.read().map_err(Error::EventFdRead)?;
+                        if self.vm.is_migrating() {
+                            info!("Deferring guest reboot until the migration finished");
+                        }
                         // A pending shutdown takes precedence.
                         self.pending_action
                             .lock()
@@ -2281,6 +2292,9 @@ impl Vmm {
                     EpollDispatch::GuestExit => {
                         info!("VM guest exit event");
                         self.guest_exit_evt.read().map_err(Error::EventFdRead)?;
+                        if self.vm.is_migrating() {
+                            info!("Deferring guest shutdown until the migration finished");
+                        }
                         *self.pending_action.lock().unwrap() = Some(PendingVmAction::Shutdown);
                     }
                     EpollDispatch::ActivateVirtioDevices => {
