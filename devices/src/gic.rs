@@ -33,7 +33,7 @@ pub const GIC_SNAPSHOT_ID: &str = "gic-v3-its";
 pub struct Gic {
     interrupt_source_group: Arc<dyn InterruptSourceGroup>,
     // The hypervisor agnostic virtual GIC
-    vgic: Option<Arc<Mutex<dyn Vgic>>>,
+    vgic: Arc<Mutex<dyn Vgic>>,
 }
 
 impl Gic {
@@ -55,7 +55,7 @@ impl Gic {
 
         let gic = Gic {
             interrupt_source_group,
-            vgic: Some(vgic),
+            vgic,
         };
         gic.enable()?;
 
@@ -63,7 +63,7 @@ impl Gic {
     }
 
     pub fn restore_vgic(&self, state: Option<GicState>) -> Result<()> {
-        let mut vgic = self.vgic.as_ref().unwrap().lock().unwrap();
+        let mut vgic = self.vgic.lock().unwrap();
         vgic.set_state(&state.unwrap()).map_err(Error::RestoreGic)
     }
 
@@ -114,7 +114,7 @@ impl Gic {
     }
 
     pub fn get_vgic(&mut self) -> Result<Arc<Mutex<dyn Vgic>>> {
-        Ok(self.vgic.clone().unwrap())
+        Ok(self.vgic.clone())
     }
 }
 
@@ -140,17 +140,14 @@ impl Snapshottable for Gic {
     }
 
     fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
-        let vgic = self.vgic.as_ref().unwrap().clone();
-        let state = vgic.lock().unwrap().state().unwrap();
+        let state = self.vgic.lock().unwrap().state().unwrap();
         Snapshot::new_from_state(&state)
     }
 }
 
 impl Pausable for Gic {
     fn pause(&mut self) -> result::Result<(), MigratableError> {
-        // Flush tables to guest RAM
-        let vgic = self.vgic.as_ref().unwrap().clone();
-        vgic.lock().unwrap().save_data_tables().map_err(|e| {
+        self.vgic.lock().unwrap().save_data_tables().map_err(|e| {
             MigratableError::Pause(anyhow!("Could not save GICv3ITS GIC pending tables {e:?}",))
         })?;
         Ok(())
