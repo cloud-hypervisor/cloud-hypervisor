@@ -2216,6 +2216,10 @@ impl Vmm {
             let Some(action) = *pending_action else {
                 return Ok(false);
             };
+            if matches!(self.vm, VmOwnership::Migration { .. }) {
+                info!("Deferring pending VM {action:?} until migration finishes");
+                return Ok(false);
+            }
             *pending_action = None;
             action
         };
