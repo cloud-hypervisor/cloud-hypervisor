@@ -41,7 +41,7 @@ use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::protocol::*;
 use vm_migration::{
     MemoryMigrationContext, Migratable, MigratableError, OngoingMigrationContext, Pausable,
-    Snapshot, Snapshottable, Transportable,
+    Snapshot, Snapshottable, Transportable, state_from_id,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::unblock_signal;
@@ -654,13 +654,18 @@ pub struct VmmThreadHandle {
     pub http_api_handle: Option<HttpApiHandle>,
 }
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 enum PendingVmAction {
     #[default]
     None,
     Reboot,
     Shutdown,
     VmmShutdown,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+struct VmmSnapshot {
+    pending_action: PendingVmAction,
 }
 
 /// Models the current ownership and associated state of the VM from the
@@ -733,6 +738,7 @@ pub struct Vmm {
 
 /// Time before aborting on the page fault connection.
 const FAULT_CONNECTION_ACCEPT_TIMEOUT: Duration = Duration::from_secs(30);
+const VMM_SNAPSHOT_ID: &str = "vmm";
 
 /// Just a wrapper for the data that goes into
 /// [`ReceiveMigrationState::Configured`]
@@ -1402,6 +1408,8 @@ impl Vmm {
                 .context("Error deserialising snapshot")
                 .map_err(MigratableError::MigrateReceive)
         })?;
+        let vmm_snapshot: VmmSnapshot =
+            state_from_id(Some(&snapshot), VMM_SNAPSHOT_ID)?.unwrap_or_default();
 
         let exit_evt = self
             .exit_evt
@@ -1472,6 +1480,7 @@ impl Vmm {
             Ok(vm)
         })?;
 
+        *self.pending_action.lock().unwrap() = vmm_snapshot.pending_action;
         self.vm = VmOwnership::Owned(vm);
 
         Ok((receive_duration, restore_duration))
@@ -1680,6 +1689,7 @@ impl Vmm {
     /// migrations.
     fn send_migration(
         vm: &mut Vm,
+        pending_action: &Mutex<PendingVmAction>,
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         hypervisor: &dyn hypervisor::Hypervisor,
         send_data_migration: &VmSendMigrationData,
@@ -1862,7 +1872,7 @@ impl Vmm {
             None
         };
 
-        let (vm_snapshot, snapshot_duration) = measure_ok(|| {
+        let (mut vm_snapshot, snapshot_duration) = measure_ok(|| {
             // Capture snapshot. This may have side effects, e.g. vhost-user backend inflight drain
             let snapshot = vm.snapshot()?;
 
@@ -1873,6 +1883,14 @@ impl Vmm {
             }
             Ok(snapshot)
         })?;
+
+        let vmm_snapshot = VmmSnapshot {
+            pending_action: *pending_action.lock().unwrap(),
+        };
+        vm_snapshot.add_snapshot(
+            VMM_SNAPSHOT_ID.to_string(),
+            Snapshot::new_from_state(&vmm_snapshot)?,
+        );
 
         let (_, send_snapshot_duration) =
             measure_ok(|| transport::send_state(&mut socket, &vm_snapshot))?;
@@ -2174,6 +2192,7 @@ impl Vmm {
                 self.vm = VmOwnership::Owned(vm);
             }
             Ok(()) => {
+                *self.pending_action.lock().unwrap() = PendingVmAction::None;
                 self.vm = VmOwnership::None;
                 let mut vm = vm;
 
@@ -3470,6 +3489,7 @@ impl RequestHandler for Vmm {
 
         match MigrationWorker::spawn(
             vm,
+            Arc::clone(&self.pending_action),
             check_migration_evt,
             send_data_migration,
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
