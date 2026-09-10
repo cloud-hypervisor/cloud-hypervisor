@@ -654,6 +654,15 @@ pub struct VmmThreadHandle {
     pub http_api_handle: Option<HttpApiHandle>,
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum PendingVmAction {
+    #[default]
+    None,
+    Reboot,
+    Shutdown,
+    VmmShutdown,
+}
+
 /// Models the current ownership and associated state of the VM from the
 /// perspective of the VMM.
 enum VmOwnership {
@@ -719,6 +728,7 @@ pub struct Vmm {
     console_socket_listener: Option<Arc<LockedUnixListener>>,
     no_shutdown: bool,
     check_migration_evt: EventFd,
+    pending_action: Arc<Mutex<PendingVmAction>>,
 }
 
 /// Time before aborting on the page fault connection.
@@ -953,6 +963,7 @@ impl Vmm {
             console_socket_listener: None,
             no_shutdown,
             check_migration_evt,
+            pending_action: Arc::new(Mutex::new(PendingVmAction::None)),
         })
     }
 
@@ -2186,6 +2197,26 @@ impl Vmm {
         }
     }
 
+    fn apply_pending_action(&mut self) -> Result<bool> {
+        let pending_action = mem::take(&mut *self.pending_action.lock().unwrap());
+
+        match pending_action {
+            PendingVmAction::None => Ok(false),
+            PendingVmAction::Reboot => {
+                self.vm_reboot().map_err(Error::VmReboot)?;
+                Ok(false)
+            }
+            PendingVmAction::Shutdown if self.no_shutdown => {
+                self.vm_shutdown().map_err(Error::VmShutdown)?;
+                Ok(false)
+            }
+            PendingVmAction::Shutdown | PendingVmAction::VmmShutdown => {
+                self.vmm_shutdown().map_err(Error::VmmShutdown)?;
+                Ok(true)
+            }
+        }
+    }
+
     fn control_loop(
         &mut self,
         api_receiver: &Receiver<ApiRequest>,
@@ -2197,6 +2228,10 @@ impl Vmm {
         let epoll_fd = self.epoll.as_raw_fd();
 
         'outer: loop {
+            if self.apply_pending_action()? {
+                break 'outer;
+            }
+
             let num_events = match epoll::wait(epoll_fd, -1, &mut events[..]) {
                 Ok(res) => res,
                 Err(e) => {
@@ -2225,27 +2260,23 @@ impl Vmm {
                         info!("VM exit event");
                         // Consume the event.
                         self.exit_evt.read().map_err(Error::EventFdRead)?;
-                        // TODO: Future follow-up must resolve lifecycle handling while migrating.
-                        self.vmm_shutdown().map_err(Error::VmmShutdown)?;
-
-                        break 'outer;
+                        *self.pending_action.lock().unwrap() = PendingVmAction::VmmShutdown;
                     }
                     EpollDispatch::Reset => {
                         info!("VM reset event");
                         // Consume the event.
                         self.reset_evt.read().map_err(Error::EventFdRead)?;
-                        // TODO: Future follow-up must resolve lifecycle handling while migrating.
-                        self.vm_reboot().map_err(Error::VmReboot)?;
+                        let mut pending_action = self.pending_action.lock().unwrap();
+                        if *pending_action == PendingVmAction::None {
+                            *pending_action = PendingVmAction::Reboot;
+                        }
                     }
                     EpollDispatch::GuestExit => {
                         info!("VM guest exit event");
                         self.guest_exit_evt.read().map_err(Error::EventFdRead)?;
-                        // TODO: Future follow-up must resolve lifecycle handling while migrating.
-                        if self.no_shutdown {
-                            self.vm_shutdown().map_err(Error::VmShutdown)?;
-                        } else {
-                            self.vmm_shutdown().map_err(Error::VmmShutdown)?;
-                            break 'outer;
+                        let mut pending_action = self.pending_action.lock().unwrap();
+                        if *pending_action != PendingVmAction::VmmShutdown {
+                            *pending_action = PendingVmAction::Shutdown;
                         }
                     }
                     EpollDispatch::ActivateVirtioDevices => {
