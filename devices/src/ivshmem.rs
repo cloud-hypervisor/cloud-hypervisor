@@ -26,7 +26,7 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 
 const IVSHMEM_BAR0_IDX: usize = 0;
 const IVSHMEM_BAR1_IDX: usize = 1;
-const IVSHMEM_BAR2_IDX: usize = 2;
+pub const IVSHMEM_DATA_BAR_IDX: usize = 2;
 
 const IVSHMEM_VENDOR_ID: u16 = 0x1af4;
 const IVSHMEM_DEVICE_ID: u16 = 0x1110;
@@ -187,14 +187,6 @@ impl IvshmemDevice {
         self.userspace_mapping = Some(userspace_mapping);
     }
 
-    pub fn config_bar_addr(&self) -> u64 {
-        self.configuration.get_bar_addr(IVSHMEM_BAR0_IDX)
-    }
-
-    pub fn data_bar_addr(&self) -> u64 {
-        self.configuration.get_bar_addr(IVSHMEM_BAR2_IDX)
-    }
-
     fn state(&self) -> IvshmemDeviceState {
         IvshmemDeviceState {
             interrupt_mask: self._interrupt_mask,
@@ -225,7 +217,7 @@ impl PciDevice for IvshmemDevice {
     ) -> result::Result<Vec<PciBarConfiguration>, PciDeviceError> {
         let mut bars = Vec::new();
         let mut bar0_addr = None;
-        let mut bar2_addr = None;
+        let mut data_bar_addr = None;
 
         let restoring = resources.is_some();
         if let Some(resources) = resources {
@@ -236,8 +228,8 @@ impl PciDevice for IvshmemDevice {
                             bar0_addr = Some(GuestAddress(base));
                         }
                         IVSHMEM_BAR1_IDX => {}
-                        IVSHMEM_BAR2_IDX => {
-                            bar2_addr = Some(GuestAddress(base));
+                        IVSHMEM_DATA_BAR_IDX => {
+                            data_bar_addr = Some(GuestAddress(base));
                         }
                         _ => {
                             error!("Unexpected pci bar index {index}");
@@ -248,7 +240,7 @@ impl PciDevice for IvshmemDevice {
                     }
                 }
             }
-            if bar0_addr.is_none() || bar2_addr.is_none() {
+            if bar0_addr.is_none() || data_bar_addr.is_none() {
                 return Err(PciDeviceError::MissingResource);
             }
         }
@@ -268,17 +260,17 @@ impl PciDevice for IvshmemDevice {
 
         // BAR1 holds MSI-X table and PBA (only ivshmem-doorbell).
 
-        // BAR2 maps the shared memory object
-        let bar2_size = self.region_size;
-        let bar2_addr = mmio64_allocator
-            .allocate(bar2_addr, bar2_size, None)
-            .ok_or(PciDeviceError::IoAllocationFailed(bar2_size))?;
-        debug!("ivshmem bar2 address 0x{:x}", bar2_addr.0);
+        // The data BAR maps the shared memory object
+        let data_bar_size = self.region_size;
+        let data_bar_addr = mmio64_allocator
+            .allocate(data_bar_addr, data_bar_size, None)
+            .ok_or(PciDeviceError::IoAllocationFailed(data_bar_size))?;
+        debug!("ivshmem data BAR address 0x{:x}", data_bar_addr.0);
 
-        let bar2 = PciBarConfiguration::default()
-            .set_index(IVSHMEM_BAR2_IDX)
-            .set_address(bar2_addr.raw_value())
-            .set_size(bar2_size)
+        let data_bar = PciBarConfiguration::default()
+            .set_index(IVSHMEM_DATA_BAR_IDX)
+            .set_address(data_bar_addr.raw_value())
+            .set_size(data_bar_size)
             .set_region_type(PciBarRegionType::Memory64BitRegion)
             .set_prefetchable(PciBarPrefetchable::Prefetchable);
 
@@ -287,12 +279,12 @@ impl PciDevice for IvshmemDevice {
                 .add_pci_bar(&bar0)
                 .map_err(|e| PciDeviceError::IoRegistrationFailed(bar0_addr.raw_value(), e))?;
             self.configuration
-                .add_pci_bar(&bar2)
-                .map_err(|e| PciDeviceError::IoRegistrationFailed(bar2_addr.raw_value(), e))?;
+                .add_pci_bar(&data_bar)
+                .map_err(|e| PciDeviceError::IoRegistrationFailed(data_bar_addr.raw_value(), e))?;
         }
 
         bars.push(bar0);
-        bars.push(bar2);
+        bars.push(data_bar);
         self.bar_regions = bars.clone();
 
         Ok(bars)
@@ -353,8 +345,8 @@ impl PciDevice for IvshmemDevice {
         None
     }
 
-    fn move_bar(&mut self, old_base: u64, new_base: u64) -> io::Result<()> {
-        if new_base == self.data_bar_addr() {
+    fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> io::Result<()> {
+        if bar_idx == IVSHMEM_DATA_BAR_IDX {
             let region = self
                 .region
                 .clone()
@@ -375,7 +367,7 @@ impl PciDevice for IvshmemDevice {
             self.userspace_mapping = Some(new_mapping);
         }
         for bar in self.bar_regions.iter_mut() {
-            if bar.addr() == old_base {
+            if bar.idx() == bar_idx {
                 *bar = bar.set_address(new_base);
             }
         }
