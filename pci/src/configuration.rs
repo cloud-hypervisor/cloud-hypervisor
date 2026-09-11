@@ -42,6 +42,14 @@ pub(crate) const PCIE_CONFIG_SPACE_SIZE: u32 = 0x1000;
 pub(crate) const PCI_EXT_CAP_ALIGN: u32 = 4;
 pub(crate) const PCI_EXT_CAP_NEXT_SHIFT: u32 = 20;
 pub(crate) const PCI_EXT_CAP_NEXT_MASK: u32 = 0xfff0_0000;
+pub(crate) const PCI_EXP_FLAGS_TYPE_MASK: u32 = 0x00f0_0000;
+pub(crate) const PCI_EXP_TYPE_RC_END: u32 = 0x0090_0000;
+pub(crate) const PCI_EXP_FLAGS_VERS_MASK: u32 = 0x000f_0000;
+pub(crate) const PCI_EXP_FLAGS_VERS_SHIFT: u32 = 16;
+pub(crate) const PCI_EXP_LNKCAP: u32 = 12;
+pub(crate) const PCI_EXP_LNKCTL: u32 = 16;
+pub(crate) const PCI_EXP_LNKCAP2: u32 = 44;
+pub(crate) const PCI_EXP_LNKCTL2: u32 = 48;
 
 const PASID_CAP_VERSION: u32 = 1;
 const PASID_CAP_CONTROL_WRITE_MASK: u32 = 0x0007_0000;
