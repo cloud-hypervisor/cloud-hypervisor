@@ -153,6 +153,8 @@ pub struct PlatformConfig {
     pub system_sku_number: Option<String>,
     #[serde(default)]
     pub chassis_asset_tag: Option<String>,
+    #[serde(default)]
+    pub oem_string_paths: Option<Box<[String]>>,
     #[cfg(feature = "tdx")]
     #[serde(default)]
     pub tdx: bool,
@@ -1286,6 +1288,17 @@ impl VmConfig {
 
         if let Some(payload) = &self.payload {
             payload.apply_landlock(&mut landlock)?;
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        if let Some(paths) = self
+            .platform
+            .as_ref()
+            .and_then(|p| p.oem_string_paths.as_deref())
+        {
+            for path in paths {
+                landlock.add_rule_with_access(Path::new(path), "r")?;
+            }
         }
 
         #[cfg(feature = "sev_snp")]
