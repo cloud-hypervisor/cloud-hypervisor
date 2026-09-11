@@ -4,6 +4,7 @@
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixListener;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -110,6 +111,7 @@ pub enum Endpoint {
     FilePair(Arc<File>, Arc<File>),
     PtyPair(Arc<File>, Arc<File>),
     Socket(Arc<UnixListener>),
+    TcpListen(Arc<TcpListener>),
     Null,
 }
 
@@ -120,6 +122,7 @@ impl Endpoint {
             Self::FilePair(f, _) => Some(f),
             Self::PtyPair(f, _) => Some(f),
             Self::Socket(..) => None,
+            Self::TcpListen(..) => None,
             Self::Null => None,
         }
     }
@@ -130,12 +133,17 @@ impl Endpoint {
             Self::FilePair(_, f) => Some(f),
             Self::PtyPair(_, f) => Some(f),
             Self::Socket(..) => None,
+            Self::TcpListen(..) => None,
             Self::Null => None,
         }
     }
 
     fn is_pty(&self) -> bool {
         matches!(self, Self::PtyPair(_, _))
+    }
+
+    fn is_socket(&self) -> bool {
+        matches!(self, Self::Socket(..) | Self::TcpListen(..))
     }
 }
 
@@ -157,7 +165,7 @@ impl ConsoleEpollHandler {
         pause_evt: EventFd,
         access_platform: Option<Arc<dyn AccessPlatform>>,
     ) -> Self {
-        let (socket_console, out, write_out) = if let Endpoint::Socket(..) = &endpoint {
+        let (socket_console, out, write_out) = if endpoint.is_socket() {
             let console = SocketConsole::new();
             let out = console.out_sink();
             (Some(console), Some(out), None)
@@ -341,8 +349,14 @@ impl ConsoleEpollHandler {
             helper.add_event_custom(in_file.as_raw_fd(), FILE_EVENT, events)?;
             self.file_event_registered = true;
         }
-        if let Endpoint::Socket(listener) = &self.endpoint {
-            helper.add_event(listener.as_raw_fd(), SOCKET_EVENT)?;
+        match &self.endpoint {
+            Endpoint::Socket(listener) => {
+                helper.add_event(listener.as_raw_fd(), SOCKET_EVENT)?;
+            }
+            Endpoint::TcpListen(listener) => {
+                helper.add_event(listener.as_raw_fd(), SOCKET_EVENT)?;
+            }
+            _ => {}
         }
 
         // In case of PTY, we want to be able to detect a connection on the
@@ -456,30 +470,55 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                 self.resizer.update_console_size();
             }
             SOCKET_EVENT => {
-                // A new client is connecting, so replace the current client with it.
-                if let (Some(console), Endpoint::Socket(listener)) =
-                    (self.socket_console.as_mut(), &self.endpoint)
-                {
+                if let Some(console) = self.socket_console.as_mut() {
+                    if let Endpoint::TcpListen(listener) = &self.endpoint {
+                        if console
+                            .accept_tcp(listener)
+                            .map_err(EpollHelperError::IoError)?
+                            && let Some(fd) = console.client_fd()
+                        {
+                            helper.del_event_custom(
+                                listener.as_raw_fd(),
+                                SOCKET_EVENT,
+                                epoll::Events::EPOLLIN,
+                            )?;
+                            helper.add_event_custom(fd, FILE_EVENT, epoll::Events::EPOLLIN)?;
+                        }
+                        return Ok(());
+                    }
                     if let Some(fd) = console.client_fd() {
                         helper.del_event_custom(fd, FILE_EVENT, epoll::Events::EPOLLIN)?;
                         console.shutdown().map_err(EpollHelperError::IoError)?;
                     }
-                    console
-                        .accept(listener)
-                        .map_err(EpollHelperError::IoError)?;
+                    if let Endpoint::Socket(listener) = &self.endpoint {
+                        console
+                            .accept(listener)
+                            .map_err(EpollHelperError::IoError)?;
+                    }
                     if let Some(fd) = console.client_fd() {
                         helper.add_event_custom(fd, FILE_EVENT, epoll::Events::EPOLLIN)?;
                     }
                 }
             }
             FILE_EVENT => {
-                if event.events & libc::EPOLLIN as u32 != 0 {
+                if event.events & libc::EPOLLIN as u32 != 0
+                    || matches!(self.endpoint, Endpoint::TcpListen(_))
+                        && event.events & (libc::EPOLLHUP | libc::EPOLLERR) as u32 != 0
+                {
                     let mut input = [0u8; 64];
                     let count = if let Some(console) = self.socket_console.as_mut() {
-                        console.read(&mut input).unwrap_or_else(|e| {
+                        let was_connected = console.client_fd().is_some();
+                        let count = console.read(&mut input).unwrap_or_else(|e| {
                             warn!("Failed to read console input: {e}");
                             0
-                        })
+                        });
+                        if was_connected
+                            && console.client_fd().is_none()
+                            && let Endpoint::TcpListen(listener) = &self.endpoint
+                        {
+                            helper.add_event(listener.as_raw_fd(), SOCKET_EVENT)?;
+                        }
+                        count
                     } else if let Some(mut in_file) = self.endpoint.in_file() {
                         in_file.read(&mut input).unwrap_or(0)
                     } else {

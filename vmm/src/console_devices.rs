@@ -12,6 +12,7 @@
 
 use std::fs::{File, OpenOptions, read_link};
 use std::mem::zeroed;
+use std::net::{SocketAddr, TcpListener};
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
@@ -25,7 +26,7 @@ use vmm_sys_util::errno;
 use crate::Vmm;
 use crate::locked_unix_listener::{LockedUnixListener, LockedUnixListenerError};
 use crate::sigwinch_listener::listen_for_sigwinch_on_tty;
-use crate::vm_config::ConsoleOutputMode;
+use crate::vm_config::{ConsoleOutputMode, TcpConsoleConfig};
 
 const TIOCSPTLCK: libc::c_int = 0x4004_5431;
 const TIOCGPTPEER: libc::c_int = 0x5441;
@@ -53,6 +54,16 @@ pub enum ConsoleDeviceError {
     #[error("Socket path missing for socket console mode")]
     MissingSocketPath,
 
+    #[error("TCP console address {0} is not loopback")]
+    TcpAddressNotLoopback(SocketAddr),
+
+    /// Cannot bind the TCP console listener
+    #[error("Cannot bind TCP console listener")]
+    BindTcpListener(#[source] io::Error),
+
+    #[error("Cannot set TCP console listener nonblocking")]
+    SetTcpListenerNonblocking(#[source] io::Error),
+
     /// Error setting pty raw mode
     #[error("Error setting pty raw mode")]
     SetPtyRaw(#[source] errno::Error),
@@ -75,7 +86,29 @@ pub enum ConsoleTransport {
     Tty(Arc<File>),
     Null,
     Socket(Arc<LockedUnixListener>),
+    TcpListen(Arc<TcpListener>),
     Off,
+}
+
+fn tcp_console_transport(
+    tcp: &TcpConsoleConfig,
+    stored: Option<&Arc<TcpListener>>,
+) -> ConsoleDeviceResult<ConsoleTransport> {
+    let addr = tcp.address;
+    if !addr.ip().is_loopback() {
+        return Err(ConsoleDeviceError::TcpAddressNotLoopback(addr));
+    }
+    // Reuse across reboot to avoid binding while sandboxed.
+    if let Some(listener) = stored
+        && listener.local_addr().is_ok_and(|bound| bound == addr)
+    {
+        return Ok(ConsoleTransport::TcpListen(Arc::clone(listener)));
+    }
+    let listener = TcpListener::bind(addr).map_err(ConsoleDeviceError::BindTcpListener)?;
+    listener
+        .set_nonblocking(true)
+        .map_err(ConsoleDeviceError::SetTcpListenerNonblocking)?;
+    Ok(ConsoleTransport::TcpListen(Arc::new(listener)))
 }
 
 #[derive(Clone)]
@@ -259,6 +292,10 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                     ConsoleTransport::Socket(Arc::new(listener))
                 }
             }
+            ConsoleOutputMode::Tcp => {
+                let tcp = vmconfig.console.common.tcp.as_ref().unwrap();
+                tcp_console_transport(tcp, vmm.console_tcp_listener.as_ref())?
+            }
             ConsoleOutputMode::Null => ConsoleTransport::Null,
             ConsoleOutputMode::Off => ConsoleTransport::Off,
         },
@@ -309,6 +346,10 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                     ConsoleTransport::Socket(Arc::new(listener))
                 }
             }
+            ConsoleOutputMode::Tcp => {
+                let tcp = vmconfig.serial.common.tcp.as_ref().unwrap();
+                tcp_console_transport(tcp, vmm.serial_tcp_listener.as_ref())?
+            }
             ConsoleOutputMode::Null => ConsoleTransport::Null,
             ConsoleOutputMode::Off => ConsoleTransport::Off,
         },
@@ -335,6 +376,9 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
             ConsoleOutputMode::Socket => {
                 return Err(ConsoleDeviceError::NoSocketOptionSupportForConsoleDevice);
             }
+            ConsoleOutputMode::Tcp => {
+                return Err(ConsoleDeviceError::NoSocketOptionSupportForConsoleDevice);
+            }
             ConsoleOutputMode::Null => ConsoleTransport::Null,
             ConsoleOutputMode::Off => ConsoleTransport::Off,
         },
@@ -350,5 +394,65 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
         _ => None,
     };
 
+    vmm.serial_tcp_listener = match &console_info.serial {
+        ConsoleTransport::TcpListen(listener) => Some(Arc::clone(listener)),
+        _ => None,
+    };
+
+    vmm.console_tcp_listener = match &console_info.console {
+        ConsoleTransport::TcpListen(listener) => Some(Arc::clone(listener)),
+        _ => None,
+    };
+
     Ok(console_info)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vm_config::parse_tcp_address;
+
+    #[test]
+    fn test_tcp_console_loopback_addresses() {
+        for address in ["127.0.0.1:0", "127.0.0.2:0", "[::1]:0"] {
+            assert!(parse_tcp_address(address).unwrap().ip().is_loopback());
+        }
+        for address in [
+            "0.0.0.0:0",
+            "[::]:0",
+            "192.0.2.1:0",
+            "[2001:db8::1]:0",
+            "[::ffff:192.0.2.1]:0",
+        ] {
+            let tcp = TcpConsoleConfig {
+                address: address.parse().unwrap(),
+                server: true,
+            };
+            assert!(matches!(
+                tcp_console_transport(&tcp, None),
+                Err(ConsoleDeviceError::TcpAddressNotLoopback(_))
+            ));
+        }
+        parse_tcp_address("not-an-endpoint").unwrap_err();
+        parse_tcp_address("localhost:0").unwrap_err();
+    }
+
+    #[test]
+    fn test_tcp_console_listener_reuse() {
+        let mut tcp = TcpConsoleConfig {
+            address: "127.0.0.1:0".parse().unwrap(),
+            server: true,
+        };
+        let ConsoleTransport::TcpListen(listener) = tcp_console_transport(&tcp, None).unwrap()
+        else {
+            panic!("Expected TCP listener");
+        };
+        tcp.address = listener.local_addr().unwrap();
+        let ConsoleTransport::TcpListen(reused) =
+            tcp_console_transport(&tcp, Some(&listener)).unwrap()
+        else {
+            panic!("Expected TCP listener");
+        };
+        assert!(Arc::ptr_eq(&listener, &reused));
+    }
 }
