@@ -38,6 +38,7 @@ pub struct DiskOpenOptions<'a> {
     pub backing_files: bool,
     pub disable_io_uring: bool,
     pub disable_aio: bool,
+    pub extent_anchor_path: Option<&'a Path>,
 }
 
 /// Returns true when io_uring is supported on the running kernel.
@@ -208,8 +209,14 @@ fn open_flat_vmdk(
 ) -> BlockResult<Box<dyn AsyncFullDiskFile>> {
     info!("Opening VMDK disk file with synchronous backend");
     Ok(Box::new(
-        VmdkDisk::new(file, options.path, options.readonly, options.direct)
-            .map_err(|e| e.with_path(options.path))?,
+        VmdkDisk::new(
+            file,
+            options.path,
+            options.readonly,
+            options.direct,
+            options.extent_anchor_path,
+        )
+        .map_err(|e| e.with_path(options.path))?,
     ))
 }
 
@@ -231,6 +238,7 @@ mod tests {
             backing_files: false,
             disable_io_uring: true,
             disable_aio: true,
+            extent_anchor_path: None,
         }
     }
 
@@ -304,6 +312,7 @@ mod tests {
             backing_files: false,
             disable_io_uring: true,
             disable_aio: true,
+            extent_anchor_path: None,
         };
         let disk = open_disk(&options, ImageType::Raw).unwrap();
         assert_eq!(disk.logical_size().unwrap(), size);

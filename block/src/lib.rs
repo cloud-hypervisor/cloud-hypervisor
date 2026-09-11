@@ -710,6 +710,25 @@ mod tests {
     }
 
     #[test]
+    fn validate_small_vmdk_descriptor() {
+        let tmp = TempFile::new().unwrap();
+        let mut f = tmp.into_file();
+        f.write_all(
+            b"# Disk DescriptorFile\n\
+              version=1\n\
+              createType=\"monolithicFlat\"\n\
+              # Extent description\n\
+              RW 2048 FLAT \"disk-flat.vmdk\"\n\
+              # The Disk Data Base\n\
+              ddb.adapterType = \"ide\"\n",
+        )
+        .unwrap();
+        f.sync_all().unwrap();
+
+        assert!(validate_image_type(&mut f, ImageType::FlatVmdk).unwrap());
+    }
+
+    #[test]
     fn test_probe_regular_file_returns_valid_alignment() {
         let temp_file = TempFile::new().unwrap();
         let mut f = temp_file.into_file();
