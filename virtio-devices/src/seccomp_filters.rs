@@ -151,12 +151,15 @@ fn create_virtio_block_ioctl_seccomp_rule() -> Vec<SeccompRule> {
 fn virtio_console_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     vec![
         (libc::SYS_accept4, vec![]),
+        (libc::SYS_connect, vec![]),
         (libc::SYS_ioctl, create_virtio_console_ioctl_seccomp_rule()),
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_sched_getaffinity, vec![]),
         (libc::SYS_sendto, vec![]),
         (libc::SYS_set_robust_list, vec![]),
+        (libc::SYS_setsockopt, vec![]),
         (libc::SYS_shutdown, vec![]),
+        (libc::SYS_socket, create_console_socket_seccomp_rule()),
     ]
 }
 
@@ -295,6 +298,14 @@ fn create_socket_seccomp_rule() -> Vec<SeccompRule> {
     or![and![
         Cond::new(0, ArgLen::Dword, Eq, libc::AF_UNIX as u64).unwrap()
     ]]
+}
+
+// A client mode TCP console dials over IPv4 or IPv6.
+fn create_console_socket_seccomp_rule() -> Vec<SeccompRule> {
+    or![
+        and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_INET as u64).unwrap()],
+        and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_INET6 as u64).unwrap()],
+    ]
 }
 
 fn create_vsock_ioctl_seccomp_rule() -> Vec<SeccompRule> {

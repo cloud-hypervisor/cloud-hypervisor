@@ -568,6 +568,13 @@ fn create_serial_manager_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Backen
     Ok(or![and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO as _)?]])
 }
 
+fn create_serial_manager_socket_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
+    Ok(or![
+        and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_INET as u64)?],
+        and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_INET6 as u64)?],
+    ])
+}
+
 // Syscalls needed by all threads, because they are used in the seccomp signal
 // handler.
 fn common_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
@@ -1155,6 +1162,7 @@ fn serial_manager_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_clock_nanosleep, vec![]),
         (libc::SYS_clock_gettime, vec![]),
         (libc::SYS_close, vec![]),
+        (libc::SYS_connect, vec![]),
         (libc::SYS_epoll_ctl, vec![]),
         (libc::SYS_epoll_pwait, vec![]),
         #[cfg(target_arch = "x86_64")]
@@ -1170,8 +1178,13 @@ fn serial_manager_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_rt_sigreturn, vec![]),
         (libc::SYS_sendto, vec![]),
+        (libc::SYS_setsockopt, vec![]),
         (libc::SYS_shutdown, vec![]),
         (libc::SYS_sigaltstack, vec![]),
+        (
+            libc::SYS_socket,
+            create_serial_manager_socket_seccomp_rule()?,
+        ),
     ])
 }
 
