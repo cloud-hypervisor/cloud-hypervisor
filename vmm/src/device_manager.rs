@@ -4108,6 +4108,7 @@ impl DeviceManager {
                 .map(|bar| *bar as u8)
                 .collect(),
             device_path,
+            Vec::new(),
         )
         .map_err(DeviceManagerError::VfioPciCreate)?;
 
