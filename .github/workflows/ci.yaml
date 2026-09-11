@@ -1,5 +1,10 @@
 name: CI
-on: [pull_request, merge_group]
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches:
+      - 'dev/*/*'
 permissions:
   contents: read
   pull-requests: read
@@ -664,13 +669,13 @@ jobs:
       - name: Run integration tests
         timeout-minutes: 60
         run: scripts/dev_cli.sh tests --integration --libc ${{ matrix.libc }}
-  # MQ-only: start all four matrix entries after preflight, in parallel with
-  # the build and quality jobs. The PR job above keeps the existing gates.
+  # MQ and dev branch pushes start all four matrix entries after preflight, in
+  # parallel with the build and quality jobs. The PR job keeps existing gates.
   integration-x86-64-mq:
     name: integration-x86-64-mq
     needs: [preflight]
-    if: >-
-      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true'
+    if: &mq-if >-
+      (github.event_name == 'merge_group' || github.event_name == 'push') && needs.preflight.outputs.full == 'true'
     timeout-minutes: 80
     env:
       # Our runner has 16 cores (nproc).
@@ -691,8 +696,7 @@ jobs:
   integration-arm64:
     name: integration-arm64
     needs: [preflight]
-    if: >-
-      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true'
+    if: *mq-if
     timeout-minutes: 120
     env:
       # Our runner has 80 cores (nproc).
@@ -747,8 +751,7 @@ jobs:
   integration-vfio:
     name: integration-vfio
     needs: [preflight]
-    if: >-
-      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true'
+    if: *mq-if
     runs-on: vfio-nvidia
     timeout-minutes: 40
     env:
@@ -771,8 +774,7 @@ jobs:
   integration-windows:
     name: integration-windows
     needs: [preflight]
-    if: >-
-      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true'
+    if: *mq-if
     runs-on: garm-noble-16
     timeout-minutes: 35
     strategy:
@@ -813,8 +815,7 @@ jobs:
   integration-mshv-x86-64:
     name: integration-mshv-x86-64
     needs: [preflight]
-    if: >-
-      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true'
+    if: *mq-if
     timeout-minutes: 50
     runs-on: mshv
     steps:
@@ -852,8 +853,7 @@ jobs:
   integration-sev-snp:
     name: integration-sev-snp
     needs: [preflight]
-    if: >-
-      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true'
+    if: *mq-if
     timeout-minutes: 30
     runs-on: noble-sevsnp
     steps:
