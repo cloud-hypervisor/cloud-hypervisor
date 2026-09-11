@@ -669,6 +669,23 @@ struct VfioMigrationData {
 pub(crate) struct ConfigPatch {
     mask: u32,
     patch: u32,
+    write_mask: u32,
+}
+
+impl ConfigPatch {
+    fn write(&mut self, offset: u64, data: &[u8]) {
+        let mut bytes = self.patch.to_le_bytes();
+
+        for (i, byte) in data.iter().enumerate() {
+            let Some(slot) = bytes.get_mut(offset as usize + i) else {
+                break;
+            };
+            *slot = *byte;
+        }
+
+        let written = u32::from_le_bytes(bytes);
+        self.patch = (self.patch & !self.write_mask) | (written & self.write_mask);
+    }
 }
 
 const NVIDIA_VENDOR_ID: u64 = 0x10de;
@@ -1282,6 +1299,7 @@ impl VfioCommon {
             ConfigPatch {
                 mask: 0x0000_ff00,
                 patch: cap_offset << 8,
+                write_mask: 0,
             },
         );
 
@@ -1291,6 +1309,7 @@ impl VfioCommon {
             ConfigPatch {
                 mask: 0xffff_ffff,
                 patch: 0x50080009u32,
+                write_mask: 0,
             },
         );
         self.patches.insert(
@@ -1298,6 +1317,7 @@ impl VfioCommon {
             ConfigPatch {
                 mask: 0xffff_ffff,
                 patch: (u32::from(clique_id) << 19) | 0x5032,
+                write_mask: 0,
             },
         );
     }
@@ -1308,6 +1328,7 @@ impl VfioCommon {
             ConfigPatch {
                 mask: PCI_EXT_CAP_NEXT_MASK,
                 patch: next << PCI_EXT_CAP_NEXT_SHIFT,
+                write_mask: 0,
             },
         );
     }
@@ -1335,6 +1356,7 @@ impl VfioCommon {
                                 mask: 0xffff_ffff,
                                 patch: (PciExpressCapabilityId::NullCapability as u32)
                                     | (u32::from(cap_next) << PCI_EXT_CAP_NEXT_SHIFT),
+                                write_mask: 0,
                             },
                         );
                     }
@@ -1570,6 +1592,11 @@ impl VfioCommon {
                     .write_config_register(reg_idx, offset, data),
                 None,
             );
+        }
+
+        if let Some(patch) = self.patches.get_mut(&reg_idx) {
+            patch.write(offset, data);
+            return (Vec::new(), None);
         }
 
         let reg = (reg_idx * PCI_CONFIG_REGISTER_SIZE) as u64;
