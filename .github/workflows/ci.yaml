@@ -748,6 +748,32 @@ jobs:
       - name: Run Windows guest integration tests
         timeout-minutes: 30
         run: scripts/dev_cli.sh tests --integration-windows --libc musl
+  integration-graviton:
+    name: integration-graviton
+    needs: [preflight]
+    if: *mq-if
+    timeout-minutes: 120
+    env:
+      # Our runner has 96 cores (nproc).
+      # We limit parallelism only to avoid exhausting disk space and memory
+      # resources, not to save CPU resources.
+      PARALLEL_INTEGRATION_TESTS_NUM: 25
+    runs-on: noble-graviton
+    steps:
+      # arm64 runner user is "runner" (vfio's is "github-runner").
+      - name: Fix workspace permissions
+        run: sudo chown -R runner:runner ${GITHUB_WORKSPACE}
+      - name: Code checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Run unit tests (musl)
+        run: scripts/dev_cli.sh tests --unit --libc musl
+      - name: Load openvswitch module
+        run: sudo modprobe openvswitch
+      - name: Run integration tests (musl)
+        timeout-minutes: 60
+        run: scripts/dev_cli.sh tests --integration --libc musl
   integration-vfio:
     name: integration-vfio
     needs: [preflight]
@@ -986,6 +1012,7 @@ jobs:
       - gitlint
       - hadolint
       - integration-arm64
+      - integration-graviton
       - integration-sev-snp
       - integration-vfio
       - integration-mshv-x86-64
