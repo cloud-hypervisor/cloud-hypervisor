@@ -5,8 +5,9 @@
 
 use std::fs::File;
 use std::io::Read;
+use std::net::SocketAddr;
 use std::os::fd::OwnedFd;
-use std::os::unix::io::{AsRawFd, FromRawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -17,7 +18,7 @@ use devices::legacy::Pl011;
 #[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))]
 use devices::legacy::Serial;
 use libc::EFD_NONBLOCK;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use seccompiler::{SeccompAction, apply_filter};
 use serial_buffer::{SerialBuffer, SocketConsole};
 use thiserror::Error;
@@ -105,6 +106,26 @@ impl From<u64> for EpollDispatch {
     }
 }
 
+// Register the client fd for input after dialing, leaving a failure for the
+// loop timeout to retry.
+fn tcp_reconnect(epoll_fd: &OwnedFd, console: &mut SocketConsole, addr: &SocketAddr) {
+    if let Err(e) = console.connect(addr) {
+        debug!("Serial TCP connect to {addr} failed: {e}");
+        return;
+    }
+
+    if let Some(fd) = console.client_fd()
+        && let Err(e) = epoll::ctl(
+            epoll_fd.as_raw_fd(),
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            fd,
+            epoll::Event::new(epoll::Events::EPOLLIN, EpollDispatch::File as u64),
+        )
+    {
+        warn!("Failed to register serial TCP client: {e}");
+    }
+}
+
 pub(crate) struct SerialManager {
     #[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))]
     serial: Arc<Mutex<Serial>>,
@@ -135,8 +156,8 @@ impl SerialManager {
         )
         .map_err(Error::Epoll)?;
 
-        let in_fd = match transport {
-            ConsoleTransport::Pty(ref fd) => fd.as_raw_fd(),
+        let in_registration: Option<(RawFd, EpollDispatch)> = match transport {
+            ConsoleTransport::Pty(ref fd) => Some((fd.as_raw_fd(), EpollDispatch::File)),
             ConsoleTransport::Tty(_)
                 // If running on an interactive TTY then accept input
                 // SAFETY: trivially safe
@@ -161,28 +182,30 @@ impl SerialManager {
                 }
 
                 transport = ConsoleTransport::Tty(Arc::new(stdin_clone));
-                fd
+                Some((fd, EpollDispatch::File))
             }
             ConsoleTransport::Tty(_) => {
                 return Ok(None);
             }
-            ConsoleTransport::Socket(ref listener) => listener.as_raw_fd(),
+            ConsoleTransport::Socket(ref listener) => {
+                Some((listener.as_raw_fd(), EpollDispatch::Socket))
+            }
+            ConsoleTransport::TcpListen(ref listener) => {
+                Some((listener.as_raw_fd(), EpollDispatch::Socket))
+            }
+            ConsoleTransport::TcpConnect(_) => None,
             _ => return Ok(None),
         };
 
-        let in_event = if let ConsoleTransport::Socket(_) = transport {
-            EpollDispatch::Socket
-        } else {
-            EpollDispatch::File
-        };
-
-        epoll::ctl(
-            epoll_fd,
-            epoll::ControlOptions::EPOLL_CTL_ADD,
-            in_fd,
-            epoll::Event::new(epoll::Events::EPOLLIN, in_event as u64),
-        )
-        .map_err(Error::Epoll)?;
+        if let Some((in_fd, in_event)) = in_registration {
+            epoll::ctl(
+                epoll_fd,
+                epoll::ControlOptions::EPOLL_CTL_ADD,
+                in_fd,
+                epoll::Event::new(epoll::Events::EPOLLIN, in_event as u64),
+            )
+            .map_err(Error::Epoll)?;
+        }
 
         let mut pty_write_out = None;
         if let ConsoleTransport::Pty(ref file) = transport {
@@ -200,7 +223,12 @@ impl SerialManager {
         // Install the persistent buffer as the device's sink so output produced
         // before the first client connects is captured rather than dropped.
         let mut socket_console = None;
-        if let ConsoleTransport::Socket(_) = transport {
+        if matches!(
+            transport,
+            ConsoleTransport::Socket(_)
+                | ConsoleTransport::TcpListen(_)
+                | ConsoleTransport::TcpConnect(_)
+        ) {
             let console = SocketConsole::new();
             serial
                 .as_ref()
@@ -271,14 +299,6 @@ impl SerialManager {
         let pty_write_out = self.pty_write_out.clone();
         let mut socket_console = self.socket_console.take();
 
-        // In case of PTY, we want to be able to detect a connection on the
-        // other end of the PTY. This is done by detecting there's no event
-        // triggered on the epoll, which is the reason why we want the
-        // epoll_wait() function to return after the timeout expired.
-        // In case of TTY, we don't expect to detect such behavior, which is
-        // why we can afford to block until an actual event is triggered.
-        let timeout = if pty_write_out.is_some() { 500 } else { -1 };
-
         let thread = thread::Builder::new()
             .name("serial-manager".to_string())
             .spawn(move || {
@@ -291,7 +311,31 @@ impl SerialManager {
                     let mut events =
                         [epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
 
+                    if let ConsoleTransport::TcpConnect(ref info) = transport
+                        && let Some(console) = socket_console.as_mut()
+                    {
+                        tcp_reconnect(&epoll_fd, console, &info.addr);
+                    }
+
                     loop {
+                        // In case of PTY, we want to be able to detect a connection on the
+                        // other end of the PTY. This is done by detecting there's no event
+                        // triggered on the epoll, which is the reason why we want the
+                        // epoll_wait() function to return after the timeout expired.
+                        // A client mode TCP console likewise uses the timeout to retry the dial.
+                        // In case of TTY, we don't expect to detect such behavior, which is
+                        // why we can afford to block until an actual event is triggered.
+                        let timeout = if pty_write_out.is_some() {
+                            500
+                        } else if let ConsoleTransport::TcpConnect(info) = &transport
+                            && socket_console.as_ref().and_then(|c| c.client_fd()).is_none()
+                            && let Some(interval) = info.reconnect
+                        {
+                            interval.as_millis() as i32
+                        } else {
+                            -1
+                        };
+
                         let num_events =
                             match epoll::wait(epoll_fd.as_raw_fd(), timeout, &mut events[..]) {
                                 Ok(res) => res,
@@ -310,12 +354,19 @@ impl SerialManager {
                                 }
                             };
 
-                        if matches!(transport, ConsoleTransport::Pty(_)) && num_events == 0 {
-                            // This very specific case happens when the serial is connected
-                            // to a PTY. We know EPOLLHUP is always present when there's nothing
-                            // connected at the other end of the PTY. That's why getting no event
-                            // means we can flush the output of the serial through the PTY.
-                            Self::trigger_pty_flush(&serial, pty_write_out.as_ref())?;
+                        if num_events == 0 {
+                            if matches!(transport, ConsoleTransport::Pty(_)) {
+                                // This very specific case happens when the serial is connected
+                                // to a PTY. We know EPOLLHUP is always present when there's nothing
+                                // connected at the other end of the PTY. That's why getting no event
+                                // means we can flush the output of the serial through the PTY.
+                                Self::trigger_pty_flush(&serial, pty_write_out.as_ref())?;
+                            } else if let ConsoleTransport::TcpConnect(ref info) = transport
+                                && let Some(console) = socket_console.as_mut()
+                                && console.client_fd().is_none()
+                            {
+                                tcp_reconnect(&epoll_fd, console, &info.addr);
+                            }
                             continue;
                         }
 
@@ -327,9 +378,6 @@ impl SerialManager {
                                     warn!("Unknown serial manager loop event: {event}");
                                 }
                                 EpollDispatch::Socket => {
-                                    let ConsoleTransport::Socket(ref socket) = transport else {
-                                        unreachable!();
-                                    };
                                     if let Some(console) = socket_console.as_mut() {
                                         if let Some(fd) = console.client_fd() {
                                             epoll::ctl(
@@ -346,9 +394,15 @@ impl SerialManager {
                                                 .shutdown()
                                                 .map_err(Error::ShutdownConnection)?;
                                         }
-                                        console
-                                            .accept(socket.listener())
-                                            .map_err(Error::AcceptConnection)?;
+                                        match transport {
+                                            ConsoleTransport::Socket(ref socket) => console
+                                                .accept(socket.listener())
+                                                .map_err(Error::AcceptConnection)?,
+                                            ConsoleTransport::TcpListen(ref listener) => console
+                                                .accept_tcp(listener)
+                                                .map_err(Error::AcceptConnection)?,
+                                            _ => unreachable!(),
+                                        }
                                         if let Some(fd) = console.client_fd() {
                                             epoll::ctl(
                                                 epoll_fd.as_raw_fd(),
@@ -367,7 +421,9 @@ impl SerialManager {
                                     if event.events & libc::EPOLLIN as u32 != 0 {
                                         let mut input = [0u8; 64];
                                         let count = match &transport {
-                                            ConsoleTransport::Socket(_) => {
+                                            ConsoleTransport::Socket(_)
+                                            | ConsoleTransport::TcpListen(_)
+                                            | ConsoleTransport::TcpConnect(_) => {
                                                 if let Some(console) = socket_console.as_mut() {
                                                     match console.read(&mut input) {
                                                         Ok(count) => count,

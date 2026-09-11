@@ -208,6 +208,18 @@ pub enum ValidationError {
     /// Socket path given without socket console mode
     #[error("Path only valid when using socket console mode")]
     ConsoleSocketPathUnexpected,
+    /// Missing address for TCP console mode
+    #[error("Address missing when using TCP console mode")]
+    ConsoleTcpAddressMissing,
+    /// TCP address given without TCP console mode
+    #[error("Address only valid when using TCP console mode")]
+    ConsoleTcpUnexpected,
+    /// wait set without server
+    #[error("TCP console wait is only valid with server=on")]
+    ConsoleTcpWaitRequiresServer,
+    /// reconnect set with server
+    #[error("TCP console reconnect is only valid with server=off")]
+    ConsoleTcpReconnectRequiresClient,
     /// Max is less than boot
     #[error("Max CPUs ({0}) lower than boot CPUs ({1})")]
     CpusMaxLowerThanBoot(u32 /* max vCPUs */, u32 /* boot vCPUs */),
@@ -2374,17 +2386,18 @@ impl PmemConfig {
 
 impl CommonConsoleConfig {
     const VALUELESS_OPTIONS: &[&str] = &["off", "pty", "tty", "null"];
-    const VALUE_OPTIONS: &[&str] = &["file", "socket"];
+    const VALUE_OPTIONS: &[&str] = &["file", "socket", "tcp", "server", "wait", "reconnect"];
 
     fn parse(console: &str, map_err: impl Fn(OptionParserError) -> Error) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
             .add_all_valueless(Self::VALUELESS_OPTIONS)
             .add_all(Self::VALUE_OPTIONS);
-        parser.parse_subset(console).map_err(map_err)?;
+        parser.parse_subset(console).map_err(&map_err)?;
 
         let mut file: Option<PathBuf> = None;
         let mut socket: Option<PathBuf> = None;
+        let mut tcp: Option<TcpConsoleConfig> = None;
         let mut mode: ConsoleOutputMode = ConsoleOutputMode::Off;
 
         if parser.is_set("off") {
@@ -2405,11 +2418,38 @@ impl CommonConsoleConfig {
             socket = Some(PathBuf::from(parser.get("socket").ok_or(
                 Error::Validation(ValidationError::ConsoleSocketPathMissing),
             )?));
+        } else if parser.is_set("tcp") {
+            mode = ConsoleOutputMode::Tcp;
+            let address = parser
+                .get("tcp")
+                .ok_or(Error::Validation(ValidationError::ConsoleTcpAddressMissing))?;
+            let server = parser
+                .convert::<Toggle>("server")
+                .map_err(&map_err)?
+                .unwrap_or(Toggle(false))
+                .0;
+            let wait = parser
+                .convert::<Toggle>("wait")
+                .map_err(&map_err)?
+                .unwrap_or(Toggle(false))
+                .0;
+            let reconnect = parser.convert::<u64>("reconnect").map_err(&map_err)?;
+            tcp = Some(TcpConsoleConfig {
+                address,
+                server,
+                wait,
+                reconnect,
+            });
         } else {
             return Err(Error::ParseConsoleInvalidModeGiven);
         }
 
-        Ok(Self { mode, file, socket })
+        Ok(Self {
+            mode,
+            file,
+            socket,
+            tcp,
+        })
     }
 
     pub fn validate(&self) -> ValidationResult<()> {
@@ -2418,6 +2458,20 @@ impl CommonConsoleConfig {
         }
         if self.socket.is_some() && self.mode != ConsoleOutputMode::Socket {
             return Err(ValidationError::ConsoleSocketPathUnexpected);
+        }
+        if self.mode == ConsoleOutputMode::Tcp && self.tcp.is_none() {
+            return Err(ValidationError::ConsoleTcpAddressMissing);
+        }
+        if self.tcp.is_some() && self.mode != ConsoleOutputMode::Tcp {
+            return Err(ValidationError::ConsoleTcpUnexpected);
+        }
+        if let Some(tcp) = &self.tcp {
+            if tcp.wait && !tcp.server {
+                return Err(ValidationError::ConsoleTcpWaitRequiresServer);
+            }
+            if tcp.reconnect.is_some() && tcp.server {
+                return Err(ValidationError::ConsoleTcpReconnectRequiresClient);
+            }
         }
         Ok(())
     }
@@ -4980,7 +5034,12 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
     #[test]
     fn test_console_parsing() -> Result<()> {
         let console_config = |mode, file, socket, iommu| ConsoleConfig {
-            common: CommonConsoleConfig { file, mode, socket },
+            common: CommonConsoleConfig {
+                file,
+                mode,
+                socket,
+                tcp: None,
+            },
             pci_common: PciDeviceCommonConfig {
                 iommu,
                 ..Default::default()
@@ -5035,6 +5094,53 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 Some(PathBuf::from("/tmp/serial.sock")),
                 true
             )
+        );
+        assert_eq!(
+            ConsoleConfig::parse("tcp=127.0.0.1:4444")?.common.tcp,
+            Some(TcpConsoleConfig {
+                address: "127.0.0.1:4444".to_string(),
+                server: false,
+                wait: false,
+                reconnect: None,
+            })
+        );
+        assert_eq!(
+            ConsoleConfig::parse("tcp=0.0.0.0:4444,server=on,wait=on")?
+                .common
+                .tcp,
+            Some(TcpConsoleConfig {
+                address: "0.0.0.0:4444".to_string(),
+                server: true,
+                wait: true,
+                reconnect: None,
+            })
+        );
+        assert_eq!(
+            ConsoleConfig::parse("tcp=127.0.0.1:4444,reconnect=5")?
+                .common
+                .tcp,
+            Some(TcpConsoleConfig {
+                address: "127.0.0.1:4444".to_string(),
+                server: false,
+                wait: false,
+                reconnect: Some(5),
+            })
+        );
+        // wait is only meaningful for a listening server.
+        assert_eq!(
+            ConsoleConfig::parse("tcp=127.0.0.1:4444,wait=on")?
+                .common
+                .validate()
+                .unwrap_err(),
+            ValidationError::ConsoleTcpWaitRequiresServer
+        );
+        // reconnect is only meaningful for a dialing client.
+        assert_eq!(
+            ConsoleConfig::parse("tcp=127.0.0.1:4444,server=on,reconnect=5")?
+                .common
+                .validate()
+                .unwrap_err(),
+            ValidationError::ConsoleTcpReconnectRequiresClient
         );
         Ok(())
     }
@@ -5945,6 +6051,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                     file: None,
                     mode: ConsoleOutputMode::Null,
                     socket: None,
+                    tcp: None,
                 },
             },
             console: ConsoleConfig {
@@ -5952,6 +6059,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                     file: None,
                     mode: ConsoleOutputMode::Tty,
                     socket: None,
+                    tcp: None,
                 },
                 pci_common: PciDeviceCommonConfig::default(),
             },
