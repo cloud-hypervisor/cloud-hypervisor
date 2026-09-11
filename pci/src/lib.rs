@@ -26,8 +26,8 @@ pub use self::bus::{
 };
 pub use self::configuration::{
     PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciCapability,
-    PciCapabilityId, PciClassCode, PciConfiguration, PciExpressCapabilityId, PciHeaderType,
-    PciMassStorageSubclass, PciNetworkControllerSubclass, PciProgrammingInterface,
+    PciCapabilityId, PciClassCode, PciConfiguration, PciExpressCapability, PciExpressCapabilityId,
+    PciHeaderType, PciMassStorageSubclass, PciNetworkControllerSubclass, PciProgrammingInterface,
     PciSerialBusSubClass, PciSubclass,
 };
 pub use self::device::{
