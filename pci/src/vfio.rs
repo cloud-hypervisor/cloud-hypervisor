@@ -56,7 +56,8 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::configuration::{
-    COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK, PCI_EXT_CAP_NEXT_MASK, PCI_EXT_CAP_NEXT_SHIFT,
+    COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK, PCI_EXT_CAP_ALIGN, PCI_EXT_CAP_NEXT_MASK,
+    PCI_EXT_CAP_NEXT_SHIFT, PCIE_CONFIG_SPACE_SIZE,
 };
 use crate::mmap::MmapRegion;
 use crate::msi::{MSI_CONFIG_ID, MsiConfigState};
@@ -65,7 +66,8 @@ use crate::{
     BarReprogrammingParams, MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE, MsiCap, MsiConfig, MsixCap,
     MsixConfig, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType,
     PciBdf, PciCapabilityId, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
-    PciExpressCapabilityId, PciHeaderType, PciSubclass, msi_num_enabled_vectors,
+    PciExpressCapability, PciExpressCapabilityId, PciHeaderType, PciSubclass,
+    msi_num_enabled_vectors,
 };
 
 pub(crate) const VFIO_COMMON_ID: &str = "vfio_common";
@@ -103,6 +105,8 @@ pub enum VfioPciError {
     RetrieveVfioCommonState(#[source] anyhow::Error),
     #[error("Failed to read the BAR addresses of the device that needs fixed BARs: {0}")]
     DiscoverFixedBars(PathBuf),
+    #[error("No space left for the extended capability {0:#x}")]
+    ExtendedCapNoSpace(u16),
     #[error("Failed to restore VFIO migration state")]
     RestoreMigration(#[source] anyhow::Error),
 }
@@ -746,6 +750,7 @@ pub(crate) struct VfioCommon {
     pub(crate) migration_flags: Option<u64>,
     // Negotiated dirty bitmap granularity while DMA logging is active.
     dma_logging_page_size: Option<u64>,
+    extended_caps: Vec<Arc<dyn PciExpressCapability + Send + Sync>>,
 }
 
 #[derive(Default)]
@@ -753,6 +758,7 @@ pub(crate) struct VfioCommonConfig {
     pub(crate) x_nv_gpudirect_clique: Option<u8>,
     pub(crate) x_exclude_mmap_bars: Vec<u8>,
     pub(crate) device_path: Option<PathBuf>,
+    pub(crate) extended_caps: Vec<Arc<dyn PciExpressCapability + Send + Sync>>,
 }
 
 impl VfioCommon {
@@ -824,6 +830,7 @@ impl VfioCommon {
             fixed_bar_addrs: discover_fixed_bars(config.device_path.as_deref())?,
             migration_flags,
             dma_logging_page_size: None,
+            extended_caps: config.extended_caps,
         };
 
         let state: Option<VfioCommonState> = snapshot
@@ -1323,14 +1330,83 @@ impl VfioCommon {
     }
 
     fn override_next_extended_cap(&mut self, offset: u32, next: u32) {
+        let reg_idx = (offset / 4) as usize;
+        let next = next << PCI_EXT_CAP_NEXT_SHIFT;
+
+        if let Some(patch) = self.patches.get_mut(&reg_idx) {
+            patch.mask |= PCI_EXT_CAP_NEXT_MASK;
+            patch.patch = (patch.patch & !PCI_EXT_CAP_NEXT_MASK) | next;
+            return;
+        }
+
         self.patches.insert(
-            (offset / 4) as usize,
+            reg_idx,
             ConfigPatch {
                 mask: PCI_EXT_CAP_NEXT_MASK,
-                patch: next << PCI_EXT_CAP_NEXT_SHIFT,
+                patch: next,
                 write_mask: 0,
             },
         );
+    }
+
+    fn add_extended_cap(
+        &mut self,
+        last_offset: u32,
+        offset: u32,
+        cap: &dyn PciExpressCapability,
+    ) -> Result<(), VfioPciError> {
+        let end = offset.checked_add(cap.size());
+
+        if last_offset >= offset
+            || !offset.is_multiple_of(PCI_EXT_CAP_ALIGN)
+            || offset < PCI_CONFIG_EXTENDED_CAPABILITY_OFFSET
+            || end.is_none_or(|end| end > PCIE_CONFIG_SPACE_SIZE)
+        {
+            return Err(VfioPciError::ExtendedCapNoSpace(cap.id() as u16));
+        }
+
+        self.override_next_extended_cap(last_offset, offset);
+
+        let mut reg_idx = (offset / 4) as usize;
+        self.patches.insert(
+            reg_idx,
+            ConfigPatch {
+                mask: 0xffff_ffff,
+                patch: (cap.id() as u32) | (cap.version() << 16),
+                write_mask: 0,
+            },
+        );
+
+        for (dword, write_mask) in cap.dwords().iter().zip(cap.write_masks()) {
+            reg_idx += 1;
+            self.patches.insert(
+                reg_idx,
+                ConfigPatch {
+                    mask: 0xffff_ffff,
+                    patch: *dword,
+                    write_mask: *write_mask,
+                },
+            );
+        }
+
+        Ok(())
+    }
+
+    fn add_extended_caps(&mut self, last_offset: u32) -> Result<(), VfioPciError> {
+        let caps = self.extended_caps.clone();
+        let total: u32 = caps.iter().map(|cap| cap.size()).sum();
+
+        let mut offset = PCIE_CONFIG_SPACE_SIZE.saturating_sub(total);
+        let mut last_offset = last_offset;
+
+        for cap in caps {
+            self.add_extended_cap(last_offset, offset, cap.as_ref())?;
+
+            last_offset = offset;
+            offset += cap.size();
+        }
+
+        Ok(())
     }
 
     fn parse_extended_capabilities(&mut self) {
@@ -1369,6 +1445,12 @@ impl VfioCommon {
             }
 
             current_offset = cap_next.into();
+        }
+
+        if let Err(e) = self
+            .add_extended_caps(last_kept_offset.unwrap_or(PCI_CONFIG_EXTENDED_CAPABILITY_OFFSET))
+        {
+            error!("Failed adding the extended capabilities: {e}");
         }
     }
 
@@ -2033,6 +2115,7 @@ impl VfioPciDevice {
         x_nv_gpudirect_clique: Option<u8>,
         x_exclude_mmap_bars: Vec<u8>,
         device_path: PathBuf,
+        extended_caps: Vec<Arc<dyn PciExpressCapability + Send + Sync>>,
     ) -> Result<Self, VfioPciError> {
         let device = Arc::new(device);
         device.reset();
@@ -2050,6 +2133,7 @@ impl VfioPciDevice {
                 x_nv_gpudirect_clique,
                 x_exclude_mmap_bars,
                 device_path: Some(device_path.clone()),
+                extended_caps,
             },
         )?;
 
@@ -3102,6 +3186,7 @@ mod tests {
             fixed_bar_addrs: None,
             migration_flags,
             dma_logging_page_size: None,
+            extended_caps: Vec::new(),
         }
     }
 
