@@ -56,8 +56,10 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::configuration::{
-    COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK, PCI_EXT_CAP_ALIGN, PCI_EXT_CAP_NEXT_MASK,
-    PCI_EXT_CAP_NEXT_SHIFT, PCIE_CONFIG_SPACE_SIZE,
+    COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK, PCI_EXP_FLAGS_TYPE_MASK, PCI_EXP_FLAGS_VERS_MASK,
+    PCI_EXP_FLAGS_VERS_SHIFT, PCI_EXP_LNKCAP, PCI_EXP_LNKCAP2, PCI_EXP_LNKCTL, PCI_EXP_LNKCTL2,
+    PCI_EXP_TYPE_RC_END, PCI_EXT_CAP_ALIGN, PCI_EXT_CAP_NEXT_MASK, PCI_EXT_CAP_NEXT_SHIFT,
+    PCIE_CONFIG_SPACE_SIZE,
 };
 use crate::mmap::MmapRegion;
 use crate::msi::{MSI_CONFIG_ID, MsiConfigState};
@@ -1267,7 +1269,19 @@ impl VfioCommon {
                         self.initialize_msix(msix_cap, cap_iter as u32, bdf, None);
                     }
                 }
-                PciCapabilityId::PciExpress => pci_express_cap_found = true,
+                PciCapabilityId::PciExpress => {
+                    pci_express_cap_found = true;
+
+                    // Advertise the device as a PCIe integrated endpoint if the
+                    // PASID capability is enabled.
+                    if self
+                        .extended_caps
+                        .iter()
+                        .any(|cap| cap.id() == PciExpressCapabilityId::ProcessAddressSpaceId)
+                    {
+                        self.present_as_integrated_endpoint(cap_iter);
+                    }
+                }
                 PciCapabilityId::PowerManagement => power_management_cap_found = true,
                 _ => {}
             }
@@ -1327,6 +1341,41 @@ impl VfioCommon {
                 write_mask: 0,
             },
         );
+    }
+
+    fn present_as_integrated_endpoint(&mut self, cap_offset: u8) {
+        let reg_idx = (u32::from(cap_offset) / 4) as usize;
+
+        self.patches.insert(
+            reg_idx,
+            ConfigPatch {
+                mask: PCI_EXP_FLAGS_TYPE_MASK,
+                patch: PCI_EXP_TYPE_RC_END,
+                write_mask: 0,
+            },
+        );
+
+        let mut clear = |this: &mut Self, reg: u32| {
+            this.patches.insert(
+                reg_idx + (reg / 4) as usize,
+                ConfigPatch {
+                    mask: 0xffff_ffff,
+                    patch: 0,
+                    write_mask: 0,
+                },
+            );
+        };
+
+        clear(self, PCI_EXP_LNKCAP);
+        clear(self, PCI_EXP_LNKCTL);
+
+        let flags = self.vfio_wrapper.read_config_dword(u32::from(cap_offset));
+        let version = (flags & PCI_EXP_FLAGS_VERS_MASK) >> PCI_EXP_FLAGS_VERS_SHIFT;
+
+        if version > 1 {
+            clear(self, PCI_EXP_LNKCAP2);
+            clear(self, PCI_EXP_LNKCTL2);
+        }
     }
 
     fn override_next_extended_cap(&mut self, offset: u32, next: u32) {
