@@ -665,6 +665,8 @@ struct VfioCommonState {
     intx_state: Option<IntxState>,
     msi_state: Option<MsiState>,
     msix_state: Option<MsixState>,
+    #[serde(default)]
+    patches: HashMap<usize, ConfigPatch>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -672,6 +674,7 @@ struct VfioMigrationData {
     blob: String,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct ConfigPatch {
     mask: u32,
     patch: u32,
@@ -1863,6 +1866,7 @@ impl VfioCommon {
             intx_state,
             msi_state,
             msix_state,
+            patches: self.patches.clone(),
         }
     }
 
@@ -1914,6 +1918,8 @@ impl VfioCommon {
                 .context("Failed to load migration data for restoring VFIO device")
                 .map_err(VfioPciError::RestoreMigration)?;
         }
+
+        self.patches = state.patches.clone();
 
         self.sync_command_and_interrupts()?;
 
@@ -3579,6 +3585,7 @@ mod tests {
             intx_state: None,
             msi_state: None,
             msix_state: None,
+            patches: HashMap::new(),
         };
         let mig = VfioMigrationData {
             blob: String::new(),
