@@ -1859,10 +1859,17 @@ impl DeviceManager {
             .unwrap()
             .vcpus_kill_signalled()
             .clone();
+        let vcpus_pause_signalled = self
+            .cpu_manager
+            .lock()
+            .unwrap()
+            .vcpus_pause_signalled()
+            .clone();
         let shutdown_device = Arc::new(Mutex::new(devices::AcpiShutdownDevice::new(
             guest_exit_evt,
             reset_evt,
             vcpus_kill_signalled,
+            vcpus_pause_signalled,
         )));
 
         self.bus_devices
@@ -1963,10 +1970,17 @@ impl DeviceManager {
             .unwrap()
             .vcpus_kill_signalled()
             .clone();
+        let vcpus_pause_signalled = self
+            .cpu_manager
+            .lock()
+            .unwrap()
+            .vcpus_pause_signalled()
+            .clone();
         // Add a shutdown device (i8042)
         let i8042 = Arc::new(Mutex::new(legacy::I8042Device::new(
             reset_evt.try_clone().unwrap(),
             vcpus_kill_signalled.clone(),
+            vcpus_pause_signalled.clone(),
         )));
 
         self.bus_devices
@@ -1994,7 +2008,8 @@ impl DeviceManager {
                 mem_below_4g,
                 mem_above_4g,
                 reset_evt,
-                Some(vcpus_kill_signalled),
+                vcpus_kill_signalled,
+                vcpus_pause_signalled.clone(),
             )));
 
             self.bus_devices
