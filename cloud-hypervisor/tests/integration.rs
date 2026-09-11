@@ -2936,6 +2936,98 @@ mod common_parallel {
         _test_socket_interaction(ConsoleKind::Console);
     }
 
+    // Boot a guest with the serial or virtio console on a TCP listener. Bridge
+    // a local pty to it with socat then drive the shared pty interaction check.
+    fn _test_tcp_interaction(kind: ConsoleKind) {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let tcp_pty = guest.tmp_dir.as_path().join("tcp.pty");
+
+        let port = TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+
+        let mut cmdline = DIRECT_KERNEL_BOOT_CMDLINE.to_owned();
+        if let ConsoleKind::Serial = kind {
+            cmdline += if cfg!(target_arch = "x86_64") {
+                " console=ttyS0"
+            } else {
+                " console=ttyAMA0"
+            };
+        }
+
+        let tcp_arg = format!("tcp=127.0.0.1:{port},server=on");
+        let (serial, console) = match kind {
+            ConsoleKind::Serial => (tcp_arg.as_str(), "null"),
+            ConsoleKind::Console => ("null", tcp_arg.as_str()),
+        };
+
+        let mut child = GuestCommand::new(&guest)
+            .default_cpus()
+            .default_memory()
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", &cmdline])
+            .default_disks()
+            .default_net()
+            .args(["--serial", serial])
+            .args(["--console", console])
+            .spawn()
+            .unwrap();
+
+        let boot = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+        });
+
+        let mut socat_command = Command::new("socat");
+        let socat_args = [
+            &format!("pty,link={},raw,echo=0", tcp_pty.display()),
+            &format!("TCP-CONNECT:127.0.0.1:{port}"),
+        ];
+        socat_command.args(socat_args);
+
+        let mut socat_child = socat_command.spawn().unwrap();
+        thread::sleep(Duration::new(1, 0));
+
+        let interaction = panic::catch_unwind(|| {
+            _test_pty_interaction(tcp_pty);
+        });
+
+        let _ = socat_child.kill();
+        let _ = socat_child.wait();
+
+        let shutdown = panic::catch_unwind(|| {
+            guest.ssh_command("sudo shutdown -h now").unwrap();
+        });
+
+        let _ = child.wait_timeout(Duration::from_secs(20));
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(boot.and(interaction).and(shutdown), &output);
+
+        let r = panic::catch_unwind(|| {
+            // Check that the cloud-hypervisor binary actually terminated
+            if !output.status.success() {
+                panic!(
+                    "Cloud Hypervisor process failed to terminate gracefully: {:?}",
+                    output.status
+                );
+            }
+        });
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_serial_tcp_interaction() {
+        _test_tcp_interaction(ConsoleKind::Serial);
+    }
+
+    #[test]
+    fn test_console_tcp_interaction() {
+        _test_tcp_interaction(ConsoleKind::Console);
+    }
+
     fn _test_serial_socket_stale_cleanup(reboot: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
