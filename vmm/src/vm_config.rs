@@ -275,6 +275,10 @@ impl ApplyLandlock for MemoryZoneConfig {
         if let Some(file) = &self.file {
             landlock.add_rule_with_access(file, "rw")?;
         }
+        if self.host_numa_node.is_some() {
+            // The prefault workers read the node cpulist from sysfs
+            landlock.add_rule_with_access(Path::new("/sys/devices/system/node"), "r")?;
+        }
         Ok(())
     }
 }
