@@ -664,6 +664,8 @@ struct VfioCommonState {
     intx_state: Option<IntxState>,
     msi_state: Option<MsiState>,
     msix_state: Option<MsixState>,
+    #[serde(default)]
+    patches: HashMap<usize, ConfigPatch>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -671,6 +673,7 @@ struct VfioMigrationData {
     blob: String,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct ConfigPatch {
     mask: u32,
     patch: u32,
@@ -1789,6 +1792,7 @@ impl VfioCommon {
             intx_state,
             msi_state,
             msix_state,
+            patches: self.patches.clone(),
         }
     }
 
@@ -1840,6 +1844,8 @@ impl VfioCommon {
                 .context("Failed to load migration data for restoring VFIO device")
                 .map_err(VfioPciError::RestoreMigration)?;
         }
+
+        self.patches = state.patches.clone();
 
         self.sync_command_and_interrupts()?;
 
@@ -3455,6 +3461,7 @@ mod tests {
             intx_state: None,
             msi_state: None,
             msix_state: None,
+            patches: HashMap::new(),
         };
         let mig = VfioMigrationData {
             blob: String::new(),
@@ -3635,5 +3642,20 @@ mod tests {
         common.write_config_register(0x50 / 4, 0, &0x1111_2222u32.to_le_bytes());
         assert_eq!(mock.dword(0x50), 0);
         assert_eq!(common.read_config_register(0x50 / 4), 0x0000_0022);
+    }
+
+    #[test]
+    fn patches_are_restored_from_a_snapshot() {
+        let mock = MockConfigSpace::new(&[]);
+        let mut common = test_vfio_common(mock.clone(), None);
+        common.patch_reg(0x40 / 4, 0x0000_ffff, 0x1234, 0);
+
+        let snapshot = Snapshot::new_from_state(&common.state()).unwrap();
+        let state: VfioCommonState = snapshot.to_state().unwrap();
+
+        let mut restored = test_vfio_common(mock, None);
+        restored.set_state(&state, None, None, None).unwrap();
+
+        assert_eq!(restored.read_config_register(0x40 / 4), 0x0000_1234);
     }
 }
