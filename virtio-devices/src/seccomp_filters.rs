@@ -156,6 +156,7 @@ fn virtio_console_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_sched_getaffinity, vec![]),
         (libc::SYS_sendto, vec![]),
         (libc::SYS_set_robust_list, vec![]),
+        (libc::SYS_setsockopt, vec![]),
         (libc::SYS_shutdown, vec![]),
     ]
 }
@@ -422,5 +423,21 @@ pub fn get_seccomp_filter(
         )
         .and_then(|filter| filter.try_into())
         .map_err(Error::Backend),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_console_has_no_outbound_socket_rules() {
+        let rules = get_seccomp_rules(Thread::VirtioConsole);
+        for syscall in [libc::SYS_socket, libc::SYS_connect] {
+            assert!(!rules.iter().any(|(number, _)| *number == syscall));
+        }
+        for syscall in [libc::SYS_accept4, libc::SYS_setsockopt] {
+            assert!(rules.iter().any(|(number, _)| *number == syscall));
+        }
     }
 }
