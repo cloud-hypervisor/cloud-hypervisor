@@ -1272,6 +1272,7 @@ fn serial_manager_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_rt_sigreturn, vec![]),
         (libc::SYS_sendto, vec![]),
+        (libc::SYS_setsockopt, vec![]),
         (libc::SYS_shutdown, vec![]),
         (libc::SYS_sigaltstack, vec![]),
     ])
@@ -1379,5 +1380,21 @@ pub fn get_seccomp_filter(
         )
         .and_then(|filter| filter.try_into())
         .map_err(Error::Backend),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_serial_manager_has_no_outbound_socket_rules() {
+        let rules = get_seccomp_rules(Thread::SerialManager, None).unwrap();
+        for syscall in [libc::SYS_socket, libc::SYS_connect] {
+            assert!(!rules.iter().any(|(number, _)| *number == syscall));
+        }
+        for syscall in [libc::SYS_accept4, libc::SYS_setsockopt] {
+            assert!(rules.iter().any(|(number, _)| *number == syscall));
+        }
     }
 }
