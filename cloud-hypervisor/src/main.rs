@@ -1354,6 +1354,7 @@ mod tests {
                     file: None,
                     mode: ConsoleOutputMode::Null,
                     socket: None,
+                    tcp: None,
                 },
             },
             console: ConsoleConfig {
@@ -1361,6 +1362,7 @@ mod tests {
                     file: None,
                     mode: ConsoleOutputMode::Tty,
                     socket: None,
+                    tcp: None,
                 },
                 pci_common: PciDeviceCommonConfig::default(),
             },
