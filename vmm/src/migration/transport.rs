@@ -12,7 +12,7 @@ use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::result::Result;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{Receiver, Sender, SyncSender, TrySendError, channel, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -34,6 +34,7 @@ use vm_migration::tls::{TlsServerConfig, TlsStream};
 use vm_migration::{MigratableError, Snapshot};
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::migration::worker::CANCEL_REQUESTED;
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::sync_utils::Gate;
 use crate::util::flatten_error_chain_to_string;
@@ -690,6 +691,7 @@ impl SendAdditionalConnections {
         tls_dir: Option<&Path>,
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         seccomp_filter: &BpfProgram,
+        cancel_state: &Arc<AtomicU8>,
     ) -> Result<Self, MigratableError> {
         let mut threads = Vec::new();
         let configured_connections = connections.get();
@@ -722,6 +724,7 @@ impl SendAdditionalConnections {
             let worker_error = worker_error.clone();
             let notify_tx = notify_tx.clone();
             let seccomp_filter = seccomp_filter.clone();
+            let cancel_state = cancel_state.clone();
 
             let thread = thread::Builder::new()
                 .name(format!("migrate-send-memory-{n}"))
@@ -738,6 +741,7 @@ impl SendAdditionalConnections {
                         &message_rx,
                         &worker_error,
                         &notify_tx,
+                        &cancel_state,
                     )
                 })
                 .inspect_err(|_| {
@@ -764,6 +768,7 @@ impl SendAdditionalConnections {
         message_rx: &Mutex<Receiver<SendMemoryThreadMessage>>,
         worker_error: &AtomicBool,
         notify_tx: &Sender<SendMemoryThreadNotify>,
+        cancel_state: &AtomicU8,
     ) -> Result<(), MigratableError> {
         loop {
             // Every memory sending thread receives messages from the main thread through this
@@ -790,13 +795,18 @@ impl SendAdditionalConnections {
                         continue;
                     }
 
-                    send_memory_ranges(guest_memory, &table, socket)
+                    send_memory_ranges(guest_memory, &table, socket, cancel_state)
                         .inspect_err(|_| {
                             worker_error.store(true, Ordering::Release);
                             notify_tx.send(SendMemoryThreadNotify::Error).ok();
                         })
-                        .context("Error sending memory to receiver side")
-                        .map_err(MigratableError::MigrateSend)?;
+                        .map_err(|e| match e {
+                            MigratableError::Cancelled => MigratableError::Cancelled,
+                            e => MigratableError::MigrateSend(
+                                anyhow::Error::new(e)
+                                    .context("Error sending memory to receiver side"),
+                            ),
+                        })?;
                 }
                 SendMemoryThreadMessage::Gate(gate) => {
                     notify_tx
@@ -817,15 +827,19 @@ impl SendAdditionalConnections {
         }
     }
 
-    /// Send memory via all connections that we have. `socket` is the original socket
-    /// that was used to connect to the destination. Returns Ok(true) if memory was
-    /// sent, Ok(false) if the given table was empty.
+    /// Send memory via all connections and wait for it to be received.
     ///
-    /// When this function returns, all memory has been sent and acknowledged.
+    /// `socket` is the original socket that was used to connect to the
+    /// destination. Returns `Ok(true)` if memory was sent and `Ok(false)` if
+    /// the given table was empty.
     pub(crate) fn send_memory(
         &mut self,
         table: MemoryRangeTable,
         socket: &mut SocketStream,
+        // In case of a single connection, this function exits early on a
+        // cancellation request. Otherwise, the sender threads of
+        // `SendAdditionalConnections` take care of that.
+        cancel_state: &AtomicU8,
     ) -> Result<bool, MigratableError> {
         if table.regions().is_empty() {
             return Ok(false);
@@ -833,7 +847,7 @@ impl SendAdditionalConnections {
 
         // If we use only one connection, we send the memory directly.
         if self.threads.is_empty() {
-            send_memory_ranges(&self.guest_memory, &table, socket)?;
+            send_memory_ranges(&self.guest_memory, &table, socket, cancel_state)?;
             return Ok(true);
         }
 
@@ -1218,10 +1232,13 @@ pub(crate) fn send_state(
 /// Sends a memory migration request, the range table, and the corresponding
 /// guest memory range over the given socket. Waits for acknowledgment
 /// from the destination.
+///
+/// Capable of cancelling transmission to avoid unnecessary network transfers.
 pub(crate) fn send_memory_ranges(
     guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
     ranges: &MemoryRangeTable,
     socket: &mut SocketStream,
+    cancel_state: &AtomicU8,
 ) -> Result<(), MigratableError> {
     if ranges.regions().is_empty() {
         return Ok(());
@@ -1241,6 +1258,11 @@ pub(crate) fn send_memory_ranges(
         // following the correct behavior. For more info about this issue
         // see: https://github.com/rust-vmm/vm-memory/issues/174
         loop {
+            // Return if there is a pending cancellation request.
+            if cancel_state.load(Ordering::Acquire) == CANCEL_REQUESTED {
+                return Err(MigratableError::Cancelled);
+            }
+
             let bytes_written = mem
                 .write_volatile_to(
                     GuestAddress(range.gpa + offset),

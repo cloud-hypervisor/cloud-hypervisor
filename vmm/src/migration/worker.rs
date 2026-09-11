@@ -13,8 +13,8 @@
 //! [`MigrationWorkerSpawnError`].
 
 use std::fmt::{self, Debug, Formatter};
-#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::thread::JoinHandle;
 use std::{io, thread};
@@ -29,6 +29,20 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::Vmm;
 use crate::api::VmSendMigrationData;
 use crate::vm::{Vm, VmState};
+
+/// Cancellation state shared between the VMM thread and the migration
+/// worker (including its memory sender threads).
+///
+/// Cancellation is coordinated at explicit checkpoints rather than through
+/// asynchronous thread interruption: the VMM thread moves the state from
+/// [`CANCEL_CONTINUE`] to [`CANCEL_REQUESTED`], and the worker fails with
+/// [`MigratableError::Cancelled`] at its next checkpoint.
+///
+/// Once the worker enters the final steps of moving the VM to the
+/// destination, it sets [`CANCEL_BLOCKED`].
+pub(crate) const CANCEL_CONTINUE: u8 = 0;
+pub(crate) const CANCEL_REQUESTED: u8 = 1;
+pub(crate) const CANCEL_BLOCKED: u8 = 2;
 
 #[derive(thiserror::Error)]
 #[error("Migration worker could not be spawned: {spawn_error}")]
@@ -48,6 +62,7 @@ impl Debug for MigrationWorkerSpawnError {
 
 pub(crate) struct MigrationWorkerHandle {
     handle: Option<JoinHandle<MigrationWorkerResult>>,
+    cancel_state: Arc<AtomicU8>,
 }
 
 impl MigrationWorkerHandle {
@@ -57,6 +72,16 @@ impl MigrationWorkerHandle {
             .expect("should have thread")
             .join()
             .expect("should join migration worker gracefully")
+    }
+
+    pub(crate) fn try_cancel_migration(&self) {
+        // A failed exchange means the worker already blocked cancellation.
+        let _ = self.cancel_state.compare_exchange(
+            CANCEL_CONTINUE,
+            CANCEL_REQUESTED,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
     }
 }
 
@@ -85,6 +110,7 @@ pub(crate) struct MigrationWorker {
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     initial_vm_state: VmState,
     seccomp_filters: MigrationSeccompFilters,
+    cancel_state: Arc<AtomicU8>,
 }
 
 impl MigrationWorker {
@@ -115,10 +141,20 @@ impl MigrationWorker {
                     &self.config,
                     self.initial_vm_state,
                     &self.seccomp_filters,
+                    &self.cancel_state,
                 )
             })
-            .inspect(|_| event!("vm", "migration-finished"))
-            .inspect_err(|_| event!("vm", "migration-failed"));
+            .inspect(|_| {
+                event!("vm", "migration-finished");
+            })
+            .inspect_err(|e| match e {
+                MigratableError::Cancelled => {
+                    event!("vm", "migration-cancelled");
+                }
+                _ => {
+                    event!("vm", "migration-failed");
+                }
+            });
 
         // Notify VMM thread to check migration result.
         self.check_migration_evt.write(1).unwrap();
@@ -145,6 +181,8 @@ impl MigrationWorker {
         initial_vm_state: VmState,
         seccomp_filters: MigrationSeccompFilters,
     ) -> Result<MigrationWorkerHandle, MigrationWorkerSpawnError> {
+        let cancel_state = Arc::new(AtomicU8::new(CANCEL_CONTINUE));
+
         let (vm_sender, vm_receiver) = mpsc::sync_channel(0);
         let worker = MigrationWorker {
             vm_receiver,
@@ -154,6 +192,7 @@ impl MigrationWorker {
             hypervisor,
             initial_vm_state,
             seccomp_filters,
+            cancel_state: cancel_state.clone(),
         };
 
         let inner_handle = match thread::Builder::new()
@@ -173,6 +212,7 @@ impl MigrationWorker {
 
         Ok(MigrationWorkerHandle {
             handle: Some(inner_handle),
+            cancel_state,
         })
     }
 }
