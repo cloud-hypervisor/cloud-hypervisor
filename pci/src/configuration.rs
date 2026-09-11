@@ -37,6 +37,8 @@ const NUM_BAR_REGS: usize = 6;
 const CAPABILITY_LIST_HEAD_OFFSET: usize = 0x34;
 const FIRST_CAPABILITY_OFFSET: usize = 0x40;
 const CAPABILITY_MAX_OFFSET: usize = 192;
+pub(crate) const PCI_EXT_CAP_NEXT_SHIFT: u32 = 20;
+pub(crate) const PCI_EXT_CAP_NEXT_MASK: u32 = 0xfff0_0000;
 
 pub const PCI_CONFIGURATION_ID: &str = "pci_configuration";
 

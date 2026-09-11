@@ -55,7 +55,9 @@ use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::configuration::{COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK};
+use crate::configuration::{
+    COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK, PCI_EXT_CAP_NEXT_MASK, PCI_EXT_CAP_NEXT_SHIFT,
+};
 use crate::mmap::MmapRegion;
 use crate::msi::{MSI_CONFIG_ID, MsiConfigState};
 use crate::msix::{MaybeMutInterruptSourceGroup, MsixConfigState};
@@ -1300,8 +1302,19 @@ impl VfioCommon {
         );
     }
 
+    fn override_next_extended_cap(&mut self, offset: u32, next: u32) {
+        self.patches.insert(
+            (offset / 4) as usize,
+            ConfigPatch {
+                mask: PCI_EXT_CAP_NEXT_MASK,
+                patch: next << PCI_EXT_CAP_NEXT_SHIFT,
+            },
+        );
+    }
+
     fn parse_extended_capabilities(&mut self) {
         let mut current_offset = PCI_CONFIG_EXTENDED_CAPABILITY_OFFSET;
+        let mut last_kept_offset: Option<u32> = None;
 
         loop {
             let ext_cap_hdr = self.vfio_wrapper.read_config_dword(current_offset);
@@ -1312,17 +1325,21 @@ impl VfioCommon {
             match PciExpressCapabilityId::from(cap_id) {
                 PciExpressCapabilityId::AlternativeRoutingIdentificationInterpretation
                 | PciExpressCapabilityId::ResizeableBar
-                | PciExpressCapabilityId::SingleRootIoVirtualization => {
-                    let reg_idx = (current_offset / 4) as usize;
-                    self.patches.insert(
-                        reg_idx,
-                        ConfigPatch {
-                            mask: 0x0000_ffff,
-                            patch: PciExpressCapabilityId::NullCapability as u32,
-                        },
-                    );
-                }
-                _ => {}
+                | PciExpressCapabilityId::SingleRootIoVirtualization => match last_kept_offset {
+                    Some(offset) => self.override_next_extended_cap(offset, cap_next.into()),
+                    None => {
+                        let reg_idx = (PCI_CONFIG_EXTENDED_CAPABILITY_OFFSET / 4) as usize;
+                        self.patches.insert(
+                            reg_idx,
+                            ConfigPatch {
+                                mask: 0xffff_ffff,
+                                patch: (PciExpressCapabilityId::NullCapability as u32)
+                                    | (u32::from(cap_next) << PCI_EXT_CAP_NEXT_SHIFT),
+                            },
+                        );
+                    }
+                },
+                _ => last_kept_offset = Some(current_offset),
             }
 
             if cap_next == 0 {
