@@ -666,6 +666,23 @@ struct VfioMigrationData {
 pub(crate) struct ConfigPatch {
     mask: u32,
     patch: u32,
+    write_mask: u32,
+}
+
+impl ConfigPatch {
+    fn write(&mut self, offset: u64, data: &[u8]) {
+        let mut bytes = self.patch.to_le_bytes();
+
+        for (i, byte) in data.iter().enumerate() {
+            let Some(slot) = bytes.get_mut(offset as usize + i) else {
+                break;
+            };
+            *slot = *byte;
+        }
+
+        let written = u32::from_le_bytes(bytes);
+        self.patch = (self.patch & !self.write_mask) | (written & self.write_mask);
+    }
 }
 
 pub(crate) struct VfioCommon {
@@ -1219,44 +1236,41 @@ impl VfioCommon {
         }
     }
 
+    fn patch_reg(&mut self, reg_idx: usize, mask: u32, patch: u32, write_mask: u32) {
+        let entry = self.patches.entry(reg_idx).or_insert(ConfigPatch {
+            mask: 0,
+            patch: 0,
+            write_mask: 0,
+        });
+
+        entry.mask |= mask;
+        entry.patch = (entry.patch & !mask) | (patch & mask);
+        entry.write_mask |= write_mask;
+    }
+
     fn add_nv_gpudirect_clique_cap(&mut self, cap_iter: u8, clique_id: u8) {
         // Turing, Ampere, Hopper, and Lovelace GPUs have dedicated space
         // at 0xD4 for this capability.
         let cap_offset = 0xd4u32;
 
-        let reg_idx = (cap_iter / 4) as usize;
-        self.patches.insert(
-            reg_idx,
-            ConfigPatch {
-                mask: 0x0000_ff00,
-                patch: cap_offset << 8,
-            },
-        );
+        self.patch_reg((cap_iter / 4) as usize, 0x0000_ff00, cap_offset << 8, 0);
 
         let reg_idx = (cap_offset / 4) as usize;
-        self.patches.insert(
-            reg_idx,
-            ConfigPatch {
-                mask: 0xffff_ffff,
-                patch: 0x50080009u32,
-            },
-        );
-        self.patches.insert(
+        self.patch_reg(reg_idx, 0xffff_ffff, 0x50080009u32, 0);
+        self.patch_reg(
             reg_idx + 1,
-            ConfigPatch {
-                mask: 0xffff_ffff,
-                patch: (u32::from(clique_id) << 19) | 0x5032,
-            },
+            0xffff_ffff,
+            (u32::from(clique_id) << 19) | 0x5032,
+            0,
         );
     }
 
     fn override_next_extended_cap(&mut self, offset: u32, next: u32) {
-        self.patches.insert(
+        self.patch_reg(
             (offset / 4) as usize,
-            ConfigPatch {
-                mask: PCI_EXT_CAP_NEXT_MASK,
-                patch: next << PCI_EXT_CAP_NEXT_SHIFT,
-            },
+            PCI_EXT_CAP_NEXT_MASK,
+            next << PCI_EXT_CAP_NEXT_SHIFT,
+            0,
         );
     }
 
@@ -1275,17 +1289,13 @@ impl VfioCommon {
                 | PciExpressCapabilityId::ResizeableBar
                 | PciExpressCapabilityId::SingleRootIoVirtualization => match last_kept_offset {
                     Some(offset) => self.override_next_extended_cap(offset, cap_next.into()),
-                    None => {
-                        let reg_idx = (PCI_CONFIG_EXTENDED_CAPABILITY_OFFSET / 4) as usize;
-                        self.patches.insert(
-                            reg_idx,
-                            ConfigPatch {
-                                mask: 0xffff_ffff,
-                                patch: (PciExpressCapabilityId::NullCapability as u32)
-                                    | (u32::from(cap_next) << PCI_EXT_CAP_NEXT_SHIFT),
-                            },
-                        );
-                    }
+                    None => self.patch_reg(
+                        (PCI_CONFIG_EXTENDED_CAPABILITY_OFFSET / 4) as usize,
+                        0xffff_ffff,
+                        (PciExpressCapabilityId::NullCapability as u32)
+                            | (u32::from(cap_next) << PCI_EXT_CAP_NEXT_SHIFT),
+                        0,
+                    ),
                 },
                 _ => last_kept_offset = Some(current_offset),
             }
@@ -1518,6 +1528,14 @@ impl VfioCommon {
                     .write_config_register(reg_idx, offset, data),
                 None,
             );
+        }
+
+        if let Some(patch) = self.patches.get_mut(&reg_idx) {
+            patch.write(offset, data);
+
+            if patch.mask == 0xffff_ffff {
+                return (Vec::new(), None);
+            }
         }
 
         let reg = (reg_idx * PCI_CONFIG_REGISTER_SIZE) as u64;
