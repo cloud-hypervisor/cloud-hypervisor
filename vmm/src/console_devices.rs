@@ -12,6 +12,7 @@
 
 use std::fs::{File, OpenOptions, read_link};
 use std::mem::zeroed;
+use std::net::{SocketAddr, TcpListener, ToSocketAddrs};
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
@@ -25,7 +26,7 @@ use vmm_sys_util::errno;
 use crate::Vmm;
 use crate::locked_unix_listener::{LockedUnixListener, LockedUnixListenerError};
 use crate::sigwinch_listener::listen_for_sigwinch_on_tty;
-use crate::vm_config::ConsoleOutputMode;
+use crate::vm_config::{ConsoleOutputMode, TcpConsoleConfig};
 
 const TIOCSPTLCK: libc::c_int = 0x4004_5431;
 const TIOCGPTPEER: libc::c_int = 0x5441;
@@ -53,6 +54,21 @@ pub enum ConsoleDeviceError {
     #[error("Socket path missing for socket console mode")]
     MissingSocketPath,
 
+    /// Cannot resolve the TCP console address
+    #[error("Cannot resolve TCP console address {0:?}")]
+    ResolveTcpAddress(String),
+
+    #[error("TCP console address {0} is not loopback")]
+    TcpAddressNotLoopback(SocketAddr),
+
+    /// Cannot bind the TCP console listener
+    #[error("Cannot bind TCP console listener")]
+    BindTcpListener(#[source] io::Error),
+
+    /// Error while waiting for a TCP console client
+    #[error("Error while waiting for a TCP console client")]
+    WaitForTcpClient(#[source] io::Error),
+
     /// Error setting pty raw mode
     #[error("Error setting pty raw mode")]
     SetPtyRaw(#[source] errno::Error),
@@ -75,7 +91,60 @@ pub enum ConsoleTransport {
     Tty(Arc<File>),
     Null,
     Socket(Arc<LockedUnixListener>),
+    TcpListen(Arc<TcpListener>),
     Off,
+}
+
+fn resolve_tcp_address(address: &str) -> ConsoleDeviceResult<SocketAddr> {
+    let addr = address
+        .to_socket_addrs()
+        .map_err(|_| ConsoleDeviceError::ResolveTcpAddress(address.to_string()))?
+        .next()
+        .ok_or_else(|| ConsoleDeviceError::ResolveTcpAddress(address.to_string()))?;
+    if !addr.ip().is_loopback() {
+        return Err(ConsoleDeviceError::TcpAddressNotLoopback(addr));
+    }
+    Ok(addr)
+}
+
+// Wait for a pending client before boot. Leave acceptance to the device thread.
+fn wait_for_tcp_client(listener: &TcpListener) -> ConsoleDeviceResult<()> {
+    let mut fds = [libc::pollfd {
+        fd: listener.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    }];
+    loop {
+        // SAFETY: fds is a valid writable array of one pollfd.
+        let ret = unsafe { libc::poll(fds.as_mut_ptr(), 1, -1) };
+        if ret >= 0 {
+            return Ok(());
+        }
+        let err = io::Error::last_os_error();
+        if err.kind() == io::ErrorKind::Interrupted {
+            continue;
+        }
+        return Err(ConsoleDeviceError::WaitForTcpClient(err));
+    }
+}
+
+fn tcp_console_transport(
+    tcp: &TcpConsoleConfig,
+    stored: Option<&Arc<TcpListener>>,
+) -> ConsoleDeviceResult<ConsoleTransport> {
+    let addr = resolve_tcp_address(&tcp.address)?;
+    // Reuse the listener across reboot as with Unix sockets.
+    // Avoid binding again while sandboxed or waiting for another client.
+    if let Some(listener) = stored
+        && listener.local_addr().is_ok_and(|bound| bound == addr)
+    {
+        return Ok(ConsoleTransport::TcpListen(Arc::clone(listener)));
+    }
+    let listener = TcpListener::bind(addr).map_err(ConsoleDeviceError::BindTcpListener)?;
+    if tcp.wait {
+        wait_for_tcp_client(&listener)?;
+    }
+    Ok(ConsoleTransport::TcpListen(Arc::new(listener)))
 }
 
 #[derive(Clone)]
@@ -259,6 +328,10 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                     ConsoleTransport::Socket(Arc::new(listener))
                 }
             }
+            ConsoleOutputMode::Tcp => {
+                let tcp = vmconfig.console.common.tcp.as_ref().unwrap();
+                tcp_console_transport(tcp, vmm.console_tcp_listener.as_ref())?
+            }
             ConsoleOutputMode::Null => ConsoleTransport::Null,
             ConsoleOutputMode::Off => ConsoleTransport::Off,
         },
@@ -309,6 +382,10 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                     ConsoleTransport::Socket(Arc::new(listener))
                 }
             }
+            ConsoleOutputMode::Tcp => {
+                let tcp = vmconfig.serial.common.tcp.as_ref().unwrap();
+                tcp_console_transport(tcp, vmm.serial_tcp_listener.as_ref())?
+            }
             ConsoleOutputMode::Null => ConsoleTransport::Null,
             ConsoleOutputMode::Off => ConsoleTransport::Off,
         },
@@ -335,6 +412,9 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
             ConsoleOutputMode::Socket => {
                 return Err(ConsoleDeviceError::NoSocketOptionSupportForConsoleDevice);
             }
+            ConsoleOutputMode::Tcp => {
+                return Err(ConsoleDeviceError::NoSocketOptionSupportForConsoleDevice);
+            }
             ConsoleOutputMode::Null => ConsoleTransport::Null,
             ConsoleOutputMode::Off => ConsoleTransport::Off,
         },
@@ -350,5 +430,95 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
         _ => None,
     };
 
+    vmm.serial_tcp_listener = match &console_info.serial {
+        ConsoleTransport::TcpListen(listener) => Some(Arc::clone(listener)),
+        _ => None,
+    };
+
+    vmm.console_tcp_listener = match &console_info.console {
+        ConsoleTransport::TcpListen(listener) => Some(Arc::clone(listener)),
+        _ => None,
+    };
+
     Ok(console_info)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::TcpStream;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn test_tcp_console_loopback_addresses() {
+        for address in ["127.0.0.1:0", "127.0.0.2:0", "[::1]:0", "localhost:0"] {
+            assert!(resolve_tcp_address(address).unwrap().ip().is_loopback());
+        }
+        for address in [
+            "0.0.0.0:0",
+            "[::]:0",
+            "192.0.2.1:0",
+            "[2001:db8::1]:0",
+            "[::ffff:192.0.2.1]:0",
+        ] {
+            let tcp = TcpConsoleConfig {
+                address: address.to_string(),
+                server: true,
+                wait: false,
+            };
+            assert!(matches!(
+                tcp_console_transport(&tcp, None),
+                Err(ConsoleDeviceError::TcpAddressNotLoopback(_))
+            ));
+        }
+        assert!(matches!(
+            resolve_tcp_address("not-an-endpoint"),
+            Err(ConsoleDeviceError::ResolveTcpAddress(_))
+        ));
+    }
+
+    #[test]
+    fn test_tcp_console_listener_reuse() {
+        let mut tcp = TcpConsoleConfig {
+            address: "127.0.0.1:0".to_string(),
+            server: true,
+            wait: false,
+        };
+        let ConsoleTransport::TcpListen(listener) = tcp_console_transport(&tcp, None).unwrap()
+        else {
+            panic!("Expected TCP listener");
+        };
+        tcp.address = listener.local_addr().unwrap().to_string();
+        tcp.wait = true;
+        let ConsoleTransport::TcpListen(reused) =
+            tcp_console_transport(&tcp, Some(&listener)).unwrap()
+        else {
+            panic!("Expected TCP listener");
+        };
+        assert!(Arc::ptr_eq(&listener, &reused));
+    }
+
+    #[test]
+    fn test_wait_for_tcp_client_leaves_connection_pending() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let waiting_listener = listener.try_clone().unwrap();
+        let (tx, rx) = mpsc::channel();
+        let waiter = thread::spawn(move || {
+            wait_for_tcp_client(&waiting_listener).unwrap();
+            tx.send(()).unwrap();
+        });
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_millis(50)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        let _client = TcpStream::connect(addr).unwrap();
+        rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        waiter.join().unwrap();
+        listener.set_nonblocking(true).unwrap();
+        listener.accept().unwrap();
+    }
 }
