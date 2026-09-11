@@ -7,6 +7,7 @@ extend-exclude = [
 ]
 
 [default.extend-words]
+AER = "AER" # PCI capability Advanced Error Reporting
 CLASSE = "CLASSE"
 Dake = "Dake"
 EXTINT = "EXTINT"

@@ -55,7 +55,12 @@ use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::configuration::{COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK};
+use crate::configuration::{
+    COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK, PCI_EXP_FLAGS_TYPE_MASK, PCI_EXP_FLAGS_VERS_MASK,
+    PCI_EXP_FLAGS_VERS_SHIFT, PCI_EXP_LNKCAP, PCI_EXP_LNKCAP2, PCI_EXP_LNKCTL, PCI_EXP_LNKCTL2,
+    PCI_EXP_TYPE_RC_END, PCI_EXT_CAP_ALIGN, PCI_EXT_CAP_NEXT_MASK, PCI_EXT_CAP_NEXT_SHIFT,
+    PCIE_CONFIG_SPACE_SIZE,
+};
 use crate::mmap::MmapRegion;
 use crate::msi::{MSI_CONFIG_ID, MsiConfigState};
 use crate::msix::{MaybeMutInterruptSourceGroup, MsixConfigState};
@@ -63,7 +68,8 @@ use crate::{
     BarReprogrammingParams, MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE, MsiCap, MsiConfig, MsixCap,
     MsixConfig, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType,
     PciBdf, PciCapabilityId, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
-    PciExpressCapabilityId, PciHeaderType, PciSubclass, msi_num_enabled_vectors,
+    PciExpressCapability, PciExpressCapabilityId, PciHeaderType, PciSubclass,
+    msi_num_enabled_vectors,
 };
 
 pub(crate) const VFIO_COMMON_ID: &str = "vfio_common";
@@ -101,6 +107,8 @@ pub enum VfioPciError {
     RetrieveVfioCommonState(#[source] anyhow::Error),
     #[error("Failed to read the BAR addresses of the device that needs fixed BARs: {0}")]
     DiscoverFixedBars(PathBuf),
+    #[error("No space left for the extended capability {0:#x}")]
+    ExtendedCapNoSpace(u16),
     #[error("Failed to restore VFIO migration state")]
     RestoreMigration(#[source] anyhow::Error),
 }
@@ -657,6 +665,8 @@ struct VfioCommonState {
     intx_state: Option<IntxState>,
     msi_state: Option<MsiState>,
     msix_state: Option<MsixState>,
+    #[serde(default)]
+    patches: HashMap<usize, ConfigPatch>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -664,9 +674,27 @@ struct VfioMigrationData {
     blob: String,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct ConfigPatch {
     mask: u32,
     patch: u32,
+    write_mask: u32,
+}
+
+impl ConfigPatch {
+    fn write(&mut self, offset: u64, data: &[u8]) {
+        let mut bytes = self.patch.to_le_bytes();
+
+        for (i, byte) in data.iter().enumerate() {
+            let Some(slot) = bytes.get_mut(offset as usize + i) else {
+                break;
+            };
+            *slot = *byte;
+        }
+
+        let written = u32::from_le_bytes(bytes);
+        self.patch = (self.patch & !self.write_mask) | (written & self.write_mask);
+    }
 }
 
 const NVIDIA_VENDOR_ID: u64 = 0x10de;
@@ -727,6 +755,7 @@ pub(crate) struct VfioCommon {
     pub(crate) migration_flags: Option<u64>,
     // Negotiated dirty bitmap granularity while DMA logging is active.
     dma_logging_page_size: Option<u64>,
+    extended_caps: Vec<Arc<dyn PciExpressCapability + Send + Sync>>,
 }
 
 #[derive(Default)]
@@ -734,6 +763,7 @@ pub(crate) struct VfioCommonConfig {
     pub(crate) x_nv_gpudirect_clique: Option<u8>,
     pub(crate) x_exclude_mmap_bars: Vec<u8>,
     pub(crate) device_path: Option<PathBuf>,
+    pub(crate) extended_caps: Vec<Arc<dyn PciExpressCapability + Send + Sync>>,
 }
 
 impl VfioCommon {
@@ -805,6 +835,7 @@ impl VfioCommon {
             fixed_bar_addrs: discover_fixed_bars(config.device_path.as_deref())?,
             migration_flags,
             dma_logging_page_size: None,
+            extended_caps: config.extended_caps,
         };
 
         let state: Option<VfioCommonState> = snapshot
@@ -1241,7 +1272,19 @@ impl VfioCommon {
                         self.initialize_msix(msix_cap, cap_iter as u32, bdf, None);
                     }
                 }
-                PciCapabilityId::PciExpress => pci_express_cap_found = true,
+                PciCapabilityId::PciExpress => {
+                    pci_express_cap_found = true;
+
+                    // Advertise the device as a PCIe integrated endpoint if the
+                    // PASID capability is enabled.
+                    if self
+                        .extended_caps
+                        .iter()
+                        .any(|cap| cap.id() == PciExpressCapabilityId::ProcessAddressSpaceId)
+                    {
+                        self.present_as_integrated_endpoint(cap_iter);
+                    }
+                }
                 PciCapabilityId::PowerManagement => power_management_cap_found = true,
                 _ => {}
             }
@@ -1280,6 +1323,7 @@ impl VfioCommon {
             ConfigPatch {
                 mask: 0x0000_ff00,
                 patch: cap_offset << 8,
+                write_mask: 0,
             },
         );
 
@@ -1289,6 +1333,7 @@ impl VfioCommon {
             ConfigPatch {
                 mask: 0xffff_ffff,
                 patch: 0x50080009u32,
+                write_mask: 0,
             },
         );
         self.patches.insert(
@@ -1296,12 +1341,129 @@ impl VfioCommon {
             ConfigPatch {
                 mask: 0xffff_ffff,
                 patch: (u32::from(clique_id) << 19) | 0x5032,
+                write_mask: 0,
             },
         );
     }
 
+    fn present_as_integrated_endpoint(&mut self, cap_offset: u8) {
+        let reg_idx = (u32::from(cap_offset) / 4) as usize;
+
+        self.patches.insert(
+            reg_idx,
+            ConfigPatch {
+                mask: PCI_EXP_FLAGS_TYPE_MASK,
+                patch: PCI_EXP_TYPE_RC_END,
+                write_mask: 0,
+            },
+        );
+
+        let mut clear = |this: &mut Self, reg: u32| {
+            this.patches.insert(
+                reg_idx + (reg / 4) as usize,
+                ConfigPatch {
+                    mask: 0xffff_ffff,
+                    patch: 0,
+                    write_mask: 0,
+                },
+            );
+        };
+
+        clear(self, PCI_EXP_LNKCAP);
+        clear(self, PCI_EXP_LNKCTL);
+
+        let flags = self.vfio_wrapper.read_config_dword(u32::from(cap_offset));
+        let version = (flags & PCI_EXP_FLAGS_VERS_MASK) >> PCI_EXP_FLAGS_VERS_SHIFT;
+
+        if version > 1 {
+            clear(self, PCI_EXP_LNKCAP2);
+            clear(self, PCI_EXP_LNKCTL2);
+        }
+    }
+
+    fn override_next_extended_cap(&mut self, offset: u32, next: u32) {
+        let reg_idx = (offset / 4) as usize;
+        let next = next << PCI_EXT_CAP_NEXT_SHIFT;
+
+        if let Some(patch) = self.patches.get_mut(&reg_idx) {
+            patch.mask |= PCI_EXT_CAP_NEXT_MASK;
+            patch.patch = (patch.patch & !PCI_EXT_CAP_NEXT_MASK) | next;
+            return;
+        }
+
+        self.patches.insert(
+            reg_idx,
+            ConfigPatch {
+                mask: PCI_EXT_CAP_NEXT_MASK,
+                patch: next,
+                write_mask: 0,
+            },
+        );
+    }
+
+    fn add_extended_cap(
+        &mut self,
+        last_offset: u32,
+        offset: u32,
+        cap: &dyn PciExpressCapability,
+    ) -> Result<(), VfioPciError> {
+        let end = offset.checked_add(cap.size());
+
+        if last_offset >= offset
+            || !offset.is_multiple_of(PCI_EXT_CAP_ALIGN)
+            || offset < PCI_CONFIG_EXTENDED_CAPABILITY_OFFSET
+            || end.is_none_or(|end| end > PCIE_CONFIG_SPACE_SIZE)
+        {
+            return Err(VfioPciError::ExtendedCapNoSpace(cap.id() as u16));
+        }
+
+        self.override_next_extended_cap(last_offset, offset);
+
+        let mut reg_idx = (offset / 4) as usize;
+        self.patches.insert(
+            reg_idx,
+            ConfigPatch {
+                mask: 0xffff_ffff,
+                patch: (cap.id() as u32) | (cap.version() << 16),
+                write_mask: 0,
+            },
+        );
+
+        for (dword, write_mask) in cap.dwords().iter().zip(cap.write_masks()) {
+            reg_idx += 1;
+            self.patches.insert(
+                reg_idx,
+                ConfigPatch {
+                    mask: 0xffff_ffff,
+                    patch: *dword,
+                    write_mask: *write_mask,
+                },
+            );
+        }
+
+        Ok(())
+    }
+
+    fn add_extended_caps(&mut self, last_offset: u32) -> Result<(), VfioPciError> {
+        let caps = self.extended_caps.clone();
+        let total: u32 = caps.iter().map(|cap| cap.size()).sum();
+
+        let mut offset = PCIE_CONFIG_SPACE_SIZE.saturating_sub(total);
+        let mut last_offset = last_offset;
+
+        for cap in caps {
+            self.add_extended_cap(last_offset, offset, cap.as_ref())?;
+
+            last_offset = offset;
+            offset += cap.size();
+        }
+
+        Ok(())
+    }
+
     fn parse_extended_capabilities(&mut self) {
         let mut current_offset = PCI_CONFIG_EXTENDED_CAPABILITY_OFFSET;
+        let mut last_kept_offset: Option<u32> = None;
 
         loop {
             let ext_cap_hdr = self.vfio_wrapper.read_config_dword(current_offset);
@@ -1312,17 +1474,22 @@ impl VfioCommon {
             match PciExpressCapabilityId::from(cap_id) {
                 PciExpressCapabilityId::AlternativeRoutingIdentificationInterpretation
                 | PciExpressCapabilityId::ResizeableBar
-                | PciExpressCapabilityId::SingleRootIoVirtualization => {
-                    let reg_idx = (current_offset / 4) as usize;
-                    self.patches.insert(
-                        reg_idx,
-                        ConfigPatch {
-                            mask: 0x0000_ffff,
-                            patch: PciExpressCapabilityId::NullCapability as u32,
-                        },
-                    );
-                }
-                _ => {}
+                | PciExpressCapabilityId::SingleRootIoVirtualization => match last_kept_offset {
+                    Some(offset) => self.override_next_extended_cap(offset, cap_next.into()),
+                    None => {
+                        let reg_idx = (PCI_CONFIG_EXTENDED_CAPABILITY_OFFSET / 4) as usize;
+                        self.patches.insert(
+                            reg_idx,
+                            ConfigPatch {
+                                mask: 0xffff_ffff,
+                                patch: (PciExpressCapabilityId::NullCapability as u32)
+                                    | (u32::from(cap_next) << PCI_EXT_CAP_NEXT_SHIFT),
+                                write_mask: 0,
+                            },
+                        );
+                    }
+                },
+                _ => last_kept_offset = Some(current_offset),
             }
 
             if cap_next == 0 {
@@ -1330,6 +1497,12 @@ impl VfioCommon {
             }
 
             current_offset = cap_next.into();
+        }
+
+        if let Err(e) = self
+            .add_extended_caps(last_kept_offset.unwrap_or(PCI_CONFIG_EXTENDED_CAPABILITY_OFFSET))
+        {
+            error!("Failed adding the extended capabilities: {e}");
         }
     }
 
@@ -1555,6 +1728,11 @@ impl VfioCommon {
             );
         }
 
+        if let Some(patch) = self.patches.get_mut(&reg_idx) {
+            patch.write(offset, data);
+            return (Vec::new(), None);
+        }
+
         let reg = (reg_idx * PCI_CONFIG_REGISTER_SIZE) as u64;
 
         // If the MSI or MSI-X capabilities are accessed, we need to
@@ -1688,6 +1866,7 @@ impl VfioCommon {
             intx_state,
             msi_state,
             msix_state,
+            patches: self.patches.clone(),
         }
     }
 
@@ -1739,6 +1918,8 @@ impl VfioCommon {
                 .context("Failed to load migration data for restoring VFIO device")
                 .map_err(VfioPciError::RestoreMigration)?;
         }
+
+        self.patches = state.patches.clone();
 
         self.sync_command_and_interrupts()?;
 
@@ -1989,6 +2170,7 @@ impl VfioPciDevice {
         x_nv_gpudirect_clique: Option<u8>,
         x_exclude_mmap_bars: Vec<u8>,
         device_path: PathBuf,
+        extended_caps: Vec<Arc<dyn PciExpressCapability + Send + Sync>>,
     ) -> Result<Self, VfioPciError> {
         let device = Arc::new(device);
         device.reset();
@@ -2006,6 +2188,7 @@ impl VfioPciDevice {
                 x_nv_gpudirect_clique,
                 x_exclude_mmap_bars,
                 device_path: Some(device_path.clone()),
+                extended_caps,
             },
         )?;
 
@@ -3058,6 +3241,7 @@ mod tests {
             fixed_bar_addrs: None,
             migration_flags,
             dma_logging_page_size: None,
+            extended_caps: Vec::new(),
         }
     }
 
@@ -3401,6 +3585,7 @@ mod tests {
             intx_state: None,
             msi_state: None,
             msix_state: None,
+            patches: HashMap::new(),
         };
         let mig = VfioMigrationData {
             blob: String::new(),
