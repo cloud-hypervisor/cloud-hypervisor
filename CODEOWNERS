@@ -1,2 +1,41 @@
-# Add the list of code owners here (using their GitHub username)
+# GitHub Codeowners File
+#
+# Used to assign reviewers to PRs. The group
+# @cloud-hypervisor/cloud-hypervisor-reviewers is always assigned. Further,
+# we assign selected domain experts. Last matching rule wins.
+#
+# KEEP THIS IN SYNC WITH MAINTAINERS.md!
+
 * @cloud-hypervisor/cloud-hypervisor-reviewers
+
+# Hypervisor backends
+/hypervisor/src/kvm/ @likebreath @phip1611 @rbradford @cloud-hypervisor/cloud-hypervisor-reviewers
+/hypervisor/src/mshv/ @jinankjain @liuw @russell-islam @up2wing @cloud-hypervisor/cloud-hypervisor-reviewers
+
+# Architectures
+/arch/src/riscv64/ @RuoqingHe @cloud-hypervisor/cloud-hypervisor-reviewers
+/hypervisor/src/kvm/riscv64/ @RuoqingHe @cloud-hypervisor/cloud-hypervisor-reviewers
+
+# CPU Profiles
+/arch/src/x86_64/cpu_profile/ @cloud-hypervisor/cloud-hypervisor-reviewers
+# @olivereanderson not yet part of org
+
+# Confidential computing
+/hypervisor/src/kvm/x86_64/sev.rs @rhakobyan @jinankjain @russell-islam @cloud-hypervisor/cloud-hypervisor-reviewers
+/vmm/src/sev.rs @jinankjain @rhakobyan @russell-islam @cloud-hypervisor/cloud-hypervisor-reviewers
+# /arch/src/x86_64/tdx/ TODO Cyberus Technology will take over soon
+
+# Live migration
+/vm-migration/ @phip1611 @likebreath @cloud-hypervisor/cloud-hypervisor-reviewers
+/vmm/src/migration/ @phip1611 @likebreath @cloud-hypervisor/cloud-hypervisor-reviewers
+
+# VFIO and vhost-user
+/pci/src/vfio.rs @alyssais @sboeuf @cloud-hypervisor/cloud-hypervisor-reviewers
+/pci/src/vfio_user.rs @alyssais @sboeuf @cloud-hypervisor/cloud-hypervisor-reviewers
+/virtio-devices/src/vhost_user/ @alyssais @sboeuf @cloud-hypervisor/cloud-hypervisor-reviewers
+/vhost_user_block/ @alyssais @cloud-hypervisor/cloud-hypervisor-reviewers
+/vhost_user_net/ @alyssais @cloud-hypervisor/cloud-hypervisor-reviewers
+
+# Block devices and disk formats
+/block/ @weltling @cloud-hypervisor/cloud-hypervisor-reviewers
+/block/src/formats/qcow/ @weltling @cloud-hypervisor/cloud-hypervisor-reviewers
