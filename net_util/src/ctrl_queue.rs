@@ -22,7 +22,7 @@ use vm_memory::{ByteValued, Bytes, GuestMemoryError};
 use vm_virtio::{AccessPlatform, Translatable};
 
 use super::virtio_features_to_tap_offload;
-use crate::{GuestMemoryMmap, Tap};
+use crate::{GuestMemoryMmap, Tap, attach_n_first_taps};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -143,7 +143,11 @@ impl CtrlQueue {
                         false
                     } else {
                         info!("Number of MQ pairs requested: {queue_pairs}");
-                        true
+                        attach_n_first_taps(&self.taps, queue_pairs.into())
+                            .inspect_err(|e| {
+                                error!("Error setting the number of tap queues: {e:?}");
+                            })
+                            .is_ok()
                     };
                     (ok, status_desc)
                 }
