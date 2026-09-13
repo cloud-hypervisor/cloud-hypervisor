@@ -4,7 +4,7 @@
 
 use std::result;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 
 use log::{debug, error, info, warn};
 use thiserror::Error;
@@ -84,6 +84,7 @@ pub struct CtrlQueue {
     pub taps: Vec<Tap>,
     pub announce_pending: Arc<AtomicBool>,
     pub max_virtqueue_pairs: u16,
+    pub curr_queue_pairs: Arc<AtomicU16>,
 }
 
 impl CtrlQueue {
@@ -91,11 +92,13 @@ impl CtrlQueue {
         taps: Vec<Tap>,
         announce_pending: Arc<AtomicBool>,
         max_virtqueue_pairs: u16,
+        curr_queue_pairs: Arc<AtomicU16>,
     ) -> Self {
         CtrlQueue {
             taps,
             announce_pending,
             max_virtqueue_pairs,
+            curr_queue_pairs,
         }
     }
 
@@ -144,6 +147,9 @@ impl CtrlQueue {
                     } else {
                         info!("Number of MQ pairs requested: {queue_pairs}");
                         associate_taps(&self.taps, queue_pairs.into())
+                            .inspect(|()| {
+                                self.curr_queue_pairs.store(queue_pairs, Ordering::Release);
+                            })
                             .inspect_err(|e| {
                                 error!("Error setting the number of tap queues: {e:?}");
                             })
@@ -297,7 +303,12 @@ mod tests {
         mem.write_obj(0xff_u8, GuestAddress(STATUS_ADDR)).unwrap();
 
         let announce_pending = Arc::new(AtomicBool::new(true));
-        let mut ctrl_q = CtrlQueue::new(Vec::new(), Arc::clone(&announce_pending), 1);
+        let mut ctrl_q = CtrlQueue::new(
+            Vec::new(),
+            Arc::clone(&announce_pending),
+            1,
+            Arc::new(AtomicU16::new(1)),
+        );
 
         ctrl_q.process(&mem, &mut queue, None).unwrap();
 
@@ -311,7 +322,7 @@ mod tests {
     /// Build a three-descriptor VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET request
     /// (readable header, readable le16 payload, writable status) and return the
     /// status byte the device wrote.
-    fn run_mq_vq_pairs_set(requested: u16, max_virtqueue_pairs: u16) -> u8 {
+    fn run_mq_vq_pairs_set(requested: u16, max_virtqueue_pairs: u16) -> (u8, u16) {
         const MEM_SIZE: usize = 0x20_0000;
         const QSIZE: u16 = 4;
         const QUEUE_ADDR: u64 = 0x0014_0000;
@@ -350,22 +361,27 @@ mod tests {
         mem.write_obj(requested, GuestAddress(DATA_ADDR)).unwrap();
         mem.write_obj(0xff_u8, GuestAddress(STATUS_ADDR)).unwrap();
 
+        let curr_queue_pairs = Arc::new(AtomicU16::new(1));
         let mut ctrl_q = CtrlQueue::new(
             Vec::new(),
             Arc::new(AtomicBool::new(false)),
             max_virtqueue_pairs,
+            Arc::clone(&curr_queue_pairs),
         );
         ctrl_q.process(&mem, &mut queue, None).unwrap();
 
-        mem.read_obj::<u8>(GuestAddress(STATUS_ADDR)).unwrap()
+        (
+            mem.read_obj::<u8>(GuestAddress(STATUS_ADDR)).unwrap(),
+            curr_queue_pairs.load(Ordering::Acquire),
+        )
     }
 
     #[test]
     fn test_process_mq_vq_pairs_set_within_max_is_accepted() {
         // The spec permits any value up to max_virtqueue_pairs, so a request
         // for exactly that many pairs must be acknowledged.
-        assert_eq!(run_mq_vq_pairs_set(4, 4), VIRTIO_NET_OK as u8);
-        assert_eq!(run_mq_vq_pairs_set(1, 4), VIRTIO_NET_OK as u8);
+        assert_eq!(run_mq_vq_pairs_set(4, 4), (VIRTIO_NET_OK as u8, 4));
+        assert_eq!(run_mq_vq_pairs_set(1, 4), (VIRTIO_NET_OK as u8, 1));
     }
 
     #[test]
@@ -373,8 +389,8 @@ mod tests {
         // "The driver MUST NOT request a virtqueue_pairs of 0 or greater than
         // max_virtqueue_pairs in the device configuration space."
         // Such a request must not be acknowledged as successful.
-        assert_eq!(run_mq_vq_pairs_set(5, 4), VIRTIO_NET_ERR as u8);
-        assert_eq!(run_mq_vq_pairs_set(0, 4), VIRTIO_NET_ERR as u8);
+        assert_eq!(run_mq_vq_pairs_set(5, 4), (VIRTIO_NET_ERR as u8, 1));
+        assert_eq!(run_mq_vq_pairs_set(0, 4), (VIRTIO_NET_ERR as u8, 1));
     }
 
     #[test]
@@ -408,7 +424,12 @@ mod tests {
         )
         .unwrap();
 
-        let mut ctrl_q = CtrlQueue::new(Vec::new(), Arc::new(AtomicBool::new(false)), 1);
+        let mut ctrl_q = CtrlQueue::new(
+            Vec::new(),
+            Arc::new(AtomicBool::new(false)),
+            1,
+            Arc::new(AtomicU16::new(1)),
+        );
 
         assert!(matches!(
             ctrl_q.process(&mem, &mut queue, None),
