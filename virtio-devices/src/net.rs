@@ -12,7 +12,7 @@ use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
 use std::time::Duration;
 
@@ -23,7 +23,7 @@ use log::{debug, error, info, warn};
 use net_util::virtio_features_to_tap_offload;
 use net_util::{
     CtrlQueue, MAC_ADDR_LEN, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap,
-    TapError, TxVirtio, VirtioNetConfig, open_tap, vnet_hdr_len,
+    TapError, TxVirtio, VirtioNetConfig, associate_taps, open_tap, vnet_hdr_len,
 };
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
@@ -503,6 +503,7 @@ pub struct Net {
     common: VirtioCommon,
     id: String,
     taps: Vec<Tap>,
+    curr_queue_pairs: Arc<AtomicU16>,
     config: VirtioNetConfig,
     counters: NetCounters,
     seccomp_action: SeccompAction,
@@ -518,6 +519,9 @@ pub struct NetState {
     pub acked_features: u64,
     pub config: VirtioNetConfig,
     pub queue_size: Vec<u16>,
+    // Absent from snapshots taken before the count was tracked.
+    #[serde(default)]
+    pub curr_queue_pairs: Option<u16>,
 }
 
 impl Net {
@@ -547,6 +551,12 @@ impl Net {
                 warn!("Failed to query tap MTU; not advertising VIRTIO_NET_F_MTU: {e}");
                 None
             }
+        };
+
+        // One pair until the driver enables more; an older snapshot keeps every pair.
+        let curr_queue_pairs = match &state {
+            Some(state) => state.curr_queue_pairs.unwrap_or(taps.len() as u16),
+            None => 1,
         };
 
         let (avail_features, acked_features, config, queue_sizes, paused, announce_pending) =
@@ -628,6 +638,7 @@ impl Net {
             },
             id,
             taps,
+            curr_queue_pairs: Arc::new(AtomicU16::new(curr_queue_pairs)),
             config,
             counters: NetCounters::default(),
             seccomp_action,
@@ -747,6 +758,7 @@ impl Net {
             acked_features: self.common.acked_features,
             config: self.config,
             queue_size: self.common.queue_sizes.clone(),
+            curr_queue_pairs: Some(self.curr_queue_pairs.load(Ordering::Acquire)),
         }
     }
 
@@ -857,6 +869,19 @@ impl VirtioDevice for Net {
         let qp_threads = (num_queues - ctrl_threads) / 2;
         self.common.paused_sync = Some(Arc::new(Barrier::new(1 + qp_threads + ctrl_threads)));
 
+        // Only a queue pair with a worker drains its tap queue, so detach the
+        // rest before the workers start.
+        let curr_queue_pairs = self
+            .curr_queue_pairs
+            .load(Ordering::Acquire)
+            .min(qp_threads as u16);
+        associate_taps(&self.taps, curr_queue_pairs.into()).map_err(|e| {
+            error!("Error setting the number of tap queues: {e:?}");
+            ActivateError::BadActivate
+        })?;
+        self.curr_queue_pairs
+            .store(curr_queue_pairs, Ordering::Release);
+
         if has_ctrl_queue {
             let ctrl_queue_index = num_queues - 1;
             let (_, mut ctrl_queue, ctrl_queue_evt) = queues.remove(ctrl_queue_index);
@@ -894,6 +919,7 @@ impl VirtioDevice for Net {
                     self.taps.clone(),
                     self.announce.pending.clone(),
                     self.config.max_virtqueue_pairs,
+                    self.curr_queue_pairs.clone(),
                 ),
                 queue: ctrl_queue,
                 queue_evt: ctrl_queue_evt,
@@ -1008,6 +1034,7 @@ impl VirtioDevice for Net {
     fn reset(&mut self) {
         self.common.reset();
         self.announce.reset();
+        self.curr_queue_pairs.store(1, Ordering::Release);
         event!("virtio-device", "reset", "id", &self.id);
     }
 
@@ -1246,6 +1273,7 @@ mod tests {
             },
             id: "test-net".to_string(),
             taps: Vec::new(),
+            curr_queue_pairs: Arc::new(AtomicU16::new(1)),
             config: VirtioNetConfig::default(),
             counters: NetCounters::default(),
             seccomp_action: SeccompAction::Allow,
@@ -1515,5 +1543,37 @@ mod tests {
         announcer.initialize();
         assert!(matches!(announcer.send_announce(), AnnounceOutcome::Retry));
         assert_eq!(val.load(Ordering::Acquire), 2);
+    }
+
+    #[test]
+    fn test_restore_state_without_curr_queue_pairs() {
+        #[derive(Serialize)]
+        struct LegacyNetState {
+            avail_features: u64,
+            acked_features: u64,
+            config: VirtioNetConfig,
+            queue_size: Vec<u16>,
+        }
+
+        let snapshot = Snapshot::new_from_state(&LegacyNetState {
+            avail_features: 0,
+            acked_features: 0,
+            config: VirtioNetConfig::default(),
+            queue_size: vec![256; 3],
+        })
+        .unwrap();
+
+        let state: NetState = snapshot.to_state().unwrap();
+        assert_eq!(state.curr_queue_pairs, None);
+    }
+
+    #[test]
+    fn test_reset_returns_to_one_queue_pair() {
+        let mut net = test_net(0, None).unwrap();
+        net.curr_queue_pairs.store(4, Ordering::Release);
+        assert_eq!(net.state().curr_queue_pairs, Some(4));
+
+        net.reset();
+        assert_eq!(net.state().curr_queue_pairs, Some(1));
     }
 }
