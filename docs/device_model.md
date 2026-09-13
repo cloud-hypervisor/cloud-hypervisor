@@ -39,6 +39,16 @@ PL011 UART device. The related command line for AArch64 is `console=ttyAMA0`.
 This device is always built-in, and it is disabled by default. It can be
 enabled with the `--serial` option, as long as its parameter is not `off`.
 
+The `--serial` parameter selects where the port is connected. Besides `off`,
+`null`, `tty`, `pty`, and `file=<path>`, the port can be exposed on a UNIX
+socket with `socket=<path>` or on a TCP endpoint with `tcp=<host>:<port>`. The
+TCP backend follows the QEMU chardev socket roles. With `server=on` it listens
+on the address and serves one client at a time, buffering output until a client
+connects. Adding `wait=on` holds the boot back until a client connects. With
+`server=off` it dials the address as a client, and `reconnect=<secs>` redials
+on that interval after a disconnect. The same backends and options apply to the
+`virtio-console` device through the `--console` parameter.
+
 ### RTC/CMOS
 
 For environments such as Windows or EFI which cannot rely on KVM clock, the
