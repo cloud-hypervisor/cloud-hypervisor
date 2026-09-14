@@ -373,6 +373,20 @@ Hypervisor makes every possible effort to resume the VM on the source and keep
 it usable.
 
 
+## Guest Reboot and Shutdown During Migration
+
+A guest that reboots or shuts down while it is being migrated does not abort
+the migration. The sender records the request, stops transferring memory,
+stops the VM and hands the request over instead of the VM state. The receiver
+applies the request instead of restoring the VM: a reboot boots the VM again on
+the receiver, a shutdown stops it (or exits the receiving VMM unless it was
+started with `--no-shutdown`). As neither the remaining memory nor the VM
+state is transmitted, the migration finishes fast and the event is replayed
+quickly.
+
+Shutting down the sending VMM, for example via `SIGTERM` or `shutdown-vmm`,
+is not deferred and aborts the migration.
+
 ## Version Compatibility
 
 Starting with `v54`, Cloud Hypervisor guarantees migration compatibility from
