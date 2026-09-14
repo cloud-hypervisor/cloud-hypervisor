@@ -1504,6 +1504,7 @@ impl Vmm {
         ctx: &mut MemoryMigrationContext,
         is_converged: impl Fn(&MemoryMigrationContext) -> result::Result<bool, MigratableError>,
         mem_send: &mut SendAdditionalConnections,
+        pending_action: &Arc<Mutex<Option<PendingVmAction>>>,
     ) -> result::Result<MemoryRangeTable /* remaining */, MigratableError> {
         loop {
             let iteration_begin = Instant::now();
@@ -1523,7 +1524,7 @@ impl Vmm {
 
             // Send the current dirty pages
             let transfer_begin = Instant::now();
-            mem_send.send_memory(iteration_table, socket)?;
+            mem_send.send_memory(iteration_table, socket, pending_action)?;
             let transfer_duration = transfer_begin.elapsed();
             ctx.update_metrics_after_transfer(transfer_begin, transfer_duration);
 
@@ -1553,10 +1554,13 @@ impl Vmm {
     ///
     /// 1. **No dirty pages remain** – the current iteration would transfer zero
     ///    bytes.
-    /// 2. **Downtime budget is met** – the estimated downtime for the final
+    /// 2. **Pending action** – the guest requested a reboot or shutdown. The
+    ///    destination applies it without resuming the guest, so the remaining
+    ///    memory is never read.
+    /// 3. **Downtime budget is met** – the estimated downtime for the final
     ///    (paused) iteration is within the caller-specified
     ///    [`VmSendMigrationData::downtime`] budget.
-    /// 3. **Timeout** – the precopy phase has been running for at least
+    /// 4. **Timeout** – the precopy phase has been running for at least
     ///    [`VmSendMigrationData::timeout`]. The outcome depends on
     ///    [`VmSendMigrationData::timeout_strategy`]:
     ///    - [`TimeoutStrategy::Cancel`] – returns
@@ -1576,9 +1580,15 @@ impl Vmm {
     fn is_precopy_converged(
         ctx: &MemoryMigrationContext,
         send_data_migration: &VmSendMigrationData,
+        pending_action: &Mutex<Option<PendingVmAction>>,
     ) -> result::Result<bool, MigratableError> {
         if ctx.current_iteration_total_bytes == 0 {
             debug!("Precopy: No more memory to transfer");
+            return Ok(true);
+        }
+
+        if let Some(action) = *pending_action.lock().unwrap() {
+            info!("Precopy: Stopping memory transfer, guest requested {action:?}");
             return Ok(true);
         }
 
@@ -1650,6 +1660,7 @@ impl Vmm {
         send_data_migration: &VmSendMigrationData,
         mem_send: &mut SendAdditionalConnections,
         ctx: &mut OngoingMigrationContext,
+        pending_action: &Arc<Mutex<Option<PendingVmAction>>>,
     ) -> result::Result<(), MigratableError> {
         let mut mem_ctx = MemoryMigrationContext::new();
 
@@ -1658,9 +1669,10 @@ impl Vmm {
             vm,
             socket,
             &mut mem_ctx,
-            // We bind send_data_migration to the callback
-            |ctx| Self::is_precopy_converged(ctx, send_data_migration),
+            // We bind the parameters to the callback
+            |ctx| Self::is_precopy_converged(ctx, send_data_migration, pending_action),
             mem_send,
+            pending_action,
         )?;
         let downtime_begin = Instant::now();
         if vm.get_state() != VmState::Paused {
@@ -1671,12 +1683,19 @@ impl Vmm {
         {
             let iteration_begin = Instant::now();
 
-            let mut final_table = vm.dirty_log()?;
-            final_table.extend(remaining);
+            let final_table = if pending_action.lock().unwrap().is_some() {
+                // Drain dirty log so we don't accidentally send it.
+                let _ = vm.dirty_log()?;
+                MemoryRangeTable::default()
+            } else {
+                let mut final_table = vm.dirty_log()?;
+                final_table.extend(remaining);
+                final_table
+            };
 
             mem_ctx.update_metrics_before_transfer(iteration_begin, &final_table);
             let transfer_begin = Instant::now();
-            mem_send.send_memory(final_table, socket)?;
+            mem_send.send_memory(final_table, socket, pending_action)?;
             let transfer_duration = transfer_begin.elapsed();
             mem_ctx.update_metrics_after_transfer(transfer_begin, transfer_duration);
             mem_ctx.iteration += 1;
@@ -1701,7 +1720,7 @@ impl Vmm {
         initial_vm_state: VmState,
         seccomp_filters: &MigrationSeccompFilters,
         vm_moved_to_destination: &mut bool,
-        pending_action: &Mutex<Option<PendingVmAction>>,
+        pending_action: &Arc<Mutex<Option<PendingVmAction>>>,
     ) -> result::Result<(), MigratableError> {
         // State machine that is updated with more context as we progress.
         let mut ctx = OngoingMigrationContext::new();
@@ -1804,6 +1823,7 @@ impl Vmm {
                     send_data_migration.tls_dir.as_deref(),
                     &vm.guest_memory(),
                     &seccomp_filters.tcp_worker,
+                    pending_action,
                 )?;
 
                 Self::do_memory_migration(
@@ -1812,6 +1832,7 @@ impl Vmm {
                     send_data_migration,
                     &mut mem_send,
                     &mut ctx,
+                    pending_action,
                 )
                 .inspect_err(|_| {
                     if let Err(e) = mem_send.cleanup_workers() {
@@ -1884,9 +1905,16 @@ impl Vmm {
             let snapshot = vm.snapshot()?;
 
             // One final memory iteration to handle side effects from snapshot.
-            if matches!(memory_mode, MigrationMode::Precopy) {
+            if matches!(memory_mode, MigrationMode::Precopy)
+                && pending_action.lock().unwrap().is_none()
+            {
                 let memory_ranges = vm.dirty_log()?;
-                transport::send_memory_ranges(&vm.guest_memory(), &memory_ranges, &mut socket)?;
+                transport::send_memory_ranges(
+                    &vm.guest_memory(),
+                    &memory_ranges,
+                    &mut socket,
+                    pending_action,
+                )?;
             }
             Ok(snapshot)
         })?;

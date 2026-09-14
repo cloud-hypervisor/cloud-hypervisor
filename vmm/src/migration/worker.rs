@@ -117,7 +117,7 @@ impl MigrationWorker {
                     self.initial_vm_state,
                     &self.seccomp_filters,
                     &mut self.vm_moved_to_destination,
-                    self.pending_action.as_ref(),
+                    &self.pending_action,
                 )
             })
             .inspect(|_| event!("vm", "migration-finished"))
