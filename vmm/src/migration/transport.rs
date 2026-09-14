@@ -37,7 +37,7 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::sync_utils::Gate;
 use crate::util::flatten_error_chain_to_string;
-use crate::{GuestMemoryMmap, VmMigrationConfig};
+use crate::{GuestMemoryMmap, PendingVmAction, VmMigrationConfig};
 
 /// Hard upper bound for migration worker connections on both the sender and
 /// receiver side.
@@ -690,6 +690,7 @@ impl SendAdditionalConnections {
         tls_dir: Option<&Path>,
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         seccomp_filter: &BpfProgram,
+        pending_action: &Arc<Mutex<Option<PendingVmAction>>>,
     ) -> Result<Self, MigratableError> {
         let mut threads = Vec::new();
         let configured_connections = connections.get();
@@ -722,6 +723,7 @@ impl SendAdditionalConnections {
             let worker_error = Arc::clone(&worker_error);
             let notify_tx = notify_tx.clone();
             let seccomp_filter = seccomp_filter.clone();
+            let pending_action = Arc::clone(pending_action);
 
             let thread = thread::Builder::new()
                 .name(format!("migrate-send-memory-{n}"))
@@ -738,6 +740,7 @@ impl SendAdditionalConnections {
                         &message_rx,
                         &worker_error,
                         &notify_tx,
+                        &pending_action,
                     )
                 })
                 .inspect_err(|_| {
@@ -764,6 +767,7 @@ impl SendAdditionalConnections {
         message_rx: &Mutex<Receiver<SendMemoryThreadMessage>>,
         worker_error: &AtomicBool,
         notify_tx: &Sender<SendMemoryThreadNotify>,
+        pending_action: &Mutex<Option<PendingVmAction>>,
     ) -> Result<(), MigratableError> {
         loop {
             // Every memory sending thread receives messages from the main thread through this
@@ -790,7 +794,7 @@ impl SendAdditionalConnections {
                         continue;
                     }
 
-                    send_memory_ranges(guest_memory, &table, socket)
+                    send_memory_ranges(guest_memory, &table, socket, pending_action)
                         .inspect_err(|_| {
                             worker_error.store(true, Ordering::Release);
                             notify_tx.send(SendMemoryThreadNotify::Error).ok();
@@ -826,6 +830,7 @@ impl SendAdditionalConnections {
         &mut self,
         table: MemoryRangeTable,
         socket: &mut SocketStream,
+        pending_action: &Arc<Mutex<Option<PendingVmAction>>>,
     ) -> Result<bool, MigratableError> {
         if table.regions().is_empty() {
             return Ok(false);
@@ -833,7 +838,7 @@ impl SendAdditionalConnections {
 
         // If we use only one connection, we send the memory directly.
         if self.threads.is_empty() {
-            send_memory_ranges(&self.guest_memory, &table, socket)?;
+            send_memory_ranges(&self.guest_memory, &table, socket, pending_action.as_ref())?;
             return Ok(true);
         }
 
@@ -1218,12 +1223,22 @@ pub(crate) fn send_state(
 /// Sends a memory migration request, the range table, and the corresponding
 /// guest memory range over the given socket. Waits for acknowledgment
 /// from the destination.
+///
+/// Capable of skipping the transmission if the conditions are met.
 pub(crate) fn send_memory_ranges(
     guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
     ranges: &MemoryRangeTable,
     socket: &mut SocketStream,
+    pending_action: &Mutex<Option<PendingVmAction>>,
 ) -> Result<(), MigratableError> {
     if ranges.regions().is_empty() {
+        return Ok(());
+    }
+
+    // We cannot have a "happy path abort" within the loop below as then the
+    // protocol goes out of sync once the memory table header was written.
+    if pending_action.lock().unwrap().is_some() {
+        debug!("Stop sending memory: there is a pending lifecycle action");
         return Ok(());
     }
 

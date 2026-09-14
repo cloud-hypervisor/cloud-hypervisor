@@ -110,7 +110,7 @@ impl MigrationWorker {
                 event!("vm", "migration-starting");
                 Vmm::send_migration(
                     &mut vm,
-                    self.pending_action.as_ref(),
+                    &self.pending_action,
                     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
                     self.hypervisor.as_ref(),
                     &self.config,
