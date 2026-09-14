@@ -1119,15 +1119,23 @@ impl Vmm {
                     Ok(Completed)
                 }
                 Command::Complete => {
-                    let vm = self
-                        .vm
-                        .as_mut()
-                        .expect("VM should have been created by now");
-                    let (_, resume_duration) = measure_ok(|| vm.resume())?;
-                    debug!(
-                        "Migration (incoming): resume:{}ms",
-                        resume_duration.as_millis()
-                    );
+                    // A pending action is applied right after the migration
+                    // and destroys the VM. Resuming the guest until then would
+                    // only let it spin in the halt loop it entered after
+                    // requesting the action.
+                    if self.pending_action.lock().unwrap().is_some() {
+                        debug!("Migration (incoming): Not resuming the VM due to a pending action");
+                    } else {
+                        let vm = self
+                            .vm
+                            .as_mut()
+                            .expect("VM should have been created by now");
+                        let (_, resume_duration) = measure_ok(|| vm.resume())?;
+                        debug!(
+                            "Migration (incoming): resume:{}ms",
+                            resume_duration.as_millis()
+                        );
+                    }
                     // This logs the downtime without the final memory delta, so
                     // it does not reflect the actual downtime. While we could
                     // pass along the timestamp from when the VM was paused,
@@ -2174,9 +2182,14 @@ impl Vmm {
             preserve_source,
         } = migration_worker_handle.join();
 
+        let has_pending_action = self.pending_action.lock().unwrap().is_some();
         let mut try_resume_vm_after_failed_migration = |mut vm: Vm| {
-            // A late failure may leave the VM paused.
-            if initial_vm_state == VmState::Running && vm.get_state() == VmState::Paused {
+            // A late failure may leave the VM paused. With a pending action,
+            // the VM is rebooted or shut down right away instead.
+            if initial_vm_state == VmState::Running
+                && vm.get_state() == VmState::Paused
+                && !has_pending_action
+            {
                 match vm.resume() {
                     Ok(_) => {
                         info!("Resumed VM successfully after failed migration");
