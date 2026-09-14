@@ -1109,15 +1109,21 @@ impl Vmm {
                     Ok(Completed)
                 }
                 Command::Complete => {
-                    let vm = self
-                        .vm
-                        .as_mut()
-                        .expect("VM should have been created by now");
-                    let (_, resume_duration) = measure_ok(|| vm.resume())?;
-                    debug!(
-                        "Migration (incoming): resume:{}ms",
-                        resume_duration.as_millis()
-                    );
+                    if let Some(action) = self.pending_action.lock().unwrap().as_ref() {
+                        debug!(
+                            "Migration (incoming): Not resuming the VM due to a pending {action:?}"
+                        );
+                    } else {
+                        let vm = self
+                            .vm
+                            .as_mut()
+                            .expect("VM should have been created by now");
+                        let (_, resume_duration) = measure_ok(|| vm.resume())?;
+                        debug!(
+                            "Migration (incoming): resume:{}ms",
+                            resume_duration.as_millis()
+                        );
+                    }
                     // This logs the downtime without the final memory delta, so
                     // it does not reflect the actual downtime. While we could
                     // pass along the timestamp from when the VM was paused,
