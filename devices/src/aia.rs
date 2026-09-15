@@ -104,7 +104,7 @@ impl Aia {
     }
 
     pub fn get_vaia(&mut self) -> Result<Arc<Mutex<dyn Vaia>>> {
-        Ok(self.vaia.clone())
+        Ok(Arc::clone(&self.vaia))
     }
 }
 
