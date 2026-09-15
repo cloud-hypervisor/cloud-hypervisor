@@ -535,7 +535,7 @@ impl VhostUserCommon {
         );
 
         Ok(VhostUserEpollHandler {
-            vu: vu.clone(),
+            vu: Arc::clone(vu),
             mem,
             kill_evt,
             pause_evt,
@@ -547,7 +547,7 @@ impl VhostUserCommon {
             server: self.server,
             backend_req_handler,
             inflight,
-            disconnected: self.disconnected.clone(),
+            disconnected: Arc::clone(&self.disconnected),
             resume_evt,
         })
     }

@@ -1241,7 +1241,7 @@ impl Iommu {
                     ..Default::default()
                 },
                 config,
-                mapping: mapping.clone(),
+                mapping: Arc::clone(&mapping),
                 ext_mapping: Arc::new(Mutex::new(BTreeMap::new())),
                 seccomp_action,
                 exit_evt,
@@ -1356,7 +1356,7 @@ impl VirtioDevice for Iommu {
             mut queues,
             device_status,
         } = context;
-        self.common.activate(&queues, interrupt_cb.clone())?;
+        self.common.activate(&queues, Arc::clone(&interrupt_cb))?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds()?;
 
         let (_, request_queue, request_queue_evt) = queues.remove(0);
@@ -1366,26 +1366,26 @@ impl VirtioDevice for Iommu {
             mem,
             request_queue,
             _event_queue,
-            interrupt_cb: interrupt_cb.clone(),
+            interrupt_cb: Arc::clone(&interrupt_cb),
             request_queue_evt,
             _event_queue_evt,
             kill_evt,
             pause_evt,
-            mapping: self.mapping.clone(),
-            ext_mapping: self.ext_mapping.clone(),
+            mapping: Arc::clone(&self.mapping),
+            ext_mapping: Arc::clone(&self.ext_mapping),
             msi_iova_space: self.msi_iova_space,
             input_range: self.input_range,
         };
 
-        let paused = self.common.paused.clone();
+        let paused = Arc::clone(&self.common.paused);
         let paused_sync = self.common.paused_sync.clone();
         self.common.spawn_worker(
             &self.id,
             &self.seccomp_action,
             Thread::VirtioIommu,
             &self.exit_evt,
-            device_status.clone(),
-            interrupt_cb.clone(),
+            Arc::clone(&device_status),
+            Arc::clone(&interrupt_cb),
             move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
 

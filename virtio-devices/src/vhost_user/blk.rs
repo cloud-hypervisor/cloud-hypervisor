@@ -305,17 +305,17 @@ impl VirtioDevice for Blk {
         } = context;
         self.vu_common
             .virtio_common
-            .activate(&queues, interrupt_cb.clone())?;
+            .activate(&queues, Arc::clone(&interrupt_cb))?;
 
         let backend_req_handler = if self.vu_common.acked_protocol_features
             & VhostUserProtocolFeatures::BACKEND_REQ.bits()
             != 0
         {
             let mut handler = FrontendReqHandler::new(Arc::new(BackendReqHandler {
-                vu: self.vu_common.vu.as_ref().unwrap().clone(),
-                config: self.config.clone(),
+                vu: Arc::clone(self.vu_common.vu.as_ref().unwrap()),
+                config: Arc::clone(&self.config),
                 num_queues: self.vu_common.virtio_common.queue_sizes.len(),
-                interrupt_cb: interrupt_cb.clone(),
+                interrupt_cb: Arc::clone(&interrupt_cb),
             }))
             .map_err(|e| {
                 crate::ActivateError::VhostUserSetup(Error::FrontendReqHandlerCreation(e))
@@ -339,14 +339,14 @@ impl VirtioDevice for Blk {
         let mut handler = self.vu_common.activate(
             mem,
             &queues,
-            interrupt_cb.clone(),
+            Arc::clone(&interrupt_cb),
             self.vu_common.virtio_common.acked_features,
             backend_req_handler,
             kill_evt,
             pause_evt,
         )?;
 
-        let paused = self.vu_common.virtio_common.paused.clone();
+        let paused = Arc::clone(&self.vu_common.virtio_common.paused);
         let paused_sync = self.vu_common.virtio_common.paused_sync.clone();
 
         self.vu_common.spawn_worker(
@@ -354,8 +354,8 @@ impl VirtioDevice for Blk {
             &self.seccomp_action,
             Thread::VirtioVhostBlock,
             &self.exit_evt,
-            device_status.clone(),
-            interrupt_cb.clone(),
+            Arc::clone(&device_status),
+            Arc::clone(&interrupt_cb),
             move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
 

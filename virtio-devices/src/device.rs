@@ -338,7 +338,7 @@ impl VirtioCommon {
         })?;
         // Create the worker collection up front so it owns the kill event;
         // handlers clone it via dup_eventfds() before any worker is spawned.
-        self.workers = Some(WorkerThreads::new(kill_evt, self.paused.clone()));
+        self.workers = Some(WorkerThreads::new(kill_evt, Arc::clone(&self.paused)));
 
         let pause_evt = EventFd::new(EFD_NONBLOCK).map_err(|e| {
             error!("failed creating pause EventFd: {e}");
@@ -568,7 +568,7 @@ mod tests {
         let kill_evt = EventFd::new(EFD_NONBLOCK).unwrap();
         let kill_evt_clone = kill_evt.try_clone().unwrap();
         let common = VirtioCommon::default();
-        let workers = WorkerThreads::new(kill_evt, common.paused.clone());
+        let workers = WorkerThreads::new(kill_evt, Arc::clone(&common.paused));
         let common = VirtioCommon {
             workers: Some(workers),
             ..common
@@ -580,7 +580,7 @@ mod tests {
     fn spawn_worker_appends_to_workers() {
         let (mut common, kill_evt_clone) = make_common_with_workers();
         let started = Arc::new(AtomicUsize::new(0));
-        let started_clone = started.clone();
+        let started_clone = Arc::clone(&started);
 
         let exit_evt = EventFd::new(EFD_NONBLOCK).unwrap();
         let status = Arc::new(AtomicU8::new(0));
@@ -615,7 +615,7 @@ mod tests {
     fn dropping_common_joins_workers() {
         let (mut common, kill_evt_clone) = make_common_with_workers();
         let started = Arc::new(AtomicUsize::new(0));
-        let started_clone = started.clone();
+        let started_clone = Arc::clone(&started);
 
         let exit_evt = EventFd::new(EFD_NONBLOCK).unwrap();
         let status = Arc::new(AtomicU8::new(0));
@@ -657,8 +657,9 @@ mod tests {
             ),
         ];
         let mut common = VirtioCommon::default();
+        let interrupt_cb = Arc::clone(&interrupt) as Arc<dyn VirtioInterrupt>;
 
-        common.activate(&queues, interrupt.clone()).unwrap();
+        common.activate(&queues, interrupt_cb).unwrap();
         common.resume().unwrap();
 
         assert_eq!(queues[0].2.read().unwrap(), 1);

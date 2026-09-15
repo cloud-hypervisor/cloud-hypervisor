@@ -332,9 +332,9 @@ impl VirtioPciDeviceActivator {
     pub fn activate(mut self) -> ActivateResult {
         let result = self.device.lock().unwrap().activate(ActivationContext {
             mem: self.memory.take().unwrap(),
-            interrupt_cb: self.interrupt.clone(),
+            interrupt_cb: Arc::clone(&self.interrupt),
             queues: self.queues.take().unwrap(),
-            device_status: self.status.clone(),
+            device_status: Arc::clone(&self.status),
         });
 
         if let Err(e) = &result {
@@ -446,7 +446,7 @@ impl VirtioPciDevice {
         let num_queues = locked_device.queue_max_sizes().len();
 
         if let Some(access_platform) = access_platform {
-            locked_device.set_access_platform(access_platform.clone());
+            locked_device.set_access_platform(Arc::clone(access_platform));
         }
 
         let mut queues: Vec<Queue> = locked_device
@@ -496,7 +496,7 @@ impl VirtioPciDevice {
                 MsixConfig::new(msix_num, interrupt_source_group, pci_device_bdf, msix_state)
                     .unwrap(),
             ));
-            let msix_config_clone = msix_config.clone();
+            let msix_config_clone = Arc::clone(&msix_config);
             (msix_config, msix_config_clone)
         };
 
@@ -544,7 +544,7 @@ impl VirtioPciDevice {
             })?;
 
         let common_config = if let Some(common_config_state) = common_config_state {
-            VirtioPciCommonConfig::new(common_config_state, device.clone())
+            VirtioPciCommonConfig::new(common_config_state, Arc::clone(&device))
         } else {
             VirtioPciCommonConfig::new(
                 VirtioPciCommonConfigState {
@@ -556,7 +556,7 @@ impl VirtioPciDevice {
                     msix_config: VIRTQ_MSI_NO_VECTOR,
                     msix_queues: vec![VIRTQ_MSI_NO_VECTOR; num_queues],
                 },
-                device.clone(),
+                Arc::clone(&device),
             )
         };
 
@@ -613,10 +613,10 @@ impl VirtioPciDevice {
         drop(locked_device);
 
         let virtio_interrupt = Arc::new(VirtioInterruptMsix::new(
-            msix_config.clone(),
-            common_config.msix_config.clone(),
-            common_config.config_changed.clone(),
-            common_config.msix_queues.clone(),
+            Arc::clone(&msix_config),
+            Arc::clone(&common_config.msix_config),
+            Arc::clone(&common_config.config_changed),
+            Arc::clone(&common_config.msix_queues),
             interrupt_source_group.clone(),
         ));
 
@@ -819,7 +819,7 @@ impl VirtioPciDevice {
     }
 
     pub fn virtio_device(&self) -> Arc<Mutex<dyn VirtioDevice>> {
-        self.device.clone()
+        Arc::clone(&self.device)
     }
 
     fn prepare_activator(&mut self, barrier: Option<Arc<Barrier>>) -> VirtioPciDeviceActivator {
@@ -843,14 +843,14 @@ impl VirtioPciDevice {
         }
 
         VirtioPciDeviceActivator {
-            interrupt: self.virtio_interrupt.clone(),
+            interrupt: Arc::clone(&self.virtio_interrupt),
             memory: Some(self.memory.clone()),
-            device: self.device.clone(),
+            device: Arc::clone(&self.device),
             queues: Some(queues),
-            device_activated: self.device_activated.clone(),
+            device_activated: Arc::clone(&self.device_activated),
             barrier,
             id: self.id.clone(),
-            status: self.common_config.driver_status.clone(),
+            status: Arc::clone(&self.common_config.driver_status),
         }
     }
 
@@ -1031,7 +1031,7 @@ impl PciDevice for VirtioPciDevice {
         resources: Option<Vec<Resource>>,
     ) -> result::Result<Vec<PciBarConfiguration>, PciDeviceError> {
         let mut bars = Vec::new();
-        let device_clone = self.device.clone();
+        let device_clone = Arc::clone(&self.device);
         let device = device_clone.lock().unwrap();
 
         let mut settings_bar_addr = None;
@@ -1285,7 +1285,7 @@ impl PciDevice for VirtioPciDevice {
         // Try and activate the device if the driver status has changed (from unready to ready)
         if !initial_ready && self.needs_activation() {
             let barrier = Arc::new(Barrier::new(2));
-            let activator = self.prepare_activator(Some(barrier.clone()));
+            let activator = self.prepare_activator(Some(Arc::clone(&barrier)));
             self.pending_activations.lock().unwrap().push(activator);
             info!(
                 "{}: Needs activation; writing to activate event fd",
@@ -1404,13 +1404,13 @@ mod tests {
     }
 
     fn make_msix_interrupt(num_vectors: u16) -> VirtioInterruptMsix {
-        let isg = Arc::new(TestInterruptSourceGroup {
+        let isg: Arc<dyn InterruptSourceGroup> = Arc::new(TestInterruptSourceGroup {
             event_fd: EventFd::new(0).unwrap(),
         });
         let msix_config = Arc::new(Mutex::new(
             MsixConfig::new(
                 num_vectors,
-                MaybeMutInterruptSourceGroup::Immutable(isg.clone()),
+                MaybeMutInterruptSourceGroup::Immutable(Arc::clone(&isg)),
                 0,
                 None,
             )
@@ -1594,15 +1594,16 @@ mod tests {
             GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
         );
         let barrier = Arc::new(Barrier::new(2));
+        let interrupt_cb = Arc::clone(&interrupt) as Arc<dyn VirtioInterrupt>;
         let activator = VirtioPciDeviceActivator {
-            interrupt: interrupt.clone(),
+            interrupt: interrupt_cb,
             memory: Some(memory),
             device,
-            device_activated: device_activated.clone(),
+            device_activated: Arc::clone(&device_activated),
             queues: Some(Vec::new()),
-            barrier: Some(barrier.clone()),
+            barrier: Some(Arc::clone(&barrier)),
             id: "test-dev".to_string(),
-            status: status.clone(),
+            status: Arc::clone(&status),
         };
         (activator, status, device_activated, interrupt, barrier)
     }

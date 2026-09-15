@@ -973,7 +973,7 @@ impl VirtioDevice for Balloon {
             mut queues,
             device_status,
         } = context;
-        self.common.activate(&queues, interrupt_cb.clone())?;
+        self.common.activate(&queues, Arc::clone(&interrupt_cb))?;
         *self.stats_cache.lock().unwrap() = None;
         let (kill_evt, pause_evt) = self.common.dup_eventfds()?;
 
@@ -1025,7 +1025,7 @@ impl VirtioDevice for Balloon {
         let mut handler = BalloonEpollHandler {
             mem,
             queues: virtqueues,
-            interrupt_cb: interrupt_cb.clone(),
+            interrupt_cb: Arc::clone(&interrupt_cb),
             inflate_queue_evt,
             deflate_queue_evt,
             stats_handler,
@@ -1037,7 +1037,7 @@ impl VirtioDevice for Balloon {
             access_platform: self.common.access_platform(),
         };
 
-        let paused = self.common.paused.clone();
+        let paused = Arc::clone(&self.common.paused);
         let paused_sync = self.common.paused_sync.clone();
 
         if let Err(e) = self.common.spawn_worker(
@@ -1045,8 +1045,8 @@ impl VirtioDevice for Balloon {
             &self.seccomp_action,
             Thread::VirtioBalloon,
             &self.exit_evt,
-            device_status.clone(),
-            interrupt_cb.clone(),
+            Arc::clone(&device_status),
+            Arc::clone(&interrupt_cb),
             move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         ) {
             self.stats_request_sender = None;

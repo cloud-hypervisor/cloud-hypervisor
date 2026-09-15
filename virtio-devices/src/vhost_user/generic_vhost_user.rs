@@ -291,7 +291,7 @@ impl VirtioDevice for GenericVhostUser {
         } = context;
         self.vu_common
             .virtio_common
-            .activate(&queues, interrupt_cb.clone())?;
+            .activate(&queues, Arc::clone(&interrupt_cb))?;
 
         let has_backend_req = self.vu_common.acked_protocol_features
             & VhostUserProtocolFeatures::BACKEND_REQ.bits()
@@ -300,7 +300,7 @@ impl VirtioDevice for GenericVhostUser {
         let backend_req_handler = has_backend_req
             .then(|| {
                 let mut handler = FrontendReqHandler::new(Arc::new(BackendReqHandler {
-                    interrupt_cb: interrupt_cb.clone(),
+                    interrupt_cb: Arc::clone(&interrupt_cb),
                 }))
                 .map_err(|e| {
                     crate::ActivateError::VhostUserSetup(Error::FrontendReqHandlerCreation(e))
@@ -325,14 +325,14 @@ impl VirtioDevice for GenericVhostUser {
         let mut handler = self.vu_common.activate(
             mem,
             &queues,
-            interrupt_cb.clone(),
+            Arc::clone(&interrupt_cb),
             self.vu_common.virtio_common.acked_features,
             backend_req_handler,
             kill_evt,
             pause_evt,
         )?;
 
-        let paused = self.vu_common.virtio_common.paused.clone();
+        let paused = Arc::clone(&self.vu_common.virtio_common.paused);
         let paused_sync = self.vu_common.virtio_common.paused_sync.clone();
 
         self.vu_common.spawn_worker(
@@ -340,8 +340,8 @@ impl VirtioDevice for GenericVhostUser {
             &self.seccomp_action,
             Thread::VirtioGenericVhostUser,
             &self.exit_evt,
-            device_status.clone(),
-            interrupt_cb.clone(),
+            Arc::clone(&device_status),
+            Arc::clone(&interrupt_cb),
             move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
 
@@ -386,7 +386,7 @@ impl VirtioDevice for GenericVhostUser {
             mappings.push(UserspaceMapping {
                 mem_slot: cache.0.mem_slot,
                 addr: cache.0.addr,
-                mapping: cache.0.mapping.clone(),
+                mapping: Arc::clone(&cache.0.mapping),
                 mergeable: false,
             });
         }

@@ -476,7 +476,7 @@ mod tests {
     fn write_base_regs() {
         let dev: Arc<Mutex<dyn VirtioDevice>> = Arc::new(Mutex::new(DummyDevice(0)));
         let mut regs = VirtioPciCommonConfig {
-            device: dev.clone(),
+            device: Arc::clone(&dev),
             driver_status: Arc::new(AtomicU8::new(0xaa)),
             config_generation: Arc::new(AtomicU8::new(0x55)),
             config_changed: Arc::new(AtomicBool::new(false)),
@@ -529,7 +529,7 @@ mod tests {
     fn oob_queue_select_does_not_panic() {
         let dev: Arc<Mutex<dyn VirtioDevice>> = Arc::new(Mutex::new(DummyDevice(0)));
         let mut regs = VirtioPciCommonConfig {
-            device: dev.clone(),
+            device: Arc::clone(&dev),
             driver_status: Arc::new(AtomicU8::new(0)),
             config_generation: Arc::new(AtomicU8::new(0)),
             config_changed: Arc::new(AtomicBool::new(false)),
