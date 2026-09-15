@@ -14,6 +14,34 @@ inherits = "release"
 strip = false
 
 [workspace]
+# All except build time heavy integration test infrastructure which is typically
+# not needed for development workflows targeting ch-remote and cloud-hypervisor.
+default-members = [
+  "api_client",
+  "arch",
+  "block",
+  "cloud-hypervisor",
+  "devices",
+  "event_monitor",
+  "hypervisor",
+  "net_util",
+  "offload_daemon",
+  "option_parser",
+  "pci",
+  # "performance-metrics",
+  "rate_limiter",
+  "serial_buffer",
+  # "test_infra",
+  "tracer",
+  "vhost_user_block",
+  "vhost_user_net",
+  "virtio-devices",
+  "vm-allocator",
+  "vm-device",
+  "vm-migration",
+  "vm-virtio",
+  "vmm",
+]
 members = [
   "api_client",
   "arch",
