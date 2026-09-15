@@ -1740,7 +1740,7 @@ fn run_test_with_timeout(
     let test_iterations = overrides.test_iterations;
     let test_timeout = overrides.test_timeout;
     let vm_type = overrides.vm_type;
-    let overrides = overrides.clone();
+    let overrides = Arc::clone(overrides);
     thread::Builder::new()
         .name(test.name.into())
         .spawn(move || {
