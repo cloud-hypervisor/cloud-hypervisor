@@ -657,9 +657,9 @@ impl Vcpu {
     }
 
     #[cfg(feature = "sev_snp")]
-    pub fn setup_sev_snp_regs(&self, vmsa: snp_defs::SevVmsa) -> Result<()> {
+    pub fn setup_sev_snp_regs(&self, vmsa: snp_defs::SevVmsa, nested: bool) -> Result<()> {
         self.vcpu
-            .setup_sev_snp_regs(vmsa)
+            .setup_sev_snp_regs(vmsa, nested)
             .map_err(Error::SetupSevSnpRegs)
     }
 

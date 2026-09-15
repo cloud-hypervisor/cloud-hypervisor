@@ -90,8 +90,8 @@ pub use x86_64::{CpuId, ExtendedControlRegisters, MsrEntries, VcpuKvmState};
 use crate::ClockData;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{
-    CpuIdEntry, FpuState, LapicState, MTRR_MSR_INDICES, MsrEntry, NUM_IOAPIC_PINS,
-    SpecialRegisters, VcpuMsrConfigUpdate, XsaveState,
+    CpuIdEntry, FpuState, LapicState, MTRR_ENABLE, MTRR_MEM_TYPE_WB, MTRR_MSR_INDICES, MsrEntry,
+    NUM_IOAPIC_PINS, SpecialRegisters, VcpuMsrConfigUpdate, XsaveState, msr_index,
 };
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use crate::{ClockRestoreMode, ClockState};
@@ -3639,8 +3639,6 @@ impl cpu::Vcpu for KvmVcpu {
     /// Return the list of initial MSR entries for a VCPU
     ///
     fn boot_msr_entries(&self) -> Vec<MsrEntry> {
-        use crate::arch::x86::{MTRR_ENABLE, MTRR_MEM_TYPE_WB, msr_index};
-
         let mut boot_entries = self.feature_msrs.clone();
 
         boot_entries.extend([
@@ -3790,7 +3788,7 @@ impl cpu::Vcpu for KvmVcpu {
     }
 
     #[cfg(feature = "sev_snp")]
-    fn setup_sev_snp_regs(&self, vmsa: SevVmsa) -> cpu::Result<()> {
+    fn setup_sev_snp_regs(&self, vmsa: SevVmsa, nested: bool) -> cpu::Result<()> {
         let mut sregs = self
             .fd
             .get_sregs()
@@ -3807,7 +3805,10 @@ impl cpu::Vcpu for KvmVcpu {
         sregs.cr0 = vmsa.cr0;
         sregs.cr4 = vmsa.cr4;
         sregs.cr3 = vmsa.cr3;
-        sregs.efer = vmsa.efer;
+        let svme = u64::from(msr_index::EFER_SVME);
+        // Guest CPUID is configured later, so KVM_SET_SREGS rejects SVME even
+        // for nested guests. Restore it through KVM_SET_MSRS below.
+        sregs.efer = vmsa.efer & !svme;
 
         sregs.idt.base = vmsa.idtr.base;
         sregs.idt.limit = vmsa
@@ -3828,6 +3829,18 @@ impl cpu::Vcpu for KvmVcpu {
         self.fd
             .set_sregs(&sregs)
             .map_err(|e: kvm_ioctls::Error| cpu::HypervisorCpuError::SetSpecialRegs(e.into()))?;
+
+        if nested && vmsa.efer & svme != 0 {
+            let efer_entry = MsrEntry {
+                index: msr_index::MSR_EFER,
+                data: vmsa.efer,
+            };
+            if self.set_msrs(&[efer_entry])? != 1 {
+                return Err(cpu::HypervisorCpuError::SetMsrEntries(anyhow!(
+                    "KVM_SET_MSRS did not set EFER"
+                )));
+            }
+        }
 
         let mut regs = self
             .fd
