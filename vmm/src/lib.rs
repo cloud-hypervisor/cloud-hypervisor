@@ -447,7 +447,7 @@ pub fn start_event_monitor_thread(
                     }
 
                     for tx in monitor.broadcast.iter() {
-                        tx.send(event.clone()).ok();
+                        tx.send(Arc::clone(&event)).ok();
                     }
                 }
             }))
@@ -1209,7 +1209,7 @@ impl Vmm {
                         "Timed out waiting for postcopy fault connection: {e}"
                     ))
                 })?;
-            let mm = config_data.memory_manager.clone();
+            let mm = Arc::clone(&config_data.memory_manager);
             let saved_regions = mm
                 .lock()
                 .unwrap()
@@ -1305,7 +1305,7 @@ impl Vmm {
             MigratableError::MigrateReceive(anyhow!("Error updating memory zones: {e:?}"))
         })?;
 
-        let config = vm_migration_config.vm_config.clone();
+        let config = Arc::clone(&vm_migration_config.vm_config);
         self.vm_config = Some(vm_migration_config.vm_config);
         self.console_info = Some(
             pre_create_console_devices(self)
@@ -1422,7 +1422,7 @@ impl Vmm {
         let (vm, restore_duration) = measure_ok(|| {
             #[cfg(not(target_arch = "riscv64"))]
             let timestamp = Instant::now();
-            let hypervisor_vm = mm.lock().unwrap().vm.clone();
+            let hypervisor_vm = Arc::clone(&mm.lock().unwrap().vm);
 
             let mut vm = Vm::new_from_memory_manager(
                 self.vm_config.clone().unwrap(),
@@ -1434,7 +1434,7 @@ impl Vmm {
                 #[cfg(feature = "guest_debug")]
                 debug_evt,
                 &self.seccomp_action,
-                self.hypervisor.clone(),
+                Arc::clone(&self.hypervisor),
                 activate_evt,
                 #[cfg(not(target_arch = "riscv64"))]
                 timestamp,
@@ -2087,7 +2087,7 @@ impl Vmm {
                     #[cfg(feature = "guest_debug")]
                     debug_evt,
                     &self.seccomp_action,
-                    self.hypervisor.clone(),
+                    Arc::clone(&self.hypervisor),
                     activate_evt,
                     self.console_info.clone(),
                     self.console_resize_pipe.clone(),
@@ -2500,7 +2500,7 @@ impl RequestHandler for Vmm {
                             #[cfg(feature = "guest_debug")]
                             vm_debug_evt,
                             &self.seccomp_action,
-                            self.hypervisor.clone(),
+                            Arc::clone(&self.hypervisor),
                             activate_evt,
                             self.console_info.clone(),
                             self.console_resize_pipe.clone(),
@@ -2736,7 +2736,7 @@ impl RequestHandler for Vmm {
             #[cfg(feature = "guest_debug")]
             debug_evt,
             &self.seccomp_action,
-            self.hypervisor.clone(),
+            Arc::clone(&self.hypervisor),
             activate_evt,
             self.console_info.clone(),
             self.console_resize_pipe.clone(),
@@ -3438,7 +3438,7 @@ impl RequestHandler for Vmm {
             check_migration_evt,
             send_data_migration,
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-            self.hypervisor.clone(),
+            Arc::clone(&self.hypervisor),
             initial_vm_state,
             seccomp_filters,
         ) {
@@ -4313,7 +4313,7 @@ mod tests {
             },
         ];
         let dummy_config = Arc::new(Mutex::new(*dummy_config));
-        let result = update_memory_zones(&memzone_updates, &dummy_config.clone());
+        let result = update_memory_zones(&memzone_updates, &dummy_config);
         assert!(
             matches!(result, Ok(()),),
             "Result should have been Ok(()) but got {result:?}"

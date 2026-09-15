@@ -428,7 +428,7 @@ impl InterruptManager for LegacyUserspaceInterruptManager {
 
     fn create_group(&self, config: Self::GroupConfig) -> Result<Arc<dyn InterruptSourceGroup>> {
         Ok(Arc::new(LegacyUserspaceInterruptGroup::new(
-            self.ioapic.clone(),
+            Arc::clone(&self.ioapic),
             config.irq,
         )))
     }
@@ -446,14 +446,17 @@ impl MsiInterruptManager {
         let mut irq_routes: HashMap<InterruptIndex, Mutex<InterruptRoute>> =
             HashMap::with_capacity(config.count as usize);
         for i in config.base..config.base + config.count {
-            irq_routes.insert(i, Mutex::new(InterruptRoute::new(self.allocator.clone())?));
+            irq_routes.insert(
+                i,
+                Mutex::new(InterruptRoute::new(Arc::clone(&self.allocator))?),
+            );
         }
 
         Ok(MsiInterruptGroup::new(
-            self.vm.clone(),
-            self.gsi_msi_routes.clone(),
+            Arc::clone(&self.vm),
+            Arc::clone(&self.gsi_msi_routes),
             irq_routes,
-            self.interrupt_remapper.clone(),
+            Arc::clone(&self.interrupt_remapper),
         ))
     }
 }
@@ -465,14 +468,17 @@ impl InterruptManager for MsiInterruptManager {
         let mut irq_routes: HashMap<InterruptIndex, Mutex<InterruptRoute>> =
             HashMap::with_capacity(config.count as usize);
         for i in config.base..config.base + config.count {
-            irq_routes.insert(i, Mutex::new(InterruptRoute::new(self.allocator.clone())?));
+            irq_routes.insert(
+                i,
+                Mutex::new(InterruptRoute::new(Arc::clone(&self.allocator))?),
+            );
         }
 
         Ok(Arc::new(MsiInterruptGroup::new(
-            self.vm.clone(),
-            self.gsi_msi_routes.clone(),
+            Arc::clone(&self.vm),
+            Arc::clone(&self.gsi_msi_routes),
             irq_routes,
-            self.interrupt_remapper.clone(),
+            Arc::clone(&self.interrupt_remapper),
         )))
     }
 
@@ -517,7 +523,7 @@ mod tests {
         #[test]
         fn test_allocate_gsi_on_same_route_is_idempotent() {
             let allocator = make_allocator();
-            let mut route = InterruptRoute::new(allocator.clone()).unwrap();
+            let mut route = InterruptRoute::new(Arc::clone(&allocator)).unwrap();
             let gsi1 = route.allocate_gsi().unwrap();
             let gsi2 = route.allocate_gsi().unwrap();
             assert_eq!(
@@ -529,8 +535,8 @@ mod tests {
         #[test]
         fn test_allocated_gsis_are_distinct_for_different_routes() {
             let allocator = make_allocator();
-            let mut route1 = InterruptRoute::new(allocator.clone()).unwrap();
-            let mut route2 = InterruptRoute::new(allocator.clone()).unwrap();
+            let mut route1 = InterruptRoute::new(Arc::clone(&allocator)).unwrap();
+            let mut route2 = InterruptRoute::new(Arc::clone(&allocator)).unwrap();
             let gsi1 = route1.allocate_gsi().unwrap();
             let gsi2 = route2.allocate_gsi().unwrap();
             assert_ne!(gsi1, gsi2, "two routes must receive distinct GSIs");
@@ -542,10 +548,10 @@ mod tests {
         fn test_drop_frees_gsi() {
             let allocator = make_allocator();
             let gsi = {
-                let mut route = InterruptRoute::new(allocator.clone()).unwrap();
+                let mut route = InterruptRoute::new(Arc::clone(&allocator)).unwrap();
                 route.allocate_gsi().unwrap()
             }; // Drop reclaims the GSI.
-            let mut route2 = InterruptRoute::new(allocator.clone()).unwrap();
+            let mut route2 = InterruptRoute::new(Arc::clone(&allocator)).unwrap();
             let gsi2 = route2.allocate_gsi().unwrap();
             assert_eq!(gsi, gsi2, "dropped GSI should be reclaimed");
         }

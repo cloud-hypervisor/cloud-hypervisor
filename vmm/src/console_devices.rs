@@ -193,7 +193,7 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
     // remains available for reuse across reboot and shutdown followed by boot.
     vmm.console_info = None;
 
-    let vm_config = vmm.vm_config.as_mut().unwrap().clone();
+    let vm_config = Arc::clone(vmm.vm_config.as_mut().unwrap());
     let mut vmconfig = vm_config.lock().unwrap();
     let mut original_termios_opt = vmm.original_termios_opt.lock().unwrap();
 

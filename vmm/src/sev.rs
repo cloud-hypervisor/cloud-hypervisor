@@ -632,7 +632,8 @@ mod tests {
         let t = SevSnpSharedPageTracker::new();
         t.register_region(base, size);
         let rec = Arc::new(Recorder::default());
-        t.add_dma_mapping_handler(rec.clone()).unwrap();
+        t.add_dma_mapping_handler(Arc::clone(&rec) as Arc<dyn ExternalDmaMapping>)
+            .unwrap();
         (t, rec)
     }
 
@@ -689,7 +690,8 @@ mod tests {
         t.set_shared(page(1), 2 * PAGE_SIZE_4K, true).unwrap();
         t.clear_dma_mapping_handler();
         let late = Arc::new(Recorder::default());
-        t.add_dma_mapping_handler(late.clone()).unwrap();
+        t.add_dma_mapping_handler(Arc::clone(&late) as Arc<dyn ExternalDmaMapping>)
+            .unwrap();
         assert_eq!(
             *late.maps.lock().unwrap(),
             vec![(page(1), PAGE_SIZE_4K), (page(2), PAGE_SIZE_4K)]
@@ -711,7 +713,10 @@ mod tests {
             fail_map_gpa: Some(page(8)),
             ..Default::default()
         });
-        assert!(t.add_dma_mapping_handler(failed.clone()).is_err());
+        assert!(
+            t.add_dma_mapping_handler(Arc::clone(&failed) as Arc<dyn ExternalDmaMapping>)
+                .is_err()
+        );
         assert_eq!(
             *failed.unmaps.lock().unwrap(),
             vec![(page(0), PAGE_SIZE_4K), (page(1), PAGE_SIZE_4K)]
@@ -719,7 +724,8 @@ mod tests {
 
         // The shared set is untouched, so a later attach replays all of it.
         let late = Arc::new(Recorder::default());
-        t.add_dma_mapping_handler(late.clone()).unwrap();
+        t.add_dma_mapping_handler(Arc::clone(&late) as Arc<dyn ExternalDmaMapping>)
+            .unwrap();
         assert_eq!(late.maps.lock().unwrap().len(), 4);
     }
 

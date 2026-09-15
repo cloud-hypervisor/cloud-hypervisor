@@ -718,8 +718,8 @@ impl SendAdditionalConnections {
             let mut socket = send_migration_socket(destination, tls_dir)?;
             ConnectionRole::PrecopyMemory.write_to(&mut socket)?;
             let guest_memory = guest_memory.clone();
-            let message_rx = message_rx.clone();
-            let worker_error = worker_error.clone();
+            let message_rx = Arc::clone(&message_rx);
+            let worker_error = Arc::clone(&worker_error);
             let notify_tx = notify_tx.clone();
             let seccomp_filter = seccomp_filter.clone();
 
@@ -883,7 +883,7 @@ impl SendAdditionalConnections {
         let gate = Arc::new(Gate::new());
         for _ in 0..self.threads.len() {
             self.message_tx
-                .send(SendMemoryThreadMessage::Gate(gate.clone()))
+                .send(SendMemoryThreadMessage::Gate(Arc::clone(&gate)))
                 .context("Error sending gate message to workers")
                 .map_err(MigratableError::MigrateSend)?;
         }

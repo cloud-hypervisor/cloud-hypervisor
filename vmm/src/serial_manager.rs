@@ -187,7 +187,7 @@ impl SerialManager {
         let mut pty_write_out = None;
         if let ConsoleTransport::Pty(ref file) = transport {
             let write_out = Arc::new(AtomicBool::new(false));
-            pty_write_out = Some(write_out.clone());
+            pty_write_out = Some(Arc::clone(&write_out));
             let writer = file.try_clone().map_err(Error::FileClone)?;
             let buffer = SerialBuffer::new(Box::new(writer), write_out);
             serial
@@ -267,7 +267,7 @@ impl SerialManager {
 
         let epoll_fd = self.epoll_fd.try_clone().map_err(Error::Epoll)?;
         let transport = self.transport.clone();
-        let serial = self.serial.clone();
+        let serial = Arc::clone(&self.serial);
         let pty_write_out = self.pty_write_out.clone();
         let mut socket_console = self.socket_console.take();
 

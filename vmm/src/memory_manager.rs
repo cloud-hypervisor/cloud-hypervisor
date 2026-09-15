@@ -721,7 +721,7 @@ impl MemoryManager {
                 // Add region to the list of regions associated with the
                 // current memory zone.
                 if let Some(memory_zone) = memory_zones.get_mut(&zone.id) {
-                    memory_zone.regions.push(region.clone());
+                    memory_zone.regions.push(Arc::clone(&region));
                 }
 
                 mem_regions.push(region);
@@ -1691,11 +1691,11 @@ impl MemoryManager {
                 memory_zone
                     .regions()
                     .iter()
-                    .map(|r| (r.clone(), false))
+                    .map(|r| (Arc::clone(r), false))
                     .collect();
 
             if let Some(virtio_mem_zone) = memory_zone.virtio_mem_zone() {
-                regions.push((virtio_mem_zone.region().clone(), true));
+                regions.push((Arc::clone(virtio_mem_zone.region()), true));
             }
 
             list.push((zone_id.clone(), regions, memory_zone.mergeable));
@@ -2615,7 +2615,7 @@ impl MemoryManager {
     }
 
     pub fn allocator(&self) -> Arc<Mutex<SystemAllocator>> {
-        self.allocator.clone()
+        Arc::clone(&self.allocator)
     }
 
     pub fn start_of_device_area(&self) -> GuestAddress {
