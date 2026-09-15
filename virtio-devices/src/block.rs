@@ -1244,6 +1244,9 @@ impl VirtioDevice for Block {
     fn counters(&self) -> Option<HashMap<&'static str, Wrapping<u64>>> {
         let mut counters = HashMap::new();
 
+        let read_ops = self.counters.read_ops.load(Ordering::Acquire);
+        let write_ops = self.counters.write_ops.load(Ordering::Acquire);
+
         counters.insert(
             "read_bytes",
             Wrapping(self.counters.read_bytes.load(Ordering::Acquire)),
@@ -1252,38 +1255,38 @@ impl VirtioDevice for Block {
             "write_bytes",
             Wrapping(self.counters.write_bytes.load(Ordering::Acquire)),
         );
-        counters.insert(
-            "read_ops",
-            Wrapping(self.counters.read_ops.load(Ordering::Acquire)),
-        );
-        counters.insert(
-            "write_ops",
-            Wrapping(self.counters.write_ops.load(Ordering::Acquire)),
-        );
-        counters.insert(
-            "write_latency_min",
-            Wrapping(self.counters.write_latency_min.load(Ordering::Acquire)),
-        );
-        counters.insert(
-            "write_latency_max",
-            Wrapping(self.counters.write_latency_max.load(Ordering::Acquire)),
-        );
-        counters.insert(
-            "write_latency_avg",
-            Wrapping(self.counters.write_latency_avg.load(Ordering::Acquire) / LATENCY_SCALE),
-        );
-        counters.insert(
-            "read_latency_min",
-            Wrapping(self.counters.read_latency_min.load(Ordering::Acquire)),
-        );
-        counters.insert(
-            "read_latency_max",
-            Wrapping(self.counters.read_latency_max.load(Ordering::Acquire)),
-        );
-        counters.insert(
-            "read_latency_avg",
-            Wrapping(self.counters.read_latency_avg.load(Ordering::Acquire) / LATENCY_SCALE),
-        );
+        counters.insert("read_ops", Wrapping(read_ops));
+        counters.insert("write_ops", Wrapping(write_ops));
+
+        // Don't publish read/write operations counters until the first operation
+        if write_ops > 0 {
+            counters.insert(
+                "write_latency_min",
+                Wrapping(self.counters.write_latency_min.load(Ordering::Acquire)),
+            );
+            counters.insert(
+                "write_latency_max",
+                Wrapping(self.counters.write_latency_max.load(Ordering::Acquire)),
+            );
+            counters.insert(
+                "write_latency_avg",
+                Wrapping(self.counters.write_latency_avg.load(Ordering::Acquire) / LATENCY_SCALE),
+            );
+        }
+        if read_ops > 0 {
+            counters.insert(
+                "read_latency_min",
+                Wrapping(self.counters.read_latency_min.load(Ordering::Acquire)),
+            );
+            counters.insert(
+                "read_latency_max",
+                Wrapping(self.counters.read_latency_max.load(Ordering::Acquire)),
+            );
+            counters.insert(
+                "read_latency_avg",
+                Wrapping(self.counters.read_latency_avg.load(Ordering::Acquire) / LATENCY_SCALE),
+            );
+        }
 
         Some(counters)
     }
