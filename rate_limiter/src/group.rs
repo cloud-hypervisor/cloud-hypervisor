@@ -57,7 +57,7 @@ pub struct RateLimiterGroupHandle {
 impl RateLimiterGroupHandle {
     fn new(inner: Arc<RateLimiterGroupInner>) -> result::Result<Self, Error> {
         let eventfd = Arc::new(EventFd::new(0).map_err(Error::EventFd)?);
-        inner.handles.lock().unwrap().push(eventfd.clone());
+        inner.handles.lock().unwrap().push(Arc::clone(&eventfd));
         Ok(Self { eventfd, inner })
     }
 
@@ -98,7 +98,7 @@ impl RateLimiterGroupHandle {
 
 impl Clone for RateLimiterGroupHandle {
     fn clone(&self) -> Self {
-        RateLimiterGroupHandle::new(self.inner.clone()).unwrap()
+        RateLimiterGroupHandle::new(Arc::clone(&self.inner)).unwrap()
     }
 }
 
@@ -211,13 +211,13 @@ impl RateLimiterGroup {
 
     /// Create a new RateLimiterGroupHandle.
     pub fn new_handle(&self) -> result::Result<RateLimiterGroupHandle, Error> {
-        RateLimiterGroupHandle::new(self.inner.clone())
+        RateLimiterGroupHandle::new(Arc::clone(&self.inner))
     }
 
     /// Start a worker thread to broadcast an event to each RateLimiterGroupHandle
     /// when the RateLimiter becomes unblocked.
     pub fn start_thread(&mut self, exit_evt: EventFd) -> result::Result<(), Error> {
-        let inner = self.inner.clone();
+        let inner = Arc::clone(&self.inner);
         let epoll_fd = self.epoll_file.as_raw_fd();
         thread::Builder::new()
             .name(format!("rate-limit-group-{}", inner.id))
