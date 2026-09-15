@@ -47,7 +47,7 @@ impl Tracer {
 
         let trace_report = TraceReport {
             duration: end.duration_since(self.start),
-            events: self.events.clone(),
+            events: Arc::clone(&self.events),
         };
 
         serde_json::to_writer_pretty(&file, &trace_report).unwrap();
