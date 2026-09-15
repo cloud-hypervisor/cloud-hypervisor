@@ -253,10 +253,10 @@ impl VhostUserBlkBackend {
         let writeback = Arc::new(AtomicBool::new(true));
         for i in 0..num_queues {
             let thread = Mutex::new(VhostUserBlkThread::new(
-                image.clone(),
+                Arc::clone(&image),
                 serial.clone(),
                 nsectors,
-                writeback.clone(),
+                Arc::clone(&writeback),
                 mem.clone(),
             )?);
             threads.push(thread);
@@ -560,7 +560,8 @@ pub fn start_block_backend(backend_command: &str) {
     let mut listener = Listener::new(&backend_config.socket, true).unwrap();
 
     let name = "vhost-user-blk-backend";
-    let mut blk_daemon = VhostUserDaemon::new(name.to_string(), blk_backend.clone(), mem).unwrap();
+    let mut blk_daemon =
+        VhostUserDaemon::new(name.to_string(), Arc::clone(&blk_backend), mem).unwrap();
 
     debug!("blk_daemon is created!\n");
 
