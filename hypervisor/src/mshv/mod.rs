@@ -739,7 +739,7 @@ impl cpu::Vcpu for MshvVcpu {
 
                     // Update the bitmap(cache) to mark the pages as host inaccessible
                     self.host_access_pages.rcu(|bitmap| {
-                        let bm = bitmap.clone();
+                        let bm = Arc::clone(bitmap);
                         bm.reset_addr_range(gfn_start as usize, gfn_count as usize);
                         bm
                     });
@@ -1941,7 +1941,7 @@ impl vm::Vm for MshvVm {
             #[cfg(target_arch = "x86_64")]
             msrs: self.msrs.load().as_ref().clone(),
             vm_ops,
-            vm_fd: self.fd.clone(),
+            vm_fd: Arc::clone(&self.fd),
             #[cfg(feature = "sev_snp")]
             ghcb,
             #[cfg(feature = "sev_snp")]
@@ -2466,7 +2466,7 @@ impl vm::Vm for MshvVm {
 
             for acquired_gpa in gpas {
                 self.host_access_pages.rcu(|bitmap| {
-                    let bm = bitmap.clone();
+                    let bm = Arc::clone(bitmap);
                     bm.set_bit((acquired_gpa >> PAGE_SHIFT) as usize);
                     bm
                 });
