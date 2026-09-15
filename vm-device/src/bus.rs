@@ -133,7 +133,7 @@ impl Bus {
         let (range, dev) = devices
             .range(..=BusRange { base: addr, len: 1 })
             .next_back()?;
-        dev.upgrade().map(|d| (*range, d.clone()))
+        dev.upgrade().map(|d| (*range, Arc::clone(&d)))
     }
 
     fn resolve(&self, addr: u64) -> Option<(u64, u64, Arc<dyn BusDeviceSync>)> {
@@ -223,7 +223,7 @@ impl Bus {
     ) -> Result<()> {
         // Retrieve the device corresponding to the range
         let device = if let Some((_, _, dev)) = self.resolve(old_base) {
-            dev.clone()
+            Arc::clone(&dev)
         } else {
             return Err(Error::MissingAddressRange);
         };
@@ -288,28 +288,28 @@ mod tests {
     #[test]
     fn bus_insert() {
         let bus = Bus::new();
-        let dummy = Arc::new(DummyDevice);
-        bus.insert(dummy.clone(), 0x10, 0).unwrap_err();
-        bus.insert(dummy.clone(), 0x10, 0x10).unwrap();
+        let dummy: Arc<dyn BusDeviceSync> = Arc::new(DummyDevice);
+        bus.insert(Arc::clone(&dummy), 0x10, 0).unwrap_err();
+        bus.insert(Arc::clone(&dummy), 0x10, 0x10).unwrap();
 
-        let result = bus.insert(dummy.clone(), 0x0f, 0x10);
+        let result = bus.insert(Arc::clone(&dummy), 0x0f, 0x10);
         assert_eq!(format!("{result:?}"), "Err(Overlap)");
 
-        bus.insert(dummy.clone(), 0x10, 0x10).unwrap_err();
-        bus.insert(dummy.clone(), 0x10, 0x15).unwrap_err();
-        bus.insert(dummy.clone(), 0x12, 0x15).unwrap_err();
-        bus.insert(dummy.clone(), 0x12, 0x01).unwrap_err();
-        bus.insert(dummy.clone(), 0x0, 0x20).unwrap_err();
-        bus.insert(dummy.clone(), 0x20, 0x05).unwrap();
-        bus.insert(dummy.clone(), 0x25, 0x05).unwrap();
+        bus.insert(Arc::clone(&dummy), 0x10, 0x10).unwrap_err();
+        bus.insert(Arc::clone(&dummy), 0x10, 0x15).unwrap_err();
+        bus.insert(Arc::clone(&dummy), 0x12, 0x15).unwrap_err();
+        bus.insert(Arc::clone(&dummy), 0x12, 0x01).unwrap_err();
+        bus.insert(Arc::clone(&dummy), 0x0, 0x20).unwrap_err();
+        bus.insert(Arc::clone(&dummy), 0x20, 0x05).unwrap();
+        bus.insert(Arc::clone(&dummy), 0x25, 0x05).unwrap();
         bus.insert(dummy, 0x0, 0x10).unwrap();
     }
 
     #[test]
     fn bus_read_write() {
         let bus = Bus::new();
-        let dummy = Arc::new(DummyDevice);
-        bus.insert(dummy.clone(), 0x10, 0x10).unwrap();
+        let dummy: Arc<dyn BusDeviceSync> = Arc::new(DummyDevice);
+        bus.insert(Arc::clone(&dummy), 0x10, 0x10).unwrap();
         bus.read(0x10, &mut [0, 0, 0, 0]).unwrap();
         bus.write(0x10, &[0, 0, 0, 0]).unwrap();
         bus.read(0x11, &mut [0, 0, 0, 0]).unwrap();
@@ -325,8 +325,8 @@ mod tests {
     #[test]
     fn bus_read_write_values() {
         let bus = Bus::new();
-        let dummy = Arc::new(ConstantDevice);
-        bus.insert(dummy.clone(), 0x10, 0x10).unwrap();
+        let dummy: Arc<dyn BusDeviceSync> = Arc::new(ConstantDevice);
+        bus.insert(Arc::clone(&dummy), 0x10, 0x10).unwrap();
 
         let mut values = [0, 1, 2, 3];
         bus.read(0x10, &mut values).unwrap();
@@ -350,8 +350,8 @@ mod tests {
 
         let bus = Bus::new();
         let mut data = [1, 2, 3, 4];
-        let device = Arc::new(DummyDevice);
-        bus.insert(device.clone(), 0x10, 0x10).unwrap();
+        let device: Arc<dyn BusDeviceSync> = Arc::new(DummyDevice);
+        bus.insert(Arc::clone(&device), 0x10, 0x10).unwrap();
         bus.write(0x10, &data).unwrap();
         bus.read(0x10, &mut data).unwrap();
         assert_eq!(data, [0, 0, 0, 0]);
