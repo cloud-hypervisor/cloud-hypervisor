@@ -421,7 +421,7 @@ pub fn start_net_backend(backend_command: &str) {
 
     let mut net_daemon = VhostUserDaemon::new(
         "vhost-user-net-backend".to_string(),
-        net_backend.clone(),
+        Arc::clone(&net_backend),
         mem,
     )
     .unwrap();
