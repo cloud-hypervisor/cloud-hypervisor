@@ -42,7 +42,7 @@ impl SocketConsole {
         let write_out = Arc::new(AtomicBool::new(false));
         let buffer = Arc::new(Mutex::new(SerialBuffer::new(
             Box::new(io::sink()),
-            write_out.clone(),
+            Arc::clone(&write_out),
         )));
         Self {
             buffer,
@@ -52,7 +52,7 @@ impl SocketConsole {
     }
 
     pub fn out_sink(&self) -> Box<dyn Write + Send> {
-        Box::new(SharedSerialBuffer(self.buffer.clone()))
+        Box::new(SharedSerialBuffer(Arc::clone(&self.buffer)))
     }
 
     /// Returns the connected client fd, or None when no client is attached.
