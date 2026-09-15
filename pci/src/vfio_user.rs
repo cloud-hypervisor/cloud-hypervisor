@@ -101,7 +101,7 @@ impl VfioUserPciDevice {
         }
 
         let vfio_wrapper = VfioUserClientWrapper {
-            client: client.clone(),
+            client: Arc::clone(&client),
         };
 
         let common = VfioCommon::new(
