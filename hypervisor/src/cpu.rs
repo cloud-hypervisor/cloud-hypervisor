@@ -641,7 +641,7 @@ pub trait Vcpu: Send + Sync {
         unimplemented!()
     }
     #[cfg(feature = "sev_snp")]
-    fn setup_sev_snp_regs(&self, _vmsa: SevVmsa) -> Result<()> {
+    fn setup_sev_snp_regs(&self, _vmsa: SevVmsa, _nested: bool) -> Result<()> {
         unimplemented!()
     }
 

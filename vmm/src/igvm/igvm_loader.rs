@@ -604,13 +604,16 @@ pub(crate) fn load_igvm(
                 // Set vCPU initial register state from VMSA before SNP_LAUNCH_FINISH
                 #[cfg(all(feature = "kvm", feature = "sev_snp"))]
                 if hypervisor_type == HypervisorType::Kvm {
-                    let vcpus = cpu_manager.lock().unwrap().vcpus();
+                    let (vcpus, nested) = {
+                        let cpu_manager = cpu_manager.lock().unwrap();
+                        (cpu_manager.vcpus(), cpu_manager.nested())
+                    };
                     for vcpu in vcpus {
                         let vcpu_locked = vcpu.lock().unwrap();
                         let vcpu_id: u16 = vcpu_locked.id().parse().unwrap();
                         if vcpu_id == *vp_index {
                             vcpu_locked
-                                .setup_sev_snp_regs(loaded_info.vmsa)
+                                .setup_sev_snp_regs(loaded_info.vmsa, nested)
                                 .map_err(Error::SetVmsa)?;
                             vcpu_locked
                                 .set_sev_control_register(0)
