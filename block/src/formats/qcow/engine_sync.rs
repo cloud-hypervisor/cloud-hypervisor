@@ -331,7 +331,7 @@ mod tests {
         let ranges: Vec<(GuestAddress, u32)> = (0..ranges_count)
             .map(|i| (GuestAddress((i * chunk) as u64), chunk as u32))
             .collect();
-        let target = GuestMemoryTarget::new(mem.clone(), &ranges).unwrap();
+        let target = GuestMemoryTarget::new(Arc::clone(&mem), &ranges).unwrap();
 
         let mut async_io = disk.create_async_io(1).unwrap();
         async_io.read_to_memory(0, target, 1).unwrap();
