@@ -952,11 +952,11 @@ impl vm::Vm for KvmVm {
             #[cfg(target_arch = "x86_64")]
             has_xcrs: self.check_extension(Cap::Xcrs),
             #[cfg(feature = "sev_snp")]
-            vm_fd: self.fd.clone(),
+            vm_fd: Arc::clone(&self.fd),
             #[cfg(feature = "sev_snp")]
             memory_slots: self.memory_slots.clone(),
             #[cfg(feature = "sev_snp")]
-            memory_conversion_handler: self.memory_conversion_handler.clone(),
+            memory_conversion_handler: Arc::clone(&self.memory_conversion_handler),
         };
         Ok(Box::new(vcpu))
     }
