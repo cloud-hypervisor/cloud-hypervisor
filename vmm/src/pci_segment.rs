@@ -136,7 +136,7 @@ impl PciSegment {
         address_manager
             .io_bus
             .insert(
-                pci_config_io.clone(),
+                Arc::clone(&pci_config_io) as Arc<dyn BusDeviceSync>,
                 PCI_CONFIG_IO_PORT,
                 PCI_CONFIG_IO_PORT_SIZE,
             )
@@ -237,7 +237,7 @@ impl PciSegment {
         device_reloc: &Arc<dyn DeviceRelocation>,
     ) -> DeviceManagerResult<Self> {
         let pci_root = (id == 0).then(|| PciRoot::new(None));
-        let pci_bus = Arc::new(Mutex::new(PciBus::new(pci_root, device_reloc.clone())));
+        let pci_bus = Arc::new(Mutex::new(PciBus::new(pci_root, Arc::clone(device_reloc))));
 
         let pci_config_mmio = Arc::new(Mutex::new(PciConfigMmio::new(Arc::clone(&pci_bus))));
         let mmio_config_address =

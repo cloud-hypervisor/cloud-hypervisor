@@ -994,7 +994,7 @@ impl CpuManager {
             cpu_id,
             x2apic_id,
             self.vm.as_ref(),
-            Some(self.vm_ops.clone()),
+            Some(Arc::clone(&self.vm_ops)),
             #[cfg(target_arch = "x86_64")]
             self.hypervisor.get_cpu_vendor(),
             #[cfg(target_arch = "x86_64")]
@@ -1027,7 +1027,7 @@ impl CpuManager {
         let vcpu = Arc::new(Mutex::new(vcpu));
 
         // Adding vCPU to the CpuManager's vCPU list.
-        self.vcpus.push(vcpu.clone());
+        self.vcpus.push(Arc::clone(&vcpu));
 
         Ok(vcpu)
     }
@@ -1204,20 +1204,17 @@ impl CpuManager {
         #[cfg(feature = "guest_debug")]
         let vm_debug_evt = self.vm_debug_evt.try_clone().map_err(Error::EventFdClone)?;
         let panic_exit_evt = self.exit_evt.try_clone().map_err(Error::EventFdClone)?;
-        let vcpus_kill_signalled = self.vcpus_kill_signalled.clone();
-        let vcpus_pause_signalled = self.vcpus_pause_signalled.clone();
-        let vcpus_kick_signalled = self.vcpus_kick_signalled.clone();
+        let vcpus_kill_signalled = Arc::clone(&self.vcpus_kill_signalled);
+        let vcpus_pause_signalled = Arc::clone(&self.vcpus_pause_signalled);
+        let vcpus_kick_signalled = Arc::clone(&self.vcpus_kick_signalled);
 
         let mut vcpu_states = self.vcpu_states.lock().unwrap();
 
-        let vcpu_kill = vcpu_states[usize::try_from(vcpu_id).unwrap()].kill.clone();
-        let vcpu_run_interrupted = vcpu_states[usize::try_from(vcpu_id).unwrap()]
-            .vcpu_run_interrupted
-            .clone();
-        let panic_vcpu_run_interrupted = vcpu_run_interrupted.clone();
-        let vcpu_paused = vcpu_states[usize::try_from(vcpu_id).unwrap()]
-            .paused
-            .clone();
+        let vcpu_kill = Arc::clone(&vcpu_states[usize::try_from(vcpu_id).unwrap()].kill);
+        let vcpu_run_interrupted =
+            Arc::clone(&vcpu_states[usize::try_from(vcpu_id).unwrap()].vcpu_run_interrupted);
+        let panic_vcpu_run_interrupted = Arc::clone(&vcpu_run_interrupted);
+        let vcpu_paused = Arc::clone(&vcpu_states[usize::try_from(vcpu_id).unwrap()].paused);
 
         // Prepare the CPU set the current vCPU is expected to run onto.
         let cpuset = self.affinity.get(&vcpu_id).map(|host_cpus| {
@@ -1233,7 +1230,7 @@ impl CpuManager {
         });
 
         let core_scheduling = self.config.core_scheduling;
-        let core_scheduling_group_leader = self.core_scheduling_group_leader.clone();
+        let core_scheduling_group_leader = Arc::clone(&self.core_scheduling_group_leader);
 
         #[cfg(target_arch = "x86_64")]
         let interrupt_controller_clone = self.interrupt_controller.as_ref().cloned();
@@ -1540,12 +1537,12 @@ impl CpuManager {
 
             // This reuses any inactive vCPUs as well as any that were newly created
             for vcpu_id in present_vcpus..desired_vcpus {
-                let vcpu = self.vcpus[vcpu_id as usize].clone();
+                let vcpu = Arc::clone(&self.vcpus[vcpu_id as usize]);
                 self.start_vcpu(
                     vcpu,
                     vcpu_id,
-                    vcpu_thread_barrier.clone(),
-                    vcpu_seccomp_filter.clone(),
+                    Arc::clone(&vcpu_thread_barrier),
+                    Arc::clone(&vcpu_seccomp_filter),
                     inserting,
                 )?;
             }
@@ -3318,7 +3315,7 @@ impl AcpiCpuHotplugController {
         Self {
             max_vcpus: cpu_manager.config.max_vcpus,
             selected_cpu: 0,
-            vcpu_states: cpu_manager.vcpu_states.clone(),
+            vcpu_states: Arc::clone(&cpu_manager.vcpu_states),
         }
     }
 

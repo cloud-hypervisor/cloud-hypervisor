@@ -55,7 +55,7 @@ mod tests {
         let gate = Arc::new(Gate::new());
         let (tx, rx) = mpsc::channel();
 
-        let gate_clone = gate.clone();
+        let gate_clone = Arc::clone(&gate);
         thread::spawn(move || {
             gate_clone.wait();
             tx.send(()).unwrap();
@@ -75,7 +75,7 @@ mod tests {
         gate.open();
 
         let (tx, rx) = mpsc::channel();
-        let gate_clone = gate.clone();
+        let gate_clone = Arc::clone(&gate);
         thread::spawn(move || {
             gate_clone.wait();
             tx.send(()).unwrap();
@@ -90,7 +90,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
 
         for _ in 0..4 {
-            let gate_clone = gate.clone();
+            let gate_clone = Arc::clone(&gate);
             let tx = tx.clone();
             thread::spawn(move || {
                 gate_clone.wait();
@@ -116,7 +116,7 @@ mod tests {
         gate.open();
 
         let (tx, rx) = mpsc::channel();
-        let gate_clone = gate.clone();
+        let gate_clone = Arc::clone(&gate);
         thread::spawn(move || {
             gate_clone.wait();
             tx.send(()).unwrap();

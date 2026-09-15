@@ -622,14 +622,14 @@ impl Vm {
         let vm_ops: Arc<dyn VmOps> = Arc::new(VmOpsHandler {
             memory,
             #[cfg(target_arch = "x86_64")]
-            io_bus: io_bus.clone(),
-            mmio_bus: mmio_bus.clone(),
+            io_bus: Arc::clone(&io_bus),
+            mmio_bus: Arc::clone(&mmio_bus),
         });
 
         // Create CPU manager
         let cpu_manager = Self::create_cpu_manager(
             &config,
-            vm.clone(),
+            Arc::clone(&vm),
             exit_evt.try_clone().map_err(Error::EventFdClone)?,
             guest_exit_evt.try_clone().map_err(Error::EventFdClone)?,
             reset_evt.try_clone().map_err(Error::EventFdClone)?,
@@ -649,10 +649,10 @@ impl Vm {
         let device_manager = Self::create_device_manager(
             io_bus,
             mmio_bus,
-            vm.clone(),
-            config.clone(),
-            memory_manager.clone(),
-            cpu_manager.clone(),
+            Arc::clone(&vm),
+            Arc::clone(&config),
+            Arc::clone(&memory_manager),
+            Arc::clone(&cpu_manager),
             exit_evt.try_clone().map_err(Error::EventFdClone)?,
             reset_evt,
             guest_exit_evt,
@@ -806,7 +806,7 @@ impl Vm {
             reset_evt,
             #[cfg(feature = "guest_debug")]
             vm_debug_evt,
-            hypervisor.clone(),
+            Arc::clone(hypervisor),
             seccomp_action,
             vm_ops,
             #[cfg(feature = "tdx")]
@@ -991,7 +991,7 @@ impl Vm {
                 device_manager,
                 console_info.cloned(),
                 console_resize_pipe.cloned(),
-                original_termios.clone(),
+                Arc::clone(original_termios),
                 snapshot,
             )?;
         }
@@ -1058,7 +1058,7 @@ impl Vm {
             .create_devices(
                 console_info.cloned(),
                 console_resize_pipe.cloned(),
-                original_termios.clone(),
+                Arc::clone(original_termios),
                 ic,
                 dm_snapshot,
             )
@@ -1096,7 +1096,7 @@ impl Vm {
             .create_devices(
                 console_info.cloned(),
                 console_resize_pipe.cloned(),
-                original_termios.clone(),
+                Arc::clone(original_termios),
                 ic,
                 dm_snapshot,
             )
@@ -1283,7 +1283,8 @@ impl Vm {
                         if let Some(mm_zone) = mm_zones.get(memory_zone) {
                             node.memory_regions.extend(mm_zone.regions().clone());
                             if let Some(virtiomem_zone) = mm_zone.virtio_mem_zone() {
-                                node.hotplug_regions.push(virtiomem_zone.region().clone());
+                                node.hotplug_regions
+                                    .push(Arc::clone(virtiomem_zone.region()));
                             }
                             node.memory_zones.push(memory_zone.clone());
                         } else {
@@ -1412,7 +1413,7 @@ impl Vm {
             if let Some(snapshot) = snapshot_from_id(snapshot, MEMORY_MANAGER_SNAPSHOT_ID) {
                 MemoryManager::new_from_snapshot(
                     snapshot,
-                    vm.clone(),
+                    Arc::clone(&vm),
                     &vm_config.lock().unwrap().memory.clone(),
                     source_url,
                     prefault.unwrap_or(false),
@@ -1423,7 +1424,7 @@ impl Vm {
                 .map_err(Error::MemoryManager)?
             } else {
                 MemoryManager::new(
-                    vm.clone(),
+                    Arc::clone(&vm),
                     &vm_config.lock().unwrap().memory.clone(),
                     None,
                     phys_bits,
@@ -1602,7 +1603,7 @@ impl Vm {
         let res = igvm_loader::load_igvm(
             igvm_file,
             memory_manager,
-            cpu_manager.clone(),
+            Arc::clone(&cpu_manager),
             "",
             #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
             measured_boot,
@@ -1796,10 +1797,10 @@ impl Vm {
             .payload
             .as_ref()
             .map(|payload| {
-                let memory_manager = memory_manager.clone();
+                let memory_manager = Arc::clone(memory_manager);
                 let payload = payload.clone();
                 #[cfg(feature = "igvm")]
-                let cpu_manager = cpu_manager.clone();
+                let cpu_manager = Arc::clone(cpu_manager);
 
                 thread::Builder::new()
                     .name("payload_loader".into())

@@ -104,7 +104,9 @@ use virtio_devices::{
 };
 use vm_allocator::{AddressAllocator, InterruptAllocError, SystemAllocator};
 use vm_device::dma_mapping::ExternalDmaMapping;
-use vm_device::interrupt::{InterruptIndex, InterruptManager, LegacyIrqGroupConfig};
+use vm_device::interrupt::{
+    InterruptIndex, InterruptManager, InterruptRemapping, LegacyIrqGroupConfig, MsiIrqGroupConfig,
+};
 use vm_device::{Bus, BusDevice, BusDeviceSync, Resource, UserspaceMapping};
 #[cfg(feature = "ivshmem")]
 use vm_memory::bitmap::AtomicBitmap;
@@ -1213,7 +1215,7 @@ impl DeviceManager {
             allocator: memory_manager.lock().unwrap().allocator(),
             io_bus,
             mmio_bus,
-            vm: vm.clone(),
+            vm: Arc::clone(&vm),
             device_tree: Arc::clone(&device_tree),
             pci_mmio32_allocators,
             pci_mmio64_allocators,
@@ -1276,7 +1278,7 @@ impl DeviceManager {
             address_manager
                 .mmio_bus
                 .insert(
-                    acpi_cpu_hotplug_controller.clone(),
+                    Arc::clone(&acpi_cpu_hotplug_controller) as Arc<dyn BusDeviceSync>,
                     acpi_address.0,
                     CPU_MANAGER_ACPI_SIZE as u64,
                 )
@@ -1421,7 +1423,7 @@ impl DeviceManager {
         self.cpu_manager
             .lock()
             .unwrap()
-            .set_interrupt_controller(interrupt_controller.clone());
+            .set_interrupt_controller(Arc::clone(&interrupt_controller));
 
         // Now we can create the legacy interrupt manager, which needs the freshly
         // formed IOAPIC device.
@@ -1476,7 +1478,7 @@ impl DeviceManager {
         )?;
 
         #[cfg(not(target_arch = "riscv64"))]
-        if let Some(tpm) = self.config.clone().lock().unwrap().tpm.as_ref() {
+        if let Some(tpm) = Arc::clone(&self.config).lock().unwrap().tpm.as_ref() {
             let tpm_dev = self.add_tpm_device(&tpm.socket)?;
             self.bus_devices
                 .push(Arc::clone(&tpm_dev) as Arc<dyn BusDeviceSync>);
@@ -1497,7 +1499,7 @@ impl DeviceManager {
             }
         }
 
-        if self.config.clone().lock().unwrap().pvpanic {
+        if Arc::clone(&self.config).lock().unwrap().pvpanic {
             self.pvpanic_device = self.add_pvpanic_device(snapshot)?;
         }
 
@@ -1518,7 +1520,7 @@ impl DeviceManager {
             self.memory_manager.lock().as_ref().unwrap().guest_memory(),
         )));
 
-        self.fw_cfg = Some(fw_cfg.clone());
+        self.fw_cfg = Some(Arc::clone(&fw_cfg));
 
         self.bus_devices
             .push(Arc::clone(&fw_cfg) as Arc<dyn BusDeviceSync>);
@@ -1535,7 +1537,11 @@ impl DeviceManager {
         {
             self.address_manager
                 .mmio_bus
-                .insert(fw_cfg.clone(), PORT_FW_CFG_BASE, PORT_FW_CFG_WIDTH)
+                .insert(
+                    Arc::clone(&fw_cfg) as Arc<dyn BusDeviceSync>,
+                    PORT_FW_CFG_BASE,
+                    PORT_FW_CFG_WIDTH,
+                )
                 .map_err(DeviceManagerError::ErrorAddingFwCfgToBus)?;
 
             let fw_cfg_irq = self
@@ -1727,13 +1733,14 @@ impl DeviceManager {
         let interrupt_controller: Arc<Mutex<gic::Gic>> = Arc::new(Mutex::new(
             gic::Gic::new(
                 self.config.lock().unwrap().cpus.boot_vcpus,
-                self.msi_interrupt_manager.clone(),
-                self.address_manager.vm.clone(),
+                Arc::clone(&self.msi_interrupt_manager)
+                    as Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+                Arc::clone(&self.address_manager.vm),
             )
             .map_err(DeviceManagerError::CreateInterruptController)?,
         ));
 
-        self.interrupt_controller = Some(interrupt_controller.clone());
+        self.interrupt_controller = Some(Arc::clone(&interrupt_controller));
 
         // Restore the vGic if this is in the process of restoration
         let id = String::from(gic::GIC_SNAPSHOT_ID);
@@ -1780,13 +1787,14 @@ impl DeviceManager {
         let interrupt_controller: Arc<Mutex<aia::Aia>> = Arc::new(Mutex::new(
             aia::Aia::new(
                 self.config.lock().unwrap().cpus.boot_vcpus,
-                self.msi_interrupt_manager.clone(),
-                self.address_manager.vm.clone(),
+                Arc::clone(&self.msi_interrupt_manager)
+                    as Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+                Arc::clone(&self.address_manager.vm),
             )
             .map_err(DeviceManagerError::CreateInterruptController)?,
         ));
 
-        self.interrupt_controller = Some(interrupt_controller.clone());
+        self.interrupt_controller = Some(Arc::clone(&interrupt_controller));
 
         // Restore the vAia if this is in the process of restoration
         let id = String::from(aia::_AIA_SNAPSHOT_ID);
@@ -1830,11 +1838,15 @@ impl DeviceManager {
             .map_err(DeviceManagerError::CreateInterruptController)?,
         ));
 
-        self.interrupt_controller = Some(interrupt_controller.clone());
+        self.interrupt_controller = Some(Arc::clone(&interrupt_controller));
 
         self.address_manager
             .mmio_bus
-            .insert(interrupt_controller.clone(), IOAPIC_START.0, IOAPIC_SIZE)
+            .insert(
+                Arc::clone(&interrupt_controller) as Arc<dyn BusDeviceSync>,
+                IOAPIC_START.0,
+                IOAPIC_SIZE,
+            )
             .map_err(DeviceManagerError::BusError)?;
 
         self.bus_devices
@@ -1857,12 +1869,8 @@ impl DeviceManager {
         reset_evt: EventFd,
         guest_exit_evt: EventFd,
     ) -> DeviceManagerResult<Option<Arc<Mutex<devices::AcpiGedDevice>>>> {
-        let vcpus_kill_signalled = self
-            .cpu_manager
-            .lock()
-            .unwrap()
-            .vcpus_kill_signalled()
-            .clone();
+        let vcpus_kill_signalled =
+            Arc::clone(self.cpu_manager.lock().unwrap().vcpus_kill_signalled());
         let shutdown_device = Arc::new(Mutex::new(devices::AcpiShutdownDevice::new(
             guest_exit_evt,
             reset_evt,
@@ -1923,7 +1931,7 @@ impl DeviceManager {
         self.address_manager
             .mmio_bus
             .insert(
-                ged_device.clone(),
+                Arc::clone(&ged_device) as Arc<dyn BusDeviceSync>,
                 ged_address.0,
                 acpi::GED_DEVICE_ACPI_SIZE as u64,
             )
@@ -1961,16 +1969,12 @@ impl DeviceManager {
 
     #[cfg(target_arch = "x86_64")]
     fn add_legacy_devices(&mut self, reset_evt: EventFd) -> DeviceManagerResult<()> {
-        let vcpus_kill_signalled = self
-            .cpu_manager
-            .lock()
-            .unwrap()
-            .vcpus_kill_signalled()
-            .clone();
+        let vcpus_kill_signalled =
+            Arc::clone(self.cpu_manager.lock().unwrap().vcpus_kill_signalled());
         // Add a shutdown device (i8042)
         let i8042 = Arc::new(Mutex::new(legacy::I8042Device::new(
             reset_evt.try_clone().unwrap(),
-            vcpus_kill_signalled.clone(),
+            Arc::clone(&vcpus_kill_signalled),
         )));
 
         self.bus_devices
@@ -2097,10 +2101,14 @@ impl DeviceManager {
 
         self.address_manager
             .mmio_bus
-            .insert(gpio_device.clone(), addr.0, MMIO_LEN)
+            .insert(
+                Arc::clone(&gpio_device) as Arc<dyn BusDeviceSync>,
+                addr.0,
+                MMIO_LEN,
+            )
             .map_err(DeviceManagerError::BusError)?;
 
-        self.gpio_device = Some(gpio_device.clone());
+        self.gpio_device = Some(Arc::clone(&gpio_device));
 
         self.id_to_dev_info.insert(
             (DeviceType::Gpio, "gpio".to_string()),
@@ -2151,7 +2159,11 @@ impl DeviceManager {
 
         self.address_manager
             .io_bus
-            .insert(debug_console.clone(), port, 0x1)
+            .insert(
+                Arc::clone(&debug_console) as Arc<dyn BusDeviceSync>,
+                port,
+                0x1,
+            )
             .map_err(DeviceManagerError::BusError)?;
 
         // Fill the device tree with a new node. In case of restore, we
@@ -2202,7 +2214,7 @@ impl DeviceManager {
 
         self.address_manager
             .io_bus
-            .insert(serial.clone(), 0x3f8, 0x8)
+            .insert(Arc::clone(&serial) as Arc<dyn BusDeviceSync>, 0x3f8, 0x8)
             .map_err(DeviceManagerError::BusError)?;
 
         // Fill the device tree with a new node. In case of restore, we
@@ -2254,7 +2266,11 @@ impl DeviceManager {
 
         self.address_manager
             .mmio_bus
-            .insert(serial.clone(), addr.0, MMIO_LEN)
+            .insert(
+                Arc::clone(&serial) as Arc<dyn BusDeviceSync>,
+                addr.0,
+                MMIO_LEN,
+            )
             .map_err(DeviceManagerError::BusError)?;
 
         self.id_to_dev_info.insert(
@@ -2317,7 +2333,11 @@ impl DeviceManager {
 
         self.address_manager
             .mmio_bus
-            .insert(serial.clone(), addr.0, MMIO_LEN)
+            .insert(
+                Arc::clone(&serial) as Arc<dyn BusDeviceSync>,
+                addr.0,
+                MMIO_LEN,
+            )
             .map_err(DeviceManagerError::BusError)?;
 
         self.id_to_dev_info.insert(
@@ -2521,7 +2541,11 @@ impl DeviceManager {
         // Add TPM Device to mmio
         self.address_manager
             .mmio_bus
-            .insert(tpm.clone(), layout::TPM_START.0, layout::TPM_SIZE)
+            .insert(
+                Arc::clone(&tpm) as Arc<dyn BusDeviceSync>,
+                layout::TPM_START.0,
+                layout::TPM_SIZE,
+            )
             .map_err(DeviceManagerError::BusError)?;
 
         Ok(tpm)
@@ -2762,7 +2786,7 @@ impl DeviceManager {
 
             let virtio_block = Arc::new(Mutex::new(virtio_block));
 
-            self.block_devices.push(virtio_block.clone());
+            self.block_devices.push(Arc::clone(&virtio_block));
 
             (
                 Arc::clone(&virtio_block) as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
@@ -3471,7 +3495,7 @@ impl DeviceManager {
     }
 
     fn make_virtio_mem_devices(&mut self, snapshot: Option<&Snapshot>) -> DeviceManagerResult<()> {
-        let mm = self.memory_manager.clone();
+        let mm = Arc::clone(&self.memory_manager);
         let mut mm = mm.lock().unwrap();
         for (memory_zone_id, memory_zone) in mm.memory_zones_mut().iter_mut() {
             if let Some(virtio_mem_zone) = memory_zone.virtio_mem_zone_mut() {
@@ -3491,7 +3515,7 @@ impl DeviceManager {
                         self.exit_evt
                             .try_clone()
                             .map_err(DeviceManagerError::EventFd)?,
-                        virtio_mem_zone.blocks_state().clone(),
+                        Arc::clone(virtio_mem_zone.blocks_state()),
                         state_from_id(snapshot, memory_zone_id.as_str())
                             .map_err(DeviceManagerError::RestoreGetState)?,
                     )
@@ -3551,8 +3575,11 @@ impl DeviceManager {
         let pvmemcontrol_pci_device = Arc::new(Mutex::new(pvmemcontrol_pci_device));
         let pvmemcontrol_bus_device = Arc::new(pvmemcontrol_bus_device);
 
-        let (bars, new_resources) =
-            self.allocate_pci_bars(pvmemcontrol_pci_device.clone(), pci_segment_id, resources)?;
+        let (bars, new_resources) = self.allocate_pci_bars(
+            Arc::clone(&pvmemcontrol_pci_device) as Arc<Mutex<dyn PciDevice>>,
+            pci_segment_id,
+            resources,
+        )?;
 
         let mut node = device_node!(id, pvmemcontrol_pci_device);
 
@@ -3563,8 +3590,8 @@ impl DeviceManager {
         self.device_tree.lock().unwrap().insert(id, node);
 
         self.commit_pci_device(
-            pvmemcontrol_bus_device.clone(),
-            pvmemcontrol_pci_device.clone(),
+            Arc::clone(&pvmemcontrol_bus_device) as Arc<dyn BusDeviceSync>,
+            Arc::clone(&pvmemcontrol_pci_device) as Arc<Mutex<dyn PciDevice>>,
             pci_segment_id,
             pci_device_bdf,
             bars,
@@ -3606,7 +3633,7 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::CreateVirtioBalloon)?,
             ));
 
-            self.balloon = Some(virtio_balloon_device.clone());
+            self.balloon = Some(Arc::clone(&virtio_balloon_device));
 
             self.virtio_devices.push(MetaVirtioDevice {
                 virtio_device: Arc::clone(&virtio_balloon_device)
@@ -3955,8 +3982,10 @@ impl DeviceManager {
             }
 
             if let Some(mapping) = &self.iommu_mapping {
-                self.msi_interrupt_manager
-                    .register_remapping(pci_device_bdf.into(), mapping.clone());
+                self.msi_interrupt_manager.register_remapping(
+                    pci_device_bdf.into(),
+                    Arc::clone(mapping) as Arc<dyn InterruptRemapping>,
+                );
             }
 
             vfio_ops
@@ -4002,7 +4031,9 @@ impl DeviceManager {
                 // Confidential VM over iommufd supports shared/private tracking.
                 Some(tracker) => {
                     tracker
-                        .add_dma_mapping_handler(vfio_mapping.clone())
+                        .add_dma_mapping_handler(
+                            Arc::clone(&vfio_mapping) as Arc<dyn ExternalDmaMapping>
+                        )
                         .map_err(DeviceManagerError::AddDmaMappingHandlerSevSnp)?;
                     false
                 }
@@ -4052,7 +4083,7 @@ impl DeviceManager {
                     .unwrap()
                     .add_dma_mapping_handler(
                         VirtioMemMappingSource::Container,
-                        vfio_mapping.clone(),
+                        Arc::clone(&vfio_mapping) as Arc<dyn ExternalDmaMapping>,
                     )
                     .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
             }
@@ -4073,7 +4104,7 @@ impl DeviceManager {
                 None
             };
 
-        let memory_manager = self.memory_manager.clone();
+        let memory_manager = Arc::clone(&self.memory_manager);
 
         let vfio_p2p_dma = self
             .config
@@ -4090,10 +4121,11 @@ impl DeviceManager {
 
         let vfio_pci_device = VfioPciDevice::new(
             vfio_name.clone(),
-            self.address_manager.vm.clone(),
+            Arc::clone(&self.address_manager.vm),
             vfio_device,
             vfio_ops,
-            self.msi_interrupt_manager.clone(),
+            Arc::clone(&self.msi_interrupt_manager)
+                as Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
             legacy_interrupt_group,
             device_cfg.pci_common.iommu,
             vfio_p2p_dma,
@@ -4113,8 +4145,11 @@ impl DeviceManager {
 
         let vfio_pci_device = Arc::new(Mutex::new(vfio_pci_device));
 
-        let (bars, new_resources) =
-            self.allocate_pci_bars(vfio_pci_device.clone(), pci_segment_id, resources)?;
+        let (bars, new_resources) = self.allocate_pci_bars(
+            Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn PciDevice>>,
+            pci_segment_id,
+            resources,
+        )?;
 
         vfio_pci_device
             .lock()
@@ -4131,7 +4166,7 @@ impl DeviceManager {
         // Update the device tree with correct resource information.
         node.resources = new_resources;
         node.pci_bdf = Some(pci_device_bdf);
-        node.pci_device_handle = Some(PciDeviceHandle::Vfio(vfio_pci_device.clone()));
+        node.pci_device_handle = Some(PciDeviceHandle::Vfio(Arc::clone(&vfio_pci_device)));
 
         self.device_tree
             .lock()
@@ -4143,7 +4178,7 @@ impl DeviceManager {
             .insert(vfio_name.clone(), pci_device_bdf);
 
         self.commit_pci_device(
-            vfio_pci_device.clone(),
+            Arc::clone(&vfio_pci_device) as Arc<dyn BusDeviceSync>,
             vfio_pci_device,
             pci_segment_id,
             pci_device_bdf,
@@ -4230,13 +4265,13 @@ impl DeviceManager {
                 PciBarRegionType::IoRegion => {
                     self.address_manager
                         .io_bus
-                        .insert(bus_device.clone(), bar.addr(), bar.size())
+                        .insert(Arc::clone(&bus_device), bar.addr(), bar.size())
                         .map_err(DeviceManagerError::PioInsert)?;
                 }
                 PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
                     self.address_manager
                         .mmio_bus
-                        .insert(bus_device.clone(), bar.addr(), bar.size())
+                        .insert(Arc::clone(&bus_device), bar.addr(), bar.size())
                         .map_err(DeviceManagerError::MmioInsert)?;
                 }
             }
@@ -4305,13 +4340,14 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::VfioUserCreateClient)?,
         ));
 
-        let memory_manager = self.memory_manager.clone();
+        let memory_manager = Arc::clone(&self.memory_manager);
 
         let mut vfio_user_pci_device = VfioUserPciDevice::new(
             vfio_user_name.clone(),
-            self.address_manager.vm.clone(),
-            client.clone(),
-            self.msi_interrupt_manager.clone(),
+            Arc::clone(&self.address_manager.vm),
+            Arc::clone(&client),
+            Arc::clone(&self.msi_interrupt_manager)
+                as Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
             legacy_interrupt_group,
             pci_device_bdf,
             memory_manager.lock().unwrap().memory_slot_allocator(),
@@ -4327,7 +4363,7 @@ impl DeviceManager {
                 .unwrap()
                 .add_dma_mapping_handler(
                     VirtioMemMappingSource::Device(pci_device_bdf.into()),
-                    vfio_user_mapping.clone(),
+                    Arc::clone(&vfio_user_mapping) as Arc<dyn ExternalDmaMapping>,
                 )
                 .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
         }
@@ -4342,8 +4378,11 @@ impl DeviceManager {
 
         let vfio_user_pci_device = Arc::new(Mutex::new(vfio_user_pci_device));
 
-        let (bars, new_resources) =
-            self.allocate_pci_bars(vfio_user_pci_device.clone(), pci_segment_id, resources)?;
+        let (bars, new_resources) = self.allocate_pci_bars(
+            Arc::clone(&vfio_user_pci_device) as Arc<Mutex<dyn PciDevice>>,
+            pci_segment_id,
+            resources,
+        )?;
 
         // Note it is required to call 'allocate_pci_bars()' in advance to have the list of
         // mmio regions provisioned correctly
@@ -4358,7 +4397,7 @@ impl DeviceManager {
         // Update the device tree with correct resource information.
         node.resources = new_resources;
         node.pci_bdf = Some(pci_device_bdf);
-        node.pci_device_handle = Some(PciDeviceHandle::VfioUser(vfio_user_pci_device.clone()));
+        node.pci_device_handle = Some(PciDeviceHandle::VfioUser(Arc::clone(&vfio_user_pci_device)));
 
         self.device_tree
             .lock()
@@ -4370,7 +4409,7 @@ impl DeviceManager {
             .insert(vfio_user_name.clone(), pci_device_bdf);
 
         self.commit_pci_device(
-            vfio_user_pci_device.clone(),
+            Arc::clone(&vfio_user_pci_device) as Arc<dyn BusDeviceSync>,
             vfio_user_pci_device,
             pci_segment_id,
             pci_device_bdf,
@@ -4434,18 +4473,20 @@ impl DeviceManager {
         if let Some(mapping) = iommu_mapping {
             access_platform = Some(Arc::new(AccessPlatformMapping::new(
                 pci_device_bdf.into(),
-                mapping.clone(),
+                Arc::clone(mapping),
             )));
-            self.msi_interrupt_manager
-                .register_remapping(pci_device_bdf.into(), mapping.clone());
+            self.msi_interrupt_manager.register_remapping(
+                pci_device_bdf.into(),
+                Arc::clone(mapping) as Arc<dyn InterruptRemapping>,
+            );
         }
 
         // If SEV-SNP is enabled create the AccessPlatform from SevSnpPageAccessProxy
         #[cfg(feature = "sev_snp")]
         if self.config.lock().unwrap().is_sev_snp_enabled() {
-            access_platform = Some(Arc::new(SevSnpPageAccessProxy::new(
-                self.address_manager.vm.clone(),
-            )));
+            access_platform = Some(Arc::new(SevSnpPageAccessProxy::new(Arc::clone(
+                &self.address_manager.vm,
+            ))));
         }
 
         let memory = self.memory_manager.lock().unwrap().guest_memory();
@@ -4458,7 +4499,7 @@ impl DeviceManager {
                     iommu
                         .lock()
                         .unwrap()
-                        .add_external_mapping(pci_device_bdf.into(), dma_handler.clone());
+                        .add_external_mapping(pci_device_bdf.into(), Arc::clone(dma_handler));
                 } else {
                     return Err(DeviceManagerError::MissingVirtualIommu);
                 }
@@ -4471,7 +4512,7 @@ impl DeviceManager {
                         .unwrap()
                         .add_dma_mapping_handler(
                             VirtioMemMappingSource::Device(pci_device_bdf.into()),
-                            dma_handler.clone(),
+                            Arc::clone(dma_handler),
                         )
                         .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
                 }
@@ -4507,14 +4548,17 @@ impl DeviceManager {
                 // that constraint and should use 64-bit BARs like the rest of the virtio devices.
                 use_64bit_bar_for_virtio_device(device_type, pci_segment_id, is_hotplug),
                 dma_handler,
-                self.pending_activations.clone(),
+                Arc::clone(&self.pending_activations),
                 vm_migration::snapshot_from_id(snapshot, id.as_str()),
             )
             .map_err(DeviceManagerError::VirtioDevice)?,
         ));
 
-        let (bars, new_resources) =
-            self.allocate_pci_bars(virtio_pci_device.clone(), pci_segment_id, resources)?;
+        let (bars, new_resources) = self.allocate_pci_bars(
+            Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn PciDevice>>,
+            pci_segment_id,
+            resources,
+        )?;
 
         let bar_addr = virtio_pci_device.lock().unwrap().config_bar_addr();
         for (event, addr) in virtio_pci_device.lock().unwrap().ioeventfds(bar_addr) {
@@ -4529,11 +4573,11 @@ impl DeviceManager {
         node.resources = new_resources;
         node.migratable = Some(Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn Migratable>>);
         node.pci_bdf = Some(pci_device_bdf);
-        node.pci_device_handle = Some(PciDeviceHandle::Virtio(virtio_pci_device.clone()));
+        node.pci_device_handle = Some(PciDeviceHandle::Virtio(Arc::clone(&virtio_pci_device)));
         self.device_tree.lock().unwrap().insert(id, node);
 
         self.commit_pci_device(
-            virtio_pci_device.clone(),
+            Arc::clone(&virtio_pci_device) as Arc<dyn BusDeviceSync>,
             virtio_pci_device,
             pci_segment_id,
             pci_device_bdf,
@@ -4562,8 +4606,11 @@ impl DeviceManager {
 
         let pvpanic_device = Arc::new(Mutex::new(pvpanic_device));
 
-        let (bars, new_resources) =
-            self.allocate_pci_bars(pvpanic_device.clone(), pci_segment_id, resources)?;
+        let (bars, new_resources) = self.allocate_pci_bars(
+            Arc::clone(&pvpanic_device) as Arc<Mutex<dyn PciDevice>>,
+            pci_segment_id,
+            resources,
+        )?;
 
         let mut node = device_node!(id, pvpanic_device);
 
@@ -4574,8 +4621,8 @@ impl DeviceManager {
         self.device_tree.lock().unwrap().insert(id, node);
 
         self.commit_pci_device(
-            pvpanic_device.clone(),
-            pvpanic_device.clone(),
+            Arc::clone(&pvpanic_device) as Arc<dyn BusDeviceSync>,
+            Arc::clone(&pvpanic_device) as Arc<Mutex<dyn PciDevice>>,
             pci_segment_id,
             pci_device_bdf,
             bars,
@@ -4608,19 +4655,22 @@ impl DeviceManager {
         let snapshot = snapshot_from_id(snapshot, id.as_str());
 
         let ivshmem_ops = Arc::new(Mutex::new(IvshmemHandler {
-            memory_manager: self.memory_manager.clone(),
+            memory_manager: Arc::clone(&self.memory_manager),
         }));
         let ivshmem_device = Arc::new(Mutex::new(
             devices::IvshmemDevice::new(
                 id.clone(),
                 ivshmem_cfg.size as u64,
-                ivshmem_ops.clone(),
+                Arc::clone(&ivshmem_ops) as Arc<Mutex<dyn IvshmemOps>>,
                 snapshot,
             )
             .map_err(DeviceManagerError::IvshmemCreate)?,
         ));
-        let (bars, new_resources) =
-            self.allocate_pci_bars(ivshmem_device.clone(), pci_segment_id, resources)?;
+        let (bars, new_resources) = self.allocate_pci_bars(
+            Arc::clone(&ivshmem_device) as Arc<Mutex<dyn PciDevice>>,
+            pci_segment_id,
+            resources,
+        )?;
 
         let start_addr = ivshmem_device.lock().unwrap().data_bar_addr();
         let (region, mapping) = ivshmem_ops
@@ -4637,8 +4687,8 @@ impl DeviceManager {
         self.device_tree.lock().unwrap().insert(id, node);
 
         self.commit_pci_device(
-            ivshmem_device.clone(),
-            ivshmem_device.clone(),
+            Arc::clone(&ivshmem_device) as Arc<dyn BusDeviceSync>,
+            Arc::clone(&ivshmem_device) as Arc<Mutex<dyn PciDevice>>,
             pci_segment_id,
             pci_device_bdf,
             bars,
@@ -4745,7 +4795,7 @@ impl DeviceManager {
     pub fn interrupt_controller(&self) -> Option<Arc<Mutex<dyn InterruptController>>> {
         self.interrupt_controller
             .as_ref()
-            .map(|ic| ic.clone() as Arc<Mutex<dyn InterruptController>>)
+            .map(|ic| Arc::clone(ic) as Arc<Mutex<dyn InterruptController>>)
     }
 
     pub(crate) fn pci_segments(&self) -> &[PciSegment] {
@@ -5494,7 +5544,7 @@ impl DeviceManager {
     }
 
     pub fn device_tree(&self) -> Arc<Mutex<DeviceTree>> {
-        self.device_tree.clone()
+        Arc::clone(&self.device_tree)
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -5611,9 +5661,9 @@ impl DeviceManager {
                 tracker.register_region(region.start_addr().raw_value(), region.len());
             }
         }
-        address_manager
-            .vm
-            .register_memory_conversion_handler(tracker.clone());
+        address_manager.vm.register_memory_conversion_handler(
+            Arc::clone(&tracker) as Arc<dyn hypervisor::MemoryConversionHandler>
+        );
 
         Some(tracker)
     }
@@ -5649,7 +5699,7 @@ impl IvshmemOps for IvshmemHandler {
         )
         .map_err(|e| IvshmemError::CreateUserMemoryRegion(e.into()))?;
         let region = Arc::new(region);
-        let mapping = self.create_userspace_mapping(start_addr, region.clone())?;
+        let mapping = self.create_userspace_mapping(start_addr, Arc::clone(&region))?;
         Ok((region, mapping))
     }
 
