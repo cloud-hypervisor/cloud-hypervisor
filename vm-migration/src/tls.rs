@@ -280,7 +280,7 @@ impl TlsStream {
         socket: TcpStream,
         config: &TlsServerConfig,
     ) -> result::Result<Self, MigratableError> {
-        let conn = ServerConnection::new(config.config.clone())
+        let conn = ServerConnection::new(Arc::clone(&config.config))
             .map_err(TlsError::RustlsError)
             .map_err(MigratableError::Tls)?;
 
