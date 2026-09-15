@@ -826,7 +826,7 @@ impl Mem {
                 ..Default::default()
             },
             id,
-            region: region.clone(),
+            region: Arc::clone(region),
             host_fd,
             config: Arc::new(Mutex::new(config)),
             seccomp_action,
@@ -950,19 +950,19 @@ impl VirtioDevice for Mem {
             mut queues,
             device_status,
         } = context;
-        self.common.activate(&queues, interrupt_cb.clone())?;
+        self.common.activate(&queues, Arc::clone(&interrupt_cb))?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds()?;
 
         let (_, queue, queue_evt) = queues.remove(0);
 
         let mut handler = MemEpollHandler {
             mem,
-            region: self.region.clone(),
+            region: Arc::clone(&self.region),
             host_fd: self.host_fd,
             blocks_state: Arc::clone(&self.blocks_state),
-            config: self.config.clone(),
+            config: Arc::clone(&self.config),
             queue,
-            interrupt_cb: interrupt_cb.clone(),
+            interrupt_cb: Arc::clone(&interrupt_cb),
             queue_evt,
             kill_evt,
             pause_evt,
@@ -985,7 +985,7 @@ impl VirtioDevice for Mem {
                 })?;
         }
 
-        let paused = self.common.paused.clone();
+        let paused = Arc::clone(&self.common.paused);
         let paused_sync = self.common.paused_sync.clone();
 
         self.common.spawn_worker(
@@ -993,8 +993,8 @@ impl VirtioDevice for Mem {
             &self.seccomp_action,
             Thread::VirtioMem,
             &self.exit_evt,
-            device_status.clone(),
-            interrupt_cb.clone(),
+            Arc::clone(&device_status),
+            Arc::clone(&interrupt_cb),
             move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
 

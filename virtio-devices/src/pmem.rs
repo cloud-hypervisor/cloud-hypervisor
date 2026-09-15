@@ -377,7 +377,7 @@ impl VirtioDevice for Pmem {
             mut queues,
             device_status,
         } = context;
-        self.common.activate(&queues, interrupt_cb.clone())?;
+        self.common.activate(&queues, Arc::clone(&interrupt_cb))?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds()?;
         if let Some(disk) = self.disk.as_ref() {
             let disk = disk.try_clone().map_err(|e| {
@@ -391,14 +391,14 @@ impl VirtioDevice for Pmem {
                 mem,
                 queue,
                 disk,
-                interrupt_cb: interrupt_cb.clone(),
+                interrupt_cb: Arc::clone(&interrupt_cb),
                 queue_evt,
                 kill_evt,
                 pause_evt,
                 access_platform: self.common.access_platform(),
             };
 
-            let paused = self.common.paused.clone();
+            let paused = Arc::clone(&self.common.paused);
             let paused_sync = self.common.paused_sync.clone();
 
             self.common.spawn_worker(
@@ -406,8 +406,8 @@ impl VirtioDevice for Pmem {
                 &self.seccomp_action,
                 Thread::VirtioPmem,
                 &self.exit_evt,
-                device_status.clone(),
-                interrupt_cb.clone(),
+                Arc::clone(&device_status),
+                Arc::clone(&interrupt_cb),
                 move || handler.run(&paused, paused_sync.as_ref().unwrap()),
             )?;
 

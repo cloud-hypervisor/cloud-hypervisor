@@ -628,7 +628,7 @@ impl VirtioDevice for Rtc {
             mut queues,
             device_status,
         } = context;
-        self.common.activate(&queues, interrupt_cb.clone())?;
+        self.common.activate(&queues, Arc::clone(&interrupt_cb))?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds()?;
 
         let (_, queue, queue_evt) = queues.remove(0);
@@ -636,22 +636,22 @@ impl VirtioDevice for Rtc {
         let mut handler = RtcEpollHandler {
             mem,
             queue,
-            interrupt_cb: interrupt_cb.clone(),
+            interrupt_cb: Arc::clone(&interrupt_cb),
             queue_evt,
             kill_evt,
             pause_evt,
             access_platform: self.common.access_platform.clone(),
         };
 
-        let paused = self.common.paused.clone();
+        let paused = Arc::clone(&self.common.paused);
         let paused_sync = self.common.paused_sync.clone();
         self.common.spawn_worker(
             &self.id,
             &self.seccomp_action,
             Thread::VirtioRtc,
             &self.exit_evt,
-            device_status.clone(),
-            interrupt_cb.clone(),
+            Arc::clone(&device_status),
+            Arc::clone(&interrupt_cb),
             move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
 

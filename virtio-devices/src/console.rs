@@ -165,7 +165,7 @@ impl ConsoleEpollHandler {
             let writer = out_file.try_clone().unwrap();
             if endpoint.is_pty() {
                 let pty_write_out = Arc::new(AtomicBool::new(false));
-                let write_out = Some(pty_write_out.clone());
+                let write_out = Some(Arc::clone(&pty_write_out));
                 let buffer = SerialBuffer::new(Box::new(writer), pty_write_out);
                 (
                     None,
@@ -687,7 +687,7 @@ impl Console {
         let console_config = Arc::new(Mutex::new(config));
         let resizer = Arc::new(ConsoleResizer {
             config_evt,
-            config: console_config.clone(),
+            config: Arc::clone(&console_config),
             tty: endpoint.out_file().as_ref().map(|t| t.try_clone().unwrap()),
             acked_features: AtomicU64::new(acked_features),
         });
@@ -708,7 +708,7 @@ impl Console {
                 },
                 id,
                 config: console_config,
-                resizer: resizer.clone(),
+                resizer: Arc::clone(&resizer),
                 resize_pipe,
                 endpoint,
                 seccomp_action,
@@ -762,7 +762,7 @@ impl VirtioDevice for Console {
             mut queues,
             device_status,
         } = context;
-        self.common.activate(&queues, interrupt_cb.clone())?;
+        self.common.activate(&queues, Arc::clone(&interrupt_cb))?;
         self.resizer
             .acked_features
             .store(self.common.acked_features, Ordering::Relaxed);
@@ -782,8 +782,8 @@ impl VirtioDevice for Console {
             mem,
             input_queue,
             output_queue,
-            interrupt_cb.clone(),
-            self.in_buffer.clone(),
+            Arc::clone(&interrupt_cb),
+            Arc::clone(&self.in_buffer),
             Arc::clone(&self.resizer),
             self.endpoint.clone(),
             input_queue_evt,
@@ -795,7 +795,7 @@ impl VirtioDevice for Console {
             self.common.access_platform(),
         );
 
-        let paused = self.common.paused.clone();
+        let paused = Arc::clone(&self.common.paused);
         let paused_sync = self.common.paused_sync.clone();
 
         self.common.spawn_worker(
@@ -803,8 +803,8 @@ impl VirtioDevice for Console {
             &self.seccomp_action,
             Thread::VirtioConsole,
             &self.exit_evt,
-            device_status.clone(),
-            interrupt_cb.clone(),
+            Arc::clone(&device_status),
+            Arc::clone(&interrupt_cb),
             move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
 

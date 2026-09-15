@@ -153,7 +153,7 @@ struct ActiveRequestGuard {
 impl ActiveRequestGuard {
     fn new(counter: &Arc<AtomicUsize>) -> Self {
         Self {
-            counter: counter.clone(),
+            counter: Arc::clone(counter),
         }
     }
 }
@@ -231,7 +231,7 @@ impl BlockEpollHandler {
         self.active_request_count.fetch_add(1, Ordering::SeqCst);
         let _active_request = ActiveRequestGuard::new(&self.active_request_count);
         // Clone the Arc so the `self.queue` mutable borrow is allowed.
-        let draining_active_requests = self.draining_active_requests.clone();
+        let draining_active_requests = Arc::clone(&self.draining_active_requests);
         if draining_active_requests.load(Ordering::SeqCst) {
             return Ok(());
         }
@@ -1156,7 +1156,7 @@ impl VirtioDevice for Block {
         if original_acked_features != self.common.acked_features {
             warn!("Guest did not acknowledge that device is read-only, acting as if it did!");
         }
-        self.common.activate(&queues, interrupt_cb.clone())?;
+        self.common.activate(&queues, Arc::clone(&interrupt_cb))?;
 
         // Recompute the barrier size from the queues that are actually activated.
         self.common.paused_sync = Some(Arc::new(Barrier::new(queues.len() + 1)));
@@ -1185,12 +1185,12 @@ impl VirtioDevice for Block {
                         error!("failed to create new AsyncIo: {e}");
                         ActivateError::BadActivate
                     })?,
-                disk_nsectors: self.disk_nsectors.clone(),
-                interrupt_cb: interrupt_cb.clone(),
+                disk_nsectors: Arc::clone(&self.disk_nsectors),
+                interrupt_cb: Arc::clone(&interrupt_cb),
                 serial: self.serial.clone(),
                 kill_evt,
                 pause_evt,
-                writeback: self.writeback.clone(),
+                writeback: Arc::clone(&self.writeback),
                 counters: self.counters.clone(),
                 queue_evt,
                 // Analysis during boot shows around ~40 maximum requests
@@ -1206,11 +1206,11 @@ impl VirtioDevice for Block {
                 access_platform: self.common.access_platform(),
                 host_cpus: self.queue_affinity.get(&queue_idx).cloned(),
                 acked_features: self.common.acked_features,
-                active_request_count: self.active_request_count.clone(),
-                draining_active_requests: self.draining_active_requests.clone(),
+                active_request_count: Arc::clone(&self.active_request_count),
+                draining_active_requests: Arc::clone(&self.draining_active_requests),
             };
 
-            let paused = self.common.paused.clone();
+            let paused = Arc::clone(&self.common.paused);
             let paused_sync = self.common.paused_sync.clone();
 
             self.common.spawn_worker(
@@ -1218,8 +1218,8 @@ impl VirtioDevice for Block {
                 &self.seccomp_action,
                 Thread::VirtioBlock,
                 &self.exit_evt,
-                self.device_status.clone(),
-                interrupt_cb.clone(),
+                Arc::clone(&self.device_status),
+                Arc::clone(&interrupt_cb),
                 move || handler.run(&paused, paused_sync.as_ref().unwrap()),
             )?;
         }

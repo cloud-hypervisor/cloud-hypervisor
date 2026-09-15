@@ -845,7 +845,7 @@ impl VirtioDevice for Net {
             device_status,
         } = context;
         self.device_status = device_status;
-        self.common.activate(&queues, interrupt_cb.clone())?;
+        self.common.activate(&queues, Arc::clone(&interrupt_cb))?;
 
         let num_queues = queues.len();
         let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
@@ -866,7 +866,7 @@ impl VirtioDevice for Net {
             let (kill_evt, pause_evt) = self.common.dup_eventfds()?;
 
             let guest_announce_ops = VirtioNetGuestAnnounceOps::new(
-                interrupt_cb.clone(),
+                Arc::clone(&interrupt_cb),
                 self.common
                     .feature_acked(VIRTIO_NET_F_GUEST_ANNOUNCE.into()),
                 &self.announce,
@@ -892,14 +892,14 @@ impl VirtioDevice for Net {
                 pause_evt,
                 ctrl_q: CtrlQueue::new(
                     self.taps.clone(),
-                    self.announce.pending.clone(),
+                    Arc::clone(&self.announce.pending),
                     self.config.max_virtqueue_pairs,
                 ),
                 queue: ctrl_queue,
                 queue_evt: ctrl_queue_evt,
                 access_platform: self.common.access_platform(),
                 queue_index: ctrl_queue_index as u16,
-                interrupt_cb: interrupt_cb.clone(),
+                interrupt_cb: Arc::clone(&interrupt_cb),
                 announce_evt: self
                     .announce
                     .evt
@@ -909,7 +909,7 @@ impl VirtioDevice for Net {
                 announcer,
             };
 
-            let paused = self.common.paused.clone();
+            let paused = Arc::clone(&self.common.paused);
             let paused_sync = self.common.paused_sync.clone();
 
             self.common.spawn_worker(
@@ -917,8 +917,8 @@ impl VirtioDevice for Net {
                 &self.seccomp_action,
                 Thread::VirtioNetCtl,
                 &self.exit_evt,
-                self.device_status.clone(),
-                interrupt_cb.clone(),
+                Arc::clone(&self.device_status),
+                Arc::clone(&interrupt_cb),
                 move || ctrl_handler.run_ctrl(&paused, paused_sync.as_ref().unwrap()),
             )?;
         }
@@ -980,12 +980,12 @@ impl VirtioDevice for Net {
                 queue_index_base: (i * 2) as u16,
                 queue_pair,
                 queue_evt_pair,
-                interrupt_cb: interrupt_cb.clone(),
+                interrupt_cb: Arc::clone(&interrupt_cb),
                 kill_evt,
                 pause_evt,
             };
 
-            let paused = self.common.paused.clone();
+            let paused = Arc::clone(&self.common.paused);
             let paused_sync = self.common.paused_sync.clone();
 
             self.common.spawn_worker(
@@ -993,8 +993,8 @@ impl VirtioDevice for Net {
                 &self.seccomp_action,
                 Thread::VirtioNet,
                 &self.exit_evt,
-                self.device_status.clone(),
-                interrupt_cb.clone(),
+                Arc::clone(&self.device_status),
+                Arc::clone(&interrupt_cb),
                 move || handler.run(&paused, paused_sync.as_ref().unwrap()),
             )?;
         }
@@ -1101,7 +1101,7 @@ impl Announcer {
 
     pub fn new(announce: &AnnouncementState, announce_ops: Box<[Box<dyn AnnounceOps>]>) -> Self {
         Self {
-            announce_generation: announce.generation.clone(),
+            announce_generation: Arc::clone(&announce.generation),
             generation: 0,
             announcements_done: 0,
             announce_ops,
@@ -1155,7 +1155,7 @@ impl VirtioNetGuestAnnounceOps {
         Self {
             interrupt_cb,
             guest_announce_negotiated,
-            announce_pending: announce.pending.clone(),
+            announce_pending: Arc::clone(&announce.pending),
         }
     }
 }
@@ -1336,7 +1336,7 @@ mod tests {
         let interrupt = Arc::new(TestInterrupt::new());
         let net = test_net(
             (1 << VIRTIO_NET_F_STATUS) | (1 << VIRTIO_NET_F_GUEST_ANNOUNCE),
-            Some(interrupt.clone() as Arc<dyn VirtioInterrupt>),
+            Some(Arc::clone(&interrupt) as Arc<dyn VirtioInterrupt>),
         )
         .unwrap();
         let mut announcer = test_announcer(&net).unwrap();
@@ -1357,7 +1357,7 @@ mod tests {
         let interrupt = Arc::new(TestInterrupt::new());
         let net = test_net(
             (1 << VIRTIO_NET_F_STATUS) | (1 << VIRTIO_NET_F_GUEST_ANNOUNCE),
-            Some(interrupt.clone() as Arc<dyn VirtioInterrupt>),
+            Some(Arc::clone(&interrupt) as Arc<dyn VirtioInterrupt>),
         )
         .unwrap();
         let mut announcer = test_announcer(&net).unwrap();
@@ -1377,7 +1377,7 @@ mod tests {
     #[test]
     fn test_post_migration_without_feature_is_noop() {
         let interrupt = Arc::new(TestInterrupt::new());
-        let net = test_net(0, Some(interrupt.clone() as Arc<dyn VirtioInterrupt>)).unwrap();
+        let net = test_net(0, Some(Arc::clone(&interrupt) as Arc<dyn VirtioInterrupt>)).unwrap();
         let mut announcer = test_announcer(&net).unwrap();
 
         net.announce.pending.store(true, Ordering::Release);
@@ -1395,7 +1395,7 @@ mod tests {
         let interrupt = Arc::new(TestInterrupt::new());
         let mut net = test_net(
             (1 << VIRTIO_NET_F_GUEST_ANNOUNCE) | (1 << VIRTIO_NET_F_STATUS),
-            Some(interrupt.clone() as Arc<dyn VirtioInterrupt>),
+            Some(Arc::clone(&interrupt) as Arc<dyn VirtioInterrupt>),
         )
         .unwrap();
         let mut announcer = test_announcer(&net).unwrap();
@@ -1420,7 +1420,7 @@ mod tests {
         let interrupt = Arc::new(TestInterrupt::new());
         let mut net = test_net(
             1 << VIRTIO_NET_F_GUEST_ANNOUNCE,
-            Some(interrupt.clone() as Arc<dyn VirtioInterrupt>),
+            Some(Arc::clone(&interrupt) as Arc<dyn VirtioInterrupt>),
         )
         .unwrap();
         let mut announcer = test_announcer(&net).unwrap();
@@ -1477,7 +1477,7 @@ mod tests {
         val: Arc<AtomicUsize>,
     ) -> Result<Announcer> {
         let first_ops = RecordingAnnounceOps {
-            val: val.clone(),
+            val: Arc::clone(&val),
             outcome: first_outcome,
         };
         let second_ops = RecordingAnnounceOps {
@@ -1508,7 +1508,7 @@ mod tests {
             &net,
             AnnounceOutcome::Retry,
             AnnounceOutcome::Done,
-            val.clone(),
+            Arc::clone(&val),
         )
         .unwrap();
 

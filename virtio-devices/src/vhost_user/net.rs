@@ -363,7 +363,7 @@ impl VirtioDevice for Net {
         } = context;
         self.vu_common
             .virtio_common
-            .activate(&queues, interrupt_cb.clone())?;
+            .activate(&queues, Arc::clone(&interrupt_cb))?;
 
         let num_queues = queues.len();
         let event_idx = self
@@ -384,7 +384,7 @@ impl VirtioDevice for Net {
             let (kill_evt, pause_evt) = self.vu_common.virtio_common.dup_eventfds()?;
 
             let announce_ops = VirtioNetGuestAnnounceOps::new(
-                interrupt_cb.clone(),
+                Arc::clone(&interrupt_cb),
                 self.vu_common
                     .virtio_common
                     .feature_acked(VIRTIO_NET_F_GUEST_ANNOUNCE.into()),
@@ -402,13 +402,13 @@ impl VirtioDevice for Net {
                 pause_evt,
                 ctrl_q: CtrlQueue::new(
                     Vec::new(),
-                    self.announce.pending.clone(),
+                    Arc::clone(&self.announce.pending),
                     self.config.max_virtqueue_pairs,
                 ),
                 queue: ctrl_queue,
                 queue_evt: ctrl_queue_evt,
                 access_platform: None,
-                interrupt_cb: interrupt_cb.clone(),
+                interrupt_cb: Arc::clone(&interrupt_cb),
                 queue_index: ctrl_queue_index as u16,
                 announce_evt: self
                     .announce
@@ -419,7 +419,7 @@ impl VirtioDevice for Net {
                 announcer,
             };
 
-            let paused = self.vu_common.virtio_common.paused.clone();
+            let paused = Arc::clone(&self.vu_common.virtio_common.paused);
             // Let's update the barrier as we need 1 for the control queue
             // thread + 1 for the common vhost-user thread + 1 for the main
             // thread signalling the pause.
@@ -431,8 +431,8 @@ impl VirtioDevice for Net {
                 &self.seccomp_action,
                 Thread::VirtioVhostNetCtl,
                 &self.exit_evt,
-                device_status.clone(),
-                interrupt_cb.clone(),
+                Arc::clone(&device_status),
+                Arc::clone(&interrupt_cb),
                 move || ctrl_handler.run_ctrl(&paused, paused_sync.as_ref().unwrap()),
             )?;
         }
@@ -446,14 +446,14 @@ impl VirtioDevice for Net {
         let mut handler = self.vu_common.activate(
             mem,
             &queues,
-            interrupt_cb.clone(),
+            Arc::clone(&interrupt_cb),
             self.vu_common.virtio_common.acked_features,
             backend_req_handler,
             kill_evt,
             pause_evt,
         )?;
 
-        let paused = self.vu_common.virtio_common.paused.clone();
+        let paused = Arc::clone(&self.vu_common.virtio_common.paused);
         let paused_sync = self.vu_common.virtio_common.paused_sync.clone();
 
         self.vu_common.spawn_worker(
@@ -461,8 +461,8 @@ impl VirtioDevice for Net {
             &self.seccomp_action,
             Thread::VirtioVhostNet,
             &self.exit_evt,
-            device_status.clone(),
-            interrupt_cb.clone(),
+            Arc::clone(&device_status),
+            Arc::clone(&interrupt_cb),
             move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
 
