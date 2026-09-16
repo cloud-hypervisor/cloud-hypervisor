@@ -106,6 +106,8 @@ impl TxBufSource for VsockPacket {
 /// socket and a host-side `Read + Write + AsRawFd` stream.
 ///
 pub(crate) struct VsockConnection<S: Read + ReadVolatile + Write + WriteVolatile + AsRawFd> {
+    /// The socket type of this connection.
+    sock_type: u16,
     /// The current connection state.
     state: ConnState,
     /// The local CID. Most of the time this will be the constant `2` (the vsock host CID).
@@ -579,8 +581,10 @@ where
         local_port: u32,
         peer_port: u32,
         peer_buf_alloc: u32,
+        sock_type: u16,
     ) -> Self {
         Self {
+            sock_type,
             local_cid,
             peer_cid,
             local_port,
@@ -608,8 +612,10 @@ where
         peer_cid: u64,
         local_port: u32,
         peer_port: u32,
+        sock_type: u16,
     ) -> Self {
         Self {
+            sock_type,
             local_cid,
             peer_cid,
             local_port,
@@ -782,7 +788,7 @@ where
             .set_dst_cid(self.peer_cid)
             .set_src_port(self.local_port)
             .set_dst_port(self.peer_port)
-            .set_type(uapi::VSOCK_TYPE_STREAM)
+            .set_type(self.sock_type)
             .set_buf_alloc(defs::CONN_TX_BUF_SIZE)
             .set_fwd_cnt(self.fwd_cnt.0)
     }
@@ -976,9 +982,15 @@ mod tests {
                     LOCAL_PORT,
                     PEER_PORT,
                     PEER_BUF_ALLOC,
+                    uapi::VSOCK_TYPE_STREAM,
                 ),
                 ConnState::LocalInit => VsockConnection::<TestStream>::new_local_init(
-                    stream, LOCAL_CID, PEER_CID, LOCAL_PORT, PEER_PORT,
+                    stream,
+                    LOCAL_CID,
+                    PEER_CID,
+                    LOCAL_PORT,
+                    PEER_PORT,
+                    uapi::VSOCK_TYPE_STREAM,
                 ),
                 ConnState::Established => {
                     let mut conn = VsockConnection::<TestStream>::new_peer_init(
@@ -988,6 +1000,7 @@ mod tests {
                         LOCAL_PORT,
                         PEER_PORT,
                         PEER_BUF_ALLOC,
+                        uapi::VSOCK_TYPE_STREAM,
                     );
                     assert!(conn.has_pending_rx());
                     conn.recv_pkt(&mut pkt).unwrap();

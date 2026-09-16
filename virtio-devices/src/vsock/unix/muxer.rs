@@ -490,6 +490,7 @@ impl VsockMuxer {
                                 self.cid,
                                 local_port,
                                 peer_port,
+                                uapi::VSOCK_TYPE_STREAM,
                             ),
                         )
                     })
@@ -733,6 +734,7 @@ impl VsockMuxer {
                         pkt.dst_port(),
                         pkt.src_port(),
                         pkt.buf_alloc(),
+                        uapi::VSOCK_TYPE_STREAM,
                     ),
                 )
             })
