@@ -62,7 +62,7 @@ use crate::uffd::{
     self, FileUffdMemorySource, SocketUffdMemorySource, UffdMemorySource, UffdRange,
 };
 use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
-use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID, userfaultfd};
+use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID, prefault, userfaultfd};
 
 struct UffdHandler {
     stop_event: EventFd,
@@ -93,8 +93,6 @@ const MPOL_MF_MOVE: u32 = 1 << 1;
 
 // Reserve 1 MiB for platform MMIO devices (e.g. ACPI control devices)
 const PLATFORM_DEVICE_AREA_SIZE: u64 = 1 << 20;
-
-const MAX_PREFAULT_THREAD_COUNT: usize = 16;
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 struct HotPlugState {
@@ -519,7 +517,7 @@ where
 }
 
 #[inline]
-fn is_aligned<T>(val: T, align: T) -> bool
+pub(crate) fn is_aligned<T>(val: T, align: T) -> bool
 where
     T: BitAnd<Output = T> + Sub<Output = T> + From<u8> + PartialEq,
 {
@@ -2310,57 +2308,11 @@ impl MemoryManager {
         if prefault {
             let page_size =
                 Self::get_prefault_align_size(backing_file, hugepages, hugepage_size)? as usize;
-
-            if !is_aligned(size, page_size) {
-                warn!("Prefaulting memory size {size} misaligned with page size {page_size}");
-            }
-
-            let num_pages = size / page_size;
-
-            let num_threads = Self::get_prefault_num_threads(page_size, num_pages);
-
-            let pages_per_thread = num_pages / num_threads;
-            let remainder = num_pages % num_threads;
-
-            let barrier = Arc::new(Barrier::new(num_threads));
-            thread::scope(|s| -> Result<(), Error> {
-                let r = &region;
-                let mut handles = Vec::new();
-                for i in 0..num_threads {
-                    let barrier = Arc::clone(&barrier);
-                    let handle = s.spawn(move || {
-                        // Wait until all threads have been spawned to avoid contention
-                        // over mmap_sem between thread stack allocation and page faulting.
-                        barrier.wait();
-                        let pages = pages_per_thread + if i < remainder { 1 } else { 0 };
-                        let offset = page_size * ((i * pages_per_thread) + cmp::min(i, remainder));
-                        // SAFETY: FFI call with correct arguments
-                        let ret = unsafe {
-                            let addr = r.as_ptr().add(offset);
-                            libc::madvise(addr.cast(), pages * page_size, libc::MADV_POPULATE_WRITE)
-                        };
-                        if ret != 0 {
-                            let e = io::Error::last_os_error();
-                            return Err(e);
-                        }
-                        Ok(())
-                    });
-                    handles.push(handle);
-                }
-
-                for handle in handles {
-                    handle
-                        .join()
-                        .map_err(|e| {
-                            Error::PrefaultMemory(io::Error::other(format!(
-                                "Prefault thread panicked: {e:?}"
-                            )))
-                        })?
-                        .map_err(Error::PrefaultMemory)?;
-                }
-
-                Ok(())
-            })?;
+            prefault::prefault_regions(&[prefault::PrefaultRegion {
+                addr: region.as_ptr() as usize,
+                size,
+                page_size,
+            }])?;
         }
 
         info!(
@@ -2434,21 +2386,6 @@ impl MemoryManager {
                 Ok(align_size)
             }
         }
-    }
-
-    fn get_prefault_num_threads(page_size: usize, num_pages: usize) -> usize {
-        // Do not create more threads than processors available.
-        let mut n = thread::available_parallelism()
-            .map_or(1, |val| val.get())
-            .min(MAX_PREFAULT_THREAD_COUNT);
-
-        // Do not create more threads than pages being allocated.
-        n = cmp::min(n, num_pages);
-
-        // Do not create threads to allocate less than 64 MiB of memory.
-        n = cmp::min(n, cmp::max(1, page_size * num_pages / (64 * (1 << 26))));
-
-        n
     }
 
     // Update the GuestMemoryMmap with the new range
