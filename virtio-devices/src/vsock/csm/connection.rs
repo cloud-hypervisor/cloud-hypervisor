@@ -83,8 +83,9 @@
 use std::io::{ErrorKind, Read, Write};
 use std::num::Wrapping;
 use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
-use std::{cmp, io};
+use std::{cmp, io, mem};
 
 use log::{debug, error, info, warn};
 use vm_memory::{ReadVolatile, WriteVolatile};
@@ -94,6 +95,62 @@ use super::super::packet::VsockPacket;
 use super::super::{Result as VsockResult, VsockChannel, VsockEpollListener, VsockError};
 use super::txbuf::{TxBuf, TxBufSource};
 use super::{ConnState, Error, PendingRx, PendingRxSet, Result, defs};
+
+/// Datagram-based host stream I/O, which `Read`/`Write` cannot express.
+pub(crate) trait SeqPacketStream {
+    fn recv_datagram(&mut self, buf: &mut [u8]) -> io::Result<usize>;
+
+    fn send_datagram(&mut self, buf: &[u8]) -> io::Result<usize>;
+}
+
+impl SeqPacketStream for UnixStream {
+    fn recv_datagram(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let mut iov = libc::iovec {
+            iov_base: buf.as_mut_ptr().cast::<libc::c_void>(),
+            iov_len: buf.len(),
+        };
+        // SAFETY: all-zero is a valid bit pattern for msghdr
+        let mut msg: libc::msghdr = unsafe { mem::zeroed() };
+        msg.msg_iov = &mut iov;
+        msg.msg_iovlen = 1;
+        // SAFETY: fd is owned by `self`; iov/msg point at valid local storage for the call.
+        let ret = unsafe {
+            libc::recvmsg(
+                self.as_raw_fd(),
+                &mut msg,
+                libc::MSG_DONTWAIT | libc::MSG_TRUNC,
+            )
+        };
+        if ret < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let len = ret as usize;
+        if len > buf.len() {
+            return Err(io::Error::other(
+                "seqpacket datagram exceeds max message size",
+            ));
+        }
+        Ok(len)
+    }
+
+    fn send_datagram(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let mut iov = libc::iovec {
+            iov_base: buf.as_ptr() as *mut libc::c_void,
+            iov_len: buf.len(),
+        };
+        // SAFETY: all-zero is a valid bit pattern for msghdr
+        let mut msg: libc::msghdr = unsafe { mem::zeroed() };
+        msg.msg_iov = &mut iov;
+        msg.msg_iovlen = 1;
+        let flags = libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL;
+        // SAFETY: fd is owned by `self`; iov/msg point at valid local storage for the call.
+        let ret = unsafe { libc::sendmsg(self.as_raw_fd(), &msg, flags) };
+        if ret < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(ret as usize)
+    }
+}
 
 impl TxBufSource for VsockPacket {
     fn copy_to_tx_buf(&self, offset: usize, dst: &mut [u8]) -> Result<()> {
@@ -148,7 +205,7 @@ pub(crate) struct VsockConnection<S: Read + ReadVolatile + Write + WriteVolatile
 
 impl<S> VsockChannel for VsockConnection<S>
 where
-    S: Read + ReadVolatile + Write + WriteVolatile + AsRawFd,
+    S: Read + ReadVolatile + Write + WriteVolatile + AsRawFd + SeqPacketStream,
 {
     /// Fill in a vsock packet, to be delivered to our peer (the guest driver).
     ///
@@ -464,7 +521,7 @@ where
 
 impl<S> VsockEpollListener for VsockConnection<S>
 where
-    S: Read + ReadVolatile + Write + WriteVolatile + AsRawFd,
+    S: Read + ReadVolatile + Write + WriteVolatile + AsRawFd + SeqPacketStream,
 {
     /// Get the file descriptor that this connection wants polled.
     ///
@@ -568,7 +625,7 @@ where
 
 impl<S> VsockConnection<S>
 where
-    S: Read + ReadVolatile + Write + WriteVolatile + AsRawFd,
+    S: Read + ReadVolatile + Write + WriteVolatile + AsRawFd + SeqPacketStream,
 {
     /// Create a new guest-initiated connection object.
     ///
@@ -790,6 +847,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::io::{Error as IoError, Result as IoResult};
     use std::{result, thread};
 
@@ -822,6 +880,8 @@ mod tests {
         read_state: StreamState,
         write_buf: Vec<u8>,
         write_state: StreamState,
+        recv_msgs: VecDeque<Vec<u8>>,
+        sent_msgs: Vec<Vec<u8>>,
     }
     impl TestStream {
         fn new() -> Self {
@@ -831,12 +891,43 @@ mod tests {
                 write_state: StreamState::Ready,
                 read_buf: Vec::new(),
                 write_buf: Vec::new(),
+                recv_msgs: VecDeque::new(),
+                sent_msgs: Vec::new(),
             }
         }
         fn new_with_read_buf(buf: &[u8]) -> Self {
             let mut stream = Self::new();
             stream.read_buf = buf.to_vec();
             stream
+        }
+    }
+
+    impl SeqPacketStream for TestStream {
+        fn recv_datagram(&mut self, buf: &mut [u8]) -> IoResult<usize> {
+            match self.read_state {
+                StreamState::Closed => Ok(0),
+                StreamState::Error(kind) => Err(IoError::new(kind, "whatevs")),
+                StreamState::WouldBlock => Err(IoError::new(ErrorKind::WouldBlock, "EAGAIN")),
+                StreamState::Ready => match self.recv_msgs.pop_front() {
+                    Some(msg) => {
+                        let n = cmp::min(buf.len(), msg.len());
+                        buf[..n].copy_from_slice(&msg[..n]);
+                        Ok(n)
+                    }
+                    None => Err(IoError::new(ErrorKind::WouldBlock, "EAGAIN")),
+                },
+            }
+        }
+        fn send_datagram(&mut self, data: &[u8]) -> IoResult<usize> {
+            match self.write_state {
+                StreamState::Closed => Err(IoError::new(ErrorKind::BrokenPipe, "EPIPE")),
+                StreamState::Error(kind) => Err(IoError::new(kind, "whatevs")),
+                StreamState::WouldBlock => Err(IoError::new(ErrorKind::WouldBlock, "EAGAIN")),
+                StreamState::Ready => {
+                    self.sent_msgs.push(data.to_vec());
+                    Ok(data.len())
+                }
+            }
         }
     }
 
