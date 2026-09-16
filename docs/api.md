@@ -214,9 +214,10 @@ D-Bus API fully reflects the functionality of the REST API, exposing the
 same group of endpoints. It can be a drop-in replacement since it also
 consumes/produces JSON.
 
-In addition, the D-Bus API also exposes events from `event-monitor` in the
+In addition, the D-Bus API also exposes events from the event monitor in the
 form of a D-Bus signal to which users can subscribe. For more information,
-see [D-Bus API Interface](#d-bus-api-interface).
+see [D-Bus API Interface](#d-bus-api-interface). More information in the
+[event monitor documentation](./event-monitor.md).
 
 #### D-Bus API Location and availability
 
