@@ -74,8 +74,11 @@ pub(crate) fn _test_api_shutdown(target_api: &TargetApi, guest: &Guest) {
         .unwrap();
 
     // Wait for API server to be ready
-    assert!(wait_until(Duration::from_secs(5), || target_api
-        .remote_command("ping", None)));
+    assert!(wait_for_sequential_events_str(
+        Duration::from_secs(10),
+        &["starting", "started"],
+        &event_path,
+    ));
 
     // Create the VM first
     let request_body = guest.api_create_body();
@@ -135,8 +138,11 @@ pub(crate) fn _test_api_delete(target_api: &TargetApi, guest: &Guest) {
         .unwrap();
 
     // Wait for API server to be ready
-    assert!(wait_until(Duration::from_secs(5), || target_api
-        .remote_command("ping", None)));
+    assert!(wait_for_sequential_events_str(
+        Duration::from_secs(10),
+        &["starting", "started"],
+        &event_path,
+    ));
 
     // Create the VM first
     let request_body = guest.api_create_body();

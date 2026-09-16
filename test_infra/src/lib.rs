@@ -1779,6 +1779,10 @@ impl Guest {
                 device_id: None,
             },
             MetaEvent {
+                event: "started".to_string(),
+                device_id: None,
+            },
+            MetaEvent {
                 event: "booting".to_string(),
                 device_id: None,
             },
