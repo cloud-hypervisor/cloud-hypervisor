@@ -376,8 +376,8 @@ VMs first spawned in older versions of Cloud Hypervisor.
 
 ## Events
 
-The following events are emitted by Cloud Hypervisor in the context of
-migration:
+To observe live migrations, we recommend observing events from the
+[event monitor](./event-monitor.md). The relevant events for migrations are:
 
 - Sender
   - `vm.migration-starting`: Migration worker is beginning the send attempt.
