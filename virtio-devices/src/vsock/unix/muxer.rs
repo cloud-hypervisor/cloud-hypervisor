@@ -41,11 +41,11 @@
 use std::cmp::max;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{self, ErrorKind, Read};
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::str;
+use std::{mem, str};
 
 use log::{debug, error, info, warn};
 
@@ -57,7 +57,101 @@ use super::super::{
 };
 use super::muxer_killq::MuxerKillQ;
 use super::muxer_rxq::MuxerRxQ;
-use super::{Error, MuxerConnection, Result, defs};
+use super::{Error, MuxerConnection, Result, SEQPACKET_PATH_SUFFIX, defs};
+
+/// Build a pathname (not abstract) `sockaddr_un`, with its length.
+fn unix_sockaddr(path: &str) -> io::Result<(libc::sockaddr_un, libc::socklen_t)> {
+    // SAFETY: all-zero is a valid bit pattern for sockaddr_un
+    let mut addr: libc::sockaddr_un = unsafe { mem::zeroed() };
+    addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
+    let bytes = path.as_bytes();
+    if bytes.len() >= addr.sun_path.len() {
+        return Err(io::Error::other("socket path too long"));
+    }
+    for (dst, src) in addr.sun_path.iter_mut().zip(bytes.iter()) {
+        *dst = *src as libc::c_char;
+    }
+    let len = (mem::size_of::<libc::sa_family_t>() + bytes.len() + 1) as libc::socklen_t;
+    Ok((addr, len))
+}
+
+fn connect_stream(path: &str) -> io::Result<UnixStream> {
+    UnixStream::connect(path).and_then(|stream| stream.set_nonblocking(true).map(|_| stream))
+}
+
+fn bind_stream_listener(path: &str) -> io::Result<UnixListener> {
+    UnixListener::bind(path).and_then(|sock| sock.set_nonblocking(true).map(|_| sock))
+}
+
+fn seqpacket_socket() -> io::Result<OwnedFd> {
+    // SAFETY: socket() with valid arguments returns a new fd or -1.
+    let fd = unsafe {
+        libc::socket(
+            libc::AF_UNIX,
+            libc::SOCK_SEQPACKET | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
+            0,
+        )
+    };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: fd is a fresh socket fd that nothing else owns yet.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+fn connect_host_socket(path: &str, sock_type: u16) -> io::Result<UnixStream> {
+    if sock_type == uapi::VSOCK_TYPE_SEQPACKET {
+        connect_seqpacket(path)
+    } else {
+        connect_stream(path)
+    }
+}
+
+/// std only creates SOCK_STREAM sockets, so build this one by hand.
+fn connect_seqpacket(path: &str) -> io::Result<UnixStream> {
+    let sock = seqpacket_socket()?;
+    let (addr, len) = unix_sockaddr(path)?;
+    // SAFETY: addr is a valid sockaddr_un for `len` bytes; the fd is owned by `sock`.
+    let ret = unsafe {
+        libc::connect(
+            sock.as_raw_fd(),
+            std::ptr::addr_of!(addr).cast::<libc::sockaddr>(),
+            len,
+        )
+    };
+    if ret < 0 {
+        let err = io::Error::last_os_error();
+        // EINPROGRESS is fine here. The CSM retries writes on a not-yet-ready stream.
+        if err.raw_os_error() != Some(libc::EINPROGRESS) {
+            return Err(err);
+        }
+    }
+    Ok(UnixStream::from(sock))
+}
+
+/// `accept()` on the returned listener yields seqpacket streams.
+fn bind_seqpacket_listener(path: &str) -> io::Result<UnixListener> {
+    // Drop a stale socket file from a previous run, else bind() gets EADDRINUSE.
+    let _ = fs::remove_file(path);
+    let sock = seqpacket_socket()?;
+    let (addr, len) = unix_sockaddr(path)?;
+    // SAFETY: addr is a valid sockaddr_un for `len` bytes; the fd is owned by `sock`.
+    let ret = unsafe {
+        libc::bind(
+            sock.as_raw_fd(),
+            std::ptr::addr_of!(addr).cast::<libc::sockaddr>(),
+            len,
+        )
+    };
+    if ret < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: the fd is an owned, bound socket.
+    if unsafe { libc::listen(sock.as_raw_fd(), 128) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(UnixListener::from(sock))
+}
 
 /// A unique identifier of a `MuxerConnection` object. Connections are stored in a hash map,
 /// keyed by a `ConnMapKey` object.
@@ -74,8 +168,13 @@ pub(super) struct ConnMapKey {
 pub(super) enum MuxerRx {
     /// The packet must be fetched from the connection identified by `ConnMapKey`.
     ConnRx(ConnMapKey),
-    /// The muxer must produce an RST packet.
-    RstPkt { local_port: u32, peer_port: u32 },
+    /// The muxer must produce an RST packet. `sock_type` comes from the connection being
+    /// reset, or from the offending packet. The guest drops an RST of the wrong type.
+    RstPkt {
+        local_port: u32,
+        peer_port: u32,
+        sock_type: u16,
+    },
 }
 
 /// An epoll listener, registered under the muxer's nested epoll FD.
@@ -88,11 +187,13 @@ enum EpollListener {
         key: ConnMapKey,
         evset: epoll::Events,
     },
-    /// A listener interested in new host-initiated connections.
+    /// A listener interested in new host-initiated stream connections.
     HostSock,
+    /// A listener interested in new host-initiated seqpacket connections.
+    HostSockSeq,
     /// A listener interested in reading host "connect \<port>" commands from a freshly
-    /// connected host socket.
-    LocalStream(UnixStream),
+    /// connected host socket. `sock_type` is that of the listener it arrived on.
+    LocalStream { stream: UnixStream, sock_type: u16 },
 }
 
 const PARTIALLY_READ_COMMAND_BUF_SIZE: usize = 32;
@@ -126,8 +227,11 @@ pub struct VsockMuxer {
     rxq: MuxerRxQ,
     /// A queue used for terminating connections that are taking too long to shut down.
     killq: MuxerKillQ,
-    /// The Unix socket, through which host-initiated connections are accepted.
+    /// The Unix socket, through which host-initiated stream connections are accepted.
     host_sock: UnixListener,
+    /// The same, for seqpacket, bound at `<host_sock_path>_seqpacket`. Handshake and payload
+    /// each travel as their own datagram, so boundaries survive.
+    host_sock_seq: UnixListener,
     /// The file system path of the host-side Unix socket. This is used to figure out the path
     /// to Unix sockets listening on specific ports. I.e. "\<this path>_\<port number>".
     host_sock_path: String,
@@ -164,6 +268,7 @@ impl VsockChannel for VsockMuxer {
                 MuxerRx::RstPkt {
                     local_port,
                     peer_port,
+                    sock_type,
                 } => {
                     pkt.set_op(uapi::VSOCK_OP_RST)
                         .set_src_cid(uapi::VSOCK_HOST_CID)
@@ -171,7 +276,7 @@ impl VsockChannel for VsockMuxer {
                         .set_src_port(local_port)
                         .set_dst_port(peer_port)
                         .set_len(0)
-                        .set_type(uapi::VSOCK_TYPE_STREAM)
+                        .set_type(sock_type)
                         .set_flags(0)
                         .set_buf_alloc(0)
                         .set_fwd_cnt(0);
@@ -235,10 +340,11 @@ impl VsockChannel for VsockMuxer {
             pkt.hdr()
         );
 
-        // If this packet has an unsupported type (!=stream), we must send back an RST.
-        //
-        if pkt.type_() != uapi::VSOCK_TYPE_STREAM {
-            self.enq_rst(pkt.dst_port(), pkt.src_port());
+        // If this packet has an unsupported type (not stream or seqpacket), we must send back an
+        // RST.
+        if pkt.type_() != uapi::VSOCK_TYPE_STREAM && pkt.type_() != uapi::VSOCK_TYPE_SEQPACKET {
+            // Echo the type back, like the guest does. We have no socket of that type anyway.
+            self.enq_rst(pkt.dst_port(), pkt.src_port(), pkt.type_());
             return Ok(());
         }
 
@@ -267,7 +373,7 @@ impl VsockChannel for VsockMuxer {
                 self.handle_peer_request_pkt(pkt);
             } else {
                 // Send back an RST, to let the drive know we weren't expecting this packet.
-                self.enq_rst(pkt.dst_port(), pkt.src_port());
+                self.enq_rst(pkt.dst_port(), pkt.src_port(), pkt.type_());
             }
             return Ok(());
         }
@@ -356,9 +462,18 @@ impl VsockBackend for VsockMuxer {
 
     fn queue_rst_for_connections(&mut self, conns: Vec<(u32, u32)>) {
         for (local_port, peer_port) in conns {
+            // The guest drops an RST of the wrong type.
+            let sock_type = self
+                .conn_map
+                .get(&ConnMapKey {
+                    local_port,
+                    peer_port,
+                })
+                .map_or(uapi::VSOCK_TYPE_STREAM, |conn| conn.sock_type());
             self.rxq.push(MuxerRx::RstPkt {
                 local_port,
                 peer_port,
+                sock_type,
             });
         }
     }
@@ -376,15 +491,19 @@ impl VsockMuxer {
         let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
 
         // Open/bind/listen on the host Unix socket, so we can accept host-initiated
-        // connections.
-        let host_sock = UnixListener::bind(&host_sock_path)
-            .and_then(|sock| sock.set_nonblocking(true).map(|_| sock))
-            .map_err(Error::UnixBind)?;
+        // stream connections.
+        let host_sock = bind_stream_listener(&host_sock_path).map_err(Error::UnixBind)?;
+
+        // Same again, for seqpacket.
+        let host_sock_seq =
+            bind_seqpacket_listener(&format!("{host_sock_path}{SEQPACKET_PATH_SUFFIX}"))
+                .map_err(Error::UnixBind)?;
 
         let mut muxer = Self {
             cid: cid.into(),
             host_sock,
             host_sock_path,
+            host_sock_seq,
             epoll_file,
             rxq: MuxerRxQ::new(),
             conn_map: HashMap::with_capacity(defs::MAX_CONNECTIONS),
@@ -396,6 +515,7 @@ impl VsockMuxer {
         };
 
         muxer.add_listener(muxer.host_sock.as_raw_fd(), EpollListener::HostSock)?;
+        muxer.add_listener(muxer.host_sock_seq.as_raw_fd(), EpollListener::HostSockSeq)?;
         Ok(muxer)
     }
 
@@ -419,17 +539,25 @@ impl VsockMuxer {
                 });
             }
 
-            // A new host-initiated connection is ready to be accepted.
+            // A new host-initiated connection is ready to be accepted. The listener it
+            // arrived on gives us its type.
             //
-            Some(EpollListener::HostSock) => {
+            Some(EpollListener::HostSock) | Some(EpollListener::HostSockSeq) => {
+                let (host_sock, sock_type) = match self.listener_map.get(&fd) {
+                    Some(EpollListener::HostSockSeq) => {
+                        (&self.host_sock_seq, uapi::VSOCK_TYPE_SEQPACKET)
+                    }
+                    _ => (&self.host_sock, uapi::VSOCK_TYPE_STREAM),
+                };
+
                 if self.conn_map.len() == defs::MAX_CONNECTIONS {
                     // If we're already maxed-out on connections, we'll just accept and
                     // immediately discard this potentially new one.
                     warn!("vsock: connection limit reached; refusing new host connection");
-                    let _ = self.host_sock.accept();
+                    let _ = host_sock.accept();
                     return;
                 }
-                self.host_sock
+                host_sock
                     .accept()
                     .map_err(Error::UnixAccept)
                     .and_then(|(stream, _)| {
@@ -443,7 +571,10 @@ impl VsockMuxer {
                         // the guest side, we need to know the destination port. We'll read
                         // that port from a "connect" command received on this socket, so the
                         // next step is to ask to be notified the moment we can read from it.
-                        self.add_listener(stream.as_raw_fd(), EpollListener::LocalStream(stream))
+                        self.add_listener(
+                            stream.as_raw_fd(),
+                            EpollListener::LocalStream { stream, sock_type },
+                        )
                     })
                     .unwrap_or_else(|err| {
                         warn!("vsock: unable to accept local connection: {err:?}");
@@ -452,13 +583,16 @@ impl VsockMuxer {
 
             // Data is ready to be read from a host-initiated connection. That would be the
             // "connect" command that we're expecting.
-            Some(EpollListener::LocalStream(_)) => {
-                if let Some(EpollListener::LocalStream(stream)) = self.listener_map.get_mut(&fd) {
+            Some(EpollListener::LocalStream { .. }) => {
+                if let Some(EpollListener::LocalStream { stream, sock_type }) =
+                    self.listener_map.get_mut(&fd)
+                {
+                    let sock_type = *sock_type;
                     let command = self
                         .partial_command_map
                         .entry(stream.as_raw_fd())
                         .or_default();
-                    let port = Self::read_local_stream_port(command, stream);
+                    let port = Self::read_local_stream_port(command, stream, sock_type);
 
                     if let Err(Error::UnixRead(ref e)) = port
                         && e.kind() == ErrorKind::WouldBlock
@@ -472,7 +606,7 @@ impl VsockMuxer {
                     self.partial_command_map.remove(&stream.as_raw_fd());
 
                     let stream = match self.remove_listener(fd) {
-                        Some(EpollListener::LocalStream(s)) => s,
+                        Some(EpollListener::LocalStream { stream, .. }) => stream,
                         _ => unreachable!(),
                     };
 
@@ -490,7 +624,7 @@ impl VsockMuxer {
                                 self.cid,
                                 local_port,
                                 peer_port,
-                                uapi::VSOCK_TYPE_STREAM,
+                                sock_type,
                             ),
                         )
                     })
@@ -549,6 +683,7 @@ impl VsockMuxer {
     fn read_local_stream_port(
         command: &mut PartiallyReadCommand,
         stream: &mut UnixStream,
+        sock_type: u16,
     ) -> Result<u32> {
         // the minimum connect statement that is still valid
         let connect_min_statement: &str = "connect 0\n";
@@ -563,8 +698,14 @@ impl VsockMuxer {
         // Another, currently unstable alternative: use UnixStream::peak to read the
         // data without removing it from the queue.
         // Issue: https://github.com/rust-lang/rust/issues/76923
+        let end = if sock_type == uapi::VSOCK_TYPE_SEQPACKET {
+            command.buf.len()
+        } else {
+            max(connect_min_statement.len(), command.len + 1)
+        };
+
         let read_bytes = stream
-            .read(&mut command.buf[command.len..max(connect_min_statement.len(), command.len + 1)])
+            .read(&mut command.buf[command.len..end])
             .map_err(Error::UnixRead)?;
 
         if read_bytes == 0 {
@@ -645,8 +786,9 @@ impl VsockMuxer {
     fn add_listener(&mut self, fd: RawFd, listener: EpollListener) -> Result<()> {
         let evset = match listener {
             EpollListener::Connection { evset, .. } => evset,
-            EpollListener::LocalStream(_) => epoll::Events::EPOLLIN,
+            EpollListener::LocalStream { .. } => epoll::Events::EPOLLIN,
             EpollListener::HostSock => epoll::Events::EPOLLIN,
+            EpollListener::HostSockSeq => epoll::Events::EPOLLIN,
         };
 
         epoll::ctl(
@@ -717,9 +859,9 @@ impl VsockMuxer {
     ///
     fn handle_peer_request_pkt(&mut self, pkt: &VsockPacket) {
         let port_path = format!("{}_{}", self.host_sock_path, pkt.dst_port());
+        let sock_type = pkt.type_();
 
-        UnixStream::connect(port_path)
-            .and_then(|stream| stream.set_nonblocking(true).map(|_| stream))
+        connect_host_socket(&port_path, sock_type)
             .map_err(Error::UnixConnect)
             .and_then(|stream| {
                 self.add_connection(
@@ -734,11 +876,11 @@ impl VsockMuxer {
                         pkt.dst_port(),
                         pkt.src_port(),
                         pkt.buf_alloc(),
-                        uapi::VSOCK_TYPE_STREAM,
+                        sock_type,
                     ),
                 )
             })
-            .unwrap_or_else(|_| self.enq_rst(pkt.dst_port(), pkt.src_port()));
+            .unwrap_or_else(|_| self.enq_rst(pkt.dst_port(), pkt.src_port(), sock_type));
     }
 
     /// Perform an action that might mutate a connection's state.
@@ -878,10 +1020,11 @@ impl VsockMuxer {
     /// handle them. We do, however, log a warning, since not being able to enqueue an RST
     /// packet means we have to drop it, which is not normal operation.
     ///
-    fn enq_rst(&mut self, local_port: u32, peer_port: u32) {
+    fn enq_rst(&mut self, local_port: u32, peer_port: u32, sock_type: u16) {
         let pushed = self.rxq.push(MuxerRx::RstPkt {
             local_port,
             peer_port,
+            sock_type,
         });
         if !pushed {
             warn!("vsock: muxer.rxq full; dropping RST packet for lp={local_port}, pp={peer_port}");
@@ -1006,7 +1149,7 @@ mod tests {
             let mut conn_lsn_count = 0usize;
             for key in self.muxer.listener_map.values() {
                 match key {
-                    EpollListener::LocalStream(_) => local_lsn_count += 1,
+                    EpollListener::LocalStream { .. } => local_lsn_count += 1,
                     EpollListener::Connection { .. } => conn_lsn_count += 1,
                     _ => (),
                 }

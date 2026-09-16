@@ -839,6 +839,14 @@ where
         self.state
     }
 
+    /// The connection's socket type.
+    ///
+    /// `init_pkt()` stamps the packets a connection emits itself, but the muxer also sends RSTs
+    /// on its behalf, and those need the same type. The guest drops an RST of the wrong type.
+    pub(crate) fn sock_type(&self) -> u16 {
+        self.sock_type
+    }
+
     /// Send some raw, untracked, data straight to the underlying connected stream.
     /// Returns: number of bytes written, or the error describing the write failure.
     ///

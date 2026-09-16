@@ -27,6 +27,8 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
 
+use super::unix::SEQPACKET_PATH_SUFFIX;
+
 /// This is the `VirtioDevice` implementation for our vsock device. It handles the virtio-level
 /// device logic: feature negotiation, device configuration, and device activation.
 /// The run-time device logic (i.e. event-driven data handling) is implemented by
@@ -349,6 +351,8 @@ pub struct Vsock<B: VsockBackend> {
     cid: u64,
     backend: Arc<RwLock<B>>,
     path: PathBuf,
+    /// Path of the seqpacket listener the backend binds alongside `path`.
+    path_seqpacket: PathBuf,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
 }
@@ -393,6 +397,9 @@ where
             (avail_features, 0, false)
         };
 
+        let mut path_seqpacket = path.clone().into_os_string();
+        path_seqpacket.push(SEQPACKET_PATH_SUFFIX);
+
         Ok(Vsock {
             common: VirtioCommon {
                 device_type: VirtioDeviceType::Vsock as u32,
@@ -408,6 +415,7 @@ where
             cid: cid.into(),
             backend: Arc::new(RwLock::new(backend)),
             path,
+            path_seqpacket: path_seqpacket.into(),
             seccomp_action,
             exit_evt,
         })
@@ -514,6 +522,7 @@ where
 
     fn shutdown(&mut self) {
         fs::remove_file(&self.path).ok();
+        fs::remove_file(&self.path_seqpacket).ok();
     }
 
     fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
