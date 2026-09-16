@@ -7915,6 +7915,31 @@ mod common_parallel {
         let _ = dest_child.kill();
         let dest_output = dest_child.wait_with_output().unwrap();
         handle_child_output(Ok(()), &dest_output);
+
+        // The checks above can't tell a deferred event from one that happened
+        // on the destination after the migration: check the log for evidence.
+        let (src_marker, dest_marker) = match guest_event {
+            GuestEventDuringMigration::RebootImmediately
+            | GuestEventDuringMigration::RebootDuringPrecopy => (
+                "Deferring guest reboot until the migration finished",
+                "Received pending VM action from the migration source: Reboot",
+            ),
+            GuestEventDuringMigration::ShutdownImmediately
+            | GuestEventDuringMigration::ShutdownDuringPrecopy => (
+                "Deferring guest shutdown until the migration finished",
+                "Received pending VM action from the migration source: Shutdown",
+            ),
+        };
+        let src_stderr = String::from_utf8_lossy(&src_output.stderr);
+        assert!(
+            src_stderr.contains(src_marker),
+            "Expected source log line {src_marker:?}. stderr: {src_stderr}"
+        );
+        let dest_stderr = String::from_utf8_lossy(&dest_output.stderr);
+        assert!(
+            dest_stderr.contains(dest_marker),
+            "Expected destination log line {dest_marker:?}. stderr: {dest_stderr}"
+        );
     }
 
     #[test]
