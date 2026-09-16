@@ -549,16 +549,12 @@ pub(crate) fn fw_path(_fw_type: FwType) -> String {
 /// is followed by a double newline
 fn parse_event_file(event_file: &str) -> Vec<serde_json::Value> {
     let content = fs::read(event_file).unwrap();
-    let mut ret = Vec::new();
-    for entry in String::from_utf8_lossy(&content)
+    String::from_utf8_lossy(&content)
         .trim()
         .split("\n\n")
-        .collect::<Vec<&str>>()
-    {
-        ret.push(serde_json::from_str(entry).unwrap());
-    }
-
-    ret
+        // Skip incomplete entries: the VMM may still be writing the file.
+        .filter_map(|entry| serde_json::from_str(entry).ok())
+        .collect()
 }
 
 /// Return true if all events from the input 'expected_events' are matched sequentially
