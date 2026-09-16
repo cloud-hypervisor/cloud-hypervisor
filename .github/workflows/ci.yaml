@@ -702,7 +702,7 @@ jobs:
       # Our runner has 80 cores (nproc).
       # We limit parallelism only to avoid exhausting disk space and memory
       # resources, not to save CPU resources.
-      PARALLEL_INTEGRATION_TESTS_NUM: 25
+      PARALLEL_INTEGRATION_TESTS_NUM: 32
     runs-on: bookworm-arm64
     steps:
       # arm64 runner user is "runner" (vfio's is "github-runner").
@@ -757,7 +757,7 @@ jobs:
       # Our runner has 96 cores (nproc).
       # We limit parallelism only to avoid exhausting disk space and memory
       # resources, not to save CPU resources.
-      PARALLEL_INTEGRATION_TESTS_NUM: 25
+      PARALLEL_INTEGRATION_TESTS_NUM: 32
     runs-on: noble-graviton
     steps:
       # arm64 runner user is "runner" (vfio's is "github-runner").
