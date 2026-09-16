@@ -639,7 +639,6 @@ impl MemoryManager {
     fn create_memory_regions_from_zones(
         ram_regions: &[(GuestAddress, usize)],
         zones: &[MemoryZoneConfig],
-        prefault: Option<bool>,
         thp: bool,
     ) -> Result<(Vec<Arc<GuestRegionMmap>>, MemoryZones), Error> {
         let mut zone_iter = zones.iter();
@@ -706,7 +705,6 @@ impl MemoryManager {
                     file_offset,
                     region_start,
                     region_size as usize,
-                    prefault.unwrap_or(zone.prefault),
                     zone.reserve.unwrap_or(zone.hugepages),
                     zone.shared,
                     zone.hugepages,
@@ -773,11 +771,49 @@ impl MemoryManager {
         Ok((mem_regions, memory_zones))
     }
 
+    fn prefault_regions_from_zones(
+        zones: &[MemoryZoneConfig],
+        memory_zones: &MemoryZones,
+        prefault: Option<bool>,
+    ) -> Result<Vec<prefault::PrefaultRegion>, Error> {
+        let mut prefault_regions = Vec::new();
+        for zone in zones {
+            if !prefault.unwrap_or(zone.prefault) {
+                continue;
+            }
+            let Some(memory_zone) = memory_zones.get(&zone.id) else {
+                continue;
+            };
+
+            let page_size =
+                Self::get_prefault_align_size(&zone.file, zone.hugepages, zone.hugepage_size)?
+                    as usize;
+            for region in &memory_zone.regions {
+                prefault_regions.push(prefault::PrefaultRegion {
+                    addr: region.as_ptr() as usize,
+                    size: region.len() as usize,
+                    page_size,
+                });
+            }
+
+            if let Some(virtio_mem_zone) = &memory_zone.virtio_mem_zone {
+                let page_size =
+                    Self::get_prefault_align_size(&None, zone.hugepages, zone.hugepage_size)?
+                        as usize;
+                prefault_regions.push(prefault::PrefaultRegion {
+                    addr: virtio_mem_zone.region.as_ptr() as usize,
+                    size: virtio_mem_zone.region.len() as usize,
+                    page_size,
+                });
+            }
+        }
+        Ok(prefault_regions)
+    }
+
     // Restore both GuestMemoryBackend regions along with MemoryZone zones.
     fn restore_memory_regions_and_zones(
         guest_ram_mappings: &[GuestRamMapping],
         zones_config: &[MemoryZoneConfig],
-        prefault: Option<bool>,
         mut existing_memory_files: HashMap<u32, File>,
         thp: bool,
     ) -> Result<(Vec<Arc<GuestRegionMmap>>, MemoryZones), Error> {
@@ -809,7 +845,6 @@ impl MemoryManager {
                         guest_ram_mapping.file_offset,
                         GuestAddress(guest_ram_mapping.gpa),
                         guest_ram_mapping.size as usize,
-                        prefault.unwrap_or(zone_config.prefault),
                         zone_config.reserve.unwrap_or(zone_config.hugepages),
                         zone_config.shared,
                         zone_config.hugepages,
@@ -1834,7 +1869,6 @@ impl MemoryManager {
             let (regions, memory_zones) = Self::restore_memory_regions_and_zones(
                 &data.guest_ram_mappings,
                 &zones,
-                prefault,
                 existing_memory_files,
                 config.thp,
             )?;
@@ -1874,7 +1908,7 @@ impl MemoryManager {
                 .collect();
 
             let (mem_regions, mut memory_zones) =
-                Self::create_memory_regions_from_zones(&ram_regions, &zones, prefault, config.thp)?;
+                Self::create_memory_regions_from_zones(&ram_regions, &zones, config.thp)?;
 
             let mut guest_memory = GuestMemoryMmap::from_arc_regions(mem_regions)
                 .map_err(Error::GuestRegionCollection)?;
@@ -1909,15 +1943,11 @@ impl MemoryManager {
                                     * virtio_devices::VIRTIO_MEM_ALIGN_SIZE,
                             );
 
-                            // When `prefault` is set by vm_restore, memory manager
-                            // will create ram region with `prefault` option in
-                            // restore config rather than same option in zone
                             let region = MemoryManager::create_ram_region(
                                 &None,
                                 0,
                                 start_addr,
                                 hotplug_size as usize,
-                                prefault.unwrap_or(zone.prefault),
                                 zone.reserve.unwrap_or(zone.hugepages),
                                 zone.shared,
                                 zone.hugepages,
@@ -1968,6 +1998,12 @@ impl MemoryManager {
                 0,
             )
         };
+
+        prefault::prefault_regions(&Self::prefault_regions_from_zones(
+            &zones,
+            &memory_zones,
+            prefault,
+        )?)?;
 
         let guest_memory = GuestMemoryAtomic::new(guest_memory);
 
@@ -2223,7 +2259,6 @@ impl MemoryManager {
         backing_file: &Option<PathBuf>,
         file_offset: u64,
         size: usize,
-        prefault: bool,
         reserve: bool,
         shared: bool,
         hugepages: bool,
@@ -2304,17 +2339,6 @@ impl MemoryManager {
             }
         }
 
-        // Prefault the region if needed, in parallel.
-        if prefault {
-            let page_size =
-                Self::get_prefault_align_size(backing_file, hugepages, hugepage_size)? as usize;
-            prefault::prefault_regions(&[prefault::PrefaultRegion {
-                addr: region.as_ptr() as usize,
-                size,
-                page_size,
-            }])?;
-        }
-
         info!(
             "RAM region mapping at 0x{:x} (size = 0x{:x})",
             region.as_ptr() as u64,
@@ -2330,7 +2354,6 @@ impl MemoryManager {
         file_offset: u64,
         start_addr: GuestAddress,
         size: usize,
-        prefault: bool,
         reserve: bool,
         shared: bool,
         hugepages: bool,
@@ -2343,7 +2366,6 @@ impl MemoryManager {
             backing_file,
             file_offset,
             size,
-            prefault,
             reserve,
             shared,
             hugepages,
@@ -2445,7 +2467,6 @@ impl MemoryManager {
             0,
             start_addr,
             size,
-            self.prefault,
             self.reserve.unwrap_or(self.hugepages),
             self.shared,
             self.hugepages,
@@ -2454,6 +2475,16 @@ impl MemoryManager {
             None,
             self.thp,
         )?;
+
+        if self.prefault {
+            let page_size =
+                Self::get_prefault_align_size(&None, self.hugepages, self.hugepage_size)? as usize;
+            prefault::prefault_regions(&[prefault::PrefaultRegion {
+                addr: region.as_ptr() as usize,
+                size,
+                page_size,
+            }])?;
+        }
 
         // Map it into the guest
         // SAFETY: guaranteed by GuestMmapRegion invariants
