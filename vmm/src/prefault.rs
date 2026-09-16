@@ -5,7 +5,7 @@
 use std::sync::{Arc, Barrier};
 use std::{cmp, io, thread};
 
-use log::warn;
+use log::{info, warn};
 
 use crate::memory_manager::{Error, is_aligned};
 
@@ -76,6 +76,7 @@ pub(crate) fn prefault_regions(regions: &[PrefaultRegion]) -> Result<(), Error> 
             Ok(())
         })?;
     }
+    info!("Prefaulted {} memory regions", regions.len());
 
     Ok(())
 }
