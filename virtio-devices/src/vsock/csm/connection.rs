@@ -80,6 +80,7 @@
 //             it thinks its peer's information is out of date.
 //          Our implementation uses the proactive approach.
 //
+use std::collections::VecDeque;
 use std::io::{ErrorKind, Read, Write};
 use std::num::Wrapping;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -218,6 +219,16 @@ pub(crate) struct VsockConnection<S: Read + ReadVolatile + Write + WriteVolatile
     /// Whether the host stream has hung up (EPOLLHUP); distinguishes a full close from a host
     /// send-side half-close on a zero-length read.
     host_hung_up: bool,
+    /// Seqpacket only: bytes of the in-progress guest->host message, accumulated across RW
+    /// packets until the one carrying `VSOCK_SEQ_EOM` completes it.
+    seq_tx_cur: Vec<u8>,
+    /// Seqpacket only: the TX buffer for this connection -- finalized guest->host datagrams
+    /// awaiting a non-blocking send to the host `SOCK_SEQPACKET` socket. Bounded by vsock flow
+    /// control (<= buf_alloc).
+    seq_tx_buf: VecDeque<Vec<u8>>,
+    /// Seqpacket only: total number of bytes held in `seq_tx_buf`. Used to enforce
+    /// `CONN_TX_BUF_SIZE`.
+    seq_tx_queued: usize,
 }
 
 impl<S> VsockChannel for VsockConnection<S>
@@ -403,6 +414,23 @@ where
         self.peer_buf_alloc = pkt.buf_alloc();
         self.peer_fwd_cnt = Wrapping(pkt.fwd_cnt());
 
+        // Seqpacket only deviates for OP_RW. All of the control and credit management ops are the
+        // same as for streams.
+        if self.is_seqpacket() && pkt.op() == uapi::VSOCK_OP_RW {
+            match self.state {
+                ConnState::Established
+                | ConnState::PeerClosed(_, false)
+                | ConnState::LocalClosed(false, _) => self.seq_send_rw(pkt),
+                _ => {
+                    debug!(
+                        "vsock: dropping seqpacket RW pkt in state {:?} (lp={}, pp={})",
+                        self.state, self.local_port, self.peer_port
+                    );
+                }
+            }
+            return Ok(());
+        }
+
         match self.state {
             // Most frequent case: this is an established connection that needs to forward some
             // data to the host stream. Also works for a connection that has begun shutting
@@ -456,12 +484,12 @@ where
                 let send_off = pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_SEND != 0;
                 self.state = ConnState::PeerClosed(recv_off, send_off);
                 if recv_off && send_off {
-                    if self.tx_buf.is_empty() {
-                        self.pending_rx.insert(PendingRx::Rst);
-                    } else {
+                    if self.has_pending_tx() {
                         self.expiry = Some(
                             Instant::now() + Duration::from_millis(defs::CONN_SHUTDOWN_TIMEOUT_MS),
                         );
+                    } else {
+                        self.pending_rx.insert(PendingRx::Rst);
                     }
                 } else if send_off {
                     // The guest half-closed its send side; surface that as an EOF to the host.
@@ -475,7 +503,7 @@ where
                 let recv_off = recv_off || (pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_RCV != 0);
                 let new_send_off = send_off || (pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_SEND != 0);
                 self.state = ConnState::PeerClosed(recv_off, new_send_off);
-                if recv_off && new_send_off && self.tx_buf.is_empty() {
+                if recv_off && new_send_off && !self.has_pending_tx() {
                     self.pending_rx.insert(PendingRx::Rst);
                 } else if new_send_off && !send_off {
                     self.shutdown_host_write_side();
@@ -488,12 +516,12 @@ where
                 let send_off = pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_SEND != 0;
                 if send_off {
                     self.state = ConnState::PeerClosed(true, true);
-                    if self.tx_buf.is_empty() {
-                        self.pending_rx.insert(PendingRx::Rst);
-                    } else {
+                    if self.has_pending_tx() {
                         self.expiry = Some(
                             Instant::now() + Duration::from_millis(defs::CONN_SHUTDOWN_TIMEOUT_MS),
                         );
+                    } else {
+                        self.pending_rx.insert(PendingRx::Rst);
                     }
                 }
             }
@@ -558,7 +586,7 @@ where
     ///
     fn get_polled_evset(&self) -> epoll::Events {
         let mut evset = epoll::Events::empty();
-        if !self.tx_buf.is_empty() {
+        if self.has_pending_tx() {
             // There's data waiting in the TX buffer, so we are interested in being notified
             // when writing to the host stream wouldn't block.
             evset.insert(epoll::Events::EPOLLOUT);
@@ -599,34 +627,38 @@ where
         if evset.contains(epoll::Events::EPOLLOUT) {
             // Data can be written to the host stream. Time to flush out the TX buffer.
             //
-            if self.tx_buf.is_empty() {
-                info!("vsock: connection received unexpected EPOLLOUT event");
-                return;
-            }
-            let flushed = self
-                .tx_buf
-                .flush_to(&mut self.stream)
-                .unwrap_or_else(|err| {
-                    warn!(
-                        "vsock: error flushing TX buf for (lp={}, pp={}): {:?}",
-                        self.local_port, self.peer_port, err
-                    );
-                    match err {
-                        Error::TxBufFlush(inner) if inner.kind() == ErrorKind::WouldBlock => {
-                            // This should never happen (EWOULDBLOCK after EPOLLOUT), but
-                            // it does, so let's absorb it.
+            if self.is_seqpacket() {
+                self.flush_seq_tx();
+            } else {
+                if self.tx_buf.is_empty() {
+                    info!("vsock: connection received unexpected EPOLLOUT event");
+                    return;
+                }
+                let flushed = self
+                    .tx_buf
+                    .flush_to(&mut self.stream)
+                    .unwrap_or_else(|err| {
+                        warn!(
+                            "vsock: error flushing TX buf for (lp={}, pp={}): {:?}",
+                            self.local_port, self.peer_port, err
+                        );
+                        match err {
+                            Error::TxBufFlush(inner) if inner.kind() == ErrorKind::WouldBlock => {
+                                // This should never happen (EWOULDBLOCK after EPOLLOUT), but
+                                // it does, so let's absorb it.
+                            }
+                            _ => self.kill(),
                         }
-                        _ => self.kill(),
-                    }
-                    0
-                });
-            self.fwd_cnt += Wrapping(flushed as u32);
+                        0
+                    });
+                self.fwd_cnt += Wrapping(flushed as u32);
+            }
 
             // If this connection was shutting down, but is waiting to drain the TX buffer
             // before forceful termination, the wait might be over.
-            if self.state == ConnState::PeerClosed(true, true) && self.tx_buf.is_empty() {
+            if self.state == ConnState::PeerClosed(true, true) && !self.has_pending_tx() {
                 self.pending_rx.insert(PendingRx::Rst);
-            } else if matches!(self.state, ConnState::PeerClosed(_, true)) && self.tx_buf.is_empty()
+            } else if matches!(self.state, ConnState::PeerClosed(_, true)) && !self.has_pending_tx()
             {
                 // A deferred guest send-side half-close: now that the TX buffer is drained, we can
                 // surface the EOF to the host.
@@ -673,6 +705,9 @@ where
             expiry: None,
             host_write_shutdown: false,
             host_hung_up: false,
+            seq_tx_cur: Vec::new(),
+            seq_tx_buf: VecDeque::new(),
+            seq_tx_queued: 0,
         }
     }
 
@@ -704,6 +739,9 @@ where
             expiry: None,
             host_write_shutdown: false,
             host_hung_up: false,
+            seq_tx_cur: Vec::new(),
+            seq_tx_buf: VecDeque::new(),
+            seq_tx_queued: 0,
         }
     }
 
@@ -808,7 +846,7 @@ where
     /// This is deferred while the TX buffer still holds guest data, since shutting down the write
     /// half now would drop those not-yet-flushed bytes; `notify()` retries once the buffer drains.
     fn shutdown_host_write_side(&mut self) {
-        if self.host_write_shutdown || !self.tx_buf.is_empty() {
+        if self.host_write_shutdown || self.has_pending_tx() {
             return;
         }
         // SAFETY: the stream owns the socket fd by construction and `shutdown` doesn't touch process
@@ -822,6 +860,12 @@ where
             );
         }
         self.host_write_shutdown = true;
+    }
+
+    /// Return true if there is any host-bound data still buffered (both stream or seqpacket).
+    ///
+    fn has_pending_tx(&self) -> bool {
+        !self.tx_buf.is_empty() || !self.seq_tx_buf.is_empty()
     }
 
     /// Check if the credit information the peer has last received from us is outdated.
@@ -863,6 +907,114 @@ where
             .set_type(self.sock_type)
             .set_buf_alloc(defs::CONN_TX_BUF_SIZE)
             .set_fwd_cnt(self.fwd_cnt.0)
+    }
+
+    /// Return true if this is a `SOCK_SEQPACKET` connection.
+    ///
+    fn is_seqpacket(&self) -> bool {
+        self.sock_type == uapi::VSOCK_TYPE_SEQPACKET
+    }
+
+    /// Absorb a guest->host seqpacket `VSOCK_OP_RW` packet.
+    ///
+    /// Payload bytes are accumulated until the packet carrying `VSOCK_SEQ_EOM` completes the
+    /// message, at which point the whole message is enqueued and flushed to the host socket as a
+    /// single `SOCK_SEQPACKET` datagram.
+    fn seq_send_rw(&mut self, pkt: &VsockPacket) {
+        let len = pkt.len() as usize;
+        let window = defs::CONN_TX_BUF_SIZE as usize;
+
+        // What `fwd_cnt` has not accounted for, capped at the `buf_alloc` we advertise.
+        if self.seq_tx_queued + self.seq_tx_cur.len() + len > window {
+            warn!(
+                "vsock: seqpacket TX window overflow, killing connection (lp={}, pp={})",
+                self.local_port, self.peer_port
+            );
+            self.kill();
+            self.seq_tx_reset();
+            return;
+        }
+
+        if len > 0 {
+            let start = self.seq_tx_cur.len();
+            self.seq_tx_cur.resize(start + len, 0);
+            if pkt
+                .copy_buf_to_slice(0, &mut self.seq_tx_cur[start..])
+                .is_err()
+            {
+                warn!(
+                    "vsock: error reading seqpacket TX payload (lp={}, pp={})",
+                    self.local_port, self.peer_port
+                );
+                self.kill();
+                self.seq_tx_reset();
+                return;
+            }
+        }
+
+        if pkt.flags() & uapi::VSOCK_SEQ_EOM != 0 {
+            let msg = mem::take(&mut self.seq_tx_cur);
+            self.seq_tx_queued += msg.len();
+            self.seq_tx_buf.push_back(msg);
+            self.flush_seq_tx();
+        } else if self.seq_tx_cur.len() >= window {
+            // An unterminated message filling the window can never earn the credit to finish.
+            warn!(
+                "vsock: seqpacket message exceeds the {window}-byte window, killing connection \
+                 (lp={}, pp={})",
+                self.local_port, self.peer_port
+            );
+            self.kill();
+            self.seq_tx_reset();
+            return;
+        }
+
+        if self.peer_needs_credit_update() {
+            self.pending_rx.insert(PendingRx::CreditUpdate);
+        }
+    }
+
+    /// Drop all buffered guest->host seqpacket data.
+    ///
+    fn seq_tx_reset(&mut self) {
+        self.seq_tx_cur = Vec::new();
+        self.seq_tx_buf.clear();
+        self.seq_tx_queued = 0;
+    }
+
+    /// Flush queued guest->host seqpacket datagrams to the host socket.
+    ///
+    fn flush_seq_tx(&mut self) {
+        while let Some(buf) = self.seq_tx_buf.pop_front() {
+            match self.stream.send_datagram(&buf) {
+                Ok(n) if n == buf.len() => {
+                    self.seq_tx_queued -= n;
+                    self.fwd_cnt += Wrapping(n as u32);
+                }
+                Ok(_) => {
+                    warn!(
+                        "vsock: short seqpacket datagram write (lp={}, pp={})",
+                        self.local_port, self.peer_port
+                    );
+                    self.kill();
+                    self.seq_tx_reset();
+                    return;
+                }
+                Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                    self.seq_tx_buf.push_front(buf);
+                    return;
+                }
+                Err(err) => {
+                    warn!(
+                        "vsock: error writing seqpacket datagram (lp={}, pp={}): {:?}",
+                        self.local_port, self.peer_port, err
+                    );
+                    self.kill();
+                    self.seq_tx_reset();
+                    return;
+                }
+            }
+        }
     }
 }
 

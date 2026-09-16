@@ -55,11 +55,20 @@ mod defs {
         /// Valid with a VSOCK_OP_SHUTDOWN packet: the packet sender will send no more data.
         pub(crate) const VSOCK_FLAGS_SHUTDOWN_SEND: u32 = 2;
 
+        /// Vsock RW packet flags (SOCK_SEQPACKET only).
+        /// Defined in `/include/uapi/linux/virtio_vsock.h`.
+        ///
+        /// End of message: the RW packet carrying this flag is the last one of a seqpacket
+        /// message. The receiver uses it to reconstruct message boundaries.
+        pub(crate) const VSOCK_SEQ_EOM: u32 = 1;
+
         /// Vsock packet type.
         /// Defined in `/include/uapi/linux/virtio_vsock.h`.
         ///
-        /// Stream / connection-oriented packet (the only currently valid type).
+        /// Stream / connection-oriented packet.
         pub(crate) const VSOCK_TYPE_STREAM: u16 = 1;
+        /// Seqpacket / connection-oriented, message-oriented packet.
+        pub(crate) const VSOCK_TYPE_SEQPACKET: u16 = 2;
 
         pub(crate) const VSOCK_HOST_CID: u64 = 2;
     }
