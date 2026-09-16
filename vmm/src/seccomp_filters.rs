@@ -745,7 +745,6 @@ fn vmm_thread_rules(
         (libc::SYS_readv, vec![]),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_readlink, vec![]),
-        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
         (libc::SYS_readlinkat, vec![]),
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_recvmsg, vec![]),

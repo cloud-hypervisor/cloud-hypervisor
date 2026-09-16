@@ -5,10 +5,11 @@
 //! Flat VMDK extent layout: opens the data extents referenced by the
 //! descriptor and maps the virtual disk onto them.
 
-use std::ffi::{CString, OsStr};
+use std::ffi::{CStr, CString, OsStr, OsString};
 use std::fs::{File, OpenOptions};
 use std::io;
-use std::os::unix::ffi::OsStrExt;
+use std::mem::replace;
+use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::{Component, Path};
@@ -62,20 +63,30 @@ struct OpenHow {
     resolve: u64,
 }
 
-// Splits an untrusted extent `filename` into its `Normal` path components for
-// the fallback walk, rejecting any `..`/`.` traversal.
+// open_how.resolve flags from openat2(2). The libc crate does not export
+// them, so they are defined here with the values from the kernel UAPI
+// (include/uapi/linux/openat2.h).
+const RESOLVE_NO_MAGICLINKS: u64 = 0x02;
+const RESOLVE_BENEATH: u64 = 0x08;
+
+// Symlinks followed while resolving one extent
+// matches kernel's MAXSYMLINKS.
+const MAX_SYMLINK_HOPS: u32 = 40;
+
+// Splits an untrusted extent `filename` into its path components for the
+// fallback walk, rejecting `.` and empty names.
 fn extent_components(filename: &str) -> io::Result<Vec<&OsStr>> {
     let mut components = Vec::new();
     for component in Path::new(filename).components() {
         match component {
             Component::Normal(name) => components.push(name),
+            Component::ParentDir => components.push(component.as_os_str()),
             Component::RootDir => {}
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!(
-                        "VMDK extent filename '{filename}' must not contain '..' or '.' path \
-                         components"
+                        "VMDK extent filename '{filename}' must not contain '.' path components"
                     ),
                 ));
             }
@@ -93,26 +104,22 @@ fn extent_components(filename: &str) -> io::Result<Vec<&OsStr>> {
 // Opens a single VMDK data extent for the descriptor whose directory is
 // base_path.
 //
-// The extent name may be relative to the descriptor or an absolute path. The
-// only difference between the two is:
-//   - relative -> colocated with descriptor file
-//   - absolute -> the filesystem root
-// The symlink policy rejects the final component if it is a symlink (O_NOFOLLOW).
+// The extent name may be relative to the descriptor or an absolute path:
+//   - relative -> resolved against the descriptor directory
+//   - absolute -> resolved from the filesystem root
 //
 // Resolution prefers openat2(2). On kernels without it (< 5.6, ENOSYS) or
 // where it is blocked (EPERM, e.g. a seccomp filter), it falls back to a
-// per-component openat walk.
+// per-component openat walk. Both confine relative names beneath the
+// descriptor directory and reject a symlinked final component (O_NOFOLLOW).
 fn open_extent(
     base_path: &str,
     filename: &str,
     writable: bool,
     direct: bool,
 ) -> io::Result<AlignedFile> {
-    let anchor = if Path::new(filename).is_absolute() {
-        "/"
-    } else {
-        base_path
-    };
+    let is_absolute = Path::new(filename).is_absolute();
+    let anchor = if is_absolute { "/" } else { base_path };
 
     let dir = OpenOptions::new()
         .read(true)
@@ -123,7 +130,7 @@ fn open_extent(
         Ok(file) => Ok(AlignedFile::new(file, direct)),
         Err(e) if matches!(e.raw_os_error(), Some(libc::ENOSYS) | Some(libc::EPERM)) => {
             let components = extent_components(filename)?;
-            open_extent_walk(dir, &components, writable, direct)
+            open_extent_walk(dir, &components, writable, direct, !is_absolute)
         }
         Err(e) => Err(e),
     }
@@ -152,10 +159,19 @@ fn open_extent_openat2(
     if direct {
         flags |= libc::O_DIRECT;
     }
+
+    // Confine a relative extent name beneath the descriptor directory. An
+    // absolute name is anchored at the filesystem root by the caller and its
+    // policy is deliberately left unchanged here, so RESOLVE_BENEATH (which
+    // rejects absolute pathnames outright) is not applied to it.
+    let mut resolve = RESOLVE_NO_MAGICLINKS;
+    if !Path::new(filename).is_absolute() {
+        resolve |= RESOLVE_BENEATH;
+    }
     let how = OpenHow {
         flags: flags as u64,
         mode: 0,
-        resolve: 0,
+        resolve,
     };
 
     // SAFETY: FFI syscall. `cname` is NUL-terminated and outlives the call,
@@ -177,24 +193,64 @@ fn open_extent_openat2(
     Ok(unsafe { File::from_raw_fd(ret as RawFd) })
 }
 
+fn read_link_at(dir: &File, name: &CStr) -> io::Result<OsString> {
+    let mut buf = vec![0u8; libc::PATH_MAX as usize];
+    // SAFETY: `dir` is a valid directory fd, `name` is NUL-terminated and
+    // `buf` is writable for `buf.len()` bytes.
+    let len = unsafe {
+        libc::readlinkat(
+            dir.as_raw_fd(),
+            name.as_ptr(),
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+        )
+    };
+    if len < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let len = len as usize;
+    // readlinkat silently truncates, so a full buffer may be a partial target.
+    if len == buf.len() {
+        return Err(io::Error::from_raw_os_error(libc::ENAMETOOLONG));
+    }
+    buf.truncate(len);
+    Ok(OsString::from_vec(buf))
+}
+
+// Fallback when openat2 is unavailable. With beneath, the kernel never
+// follows a symlink. Each one is read and its relative target walked from the
+// directory holding it, so resolution cannot leave the anchor.
 fn open_extent_walk(
     mut dir: File,
     components: &[&OsStr],
     writable: bool,
     direct: bool,
+    beneath: bool,
 ) -> io::Result<AlignedFile> {
-    let last = components.len() - 1;
-    for (i, name) in components.iter().enumerate() {
-        let cname = CString::new(name.as_bytes()).map_err(|_| {
+    // Names still to resolve, next one last.
+    let mut pending: Vec<OsString> = components.iter().rev().map(|c| c.to_os_string()).collect();
+    let mut parents: Vec<File> = Vec::new();
+    let mut hops = 0;
+
+    while let Some(mut name) = pending.pop() {
+        if beneath && name == ".." {
+            dir = parents
+                .pop()
+                .ok_or_else(|| io::Error::from_raw_os_error(libc::EXDEV))?;
+            if !pending.is_empty() {
+                continue;
+            }
+            name = OsString::from(".");
+        }
+
+        let cname = CString::new(name.into_vec()).map_err(|_| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 "VMDK extent filename contains an interior NUL byte",
             )
         })?;
 
-        let flags = if i < last {
-            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC
-        } else {
+        if pending.is_empty() {
             // Final component: the extent file, opened with the declared access
             // and cache mode, and O_NOFOLLOW so it may not be a symlink either.
             let access = if writable {
@@ -206,23 +262,57 @@ fn open_extent_walk(
             if direct {
                 flags |= libc::O_DIRECT;
             }
-            flags
-        };
+            // SAFETY: `dir` is a valid open directory fd and `cname` is a
+            // NUL-terminated C string that outlives the call.
+            let fd = unsafe { libc::openat(dir.as_raw_fd(), cname.as_ptr(), flags) };
+            if fd < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            // SAFETY: `fd` is a freshly opened descriptor we now own exclusively.
+            return Ok(AlignedFile::new(unsafe { File::from_raw_fd(fd) }, direct));
+        }
 
+        let mut flags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC;
+        if beneath {
+            flags |= libc::O_NOFOLLOW;
+        }
         // SAFETY: `dir` is a valid open directory fd and `cname` is a
         // NUL-terminated C string that outlives the call.
         let fd = unsafe { libc::openat(dir.as_raw_fd(), cname.as_ptr(), flags) };
-        if fd < 0 {
-            return Err(io::Error::last_os_error());
+        if fd >= 0 {
+            // SAFETY: `fd` is a freshly opened descriptor we now own exclusively.
+            parents.push(replace(&mut dir, unsafe { File::from_raw_fd(fd) }));
+            continue;
         }
-        // SAFETY: `fd` is a freshly opened descriptor we now own exclusively.
-        let opened = unsafe { File::from_raw_fd(fd) };
 
-        if i < last {
-            // Reassignment drops the previous directory `File`, closing that fd.
-            dir = opened;
-        } else {
-            return Ok(AlignedFile::new(opened, direct));
+        let err = io::Error::last_os_error();
+        // O_DIRECTORY | O_NOFOLLOW on a symlink fails with ENOTDIR.
+        if !beneath || !matches!(err.raw_os_error(), Some(libc::ENOTDIR) | Some(libc::ELOOP)) {
+            return Err(err);
+        }
+        let target = match read_link_at(&dir, &cname) {
+            Ok(target) => target,
+            // Not a symlink, so the original error stands.
+            Err(e) if e.raw_os_error() == Some(libc::EINVAL) => return Err(err),
+            Err(e) => return Err(e),
+        };
+
+        hops += 1;
+        if hops > MAX_SYMLINK_HOPS {
+            return Err(io::Error::from_raw_os_error(libc::ELOOP));
+        }
+
+        let target = Path::new(&target);
+        if target.is_absolute() {
+            return Err(io::Error::from_raw_os_error(libc::EXDEV));
+        }
+        for component in target.components().rev() {
+            match component {
+                Component::Normal(part) => pending.push(part.to_os_string()),
+                Component::ParentDir => pending.push(OsString::from("..")),
+                Component::CurDir => {}
+                _ => return Err(io::Error::from_raw_os_error(libc::EXDEV)),
+            }
         }
     }
 
@@ -394,13 +484,10 @@ mod tests {
     }
 
     #[test]
-    fn extent_components_rejects_traversal_and_empty() {
-        // `..`/`.` traversal and empty names are refused. (An absolute path is
+    fn extent_components_rejects_curdir_and_empty() {
+        // `.` and empty names are refused. (An absolute path is
         // decomposed into its Normal components, the leading `/` is skipped and
         // the caller anchors the walk at the filesystem root.)
-        extent_components("../../etc/passwd").unwrap_err();
-        extent_components("sub/../../escape").unwrap_err();
-        extent_components("extent-1.vmdk/../../").unwrap_err();
         extent_components("./s001.vmdk").unwrap_err();
         extent_components("").unwrap_err();
     }
@@ -456,8 +543,9 @@ mod tests {
         let openat2_res = open_extent_openat2(openat2_dir.as_raw_fd(), filename, writable, direct);
 
         let walk_dir = open_dir(anchor);
+        let beneath = !Path::new(filename).is_absolute();
         let walk_res = match extent_components(filename) {
-            Ok(components) => open_extent_walk(walk_dir, &components, writable, direct),
+            Ok(components) => open_extent_walk(walk_dir, &components, writable, direct, beneath),
             Err(e) => Err(e),
         };
 
@@ -581,23 +669,62 @@ mod tests {
     }
 
     #[test]
-    fn open_extent_follows_symlinked_intermediate_directory_relative() {
+    fn open_extent_follows_in_tree_intermediate_symlink_relative() {
         use std::os::unix::fs::symlink;
 
         use vmm_sys_util::tempdir::TempDir;
 
-        // A relative path may traverse a symlinked intermediate directory
-        // (only the final component is guarded).
-        let real = TempDir::new_with_prefix("/tmp/vmdk-rel-real-test").unwrap();
-        fs::write(real.as_path().join("s001.vmdk"), b"data").unwrap();
-
-        let dir = TempDir::new_with_prefix("/tmp/vmdk-rel-symdir-test").unwrap();
+        // `latest -> v1` stays beneath the descriptor directory, so both
+        // implementations must follow it, as RESOLVE_BENEATH does.
+        let dir = TempDir::new_with_prefix("/tmp/vmdk-rel-intree-test").unwrap();
         let base = dir.as_path();
-        symlink(real.as_path(), base.join("sub")).unwrap();
+        fs::create_dir(base.join("v1")).unwrap();
+        fs::write(base.join("v1").join("disk1.vmdk"), b"data").unwrap();
+        symlink("v1", base.join("latest")).unwrap();
 
-        let (openat2_res, walk_res) = open_both(base, "sub/s001.vmdk", false, false);
+        let (openat2_res, walk_res) = open_both(base, "latest/disk1.vmdk", false, false);
         check_openat2(&openat2_res, true);
         check_walk(&walk_res, true);
+    }
+
+    #[test]
+    fn open_extent_walk_allows_symlinked_base_directory() {
+        use std::os::unix::fs::symlink;
+
+        use vmm_sys_util::tempdir::TempDir;
+
+        let real = TempDir::new_with_prefix("/tmp/vmdk-realbase-test").unwrap();
+        fs::write(real.as_path().join("s001.vmdk"), b"data").unwrap();
+
+        let link_parent = TempDir::new_with_prefix("/tmp/vmdk-linkbase-test").unwrap();
+        let base_link = link_parent.as_path().join("base");
+        symlink(real.as_path(), &base_link).unwrap();
+
+        let walk_dir = open_dir(&base_link);
+        let components = extent_components("s001.vmdk").unwrap();
+        let res = open_extent_walk(walk_dir, &components, false, false, true);
+        assert!(
+            res.is_ok(),
+            "a symlinked base directory must still resolve its (real) extents"
+        );
+    }
+
+    #[test]
+    fn open_extent_openat2_rejects_relative_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        use vmm_sys_util::tempdir::TempDir;
+
+        let outside = TempDir::new_with_prefix("/tmp/vmdk-escape-outside").unwrap();
+        fs::write(outside.as_path().join("s001.vmdk"), b"secret").unwrap();
+
+        let dir = TempDir::new_with_prefix("/tmp/vmdk-escape-anchor").unwrap();
+        let base = dir.as_path();
+        symlink(outside.as_path(), base.join("sub")).unwrap();
+
+        let anchor = open_dir(base);
+        let res = open_extent_openat2(anchor.as_raw_fd(), "sub/s001.vmdk", false, false);
+        check_openat2(&res, false);
     }
 
     #[test]
@@ -619,5 +746,74 @@ mod tests {
         let (openat2_res, walk_res) = open_both(base, via_symlink.to_str().unwrap(), false, false);
         check_openat2(&openat2_res, true);
         check_walk(&walk_res, true);
+    }
+
+    #[test]
+    fn open_extent_rejects_parent_dir_traversal() {
+        use vmm_sys_util::tempdir::TempDir;
+
+        // Layout:
+        //   root/
+        //     secret     <- must NOT be reachable through the extent name
+        //     anchor/    <- the "descriptor directory" used as the open anchor
+        let root = TempDir::new_with_prefix("/tmp/vmdk-traversal-test").unwrap();
+        let anchor = root.as_path().join("anchor");
+        fs::create_dir(&anchor).unwrap();
+        fs::write(root.as_path().join("secret"), b"secret").unwrap();
+
+        // `..` climbs out of `anchor` back into `root` and reaches `secret`.
+        let (openat2_res, walk_res) = open_both(&anchor, "../secret", false, false);
+        check_openat2(&openat2_res, false);
+        check_walk(&walk_res, false);
+    }
+
+    #[test]
+    fn open_extent_rejects_relative_traversal() {
+        use vmm_sys_util::tempdir::TempDir;
+
+        let outer = TempDir::new_with_prefix("/tmp/vmdk-traversal-test").unwrap();
+        fs::write(outer.as_path().join("escape.vmdk"), b"secret").unwrap();
+        let base = outer.as_path().join("descriptor-dir");
+        fs::create_dir(&base).unwrap();
+        fs::create_dir(base.join("sub")).unwrap();
+
+        for name in [
+            "../escape.vmdk",
+            "./../escape.vmdk",
+            "sub/../../escape.vmdk",
+        ] {
+            let (openat2_res, walk_res) = open_both(&base, name, true, false);
+            check_openat2(&openat2_res, false);
+            check_walk(&walk_res, false);
+        }
+
+        let err = open_extent(base.to_str().unwrap(), "../escape.vmdk", true, false).unwrap_err();
+        assert_eq!(
+            err.raw_os_error(),
+            Some(libc::EXDEV),
+            "extent traversal must fail with EXDEV, not fall back to the walk"
+        );
+    }
+
+    #[test]
+    fn open_extent_walk_rejects_intermediate_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        use vmm_sys_util::tempdir::TempDir;
+
+        let outside = TempDir::new_with_prefix("/tmp/vmdk-walk-escape-outside").unwrap();
+        fs::write(outside.as_path().join("s001.vmdk"), b"secret").unwrap();
+
+        let dir = TempDir::new_with_prefix("/tmp/vmdk-walk-escape-anchor").unwrap();
+        let base = dir.as_path();
+        symlink(outside.as_path(), base.join("sub")).unwrap();
+
+        let walk_dir = open_dir(base);
+        let components = extent_components("sub/s001.vmdk").unwrap();
+        let res = open_extent_walk(walk_dir, &components, false, false, true);
+        assert!(
+            res.is_err(),
+            "fallback walk must reject an intermediate symlink escaping the descriptor directory"
+        );
     }
 }
