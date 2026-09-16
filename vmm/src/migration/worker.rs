@@ -85,12 +85,13 @@ pub(crate) struct MigrationWorker {
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     initial_vm_state: VmState,
     seccomp_filters: MigrationSeccompFilters,
+    vm_moved_to_destination: bool,
 }
 
 impl MigrationWorker {
     /// Drives the migration from its start to its end (success, cancellation,
     /// failure)
-    fn run(self) -> MigrationWorkerResult {
+    fn run(mut self) -> MigrationWorkerResult {
         let seccomp_res = if self.seccomp_filters.worker.is_empty() {
             Ok(())
         } else {
@@ -115,6 +116,7 @@ impl MigrationWorker {
                     &self.config,
                     self.initial_vm_state,
                     &self.seccomp_filters,
+                    &mut self.vm_moved_to_destination,
                 )
             })
             .inspect(|_| event!("vm", "migration-finished"))
@@ -127,7 +129,8 @@ impl MigrationWorker {
             vm,
             migration_result,
             initial_vm_state: self.initial_vm_state,
-            preserve_source: self.config.preserve_source,
+            config: self.config,
+            vm_moved_to_destination: self.vm_moved_to_destination,
         }
     }
 
@@ -154,6 +157,7 @@ impl MigrationWorker {
             hypervisor,
             initial_vm_state,
             seccomp_filters,
+            vm_moved_to_destination: false,
         };
 
         let inner_handle = match thread::Builder::new()
@@ -189,5 +193,6 @@ pub(crate) struct MigrationWorkerResult {
     /// The result of [`Vmm::send_migration`].
     pub migration_result: Result<(), MigratableError>,
     pub initial_vm_state: VmState,
-    pub preserve_source: bool,
+    pub config: VmSendMigrationData,
+    pub vm_moved_to_destination: bool,
 }
