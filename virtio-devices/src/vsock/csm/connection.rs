@@ -168,6 +168,23 @@ impl SeqPacketStream for UnixStream {
     }
 }
 
+/// A host->guest seqpacket datagram being chunked out across one or more `VSOCK_OP_RW` packets.
+#[derive(Default)]
+struct SeqRxMsg {
+    /// The buffer for the payloads.
+    buf: Vec<u8>,
+    /// Length of the datagram currently held in `buf[..len]`.
+    len: usize,
+    /// How many bytes of it have already been delivered to the guest.
+    pos: usize,
+}
+
+impl SeqRxMsg {
+    fn is_draining(&self) -> bool {
+        self.pos < self.len
+    }
+}
+
 impl TxBufSource for VsockPacket {
     fn copy_to_tx_buf(&self, offset: usize, dst: &mut [u8]) -> Result<()> {
         self.copy_buf_to_slice(offset, dst)
@@ -219,6 +236,8 @@ pub(crate) struct VsockConnection<S: Read + ReadVolatile + Write + WriteVolatile
     /// Whether the host stream has hung up (EPOLLHUP); distinguishes a full close from a host
     /// send-side half-close on a zero-length read.
     host_hung_up: bool,
+    /// Seqpacket only: whether the host peer has closed its send side (EPOLLRDHUP/EPOLLHUP).
+    host_read_closed: bool,
     /// Seqpacket only: bytes of the in-progress guest->host message, accumulated across RW
     /// packets until the one carrying `VSOCK_SEQ_EOM` completes it.
     seq_tx_cur: Vec<u8>,
@@ -229,6 +248,8 @@ pub(crate) struct VsockConnection<S: Read + ReadVolatile + Write + WriteVolatile
     /// Seqpacket only: total number of bytes held in `seq_tx_buf`. Used to enforce
     /// `CONN_TX_BUF_SIZE`.
     seq_tx_queued: usize,
+    /// Seqpacket only: the current host->guest datagram being chunked out to the guest.
+    seq_rx: SeqRxMsg,
 }
 
 impl<S> VsockChannel for VsockConnection<S>
@@ -299,6 +320,10 @@ where
                     pkt.set_op(uapi::VSOCK_OP_RST);
                     return Ok(());
                 }
+            }
+
+            if self.is_seqpacket() {
+                return self.seq_recv_pkt(pkt);
             }
 
             // Oh wait, before we start bringing in the big data, can our peer handle receiving so
@@ -413,6 +438,20 @@ where
         // Update the peer credit information.
         self.peer_buf_alloc = pkt.buf_alloc();
         self.peer_fwd_cnt = Wrapping(pkt.fwd_cnt());
+
+        // Resume delivering a message that stalled on peer credit.
+        // We've already received it from the unix side, so can't expect
+        // EPOLLIN handling to complete its delivery.
+        if self.is_seqpacket()
+            && self.seq_rx.is_draining()
+            && !self.need_credit_update_from_peer()
+            && matches!(
+                self.state,
+                ConnState::Established | ConnState::PeerClosed(false, _)
+            )
+        {
+            self.pending_rx.insert(PendingRx::Rw);
+        }
 
         // Seqpacket only deviates for OP_RW. All of the control and credit management ops are the
         // same as for streams.
@@ -607,6 +646,10 @@ where
             _ if self.need_credit_update_from_peer() => (),
             _ => evset.insert(epoll::Events::EPOLLIN),
         }
+        // EPOLLRDHUP is the only thing telling an EOF apart from an empty datagram.
+        if self.is_seqpacket() && evset.contains(epoll::Events::EPOLLIN) {
+            evset.insert(epoll::Events::EPOLLRDHUP);
+        }
         evset
     }
 
@@ -615,6 +658,13 @@ where
     fn notify(&mut self, evset: epoll::Events) {
         if evset.contains(epoll::Events::EPOLLHUP) {
             self.host_hung_up = true;
+            self.host_read_closed = true;
+            self.pending_rx.insert(PendingRx::Rw);
+        }
+
+        if evset.contains(epoll::Events::EPOLLRDHUP) {
+            // Remember the close, so the zero-length read it produces is read as EOF.
+            self.host_read_closed = true;
             self.pending_rx.insert(PendingRx::Rw);
         }
 
@@ -705,9 +755,11 @@ where
             expiry: None,
             host_write_shutdown: false,
             host_hung_up: false,
+            host_read_closed: false,
             seq_tx_cur: Vec::new(),
             seq_tx_buf: VecDeque::new(),
             seq_tx_queued: 0,
+            seq_rx: SeqRxMsg::default(),
         }
     }
 
@@ -739,9 +791,11 @@ where
             expiry: None,
             host_write_shutdown: false,
             host_hung_up: false,
+            host_read_closed: false,
             seq_tx_cur: Vec::new(),
             seq_tx_buf: VecDeque::new(),
             seq_tx_queued: 0,
+            seq_rx: SeqRxMsg::default(),
         }
     }
 
@@ -913,6 +967,123 @@ where
     ///
     fn is_seqpacket(&self) -> bool {
         self.sock_type == uapi::VSOCK_TYPE_SEQPACKET
+    }
+
+    /// The largest message deliverable to the guest, it must fit in both windows.
+    fn seq_max_msg_len(&self) -> usize {
+        cmp::min(
+            self.peer_buf_alloc as usize,
+            defs::CONN_TX_BUF_SIZE as usize,
+        )
+    }
+
+    /// Reset the connection.
+    fn seq_rx_reset_undeliverable(&mut self, pkt: &mut VsockPacket, len: usize, why: &str) {
+        warn!(
+            "vsock: undeliverable seqpacket message ({why}): {len} bytes vs a {} byte limit \
+             (peer_buf_alloc={}); resetting connection (lp={}, pp={})",
+            self.seq_max_msg_len(),
+            self.peer_buf_alloc,
+            self.local_port,
+            self.peer_port
+        );
+        self.seq_rx.len = 0;
+        self.seq_rx.pos = 0;
+        pkt.set_op(uapi::VSOCK_OP_RST);
+        self.last_fwd_cnt_to_peer = self.fwd_cnt;
+    }
+
+    /// Fill in a host->guest seqpacket data packet.
+    ///
+    /// Unlike the stream path (which reads straight into the guest RX buffer), a seqpacket
+    /// connection reads a whole datagram from the host and then chunks it out across one or more
+    /// `VSOCK_OP_RW` packets, tagging the final chunk of each datagram with `VSOCK_SEQ_EOM` so
+    /// the guest can reconstruct the message boundary. `PendingRx::Rw` is re-armed while a
+    /// partially-delivered datagram remains.
+    fn seq_recv_pkt(&mut self, pkt: &mut VsockPacket) -> VsockResult<()> {
+        if self.seq_rx.is_draining() && self.seq_rx.len > self.seq_max_msg_len() {
+            let len = self.seq_rx.len;
+            self.seq_rx_reset_undeliverable(pkt, len, "peer shrank its window mid-message");
+            return Ok(());
+        }
+
+        // Respect peer flow control: if the guest has no room, ask for a credit update and retry
+        // the read once it grants more space.
+        if self.need_credit_update_from_peer() {
+            // Deliberately not re-arming Rw: that would emit a credit request per call.
+            self.last_fwd_cnt_to_peer = self.fwd_cnt;
+            pkt.set_op(uapi::VSOCK_OP_CREDIT_REQUEST);
+            return Ok(());
+        }
+
+        // Pull the next datagram from the host, if we're not still draining one.
+        if !self.seq_rx.is_draining() {
+            if self.seq_rx.buf.is_empty() {
+                self.seq_rx.buf = vec![0u8; defs::CONN_TX_BUF_SIZE as usize];
+            }
+            let max_msg_len = self.seq_max_msg_len();
+            match self.stream.recv_datagram(&mut self.seq_rx.buf) {
+                Ok(0) if !self.host_read_closed => {
+                    // Zero bytes with the peer still up is an empty datagram, not an EOF.
+                    pkt.set_op(uapi::VSOCK_OP_RW)
+                        .set_len(0)
+                        .set_flag(uapi::VSOCK_SEQ_EOM);
+                    self.last_fwd_cnt_to_peer = self.fwd_cnt;
+                    return Ok(());
+                }
+                Ok(0) => {
+                    self.state = ConnState::LocalClosed(true, true);
+                    self.expiry = Some(
+                        Instant::now() + Duration::from_millis(defs::CONN_SHUTDOWN_TIMEOUT_MS),
+                    );
+                    pkt.set_op(uapi::VSOCK_OP_SHUTDOWN)
+                        .set_flag(uapi::VSOCK_FLAGS_SHUTDOWN_RCV)
+                        .set_flag(uapi::VSOCK_FLAGS_SHUTDOWN_SEND);
+                    self.last_fwd_cnt_to_peer = self.fwd_cnt;
+                    return Ok(());
+                }
+                Ok(n) if n > max_msg_len => {
+                    self.seq_rx_reset_undeliverable(pkt, n, "datagram exceeds the peer's window");
+                    return Ok(());
+                }
+                Ok(n) => {
+                    self.seq_rx.len = n;
+                    self.seq_rx.pos = 0;
+                }
+                Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                    return Err(VsockError::NoData);
+                }
+                Err(err) => {
+                    error!(
+                        "vsock: error reading seqpacket datagram (lp={}, pp={}): {:?}",
+                        self.local_port, self.peer_port, err
+                    );
+                    pkt.set_op(uapi::VSOCK_OP_RST);
+                    self.last_fwd_cnt_to_peer = self.fwd_cnt;
+                    return Ok(());
+                }
+            }
+        }
+
+        let buf_capacity = pkt.buf_capacity().unwrap_or(0);
+        let peer_credit = self.peer_avail_credit();
+        let msg = &mut self.seq_rx;
+        let remaining = msg.len - msg.pos;
+        let max_len = cmp::min(cmp::min(buf_capacity, peer_credit), remaining);
+
+        pkt.copy_buf_from_slice(0, &msg.buf[msg.pos..msg.pos + max_len])?;
+        pkt.set_op(uapi::VSOCK_OP_RW).set_len(max_len as u32);
+        msg.pos += max_len;
+
+        if msg.is_draining() {
+            self.pending_rx.insert(PendingRx::Rw);
+        } else {
+            pkt.set_flag(uapi::VSOCK_SEQ_EOM);
+        }
+
+        self.rx_cnt += Wrapping(max_len as u32);
+        self.last_fwd_cnt_to_peer = self.fwd_cnt;
+        Ok(())
     }
 
     /// Absorb a guest->host seqpacket `VSOCK_OP_RW` packet.
