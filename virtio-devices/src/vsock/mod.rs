@@ -156,10 +156,10 @@ pub trait VsockChannel {
 /// Currently, the only implementation we have is `crate::virtio::unix::muxer::VsockMuxer`, which
 /// translates guest-side vsock connections to host-side Unix domain socket connections.
 pub trait VsockBackend: VsockChannel + VsockEpollListener + Send {
-    fn connections(&self) -> Vec<(u32, u32)> {
+    fn connections(&self) -> Vec<(u32, u32, u16)> {
         Vec::new()
     }
-    fn queue_rst_for_connections(&mut self, _conns: Vec<(u32, u32)>) {}
+    fn queue_rst_for_connections(&mut self, _conns: Vec<(u32, u32, u16)>) {}
 }
 
 #[cfg(any(test, fuzzing))]
