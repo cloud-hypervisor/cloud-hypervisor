@@ -7989,15 +7989,21 @@ mod dbus_api {
         let guest = Guest::new(Box::new(disk_config));
         let dbus_api = TargetApi::new_dbus_api(&guest.tmp_dir);
         let http_api = TargetApi::new_http_api(&guest.tmp_dir);
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
 
         let mut child = GuestCommand::new(&guest)
             .args(dbus_api.guest_args())
             .args(http_api.guest_args())
+            .args(["--event-monitor", format!("path={event_path}").as_str()])
             .capture_output()
             .spawn()
             .unwrap();
 
-        thread::sleep(Duration::new(1, 0));
+        assert!(wait_for_sequential_events_str(
+            Duration::from_secs(10),
+            &["starting", "started"],
+            &event_path,
+        ));
 
         // Verify API servers are running
         assert!(dbus_api.remote_command("ping", None));
@@ -8850,6 +8856,10 @@ mod snapshot_restore_common {
         let expected_events = [
             &MetaEvent {
                 event: "starting".to_string(),
+                device_id: None,
+            },
+            &MetaEvent {
+                event: "started".to_string(),
                 device_id: None,
             },
             &MetaEvent {
@@ -9867,7 +9877,11 @@ mod common_sequential {
             .capture_output()
             .spawn()
             .unwrap();
-        thread::sleep(Duration::new(2, 0));
+        assert!(wait_for_sequential_events_str(
+            Duration::from_secs(10),
+            &["starting", "started"],
+            &event_path_restored,
+        ));
 
         let taps = net_util::open_tap(
             Some(tap_name),
@@ -9907,6 +9921,10 @@ mod common_sequential {
         let expected_events = [
             &MetaEvent {
                 event: "starting".to_string(),
+                device_id: None,
+            },
+            &MetaEvent {
+                event: "started".to_string(),
                 device_id: None,
             },
             &MetaEvent {
