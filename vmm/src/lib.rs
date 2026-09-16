@@ -1674,6 +1674,7 @@ impl Vmm {
         send_data_migration: &VmSendMigrationData,
         initial_vm_state: VmState,
         seccomp_filters: &MigrationSeccompFilters,
+        vm_moved_to_destination: &mut bool,
     ) -> result::Result<(), MigratableError> {
         // State machine that is updated with more context as we progress.
         let mut ctx = OngoingMigrationContext::new();
@@ -1876,6 +1877,9 @@ impl Vmm {
             Request::complete_paused()
         };
         let (_, complete_duration) = measure_ok(|| {
+            // We might lose an ACK, but this is preferable to an inconsistent
+            // source VM or both VMs running. This is a known postcopy tradeoff.
+            *vm_moved_to_destination = true;
             transport::send_request_expect_ok(
                 &mut socket,
                 complete_req,
@@ -2132,7 +2136,8 @@ impl Vmm {
             vm,
             migration_result: migration_res,
             initial_vm_state,
-            preserve_source,
+            config,
+            vm_moved_to_destination,
         } = migration_worker_handle.join();
 
         let mut try_resume_vm_after_failed_migration = |mut vm: Vm| {
@@ -2158,7 +2163,7 @@ impl Vmm {
         };
 
         match migration_res {
-            Ok(()) if preserve_source => {
+            Ok(()) if config.preserve_source => {
                 // Give the source VM back to the VMM.
                 self.vm = VmOwnership::Owned(vm);
             }
@@ -2177,11 +2182,21 @@ impl Vmm {
                 }
             }
             Err(e) => {
-                error!(
-                    "Migration failed: {}",
-                    util::flatten_error_chain_to_string(&e)
-                );
-                try_resume_vm_after_failed_migration(vm);
+                error!("Migration failed: {}", flatten_error_chain_to_string(&e));
+
+                if matches!(config.memory_mode, MigrationMode::Postcopy) && vm_moved_to_destination
+                {
+                    warn!(
+                        "Postcopy migration failed after the VM was already moved to the new location: recovery impossible"
+                    );
+                    self.vm = VmOwnership::None;
+                    let mut vm = vm;
+                    if let Err(e) = vm.shutdown() {
+                        warn!("Failed tearing down the VM after failed postcopy migration: {e}");
+                    }
+                } else {
+                    try_resume_vm_after_failed_migration(vm);
+                }
             }
         }
     }
