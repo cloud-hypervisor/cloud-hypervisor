@@ -793,6 +793,7 @@ impl MemoryManager {
                     addr: region.as_ptr() as usize,
                     size: region.len() as usize,
                     page_size,
+                    host_numa_node: zone.host_numa_node,
                 });
             }
 
@@ -804,6 +805,7 @@ impl MemoryManager {
                     addr: virtio_mem_zone.region.as_ptr() as usize,
                     size: virtio_mem_zone.region.len() as usize,
                     page_size,
+                    host_numa_node: zone.host_numa_node,
                 });
             }
         }
@@ -2404,6 +2406,8 @@ impl MemoryManager {
         }
     }
 
+    // Intersect the node's cpu set with the calling thread's current
+    // affinity, so pinning a prefault worker never widens a task set the
     // Update the GuestMemoryMmap with the new range
     fn add_region(&mut self, region: Arc<GuestRegionMmap>) -> Result<(), Error> {
         let guest_memory = self
@@ -2477,6 +2481,7 @@ impl MemoryManager {
                 addr: region.as_ptr() as usize,
                 size,
                 page_size,
+                host_numa_node: None,
             }])?;
         }
 
