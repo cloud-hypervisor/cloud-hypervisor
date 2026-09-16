@@ -80,6 +80,7 @@
 //             it thinks its peer's information is out of date.
 //          Our implementation uses the proactive approach.
 //
+use std::collections::VecDeque;
 use std::io::{ErrorKind, Read, Write};
 use std::num::Wrapping;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -163,6 +164,7 @@ impl TxBufSource for VsockPacket {
 /// socket and a host-side `Read + Write + AsRawFd` stream.
 ///
 pub(crate) struct VsockConnection<S: Read + ReadVolatile + Write + WriteVolatile + AsRawFd> {
+    sock_type: u16,
     /// The current connection state.
     state: ConnState,
     /// The local CID. Most of the time this will be the constant `2` (the vsock host CID).
@@ -201,6 +203,9 @@ pub(crate) struct VsockConnection<S: Read + ReadVolatile + Write + WriteVolatile
     /// Whether the host stream has hung up (EPOLLHUP); distinguishes a full close from a host
     /// send-side half-close on a zero-length read.
     host_hung_up: bool,
+    seq_tx_cur: Vec<u8>,
+    seq_tx_buf: VecDeque<Vec<u8>>,
+    seq_tx_queued: usize,
 }
 
 impl<S> VsockChannel for VsockConnection<S>
@@ -386,6 +391,16 @@ where
         self.peer_buf_alloc = pkt.buf_alloc();
         self.peer_fwd_cnt = Wrapping(pkt.fwd_cnt());
 
+        if self.is_seqpacket() && pkt.op() == uapi::VSOCK_OP_RW {
+            match self.state {
+                ConnState::Established
+                | ConnState::PeerClosed(_, false)
+                | ConnState::LocalClosed(false, _) => self.seq_send_rw(pkt),
+                _ => (),
+            }
+            return Ok(());
+        }
+
         match self.state {
             // Most frequent case: this is an established connection that needs to forward some
             // data to the host stream. Also works for a connection that has begun shutting
@@ -439,12 +454,12 @@ where
                 let send_off = pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_SEND != 0;
                 self.state = ConnState::PeerClosed(recv_off, send_off);
                 if recv_off && send_off {
-                    if self.tx_buf.is_empty() {
-                        self.pending_rx.insert(PendingRx::Rst);
-                    } else {
+                    if self.has_pending_tx() {
                         self.expiry = Some(
                             Instant::now() + Duration::from_millis(defs::CONN_SHUTDOWN_TIMEOUT_MS),
                         );
+                    } else {
+                        self.pending_rx.insert(PendingRx::Rst);
                     }
                 } else if send_off {
                     // The guest half-closed its send side; surface that as an EOF to the host.
@@ -458,7 +473,7 @@ where
                 let recv_off = recv_off || (pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_RCV != 0);
                 let new_send_off = send_off || (pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_SEND != 0);
                 self.state = ConnState::PeerClosed(recv_off, new_send_off);
-                if recv_off && new_send_off && self.tx_buf.is_empty() {
+                if recv_off && new_send_off && !self.has_pending_tx() {
                     self.pending_rx.insert(PendingRx::Rst);
                 } else if new_send_off && !send_off {
                     self.shutdown_host_write_side();
@@ -471,12 +486,12 @@ where
                 let send_off = pkt.flags() & uapi::VSOCK_FLAGS_SHUTDOWN_SEND != 0;
                 if send_off {
                     self.state = ConnState::PeerClosed(true, true);
-                    if self.tx_buf.is_empty() {
-                        self.pending_rx.insert(PendingRx::Rst);
-                    } else {
+                    if self.has_pending_tx() {
                         self.expiry = Some(
                             Instant::now() + Duration::from_millis(defs::CONN_SHUTDOWN_TIMEOUT_MS),
                         );
+                    } else {
+                        self.pending_rx.insert(PendingRx::Rst);
                     }
                 }
             }
@@ -541,7 +556,7 @@ where
     ///
     fn get_polled_evset(&self) -> epoll::Events {
         let mut evset = epoll::Events::empty();
-        if !self.tx_buf.is_empty() {
+        if self.has_pending_tx() {
             // There's data waiting in the TX buffer, so we are interested in being notified
             // when writing to the host stream wouldn't block.
             evset.insert(epoll::Events::EPOLLOUT);
@@ -582,34 +597,38 @@ where
         if evset.contains(epoll::Events::EPOLLOUT) {
             // Data can be written to the host stream. Time to flush out the TX buffer.
             //
-            if self.tx_buf.is_empty() {
-                info!("vsock: connection received unexpected EPOLLOUT event");
-                return;
-            }
-            let flushed = self
-                .tx_buf
-                .flush_to(&mut self.stream)
-                .unwrap_or_else(|err| {
-                    warn!(
-                        "vsock: error flushing TX buf for (lp={}, pp={}): {:?}",
-                        self.local_port, self.peer_port, err
-                    );
-                    match err {
-                        Error::TxBufFlush(inner) if inner.kind() == ErrorKind::WouldBlock => {
-                            // This should never happen (EWOULDBLOCK after EPOLLOUT), but
-                            // it does, so let's absorb it.
+            if self.is_seqpacket() {
+                self.flush_seq_tx();
+            } else {
+                if self.tx_buf.is_empty() {
+                    info!("vsock: connection received unexpected EPOLLOUT event");
+                    return;
+                }
+                let flushed = self
+                    .tx_buf
+                    .flush_to(&mut self.stream)
+                    .unwrap_or_else(|err| {
+                        warn!(
+                            "vsock: error flushing TX buf for (lp={}, pp={}): {:?}",
+                            self.local_port, self.peer_port, err
+                        );
+                        match err {
+                            Error::TxBufFlush(inner) if inner.kind() == ErrorKind::WouldBlock => {
+                                // This should never happen (EWOULDBLOCK after EPOLLOUT), but
+                                // it does, so let's absorb it.
+                            }
+                            _ => self.kill(),
                         }
-                        _ => self.kill(),
-                    }
-                    0
-                });
-            self.fwd_cnt += Wrapping(flushed as u32);
+                        0
+                    });
+                self.fwd_cnt += Wrapping(flushed as u32);
+            }
 
             // If this connection was shutting down, but is waiting to drain the TX buffer
             // before forceful termination, the wait might be over.
-            if self.state == ConnState::PeerClosed(true, true) && self.tx_buf.is_empty() {
+            if self.state == ConnState::PeerClosed(true, true) && !self.has_pending_tx() {
                 self.pending_rx.insert(PendingRx::Rst);
-            } else if matches!(self.state, ConnState::PeerClosed(_, true)) && self.tx_buf.is_empty()
+            } else if matches!(self.state, ConnState::PeerClosed(_, true)) && !self.has_pending_tx()
             {
                 // A deferred guest send-side half-close: now that the TX buffer is drained, we can
                 // surface the EOF to the host.
@@ -636,8 +655,10 @@ where
         local_port: u32,
         peer_port: u32,
         peer_buf_alloc: u32,
+        sock_type: u16,
     ) -> Self {
         Self {
+            sock_type,
             local_cid,
             peer_cid,
             local_port,
@@ -654,6 +675,9 @@ where
             expiry: None,
             host_write_shutdown: false,
             host_hung_up: false,
+            seq_tx_cur: Vec::new(),
+            seq_tx_buf: VecDeque::new(),
+            seq_tx_queued: 0,
         }
     }
 
@@ -665,8 +689,10 @@ where
         peer_cid: u64,
         local_port: u32,
         peer_port: u32,
+        sock_type: u16,
     ) -> Self {
         Self {
+            sock_type,
             local_cid,
             peer_cid,
             local_port,
@@ -683,6 +709,9 @@ where
             expiry: None,
             host_write_shutdown: false,
             host_hung_up: false,
+            seq_tx_cur: Vec::new(),
+            seq_tx_buf: VecDeque::new(),
+            seq_tx_queued: 0,
         }
     }
 
@@ -787,7 +816,7 @@ where
     /// This is deferred while the TX buffer still holds guest data, since shutting down the write
     /// half now would drop those not-yet-flushed bytes; `notify()` retries once the buffer drains.
     fn shutdown_host_write_side(&mut self) {
-        if self.host_write_shutdown || !self.tx_buf.is_empty() {
+        if self.host_write_shutdown || self.has_pending_tx() {
             return;
         }
         // SAFETY: the stream owns the socket fd by construction and `shutdown` doesn't touch process
@@ -801,6 +830,10 @@ where
             );
         }
         self.host_write_shutdown = true;
+    }
+
+    fn has_pending_tx(&self) -> bool {
+        !self.tx_buf.is_empty() || !self.seq_tx_buf.is_empty()
     }
 
     /// Check if the credit information the peer has last received from us is outdated.
@@ -839,9 +872,93 @@ where
             .set_dst_cid(self.peer_cid)
             .set_src_port(self.local_port)
             .set_dst_port(self.peer_port)
-            .set_type(uapi::VSOCK_TYPE_STREAM)
+            .set_type(self.sock_type)
             .set_buf_alloc(defs::CONN_TX_BUF_SIZE)
             .set_fwd_cnt(self.fwd_cnt.0)
+    }
+
+    fn is_seqpacket(&self) -> bool {
+        self.sock_type == uapi::VSOCK_TYPE_SEQPACKET
+    }
+
+    fn seq_send_rw(&mut self, pkt: &VsockPacket) {
+        let len = pkt.len() as usize;
+        let window = defs::CONN_TX_BUF_SIZE as usize;
+
+        // What `fwd_cnt` has not accounted for, capped at the `buf_alloc` we advertise.
+        if self.seq_tx_queued + self.seq_tx_cur.len() + len > window {
+            warn!(
+                "vsock: guest seqpacket message exceeds the {window}-byte window, killing \
+                 connection (lp={}, pp={})",
+                self.local_port, self.peer_port
+            );
+            self.kill();
+            self.seq_tx_reset();
+            return;
+        }
+
+        if len > 0 {
+            let start = self.seq_tx_cur.len();
+            self.seq_tx_cur.resize(start + len, 0);
+            if pkt
+                .copy_buf_to_slice(0, &mut self.seq_tx_cur[start..])
+                .is_err()
+            {
+                self.kill();
+                self.seq_tx_reset();
+                return;
+            }
+        }
+
+        if pkt.flags() & uapi::VSOCK_SEQ_EOM != 0 {
+            let msg = mem::take(&mut self.seq_tx_cur);
+            self.seq_tx_queued += msg.len();
+            self.seq_tx_buf.push_back(msg);
+            self.flush_seq_tx();
+        } else if self.seq_tx_cur.len() >= window {
+            self.kill();
+            self.seq_tx_reset();
+            return;
+        }
+
+        if self.peer_needs_credit_update() {
+            self.pending_rx.insert(PendingRx::CreditUpdate);
+        }
+    }
+
+    fn seq_tx_reset(&mut self) {
+        self.seq_tx_cur = Vec::new();
+        self.seq_tx_buf.clear();
+        self.seq_tx_queued = 0;
+    }
+
+    fn flush_seq_tx(&mut self) {
+        while let Some(buf) = self.seq_tx_buf.pop_front() {
+            match self.stream.send_datagram(&buf) {
+                Ok(n) if n == buf.len() => {
+                    self.seq_tx_queued -= n;
+                    self.fwd_cnt += Wrapping(n as u32);
+                }
+                Ok(_) => {
+                    self.kill();
+                    self.seq_tx_reset();
+                    return;
+                }
+                Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                    self.seq_tx_buf.push_front(buf);
+                    return;
+                }
+                Err(err) => {
+                    warn!(
+                        "vsock: error writing seqpacket datagram (lp={}, pp={}): {:?}",
+                        self.local_port, self.peer_port, err
+                    );
+                    self.kill();
+                    self.seq_tx_reset();
+                    return;
+                }
+            }
+        }
     }
 }
 
@@ -1045,8 +1162,15 @@ mod tests {
         fn new_established() -> Self {
             Self::new(ConnState::Established)
         }
+        fn new_established_seqpacket() -> Self {
+            Self::new_with_type(ConnState::Established, uapi::VSOCK_TYPE_SEQPACKET)
+        }
 
         fn new(conn_state: ConnState) -> Self {
+            Self::new_with_type(conn_state, uapi::VSOCK_TYPE_STREAM)
+        }
+
+        fn new_with_type(conn_state: ConnState, sock_type: u16) -> Self {
             let vsock_test_ctx = TestContext::new();
             let mut handler_ctx = vsock_test_ctx.create_epoll_handler_context();
             let stream = TestStream::new();
@@ -1067,9 +1191,10 @@ mod tests {
                     LOCAL_PORT,
                     PEER_PORT,
                     PEER_BUF_ALLOC,
+                    sock_type,
                 ),
                 ConnState::LocalInit => VsockConnection::<TestStream>::new_local_init(
-                    stream, LOCAL_CID, PEER_CID, LOCAL_PORT, PEER_PORT,
+                    stream, LOCAL_CID, PEER_CID, LOCAL_PORT, PEER_PORT, sock_type,
                 ),
                 ConnState::Established => {
                     let mut conn = VsockConnection::<TestStream>::new_peer_init(
@@ -1079,6 +1204,7 @@ mod tests {
                         LOCAL_PORT,
                         PEER_PORT,
                         PEER_BUF_ALLOC,
+                        sock_type,
                     );
                     assert!(conn.has_pending_rx());
                     conn.recv_pkt(&mut pkt).unwrap();
@@ -1137,6 +1263,17 @@ mod tests {
             assert!(data.len() <= self.pkt.buf_capacity().unwrap());
             self.init_pkt(uapi::VSOCK_OP_RW, data.len() as u32);
             self.pkt.copy_buf_from_slice(0, data).unwrap();
+            &self.pkt
+        }
+
+        fn init_seq_data_pkt(&mut self, data: &[u8], eom: bool) -> &VsockPacket {
+            assert!(data.len() <= self.pkt.buf_capacity().unwrap());
+            self.init_pkt(uapi::VSOCK_OP_RW, data.len() as u32);
+            if !data.is_empty() {
+                self.pkt.copy_buf_from_slice(0, data).unwrap();
+            }
+            let flags = if eom { uapi::VSOCK_SEQ_EOM } else { 0 };
+            self.pkt.set_flags(flags);
             &self.pkt
         }
 
@@ -1701,5 +1838,154 @@ mod tests {
         assert!(ctx.conn.has_pending_rx());
         ctx.recv();
         assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RST);
+    }
+
+    #[test]
+    fn test_seqpacket_tx_message_boundaries() {
+        let mut ctx = CsmTestContext::new_established_seqpacket();
+
+        ctx.init_seq_data_pkt(&[1, 2, 3], false);
+        ctx.send();
+        assert!(ctx.conn.stream.sent_msgs.is_empty());
+
+        ctx.init_seq_data_pkt(&[4, 5], true);
+        ctx.send();
+        assert_eq!(ctx.conn.stream.sent_msgs, vec![vec![1, 2, 3, 4, 5]]);
+
+        ctx.init_seq_data_pkt(&[9], true);
+        ctx.send();
+        assert_eq!(
+            ctx.conn.stream.sent_msgs,
+            vec![vec![1, 2, 3, 4, 5], vec![9]]
+        );
+    }
+
+    #[test]
+    fn test_seqpacket_tx_backpressure_flushes_on_epollout() {
+        let mut ctx = CsmTestContext::new_established_seqpacket();
+        let mut stream = TestStream::new();
+        stream.write_state = StreamState::WouldBlock;
+        ctx.set_stream(stream);
+
+        ctx.init_seq_data_pkt(&[1, 2, 3], true);
+        ctx.send();
+        assert!(ctx.conn.stream.sent_msgs.is_empty());
+        assert!(
+            ctx.conn
+                .get_polled_evset()
+                .contains(epoll::Events::EPOLLOUT)
+        );
+
+        ctx.conn.stream.write_state = StreamState::Ready;
+        ctx.notify_epollout();
+        assert_eq!(ctx.conn.stream.sent_msgs, vec![vec![1, 2, 3]]);
+        assert!(
+            !ctx.conn
+                .get_polled_evset()
+                .contains(epoll::Events::EPOLLOUT)
+        );
+    }
+
+    #[test]
+    fn test_seqpacket_tx_window_overflow_kills_connection() {
+        let mut ctx = CsmTestContext::new_established_seqpacket();
+        let cap = ctx.pkt.buf_capacity().unwrap();
+        let chunk = vec![0xabu8; cap];
+
+        for _ in 0..(4 * defs::CONN_TX_BUF_SIZE as usize / cap) {
+            ctx.init_seq_data_pkt(&chunk, false);
+            ctx.send();
+        }
+
+        assert_eq!(ctx.conn.state, ConnState::Killed);
+        assert!(ctx.conn.stream.sent_msgs.is_empty());
+        assert!(ctx.conn.seq_tx_cur.len() <= defs::CONN_TX_BUF_SIZE as usize);
+        assert!(!ctx.conn.has_pending_tx());
+    }
+
+    #[test]
+    fn test_seqpacket_tx_message_filling_window_succeeds() {
+        let mut ctx = CsmTestContext::new_established_seqpacket();
+        let cap = ctx.pkt.buf_capacity().unwrap();
+        let chunk = vec![0xabu8; cap];
+        let pkts = defs::CONN_TX_BUF_SIZE as usize / cap;
+
+        for i in 0..pkts {
+            ctx.init_seq_data_pkt(&chunk, i == pkts - 1);
+            ctx.send();
+        }
+
+        assert_eq!(ctx.conn.state, ConnState::Established);
+        assert_eq!(
+            ctx.conn.stream.sent_msgs,
+            vec![vec![0xabu8; defs::CONN_TX_BUF_SIZE as usize]]
+        );
+    }
+
+    #[test]
+    fn test_seqpacket_tx_message_larger_than_window_resets() {
+        // A well-behaved guest sending a message larger than the window must not be left
+        // blocked with the connection still up.
+        const MSG_LEN: usize = 2 * defs::CONN_TX_BUF_SIZE as usize;
+
+        let mut ctx = CsmTestContext::new_established_seqpacket();
+        let cap = ctx.pkt.buf_capacity().unwrap();
+        let chunk = vec![0xabu8; cap];
+
+        // The guest's view of our receive window, as it computes it from our packet headers:
+        // free = buf_alloc - (tx_cnt - fwd_cnt).
+        let mut guest_tx_cnt = 0usize;
+        let mut our_buf_alloc = defs::CONN_TX_BUF_SIZE as usize;
+        let mut our_fwd_cnt = 0usize;
+
+        while guest_tx_cnt < MSG_LEN {
+            for _ in 0..16 {
+                if !ctx.conn.has_pending_rx() || ctx.conn.recv_pkt(&mut ctx.pkt).is_err() {
+                    break;
+                }
+                our_buf_alloc = ctx.pkt.buf_alloc() as usize;
+                our_fwd_cnt = ctx.pkt.fwd_cnt() as usize;
+            }
+
+            if our_buf_alloc - (guest_tx_cnt - our_fwd_cnt) == 0 {
+                // Out of credit mid-message with no way to earn any: must not stay up.
+                assert_ne!(
+                    ctx.conn.state(),
+                    ConnState::Established,
+                    "guest blocked {guest_tx_cnt} bytes into a {MSG_LEN}-byte message with the \
+                     connection still established: buf_alloc={our_buf_alloc}, \
+                     fwd_cnt={our_fwd_cnt}"
+                );
+                return;
+            }
+
+            let n = cmp::min(our_buf_alloc - (guest_tx_cnt - our_fwd_cnt), cap);
+            let eom = guest_tx_cnt + n == MSG_LEN;
+            ctx.init_seq_data_pkt(&chunk[..n], eom);
+            ctx.send();
+            guest_tx_cnt += n;
+        }
+
+        // If the whole message got through, it must have arrived as exactly one datagram.
+        assert_eq!(ctx.conn.stream.sent_msgs, vec![vec![0xabu8; MSG_LEN]]);
+    }
+
+    #[test]
+    fn test_stream_tx_buf_overflow_kills_connection() {
+        // The stream-side invariant that the two seqpacket tests above mirror: a guest that
+        // pushes more unflushed data than the window we advertise gets the connection killed.
+        let mut ctx = CsmTestContext::new_established();
+        let cap = ctx.pkt.buf_capacity().unwrap();
+        let chunk = vec![0xabu8; cap];
+        let mut stream = TestStream::new();
+        stream.write_state = StreamState::WouldBlock;
+        ctx.set_stream(stream);
+
+        let pkts = 4 * defs::CONN_TX_BUF_SIZE as usize / cap;
+        for _ in 0..pkts {
+            ctx.init_data_pkt(&chunk);
+            ctx.send();
+        }
+        assert_eq!(ctx.conn.state, ConnState::Killed);
     }
 }
