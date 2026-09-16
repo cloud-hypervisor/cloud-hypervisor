@@ -275,6 +275,13 @@ impl ApplyLandlock for MemoryZoneConfig {
         if let Some(file) = &self.file {
             landlock.add_rule_with_access(file, "rw")?;
         }
+        if let Some(node) = self.host_numa_node {
+            // Prefault workers read this to pin. Absent falls back to unpinned.
+            let cpulist = format!("/sys/devices/system/node/node{node}/cpulist");
+            if Path::new(&cpulist).exists() {
+                landlock.add_rule_with_access(Path::new(&cpulist), "r")?;
+            }
+        }
         Ok(())
     }
 }

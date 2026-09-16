@@ -793,6 +793,7 @@ impl MemoryManager {
                     addr: region.as_ptr() as usize,
                     size: region.len() as usize,
                     page_size,
+                    host_numa_node: zone.host_numa_node,
                 });
             }
 
@@ -804,6 +805,7 @@ impl MemoryManager {
                     addr: virtio_mem_zone.region.as_ptr() as usize,
                     size: virtio_mem_zone.region.len() as usize,
                     page_size,
+                    host_numa_node: zone.host_numa_node,
                 });
             }
         }
@@ -2483,6 +2485,7 @@ impl MemoryManager {
                 addr: region.as_ptr() as usize,
                 size,
                 page_size,
+                host_numa_node: None,
             }])?;
         }
 
