@@ -2289,6 +2289,19 @@ impl MemoryManager {
                 .map_err(Error::ApplyNumaPolicy)?;
         }
 
+        // Must happen before prefaulting: only a region that is already marked
+        // as eligible gets huge pages when its pages are faulted in.
+        if thp && !hugepages {
+            // SAFETY: FFI call with correct arguments
+            let ret = unsafe { libc::madvise(region.as_ptr().cast(), size, libc::MADV_HUGEPAGE) };
+            if ret != 0 {
+                let e = io::Error::last_os_error();
+                warn!("Failed to mark pages as THP eligible: {e}");
+            } else {
+                debug!("Successfully marked pages as THP eligible");
+            }
+        }
+
         // Prefault the region if needed, in parallel.
         if prefault {
             let page_size =
@@ -2351,17 +2364,6 @@ impl MemoryManager {
             region.as_ptr() as u64,
             size
         );
-
-        if thp && !hugepages {
-            // SAFETY: FFI call with correct arguments
-            let ret = unsafe { libc::madvise(region.as_ptr().cast(), size, libc::MADV_HUGEPAGE) };
-            if ret != 0 {
-                let e = io::Error::last_os_error();
-                warn!("Failed to mark pages as THP eligible: {e}");
-            } else {
-                debug!("Successfully marked pages as THP eligible");
-            }
-        }
 
         Ok(region)
     }
