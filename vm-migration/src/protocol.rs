@@ -600,12 +600,32 @@ impl MemoryRangeTable {
         self.data.extend(table.data);
     }
 
-    pub fn new_from_tables(tables: Vec<Self>) -> Self {
-        let mut data = Vec::new();
+    /// Merges the given tables into one.
+    pub fn new_from_tables(mut tables: Vec<Self>) -> Self {
+        let Some((largest_idx, _)) = tables
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, table)| table.length())
+        else {
+            return Self::default();
+        };
+
+        // These tables can be large (hundreds of MiB for VMs with multiple TiB
+        // of memory): reuse the largest vector to avoid copying its data.
+        let mut merged = tables.swap_remove(largest_idx);
+
+        let amount_additional_ranges = tables
+            .iter()
+            .map(|table| table.ranges().len())
+            .sum::<usize>();
+
+        // Prevent multiple reallocations
+        merged.data.reserve_exact(amount_additional_ranges);
         for table in tables {
-            data.extend(table.data);
+            merged.extend(table);
         }
-        Self { data }
+
+        merged
     }
 
     /// Returns the effective size in bytes.

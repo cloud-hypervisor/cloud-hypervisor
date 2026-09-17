@@ -3606,7 +3606,7 @@ impl Migratable for MemoryManager {
     // Generate a table for the pages that are dirty. The dirty pages are collapsed
     // together in the table if they are contiguous.
     fn dirty_log(&mut self) -> result::Result<MemoryRangeTable, MigratableError> {
-        let mut table = MemoryRangeTable::default();
+        let mut tables = Vec::with_capacity(self.guest_ram_mappings.len());
         for r in &self.guest_ram_mappings {
             let vm_dirty_bitmap = self
                 .vm
@@ -3642,9 +3642,9 @@ impl Migratable for MemoryManager {
                 sub_table.effective_size() / 1024,
             );
 
-            table.extend(sub_table);
+            tables.push(sub_table);
         }
-        Ok(table)
+        Ok(MemoryRangeTable::new_from_tables(tables))
     }
 }
 
