@@ -183,6 +183,8 @@ fn parse_format(fmt: &str) -> Result<Vec<Token>, Error> {
 pub(crate) const DEFAULT_FORMAT: &str =
     "cloud-hypervisor: {boottime}s: <{thread}> {level}:{location} -- {msg}";
 
+const AVERAGE_RECORD_LEN: usize = 128;
+
 pub(crate) struct Logger {
     output: Mutex<Box<dyn Write + Send>>,
     start: Instant,
@@ -220,46 +222,55 @@ impl log::Log for Logger {
         // that multiple `{hour}`/`{minute}`/`{second}`/etc. fields stay coherent.
         let zoned_utc = LazyCell::new(|| jiff::Timestamp::now().to_zoned(TimeZone::UTC));
         let zoned_local = LazyCell::new(|| jiff::Timestamp::now().to_zoned(self.local_tz.clone()));
-        let mut out = self.output.lock().unwrap();
+        let mut out_buffer: Vec<u8> = Vec::with_capacity(AVERAGE_RECORD_LEN);
         for token in &self.tokens {
             let _ = match token {
-                Token::Literal(s) => out.write_all(s.as_bytes()),
+                Token::Literal(s) => out_buffer.write_all(s.as_bytes()),
                 // 10: 6 decimal places + sep => whole seconds in range `0..=999` properly aligned
-                Token::BootTime => write!(&mut *out, "{duration_s:>10.6?}"),
+                Token::BootTime => write!(&mut out_buffer, "{duration_s:>10.6?}"),
                 Token::WallClock => {
-                    write!(&mut *out, "{:.6}", zoned_utc.timestamp())
+                    write!(&mut out_buffer, "{:.6}", zoned_utc.timestamp())
                 }
                 Token::Glog => {
-                    write!(&mut *out, "{}", zoned_utc.strftime("%m%d %H:%M:%S%.6f"))
+                    write!(
+                        &mut out_buffer,
+                        "{}",
+                        zoned_utc.strftime("%m%d %H:%M:%S%.6f")
+                    )
                 }
                 Token::LocalGlog => {
-                    write!(&mut *out, "{}", zoned_local.strftime("%m%d %H:%M:%S%.6f"))
+                    write!(
+                        &mut out_buffer,
+                        "{}",
+                        zoned_local.strftime("%m%d %H:%M:%S%.6f")
+                    )
                 }
-                Token::Pid => write!(&mut *out, "{}", self.pid),
+                Token::Pid => write!(&mut out_buffer, "{}", self.pid),
                 // SAFETY: gettid(2) always succeeds
-                Token::Tid => write!(&mut *out, "{}", unsafe { libc::gettid() }),
+                Token::Tid => write!(&mut out_buffer, "{}", unsafe { libc::gettid() }),
                 Token::Thread => write!(
-                    &mut *out,
+                    &mut out_buffer,
                     "{}",
                     thread::current().name().unwrap_or("anonymous")
                 ),
-                Token::Level => write!(&mut *out, "{}", record.level()),
-                Token::LevelChar => write!(&mut *out, "{}", level_char(record.level())),
+                Token::Level => write!(&mut out_buffer, "{}", record.level()),
+                Token::LevelChar => write!(&mut out_buffer, "{}", level_char(record.level())),
                 Token::Location => match (record.file(), record.line()) {
-                    (Some(file), Some(line)) => write!(&mut *out, "{file}:{line}"),
-                    _ => write!(&mut *out, "{}", record.target()),
+                    (Some(file), Some(line)) => write!(&mut out_buffer, "{file}:{line}"),
+                    _ => write!(&mut out_buffer, "{}", record.target()),
                 },
-                Token::Msg => write!(&mut *out, "{}", record.args()),
+                Token::Msg => write!(&mut out_buffer, "{}", record.args()),
                 Token::Time(field, zone) => {
                     let zoned = match zone {
                         Zone::Utc => &*zoned_utc,
                         Zone::Local => &*zoned_local,
                     };
-                    write_time_field(&mut *out, *field, zoned)
+                    write_time_field(&mut out_buffer, *field, zoned)
                 }
             };
         }
-        let _ = out.write_all(b"\r\n");
+        let _ = out_buffer.write_all(b"\r\n");
+        let _ = self.output.lock().unwrap().write_all(&out_buffer);
     }
 
     fn flush(&self) {}
