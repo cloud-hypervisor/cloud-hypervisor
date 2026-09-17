@@ -4,7 +4,7 @@
 //
 
 use std::cell::LazyCell;
-use std::io::{self, Write};
+use std::io::{self, BufWriter, Write};
 use std::str::FromStr;
 use std::sync::Mutex;
 use std::time::Instant;
@@ -184,7 +184,7 @@ pub(crate) const DEFAULT_FORMAT: &str =
     "cloud-hypervisor: {boottime}s: <{thread}> {level}:{location} -- {msg}";
 
 pub(crate) struct Logger {
-    output: Mutex<Box<dyn Write + Send>>,
+    output: Mutex<BufWriter<Box<dyn Write + Send>>>,
     start: Instant,
     pid: u32,
     tokens: Vec<Token>,
@@ -196,7 +196,7 @@ pub(crate) struct Logger {
 impl Logger {
     pub(crate) fn new(output: Box<dyn Write + Send>, format: &str) -> Result<Self, Error> {
         Ok(Self {
-            output: Mutex::new(output),
+            output: Mutex::new(BufWriter::new(output)),
             start: Instant::now(),
             pid: process::id(),
             tokens: parse_format(format)?,
@@ -260,6 +260,10 @@ impl log::Log for Logger {
             };
         }
         let _ = out.write_all(b"\r\n");
+
+        // Write each log line immediately to the file.
+        // Ignore result, we can't do anything about it anyway.
+        let _ = out.flush();
     }
 
     fn flush(&self) {}
