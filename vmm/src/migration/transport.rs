@@ -838,7 +838,11 @@ impl SendAdditionalConnections {
 
         // If we use only one connection, we send the memory directly.
         if self.threads.is_empty() {
-            send_memory_ranges(&self.guest_memory, &table, socket, pending_action.as_ref())?;
+            // Using chunks ensures more frequent "ok" checks and we can exit
+            // the transmission earlier if needed.
+            for chunk in table.partition(Self::CHUNK_SIZE) {
+                send_memory_ranges(&self.guest_memory, &chunk, socket, pending_action.as_ref())?;
+            }
             return Ok(true);
         }
 
