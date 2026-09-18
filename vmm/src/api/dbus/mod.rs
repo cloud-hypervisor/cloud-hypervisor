@@ -22,10 +22,10 @@ use super::{ApiAction, ApiRequest};
 use crate::api::VmCoredump;
 use crate::api::{
     AddDisk, Body, VmAddDevice, VmAddFs, VmAddGenericVhostUser, VmAddNet, VmAddPmem,
-    VmAddUserDevice, VmAddVdpa, VmAddVsock, VmBalloonStats, VmBoot, VmCounters, VmCreate, VmDelete,
-    VmInfo, VmPause, VmPowerButton, VmReboot, VmReceiveMigration, VmRemoveDevice, VmResize,
-    VmResizeZone, VmRestore, VmResume, VmSendMigration, VmShutdown, VmSnapshot, VmmPing,
-    VmmShutdown,
+    VmAddUserDevice, VmAddVdpa, VmAddVsock, VmBalloonStats, VmBoot, VmCancelMigration, VmCounters,
+    VmCreate, VmDelete, VmInfo, VmPause, VmPowerButton, VmReboot, VmReceiveMigration,
+    VmRemoveDevice, VmResize, VmResizeZone, VmRestore, VmResume, VmSendMigration, VmShutdown,
+    VmSnapshot, VmmPing, VmmShutdown,
 };
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::{Error as VmmError, NetConfig, Result as VmmResult, VmConfig};
@@ -290,6 +290,10 @@ impl DBusApi {
     async fn vm_restore(&self, restore_config: String) -> Result<()> {
         let restore_config = serde_json::from_str(&restore_config).map_err(api_error)?;
         self.vm_action(&VmRestore, restore_config).await.map(|_| ())
+    }
+
+    async fn vm_cancel_migration(&self) -> Result<()> {
+        self.vm_action(&VmCancelMigration, ()).await.map(|_| ())
     }
 
     async fn vm_receive_migration(&self, receive_migration_data: String) -> Result<()> {
