@@ -283,7 +283,7 @@ impl ConsoleEpollHandler {
                 }
                 if let Some(out) = &mut self.out {
                     let mut buf: Vec<u8> = Vec::new();
-                    if let Err(e) = desc_chain.memory().write_volatile_to(
+                    if let Err(e) = desc_chain.memory().write_all_volatile_to(
                         desc.addr(),
                         &mut buf,
                         desc.len() as usize,
