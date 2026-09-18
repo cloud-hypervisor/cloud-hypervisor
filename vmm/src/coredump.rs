@@ -234,7 +234,7 @@ pub(crate) trait Elf64Writable {
         let mut coredump_file = dump_state.file.as_ref().unwrap();
         let bytes: &[u8] = elf64_ehdr.as_slice();
         coredump_file
-            .write(bytes)
+            .write_all(bytes)
             .map_err(GuestDebuggableError::CoredumpFile)?;
 
         Ok(())
@@ -256,7 +256,7 @@ pub(crate) trait Elf64Writable {
         let mut coredump_file = dump_state.file.as_ref().unwrap();
         let bytes: &[u8] = elf64_phdr.as_slice();
         coredump_file
-            .write(bytes)
+            .write_all(bytes)
             .map_err(GuestDebuggableError::CoredumpFile)?;
 
         Ok(())
@@ -284,7 +284,7 @@ pub(crate) trait Elf64Writable {
         let mut coredump_file = dump_state.file.as_ref().unwrap();
         let bytes: &[u8] = elf64_load.as_slice();
         coredump_file
-            .write(bytes)
+            .write_all(bytes)
             .map_err(GuestDebuggableError::CoredumpFile)?;
 
         Ok(())
