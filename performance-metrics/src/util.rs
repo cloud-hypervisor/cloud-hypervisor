@@ -231,8 +231,8 @@ fn create_overlay_tempfiles(num_clusters: usize) -> (TempFile, TempFile) {
         f.set_len(virtual_size).expect("set_len failed");
         let buf = vec![0xA5u8; QCOW_CLUSTER_SIZE as usize];
         for i in 0..num_clusters {
-            f.write_at(&buf, i as u64 * QCOW_CLUSTER_SIZE)
-                .expect("write_at failed");
+            f.write_all_at(&buf, i as u64 * QCOW_CLUSTER_SIZE)
+                .expect("write_all_at failed");
         }
     }
 
@@ -286,8 +286,8 @@ fn create_compressed_qcow_tempfile(num_clusters: usize) -> TempFile {
         f.set_len(virtual_size).expect("set_len failed");
         let buf = vec![0xA5u8; QCOW_CLUSTER_SIZE as usize];
         for i in 0..num_clusters {
-            f.write_at(&buf, i as u64 * QCOW_CLUSTER_SIZE)
-                .expect("write_at failed");
+            f.write_all_at(&buf, i as u64 * QCOW_CLUSTER_SIZE)
+                .expect("write_all_at failed");
         }
     }
 
