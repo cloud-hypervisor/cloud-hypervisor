@@ -1206,7 +1206,7 @@ impl AnnounceOps for VirtioNetHostAnnounceOps {
             buf[vnet_hdr_len()..].copy_from_slice(&rarp_announce);
 
             for tap in &mut self.taps {
-                if let Err(e) = tap.write(&buf) {
+                if let Err(e) = tap.write_all(&buf) {
                     // The host-side RARP packets are best-effort. Thus, to keep things simple, we
                     // only log errors here instead of waiting for the TAP to become writable again.
                     error!("Host RARP write to TAP failed: {e}");
