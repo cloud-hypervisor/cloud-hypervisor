@@ -3692,7 +3692,8 @@ mod common_parallel {
 
     #[test]
     fn test_memory_prefault() {
-        let guest_memory_region_sizes_kb = [128 * 1024, 128 * 1024];
+        let guest_memory_region_size_kb = 128 * 1024;
+        let guest_memory_size_kb = 2 * guest_memory_region_size_kb;
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
@@ -3715,7 +3716,7 @@ mod common_parallel {
 
             let smaps = File::open(format!("/proc/{}/smaps", child.id())).unwrap();
             let reader = BufReader::new(smaps);
-            let mut remaining_region_sizes = guest_memory_region_sizes_kb.to_vec();
+            let mut remaining_guest_memory_size_kb = guest_memory_size_kb;
             let mut guest_memory_mapping = None;
             let mut rss = 0;
 
@@ -3723,9 +3724,14 @@ mod common_parallel {
                 let line = line.unwrap();
                 if line.starts_with("Size:") {
                     let size: u32 = line.split_whitespace().nth(1).unwrap().parse().unwrap();
-                    guest_memory_mapping = remaining_region_sizes.iter().position(|&s| s == size);
-                } else if let Some(index) = guest_memory_mapping
+                    // MADV_HUGEPAGE can merge the two adjacent memory zones
+                    // into a single VMA before they are prefaulted.
+                    guest_memory_mapping = (size == guest_memory_region_size_kb
+                        || size == guest_memory_size_kb)
+                        .then_some(size);
+                } else if let Some(size) = guest_memory_mapping
                     && line.starts_with("Rss:")
+                    && size <= remaining_guest_memory_size_kb
                 {
                     rss += line
                         .split_whitespace()
@@ -3733,18 +3739,17 @@ mod common_parallel {
                         .unwrap()
                         .parse::<u32>()
                         .unwrap();
-                    remaining_region_sizes.swap_remove(index);
+                    remaining_guest_memory_size_kb -= size;
                     guest_memory_mapping = None;
                 }
             }
 
             assert!(
-                remaining_region_sizes.is_empty(),
-                "Could not find guest memory mappings of {remaining_region_sizes:?} KiB"
+                remaining_guest_memory_size_kb == 0,
+                "Could not find guest memory mappings totaling {guest_memory_size_kb} KiB"
             );
             assert_eq!(
-                rss,
-                guest_memory_region_sizes_kb.iter().sum::<u32>(),
+                rss, guest_memory_size_kb,
                 "Guest memory was not fully populated"
             );
         });
