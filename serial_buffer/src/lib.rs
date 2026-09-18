@@ -73,25 +73,24 @@ impl Write for SerialBuffer {
             return Ok(buf.len());
         }
 
-        // We reach this point if we're allowed to write to the out device
-        // and we know there's nothing left in the buffer.
+        // First try writing directly to the output device; if that fails,
+        // buffer the data in memory for later.
         let mut offset = 0;
-        loop {
+        while offset < buf.len() {
             match self.out.write(&buf[offset..]) {
-                Ok(written_bytes) => {
-                    if written_bytes < buf.len() - offset {
-                        offset += written_bytes;
-                        continue;
-                    }
-                }
-                Err(e) => {
-                    if !matches!(e.kind(), io::ErrorKind::WouldBlock) {
-                        return Err(e);
-                    }
+                Ok(0) => {
                     self.fill_buffer(&buf[offset..]);
+                    break;
                 }
+                Ok(written) => {
+                    offset += written;
+                }
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    self.fill_buffer(&buf[offset..]);
+                    break;
+                }
+                Err(e) => return Err(e),
             }
-            break;
         }
 
         // Make sure we flush anything that might have been written to the
