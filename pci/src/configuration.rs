@@ -37,6 +37,27 @@ const NUM_BAR_REGS: usize = 6;
 const CAPABILITY_LIST_HEAD_OFFSET: usize = 0x34;
 const FIRST_CAPABILITY_OFFSET: usize = 0x40;
 const CAPABILITY_MAX_OFFSET: usize = 192;
+const PCI_EXT_CAP_HEADER_SIZE: u32 = 4;
+pub(crate) const PCIE_CONFIG_SPACE_SIZE: u32 = 0x1000;
+pub(crate) const PCI_EXT_CAP_ALIGN: u32 = 4;
+pub(crate) const PCI_EXT_CAP_NEXT_SHIFT: u32 = 20;
+pub(crate) const PCI_EXT_CAP_NEXT_MASK: u32 = 0xfff0_0000;
+pub(crate) const PCI_EXP_FLAGS_TYPE_MASK: u32 = 0x00f0_0000;
+pub(crate) const PCI_EXP_TYPE_RC_END: u32 = 0x0090_0000;
+pub(crate) const PCI_EXP_FLAGS_VERS_MASK: u32 = 0x000f_0000;
+pub(crate) const PCI_EXP_FLAGS_VERS_SHIFT: u32 = 16;
+pub(crate) const PCI_EXP_LNKCAP: u32 = 12;
+pub(crate) const PCI_EXP_LNKCTL: u32 = 16;
+pub(crate) const PCI_EXP_LNKCAP2: u32 = 44;
+pub(crate) const PCI_EXP_LNKCTL2: u32 = 48;
+
+const PASID_CAP_VERSION: u32 = 1;
+const PASID_CAP_CONTROL_WRITE_MASK: u32 = 0x0007_0000;
+const PASID_CAP_EXEC_PERM: u32 = 0x0000_0002;
+const PASID_CAP_PRIV_MODE: u32 = 0x0000_0004;
+const PASID_CAP_MAX_WIDTH_SHIFT: u32 = 8;
+const PASID_CAP_MAX_WIDTH_MASK: u32 = 0x0000_1f00;
+const PASID_CAP_MAX_WIDTH: u8 = 20;
 
 pub const PCI_CONFIGURATION_ID: &str = "pci_configuration";
 
@@ -356,6 +377,61 @@ impl From<u16> for PciExpressCapabilityId {
             0xffff => PciExpressCapabilityId::ExtendedCapabilitiesAbsence,
             _ => PciExpressCapabilityId::Reserved,
         }
+    }
+}
+
+/// A PCI Express extended capability
+pub trait PciExpressCapability {
+    fn id(&self) -> PciExpressCapabilityId;
+    fn version(&self) -> u32;
+    fn dwords(&self) -> &[u32];
+    fn write_masks(&self) -> &[u32];
+    fn size(&self) -> u32 {
+        PCI_EXT_CAP_HEADER_SIZE + 4 * self.dwords().len() as u32
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct PasidCap {
+    dwords: [u32; 1],
+}
+
+impl PasidCap {
+    pub fn new(max_width: u8, exec_perm: bool, priv_mode: bool) -> Self {
+        if max_width > PASID_CAP_MAX_WIDTH {
+            warn!("PASID width {max_width} exceeds {PASID_CAP_MAX_WIDTH}, capping");
+        }
+
+        let max_width = max_width.min(PASID_CAP_MAX_WIDTH);
+        let mut value =
+            (u32::from(max_width) << PASID_CAP_MAX_WIDTH_SHIFT) & PASID_CAP_MAX_WIDTH_MASK;
+
+        if exec_perm {
+            value |= PASID_CAP_EXEC_PERM;
+        }
+        if priv_mode {
+            value |= PASID_CAP_PRIV_MODE;
+        }
+
+        PasidCap { dwords: [value] }
+    }
+}
+
+impl PciExpressCapability for PasidCap {
+    fn id(&self) -> PciExpressCapabilityId {
+        PciExpressCapabilityId::ProcessAddressSpaceId
+    }
+
+    fn version(&self) -> u32 {
+        PASID_CAP_VERSION
+    }
+
+    fn dwords(&self) -> &[u32] {
+        &self.dwords
+    }
+
+    fn write_masks(&self) -> &[u32] {
+        &[PASID_CAP_CONTROL_WRITE_MASK]
     }
 }
 
