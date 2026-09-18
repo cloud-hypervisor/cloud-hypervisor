@@ -405,10 +405,55 @@ struct PciBar {
     r#type: Option<PciBarRegionType>,
 }
 
+/// A register map of a PCI configuration space omitting zeroed registers
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+enum PciConfigurationRegisterState {
+    Sparse(Vec<(u16 /* idx */, u32 /* value */)>),
+    // Only deserialized, never produced.
+    #[deprecated = "CH version v53 is the last to produce this"]
+    Linear(Vec<u32>),
+}
+
+impl From<&[u32; NUM_CONFIGURATION_REGISTERS]> for PciConfigurationRegisterState {
+    fn from(registers: &[u32; NUM_CONFIGURATION_REGISTERS]) -> Self {
+        let vec = registers
+            .iter()
+            .enumerate()
+            .filter(|(_, value)| **value != 0)
+            .map(|(index, value)| {
+                (
+                    u16::try_from(index).expect("a PCI register index should fit into u16"),
+                    *value,
+                )
+            })
+            .collect();
+        Self::Sparse(vec)
+    }
+}
+
+impl From<PciConfigurationRegisterState> for Vec<u32> {
+    fn from(value: PciConfigurationRegisterState) -> Self {
+        match value {
+            PciConfigurationRegisterState::Sparse(sparse_vec) => {
+                let mut vec = vec![0; NUM_CONFIGURATION_REGISTERS];
+                for (idx, val) in sparse_vec {
+                    let idx = usize::from(idx);
+                    assert!(idx < NUM_CONFIGURATION_REGISTERS);
+                    vec[idx] = val;
+                }
+                vec
+            }
+            #[expect(deprecated)]
+            PciConfigurationRegisterState::Linear(vec) => vec,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct PciConfigurationState {
-    registers: Vec<u32>,
-    writable_bits: Vec<u32>,
+    registers: PciConfigurationRegisterState,
+    writable_bits: PciConfigurationRegisterState,
     bars: Vec<PciBar>,
     rom_bar_addr: u32,
     rom_bar_size: u32,
@@ -553,9 +598,11 @@ impl PciConfiguration {
             msix_cap_reg_idx,
             pending_bar_reprogram,
         ) = if let Some(state) = state {
+            let registers: Vec<u32> = state.registers.into();
+            let writable_bits: Vec<u32> = state.writable_bits.into();
             (
-                state.registers.try_into().unwrap(),
-                state.writable_bits.try_into().unwrap(),
+                registers.try_into().unwrap(),
+                writable_bits.try_into().unwrap(),
                 state.bars.try_into().unwrap(),
                 state.rom_bar_addr,
                 state.rom_bar_size,
@@ -622,8 +669,8 @@ impl PciConfiguration {
 
     fn state(&self) -> PciConfigurationState {
         PciConfigurationState {
-            registers: self.registers.to_vec(),
-            writable_bits: self.writable_bits.to_vec(),
+            registers: (&self.registers).into(),
+            writable_bits: (&self.writable_bits).into(),
             bars: self.bars.to_vec(),
             rom_bar_addr: self.rom_bar_addr,
             rom_bar_size: self.rom_bar_size,
@@ -1241,6 +1288,27 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn test_register_map_keeps_only_what_is_set() {
+        let mut registers = [0u32; NUM_CONFIGURATION_REGISTERS];
+        registers[0] = 0x1234_5678;
+        registers[15] = 0xff;
+
+        let state = PciConfigurationRegisterState::from(&registers);
+        let PciConfigurationRegisterState::Sparse(registers) = state else {
+            panic!("a new register map should be sparse");
+        };
+        assert_eq!(registers.as_slice(), &[(0, 0x1234_5678), (15, 0xff)]);
+    }
+
+    #[test]
+    fn test_register_map_restores_the_dense_form() {
+        // Snapshots of older versions carry every register.
+        #[expect(deprecated)]
+        let dense = PciConfigurationRegisterState::Linear(vec![1, 0, 3]);
+        assert_eq!(Into::<Vec<u32>>::into(dense), vec![1_u32, 0, 3]);
+    }
+
     #[repr(C, packed)]
     #[derive(Clone, Copy, Default)]
     struct TestCap {
@@ -1411,5 +1479,43 @@ mod tests {
 
         assert!(reprogram.is_empty());
         assert_eq!(cfg.get_bar_addr(0), bar_addr);
+    }
+
+    #[test]
+    fn registers_serialization_old_sender_json_still_parses() {
+        const OLD_JSON: &str = r#"{
+            "registers": [1, 0, 3],
+            "writable_bits": [0, 0, 7],
+            "bars": [],
+            "rom_bar_addr": 0,
+            "rom_bar_size": 0,
+            "rom_bar_used": false,
+            "last_capability": null,
+            "msix_cap_reg_idx": null
+        }"#;
+
+        let state: PciConfigurationState = serde_json::from_str(OLD_JSON).unwrap();
+        assert_eq!(Into::<Vec<u32>>::into(state.registers), vec![1, 0, 3]);
+        assert_eq!(Into::<Vec<u32>>::into(state.writable_bits), vec![0, 0, 7]);
+
+        const NEW_JSON: &str = r#"{
+            "registers": [[0, 1], [5, 7], [7,8]],
+            "writable_bits":  [[0, 1], [5, 7], [7,9]],
+            "bars": [],
+            "rom_bar_addr": 0,
+            "rom_bar_size": 0,
+            "rom_bar_used": false,
+            "last_capability": null,
+            "msix_cap_reg_idx": null
+        }"#;
+
+        let state: PciConfigurationState = serde_json::from_str(NEW_JSON).unwrap();
+        let expected: &[u32] = &[1, 0, 0, 0, 0, 7, 0, 8];
+        let actual_vec: Vec<u32> = state.registers.into();
+        assert_eq!(&actual_vec[..8], expected);
+
+        let actual_vec: Vec<u32> = state.writable_bits.into();
+        let expected: &[u32] = &[1, 0, 0, 0, 0, 7, 0, 9];
+        assert_eq!(&actual_vec[..8], expected);
     }
 }
