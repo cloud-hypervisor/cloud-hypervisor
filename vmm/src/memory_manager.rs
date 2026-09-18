@@ -910,6 +910,12 @@ impl MemoryManager {
                                 (range.length - offset) as usize,
                             )
                             .map_err(Error::SnapshotCopy)?;
+                        if bytes_read == 0 {
+                            return Err(Error::SnapshotRead(io::Error::new(
+                                io::ErrorKind::UnexpectedEof,
+                                "Memory snapshot file is shorter than the saved range",
+                            )));
+                        }
                         offset += bytes_read as u64;
                         if offset == range.length {
                             break;
