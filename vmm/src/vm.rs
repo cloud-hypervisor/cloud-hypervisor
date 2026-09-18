@@ -553,9 +553,6 @@ pub struct Vm {
     saved_clock: Option<SavedClock>,
     #[cfg(not(target_arch = "riscv64"))]
     numa_nodes: NumaNodes,
-    #[cfg_attr(any(not(feature = "kvm"), target_arch = "aarch64"), allow(dead_code))]
-    #[cfg(not(target_arch = "riscv64"))]
-    hypervisor: Arc<dyn hypervisor::Hypervisor>,
     stop_on_boot: bool,
     load_payload_handle: Option<thread::JoinHandle<Result<EntryPoint>>>,
 }
@@ -736,8 +733,6 @@ impl Vm {
             saved_clock,
             #[cfg(not(target_arch = "riscv64"))]
             numa_nodes,
-            #[cfg(not(target_arch = "riscv64"))]
-            hypervisor,
             stop_on_boot,
             load_payload_handle,
         })
@@ -2814,8 +2809,10 @@ impl Vm {
                 let kvm_sev_snp_enabled = {
                     #[cfg(feature = "sev_snp")]
                     {
-                        self.config.lock().unwrap().is_sev_snp_enabled()
-                            && self.hypervisor.hypervisor_type() == hypervisor::HypervisorType::Kvm
+                        let sev_snp_enabled = self.config.lock().unwrap().is_sev_snp_enabled();
+                        sev_snp_enabled
+                            && self.cpu_manager.lock().unwrap().hypervisor_type()
+                                == hypervisor::HypervisorType::Kvm
                     }
                     #[cfg(not(feature = "sev_snp"))]
                     {
@@ -3363,35 +3360,10 @@ impl Snapshottable for Vm {
             )));
         }
 
+        // Reuse what the CPU manager generated at VM creation from the same
+        // configuration.
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-        let common_cpuid = {
-            let (amx, max_phys_bits, kvm_hyperv, profile) = {
-                let guard = self.config.lock().unwrap();
-                let VmConfig { cpus, .. } = &*guard;
-                (
-                    cpus.features.amx,
-                    cpus.max_phys_bits,
-                    cpus.kvm_hyperv,
-                    cpus.profile,
-                )
-            };
-
-            let phys_bits = physical_bits(self.hypervisor.as_ref(), max_phys_bits);
-
-            arch::generate_common_cpuid(
-                self.hypervisor.as_ref(),
-                &arch::CpuidConfig {
-                    phys_bits,
-                    kvm_hyperv,
-                    #[cfg(feature = "tdx")]
-                    tdx: false,
-                    amx,
-                    profile,
-                },
-            )
-            .context("Error generating common cpuid")
-            .map_err(MigratableError::MigrateReceive)?
-        };
+        let common_cpuid = self.cpu_manager.lock().unwrap().common_cpuid();
 
         let vm_snapshot_state = VmSnapshot {
             clock: self.saved_clock.map(|saved| saved.state),
