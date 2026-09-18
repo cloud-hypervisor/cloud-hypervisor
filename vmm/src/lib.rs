@@ -41,7 +41,7 @@ use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::protocol::*;
 use vm_migration::{
     MemoryMigrationContext, Migratable, MigratableError, OngoingMigrationContext, Pausable,
-    Snapshot, Snapshottable, Transportable,
+    Snapshot, Snapshottable, Transportable, state_from_id,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::unblock_signal;
@@ -654,6 +654,20 @@ pub struct VmmThreadHandle {
     pub http_api_handle: Option<HttpApiHandle>,
 }
 
+#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+enum PendingVmAction {
+    #[default]
+    None,
+    Reboot,
+    Shutdown,
+    VmmShutdown,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+struct VmmSnapshot {
+    pending_action: PendingVmAction,
+}
+
 /// Models the current ownership and associated state of the VM from the
 /// perspective of the VMM.
 enum VmOwnership {
@@ -719,10 +733,12 @@ pub struct Vmm {
     console_socket_listener: Option<Arc<LockedUnixListener>>,
     no_shutdown: bool,
     check_migration_evt: EventFd,
+    pending_action: Arc<Mutex<PendingVmAction>>,
 }
 
 /// Time before aborting on the page fault connection.
 const FAULT_CONNECTION_ACCEPT_TIMEOUT: Duration = Duration::from_secs(30);
+const VMM_SNAPSHOT_ID: &str = "vmm";
 
 /// Just a wrapper for the data that goes into
 /// [`ReceiveMigrationState::Configured`]
@@ -953,6 +969,7 @@ impl Vmm {
             console_socket_listener: None,
             no_shutdown,
             check_migration_evt,
+            pending_action: Arc::new(Mutex::new(PendingVmAction::None)),
         })
     }
 
@@ -1391,6 +1408,8 @@ impl Vmm {
                 .context("Error deserialising snapshot")
                 .map_err(MigratableError::MigrateReceive)
         })?;
+        let vmm_snapshot: VmmSnapshot =
+            state_from_id(Some(&snapshot), VMM_SNAPSHOT_ID)?.unwrap_or_default();
 
         let exit_evt = self
             .exit_evt
@@ -1461,6 +1480,7 @@ impl Vmm {
             Ok(vm)
         })?;
 
+        *self.pending_action.lock().unwrap() = vmm_snapshot.pending_action;
         self.vm = VmOwnership::Owned(vm);
 
         Ok((receive_duration, restore_duration))
@@ -1669,6 +1689,7 @@ impl Vmm {
     /// migrations.
     fn send_migration(
         vm: &mut Vm,
+        pending_action: &Mutex<PendingVmAction>,
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         hypervisor: &dyn hypervisor::Hypervisor,
         send_data_migration: &VmSendMigrationData,
@@ -1851,7 +1872,7 @@ impl Vmm {
             None
         };
 
-        let (vm_snapshot, snapshot_duration) = measure_ok(|| {
+        let (mut vm_snapshot, snapshot_duration) = measure_ok(|| {
             // Capture snapshot. This may have side effects, e.g. vhost-user backend inflight drain
             let snapshot = vm.snapshot()?;
 
@@ -1862,6 +1883,14 @@ impl Vmm {
             }
             Ok(snapshot)
         })?;
+
+        let vmm_snapshot = VmmSnapshot {
+            pending_action: *pending_action.lock().unwrap(),
+        };
+        vm_snapshot.add_snapshot(
+            VMM_SNAPSHOT_ID.to_string(),
+            Snapshot::new_from_state(&vmm_snapshot)?,
+        );
 
         let (_, send_snapshot_duration) =
             measure_ok(|| transport::send_state(&mut socket, &vm_snapshot))?;
@@ -2163,6 +2192,7 @@ impl Vmm {
                 self.vm = VmOwnership::Owned(vm);
             }
             Ok(()) => {
+                *self.pending_action.lock().unwrap() = PendingVmAction::None;
                 self.vm = VmOwnership::None;
                 let mut vm = vm;
 
@@ -2186,6 +2216,30 @@ impl Vmm {
         }
     }
 
+    fn apply_pending_action(&mut self) -> Result<bool> {
+        if matches!(&self.vm, VmOwnership::Migration { .. }) {
+            return Ok(false);
+        }
+
+        let pending_action = mem::take(&mut *self.pending_action.lock().unwrap());
+
+        match pending_action {
+            PendingVmAction::None => Ok(false),
+            PendingVmAction::Reboot => {
+                self.vm_reboot().map_err(Error::VmReboot)?;
+                Ok(false)
+            }
+            PendingVmAction::Shutdown if self.no_shutdown => {
+                self.vm_shutdown().map_err(Error::VmShutdown)?;
+                Ok(false)
+            }
+            PendingVmAction::Shutdown | PendingVmAction::VmmShutdown => {
+                self.vmm_shutdown().map_err(Error::VmmShutdown)?;
+                Ok(true)
+            }
+        }
+    }
+
     fn control_loop(
         &mut self,
         api_receiver: &Receiver<ApiRequest>,
@@ -2197,6 +2251,10 @@ impl Vmm {
         let epoll_fd = self.epoll.as_raw_fd();
 
         'outer: loop {
+            if self.apply_pending_action()? {
+                break 'outer;
+            }
+
             let num_events = match epoll::wait(epoll_fd, -1, &mut events[..]) {
                 Ok(res) => res,
                 Err(e) => {
@@ -2225,27 +2283,23 @@ impl Vmm {
                         info!("VM exit event");
                         // Consume the event.
                         self.exit_evt.read().map_err(Error::EventFdRead)?;
-                        // TODO: Future follow-up must resolve lifecycle handling while migrating.
-                        self.vmm_shutdown().map_err(Error::VmmShutdown)?;
-
-                        break 'outer;
+                        *self.pending_action.lock().unwrap() = PendingVmAction::VmmShutdown;
                     }
                     EpollDispatch::Reset => {
                         info!("VM reset event");
                         // Consume the event.
                         self.reset_evt.read().map_err(Error::EventFdRead)?;
-                        // TODO: Future follow-up must resolve lifecycle handling while migrating.
-                        self.vm_reboot().map_err(Error::VmReboot)?;
+                        let mut pending_action = self.pending_action.lock().unwrap();
+                        if *pending_action == PendingVmAction::None {
+                            *pending_action = PendingVmAction::Reboot;
+                        }
                     }
                     EpollDispatch::GuestExit => {
                         info!("VM guest exit event");
                         self.guest_exit_evt.read().map_err(Error::EventFdRead)?;
-                        // TODO: Future follow-up must resolve lifecycle handling while migrating.
-                        if self.no_shutdown {
-                            self.vm_shutdown().map_err(Error::VmShutdown)?;
-                        } else {
-                            self.vmm_shutdown().map_err(Error::VmmShutdown)?;
-                            break 'outer;
+                        let mut pending_action = self.pending_action.lock().unwrap();
+                        if *pending_action != PendingVmAction::VmmShutdown {
+                            *pending_action = PendingVmAction::Shutdown;
                         }
                     }
                     EpollDispatch::ActivateVirtioDevices => {
@@ -3435,6 +3489,7 @@ impl RequestHandler for Vmm {
 
         match MigrationWorker::spawn(
             vm,
+            Arc::clone(&self.pending_action),
             check_migration_evt,
             send_data_migration,
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]

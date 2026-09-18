@@ -13,9 +13,8 @@
 //! [`MigrationWorkerSpawnError`].
 
 use std::fmt::{self, Debug, Formatter};
-#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::{io, thread};
 
@@ -26,9 +25,9 @@ use seccompiler::{BpfProgram, apply_filter};
 use vm_migration::MigratableError;
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::Vmm;
 use crate::api::VmSendMigrationData;
 use crate::vm::{Vm, VmState};
+use crate::{PendingVmAction, Vmm};
 
 #[derive(thiserror::Error)]
 #[error("Migration worker could not be spawned: {spawn_error}")]
@@ -80,6 +79,7 @@ pub(crate) struct MigrationWorker {
     // Keep the VM out of the thread closure until spawning succeeds.
     vm_receiver: Receiver<Vm>,
     check_migration_evt: EventFd,
+    pending_action: Arc<Mutex<PendingVmAction>>,
     config: VmSendMigrationData,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
@@ -110,6 +110,7 @@ impl MigrationWorker {
                 event!("vm", "migration-starting");
                 Vmm::send_migration(
                     &mut vm,
+                    self.pending_action.as_ref(),
                     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
                     self.hypervisor.as_ref(),
                     &self.config,
@@ -137,6 +138,7 @@ impl MigrationWorker {
     #[expect(clippy::result_large_err)]
     pub(crate) fn spawn(
         vm: Vm,
+        pending_action: Arc<Mutex<PendingVmAction>>,
         check_migration_evt: EventFd,
         config: VmSendMigrationData,
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))] hypervisor: Arc<
@@ -149,6 +151,7 @@ impl MigrationWorker {
         let worker = MigrationWorker {
             vm_receiver,
             check_migration_evt,
+            pending_action,
             config,
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             hypervisor,
