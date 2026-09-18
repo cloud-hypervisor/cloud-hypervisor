@@ -1645,8 +1645,17 @@ impl Vmm {
         {
             let iteration_begin = Instant::now();
 
-            let mut final_table = vm.dirty_log()?;
-            final_table.extend(remaining);
+            // Merge into whichever table holds more ranges: this runs with the
+            // VM paused, and the tables can hold millions of ranges.
+            let (mut final_table, rest) = {
+                let dirty = vm.dirty_log()?;
+                if remaining.regions().len() > dirty.regions().len() {
+                    (remaining, dirty)
+                } else {
+                    (dirty, remaining)
+                }
+            };
+            final_table.extend(rest);
 
             mem_ctx.update_metrics_before_transfer(iteration_begin, &final_table);
             let transfer_begin = Instant::now();

@@ -26,7 +26,7 @@ use arch::{RegionType, layout};
 use devices::ioapic;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use hypervisor::HypervisorVmError;
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracer::trace_scoped;
@@ -2289,6 +2289,19 @@ impl MemoryManager {
                 .map_err(Error::ApplyNumaPolicy)?;
         }
 
+        // Must happen before prefaulting: only a region that is already marked
+        // as eligible gets huge pages when its pages are faulted in.
+        if thp && !hugepages {
+            // SAFETY: FFI call with correct arguments
+            let ret = unsafe { libc::madvise(region.as_ptr().cast(), size, libc::MADV_HUGEPAGE) };
+            if ret != 0 {
+                let e = io::Error::last_os_error();
+                warn!("Failed to mark pages as THP eligible: {e}");
+            } else {
+                debug!("Successfully marked pages as THP eligible");
+            }
+        }
+
         // Prefault the region if needed, in parallel.
         if prefault {
             let page_size =
@@ -2351,17 +2364,6 @@ impl MemoryManager {
             region.as_ptr() as u64,
             size
         );
-
-        if thp && !hugepages {
-            // SAFETY: FFI call with correct arguments
-            let ret = unsafe { libc::madvise(region.as_ptr().cast(), size, libc::MADV_HUGEPAGE) };
-            if ret != 0 {
-                let e = io::Error::last_os_error();
-                warn!("Failed to mark pages as THP eligible: {e}");
-            } else {
-                debug!("Successfully marked pages as THP eligible");
-            }
-        }
 
         Ok(region)
     }
@@ -3606,7 +3608,7 @@ impl Migratable for MemoryManager {
     // Generate a table for the pages that are dirty. The dirty pages are collapsed
     // together in the table if they are contiguous.
     fn dirty_log(&mut self) -> result::Result<MemoryRangeTable, MigratableError> {
-        let mut table = MemoryRangeTable::default();
+        let mut tables = Vec::with_capacity(self.guest_ram_mappings.len());
         for r in &self.guest_ram_mappings {
             let vm_dirty_bitmap = self
                 .vm
@@ -3635,18 +3637,16 @@ impl Migratable for MemoryManager {
 
             let sub_table = MemoryRangeTable::from_dirty_bitmap(dirty_bitmap, r.gpa, 4096);
 
-            if sub_table.regions().is_empty() {
-                debug!("Dirty Memory Range Table is empty");
-            } else {
-                debug!("Dirty Memory Range Table:");
-                for range in sub_table.regions() {
-                    debug!("GPA: {:x} size: {} (KiB)", range.gpa, range.length / 1024);
-                }
-            }
+            trace!(
+                "Dirty memory range table for slot {}: ranges = {} size = {} KiB",
+                r.slot,
+                sub_table.regions().len(),
+                sub_table.effective_size() / 1024,
+            );
 
-            table.extend(sub_table);
+            tables.push(sub_table);
         }
-        Ok(table)
+        Ok(MemoryRangeTable::new_from_tables(tables))
     }
 }
 
