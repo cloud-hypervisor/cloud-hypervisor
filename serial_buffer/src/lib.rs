@@ -53,12 +53,12 @@ impl SerialBuffer {
 }
 
 impl Write for SerialBuffer {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
         // Simply fill the buffer if we're not allowed to write to the out
         // device.
         if !self.write_out.load(Ordering::Acquire) {
-            self.fill_buffer(buf);
-            return Ok(buf.len());
+            self.fill_buffer(data);
+            return Ok(data.len());
         }
 
         // In case we're allowed to write to the out device, we flush the
@@ -69,24 +69,24 @@ impl Write for SerialBuffer {
         // only a subset of the bytes was written and we should fill the buffer
         // with what's coming from the serial.
         if !self.buffer.is_empty() {
-            self.fill_buffer(buf);
-            return Ok(buf.len());
+            self.fill_buffer(data);
+            return Ok(data.len());
         }
 
         // First try writing directly to the output device; if that fails,
         // buffer the data in memory for later.
         let mut offset = 0;
-        while offset < buf.len() {
-            match self.out.write(&buf[offset..]) {
+        while offset < data.len() {
+            match self.out.write(&data[offset..]) {
                 Ok(0) => {
-                    self.fill_buffer(&buf[offset..]);
+                    self.fill_buffer(&data[offset..]);
                     break;
                 }
                 Ok(written) => {
                     offset += written;
                 }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    self.fill_buffer(&buf[offset..]);
+                    self.fill_buffer(&data[offset..]);
                     break;
                 }
                 Err(e) => return Err(e),
@@ -97,7 +97,7 @@ impl Write for SerialBuffer {
         // out device.
         self.out.flush()?;
 
-        Ok(buf.len())
+        Ok(data.len())
     }
 
     // This function flushes the content of the buffer to the out device if
