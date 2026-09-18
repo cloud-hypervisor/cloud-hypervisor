@@ -507,7 +507,7 @@ impl VsockPacket {
         self.validate_len()?;
 
         guest_mem
-            .write(self.hdr(), self.guest_hdr_addr)
+            .write_slice(self.hdr(), self.guest_hdr_addr)
             .map_err(VsockError::GuestMemoryAccess)?;
 
         Ok(())
