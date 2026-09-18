@@ -1491,8 +1491,10 @@ impl Vm {
             arch::initramfs_load_addr(guest_mem, size).map_err(Error::InitramfsAddress)?;
         let address = GuestAddress(address);
 
+        // TODO although the name indicates, there is no retry internally: https://github.com/rust-vmm/rust-vmm/issues/43
+        // For now, we prefer to fail loudly at least.
         guest_mem
-            .read_volatile_from(address, initramfs, size)
+            .read_exact_volatile_from(address, initramfs, size)
             .map_err(Error::InitramfsRead)?;
 
         info!("Initramfs loaded: address = 0x{:x}", address.0);
