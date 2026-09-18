@@ -1011,6 +1011,15 @@ components:
           type: string
         chassis_asset_tag:
           type: string
+        oem_string_paths:
+          description: >-
+            Host paths to nonempty UTF-8 files without NUL bytes. Each file is
+            read at VM boot and appended as one OEM string after oem_strings,
+            in list order. Whitespace and newlines are preserved.
+            The combined number of inline strings and paths must not exceed 255.
+          type: array
+          items:
+            type: string
         tdx:
           type: boolean
           default: false
