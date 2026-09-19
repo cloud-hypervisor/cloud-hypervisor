@@ -359,6 +359,19 @@ descriptors through the `vfio_fds` and `iommufd_fd` options of
 See [Live Migration of VFIO Devices](vfio.md#live-migration-of-vfio-devices)
 for the requirements, the dirty tracking behavior, and an example.
 
+## Guest Reboot and Shutdown During Migration
+
+A guest that reboots or shuts down while it is being migrated does not abort
+the migration. The sender records the request, stops transferring memory and
+finishes the migration with the VM paused. The receiver applies the request
+instead of resuming the VM: a reboot boots the VM again on the receiver, a
+shutdown stops it (or exits the receiving VMM unless it was started with
+`--no-shutdown`). From the outside this looks like the reboot or shutdown
+happened on the receiver right after the migration.
+
+Shutting down the sending VMM, for example via `SIGTERM` or `shutdown-vmm`,
+is not deferred and aborts the migration.
+
 ## Version Compatibility
 
 Starting with `v54`, Cloud Hypervisor guarantees migration compatibility from
