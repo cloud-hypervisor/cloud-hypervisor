@@ -95,6 +95,7 @@ pub mod locked_unix_listener;
 pub mod memory_manager;
 pub mod migration;
 mod pci_segment;
+mod prefault;
 pub mod seccomp_filters;
 mod serial_manager;
 #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]

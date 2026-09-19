@@ -62,7 +62,7 @@ use crate::uffd::{
     self, FileUffdMemorySource, SocketUffdMemorySource, UffdMemorySource, UffdRange,
 };
 use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
-use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID, userfaultfd};
+use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID, prefault, userfaultfd};
 
 struct UffdHandler {
     stop_event: EventFd,
@@ -93,8 +93,6 @@ const MPOL_MF_MOVE: u32 = 1 << 1;
 
 // Reserve 1 MiB for platform MMIO devices (e.g. ACPI control devices)
 const PLATFORM_DEVICE_AREA_SIZE: u64 = 1 << 20;
-
-const MAX_PREFAULT_THREAD_COUNT: usize = 16;
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 struct HotPlugState {
@@ -519,7 +517,7 @@ where
 }
 
 #[inline]
-fn is_aligned<T>(val: T, align: T) -> bool
+pub(crate) fn is_aligned<T>(val: T, align: T) -> bool
 where
     T: BitAnd<Output = T> + Sub<Output = T> + From<u8> + PartialEq,
 {
@@ -641,7 +639,6 @@ impl MemoryManager {
     fn create_memory_regions_from_zones(
         ram_regions: &[(GuestAddress, usize)],
         zones: &[MemoryZoneConfig],
-        prefault: Option<bool>,
         thp: bool,
     ) -> Result<(Vec<Arc<GuestRegionMmap>>, MemoryZones), Error> {
         let mut zone_iter = zones.iter();
@@ -708,7 +705,6 @@ impl MemoryManager {
                     file_offset,
                     region_start,
                     region_size as usize,
-                    prefault.unwrap_or(zone.prefault),
                     zone.reserve.unwrap_or(zone.hugepages),
                     zone.shared,
                     zone.hugepages,
@@ -775,11 +771,51 @@ impl MemoryManager {
         Ok((mem_regions, memory_zones))
     }
 
+    fn prefault_regions_from_zones(
+        zones: &[MemoryZoneConfig],
+        memory_zones: &MemoryZones,
+        prefault: Option<bool>,
+    ) -> Result<Vec<prefault::PrefaultRegion>, Error> {
+        let mut prefault_regions = Vec::new();
+        for zone in zones {
+            if !prefault.unwrap_or(zone.prefault) {
+                continue;
+            }
+            let Some(memory_zone) = memory_zones.get(&zone.id) else {
+                continue;
+            };
+
+            let page_size =
+                Self::get_prefault_align_size(&zone.file, zone.hugepages, zone.hugepage_size)?
+                    as usize;
+            for region in &memory_zone.regions {
+                prefault_regions.push(prefault::PrefaultRegion {
+                    addr: region.as_ptr() as usize,
+                    size: region.len() as usize,
+                    page_size,
+                    host_numa_node: zone.host_numa_node,
+                });
+            }
+
+            if let Some(virtio_mem_zone) = &memory_zone.virtio_mem_zone {
+                let page_size =
+                    Self::get_prefault_align_size(&None, zone.hugepages, zone.hugepage_size)?
+                        as usize;
+                prefault_regions.push(prefault::PrefaultRegion {
+                    addr: virtio_mem_zone.region.as_ptr() as usize,
+                    size: virtio_mem_zone.region.len() as usize,
+                    page_size,
+                    host_numa_node: zone.host_numa_node,
+                });
+            }
+        }
+        Ok(prefault_regions)
+    }
+
     // Restore both GuestMemoryBackend regions along with MemoryZone zones.
     fn restore_memory_regions_and_zones(
         guest_ram_mappings: &[GuestRamMapping],
         zones_config: &[MemoryZoneConfig],
-        prefault: Option<bool>,
         mut existing_memory_files: HashMap<u32, File>,
         thp: bool,
     ) -> Result<(Vec<Arc<GuestRegionMmap>>, MemoryZones), Error> {
@@ -811,7 +847,6 @@ impl MemoryManager {
                         guest_ram_mapping.file_offset,
                         GuestAddress(guest_ram_mapping.gpa),
                         guest_ram_mapping.size as usize,
-                        prefault.unwrap_or(zone_config.prefault),
                         zone_config.reserve.unwrap_or(zone_config.hugepages),
                         zone_config.shared,
                         zone_config.hugepages,
@@ -1836,7 +1871,6 @@ impl MemoryManager {
             let (regions, memory_zones) = Self::restore_memory_regions_and_zones(
                 &data.guest_ram_mappings,
                 &zones,
-                prefault,
                 existing_memory_files,
                 config.thp,
             )?;
@@ -1876,7 +1910,7 @@ impl MemoryManager {
                 .collect();
 
             let (mem_regions, mut memory_zones) =
-                Self::create_memory_regions_from_zones(&ram_regions, &zones, prefault, config.thp)?;
+                Self::create_memory_regions_from_zones(&ram_regions, &zones, config.thp)?;
 
             let mut guest_memory = GuestMemoryMmap::from_arc_regions(mem_regions)
                 .map_err(Error::GuestRegionCollection)?;
@@ -1911,15 +1945,11 @@ impl MemoryManager {
                                     * virtio_devices::VIRTIO_MEM_ALIGN_SIZE,
                             );
 
-                            // When `prefault` is set by vm_restore, memory manager
-                            // will create ram region with `prefault` option in
-                            // restore config rather than same option in zone
                             let region = MemoryManager::create_ram_region(
                                 &None,
                                 0,
                                 start_addr,
                                 hotplug_size as usize,
-                                prefault.unwrap_or(zone.prefault),
                                 zone.reserve.unwrap_or(zone.hugepages),
                                 zone.shared,
                                 zone.hugepages,
@@ -1970,6 +2000,12 @@ impl MemoryManager {
                 0,
             )
         };
+
+        prefault::prefault_regions(&Self::prefault_regions_from_zones(
+            &zones,
+            &memory_zones,
+            prefault,
+        )?)?;
 
         let guest_memory = GuestMemoryAtomic::new(guest_memory);
 
@@ -2225,7 +2261,6 @@ impl MemoryManager {
         backing_file: &Option<PathBuf>,
         file_offset: u64,
         size: usize,
-        prefault: bool,
         reserve: bool,
         shared: bool,
         hugepages: bool,
@@ -2295,63 +2330,6 @@ impl MemoryManager {
                 .map_err(Error::ApplyNumaPolicy)?;
         }
 
-        // Prefault the region if needed, in parallel.
-        if prefault {
-            let page_size =
-                Self::get_prefault_align_size(backing_file, hugepages, hugepage_size)? as usize;
-
-            if !is_aligned(size, page_size) {
-                warn!("Prefaulting memory size {size} misaligned with page size {page_size}");
-            }
-
-            let num_pages = size / page_size;
-
-            let num_threads = Self::get_prefault_num_threads(page_size, num_pages);
-
-            let pages_per_thread = num_pages / num_threads;
-            let remainder = num_pages % num_threads;
-
-            let barrier = Arc::new(Barrier::new(num_threads));
-            thread::scope(|s| -> Result<(), Error> {
-                let r = &region;
-                let mut handles = Vec::new();
-                for i in 0..num_threads {
-                    let barrier = Arc::clone(&barrier);
-                    let handle = s.spawn(move || {
-                        // Wait until all threads have been spawned to avoid contention
-                        // over mmap_sem between thread stack allocation and page faulting.
-                        barrier.wait();
-                        let pages = pages_per_thread + if i < remainder { 1 } else { 0 };
-                        let offset = page_size * ((i * pages_per_thread) + cmp::min(i, remainder));
-                        // SAFETY: FFI call with correct arguments
-                        let ret = unsafe {
-                            let addr = r.as_ptr().add(offset);
-                            libc::madvise(addr.cast(), pages * page_size, libc::MADV_POPULATE_WRITE)
-                        };
-                        if ret != 0 {
-                            let e = io::Error::last_os_error();
-                            return Err(e);
-                        }
-                        Ok(())
-                    });
-                    handles.push(handle);
-                }
-
-                for handle in handles {
-                    handle
-                        .join()
-                        .map_err(|e| {
-                            Error::PrefaultMemory(io::Error::other(format!(
-                                "Prefault thread panicked: {e:?}"
-                            )))
-                        })?
-                        .map_err(Error::PrefaultMemory)?;
-                }
-
-                Ok(())
-            })?;
-        }
-
         info!(
             "RAM region mapping at 0x{:x} (size = 0x{:x})",
             region.as_ptr() as u64,
@@ -2378,7 +2356,6 @@ impl MemoryManager {
         file_offset: u64,
         start_addr: GuestAddress,
         size: usize,
-        prefault: bool,
         reserve: bool,
         shared: bool,
         hugepages: bool,
@@ -2391,7 +2368,6 @@ impl MemoryManager {
             backing_file,
             file_offset,
             size,
-            prefault,
             reserve,
             shared,
             hugepages,
@@ -2436,21 +2412,8 @@ impl MemoryManager {
         }
     }
 
-    fn get_prefault_num_threads(page_size: usize, num_pages: usize) -> usize {
-        // Do not create more threads than processors available.
-        let mut n = thread::available_parallelism()
-            .map_or(1, |val| val.get())
-            .min(MAX_PREFAULT_THREAD_COUNT);
-
-        // Do not create more threads than pages being allocated.
-        n = cmp::min(n, num_pages);
-
-        // Do not create threads to allocate less than 64 MiB of memory.
-        n = cmp::min(n, cmp::max(1, page_size * num_pages / (64 * (1 << 26))));
-
-        n
-    }
-
+    // Intersect the node's cpu set with the calling thread's current
+    // affinity, so pinning a prefault worker never widens a task set the
     // Update the GuestMemoryMmap with the new range
     fn add_region(&mut self, region: Arc<GuestRegionMmap>) -> Result<(), Error> {
         let guest_memory = self
@@ -2508,7 +2471,6 @@ impl MemoryManager {
             0,
             start_addr,
             size,
-            self.prefault,
             self.reserve.unwrap_or(self.hugepages),
             self.shared,
             self.hugepages,
@@ -2517,6 +2479,17 @@ impl MemoryManager {
             None,
             self.thp,
         )?;
+
+        if self.prefault {
+            let page_size =
+                Self::get_prefault_align_size(&None, self.hugepages, self.hugepage_size)? as usize;
+            prefault::prefault_regions(&[prefault::PrefaultRegion {
+                addr: region.as_ptr() as usize,
+                size,
+                page_size,
+                host_numa_node: None,
+            }])?;
+        }
 
         // Map it into the guest
         // SAFETY: guaranteed by GuestMmapRegion invariants
