@@ -364,6 +364,12 @@ pub enum DeviceManagerError {
     #[error("Failed to DMA map VFIO device")]
     VfioDmaMap(#[source] vfio_ioctls::VfioError),
 
+    /// Guest RAM sits in the range the host IOMMU reserves.
+    #[error(
+        "Guest RAM overlaps the AMD HyperTransport range reserved by the host IOMMU, so it cannot be DMA mapped"
+    )]
+    VfioHypertransportRange,
+
     /// Failed to create the passthrough device.
     #[error("Failed to create the passthrough device")]
     CreatePassthroughDevice(#[source] anyhow::Error),
@@ -4030,6 +4036,16 @@ impl DeviceManager {
         };
 
         if needs_dma_mapping {
+            // A guest booted where the range is free keeps RAM there across a
+            // migration, and the host IOMMU will not map it.
+            #[cfg(target_arch = "x86_64")]
+            if arch::guest_ram_in_hypertransport_range(
+                &self.memory_manager.lock().unwrap().guest_memory().memory(),
+            ) && arch::host_reserves_hypertransport_range() == Some(true)
+            {
+                return Err(DeviceManagerError::VfioHypertransportRange);
+            }
+
             let vfio_mapping = Arc::new(VfioDmaMapping::new(
                 Arc::clone(&vfio_ops),
                 Arc::new(self.memory_manager.lock().unwrap().guest_memory()),

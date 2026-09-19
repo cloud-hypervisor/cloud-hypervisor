@@ -1420,6 +1420,17 @@ pub fn host_reserves_hypertransport_range() -> Option<bool> {
     reserved
 }
 
+/// True when guest RAM overlaps the AMD HyperTransport range.
+pub fn guest_ram_in_hypertransport_range(guest_mem: &GuestMemoryMmap) -> bool {
+    let start = layout::AMD_HYPER_TRANSPORT_HOLE_START.raw_value();
+    let end = start + layout::AMD_HYPER_TRANSPORT_HOLE_SIZE - 1;
+
+    guest_mem.iter().any(|region| {
+        let base = region.start_addr().raw_value();
+        base <= end && base + region.len() > start
+    })
+}
+
 /// Returns the AMD HyperTransport range as (base, size) when the guest memory
 /// map leaves it as a hole between two RAM ranges.
 pub fn amd_hypertransport_hole(guest_mem: &GuestMemoryMmap) -> Option<(u64, u64)> {
@@ -1964,6 +1975,31 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(amd_hypertransport_hole(&gm), None);
+    }
+
+    #[test]
+    fn guest_ram_overlapping_ht_range() {
+        let hole_start = layout::AMD_HYPER_TRANSPORT_HOLE_START;
+        let hole_size = layout::AMD_HYPER_TRANSPORT_HOLE_SIZE;
+        let above_hole = hole_start.unchecked_add(hole_size);
+
+        // The carved layout keeps RAM on either side.
+        let gm = GuestMemoryMmap::from_ranges(&[
+            (hole_start.unchecked_sub(0x1000), 0x1000),
+            (above_hole, 0x1000),
+        ])
+        .unwrap();
+        assert!(!guest_ram_in_hypertransport_range(&gm));
+
+        // RAM running into the range from below.
+        let gm =
+            GuestMemoryMmap::from_ranges(&[(hole_start.unchecked_sub(0x1000), 0x2000)]).unwrap();
+        assert!(guest_ram_in_hypertransport_range(&gm));
+
+        // RAM wholly inside the range.
+        let gm =
+            GuestMemoryMmap::from_ranges(&[(hole_start.unchecked_add(0x1000), 0x1000)]).unwrap();
+        assert!(guest_ram_in_hypertransport_range(&gm));
     }
 
     #[test]
