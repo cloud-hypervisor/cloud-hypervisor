@@ -364,6 +364,12 @@ pub enum DeviceManagerError {
     #[error("Failed to DMA map VFIO device")]
     VfioDmaMap(#[source] vfio_ioctls::VfioError),
 
+    /// Guest RAM sits in the range the host IOMMU reserves.
+    #[error(
+        "Guest RAM overlaps the AMD HyperTransport range reserved by the host IOMMU, so it cannot be DMA mapped"
+    )]
+    VfioHypertransportRange,
+
     /// Failed to create the passthrough device.
     #[error("Failed to create the passthrough device")]
     CreatePassthroughDevice(#[source] anyhow::Error),
@@ -952,6 +958,11 @@ pub struct DeviceManager {
     // Memory Manager
     memory_manager: Arc<Mutex<MemoryManager>>,
 
+    // Captured here because the DSDT is built with the memory manager
+    // already locked by the caller.
+    #[cfg(target_arch = "x86_64")]
+    ht_hole: Option<(u64, u64)>,
+
     // CPU Manager
     cpu_manager: Arc<Mutex<CpuManager>>,
 
@@ -1203,6 +1214,9 @@ impl DeviceManager {
 
         let start_of_mmio64_area = memory_manager.lock().unwrap().start_of_device_area().0;
         let end_of_mmio64_area = memory_manager.lock().unwrap().end_of_device_area().0;
+        #[cfg(target_arch = "x86_64")]
+        let ht_hole =
+            arch::amd_hypertransport_hole(&memory_manager.lock().unwrap().guest_memory().memory());
         let pci_mmio64_allocators = create_mmio_allocators(
             start_of_mmio64_area,
             end_of_mmio64_area,
@@ -1329,6 +1343,8 @@ impl DeviceManager {
             ged_notification_device: None,
             config,
             memory_manager,
+            #[cfg(target_arch = "x86_64")]
+            ht_hole,
             cpu_manager,
             virtio_devices: Vec::new(),
             block_devices: vec![],
@@ -4020,6 +4036,16 @@ impl DeviceManager {
         };
 
         if needs_dma_mapping {
+            // A guest booted where the range is free keeps RAM there across a
+            // migration, and the host IOMMU will not map it.
+            #[cfg(target_arch = "x86_64")]
+            if arch::guest_ram_in_hypertransport_range(
+                &self.memory_manager.lock().unwrap().guest_memory().memory(),
+            ) && arch::host_reserves_hypertransport_range() == Some(true)
+            {
+                return Err(DeviceManagerError::VfioHypertransportRange);
+            }
+
             let vfio_mapping = Arc::new(VfioDmaMapping::new(
                 Arc::clone(&vfio_ops),
                 Arc::new(self.memory_manager.lock().unwrap().guest_memory()),
@@ -5889,6 +5915,23 @@ impl Aml for DeviceManager {
         let mut mbrd_memory_refs = Vec::new();
         for mbrd_memory_ref in &mbrd_memory {
             mbrd_memory_refs.push(mbrd_memory_ref as &dyn Aml);
+        }
+
+        // The DSDT reaches the guest unchanged, while an E820 entry has to
+        // survive the firmware rebuilding the memory map.
+        #[cfg(target_arch = "x86_64")]
+        let ht_hole_crs = self.ht_hole.map(|(base, size)| {
+            aml::AddressSpace::new_memory(
+                aml::AddressSpaceCacheable::NotCacheable,
+                true,
+                base,
+                base + size - 1,
+                None,
+            )
+        });
+        #[cfg(target_arch = "x86_64")]
+        if let Some(ht_hole_crs) = &ht_hole_crs {
+            mbrd_memory_refs.push(ht_hole_crs as &dyn Aml);
         }
 
         aml::Device::new(

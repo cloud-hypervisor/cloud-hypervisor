@@ -24,6 +24,8 @@ use anyhow::{Context, anyhow};
 use arch::{RegionType, layout};
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
+#[cfg(target_arch = "x86_64")]
+use hypervisor::CpuVendor;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use hypervisor::HypervisorVmError;
 use log::{debug, error, info, warn};
@@ -1749,13 +1751,13 @@ impl MemoryManager {
                 // based on the GuestMemoryBackend regions.
                 continue;
             }
-            self.ram_allocator
-                .allocate(
-                    Some(GuestAddress(region.base)),
-                    region.size as GuestUsize,
-                    None,
-                )
-                .ok_or(Error::MemoryRangeAllocation)?;
+            // This allocation may fail for reserved regions that are above the
+            // maximum hotpluggable memory threshold.
+            self.ram_allocator.allocate(
+                Some(GuestAddress(region.base)),
+                region.size as GuestUsize,
+                None,
+            );
         }
 
         Ok(())
@@ -1803,6 +1805,7 @@ impl MemoryManager {
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         restore_data: Option<&MemoryManagerSnapshotData>,
         existing_memory_files: HashMap<u32, File>,
+        #[cfg(target_arch = "x86_64")] cpu_vendor: CpuVendor,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         trace_scoped!("MemoryManager::new");
 
@@ -1858,6 +1861,12 @@ impl MemoryManager {
             )
         } else {
             // Init guest memory
+            #[cfg(target_arch = "x86_64")]
+            let arch_mem_regions = arch::arch_memory_regions(
+                matches!(cpu_vendor, CpuVendor::AMD)
+                    && arch::host_reserves_hypertransport_range().unwrap_or(true),
+            );
+            #[cfg(not(target_arch = "x86_64"))]
             let arch_mem_regions = arch::arch_memory_regions();
 
             let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
@@ -2064,6 +2073,7 @@ impl MemoryManager {
         memory_restore_mode: MemoryRestoreMode,
         phys_bits: u8,
         exit_evt: &EventFd,
+        #[cfg(target_arch = "x86_64")] cpu_vendor: CpuVendor,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         if let Some(source_url) = source_url {
             let mut memory_file_path = url_to_path(source_url).map_err(Error::Restore)?;
@@ -2081,6 +2091,8 @@ impl MemoryManager {
                 false,
                 Some(&mem_snapshot),
                 Default::default(),
+                #[cfg(target_arch = "x86_64")]
+                cpu_vendor,
             )?;
 
             if !mem_snapshot.memory_ranges.is_empty() {

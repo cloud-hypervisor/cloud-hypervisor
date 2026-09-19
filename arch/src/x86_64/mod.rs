@@ -22,6 +22,7 @@ mod mpspec;
 mod mptable;
 
 use std::arch::x86_64;
+use std::fs;
 
 use helpers::{deserialize_u32_hex, serialize_u32_hex};
 use hypervisor::arch::x86::{CPUID_FLAG_VALID_INDEX, CpuIdEntry, VcpuMsrConfigUpdate};
@@ -1176,7 +1177,53 @@ pub fn configure_vcpu(
 /// These should be used to configure the GuestMemoryBackend structure for the
 /// platform. For x86_64 all addresses are valid from the start of the kernel
 /// except a carve out at the end of 32bit address space.
-pub fn arch_memory_regions() -> Vec<(GuestAddress, usize, RegionType)> {
+///
+/// Set `amd_hypertransport_hole` to keep RAM out of the range the AMD IOMMU
+/// reserves.
+pub fn arch_memory_regions(
+    amd_hypertransport_hole: bool,
+) -> Vec<(GuestAddress, usize, RegionType)> {
+    if amd_hypertransport_hole {
+        arch_memory_regions_amd()
+    } else {
+        arch_memory_regions_default()
+    }
+}
+
+/// The default layout with its 64 bit RAM entry split around the range the
+/// AMD IOMMU reserves. Entry order follows the default, which groups by
+/// region type rather than by address.
+fn arch_memory_regions_amd() -> Vec<(GuestAddress, usize, RegionType)> {
+    let hole_start = layout::AMD_HYPER_TRANSPORT_HOLE_START;
+    let hole_size = layout::AMD_HYPER_TRANSPORT_HOLE_SIZE;
+
+    arch_memory_regions_default()
+        .into_iter()
+        .flat_map(|region| {
+            if region.0 != layout::RAM_64BIT_START {
+                return vec![region];
+            }
+            vec![
+                // 4 GiB ~ 1012 GiB
+                (
+                    layout::RAM_64BIT_START,
+                    hole_start.unchecked_offset_from(layout::RAM_64BIT_START) as usize,
+                    RegionType::Ram,
+                ),
+                // 1012 GiB ~ 1 TiB, the range the AMD IOMMU reserves
+                (hole_start, hole_size as usize, RegionType::Reserved),
+                // 1 TiB ~ inf
+                (
+                    hole_start.unchecked_add(hole_size),
+                    usize::MAX,
+                    RegionType::Ram,
+                ),
+            ]
+        })
+        .collect()
+}
+
+fn arch_memory_regions_default() -> Vec<(GuestAddress, usize, RegionType)> {
     vec![
         // 0 GiB ~ 3GiB: memory before the gap
         (
@@ -1335,6 +1382,75 @@ pub fn generate_ram_ranges(guest_mem: &GuestMemoryMmap) -> super::Result<Vec<Ram
     Ok(ram_ranges)
 }
 
+const IOMMU_GROUPS_PATH: &str = "/sys/kernel/iommu_groups";
+
+/// True when a `reserved_regions` listing covers any part of the HT range.
+fn reserved_regions_cover_ht_range(listing: &str) -> bool {
+    let start = layout::AMD_HYPER_TRANSPORT_HOLE_START.raw_value();
+    let end = start + layout::AMD_HYPER_TRANSPORT_HOLE_SIZE - 1;
+
+    listing.lines().any(|line| {
+        let mut fields = line.split_whitespace();
+        let parse = |f: Option<&str>| {
+            f.and_then(|v| u64::from_str_radix(v.trim_start_matches("0x"), 16).ok())
+        };
+        match (parse(fields.next()), parse(fields.next())) {
+            (Some(base), Some(limit)) => base <= end && limit >= start,
+            _ => false,
+        }
+    })
+}
+
+/// Whether the host IOMMU reserves the AMD HyperTransport range. None when no
+/// IOMMU group could be read, which each caller resolves its own way.
+pub fn host_reserves_hypertransport_range() -> Option<bool> {
+    let groups = fs::read_dir(IOMMU_GROUPS_PATH).ok()?;
+
+    let mut reserved = None;
+    for group in groups.flatten() {
+        let Ok(listing) = fs::read_to_string(group.path().join("reserved_regions")) else {
+            continue;
+        };
+        if reserved_regions_cover_ht_range(&listing) {
+            return Some(true);
+        }
+        reserved = Some(false);
+    }
+
+    reserved
+}
+
+/// True when guest RAM overlaps the AMD HyperTransport range.
+pub fn guest_ram_in_hypertransport_range(guest_mem: &GuestMemoryMmap) -> bool {
+    let start = layout::AMD_HYPER_TRANSPORT_HOLE_START.raw_value();
+    let end = start + layout::AMD_HYPER_TRANSPORT_HOLE_SIZE - 1;
+
+    guest_mem.iter().any(|region| {
+        let base = region.start_addr().raw_value();
+        base <= end && base + region.len() > start
+    })
+}
+
+/// Returns the AMD HyperTransport range as (base, size) when the guest memory
+/// map leaves it as a hole between two RAM ranges.
+pub fn amd_hypertransport_hole(guest_mem: &GuestMemoryMmap) -> Option<(u64, u64)> {
+    let start = layout::AMD_HYPER_TRANSPORT_HOLE_START;
+    let size = layout::AMD_HYPER_TRANSPORT_HOLE_SIZE;
+    let end = start.unchecked_add(size - 1);
+
+    // Nothing to separate unless RAM resumes above the range.
+    if guest_mem.last_addr() <= end {
+        return None;
+    }
+
+    // Layouts without the carve out run RAM straight through it.
+    if guest_mem.find_region(start).is_some() || guest_mem.find_region(end).is_some() {
+        return None;
+    }
+
+    Some((start.raw_value(), size))
+}
+
 fn configure_pvh(
     guest_mem: &GuestMemoryMmap,
     cmdline_addr: GuestAddress,
@@ -1396,6 +1512,10 @@ fn configure_pvh(
             ram_range.1 - ram_range.0,
             E820_RAM,
         );
+    }
+
+    if let Some((base, size)) = amd_hypertransport_hole(guest_mem) {
+        add_memmap_entry(&mut memmap, base, size, E820_RESERVED);
     }
 
     add_memmap_entry(
@@ -1490,12 +1610,29 @@ fn configure_32bit_entry(
             E820_RAM,
         )?;
         if mem_end > layout::RAM_64BIT_START {
-            add_e820_entry(
-                &mut params,
-                layout::RAM_64BIT_START.raw_value(),
-                mem_end.unchecked_offset_from(layout::RAM_64BIT_START) + 1,
-                E820_RAM,
-            )?;
+            if let Some((hole_base, hole_size)) = amd_hypertransport_hole(guest_mem) {
+                let above_hole = hole_base + hole_size;
+                add_e820_entry(
+                    &mut params,
+                    layout::RAM_64BIT_START.raw_value(),
+                    hole_base - layout::RAM_64BIT_START.raw_value(),
+                    E820_RAM,
+                )?;
+                add_e820_entry(&mut params, hole_base, hole_size, E820_RESERVED)?;
+                add_e820_entry(
+                    &mut params,
+                    above_hole,
+                    mem_end.raw_value() - above_hole + 1,
+                    E820_RAM,
+                )?;
+            } else {
+                add_e820_entry(
+                    &mut params,
+                    layout::RAM_64BIT_START.raw_value(),
+                    mem_end.unchecked_offset_from(layout::RAM_64BIT_START) + 1,
+                    E820_RAM,
+                )?;
+            }
         }
     }
 
@@ -1774,10 +1911,95 @@ mod tests {
 
     #[test]
     fn regions_base_addr() {
-        let regions = arch_memory_regions();
-        assert_eq!(4, regions.len());
+        let default = arch_memory_regions(false);
+        assert_eq!(4, default.len());
+        assert_eq!(GuestAddress(0), default[0].0);
+        assert_eq!(GuestAddress(1 << 32), default[1].0);
+
+        let regions = arch_memory_regions(true);
+        assert_eq!(6, regions.len());
         assert_eq!(GuestAddress(0), regions[0].0);
         assert_eq!(GuestAddress(1 << 32), regions[1].0);
+
+        // Everything but the 64 bit RAM entry comes through unchanged, so the
+        // 32 bit device and reserved holes are still there.
+        for entry in default.iter().filter(|r| r.0 != layout::RAM_64BIT_START) {
+            assert!(regions.contains(entry));
+        }
+    }
+
+    #[test]
+    fn reserved_regions_parsing() {
+        // As emitted by an AMD IOMMU that does not advertise HTRangeIgnore.
+        let amd = "0x00000000fee00000 0x00000000feefffff msi\n\
+                   0x000000fd00000000 0x000000ffffffffff reserved\n";
+        assert!(reserved_regions_cover_ht_range(amd));
+
+        // MSI only, as on Intel and on AMD parts that do advertise it.
+        let msi_only = "0x00000000fee00000 0x00000000feefffff msi\n";
+        assert!(!reserved_regions_cover_ht_range(msi_only));
+
+        assert!(!reserved_regions_cover_ht_range(""));
+        assert!(!reserved_regions_cover_ht_range("garbage\n"));
+
+        // A range merely touching the bottom of the span still counts.
+        let touching = "0x000000fc00000000 0x000000fd00000000 reserved\n";
+        assert!(reserved_regions_cover_ht_range(touching));
+    }
+
+    #[test]
+    fn hypertransport_hole_detection() {
+        let hole_start = layout::AMD_HYPER_TRANSPORT_HOLE_START;
+        let hole_size = layout::AMD_HYPER_TRANSPORT_HOLE_SIZE;
+        let above_hole = hole_start.unchecked_add(hole_size);
+
+        // RAM stopping below the range leaves nothing to separate.
+        let gm = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
+        assert_eq!(amd_hypertransport_hole(&gm), None);
+
+        // The AMD layout has RAM on both sides, so report the hole.
+        let gm = GuestMemoryMmap::from_ranges(&[
+            (hole_start.unchecked_sub(0x1000), 0x1000),
+            (above_hole, 0x1000),
+        ])
+        .unwrap();
+        assert_eq!(
+            amd_hypertransport_hole(&gm),
+            Some((hole_start.raw_value(), hole_size))
+        );
+
+        // The default layout runs RAM into the range, so report nothing.
+        let gm = GuestMemoryMmap::from_ranges(&[
+            (hole_start.unchecked_sub(0x1000), 0x2000),
+            (above_hole, 0x1000),
+        ])
+        .unwrap();
+        assert_eq!(amd_hypertransport_hole(&gm), None);
+    }
+
+    #[test]
+    fn guest_ram_overlapping_ht_range() {
+        let hole_start = layout::AMD_HYPER_TRANSPORT_HOLE_START;
+        let hole_size = layout::AMD_HYPER_TRANSPORT_HOLE_SIZE;
+        let above_hole = hole_start.unchecked_add(hole_size);
+
+        // The carved layout keeps RAM on either side.
+        let gm = GuestMemoryMmap::from_ranges(&[
+            (hole_start.unchecked_sub(0x1000), 0x1000),
+            (above_hole, 0x1000),
+        ])
+        .unwrap();
+        assert!(!guest_ram_in_hypertransport_range(&gm));
+
+        // RAM running into the range from below.
+        let gm =
+            GuestMemoryMmap::from_ranges(&[(hole_start.unchecked_sub(0x1000), 0x2000)]).unwrap();
+        assert!(guest_ram_in_hypertransport_range(&gm));
+
+        // RAM wholly inside the range.
+        let gm =
+            GuestMemoryMmap::from_ranges(&[(hole_start.unchecked_add(0x1000), 0x1000)]).unwrap();
+        assert!(guest_ram_in_hypertransport_range(&gm));
     }
 
     #[test]
@@ -1798,7 +2020,7 @@ mod tests {
         config_err.unwrap_err();
 
         // Now assigning some memory that falls before the 32bit memory hole.
-        let arch_mem_regions = arch_memory_regions();
+        let arch_mem_regions = arch_memory_regions(false);
         let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
             .iter()
             .filter(|r| r.2 == RegionType::Ram && r.1 != usize::MAX)
@@ -1820,7 +2042,7 @@ mod tests {
         .unwrap();
 
         // Now assigning some memory that falls after the 32bit memory hole.
-        let arch_mem_regions = arch_memory_regions();
+        let arch_mem_regions = arch_memory_regions(false);
         let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
             .iter()
             .filter(|r| r.2 == RegionType::Ram)

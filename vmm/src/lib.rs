@@ -1356,6 +1356,8 @@ impl Vmm {
             false,
             Some(&vm_migration_config.memory_manager_data),
             existing_memory_files,
+            #[cfg(target_arch = "x86_64")]
+            self.hypervisor.get_cpu_vendor(),
         )
         .context("Error creating MemoryManager from snapshot")
         .map_err(MigratableError::MigrateReceive)?;

@@ -1420,6 +1420,8 @@ impl Vm {
                     memory_restore_mode,
                     phys_bits,
                     &exit_evt,
+                    #[cfg(target_arch = "x86_64")]
+                    hypervisor.get_cpu_vendor(),
                 )
                 .map_err(Error::MemoryManager)?
             } else {
@@ -1432,6 +1434,8 @@ impl Vm {
                     tdx_enabled,
                     None,
                     Default::default(),
+                    #[cfg(target_arch = "x86_64")]
+                    hypervisor.get_cpu_vendor(),
                 )
                 .map_err(Error::MemoryManager)?
             };
