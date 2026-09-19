@@ -4,16 +4,18 @@
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpListener};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixListener;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
+use std::time::Duration;
 use std::{cmp, io, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
 use libc::{EFD_NONBLOCK, TIOCGWINSZ};
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use serial_buffer::{SerialBuffer, SocketConsole};
@@ -110,6 +112,11 @@ pub enum Endpoint {
     FilePair(Arc<File>, Arc<File>),
     PtyPair(Arc<File>, Arc<File>),
     Socket(Arc<UnixListener>),
+    TcpListen(Arc<TcpListener>),
+    TcpConnect {
+        addr: SocketAddr,
+        reconnect: Option<Duration>,
+    },
     Null,
 }
 
@@ -120,6 +127,8 @@ impl Endpoint {
             Self::FilePair(f, _) => Some(f),
             Self::PtyPair(f, _) => Some(f),
             Self::Socket(..) => None,
+            Self::TcpListen(..) => None,
+            Self::TcpConnect { .. } => None,
             Self::Null => None,
         }
     }
@@ -130,12 +139,21 @@ impl Endpoint {
             Self::FilePair(_, f) => Some(f),
             Self::PtyPair(_, f) => Some(f),
             Self::Socket(..) => None,
+            Self::TcpListen(..) => None,
+            Self::TcpConnect { .. } => None,
             Self::Null => None,
         }
     }
 
     fn is_pty(&self) -> bool {
         matches!(self, Self::PtyPair(_, _))
+    }
+
+    fn is_socket(&self) -> bool {
+        matches!(
+            self,
+            Self::Socket(..) | Self::TcpListen(..) | Self::TcpConnect { .. }
+        )
     }
 }
 
@@ -157,7 +175,7 @@ impl ConsoleEpollHandler {
         pause_evt: EventFd,
         access_platform: Option<Arc<dyn AccessPlatform>>,
     ) -> Self {
-        let (socket_console, out, write_out) = if let Endpoint::Socket(..) = &endpoint {
+        let (socket_console, out, write_out) = if endpoint.is_socket() {
             let console = SocketConsole::new();
             let out = console.out_sink();
             (Some(console), Some(out), None)
@@ -341,18 +359,34 @@ impl ConsoleEpollHandler {
             helper.add_event_custom(in_file.as_raw_fd(), FILE_EVENT, events)?;
             self.file_event_registered = true;
         }
-        if let Endpoint::Socket(listener) = &self.endpoint {
-            helper.add_event(listener.as_raw_fd(), SOCKET_EVENT)?;
+        match &self.endpoint {
+            Endpoint::Socket(listener) => {
+                helper.add_event(listener.as_raw_fd(), SOCKET_EVENT)?;
+            }
+            Endpoint::TcpListen(listener) => {
+                helper.add_event(listener.as_raw_fd(), SOCKET_EVENT)?;
+            }
+            Endpoint::TcpConnect { .. } => {
+                self.tcp_connect(&mut helper);
+            }
+            _ => {}
         }
 
         // In case of PTY, we want to be able to detect a connection on the
         // other end of the PTY. This is done by detecting there's no event
         // triggered on the epoll, which is the reason why we want the
         // epoll_wait() function to return after the timeout expired.
+        // A client mode TCP console likewise uses the timeout to retry the dial.
         // In case of TTY, we don't expect to detect such behavior, which is
         // why we can afford to block until an actual event is triggered.
         let (timeout, enable_event_list) = if self.endpoint.is_pty() {
             (500, true)
+        } else if let Endpoint::TcpConnect {
+            reconnect: Some(interval),
+            ..
+        } = &self.endpoint
+        {
+            (interval.as_millis() as i32, false)
         } else {
             (-1, false)
         };
@@ -395,6 +429,30 @@ impl ConsoleEpollHandler {
         self.file_event_registered = true;
 
         Ok(())
+    }
+
+    // Register the client fd for input after dialing, leaving a failure for the
+    // timeout to retry.
+    fn tcp_connect(&mut self, helper: &mut EpollHelper) {
+        let addr = match &self.endpoint {
+            Endpoint::TcpConnect { addr, .. } => *addr,
+            _ => return,
+        };
+        let Some(console) = self.socket_console.as_mut() else {
+            return;
+        };
+        match console.connect(&addr) {
+            Ok(()) => {
+                if let Some(fd) = console.client_fd()
+                    && let Err(e) = helper.add_event_custom(fd, FILE_EVENT, epoll::Events::EPOLLIN)
+                {
+                    warn!("Failed to register console TCP client: {e:?}");
+                }
+            }
+            Err(e) => {
+                debug!("Console TCP connect to {addr} failed: {e}");
+            }
+        }
     }
 }
 
@@ -457,16 +515,24 @@ impl EpollHelperHandler for ConsoleEpollHandler {
             }
             SOCKET_EVENT => {
                 // A new client is connecting, so replace the current client with it.
-                if let (Some(console), Endpoint::Socket(listener)) =
-                    (self.socket_console.as_mut(), &self.endpoint)
-                {
+                if let Some(console) = self.socket_console.as_mut() {
                     if let Some(fd) = console.client_fd() {
                         helper.del_event_custom(fd, FILE_EVENT, epoll::Events::EPOLLIN)?;
                         console.shutdown().map_err(EpollHelperError::IoError)?;
                     }
-                    console
-                        .accept(listener)
-                        .map_err(EpollHelperError::IoError)?;
+                    match &self.endpoint {
+                        Endpoint::Socket(listener) => {
+                            console
+                                .accept(listener)
+                                .map_err(EpollHelperError::IoError)?;
+                        }
+                        Endpoint::TcpListen(listener) => {
+                            console
+                                .accept_tcp(listener)
+                                .map_err(EpollHelperError::IoError)?;
+                        }
+                        _ => {}
+                    }
                     if let Some(fd) = console.client_fd() {
                         helper.add_event_custom(fd, FILE_EVENT, epoll::Events::EPOLLIN)?;
                     }
@@ -532,6 +598,18 @@ impl EpollHelperHandler for ConsoleEpollHandler {
     // This function will be invoked whenever the timeout is reached before
     // any other event was triggered while waiting for the epoll.
     fn handle_timeout(&mut self, helper: &mut EpollHelper) -> Result<(), EpollHelperError> {
+        if let Endpoint::TcpConnect { .. } = &self.endpoint {
+            if self
+                .socket_console
+                .as_ref()
+                .and_then(|c| c.client_fd())
+                .is_none()
+            {
+                self.tcp_connect(helper);
+            }
+            return Ok(());
+        }
+
         if !self.endpoint.is_pty() {
             return Ok(());
         }
