@@ -2,7 +2,6 @@
 //
 // Copyright © 2025, Microsoft Corporation
 //
-use std::any::Any;
 
 use serde::{Deserialize, Serialize};
 
@@ -106,10 +105,6 @@ impl Vgic for MshvGicV2M {
 
     fn state(&self) -> Result<GicState> {
         unimplemented!()
-    }
-
-    fn as_any_concrete_mut(&mut self) -> &mut dyn Any {
-        self
     }
 
     fn set_state(&mut self, _state: &GicState) -> Result<()> {

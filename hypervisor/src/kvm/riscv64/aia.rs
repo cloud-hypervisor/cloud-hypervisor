@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::any::Any;
 use std::cmp;
 
 use kvm_ioctls::DeviceFd;
@@ -253,10 +252,6 @@ impl Vaia for KvmAiaImsics {
 
     fn msi_compatible(&self) -> bool {
         true
-    }
-
-    fn as_any_concrete_mut(&mut self) -> &mut dyn Any {
-        self
     }
 
     /// Save the state of AIA.
