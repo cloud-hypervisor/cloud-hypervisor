@@ -96,13 +96,6 @@ pub trait CpuStateManager: Clone {
     /// Get the CPU Extended Feature Enable Register.
     fn efer(&self) -> u64;
 
-    /// Set the CPU Extended Feature Enable Register.
-    ///
-    /// # Arguments
-    ///
-    /// * `efer` - The CPU EFER value.
-    fn set_efer(&mut self, efer: u64);
-
     /// Get the CPU flags.
     fn flags(&self) -> u64;
 
@@ -426,10 +419,6 @@ impl CpuStateManager for EmulatorCpuState {
 
     fn efer(&self) -> u64 {
         self.sregs.efer
-    }
-
-    fn set_efer(&mut self, efer: u64) {
-        self.sregs.efer = efer;
     }
 
     fn flags(&self) -> u64 {
