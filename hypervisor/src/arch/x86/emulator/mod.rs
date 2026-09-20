@@ -13,7 +13,7 @@ use crate::arch::emulator::{EmulationError, EmulationResult, PlatformEmulator, P
 use crate::arch::x86::emulator::instructions::*;
 use crate::arch::x86::regs::{CR0_PE, EFER_LMA};
 use crate::arch::x86::{
-    Exception, SegmentRegister, SpecialRegisters, segment_type_expand_down, segment_type_ro,
+    SegmentRegister, SpecialRegisters, segment_type_expand_down, segment_type_ro,
 };
 
 #[macro_use]
@@ -544,7 +544,7 @@ impl<T: CpuStateManager> Emulator<'_, T> {
         old_state: &T,
         insn_stream: &[u8],
         num_insn: Option<usize>,
-    ) -> EmulationResult<T, Exception> {
+    ) -> EmulationResult<T> {
         let mut state = old_state.clone();
         let mut decoder = Decoder::new(64, insn_stream, DecoderOptions::NONE);
         let mut insn = Instruction::default();
@@ -624,7 +624,7 @@ impl<T: CpuStateManager> Emulator<'_, T> {
     }
 
     /// Emulate all instructions from the instructions stream.
-    pub fn emulate(&mut self, cpu_id: usize, insn_stream: &[u8]) -> EmulationResult<T, Exception> {
+    pub fn emulate(&mut self, cpu_id: usize, insn_stream: &[u8]) -> EmulationResult<T> {
         let state = self
             .platform
             .cpu_state(cpu_id)
@@ -637,11 +637,7 @@ impl<T: CpuStateManager> Emulator<'_, T> {
     /// This is useful for cases where we get readahead instruction stream
     /// but implicitly must only emulate the first instruction, and then return
     /// to the guest.
-    pub fn emulate_first_insn(
-        &mut self,
-        cpu_id: usize,
-        insn_stream: &[u8],
-    ) -> EmulationResult<T, Exception> {
+    pub fn emulate_first_insn(&mut self, cpu_id: usize, insn_stream: &[u8]) -> EmulationResult<T> {
         let state = self
             .platform
             .cpu_state(cpu_id)
@@ -665,7 +661,7 @@ mod mock_vmm {
         state: Arc<Mutex<CpuState>>,
     }
 
-    pub(super) type MockResult = Result<(), EmulationError<Exception>>;
+    pub(super) type MockResult = Result<(), EmulationError>;
 
     impl MockVmm {
         pub(super) fn new(
