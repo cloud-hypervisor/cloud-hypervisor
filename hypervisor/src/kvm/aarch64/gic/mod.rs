@@ -6,8 +6,6 @@ mod dist_regs;
 mod icc_regs;
 mod redist_regs;
 
-use std::any::Any;
-
 use dist_regs::{get_dist_regs, read_ctlr, set_dist_regs, write_ctlr};
 use icc_regs::{get_icc_regs, set_icc_regs};
 use kvm_ioctls::DeviceFd;
@@ -315,10 +313,6 @@ impl Vgic for KvmGicV3Its {
 
     fn msi_properties(&self) -> [u64; 2] {
         [self.msi_addr, self.msi_size]
-    }
-
-    fn as_any_concrete_mut(&mut self) -> &mut dyn Any {
-        self
     }
 
     /// Save the state of GICv3ITS.

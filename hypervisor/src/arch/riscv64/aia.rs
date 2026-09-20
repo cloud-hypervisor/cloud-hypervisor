@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::any::Any;
 use std::result;
 
 use thiserror::Error;
@@ -54,9 +53,6 @@ pub trait Vaia: Send + Sync {
 
     /// Returns whether the AIA device is MSI compatible or not
     fn msi_compatible(&self) -> bool;
-
-    /// Downcast the trait object to its concrete type.
-    fn as_any_concrete_mut(&mut self) -> &mut dyn Any;
 
     /// Save the state of AiaImsics.
     fn state(&self) -> Result<AiaState>;
