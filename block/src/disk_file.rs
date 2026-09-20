@@ -73,14 +73,6 @@ pub trait SparseCapable: Send + Debug {
     fn supports_sparse_operations(&self) -> bool {
         false
     }
-
-    /// Indicates support for a metadata level zero flag optimization in
-    /// virtio `VIRTIO_BLK_T_WRITE_ZEROES` requests. When true, the format
-    /// can mark regions as reading zeros via a metadata bit rather than
-    /// writing actual zero bytes to disk.
-    fn supports_zero_flag(&self) -> bool {
-        false
-    }
 }
 
 /// Live disk resize support.
