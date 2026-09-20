@@ -41,15 +41,6 @@ pub use self::msix::{
 pub use self::vfio::{MmioRegion, VfioDmaMapping, VfioPciDevice, VfioPciError};
 pub use self::vfio_user::{VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError};
 
-/// PCI has four interrupt pins A->D.
-#[derive(Copy, Clone)]
-pub enum PciInterruptPin {
-    IntA,
-    IntB,
-    IntC,
-    IntD,
-}
-
 #[cfg(target_arch = "x86_64")]
 pub const PCI_CONFIG_IO_PORT: u64 = 0xcf8;
 #[cfg(target_arch = "x86_64")]
