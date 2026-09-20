@@ -264,10 +264,6 @@ impl disk_file::SparseCapable for QcowDisk {
     fn supports_sparse_operations(&self) -> bool {
         true
     }
-
-    fn supports_zero_flag(&self) -> bool {
-        true
-    }
 }
 
 impl disk_file::Resizable for QcowDisk {
