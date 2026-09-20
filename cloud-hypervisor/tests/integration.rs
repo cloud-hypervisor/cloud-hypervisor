@@ -5098,9 +5098,6 @@ mod common_parallel {
             "Failed to create {format_name} test image"
         );
 
-        const WRITE_SIZE_MB: u64 = 4;
-        const CLUSTER_SIZE_BYTES: u64 = 64 * 1024;
-
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
             .default_memory()
