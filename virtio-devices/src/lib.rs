@@ -129,8 +129,6 @@ pub enum ActivateError {
 
 pub type ActivateResult = result::Result<(), ActivateError>;
 
-pub type DeviceEventT = u16;
-
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Failed to single used queue")]
