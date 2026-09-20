@@ -440,8 +440,6 @@ pub struct VhostUserState<C> {
     pub acked_protocol_features: u64,
     pub vu_num_queues: usize,
     #[serde(default)]
-    pub backend_req_support: bool,
-    #[serde(default)]
     pub vring_bases: Option<Vec<u64>>,
     #[serde(default)]
     pub backend_state: Option<Vec<u8>>,
