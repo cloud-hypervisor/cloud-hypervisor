@@ -46,8 +46,6 @@ pub enum DiskFileError {
     Clone(#[source] io::Error),
 }
 
-pub type DiskFileResult<T> = result::Result<T, DiskFileError>;
-
 /// A wrapper for [`RawFd`] capturing the lifetime of a corresponding disk file.
 ///
 /// This fulfills the same role as [`BorrowedFd`] but is tailored to the limitations
