@@ -517,11 +517,6 @@ pub trait Vcpu: Send + Sync {
     #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
     fn set_cntvct(&self, val: u64) -> Result<()>;
     ///
-    /// Gets the value of a non-core register on RISC-V 64-bit
-    ///
-    #[cfg(target_arch = "riscv64")]
-    fn get_non_core_reg(&self, non_core_reg: u32) -> Result<u64>;
-    ///
     /// Get the timebase frequency (timer frequency in Hz) on RISC-V 64-bit.
     /// This is the frequency at which the RISC-V `time` CSR increments.
     ///
