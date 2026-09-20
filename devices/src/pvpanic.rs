@@ -179,8 +179,24 @@ impl PciDevice for PvPanicDevice {
         let bar_id = 0;
         let region_size = PVPANIC_DEVICE_MMIO_SIZE;
         let restoring = resources.is_some();
+
+        let mut bar_addr = None;
+        if let Some(resources) = resources {
+            for resource in resources {
+                if let Resource::PciBar { index, base, .. } = resource
+                    && index == bar_id as usize
+                {
+                    bar_addr = Some(GuestAddress(base));
+                    break;
+                }
+            }
+            if bar_addr.is_none() {
+                return Err(PciDeviceError::MissingResource);
+            }
+        }
+
         let bar_addr = mmio32_allocator
-            .allocate(None, region_size, Some(PVPANIC_DEVICE_MMIO_ALIGNMENT))
+            .allocate(bar_addr, region_size, Some(PVPANIC_DEVICE_MMIO_ALIGNMENT))
             .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
 
         let bar = PciBarConfiguration::default()
