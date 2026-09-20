@@ -26,7 +26,7 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 
 const IVSHMEM_BAR0_IDX: usize = 0;
 const IVSHMEM_BAR1_IDX: usize = 1;
-const IVSHMEM_DATA_BAR_IDX: usize = 2;
+pub const IVSHMEM_DATA_BAR_IDX: usize = 2;
 
 const IVSHMEM_VENDOR_ID: u16 = 0x1af4;
 const IVSHMEM_DEVICE_ID: u16 = 0x1110;
@@ -187,14 +187,6 @@ impl IvshmemDevice {
         self.userspace_mapping = Some(userspace_mapping);
     }
 
-    pub fn config_bar_addr(&self) -> u64 {
-        self.configuration.get_bar_addr(IVSHMEM_BAR0_IDX)
-    }
-
-    pub fn data_bar_addr(&self) -> u64 {
-        self.configuration.get_bar_addr(IVSHMEM_DATA_BAR_IDX)
-    }
-
     fn state(&self) -> IvshmemDeviceState {
         IvshmemDeviceState {
             interrupt_mask: self._interrupt_mask,
@@ -353,8 +345,8 @@ impl PciDevice for IvshmemDevice {
         None
     }
 
-    fn move_bar(&mut self, old_base: u64, new_base: u64) -> io::Result<()> {
-        if new_base == self.data_bar_addr() {
+    fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> io::Result<()> {
+        if bar_idx == IVSHMEM_DATA_BAR_IDX {
             let region = self
                 .region
                 .clone()
@@ -375,7 +367,7 @@ impl PciDevice for IvshmemDevice {
             self.userspace_mapping = Some(new_mapping);
         }
         for bar in self.bar_regions.iter_mut() {
-            if bar.addr() == old_base {
+            if bar.idx() == bar_idx {
                 *bar = bar.set_address(new_base);
             }
         }

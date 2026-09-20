@@ -566,6 +566,7 @@ mod tests {
     impl DeviceRelocation for MockDeviceRelocation {
         fn move_bar(
             &self,
+            _bar_idx: usize,
             _old_base: u64,
             _new_base: u64,
             _len: u64,
