@@ -3034,14 +3034,6 @@ impl cpu::Vcpu for KvmVcpu {
         Ok(())
     }
 
-    ///
-    /// Gets the value of a non-core register
-    ///
-    #[cfg(target_arch = "riscv64")]
-    fn get_non_core_reg(&self, _non_core_reg: u32) -> cpu::Result<u64> {
-        unimplemented!()
-    }
-
     #[cfg(target_arch = "riscv64")]
     fn get_timebase_frequency(&self) -> cpu::Result<u64> {
         use kvm_bindings::kvm_riscv_timer;
