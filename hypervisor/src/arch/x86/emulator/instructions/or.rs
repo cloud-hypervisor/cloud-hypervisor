@@ -19,7 +19,7 @@ macro_rules! or_rm_r {
             insn: &Instruction,
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
-        ) -> Result<(), EmulationError<Exception>> {
+        ) -> Result<(), EmulationError> {
             let src_reg_value = get_op(&insn, 1, size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
 

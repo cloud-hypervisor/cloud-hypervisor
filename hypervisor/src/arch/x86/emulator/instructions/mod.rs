@@ -8,7 +8,6 @@ use anyhow::anyhow;
 use iced_x86::*;
 
 use crate::arch::emulator::{EmulationError, PlatformEmulator, PlatformError};
-use crate::arch::x86::Exception;
 use crate::arch::x86::emulator::CpuStateManager;
 use crate::arch::x86::regs::DF;
 
@@ -152,7 +151,7 @@ pub(super) trait InstructionHandler<T: CpuStateManager> {
         insn: &Instruction,
         state: &mut T,
         platform: &mut dyn PlatformEmulator<CpuState = T>,
-    ) -> Result<(), EmulationError<Exception>>;
+    ) -> Result<(), EmulationError>;
 }
 
 #[cfg(test)]

@@ -4,36 +4,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use core::fmt::Debug;
-use std::fmt::{self, Display};
 use std::result;
 
 use thiserror::Error;
-
-#[derive(Clone, Copy, Error, Debug)]
-pub struct Exception<T: Debug> {
-    vector: T,
-    ip: u64,
-    error: Option<u32>,
-    payload: Option<u64>,
-}
-
-impl<T: Debug> Display for Exception<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "Exception {:?} at IP {:#x}{}{}",
-            self.vector,
-            self.ip,
-            self.error
-                .map(|e| format!(": error {e:x}"))
-                .unwrap_or_default(),
-            self.payload
-                .map(|payload| format!(": payload {payload:x}"))
-                .unwrap_or_default()
-        )
-    }
-}
 
 #[derive(Error, Debug)]
 pub enum PlatformError {
@@ -69,15 +42,12 @@ pub enum PlatformError {
 }
 
 #[derive(Error, Debug)]
-pub enum EmulationError<T: Debug> {
+pub enum EmulationError {
     #[error("Unsupported instruction")]
     UnsupportedInstruction(#[source] anyhow::Error),
 
     #[error("Invalid operand")]
     InvalidOperand(#[source] anyhow::Error),
-
-    #[error("Instruction Exception")]
-    InstructionException(#[source] Exception<T>),
 
     #[error("Instruction fetching error")]
     InstructionFetchingError(#[source] anyhow::Error),
@@ -142,4 +112,4 @@ pub trait PlatformEmulator {
     fn fetch(&self, ip: u64, instruction_bytes: &mut [u8]) -> Result<(), PlatformError>;
 }
 
-pub type EmulationResult<S, E> = result::Result<S, EmulationError<E>>;
+pub type EmulationResult<S> = result::Result<S, EmulationError>;

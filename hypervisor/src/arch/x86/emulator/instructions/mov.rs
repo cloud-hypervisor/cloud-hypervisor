@@ -21,7 +21,7 @@ macro_rules! mov_rm_r {
             insn: &Instruction,
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
-        ) -> Result<(), EmulationError<Exception>> {
+        ) -> Result<(), EmulationError> {
             let src_reg_value = get_op(&insn, 1, size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
 
@@ -47,7 +47,7 @@ macro_rules! mov_rm_imm {
             insn: &Instruction,
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
-        ) -> Result<(), EmulationError<Exception>> {
+        ) -> Result<(), EmulationError> {
             let imm = get_op(&insn, 1, size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
 
@@ -66,7 +66,7 @@ macro_rules! movzx {
             insn: &Instruction,
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
-        ) -> Result<(), EmulationError<Exception>> {
+        ) -> Result<(), EmulationError> {
             let src_value = get_op(&insn, 1, size_of::<$src_op_size>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
 
@@ -99,7 +99,7 @@ macro_rules! mov_r_imm {
             insn: &Instruction,
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
-        ) -> Result<(), EmulationError<Exception>> {
+        ) -> Result<(), EmulationError> {
             let imm = get_op(&insn, 1, size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
 

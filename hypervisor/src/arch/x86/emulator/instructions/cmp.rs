@@ -53,7 +53,7 @@ macro_rules! cmp_rm_r {
             insn: &Instruction,
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
-        ) -> Result<(), EmulationError<Exception>> {
+        ) -> Result<(), EmulationError> {
             let op0_value = get_op(&insn, 0, size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
             let op1_value = get_op(&insn, 1, size_of::<$bound>(), state, platform)
@@ -75,7 +75,7 @@ macro_rules! cmp_r_rm {
             insn: &Instruction,
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
-        ) -> Result<(), EmulationError<Exception>> {
+        ) -> Result<(), EmulationError> {
             let op0_value = get_op(&insn, 0, size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
             let op1_value = get_op(&insn, 1, size_of::<$bound>(), state, platform)
@@ -97,7 +97,7 @@ macro_rules! cmp_rm_imm {
             insn: &Instruction,
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
-        ) -> Result<(), EmulationError<Exception>> {
+        ) -> Result<(), EmulationError> {
             let op0_value = get_op(&insn, 0, size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
             let op1_value = get_op(&insn, 1, size_of::<$imm>(), state, platform)

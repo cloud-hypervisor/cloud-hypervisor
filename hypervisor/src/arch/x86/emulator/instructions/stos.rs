@@ -21,7 +21,7 @@ macro_rules! stos {
             insn: &Instruction,
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
-        ) -> Result<(), EmulationError<Exception>> {
+        ) -> Result<(), EmulationError> {
             let rcx = if insn.has_rep_prefix() {
                 state
                     .read_reg(Register::ECX)
