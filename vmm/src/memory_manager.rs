@@ -859,7 +859,7 @@ impl MemoryManager {
         let guest_memory = self.guest_memory.memory();
         let mut file_cursor: u64 = 0;
 
-        for range in saved_regions.regions() {
+        for range in saved_regions.ranges() {
             let end = file_cursor + range.length;
 
             // First call doubles as a SEEK_HOLE-support probe. On error,
@@ -950,7 +950,7 @@ impl MemoryManager {
             .open(file_path)
             .map_err(Error::SnapshotOpen)?;
         // A range mapped past EOF faults SIGBUS at run time, not restore time.
-        let mapped_len: u64 = saved_regions.regions().iter().map(|r| r.length).sum();
+        let mapped_len: u64 = saved_regions.ranges().iter().map(|r| r.length).sum();
         let file_len = memory_file.metadata().map_err(Error::SnapshotOpen)?.len();
         if file_len < mapped_len {
             return Err(Error::SnapshotMmap(io::Error::new(
@@ -1056,11 +1056,11 @@ impl MemoryManager {
 
         info!(
             "UFFD: registering {} region(s) for demand paging",
-            saved_regions.regions().len()
+            saved_regions.ranges().len()
         );
 
         if saved_regions
-            .regions()
+            .ranges()
             .iter()
             .any(|range| range.gpa % base_page_size != 0 || range.length % base_page_size != 0)
         {
@@ -1071,7 +1071,7 @@ impl MemoryManager {
 
         let mut handler_ranges: Vec<UffdRange> = Vec::new();
 
-        for range in saved_regions.regions() {
+        for range in saved_regions.ranges() {
             let host_addr = guest_memory
                 .get_host_address(GuestAddress(range.gpa))
                 .map_err(|e| UffdError::GpaTranslation {
@@ -3069,7 +3069,7 @@ impl MemoryManager {
         let guest_memory = self.guest_memory.memory();
         let mut total_bytes: u64 = 0;
 
-        for range in snapshot_memory_ranges.regions() {
+        for range in snapshot_memory_ranges.ranges() {
             let mut offset: u64 = 0;
             loop {
                 let bytes_written = guest_memory
@@ -3505,7 +3505,7 @@ impl Transportable for MemoryManager {
 
         let total_len: u64 = self
             .snapshot_memory_ranges
-            .regions()
+            .ranges()
             .iter()
             .map(|r| r.length)
             .sum();
@@ -3522,7 +3522,7 @@ impl Transportable for MemoryManager {
         let guest_memory = self.guest_memory.memory();
         let mut file_cursor: u64 = 0;
 
-        for range in self.snapshot_memory_ranges.regions() {
+        for range in self.snapshot_memory_ranges.ranges() {
             let mut wrote_sparse = false;
             if sparse_layout
                 && let Some(region) = guest_memory.find_region(GuestAddress(range.gpa))
@@ -3639,9 +3639,9 @@ impl Migratable for MemoryManager {
                 .zip(vmm_dirty_bitmap.iter())
                 .map(|(x, y)| x | y);
 
-            let ranges_before = table.regions().len();
+            let ranges_before = table.ranges().len();
             table.extend_from_dirty_bitmap(dirty_bitmap, r.gpa, 4096);
-            let slot_ranges = &table.regions()[ranges_before..];
+            let slot_ranges = &table.ranges()[ranges_before..];
 
             trace!(
                 "Dirty memory range table for slot {}: ranges = {} size = {} KiB",
@@ -3665,7 +3665,7 @@ fn is_restore_cow_compatible(
     // SAFETY: sysconf(_SC_PAGESIZE) has no failure mode relevant here.
     let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u64;
     let mut file_offset: u64 = 0;
-    for range in saved_regions.regions() {
+    for range in saved_regions.ranges() {
         if !file_offset.is_multiple_of(page_size)
             || !range.gpa.is_multiple_of(page_size)
             || !range.length.is_multiple_of(page_size)
@@ -3701,7 +3701,7 @@ fn do_mmap_cow_saved_regions(
     thp: bool,
 ) -> Result<(), Error> {
     let mut file_offset: u64 = 0;
-    for range in saved_regions.regions() {
+    for range in saved_regions.ranges() {
         // Zones map with their own reserve setting, so take MAP_NORESERVE
         // from the region actually backing this range rather than from the
         // global memory config.

@@ -971,7 +971,7 @@ impl VirtioDevice for Mem {
         };
 
         let unplugged_memory_ranges = self.blocks_state.lock().unwrap().memory_ranges(0, false);
-        for range in unplugged_memory_ranges.regions() {
+        for range in unplugged_memory_ranges.ranges() {
             handler
                 .discard_memory_range(range.gpa, range.length)
                 .map_err(|e| {
