@@ -534,14 +534,6 @@ impl MemoryRangeTable {
         self.data.extend(table.data);
     }
 
-    pub fn new_from_tables(tables: Vec<Self>) -> Self {
-        let mut data = Vec::new();
-        for table in tables {
-            data.extend(table.data);
-        }
-        Self { data }
-    }
-
     /// Returns the effective size in bytes.
     pub fn effective_size(&self) -> u64 {
         self.data.iter().map(|r| r.length).sum()

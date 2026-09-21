@@ -6112,13 +6112,13 @@ impl Migratable for DeviceManager {
     }
 
     fn dirty_log(&mut self) -> result::Result<MemoryRangeTable, MigratableError> {
-        let mut tables = Vec::new();
+        let mut table = MemoryRangeTable::default();
         for (_, device_node) in self.device_tree.lock().unwrap().iter() {
             if let Some(migratable) = &device_node.migratable {
-                tables.push(migratable.lock().unwrap().dirty_log()?);
+                table.extend(migratable.lock().unwrap().dirty_log()?);
             }
         }
-        Ok(MemoryRangeTable::new_from_tables(tables))
+        Ok(table)
     }
 
     fn start_migration(&mut self) -> result::Result<(), MigratableError> {
