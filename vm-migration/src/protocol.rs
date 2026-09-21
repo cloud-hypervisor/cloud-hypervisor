@@ -433,83 +433,6 @@ pub struct MemoryRangeTable {
     data: Vec<MemoryRange>,
 }
 
-/// Iterator returned by [`MemoryRangeTable::partition`].
-///
-/// Each item contains at most `chunk_size` bytes. A range may be split across
-/// multiple items.
-///
-/// The iterator may reorder ranges for efficiency, so callers must not rely on
-/// the order in which chunks or ranges are yielded.
-#[derive(Clone, Default, Debug)]
-struct MemoryRangeTableIterator {
-    chunk_size: u64,
-    data: Vec<MemoryRange>,
-}
-
-impl MemoryRangeTableIterator {
-    /// Create an iterator that partitions `table` into chunks of at most
-    /// `chunk_size` bytes.
-    pub(crate) fn new(table: MemoryRangeTable, chunk_size: u64) -> Self {
-        MemoryRangeTableIterator {
-            chunk_size,
-            data: table.data,
-        }
-    }
-}
-
-impl Iterator for MemoryRangeTableIterator {
-    type Item = MemoryRangeTable;
-
-    /// Return the next memory range in the table, making sure that
-    /// the returned range is not larger than `chunk_size`.
-    ///
-    /// **Note**: Do not rely on the order of the ranges returned by this
-    /// iterator. This allows for a more efficient implementation.
-    fn next(&mut self) -> Option<Self::Item> {
-        let mut ranges: Vec<MemoryRange> = vec![];
-        let mut ranges_size: u64 = 0;
-
-        loop {
-            assert!(ranges_size <= self.chunk_size);
-
-            if ranges_size == self.chunk_size || self.data.is_empty() {
-                break;
-            }
-
-            if let Some(range) = self.data.pop() {
-                let next_range: MemoryRange = if ranges_size + range.length > self.chunk_size {
-                    // How many bytes we need to put back into the table.
-                    let leftover_bytes = ranges_size + range.length - self.chunk_size;
-                    assert!(leftover_bytes <= range.length);
-                    let returned_bytes = range.length - leftover_bytes;
-                    assert!(returned_bytes <= range.length);
-                    assert_eq!(leftover_bytes + returned_bytes, range.length);
-
-                    self.data.push(MemoryRange {
-                        gpa: range.gpa,
-                        length: leftover_bytes,
-                    });
-                    MemoryRange {
-                        gpa: range.gpa + leftover_bytes,
-                        length: returned_bytes,
-                    }
-                } else {
-                    range
-                };
-
-                ranges_size += next_range.length;
-                ranges.push(next_range);
-            }
-        }
-
-        if ranges.is_empty() {
-            None
-        } else {
-            Some(MemoryRangeTable { data: ranges })
-        }
-    }
-}
-
 impl MemoryRangeTable {
     pub fn ranges(&self) -> &[MemoryRange] {
         &self.data
@@ -611,6 +534,83 @@ impl MemoryRangeTable {
     /// Returns the effective size in bytes.
     pub fn effective_size(&self) -> u64 {
         self.data.iter().map(|r| r.length).sum()
+    }
+}
+
+/// Iterator returned by [`MemoryRangeTable::partition`].
+///
+/// Each item contains at most `chunk_size` bytes. A range may be split across
+/// multiple items.
+///
+/// The iterator may reorder ranges for efficiency, so callers must not rely on
+/// the order in which chunks or ranges are yielded.
+#[derive(Clone, Default, Debug)]
+struct MemoryRangeTableIterator {
+    chunk_size: u64,
+    data: Vec<MemoryRange>,
+}
+
+impl MemoryRangeTableIterator {
+    /// Create an iterator that partitions `table` into chunks of at most
+    /// `chunk_size` bytes.
+    pub(crate) fn new(table: MemoryRangeTable, chunk_size: u64) -> Self {
+        MemoryRangeTableIterator {
+            chunk_size,
+            data: table.data,
+        }
+    }
+}
+
+impl Iterator for MemoryRangeTableIterator {
+    type Item = MemoryRangeTable;
+
+    /// Return the next memory range in the table, making sure that
+    /// the returned range is not larger than `chunk_size`.
+    ///
+    /// **Note**: Do not rely on the order of the ranges returned by this
+    /// iterator. This allows for a more efficient implementation.
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut ranges: Vec<MemoryRange> = vec![];
+        let mut ranges_size: u64 = 0;
+
+        loop {
+            assert!(ranges_size <= self.chunk_size);
+
+            if ranges_size == self.chunk_size || self.data.is_empty() {
+                break;
+            }
+
+            if let Some(range) = self.data.pop() {
+                let next_range: MemoryRange = if ranges_size + range.length > self.chunk_size {
+                    // How many bytes we need to put back into the table.
+                    let leftover_bytes = ranges_size + range.length - self.chunk_size;
+                    assert!(leftover_bytes <= range.length);
+                    let returned_bytes = range.length - leftover_bytes;
+                    assert!(returned_bytes <= range.length);
+                    assert_eq!(leftover_bytes + returned_bytes, range.length);
+
+                    self.data.push(MemoryRange {
+                        gpa: range.gpa,
+                        length: leftover_bytes,
+                    });
+                    MemoryRange {
+                        gpa: range.gpa + leftover_bytes,
+                        length: returned_bytes,
+                    }
+                } else {
+                    range
+                };
+
+                ranges_size += next_range.length;
+                ranges.push(next_range);
+            }
+        }
+
+        if ranges.is_empty() {
+            None
+        } else {
+            Some(MemoryRangeTable { data: ranges })
+        }
     }
 }
 
