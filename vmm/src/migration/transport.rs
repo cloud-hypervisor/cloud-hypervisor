@@ -827,7 +827,7 @@ impl SendAdditionalConnections {
         table: MemoryRangeTable,
         socket: &mut SocketStream,
     ) -> Result<bool, MigratableError> {
-        if table.regions().is_empty() {
+        if table.ranges().is_empty() {
             return Ok(false);
         }
 
@@ -1225,7 +1225,7 @@ pub(crate) fn send_memory_ranges(
     ranges: &MemoryRangeTable,
     socket: &mut SocketStream,
 ) -> Result<(), MigratableError> {
-    if ranges.regions().is_empty() {
+    if ranges.ranges().is_empty() {
         return Ok(());
     }
 
@@ -1235,7 +1235,7 @@ pub(crate) fn send_memory_ranges(
 
     // And then the memory itself
     let mem = guest_memory.memory();
-    for range in ranges.regions() {
+    for range in ranges.ranges() {
         let mut offset: u64 = 0;
         // Here we are manually handling the retry in case we can't read the
         // whole region at once because we can't use the implementation
@@ -1277,7 +1277,7 @@ pub(crate) fn receive_memory_ranges(
     // And then the memory itself
     let mem = guest_memory.memory();
 
-    for range in ranges.regions() {
+    for range in ranges.ranges() {
         let mut offset: u64 = 0;
         // Here we are manually handling the retry in case we can't read the
         // whole region at once because we can't use the implementation

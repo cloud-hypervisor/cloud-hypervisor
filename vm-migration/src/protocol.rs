@@ -435,10 +435,6 @@ pub struct MemoryRangeTable {
 }
 
 impl MemoryRangeTable {
-    pub fn ranges(&self) -> &[MemoryRange] {
-        &self.data
-    }
-
     /// Partitions the table into chunks of at most `chunk_size` bytes.
     pub fn partition(self, chunk_size: u64) -> impl Iterator<Item = MemoryRangeTable> {
         MemoryRangeTableIterator::new(self, chunk_size)
@@ -498,7 +494,7 @@ impl MemoryRangeTable {
             .extend(Self::dirty_ranges_iter(bitmap, start_addr, page_size));
     }
 
-    pub fn regions(&self) -> &[MemoryRange] {
+    pub fn ranges(&self) -> &[MemoryRange] {
         &self.data
     }
 
@@ -735,7 +731,7 @@ mod tests {
 
         let range = MemoryRangeTable::from_dirty_bitmap(input, start_gpa, page_size);
         assert_eq!(
-            range.regions(),
+            range.ranges(),
             &[
                 MemoryRange {
                     gpa: start_gpa + page_size,
@@ -770,7 +766,7 @@ mod tests {
         }
 
         assert_eq!(
-            appended.regions(),
+            appended.ranges(),
             &[
                 MemoryRange {
                     gpa: 0x1000 + page_size,
@@ -786,7 +782,7 @@ mod tests {
                 },
             ]
         );
-        assert_eq!(appended.regions(), merged.regions());
+        assert_eq!(appended.ranges(), merged.ranges());
     }
 
     #[test]
@@ -817,7 +813,7 @@ mod tests {
                 length: page_size * 2,
             },
         ];
-        assert_eq!(table.regions(), &expected_regions);
+        assert_eq!(table.ranges(), &expected_regions);
 
         // In the first test, we expect to see the exact same result as above, as we use the length
         // of every region (which is fixed!).

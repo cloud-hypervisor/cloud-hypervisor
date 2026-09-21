@@ -3350,7 +3350,7 @@ mod tests {
             length: page_size * 64,
         };
         let table = mock.report_dma_logging(range, page_size).unwrap();
-        let ranges = table.regions();
+        let ranges = table.ranges();
         assert_eq!(ranges.len(), 2);
         assert_eq!(ranges[0].gpa, 0x1_0000_0000);
         assert_eq!(ranges[0].length, page_size * 2);
