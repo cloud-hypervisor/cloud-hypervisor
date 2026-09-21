@@ -481,9 +481,20 @@ impl MemoryRangeTable {
         start_addr: u64,
         page_size: u64,
     ) -> Self {
-        Self {
-            data: Self::dirty_ranges_iter(bitmap, start_addr, page_size).collect(),
-        }
+        let mut table = Self::default();
+        table.extend_from_dirty_bitmap(bitmap, start_addr, page_size);
+        table
+    }
+
+    /// Appends the dirty ranges of the given bitmap.
+    pub fn extend_from_dirty_bitmap(
+        &mut self,
+        bitmap: impl IntoIterator<Item = u64>,
+        start_addr: u64,
+        page_size: u64,
+    ) {
+        self.data
+            .extend(Self::dirty_ranges_iter(bitmap, start_addr, page_size));
     }
 
     pub fn regions(&self) -> &[MemoryRange] {
@@ -716,6 +727,42 @@ mod tests {
                 }
             ]
         );
+    }
+
+    /// Appending multiple bitmaps must yield the same table as merging the
+    /// tables of each bitmap.
+    #[test]
+    fn test_memory_range_table_extend_from_dirty_bitmap() {
+        let page_size = 0x1000;
+        let slots = [(0x1000, [0b1110u64]), (0x100000, [0b1_0001])];
+
+        let mut appended = MemoryRangeTable::default();
+        let mut merged = MemoryRangeTable::default();
+        for (start_gpa, bitmap) in slots {
+            appended.extend_from_dirty_bitmap(bitmap, start_gpa, page_size);
+            merged.extend(MemoryRangeTable::from_dirty_bitmap(
+                bitmap, start_gpa, page_size,
+            ));
+        }
+
+        assert_eq!(
+            appended.regions(),
+            &[
+                MemoryRange {
+                    gpa: 0x1000 + page_size,
+                    length: page_size * 3,
+                },
+                MemoryRange {
+                    gpa: 0x100000,
+                    length: page_size,
+                },
+                MemoryRange {
+                    gpa: 0x100000 + 4 * page_size,
+                    length: page_size,
+                },
+            ]
+        );
+        assert_eq!(appended.regions(), merged.regions());
     }
 
     #[test]

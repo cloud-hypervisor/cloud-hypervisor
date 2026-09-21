@@ -3639,16 +3639,16 @@ impl Migratable for MemoryManager {
                 .zip(vmm_dirty_bitmap.iter())
                 .map(|(x, y)| x | y);
 
-            let sub_table = MemoryRangeTable::from_dirty_bitmap(dirty_bitmap, r.gpa, 4096);
+            let ranges_before = table.regions().len();
+            table.extend_from_dirty_bitmap(dirty_bitmap, r.gpa, 4096);
+            let slot_ranges = &table.regions()[ranges_before..];
 
             trace!(
                 "Dirty memory range table for slot {}: ranges = {} size = {} KiB",
                 r.slot,
-                sub_table.regions().len(),
-                sub_table.effective_size() / 1024,
+                slot_ranges.len(),
+                slot_ranges.iter().map(|r| r.length).sum::<u64>() / 1024,
             );
-
-            table.extend(sub_table);
         }
         Ok(table)
     }
