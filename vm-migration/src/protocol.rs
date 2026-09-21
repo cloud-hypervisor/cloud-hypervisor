@@ -96,6 +96,7 @@
 //!
 //! [start-command]: [`Command::Start`]
 
+use std::cmp::max;
 use std::io::{Read, Write};
 use std::ops::RangeInclusive;
 
@@ -534,9 +535,40 @@ impl MemoryRangeTable {
         self.data.extend(table.data);
     }
 
+    /// Merges `self` and `other` and combines adjacent and overlapping ranges
+    /// into a continuous and sorted table.
+    pub fn merge(mut self, other: Self) -> Self {
+        self.data.extend(other.data);
+        // Faster than sort_unstable() as both ranges are mostly sorted already.
+        self.data.sort_by_key(|range| range.gpa);
+        self.data.dedup_by(|curr, prev| {
+            if curr.gpa <= prev.gpa + prev.length {
+                let end = max(prev.gpa + prev.length, curr.gpa + curr.length);
+                prev.length = end - prev.gpa;
+                true
+            } else {
+                false
+            }
+        });
+        self
+    }
+
     /// Returns the effective size in bytes.
     pub fn effective_size(&self) -> u64 {
         self.data.iter().map(|r| r.length).sum()
+    }
+}
+
+#[cfg(test)]
+impl<const N: usize> From<&[(u64, u64); N]> for MemoryRangeTable {
+    fn from(pairs: &[(u64, u64); N]) -> Self {
+        let pairs: &[(u64, u64)] = &pairs[..];
+        MemoryRangeTable {
+            data: pairs
+                .iter()
+                .map(|&(gpa, length)| MemoryRange { gpa, length })
+                .collect(),
+        }
     }
 }
 
@@ -861,6 +893,44 @@ mod tests {
                 ]
             );
         }
+    }
+
+    #[test]
+    fn test_merge() {
+        let a = MemoryRangeTable::from(&[
+            (0x1000_u64, 0x2000_u64),
+            (0x8000, 0x1000),
+            (0x0, 0x1000),
+            (0x20000, 0x1000),
+        ]);
+        let b = MemoryRangeTable::from(&[
+            (0x2000_u64, 0x2000_u64),
+            (0x9000, 0x1000),
+            (0x30000, 0x1000),
+        ]);
+
+        let merged = a.clone().merge(b.clone());
+
+        assert_eq!(
+            merged.ranges(),
+            MemoryRangeTable::from(&[
+                (0x0_u64, 0x4000_u64),
+                (0x8000, 0x2000),
+                (0x20000, 0x1000),
+                (0x30000, 0x1000),
+            ])
+            .ranges()
+        );
+    }
+
+    #[test]
+    fn test_merge_empty_operands() {
+        let empty = MemoryRangeTable::default();
+        let t = MemoryRangeTable::from(&[(0x1000_u64, 0x1000_u64)]);
+
+        assert!(empty.clone().merge(empty.clone()).is_empty());
+        assert_eq!(t.clone().merge(empty.clone()).ranges(), t.ranges());
+        assert_eq!(empty.merge(t.clone()).ranges(), t.ranges());
     }
 
     #[test]

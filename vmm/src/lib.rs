@@ -1645,8 +1645,8 @@ impl Vmm {
         {
             let iteration_begin = Instant::now();
 
-            let mut final_table = vm.dirty_log()?;
-            final_table.extend(remaining);
+            let final_dirty_log = vm.dirty_log()?;
+            let final_table = remaining.merge(final_dirty_log);
 
             mem_ctx.update_metrics_before_transfer(iteration_begin, &final_table);
             let transfer_begin = Instant::now();
