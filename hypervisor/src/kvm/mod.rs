@@ -183,6 +183,9 @@ const KVM_REG_ARM_TIMER_CNT: u64 = KVM_REG_ARM64
 #[cfg(target_arch = "aarch64")]
 const NANOS_PER_SECOND: u128 = 1_000_000_000;
 
+#[cfg(target_arch = "aarch64")]
+const KVM_CAP_ARM_EL2: u32 = 240;
+
 #[cfg(target_arch = "x86_64")]
 const INVALID_GPA: u64 = u64::MAX;
 
@@ -1754,6 +1757,11 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 }
             }
             break;
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        if _config.nested && fd.check_extension_raw(KVM_CAP_ARM_EL2 as libc::c_ulong) <= 0 {
+            return Err(hypervisor::HypervisorError::NestedVirtualizationNotSupported);
         }
 
         #[cfg(target_arch = "x86_64")]
