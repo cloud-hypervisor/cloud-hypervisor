@@ -802,6 +802,7 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
     const ACPI_IORT_NODE_SMMU_V3: u8 = 0x04;
     const ACPI_IORT_SMMU_V3_GENERIC: u32 = 0;
     const ACPI_IORT_SMMU_V3_COHACC_OVERRIDE: u32 = 1 << 0;
+    const ACPI_IORT_ATS_SUPPORTED: u32 = 1 << 0;
     const ACPI_IORT_REVISION: u8 = 6;
 
     let mut next_id = 0;
@@ -944,6 +945,18 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
             mappings
         };
 
+        let ats_attribute = if smmus.iter().any(|smmu| {
+            smmu.ats_supported
+                && smmu
+                    .attached_bdfs
+                    .iter()
+                    .any(|bdf| bdf.segment() == segment.id)
+        }) {
+            ACPI_IORT_ATS_SUPPORTED
+        } else {
+            0
+        };
+
         let num_id_mappings = id_mappings.len();
         let node_size =
             size_of::<IortPciRootComplexBase>() + num_id_mappings * size_of::<IortIdMapping>();
@@ -964,7 +977,7 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
                 _reserved: 0,
                 maf: 3, // CPM = DCAS = 1
             },
-            ats_attribute: 0,
+            ats_attribute,
             pci_segment_number: segment.id as u32,
             memory_address_size_limit: 64u8,
             pasid_capabilities: 0,
