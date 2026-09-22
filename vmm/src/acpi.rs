@@ -17,6 +17,8 @@ use arch::DeviceType;
 use arch::aarch64::DeviceInfoForFdt;
 use arch::{NumaNodes, layout};
 use bitflags::bitflags;
+#[cfg(target_arch = "aarch64")]
+use devices::iommu::Smmuv3AcpiInfo;
 use log::{info, warn};
 use pci::PciBdf;
 use thiserror::Error;
@@ -752,6 +754,24 @@ struct IortPciRootComplexBase {
 }
 
 #[cfg(target_arch = "aarch64")]
+#[repr(C, packed)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
+struct IortSmmuV3Base {
+    pub common: IortNodeCommon,
+    pub base_address: u64,
+    pub flags: u32,
+    _reserved: u32,
+    pub vatos_address: u64,
+    pub model: u32,
+    pub event_gsiv: u32,
+    pub pri_gsiv: u32,
+    pub gerr_gsiv: u32,
+    pub sync_gsiv: u32,
+    pub proximity_domain: u32,
+    pub deviceid_mapping_index: u32,
+}
+
+#[cfg(target_arch = "aarch64")]
 #[inline]
 fn align_to_8_bytes(len: usize) -> usize {
     (8 - (len % 8)) % 8
@@ -767,11 +787,14 @@ fn next_node_id(next_id: &mut u32) -> u32 {
 #[cfg(target_arch = "aarch64")]
 // Generate IORT table based on Spec Revision E.e:
 // https://developer.arm.com/documentation/den0049/ee/?lang=en
-fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
+fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> Sdt {
     const ACPI_IORT_HEADER_SIZE: u32 = 36;
-    const ACPI_IORT_REVISION: u8 = 6;
+    const DEVICE_IDS_PER_SEGMENT: usize = 256;
     const ACPI_IORT_NODE_ITS_GROUP: u8 = 0x00;
     const ACPI_IORT_NODE_PCI_ROOT_COMPLEX: u8 = 0x02;
+    const ACPI_IORT_NODE_SMMU_V3: u8 = 0x04;
+    const ACPI_IORT_SMMU_V3_GENERIC: u32 = 0;
+    const ACPI_IORT_REVISION: u8 = 6;
 
     let mut next_id = 0;
 
@@ -789,8 +812,10 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
     // The IORT table contains:
     // - IortBodyBase
     // - 1 x ITS Group Node
+    // - M x SMMUv3 Node (M = number of SMMUv3s)
     // - N x PCI Root Complex Node (N = number of pci segments)
-    let num_nodes = (1 + pci_segments.len()) as u32;
+    let num_smmu = smmus.len();
+    let num_nodes = (1 + num_smmu + pci_segments.len()) as u32;
     // First node is the ITS Group Node located right after the IORT Body Base
     let offset_its_node = iort.len() + size_of::<IortBodyBase>();
     assert!(align_to_8_bytes(offset_its_node) == 0); // Ensure the ITS node is 8-byte aligned
@@ -823,6 +848,47 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
     });
     iort.append(its_id_array);
     iort.append_slice(&vec![0u8; padding]); // Add padding to align to 8 bytes
+
+    for smmu in smmus {
+        assert!(align_to_8_bytes(iort.len()) == 0);
+
+        // Single ID mapping since all StreamIDs map to a single ITS group
+        let num_id_mappings = 1;
+        let node_size = size_of::<IortSmmuV3Base>() + num_id_mappings * size_of::<IortIdMapping>();
+        let padding = align_to_8_bytes(iort.len() + node_size);
+        iort.append(IortSmmuV3Base {
+            common: IortNodeCommon {
+                type_: ACPI_IORT_NODE_SMMU_V3,
+                length: (node_size + padding) as u16,
+                revision: 5,
+                node_id: next_node_id(&mut next_id),
+                num_id_mappings: num_id_mappings as u32,
+                id_mappings_array_offset: size_of::<IortSmmuV3Base>() as u32,
+            },
+            base_address: smmu.base,
+            flags: 0,
+            _reserved: 0,
+            vatos_address: 0,
+            model: ACPI_IORT_SMMU_V3_GENERIC,
+            event_gsiv: smmu.event_gsiv,
+            pri_gsiv: smmu.pri_gsiv,
+            gerr_gsiv: smmu.gerror_gsiv,
+            sync_gsiv: smmu.sync_gsiv,
+            proximity_domain: 0,
+            deviceid_mapping_index: 0,
+        });
+        // Identity StreamID to DeviceID mapping, so a device gets the same ITS
+        // DeviceID from its root complex mapping whether it sits behind an
+        // SMMUv3 or not.
+        iort.append(IortIdMapping {
+            input_base: 0,
+            num_ids: (DEVICE_IDS_PER_SEGMENT * pci_segments.len() - 1) as u32,
+            output_base: 0,
+            output_reference: offset_its_node as u32,
+            flags: 0,
+        });
+        iort.append_slice(&vec![0u8; padding]);
+    }
 
     // Create PCI Root Complex Node for each PCI segment
     for segment in pci_segments.iter() {
@@ -1086,7 +1152,7 @@ fn create_acpi_tables_internal(
 
     #[cfg(target_arch = "aarch64")]
     {
-        let iort = create_iort_table(device_manager.pci_segments());
+        let iort = create_iort_table(device_manager.pci_segments(), &[]);
         let iort_addr = next_table_address(prev_tbl_addr, prev_tbl_len)?;
         tables_bytes.extend_from_slice(iort.as_slice());
         xsdt_table_pointers.push(iort_addr.0);
