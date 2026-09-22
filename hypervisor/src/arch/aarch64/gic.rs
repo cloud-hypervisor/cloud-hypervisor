@@ -40,6 +40,7 @@ pub struct VgicConfig {
     pub msi_addr: u64,
     pub msi_size: u64,
     pub nr_irqs: u32,
+    pub maintenance_irq: Option<u32>,
 }
 
 #[derive(Clone, Serialize)]

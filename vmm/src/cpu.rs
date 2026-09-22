@@ -44,7 +44,7 @@ use hypervisor::StandardRegisters;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::arch::aarch64::gic::Vgic;
 #[cfg(target_arch = "aarch64")]
-use hypervisor::arch::aarch64::regs::{AARCH64_PMU_IRQ, MPIDR_EL1};
+use hypervisor::arch::aarch64::regs::{AARCH64_GIC_MAINT_IRQ, AARCH64_PMU_IRQ, MPIDR_EL1};
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 use hypervisor::arch::aarch64::regs::{ID_AA64MMFR0_EL1, TCR_EL1, TTBR1_EL1};
 #[cfg(target_arch = "aarch64")]
@@ -1910,7 +1910,11 @@ impl CpuManager {
                     base_address: 0,
                     gicv_base_address: 0,
                     gich_base_address: 0,
-                    vgic_interrupt: 0,
+                    vgic_interrupt: if self.nested() {
+                        AARCH64_GIC_MAINT_IRQ
+                    } else {
+                        0
+                    },
                     gicr_base_address: 0,
                     mpidr: mpidr & mpidr_mask,
                     proc_power_effi_class: 0,
