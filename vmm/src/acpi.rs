@@ -785,6 +785,13 @@ fn next_node_id(next_id: &mut u32) -> u32 {
 }
 
 #[cfg(target_arch = "aarch64")]
+struct RcIdMapping {
+    input_base: u16,
+    count: u16,
+    smmu: Option<usize>,
+}
+
+#[cfg(target_arch = "aarch64")]
 // Generate IORT table based on Spec Revision E.e:
 // https://developer.arm.com/documentation/den0049/ee/?lang=en
 fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> Sdt {
@@ -849,8 +856,10 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
     iort.append(its_id_array);
     iort.append_slice(&vec![0u8; padding]); // Add padding to align to 8 bytes
 
+    let mut smmu_node_offsets: Vec<usize> = Vec::with_capacity(smmus.len());
     for smmu in smmus {
         assert!(align_to_8_bytes(iort.len()) == 0);
+        smmu_node_offsets.push(iort.len());
 
         // Single ID mapping since all StreamIDs map to a single ITS group
         let num_id_mappings = 1;
@@ -897,9 +906,40 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
         // Each PCI Root Complex Node contains:
         // - IortPciRootComplexBase
         // - ID mapping Array: Array of IortIdMapping
-        //   Currently contains a single mapping that maps all device IDs
-        //   in the segment to the ITS Group Node.
-        let num_id_mappings = 1;
+        let id_mappings: Vec<RcIdMapping> = if smmus.is_empty() {
+            vec![RcIdMapping {
+                input_base: 0,
+                count: DEVICE_IDS_PER_SEGMENT as u16,
+                smmu: None,
+            }]
+        } else {
+            let mut id_to_smmu: [Option<usize>; DEVICE_IDS_PER_SEGMENT] =
+                [None; DEVICE_IDS_PER_SEGMENT];
+            for (i, smmu) in smmus.iter().enumerate() {
+                for bdf in &smmu.attached_bdfs {
+                    if bdf.segment() == segment.id {
+                        id_to_smmu[(u32::from(*bdf) & 0xff) as usize] = Some(i);
+                    }
+                }
+            }
+            let mut mappings = Vec::new();
+            let mut id = 0usize;
+            while id < DEVICE_IDS_PER_SEGMENT {
+                let smmu = id_to_smmu[id];
+                let start = id;
+                while id < DEVICE_IDS_PER_SEGMENT && id_to_smmu[id] == smmu {
+                    id += 1;
+                }
+                mappings.push(RcIdMapping {
+                    input_base: start as u16,
+                    count: (id - start) as u16,
+                    smmu,
+                });
+            }
+            mappings
+        };
+
+        let num_id_mappings = id_mappings.len();
         let node_size =
             size_of::<IortPciRootComplexBase>() + num_id_mappings * size_of::<IortIdMapping>();
         let padding = align_to_8_bytes(iort.len() + node_size);
@@ -929,23 +969,25 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
         // ID Mapping for this Root Complex
         // Maps 256 device IDs (1 bus × 32 devices × 8 functions)
         assert!(segment.id < 256, "Up to 256 PCI segments are supported.");
-        iort.append(IortIdMapping {
-            input_base: 0,
-            // The number of IDs in the range minus one:
-            // This should cover all the devices of a segment:
-            // 1 (bus) x 32 (devices) x 8 (functions) = 256
-            // Note: Currently only 1 bus is supported in a segment.
-            num_ids: 255,
-            // Output base maps to ITS device IDs which must match the
-            // device ID encoding used in KVM MSI routing setup, which
-            // shares the same limitation - only 1 bus per segment and
-            // up to 256 segments.
-            // See: https://github.com/cloud-hypervisor/cloud-hypervisor/commit/c9374d87ac453d49185aa7b734df089444166484
-            output_base: (256 * segment.id) as u32,
-            // Output reference node is the ITS group node as there is no SMMU node
-            output_reference: offset_its_node as u32,
-            flags: 0,
-        });
+        for mapping in &id_mappings {
+            let output_reference = match mapping.smmu {
+                Some(i) => smmu_node_offsets[i],
+                None => offset_its_node,
+            } as u32;
+            iort.append(IortIdMapping {
+                input_base: u32::from(mapping.input_base),
+                num_ids: u32::from(mapping.count - 1),
+                // Output base maps to ITS device IDs which must match the
+                // device ID encoding used in KVM MSI routing setup, which
+                // shares the same limitation - only 1 bus per segment and
+                // up to 256 segments.
+                // See: https://github.com/cloud-hypervisor/cloud-hypervisor/commit/c9374d87ac453d49185aa7b734df089444166484
+                output_base: (DEVICE_IDS_PER_SEGMENT * segment.id as usize) as u32
+                    + u32::from(mapping.input_base),
+                output_reference,
+                flags: 0,
+            });
+        }
         iort.append_slice(&vec![0u8; padding]); // Add padding to align to 8 bytes
     }
 
