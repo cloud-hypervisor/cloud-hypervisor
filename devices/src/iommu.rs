@@ -4,6 +4,8 @@
 
 use std::io;
 
+#[cfg(target_arch = "aarch64")]
+use pci::PciBdf;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -41,4 +43,23 @@ pub trait PhysicalIommu: Send + Sync {
     fn set_blocking(&self, device_id: u32) -> Result<(), Error>;
 
     fn invalidate(&self, invalidation: Invalidation) -> Result<(), Error>;
+}
+
+#[cfg(target_arch = "aarch64")]
+#[derive(Clone, Debug, Default)]
+pub struct Smmuv3AcpiInfo {
+    pub base: u64,
+    pub event_gsiv: u32,
+    pub gerror_gsiv: u32,
+    pub pri_gsiv: u32,
+    pub sync_gsiv: u32,
+    pub coherent: bool,
+    pub ats_supported: bool,
+    pub attached_bdfs: Vec<PciBdf>,
+}
+
+#[derive(Clone, Debug)]
+pub enum IommuAcpiInfo {
+    #[cfg(target_arch = "aarch64")]
+    Smmuv3(Smmuv3AcpiInfo),
 }
