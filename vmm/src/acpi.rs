@@ -801,6 +801,7 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
     const ACPI_IORT_NODE_PCI_ROOT_COMPLEX: u8 = 0x02;
     const ACPI_IORT_NODE_SMMU_V3: u8 = 0x04;
     const ACPI_IORT_SMMU_V3_GENERIC: u32 = 0;
+    const ACPI_IORT_SMMU_V3_COHACC_OVERRIDE: u32 = 1 << 0;
     const ACPI_IORT_SMMU_V3_DEVICEID_VALID: u32 = 1 << 4;
     const ACPI_IORT_REVISION: u8 = 6;
 
@@ -867,6 +868,9 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
         let node_size = size_of::<IortSmmuV3Base>() + num_id_mappings * size_of::<IortIdMapping>();
         let padding = align_to_8_bytes(iort.len() + node_size);
         let mut flags = 0;
+        if smmu.coherent {
+            flags |= ACPI_IORT_SMMU_V3_COHACC_OVERRIDE;
+        }
         if smmu.deviceid_mapping_index_valid {
             flags |= ACPI_IORT_SMMU_V3_DEVICEID_VALID;
         }
