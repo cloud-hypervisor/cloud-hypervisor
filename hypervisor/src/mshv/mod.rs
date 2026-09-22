@@ -479,7 +479,12 @@ pub struct MshvVcpu {
 /// let mshv = MshvHypervisor::new().unwrap();
 /// let hypervisor = Arc::new(mshv);
 /// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
-/// let vcpu = vm.create_vcpu(0, None, #[cfg(target_arch = "x86_64")] Default::default()).unwrap();
+/// let vcpu = vm.create_vcpu(
+///     0,
+///     None,
+///     #[cfg(target_arch = "x86_64")]
+///     Default::default(),
+/// ).unwrap();
 /// ```
 impl cpu::Vcpu for MshvVcpu {
     ///
@@ -1300,10 +1305,16 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn setup_regs(&self, cpu_id: u32, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
+    fn setup_regs(
+        &self,
+        cpu_id: u32,
+        boot_ip: u64,
+        fdt_start: u64,
+        _el2_enabled: bool,
+    ) -> cpu::Result<()> {
         let arr_reg_name_value = [(
             hv_register_name_HV_ARM64_REGISTER_PSTATE,
-            regs::PSTATE_FAULT_BITS_64,
+            regs::PSTATE_FAULT_BITS_64_EL1H,
         )];
         set_registers_64!(self.fd, arr_reg_name_value)
             .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
@@ -1373,6 +1384,7 @@ impl cpu::Vcpu for MshvVcpu {
         _vm: &dyn crate::Vm,
         _kvi: &mut crate::VcpuInit,
         _id: u32,
+        _el2_enabled: bool,
     ) -> cpu::Result<()> {
         Ok(())
     }
