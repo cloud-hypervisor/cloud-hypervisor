@@ -136,6 +136,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
     gic_device: &Arc<Mutex<dyn Vgic>>,
     numa_nodes: &NumaNodes,
     pmu_supported: bool,
+    el2_supported: bool,
     smbios: Option<&smbios::SmbiosConfig>,
 ) -> super::Result<()> {
     let fdt_final = fdt::create_fdt(
@@ -150,6 +151,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
         numa_nodes,
         virtio_iommu_bdf,
         pmu_supported,
+        el2_supported,
     )
     .map_err(|_| Error::SetupFdt)?;
 

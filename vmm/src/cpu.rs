@@ -702,6 +702,8 @@ impl Snapshottable for Vcpu {
 
 pub struct CpuManager {
     config: CpusConfig,
+    #[cfg(target_arch = "aarch64")]
+    el2_supported: bool,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
     #[cfg(target_arch = "x86_64")]
@@ -942,8 +944,13 @@ impl CpuManager {
         )
         .map_err(Error::MsrConfigurationUpdate)?;
 
+        #[cfg(target_arch = "aarch64")]
+        let el2_supported = config.nested && vm.has_el2_support();
+
         Ok(Arc::new(Mutex::new(CpuManager {
             config: config.clone(),
+            #[cfg(target_arch = "aarch64")]
+            el2_supported,
             interrupt_controller: None,
             #[cfg(target_arch = "x86_64")]
             cpuid,
@@ -1009,7 +1016,7 @@ impl CpuManager {
 
             #[cfg(target_arch = "aarch64")]
             {
-                vcpu.init(self.vm.as_ref(), false)?;
+                vcpu.init(self.vm.as_ref(), self.el2_supported)?;
                 let pre_finalize = state.pre_finalize_regs();
                 if !pre_finalize.is_empty() {
                     vcpu.vcpu
@@ -1085,12 +1092,17 @@ impl CpuManager {
         )?;
 
         #[cfg(target_arch = "aarch64")]
-        vcpu.configure(self.vm.as_ref(), false, boot_setup)?;
+        vcpu.configure(self.vm.as_ref(), self.el2_supported, boot_setup)?;
 
         #[cfg(target_arch = "riscv64")]
         vcpu.configure(boot_setup)?;
 
         Ok(())
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    pub fn el2_supported(&self) -> bool {
+        self.el2_supported
     }
 
     #[cfg(target_arch = "x86_64")]

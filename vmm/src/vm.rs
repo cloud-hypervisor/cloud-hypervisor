@@ -1942,6 +1942,8 @@ impl Vm {
             .as_ref()
             .and_then(|p| p.smbios_config());
 
+        let el2_supported = self.cpu_manager.lock().unwrap().el2_supported();
+
         arch::configure_system(
             &mem,
             cmdline.as_cstring().unwrap().to_str().unwrap(),
@@ -1954,6 +1956,7 @@ impl Vm {
             &vgic,
             &self.numa_nodes,
             pmu_supported,
+            el2_supported,
             smbios.as_ref(),
         )
         .map_err(Error::ConfigureSystem)?;
@@ -4067,6 +4070,7 @@ mod tests {
             &BTreeMap::new(),
             None,
             true,
+            false,
         )
         .unwrap();
     }
