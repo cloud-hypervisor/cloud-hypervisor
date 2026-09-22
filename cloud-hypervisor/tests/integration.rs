@@ -13975,6 +13975,78 @@ mod fw_cfg {
     }
 
     #[test]
+    #[cfg(target_arch = "aarch64")]
+    fn test_firmware_kernel_boot_disk_hotplug() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let api_socket = temp_api_path(&guest.tmp_dir);
+        let test_disk_path = guest.tmp_dir.as_path().join("hotplug.raw");
+        File::create(&test_disk_path)
+            .unwrap()
+            .set_len(16 << 20)
+            .unwrap();
+
+        let cmdline = format!("{DIRECT_KERNEL_BOOT_CMDLINE} fw_cfg_kernel_boot=1");
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket])
+            .default_cpus()
+            .default_memory()
+            .args(["--firmware", edk2_path().to_str().unwrap()])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", &cmdline])
+            .args(["--fw-cfg-config", "initramfs=off"])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            guest
+                .ssh_command("grep -qw fw_cfg_kernel_boot=1 /proc/cmdline")
+                .unwrap();
+            guest
+                .ssh_command("test -f /sys/firmware/acpi/tables/DSDT")
+                .unwrap();
+            guest.ssh_command("test ! -e /dev/vdc").unwrap();
+
+            let (cmd_success, cmd_output, cmd_error) = remote_command_w_output(
+                &api_socket,
+                "add-disk",
+                Some(
+                    format!(
+                        "path={},id=test0,readonly=true,image_type=raw",
+                        test_disk_path.to_str().unwrap()
+                    )
+                    .as_str(),
+                ),
+            );
+            assert!(
+                cmd_success,
+                "disk hotplug failed: {}",
+                String::from_utf8_lossy(&cmd_error)
+            );
+            assert!(String::from_utf8_lossy(&cmd_output).contains("\"id\":\"test0\""));
+
+            assert!(wait_until(Duration::from_secs(10), || {
+                guest
+                    .ssh_command("lsblk | grep vdc | grep -c 16M")
+                    .is_ok_and(|s| s.trim().parse::<u32>().unwrap_or_default() == 1)
+            }));
+            guest
+                .ssh_command("sudo dd if=/dev/vdc of=/dev/null bs=1M iflag=direct count=16")
+                .unwrap();
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
     fn test_fw_cfg_string() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));

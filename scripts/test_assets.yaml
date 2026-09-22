@@ -20,8 +20,8 @@ assets:
     test: [integration, windows]
 
   - filename: CLOUDHV_EFI.fd
-    url: https://github.com/cloud-hypervisor/edk2/releases/download/ch-1e1b96f126/CLOUDHV_EFI.fd
-    sha1: ce3656987f9e4238ef8afbd65fca219460c1f767
+    url: https://github.com/cloud-hypervisor/edk2/releases/download/ch-97eeb7b09/CLOUDHV_EFI.fd
+    sha256: 13cf4eddc44f3fac4e223b54bcf958de99539297fee8b61cca2605ab5b5009fb
     arch: [aarch64]
     test: [integration, windows]
 
