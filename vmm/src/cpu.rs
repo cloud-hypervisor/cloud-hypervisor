@@ -537,6 +537,7 @@ impl Vcpu {
     pub fn configure(
         &mut self,
         #[cfg(target_arch = "aarch64")] vm: &dyn hypervisor::Vm,
+        #[cfg(target_arch = "aarch64")] enable_el2: bool,
         boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
         #[cfg(target_arch = "x86_64")] cpuid: Vec<CpuIdEntry>,
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
@@ -546,10 +547,10 @@ impl Vcpu {
     ) -> Result<()> {
         #[cfg(target_arch = "aarch64")]
         {
-            self.init(vm)?;
+            self.init(vm, enable_el2)?;
             self.finalize_sve()?;
             self.verify_mpidr();
-            arch::configure_vcpu(self.vcpu.as_ref(), self.id, boot_setup)
+            arch::configure_vcpu(self.vcpu.as_ref(), self.id, boot_setup, enable_el2)
                 .map_err(Error::VcpuConfiguration)?;
         }
         #[cfg(target_arch = "riscv64")]
@@ -589,14 +590,14 @@ impl Vcpu {
 
     /// Initializes an aarch64 specific vcpu for booting Linux.
     #[cfg(target_arch = "aarch64")]
-    pub fn init(&self, vm: &dyn hypervisor::Vm) -> Result<()> {
+    pub fn init(&self, vm: &dyn hypervisor::Vm, enable_el2: bool) -> Result<()> {
         let mut kvi = self.vcpu.create_vcpu_init();
 
         vm.get_preferred_target(&mut kvi)
             .map_err(Error::VcpuArmPreferredTarget)?;
 
         self.vcpu
-            .vcpu_set_processor_features(vm, &mut kvi, self.id)
+            .vcpu_set_processor_features(vm, &mut kvi, self.id, enable_el2)
             .map_err(Error::VcpuSetProcessorFeatures)?;
 
         self.vcpu.vcpu_init(&kvi).map_err(Error::VcpuArmInit)?;
@@ -1008,7 +1009,7 @@ impl CpuManager {
 
             #[cfg(target_arch = "aarch64")]
             {
-                vcpu.init(self.vm.as_ref())?;
+                vcpu.init(self.vm.as_ref(), false)?;
                 let pre_finalize = state.pre_finalize_regs();
                 if !pre_finalize.is_empty() {
                     vcpu.vcpu
@@ -1084,7 +1085,7 @@ impl CpuManager {
         )?;
 
         #[cfg(target_arch = "aarch64")]
-        vcpu.configure(self.vm.as_ref(), boot_setup)?;
+        vcpu.configure(self.vm.as_ref(), false, boot_setup)?;
 
         #[cfg(target_arch = "riscv64")]
         vcpu.configure(boot_setup)?;
@@ -3618,13 +3619,14 @@ mod tests {
         let vcpu = vm.create_vcpu(0, None).unwrap();
 
         // Must fail when vcpu is not initialized yet.
-        vcpu.setup_regs(0, 0x0, layout::FDT_START.0).unwrap_err();
+        vcpu.setup_regs(0, 0x0, layout::FDT_START.0, false)
+            .unwrap_err();
 
         let mut kvi = vcpu.create_vcpu_init();
         vm.get_preferred_target(&mut kvi).unwrap();
         vcpu.vcpu_init(&kvi).unwrap();
 
-        vcpu.setup_regs(0, 0x0, layout::FDT_START.0).unwrap();
+        vcpu.setup_regs(0, 0x0, layout::FDT_START.0, false).unwrap();
     }
 
     #[test]
@@ -3661,7 +3663,7 @@ mod tests {
             assert_eq!(mpidr_from_vcpu_id(id as u64), expected, "vCPU {id}");
 
             // Must be what the hypervisor itself calculates.
-            vcpu.init(vm.as_ref()).unwrap();
+            vcpu.init(vm.as_ref(), false).unwrap();
             vcpu.finalize_sve().unwrap();
             vcpu.verify_mpidr();
         }
