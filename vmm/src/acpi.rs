@@ -772,6 +772,25 @@ struct IortSmmuV3Base {
 }
 
 #[cfg(target_arch = "aarch64")]
+#[repr(C, packed)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
+struct IortRmrBase {
+    pub common: IortNodeCommon,
+    pub flags: u32,
+    pub num_mem_range_descriptors: u32,
+    pub mem_range_desc_offset: u32,
+}
+
+#[cfg(target_arch = "aarch64")]
+#[repr(C, packed)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
+struct IortRmrMemRangeDescriptor {
+    pub base_address: u64,
+    pub length: u64,
+    _reserved: u32,
+}
+
+#[cfg(target_arch = "aarch64")]
 #[inline]
 fn align_to_8_bytes(len: usize) -> usize {
     (8 - (len % 8)) % 8
@@ -801,9 +820,17 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
     const ACPI_IORT_NODE_PCI_ROOT_COMPLEX: u8 = 0x02;
     const ACPI_IORT_NODE_SMMU_V3: u8 = 0x04;
     const ACPI_IORT_SMMU_V3_GENERIC: u32 = 0;
+    const ACPI_IORT_NODE_RMR: u8 = 0x06;
     const ACPI_IORT_SMMU_V3_COHACC_OVERRIDE: u32 = 1 << 0;
     const ACPI_IORT_ATS_SUPPORTED: u32 = 1 << 0;
     const ACPI_IORT_REVISION: u8 = 6;
+    const ACPI_IORT_RMR_MSI_IOVA_BASE: u64 = 0x0800_0000;
+    const ACPI_IORT_RMR_MSI_IOVA_LENGTH: u64 = 0x0010_0000;
+
+    let num_rmr = smmus
+        .iter()
+        .filter(|smmu| !smmu.attached_bdfs.is_empty())
+        .count();
 
     let mut next_id = 0;
 
@@ -822,9 +849,10 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
     // - IortBodyBase
     // - 1 x ITS Group Node
     // - M x SMMUv3 Node (M = number of SMMUv3s)
+    // - R x RMR Node (R = number of SMMUv3s with attached devices)
     // - N x PCI Root Complex Node (N = number of pci segments)
     let num_smmu = smmus.len();
-    let num_nodes = (1 + num_smmu + pci_segments.len()) as u32;
+    let num_nodes = (1 + num_smmu + pci_segments.len() + num_rmr) as u32;
     // First node is the ITS Group Node located right after the IORT Body Base
     let offset_its_node = iort.len() + size_of::<IortBodyBase>();
     assert!(align_to_8_bytes(offset_its_node) == 0); // Ensure the ITS node is 8-byte aligned
@@ -861,7 +889,8 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
     let mut smmu_node_offsets: Vec<usize> = Vec::with_capacity(smmus.len());
     for smmu in smmus {
         assert!(align_to_8_bytes(iort.len()) == 0);
-        smmu_node_offsets.push(iort.len());
+        let smmu_node_offset = iort.len();
+        smmu_node_offsets.push(smmu_node_offset);
 
         // Single ID mapping since all StreamIDs map to a single ITS group
         let num_id_mappings = 1;
@@ -901,6 +930,50 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
             output_base: 0,
             output_reference: offset_its_node as u32,
             flags: 0,
+        });
+        iort.append_slice(&vec![0u8; padding]);
+
+        if smmu.attached_bdfs.is_empty() {
+            continue;
+        }
+        assert!(align_to_8_bytes(iort.len()) == 0);
+
+        let num_id_mappings = smmu.attached_bdfs.len();
+        let num_mem_range_descriptors = 1usize;
+        let node_size = size_of::<IortRmrBase>()
+            + num_id_mappings * size_of::<IortIdMapping>()
+            + num_mem_range_descriptors * size_of::<IortRmrMemRangeDescriptor>();
+        let padding = align_to_8_bytes(iort.len() + node_size);
+        iort.append(IortRmrBase {
+            common: IortNodeCommon {
+                type_: ACPI_IORT_NODE_RMR,
+                length: (node_size + padding) as u16,
+                revision: 3,
+                node_id: next_node_id(&mut next_id),
+                num_id_mappings: num_id_mappings as u32,
+                id_mappings_array_offset: size_of::<IortRmrBase>() as u32,
+            },
+            flags: 0,
+            num_mem_range_descriptors: num_mem_range_descriptors as u32,
+            mem_range_desc_offset: (size_of::<IortRmrBase>()
+                + num_id_mappings * size_of::<IortIdMapping>())
+                as u32,
+        });
+        for bdf in &smmu.attached_bdfs {
+            let stream_id =
+                DEVICE_IDS_PER_SEGMENT as u32 * u32::from(bdf.segment()) + (u32::from(*bdf) & 0xff);
+            iort.append(IortIdMapping {
+                input_base: stream_id,
+                num_ids: 0,
+                output_base: stream_id,
+                output_reference: smmu_node_offset as u32,
+                flags: 0,
+            });
+        }
+        iort.append(IortRmrMemRangeDescriptor {
+            base_address: ACPI_IORT_RMR_MSI_IOVA_BASE,
+            length: ACPI_IORT_RMR_MSI_IOVA_LENGTH,
+            _reserved: 0,
         });
         iort.append_slice(&vec![0u8; padding]);
     }
