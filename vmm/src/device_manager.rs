@@ -75,7 +75,7 @@ use devices::{AcpiNotificationFlags, acpi, interrupt_controller, legacy, pvpanic
 use event_monitor::event;
 use hypervisor::IoEventAddress;
 #[cfg(target_arch = "aarch64")]
-use hypervisor::arch::aarch64::regs::AARCH64_PMU_IRQ;
+use hypervisor::arch::aarch64::regs::{AARCH64_GIC_MAINT_IRQ, AARCH64_PMU_IRQ};
 #[cfg(feature = "kvm")]
 use iommufd_ioctls::IommuFd;
 use libc::{
@@ -1736,12 +1736,19 @@ impl DeviceManager {
         &mut self,
         snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<Arc<Mutex<dyn InterruptController>>> {
+        let maintenance_irq = self
+            .cpu_manager
+            .lock()
+            .unwrap()
+            .el2_enabled()
+            .then_some(AARCH64_GIC_MAINT_IRQ);
         let interrupt_controller: Arc<Mutex<gic::Gic>> = Arc::new(Mutex::new(
             gic::Gic::new(
                 self.config.lock().unwrap().cpus.boot_vcpus,
                 Arc::clone(&self.msi_interrupt_manager)
                     as Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
                 Arc::clone(&self.address_manager.vm),
+                maintenance_irq,
             )
             .map_err(DeviceManagerError::CreateInterruptController)?,
         ));
