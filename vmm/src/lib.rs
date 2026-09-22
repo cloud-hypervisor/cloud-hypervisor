@@ -1037,12 +1037,6 @@ impl Vmm {
             Ok(memory_files)
         };
 
-        #[expect(deprecated)] // last sent in v52
-        if req.command() == Command::Abandon {
-            info!("Abandon Command Received");
-            return Ok(Aborted);
-        }
-
         let state_name = state.variant_name();
         match state {
             Established => match req.command() {
