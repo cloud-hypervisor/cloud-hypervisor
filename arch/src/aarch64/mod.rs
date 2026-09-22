@@ -139,6 +139,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
     gic_device: &Arc<Mutex<dyn Vgic>>,
     numa_nodes: &NumaNodes,
     pmu_supported: bool,
+    nested: bool,
     smbios: Option<&smbios::SmbiosConfig>,
     rsdp_addr: Option<GuestAddress>,
 ) -> super::Result<()> {
@@ -158,6 +159,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
         numa_nodes,
         virtio_iommu_bdf,
         pmu_supported,
+        nested,
         uefi_mmap_size,
     )
     .map_err(|_| Error::SetupFdt)?;

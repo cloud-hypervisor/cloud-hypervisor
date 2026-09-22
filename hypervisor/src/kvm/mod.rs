@@ -183,6 +183,9 @@ const KVM_REG_ARM_TIMER_CNT: u64 = KVM_REG_ARM64
 #[cfg(target_arch = "aarch64")]
 const NANOS_PER_SECOND: u128 = 1_000_000_000;
 
+#[cfg(target_arch = "aarch64")]
+const KVM_CAP_ARM_EL2: u32 = 240;
+
 #[cfg(target_arch = "x86_64")]
 const INVALID_GPA: u64 = u64::MAX;
 
@@ -781,6 +784,13 @@ impl KvmVm {
 /// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
 /// ```
 impl vm::Vm for KvmVm {
+    #[cfg(target_arch = "aarch64")]
+    fn el2_supported(&self) -> bool {
+        self.fd
+            .check_extension_raw(KVM_CAP_ARM_EL2 as libc::c_ulong)
+            > 0
+    }
+
     #[cfg(feature = "sev_snp")]
     fn register_memory_conversion_handler(&self, handler: Arc<dyn vm::MemoryConversionHandler>) {
         self.memory_conversion_handler

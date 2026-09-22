@@ -764,6 +764,8 @@ fn parallel_map<T: Sync, R: Send, E: Send>(
 
 pub struct CpuManager {
     config: CpusConfig,
+    #[cfg(target_arch = "aarch64")]
+    nested: bool,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
     #[cfg(target_arch = "x86_64")]
@@ -1004,8 +1006,13 @@ impl CpuManager {
         )
         .map_err(Error::MsrConfigurationUpdate)?;
 
+        #[cfg(target_arch = "aarch64")]
+        let nested = config.nested && vm.el2_supported();
+
         Ok(Arc::new(Mutex::new(CpuManager {
             config: config.clone(),
+            #[cfg(target_arch = "aarch64")]
+            nested,
             interrupt_controller: None,
             #[cfg(target_arch = "x86_64")]
             cpuid,
@@ -1061,7 +1068,7 @@ impl CpuManager {
         )?;
 
         #[cfg(target_arch = "aarch64")]
-        vcpu.init(self.vm.as_ref(), false)?;
+        vcpu.init(self.vm.as_ref(), self.nested)?;
 
         let vcpu = Arc::new(Mutex::new(vcpu));
 
@@ -1123,12 +1130,17 @@ impl CpuManager {
         )?;
 
         #[cfg(target_arch = "aarch64")]
-        vcpu.configure(boot_setup, false)?;
+        vcpu.configure(boot_setup, self.nested)?;
 
         #[cfg(target_arch = "riscv64")]
         vcpu.configure(boot_setup)?;
 
         Ok(())
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    pub fn nested(&self) -> bool {
+        self.nested
     }
 
     #[cfg(target_arch = "x86_64")]

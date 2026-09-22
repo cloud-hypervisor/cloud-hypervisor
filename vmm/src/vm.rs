@@ -1942,6 +1942,8 @@ impl Vm {
             .as_ref()
             .and_then(|p| p.smbios_config());
 
+        let nested = self.cpu_manager.lock().unwrap().nested();
+
         arch::configure_system(
             &mem,
             cmdline.as_cstring().unwrap().to_str().unwrap(),
@@ -1954,6 +1956,7 @@ impl Vm {
             &vgic,
             &self.numa_nodes,
             pmu_supported,
+            nested,
             smbios.as_ref(),
             rsdp_addr.filter(|_| entry_addr.entry_addr != layout::UEFI_START),
         )
@@ -4085,6 +4088,7 @@ mod tests {
             &BTreeMap::new(),
             None,
             true,
+            false,
             None,
         )
         .unwrap();
