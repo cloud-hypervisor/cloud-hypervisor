@@ -1064,7 +1064,7 @@ impl CpuManager {
         )?;
 
         #[cfg(target_arch = "aarch64")]
-        vcpu.init(self.vm.as_ref(), false)?;
+        vcpu.init(self.vm.as_ref(), self.config.nested)?;
 
         let vcpu = Arc::new(Mutex::new(vcpu));
 
@@ -1126,7 +1126,7 @@ impl CpuManager {
         )?;
 
         #[cfg(target_arch = "aarch64")]
-        vcpu.configure(boot_setup, false)?;
+        vcpu.configure(boot_setup, self.config.nested)?;
 
         #[cfg(target_arch = "riscv64")]
         vcpu.configure(boot_setup)?;
@@ -1134,7 +1134,7 @@ impl CpuManager {
         Ok(())
     }
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
     pub fn nested(&self) -> bool {
         self.config.nested
     }

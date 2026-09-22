@@ -287,6 +287,11 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     /// let vm = hypervisor.create_vm(config).unwrap();
     /// ```
     fn create_vm(&self, _config: HypervisorVmConfig) -> hypervisor::Result<Arc<dyn vm::Vm>> {
+        #[cfg(target_arch = "aarch64")]
+        if _config.nested {
+            return Err(hypervisor::HypervisorError::NestedVirtualizationNotSupported);
+        }
+
         #[allow(unused_mut)]
         #[allow(unused_assignments)]
         let mut mshv_vm_type = VmType::Normal; // Create with default platform type
