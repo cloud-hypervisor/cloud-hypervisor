@@ -932,8 +932,9 @@ pub struct NumaConfig {
 /// firmware, and initrd.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum PayloadConfigError {
-    /// Specifying a kernel is not supported when a firmware is provided.
-    #[error("Specifying a kernel is not supported when a firmware is provided")]
+    /// Specifying a kernel is not supported when a firmware is provided unless
+    /// the kernel is delivered through fw_cfg.
+    #[error("Specifying both --firmware and --kernel requires --fw-cfg-config kernel=on")]
     FirmwarePlusOtherPayloads,
     /// No bootitem provided: neither firmware nor kernel.
     #[error("No bootitem provided: neither firmware nor kernel")]
@@ -1075,6 +1076,15 @@ impl PayloadConfig {
             }
         }
         match (&self.firmware, &self.kernel) {
+            #[cfg(feature = "fw_cfg")]
+            (Some(_firmware), Some(_kernel))
+                if self
+                    .fw_cfg_config
+                    .as_ref()
+                    .is_some_and(|config| config.kernel) =>
+            {
+                Ok(())
+            }
             (Some(_firmware), Some(_kernel)) => Err(PayloadConfigError::FirmwarePlusOtherPayloads),
             (Some(_firmware), None) => {
                 if self.cmdline.is_some() {

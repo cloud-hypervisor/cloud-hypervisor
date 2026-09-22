@@ -682,7 +682,7 @@ impl Vm {
             igvm_file,
         )?;
 
-        // Load kernel and initramfs files
+        // Load files needed directly by the VMM.
         #[cfg(feature = "tdx")]
         let kernel = config
             .lock()
@@ -699,8 +699,8 @@ impl Vm {
             .unwrap()
             .payload
             .as_ref()
-            .map(|p| p.initramfs.as_ref().map(File::open))
-            .unwrap_or_default()
+            .filter(|payload| payload.firmware.is_none())
+            .and_then(|payload| payload.initramfs.as_ref().map(File::open))
             .transpose()
             .map_err(Error::InitramfsFile)?;
 
@@ -1745,7 +1745,7 @@ impl Vm {
             }
         }
         match (&payload.firmware, &payload.kernel) {
-            (Some(firmware), None) => {
+            (Some(firmware), _) => {
                 let firmware = File::open(firmware).map_err(Error::FirmwareFile)?;
                 Self::load_kernel(firmware, None, memory_manager)
             }
@@ -1767,7 +1767,7 @@ impl Vm {
         memory_manager: Arc<Mutex<MemoryManager>>,
     ) -> Result<EntryPoint> {
         match (&payload.firmware, &payload.kernel) {
-            (Some(firmware), None) => {
+            (Some(firmware), _) => {
                 let firmware = File::open(firmware).map_err(Error::FirmwareFile)?;
                 Self::load_firmware(&firmware, memory_manager)
             }

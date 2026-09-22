@@ -21,6 +21,29 @@ The `fw_cfg` device is enabled via the `fw_cfg` feature flag when building Cloud
 cargo build --features fw_cfg
 ```
 
+## Firmware-Assisted Direct Kernel Boot
+
+Providing both `--firmware` and `--kernel` requires `--fw-cfg-config`. The
+firmware becomes the initial payload and receives the kernel, command line,
+initramfs, and ACPI tables selected by `--fw-cfg-config`. For example, an
+AArch64 guest without an initramfs can be booted with:
+
+```bash
+cloud-hypervisor \
+    --firmware /path/to/CLOUDHV_EFI.fd \
+    --kernel /path/to/Image \
+    --cmdline "console=ttyAMA0 root=/dev/vda1" \
+    --disk path=/path/to/rootfs.raw,image_type=raw \
+    --serial tty \
+    --console off \
+    --fw-cfg-config initramfs=off
+```
+
+The firmware must support loading a kernel through the QEMU-compatible
+`fw_cfg` interface. Cloud Hypervisor's EDK II firmware provides this support.
+Options in `--fw-cfg-config` default to enabled, so explicitly disable any
+payload component that is not supplied.
+
 ## Guest Kernel Configuration
 
 For the guest Linux kernel to recognize and use the `fw_cfg` device via sysfs, the following kernel configuration option must be enabled:

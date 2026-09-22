@@ -6008,6 +6008,39 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
         #[cfg(feature = "fw_cfg")]
         {
+            let mut firmware_kernel_config = valid_config.clone();
+            if let Some(payload) = firmware_kernel_config.payload.as_mut() {
+                payload.firmware = Some(PathBuf::from("/path/to/firmware"));
+                payload.cmdline = Some("console=hvc0".to_string());
+                payload.fw_cfg_config = Some(FwCfgConfig {
+                    initramfs: false,
+                    ..Default::default()
+                });
+            }
+            firmware_kernel_config.validate().unwrap();
+
+            let mut firmware_kernel_without_fw_cfg = valid_config.clone();
+            if let Some(payload) = firmware_kernel_without_fw_cfg.payload.as_mut() {
+                payload.firmware = Some(PathBuf::from("/path/to/firmware"));
+            }
+            assert_eq!(
+                firmware_kernel_without_fw_cfg.validate(),
+                Err(ValidationError::PayloadError(
+                    PayloadConfigError::FirmwarePlusOtherPayloads
+                ))
+            );
+
+            let mut firmware_kernel_disabled = firmware_kernel_config.clone();
+            if let Some(payload) = firmware_kernel_disabled.payload.as_mut() {
+                payload.fw_cfg_config.as_mut().unwrap().kernel = false;
+            }
+            assert_eq!(
+                firmware_kernel_disabled.validate(),
+                Err(ValidationError::PayloadError(
+                    PayloadConfigError::FirmwarePlusOtherPayloads
+                ))
+            );
+
             let mut invalid_config = valid_config.clone();
             if let Some(payload) = invalid_config.payload.as_mut() {
                 payload.fw_cfg_config = Some(FwCfgConfig {
