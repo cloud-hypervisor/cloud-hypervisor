@@ -66,6 +66,12 @@ pub enum HypervisorError {
     /// Unable to read all feature MSRs advertised by the Hypervisor
     #[error("Unable to read all feature MSRs")]
     GetFeatureMsrsPartial,
+    #[cfg(target_arch = "aarch64")]
+    ///
+    /// Nested virtualization requested but not supported
+    ///
+    #[error("Nested virtualization requested but not supported")]
+    NestedVirtualizationNotSupported,
 }
 
 /// Result type for returning from a function
