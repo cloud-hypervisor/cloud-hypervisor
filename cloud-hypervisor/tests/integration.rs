@@ -5593,13 +5593,34 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_balloon_free_page_reporting() {
+        _test_virtio_balloon_free_page_reporting(&["--memory", "size=4G"]);
+    }
+
+    #[test]
+    fn test_virtio_balloon_free_page_reporting_read_only_file() {
+        let memory_file = TempFile::new().unwrap();
+        memory_file.as_file().set_len(4 << 30).unwrap();
+        let memory_zone = format!(
+            "id=mem0,size=4G,file={},shared=off",
+            memory_file.as_path().display()
+        );
+
+        _test_virtio_balloon_free_page_reporting(&[
+            "--memory",
+            "size=0",
+            "--memory-zone",
+            memory_zone.as_str(),
+        ]);
+    }
+
+    fn _test_virtio_balloon_free_page_reporting(memory_args: &[&str]) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        //Let's start a 4G guest with balloon occupied 2G memory
+        // Start a guest with the requested memory configuration and free-page reporting enabled.
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=4G"])
+            .args(memory_args)
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args(["--balloon", "size=0,free_page_reporting=on"])

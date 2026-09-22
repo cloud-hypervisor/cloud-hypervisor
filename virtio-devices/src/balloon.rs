@@ -351,7 +351,12 @@ impl BalloonEpollHandler {
             return Ok(());
         }
 
-        if let Some(f_off) = region.file_offset() {
+        // Only punch holes for MAP_SHARED file-backed memory regions. Private
+        // mappings are copy-on-write views where the backing file must remain
+        // unmodified; MADV_DONTNEED below discards their private pages instead.
+        if region.flags() & libc::MAP_SHARED == libc::MAP_SHARED
+            && let Some(f_off) = region.file_offset()
+        {
             // SAFETY: FFI call with valid arguments
             let res = unsafe {
                 libc::fallocate64(
@@ -1158,6 +1163,54 @@ mod tests {
         }
         .as_bytes()
         .to_vec()
+    }
+
+    fn test_release_private_page(read_only: bool) {
+        use std::fs::{self, OpenOptions};
+        use std::io::Write;
+
+        use vm_memory::{FileOffset, GuestAddress, MmapRegion};
+        use vmm_sys_util::tempfile::TempFile;
+
+        use crate::GuestRegionMmap;
+
+        let backing_file = TempFile::new().unwrap();
+        backing_file.as_file().write_all(&[0x5a; 4096]).unwrap();
+        let original = fs::read(backing_file.as_path()).unwrap();
+
+        let file = OpenOptions::new()
+            .read(true)
+            .write(!read_only)
+            .open(backing_file.as_path())
+            .unwrap();
+        let mmap = MmapRegion::build(
+            Some(FileOffset::new(file, 0)),
+            4096,
+            libc::PROT_READ | libc::PROT_WRITE,
+            libc::MAP_PRIVATE,
+        )
+        .unwrap();
+        let region = GuestRegionMmap::new(mmap, GuestAddress(0)).unwrap();
+        let memory = GuestMemoryMmap::from_regions(vec![region]).unwrap();
+        memory.write_slice(&[0xa5], GuestAddress(0)).unwrap();
+        assert_eq!(memory.read_obj::<u8>(GuestAddress(0)).unwrap(), 0xa5);
+
+        let res = BalloonEpollHandler::release_memory_range(&memory, GuestAddress(0), 4096);
+        assert!(res.is_ok(), "release_memory_range failed: {res:?}");
+        assert_eq!(memory.read_obj::<u8>(GuestAddress(0)).unwrap(), 0x5a);
+        assert_eq!(fs::read(backing_file.as_path()).unwrap(), original);
+    }
+
+    #[test]
+    fn release_private_page_with_read_only_backing_file() {
+        // Match open_backing_file() when shared=false.
+        test_release_private_page(true);
+    }
+
+    #[test]
+    fn release_private_page_does_not_modify_writable_backing_file() {
+        // A writable descriptor does not make a MAP_PRIVATE mapping punchable.
+        test_release_private_page(false);
     }
 
     #[test]
