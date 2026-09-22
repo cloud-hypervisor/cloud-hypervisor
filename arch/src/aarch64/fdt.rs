@@ -722,6 +722,7 @@ fn create_fw_cfg_node<T: DeviceInfoForFdt + Clone + Debug>(
     let fw_cfg_node = fdt.begin_node(&format!("fw-cfg@{:x}", dev_info.addr()))?;
     fdt.property("compatible", b"qemu,fw-cfg-mmio\0")?;
     fdt.property_array_u64("reg", &[dev_info.addr(), dev_info.length()])?;
+    fdt.property_null("dma-coherent")?;
     fdt.end_node(fw_cfg_node)?;
 
     Ok(())

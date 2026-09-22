@@ -75,7 +75,7 @@ const PORT_FW_CFG_DMA_LO: u64 = 0x9030014;
 #[cfg(target_arch = "aarch64")]
 pub const PORT_FW_CFG_BASE: u64 = 0x9030000;
 #[cfg(target_arch = "aarch64")]
-pub const PORT_FW_CFG_WIDTH: u64 = 0x10;
+pub const PORT_FW_CFG_WIDTH: u64 = 0x18;
 
 const FW_CFG_SIGNATURE: u16 = 0x00;
 const FW_CFG_ID: u16 = 0x01;
@@ -814,6 +814,13 @@ impl BusDevice for FwCfg {
                 self.data_offset = 0;
             }
             (PORT_FW_CFG_DATA, 1) => error!("fw_cfg: data register is read-only."),
+            #[cfg(target_arch = "aarch64")]
+            (PORT_FW_CFG_DMA_HI, 8) => {
+                let mut buf = [0u8; 8];
+                buf.copy_from_slice(data);
+                self.dma_address = u64::from_be_bytes(buf);
+                self.do_dma();
+            }
             (PORT_FW_CFG_DMA_HI, 4) => {
                 let mut buf = [0u8; 4];
                 buf[..size].copy_from_slice(&data[..size]);
@@ -1018,7 +1025,9 @@ mod tests {
         // access address is where to put the code
         let access_address = GuestAddress(load_addr.0);
         let address_bytes = access_address.0.to_be_bytes();
+        #[cfg(target_arch = "x86_64")]
         let dma_lo: [u8; 4] = address_bytes[0..4].try_into().unwrap();
+        #[cfg(target_arch = "x86_64")]
         let dma_hi: [u8; 4] = address_bytes[4..8].try_into().unwrap();
 
         // writing the FwCfgDmaAccess to mem (this would just be self.dma_access.as_ref() in guest)
@@ -1036,9 +1045,17 @@ mod tests {
         let _ = mem.read(&mut data, GuestAddress(code_address));
         assert_ne!(data, code);
 
+        #[cfg(target_arch = "aarch64")]
+        fw_cfg.write(0, SELECTOR_OFFSET, &FW_CFG_FILE_FIRST.to_be_bytes());
+        #[cfg(target_arch = "x86_64")]
         fw_cfg.write(0, SELECTOR_OFFSET, &[FW_CFG_FILE_FIRST as u8, 0]);
-        fw_cfg.write(0, DMA_OFFSET, &dma_lo);
-        fw_cfg.write(0, DMA_OFFSET + 4, &dma_hi);
+        #[cfg(target_arch = "aarch64")]
+        fw_cfg.write(0, DMA_OFFSET, &address_bytes);
+        #[cfg(target_arch = "x86_64")]
+        {
+            fw_cfg.write(0, DMA_OFFSET, &dma_lo);
+            fw_cfg.write(0, DMA_OFFSET + 4, &dma_hi);
+        }
         let _ = mem.read(&mut data, GuestAddress(code_address));
         assert_eq!(data, code);
     }
