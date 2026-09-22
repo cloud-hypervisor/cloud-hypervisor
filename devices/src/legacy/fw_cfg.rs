@@ -35,14 +35,12 @@ use arch::layout::{
 use bitfield_struct::bitfield;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::bootparam::boot_params;
-#[cfg(target_arch = "aarch64")]
-use linux_loader::loader::pe::arm64_image_header as boot_params;
 use log::{debug, error};
 use vm_device::BusDevice;
+#[cfg(target_arch = "x86_64")]
+use vm_memory::ByteValued;
 use vm_memory::bitmap::AtomicBitmap;
-use vm_memory::{
-    ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
-};
+use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vmm_sys_util::sock_ctrl_msg::IntoIovec;
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes};
 
@@ -87,7 +85,9 @@ const FW_CFG_KERNEL_DATA: u16 = 0x11;
 const FW_CFG_INITRD_DATA: u16 = 0x12;
 const FW_CFG_CMDLINE_SIZE: u16 = 0x14;
 const FW_CFG_CMDLINE_DATA: u16 = 0x15;
+#[cfg(target_arch = "x86_64")]
 const FW_CFG_SETUP_SIZE: u16 = 0x17;
+#[cfg(target_arch = "x86_64")]
 const FW_CFG_SETUP_DATA: u16 = 0x18;
 const FW_CFG_FILE_DIR: u16 = 0x19;
 const FW_CFG_KNOWN_ITEMS: usize = 0x20;
@@ -639,29 +639,20 @@ impl FwCfg {
         }
     }
 
-    pub fn add_kernel_data(
-        &mut self,
-        file: &File,
-        #[cfg(target_arch = "x86_64")] kvm_sev_snp_enabled: bool,
-    ) -> Result<()> {
+    #[cfg(target_arch = "x86_64")]
+    pub fn add_kernel_data(&mut self, file: &File, kvm_sev_snp_enabled: bool) -> Result<()> {
         let mut buffer = vec![0u8; size_of::<boot_params>()];
         file.read_exact_at(&mut buffer, 0)?;
         let bp = boot_params::from_mut_slice(&mut buffer).unwrap();
-        #[cfg(target_arch = "x86_64")]
-        {
-            // For SEV-SNP guests on KVM, don't modify the kernel header so the
-            // bytes sent via fw_cfg match what the VMM hashes for the launch digest.
-            // The guest firmware handles these fields itself.
-            if !kvm_sev_snp_enabled {
-                if bp.hdr.setup_sects == 0 {
-                    bp.hdr.setup_sects = 4;
-                }
-                bp.hdr.type_of_loader = 0xff;
+        // For SEV-SNP guests on KVM, don't modify the kernel header so the
+        // bytes sent via fw_cfg match what the VMM hashes for the launch digest.
+        // The guest firmware handles these fields itself.
+        if !kvm_sev_snp_enabled {
+            if bp.hdr.setup_sects == 0 {
+                bp.hdr.setup_sects = 4;
             }
+            bp.hdr.type_of_loader = 0xff;
         }
-        #[cfg(target_arch = "aarch64")]
-        let kernel_start = bp.text_offset;
-        #[cfg(target_arch = "x86_64")]
         let kernel_start = {
             let sects = if bp.hdr.setup_sects == 0 {
                 4
@@ -671,7 +662,6 @@ impl FwCfg {
             (sects as usize + 1) * 512
         };
 
-        #[cfg(target_arch = "x86_64")]
         if kernel_start <= buffer.len() {
             buffer.truncate(kernel_start);
         } else {
@@ -688,6 +678,18 @@ impl FwCfg {
             FwCfgContent::U32(file.metadata()?.len() as u32 - kernel_start as u32);
         self.known_items[FW_CFG_KERNEL_DATA as usize] =
             FwCfgContent::File(kernel_start as u64, file.try_clone()?);
+        Ok(())
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    pub fn add_kernel_data(&mut self, file: &File) -> Result<()> {
+        let kernel_size =
+            u32::try_from(file.metadata()?.len()).map_err(|_| ErrorKind::InvalidInput)?;
+
+        // AArch64 firmware expects the complete Image in FW_CFG_KERNEL_DATA,
+        // matching QEMU's firmware boot path.
+        self.known_items[FW_CFG_KERNEL_SIZE as usize] = FwCfgContent::U32(kernel_size);
+        self.known_items[FW_CFG_KERNEL_DATA as usize] = FwCfgContent::File(0, file.try_clone()?);
         Ok(())
     }
 
@@ -878,6 +880,7 @@ mod tests {
             }
         }
     }
+
     #[test]
     fn test_kernel_cmdline() {
         let gm = GuestMemoryAtomic::new(
@@ -902,6 +905,30 @@ mod tests {
                 return;
             }
         }
+    }
+
+    #[test]
+    #[cfg(target_arch = "aarch64")]
+    fn test_kernel_data() {
+        let gm = GuestMemoryAtomic::new(
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), RAM_64BIT_START.0 as usize)]).unwrap(),
+        );
+        let mut fw_cfg = FwCfg::new(gm);
+        let kernel = b"test kernel image";
+        let temp = TempFile::new().unwrap();
+        temp.as_file().write_all(kernel).unwrap();
+
+        fw_cfg.add_kernel_data(temp.as_file()).unwrap();
+
+        let mut size = [0u8; size_of::<u32>()];
+        fw_cfg.write(0, SELECTOR_OFFSET, &FW_CFG_KERNEL_SIZE.to_be_bytes());
+        fw_cfg.read(0, DATA_OFFSET, &mut size);
+        assert_eq!(u32::from_le_bytes(size), kernel.len() as u32);
+
+        let mut data = vec![0u8; kernel.len()];
+        fw_cfg.write(0, SELECTOR_OFFSET, &FW_CFG_KERNEL_DATA.to_be_bytes());
+        fw_cfg.read(0, DATA_OFFSET, &mut data);
+        assert_eq!(data, kernel);
     }
 
     #[test]
