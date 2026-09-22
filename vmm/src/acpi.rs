@@ -801,6 +801,7 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
     const ACPI_IORT_NODE_PCI_ROOT_COMPLEX: u8 = 0x02;
     const ACPI_IORT_NODE_SMMU_V3: u8 = 0x04;
     const ACPI_IORT_SMMU_V3_GENERIC: u32 = 0;
+    const ACPI_IORT_SMMU_V3_COHACC_OVERRIDE: u32 = 1 << 0;
     const ACPI_IORT_REVISION: u8 = 6;
 
     let mut next_id = 0;
@@ -875,7 +876,11 @@ fn create_iort_table(pci_segments: &[PciSegment], smmus: &[Smmuv3AcpiInfo]) -> S
                 id_mappings_array_offset: size_of::<IortSmmuV3Base>() as u32,
             },
             base_address: smmu.base,
-            flags: 0,
+            flags: if smmu.coherent {
+                ACPI_IORT_SMMU_V3_COHACC_OVERRIDE
+            } else {
+                0
+            },
             _reserved: 0,
             vatos_address: 0,
             model: ACPI_IORT_SMMU_V3_GENERIC,
