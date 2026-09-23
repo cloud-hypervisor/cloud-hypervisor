@@ -72,6 +72,7 @@ use seccompiler::{BpfProgram, SeccompAction, apply_filter};
 use thiserror::Error;
 use tracer::trace_scoped;
 use vm_device::BusDevice;
+use vm_device::lifecycle::{GuestLifecycle, PendingVmAction};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use vm_memory::ByteValued;
 #[cfg(feature = "guest_debug")]
@@ -713,9 +714,7 @@ pub struct CpuManager {
     vcpus_pause_signalled: Arc<AtomicBool>,
     vcpus_kick_signalled: Arc<AtomicBool>,
     exit_evt: EventFd,
-    guest_exit_evt: EventFd,
-    #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
-    reset_evt: EventFd,
+    lifecycle: Arc<GuestLifecycle>,
     #[cfg(feature = "guest_debug")]
     vm_debug_evt: EventFd,
     // Shared with AcpiCpuHotplugController
@@ -856,8 +855,7 @@ impl CpuManager {
         config: &CpusConfig,
         vm: Arc<dyn hypervisor::Vm>,
         exit_evt: EventFd,
-        guest_exit_evt: EventFd,
-        reset_evt: EventFd,
+        lifecycle: Arc<GuestLifecycle>,
         #[cfg(feature = "guest_debug")] vm_debug_evt: EventFd,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         seccomp_action: SeccompAction,
@@ -954,8 +952,7 @@ impl CpuManager {
             vcpus_kick_signalled: Arc::new(AtomicBool::new(false)),
             vcpu_states,
             exit_evt,
-            guest_exit_evt,
-            reset_evt,
+            lifecycle,
             #[cfg(feature = "guest_debug")]
             vm_debug_evt,
             vcpus: Vec::with_capacity(max_vcpus),
@@ -1192,12 +1189,8 @@ impl CpuManager {
         vcpu_seccomp_filter: Arc<BpfProgram>,
         inserting: bool,
     ) -> Result<()> {
-        let reset_evt = self.reset_evt.try_clone().map_err(Error::EventFdClone)?;
         let exit_evt = self.exit_evt.try_clone().map_err(Error::EventFdClone)?;
-        let guest_exit_evt = self
-            .guest_exit_evt
-            .try_clone()
-            .map_err(Error::EventFdClone)?;
+        let lifecycle = Arc::clone(&self.lifecycle);
 
         #[cfg(feature = "kvm")]
         let hypervisor_type = self.hypervisor.hypervisor_type();
@@ -1439,13 +1432,13 @@ impl CpuManager {
                                     VmExit::Reset => {
                                         info!("VmExit::Reset");
                                         vcpu_run_interrupted.store(true, Ordering::SeqCst);
-                                        reset_evt.write(1).unwrap();
+                                        lifecycle.request(PendingVmAction::Reboot).unwrap();
                                         break;
                                     }
                                     VmExit::Shutdown => {
                                         info!("VmExit::Shutdown");
                                         vcpu_run_interrupted.store(true, Ordering::SeqCst);
-                                        guest_exit_evt.write(1).unwrap();
+                                        lifecycle.request(PendingVmAction::Shutdown).unwrap();
                                         break;
                                     }
                                     #[cfg(feature = "tdx")]
