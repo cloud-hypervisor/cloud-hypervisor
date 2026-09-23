@@ -75,6 +75,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracer::trace_scoped;
 use vm_device::Bus;
+use vm_device::lifecycle::GuestLifecycle;
 #[cfg(feature = "tdx")]
 use vm_memory::GuestMemoryBackend;
 #[cfg(feature = "tdx")]
@@ -551,6 +552,8 @@ pub struct Vm {
     // The hypervisor abstracted virtual machine.
     vm: Arc<dyn hypervisor::Vm>,
     saved_clock: Option<SavedClock>,
+    #[expect(dead_code, reason = "read once migrations record guest requests")]
+    lifecycle: Arc<GuestLifecycle>,
     #[cfg(not(target_arch = "riscv64"))]
     numa_nodes: NumaNodes,
     stop_on_boot: bool,
@@ -623,13 +626,17 @@ impl Vm {
             mmio_bus: Arc::clone(&mmio_bus),
         });
 
+        let lifecycle = Arc::new(GuestLifecycle::new(
+            reset_evt.try_clone().map_err(Error::EventFdClone)?,
+            guest_exit_evt.try_clone().map_err(Error::EventFdClone)?,
+        ));
+
         // Create CPU manager
         let cpu_manager = Self::create_cpu_manager(
             &config,
             Arc::clone(&vm),
             exit_evt.try_clone().map_err(Error::EventFdClone)?,
-            guest_exit_evt.try_clone().map_err(Error::EventFdClone)?,
-            reset_evt.try_clone().map_err(Error::EventFdClone)?,
+            Arc::clone(&lifecycle),
             #[cfg(feature = "guest_debug")]
             vm_debug_evt,
             &hypervisor,
@@ -731,6 +738,7 @@ impl Vm {
             memory_manager,
             vm,
             saved_clock,
+            lifecycle,
             #[cfg(not(target_arch = "riscv64"))]
             numa_nodes,
             stop_on_boot,
@@ -771,8 +779,7 @@ impl Vm {
         config: &Arc<Mutex<VmConfig>>,
         vm: Arc<dyn hypervisor::Vm>,
         exit_evt: EventFd,
-        guest_exit_evt: EventFd,
-        reset_evt: EventFd,
+        lifecycle: Arc<GuestLifecycle>,
         #[cfg(feature = "guest_debug")] vm_debug_evt: EventFd,
         hypervisor: &Arc<dyn hypervisor::Hypervisor>,
         seccomp_action: SeccompAction,
@@ -797,8 +804,7 @@ impl Vm {
             &cpus_config,
             vm,
             exit_evt,
-            guest_exit_evt,
-            reset_evt,
+            lifecycle,
             #[cfg(feature = "guest_debug")]
             vm_debug_evt,
             Arc::clone(hypervisor),
