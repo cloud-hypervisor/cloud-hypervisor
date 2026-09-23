@@ -3357,6 +3357,13 @@ impl Snapshottable for Vm {
             }
         }
 
+        #[cfg(target_arch = "aarch64")]
+        if self.cpu_manager.lock().unwrap().el2_enabled() {
+            return Err(MigratableError::Snapshot(anyhow!(
+                "Snapshot not supported with aarch64 nested virtualization"
+            )));
+        }
+
         if self.get_state() != VmState::Paused {
             return Err(MigratableError::Snapshot(anyhow!(
                 "Trying to snapshot while VM is running"
