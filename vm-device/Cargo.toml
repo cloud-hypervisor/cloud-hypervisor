@@ -12,6 +12,7 @@ mshv = ["vfio-ioctls/mshv"]
 
 [dependencies]
 hypervisor = { path = "../hypervisor" }
+log = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 thiserror = { workspace = true }
 vfio-ioctls = { workspace = true, default-features = false }
