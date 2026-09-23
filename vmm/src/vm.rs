@@ -552,7 +552,6 @@ pub struct Vm {
     // The hypervisor abstracted virtual machine.
     vm: Arc<dyn hypervisor::Vm>,
     saved_clock: Option<SavedClock>,
-    #[expect(dead_code, reason = "read once migrations record guest requests")]
     lifecycle: Arc<GuestLifecycle>,
     #[cfg(not(target_arch = "riscv64"))]
     numa_nodes: NumaNodes,
@@ -3260,6 +3259,10 @@ impl Vm {
             .restore_clock(&hv_vcpus, &saved.state, saved.mode)
             .context("Could not restore guest clock")
             .map_err(MigratableError::Resume)
+    }
+
+    pub(crate) fn lifecycle(&self) -> &Arc<GuestLifecycle> {
+        &self.lifecycle
     }
 
     pub fn device_manager(&self) -> &Arc<Mutex<DeviceManager>> {
