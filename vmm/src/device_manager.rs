@@ -76,7 +76,10 @@ use hypervisor::IoEventAddress;
 use hypervisor::arch::aarch64::regs::AARCH64_PMU_IRQ;
 #[cfg(feature = "kvm")]
 use iommufd_bindings::{
-    iommu_hw_info, iommu_hw_info_arm_smmuv3, iommu_hw_info_type_IOMMU_HW_INFO_TYPE_ARM_SMMUV3,
+    iommu_hw_info, iommu_hw_info__bindgen_ty_1, iommu_hw_info_arm_smmuv3,
+    iommu_hw_info_type_IOMMU_HW_INFO_TYPE_ARM_SMMUV3,
+    iommu_hw_info_type_IOMMU_HW_INFO_TYPE_TEGRA241_CMDQV,
+    iommufd_hw_info_flags_IOMMU_HW_INFO_FLAG_INPUT_TYPE,
 };
 #[cfg(feature = "kvm")]
 use iommufd_ioctls::IommuFd;
@@ -1531,6 +1534,29 @@ impl DeviceManager {
         Ok(Some(decode_smmuv3_caps(&info.idr)))
     }
 
+    #[cfg(feature = "kvm")]
+    fn probe_host_cmdqv(&self, dev_id: Option<u32>) -> DeviceManagerResult<bool> {
+        let Some(dev_id) = dev_id else {
+            return Ok(false);
+        };
+
+        let mut hw_info = iommu_hw_info {
+            size: size_of::<iommu_hw_info>() as u32,
+            flags: iommufd_hw_info_flags_IOMMU_HW_INFO_FLAG_INPUT_TYPE,
+            dev_id,
+            __bindgen_anon_1: iommu_hw_info__bindgen_ty_1 {
+                in_data_type: iommu_hw_info_type_IOMMU_HW_INFO_TYPE_TEGRA241_CMDQV,
+            },
+            ..Default::default()
+        };
+
+        Ok(self
+            .iommufd_backend()?
+            .iommufd()
+            .get_hw_info(&mut hw_info)
+            .is_ok())
+    }
+
     /// Report the virtual SMMUv3 topology the host implies.
     fn report_smmuv3_probe(&self) {
         if !self.smmuv3_enabled() {
@@ -1561,6 +1587,15 @@ impl DeviceManager {
                     "SMMUv3: instance {index}: the host IOMMU did not report SMMUv3 information"
                 ),
                 Err(e) => warn!("SMMUv3: instance {index}: cannot read host information: {e:?}"),
+            }
+
+            #[cfg(feature = "kvm")]
+            match self.probe_host_cmdqv(group.dev_id) {
+                Ok(cmdqv) => info!(
+                    "SMMUv3: instance {index}: the host SMMU {} a Tegra241 CMDQV",
+                    if cmdqv { "supports" } else { "doesn't support" },
+                ),
+                Err(e) => warn!("SMMUv3: instance {index}: cannot query for a CMDQV: {e:?}"),
             }
         }
     }
