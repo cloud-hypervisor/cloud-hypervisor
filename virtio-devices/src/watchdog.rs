@@ -20,6 +20,7 @@ use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
+use vm_device::lifecycle::{GuestLifecycle, PendingVmAction};
 use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic, guest_memory};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::checked_descriptor::DescriptorChainExt;
@@ -72,7 +73,7 @@ struct WatchdogEpollHandler {
     pause_evt: EventFd,
     timer: File,
     last_ping_time: Arc<Mutex<Option<Instant>>>,
-    reset_evt: EventFd,
+    lifecycle: Arc<GuestLifecycle>,
 }
 
 impl WatchdogEpollHandler {
@@ -173,7 +174,7 @@ impl EpollHelperHandler for WatchdogEpollHandler {
                     let gap = now.duration_since(*last_ping_time).as_secs();
                     if gap > WATCHDOG_TIMEOUT {
                         error!("Watchdog triggered: {gap} seconds since last ping");
-                        self.reset_evt.write(1).ok();
+                        self.lifecycle.request(PendingVmAction::Reboot).ok();
                     }
                 }
             }
@@ -192,7 +193,7 @@ pub struct Watchdog {
     common: VirtioCommon,
     id: String,
     seccomp_action: SeccompAction,
-    reset_evt: EventFd,
+    lifecycle: Arc<GuestLifecycle>,
     last_ping_time: Arc<Mutex<Option<Instant>>>,
     timer: File,
     exit_evt: EventFd,
@@ -210,7 +211,7 @@ impl Watchdog {
     pub fn new(
         id: String,
         access_platform_enabled: bool,
-        reset_evt: EventFd,
+        lifecycle: Arc<GuestLifecycle>,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
         state: Option<WatchdogState>,
@@ -255,7 +256,7 @@ impl Watchdog {
             },
             id,
             seccomp_action,
-            reset_evt,
+            lifecycle,
             last_ping_time: Arc::new(Mutex::new(last_ping_time)),
             timer,
             exit_evt,
@@ -340,11 +341,6 @@ impl VirtioDevice for Watchdog {
         self.common.activate(&queues, Arc::clone(&interrupt_cb))?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds()?;
 
-        let reset_evt = self.reset_evt.try_clone().map_err(|e| {
-            error!("Failed to clone reset_evt eventfd: {e}");
-            ActivateError::BadActivate
-        })?;
-
         let timer = self.timer.try_clone().map_err(|e| {
             error!("Failed to clone timer fd: {e}");
             ActivateError::BadActivate
@@ -361,7 +357,7 @@ impl VirtioDevice for Watchdog {
             pause_evt,
             timer,
             last_ping_time: Arc::clone(&self.last_ping_time),
-            reset_evt,
+            lifecycle: Arc::clone(&self.lifecycle),
         };
 
         let paused = Arc::clone(&self.common.paused);

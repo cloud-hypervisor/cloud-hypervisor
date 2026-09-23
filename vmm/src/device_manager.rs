@@ -109,6 +109,7 @@ use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptRemapping, LegacyIrqGroupConfig, MsiIrqGroupConfig,
 };
+use vm_device::lifecycle::GuestLifecycle;
 use vm_device::{Bus, BusDevice, BusDeviceSync, Resource, UserspaceMapping};
 #[cfg(feature = "ivshmem")]
 use vm_memory::bitmap::AtomicBitmap;
@@ -1018,8 +1019,7 @@ pub struct DeviceManager {
 
     // Exit event
     exit_evt: EventFd,
-    reset_evt: EventFd,
-    guest_exit_evt: EventFd,
+    lifecycle: Arc<GuestLifecycle>,
 
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     id_to_dev_info: HashMap<(DeviceType, String), MmioDeviceInfo>,
@@ -1148,8 +1148,7 @@ impl DeviceManager {
         memory_manager: Arc<Mutex<MemoryManager>>,
         cpu_manager: Arc<Mutex<CpuManager>>,
         exit_evt: EventFd,
-        reset_evt: EventFd,
-        guest_exit_evt: EventFd,
+        lifecycle: Arc<GuestLifecycle>,
         seccomp_action: SeccompAction,
         numa_nodes: NumaNodes,
         activate_evt: &EventFd,
@@ -1352,8 +1351,7 @@ impl DeviceManager {
             pci_segments: pci_segments.into_boxed_slice(),
             device_tree,
             exit_evt,
-            reset_evt,
-            guest_exit_evt,
+            lifecycle,
             #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
             id_to_dev_info: HashMap::new(),
             seccomp_action,
@@ -1453,25 +1451,14 @@ impl DeviceManager {
         }
 
         #[cfg(target_arch = "x86_64")]
-        self.add_legacy_devices(
-            self.reset_evt
-                .try_clone()
-                .map_err(DeviceManagerError::EventFd)?,
-        )?;
+        self.add_legacy_devices()?;
 
         #[cfg(target_arch = "aarch64")]
         self.add_legacy_devices(legacy_interrupt_manager.as_ref(), snapshot)?;
 
         {
-            self.ged_notification_device = self.add_acpi_devices(
-                legacy_interrupt_manager.as_ref(),
-                self.reset_evt
-                    .try_clone()
-                    .map_err(DeviceManagerError::EventFd)?,
-                self.guest_exit_evt
-                    .try_clone()
-                    .map_err(DeviceManagerError::EventFd)?,
-            )?;
+            self.ged_notification_device =
+                self.add_acpi_devices(legacy_interrupt_manager.as_ref())?;
         }
 
         self.original_termios_opt = original_termios_opt;
@@ -1872,14 +1859,11 @@ impl DeviceManager {
     fn add_acpi_devices(
         &mut self,
         interrupt_manager: &dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>,
-        reset_evt: EventFd,
-        guest_exit_evt: EventFd,
     ) -> DeviceManagerResult<Option<Arc<Mutex<devices::AcpiGedDevice>>>> {
         let vcpus_kill_signalled =
             Arc::clone(self.cpu_manager.lock().unwrap().vcpus_kill_signalled());
         let shutdown_device = Arc::new(Mutex::new(devices::AcpiShutdownDevice::new(
-            guest_exit_evt,
-            reset_evt,
+            Arc::clone(&self.lifecycle),
             vcpus_kill_signalled,
         )));
 
@@ -1974,12 +1958,12 @@ impl DeviceManager {
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn add_legacy_devices(&mut self, reset_evt: EventFd) -> DeviceManagerResult<()> {
+    fn add_legacy_devices(&mut self) -> DeviceManagerResult<()> {
         let vcpus_kill_signalled =
             Arc::clone(self.cpu_manager.lock().unwrap().vcpus_kill_signalled());
         // Add a shutdown device (i8042)
         let i8042 = Arc::new(Mutex::new(legacy::I8042Device::new(
-            reset_evt.try_clone().unwrap(),
+            Arc::clone(&self.lifecycle),
             Arc::clone(&vcpus_kill_signalled),
         )));
 
@@ -2007,7 +1991,7 @@ impl DeviceManager {
             let cmos = Arc::new(Mutex::new(legacy::Cmos::new(
                 mem_below_4g,
                 mem_above_4g,
-                reset_evt,
+                Arc::clone(&self.lifecycle),
                 vcpus_kill_signalled,
             )));
 
@@ -3672,7 +3656,7 @@ impl DeviceManager {
             virtio_devices::Watchdog::new(
                 id.clone(),
                 self.force_access_platform,
-                self.reset_evt.try_clone().unwrap(),
+                Arc::clone(&self.lifecycle),
                 self.seccomp_action.clone(),
                 self.exit_evt
                     .try_clone()

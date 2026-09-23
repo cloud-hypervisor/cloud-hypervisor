@@ -9,6 +9,7 @@ use std::sync::Arc;
 use devices::legacy::Cmos;
 use libc::EFD_NONBLOCK;
 use libfuzzer_sys::{fuzz_target, Corpus};
+use vm_device::lifecycle::GuestLifecycle;
 use vm_device::BusDevice;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -27,7 +28,10 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     let mut cmos = Cmos::new(
         u64::from_le_bytes(below_4g),
         u64::from_le_bytes(above_4g),
-        EventFd::new(EFD_NONBLOCK).unwrap(),
+        Arc::new(GuestLifecycle::new(
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+        )),
         Arc::new(AtomicBool::new(true)),
     );
 

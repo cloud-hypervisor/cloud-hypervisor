@@ -11,19 +11,22 @@ use std::time::Duration;
 
 use log::{error, info};
 use vm_device::BusDevice;
-use vmm_sys_util::eventfd::EventFd;
+use vm_device::lifecycle::{GuestLifecycle, PendingVmAction};
 
 /// A i8042 PS/2 controller that emulates just enough to shutdown the machine.
 pub struct I8042Device {
-    reset_evt: EventFd,
+    lifecycle: Arc<GuestLifecycle>,
     vcpus_kill_signalled: Arc<AtomicBool>,
 }
 
 impl I8042Device {
-    /// Constructs a i8042 device that will signal the given event when the guest requests it.
-    pub fn new(reset_evt: EventFd, vcpus_kill_signalled: Arc<AtomicBool>) -> I8042Device {
+    /// Constructs a i8042 device that requests a reboot when the guest asks for one.
+    pub fn new(
+        lifecycle: Arc<GuestLifecycle>,
+        vcpus_kill_signalled: Arc<AtomicBool>,
+    ) -> I8042Device {
         I8042Device {
-            reset_evt,
+            lifecycle,
             vcpus_kill_signalled,
         }
     }
@@ -46,7 +49,7 @@ impl BusDevice for I8042Device {
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         if data.len() == 1 && data[0] == 0xfe && offset == 3 {
             info!("i8042 reset signalled");
-            if let Err(e) = self.reset_evt.write(1) {
+            if let Err(e) = self.lifecycle.request(PendingVmAction::Reboot) {
                 error!("Error triggering i8042 reset event: {e}");
             }
             // Spin until we are sure the reset_evt has been handled and that when

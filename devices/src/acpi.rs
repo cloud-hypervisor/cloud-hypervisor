@@ -12,8 +12,8 @@ use acpi_tables::{Aml, AmlSink, aml};
 use log::{error, info, warn};
 use vm_device::BusDevice;
 use vm_device::interrupt::InterruptSourceGroup;
+use vm_device::lifecycle::{GuestLifecycle, PendingVmAction};
 use vm_memory::GuestAddress;
-use vmm_sys_util::eventfd::EventFd;
 
 use super::AcpiNotificationFlags;
 
@@ -21,21 +21,18 @@ pub const GED_DEVICE_ACPI_SIZE: usize = 0x1;
 
 /// A device for handling ACPI shutdown and reboot
 pub struct AcpiShutdownDevice {
-    guest_exit_evt: EventFd,
-    reset_evt: EventFd,
+    lifecycle: Arc<GuestLifecycle>,
     vcpus_kill_signalled: Arc<AtomicBool>,
 }
 
 impl AcpiShutdownDevice {
-    /// Constructs a device that will signal the given event when the guest requests it.
+    /// Constructs a device that requests a reboot or shutdown when the guest asks for one.
     pub fn new(
-        guest_exit_evt: EventFd,
-        reset_evt: EventFd,
+        lifecycle: Arc<GuestLifecycle>,
         vcpus_kill_signalled: Arc<AtomicBool>,
     ) -> AcpiShutdownDevice {
         AcpiShutdownDevice {
-            guest_exit_evt,
-            reset_evt,
+            lifecycle,
             vcpus_kill_signalled,
         }
     }
@@ -62,7 +59,7 @@ impl BusDevice for AcpiShutdownDevice {
         }
         if data[0] == 1 {
             info!("ACPI Reboot signalled");
-            if let Err(e) = self.reset_evt.write(1) {
+            if let Err(e) = self.lifecycle.request(PendingVmAction::Reboot) {
                 error!("Error triggering ACPI reset event: {e}");
             }
             // Spin until we are sure the reset_evt has been handled and that when
@@ -79,7 +76,7 @@ impl BusDevice for AcpiShutdownDevice {
         const SLEEP_VALUE_BIT: u8 = 2;
         if data[0] == (S5_SLEEP_VALUE << SLEEP_VALUE_BIT) | (1 << SLEEP_STATUS_EN_BIT) {
             info!("ACPI Shutdown signalled");
-            if let Err(e) = self.guest_exit_evt.write(1) {
+            if let Err(e) = self.lifecycle.request(PendingVmAction::Shutdown) {
                 error!("Error triggering ACPI shutdown event: {e}");
             }
             // Spin until we are sure the reset_evt has been handled and that when
