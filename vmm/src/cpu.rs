@@ -175,6 +175,9 @@ pub enum Error {
     #[error("Timeout when waiting for signal to be acknowledged")]
     SignalAcknowledgeTimeout,
 
+    #[error("The guest requested a {0:?}")]
+    GuestRequestedAction(PendingVmAction),
+
     #[error("Error adding CpuManager to MMIO bus")]
     BusError(#[source] vm_device::BusError),
 
@@ -811,12 +814,15 @@ impl VcpuState {
     /// the signal every 10ms. Times out after 1000ms.
     ///
     /// This is the counterpart of [`Self::signal_thread`].
-    fn wait_until_signal_acknowledged(&self) -> Result<()> {
+    fn wait_until_signal_acknowledged(&self, lifecycle: Option<&GuestLifecycle>) -> Result<()> {
         if let Some(_handle) = self.handle.as_ref() {
             let mut count = 0;
             loop {
                 if self.vcpu_run_interrupted.load(Ordering::SeqCst) {
                     return Ok(());
+                }
+                if let Some(action) = lifecycle.and_then(GuestLifecycle::pending) {
+                    return Err(Error::GuestRequestedAction(action));
                 }
                 // This is more effective than thread::yield_now() at
                 // avoiding a priority inversion with the vCPU thread
@@ -1649,7 +1655,7 @@ impl CpuManager {
     ///
     /// Calls [`VcpuState::signal_thread`] and
     /// [`VcpuState::wait_until_signal_acknowledged`] for each vCPU.
-    fn signal_vcpus(&mut self) -> Result<()> {
+    fn signal_vcpus(&mut self, abort_on_guest_request: bool) -> Result<()> {
         let vcpu_count = self.vcpu_states.lock().unwrap().len();
 
         // Splitting this into two loops reduced the time to pause many vCPUs
@@ -1665,7 +1671,9 @@ impl CpuManager {
         }
         for cpu_id in 0..vcpu_count {
             let vcpu_states = self.vcpu_states.lock().unwrap();
-            vcpu_states[cpu_id].wait_until_signal_acknowledged()?;
+            vcpu_states[cpu_id].wait_until_signal_acknowledged(
+                abort_on_guest_request.then_some(self.lifecycle.as_ref()),
+            )?;
         }
 
         Ok(())
@@ -1683,7 +1691,7 @@ impl CpuManager {
             state.unpark_thread();
         }
 
-        self.signal_vcpus()?;
+        self.signal_vcpus(false)?;
 
         // Wait for all the threads to finish. This removes the state from the vector.
         for mut state in self.vcpu_states.lock().unwrap().drain(..) {
@@ -2384,7 +2392,7 @@ impl CpuManager {
 
     pub(crate) fn nmi(&mut self) -> Result<()> {
         self.vcpus_kick_signalled.store(true, Ordering::SeqCst);
-        self.signal_vcpus()?;
+        self.signal_vcpus(false)?;
         self.vcpus_kick_signalled.store(false, Ordering::SeqCst);
 
         Ok(())
@@ -2742,7 +2750,7 @@ impl Pausable for CpuManager {
         // Tell the vCPUs to pause themselves next time they exit
         self.vcpus_pause_signalled.store(true, Ordering::SeqCst);
 
-        self.signal_vcpus()
+        self.signal_vcpus(true)
             .map_err(|e| MigratableError::Pause(anyhow!("Error signalling vCPUs: {e}")))?;
 
         // Notify all guests (including Hyper-V / Windows) that the clock was
@@ -2763,6 +2771,12 @@ impl Pausable for CpuManager {
             if state.active() {
                 // wait for vCPU to update state
                 while !state.paused.load(Ordering::SeqCst) {
+                    if let Some(action) = self.lifecycle.pending() {
+                        return Err(MigratableError::Pause(anyhow!(
+                            "{}",
+                            Error::GuestRequestedAction(action)
+                        )));
+                    }
                     // To avoid a priority inversion with the vCPU thread
                     thread::sleep(time::Duration::from_millis(1));
                 }
@@ -3319,7 +3333,7 @@ impl AcpiCpuHotplugController {
         info!("Removing vCPU: cpu_id = {cpu_id}");
         state.kill.store(true, Ordering::SeqCst);
         state.signal_thread();
-        state.wait_until_signal_acknowledged()?;
+        state.wait_until_signal_acknowledged(None)?;
         state.join_thread()?;
         state.handle = None;
 
