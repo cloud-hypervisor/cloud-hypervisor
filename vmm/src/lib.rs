@@ -1848,6 +1848,7 @@ impl Vmm {
                     &vm.guest_memory(),
                     &seccomp_filters.tcp_worker,
                     cancel_migration,
+                    &lifecycle,
                 )?;
 
                 Self::do_memory_migration(
@@ -1948,6 +1949,7 @@ impl Vmm {
                     &mut socket,
                     // Cancellation impossible at this point
                     &AtomicBool::new(false),
+                    &lifecycle,
                 )?;
             }
             Ok(snapshot)

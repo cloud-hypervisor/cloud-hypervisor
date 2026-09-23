@@ -24,6 +24,7 @@ use seccompiler::{BpfProgram, SeccompAction, apply_filter};
 use serde_json;
 use socket2::{SockRef, TcpKeepalive};
 use thiserror::Error;
+use vm_device::lifecycle::GuestLifecycle;
 use vm_memory::bitmap::BitmapSlice;
 use vm_memory::{
     Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, ReadVolatile, VolatileMemoryError,
@@ -652,6 +653,7 @@ enum SendMemoryThreadNotify {
 /// This struct keeps track of additional threads we use to send VM memory.
 pub(crate) struct SendAdditionalConnections {
     guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
+    lifecycle: Arc<GuestLifecycle>,
     threads: Vec<JoinHandle<Result<(), MigratableError>>>,
     /// Sender to all workers. The receiver is shared by all workers.
     message_tx: SyncSender<SendMemoryThreadMessage>,
@@ -691,6 +693,7 @@ impl SendAdditionalConnections {
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         seccomp_filter: &BpfProgram,
         cancel_migration: &Arc<AtomicBool>,
+        lifecycle: &Arc<GuestLifecycle>,
     ) -> Result<Self, MigratableError> {
         let mut threads = Vec::new();
         let configured_connections = connections.get();
@@ -704,6 +707,7 @@ impl SendAdditionalConnections {
         if configured_connections == 1 {
             return Ok(Self {
                 guest_memory: guest_memory.clone(),
+                lifecycle: Arc::clone(lifecycle),
                 threads,
                 message_tx,
                 worker_error,
@@ -724,6 +728,7 @@ impl SendAdditionalConnections {
             let notify_tx = notify_tx.clone();
             let seccomp_filter = seccomp_filter.clone();
             let cancel_migration = Arc::clone(cancel_migration);
+            let lifecycle = Arc::clone(lifecycle);
 
             let thread = thread::Builder::new()
                 .name(format!("migrate-send-memory-{n}"))
@@ -741,6 +746,7 @@ impl SendAdditionalConnections {
                         &worker_error,
                         &notify_tx,
                         &cancel_migration,
+                        &lifecycle,
                     )
                 })
                 .inspect_err(|_| {
@@ -753,6 +759,7 @@ impl SendAdditionalConnections {
 
         Ok(Self {
             guest_memory: guest_memory.clone(),
+            lifecycle: Arc::clone(lifecycle),
             threads,
             message_tx,
             worker_error,
@@ -768,6 +775,7 @@ impl SendAdditionalConnections {
         worker_error: &AtomicBool,
         notify_tx: &Sender<SendMemoryThreadNotify>,
         cancel_migration: &AtomicBool,
+        lifecycle: &GuestLifecycle,
     ) -> Result<(), MigratableError> {
         loop {
             // Every memory sending thread receives messages from the main thread through this
@@ -794,7 +802,7 @@ impl SendAdditionalConnections {
                         continue;
                     }
 
-                    send_memory_ranges(guest_memory, &table, socket, cancel_migration)
+                    send_memory_ranges(guest_memory, &table, socket, cancel_migration, lifecycle)
                         .inspect_err(|_| {
                             worker_error.store(true, Ordering::Release);
                             notify_tx.send(SendMemoryThreadNotify::Error).ok();
@@ -845,7 +853,13 @@ impl SendAdditionalConnections {
         // Multiple connections handle cancellation in SendAdditionalConnections.
         if self.threads.is_empty() {
             for chunk in table.partition(Self::CHUNK_SIZE) {
-                send_memory_ranges(&self.guest_memory, &chunk, socket, cancel_migration)?;
+                send_memory_ranges(
+                    &self.guest_memory,
+                    &chunk,
+                    socket,
+                    cancel_migration,
+                    &self.lifecycle,
+                )?;
             }
             return Ok(true);
         }
@@ -1238,8 +1252,9 @@ pub(crate) fn send_memory_ranges(
     ranges: &MemoryRangeTable,
     socket: &mut SocketStream,
     cancel_migration: &AtomicBool,
+    lifecycle: &GuestLifecycle,
 ) -> Result<(), MigratableError> {
-    if ranges.ranges().is_empty() {
+    if ranges.ranges().is_empty() || lifecycle.pending().is_some() {
         return Ok(());
     }
 
