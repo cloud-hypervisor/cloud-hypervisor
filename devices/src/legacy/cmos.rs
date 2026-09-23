@@ -16,7 +16,7 @@ use libc::time_t;
 use libc::{CLOCK_REALTIME, clock_gettime, gmtime_r, timespec, tm};
 use log::{info, warn};
 use vm_device::BusDevice;
-use vmm_sys_util::eventfd::EventFd;
+use vm_device::lifecycle::{GuestLifecycle, PendingVmAction};
 
 const INDEX_MASK: u8 = 0x7f;
 const INDEX_OFFSET: u64 = 0x0;
@@ -27,7 +27,7 @@ const DATA_LEN: usize = 128;
 pub struct Cmos {
     index: u8,
     data: [u8; DATA_LEN],
-    reset_evt: EventFd,
+    lifecycle: Arc<GuestLifecycle>,
     vcpus_kill_signalled: Arc<AtomicBool>,
 }
 
@@ -38,7 +38,7 @@ impl Cmos {
     pub fn new(
         mem_below_4g: u64,
         mem_above_4g: u64,
-        reset_evt: EventFd,
+        lifecycle: Arc<GuestLifecycle>,
         vcpus_kill_signalled: Arc<AtomicBool>,
     ) -> Cmos {
         let mut data = [0u8; DATA_LEN];
@@ -60,7 +60,7 @@ impl Cmos {
         Cmos {
             index: 0,
             data,
-            reset_evt,
+            lifecycle,
             vcpus_kill_signalled,
         }
     }
@@ -78,7 +78,7 @@ impl BusDevice for Cmos {
             DATA_OFFSET => {
                 if self.index == 0x8f && data[0] == 0 {
                     info!("CMOS reset");
-                    self.reset_evt.write(1).unwrap();
+                    self.lifecycle.request(PendingVmAction::Reboot).unwrap();
                     // Spin until we are sure the reset_evt has been handled and that when
                     // we return from the KVM_RUN we will exit rather than re-enter the guest.
                     while !self.vcpus_kill_signalled.load(Ordering::SeqCst) {

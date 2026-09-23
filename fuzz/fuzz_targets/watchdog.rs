@@ -11,6 +11,7 @@ use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
 use virtio_devices::{VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
+use vm_device::lifecycle::GuestLifecycle;
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
@@ -38,7 +39,10 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     let mut watchdog = virtio_devices::Watchdog::new(
         "fuzzer_watchdog".to_owned(),
         false,
-        EventFd::new(EFD_NONBLOCK).unwrap(),
+        Arc::new(GuestLifecycle::new(
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+        )),
         SeccompAction::Allow,
         EventFd::new(EFD_NONBLOCK).unwrap(),
         None,

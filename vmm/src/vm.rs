@@ -626,10 +626,7 @@ impl Vm {
             mmio_bus: Arc::clone(&mmio_bus),
         });
 
-        let lifecycle = Arc::new(GuestLifecycle::new(
-            reset_evt.try_clone().map_err(Error::EventFdClone)?,
-            guest_exit_evt.try_clone().map_err(Error::EventFdClone)?,
-        ));
+        let lifecycle = Arc::new(GuestLifecycle::new(reset_evt, guest_exit_evt));
 
         // Create CPU manager
         let cpu_manager = Self::create_cpu_manager(
@@ -658,8 +655,7 @@ impl Vm {
             Arc::clone(&memory_manager),
             Arc::clone(&cpu_manager),
             exit_evt.try_clone().map_err(Error::EventFdClone)?,
-            reset_evt,
-            guest_exit_evt,
+            Arc::clone(&lifecycle),
             seccomp_action.clone(),
             numa_nodes.clone(),
             &activate_evt,
@@ -848,8 +844,7 @@ impl Vm {
         memory_manager: Arc<Mutex<MemoryManager>>,
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
         exit_evt: EventFd,
-        reset_evt: EventFd,
-        guest_exit_evt: EventFd,
+        lifecycle: Arc<GuestLifecycle>,
         seccomp_action: SeccompAction,
         numa_nodes: NumaNodes,
         activate_evt: &EventFd,
@@ -871,8 +866,7 @@ impl Vm {
             memory_manager,
             cpu_manager,
             exit_evt,
-            reset_evt,
-            guest_exit_evt,
+            lifecycle,
             seccomp_action,
             numa_nodes,
             activate_evt,
