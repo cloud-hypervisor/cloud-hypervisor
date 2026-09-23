@@ -1841,6 +1841,7 @@ impl Vmm {
                     send_data_migration.tls_dir.as_deref(),
                     &vm.guest_memory(),
                     &seccomp_filters.tcp_worker,
+                    &lifecycle,
                 )?;
 
                 Self::do_memory_migration(
@@ -1928,7 +1929,12 @@ impl Vmm {
             // One final memory iteration to handle side effects from snapshot.
             if matches!(memory_mode, MigrationMode::Precopy) {
                 let memory_ranges = vm.dirty_log()?;
-                transport::send_memory_ranges(&vm.guest_memory(), &memory_ranges, &mut socket)?;
+                transport::send_memory_ranges(
+                    &vm.guest_memory(),
+                    &memory_ranges,
+                    &mut socket,
+                    &lifecycle,
+                )?;
             }
             Ok(snapshot)
         })?;

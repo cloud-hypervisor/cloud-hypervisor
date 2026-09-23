@@ -24,6 +24,7 @@ use seccompiler::{BpfProgram, SeccompAction, apply_filter};
 use serde_json;
 use socket2::{SockRef, TcpKeepalive};
 use thiserror::Error;
+use vm_device::lifecycle::GuestLifecycle;
 use vm_memory::bitmap::BitmapSlice;
 use vm_memory::{
     Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, ReadVolatile, VolatileMemoryError,
@@ -652,6 +653,7 @@ enum SendMemoryThreadNotify {
 /// This struct keeps track of additional threads we use to send VM memory.
 pub(crate) struct SendAdditionalConnections {
     guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
+    lifecycle: Arc<GuestLifecycle>,
     threads: Vec<JoinHandle<Result<(), MigratableError>>>,
     /// Sender to all workers. The receiver is shared by all workers.
     message_tx: SyncSender<SendMemoryThreadMessage>,
@@ -690,6 +692,7 @@ impl SendAdditionalConnections {
         tls_dir: Option<&Path>,
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         seccomp_filter: &BpfProgram,
+        lifecycle: &Arc<GuestLifecycle>,
     ) -> Result<Self, MigratableError> {
         let mut threads = Vec::new();
         let configured_connections = connections.get();
@@ -703,6 +706,7 @@ impl SendAdditionalConnections {
         if configured_connections == 1 {
             return Ok(Self {
                 guest_memory: guest_memory.clone(),
+                lifecycle: Arc::clone(lifecycle),
                 threads,
                 message_tx,
                 worker_error,
@@ -722,6 +726,7 @@ impl SendAdditionalConnections {
             let worker_error = Arc::clone(&worker_error);
             let notify_tx = notify_tx.clone();
             let seccomp_filter = seccomp_filter.clone();
+            let lifecycle = Arc::clone(lifecycle);
 
             let thread = thread::Builder::new()
                 .name(format!("migrate-send-memory-{n}"))
@@ -738,6 +743,7 @@ impl SendAdditionalConnections {
                         &message_rx,
                         &worker_error,
                         &notify_tx,
+                        &lifecycle,
                     )
                 })
                 .inspect_err(|_| {
@@ -750,6 +756,7 @@ impl SendAdditionalConnections {
 
         Ok(Self {
             guest_memory: guest_memory.clone(),
+            lifecycle: Arc::clone(lifecycle),
             threads,
             message_tx,
             worker_error,
@@ -764,6 +771,7 @@ impl SendAdditionalConnections {
         message_rx: &Mutex<Receiver<SendMemoryThreadMessage>>,
         worker_error: &AtomicBool,
         notify_tx: &Sender<SendMemoryThreadNotify>,
+        lifecycle: &GuestLifecycle,
     ) -> Result<(), MigratableError> {
         loop {
             // Every memory sending thread receives messages from the main thread through this
@@ -790,7 +798,7 @@ impl SendAdditionalConnections {
                         continue;
                     }
 
-                    send_memory_ranges(guest_memory, &table, socket)
+                    send_memory_ranges(guest_memory, &table, socket, lifecycle)
                         .inspect_err(|_| {
                             worker_error.store(true, Ordering::Release);
                             notify_tx.send(SendMemoryThreadNotify::Error).ok();
@@ -834,7 +842,7 @@ impl SendAdditionalConnections {
         // If we use only one connection, we send the memory directly.
         if self.threads.is_empty() {
             for chunk in table.partition(Self::CHUNK_SIZE) {
-                send_memory_ranges(&self.guest_memory, &chunk, socket)?;
+                send_memory_ranges(&self.guest_memory, &chunk, socket, &self.lifecycle)?;
             }
             return Ok(true);
         }
@@ -1224,8 +1232,9 @@ pub(crate) fn send_memory_ranges(
     guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
     ranges: &MemoryRangeTable,
     socket: &mut SocketStream,
+    lifecycle: &GuestLifecycle,
 ) -> Result<(), MigratableError> {
-    if ranges.regions().is_empty() {
+    if ranges.regions().is_empty() || lifecycle.pending().is_some() {
         return Ok(());
     }
 
