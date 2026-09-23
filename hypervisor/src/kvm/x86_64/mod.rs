@@ -87,6 +87,8 @@ pub struct VcpuKvmState {
     pub nested_state: Option<KvmNestedStateBuffer>,
     #[serde(default)]
     pub hyperv_synic: bool,
+    #[serde(default)]
+    pub guest_ssp: Option<u64>,
 }
 
 impl From<SegmentRegister> for kvm_segment {
