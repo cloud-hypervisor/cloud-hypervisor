@@ -2237,7 +2237,7 @@ impl Vmm {
                         warn!("Unknown VMM loop event: {event}");
                     }
                     EpollDispatch::Exit => {
-                        info!("VM exit event");
+                        info!("VMM exit event");
                         // Consume the event.
                         self.exit_evt.read().map_err(Error::EventFdRead)?;
                         // TODO: Future follow-up must resolve lifecycle handling while migrating.
