@@ -23,9 +23,7 @@ use std::io::{self, IsTerminal, Seek, SeekFrom, stdout};
 use std::num::Wrapping;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
-#[cfg(not(target_arch = "riscv64"))]
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 #[cfg(not(target_arch = "riscv64"))]
 use std::time::Instant;
@@ -345,6 +343,10 @@ pub enum DeviceManagerError {
     /// iommufd is not supported
     #[error("iommufd is not supported without the kvm feature")]
     IommufdNotSupported,
+
+    /// The physical SMMU behind an assigned device could not be resolved.
+    #[error("Cannot resolve the physical SMMU behind VFIO device {0}")]
+    Smmuv3HostIommuUnresolved(String, #[source] io::Error),
 
     /// The operation requires the iommufd VFIO backend
     #[error("The VFIO backend in use is not iommufd")]
@@ -998,6 +1000,9 @@ pub struct DeviceManager {
     // DeviceManager to be reused.
     vfio_ops: Option<Arc<dyn VfioOps>>,
 
+    // Physical SMMU -> the assigned devices sitting behind it.
+    smmuv3_host_smmus: BTreeMap<PathBuf, Smmuv3ProbeGroup>,
+
     // Number of active VFIO devices sharing `vfio_ops`.
     #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
     shared_vfio_devices: usize,
@@ -1136,6 +1141,21 @@ fn use_64bit_bar_for_virtio_device(
     is_hotplug: bool,
 ) -> bool {
     pci_segment_id > 0 || device_type != VirtioDeviceType::Block as u32 || is_hotplug
+}
+
+/// The assigned devices behind one physical SMMU
+#[derive(Debug, Default)]
+struct Smmuv3ProbeGroup {
+    devices: Vec<String>,
+}
+
+/// Resolve the physical IOMMU behind an assigned device from its sysfs
+/// directory: <sysfs_dev>/iommu is a symlink to the IOMMU device.
+fn host_iommu_of(sysfs_dev: &Path) -> io::Result<PathBuf> {
+    use std::fs::read_link;
+
+    let target = read_link(sysfs_dev.join("iommu"))?;
+    sysfs_dev.join(target).canonicalize()
 }
 
 impl DeviceManager {
@@ -1344,6 +1364,7 @@ impl DeviceManager {
             legacy_interrupt_manager: None,
             passthrough_device: None,
             vfio_ops: None,
+            smmuv3_host_smmus: BTreeMap::new(),
             #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
             shared_vfio_devices: 0,
             iommu_device: None,
@@ -1413,6 +1434,35 @@ impl DeviceManager {
         snapshot: Option<&Snapshot>,
     ) -> DeviceManagerResult<Arc<Mutex<dyn InterruptController>>> {
         self.add_interrupt_controller(snapshot)
+    }
+
+    fn smmuv3_enabled(&self) -> bool {
+        self.config
+            .lock()
+            .unwrap()
+            .platform
+            .as_ref()
+            .is_some_and(|p| p.iommu_is_smmuv3())
+    }
+
+    /// Report the virtual SMMUv3 topology the host implies.
+    fn report_smmuv3_probe(&self) {
+        if !self.smmuv3_enabled() {
+            return;
+        }
+
+        if self.smmuv3_host_smmus.is_empty() {
+            info!(
+                "SMMUv3: no assigned device asked for translation, so no instance would be created"
+            );
+        }
+        for (index, (host_smmu, group)) in self.smmuv3_host_smmus.iter().enumerate() {
+            info!(
+                "SMMUv3: instance {index} would back {} behind host SMMU {}",
+                group.devices.join(", "),
+                host_smmu.display(),
+            );
+        }
     }
 
     #[expect(clippy::needless_pass_by_value)]
@@ -1516,6 +1566,8 @@ impl DeviceManager {
                 self.ivshmem_device = self.add_ivshmem_device(ivshmem, snapshot)?;
             }
         }
+
+        self.report_smmuv3_probe();
 
         Ok(())
     }
@@ -4036,6 +4088,13 @@ impl DeviceManager {
             _ => unreachable!("DeviceConfig::validate enforces exactly one of path/fd"),
         };
 
+        if self.smmuv3_enabled() && device_cfg.pci_common.iommu {
+            let host_smmu = host_iommu_of(&device_path)
+                .map_err(|e| DeviceManagerError::Smmuv3HostIommuUnresolved(vfio_name.clone(), e))?;
+            let group = self.smmuv3_host_smmus.entry(host_smmu).or_default();
+            group.devices.push(vfio_name.clone());
+        }
+
         if needs_dma_mapping {
             let vfio_mapping = Arc::new(VfioDmaMapping::new(
                 Arc::clone(&vfio_ops),
@@ -6273,7 +6332,70 @@ impl Drop for DeviceManager {
 
 #[cfg(test)]
 mod tests {
+    use std::fs::create_dir_all;
+    use std::os::unix::fs::symlink;
+
     use super::*;
+
+    // `host_iommu_of` is what decides the virtual SMMUv3 topology, so it is
+    // tested directly, on any architecture, against a sysfs tree built with
+    // tempfile rather than against a host that happens to have an SMMU.
+    #[test]
+    fn test_host_iommu_of_resolves_the_symlink() {
+        let sysfs = tempfile::tempdir().unwrap();
+        let dev = sysfs.path().join("0000:01:00.0");
+        let smmu = sysfs.path().join("platform").join("arm-smmu-v3.0.auto");
+        create_dir_all(&dev).unwrap();
+        create_dir_all(&smmu).unwrap();
+        symlink(&smmu, dev.join("iommu")).unwrap();
+
+        assert_eq!(
+            host_iommu_of(&dev).unwrap(),
+            smmu.canonicalize().unwrap(),
+            "the device resolves to the SMMU its iommu link names"
+        );
+    }
+
+    #[test]
+    fn test_host_iommu_of_without_a_link_is_an_error() {
+        let sysfs = tempfile::tempdir().unwrap();
+        let dev = sysfs.path().join("0000:01:00.0");
+        create_dir_all(&dev).unwrap();
+
+        // A device with no IOMMU cannot be put behind one, and saying so is
+        // the point: this is an error, not a silently skipped device.
+        host_iommu_of(&dev).unwrap_err();
+    }
+
+    #[test]
+    fn test_host_iommu_of_groups_by_physical_smmu() {
+        let sysfs = tempfile::tempdir().unwrap();
+        let smmu0 = sysfs.path().join("platform").join("arm-smmu-v3.0.auto");
+        let smmu1 = sysfs.path().join("platform").join("arm-smmu-v3.1.auto");
+        create_dir_all(&smmu0).unwrap();
+        create_dir_all(&smmu1).unwrap();
+
+        let dev = |name: &str, smmu: &Path| {
+            let d = sysfs.path().join(name);
+            create_dir_all(&d).unwrap();
+            symlink(smmu, d.join("iommu")).unwrap();
+            host_iommu_of(&d).unwrap()
+        };
+
+        // Two devices on one SMMU share an instance; a third on another SMMU
+        // gets its own. That is the whole grouping rule.
+        let a = dev("0000:01:00.0", &smmu0);
+        let b = dev("0000:02:00.0", &smmu0);
+        let c = dev("0000:03:00.0", &smmu1);
+        assert_eq!(a, b, "devices behind one physical SMMU group together");
+        assert_ne!(a, c, "a device behind another physical SMMU does not");
+
+        let mut groups: BTreeMap<PathBuf, Vec<&str>> = BTreeMap::new();
+        for (path, name) in [(a, "a"), (b, "b"), (c, "c")] {
+            groups.entry(path).or_default().push(name);
+        }
+        assert_eq!(groups.len(), 2, "two physical SMMUs, two instances");
+    }
 
     #[test]
     fn test_s5_sleep_state_uses_complete_package() {
