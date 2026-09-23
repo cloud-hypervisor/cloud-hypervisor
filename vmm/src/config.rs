@@ -306,6 +306,21 @@ pub enum ValidationError {
         "IOMMU address width in bits ({0}) should be less than or equal to {MAX_IOMMU_ADDRESS_WIDTH_BITS}"
     )]
     InvalidIommuAddressWidthBits(u8),
+    /// `iommu=smmuv3` was given without the iommufd backend.
+    #[error("`--platform iommu=smmuv3` requires `iommufd=on`")]
+    Smmuv3RequiresIommufd,
+    /// A VFIO device placed behind the SMMUv3 (`iommu=on` with
+    /// `--platform iommu=smmuv3`) was given as `fd=`.
+    #[error("A VFIO device behind the SMMUv3 cannot be given as `fd=`")]
+    Smmuv3VfioWithFd,
+    /// `--platform iommu=off|smmuv3` while a virtio-iommu is requested,
+    /// by a device's `iommu=on`, by `iommu_segments`, or by the `iommu`
+    /// field of the VM configuration.
+    #[error(
+        "`--platform iommu={0}` conflicts with a virtio-iommu requested by a device's \
+         `iommu=on`, by `iommu_segments`, or by the VM configuration"
+    )]
+    PlatformIommuConflict(IommuType),
     /// Balloon too big
     #[error("Balloon size ({0}) greater than RAM ({1})")]
     BalloonLargerThanRam(u64, u64),
@@ -877,12 +892,33 @@ impl PciSegmentConfig {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum ParseIommuTypeError {
+    #[error("Invalid iommu value: {0}; expected off, on, virtio-iommu or smmuv3")]
+    InvalidValue(String),
+}
+
+impl FromStr for IommuType {
+    type Err = ParseIommuTypeError;
+
+    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "off" => Ok(IommuType::Off),
+            "on" => Ok(IommuType::On),
+            "virtio-iommu" => Ok(IommuType::VirtioIommu),
+            "smmuv3" => Ok(IommuType::Smmuv3),
+            _ => Err(ParseIommuTypeError::InvalidValue(s.to_owned())),
+        }
+    }
+}
+
 impl PlatformConfig {
     pub fn syntax() -> &'static str {
         static SYNTAX: LazyLock<String> = LazyLock::new(|| {
             let mut syntax = "Platform configuration parameters \
             \"num_pci_segments=<num_pci_segments>,iommu_segments=<list_of_segments>,\
             iommu_address_width=<bits>,iommufd=on|off,iommufd_fd=<fd>,vfio_p2p_dma=on|off,\
+            iommu=off|on|virtio-iommu|smmuv3,\
             system_manufacturer=<dmi_system_manufacturer>,\
             system_product_name=<dmi_system_product_name>,system_version=<dmi_system_version>,\
             system_serial_number=<dmi_system_serial_number>,system_uuid=<dmi_system_uuid>,\
@@ -957,7 +993,8 @@ impl PlatformConfig {
             .add("oem_strings")
             .add("iommufd")
             .add("iommufd_fd")
-            .add("vfio_p2p_dma");
+            .add("vfio_p2p_dma")
+            .add("iommu");
         for field in SMBIOS_STRING_FIELDS {
             parser.add(field.key);
         }
@@ -996,6 +1033,9 @@ impl PlatformConfig {
             .map_err(Error::ParsePlatform)?
             .unwrap_or(Toggle(true))
             .0;
+        let iommu = parser
+            .convert::<IommuType>("iommu")
+            .map_err(Error::ParsePlatform)?;
         #[cfg(feature = "tdx")]
         let tdx = parser
             .convert::<Toggle>("tdx")
@@ -1029,6 +1069,7 @@ impl PlatformConfig {
             #[cfg(feature = "sev_snp")]
             sev_snp,
             vfio_p2p_dma,
+            iommu,
         };
 
         for field in SMBIOS_STRING_FIELDS {
@@ -1084,6 +1125,11 @@ impl PlatformConfig {
 
         if self.iommufd_fd.is_some() && !self.iommufd {
             return Err(ValidationError::IommufdFdRequiresIommufd);
+        }
+
+        // smmuv3 support depends on iommufd and vfio.
+        if self.iommu_is_smmuv3() && !self.iommufd {
+            return Err(ValidationError::Smmuv3RequiresIommufd);
         }
 
         Ok(())
@@ -2584,6 +2630,21 @@ impl DeviceConfig {
             }
         }
 
+        // --platform iommu=smmuv3 places a VFIO device with iommu=on behind
+        // the SMMUv3 instead of the virtio-iommu.
+        if vm_config
+            .platform
+            .as_ref()
+            .is_some_and(PlatformConfig::iommu_is_smmuv3)
+            && self.pci_common.iommu
+        {
+            // Later will determine smmuv3 device by probing sysfs.
+            // fd isn't supported. (yet)
+            if self.fd.is_some() {
+                return Err(ValidationError::Smmuv3VfioWithFd);
+            }
+        }
+
         Ok(())
     }
 }
@@ -3612,7 +3673,14 @@ impl VmConfig {
                 }
 
                 device.validate(self)?;
-                self.iommu |= device.pci_common.iommu;
+
+                if !self
+                    .platform
+                    .as_ref()
+                    .is_some_and(PlatformConfig::iommu_is_smmuv3)
+                {
+                    self.iommu |= device.pci_common.iommu;
+                }
 
                 Self::validate_identifier(&mut id_list, &device.pci_common.id)?;
             }
@@ -3690,6 +3758,17 @@ impl VmConfig {
             .as_ref()
             .map(|p| p.iommu_segments.is_some())
             .unwrap_or_default();
+
+        // VmConfig.iommu: use virtio-iommu or not. solely for virtio-iommu.
+        // --platform iommu=<string>: iommu type
+        // consistency check as platform iommu=<string> is introduced later.
+        match self.platform.as_ref().and_then(|p| p.iommu) {
+            Some(t) if t.is_virtio_iommu() => self.iommu = true,
+            Some(t @ (IommuType::Off | IommuType::Smmuv3)) if self.iommu => {
+                return Err(ValidationError::PlatformIommuConflict(t));
+            }
+            _ => {}
+        }
 
         // Checked after self.iommu changes, so it sees devices and iommu_segments
         #[cfg(feature = "sev_snp")]
@@ -5196,6 +5275,62 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
     }
 
     #[test]
+    fn test_platform_iommu_parsing() -> Result<()> {
+        assert_eq!(PlatformConfig::parse("")?.iommu, None);
+        assert_eq!(PlatformConfig::parse("iommufd=on")?.iommu, None);
+        for (value, expected) in [
+            ("off", IommuType::Off),
+            ("on", IommuType::On),
+            ("virtio-iommu", IommuType::VirtioIommu),
+            ("smmuv3", IommuType::Smmuv3),
+            ("SMMUv3", IommuType::Smmuv3),
+        ] {
+            assert_eq!(
+                PlatformConfig::parse(&format!("iommu={value}"))?.iommu,
+                Some(expected),
+                "iommu={value}"
+            );
+        }
+        let p = PlatformConfig::parse("iommufd=on,iommu=smmuv3")?;
+        assert!(p.iommufd && p.iommu_is_smmuv3());
+        PlatformConfig::parse("iommu=maybe").unwrap_err();
+        // The old boolean spelling is gone.
+        PlatformConfig::parse("smmuv3=on").unwrap_err();
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_platform_iommu_json() {
+        // Unset is omitted, and the values use the command line spelling.
+        let json = |iommu| {
+            serde_json::to_value(PlatformConfig {
+                iommu,
+                ..platform_fixture()
+            })
+            .unwrap()
+        };
+        assert_eq!(json(None).get("iommu"), None);
+        assert_eq!(json(Some(IommuType::Smmuv3))["iommu"], "smmuv3");
+        assert_eq!(json(Some(IommuType::VirtioIommu))["iommu"], "virtio-iommu");
+        for (value, expected) in [
+            ("off", IommuType::Off),
+            ("on", IommuType::On),
+            ("virtio-iommu", IommuType::VirtioIommu),
+            ("smmuv3", IommuType::Smmuv3),
+        ] {
+            let p: PlatformConfig =
+                serde_json::from_str(&format!(r#"{{"iommu": "{value}"}}"#)).unwrap();
+            assert_eq!(p.iommu, Some(expected));
+        }
+        serde_json::from_str::<PlatformConfig>(r#"{"iommu": true}"#).unwrap_err();
+        assert_eq!(
+            serde_json::from_str::<PlatformConfig>("{}").unwrap().iommu,
+            None
+        );
+    }
+
+    #[test]
     fn test_vsock_parsing() -> Result<()> {
         // socket and cid is required
         VsockConfig::parse("").unwrap_err();
@@ -5869,6 +6004,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             iommufd: false,
             iommufd_fd: None,
             vfio_p2p_dma: default_platformconfig_vfio_p2p_dma(),
+            iommu: None,
             system_manufacturer: None,
             system_product_name: None,
             system_version: None,
@@ -7013,6 +7149,118 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             neither_path_nor_fd.validate(),
             Err(ValidationError::VfioDeviceNeitherPathNorFd),
         ));
+
+        let with_iommu = |iommu, iommufd| PlatformConfig {
+            iommu: Some(iommu),
+            iommufd,
+            ..platform_fixture()
+        };
+        let vfio = |iommu: bool| DeviceConfig {
+            pci_common: PciDeviceCommonConfig {
+                iommu,
+                ..device_fixture().pci_common
+            },
+            ..device_fixture()
+        };
+
+        // smmuv3 needs the iommufd backend.
+        let mut smmuv3_no_iommufd = valid_config.clone();
+        smmuv3_no_iommufd.platform = Some(with_iommu(IommuType::Smmuv3, false));
+        assert!(matches!(
+            smmuv3_no_iommufd.validate(),
+            Err(ValidationError::Smmuv3RequiresIommufd),
+        ));
+        let mut smmuv3_valid = valid_config.clone();
+        smmuv3_valid.platform = Some(with_iommu(IommuType::Smmuv3, true));
+        smmuv3_valid.validate().unwrap();
+        assert!(!smmuv3_valid.iommu);
+
+        // A VFIO device with iommu=on goes behind the SMMUv3, so it does not
+        // ask for the virtio-iommu.
+        let mut bound = smmuv3_valid.clone();
+        bound.devices = Some(vec![vfio(true)]);
+        bound.validate().unwrap();
+        assert!(!bound.iommu);
+
+        // Without the platform option the same device asks for the
+        // virtio-iommu, as it always has.
+        let mut legacy = valid_config.clone();
+        legacy.devices = Some(vec![vfio(true)]);
+        legacy.validate().unwrap();
+        assert!(legacy.iommu);
+
+        // smmuv3 and off leave no room for a virtio-iommu, whoever asks for
+        // it: a virtio device, iommu_segments, or the VM configuration.
+        for (t, iommufd) in [(IommuType::Smmuv3, true), (IommuType::Off, false)] {
+            let mut virtio_device = valid_config.clone();
+            virtio_device.platform = Some(with_iommu(t, iommufd));
+            virtio_device.rng.pci_common.iommu = true;
+            assert!(
+                matches!(
+                    virtio_device.validate(),
+                    Err(ValidationError::PlatformIommuConflict(c)) if c == t
+                ),
+                "virtio device iommu=on with platform iommu={t}"
+            );
+            let mut segments = valid_config.clone();
+            // Segment 1 carries no device, so this is the iommu_segments
+            // conflict, not OnIommuSegment for a device on it.
+            segments.platform = Some(PlatformConfig {
+                num_pci_segments: 2,
+                iommu_segments: Some(vec![1].into_boxed_slice()),
+                ..with_iommu(t, iommufd)
+            });
+            assert!(matches!(
+                segments.validate(),
+                Err(ValidationError::PlatformIommuConflict(_))
+            ));
+            let mut vm_field = valid_config.clone();
+            vm_field.platform = Some(with_iommu(t, iommufd));
+            vm_field.iommu = true;
+            assert!(matches!(
+                vm_field.validate(),
+                Err(ValidationError::PlatformIommuConflict(_))
+            ));
+        }
+        // off: a VFIO device's iommu=on is a virtio-iommu request too.
+        let mut off_vfio = valid_config.clone();
+        off_vfio.platform = Some(with_iommu(IommuType::Off, false));
+        off_vfio.devices = Some(vec![vfio(true)]);
+        assert!(matches!(
+            off_vfio.validate(),
+            Err(ValidationError::PlatformIommuConflict(IommuType::Off))
+        ));
+        let mut off_valid = valid_config.clone();
+        off_valid.platform = Some(with_iommu(IommuType::Off, false));
+        off_valid.validate().unwrap();
+        assert!(!off_valid.iommu);
+
+        // on and virtio-iommu provide the virtio-iommu even with no device
+        // asking for it, like iommu_segments does.
+        for t in [IommuType::On, IommuType::VirtioIommu] {
+            let mut virtio = valid_config.clone();
+            virtio.platform = Some(with_iommu(t, false));
+            virtio.validate().unwrap();
+            assert!(virtio.iommu, "platform iommu={t}");
+        }
+
+        // A device behind the SMMUv3 cannot be given as fd=.
+        let mut with_fd = fd_valid_config.clone();
+        with_fd
+            .platform
+            .as_mut()
+            .expect("fd config has a platform")
+            .iommu = Some(IommuType::Smmuv3);
+        with_fd.devices = Some(vec![DeviceConfig {
+            path: None,
+            fd: Some(7),
+            ..vfio(true)
+        }]);
+        assert!(matches!(
+            with_fd.validate(),
+            Err(ValidationError::Smmuv3VfioWithFd),
+        ));
+
         #[cfg(feature = "sev_snp")]
         {
             let mut sev_snp_config = valid_config.clone();
