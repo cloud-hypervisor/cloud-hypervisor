@@ -75,6 +75,10 @@ use hypervisor::IoEventAddress;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::arch::aarch64::regs::AARCH64_PMU_IRQ;
 #[cfg(feature = "kvm")]
+use iommufd_bindings::{
+    iommu_hw_info, iommu_hw_info_arm_smmuv3, iommu_hw_info_type_IOMMU_HW_INFO_TYPE_ARM_SMMUV3,
+};
+#[cfg(feature = "kvm")]
 use iommufd_ioctls::IommuFd;
 use libc::{
     MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED, O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW, tcsetattr,
@@ -347,6 +351,11 @@ pub enum DeviceManagerError {
     /// The physical SMMU behind an assigned device could not be resolved.
     #[error("Cannot resolve the physical SMMU behind VFIO device {0}")]
     Smmuv3HostIommuUnresolved(String, #[source] io::Error),
+
+    /// The host IOMMU information could not be read.
+    #[cfg(feature = "kvm")]
+    #[error("Cannot read the host IOMMU information")]
+    Smmuv3HostInfo(#[source] iommufd_ioctls::IommufdError),
 
     /// The operation requires the iommufd VFIO backend
     #[error("The VFIO backend in use is not iommufd")]
@@ -1147,6 +1156,40 @@ fn use_64bit_bar_for_virtio_device(
 #[derive(Debug, Default)]
 struct Smmuv3ProbeGroup {
     devices: Vec<String>,
+    /// The iommufd device ID
+    dev_id: Option<u32>,
+}
+
+#[cfg(feature = "kvm")]
+#[derive(Debug, PartialEq, Eq)]
+struct HostSmmuv3Caps {
+    /// IDR5.OAS as a number of bits.
+    oas_bits: u32,
+    /// IDR0.ATS.
+    ats: bool,
+    /// IDR1.SSIDSIZE, the width of a substream (PASID) ID.
+    ssidsize: u32,
+}
+
+#[cfg(feature = "kvm")]
+fn decode_smmuv3_caps(idr: &[u32; 6]) -> HostSmmuv3Caps {
+    // IDR5.OAS is a 3-bit encoding (Arm IHI 0070, 6.3.6);
+    let oas_bits = match idr[5] & 0b111 {
+        0 => 32,
+        1 => 36,
+        2 => 40,
+        3 => 42,
+        4 => 44,
+        5 => 48,
+        6 => 52,
+        _ => 0,
+    };
+
+    HostSmmuv3Caps {
+        oas_bits,
+        ats: idr[0] & (1 << 10) != 0,
+        ssidsize: (idr[1] >> 6) & 0b1_1111,
+    }
 }
 
 /// Resolve the physical IOMMU behind an assigned device from its sysfs
@@ -1445,6 +1488,49 @@ impl DeviceManager {
             .is_some_and(|p| p.iommu_is_smmuv3())
     }
 
+    #[cfg(feature = "kvm")]
+    fn iommufd_backend(&self) -> DeviceManagerResult<Arc<VfioIommufd>> {
+        let vfio_ops = self
+            .vfio_ops
+            .as_ref()
+            .ok_or(DeviceManagerError::ExpectedIommufdBackend)?;
+        (Arc::clone(vfio_ops) as Arc<dyn Any + Send + Sync>)
+            .downcast::<VfioIommufd>()
+            .map_err(|_| DeviceManagerError::ExpectedIommufdBackend)
+    }
+
+    #[cfg(feature = "kvm")]
+    fn probe_host_smmuv3(
+        &self,
+        dev_id: Option<u32>,
+    ) -> DeviceManagerResult<Option<HostSmmuv3Caps>> {
+        let Some(dev_id) = dev_id else {
+            return Ok(None);
+        };
+
+        let mut info = iommu_hw_info_arm_smmuv3::default();
+        let mut hw_info = iommu_hw_info {
+            size: size_of::<iommu_hw_info>() as u32,
+            dev_id,
+            data_len: size_of::<iommu_hw_info_arm_smmuv3>() as u32,
+            data_uptr: &raw mut info as u64,
+            ..Default::default()
+        };
+
+        self.iommufd_backend()?
+            .iommufd()
+            .get_hw_info(&mut hw_info)
+            .map_err(DeviceManagerError::Smmuv3HostInfo)?;
+
+        // SAFETY: the union's out_data_type is written by the ioctl above.
+        let data_type = unsafe { hw_info.__bindgen_anon_1.out_data_type };
+        if data_type != iommu_hw_info_type_IOMMU_HW_INFO_TYPE_ARM_SMMUV3 {
+            return Ok(None);
+        }
+
+        Ok(Some(decode_smmuv3_caps(&info.idr)))
+    }
+
     /// Report the virtual SMMUv3 topology the host implies.
     fn report_smmuv3_probe(&self) {
         if !self.smmuv3_enabled() {
@@ -1462,6 +1548,20 @@ impl DeviceManager {
                 group.devices.join(", "),
                 host_smmu.display(),
             );
+
+            #[cfg(feature = "kvm")]
+            match self.probe_host_smmuv3(group.dev_id) {
+                Ok(Some(caps)) => info!(
+                    "SMMUv3: instance {index} would advertise OAS {} bits, ATS {}, SSIDSIZE {}",
+                    caps.oas_bits,
+                    if caps.ats { "on" } else { "off" },
+                    caps.ssidsize,
+                ),
+                Ok(None) => info!(
+                    "SMMUv3: instance {index}: the host IOMMU did not report SMMUv3 information"
+                ),
+                Err(e) => warn!("SMMUv3: instance {index}: cannot read host information: {e:?}"),
+            }
         }
     }
 
@@ -4093,6 +4193,9 @@ impl DeviceManager {
                 .map_err(|e| DeviceManagerError::Smmuv3HostIommuUnresolved(vfio_name.clone(), e))?;
             let group = self.smmuv3_host_smmus.entry(host_smmu).or_default();
             group.devices.push(vfio_name.clone());
+            if group.dev_id.is_none() {
+                group.dev_id = vfio_device.iommufd_dev_id();
+            }
         }
 
         if needs_dma_mapping {
@@ -6395,6 +6498,41 @@ mod tests {
             groups.entry(path).or_default().push(name);
         }
         assert_eq!(groups.len(), 2, "two physical SMMUs, two instances");
+    }
+
+    #[cfg(feature = "kvm")]
+    #[test]
+    fn test_decode_smmuv3_caps_reads_the_host_idrs() {
+        let mut idr = [0u32; 6];
+        idr[0] = 1 << 10;
+        idr[1] = (16 << 6) | 32;
+        idr[5] = 5;
+        assert_eq!(
+            decode_smmuv3_caps(&idr),
+            HostSmmuv3Caps {
+                oas_bits: 48,
+                ats: true,
+                ssidsize: 16,
+            }
+        );
+
+        // A host without ATS, with a 44-bit output address size and no
+        // substream IDs, is reported as such rather than defaulted.
+        let mut idr = [0u32; 6];
+        idr[5] = 4;
+        assert_eq!(
+            decode_smmuv3_caps(&idr),
+            HostSmmuv3Caps {
+                oas_bits: 44,
+                ats: false,
+                ssidsize: 0,
+            }
+        );
+
+        // Encoding 7 is reserved: report 0 rather than inventing a width.
+        let mut idr = [0u32; 6];
+        idr[5] = 7;
+        assert_eq!(decode_smmuv3_caps(&idr).oas_bits, 0);
     }
 
     #[test]
