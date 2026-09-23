@@ -3265,6 +3265,25 @@ impl Vm {
         &self.lifecycle
     }
 
+    /// Pauses the VM unless the guest requested a reboot or shutdown, which
+    /// makes pausing fail by design (see [`cpu::CpuManager`]). Returns
+    /// whether the VM is paused.
+    pub(crate) fn pause_unless_guest_request(&mut self) -> result::Result<bool, MigratableError> {
+        if self.state == VmState::Paused {
+            return Ok(true);
+        }
+        match self.pause() {
+            Ok(()) => Ok(true),
+            Err(e) => match self.lifecycle.pending() {
+                Some(action) => {
+                    info!("Not pausing the VM, the guest requested {action:?}: {e}");
+                    Ok(false)
+                }
+                None => Err(e),
+            },
+        }
+    }
+
     pub fn device_manager(&self) -> &Arc<Mutex<DeviceManager>> {
         &self.device_manager
     }
