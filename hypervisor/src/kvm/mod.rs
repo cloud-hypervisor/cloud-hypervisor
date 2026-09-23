@@ -202,6 +202,27 @@ ioctl_iow_nr!(
     0xe3,
     kvm_bindings::kvm_device_attr
 );
+// kvm-ioctls only exposes KVM_{GET,SET}_ONE_REG for aarch64 and riscv64.
+#[cfg(target_arch = "x86_64")]
+ioctl_iow_nr!(
+    KVM_GET_ONE_REG,
+    kvm_bindings::KVMIO,
+    0xab,
+    kvm_bindings::kvm_one_reg
+);
+#[cfg(target_arch = "x86_64")]
+ioctl_iow_nr!(
+    KVM_SET_ONE_REG,
+    kvm_bindings::KVMIO,
+    0xac,
+    kvm_bindings::kvm_one_reg
+);
+// KVM_X86_REG_KVM(KVM_REG_GUEST_SSP). The live SSP is a register, not an MSR,
+// so KVM_GET_MSRS never returns it.
+#[cfg(target_arch = "x86_64")]
+const KVM_REG_GUEST_SSP: u64 = 0x2030_0003_0000_0000;
+#[cfg(target_arch = "x86_64")]
+const SHSTK_ECX_BIT: u8 = 7; // CET shadow stack, CPUID leaf 7 subleaf 0 ECX
 
 #[cfg(feature = "sev_snp")]
 use igvm_defs::PAGE_SIZE_4K;
@@ -3241,6 +3262,27 @@ impl cpu::Vcpu for KvmVcpu {
 
         let vcpu_events = self.get_vcpu_events()?;
         let tsc_khz = self.tsc_khz()?;
+        let guest_has_shstk = cpuid
+            .iter()
+            .any(|e| e.function == 7 && e.index == 0 && e.ecx & (1 << SHSTK_ECX_BIT) != 0);
+        // A vCPU paused in user mode keeps its live SSP here, not in MSR_IA32_PL3_SSP.
+        let guest_ssp = if guest_has_shstk {
+            let mut ssp = 0u64;
+            let reg = kvm_bindings::kvm_one_reg {
+                id: KVM_REG_GUEST_SSP,
+                addr: &raw mut ssp as u64,
+            };
+            // SAFETY: FFI call; `reg.addr` points to `ssp`, filled in by the kernel.
+            let ret = unsafe { ioctl_with_ref(&self.fd, KVM_GET_ONE_REG(), &reg) };
+            if ret < 0 {
+                return Err(cpu::HypervisorCpuError::GetRegister(
+                    io::Error::last_os_error().into(),
+                ));
+            }
+            Some(ssp)
+        } else {
+            None
+        };
 
         Ok(VcpuKvmState {
             cpuid,
@@ -3256,6 +3298,7 @@ impl cpu::Vcpu for KvmVcpu {
             tsc_khz,
             nested_state,
             hyperv_synic,
+            guest_ssp,
         }
         .into())
     }
@@ -3492,6 +3535,20 @@ impl cpu::Vcpu for KvmVcpu {
             }
             if required_feature_msr_not_set {
                 return Err(cpu::HypervisorCpuError::RestoreFeatureMsr);
+            }
+        }
+
+        if let Some(ssp) = state.guest_ssp {
+            let reg = kvm_bindings::kvm_one_reg {
+                id: KVM_REG_GUEST_SSP,
+                addr: &raw const ssp as u64,
+            };
+            // SAFETY: FFI call; `reg.addr` points to `ssp`, read by the kernel.
+            let ret = unsafe { ioctl_with_ref(&self.fd, KVM_SET_ONE_REG(), &reg) };
+            if ret < 0 {
+                return Err(cpu::HypervisorCpuError::SetRegister(
+                    io::Error::last_os_error().into(),
+                ));
             }
         }
 
