@@ -36,6 +36,7 @@ use serde::{Deserialize, Serialize};
 use signal_hook::iterator::{Handle, Signals};
 use thiserror::Error;
 use tracer::trace_scoped;
+use vm_device::lifecycle::{GuestLifecycle, PendingVmAction};
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::protocol::*;
@@ -668,6 +669,8 @@ enum VmOwnership {
         vm_info_response: VmInfoResponse,
         /// Access to VM state needed during migration.
         device_manager: Weak<Mutex<DeviceManager>>,
+        /// Accessory to recorded guest actions.
+        lifecycle: Arc<GuestLifecycle>,
     },
     None,
 }
@@ -2140,6 +2143,9 @@ impl Vmm {
             vm_moved_to_destination,
         } = migration_worker_handle.join();
 
+        // All guest's requests go to the VMM again.
+        vm.lifecycle().set_migrating(false);
+
         let mut try_resume_vm_after_failed_migration = |mut vm: Vm| {
             // A late failure may leave the VM paused.
             if initial_vm_state == VmState::Running && vm.get_state() == VmState::Paused {
@@ -2201,6 +2207,36 @@ impl Vmm {
         }
     }
 
+    /// Returns whether the control loop must exit.
+    fn handle_guest_request(&mut self, action: PendingVmAction) -> Result<bool> {
+        match &self.vm {
+            VmOwnership::Owned(_) => match action {
+                PendingVmAction::Reboot => {
+                    self.vm_reboot().map_err(Error::VmReboot)?;
+                    Ok(false)
+                }
+                PendingVmAction::Shutdown if self.no_shutdown => {
+                    self.vm_shutdown().map_err(Error::VmShutdown)?;
+                    Ok(false)
+                }
+                PendingVmAction::Shutdown => {
+                    self.vmm_shutdown().map_err(Error::VmmShutdown)?;
+                    Ok(true)
+                }
+            },
+            // Only called if the request raced with the start of a migration.
+            VmOwnership::Migration { lifecycle, .. } => {
+                info!("Deferring pending VM {action:?} until migration finishes");
+                lifecycle.record(action);
+                Ok(false)
+            }
+            VmOwnership::None => {
+                warn!("Ignoring the guest's {action:?} request: there is no VM");
+                Ok(false)
+            }
+        }
+    }
+
     fn control_loop(
         &mut self,
         api_receiver: &Receiver<ApiRequest>,
@@ -2240,7 +2276,6 @@ impl Vmm {
                         info!("VMM exit event");
                         // Consume the event.
                         self.exit_evt.read().map_err(Error::EventFdRead)?;
-                        // TODO: Future follow-up must resolve lifecycle handling while migrating.
                         self.vmm_shutdown().map_err(Error::VmmShutdown)?;
 
                         break 'outer;
@@ -2249,17 +2284,14 @@ impl Vmm {
                         info!("VM reset event");
                         // Consume the event.
                         self.reset_evt.read().map_err(Error::EventFdRead)?;
-                        // TODO: Future follow-up must resolve lifecycle handling while migrating.
-                        self.vm_reboot().map_err(Error::VmReboot)?;
+                        if self.handle_guest_request(PendingVmAction::Reboot)? {
+                            break 'outer;
+                        }
                     }
                     EpollDispatch::GuestExit => {
                         info!("VM guest exit event");
                         self.guest_exit_evt.read().map_err(Error::EventFdRead)?;
-                        // TODO: Future follow-up must resolve lifecycle handling while migrating.
-                        if self.no_shutdown {
-                            self.vm_shutdown().map_err(Error::VmShutdown)?;
-                        } else {
-                            self.vmm_shutdown().map_err(Error::VmmShutdown)?;
+                        if self.handle_guest_request(PendingVmAction::Shutdown)? {
                             break 'outer;
                         }
                     }
@@ -3447,6 +3479,8 @@ impl RequestHandler for Vmm {
             .expect("should have VM ownership as we just checked it");
 
         let device_manager = Arc::downgrade(vm.device_manager());
+        let lifecycle = Arc::clone(vm.lifecycle());
+        lifecycle.set_migrating(true);
 
         match MigrationWorker::spawn(
             vm,
@@ -3462,10 +3496,12 @@ impl RequestHandler for Vmm {
                     migration_worker_handle: handle,
                     vm_info_response: vm_info_snapshot,
                     device_manager,
+                    lifecycle,
                 };
                 Ok(())
             }
             Err(e) => {
+                lifecycle.set_migrating(false);
                 self.vm = VmOwnership::Owned(e.vm);
                 Err(MigratableError::MigrateSend(e.spawn_error.into()))
             }
