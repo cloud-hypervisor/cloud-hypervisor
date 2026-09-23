@@ -69,6 +69,13 @@ pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
     Ok(())
 }
 
+/// CPUID.(EAX=7,ECX=0):ECX[7], CET shadow stack.
+pub fn cpuid_has_shstk(cpuid: &[CpuIdEntry]) -> bool {
+    cpuid
+        .iter()
+        .any(|e| e.function == 7 && e.index == 0 && e.ecx & (1 << 7) != 0)
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct VcpuKvmState {
     pub cpuid: Vec<CpuIdEntry>,
@@ -87,6 +94,9 @@ pub struct VcpuKvmState {
     pub nested_state: Option<KvmNestedStateBuffer>,
     #[serde(default)]
     pub hyperv_synic: bool,
+    // None for snapshots taken before it was saved and for guests without SHSTK.
+    #[serde(default)]
+    pub guest_ssp: Option<u64>,
 }
 
 impl From<SegmentRegister> for kvm_segment {
@@ -360,5 +370,57 @@ impl XsaveState {
         let extra_slice = xsave.as_mut_slice();
         extra_slice.copy_from_slice(&self.extra);
         Ok(xsave)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_state(guest_ssp: Option<u64>) -> VcpuKvmState {
+        VcpuKvmState {
+            cpuid: Vec::new(),
+            msrs: Vec::new(),
+            vcpu_events: VcpuEvents::default(),
+            regs: kvm_regs::default(),
+            sregs: kvm_sregs::default(),
+            fpu: FpuState::default(),
+            lapic_state: LapicState::default(),
+            xsave: XsaveState::default(),
+            xcrs: ExtendedControlRegisters::default(),
+            mp_state: MpState::default(),
+            tsc_khz: None,
+            nested_state: None,
+            hyperv_synic: false,
+            guest_ssp,
+        }
+    }
+
+    #[test]
+    fn test_cpuid_has_shstk() {
+        let shstk = CpuIdEntry {
+            function: 7,
+            index: 0,
+            ecx: 1 << 7,
+            ..Default::default()
+        };
+        assert!(cpuid_has_shstk(&[shstk]));
+        assert!(!cpuid_has_shstk(&[CpuIdEntry { index: 1, ..shstk }]));
+        assert!(!cpuid_has_shstk(&[CpuIdEntry { ecx: 0, ..shstk }]));
+    }
+
+    #[test]
+    fn test_guest_ssp_round_trips() {
+        let json = serde_json::to_value(test_state(Some(0x7fff_ffff_f000))).unwrap();
+        let state: VcpuKvmState = serde_json::from_value(json).unwrap();
+        assert_eq!(state.guest_ssp, Some(0x7fff_ffff_f000));
+    }
+
+    #[test]
+    fn test_state_without_guest_ssp_deserializes() {
+        let mut json = serde_json::to_value(test_state(Some(0x7fff_ffff_f000))).unwrap();
+        json.as_object_mut().unwrap().remove("guest_ssp").unwrap();
+        let state: VcpuKvmState = serde_json::from_value(json).unwrap();
+        assert_eq!(state.guest_ssp, None);
     }
 }
