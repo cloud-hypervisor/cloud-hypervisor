@@ -23,7 +23,10 @@ use hypervisor::arch::aarch64::regs::{
 use log::{debug, info};
 use thiserror::Error;
 use vm_fdt::{FdtWriter, FdtWriterResult};
-use vm_memory::{Address, Bytes, GuestMemoryBackend, GuestMemoryError, GuestMemoryRegion};
+use vm_memory::{
+    Address, ByteValued, Bytes, GuestAddress, GuestMemoryBackend, GuestMemoryError,
+    GuestMemoryRegion,
+};
 
 use super::super::{DeviceType, GuestMemoryMmap, InitramfsConfig};
 use super::cache::{CacheTopologyInfo, read_cache_topology};
@@ -87,8 +90,128 @@ pub enum Error {
     /// Failure in writing FDT in memory.
     #[error("Failure in writing FDT in memory")]
     WriteFdtToMemory(#[source] GuestMemoryError),
+
+    /// FDT blob exceeds maximum allowed size (`FDT_MAX_SIZE`).
+    #[error("FDT size ({0} bytes) exceeds maximum allowed size ({1} bytes)")]
+    FdtTooLarge(usize, u64),
+
+    /// EFI memory map exceeds the reserved space before `ACPI_START`.
+    #[error("EFI memory map size ({0} bytes) exceeds reserved size ({1} bytes)")]
+    EfiMmapTooLarge(u64, u64),
 }
 type Result<T> = result::Result<T, Error>;
+
+// UEFI 2.8 Specification definitions for FDT-based UEFI/ACPI discovery.
+// Linux's `early_init_dt_scan_chosen()` parses `linux,uefi-system-table` and
+// `linux,uefi-mmap-*` under `/chosen` to initialize EFI config tables (`efi_init()`)
+// and discover the ACPI 2.0 RSDP (`RSDP_POINTER`) and SMBIOS 3.0 entrypoint
+// (`SMBIOS_START`) during direct `--kernel` boot.
+const EFI_SYSTEM_TABLE_SIGNATURE: u64 = 0x5453_5953_2049_4249; // "IBI SYST"
+const EFI_2_80_SYSTEM_TABLE_REVISION: u32 = (2 << 16) | 80;
+
+// EFI_ACPI_20_TABLE_GUID: 8868e871-e4f1-11d3-bc22-0080c73c8881
+const EFI_ACPI_20_TABLE_GUID: [u8; 16] = [
+    0x71, 0xe8, 0x68, 0x88, 0xf1, 0xe4, 0xd3, 0x11, 0xbc, 0x22, 0x00, 0x80, 0xc7, 0x3c, 0x88, 0x81,
+];
+
+// SMBIOS3_TABLE_GUID: f2fd1544-9794-4a2c-992e-e5bbcf20e394
+const SMBIOS3_TABLE_GUID: [u8; 16] = [
+    0x44, 0x15, 0xfd, 0xf2, 0x94, 0x97, 0x2c, 0x4a, 0x99, 0x2e, 0xe5, 0xbb, 0xcf, 0x20, 0xe3, 0x94,
+];
+
+// EFI_RT_PROPERTIES_TABLE_GUID: eb66918a-7eef-402a-842e-931d21c38ae9
+const EFI_RT_PROPERTIES_TABLE_GUID: [u8; 16] = [
+    0x8a, 0x91, 0x66, 0xeb, 0xef, 0x7e, 0x2a, 0x40, 0x84, 0x2e, 0x93, 0x1d, 0x21, 0xc3, 0x8a, 0xe9,
+];
+
+const EFI_RT_PROPERTIES_TABLE_VERSION: u16 = 0x1;
+
+// EFI Memory Types and Attributes (UEFI 2.8 Section 7.2)
+const EFI_RESERVED_MEMORY_TYPE: u32 = 0;
+const EFI_CONVENTIONAL_MEMORY: u32 = 7;
+const EFI_MEMORY_WB: u64 = 0x8;
+const EFI_MEMORY_DESCRIPTOR_VERSION: u32 = 1;
+const EFI_PAGE_SIZE: u64 = 4096;
+
+/// UEFI Specification 2.8 Section 4.2 - `EFI_TABLE_HEADER`
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct EfiTableHeader {
+    signature: u64,
+    revision: u32,
+    header_size: u32,
+    crc32: u32,
+    reserved: u32,
+}
+
+const _: () = assert!(size_of::<EfiTableHeader>() == 24);
+// SAFETY: `EfiTableHeader` is `#[repr(C)]` with no padding and contains only plain integer fields.
+unsafe impl ByteValued for EfiTableHeader {}
+
+/// UEFI Specification 2.8 Section 4.3 - `EFI_SYSTEM_TABLE` (64-bit)
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct EfiSystemTable {
+    hdr: EfiTableHeader,
+    firmware_vendor: u64,
+    firmware_revision: u32,
+    _pad: u32,
+    console_in_handle: u64,
+    con_in: u64,
+    console_out_handle: u64,
+    con_out: u64,
+    standard_error_handle: u64,
+    std_err: u64,
+    runtime_services: u64,
+    boot_services: u64,
+    number_of_table_entries: u64,
+    configuration_table: u64,
+}
+
+const _: () = assert!(size_of::<EfiSystemTable>() == 120);
+// SAFETY: `EfiSystemTable` is `#[repr(C)]` with explicit padding (`_pad`) and contains only POD types.
+unsafe impl ByteValued for EfiSystemTable {}
+
+/// UEFI Specification 2.8 Section 4.6 - `EFI_CONFIGURATION_TABLE` (64-bit)
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct EfiConfigurationTable {
+    vendor_guid: [u8; 16],
+    vendor_table: u64,
+}
+
+const _: () = assert!(size_of::<EfiConfigurationTable>() == 24);
+// SAFETY: `EfiConfigurationTable` is `#[repr(C)]` with no padding and contains only POD types.
+unsafe impl ByteValued for EfiConfigurationTable {}
+
+/// UEFI Specification 2.8 Section 4.6 - `EFI_RT_PROPERTIES_TABLE`
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct EfiRtPropertiesTable {
+    version: u16,
+    length: u16,
+    runtime_services_supported: u32,
+}
+
+const _: () = assert!(size_of::<EfiRtPropertiesTable>() == 8);
+// SAFETY: `EfiRtPropertiesTable` is `#[repr(C)]` with no padding and contains only plain integer fields.
+unsafe impl ByteValued for EfiRtPropertiesTable {}
+
+/// UEFI Specification 2.8 Section 7.2 - `EFI_MEMORY_DESCRIPTOR`
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct EfiMemoryDescriptor {
+    r#type: u32,
+    _pad: u32,
+    physical_start: u64,
+    virtual_start: u64,
+    number_of_pages: u64,
+    attribute: u64,
+}
+
+const _: () = assert!(size_of::<EfiMemoryDescriptor>() == 40);
+// SAFETY: `EfiMemoryDescriptor` is `#[repr(C)]` with explicit padding (`_pad`) and contains only plain integers.
+unsafe impl ByteValued for EfiMemoryDescriptor {}
 
 /// Creates the flattened device tree for this aarch64 VM.
 #[expect(clippy::too_many_arguments)]
@@ -124,7 +247,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
     fdt.property_u32("interrupt-parent", GIC_PHANDLE)?;
     create_cpu_nodes(&mut fdt, vcpu_mpidr, vcpu_topology, numa_nodes)?;
     create_memory_node(&mut fdt, guest_mem, numa_nodes)?;
-    create_chosen_node(&mut fdt, cmdline, initrd)?;
+    create_chosen_node(&mut fdt, cmdline, initrd, guest_mem)?;
     create_gic_node(&mut fdt, gic_device)?;
     create_timer_node(&mut fdt)?;
     if pmu_supported {
@@ -146,11 +269,194 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
     Ok(fdt_final)
 }
 
+/// Standard IEEE 802.3 CRC32 used for `EFI_TABLE_HEADER.CRC32` (UEFI 2.8 Section 4.2).
+fn efi_crc32(data: &[u8]) -> u32 {
+    let mut crc: u32 = 0xffff_ffff;
+    for &byte in data {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            if (crc & 1) != 0 {
+                crc = (crc >> 1) ^ 0xedb8_8320;
+            } else {
+                crc >>= 1;
+            }
+        }
+    }
+    !crc
+}
+
+fn write_uefi_tables(guest_mem: &GuestMemoryMmap) -> Result<()> {
+    // 1. Write UCS-2 NUL-terminated Firmware Vendor string ("Cloud Hypervisor")
+    let vendor_utf16: Vec<u16> = "Cloud Hypervisor\0".encode_utf16().collect();
+    let mut vendor_bytes = Vec::with_capacity(vendor_utf16.len() * 2);
+    for ch in vendor_utf16 {
+        vendor_bytes.extend_from_slice(&ch.to_le_bytes());
+    }
+    guest_mem
+        .write_slice(&vendor_bytes, super::layout::UEFI_FW_VENDOR_START)
+        .map_err(Error::WriteFdtToMemory)?;
+
+    // 2. Write EFI_RT_PROPERTIES_TABLE with RuntimeServicesSupported = 0 so the
+    //    Linux kernel knows no runtime service calls are supported.
+    let rt_prop = EfiRtPropertiesTable {
+        version: EFI_RT_PROPERTIES_TABLE_VERSION,
+        length: size_of::<EfiRtPropertiesTable>() as u16,
+        runtime_services_supported: 0,
+    };
+    guest_mem
+        .write_obj(rt_prop, super::layout::UEFI_RT_PROP_START)
+        .map_err(Error::WriteFdtToMemory)?;
+
+    // 3. Write the 3 EFI_CONFIGURATION_TABLE entries:
+    //    - Entry 0: EFI_ACPI_20_TABLE_GUID -> RSDP_POINTER (0x4020_0000)
+    //    - Entry 1: SMBIOS3_TABLE_GUID -> SMBIOS_START (0x403f_0000)
+    //    - Entry 2: EFI_RT_PROPERTIES_TABLE_GUID -> UEFI_RT_PROP_START (0x401f_0180)
+    let config_tables = [
+        EfiConfigurationTable {
+            vendor_guid: EFI_ACPI_20_TABLE_GUID,
+            vendor_table: super::layout::RSDP_POINTER.0,
+        },
+        EfiConfigurationTable {
+            vendor_guid: SMBIOS3_TABLE_GUID,
+            vendor_table: super::layout::SMBIOS_START.0,
+        },
+        EfiConfigurationTable {
+            vendor_guid: EFI_RT_PROPERTIES_TABLE_GUID,
+            vendor_table: super::layout::UEFI_RT_PROP_START.0,
+        },
+    ];
+    let config_entry_size = size_of::<EfiConfigurationTable>() as u64;
+    for (idx, entry) in config_tables.iter().enumerate() {
+        let addr = GuestAddress(
+            super::layout::UEFI_CONFIG_TABLE_START.0 + (idx as u64) * config_entry_size,
+        );
+        guest_mem
+            .write_obj(*entry, addr)
+            .map_err(Error::WriteFdtToMemory)?;
+    }
+
+    // 4. Construct EFI_SYSTEM_TABLE, compute IEEE 802.3 CRC32 over the 120-byte
+    //    table (with hdr.crc32 = 0), and write it to UEFI_SYSTAB_START.
+    let mut systab = EfiSystemTable {
+        hdr: EfiTableHeader {
+            signature: EFI_SYSTEM_TABLE_SIGNATURE,
+            revision: EFI_2_80_SYSTEM_TABLE_REVISION,
+            header_size: size_of::<EfiSystemTable>() as u32,
+            crc32: 0,
+            reserved: 0,
+        },
+        firmware_vendor: super::layout::UEFI_FW_VENDOR_START.0,
+        firmware_revision: 1,
+        _pad: 0,
+        console_in_handle: 0,
+        con_in: 0,
+        console_out_handle: 0,
+        con_out: 0,
+        standard_error_handle: 0,
+        std_err: 0,
+        runtime_services: 0,
+        boot_services: 0,
+        number_of_table_entries: config_tables.len() as u64,
+        configuration_table: super::layout::UEFI_CONFIG_TABLE_START.0,
+    };
+    systab.hdr.crc32 = efi_crc32(systab.as_slice());
+
+    guest_mem
+        .write_obj(systab, super::layout::UEFI_SYSTAB_START)
+        .map_err(Error::WriteFdtToMemory)?;
+
+    Ok(())
+}
+
+fn build_efi_mmap_descriptors(guest_mem: &GuestMemoryMmap) -> Vec<EfiMemoryDescriptor> {
+    let mut descriptors = Vec::new();
+
+    // Descriptor 0: Reserve the 2 MiB FDT + UEFI System Table + Memory Map area (0x4000_0000 .. 0x4020_0000).
+    // Setting `attribute: EFI_MEMORY_WB` keeps `[0x4000_0000 .. 0x4020_0000)` in `memblock.memory`
+    // (as `MEMBLOCK_NOMAP` due to `EFI_RESERVED_MEMORY_TYPE`) when `efi_init()` rebuilds memblock,
+    // preserving `memblock_start_of_DRAM()` at `RAM_START` (0x4000_0000).
+    descriptors.push(EfiMemoryDescriptor {
+        r#type: EFI_RESERVED_MEMORY_TYPE,
+        _pad: 0,
+        physical_start: super::layout::FDT_START.0,
+        virtual_start: 0,
+        number_of_pages: (super::layout::ACPI_START.0 - super::layout::FDT_START.0) / EFI_PAGE_SIZE,
+        attribute: EFI_MEMORY_WB,
+    });
+
+    // Descriptor 1: Reserve the 2 MiB ACPI + SMBIOS tables area (0x4020_0000 .. 0x4040_0000).
+    // Setting `attribute: EFI_MEMORY_WB` ensures `acpi_os_ioremap()` maps the ACPI tables as
+    // normal write-back memory (`PAGE_KERNEL`) rather than `PROT_DEVICE_nGnRnE`, avoiding
+    // alignment faults on unaligned table accesses.
+    descriptors.push(EfiMemoryDescriptor {
+        r#type: EFI_RESERVED_MEMORY_TYPE,
+        _pad: 0,
+        physical_start: super::layout::ACPI_START.0,
+        virtual_start: 0,
+        number_of_pages: (super::layout::KERNEL_START.0 - super::layout::ACPI_START.0)
+            / EFI_PAGE_SIZE,
+        attribute: EFI_MEMORY_WB,
+    });
+
+    // Remaining descriptors: Usable guest RAM starting at KERNEL_START (0x4040_0000)
+    let usable_ram_start = super::layout::KERNEL_START.0;
+    for region in guest_mem.iter() {
+        let region_start = region.start_addr().raw_value();
+        let region_end = region_start + region.len();
+        let start = cmp::max(region_start, usable_ram_start);
+        if region_end > start {
+            let pages = (region_end - start) / EFI_PAGE_SIZE;
+            if pages > 0 {
+                descriptors.push(EfiMemoryDescriptor {
+                    r#type: EFI_CONVENTIONAL_MEMORY,
+                    _pad: 0,
+                    physical_start: start,
+                    virtual_start: 0,
+                    number_of_pages: pages,
+                    attribute: EFI_MEMORY_WB,
+                });
+            }
+        }
+    }
+
+    descriptors
+}
+
+fn write_efi_mmap(guest_mem: &GuestMemoryMmap) -> Result<()> {
+    let descriptors = build_efi_mmap_descriptors(guest_mem);
+    let desc_size = size_of::<EfiMemoryDescriptor>() as u64;
+    let mmap_size = (descriptors.len() as u64).saturating_mul(desc_size);
+    let max_mmap_size = super::layout::ACPI_START.0 - super::layout::UEFI_MMAP_START.0;
+    if mmap_size > max_mmap_size {
+        return Err(Error::EfiMmapTooLarge(mmap_size, max_mmap_size));
+    }
+    for (idx, desc) in descriptors.iter().enumerate() {
+        let addr = GuestAddress(super::layout::UEFI_MMAP_START.0 + (idx as u64) * desc_size);
+        guest_mem
+            .write_obj(*desc, addr)
+            .map_err(Error::WriteFdtToMemory)?;
+    }
+    Ok(())
+}
+
 pub fn write_fdt_to_memory(fdt_final: &[u8], guest_mem: &GuestMemoryMmap) -> Result<()> {
+    if fdt_final.len() as u64 > super::layout::FDT_MAX_SIZE {
+        return Err(Error::FdtTooLarge(
+            fdt_final.len(),
+            super::layout::FDT_MAX_SIZE,
+        ));
+    }
+
     // Write FDT to memory.
     guest_mem
         .write_slice(fdt_final, super::layout::FDT_START)
         .map_err(Error::WriteFdtToMemory)?;
+
+    // Write stub UEFI System Table, Configuration Tables, and EFI Memory Map so
+    // the guest Linux kernel can discover ACPI and SMBIOS tables on direct kernel boot.
+    write_uefi_tables(guest_mem)?;
+    write_efi_mmap(guest_mem)?;
+
     Ok(())
 }
 
@@ -489,6 +795,7 @@ fn create_chosen_node(
     fdt: &mut FdtWriter,
     cmdline: &str,
     initrd: &Option<InitramfsConfig>,
+    guest_mem: &GuestMemoryMmap,
 ) -> FdtWriterResult<()> {
     let chosen_node = fdt.begin_node("chosen")?;
     fdt.property_string("bootargs", cmdline)?;
@@ -499,6 +806,20 @@ fn create_chosen_node(
         fdt.property_u64("linux,initrd-start", initrd_start)?;
         fdt.property_u64("linux,initrd-end", initrd_end)?;
     }
+
+    // Advertise stub UEFI System Table and EFI Memory Map so the Linux kernel's
+    // `early_init_dt_scan_chosen()` -> `efi_init()` path discovers ACPI (RSDP)
+    // and SMBIOS 3.0 tables during direct `--kernel` boot without UEFI firmware.
+    let num_mmap_entries = build_efi_mmap_descriptors(guest_mem).len() as u32;
+    let desc_size = size_of::<EfiMemoryDescriptor>() as u32;
+    fdt.property_u64(
+        "linux,uefi-system-table",
+        super::layout::UEFI_SYSTAB_START.0,
+    )?;
+    fdt.property_u64("linux,uefi-mmap-start", super::layout::UEFI_MMAP_START.0)?;
+    fdt.property_u32("linux,uefi-mmap-size", num_mmap_entries * desc_size)?;
+    fdt.property_u32("linux,uefi-mmap-desc-size", desc_size)?;
+    fdt.property_u32("linux,uefi-mmap-desc-ver", EFI_MEMORY_DESCRIPTOR_VERSION)?;
 
     fdt.end_node(chosen_node)?;
 
@@ -1172,5 +1493,185 @@ mod tests {
         let mut fdt = FdtWriter::new().unwrap();
         let result = create_distance_map_node(&mut fdt, &numa_nodes);
         assert!(result.is_ok(), "Should default to 20 for missing distances");
+    }
+
+    #[test]
+    fn test_chosen_node_uefi_properties() {
+        let ram_start = super::super::layout::RAM_START;
+        let guest_mem = GuestMemoryMmap::from_ranges(&[(ram_start, 64 << 20)]).unwrap();
+
+        let mut fdt = FdtWriter::new().unwrap();
+        let root = fdt.begin_node("").unwrap();
+        create_chosen_node(&mut fdt, "console=ttyAMA0", &None, &guest_mem).unwrap();
+        fdt.end_node(root).unwrap();
+        let fdt_bytes = fdt.finish().unwrap();
+
+        let parsed = fdt_parser::Fdt::new(&fdt_bytes).unwrap();
+        let chosen = parsed
+            .find_node("/chosen")
+            .expect("/chosen node must exist");
+
+        let systab_prop = chosen
+            .property("linux,uefi-system-table")
+            .expect("linux,uefi-system-table must exist");
+        assert_eq!(
+            BigEndian::read_u64(systab_prop.value),
+            super::super::layout::UEFI_SYSTAB_START.0
+        );
+
+        let mmap_start_prop = chosen
+            .property("linux,uefi-mmap-start")
+            .expect("linux,uefi-mmap-start must exist");
+        assert_eq!(
+            BigEndian::read_u64(mmap_start_prop.value),
+            super::super::layout::UEFI_MMAP_START.0
+        );
+
+        let desc_size_prop = chosen
+            .property("linux,uefi-mmap-desc-size")
+            .expect("linux,uefi-mmap-desc-size must exist");
+        let desc_size = BigEndian::read_u32(desc_size_prop.value);
+        assert_eq!(desc_size, size_of::<EfiMemoryDescriptor>() as u32);
+
+        let desc_ver_prop = chosen
+            .property("linux,uefi-mmap-desc-ver")
+            .expect("linux,uefi-mmap-desc-ver must exist");
+        assert_eq!(
+            BigEndian::read_u32(desc_ver_prop.value),
+            EFI_MEMORY_DESCRIPTOR_VERSION
+        );
+
+        let mmap_size_prop = chosen
+            .property("linux,uefi-mmap-size")
+            .expect("linux,uefi-mmap-size must exist");
+        // 2 reserved descriptors + 1 conventional RAM descriptor = 3 descriptors
+        assert_eq!(BigEndian::read_u32(mmap_size_prop.value), 3 * desc_size);
+    }
+
+    #[test]
+    fn test_write_fdt_to_memory_uefi_tables() {
+        let ram_start = super::super::layout::RAM_START;
+        let ram_size: usize = 64 << 20; // 64 MiB
+        let guest_mem = GuestMemoryMmap::from_ranges(&[(ram_start, ram_size)]).unwrap();
+
+        let dummy_fdt = [0xd0, 0x0d, 0xfe, 0xed];
+        write_fdt_to_memory(&dummy_fdt, &guest_mem).unwrap();
+
+        // 1. Verify EFI System Table at UEFI_SYSTAB_START (0x401f_0000)
+        let mut systab: EfiSystemTable = guest_mem
+            .read_obj(super::super::layout::UEFI_SYSTAB_START)
+            .unwrap();
+        assert_eq!(systab.hdr.signature, EFI_SYSTEM_TABLE_SIGNATURE);
+        assert_eq!(systab.hdr.revision, EFI_2_80_SYSTEM_TABLE_REVISION);
+        assert_eq!(systab.hdr.header_size as usize, size_of::<EfiSystemTable>());
+        assert_eq!(
+            systab.firmware_vendor,
+            super::super::layout::UEFI_FW_VENDOR_START.0
+        );
+        assert_eq!(systab.number_of_table_entries, 3);
+        assert_eq!(
+            systab.configuration_table,
+            super::super::layout::UEFI_CONFIG_TABLE_START.0
+        );
+
+        // Verify IEEE 802.3 CRC32 checksum of EfiSystemTable
+        let recorded_crc = systab.hdr.crc32;
+        assert_ne!(recorded_crc, 0);
+        systab.hdr.crc32 = 0;
+        let computed_crc = efi_crc32(systab.as_slice());
+        assert_eq!(recorded_crc, computed_crc);
+
+        // 2. Verify UCS-2 Firmware Vendor string ("Cloud Hypervisor\0")
+        let expected_utf16: Vec<u16> = "Cloud Hypervisor\0".encode_utf16().collect();
+        for (i, expected_ch) in expected_utf16.iter().enumerate() {
+            let ch: u16 = guest_mem
+                .read_obj(GuestAddress(
+                    super::super::layout::UEFI_FW_VENDOR_START.0 + (i as u64) * 2,
+                ))
+                .unwrap();
+            assert_eq!(ch, *expected_ch);
+        }
+
+        // 3. Verify EFI Configuration Table entries (ACPI 2.0, SMBIOS 3.0, RT Properties)
+        let entry_size = size_of::<EfiConfigurationTable>() as u64;
+        let cfg0: EfiConfigurationTable = guest_mem
+            .read_obj(super::super::layout::UEFI_CONFIG_TABLE_START)
+            .unwrap();
+        assert_eq!(cfg0.vendor_guid, EFI_ACPI_20_TABLE_GUID);
+        assert_eq!(cfg0.vendor_table, super::super::layout::RSDP_POINTER.0);
+
+        let cfg1: EfiConfigurationTable = guest_mem
+            .read_obj(GuestAddress(
+                super::super::layout::UEFI_CONFIG_TABLE_START.0 + entry_size,
+            ))
+            .unwrap();
+        assert_eq!(cfg1.vendor_guid, SMBIOS3_TABLE_GUID);
+        assert_eq!(cfg1.vendor_table, super::super::layout::SMBIOS_START.0);
+
+        let cfg2: EfiConfigurationTable = guest_mem
+            .read_obj(GuestAddress(
+                super::super::layout::UEFI_CONFIG_TABLE_START.0 + 2 * entry_size,
+            ))
+            .unwrap();
+        assert_eq!(cfg2.vendor_guid, EFI_RT_PROPERTIES_TABLE_GUID);
+        assert_eq!(
+            cfg2.vendor_table,
+            super::super::layout::UEFI_RT_PROP_START.0
+        );
+
+        // 4. Verify EFI RT Properties Table
+        let rt_prop: EfiRtPropertiesTable = guest_mem
+            .read_obj(super::super::layout::UEFI_RT_PROP_START)
+            .unwrap();
+        assert_eq!(rt_prop.version, EFI_RT_PROPERTIES_TABLE_VERSION);
+        assert_eq!(rt_prop.length as usize, size_of::<EfiRtPropertiesTable>());
+        assert_eq!(rt_prop.runtime_services_supported, 0);
+
+        // 5. Verify EFI Memory Map descriptors at UEFI_MMAP_START (0x401f_1000)
+        let desc_size = size_of::<EfiMemoryDescriptor>() as u64;
+        let desc0: EfiMemoryDescriptor = guest_mem
+            .read_obj(super::super::layout::UEFI_MMAP_START)
+            .unwrap();
+        assert_eq!(desc0.r#type, EFI_RESERVED_MEMORY_TYPE);
+        assert_eq!(desc0.physical_start, super::super::layout::FDT_START.0);
+        assert_eq!(
+            desc0.number_of_pages,
+            (super::super::layout::ACPI_START.0 - super::super::layout::FDT_START.0)
+                / EFI_PAGE_SIZE
+        );
+        assert_eq!(desc0.attribute, EFI_MEMORY_WB);
+
+        let desc1: EfiMemoryDescriptor = guest_mem
+            .read_obj(GuestAddress(
+                super::super::layout::UEFI_MMAP_START.0 + desc_size,
+            ))
+            .unwrap();
+        assert_eq!(desc1.r#type, EFI_RESERVED_MEMORY_TYPE);
+        assert_eq!(desc1.physical_start, super::super::layout::ACPI_START.0);
+        assert_eq!(
+            desc1.number_of_pages,
+            (super::super::layout::KERNEL_START.0 - super::super::layout::ACPI_START.0)
+                / EFI_PAGE_SIZE
+        );
+        assert_eq!(desc1.attribute, EFI_MEMORY_WB);
+
+        let desc2: EfiMemoryDescriptor = guest_mem
+            .read_obj(GuestAddress(
+                super::super::layout::UEFI_MMAP_START.0 + 2 * desc_size,
+            ))
+            .unwrap();
+        assert_eq!(desc2.r#type, EFI_CONVENTIONAL_MEMORY);
+        assert_eq!(desc2.physical_start, super::super::layout::KERNEL_START.0);
+        assert_eq!(
+            desc2.number_of_pages,
+            ((ram_start.0 + ram_size as u64) - super::super::layout::KERNEL_START.0)
+                / EFI_PAGE_SIZE
+        );
+        assert_eq!(desc2.attribute, EFI_MEMORY_WB);
+
+        // 6. Verify oversized FDT is rejected before overwriting UEFI_SYSTAB_START
+        let oversized_fdt = vec![0u8; (super::super::layout::FDT_MAX_SIZE as usize) + 1];
+        let err = write_fdt_to_memory(&oversized_fdt, &guest_mem).unwrap_err();
+        assert!(matches!(err, Error::FdtTooLarge(_, _)));
     }
 }

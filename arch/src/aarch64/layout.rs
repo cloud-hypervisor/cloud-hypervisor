@@ -25,9 +25,17 @@
 // 4GB-64M   +---------------------------------------------------------------+
 //           |                                                               |
 //           |                                                               |
-//           |                            DRAM                               |
+//           |                      Kernel & DRAM                            |
 //           |                                                               |
 //           |                                                               |
+// 1GB+4M    +---------------------------------------------------------------+
+//           |                   SMBIOS tables (64 KiB)                      |
+// 1GB+4M-64K+---------------------------------------------------------------+
+//           |                   ACPI tables (1984 KiB)                      |
+// 1GB+2M    +---------------------------------------------------------------+
+//           |           UEFI System Table & Memory Map (64 KiB)             |
+// 1GB+2M-64K+---------------------------------------------------------------+
+//           |                        FDT (1984 KiB)                         |
 // 1GB       +---------------------------------------------------------------+
 //           |                                                               |
 //           |                        PCI MMCONFIG space                     |
@@ -112,12 +120,27 @@ pub const CMDLINE_MAX_SIZE: usize = 2048;
 
 /// FDT is at the beginning of RAM.
 pub const FDT_START: GuestAddress = RAM_START;
+/// Offset from RAM_START where the UEFI System Table and Memory Map live.
+/// We reserve the last 64 KiB of the 2 MiB FDT area for UEFI stub structures.
+pub const UEFI_SYSTAB_OFFSET: u64 = 0x1f_0000;
 /// Maximum size of the device tree blob as specified in [the kernel
-/// documentation](https://www.kernel.org/doc/Documentation/arm64/booting.txt).
-pub const FDT_MAX_SIZE: u64 = 0x20_0000;
+/// documentation](https://www.kernel.org/doc/Documentation/arm64/booting.txt),
+/// minus 64 KiB reserved for UEFI tables.
+pub const FDT_MAX_SIZE: u64 = UEFI_SYSTAB_OFFSET;
 
-/// Put ACPI table above dtb
-pub const ACPI_START: GuestAddress = GuestAddress(RAM_START.0 + FDT_MAX_SIZE);
+/// UEFI System Table is placed right after the FDT area.
+pub const UEFI_SYSTAB_START: GuestAddress = GuestAddress(RAM_START.0 + UEFI_SYSTAB_OFFSET);
+/// UEFI Configuration Table array starts 128 bytes after the System Table.
+pub const UEFI_CONFIG_TABLE_START: GuestAddress = GuestAddress(UEFI_SYSTAB_START.0 + 0x80);
+/// UEFI Firmware Vendor UCS-2 string ("Cloud Hypervisor") starts 256 bytes after the System Table.
+pub const UEFI_FW_VENDOR_START: GuestAddress = GuestAddress(UEFI_SYSTAB_START.0 + 0x100);
+/// EFI Runtime Properties Table starts 384 bytes after the System Table.
+pub const UEFI_RT_PROP_START: GuestAddress = GuestAddress(UEFI_SYSTAB_START.0 + 0x180);
+/// UEFI Memory Map starts 4 KiB after the System Table.
+pub const UEFI_MMAP_START: GuestAddress = GuestAddress(UEFI_SYSTAB_START.0 + 0x1000);
+
+/// Put ACPI table above the FDT and UEFI stub tables.
+pub const ACPI_START: GuestAddress = GuestAddress(UEFI_SYSTAB_START.0 + 0x1_0000);
 const ACPI_SMBIOS_MAX_SIZE: u64 = 0x20_0000;
 pub const ACPI_MAX_SIZE: u64 = ACPI_SMBIOS_MAX_SIZE - SMBIOS_MAX_SIZE;
 pub const RSDP_POINTER: GuestAddress = ACPI_START;
