@@ -151,7 +151,7 @@ impl VhostUserHandle {
             self.vu.set_hdr_flags(VhostUserHeaderFlag::NEED_REPLY);
         }
 
-        self.update_supported_features(acked_features, acked_protocol_features.bits());
+        self.update_supported_protocol_features(acked_protocol_features.bits());
 
         Ok((acked_features, acked_protocol_features.bits()))
     }
@@ -345,7 +345,7 @@ impl VhostUserHandle {
             }
         }
 
-        self.update_supported_features(acked_features, acked_protocol_features);
+        self.update_supported_protocol_features(acked_protocol_features);
 
         Ok(())
     }
@@ -589,8 +589,9 @@ impl VhostUserHandle {
         Ok(())
     }
 
-    fn update_supported_features(&mut self, acked_features: u64, acked_protocol_features: u64) {
-        self.supports_migration = acked_features & VhostUserVirtioFeatures::LOG_ALL.bits() != 0
+    fn update_supported_protocol_features(&mut self, acked_protocol_features: u64) {
+        self.supports_migration = self.backend_features & VhostUserVirtioFeatures::LOG_ALL.bits()
+            != 0
             && acked_protocol_features & VhostUserProtocolFeatures::LOG_SHMFD.bits() != 0;
         self.supports_device_state =
             acked_protocol_features & VhostUserProtocolFeatures::DEVICE_STATE.bits() != 0;
