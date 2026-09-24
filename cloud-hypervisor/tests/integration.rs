@@ -42,8 +42,7 @@ mod common_parallel {
     use std::io::{self, SeekFrom};
     use std::num::NonZeroU32;
     use std::process::Command;
-    use std::sync::mpsc;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use test_infra::GuestFactory;
     use vmm::api::{BalloonStatsResponse, TimeoutStrategy};
@@ -8168,6 +8167,9 @@ mod common_parallel {
     }
 
     fn _test_live_migration_virtio_fs(memfds: bool) {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
@@ -8197,7 +8199,9 @@ mod common_parallel {
             .spawn()
             .unwrap();
 
-        // Start the destination VM
+        // Start the destination VMs: the VM is migrated twice, source ->
+        // dest -> dest2, because a restored vhost-user device has to stay
+        // migratable.
         let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
         dest_api_socket.push_str(".dest");
         let mut dest_child = GuestCommand::new(&guest)
@@ -8206,31 +8210,52 @@ mod common_parallel {
             .spawn()
             .unwrap();
 
-        // Spawn a thread that waits for the old virtiofsd to exit then
-        // starts a replacement.  During migration the source saves
-        // DEVICE_STATE then disconnects, causing virtiofsd to exit.
-        // The destination needs a fresh virtiofsd to load DEVICE_STATE.
-        // We remove the socket file first so the destination cannot
+        // Each migration makes the sending VM save DEVICE_STATE and then
+        // disconnect, causing its virtiofsd to exit. The receiving VM needs a
+        // fresh virtiofsd to load DEVICE_STATE, so keep replacing the daemon
+        // whenever it exits until the test is done. The socket file is
+        // removed before each migration so the receiving VM cannot
         // accidentally connect to the old instance.
-        let virtiofsd_socket_clone = virtiofsd_socket_path.clone();
-        let shared_dir_str = shared_dir.to_str().unwrap().to_string();
-        let (restart_tx, restart_rx) = mpsc::channel();
-        let _monitor = thread::spawn(move || {
-            let mut child = daemon_child;
-            let _ = child.wait();
-            let mut path = dirs::home_dir().unwrap();
-            path.push("workloads");
-            path.push("virtiofsd");
-            let new_child = Command::new(path)
-                .args(["--shared-dir", &shared_dir_str])
-                .args(["--socket-path", &virtiofsd_socket_clone])
-                .args(["--cache", "never"])
-                .args(["--tag", "myfs"])
-                .spawn()
-                .unwrap();
-            wait_for_virtiofsd_socket(&virtiofsd_socket_clone);
-            let _ = restart_tx.send(new_child);
-        });
+        let daemon = Arc::new(Mutex::new(daemon_child));
+        let stop = Arc::new(AtomicBool::new(false));
+        let monitor = {
+            let daemon = Arc::clone(&daemon);
+            let stop = Arc::clone(&stop);
+            let socket_path = virtiofsd_socket_path.clone();
+            let shared_dir = shared_dir.to_str().unwrap().to_string();
+            thread::spawn(move || {
+                loop {
+                    // Checked under the lock, so a daemon killed by
+                    // stop_daemon() is never mistaken for one that exited
+                    // after a migration.
+                    let mut daemon = daemon.lock().unwrap();
+                    if stop.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    if matches!(daemon.try_wait(), Ok(Some(_))) {
+                        let mut path = dirs::home_dir().unwrap();
+                        path.push("workloads");
+                        path.push("virtiofsd");
+                        *daemon = Command::new(path)
+                            .args(["--shared-dir", &shared_dir])
+                            .args(["--socket-path", &socket_path])
+                            .args(["--cache", "never"])
+                            .args(["--tag", "myfs"])
+                            .spawn()
+                            .unwrap();
+                        wait_for_virtiofsd_socket(&socket_path);
+                    }
+                    drop(daemon);
+                    thread::sleep(Duration::from_millis(100));
+                }
+            })
+        };
+        let stop_daemon = || {
+            let mut daemon = daemon.lock().unwrap();
+            stop.store(true, Ordering::SeqCst);
+            let _ = daemon.kill();
+            let _ = daemon.wait();
+        };
 
         let r = panic::catch_unwind(|| {
             guest.wait_vm_boot().unwrap();
@@ -8288,6 +8313,7 @@ mod common_parallel {
 
         // Check and report any errors occurred during the live-migration
         if r.is_err() {
+            stop_daemon();
             print_and_panic(
                 src_child,
                 dest_child,
@@ -8300,6 +8326,7 @@ mod common_parallel {
             matches!(src_child.try_wait(), Ok(Some(_)))
         }) && src_child.try_wait().unwrap().is_some_and(|s| s.success());
         if !src_exited_ok {
+            stop_daemon();
             print_and_panic(
                 src_child,
                 dest_child,
@@ -8335,17 +8362,110 @@ mod common_parallel {
             guest.remove_test_disk(&dest_api_socket);
         });
 
-        // Clean up
-        let _ = dest_child.kill();
-        let dest_output = dest_child.wait_with_output().unwrap();
-        if let Ok(mut new_daemon) = restart_rx.try_recv() {
-            let _ = new_daemon.kill();
-            let _ = new_daemon.wait();
+        if r.is_err() {
+            stop_daemon();
+            let _ = dest_child.kill();
+            let dest_output = dest_child.wait_with_output().unwrap();
+            handle_child_output(r, &dest_output);
+            return;
         }
+
+        // Migrate the restored VM once more, dest -> dest2
+        let mut dest2_api_socket = temp_api_path(&guest.tmp_dir);
+        dest2_api_socket.push_str(".dest2");
+        let mut dest2_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &dest2_api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            let migration_socket = String::from(
+                guest
+                    .tmp_dir
+                    .as_path()
+                    .join("live-migration-2.sock")
+                    .to_str()
+                    .unwrap(),
+            );
+
+            let _ = fs::remove_file(&virtiofsd_socket_path);
+
+            // Wait for the VMM to create its API socket
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !Path::new(&dest2_api_socket).exists() {
+                assert!(
+                    Instant::now() < deadline,
+                    "dest2 API socket did not appear within 10s"
+                );
+                thread::sleep(Duration::from_millis(50));
+            }
+
+            assert!(
+                start_live_migration(
+                    &migration_socket,
+                    &dest_api_socket,
+                    &dest2_api_socket,
+                    memfds,
+                    false,
+                    false
+                ),
+                "Unsuccessful second 'send-migration' or 'receive-migration'."
+            );
+        });
+
+        if r.is_err() {
+            stop_daemon();
+            print_and_panic(
+                dest_child,
+                dest2_child,
+                None,
+                "Error occurred during the second live-migration with virtio-fs",
+            );
+        }
+
+        let dest_exited_ok = wait_until(Duration::from_secs(30), || {
+            matches!(dest_child.try_wait(), Ok(Some(_)))
+        }) && dest_child.try_wait().unwrap().is_some_and(|s| s.success());
+        if !dest_exited_ok {
+            stop_daemon();
+            print_and_panic(
+                dest_child,
+                dest2_child,
+                None,
+                "first destination VM was not terminated successfully.",
+            );
+        }
+
+        let r = panic::catch_unwind(|| {
+            assert_eq!(
+                guest
+                    .ssh_command("cat mount_dir/post_migration_file")
+                    .unwrap()
+                    .trim(),
+                "post_migration_data"
+            );
+
+            guest
+                .ssh_command(
+                    "sudo bash -c 'echo second_migration_data > mount_dir/second_migration_file'",
+                )
+                .unwrap();
+
+            let content = fs::read_to_string(shared_dir.join("second_migration_file")).unwrap();
+            assert_eq!(content.trim(), "second_migration_data");
+        });
+
+        // Clean up
+        stop_daemon();
+        monitor.join().unwrap();
+        let _ = dest2_child.kill();
+        let dest2_output = dest2_child.wait_with_output().unwrap();
         let _ = fs::remove_file(shared_dir.join("migration_test_file"));
         let _ = fs::remove_file(shared_dir.join("post_migration_file"));
+        let _ = fs::remove_file(shared_dir.join("second_migration_file"));
 
-        handle_child_output(r, &dest_output);
+        handle_child_output(r, &dest2_output);
     }
 
     #[test]
