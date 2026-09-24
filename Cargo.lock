@@ -1420,6 +1420,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
+name = "lz4_flex"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90071f8077f8e40adfc4b7fe9cd495ce316263f19e75c2211eeff3fdf475a3d9"
+dependencies = [
+ "twox-hash",
+]
+
+[[package]]
 name = "managed"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1571,16 +1580,21 @@ dependencies = [
 name = "offload_daemon"
 version = "0.1.0"
 dependencies = [
+ "cc",
  "clap",
  "env_logger",
  "libc",
  "log",
+ "lz4_flex",
+ "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "vm-memory",
  "vm-migration",
  "vmm",
  "vmm-sys-util",
+ "zstd",
 ]
 
 [[package]]
@@ -2543,6 +2557,12 @@ checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
 dependencies = [
  "once_cell",
 ]
+
+[[package]]
+name = "twox-hash"
+version = "2.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5283634e518fe9e82c7b20520bb4bc209009fd16c82077c802f8111ecbb0117a"
 
 [[package]]
 name = "typenum"

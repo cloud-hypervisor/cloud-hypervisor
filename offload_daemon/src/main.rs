@@ -16,6 +16,10 @@
 //! the VM, and `--ondemand` serves pages on demand over the postcopy fault
 //! connection instead of preloading them.
 
+mod compression;
+#[cfg(feature = "qpl")]
+mod qpl;
+
 use std::ffi::{CString, NulError};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -42,6 +46,8 @@ use vmm::migration::SNAPSHOT_STATE_FILE;
 use vmm::sparse::copy_region;
 use vmm_sys_util::errno;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
+
+use crate::compression::{Codec, compress_file, decompress_file};
 
 const MIGRATION_CONFIG_FILENAME: &str = "migration_config.json";
 
@@ -109,10 +115,16 @@ enum Error {
     SpawnServeThread(#[source] io::Error),
     #[error("The fault serve thread panicked")]
     ServeThreadPanic,
+    #[error("A memory slot worker panicked")]
+    WorkerPanic,
     #[error("PageFault gpa={0:#x} len={1} is not within any slot")]
     PageFaultUnmapped(u64, u64),
     #[error("Writing a faulted page into guest memory")]
     WriteGuestMemory(#[source] GuestMemoryError),
+    #[error("Processing compressed snapshot memory")]
+    Compression(#[from] compression::Error),
+    #[error("Compressed snapshots do not support on demand restore")]
+    CompressedOnDemand,
 }
 
 type Result<T> = result::Result<T, Error>;
@@ -138,6 +150,18 @@ enum Mode {
         /// Directory to write snapshot artifacts into.
         #[arg(long)]
         output_dir: PathBuf,
+        /// Compression codec. Omit to preserve the sparse raw format.
+        #[arg(long)]
+        compression: Option<Codec>,
+        /// Independently compressed chunk size in bytes.
+        #[arg(long, default_value_t = 1 << 20)]
+        chunk_size: usize,
+        /// Number of compression workers.
+        #[arg(long, default_value_t = default_workers())]
+        workers: usize,
+        /// Zstd compression level.
+        #[arg(long, default_value_t = 1)]
+        zstd_level: i32,
     },
     /// Read a snapshot from disk and stream it to a listening CH instance.
     Restore {
@@ -154,7 +178,22 @@ enum Mode {
         /// On demand paging.
         #[arg(long)]
         ondemand: bool,
+        /// Number of decompression workers.
+        #[arg(long, default_value_t = default_workers())]
+        workers: usize,
     },
+}
+
+#[derive(Clone)]
+struct CompressionOptions {
+    codec: Codec,
+    chunk_size: usize,
+    workers: usize,
+    zstd_level: i32,
+}
+
+fn default_workers() -> usize {
+    thread::available_parallelism().map_or(1, usize::from)
 }
 
 fn main() -> Result<()> {
@@ -162,13 +201,29 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
     match cli.mode {
-        Mode::Snapshot { socket, output_dir } => run_snapshot(&socket, &output_dir),
+        Mode::Snapshot {
+            socket,
+            output_dir,
+            compression,
+            chunk_size,
+            workers,
+            zstd_level,
+        } => {
+            let compression = compression.map(|codec| CompressionOptions {
+                codec,
+                chunk_size,
+                workers,
+                zstd_level,
+            });
+            run_snapshot(&socket, &output_dir, compression.as_ref())
+        }
         Mode::Restore {
             socket,
             input_dir,
             resume,
             ondemand,
-        } => run_restore(&socket, &input_dir, resume, ondemand),
+            workers,
+        } => run_restore(&socket, &input_dir, resume, ondemand, workers),
     }
 }
 
@@ -214,7 +269,11 @@ fn acquire_socket_lock(socket_path: &Path) -> Result<File> {
 }
 
 // Snapshot mode (migration receiver).
-fn run_snapshot(socket_path: &Path, output_dir: &Path) -> Result<()> {
+fn run_snapshot(
+    socket_path: &Path,
+    output_dir: &Path,
+    compression: Option<&CompressionOptions>,
+) -> Result<()> {
     fs::create_dir_all(output_dir).map_err(Error::CreateOutputDir)?;
 
     // Hold the lock for the daemon's lifetime. While we hold it, any socket at
@@ -276,7 +335,7 @@ fn run_snapshot(socket_path: &Path, output_dir: &Path) -> Result<()> {
                 let _ = state_bytes
                     .as_ref()
                     .ok_or(Error::PrematureCompletion("State"))?;
-                dump_memory_slots(&memory_slots, mm, output_dir)?;
+                dump_memory_slots(&memory_slots, mm, output_dir, compression)?;
                 Response::ok()
                     .write_to(&mut stream)
                     .map_err(Error::Protocol)?;
@@ -316,12 +375,55 @@ fn dump_memory_slots(
     slots: &[(u32, File)],
     config: &VmMigrationConfig,
     output_dir: &Path,
+    compression: Option<&CompressionOptions>,
 ) -> Result<()> {
     let sizes = slot_sizes(config)?;
     for (expected_slot, _, _) in &sizes {
         if !slots.iter().any(|(s, _)| s == expected_slot) {
             return Err(Error::MissingSlot(*expected_slot));
         }
+    }
+    if let Some(options) = compression {
+        let workers_per_slot = options.workers.div_ceil(slots.len().max(1)).max(1);
+        return thread::scope(|scope| {
+            let mut handles = Vec::with_capacity(slots.len());
+            for (slot, file) in slots {
+                let (size, file_offset) = sizes
+                    .iter()
+                    .find(|(candidate, _, _)| candidate == slot)
+                    .map(|(_, size, file_offset)| (*size, *file_offset))
+                    .ok_or(Error::MissingSlot(*slot))?;
+                let data_path = output_dir.join(format!("memory-{slot}.compressed"));
+                let manifest_path = output_dir.join(format!("memory-{slot}.index.json"));
+                handles.push(scope.spawn(move || {
+                    let stats = compress_file(
+                        file,
+                        file_offset,
+                        size,
+                        &data_path,
+                        &manifest_path,
+                        options.codec,
+                        options.chunk_size,
+                        workers_per_slot,
+                        options.zstd_level,
+                    )?;
+                    info!(
+                        "Compressed slot {slot}: codec={}, chunks={}, input={} bytes, output={} bytes, ratio={:.3}, throughput={:.3} GiB/s",
+                        options.codec,
+                        stats.chunks,
+                        stats.input_bytes,
+                        stats.output_bytes,
+                        stats.ratio(),
+                        stats.throughput_gib_per_second(),
+                    );
+                    Ok::<(), Error>(())
+                }));
+            }
+            for handle in handles {
+                handle.join().map_err(|_| Error::WorkerPanic)??;
+            }
+            Ok(())
+        });
     }
     for (slot, file) in slots {
         let (size, file_offset) = sizes
@@ -396,7 +498,13 @@ fn parse_guest_ram_mappings(value: &serde_json::Value) -> Result<Vec<(u32, u64, 
 }
 
 // Restore mode (migration sender).
-fn run_restore(socket_path: &Path, input_dir: &Path, resume: bool, ondemand: bool) -> Result<()> {
+fn run_restore(
+    socket_path: &Path,
+    input_dir: &Path,
+    resume: bool,
+    ondemand: bool,
+    workers: usize,
+) -> Result<()> {
     let migration_config_bytes =
         fs::read(input_dir.join(MIGRATION_CONFIG_FILENAME)).map_err(Error::ReadFile)?;
     let mut migration_config: VmMigrationConfig = serde_json::from_slice(&migration_config_bytes)?;
@@ -416,27 +524,62 @@ fn run_restore(socket_path: &Path, input_dir: &Path, resume: bool, ondemand: boo
     send_request_expect_ok(&mut stream, Request::start(), "Start")?;
 
     let mut ondemand_slots: Vec<OnDemandSlot> = Vec::new();
+    let slots = slot_info(&migration_config)?;
 
-    for (slot, gpa, size, file_offset) in slot_info(&migration_config)? {
+    if !ondemand {
+        let workers_per_slot = workers.div_ceil(slots.len().max(1)).max(1);
+        let memfds = thread::scope(|scope| {
+            let mut handles = Vec::with_capacity(slots.len());
+            for &(slot, _, size, file_offset) in &slots {
+                let disk_path = input_dir.join(memory_slot_filename(slot));
+                let compressed_data_path = input_dir.join(format!("memory-{slot}.compressed"));
+                let manifest_path = input_dir.join(format!("memory-{slot}.index.json"));
+                handles.push(scope.spawn(move || {
+                    let compressed = manifest_path.exists();
+                    let memfd = create_memfd_with_contents(
+                        &disk_path,
+                        compressed
+                            .then_some((compressed_data_path.as_path(), manifest_path.as_path())),
+                        file_offset,
+                        size,
+                        &format!("offload-slot-{slot}"),
+                        workers_per_slot,
+                    )?;
+                    Ok::<_, Error>((slot, size, file_offset, memfd))
+                }));
+            }
+            handles
+                .into_iter()
+                .map(|handle| handle.join().map_err(|_| Error::WorkerPanic)?)
+                .collect::<Result<Vec<_>>>()
+        })?;
+        for (slot, size, file_offset, memfd) in memfds {
+            send_memory_fd(&mut stream, slot, &memfd)?;
+            debug!(
+                "restore: sent memory fd for slot {slot} ({size} bytes at fd offset \
+                 {file_offset:#x}, ondemand=false)"
+            );
+        }
+    }
+
+    for (slot, gpa, size, file_offset) in slots {
+        if !ondemand {
+            continue;
+        }
         let disk_path = input_dir.join(memory_slot_filename(slot));
-        let memfd = if ondemand {
-            let memfd = create_empty_memfd(file_offset + size, &format!("offload-slot-{slot}"))?;
-            ondemand_slots.push(OnDemandSlot::new(
-                &memfd,
-                gpa,
-                size,
-                file_offset,
-                &disk_path,
-            )?);
-            memfd
-        } else {
-            create_memfd_with_contents(
-                &disk_path,
-                file_offset,
-                size,
-                &format!("offload-slot-{slot}"),
-            )?
-        };
+        let manifest_path = input_dir.join(format!("memory-{slot}.index.json"));
+        let compressed = manifest_path.exists();
+        if compressed {
+            return Err(Error::CompressedOnDemand);
+        }
+        let memfd = create_empty_memfd(file_offset + size, &format!("offload-slot-{slot}"))?;
+        ondemand_slots.push(OnDemandSlot::new(
+            &memfd,
+            gpa,
+            size,
+            file_offset,
+            &disk_path,
+        )?);
         send_memory_fd(&mut stream, slot, &memfd)?;
         debug!(
             "restore: sent memory fd for slot {slot} ({size} bytes at fd offset \
@@ -621,15 +764,29 @@ fn send_memory_fd(stream: &mut UnixStream, slot: u32, memfd: &File) -> Result<()
 
 fn create_memfd_with_contents(
     src_path: &Path,
+    compressed_paths: Option<(&Path, &Path)>,
     file_offset: u64,
     size: u64,
     name: &str,
+    workers: usize,
 ) -> Result<File> {
     // Size the memfd to cover the range CH maps at `file_offset`.
     let memfd = create_empty_memfd(file_offset + size, name)?;
-    let src = File::open(src_path).map_err(Error::ReadFile)?;
-    // Copy sparsely so the memfd keeps the snapshot's holes.
-    copy_region(&src, 0, &memfd, file_offset, size).map_err(Error::CopyMemory)?;
+    if let Some((data_path, manifest_path)) = compressed_paths {
+        let stats = decompress_file(data_path, manifest_path, &memfd, file_offset, size, workers)?;
+        info!(
+            "Decompressed {name}: chunks={}, compressed={} bytes, output={} bytes, ratio={:.3}, throughput={:.3} GiB/s",
+            stats.chunks,
+            stats.output_bytes,
+            stats.input_bytes,
+            stats.ratio(),
+            stats.throughput_gib_per_second(),
+        );
+    } else {
+        let src = File::open(src_path).map_err(Error::ReadFile)?;
+        // Copy sparsely so the memfd keeps the snapshot's holes.
+        copy_region(&src, 0, &memfd, file_offset, size).map_err(Error::CopyMemory)?;
+    }
     Ok(memfd)
 }
 

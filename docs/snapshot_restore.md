@@ -324,6 +324,53 @@ call is the same as for a regular restore:
     --resume --ondemand
 ```
 
+### Compression evaluation
+
+The reference daemon can store each memory slot as independently compressed
+chunks for eager restore. Build with the `qpl` feature to enable Intel QPL;
+LZ4 and Zstd are available in ordinary builds.
+
+```bash
+QPL_INCLUDE_DIR=/usr/local/include \
+QPL_LIB_DIR=/usr/local/lib64 \
+  cargo build -p offload_daemon --release --features qpl
+
+./target/release/offload_daemon snapshot \
+  --socket /tmp/offload.sock \
+  --output-dir /var/snapshots/vm1 \
+  --compression qpl-hardware-static \
+  --chunk-size 1048576 \
+  --workers 8
+
+./target/release/offload_daemon restore \
+  --socket /tmp/restore.sock \
+  --input-dir /var/snapshots/vm1 \
+  --workers 8
+```
+
+QPL is statically linked when the `qpl` feature is enabled. `QPL_INCLUDE_DIR`
+selects the directory containing `qpl/qpl.h`, and `QPL_LIB_DIR` selects the
+directory containing `libqpl.a`; they default to `/usr/local/include` and
+`/usr/local/lib64`. `/usr/local/share/QPL` contains accelerator configuration
+files and scripts, not the linkable library.
+
+Use `lz4`, `zstd`, `qpl-hardware-static`, `qpl-hardware-dynamic`,
+`qpl-hardware-static-async`,
+`qpl-hardware-dynamic-async`, or `qpl-auto` as the compression codec. Static
+mode uses fixed Deflate Huffman coding; dynamic mode sets QPL's
+`QPL_FLAG_DYNAMIC_HUFFMAN`. The `-async` codecs reuse a bounded rolling pool,
+submit chunks to IAA in parallel, retry a busy shared work queue, and refill
+each job slot immediately after completion. Submission and completion waits
+are bounded. For these codecs, `--workers` is the maximum number of in-flight
+jobs. Input and output buffers are reused in both synchronous and asynchronous
+paths. Independent VM memory slots are processed concurrently while sharing
+the configured worker budget. All-zero chunks have explicit manifest records
+and no compressed payload; eager restore leaves those ranges in the fresh
+zero-filled memfd. The legacy `qpl-hardware` name remains a dynamic mode alias
+for existing manifests. The daemon logs input size, output size, ratio, chunk
+count, and uncompressed GiB/s for each slot. Compressed snapshots currently
+support eager restore only; combining them with `--ondemand` is rejected.
+
 ### The daemon protocol
 
 The daemon implements the local live-migration wire protocol defined in

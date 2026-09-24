@@ -125,6 +125,7 @@ flume = "0.12.0"
 itertools = "0.15.0"
 jiff = { version = "0.2", default-features = false, features = ["std"] }
 libc = "0.2.186"
+lz4_flex = "0.12.0"
 log = "0.4.30"
 rustls = { version = "0.23.40", default-features = false, features = [
   "logging",
@@ -139,6 +140,7 @@ thiserror = "2.0.18"
 uuid = { version = "1.23.2" }
 wait-timeout = "0.2.1"
 zerocopy = { version = "0.8.50", default-features = false }
+zstd = "0.14.0"
 
 [workspace.lints.clippy]
 # Any clippy lint (group) in alphabetical order:
