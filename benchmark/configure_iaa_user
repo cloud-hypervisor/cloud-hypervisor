@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+
+# Script configure IAA devices
+
+# Usage : ./configure_iaa_user <mode> <start,end> <wq_size>
+# mode: 0 - shared, 1 - dedicated
+# devices: 0 - all devices or start and end device number. 
+#  For example, 1, 7 will configure all the Socket0 devices in host or 0, 3  will configure all the Socket0 devices in guest
+#               9, 15  will configure all the Socket1 devices and son on
+#               1  will conigure only device 1
+# skip_disable: Skip IAA device disabling before reconfiguring. Useful when configurating across sockets. 
+#               For example, Use skip_disable for the second socket
+# wq_size: 1-128
+#
+# select iax config
+#
+dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+#echo ${dir}
+#
+# count iax instances
+#
+iax_dev_id="0cfe|1216"
+num_iax=$(lspci -Dnn | grep -Ec ${iax_dev_id})
+echo "Found ${num_iax} IAX instances"
+
+dedicated=${1:-0}; shift
+device_num=${1:-$num_iax}; shift
+skip_disable=${1:-0}; shift # skip_disable turned off by default
+wq_size=${1:-128}; shift
+
+if [ ${dedicated} -eq 0 ]; then
+    mode="shared"
+else
+    mode="dedicated"
+fi
+
+# Adjust the number of IAA engines based on the product. 
+model=$(lscpu | grep "Model:" | awk -F '[:]' '{print $2}' | tr -d " ")
+cpu_family=$(lscpu | grep "^CPU family:" | awk -F '[:]' '{print $2}' | tr -d " ")
+engines=8
+if [[ $model -eq  1 && $cpu_family -eq 19 ]]; then
+    # 7th Gen Xeon
+    engines=12
+fi
+
+#check whether running on host or guest and if dsa exist
+hyp=`lscpu | grep -c hypervisor`
+#check if devices are configurable or vdevs
+conf=`cat /sys/bus/dsa/devices/iax*/configurable|uniq` 
+dsa=`lspci -Dnn | grep -Ec '0b25|1212'`
+#set first,step counters to correctly enumerate iax devices based on whether running on guest or host with or without dsa
+first=0
+step=1
+#[[ $hyp -eq 0 || $dsa -gt 0 ]] && first=1 && step=2
+[[ $dsa -gt 0 && -d /sys/bus/dsa/devices/dsa0 ]] && first=1 && step=2
+[[ $hyp -eq 0 ]] && for ((i = ${first}; i < ${step} * ${num_iax}; i += ${step})); do accel-config remove-mdev iax$i all 2> /dev/null;done #remove any mdev
+echo "first index: ${first}, step: ${step}, hyp: $hyp configurable: $conf"
+
+
+#
+# disable iax wqs and devices
+#
+echo "Disable IAX"
+
+
+if [ ${skip_disable} -eq 0 ]; then
+    # Disable devices only when skip_disable is turned off
+    for ((i = ${first}; i < ${step} * ${num_iax}; i += ${step})); do
+        echo disable wq iax${i}/wq${i}.0 >& /dev/null
+        accel-config disable-wq iax${i}/wq${i}.0 >& /dev/null
+        echo disable iax iax${i} >& /dev/null
+        [[ $conf -eq 1 ]] && accel-config disable-device iax${i} >& /dev/null
+    done
+fi
+
+echo "Configuring devices: ${device_num}"
+
+if [ ${device_num} == $num_iax ]; then
+    echo "Configuring all devices"
+    start=${first}
+    end=$(( ${step} * ${num_iax} ))
+else
+    echo "Configuring devices ${device_num}"
+    declare -a array=($(echo ${device_num}| tr "," " ")) 
+    start=${array[0]}
+    if [ ${array[1]}  ];then
+        end=$((${array[1]} + 1 ))
+    else
+        end=$((${array[0]} + 1 ))
+    fi
+fi
+
+
+#
+# enable all iax devices and wqs
+#
+echo "Enable IAX ${start} to ${end}"
+for ((i = ${start}; i < ${end}; i += ${step})); do
+    # Config  Engines and groups
+
+    if [[ $conf -eq 1 ]]; then
+        for ((j = 0; j < ${engines}; j += 1)); do
+            accel-config config-engine iax${i}/engine${i}.${j} --group-id=0
+        done
+        # Config WQ: group 0, size = 128, priority=10, mode=shared, type = user, name=iax_crypto, threashold=128, block_on_fault=1, driver_name=user
+        accel-config config-wq iax${i}/wq${i}.0 -g 0 -s $wq_size -p 10 -m ${mode} -y user -n user${i} -t $wq_size -b 1 -d user -x 300000000
+    else
+        accel-config config-wq  iax${i}/wq${i}.0 -y user -n user${i} -d user
+    fi
+
+    echo enable device iax${i}
+    accel-config enable-device iax${i}
+    echo enable wq iax${i}/wq${i}.0
+    accel-config enable-wq iax${i}/wq${i}.0
+done
+
+

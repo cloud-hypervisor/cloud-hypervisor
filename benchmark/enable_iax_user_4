@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+# Enable all IAA devices in shared mode 
+echo "Configuring 4 IAA device"
+${dir}/configure_iaa_user 0 1,7
