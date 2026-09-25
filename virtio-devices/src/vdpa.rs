@@ -10,13 +10,13 @@ use std::{io, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vhost::vdpa::{VhostVdpa, VhostVdpaIovaRange};
 use vhost::vhost_kern::VhostKernFeatures;
 use vhost::vhost_kern::vdpa::VhostKernVdpa;
-use vhost::vhost_kern::vhost_binding::VHOST_BACKEND_F_SUSPEND;
+use vhost::vhost_kern::vhost_binding::{VHOST, VHOST_BACKEND_F_SUSPEND};
 use vhost::{VhostBackend, VringConfigData};
 use virtio_queue::desc::RawDescriptor;
 use virtio_queue::{Queue, QueueT};
@@ -25,6 +25,8 @@ use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryB
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
+use vmm_sys_util::ioctl::ioctl;
+use vmm_sys_util::ioctl_io_nr;
 
 use crate::device::ActivationContext;
 use crate::{
@@ -88,6 +90,10 @@ pub enum Error {
 }
 
 pub type Result<T> = result::Result<T, Error>;
+
+// Linux vhost UAPI definitions not yet exposed by the vhost crate.
+const VHOST_BACKEND_F_RESUME: u64 = 0x5;
+ioctl_io_nr!(VHOST_VDPA_RESUME, VHOST, 0x7e);
 
 #[derive(Serialize, Deserialize)]
 pub struct VdpaState {
@@ -526,19 +532,47 @@ impl Transportable for Vdpa {}
 
 impl Migratable for Vdpa {
     fn start_migration(&mut self) -> result::Result<(), MigratableError> {
-        self.migrating = true;
+        if self.backend_features & (1 << VHOST_BACKEND_F_RESUME) == 0 {
+            warn!(
+                "vDPA device {} isn't capable of being resumed after a failed migration",
+                self.id
+            );
+        }
+
         // Given there's no way to track dirty pages, we must suspend the
         // device as soon as the migration process starts.
         if self.backend_features & (1 << VHOST_BACKEND_F_SUSPEND) != 0 {
             assert!(self.vhost.is_some());
             self.vhost.as_ref().unwrap().suspend().map_err(|e| {
                 MigratableError::StartMigration(anyhow!("Error suspending vDPA device: {e:?}"))
-            })
+            })?;
+            self.migrating = true;
+            Ok(())
         } else {
             Err(MigratableError::StartMigration(anyhow!(
                 "vDPA device can't be suspended"
             )))
         }
+    }
+
+    fn failed_migration(&mut self) -> result::Result<(), MigratableError> {
+        if !self.migrating {
+            return Ok(());
+        }
+
+        // Snapshot might have taken the device already.
+        let vhost = self.vhost.as_ref().ok_or_else(|| {
+            MigratableError::AbortMigration(anyhow!("Missing vDPA device to resume"))
+        })?;
+        // SAFETY: vhost owns a valid vDPA fd and this ioctl takes no arguments.
+        if unsafe { ioctl(vhost, VHOST_VDPA_RESUME()) } < 0 {
+            return Err(MigratableError::AbortMigration(
+                anyhow::Error::new(io::Error::last_os_error())
+                    .context("Error resuming vDPA device"),
+            ));
+        }
+        self.migrating = false;
+        Ok(())
     }
 
     fn complete_migration(&mut self) -> result::Result<(), MigratableError> {

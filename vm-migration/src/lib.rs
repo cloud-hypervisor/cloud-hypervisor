@@ -98,6 +98,9 @@ pub enum MigratableError {
     #[error("Failed to start migration for migratable component")]
     StartMigration(#[source] anyhow::Error),
 
+    #[error("Failed to abort migration for migratable component")]
+    AbortMigration(#[source] anyhow::Error),
+
     #[error("Failed to complete migration for migratable component")]
     CompleteMigration(#[source] anyhow::Error),
 
