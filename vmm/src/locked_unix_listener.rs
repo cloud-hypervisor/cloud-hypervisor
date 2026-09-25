@@ -32,13 +32,46 @@ pub(crate) enum LockedUnixListenerError {
     Io(#[source] io::Error),
 }
 
+struct SocketLock {
+    _file: File,
+    path: PathBuf,
+}
+
+impl SocketLock {
+    fn acquire(socket_path: &Path) -> Result<Self, LockedUnixListenerError> {
+        let mut path = socket_path.to_path_buf().into_os_string();
+        path.push(".lock");
+        let path = PathBuf::from(path);
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .map_err(LockedUnixListenerError::Io)?;
+
+        match try_acquire_lock(&file, LockType::Write, LockGranularity::WholeFile) {
+            Ok(()) => Ok(Self { _file: file, path }),
+            Err(LockError::AlreadyLocked) => {
+                Err(LockedUnixListenerError::InUse(socket_path.to_path_buf()))
+            }
+            Err(LockError::Io(e)) => Err(LockedUnixListenerError::Io(e)),
+        }
+    }
+}
+
+impl Drop for SocketLock {
+    fn drop(&mut self) {
+        fs::remove_file(&self.path).ok();
+    }
+}
+
 /// A bound Unix socket together with the lock guarding its path.
 ///
 /// The lock is held for as long as the socket is bound and released by the
 /// kernel when the process exits, including on a crash.
 pub struct LockedUnixListener {
     listener: UnixListener,
-    _lock: File,
+    _lock: SocketLock,
     path: PathBuf,
 }
 
@@ -48,7 +81,7 @@ impl LockedUnixListener {
     /// Fails with [`LockedUnixListenerError::InUse`] if another instance is bound to this
     /// path.
     pub(crate) fn bind(socket_path: &Path) -> Result<Self, LockedUnixListenerError> {
-        let lock = Self::acquire_lock(socket_path)?;
+        let lock = SocketLock::acquire(socket_path)?;
         // We hold the lock, so a socket here is stale from a crash; remove it
         // (only an actual socket, not another file at this path). metadata()
         // rather than symlink_metadata() to avoid lstat(), which the vmm
@@ -64,26 +97,6 @@ impl LockedUnixListener {
             _lock: lock,
             path: socket_path.to_path_buf(),
         })
-    }
-
-    fn acquire_lock(socket_path: &Path) -> Result<File, LockedUnixListenerError> {
-        let mut lock_path = socket_path.to_path_buf().into_os_string();
-        lock_path.push(".lock");
-
-        let lock = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&lock_path)
-            .map_err(LockedUnixListenerError::Io)?;
-
-        match try_acquire_lock(&lock, LockType::Write, LockGranularity::WholeFile) {
-            Ok(()) => Ok(lock),
-            Err(LockError::AlreadyLocked) => {
-                Err(LockedUnixListenerError::InUse(socket_path.to_path_buf()))
-            }
-            Err(LockError::Io(e)) => Err(LockedUnixListenerError::Io(e)),
-        }
     }
 
     pub(crate) fn listener(&self) -> &UnixListener {
@@ -159,15 +172,33 @@ mod tests {
     }
 
     #[test]
-    fn test_drop_unlinks_the_socket() {
+    fn test_drop_unlinks_the_socket_and_lock() {
         let tmp_dir = TempDir::new_with_prefix("/tmp/locked-socket").unwrap();
         let path = tmp_dir.as_path().join("test.sock");
+        let mut lock_path = path.clone().into_os_string();
+        lock_path.push(".lock");
+        let lock_path = PathBuf::from(lock_path);
 
         {
             let _socket = LockedUnixListener::bind(&path).unwrap();
             assert!(path.exists());
+            assert!(lock_path.exists());
         }
         assert!(!path.exists());
+        assert!(!lock_path.exists());
+    }
+
+    #[test]
+    fn test_failed_bind_unlinks_the_lock() {
+        let tmp_dir = TempDir::new_with_prefix("/tmp/locked-socket").unwrap();
+        let path = tmp_dir.as_path().join("test.sock");
+        let mut lock_path = path.clone().into_os_string();
+        lock_path.push(".lock");
+        let lock_path = PathBuf::from(lock_path);
+        fs::write(&path, "not a socket").unwrap();
+
+        assert!(LockedUnixListener::bind(&path).is_err());
+        assert!(!lock_path.exists());
     }
 
     #[test]
