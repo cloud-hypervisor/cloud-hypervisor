@@ -1749,6 +1749,10 @@ impl MemoryManager {
                 // based on the GuestMemoryBackend regions.
                 continue;
             }
+            // The allocator stops at the device area.
+            if GuestAddress(region.base) > self.ram_allocator.end() {
+                continue;
+            }
             self.ram_allocator
                 .allocate(
                     Some(GuestAddress(region.base)),
@@ -3432,6 +3436,42 @@ impl Aml for MemoryManager {
                 ],
             )
             .to_aml_bytes(sink);
+        }
+
+        // Ranges below 4 GiB fall in the 32 bit device hole, which guest
+        // RAM never occupies, so only the higher ones need declaring.
+        #[cfg(target_arch = "x86_64")]
+        {
+            let reserved: Vec<_> = self
+                .arch_mem_regions
+                .iter()
+                .filter(|r| {
+                    r.r_type == RegionType::Reserved
+                        && r.base >= layout::RAM_64BIT_START.raw_value()
+                })
+                .map(|r| {
+                    aml::AddressSpace::new_memory(
+                        aml::AddressSpaceCacheable::NotCacheable,
+                        true,
+                        r.base,
+                        r.base + r.size as u64 - 1,
+                        None,
+                    )
+                })
+                .collect();
+
+            if !reserved.is_empty() {
+                let crs: Vec<&dyn Aml> = reserved.iter().map(|r| r as &dyn Aml).collect();
+                aml::Device::new(
+                    "_SB_.MRSV".into(),
+                    vec![
+                        &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0C02")),
+                        &aml::Name::new("_UID".into(), &"Reserved Memory"),
+                        &aml::Name::new("_CRS".into(), &aml::ResourceTemplate::new(crs)),
+                    ],
+                )
+                .to_aml_bytes(sink);
+            }
         }
     }
 }

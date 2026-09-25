@@ -1184,8 +1184,26 @@ pub fn arch_memory_regions() -> Vec<(GuestAddress, usize, RegionType)> {
             layout::MEM_32BIT_RESERVED_START.raw_value() as usize,
             RegionType::Ram,
         ),
-        // 4 GiB ~ inf: memory after the gap
-        (layout::RAM_64BIT_START, usize::MAX, RegionType::Ram),
+        // 4 GiB ~ 1012 GiB: memory after the gap
+        (
+            layout::RAM_64BIT_START,
+            layout::AMD_HYPER_TRANSPORT_HOLE_START.unchecked_offset_from(layout::RAM_64BIT_START)
+                as usize,
+            RegionType::Ram,
+        ),
+        // 1012 GiB ~ 1 TiB: the range the AMD IOMMU reserves
+        (
+            layout::AMD_HYPER_TRANSPORT_HOLE_START,
+            layout::AMD_HYPER_TRANSPORT_HOLE_SIZE as usize,
+            RegionType::Reserved,
+        ),
+        // 1 TiB ~ inf: memory above the reserved range
+        (
+            layout::AMD_HYPER_TRANSPORT_HOLE_START
+                .unchecked_add(layout::AMD_HYPER_TRANSPORT_HOLE_SIZE),
+            usize::MAX,
+            RegionType::Ram,
+        ),
         // 3 GiB ~ 3712 MiB: 32-bit device memory hole
         (
             layout::MEM_32BIT_RESERVED_START,
@@ -1757,9 +1775,21 @@ mod tests {
     #[test]
     fn regions_base_addr() {
         let regions = arch_memory_regions();
-        assert_eq!(4, regions.len());
+        assert_eq!(6, regions.len());
         assert_eq!(GuestAddress(0), regions[0].0);
         assert_eq!(GuestAddress(1 << 32), regions[1].0);
+
+        assert_eq!(layout::AMD_HYPER_TRANSPORT_HOLE_START, regions[2].0);
+        assert_eq!(RegionType::Reserved, regions[2].2);
+        assert_eq!(
+            layout::AMD_HYPER_TRANSPORT_HOLE_START
+                .unchecked_add(layout::AMD_HYPER_TRANSPORT_HOLE_SIZE),
+            regions[3].0
+        );
+
+        assert_eq!(layout::MEM_32BIT_RESERVED_START, regions[4].0);
+        assert_eq!(RegionType::SubRegion, regions[4].2);
+        assert_eq!(RegionType::Reserved, regions[5].2);
     }
 
     #[test]
@@ -1767,6 +1797,14 @@ mod tests {
         assert!(
             reserved_regions().contains(&(layout::PCI_MMCONFIG_START.0, layout::PCI_MMCONFIG_SIZE))
         );
+    }
+
+    #[test]
+    fn reserved_regions_hold_hypertransport() {
+        assert!(reserved_regions().contains(&(
+            layout::AMD_HYPER_TRANSPORT_HOLE_START.raw_value(),
+            layout::AMD_HYPER_TRANSPORT_HOLE_SIZE
+        )));
     }
 
     #[test]
