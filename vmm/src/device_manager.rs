@@ -137,6 +137,7 @@ use crate::pci_segment::PciSegment;
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
 #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
 use crate::sev::SevSnpSharedPageTracker;
+use crate::util::flatten_error_chain_to_string;
 #[cfg(feature = "ivshmem")]
 use crate::vm_config::IvshmemConfig;
 use crate::vm_config::{
@@ -6128,6 +6129,22 @@ impl Migratable for DeviceManager {
             }
         }
         Ok(())
+    }
+
+    fn failed_migration(&mut self) -> result::Result<(), MigratableError> {
+        let mut result = Ok(());
+        for (id, device_node) in self.device_tree.lock().unwrap().iter() {
+            if let Some(migratable) = &device_node.migratable
+                && let Err(e) = migratable.lock().unwrap().failed_migration()
+            {
+                warn!(
+                    "Failed to abort migration for device {id}: {}",
+                    flatten_error_chain_to_string(&e)
+                );
+                result = result.and(Err(e));
+            }
+        }
+        result
     }
 
     fn complete_migration(&mut self) -> result::Result<(), MigratableError> {

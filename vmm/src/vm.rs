@@ -3483,6 +3483,11 @@ impl Migratable for Vm {
         self.device_manager.lock().unwrap().start_migration()
     }
 
+    fn failed_migration(&mut self) -> result::Result<(), MigratableError> {
+        self.memory_manager.lock().unwrap().failed_migration()?;
+        self.device_manager.lock().unwrap().failed_migration()
+    }
+
     fn complete_migration(&mut self) -> result::Result<(), MigratableError> {
         self.memory_manager.lock().unwrap().complete_migration()?;
         self.device_manager.lock().unwrap().complete_migration()

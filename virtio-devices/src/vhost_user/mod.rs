@@ -846,6 +846,11 @@ impl VhostUserCommon {
         Ok(())
     }
 
+    pub fn failed_migration(&mut self) -> result::Result<(), MigratableError> {
+        self.migration_started = false;
+        Ok(())
+    }
+
     pub fn complete_migration(&mut self) -> result::Result<(), MigratableError> {
         self.migration_started = false;
         self.dirty_logging = false;
