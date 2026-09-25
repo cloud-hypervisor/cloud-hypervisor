@@ -46,6 +46,7 @@ bitflags! {
         const MEMORY_DEVICES_CHANGED = 0b10;
         const PCI_DEVICES_CHANGED = 0b100;
         const POWER_BUTTON_CHANGED = 0b1000;
+        const VMGENID_CHANGED = 0b1_0000;
     }
 }
 

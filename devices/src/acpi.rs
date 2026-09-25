@@ -34,6 +34,8 @@ pub const VMGENID_SIZE: usize = 16;
 #[cfg(not(target_arch = "riscv64"))]
 pub const VMGENID_REGION_SIZE: u64 = 0x1000;
 
+const VMGENID_GED_BIT: usize = AcpiNotificationFlags::VMGENID_CHANGED.bits() as usize;
+
 /// A device for handling ACPI shutdown and reboot
 pub struct AcpiShutdownDevice {
     guest_exit_evt: EventFd,
@@ -213,6 +215,14 @@ impl Aml for AcpiGedDevice {
                                 &0x80usize,
                             )],
                         ),
+                        &aml::And::new(&aml::Local(1), &aml::Local(0), &VMGENID_GED_BIT),
+                        &aml::If::new(
+                            &aml::Equal::new(&aml::Local(1), &VMGENID_GED_BIT),
+                            vec![&aml::Notify::new(
+                                &aml::Path::new("\\_SB_.VGEN"),
+                                &0x80usize,
+                            )],
+                        ),
                     ],
                 ),
             ],
@@ -364,12 +374,40 @@ impl BusDevice for AcpiPmTimerDevice {
 
 #[cfg(all(test, not(target_arch = "riscv64")))]
 mod tests {
+    use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};
+
     use super::*;
 
     const DEVICE_OP: &[u8] = &[0x5b, 0x82];
     const DUAL_NAME_PREFIX: u8 = 0x2e;
     const NAME_OP: u8 = 0x08;
     const STRING_PREFIX: u8 = 0x0d;
+
+    struct NoopInterrupts;
+
+    impl InterruptSourceGroup for NoopInterrupts {
+        fn trigger(&self, _index: InterruptIndex) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
+            None
+        }
+
+        fn update(
+            &self,
+            _index: InterruptIndex,
+            _config: InterruptSourceConfig,
+            _masked: bool,
+            _set_gsi: bool,
+        ) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn set_gsi(&self) -> io::Result<()> {
+            Ok(())
+        }
+    }
 
     fn encode(aml: &dyn Aml) -> Vec<u8> {
         let mut bytes = Vec::new();
@@ -422,6 +460,19 @@ mod tests {
         expected.push(0x01); // One
 
         assert_eq!(&bytes[bytes.len() - expected.len()..], expected);
+    }
+
+    #[test]
+    fn test_ged_notifies_vmgenid() {
+        let ged = AcpiGedDevice::new(Arc::new(NoopInterrupts), 5, GuestAddress(0x1000));
+
+        let mut notify = Vec::new();
+        notify.extend_from_slice(&[0x86, 0x5c, DUAL_NAME_PREFIX]); // Notify, root path
+        notify.extend_from_slice(b"_SB_VGEN");
+        notify.extend_from_slice(&[0x0a, 0x80]); // 0x80
+
+        let bytes = encode(&ged);
+        assert!(bytes.windows(notify.len()).any(|w| w == notify));
     }
 
     #[test]
