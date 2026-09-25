@@ -658,6 +658,7 @@ dependencies = [
  "bitflags 2.13.2",
  "byteorder",
  "event_monitor",
+ "getrandom 0.3.4",
  "hypervisor",
  "libc",
  "linux-loader",
