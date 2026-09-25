@@ -499,11 +499,28 @@ impl FwCfg {
                 MEM_32BIT_RESERVED_START.0 as usize - HIGH_RAM_START.0 as usize,
                 RegionType::Ram,
             ));
-            mem_regions.push((
-                RAM_64BIT_START,
-                mem_size - (MEM_32BIT_DEVICES_START.0 as usize),
-                RegionType::Ram,
-            ));
+            let mut base = RAM_64BIT_START.0;
+            let mut left = mem_size as u64 - MEM_32BIT_DEVICES_START.0;
+            for (r_base, r_size) in arch::arch_memory_regions()
+                .into_iter()
+                .filter(|(base, _, r_type)| {
+                    *r_type == RegionType::Reserved && base.0 >= RAM_64BIT_START.0
+                })
+                .map(|(base, size, _)| (base.0, size as u64))
+            {
+                if base + left <= r_base {
+                    break;
+                }
+                mem_regions.push((
+                    GuestAddress(base),
+                    (r_base - base) as usize,
+                    RegionType::Ram,
+                ));
+                mem_regions.push((GuestAddress(r_base), r_size as usize, RegionType::Reserved));
+                left -= r_base - base;
+                base = r_base + r_size;
+            }
+            mem_regions.push((GuestAddress(base), left as usize, RegionType::Ram));
         }
         let mut bytes = vec![];
         for (addr, size, region) in mem_regions.iter() {
