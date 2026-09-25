@@ -124,6 +124,16 @@ seed_vmdk() {
     "$QEMU_IMG" convert -O vmdk -o subformat=twoGbMaxExtentFlat "$source" "$work/two.vmdk"
     cp "$work/flat.vmdk" "$out/monolithic.vmdk"
     cp "$work/two.vmdk" "$out/twogb.vmdk"
+
+    # One byte over the parser's 1 MiB descriptor limit.
+    python3 - "$out/oversized.vmdk" <<'PY'
+import pathlib
+import sys
+
+limit = 1 << 20
+header = b"# Disk DescriptorFile\n"
+pathlib.Path(sys.argv[1]).write_bytes(header + b"#" * (limit + 1 - len(header)))
+PY
 }
 
 # disk_detect seeds: the seeds of every image target.
