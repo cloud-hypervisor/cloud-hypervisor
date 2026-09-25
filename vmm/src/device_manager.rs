@@ -2709,8 +2709,10 @@ impl DeviceManager {
                 return Err(DeviceManagerError::GuestBlockSizeBelowBackend);
             }
 
-            if disk_cfg.image_type != ImageType::Qcow2 && disk_cfg.backing_files {
-                warn!("Enabling backing_files option only applies for QCOW2 files");
+            if disk_cfg.backing_files
+                && !matches!(disk_cfg.image_type, ImageType::Qcow2 | ImageType::FlatVmdk)
+            {
+                warn!("Enabling backing_files option only applies for QCOW2 and VMDK files");
             }
 
             let rate_limit_group =
