@@ -10,14 +10,29 @@ use std::{io, thread};
 
 use acpi_tables::{Aml, AmlSink, aml};
 use log::{error, info, warn};
+#[cfg(not(target_arch = "riscv64"))]
+use thiserror::Error;
 use vm_device::BusDevice;
 use vm_device::interrupt::InterruptSourceGroup;
-use vm_memory::GuestAddress;
+#[cfg(not(target_arch = "riscv64"))]
+use vm_memory::VolatileMemory;
+#[cfg(not(target_arch = "riscv64"))]
+use vm_memory::bitmap::AtomicBitmap;
+#[cfg(not(target_arch = "riscv64"))]
+use vm_memory::volatile_memory::Error as VolatileMemoryError;
+use vm_memory::{GuestAddress, MmapRegion};
 use vmm_sys_util::eventfd::EventFd;
 
 use super::AcpiNotificationFlags;
 
 pub const GED_DEVICE_ACPI_SIZE: usize = 0x1;
+
+#[cfg(not(target_arch = "riscv64"))]
+pub const VMGENID_SIZE: usize = 16;
+
+// KVM requires a memory slot to be page sized.
+#[cfg(not(target_arch = "riscv64"))]
+pub const VMGENID_REGION_SIZE: u64 = 0x1000;
 
 /// A device for handling ACPI shutdown and reboot
 pub struct AcpiShutdownDevice {
@@ -230,6 +245,70 @@ impl Aml for AcpiGedDevice {
     }
 }
 
+/// A device exposing a VM Generation ID from its own memory region
+#[cfg(not(target_arch = "riscv64"))]
+pub struct VmGenIdDevice {
+    address: GuestAddress,
+    region: Arc<MmapRegion<AtomicBitmap>>,
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+#[derive(Debug, Error)]
+pub enum VmGenIdError {
+    #[error("Failed to read random bytes for the VM Generation ID")]
+    Random(#[source] getrandom::Error),
+
+    #[error("Failed to publish the VM Generation ID")]
+    Publish(#[source] VolatileMemoryError),
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+impl VmGenIdDevice {
+    pub fn new(
+        address: GuestAddress,
+        region: Arc<MmapRegion<AtomicBitmap>>,
+    ) -> Result<VmGenIdDevice, VmGenIdError> {
+        let device = VmGenIdDevice { address, region };
+        device.regenerate()?;
+
+        Ok(device)
+    }
+
+    pub fn regenerate(&self) -> Result<(), VmGenIdError> {
+        let mut gen_id = [0u8; VMGENID_SIZE];
+        getrandom::fill(&mut gen_id).map_err(VmGenIdError::Random)?;
+
+        self.region
+            .get_slice(0, VMGENID_SIZE)
+            .map_err(VmGenIdError::Publish)?
+            .copy_from(&gen_id);
+
+        Ok(())
+    }
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+impl Aml for VmGenIdDevice {
+    fn to_aml_bytes(&self, sink: &mut dyn AmlSink) {
+        let addr_low = self.address.0 as u32;
+        let addr_high = (self.address.0 >> 32) as u32;
+
+        aml::Device::new(
+            "_SB_.VGEN".into(),
+            vec![
+                &aml::Name::new("_HID".into(), &"VMGENCTR"),
+                &aml::Name::new("_CID".into(), &"VM_Gen_Counter"),
+                &aml::Name::new("_DDN".into(), &"VM_Gen_Counter"),
+                &aml::Name::new(
+                    "ADDR".into(),
+                    &aml::Package::new(vec![&addr_low, &addr_high]),
+                ),
+            ],
+        )
+        .to_aml_bytes(sink);
+    }
+}
+
 pub struct AcpiPmTimerDevice {
     start: Instant,
 }
@@ -265,5 +344,32 @@ impl BusDevice for AcpiPmTimerDevice {
         let counter: u32 = (counter & 0xffff_ffff) as u32;
 
         data.copy_from_slice(&counter.to_le_bytes());
+    }
+}
+
+#[cfg(all(test, not(target_arch = "riscv64")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_vmgenid_regenerate() {
+        let region = Arc::new(MmapRegion::new(VMGENID_REGION_SIZE as usize).unwrap());
+        let device = VmGenIdDevice::new(GuestAddress(0xa_0028), Arc::clone(&region)).unwrap();
+
+        let mut first = [0u8; VMGENID_SIZE];
+        region
+            .get_slice(0, VMGENID_SIZE)
+            .unwrap()
+            .copy_to(&mut first);
+
+        device.regenerate().unwrap();
+
+        let mut second = [0u8; VMGENID_SIZE];
+        region
+            .get_slice(0, VMGENID_SIZE)
+            .unwrap()
+            .copy_to(&mut second);
+
+        assert_ne!(first, second);
     }
 }

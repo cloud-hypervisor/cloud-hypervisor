@@ -33,6 +33,8 @@ pub mod tpm;
 use bitflags::bitflags;
 
 pub use self::acpi::{AcpiGedDevice, AcpiPmTimerDevice, AcpiShutdownDevice};
+#[cfg(not(target_arch = "riscv64"))]
+pub use self::acpi::{VMGENID_REGION_SIZE, VMGENID_SIZE, VmGenIdDevice, VmGenIdError};
 #[cfg(feature = "ivshmem")]
 pub use self::ivshmem::IvshmemDevice;
 pub use self::pvpanic::{PVPANIC_DEVICE_MMIO_SIZE, PvPanicDevice};
