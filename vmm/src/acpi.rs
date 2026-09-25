@@ -756,6 +756,13 @@ fn align_to_8_bytes(len: usize) -> usize {
 }
 
 #[cfg(target_arch = "aarch64")]
+fn next_node_id(next_id: &mut u32) -> u32 {
+    let id = *next_id;
+    *next_id += 1;
+    id
+}
+
+#[cfg(target_arch = "aarch64")]
 // Generate IORT table based on Spec Revision E.b:
 // https://developer.arm.com/documentation/den0049/eb/?lang=en
 fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
@@ -763,6 +770,8 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
     const ACPI_IORT_REVISION: u8 = 3;
     const ACPI_IORT_NODE_ITS_GROUP: u8 = 0x00;
     const ACPI_IORT_NODE_PCI_ROOT_COMPLEX: u8 = 0x02;
+
+    let mut next_id = 0;
 
     // IORT header
     let mut iort = Sdt::new(
@@ -804,7 +813,7 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
             type_: ACPI_IORT_NODE_ITS_GROUP,
             length: (its_group_node_size + padding) as u16,
             revision: 1,
-            node_id: 0, // todo
+            node_id: next_node_id(&mut next_id),
             num_id_mappings: 0,
             id_mappings_array_offset: 0,
         },
@@ -831,7 +840,7 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
                 type_: ACPI_IORT_NODE_PCI_ROOT_COMPLEX,
                 length: (node_size + padding) as u16,
                 revision: 3,
-                node_id: segment.id as u32, // todo to avoid conflict with ITS node IDs
+                node_id: next_node_id(&mut next_id),
                 num_id_mappings: num_id_mappings as u32,
                 // ID mapping array starts right after `IortPciRootComplexBase`
                 id_mappings_array_offset: size_of::<IortPciRootComplexBase>() as u32,
