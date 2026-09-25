@@ -11,9 +11,11 @@ use std::path::{Component, Path};
 use block::disk_file::AsyncFullDiskFile;
 use block::error::{BlockError, BlockErrorKind, BlockResult};
 use block::formats::vmdk::VmdkDisk;
+use libfuzzer_sys::Corpus;
 
 use crate::disk_engine::format::{DiskFormat, OpenConfig};
 use crate::disk_engine::image::scratch_dir;
+use crate::disk_engine::{fuzz_image, sandbox};
 
 /// Size of each extent file the harness provides.
 const EXTENT_LEN: u64 = 1 << 20;
@@ -54,6 +56,24 @@ pub const TEMPLATE_LOGICAL_SIZE: u64 = (2048 + 1024) * 512;
 
 /// Virtual offset where [`TEMPLATE`]'s first extent ends.
 pub const TEMPLATE_EXTENT_BOUNDARY: u64 = 2048 * 512;
+
+/// One byte over the parser's 1 MiB descriptor limit, so the engine rather
+/// than the harness refuses an oversized descriptor.
+const MAX_FUZZ_DESCRIPTOR_LEN: usize = (1 << 20) + 1;
+
+/// Fuzzes the flat VMDK parser under Landlock, refusing every input if
+/// confinement fails: this bypasses the production `backing_files` gate.
+pub fn fuzz_vmdk(bytes: &[u8]) -> Corpus {
+    let dir = scratch_dir(Vmdk::NAME).unwrap_or_else(|e| {
+        eprintln!("disk_vmdk: scratch directory setup failed: {e}");
+        std::process::exit(2);
+    });
+    if !sandbox::confine(dir) {
+        return Corpus::Reject;
+    }
+
+    fuzz_image::<Vmdk>(bytes)
+}
 
 /// Flat VMDK images, as opened by [`VmdkDisk`]. The descriptor is written to
 /// a scratch directory holding the extent files it may name.
@@ -97,8 +117,8 @@ impl DiskFormat for Vmdk {
     // The descriptor names its extents relative to its own directory.
     const NEEDS_PATH: bool = true;
 
-    // A descriptor is a small text file; the data lives in the extents.
-    const MAX_IMAGE_LEN: usize = 64 << 10;
+    // See `MAX_FUZZ_DESCRIPTOR_LEN`.
+    const MAX_IMAGE_LEN: usize = MAX_FUZZ_DESCRIPTOR_LEN;
 
     // Mirrors `read_descriptor` and `parse_header`: UTF-8 and the header line.
     fn magic_ok(bytes: &[u8]) -> bool {
@@ -124,7 +144,11 @@ impl DiskFormat for Vmdk {
             .unwrap_or_else(|| scratch_dir(Self::NAME).expect("scratch directory"));
 
         // Read positionally: the engine shares the file cursor.
-        let mut raw = vec![0u8; Self::MAX_IMAGE_LEN];
+        let file_len = file
+            .metadata()
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?
+            .len();
+        let mut raw = vec![0u8; file_len.min(Self::MAX_IMAGE_LEN as u64) as usize];
         let len = file
             .read_at(&mut raw, 0)
             .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
@@ -324,5 +348,53 @@ mod tests {
             // Panics on a read back mismatch.
             executor.run(&program);
         }
+    }
+
+    /// The parser's 1 MiB limit must be reachable from both sides. Padding
+    /// after the DDB line is ignored.
+    #[test]
+    fn the_descriptor_size_limit_is_reachable_from_both_sides() {
+        // Opening resets the shared extent files.
+        let _guard = TEMPLATE_IO.lock().unwrap_or_else(|e| e.into_inner());
+        const LIMIT: usize = 1 << 20;
+        assert_eq!(Vmdk::MAX_IMAGE_LEN, LIMIT + 1);
+
+        // Its own path, so no other test can replace the descriptor.
+        let path = scratch_dir(Vmdk::NAME)
+            .expect("scratch directory")
+            .join("boundary.vmdk");
+        let open = |len: usize| {
+            let mut descriptor = TEMPLATE.as_bytes().to_vec();
+            descriptor.resize(len - 1, b'#');
+            descriptor.push(b'\n');
+            std::fs::write(&path, &descriptor).expect("boundary descriptor");
+
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&path)
+                .expect("boundary descriptor");
+            Vmdk::open(file, Some(&path), &OpenConfig::default())
+        };
+
+        let disk = open(LIMIT).expect("a 1 MiB descriptor must open");
+        assert_eq!(
+            disk.logical_size().expect("the descriptor reports a size"),
+            TEMPLATE_LOGICAL_SIZE
+        );
+        drop(disk);
+
+        let err = open(LIMIT + 1)
+            .err()
+            .expect("a descriptor over 1 MiB must be refused");
+        let cause = err
+            .downcast_ref::<std::io::Error>()
+            .expect("the engine's descriptor read error");
+        assert!(
+            cause.to_string().contains("maximum descriptor size"),
+            "the engine refused the descriptor for another reason: {cause}"
+        );
+
+        let _ = std::fs::remove_file(&path);
     }
 }

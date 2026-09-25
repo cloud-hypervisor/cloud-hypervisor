@@ -2,11 +2,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//! Landlock confinement for the qcow2 backing chain target.
+//! Landlock confinement for the path backed targets.
 //!
-//! The engine opens backing files by host path, trusting the image. The
-//! harness name guard is backed by confining the process to its scratch
-//! directory, and the caller fails closed if that fails. Landlock rather
+//! The qcow2 chain and VMDK targets hand the engine host paths from fuzzed
+//! images. Their name guards are backed by confining the process to its
+//! scratch directory, and callers fail closed if that fails. Landlock rather
 //! than a namespace keeps the ASan symbolizer and OSS-Fuzz working.
 
 use std::ffi::CString;
@@ -218,9 +218,7 @@ pub fn confine(scratch: &Path) -> bool {
     *CONFINED.get_or_init(|| {
         let confined = restrict(scratch).is_ok();
         if !confined {
-            eprintln!(
-                "disk_qcow2_chain: Landlock unavailable, refusing to enable qcow2 backing files"
-            );
+            eprintln!("disk fuzz sandbox: Landlock unavailable, refusing path-backed input");
         }
         confined
     })
