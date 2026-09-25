@@ -2141,6 +2141,13 @@ impl Vmm {
         } = migration_worker_handle.join();
 
         let mut try_resume_vm_after_failed_migration = |mut vm: Vm| {
+            if let Err(e) = vm.failed_migration() {
+                warn!(
+                    "Failed to notify VM's components the migration was aborted: {}",
+                    flatten_error_chain_to_string(&e)
+                );
+            }
+
             // A late failure may leave the VM paused.
             if initial_vm_state == VmState::Running && vm.get_state() == VmState::Paused {
                 match vm.resume() {
@@ -2148,7 +2155,7 @@ impl Vmm {
                         info!("Resumed VM successfully after failed migration");
                     }
                     Err(e) => {
-                        error!("Failed resuming VM after failed migration: {e}");
+                        warn!("Failed resuming VM after failed migration: {e}");
                         self.exit_evt.write(1).unwrap();
                     }
                 }

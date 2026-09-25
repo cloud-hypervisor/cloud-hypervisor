@@ -300,6 +300,10 @@ pub trait Migratable: Send + Pausable + Snapshottable + Transportable {
         Ok(())
     }
 
+    fn failed_migration(&mut self) -> result::Result<(), MigratableError> {
+        Ok(())
+    }
+
     fn complete_migration(&mut self) -> result::Result<(), MigratableError> {
         Ok(())
     }
