@@ -1335,6 +1335,15 @@ pub fn generate_ram_ranges(guest_mem: &GuestMemoryMmap) -> super::Result<Vec<Ram
     Ok(ram_ranges)
 }
 
+/// The reserved ranges of the guest memory map, as (base, size).
+fn reserved_regions() -> Vec<(u64, u64)> {
+    arch_memory_regions()
+        .into_iter()
+        .filter(|(_, _, r_type)| *r_type == RegionType::Reserved)
+        .map(|(base, size, _)| (base.raw_value(), size as u64))
+        .collect()
+}
+
 fn configure_pvh(
     guest_mem: &GuestMemoryMmap,
     cmdline_addr: GuestAddress,
@@ -1398,12 +1407,9 @@ fn configure_pvh(
         );
     }
 
-    add_memmap_entry(
-        &mut memmap,
-        layout::PCI_MMCONFIG_START.0,
-        layout::PCI_MMCONFIG_SIZE,
-        E820_RESERVED,
-    );
+    for (base, size) in reserved_regions() {
+        add_memmap_entry(&mut memmap, base, size, E820_RESERVED);
+    }
 
     start_info.memmap_entries = memmap.len() as u32;
 
@@ -1474,37 +1480,13 @@ fn configure_32bit_entry(
 
     add_e820_entry(&mut params, 0, layout::EBDA_START.raw_value(), E820_RAM)?;
 
-    let mem_end = guest_mem.last_addr();
-    if mem_end < layout::MEM_32BIT_RESERVED_START {
-        add_e820_entry(
-            &mut params,
-            layout::HIGH_RAM_START.raw_value(),
-            mem_end.unchecked_offset_from(layout::HIGH_RAM_START) + 1,
-            E820_RAM,
-        )?;
-    } else {
-        add_e820_entry(
-            &mut params,
-            layout::HIGH_RAM_START.raw_value(),
-            layout::MEM_32BIT_RESERVED_START.unchecked_offset_from(layout::HIGH_RAM_START),
-            E820_RAM,
-        )?;
-        if mem_end > layout::RAM_64BIT_START {
-            add_e820_entry(
-                &mut params,
-                layout::RAM_64BIT_START.raw_value(),
-                mem_end.unchecked_offset_from(layout::RAM_64BIT_START) + 1,
-                E820_RAM,
-            )?;
-        }
+    for (start, end) in generate_ram_ranges(guest_mem)? {
+        add_e820_entry(&mut params, start, end - start, E820_RAM)?;
     }
 
-    add_e820_entry(
-        &mut params,
-        layout::PCI_MMCONFIG_START.0,
-        layout::PCI_MMCONFIG_SIZE,
-        E820_RESERVED,
-    )?;
+    for (base, size) in reserved_regions() {
+        add_e820_entry(&mut params, base, size, E820_RESERVED)?;
+    }
 
     if let Some(rsdp_addr) = rsdp_addr {
         params.acpi_rsdp_addr = rsdp_addr.0;
@@ -1778,6 +1760,44 @@ mod tests {
         assert_eq!(4, regions.len());
         assert_eq!(GuestAddress(0), regions[0].0);
         assert_eq!(GuestAddress(1 << 32), regions[1].0);
+    }
+
+    #[test]
+    fn reserved_regions_hold_mmconfig() {
+        assert!(
+            reserved_regions().contains(&(layout::PCI_MMCONFIG_START.0, layout::PCI_MMCONFIG_SIZE))
+        );
+    }
+
+    #[test]
+    fn ram_ranges_start_at_high_ram() {
+        let gm = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 1 << 30)]).unwrap();
+        assert_eq!(
+            generate_ram_ranges(&gm).unwrap(),
+            vec![(layout::HIGH_RAM_START.raw_value(), 1 << 30)]
+        );
+
+        let gm = GuestMemoryMmap::from_ranges(&[
+            (
+                GuestAddress(0),
+                layout::MEM_32BIT_RESERVED_START.raw_value() as usize,
+            ),
+            (layout::RAM_64BIT_START, 1 << 30),
+        ])
+        .unwrap();
+        assert_eq!(
+            generate_ram_ranges(&gm).unwrap(),
+            vec![
+                (
+                    layout::HIGH_RAM_START.raw_value(),
+                    layout::MEM_32BIT_RESERVED_START.raw_value()
+                ),
+                (
+                    layout::RAM_64BIT_START.raw_value(),
+                    layout::RAM_64BIT_START.raw_value() + (1 << 30)
+                ),
+            ]
+        );
     }
 
     #[test]
