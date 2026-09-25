@@ -425,17 +425,28 @@ fn dump_memory_slots(
             Ok(())
         });
     }
-    for (slot, file) in slots {
-        let (size, file_offset) = sizes
-            .iter()
-            .find(|(s, _, _)| s == slot)
-            .map(|(_, sz, fo)| (*sz, *fo))
-            .ok_or(Error::MissingSlot(*slot))?;
-        let path = output_dir.join(memory_slot_filename(*slot));
-        dump_fd_to_path(file, file_offset, size, &path)?;
-        debug!("dumped {size} bytes from slot {slot} (fd offset {file_offset:#x}) to {path:?}");
-    }
-    Ok(())
+    thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(slots.len());
+        for (slot, file) in slots {
+            let (size, file_offset) = sizes
+                .iter()
+                .find(|(candidate, _, _)| candidate == slot)
+                .map(|(_, size, file_offset)| (*size, *file_offset))
+                .ok_or(Error::MissingSlot(*slot))?;
+            let path = output_dir.join(memory_slot_filename(*slot));
+            handles.push(scope.spawn(move || {
+                dump_fd_to_path(file, file_offset, size, &path)?;
+                debug!(
+                    "dumped {size} bytes from slot {slot} (fd offset {file_offset:#x}) to {path:?}"
+                );
+                Ok::<(), Error>(())
+            }));
+        }
+        for handle in handles {
+            handle.join().map_err(|_| Error::WorkerPanic)??;
+        }
+        Ok(())
+    })
 }
 
 fn dump_fd_to_path(file: &File, src_offset: u64, size: u64, path: &Path) -> Result<()> {

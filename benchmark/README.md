@@ -30,10 +30,12 @@ setup explicitly:
 
 Creating the TAP interface may invoke `sudo`. A source VM is stopped before
 restore measurements to release its disk lock, and cleanup also runs when a
-stage fails. The default matrix compares raw, LZ4, Zstd, and QPL hardware in
-static/dynamic and synchronous/asynchronous modes with 1 MiB chunks. The
-measured defaults use four software workers, 16 synchronous QPL workers, an
-async snapshot depth of 16, and an async restore depth of eight. Configure
+stage fails. The default matrix compares raw, LZ4, Zstd, and asynchronous QPL
+hardware in static and dynamic Huffman modes with 1 MiB chunks. The defaults
+use one software worker, an async snapshot depth of eight, and an async restore
+depth of 32. This compares single-worker CPU paths with one host thread driving
+multiple IAA requests.
+Configure
 additional chunk sizes, workers, depths, and iterations in
 `benchmark/benchmark.env`.
 
@@ -52,6 +54,7 @@ The cleanup can also be run directly:
 
 The final report is written to `benchmark/results/kpi-report.csv`. It includes:
 
+- The guest dataset used for each result, such as `random` or `silesia`.
 - Snapshot and restore median and p95 latency.
 - Mean stored snapshot size in MiB.
 - Compression ratio and storage savings relative to raw.
@@ -143,9 +146,9 @@ tail -f benchmark/results/logs/source-serial.log
 
 ## Prepare and pause the VM
 
-`prepare-memory.sh` waits for SSH, writes a resident file under `/dev/shm`, and
-pauses the VM. A repeating pattern approximates highly compressible application
-memory. The canonical test image uses the development credentials
+`prepare-memory.sh` waits for SSH, prepares a resident workload, and pauses the
+VM. File patterns live under `/dev/shm`; the Redis pattern keeps a populated
+Redis server resident. The canonical test image uses the development credentials
 `cloud/cloud123`; password authentication requires `sshpass`:
 
 ```bash
@@ -166,7 +169,41 @@ MEMORY_PATTERN=zero ./benchmark/prepare-memory.sh
 
 # Worst-case compression
 MEMORY_PATTERN=random ./benchmark/prepare-memory.sh
+
+# Repeat the uncompressed Silesia corpus to WORKING_SET_MIB
+MEMORY_PATTERN=silesia ./benchmark/prepare-memory.sh
+
+# Populate a live Redis instance with deterministic 4 KiB values
+MEMORY_PATTERN=redis ./benchmark/prepare-memory.sh
+
+The complete benchmark also accepts the pattern as an argument:
+
+```bash
+./benchmark/benchmark.sh --pattern silesia
 ```
+```
+
+The Silesia mode downloads the canonical corpus on the host, verifies its
+SHA-256 checksum, creates `benchmark/assets/silesia.tar`, copies it to the
+guest, and repeats its bytes to the exact requested size. Override
+`SILESIA_PATH` to use an existing uncompressed tar.
+
+Redis persistence is disabled so the measured state is resident memory rather
+than an RDB or append-only file. `REDIS_VALUE_SIZE` controls value size and
+defaults to 4096 bytes. When host `redis-server` and `redis-cli` binaries are
+available, they are copied into the guest; override their locations with
+`REDIS_SERVER_PATH` and `REDIS_CLI_PATH`. Otherwise, existing guest binaries
+are used. As a final fallback, `REDIS_AUTO_INSTALL=1` uses `apt-get`, which
+requires guest package-network access.
+
+For Redis, `WORKING_SET_MIB=1536` targets approximately 1536 MiB of Redis
+`used_memory`, including keys and dataset allocation overhead, rather than
+creating 1536 MiB of values and adding overhead afterward. Loading stops after
+the first bounded batch that reaches the target and reports both `used_memory`
+and resident-set size.
+
+Run different memory patterns as separate benchmark result sets; do not average
+their compression ratios or latency results together.
 
 When the guest workload is already prepared manually, pause it directly:
 
@@ -229,13 +266,22 @@ Use `qpl-hardware-static` and `qpl-hardware-dynamic` to compare fixed and
 dynamic Deflate Huffman coding on IAA. The legacy `qpl-hardware` name remains
 an alias for dynamic coding so existing snapshots can still be restored.
 Append `-async` to either explicit hardware codec to use a reusable rolling
-pool of asynchronously submitted QPL jobs. `SOFTWARE_WORKER_COUNTS` and
-`QPL_SYNC_WORKER_COUNTS` control host workers. `QPL_ASYNC_SNAPSHOT_DEPTHS` and
+pool of asynchronously submitted QPL jobs. `SOFTWARE_WORKER_COUNTS` controls
+host workers. `QPL_ASYNC_SNAPSHOT_DEPTHS` and
 `QPL_ASYNC_RESTORE_DEPTHS` independently control maximum in-flight IAA jobs.
 The daemon refills each completed slot immediately, bounds submission and
 completion waits, reuses buffers, and divides the configured budget across
 independent VM memory slots. `NUMA_NODE` binds the VM, receiver, and daemon to
-the IAA-local node.
+the IAA-local node. `OFFLOAD_CPU` additionally pins the offload daemon to one
+CPU for a per-core comparison. Async depths still control concurrent IAA jobs;
+the hardware engines do not execute on that CPU.
+
+Each measured row includes `cpu_util_pct` from the offload daemon. The KPI
+report shows its median as `median_cpu_util_pct`. This excludes Cloud Hypervisor
+and `ch-remote`; it measures the host CPU cost of raw copying, compression, or
+decompression. With `OFFLOAD_CPU` set, 100% represents one fully occupied host
+CPU even when several daemon threads share that CPU. IAA engine execution is
+not counted as host CPU utilization.
 
 Raw snapshots ignore chunk size and worker count:
 

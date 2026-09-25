@@ -8,7 +8,7 @@ QPL_INCLUDE_DIR=${QPL_INCLUDE_DIR:-/usr/local/include}
 QPL_LIB_DIR=${QPL_LIB_DIR:-/usr/local/lib64}
 WITH_QPL=${WITH_QPL:-1}
 
-required_commands=(curl gcc g++ make cmake ninja pkg-config ssh sshpass ip qemu-img python3 mkdosfs mcopy)
+required_commands=(curl gcc g++ make cmake ninja pkg-config ssh scp sshpass ip qemu-img python3 mkdosfs mcopy unzip taskset /usr/bin/time)
 
 find_cargo() {
     if [[ -n ${CARGO_BIN:-} && -x ${CARGO_BIN:-} ]]; then
@@ -85,18 +85,18 @@ install_packages() {
         run_privileged dnf install -y \
             git gcc gcc-c++ make cmake ninja-build pkgconf-pkg-config \
             m4 bison flex libuuid-devel qemu-img openssh-clients sshpass \
-            iproute curl python3 tar gzip dosfstools mtools
+            iproute curl python3 tar gzip unzip dosfstools mtools util-linux time
     elif command -v yum >/dev/null 2>&1; then
         run_privileged yum install -y \
             git gcc gcc-c++ make cmake ninja-build pkgconfig \
             m4 bison flex libuuid-devel qemu-img openssh-clients sshpass \
-            iproute curl python3 tar gzip dosfstools mtools
+            iproute curl python3 tar gzip unzip dosfstools mtools util-linux time
     elif command -v apt-get >/dev/null 2>&1; then
         run_privileged apt-get update
         run_privileged apt-get install -y \
             git build-essential cmake ninja-build pkg-config m4 bison flex \
             uuid-dev qemu-utils openssh-client sshpass iproute2 curl python3 \
-            tar gzip dosfstools mtools
+            tar gzip unzip dosfstools mtools util-linux time
     else
         echo "Unsupported package manager. Install the commands listed by --check." >&2
         exit 1

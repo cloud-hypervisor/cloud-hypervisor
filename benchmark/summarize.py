@@ -29,39 +29,57 @@ def main() -> int:
         print(f"Results file not found: {results_path}", file=sys.stderr)
         return 1
 
-    groups: dict[tuple[str, str, str, str], list[float]] = defaultdict(list)
+    groups: dict[tuple[str, str, str, str, str], list[tuple[float, float]]] = (
+        defaultdict(list)
+    )
     with results_path.open(newline="", encoding="utf-8") as results_file:
         for row in csv.DictReader(results_file):
-            key = (row["phase"], row["codec"], row["chunk_size"], row["workers"])
-            groups[key].append(float(row["elapsed_ms"]))
+            key = (
+                row.get("dataset") or "unknown",
+                row["phase"],
+                row["codec"],
+                row["chunk_size"],
+                row["workers"],
+            )
+            groups[key].append(
+                (float(row["elapsed_ms"]), float(row.get("cpu_util_pct") or math.nan))
+            )
 
-    header = (
-        "phase",
-        "codec",
-        "chunk",
-        "workers",
-        "runs",
-        "mean_ms",
-        "median_ms",
-        "p95_ms",
-        "min_ms",
-        "max_ms",
+    dataset_width = max(len("dataset"), *(len(key[0]) for key in groups))
+    codec_width = max(len("codec"), *(len(key[2]) for key in groups))
+    print(
+        f"{'dataset':<{dataset_width}} {'phase':<8} {'codec':<{codec_width}} "
+        f"{'chunk':>10} {'workers':>7} "
+        f"{'runs':>5} {'mean_ms':>12} {'median_ms':>12} {'p95_ms':>12} "
+        f"{'min_ms':>12} {'max_ms':>12} {'cpu_med%':>10}"
     )
-    print(" ".join(f"{column:>14}" for column in header))
-    for key in sorted(groups):
-        values = groups[key]
-        fields = (*key, str(len(values)))
+    phase_order = {"restore": 0, "snapshot": 1}
+    sorted_groups = sorted(
+        groups.items(),
+        key=lambda item: (
+            item[0][0],
+            phase_order.get(item[0][1], len(phase_order)),
+            statistics.median(value[0] for value in item[1]),
+            item[0][2:],
+        ),
+    )
+    for key, values in sorted_groups:
+        dataset, phase, codec, chunk, workers = key
+        elapsed_values = [value[0] for value in values]
+        cpu_values = [value[1] for value in values]
         metrics = (
-            statistics.fmean(values),
-            statistics.median(values),
-            percentile(values, 0.95),
-            min(values),
-            max(values),
+            statistics.fmean(elapsed_values),
+            statistics.median(elapsed_values),
+            percentile(elapsed_values, 0.95),
+            min(elapsed_values),
+            max(elapsed_values),
         )
         print(
-            " ".join(f"{field:>14}" for field in fields)
-            + " "
-            + " ".join(f"{metric:14.3f}" for metric in metrics)
+            f"{dataset:<{dataset_width}} {phase:<8} {codec:<{codec_width}} "
+            f"{chunk:>10} {workers:>7} "
+            f"{len(values):>5} "
+            + " ".join(f"{metric:12.3f}" for metric in metrics)
+            + f" {statistics.median(cpu_values):10.1f}"
         )
     return 0
 

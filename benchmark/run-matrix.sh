@@ -14,7 +14,7 @@ usage() {
 phase=$1
 [[ "$phase" == snapshot || "$phase" == restore ]] || usage
 
-read -r -a codecs <<<"${CODECS:-raw lz4 zstd qpl-hardware-static qpl-hardware-dynamic qpl-hardware-static-async qpl-hardware-dynamic-async}"
+read -r -a codecs <<<"${CODECS:-raw lz4 zstd qpl-hardware-static-async qpl-hardware-dynamic-async}"
 read -r -a chunk_sizes <<<"${CHUNK_SIZES:-65536 262144 1048576 2097152}"
 iterations=${ITERATIONS:-5}
 warmups=${WARMUPS:-1}
@@ -28,13 +28,13 @@ workers_for_codec() {
     case "$selected_codec" in
         qpl-*-async)
             if [[ "$selected_phase" == snapshot ]]; then
-                counts=${QPL_ASYNC_SNAPSHOT_DEPTHS:-8 16 32}
+                counts=${QPL_ASYNC_SNAPSHOT_DEPTHS:-8}
             else
-                counts=${QPL_ASYNC_RESTORE_DEPTHS:-32 64 128}
+                counts=${QPL_ASYNC_RESTORE_DEPTHS:-32}
             fi
             ;;
-        qpl-*) counts=${QPL_SYNC_WORKER_COUNTS:-4 8 16} ;;
-        *) counts=${SOFTWARE_WORKER_COUNTS:-${WORKER_COUNTS:-1 2 4}} ;;
+        qpl-*) counts=${SOFTWARE_WORKER_COUNTS:-${WORKER_COUNTS:-1}} ;;
+        *) counts=${SOFTWARE_WORKER_COUNTS:-${WORKER_COUNTS:-1}} ;;
     esac
     printf '%s\n' "$counts"
 }

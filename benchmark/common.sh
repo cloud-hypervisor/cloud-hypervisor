@@ -19,10 +19,11 @@ SOURCE_API_SOCKET=${SOURCE_API_SOCKET:-/tmp/ch-compression-source.sock}
 RESTORE_API_SOCKET=${RESTORE_API_SOCKET:-/tmp/ch-compression-restore.sock}
 OFFLOAD_SOCKET=${OFFLOAD_SOCKET:-/tmp/ch-compression-offload.sock}
 RESTORE_SOCKET=${RESTORE_SOCKET:-/tmp/ch-compression-restore-data.sock}
-SNAPSHOT_ROOT=${SNAPSHOT_ROOT:-$REPO_ROOT/benchmark/results/snapshots}
 RESULTS_DIR=${RESULTS_DIR:-$REPO_ROOT/benchmark/results}
+SNAPSHOT_ROOT=${SNAPSHOT_ROOT:-$RESULTS_DIR/snapshots}
 RESULTS_CSV=${RESULTS_CSV:-$RESULTS_DIR/results.csv}
 LOG_DIR=${LOG_DIR:-$RESULTS_DIR/logs}
+TIME_BIN=${TIME_BIN:-/usr/bin/time}
 SOCKET_TIMEOUT=${SOCKET_TIMEOUT:-30}
 SOURCE_PID_FILE=${SOURCE_PID_FILE:-$RESULTS_DIR/source-vm.pid}
 SOURCE_VMM_LOG=${SOURCE_VMM_LOG:-$LOG_DIR/source-vm.log}
@@ -37,6 +38,15 @@ if [[ -n ${NUMA_NODE:-} ]]; then
         exit 1
     }
     NUMA_PREFIX=(numactl "--cpunodebind=$NUMA_NODE" "--membind=$NUMA_NODE")
+fi
+
+OFFLOAD_PREFIX=()
+if [[ -n ${OFFLOAD_CPU:-} ]]; then
+    command -v taskset >/dev/null || {
+        echo "OFFLOAD_CPU requires taskset" >&2
+        exit 1
+    }
+    OFFLOAD_PREFIX=(taskset --cpu-list "$OFFLOAD_CPU")
 fi
 
 require_executable() {
@@ -73,10 +83,24 @@ snapshot_size_bytes() {
 }
 
 initialize_results() {
+    local expected_header='dataset,phase,codec,chunk_size,workers,iteration,elapsed_ms,cpu_util_pct,stored_bytes,snapshot_dir'
+    local legacy_header='phase,codec,chunk_size,workers,iteration,elapsed_ms,cpu_util_pct,stored_bytes,snapshot_dir'
     if [[ ! -e "$RESULTS_CSV" ]]; then
-        printf '%s\n' \
-            'phase,codec,chunk_size,workers,iteration,elapsed_ms,stored_bytes,snapshot_dir' \
-            >"$RESULTS_CSV"
+        printf '%s\n' "$expected_header" >"$RESULTS_CSV"
+        return
+    fi
+
+    local current_header
+    IFS= read -r current_header <"$RESULTS_CSV"
+    if [[ "$current_header" == "$legacy_header" ]]; then
+        local upgraded_results
+        upgraded_results=$(mktemp "${RESULTS_CSV}.XXXXXX")
+        awk 'NR == 1 { print "dataset," $0; next } { print "unknown," $0 }' \
+            "$RESULTS_CSV" >"$upgraded_results"
+        mv -- "$upgraded_results" "$RESULTS_CSV"
+    elif [[ "$current_header" != "$expected_header" ]]; then
+        echo "Unsupported results header: $current_header" >&2
+        exit 1
     fi
 }
 
@@ -87,13 +111,20 @@ record_result() {
     local workers=$4
     local iteration=$5
     local duration_ms=$6
-    local stored_bytes=$7
-    local snapshot_dir=$8
+    local cpu_util_pct=$7
+    local stored_bytes=$8
+    local snapshot_dir=$9
+    local dataset=${BENCHMARK_DATASET:-${MEMORY_PATTERN:-unknown}}
 
     initialize_results
-    printf '%s,%s,%s,%s,%s,%s,%s,%s\n' \
-        "$phase" "$codec" "$chunk_size" "$workers" "$iteration" \
-        "$duration_ms" "$stored_bytes" "$snapshot_dir" >>"$RESULTS_CSV"
+    printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+        "$dataset" "$phase" "$codec" "$chunk_size" "$workers" "$iteration" \
+        "$duration_ms" "$cpu_util_pct" "$stored_bytes" "$snapshot_dir" >>"$RESULTS_CSV"
+}
+
+read_cpu_utilization() {
+    local time_file=$1
+    tr -d '%[:space:]' <"$time_file"
 }
 
 drop_page_cache() {

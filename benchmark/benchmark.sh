@@ -8,29 +8,52 @@ source "$BENCHMARK_DIR/common.sh"
 
 usage() {
     cat <<EOF
-Usage: $0 [--dry-run]
+Usage: $0 [OPTIONS]
 
 Runs the complete compression benchmark:
   build -> download assets -> create TAP -> start VM -> prepare memory
   -> snapshot matrix -> stop source VM -> restore matrix -> KPI report
 
 Configuration is read from benchmark/benchmark.env and environment variables.
+
+Options:
+  -p, --pattern PATTERN  Guest memory pattern: zero, repeat, random, silesia, redis
+      --dry-run          Print the resolved configuration without running
+  -h, --help             Show this help
 EOF
 }
 
 dry_run=0
-case ${1:-} in
-    "") ;;
-    --dry-run) dry_run=1 ;;
-    -h | --help)
-        usage
-        exit 0
-        ;;
-    *)
-        usage >&2
-        exit 2
-        ;;
-esac
+while (($#)); do
+    case $1 in
+        -p | --pattern)
+            [[ $# -ge 2 ]] || {
+                echo "$1 requires a pattern" >&2
+                usage >&2
+                exit 2
+            }
+            MEMORY_PATTERN=$2
+            shift 2
+            ;;
+        --pattern=*)
+            MEMORY_PATTERN=${1#*=}
+            shift
+            ;;
+        --dry-run)
+            dry_run=1
+            shift
+            ;;
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
 
 BUILD_BINARIES=${BUILD_BINARIES:-1}
 DOWNLOAD_ASSETS=${DOWNLOAD_ASSETS:-1}
@@ -48,10 +71,9 @@ WORKING_SET_MIB=${WORKING_SET_MIB:-1536}
 MEMORY_PATTERN=${MEMORY_PATTERN:-random}
 WITH_QPL=${WITH_QPL:-1}
 CHUNK_SIZES=${CHUNK_SIZES:-1048576}
-SOFTWARE_WORKER_COUNTS=${SOFTWARE_WORKER_COUNTS:-${WORKER_COUNTS:-1 2 4}}
-QPL_SYNC_WORKER_COUNTS=${QPL_SYNC_WORKER_COUNTS:-4 8 16}
-QPL_ASYNC_SNAPSHOT_DEPTHS=${QPL_ASYNC_SNAPSHOT_DEPTHS:-8 16 32}
-QPL_ASYNC_RESTORE_DEPTHS=${QPL_ASYNC_RESTORE_DEPTHS:-32 64 128}
+SOFTWARE_WORKER_COUNTS=${SOFTWARE_WORKER_COUNTS:-${WORKER_COUNTS:-1}}
+QPL_ASYNC_SNAPSHOT_DEPTHS=${QPL_ASYNC_SNAPSHOT_DEPTHS:-8}
+QPL_ASYNC_RESTORE_DEPTHS=${QPL_ASYNC_RESTORE_DEPTHS:-32}
 ITERATIONS=${ITERATIONS:-3}
 WARMUPS=${WARMUPS:-1}
 CLEAN_RESULTS=${CLEAN_RESULTS:-1}
@@ -60,9 +82,17 @@ CLEANUP_EXISTING_VMS=${CLEANUP_EXISTING_VMS:-1}
 REPORT_CSV=${REPORT_CSV:-$RESULTS_DIR/kpi-report.csv}
 AUTO_SETUP=${AUTO_SETUP:-1}
 
+case $MEMORY_PATTERN in
+    zero | repeat | random | silesia | redis) ;;
+    *)
+        echo "Invalid pattern '$MEMORY_PATTERN': expected zero, repeat, random, silesia, or redis" >&2
+        exit 2
+        ;;
+esac
+
 if [[ -z ${CODECS:-} ]]; then
     if [[ "$WITH_QPL" == 1 ]]; then
-        CODECS="raw lz4 zstd qpl-hardware-static qpl-hardware-dynamic qpl-hardware-static-async qpl-hardware-dynamic-async"
+        CODECS="raw lz4 zstd qpl-hardware-static-async qpl-hardware-dynamic-async"
     else
         CODECS="raw lz4 zstd"
     fi
@@ -74,12 +104,13 @@ Cloud Hypervisor compression benchmark
   disk:         $DISK_PATH
   VM:           $VCPUS vCPUs, $MEMORY_SIZE RAM
   guest data:   $WORKING_SET_MIB MiB, $MEMORY_PATTERN
+    guest tmpfs:  ${SHM_SIZE_MIB:-default} MiB
   codecs:       $CODECS
     chunk sizes:  $CHUNK_SIZES
     CPU workers:  $SOFTWARE_WORKER_COUNTS
-    QPL sync:     $QPL_SYNC_WORKER_COUNTS
     QPL async:    snapshot [$QPL_ASYNC_SNAPSHOT_DEPTHS], restore [$QPL_ASYNC_RESTORE_DEPTHS]
     NUMA node:    ${NUMA_NODE:-unbound}
+    offload CPU:  ${OFFLOAD_CPU:-unbound}
   iterations:   $ITERATIONS measured + $WARMUPS warm-up
   results:      $RESULTS_DIR
 EOF
@@ -197,11 +228,13 @@ GUEST_SSH_TARGET=$GUEST_SSH_TARGET \
 SSH_KEY=${SSH_KEY:-} \
 SSH_PASSWORD=$SSH_PASSWORD \
 WORKING_SET_MIB=$WORKING_SET_MIB \
+SHM_SIZE_MIB=${SHM_SIZE_MIB:-} \
 MEMORY_PATTERN=$MEMORY_PATTERN \
 PAUSE_AFTER_PREPARE=1 \
     "$BENCHMARK_DIR/prepare-memory.sh"
 
-export CODECS CHUNK_SIZES SOFTWARE_WORKER_COUNTS QPL_SYNC_WORKER_COUNTS
+BENCHMARK_DATASET=$MEMORY_PATTERN
+export BENCHMARK_DATASET CODECS CHUNK_SIZES SOFTWARE_WORKER_COUNTS
 export QPL_ASYNC_SNAPSHOT_DEPTHS QPL_ASYNC_RESTORE_DEPTHS ITERATIONS WARMUPS WITH_QPL
 
 echo "==> Running snapshot matrix"
