@@ -359,6 +359,20 @@ descriptors through the `vfio_fds` and `iommufd_fd` options of
 See [Live Migration of VFIO Devices](vfio.md#live-migration-of-vfio-devices)
 for the requirements, the dirty tracking behavior, and an example.
 
+## Migrating VMs with vDPA Devices
+
+vDPA backends must support suspend for migration. The source device is
+suspended before memory transfer because vDPA dirty tracking is not available.
+An aborted migration resumes the device on the source, which requires backend
+support for resume.
+
+## Behavior on Failed Migrations
+
+If migration fails before the VM is transferred to the destination, Cloud
+Hypervisor makes every possible effort to resume the VM on the source and keep
+it usable.
+
+
 ## Version Compatibility
 
 Starting with `v54`, Cloud Hypervisor guarantees migration compatibility from
