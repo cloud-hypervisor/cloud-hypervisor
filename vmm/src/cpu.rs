@@ -72,6 +72,7 @@ use seccompiler::{BpfProgram, SeccompAction, apply_filter};
 use thiserror::Error;
 use tracer::trace_scoped;
 use vm_device::BusDevice;
+use vm_device::lifecycle::{GuestLifecycle, PendingVmAction};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use vm_memory::ByteValued;
 #[cfg(feature = "guest_debug")]
@@ -173,6 +174,9 @@ pub enum Error {
 
     #[error("Timeout when waiting for signal to be acknowledged")]
     SignalAcknowledgeTimeout,
+
+    #[error("The guest requested a {0:?}")]
+    GuestRequestedAction(PendingVmAction),
 
     #[error("Error adding CpuManager to MMIO bus")]
     BusError(#[source] vm_device::BusError),
@@ -713,9 +717,7 @@ pub struct CpuManager {
     vcpus_pause_signalled: Arc<AtomicBool>,
     vcpus_kick_signalled: Arc<AtomicBool>,
     exit_evt: EventFd,
-    guest_exit_evt: EventFd,
-    #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
-    reset_evt: EventFd,
+    lifecycle: Arc<GuestLifecycle>,
     #[cfg(feature = "guest_debug")]
     vm_debug_evt: EventFd,
     // Shared with AcpiCpuHotplugController
@@ -812,12 +814,15 @@ impl VcpuState {
     /// the signal every 10ms. Times out after 1000ms.
     ///
     /// This is the counterpart of [`Self::signal_thread`].
-    fn wait_until_signal_acknowledged(&self) -> Result<()> {
+    fn wait_until_signal_acknowledged(&self, lifecycle: Option<&GuestLifecycle>) -> Result<()> {
         if let Some(_handle) = self.handle.as_ref() {
             let mut count = 0;
             loop {
                 if self.vcpu_run_interrupted.load(Ordering::SeqCst) {
                     return Ok(());
+                }
+                if let Some(action) = lifecycle.and_then(GuestLifecycle::pending) {
+                    return Err(Error::GuestRequestedAction(action));
                 }
                 // This is more effective than thread::yield_now() at
                 // avoiding a priority inversion with the vCPU thread
@@ -856,8 +861,7 @@ impl CpuManager {
         config: &CpusConfig,
         vm: Arc<dyn hypervisor::Vm>,
         exit_evt: EventFd,
-        guest_exit_evt: EventFd,
-        reset_evt: EventFd,
+        lifecycle: Arc<GuestLifecycle>,
         #[cfg(feature = "guest_debug")] vm_debug_evt: EventFd,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         seccomp_action: SeccompAction,
@@ -954,8 +958,7 @@ impl CpuManager {
             vcpus_kick_signalled: Arc::new(AtomicBool::new(false)),
             vcpu_states,
             exit_evt,
-            guest_exit_evt,
-            reset_evt,
+            lifecycle,
             #[cfg(feature = "guest_debug")]
             vm_debug_evt,
             vcpus: Vec::with_capacity(max_vcpus),
@@ -1192,12 +1195,8 @@ impl CpuManager {
         vcpu_seccomp_filter: Arc<BpfProgram>,
         inserting: bool,
     ) -> Result<()> {
-        let reset_evt = self.reset_evt.try_clone().map_err(Error::EventFdClone)?;
         let exit_evt = self.exit_evt.try_clone().map_err(Error::EventFdClone)?;
-        let guest_exit_evt = self
-            .guest_exit_evt
-            .try_clone()
-            .map_err(Error::EventFdClone)?;
+        let lifecycle = Arc::clone(&self.lifecycle);
 
         #[cfg(feature = "kvm")]
         let hypervisor_type = self.hypervisor.hypervisor_type();
@@ -1439,13 +1438,13 @@ impl CpuManager {
                                     VmExit::Reset => {
                                         info!("VmExit::Reset");
                                         vcpu_run_interrupted.store(true, Ordering::SeqCst);
-                                        reset_evt.write(1).unwrap();
+                                        lifecycle.request(PendingVmAction::Reboot).unwrap();
                                         break;
                                     }
                                     VmExit::Shutdown => {
                                         info!("VmExit::Shutdown");
                                         vcpu_run_interrupted.store(true, Ordering::SeqCst);
-                                        guest_exit_evt.write(1).unwrap();
+                                        lifecycle.request(PendingVmAction::Shutdown).unwrap();
                                         break;
                                     }
                                     #[cfg(feature = "tdx")]
@@ -1656,7 +1655,7 @@ impl CpuManager {
     ///
     /// Calls [`VcpuState::signal_thread`] and
     /// [`VcpuState::wait_until_signal_acknowledged`] for each vCPU.
-    fn signal_vcpus(&mut self) -> Result<()> {
+    fn signal_vcpus(&mut self, abort_on_guest_request: bool) -> Result<()> {
         let vcpu_count = self.vcpu_states.lock().unwrap().len();
 
         // Splitting this into two loops reduced the time to pause many vCPUs
@@ -1672,7 +1671,9 @@ impl CpuManager {
         }
         for cpu_id in 0..vcpu_count {
             let vcpu_states = self.vcpu_states.lock().unwrap();
-            vcpu_states[cpu_id].wait_until_signal_acknowledged()?;
+            vcpu_states[cpu_id].wait_until_signal_acknowledged(
+                abort_on_guest_request.then_some(self.lifecycle.as_ref()),
+            )?;
         }
 
         Ok(())
@@ -1690,7 +1691,7 @@ impl CpuManager {
             state.unpark_thread();
         }
 
-        self.signal_vcpus()?;
+        self.signal_vcpus(false)?;
 
         // Wait for all the threads to finish. This removes the state from the vector.
         for mut state in self.vcpu_states.lock().unwrap().drain(..) {
@@ -2391,7 +2392,7 @@ impl CpuManager {
 
     pub(crate) fn nmi(&mut self) -> Result<()> {
         self.vcpus_kick_signalled.store(true, Ordering::SeqCst);
-        self.signal_vcpus()?;
+        self.signal_vcpus(false)?;
         self.vcpus_kick_signalled.store(false, Ordering::SeqCst);
 
         Ok(())
@@ -2749,7 +2750,7 @@ impl Pausable for CpuManager {
         // Tell the vCPUs to pause themselves next time they exit
         self.vcpus_pause_signalled.store(true, Ordering::SeqCst);
 
-        self.signal_vcpus()
+        self.signal_vcpus(true)
             .map_err(|e| MigratableError::Pause(anyhow!("Error signalling vCPUs: {e}")))?;
 
         // Notify all guests (including Hyper-V / Windows) that the clock was
@@ -2770,6 +2771,12 @@ impl Pausable for CpuManager {
             if state.active() {
                 // wait for vCPU to update state
                 while !state.paused.load(Ordering::SeqCst) {
+                    if let Some(action) = self.lifecycle.pending() {
+                        return Err(MigratableError::Pause(anyhow!(
+                            "{}",
+                            Error::GuestRequestedAction(action)
+                        )));
+                    }
                     // To avoid a priority inversion with the vCPU thread
                     thread::sleep(time::Duration::from_millis(1));
                 }
@@ -3326,7 +3333,7 @@ impl AcpiCpuHotplugController {
         info!("Removing vCPU: cpu_id = {cpu_id}");
         state.kill.store(true, Ordering::SeqCst);
         state.signal_thread();
-        state.wait_until_signal_acknowledged()?;
+        state.wait_until_signal_acknowledged(None)?;
         state.join_thread()?;
         state.handle = None;
 

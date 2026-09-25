@@ -154,6 +154,10 @@ pub enum Command {
     /// Request a page to be faulted in. The page content can be sent
     /// through the response or simply written to the shared memory.
     PageFault = 9,
+    /// The guest requested a reboot: the sender stopped its VM and sends no state.
+    GuestReboot = 10,
+    /// The guest requested a shutdown: the sender stopped its VM and sends no state.
+    GuestShutdown = 11,
 }
 
 /// Role announced as the first message on an additional migration connection.
@@ -263,6 +267,14 @@ impl Request {
     /// Finalizes the migration without resuming the VM on the destination.
     pub fn complete_paused() -> Self {
         Self::new(Command::CompletePaused, 0)
+    }
+
+    pub fn guest_reboot() -> Self {
+        Self::new(Command::GuestReboot, 0)
+    }
+
+    pub fn guest_shutdown() -> Self {
+        Self::new(Command::GuestShutdown, 0)
     }
 
     /// PageFault request always carries a single `MemoryRange`.

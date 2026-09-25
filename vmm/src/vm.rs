@@ -75,6 +75,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracer::trace_scoped;
 use vm_device::Bus;
+use vm_device::lifecycle::GuestLifecycle;
 #[cfg(feature = "tdx")]
 use vm_memory::GuestMemoryBackend;
 #[cfg(feature = "tdx")]
@@ -551,6 +552,7 @@ pub struct Vm {
     // The hypervisor abstracted virtual machine.
     vm: Arc<dyn hypervisor::Vm>,
     saved_clock: Option<SavedClock>,
+    lifecycle: Arc<GuestLifecycle>,
     #[cfg(not(target_arch = "riscv64"))]
     numa_nodes: NumaNodes,
     stop_on_boot: bool,
@@ -623,13 +625,14 @@ impl Vm {
             mmio_bus: Arc::clone(&mmio_bus),
         });
 
+        let lifecycle = Arc::new(GuestLifecycle::new(reset_evt, guest_exit_evt));
+
         // Create CPU manager
         let cpu_manager = Self::create_cpu_manager(
             &config,
             Arc::clone(&vm),
             exit_evt.try_clone().map_err(Error::EventFdClone)?,
-            guest_exit_evt.try_clone().map_err(Error::EventFdClone)?,
-            reset_evt.try_clone().map_err(Error::EventFdClone)?,
+            Arc::clone(&lifecycle),
             #[cfg(feature = "guest_debug")]
             vm_debug_evt,
             &hypervisor,
@@ -651,8 +654,7 @@ impl Vm {
             Arc::clone(&memory_manager),
             Arc::clone(&cpu_manager),
             exit_evt.try_clone().map_err(Error::EventFdClone)?,
-            reset_evt,
-            guest_exit_evt,
+            Arc::clone(&lifecycle),
             seccomp_action.clone(),
             numa_nodes.clone(),
             &activate_evt,
@@ -731,6 +733,7 @@ impl Vm {
             memory_manager,
             vm,
             saved_clock,
+            lifecycle,
             #[cfg(not(target_arch = "riscv64"))]
             numa_nodes,
             stop_on_boot,
@@ -771,8 +774,7 @@ impl Vm {
         config: &Arc<Mutex<VmConfig>>,
         vm: Arc<dyn hypervisor::Vm>,
         exit_evt: EventFd,
-        guest_exit_evt: EventFd,
-        reset_evt: EventFd,
+        lifecycle: Arc<GuestLifecycle>,
         #[cfg(feature = "guest_debug")] vm_debug_evt: EventFd,
         hypervisor: &Arc<dyn hypervisor::Hypervisor>,
         seccomp_action: SeccompAction,
@@ -797,8 +799,7 @@ impl Vm {
             &cpus_config,
             vm,
             exit_evt,
-            guest_exit_evt,
-            reset_evt,
+            lifecycle,
             #[cfg(feature = "guest_debug")]
             vm_debug_evt,
             Arc::clone(hypervisor),
@@ -842,8 +843,7 @@ impl Vm {
         memory_manager: Arc<Mutex<MemoryManager>>,
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
         exit_evt: EventFd,
-        reset_evt: EventFd,
-        guest_exit_evt: EventFd,
+        lifecycle: Arc<GuestLifecycle>,
         seccomp_action: SeccompAction,
         numa_nodes: NumaNodes,
         activate_evt: &EventFd,
@@ -865,8 +865,7 @@ impl Vm {
             memory_manager,
             cpu_manager,
             exit_evt,
-            reset_evt,
-            guest_exit_evt,
+            lifecycle,
             seccomp_action,
             numa_nodes,
             activate_evt,
@@ -3260,6 +3259,29 @@ impl Vm {
             .restore_clock(&hv_vcpus, &saved.state, saved.mode)
             .context("Could not restore guest clock")
             .map_err(MigratableError::Resume)
+    }
+
+    pub(crate) fn lifecycle(&self) -> &Arc<GuestLifecycle> {
+        &self.lifecycle
+    }
+
+    /// Pauses the VM unless the guest requested a reboot or shutdown, which
+    /// makes pausing fail by design (see [`cpu::CpuManager`]). Returns
+    /// whether the VM is paused.
+    pub(crate) fn pause_unless_guest_request(&mut self) -> result::Result<bool, MigratableError> {
+        if self.state == VmState::Paused {
+            return Ok(true);
+        }
+        match self.pause() {
+            Ok(()) => Ok(true),
+            Err(e) => match self.lifecycle.pending() {
+                Some(action) => {
+                    info!("Not pausing the VM, the guest requested {action:?}: {e}");
+                    Ok(false)
+                }
+                None => Err(e),
+            },
+        }
     }
 
     pub fn device_manager(&self) -> &Arc<Mutex<DeviceManager>> {

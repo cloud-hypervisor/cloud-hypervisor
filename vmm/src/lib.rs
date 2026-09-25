@@ -36,6 +36,7 @@ use serde::{Deserialize, Serialize};
 use signal_hook::iterator::{Handle, Signals};
 use thiserror::Error;
 use tracer::trace_scoped;
+use vm_device::lifecycle::{GuestLifecycle, PendingVmAction};
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::protocol::*;
@@ -668,6 +669,8 @@ enum VmOwnership {
         vm_info_response: VmInfoResponse,
         /// Access to VM state needed during migration.
         device_manager: Weak<Mutex<DeviceManager>>,
+        /// Accessory to recorded guest actions.
+        lifecycle: Arc<GuestLifecycle>,
     },
     None,
 }
@@ -765,6 +768,10 @@ enum ReceiveMigrationState {
     /// The migration is successful.
     Completed,
 
+    /// The sender stopped its VM because the guest requested a reboot or
+    /// shutdown. No state follows and the action is applied instead.
+    GuestActionReceived(PendingVmAction),
+
     /// The migration couldn't complete, either due to an error or because the sender abandoned the migration.
     Aborted,
 }
@@ -778,6 +785,7 @@ impl ReceiveMigrationState {
             ReceiveMigrationState::Configured(_) => "Configured",
             ReceiveMigrationState::StateReceived { .. } => "StateReceived",
             ReceiveMigrationState::Completed => "Completed",
+            ReceiveMigrationState::GuestActionReceived(_) => "GuestActionReceived",
             ReceiveMigrationState::Aborted => "Aborted",
         }
     }
@@ -785,7 +793,9 @@ impl ReceiveMigrationState {
     fn finished(&self) -> bool {
         matches!(
             self,
-            ReceiveMigrationState::Completed | ReceiveMigrationState::Aborted
+            ReceiveMigrationState::Completed
+                | ReceiveMigrationState::GuestActionReceived(_)
+                | ReceiveMigrationState::Aborted
         )
     }
 }
@@ -1085,6 +1095,16 @@ impl Vmm {
                     Ok(Configured(config_data))
                 }
                 Command::State => self.vm_receive_state_command(req, socket, config_data),
+                Command::GuestReboot | Command::GuestShutdown => {
+                    let action = if req.command() == Command::GuestReboot {
+                        PendingVmAction::Reboot
+                    } else {
+                        PendingVmAction::Shutdown
+                    };
+                    info!("Received pending VM action from the migration source: {action:?}");
+                    config_data.connections.cleanup()?;
+                    Ok(GuestActionReceived(action))
+                }
                 c => invalid_command(state_name, c),
             },
             StateReceived {
@@ -1118,7 +1138,7 @@ impl Vmm {
                 }
                 c => invalid_command(state_name, c),
             },
-            Completed | Aborted => {
+            Completed | GuestActionReceived(_) | Aborted => {
                 unreachable!("Performed a step on the finished state machine")
             }
         }
@@ -1129,7 +1149,7 @@ impl Vmm {
         &mut self,
         mut listener: ReceiveListener,
         receive_data_migration: &VmReceiveMigrationData,
-    ) -> result::Result<(), MigratableError> {
+    ) -> result::Result<Option<PendingVmAction>, MigratableError> {
         event!("vm", "migration-receive-ready");
         // Accept the connection and get the socket
         let mut socket = listener.accept()?;
@@ -1184,8 +1204,9 @@ impl Vmm {
             ReceiveMigrationState::Aborted => Err(MigratableError::CompleteMigration(anyhow!(
                 "Migration was aborted"
             ))),
-            ReceiveMigrationState::Completed => Ok(()),
-            _ => unreachable!("loop only exits in Completed or Aborted"),
+            ReceiveMigrationState::Completed => Ok(None),
+            ReceiveMigrationState::GuestActionReceived(action) => Ok(Some(action)),
+            _ => unreachable!("loop only exits in a finished state"),
         }
     }
 
@@ -1527,10 +1548,12 @@ impl Vmm {
     ///
     /// 1. **No dirty pages remain** – the current iteration would transfer zero
     ///    bytes.
-    /// 2. **Downtime budget is met** – the estimated downtime for the final
+    /// 2. **Guest request** – the guest requested a reboot or shutdown; the
+    ///    remaining memory is never read.
+    /// 3. **Downtime budget is met** – the estimated downtime for the final
     ///    (paused) iteration is within the caller-specified
     ///    [`VmSendMigrationData::downtime`] budget.
-    /// 3. **Timeout** – the precopy phase has been running for at least
+    /// 4. **Timeout** – the precopy phase has been running for at least
     ///    [`VmSendMigrationData::timeout`]. The outcome depends on
     ///    [`VmSendMigrationData::timeout_strategy`]:
     ///    - [`TimeoutStrategy::Cancel`] – returns
@@ -1550,9 +1573,15 @@ impl Vmm {
     fn is_precopy_converged(
         ctx: &MemoryMigrationContext,
         send_data_migration: &VmSendMigrationData,
+        lifecycle: &GuestLifecycle,
     ) -> result::Result<bool, MigratableError> {
         if ctx.current_iteration_total_bytes == 0 {
             debug!("Precopy: No more memory to transfer");
+            return Ok(true);
+        }
+
+        if let Some(action) = lifecycle.pending() {
+            info!("Precopy: Stopping memory transfer, guest requested {action:?}");
             return Ok(true);
         }
 
@@ -1624,6 +1653,7 @@ impl Vmm {
         send_data_migration: &VmSendMigrationData,
         mem_send: &mut SendAdditionalConnections,
         ctx: &mut OngoingMigrationContext,
+        lifecycle: &GuestLifecycle,
     ) -> result::Result<(), MigratableError> {
         let mut mem_ctx = MemoryMigrationContext::new();
 
@@ -1632,13 +1662,12 @@ impl Vmm {
             vm,
             socket,
             &mut mem_ctx,
-            // We bind send_data_migration to the callback
-            |ctx| Self::is_precopy_converged(ctx, send_data_migration),
+            |ctx| Self::is_precopy_converged(ctx, send_data_migration, lifecycle),
             mem_send,
         )?;
         let downtime_begin = Instant::now();
-        if vm.get_state() != VmState::Paused {
-            vm.pause()?;
+        if !vm.pause_unless_guest_request()? {
+            return Ok(());
         }
 
         // Send last batch of dirty pages: final iteration
@@ -1663,6 +1692,39 @@ impl Vmm {
         Ok(())
     }
 
+    /// Stops the VM and hands the guest's reboot or shutdown request over to
+    /// the destination, which applies it instead of restoring the VM.
+    fn hand_over_guest_request(
+        vm: &mut Vm,
+        socket: &mut SocketStream,
+        action: PendingVmAction,
+    ) -> result::Result<(), MigratableError> {
+        info!(
+            "The guest requested {action:?} during the migration: stopping the VM and handing the request over to the destination"
+        );
+        vm.shutdown().map_err(|e| {
+            MigratableError::MigrateSend(anyhow!(
+                "Error stopping the VM after the guest requested {action:?}: {e}"
+            ))
+        })?;
+        // Let the destination lock the disk images when it boots the VM for
+        // a reboot.
+        vm.release_disk_locks().map_err(|e| {
+            MigratableError::UnlockError(anyhow!("{}", flatten_error_chain_to_string(&e)))
+        })?;
+        let request = match action {
+            PendingVmAction::Reboot => Request::guest_reboot(),
+            PendingVmAction::Shutdown => Request::guest_shutdown(),
+        };
+        transport::send_request_expect_ok(
+            socket,
+            request,
+            MigratableError::MigrateSend(anyhow!(
+                "Error handing the guest's {action:?} request over to the destination"
+            )),
+        )
+    }
+
     /// Performs a migration.
     ///
     /// Runs after-migration cleanup only on success. Callers must handle failed
@@ -1680,6 +1742,8 @@ impl Vmm {
         let mut ctx = OngoingMigrationContext::new();
 
         let memory_mode = send_data_migration.effective_memory_mode();
+
+        let lifecycle = Arc::clone(vm.lifecycle());
 
         // Set up the socket connection
         let mut socket = transport::send_migration_socket(
@@ -1777,6 +1841,7 @@ impl Vmm {
                     send_data_migration.tls_dir.as_deref(),
                     &vm.guest_memory(),
                     &seccomp_filters.tcp_worker,
+                    &lifecycle,
                 )?;
 
                 Self::do_memory_migration(
@@ -1785,6 +1850,7 @@ impl Vmm {
                     send_data_migration,
                     &mut mem_send,
                     &mut ctx,
+                    &lifecycle,
                 )
                 .inspect_err(|_| {
                     if let Err(e) = mem_send.cleanup_workers() {
@@ -1797,23 +1863,27 @@ impl Vmm {
             // No need for precopy: just pause VM
             (MigrationMode::MemFDs, SocketStream::Unix(_)) | (MigrationMode::Postcopy, _) => {
                 let downtime_begin = Instant::now();
-                if vm.get_state() != VmState::Paused {
-                    vm.pause()?;
+                if vm.pause_unless_guest_request()? {
+                    ctx.set_vm_paused(
+                        downtime_begin,
+                        // No memory was transferred
+                        MemoryMigrationContext::empty_finalized(),
+                    )
+                    .expect(
+                        "migration context should transition to VmPaused for memfds/postcopy migration",
+                    );
                 }
-                ctx.set_vm_paused(
-                    downtime_begin,
-                    // No memory was transferred
-                    MemoryMigrationContext::empty_finalized(),
-                )
-                .expect(
-                    "migration context should transition to VmPaused for memfds/postcopy migration",
-                );
             }
             (socket, mode) => {
                 return Err(MigratableError::MigrateSend(anyhow!(
                     "Unexpected memory transfer configuration: socket:{socket:?}, mode:{mode:?}",
                 )));
             }
+        }
+
+        // No vCPU runs any more at this point: hand over
+        if let Some(action) = lifecycle.pending() {
+            return Self::hand_over_guest_request(vm, &mut socket, action);
         }
 
         // We release the locks early to enable locking them on the destination host.
@@ -1859,7 +1929,12 @@ impl Vmm {
             // One final memory iteration to handle side effects from snapshot.
             if matches!(memory_mode, MigrationMode::Precopy) {
                 let memory_ranges = vm.dirty_log()?;
-                transport::send_memory_ranges(&vm.guest_memory(), &memory_ranges, &mut socket)?;
+                transport::send_memory_ranges(
+                    &vm.guest_memory(),
+                    &memory_ranges,
+                    &mut socket,
+                    &lifecycle,
+                )?;
             }
             Ok(snapshot)
         })?;
@@ -2140,6 +2215,38 @@ impl Vmm {
             vm_moved_to_destination,
         } = migration_worker_handle.join();
 
+        // All guest's requests go to the VMM again.
+        vm.lifecycle().set_migrating(false);
+
+        if vm.get_state() == VmState::Shutdown {
+            // The worker stopped the VM to hand the guest's request over.
+            let action = vm.lifecycle().pending();
+            drop(vm);
+            self.console_info = None;
+            match migration_res {
+                Ok(()) if config.preserve_source => info!(
+                    "The guest's request was applied on the migration destination, there is no source VM left to preserve"
+                ),
+                Ok(()) => {
+                    if let Err(e) = self.exit_evt.write(1) {
+                        error!("Failed exiting the VMM after migration: {e}");
+                    }
+                }
+                Err(e) => {
+                    error!("Migration failed: {}", flatten_error_chain_to_string(&e));
+                    if let Some(action) = action
+                        && let Err(e) = self.apply_guest_request(action)
+                    {
+                        error!(
+                            "Failed applying the guest's {action:?} request after the failed migration: {e}"
+                        );
+                        self.exit_evt.write(1).unwrap();
+                    }
+                }
+            }
+            return;
+        }
+
         let mut try_resume_vm_after_failed_migration = |mut vm: Vm| {
             // A late failure may leave the VM paused.
             if initial_vm_state == VmState::Running && vm.get_state() == VmState::Paused {
@@ -2194,9 +2301,63 @@ impl Vmm {
                     if let Err(e) = vm.shutdown() {
                         warn!("Failed tearing down the VM after failed postcopy migration: {e}");
                     }
+                } else if let Some(action) = vm.lifecycle().pending() {
+                    // The worker failed before it could hand the request over.
+                    self.vm = VmOwnership::Owned(vm);
+                    if let Err(e) = self.apply_guest_request(action) {
+                        error!(
+                            "Failed applying the guest's {action:?} request after the failed migration: {e}"
+                        );
+                        self.exit_evt.write(1).unwrap();
+                    }
                 } else {
                     try_resume_vm_after_failed_migration(vm);
                 }
+            }
+        }
+    }
+
+    fn handle_guest_request(&mut self, action: PendingVmAction) -> result::Result<(), VmError> {
+        match &self.vm {
+            VmOwnership::Owned(_) => self.apply_guest_request(action),
+            // Only called if the request raced with the start of a migration.
+            VmOwnership::Migration { lifecycle, .. } => {
+                info!("Deferring pending VM {action:?} until migration finishes");
+                lifecycle.record(action);
+                Ok(())
+            }
+            VmOwnership::None => {
+                warn!("Ignoring the guest's {action:?} request: there is no VM");
+                Ok(())
+            }
+        }
+    }
+
+    /// The VM may not exist: a migration destination never restored it, the
+    /// source's worker may have stopped it. A reboot then boots a fresh VM.
+    fn apply_guest_request(&mut self, action: PendingVmAction) -> result::Result<(), VmError> {
+        let vm_exists = matches!(self.vm, VmOwnership::Owned(_));
+        match action {
+            PendingVmAction::Reboot if vm_exists => self.vm_reboot(),
+            PendingVmAction::Reboot => {
+                event!("vm", "rebooting");
+                self.vm_boot()?;
+                event!("vm", "rebooted");
+                Ok(())
+            }
+            PendingVmAction::Shutdown => {
+                if vm_exists {
+                    self.vm_shutdown()?;
+                } else {
+                    event!("vm", "shutdown");
+                }
+                if !self.no_shutdown {
+                    // The control loop shuts the VMM down.
+                    if let Err(e) = self.exit_evt.write(1) {
+                        error!("Failed exiting the VMM after the guest's shutdown request: {e}");
+                    }
+                }
+                Ok(())
             }
         }
     }
@@ -2240,7 +2401,6 @@ impl Vmm {
                         info!("VMM exit event");
                         // Consume the event.
                         self.exit_evt.read().map_err(Error::EventFdRead)?;
-                        // TODO: Future follow-up must resolve lifecycle handling while migrating.
                         self.vmm_shutdown().map_err(Error::VmmShutdown)?;
 
                         break 'outer;
@@ -2249,19 +2409,14 @@ impl Vmm {
                         info!("VM reset event");
                         // Consume the event.
                         self.reset_evt.read().map_err(Error::EventFdRead)?;
-                        // TODO: Future follow-up must resolve lifecycle handling while migrating.
-                        self.vm_reboot().map_err(Error::VmReboot)?;
+                        self.handle_guest_request(PendingVmAction::Reboot)
+                            .map_err(Error::VmReboot)?;
                     }
                     EpollDispatch::GuestExit => {
                         info!("VM guest exit event");
                         self.guest_exit_evt.read().map_err(Error::EventFdRead)?;
-                        // TODO: Future follow-up must resolve lifecycle handling while migrating.
-                        if self.no_shutdown {
-                            self.vm_shutdown().map_err(Error::VmShutdown)?;
-                        } else {
-                            self.vmm_shutdown().map_err(Error::VmmShutdown)?;
-                            break 'outer;
-                        }
+                        self.handle_guest_request(PendingVmAction::Shutdown)
+                            .map_err(Error::VmShutdown)?;
                     }
                     EpollDispatch::ActivateVirtioDevices => {
                         let count = self.activate_evt.read().map_err(Error::EventFdRead)?;
@@ -3313,7 +3468,8 @@ impl RequestHandler for Vmm {
             warn!("The existing VM config will be overwritten");
         }
 
-        self.vm_receive_migration_protocol(listener, &receive_data_migration)
+        let guest_action = self
+            .vm_receive_migration_protocol(listener, &receive_data_migration)
             .inspect(|_| {
                 // Serving and resume already happened in the protocol loop.
                 event!("vm", "migration-receive-finished");
@@ -3322,7 +3478,18 @@ impl RequestHandler for Vmm {
                 event!("vm", "migration-receive-failed");
                 self.vm = VmOwnership::None;
                 self.vm_config = None;
-            })
+            })?;
+
+        if let Some(action) = guest_action {
+            // The sender stopped its VM instead of transferring its state.
+            self.apply_guest_request(action).map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!(
+                    "Error applying the guest's {action:?} request after the migration: {e}"
+                ))
+            })?;
+        }
+
+        Ok(())
     }
 
     /// Dispatches a migration.
@@ -3447,6 +3614,8 @@ impl RequestHandler for Vmm {
             .expect("should have VM ownership as we just checked it");
 
         let device_manager = Arc::downgrade(vm.device_manager());
+        let lifecycle = Arc::clone(vm.lifecycle());
+        lifecycle.set_migrating(true);
 
         match MigrationWorker::spawn(
             vm,
@@ -3462,10 +3631,12 @@ impl RequestHandler for Vmm {
                     migration_worker_handle: handle,
                     vm_info_response: vm_info_snapshot,
                     device_manager,
+                    lifecycle,
                 };
                 Ok(())
             }
             Err(e) => {
+                lifecycle.set_migrating(false);
                 self.vm = VmOwnership::Owned(e.vm);
                 Err(MigratableError::MigrateSend(e.spawn_error.into()))
             }
