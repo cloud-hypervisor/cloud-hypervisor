@@ -541,6 +541,10 @@ impl Migratable for Net {
         self.vu_common.start_migration()
     }
 
+    fn failed_migration(&mut self) -> result::Result<(), MigratableError> {
+        self.vu_common.failed_migration()
+    }
+
     fn complete_migration(&mut self) -> result::Result<(), MigratableError> {
         self.vu_common.complete_migration()
     }
