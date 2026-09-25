@@ -1093,7 +1093,7 @@ impl Snapshottable for Net {
 }
 impl Transportable for Net {}
 impl Migratable for Net {
-    fn start_migration(&mut self) -> result::Result<(), MigratableError> {
+    fn notify_started_migration(&mut self) -> result::Result<(), MigratableError> {
         self.announce.invalidate();
         Ok(())
     }
@@ -1481,7 +1481,7 @@ mod tests {
     #[test]
     fn test_start_migration_invalidates_old_announcer() {
         assert_old_announcer_invalidated(|net| {
-            net.start_migration().unwrap();
+            net.notify_started_migration().unwrap();
         });
     }
 

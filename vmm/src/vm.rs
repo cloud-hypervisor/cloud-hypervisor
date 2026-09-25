@@ -3478,19 +3478,37 @@ impl Migratable for Vm {
         ]))
     }
 
-    fn start_migration(&mut self) -> result::Result<(), MigratableError> {
-        self.memory_manager.lock().unwrap().start_migration()?;
-        self.device_manager.lock().unwrap().start_migration()
+    fn notify_started_migration(&mut self) -> result::Result<(), MigratableError> {
+        self.memory_manager
+            .lock()
+            .unwrap()
+            .notify_started_migration()?;
+        self.device_manager
+            .lock()
+            .unwrap()
+            .notify_started_migration()
     }
 
-    fn failed_migration(&mut self) -> result::Result<(), MigratableError> {
-        self.memory_manager.lock().unwrap().failed_migration()?;
-        self.device_manager.lock().unwrap().failed_migration()
+    fn notify_failed_migration(&mut self) -> result::Result<(), MigratableError> {
+        self.memory_manager
+            .lock()
+            .unwrap()
+            .notify_failed_migration()?;
+        self.device_manager
+            .lock()
+            .unwrap()
+            .notify_failed_migration()
     }
 
-    fn complete_migration(&mut self) -> result::Result<(), MigratableError> {
-        self.memory_manager.lock().unwrap().complete_migration()?;
-        self.device_manager.lock().unwrap().complete_migration()
+    fn notify_completed_migration(&mut self) -> result::Result<(), MigratableError> {
+        self.memory_manager
+            .lock()
+            .unwrap()
+            .notify_completed_migration()?;
+        self.device_manager
+            .lock()
+            .unwrap()
+            .notify_completed_migration()
     }
 }
 
