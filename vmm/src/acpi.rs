@@ -745,7 +745,9 @@ struct IortPciRootComplexBase {
     pub ats_attribute: u32,
     pub pci_segment_number: u32,
     pub memory_address_size_limit: u8,
-    _reserved: [u8; 3],
+    pub pasid_capabilities: u16,
+    _reserved: u8,
+    pub flags: u32,
     // ID mappings follow: array of `struct IortIdMapping`
 }
 
@@ -763,11 +765,11 @@ fn next_node_id(next_id: &mut u32) -> u32 {
 }
 
 #[cfg(target_arch = "aarch64")]
-// Generate IORT table based on Spec Revision E.b:
-// https://developer.arm.com/documentation/den0049/eb/?lang=en
+// Generate IORT table based on Spec Revision E.e:
+// https://developer.arm.com/documentation/den0049/ee/?lang=en
 fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
     const ACPI_IORT_HEADER_SIZE: u32 = 36;
-    const ACPI_IORT_REVISION: u8 = 3;
+    const ACPI_IORT_REVISION: u8 = 6;
     const ACPI_IORT_NODE_ITS_GROUP: u8 = 0x00;
     const ACPI_IORT_NODE_PCI_ROOT_COMPLEX: u8 = 0x02;
 
@@ -839,7 +841,7 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
             common: IortNodeCommon {
                 type_: ACPI_IORT_NODE_PCI_ROOT_COMPLEX,
                 length: (node_size + padding) as u16,
-                revision: 3,
+                revision: 4,
                 node_id: next_node_id(&mut next_id),
                 num_id_mappings: num_id_mappings as u32,
                 // ID mapping array starts right after `IortPciRootComplexBase`
@@ -854,7 +856,9 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
             ats_attribute: 0,
             pci_segment_number: segment.id as u32,
             memory_address_size_limit: 64u8,
-            _reserved: [0; 3],
+            pasid_capabilities: 0,
+            _reserved: 0,
+            flags: 0,
         });
         // ID Mapping for this Root Complex
         // Maps 256 device IDs (1 bus × 32 devices × 8 functions)
