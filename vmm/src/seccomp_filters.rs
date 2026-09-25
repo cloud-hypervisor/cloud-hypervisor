@@ -26,6 +26,7 @@ use vhost::vhost_kern::vhost_binding::{
     VHOST_VDPA_GET_VRING_NUM, VHOST_VDPA_SET_CONFIG, VHOST_VDPA_SET_CONFIG_CALL,
     VHOST_VDPA_SET_STATUS, VHOST_VDPA_SET_VRING_ENABLE, VHOST_VDPA_SUSPEND,
 };
+use virtio_devices::vdpa::VHOST_VDPA_RESUME;
 
 use crate::userfaultfd::{
     UFFDIO_API, UFFDIO_CONTINUE, UFFDIO_COPY, UFFDIO_REGISTER, UFFDIO_WAKE, USERFAULTFD_IOC_NEW,
@@ -433,6 +434,7 @@ fn create_vmm_ioctl_seccomp_rule_common(
             VHOST_VDPA_GET_CONFIG_SIZE()
         )?],
         and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_SUSPEND())?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_RESUME())?],
         and![Cond::new(1, ArgLen::Dword, Eq, UFFDIO_API)?],
         and![Cond::new(1, ArgLen::Dword, Eq, UFFDIO_COPY)?],
         and![Cond::new(1, ArgLen::Dword, Eq, UFFDIO_REGISTER)?],
