@@ -1938,6 +1938,8 @@ impl Vm {
             .as_ref()
             .and_then(|p| p.smbios_config());
 
+        let el2_enabled = self.cpu_manager.lock().unwrap().el2_enabled();
+
         arch::configure_system(
             &mem,
             cmdline.as_cstring().unwrap().to_str().unwrap(),
@@ -1950,6 +1952,7 @@ impl Vm {
             &vgic,
             &self.numa_nodes,
             pmu_supported,
+            el2_enabled,
             smbios.as_ref(),
         )
         .map_err(Error::ConfigureSystem)?;
@@ -3354,6 +3357,13 @@ impl Snapshottable for Vm {
             }
         }
 
+        #[cfg(target_arch = "aarch64")]
+        if self.cpu_manager.lock().unwrap().el2_enabled() {
+            return Err(MigratableError::Snapshot(anyhow!(
+                "Snapshot not supported with aarch64 nested virtualization"
+            )));
+        }
+
         if self.get_state() != VmState::Paused {
             return Err(MigratableError::Snapshot(anyhow!(
                 "Trying to snapshot while VM is running"
@@ -4063,6 +4073,7 @@ mod tests {
             &BTreeMap::new(),
             None,
             true,
+            false,
         )
         .unwrap();
     }

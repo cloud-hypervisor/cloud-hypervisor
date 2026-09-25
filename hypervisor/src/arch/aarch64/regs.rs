@@ -165,16 +165,21 @@ pub enum ExceptionClass {
     BRK = 0b111100,
 }
 
-#[expect(non_upper_case_globals)]
 // PSR (Processor State Register) bits.
 // Taken from arch/arm64/include/uapi/asm/ptrace.h.
+#[expect(non_upper_case_globals)]
 const PSR_MODE_EL1h: u64 = 0x0000_0005;
+#[expect(non_upper_case_globals)]
+const PSR_MODE_EL2h: u64 = 0x0000_0009;
 const PSR_F_BIT: u64 = 0x0000_0040;
 const PSR_I_BIT: u64 = 0x0000_0080;
 const PSR_A_BIT: u64 = 0x0000_0100;
 const PSR_D_BIT: u64 = 0x0000_0200;
 // Taken from arch/arm64/kvm/inject_fault.c.
-pub const PSTATE_FAULT_BITS_64: u64 = PSR_MODE_EL1h | PSR_A_BIT | PSR_F_BIT | PSR_I_BIT | PSR_D_BIT;
+pub const PSTATE_FAULT_BITS_64_EL1H: u64 =
+    PSR_MODE_EL1h | PSR_A_BIT | PSR_F_BIT | PSR_I_BIT | PSR_D_BIT;
+pub const PSTATE_FAULT_BITS_64_EL2H: u64 =
+    PSR_MODE_EL2h | PSR_A_BIT | PSR_F_BIT | PSR_I_BIT | PSR_D_BIT;
 
 // AArch64 system register encoding:
 // See https://developer.arm.com/documentation/ddi0487 (chapter D12)
@@ -225,3 +230,5 @@ pub const AARCH64_ARCH_TIMER_HYP_IRQ: u32 = 10;
 pub const AARCH64_PMU_PPI_INDEX: u32 = 7;
 pub const AARCH64_MIN_PPI_IRQ: u32 = 16;
 pub const AARCH64_PMU_IRQ: u32 = AARCH64_MIN_PPI_IRQ + AARCH64_PMU_PPI_INDEX;
+pub const AARCH64_GIC_MAINT_PPI_INDEX: u32 = 9;
+pub const AARCH64_GIC_MAINT_IRQ: u32 = AARCH64_MIN_PPI_IRQ + AARCH64_GIC_MAINT_PPI_INDEX;
