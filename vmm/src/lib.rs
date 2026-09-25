@@ -1762,7 +1762,7 @@ impl Vmm {
         // Let every Migratable object know about the migration being started
         // unless the source VM must be preserved.
         if !send_data_migration.preserve_source {
-            vm.start_migration()?;
+            vm.notify_started_migration()?;
         }
 
         // Memory transfer
@@ -1918,7 +1918,7 @@ impl Vmm {
         if send_data_migration.preserve_source {
             Ok(())
         } else {
-            vm.complete_migration()
+            vm.notify_completed_migration()
         }
     }
 
@@ -2141,7 +2141,7 @@ impl Vmm {
         } = migration_worker_handle.join();
 
         let mut try_resume_vm_after_failed_migration = |mut vm: Vm| {
-            if let Err(e) = vm.failed_migration() {
+            if let Err(e) = vm.notify_failed_migration() {
                 warn!(
                     "Failed to notify VM's components the migration was aborted: {}",
                     flatten_error_chain_to_string(&e)

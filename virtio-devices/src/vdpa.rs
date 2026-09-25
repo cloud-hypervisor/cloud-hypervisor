@@ -531,7 +531,7 @@ impl Snapshottable for Vdpa {
 impl Transportable for Vdpa {}
 
 impl Migratable for Vdpa {
-    fn start_migration(&mut self) -> result::Result<(), MigratableError> {
+    fn notify_started_migration(&mut self) -> result::Result<(), MigratableError> {
         if self.backend_features & (1 << VHOST_BACKEND_F_RESUME) == 0 {
             warn!(
                 "vDPA device {} isn't capable of being resumed after a failed migration",
@@ -555,7 +555,7 @@ impl Migratable for Vdpa {
         }
     }
 
-    fn failed_migration(&mut self) -> result::Result<(), MigratableError> {
+    fn notify_failed_migration(&mut self) -> result::Result<(), MigratableError> {
         if !self.migrating {
             return Ok(());
         }
@@ -575,7 +575,7 @@ impl Migratable for Vdpa {
         Ok(())
     }
 
-    fn complete_migration(&mut self) -> result::Result<(), MigratableError> {
+    fn notify_completed_migration(&mut self) -> result::Result<(), MigratableError> {
         self.migrating = false;
         Ok(())
     }

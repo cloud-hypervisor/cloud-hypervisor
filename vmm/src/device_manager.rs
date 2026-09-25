@@ -6122,20 +6122,20 @@ impl Migratable for DeviceManager {
         Ok(table)
     }
 
-    fn start_migration(&mut self) -> result::Result<(), MigratableError> {
+    fn notify_started_migration(&mut self) -> result::Result<(), MigratableError> {
         for (_, device_node) in self.device_tree.lock().unwrap().iter() {
             if let Some(migratable) = &device_node.migratable {
-                migratable.lock().unwrap().start_migration()?;
+                migratable.lock().unwrap().notify_started_migration()?;
             }
         }
         Ok(())
     }
 
-    fn failed_migration(&mut self) -> result::Result<(), MigratableError> {
+    fn notify_failed_migration(&mut self) -> result::Result<(), MigratableError> {
         let mut result = Ok(());
         for (id, device_node) in self.device_tree.lock().unwrap().iter() {
             if let Some(migratable) = &device_node.migratable
-                && let Err(e) = migratable.lock().unwrap().failed_migration()
+                && let Err(e) = migratable.lock().unwrap().notify_failed_migration()
             {
                 warn!(
                     "Failed to abort migration for device {id}: {}",
@@ -6147,10 +6147,10 @@ impl Migratable for DeviceManager {
         result
     }
 
-    fn complete_migration(&mut self) -> result::Result<(), MigratableError> {
+    fn notify_completed_migration(&mut self) -> result::Result<(), MigratableError> {
         for (_, device_node) in self.device_tree.lock().unwrap().iter() {
             if let Some(migratable) = &device_node.migratable {
-                migratable.lock().unwrap().complete_migration()?;
+                migratable.lock().unwrap().notify_completed_migration()?;
             }
         }
         Ok(())

@@ -299,15 +299,15 @@ pub trait Migratable: Send + Pausable + Snapshottable + Transportable {
         Ok(MemoryRangeTable::default())
     }
 
-    fn start_migration(&mut self) -> result::Result<(), MigratableError> {
+    fn notify_started_migration(&mut self) -> result::Result<(), MigratableError> {
         Ok(())
     }
 
-    fn failed_migration(&mut self) -> result::Result<(), MigratableError> {
+    fn notify_failed_migration(&mut self) -> result::Result<(), MigratableError> {
         Ok(())
     }
 
-    fn complete_migration(&mut self) -> result::Result<(), MigratableError> {
+    fn notify_completed_migration(&mut self) -> result::Result<(), MigratableError> {
         Ok(())
     }
 }

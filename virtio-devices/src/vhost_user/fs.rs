@@ -370,15 +370,15 @@ impl Migratable for Fs {
         self.vu_common.dirty_log()
     }
 
-    fn start_migration(&mut self) -> result::Result<(), MigratableError> {
-        self.vu_common.start_migration()
+    fn notify_started_migration(&mut self) -> result::Result<(), MigratableError> {
+        self.vu_common.notify_started_migration()
     }
 
-    fn failed_migration(&mut self) -> result::Result<(), MigratableError> {
-        self.vu_common.failed_migration()
+    fn notify_failed_migration(&mut self) -> result::Result<(), MigratableError> {
+        self.vu_common.notify_failed_migration()
     }
 
-    fn complete_migration(&mut self) -> result::Result<(), MigratableError> {
-        self.vu_common.complete_migration()
+    fn notify_completed_migration(&mut self) -> result::Result<(), MigratableError> {
+        self.vu_common.notify_completed_migration()
     }
 }

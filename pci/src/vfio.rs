@@ -2715,7 +2715,7 @@ impl Snapshottable for VfioPciDevice {
 impl Transportable for VfioPciDevice {}
 
 impl Migratable for VfioPciDevice {
-    fn start_migration(&mut self) -> result::Result<(), MigratableError> {
+    fn notify_started_migration(&mut self) -> result::Result<(), MigratableError> {
         // Reject a device that does not implement migration v2 up front,
         // rather than silently skipping its state and dirty tracking.
         if self.common.migration_flags.is_none() {

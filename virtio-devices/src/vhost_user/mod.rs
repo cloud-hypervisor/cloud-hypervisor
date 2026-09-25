@@ -841,17 +841,17 @@ impl VhostUserCommon {
         }
     }
 
-    pub fn start_migration(&mut self) -> result::Result<(), MigratableError> {
+    pub fn notify_started_migration(&mut self) -> result::Result<(), MigratableError> {
         self.migration_started = true;
         Ok(())
     }
 
-    pub fn failed_migration(&mut self) -> result::Result<(), MigratableError> {
+    pub fn notify_failed_migration(&mut self) -> result::Result<(), MigratableError> {
         self.migration_started = false;
         Ok(())
     }
 
-    pub fn complete_migration(&mut self) -> result::Result<(), MigratableError> {
+    pub fn notify_completed_migration(&mut self) -> result::Result<(), MigratableError> {
         self.migration_started = false;
         self.dirty_logging = false;
 
