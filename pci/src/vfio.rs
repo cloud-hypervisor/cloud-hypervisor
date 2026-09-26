@@ -16,7 +16,6 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use byteorder::{ByteOrder, LittleEndian};
 use hypervisor::HypervisorVmError;
-use libc::{_SC_PAGESIZE, sysconf};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -1020,11 +1019,7 @@ impl VfioCommon {
                             .allocate(
                                 restored_bar_addr,
                                 region_size,
-                                Some(cmp::max(
-                                    // SAFETY: FFI call. Trivially safe.
-                                    unsafe { sysconf(_SC_PAGESIZE) as GuestUsize },
-                                    region_size,
-                                )),
+                                Some(cmp::max(get_page_size(), region_size)),
                             )
                     })
                     .ok_or(PciDeviceError::IoAllocationFailed(region_size))?
