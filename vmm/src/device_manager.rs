@@ -85,8 +85,9 @@ use libc::{
 use log::{debug, error, info, warn};
 use net_util::MacAddr;
 use pci::{
-    DeviceRelocation, MmioRegion, PciBarConfiguration, PciBarRegionType, PciBdf, PciDevice,
-    VfioDmaMapping, VfioPciDevice, VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError,
+    DeviceRelocation, MmioRegion, MmioWindow, PciBarConfiguration, PciBarRegionType, PciBdf,
+    PciDevice, VfioDmaMapping, VfioPciDevice, VfioUserDmaMapping, VfioUserPciDevice,
+    VfioUserPciDeviceError,
 };
 use rate_limiter::group;
 use rate_limiter::group::RateLimiterGroup;
@@ -652,6 +653,71 @@ pub(crate) struct AddressManager {
     pci_mmio64_allocators: Box<[Arc<Mutex<AddressAllocator>>]>,
 }
 
+impl AddressManager {
+    /// Returns the PCI segment of `pci_dev`, as recorded in the device tree
+    /// when the device was added.
+    fn pci_segment(&self, pci_dev: &dyn PciDevice) -> io::Result<usize> {
+        let id = pci_dev
+            .id()
+            .ok_or_else(|| io::Error::other("PCI device with BARs has no id"))?;
+        let device_tree = self.device_tree.lock().unwrap();
+        let bdf = device_tree
+            .get(&id)
+            .and_then(|node| node.pci_bdf)
+            .ok_or_else(|| {
+                io::Error::other(format!("{id} has no PCI address in the device tree"))
+            })?;
+        Ok(bdf.segment().into())
+    }
+
+    /// Moves a memory BAR to `new_base` within PCI segment `segment`.
+    ///
+    /// On failure nothing changes, and the caller writes the old address back
+    /// into the BAR, so the device, the MMIO bus and the windows keep agreeing
+    /// on where the BAR is.
+    fn move_mmio_bar(
+        &self,
+        segment: usize,
+        region_type: PciBarRegionType,
+        old_base: u64,
+        new_base: u64,
+        len: u64,
+    ) -> io::Result<()> {
+        let old_addr = GuestAddress(old_base);
+        let new_addr = GuestAddress(new_base);
+        let size = len as GuestUsize;
+
+        // Lock the 32-bit window before the 64-bit one, as allocate_bars()
+        // does, so the two paths cannot deadlock.
+        let mut mmio32 = self.pci_mmio32_allocators[segment].lock().unwrap();
+        let mut mmio64 = self.pci_mmio64_allocators[segment].lock().unwrap();
+
+        let Some(src) = MmioWindow::from_addr(region_type, old_addr, &mmio32, &mmio64) else {
+            return Err(io::Error::other(format!(
+                "{region_type:?} BAR at {old_base:#x} is outside its PCI MMIO windows"
+            )));
+        };
+
+        // from_addr() only returns windows the BAR's type may occupy, so a
+        // 32-bit BAR cannot move out of the 32-bit window.
+        let Some(dst) = MmioWindow::from_addr(region_type, new_addr, &mmio32, &mmio64) else {
+            return Err(io::Error::other(format!(
+                "{region_type:?} BAR cannot move to {new_base:#x}, outside its PCI MMIO windows"
+            )));
+        };
+
+        // Reserve the new range before freeing the old one, so a refused move
+        // changes nothing. The two ranges cannot overlap: BAR sizes are powers
+        // of two, both ranges are aligned to that size, and move_bar() only
+        // runs when the address changes.
+        dst.select(&mut *mmio32, &mut *mmio64)
+            .allocate(Some(new_addr), size, Some(len))
+            .ok_or_else(|| io::Error::other("failed allocating new MMIO range"))?;
+        src.select(&mut *mmio32, &mut *mmio64).free(old_addr, size);
+        Ok(())
+    }
+}
+
 impl DeviceRelocation for AddressManager {
     fn move_bar(
         &self,
@@ -693,45 +759,8 @@ impl DeviceRelocation for AddressManager {
                     .map_err(io::Error::other)?;
             }
             PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
-                let pci_mmio_allocators = if region_type == PciBarRegionType::Memory32BitRegion {
-                    &self.pci_mmio32_allocators
-                } else {
-                    &self.pci_mmio64_allocators
-                };
-
-                // Find the specific allocator that this BAR was allocated from and use it for a new one
-                for pci_mmio_allocator_mutex in pci_mmio_allocators {
-                    let mut pci_mmio_allocator = pci_mmio_allocator_mutex.lock().unwrap();
-
-                    if old_base >= pci_mmio_allocator.base().0
-                        && old_base <= pci_mmio_allocator.end().0
-                    {
-                        // Free old_base first so allocate(new_base) sees it
-                        // as available; restore old_base on failure to keep
-                        // the allocator in sync with the MMIO bus.
-                        pci_mmio_allocator.free(GuestAddress(old_base), len as GuestUsize);
-                        if pci_mmio_allocator
-                            .allocate(Some(GuestAddress(new_base)), len as GuestUsize, Some(len))
-                            .is_none()
-                        {
-                            if pci_mmio_allocator
-                                .allocate(
-                                    Some(GuestAddress(old_base)),
-                                    len as GuestUsize,
-                                    Some(len),
-                                )
-                                .is_none()
-                            {
-                                error!(
-                                    "Failed to restore old MMIO range 0x{old_base:x} after rejected move_bar"
-                                );
-                            }
-                            return Err(io::Error::other("failed allocating new MMIO range"));
-                        }
-
-                        break;
-                    }
-                }
+                let segment = self.pci_segment(pci_dev)?;
+                self.move_mmio_bar(segment, region_type, old_base, new_base, len)?;
 
                 // Update MMIO bus
                 self.mmio_bus
