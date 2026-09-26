@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::io::{self, ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -17,6 +16,7 @@ use std::sync::mpsc::{Receiver, Sender, SyncSender, TrySendError, channel, sync_
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
+use std::{fmt, mem};
 
 use anyhow::{Context, anyhow};
 use log::{debug, error, info, warn};
@@ -33,6 +33,7 @@ use vm_migration::protocol::{Command, ConnectionRole, MemoryRangeTable, Request,
 use vm_migration::tls::{TlsServerConfig, TlsStream};
 use vm_migration::{MigratableError, Snapshot};
 use vmm_sys_util::eventfd::EventFd;
+use zerocopy::IntoBytes;
 
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::sync_utils::Gate;
@@ -1231,6 +1232,59 @@ pub(crate) fn send_state(
     )
 }
 
+/// Buffer to significantly speed up transmission of scattered memory ranges.
+struct TransmissionBuffer {
+    buffer: Vec<u8>,
+    filled: usize,
+}
+
+impl Default for TransmissionBuffer {
+    fn default() -> Self {
+        Self {
+            buffer: vec![0; Self::SIZE],
+            filled: 0,
+        }
+    }
+}
+
+impl TransmissionBuffer {
+    /// Spreads the fixed cost of a write (syscall, TLS record) over many
+    /// pages. A multiple of the 16 KiB TLS record, so it fills whole records.
+    const SIZE: usize = 64 /* KiB */ << 10;
+
+    /// Reserves `len` bytes, sending what is collected if they do not fit.
+    fn reserve(
+        &mut self,
+        socket: &mut SocketStream,
+        len: usize,
+    ) -> Result<&mut [u8], MigratableError> {
+        assert!(len <= Self::SIZE);
+
+        if self.filled + len > Self::SIZE {
+            self.flush(socket)?;
+        }
+
+        let start = self.filled;
+        self.filled += len;
+        Ok(&mut self.buffer[start..self.filled])
+    }
+
+    fn push(&mut self, socket: &mut SocketStream, bytes: &[u8]) -> Result<(), MigratableError> {
+        for chunk in bytes.chunks(Self::SIZE) {
+            self.reserve(socket, chunk.len())?.copy_from_slice(chunk);
+        }
+
+        Ok(())
+    }
+
+    fn flush(&mut self, socket: &mut SocketStream) -> Result<(), MigratableError> {
+        let filled = mem::take(&mut self.filled);
+        socket
+            .write_all(&self.buffer[..filled])
+            .map_err(MigratableError::MigrateSocket)
+    }
+}
+
 /// Transmits the given [`MemoryRangeTable`] and the corresponding guest memory
 /// content over the wire if there is at least one range.
 ///
@@ -1241,47 +1295,52 @@ pub(crate) fn send_state(
 /// In case the migration is cancelled, this shortcuts the transfer.
 pub(crate) fn send_memory_ranges(
     guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
-    ranges: &MemoryRangeTable,
+    range_table: &MemoryRangeTable,
     socket: &mut SocketStream,
     cancel_migration: &AtomicBool,
 ) -> Result<(), MigratableError> {
-    if ranges.ranges().is_empty() {
+    if range_table.ranges().is_empty() {
         return Ok(());
     }
 
-    // Send the memory table
-    Request::memory(ranges.length()).write_to(socket)?;
-    ranges.write_to(socket)?;
+    let mut tx_buffer = TransmissionBuffer::default();
+    tx_buffer.push(socket, Request::memory(range_table.length()).as_bytes())?;
+    tx_buffer.push(socket, range_table.as_bytes())?;
 
-    // And then the memory itself
     let mem = guest_memory.memory();
-    for range in ranges.ranges() {
-        let mut offset: u64 = 0;
-        // Here we are manually handling the retry in case we can't read the
-        // whole region at once because we can't use the implementation
-        // from vm-memory::GuestMemory of write_all_to() as it is not
-        // following the correct behavior. For more info about this issue
-        // see: https://github.com/rust-vmm/vm-memory/issues/174
-        loop {
+    for range in range_table.ranges() {
+        if range.length >= TransmissionBuffer::SIZE as u64 {
             if cancel_migration.load(Ordering::Acquire) {
                 return Err(MigratableError::Cancelled);
             }
 
-            let bytes_written = mem
-                .write_volatile_to(
-                    GuestAddress(range.gpa + offset),
-                    socket,
-                    (range.length - offset) as usize,
-                )
-                .context("Error transferring memory to socket")
-                .map_err(MigratableError::MigrateSend)?;
-            offset += bytes_written as u64;
+            tx_buffer.flush(socket)?;
 
-            if offset == range.length {
-                break;
+            let mut offset = 0;
+            while offset < range.length {
+                if cancel_migration.load(Ordering::Acquire) {
+                    return Err(MigratableError::Cancelled);
+                }
+
+                let bytes_written = mem
+                    .write_volatile_to(
+                        GuestAddress(range.gpa + offset),
+                        socket,
+                        (range.length - offset) as usize,
+                    )
+                    .context("Error transferring memory to socket")
+                    .map_err(MigratableError::MigrateSend)?;
+                offset += bytes_written as u64;
             }
+        } else {
+            let target = tx_buffer.reserve(socket, range.length as usize)?;
+            mem.read_slice(target, GuestAddress(range.gpa))
+                .context("Error accessing guest memory to transfer")
+                .map_err(MigratableError::MigrateSend)?;
         }
     }
+    tx_buffer.flush(socket)?;
+
     expect_ok_response(
         socket,
         MigratableError::MigrateSend(anyhow!("Error during dirty memory migration")),
