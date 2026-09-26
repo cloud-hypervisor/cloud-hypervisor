@@ -129,12 +129,13 @@ qemu-img resize -f raw <ubuntu-image> +5G
 
 ### Boot VM
 
-Note the inclusion of the AIA interrupt controller in the 
-invocation.
+Note the inclusion of the AIA interrupt controller and the Smstateen
+extension in the invocation.
 
 ```console
 qemu-system-riscv64 \
   -machine virt,aia=aplic-imsic \
+  -cpu rv64,smstateen=true \
   -nographic -m 1G -smp 8 \
   -kernel /usr/lib/u-boot/qemu-riscv64_smode/uboot.elf \
   -device virtio-rng-pci \
