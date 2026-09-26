@@ -367,9 +367,9 @@ pub enum DeviceManagerError {
     #[error("Failed to map VFIO MMIO region")]
     VfioMapRegion(#[source] pci::VfioPciError),
 
-    /// Failed to DMA map VFIO device.
-    #[error("Failed to DMA map VFIO device")]
-    VfioDmaMap(#[source] vfio_ioctls::VfioError),
+    /// Failed to DMA map guest RAM for a VFIO device.
+    #[error("Failed to DMA map guest RAM at {1:#x} length {2:#x}")]
+    VfioDmaMap(#[source] vfio_ioctls::VfioError, u64, u64),
 
     /// Failed to create the passthrough device.
     #[error("Failed to create the passthrough device")]
@@ -4090,7 +4090,13 @@ impl DeviceManager {
                                 region.as_ptr(),
                             )
                         }
-                        .map_err(DeviceManagerError::VfioDmaMap)?;
+                        .map_err(|e| {
+                            DeviceManagerError::VfioDmaMap(
+                                e,
+                                region.start_addr().raw_value(),
+                                region.len(),
+                            )
+                        })?;
                     }
                 }
             }
