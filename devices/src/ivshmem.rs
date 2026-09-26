@@ -12,9 +12,9 @@ use std::{io, result};
 use anyhow::anyhow;
 use log::{debug, error, warn};
 use pci::{
-    BarReprogrammingParams, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable,
-    PciBarRegionType, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType,
-    PciSubclass,
+    BarReprogrammingParams, MmioWindow, PCI_CONFIGURATION_ID, PciBarConfiguration,
+    PciBarPrefetchable, PciBarRegionType, PciClassCode, PciConfiguration, PciDevice,
+    PciDeviceError, PciHeaderType, PciSubclass,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -270,9 +270,20 @@ impl PciDevice for IvshmemDevice {
 
         // The data BAR maps the shared memory object
         let data_bar_size = self.region_size;
-        let data_bar_addr = mmio64_allocator
-            .allocate(data_bar_addr, data_bar_size, None)
-            .ok_or(PciDeviceError::IoAllocationFailed(data_bar_size))?;
+        let data_bar_addr = MmioWindow::for_bar(
+            PciBarRegionType::Memory64BitRegion,
+            data_bar_addr,
+            mmio32_allocator,
+            mmio64_allocator,
+        )
+        .and_then(|window| {
+            window.select(mmio32_allocator, mmio64_allocator).allocate(
+                data_bar_addr,
+                data_bar_size,
+                None,
+            )
+        })
+        .ok_or(PciDeviceError::IoAllocationFailed(data_bar_size))?;
         debug!("ivshmem data BAR address 0x{:x}", data_bar_addr.0);
 
         let data_bar = PciBarConfiguration::default()
