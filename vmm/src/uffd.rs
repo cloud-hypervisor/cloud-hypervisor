@@ -238,6 +238,13 @@ struct UffdioRange {
     len: u64,
 }
 
+#[repr(C)]
+struct UffdioPoison {
+    range: UffdioRange,
+    mode: u64,
+    updated: i64,
+}
+
 /// A guest memory range registered with userfaultfd, plus where its bytes
 /// live for the data source.
 pub(crate) struct UffdRange {
@@ -433,6 +440,35 @@ impl Drop for SocketUffdMemorySource {
 
 fn io_other<E: fmt::Display>(e: E) -> io::Error {
     io::Error::other(e.to_string())
+}
+
+/// Mark a missing page so that an access to it fails instead of resolving a
+/// zero page.
+pub(crate) fn poison(fd: BorrowedFd<'_>, addr: u64, len: u64) -> Result<(), Error> {
+    let mut poison = UffdioPoison {
+        range: UffdioRange { start: addr, len },
+        mode: 0,
+        updated: 0,
+    };
+    loop {
+        // SAFETY: `poison` is a valid, correctly-sized struct for this ioctl.
+        let ret = unsafe {
+            libc::ioctl(
+                fd.as_raw_fd(),
+                userfaultfd::UFFDIO_POISON as libc::Ioctl,
+                &mut poison,
+            )
+        };
+        if ret >= 0 {
+            return Ok(());
+        }
+
+        let error = Error::last_os_error();
+        if error.raw_os_error() != Some(libc::EAGAIN) {
+            return Err(error);
+        }
+        thread::yield_now();
+    }
 }
 
 /// Wake threads waiting on a fault in the given range without copying data.
