@@ -10,14 +10,31 @@ use std::{io, thread};
 
 use acpi_tables::{Aml, AmlSink, aml};
 use log::{error, info, warn};
+#[cfg(not(target_arch = "riscv64"))]
+use thiserror::Error;
 use vm_device::BusDevice;
 use vm_device::interrupt::InterruptSourceGroup;
-use vm_memory::GuestAddress;
+#[cfg(not(target_arch = "riscv64"))]
+use vm_memory::VolatileMemory;
+#[cfg(not(target_arch = "riscv64"))]
+use vm_memory::bitmap::AtomicBitmap;
+#[cfg(not(target_arch = "riscv64"))]
+use vm_memory::volatile_memory::Error as VolatileMemoryError;
+use vm_memory::{GuestAddress, MmapRegion};
 use vmm_sys_util::eventfd::EventFd;
 
 use super::AcpiNotificationFlags;
 
 pub const GED_DEVICE_ACPI_SIZE: usize = 0x1;
+
+#[cfg(not(target_arch = "riscv64"))]
+pub const VMGENID_SIZE: usize = 16;
+
+// The value sits in its own memory slot, which KVM requires to be page sized.
+#[cfg(not(target_arch = "riscv64"))]
+pub const VMGENID_REGION_SIZE: u64 = 0x1000;
+
+const VMGENID_GED_BIT: usize = AcpiNotificationFlags::VMGENID_CHANGED.bits() as usize;
 
 /// A device for handling ACPI shutdown and reboot
 pub struct AcpiShutdownDevice {
@@ -198,6 +215,14 @@ impl Aml for AcpiGedDevice {
                                 &0x80usize,
                             )],
                         ),
+                        &aml::And::new(&aml::Local(1), &aml::Local(0), &VMGENID_GED_BIT),
+                        &aml::If::new(
+                            &aml::Equal::new(&aml::Local(1), &VMGENID_GED_BIT),
+                            vec![&aml::Notify::new(
+                                &aml::Path::new("\\_SB_.VGEN"),
+                                &0x80usize,
+                            )],
+                        ),
                     ],
                 ),
             ],
@@ -223,6 +248,85 @@ impl Aml for AcpiGedDevice {
                     1,
                     true,
                     vec![&aml::MethodCall::new("\\_SB_.GEC_.ESCN".into(), vec![])],
+                ),
+            ],
+        )
+        .to_aml_bytes(sink);
+    }
+}
+
+/// A device exposing a VM Generation ID from its own memory region
+#[cfg(not(target_arch = "riscv64"))]
+pub struct VmGenIdDevice {
+    address: GuestAddress,
+    region: Arc<MmapRegion<AtomicBitmap>>,
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+#[derive(Debug, Error)]
+pub enum VmGenIdError {
+    #[error("Failed to draw a VM Generation ID")]
+    Random(#[source] getrandom::Error),
+
+    #[error("Failed to publish the VM Generation ID")]
+    Publish(#[source] VolatileMemoryError),
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+impl VmGenIdDevice {
+    pub fn new(
+        address: GuestAddress,
+        region: Arc<MmapRegion<AtomicBitmap>>,
+    ) -> Result<VmGenIdDevice, VmGenIdError> {
+        let device = VmGenIdDevice { address, region };
+        device.regenerate()?;
+
+        Ok(device)
+    }
+
+    /// Draws a fresh value and publishes it where the guest reads it.
+    pub fn regenerate(&self) -> Result<(), VmGenIdError> {
+        let mut gen_id = [0u8; VMGENID_SIZE];
+        getrandom::fill(&mut gen_id).map_err(VmGenIdError::Random)?;
+
+        self.region
+            .get_slice(0, VMGENID_SIZE)
+            .map_err(VmGenIdError::Publish)?
+            .copy_from(&gen_id);
+
+        Ok(())
+    }
+
+    pub fn address(&self) -> GuestAddress {
+        self.address
+    }
+
+    #[cfg(test)]
+    fn gen_id(&self) -> [u8; VMGENID_SIZE] {
+        let mut out = [0u8; VMGENID_SIZE];
+        self.region
+            .get_slice(0, VMGENID_SIZE)
+            .unwrap()
+            .copy_to(&mut out);
+        out
+    }
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+impl Aml for VmGenIdDevice {
+    fn to_aml_bytes(&self, sink: &mut dyn AmlSink) {
+        let addr_low = self.address.0 as u32;
+        let addr_high = (self.address.0 >> 32) as u32;
+
+        aml::Device::new(
+            "_SB_.VGEN".into(),
+            vec![
+                &aml::Name::new("_HID".into(), &"VMGENCTR"),
+                &aml::Name::new("_CID".into(), &"VM_Gen_Counter"),
+                &aml::Name::new("_DDN".into(), &"VM_Gen_Counter"),
+                &aml::Name::new(
+                    "ADDR".into(),
+                    &aml::Package::new(vec![&addr_low, &addr_high]),
                 ),
             ],
         )
@@ -265,5 +369,120 @@ impl BusDevice for AcpiPmTimerDevice {
         let counter: u32 = (counter & 0xffff_ffff) as u32;
 
         data.copy_from_slice(&counter.to_le_bytes());
+    }
+}
+
+#[cfg(all(test, not(target_arch = "riscv64")))]
+mod tests {
+    use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};
+
+    use super::*;
+
+    const DEVICE_OP: &[u8] = &[0x5b, 0x82];
+    const DUAL_NAME_PREFIX: u8 = 0x2e;
+    const NAME_OP: u8 = 0x08;
+    const STRING_PREFIX: u8 = 0x0d;
+
+    struct NoopInterrupts;
+
+    impl InterruptSourceGroup for NoopInterrupts {
+        fn trigger(&self, _index: InterruptIndex) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
+            None
+        }
+
+        fn update(
+            &self,
+            _index: InterruptIndex,
+            _config: InterruptSourceConfig,
+            _masked: bool,
+            _set_gsi: bool,
+        ) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn set_gsi(&self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn encode(aml: &dyn Aml) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        aml.to_aml_bytes(&mut bytes);
+        bytes
+    }
+
+    fn push_name(bytes: &mut Vec<u8>, name: &[u8], value: &[u8]) {
+        bytes.push(NAME_OP);
+        bytes.extend_from_slice(name);
+        bytes.push(STRING_PREFIX);
+        bytes.extend_from_slice(value);
+        bytes.push(0x00);
+    }
+
+    fn device_at(address: u64) -> VmGenIdDevice {
+        let region = Arc::new(MmapRegion::new(VMGENID_REGION_SIZE as usize).unwrap());
+        VmGenIdDevice::new(GuestAddress(address), region).unwrap()
+    }
+
+    #[test]
+    fn test_vmgenid_aml() {
+        let device = device_at(0xa_0028);
+
+        let mut expected = Vec::new();
+        expected.extend_from_slice(DEVICE_OP);
+        expected.extend_from_slice(&[0x42, 0x05]); // PkgLength
+        expected.push(DUAL_NAME_PREFIX);
+        expected.extend_from_slice(b"_SB_VGEN");
+        push_name(&mut expected, b"_HID", b"VMGENCTR");
+        push_name(&mut expected, b"_CID", b"VM_Gen_Counter");
+        push_name(&mut expected, b"_DDN", b"VM_Gen_Counter");
+        expected.push(NAME_OP);
+        expected.extend_from_slice(b"ADDR");
+        expected.extend_from_slice(&[0x12, 0x08, 0x02]); // Package of two
+        expected.extend_from_slice(&[0x0c, 0x28, 0x00, 0x0a, 0x00]); // DWord 0xa_0028
+        expected.push(0x00); // Zero
+
+        assert_eq!(encode(&device), expected);
+    }
+
+    #[test]
+    fn test_vmgenid_aml_splits_address() {
+        let device = device_at(0x1_0000_1000);
+        let bytes = encode(&device);
+
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&[0x12, 0x06, 0x02]); // Package of two
+        expected.extend_from_slice(&[0x0b, 0x00, 0x10]); // Word 0x1000
+        expected.push(0x01); // One
+
+        assert_eq!(&bytes[bytes.len() - expected.len()..], expected);
+    }
+
+    #[test]
+    fn test_ged_notifies_vmgenid() {
+        let ged = AcpiGedDevice::new(Arc::new(NoopInterrupts), 5, GuestAddress(0x1000));
+
+        let mut notify = Vec::new();
+        notify.extend_from_slice(&[0x86, 0x5c, DUAL_NAME_PREFIX]); // Notify, root path
+        notify.extend_from_slice(b"_SB_VGEN");
+        notify.extend_from_slice(&[0x0a, 0x80]); // 0x80
+
+        let bytes = encode(&ged);
+        assert!(bytes.windows(notify.len()).any(|w| w == notify));
+    }
+
+    #[test]
+    fn test_vmgenid_regenerate() {
+        let device = device_at(0xa_0028);
+        let first = device.gen_id();
+
+        device.regenerate().unwrap();
+
+        assert_ne!(device.gen_id(), first);
+        assert_eq!(device.address(), GuestAddress(0xa_0028));
     }
 }

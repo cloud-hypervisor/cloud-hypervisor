@@ -122,6 +122,7 @@ dirs = "7.0.0"
 env_logger = "0.11.10"
 epoll = "4.4.0"
 flume = "0.12.0"
+getrandom = { version = "0.3.4", features = ["std"] }
 itertools = "0.15.0"
 jiff = { version = "0.2", default-features = false, features = ["std"] }
 libc = "0.2.186"
