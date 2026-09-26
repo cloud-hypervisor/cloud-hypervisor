@@ -1164,6 +1164,7 @@ impl MemoryManager {
 
                     if let Err(e) = &result {
                         error!("UFFD handler exited with error: {e}");
+                        Self::uffd_teardown_ranges(uffd_fd.as_fd(), &handler_ranges);
                         thread_exit_evt.write(1).ok();
                     }
 
@@ -1239,6 +1240,31 @@ impl MemoryManager {
         self.uffd_handler
             .as_ref()
             .is_some_and(|h| !h.prefault_complete.load(Ordering::Acquire))
+    }
+
+    /// Tear down `ranges` once the handler can no longer serve them. Poisoning
+    /// the pages it never served means a thread blocked on one takes a fault
+    /// instead of resolving a zero page when the registration goes away.
+    fn uffd_teardown_ranges(uffd_fd: BorrowedFd<'_>, ranges: &[UffdRange]) {
+        let mut poisoned = 0;
+        for range in ranges {
+            let end = range.host_addr + range.length;
+            let mut addr = range.host_addr;
+            while addr < end {
+                match uffd::poison(uffd_fd, addr, end - addr) {
+                    Ok(done) => {
+                        poisoned += done;
+                        // Skip the present page that stopped the poisoning.
+                        addr += done + range.page_size;
+                    }
+                    Err(e) => {
+                        error!("UFFD: failed to poison unserved guest memory: {e}");
+                        return;
+                    }
+                }
+            }
+        }
+        info!("UFFD: poisoned {poisoned} bytes of unserved guest memory");
     }
 
     /// Serve UFFD faults via `source`, prefaulting one page per idle
