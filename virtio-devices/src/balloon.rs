@@ -940,8 +940,12 @@ impl VirtioDevice for Balloon {
     }
 
     fn write_config(&mut self, offset: u64, data: &[u8]) {
-        // The "actual" field is the only mutable field
-        if offset != CONFIG_ACTUAL_OFFSET || data.len() != CONFIG_ACTUAL_SIZE {
+        // The "actual" field is the only mutable field. Accept any write that
+        // stays within it: some drivers update it one byte at a time, and QEMU
+        // accepts 1, 2 and 4 byte device config writes alike.
+        let actual = CONFIG_ACTUAL_OFFSET..CONFIG_ACTUAL_OFFSET + CONFIG_ACTUAL_SIZE as u64;
+        let end = offset.checked_add(data.len() as u64);
+        if data.is_empty() || !actual.contains(&offset) || end.is_none_or(|end| end > actual.end) {
             error!(
                 "Attempt to write to read-only field: offset {:x} length {}",
                 offset,
@@ -1263,6 +1267,53 @@ mod tests {
             parse_balloon_stats(&data),
             Err(BalloonStatsError::InvalidBufferLength(11))
         ));
+    }
+
+    fn test_balloon() -> Balloon {
+        Balloon::new(
+            "balloon0".to_string(),
+            0,
+            false,
+            false,
+            false,
+            SeccompAction::Allow,
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+            None,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn config_write_actual_byte_at_a_time() {
+        let pages: u32 = 0x0001_2345;
+        let mut whole = test_balloon();
+        whole.write_config(CONFIG_ACTUAL_OFFSET, &pages.to_le_bytes());
+        let mut bytewise = test_balloon();
+        for (index, byte) in pages.to_le_bytes().iter().enumerate() {
+            bytewise.write_config(CONFIG_ACTUAL_OFFSET + index as u64, &[*byte]);
+        }
+
+        assert_eq!(bytewise.get_actual(), whole.get_actual());
+        assert_eq!(
+            whole.get_actual(),
+            u64::from(pages) << VIRTIO_BALLOON_PFN_SHIFT
+        );
+    }
+
+    #[test]
+    fn config_write_outside_actual_is_ignored() {
+        let mut balloon = test_balloon();
+        let mut before = [0u8; 8];
+        balloon.read_config(0, &mut before);
+
+        balloon.write_config(0, &[0xff; 4]);
+        balloon.write_config(CONFIG_ACTUAL_OFFSET - 1, &[0xff; 2]);
+        balloon.write_config(CONFIG_ACTUAL_OFFSET + 2, &[0xff; 4]);
+        balloon.write_config(CONFIG_ACTUAL_OFFSET, &[]);
+
+        let mut after = [0u8; 8];
+        balloon.read_config(0, &mut after);
+        assert_eq!(after, before);
     }
 
     #[test]
