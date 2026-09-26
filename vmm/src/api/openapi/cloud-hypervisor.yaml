@@ -1038,6 +1038,14 @@ components:
         vfio_p2p_dma:
           type: boolean
           default: true
+        iommu:
+          type: string
+          enum: ["off", "on", "virtio-iommu", "smmuv3"]
+          description: |
+            The platform's virtual IOMMU. "on" is an alias of
+            "virtio-iommu". With "smmuv3", VFIO devices with `iommu: true`
+            are placed behind an ARM SMMUv3 instead of the virtio-iommu, and
+            `iommufd` is required.
 
     MemoryZoneConfig:
       required:
