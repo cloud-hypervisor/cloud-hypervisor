@@ -8,6 +8,7 @@ pub(crate) const UFFDIO_REGISTER: u64 = 0xc020_aa00; // _IOWR(0xAA, 0x00, struct
 pub(crate) const UFFDIO_COPY: u64 = 0xc028_aa03; // _IOWR(0xAA, 0x03, struct uffdio_copy)
 pub(crate) const UFFDIO_WAKE: u64 = 0x8010_aa02; // _IOR(0xAA, 0x02, struct uffdio_range)
 pub(crate) const UFFDIO_CONTINUE: u64 = 0xc020_aa07; // _IOWR(0xAA, 0x07, struct uffdio_continue)
+pub(crate) const UFFDIO_POISON: u64 = 0xc020_aa08; // _IOWR(0xAA, 0x08, struct uffdio_poison)
 
 // Validate ioctl encoding against the _IO{R,W,WR}(type, nr, size) formula so
 // transposed direction bits or sizes are caught at compile time.
@@ -21,6 +22,7 @@ const _: () = assert!(UFFDIO_REGISTER == ioctl_ioc(IOC_READWRITE, 0xAA, 0x00, 32
 const _: () = assert!(UFFDIO_COPY == ioctl_ioc(IOC_READWRITE, 0xAA, 0x03, 40));
 const _: () = assert!(UFFDIO_WAKE == ioctl_ioc(IOC_READ, 0xAA, 0x02, 16));
 const _: () = assert!(UFFDIO_CONTINUE == ioctl_ioc(IOC_READWRITE, 0xAA, 0x07, 32));
+const _: () = assert!(UFFDIO_POISON == ioctl_ioc(IOC_READWRITE, 0xAA, 0x08, 32));
 
 // Seccomp compares these as Dword (u32); ensure they fit.
 const _: () = assert!(UFFDIO_API <= u32::MAX as u64);
@@ -28,6 +30,7 @@ const _: () = assert!(UFFDIO_REGISTER <= u32::MAX as u64);
 const _: () = assert!(UFFDIO_COPY <= u32::MAX as u64);
 const _: () = assert!(UFFDIO_WAKE <= u32::MAX as u64);
 const _: () = assert!(UFFDIO_CONTINUE <= u32::MAX as u64);
+const _: () = assert!(UFFDIO_POISON <= u32::MAX as u64);
 
 // /dev/userfaultfd ioctl: _IO(0xAA, 0x00)
 pub(crate) const USERFAULTFD_IOC_NEW: u64 = 0x0000_AA00;
