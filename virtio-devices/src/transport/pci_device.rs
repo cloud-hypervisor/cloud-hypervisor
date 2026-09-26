@@ -17,10 +17,10 @@ use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
 use log::{error, info, warn};
 use pci::{
-    BarReprogrammingParams, MaybeMutInterruptSourceGroup, MsixCap, MsixConfig, PciBarConfiguration,
-    PciBarRegionType, PciCapability, PciCapabilityId, PciClassCode, PciConfiguration, PciDevice,
-    PciDeviceError, PciHeaderType, PciMassStorageSubclass, PciNetworkControllerSubclass,
-    PciSubclass,
+    BarReprogrammingParams, MaybeMutInterruptSourceGroup, MmioWindow, MsixCap, MsixConfig,
+    PciBarConfiguration, PciBarRegionType, PciCapability, PciCapabilityId, PciClassCode,
+    PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciMassStorageSubclass,
+    PciNetworkControllerSubclass, PciSubclass,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -1069,9 +1069,20 @@ impl PciDevice for VirtioPciDevice {
             } else {
                 Some(VIRTIO_PCI_BAR_ALIGN)
             };
-            let addr = mmio64_allocator
-                .allocate(settings_bar_addr, CAPABILITY_BAR_SIZE, alignment)
-                .ok_or(PciDeviceError::IoAllocationFailed(CAPABILITY_BAR_SIZE))?;
+            let addr = MmioWindow::for_bar(
+                region_type,
+                settings_bar_addr,
+                mmio32_allocator,
+                mmio64_allocator,
+            )
+            .and_then(|window| {
+                window.select(mmio32_allocator, mmio64_allocator).allocate(
+                    settings_bar_addr,
+                    CAPABILITY_BAR_SIZE,
+                    alignment,
+                )
+            })
+            .ok_or(PciDeviceError::IoAllocationFailed(CAPABILITY_BAR_SIZE))?;
             (addr, region_type)
         } else {
             let region_type = PciBarRegionType::Memory32BitRegion;
@@ -1152,14 +1163,21 @@ impl PciDevice for VirtioPciDevice {
         mmio64_allocator: &mut AddressAllocator,
     ) -> result::Result<(), PciDeviceError> {
         for bar in self.bar_regions.drain(..) {
-            match bar.region_type() {
-                PciBarRegionType::Memory32BitRegion => {
-                    mmio32_allocator.free(GuestAddress(bar.addr()), bar.size());
-                }
-                PciBarRegionType::Memory64BitRegion => {
-                    mmio64_allocator.free(GuestAddress(bar.addr()), bar.size());
-                }
-                _ => error!("Unexpected PCI bar type"),
+            let addr = GuestAddress(bar.addr());
+            // Free the BAR from the window holding it. A 64-bit BAR the guest
+            // moved sits in the 32-bit window. `None` means the BAR was never
+            // reserved in a permitted window, which move_bar() and allocate_bars()
+            // do not allow.
+            match MmioWindow::from_addr(bar.region_type(), addr, mmio32_allocator, mmio64_allocator)
+            {
+                Some(window) => window
+                    .select(&mut *mmio32_allocator, &mut *mmio64_allocator)
+                    .free(addr, bar.size()),
+                None => error!(
+                    "{:?} BAR at {:#x} is outside its PCI MMIO windows",
+                    bar.region_type(),
+                    addr.0
+                ),
             }
         }
         Ok(())

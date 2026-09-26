@@ -60,6 +60,7 @@ use crate::configuration::{
     PCI_EXP_TYPE_RC_END, PCI_EXT_CAP_ALIGN, PCI_EXT_CAP_NEXT_MASK, PCI_EXT_CAP_NEXT_SHIFT,
     PCIE_CONFIG_SPACE_SIZE,
 };
+use crate::device::MmioWindow;
 use crate::mmap::MmapRegion;
 use crate::msi::{MSI_CONFIG_ID, MsiConfigState};
 use crate::msix::{MaybeMutInterruptSourceGroup, MsixConfigState};
@@ -1007,17 +1008,26 @@ impl VfioCommon {
                     // We need do some fixup to keep MMIO RW region and msix cap region page size
                     // aligned.
                     region_size = self.fixup_msix_region(bar_id, region_size);
-                    mmio64_allocator
-                        .allocate(
-                            restored_bar_addr,
-                            region_size,
-                            Some(cmp::max(
-                                // SAFETY: FFI call. Trivially safe.
-                                unsafe { sysconf(_SC_PAGESIZE) as GuestUsize },
+                    MmioWindow::for_bar(
+                        region_type,
+                        restored_bar_addr,
+                        mmio32_allocator,
+                        mmio64_allocator,
+                    )
+                    .and_then(|window| {
+                        window
+                            .select(&mut *mmio32_allocator, &mut *mmio64_allocator)
+                            .allocate(
+                                restored_bar_addr,
                                 region_size,
-                            )),
-                        )
-                        .ok_or(PciDeviceError::IoAllocationFailed(region_size))?
+                                Some(cmp::max(
+                                    // SAFETY: FFI call. Trivially safe.
+                                    unsafe { sysconf(_SC_PAGESIZE) as GuestUsize },
+                                    region_size,
+                                )),
+                            )
+                    })
+                    .ok_or(PciDeviceError::IoAllocationFailed(region_size))?
                 }
             };
 
@@ -1072,11 +1082,25 @@ impl VfioCommon {
                 PciBarRegionType::IoRegion => {
                     allocator.free_io_addresses(region.start, region.length);
                 }
-                PciBarRegionType::Memory32BitRegion => {
-                    mmio32_allocator.free(region.start, region.length);
-                }
-                PciBarRegionType::Memory64BitRegion => {
-                    mmio64_allocator.free(region.start, region.length);
+                PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
+                    // Free the BAR from the window holding it. A 64-bit BAR the guest
+                    // moved sits in the 32-bit window. `None` means the BAR was never
+                    // reserved in a permitted window, which move_bar() and allocate_bars()
+                    // do not allow.
+                    match MmioWindow::from_addr(
+                        region.type_,
+                        region.start,
+                        mmio32_allocator,
+                        mmio64_allocator,
+                    ) {
+                        Some(window) => window
+                            .select(&mut *mmio32_allocator, &mut *mmio64_allocator)
+                            .free(region.start, region.length),
+                        None => error!(
+                            "{:?} BAR at {:#x} is outside its PCI MMIO windows",
+                            region.type_, region.start.0
+                        ),
+                    }
                 }
             }
         }
