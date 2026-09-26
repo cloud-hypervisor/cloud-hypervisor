@@ -2942,6 +2942,98 @@ mod common_parallel {
         _test_socket_interaction(ConsoleKind::Console);
     }
 
+    // Boot a guest with the serial or virtio console on a TCP listener. Bridge
+    // a local pty to it with socat then drive the shared pty interaction check.
+    fn _test_tcp_interaction(kind: ConsoleKind) {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let tcp_pty = guest.tmp_dir.as_path().join("tcp.pty");
+
+        let port = TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+
+        let mut cmdline = DIRECT_KERNEL_BOOT_CMDLINE.to_owned();
+        if let ConsoleKind::Serial = kind {
+            cmdline += if cfg!(target_arch = "x86_64") {
+                " console=ttyS0"
+            } else {
+                " console=ttyAMA0"
+            };
+        }
+
+        let tcp_arg = format!("tcp=127.0.0.1:{port},server=on");
+        let (serial, console) = match kind {
+            ConsoleKind::Serial => (tcp_arg.as_str(), "null"),
+            ConsoleKind::Console => ("null", tcp_arg.as_str()),
+        };
+
+        let mut child = GuestCommand::new(&guest)
+            .default_cpus()
+            .default_memory()
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", &cmdline])
+            .default_disks()
+            .default_net()
+            .args(["--serial", serial])
+            .args(["--console", console])
+            .spawn()
+            .unwrap();
+
+        let boot = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+        });
+
+        let mut socat_command = Command::new("socat");
+        let socat_args = [
+            &format!("pty,link={},raw,echo=0", tcp_pty.display()),
+            &format!("TCP-CONNECT:127.0.0.1:{port}"),
+        ];
+        socat_command.args(socat_args);
+
+        let mut socat_child = socat_command.spawn().unwrap();
+        thread::sleep(Duration::new(1, 0));
+
+        let interaction = panic::catch_unwind(|| {
+            _test_pty_interaction(tcp_pty);
+        });
+
+        let _ = socat_child.kill();
+        let _ = socat_child.wait();
+
+        let shutdown = panic::catch_unwind(|| {
+            guest.ssh_command("sudo shutdown -h now").unwrap();
+        });
+
+        let _ = child.wait_timeout(Duration::from_secs(20));
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(boot.and(interaction).and(shutdown), &output);
+
+        let r = panic::catch_unwind(|| {
+            // Check that the cloud-hypervisor binary actually terminated
+            if !output.status.success() {
+                panic!(
+                    "Cloud Hypervisor process failed to terminate gracefully: {:?}",
+                    output.status
+                );
+            }
+        });
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_serial_tcp_interaction() {
+        _test_tcp_interaction(ConsoleKind::Serial);
+    }
+
+    #[test]
+    fn test_console_tcp_interaction() {
+        _test_tcp_interaction(ConsoleKind::Console);
+    }
+
     fn _test_serial_socket_stale_cleanup(reboot: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -7541,6 +7633,152 @@ mod common_parallel {
         handle_child_output(r, &dest_output);
     }
 
+    // Migrate a guest whose serial or virtio console is a client mode TCP
+    // socket, and check it still flows on the destination after it redials.
+    fn _test_live_migration_console_via_tcp(kind: ConsoleKind) {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+        let migrated_text = String::from("The destination console still speaks TCP.");
+        let net_id = "net123";
+        let net_params = format!(
+            "id={},tap=,mac={},ip={},mask=255.255.255.128",
+            net_id, guest.network.guest_mac0, guest.network.host_ip0
+        );
+        let memory_param: &[&str] = &["--memory", "size=1500M,shared=on"];
+        let boot_vcpus = 2;
+        let max_vcpus = 4;
+        let dest_event_path = temp_event_monitor_path(&guest.tmp_dir);
+
+        // socat forks per connection so the destination can redial after
+        // migration, appending the byte stream to a file the test asserts on.
+        let console_port = get_available_port();
+        let console_log = guest.tmp_dir.as_path().join("migration-console.log");
+        let mut socat_child = Command::new("socat")
+            .arg("-u")
+            .arg(format!("TCP-LISTEN:{console_port},reuseaddr,fork"))
+            .arg(format!("OPEN:{},creat,append", console_log.display()))
+            .spawn()
+            .unwrap();
+
+        let mut cmdline = DIRECT_KERNEL_BOOT_CMDLINE.to_owned();
+        let console_device = match kind {
+            ConsoleKind::Serial => {
+                cmdline += if cfg!(target_arch = "x86_64") {
+                    " console=ttyS0"
+                } else {
+                    " console=ttyAMA0"
+                };
+                if cfg!(target_arch = "x86_64") {
+                    "/dev/ttyS0"
+                } else {
+                    "/dev/ttyAMA0"
+                }
+            }
+            ConsoleKind::Console => "/dev/hvc0",
+        };
+        let tcp_arg = format!("tcp=127.0.0.1:{console_port},server=off,reconnect=1");
+        let (serial, console) = match kind {
+            ConsoleKind::Serial => (tcp_arg.as_str(), "null"),
+            ConsoleKind::Console => ("null", tcp_arg.as_str()),
+        };
+
+        // Start the source VM
+        let src_vm_path = clh_command("cloud-hypervisor");
+        let src_api_socket = temp_api_path(&guest.tmp_dir);
+        let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
+        src_vm_cmd
+            .args([
+                "--cpus",
+                format!("boot={boot_vcpus},max={max_vcpus}").as_str(),
+            ])
+            .args(memory_param)
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", &cmdline])
+            .default_disks()
+            .args(["--net", net_params.as_str()])
+            .args(["--api-socket", &src_api_socket])
+            .args(["--serial", serial])
+            .args(["--console", console])
+            .capture_output();
+        let mut src_child = src_vm_cmd.spawn().unwrap();
+
+        // Start the destination VM
+        let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
+        dest_api_socket.push_str(".dest");
+        let mut dest_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &dest_api_socket])
+            .args([
+                "--event-monitor",
+                format!("path={dest_event_path}").as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            assert!(
+                start_live_migration_tcp_with_flags(
+                    &src_api_socket,
+                    &dest_api_socket,
+                    &dest_event_path,
+                    NonZeroU32::new(1).unwrap(),
+                    false
+                ),
+                "Unsuccessful command: 'send-migration' or 'receive-migration'."
+            );
+        });
+        if r.is_err() {
+            let _ = socat_child.kill();
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Error occurred during live-migration",
+            );
+        }
+
+        let src_exited_ok = wait_until(Duration::from_secs(30), || {
+            matches!(src_child.try_wait(), Ok(Some(_)))
+        }) && src_child.try_wait().unwrap().is_some_and(|s| s.success());
+        if !src_exited_ok {
+            let _ = socat_child.kill();
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Source VM was not terminated successfully.",
+            );
+        }
+
+        // Write a distinct string on the destination to prove the console flows.
+        let r = panic::catch_unwind(|| {
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            guest
+                .ssh_command(&format!("echo {migrated_text} | sudo tee {console_device}"))
+                .unwrap();
+        });
+
+        thread::sleep(Duration::new(1, 0));
+        let _ = socat_child.kill();
+        let _ = socat_child.wait();
+        let _ = dest_child.kill();
+        let dest_output = dest_child.wait_with_output().unwrap();
+        handle_child_output(r, &dest_output);
+
+        let r = panic::catch_unwind(|| {
+            let captured = fs::read_to_string(&console_log).unwrap_or_default();
+            assert!(
+                captured.contains(&migrated_text),
+                "destination console output missing from {}",
+                console_log.display()
+            );
+        });
+        handle_child_output(r, &dest_output);
+    }
+
     // Postcopy live migration. Verifies the destination boots a guest
     // that touches all of its memory, which forces every page to be
     // demand-faulted across the network.
@@ -8142,6 +8380,16 @@ mod common_parallel {
     #[test]
     fn test_live_migration_tcp_parallel_connections() {
         _test_live_migration_tcp(NonZeroU32::new(8).unwrap());
+    }
+
+    #[test]
+    fn test_live_migration_tcp_serial_via_tcp() {
+        _test_live_migration_console_via_tcp(ConsoleKind::Serial);
+    }
+
+    #[test]
+    fn test_live_migration_tcp_console_via_tcp() {
+        _test_live_migration_console_via_tcp(ConsoleKind::Console);
     }
 
     #[test]
