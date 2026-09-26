@@ -238,6 +238,13 @@ struct UffdioRange {
     len: u64,
 }
 
+#[repr(C)]
+struct UffdioPoison {
+    range: UffdioRange,
+    mode: u64,
+    updated: i64,
+}
+
 /// A guest memory range registered with userfaultfd, plus where its bytes
 /// live for the data source.
 pub(crate) struct UffdRange {
@@ -433,6 +440,40 @@ impl Drop for SocketUffdMemorySource {
 
 fn io_other<E: fmt::Display>(e: E) -> io::Error {
     io::Error::other(e.to_string())
+}
+
+/// Install poison markers over the missing pages of the given range (Linux
+/// 6.6+), so that a later access fails instead of resolving a zero page.
+/// Returns the number of bytes poisoned.
+///
+/// The kernel refuses to overwrite a page that is already present: it stops
+/// there and reports how far it got, so the caller resumes past that page.
+pub(crate) fn poison(fd: BorrowedFd<'_>, addr: u64, len: u64) -> Result<u64, Error> {
+    let mut poison = UffdioPoison {
+        range: UffdioRange { start: addr, len },
+        mode: 0,
+        updated: 0,
+    };
+    // SAFETY: `poison` is a valid, correctly-sized struct for this ioctl.
+    let ret = unsafe {
+        libc::ioctl(
+            fd.as_raw_fd(),
+            userfaultfd::UFFDIO_POISON as libc::Ioctl,
+            &mut poison,
+        )
+    };
+    if ret < 0 {
+        let e = Error::last_os_error();
+        if poison.updated > 0 {
+            return Ok(poison.updated as u64);
+        }
+        // The first page of the range was already present.
+        if e.raw_os_error() == Some(libc::EEXIST) {
+            return Ok(0);
+        }
+        return Err(e);
+    }
+    Ok(len)
 }
 
 /// Wake threads waiting on a fault in the given range without copying data.
