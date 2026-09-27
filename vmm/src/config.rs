@@ -277,6 +277,9 @@ pub enum ValidationError {
     /// Block queue size too small to advertise a usable seg_max
     #[error("Block queue size must be greater than {MINIMUM_BLOCK_QUEUE_SIZE}: {0}")]
     BlockQueueSizeTooSmall(u16),
+    /// Disk queue affinity refers to a queue the disk does not have
+    #[error("Queue affinity refers to queue {0}, but the disk has {1} queues")]
+    InvalidQueueAffinity(u16 /* queue index */, usize /* queues */),
     /// Disk guest_block_size is not a power of 2 within the supported range
     #[error("Disk guest_block_size must be a power of 2 between 512 and 65536: {0}")]
     InvalidGuestBlockSize(u32),
@@ -1667,6 +1670,17 @@ impl DiskConfig {
 
         if self.queue_size <= MINIMUM_BLOCK_QUEUE_SIZE {
             return Err(ValidationError::BlockQueueSizeTooSmall(self.queue_size));
+        }
+
+        if let Some(affinity) = self.queue_affinity.as_ref()
+            && let Some(invalid) = affinity
+                .iter()
+                .find(|a| a.queue_index as usize >= self.num_queues)
+        {
+            return Err(ValidationError::InvalidQueueAffinity(
+                invalid.queue_index,
+                self.num_queues,
+            ));
         }
 
         if self.vhost_user && self.pci_common.iommu {
@@ -6220,6 +6234,20 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             invalid_config.validate(),
             Err(ValidationError::VhostUserGuestBlockSizeNotSupported)
+        );
+
+        // A queue affinity for a queue the disk does not have is rejected.
+        let mut invalid_config = valid_config.clone();
+        invalid_config.disks = Some(vec![DiskConfig {
+            queue_affinity: Some(Box::new([VirtQueueAffinity {
+                queue_index: 1,
+                host_cpus: Box::new([0]),
+            }])),
+            ..raw_disk_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::InvalidQueueAffinity(1, 1))
         );
 
         // A block queue size that is not a power of 2 is rejected.
