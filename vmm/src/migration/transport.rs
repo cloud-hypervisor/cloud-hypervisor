@@ -668,18 +668,15 @@ pub(crate) struct SendAdditionalConnections {
 impl SendAdditionalConnections {
     /// Number of queued memory send requests per thread in the bounded
     /// [`sync_channel`]. This balances batching performance with timely
-    /// backpressure, allowing [Self::enqueue_chunk] to detect worker errors
+    /// backpressure, allowing [`Self::enqueue_chunk`] to detect worker errors
     /// promptly.
     const BUFFERED_REQUESTS_PER_THREAD: usize = 64;
 
-    /// The size of each chunk of memory to send.
+    /// The maximum size of each chunk of memory to send.
     ///
-    /// Trade-off between high throughput and reliability as each chunk is
-    /// acknowledged.
-    ///
-    /// It should be set large enough so that even very fast links need some
-    /// milliseconds to send it. This chunk size together with eight connections
-    /// is sufficient to saturate a 100G link.
+    /// Balances throughput and responsiveness. Benchmarks on real 1G and 100G
+    /// networks showed this to be a good trade-off. With eight connections it
+    /// saturates a 100G link.
     const CHUNK_SIZE: u64 = 64 /* MiB */ << 20;
 
     /// Returns a ready-to-use thread pool when multiple connections are
@@ -850,7 +847,12 @@ impl SendAdditionalConnections {
             return Ok(true);
         }
 
-        for chunk in table.partition(Self::CHUNK_SIZE) {
+        let chunk_size = table
+            .effective_size()
+            .div_ceil(self.threads.len() as u64)
+            .next_multiple_of(1 << 20 /* MiB */)
+            .clamp(4 << 20 /* MiB */, Self::CHUNK_SIZE);
+        for chunk in table.partition(chunk_size) {
             self.enqueue_chunk(chunk)?;
         }
 
