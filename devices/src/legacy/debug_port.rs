@@ -76,7 +76,7 @@ impl BusDevice for DebugPort {
             DebugIoPortRange::from_u8(code),
             code,
             elapsed.as_secs(),
-            elapsed.as_micros()
+            elapsed.subsec_micros()
         );
 
         None
