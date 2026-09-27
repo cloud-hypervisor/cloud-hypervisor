@@ -114,7 +114,11 @@ fn api_error_status_code(error: &ApiError) -> StatusCode {
             | VmError::NoDeviceToRemove(_)
             | VmError::DeviceManager(DeviceManagerError::UnknownDeviceId(_)),
         ) => StatusCode::NotFound,
-        Some(VmError::VmMigrating | VmError::VmRestoring) => StatusCode::Conflict,
+        Some(
+            VmError::VmMigrating
+            | VmError::VmRestoring
+            | VmError::DeviceManager(DeviceManagerError::IdentifierNotUnique(_)),
+        ) => StatusCode::Conflict,
         Some(VmError::ConfigValidation(e)) => match e {
             ValidationError::IdentifierNotUnique(_) | ValidationError::DuplicateDevicePath(_) => {
                 StatusCode::Conflict
@@ -574,6 +578,13 @@ mod tests {
         assert_eq!(
             api_error_status_code(&ApiError::VmRestore(VmError::ConfigValidation(
                 ValidationError::IdentifierNotUnique("net0".to_string())
+            ))),
+            StatusCode::Conflict
+        );
+        // E.g. hotplug with the id of a device whose removal is pending.
+        assert_eq!(
+            api_error_status_code(&ApiError::VmAddDisk(VmError::DeviceManager(
+                DeviceManagerError::IdentifierNotUnique("disk0".to_string())
             ))),
             StatusCode::Conflict
         );
