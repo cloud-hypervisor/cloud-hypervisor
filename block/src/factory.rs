@@ -14,7 +14,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 use std::{fs, io};
 
-use log::info;
+use log::{info, warn};
 
 #[cfg(feature = "io_uring")]
 use crate::block_io_uring_is_supported;
@@ -117,7 +117,7 @@ fn open_fixed_vhd(
                 VhdDisk::new(file, true, options.direct).map_err(|e| e.with_path(options.path))?,
             ));
         }
-        info!("io_uring runtime probe failed for fixed VHD, using synchronous backend");
+        warn!("io_uring runtime probe failed for fixed VHD, using synchronous backend");
     }
 
     info!("Opening fixed VHD disk file with synchronous backend");
@@ -144,7 +144,7 @@ fn open_raw(
                 options.direct,
             )));
         }
-        info!("io_uring runtime probe failed for RAW, trying next backend");
+        warn!("io_uring runtime probe failed for RAW, trying next backend");
     }
 
     if !options.disable_aio {
@@ -156,7 +156,7 @@ fn open_raw(
                 options.direct,
             )));
         }
-        info!("AIO runtime probe failed for RAW, using synchronous backend");
+        warn!("AIO runtime probe failed for RAW, using synchronous backend");
     }
 
     info!("Opening RAW disk file with synchronous backend");
@@ -186,7 +186,7 @@ fn open_qcow2(
                 .map_err(|e| e.with_path(options.path))?,
             ));
         }
-        info!("io_uring runtime probe failed for QCOW2, using synchronous backend");
+        warn!("io_uring runtime probe failed for QCOW2, using synchronous backend");
     }
 
     info!("Opening QCOW2 disk file with synchronous backend");
