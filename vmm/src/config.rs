@@ -245,6 +245,9 @@ pub enum ValidationError {
     /// Virtio needs a min of 2 queues
     #[error("Number of queues ({0}) to virtio_net should be higher than 2")]
     VnetQueueLowerThan2(usize),
+    /// Virtio-net queues come in RX/TX pairs
+    #[error("Number of queues ({0}) to virtio_net must be even")]
+    VnetQueueOdd(usize),
     /// The input queue number for virtio_net must match the number of input fds
     #[error("Number of queues ({0}) to virtio_net does not match the number of FDs ({1})")]
     VnetQueueFdMismatch(usize /* num of queues */, usize /* FD num */),
@@ -1906,6 +1909,10 @@ impl NetConfig {
 
         if self.num_queues < 2 {
             return Err(ValidationError::VnetQueueLowerThan2(self.num_queues));
+        }
+
+        if !self.num_queues.is_multiple_of(2) {
+            return Err(ValidationError::VnetQueueOdd(self.num_queues));
         }
 
         if let Some(fds) = &self.fds {
@@ -6407,6 +6414,16 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             invalid_config.validate(),
             Err(ValidationError::VhostUserRateLimiterNotSupported)
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.net = Some(vec![NetConfig {
+            num_queues: 3,
+            ..net_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::VnetQueueOdd(3))
         );
 
         let mut invalid_config = valid_config.clone();
