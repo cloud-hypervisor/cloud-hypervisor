@@ -125,10 +125,12 @@ impl SerialManager {
         mut transport: ConsoleTransport,
     ) -> Result<Option<Self>> {
         let epoll_fd = epoll::create(true).map_err(Error::Epoll)?;
+        // SAFETY: epoll::create() returns a new fd that we exclusively own.
+        let epoll_fd = unsafe { OwnedFd::from_raw_fd(epoll_fd) };
         let kill_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFd)?;
 
         epoll::ctl(
-            epoll_fd,
+            epoll_fd.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_ADD,
             kill_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, EpollDispatch::Kill as u64),
@@ -177,7 +179,7 @@ impl SerialManager {
         };
 
         epoll::ctl(
-            epoll_fd,
+            epoll_fd.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_ADD,
             in_fd,
             epoll::Event::new(epoll::Events::EPOLLIN, in_event as u64),
@@ -209,10 +211,6 @@ impl SerialManager {
                 .set_out(Some(console.out_sink()));
             socket_console = Some(console);
         }
-
-        // Use 'OwnedFd' to manage lifetime
-        // SAFETY: epoll_fd is valid
-        let epoll_fd = unsafe { OwnedFd::from_raw_fd(epoll_fd) };
 
         Ok(Some(SerialManager {
             serial,
