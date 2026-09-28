@@ -1070,7 +1070,9 @@ fn migration_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError
         (libc::SYS_exit, vec![]),
         (libc::SYS_exit_group, vec![]),
         (libc::SYS_fcntl, vec![]),
+        (libc::SYS_fdatasync, vec![]),
         (libc::SYS_fstat, vec![]),
+        (libc::SYS_fsync, vec![]),
         (libc::SYS_ftruncate, vec![]),
         (libc::SYS_futex, vec![]),
         (libc::SYS_getrandom, vec![]),
@@ -1091,6 +1093,8 @@ fn migration_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError
         #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
         (libc::SYS_ppoll, vec![]),
         (libc::SYS_prctl, vec![]),
+        (libc::SYS_pread64, vec![]),
+        (libc::SYS_pwrite64, vec![]),
         (libc::SYS_readv, vec![]),
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_recvmsg, vec![]),
