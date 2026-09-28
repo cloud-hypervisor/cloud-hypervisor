@@ -14,7 +14,6 @@ use std::sync::LazyLock;
 use arch::CpuProfile;
 use block::ImageType;
 use clap::ArgMatches;
-use libc::CPU_SETSIZE;
 use log::{debug, warn};
 use option_parser::{
     ByteSized, IntegerList, OptionParser, OptionParserError, StringList, Toggle, Tuple, TupleList,
@@ -3411,10 +3410,12 @@ impl VmConfig {
 
         if let Some(affinity) = &self.cpus.affinity {
             for affinity in affinity.iter().flat_map(|affinity| &affinity.host_cpus) {
-                if *affinity >= CPU_SETSIZE as usize {
+                let max_affinity = 8 * size_of::<libc::cpu_set_t>();
+
+                if *affinity >= max_affinity {
                     return Err(ValidationError::CpuAffinityExceedsMax(
                         *affinity,
-                        CPU_SETSIZE as usize,
+                        max_affinity,
                     ));
                 }
             }
@@ -6189,10 +6190,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         }]));
         assert_eq!(
             invalid_config.validate(),
-            Err(ValidationError::CpuAffinityExceedsMax(
-                1024,
-                CPU_SETSIZE as usize
-            ))
+            Err(ValidationError::CpuAffinityExceedsMax(1024, 1024))
         );
 
         let mut invalid_config = valid_config.clone();
