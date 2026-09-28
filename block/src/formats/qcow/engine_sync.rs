@@ -445,6 +445,60 @@ mod tests {
         );
     }
 
+    // A cluster freed by a nested refcount block move must reach the free list.
+    #[test]
+    fn freed_clusters_are_tracked_across_refcount_blocks() {
+        const CL: u64 = 65536;
+        // Just over 2 GiB, so the file spans two refcount blocks.
+        const HOST_SIZE: u64 = (2 << 30) + 64 * CL;
+        let virtual_size = 1 << 30;
+        let (temp, disk) = create_disk_with_data(virtual_size, &[], 0, true, false);
+        drop(disk);
+        temp.as_file().set_len(HOST_SIZE).unwrap();
+        let disk = QcowDisk::new(
+            temp.as_file().try_clone().unwrap(),
+            false,
+            false,
+            true,
+            false,
+        )
+        .unwrap();
+
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let mut written = Vec::new();
+        for i in 0..600u64 {
+            let offset = next() % (virtual_size / CL) * CL;
+            async_write(&disk, offset, &vec![i as u8; CL as usize]);
+            written.push(offset);
+            if i % 3 == 0 {
+                let victim = written.swap_remove((next() % written.len() as u64) as usize);
+                let mut async_io = disk.create_async_io(1).unwrap();
+                async_io.punch_hole(victim, CL, 3).unwrap();
+                assert_eq!(next_completion(async_io.as_mut()), (3, 0));
+            }
+            if i % 2 == 0 {
+                async_fsync(&disk);
+            }
+        }
+        async_fsync(&disk);
+
+        let file_clusters = temp.as_file().metadata().unwrap().len() / CL;
+        let free_on_disk = (0..file_clusters)
+            .filter(|c| disk.metadata().cluster_refcount(c * CL).unwrap() == 0)
+            .count();
+        let tracked = disk.metadata().free_list_len();
+        assert_eq!(
+            free_on_disk, tracked,
+            "{free_on_disk} free clusters on disk, {tracked} on the free list",
+        );
+    }
+
     // sync_metadata must make completed writes visible to a fresh reader of
     // the file while the writing disk stays open. Device pause relies on
     // this so snapshot copies and migration reopen a self-consistent image
