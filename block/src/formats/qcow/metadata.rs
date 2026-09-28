@@ -1051,7 +1051,8 @@ impl QcowState {
         }
 
         for addr in added_clusters {
-            self.set_cluster_refcount(addr, 1)?;
+            let mut freed = self.set_cluster_refcount(addr, 1)?;
+            unref_clusters.append(&mut freed);
         }
         Ok(unref_clusters)
     }
