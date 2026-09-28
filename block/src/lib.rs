@@ -97,20 +97,19 @@ fn build_device_id(disk_path: &Path) -> result::Result<String, Error> {
 }
 
 pub fn build_serial(disk_path: &Path) -> Vec<u8> {
-    let mut default_serial = vec![0; VIRTIO_BLK_ID_BYTES as usize];
-    match build_device_id(disk_path) {
-        Err(_) => {
-            warn!("Could not generate device id. We'll use a default.");
-        }
-        Ok(m) => {
+    build_device_id(disk_path).map_or_else(
+        |e| {
+            warn!("Error building device serial: {e}, using zero default");
+            vec![0; VIRTIO_BLK_ID_BYTES as usize]
+        },
+        |m| {
+            let mut serial = m.into_bytes();
             // The kernel only knows to read a maximum of VIRTIO_BLK_ID_BYTES.
             // This will also zero out any leftover bytes.
-            let disk_id = m.as_bytes();
-            let bytes_to_copy = cmp::min(disk_id.len(), VIRTIO_BLK_ID_BYTES as usize);
-            default_serial[..bytes_to_copy].clone_from_slice(&disk_id[..bytes_to_copy]);
-        }
-    }
-    default_serial
+            serial.resize(VIRTIO_BLK_ID_BYTES as usize, 0);
+            serial
+        },
+    )
 }
 
 #[derive(Error, Debug)]
