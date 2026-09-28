@@ -3413,6 +3413,14 @@ mod common_parallel {
             guest.wait_vm_boot().unwrap();
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
+            // Ensure the CPUs to be hotplugged are not already present but offline.
+            assert_eq!(
+                guest
+                    .ssh_command("cat /sys/devices/system/cpu/present")
+                    .unwrap()
+                    .trim(),
+                "0-1"
+            );
 
             // Resize the VM
             let desired_vcpus = 4;
@@ -3442,6 +3450,15 @@ mod common_parallel {
             assert!(wait_until(Duration::from_secs(10), || {
                 guest.get_cpu_count().unwrap_or_default() == u32::from(desired_vcpus)
             }));
+            // Offlined CPUs remain present if their vCPU threads were not ejected.
+            assert!(
+                wait_until(Duration::from_secs(10), || {
+                    guest
+                        .ssh_command("cat /sys/devices/system/cpu/present")
+                        .is_ok_and(|present| present.trim() == "0-1")
+                }),
+                "Hot-unplugged CPUs are still present in the guest"
+            );
 
             // Resize the VM back up to 4
             let desired_vcpus = 4;
