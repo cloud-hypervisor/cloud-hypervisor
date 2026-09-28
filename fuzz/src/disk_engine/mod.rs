@@ -39,6 +39,17 @@ pub use crate::disk_engine::program::{
     default_program, Op, OpLen, OpOffset, Program, MAX_OPS, MAX_OP_LEN,
 };
 
+/// Sets up confinement before libFuzzer starts its RSS monitor and fork workers.
+/// Call before creating threads; repeated setup is idempotent.
+pub fn initialize_path_backed(name: &'static str) -> bool {
+    sandbox::prepare_tmpdir(name);
+    let dir = scratch_dir(name).unwrap_or_else(|e| {
+        eprintln!("{name}: scratch directory setup failed: {e}");
+        std::process::exit(2);
+    });
+    sandbox::confine(dir)
+}
+
 /// How many inputs failing [`DiskFormat::magic_ok`] are kept per length
 /// class. Parsers do work before the magic check, so some must be kept.
 const NON_MAGIC_BUDGET: usize = 8;

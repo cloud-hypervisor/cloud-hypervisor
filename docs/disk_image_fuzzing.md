@@ -73,11 +73,10 @@ them with `backing_files=on` and treats such images as trusted, but
 names inside a scratch directory and confine the process to it with Landlock,
 refusing every input where Landlock is unavailable.
 
-A confined process may also write to its working directory and to absolute
-paths on its command line. With `-fork`, libFuzzer passes seeds and merge
-inputs to its workers through list files instead, so keep the corpus and
-`TMPDIR` under the working directory. That also lets each process remove its
-scratch directory when it exits.
+Confinement starts before libFuzzer creates threads or fork workers, avoiding
+false LeakSanitizer reports and keeping workers sandboxed. Runner inputs and
+temporary storage are allowed separately from image paths, so native and
+OSS-Fuzz runs work without weakening image confinement.
 
 ## Adding a format
 

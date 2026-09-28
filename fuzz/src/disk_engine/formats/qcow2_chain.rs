@@ -22,8 +22,8 @@ use crate::disk_engine::executor::Executor;
 use crate::disk_engine::format::{DiskFormat, OpenConfig};
 use crate::disk_engine::formats::qcow2::Qcow2;
 use crate::disk_engine::image::{image_file, scratch_dir};
+use crate::disk_engine::initialize_path_backed;
 use crate::disk_engine::program::default_program;
-use crate::disk_engine::sandbox;
 
 /// Largest image half of an input.
 const MAX_HALF_LEN: usize = 2 << 20;
@@ -185,13 +185,10 @@ fn split(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
 
 /// Fuzzes qcow2 backing chains. Refuses every input without Landlock.
 pub fn fuzz_chain(bytes: &[u8]) -> Corpus {
-    let dir = scratch_dir(Qcow2Chain::NAME).unwrap_or_else(|e| {
-        eprintln!("disk_qcow2_chain: scratch directory setup failed: {e}");
-        std::process::exit(2);
-    });
-    if !sandbox::confine(dir) {
+    if !initialize_path_backed(Qcow2Chain::NAME) {
         return Corpus::Reject;
     }
+    let dir = scratch_dir(Qcow2Chain::NAME).expect("path-backed initialization created scratch");
 
     let Some((top, backing)) = split(bytes) else {
         return Corpus::Reject;
