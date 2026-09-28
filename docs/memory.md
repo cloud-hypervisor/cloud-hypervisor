@@ -208,9 +208,13 @@ _Example_
 
 ### `thp`
 
-Specifies if private anonymous memory for the guest (i.e. `shared=off` and no
-backing file) should be labelled `MADV_HUGEPAGE` with `madvise(2)` indicating
-to the kernel that this memory may be backed with huge pages transparently.
+Specifies if the memory for the guest (unless `hugepages=on`) should be labelled
+`MADV_HUGEPAGE` with `madvise(2)` indicating to the kernel that this memory may
+be backed with huge pages transparently.
+
+With `shared=on` and no backing file the memory only gets huge pages if the
+host setting `/sys/kernel/mm/transparent_hugepage/shmem_enabled` allows it,
+for example when set to `advise`.
 
 The use of transparent huge pages can improve the performance of the guest as
 there will be fewer virtualisation related page faults. Unlike using
