@@ -3401,21 +3401,19 @@ impl BusDevice for AcpiCpuHotplugController {
                     // lock for the entire function doesn't cause any deadlock.
                     let mut vcpu_states = self.vcpu_states.lock().unwrap();
                     let state = &mut vcpu_states[usize::try_from(self.selected_cpu).unwrap()];
-                    // The ACPI code writes back a 1 to acknowledge the insertion
+                    // These flags are mutually exclusively written by the AML code
                     if (data[0] & (1 << Self::CPU_INSERTING_FLAG) == 1 << Self::CPU_INSERTING_FLAG)
                         && state.inserting
                     {
                         state.inserting = false;
-                    }
-                    // Ditto for removal
-                    if (data[0] & (1 << Self::CPU_REMOVING_FLAG) == 1 << Self::CPU_REMOVING_FLAG)
+                    } else if (data[0] & (1 << Self::CPU_REMOVING_FLAG)
+                        == 1 << Self::CPU_REMOVING_FLAG)
                         && state.removing
                     {
                         state.removing = false;
-                    }
-                    // Only allow the guest to eject vCPUs we expect to be ejected (also deny boot
-                    // vcpu).
-                    if data[0] & (1 << Self::CPU_EJECT_FLAG) == 1 << Self::CPU_EJECT_FLAG {
+                    } else if data[0] & (1 << Self::CPU_EJECT_FLAG) == 1 << Self::CPU_EJECT_FLAG {
+                        // Only allow the guest to eject vCPUs we expect to be ejected (also deny boot
+                        // vcpu).
                         if self.selected_cpu == 0 {
                             warn!("Ignoring guest request to eject the boot vCPU (CPU 0)");
                         } else if state.pending_removal.load(Ordering::SeqCst) {
