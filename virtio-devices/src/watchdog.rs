@@ -7,6 +7,8 @@
 
 use std::fs::File;
 use std::io::{self, Read};
+#[cfg(fuzzing)]
+use std::mem;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
@@ -195,6 +197,8 @@ pub struct Watchdog {
     reset_evt: EventFd,
     last_ping_time: Arc<Mutex<Option<Instant>>>,
     timer: File,
+    #[cfg(fuzzing)]
+    fuzz_one_shot: bool,
     exit_evt: EventFd,
 }
 
@@ -258,6 +262,8 @@ impl Watchdog {
             reset_evt,
             last_ping_time: Arc::new(Mutex::new(last_ping_time)),
             timer,
+            #[cfg(fuzzing)]
+            fuzz_one_shot: false,
             exit_evt,
         })
     }
@@ -274,6 +280,17 @@ impl Watchdog {
     pub fn wait_for_epoll_threads(&mut self) {
         self.common.wait_for_epoll_threads();
     }
+
+    #[cfg(fuzzing)]
+    pub fn arm_timer_for_fuzzing(&mut self) -> Result<(), io::Error> {
+        self.fuzz_one_shot = true;
+        timerfd_setup_one_shot(&self.timer, 0, 1)
+    }
+
+    #[cfg(fuzzing)]
+    pub fn inject_timer_for_fuzzing(&mut self, timer: File) -> File {
+        mem::replace(&mut self.timer, timer)
+    }
 }
 
 fn timerfd_create() -> Result<RawFd, io::Error> {
@@ -287,14 +304,33 @@ fn timerfd_create() -> Result<RawFd, io::Error> {
 }
 
 fn timerfd_setup(timer: &File, secs: i64) -> Result<(), io::Error> {
+    timerfd_setup_duration(timer, secs, 0)
+}
+
+fn timerfd_setup_duration(timer: &File, secs: i64, nanos: i64) -> Result<(), io::Error> {
+    timerfd_settime(timer, secs, nanos, secs, nanos)
+}
+
+#[cfg(fuzzing)]
+fn timerfd_setup_one_shot(timer: &File, secs: i64, nanos: i64) -> Result<(), io::Error> {
+    timerfd_settime(timer, 0, 0, secs, nanos)
+}
+
+fn timerfd_settime(
+    timer: &File,
+    interval_secs: i64,
+    interval_nanos: i64,
+    value_secs: i64,
+    value_nanos: i64,
+) -> Result<(), io::Error> {
     let periodic = libc::itimerspec {
         it_interval: libc::timespec {
-            tv_sec: secs,
-            tv_nsec: 0,
+            tv_sec: interval_secs,
+            tv_nsec: interval_nanos,
         },
         it_value: libc::timespec {
-            tv_sec: secs,
-            tv_nsec: 0,
+            tv_sec: value_secs,
+            tv_nsec: value_nanos,
         },
     };
 
@@ -400,8 +436,15 @@ impl Pausable for Watchdog {
         if self.last_ping_time.lock().unwrap().is_some() {
             info!("Watchdog resumed - enabling timer (every {WATCHDOG_TIMER_INTERVAL} seconds)");
             self.last_ping_time.lock().unwrap().replace(Instant::now());
-            timerfd_setup(&self.timer, WATCHDOG_TIMER_INTERVAL)
-                .map_err(|e| MigratableError::Resume(anyhow!("Error setting timer: {e:?}")))?;
+            #[cfg(fuzzing)]
+            let setup = if self.fuzz_one_shot {
+                timerfd_setup_one_shot(&self.timer, 0, 1)
+            } else {
+                timerfd_setup(&self.timer, WATCHDOG_TIMER_INTERVAL)
+            };
+            #[cfg(not(fuzzing))]
+            let setup = timerfd_setup(&self.timer, WATCHDOG_TIMER_INTERVAL);
+            setup.map_err(|e| MigratableError::Resume(anyhow!("Error setting timer: {e:?}")))?;
         }
         self.common.resume()
     }
