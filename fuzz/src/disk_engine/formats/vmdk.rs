@@ -15,7 +15,7 @@ use libfuzzer_sys::Corpus;
 
 use crate::disk_engine::format::{DiskFormat, OpenConfig};
 use crate::disk_engine::image::scratch_dir;
-use crate::disk_engine::{fuzz_image, sandbox};
+use crate::disk_engine::{fuzz_image, initialize_path_backed};
 
 /// Size of each extent file the harness provides.
 const EXTENT_LEN: u64 = 1 << 20;
@@ -64,11 +64,7 @@ const MAX_FUZZ_DESCRIPTOR_LEN: usize = (1 << 20) + 1;
 /// Fuzzes the flat VMDK parser under Landlock, refusing every input if
 /// confinement fails: this bypasses the production `backing_files` gate.
 pub fn fuzz_vmdk(bytes: &[u8]) -> Corpus {
-    let dir = scratch_dir(Vmdk::NAME).unwrap_or_else(|e| {
-        eprintln!("disk_vmdk: scratch directory setup failed: {e}");
-        std::process::exit(2);
-    });
-    if !sandbox::confine(dir) {
+    if !initialize_path_backed(Vmdk::NAME) {
         return Corpus::Reject;
     }
 

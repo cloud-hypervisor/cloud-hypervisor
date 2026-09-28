@@ -9,7 +9,15 @@
 
 #![no_main]
 
-use cloud_hypervisor_fuzz::disk_engine::formats::vmdk::fuzz_vmdk;
+use cloud_hypervisor_fuzz::disk_engine::formats::vmdk::{fuzz_vmdk, Vmdk};
+use cloud_hypervisor_fuzz::disk_engine::{initialize_path_backed, DiskFormat};
 use libfuzzer_sys::{fuzz_target, Corpus};
 
-fuzz_target!(|bytes: &[u8]| -> Corpus { fuzz_vmdk(bytes) });
+fuzz_target!(
+    init: {
+        if !initialize_path_backed(Vmdk::NAME) {
+            std::process::exit(2);
+        }
+    },
+    |bytes: &[u8]| -> Corpus { fuzz_vmdk(bytes) }
+);
