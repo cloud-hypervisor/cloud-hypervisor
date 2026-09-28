@@ -191,6 +191,29 @@ pub mod tests {
         }
     }
 
+    struct TestVirtioInterrupt {
+        fail: bool,
+    }
+
+    impl VirtioInterrupt for TestVirtioInterrupt {
+        fn trigger(&self, _int_type: VirtioInterruptType) -> io::Result<()> {
+            if self.fail {
+                Err(io::Error::other("fuzz interrupt failure"))
+            } else {
+                Ok(())
+            }
+        }
+
+        fn set_notifier(
+            &self,
+            _interrupt: u32,
+            _eventfd: Option<EventFd>,
+            _vm: &dyn hypervisor::Vm,
+        ) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
     pub struct TestBackend {
         pub evfd: EventFd,
         pub rx_err: Option<VsockError>,
@@ -352,22 +375,56 @@ pub mod tests {
         pub guest_evvq: GuestQ<'a>,
     }
 
+    // The event helpers are inline so external callers instantiate the
+    // handler in the same crate as the device worker.
     impl EpollHandlerContext<'_> {
-        pub fn signal_txq_event(&mut self) {
-            self.handler.queue_evts[1].write(1).unwrap();
-            let events = epoll::Events::EPOLLIN;
-            let event = epoll::Event::new(events, TX_QUEUE_EVENT as u64);
+        pub fn configure_backend(
+            &mut self,
+            pending_rx: bool,
+            rx_err: Option<VsockError>,
+            tx_err: Option<VsockError>,
+        ) {
+            let mut backend = self.handler.backend.write().unwrap();
+            backend.set_pending_rx(pending_rx);
+            backend.set_rx_err(rx_err);
+            backend.set_tx_err(tx_err);
+        }
+
+        pub fn fail_interrupt(&mut self, fail: bool) {
+            self.handler.interrupt_cb = Arc::new(TestVirtioInterrupt { fail });
+        }
+
+        #[inline]
+        pub fn dispatch_event(&mut self, events: epoll::Events, data: u16) {
+            self.dispatch_raw_event(events.bits(), data);
+        }
+
+        #[inline]
+        pub fn dispatch_raw_event(&mut self, events: u32, data: u16) {
+            let event = epoll::Event {
+                events,
+                data: data as u64,
+            };
             let mut epoll_helper =
                 EpollHelper::new(&self.handler.kill_evt, &self.handler.pause_evt).unwrap();
             self.handler.handle_event(&mut epoll_helper, &event).ok();
         }
+
+        #[inline]
+        pub fn signal_backend_event(&mut self) {
+            self.handler.backend.write().unwrap().evfd.write(1).unwrap();
+            self.dispatch_event(epoll::Events::EPOLLIN, super::device::BACKEND_EVENT);
+        }
+
+        #[inline]
+        pub fn signal_txq_event(&mut self) {
+            self.handler.queue_evts[1].write(1).unwrap();
+            self.dispatch_event(epoll::Events::EPOLLIN, TX_QUEUE_EVENT);
+        }
+        #[inline]
         pub fn signal_rxq_event(&mut self) {
             self.handler.queue_evts[0].write(1).unwrap();
-            let events = epoll::Events::EPOLLIN;
-            let event = epoll::Event::new(events, RX_QUEUE_EVENT as u64);
-            let mut epoll_helper =
-                EpollHelper::new(&self.handler.kill_evt, &self.handler.pause_evt).unwrap();
-            self.handler.handle_event(&mut epoll_helper, &event).ok();
+            self.dispatch_event(epoll::Events::EPOLLIN, RX_QUEUE_EVENT);
         }
     }
 }
