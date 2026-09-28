@@ -75,6 +75,11 @@ _Example_
 --balloon size=0,free_page_reporting=on
 ```
 
+Guest memory backed by huge pages (`hugepages=on`) can only be given back to
+the host a whole huge page at a time. As the guest balloons 4 KiB pages,
+inflating the balloon does not give such memory back; free page reporting
+releases the huge pages that the reported free ranges fully cover.
+
 ## Statistics
 
 Cloud Hypervisor offers the virtio statistics queue whenever a balloon device

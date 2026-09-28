@@ -107,7 +107,11 @@ fn create_virtio_mem_ioctl_seccomp_rule() -> Vec<SeccompRule> {
 }
 
 fn virtio_balloon_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
-    vec![(libc::SYS_fallocate, vec![])]
+    vec![
+        (libc::SYS_fallocate, vec![]),
+        // Tells hugetlbfs-backed guest memory apart, to release whole huge pages.
+        (libc::SYS_fstatfs, vec![]),
+    ]
 }
 
 fn virtio_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {

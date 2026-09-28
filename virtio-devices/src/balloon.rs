@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+use std::fs::File;
 use std::io::{self, Write};
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
@@ -295,7 +297,23 @@ struct BalloonEpollHandler {
     kill_evt: EventFd,
     pause_evt: EventFd,
     pbp: Option<PartiallyBalloonedPage>,
+    // Backing page size of each memory region, keyed by (start, length).
+    backing_page_sizes: HashMap<(u64, u64), u64>,
     access_platform: Option<Arc<dyn AccessPlatform>>,
+}
+
+/// Huge page size of the hugetlbfs file backing a memory region, if it is one.
+fn hugetlbfs_page_size(file: &File) -> Option<u64> {
+    let mut st = mem::MaybeUninit::<libc::statfs>::uninit();
+    // SAFETY: `file` is an open descriptor and `st` is a statfs-sized buffer.
+    if unsafe { libc::fstatfs(file.as_raw_fd(), st.as_mut_ptr()) } != 0 {
+        return None;
+    }
+    // SAFETY: fstatfs() succeeded, so it initialized `st`.
+    let st = unsafe { st.assume_init() };
+    // HUGETLBFS_MAGIC as an untyped literal, and `as _`, because f_type and
+    // f_bsize are i64 in glibc and u64 in musl.
+    (st.f_type == 0x9584_58f6).then_some(st.f_bsize as _)
 }
 
 impl BalloonEpollHandler {
@@ -327,10 +345,30 @@ impl BalloonEpollHandler {
         Ok(())
     }
 
+    /// Size of the host pages backing guest memory at `addr`: the huge page
+    /// size for hugetlbfs-backed memory, the base page size otherwise.
+    fn backing_page_size(
+        cache: &mut HashMap<(u64, u64), u64>,
+        memory: &GuestMemoryMmap,
+        addr: GuestAddress,
+    ) -> result::Result<u64, Error> {
+        let region = memory.find_region(addr).ok_or(Error::GuestMemory(
+            GuestMemoryError::InvalidGuestAddress(addr),
+        ))?;
+        let key = (region.start_addr().raw_value(), region.len());
+        Ok(*cache.entry(key).or_insert_with(|| {
+            region
+                .file_offset()
+                .and_then(|f| hugetlbfs_page_size(f.file()))
+                .unwrap_or_else(get_page_size)
+        }))
+    }
+
     fn release_memory_range(
         memory: &GuestMemoryMmap,
         range_base: GuestAddress,
         range_len: usize,
+        page_size: u64,
     ) -> result::Result<(), Error> {
         let region = memory.find_region(range_base).ok_or(Error::GuestMemory(
             GuestMemoryError::InvalidGuestAddress(range_base),
@@ -347,9 +385,18 @@ impl BalloonEpollHandler {
                 range_base.0, range_len, len
             );
         }
-        if len == 0 {
+
+        // Memory backed by pages larger than the range, such as huge pages, can
+        // only be given back whole: madvise() rejects a range that starts inside
+        // one and a hole punch rounds it away. Release the backing pages the
+        // range covers entirely.
+        let start = offset.next_multiple_of(page_size);
+        let end = (offset + len) / page_size * page_size;
+        if end <= start {
             return Ok(());
         }
+        let (offset, len) = (start, end - start);
+        let range_base = region.start_addr().unchecked_add(offset);
 
         // Only punch holes for MAP_SHARED file-backed memory regions. Private
         // mappings are copy-on-write views where the backing file must remain
@@ -377,15 +424,24 @@ impl BalloonEpollHandler {
 
     fn release_memory_range_4k(
         pbp: &mut Option<PartiallyBalloonedPage>,
+        page_sizes: &mut HashMap<(u64, u64), u64>,
         memory: &GuestMemoryMmap,
         pfn: u32,
     ) -> result::Result<(), Error> {
         let range_base = GuestAddress((pfn as u64) << VIRTIO_BALLOON_PFN_SHIFT);
         let range_len = 1 << VIRTIO_BALLOON_PFN_SHIFT;
 
+        // A huge page can only be given back whole, but the guest balloons 4 KiB
+        // pieces of it: madvise() fails with EINVAL on a piece that starts inside
+        // the huge page and has no effect on one that starts on its boundary.
+        // Free page reporting can release such memory in whole huge pages.
         let page_size: u64 = get_page_size();
+        if Self::backing_page_size(page_sizes, memory, range_base)? > page_size {
+            return Ok(());
+        }
+
         if page_size == 1 << VIRTIO_BALLOON_PFN_SHIFT {
-            return Self::release_memory_range(memory, range_base, range_len);
+            return Self::release_memory_range(memory, range_base, range_len, page_size);
         }
 
         if pbp.is_none() {
@@ -404,6 +460,7 @@ impl BalloonEpollHandler {
                 memory,
                 vm_memory::GuestAddress(pbp.as_ref().unwrap().addr),
                 page_size as usize,
+                page_size,
             )?;
 
             pbp.as_mut().unwrap().reset();
@@ -465,6 +522,7 @@ impl BalloonEpollHandler {
                         0 => {
                             if let Err(e) = Self::release_memory_range_4k(
                                 &mut self.pbp,
+                                &mut self.backing_page_sizes,
                                 desc_chain.memory(),
                                 pfn,
                             ) {
@@ -615,11 +673,19 @@ impl BalloonEpollHandler {
                     Err(_) => break,
                 };
                 descs_len += desc.len();
-                if let Err(e) = Self::release_memory_range(
+                if let Err(e) = Self::backing_page_size(
+                    &mut self.backing_page_sizes,
                     desc_chain.memory(),
                     desc.addr(),
-                    desc.len() as usize,
-                ) {
+                )
+                .and_then(|page_size| {
+                    Self::release_memory_range(
+                        desc_chain.memory(),
+                        desc.addr(),
+                        desc.len() as usize,
+                        page_size,
+                    )
+                }) {
                     warn!("Failed to release reported memory range: {e}");
                 }
             }
@@ -1039,6 +1105,7 @@ impl VirtioDevice for Balloon {
             kill_evt,
             pause_evt,
             pbp: None,
+            backing_page_sizes: HashMap::new(),
             access_platform: self.common.access_platform(),
         };
 
@@ -1152,6 +1219,7 @@ mod tests {
             kill_evt: EventFd::new(EFD_NONBLOCK).unwrap(),
             pause_evt: EventFd::new(EFD_NONBLOCK).unwrap(),
             pbp: None,
+            backing_page_sizes: HashMap::new(),
             access_platform: None,
         }
     }
@@ -1195,7 +1263,7 @@ mod tests {
         memory.write_slice(&[0xa5], GuestAddress(0)).unwrap();
         assert_eq!(memory.read_obj::<u8>(GuestAddress(0)).unwrap(), 0xa5);
 
-        let res = BalloonEpollHandler::release_memory_range(&memory, GuestAddress(0), 4096);
+        let res = BalloonEpollHandler::release_memory_range(&memory, GuestAddress(0), 4096, 4096);
         assert!(res.is_ok(), "release_memory_range failed: {res:?}");
         assert_eq!(memory.read_obj::<u8>(GuestAddress(0)).unwrap(), 0x5a);
         assert_eq!(fs::read(backing_file.as_path()).unwrap(), original);
@@ -1211,6 +1279,85 @@ mod tests {
     fn release_private_page_does_not_modify_writable_backing_file() {
         // A writable descriptor does not make a MAP_PRIVATE mapping punchable.
         test_release_private_page(false);
+    }
+
+    const HUGE_PAGE: u64 = 2 << 20;
+
+    // Guest memory backed by one shared 2 MiB hugetlbfs page, as the VMM maps
+    // it for `hugepages=on`, or None when the host has no huge page to spare.
+    fn huge_page_memory() -> Option<GuestMemoryMmap> {
+        use std::ffi::CString;
+        use std::os::unix::io::FromRawFd;
+
+        use vm_memory::{FileOffset, MmapRegion};
+
+        use crate::GuestRegionMmap;
+
+        let name = CString::new("balloon-test").unwrap();
+        // SAFETY: FFI call with a valid NUL-terminated name.
+        let fd = unsafe { libc::memfd_create(name.as_ptr(), libc::MFD_HUGETLB) };
+        if fd < 0 {
+            return None;
+        }
+        // SAFETY: memfd_create() returned a fresh descriptor we own.
+        let file = unsafe { File::from_raw_fd(fd) };
+        file.set_len(HUGE_PAGE).ok()?;
+        // A shared hugetlbfs mapping reserves its page at mmap() time, so a
+        // host without free huge pages fails here rather than with SIGBUS.
+        let mmap = MmapRegion::build(
+            Some(FileOffset::new(file, 0)),
+            HUGE_PAGE as usize,
+            libc::PROT_READ | libc::PROT_WRITE,
+            libc::MAP_SHARED,
+        )
+        .ok()?;
+        let region = GuestRegionMmap::new(mmap, GuestAddress(0))?;
+        let memory = GuestMemoryMmap::from_regions(vec![region]).ok()?;
+        memory.write_slice(&[0xab; 8192], GuestAddress(0)).unwrap();
+        Some(memory)
+    }
+
+    #[test]
+    fn ballooning_pieces_of_a_huge_page_is_not_an_error() {
+        let Some(memory) = huge_page_memory() else {
+            eprintln!("skipped: no free huge pages on this host");
+            return;
+        };
+        let (mut pbp, mut page_sizes) = (None, HashMap::new());
+        // Each piece used to reach madvise() and fail with EINVAL, logging one
+        // warning per page. None of them releases the huge page, not even all
+        // of them together.
+        for pfn in 0..(HUGE_PAGE >> VIRTIO_BALLOON_PFN_SHIFT) as u32 {
+            BalloonEpollHandler::release_memory_range_4k(&mut pbp, &mut page_sizes, &memory, pfn)
+                .unwrap();
+        }
+        assert_eq!(memory.read_obj::<u8>(GuestAddress(0x1000)).unwrap(), 0xab);
+    }
+
+    #[test]
+    fn reporting_releases_whole_huge_pages_only() {
+        let Some(memory) = huge_page_memory() else {
+            eprintln!("skipped: no free huge pages on this host");
+            return;
+        };
+        let page_size =
+            BalloonEpollHandler::backing_page_size(&mut HashMap::new(), &memory, GuestAddress(0))
+                .unwrap();
+        assert_eq!(page_size, HUGE_PAGE);
+        // A reported range inside the huge page is skipped...
+        BalloonEpollHandler::release_memory_range(&memory, GuestAddress(0x1000), 0x1000, page_size)
+            .unwrap();
+        assert_eq!(memory.read_obj::<u8>(GuestAddress(0x1000)).unwrap(), 0xab);
+        // ...and one that covers it releases it: the hole punched into the
+        // hugetlbfs file reads back as zeroes.
+        BalloonEpollHandler::release_memory_range(
+            &memory,
+            GuestAddress(0),
+            HUGE_PAGE as usize,
+            page_size,
+        )
+        .unwrap();
+        assert_eq!(memory.read_obj::<u8>(GuestAddress(0x1000)).unwrap(), 0);
     }
 
     #[test]

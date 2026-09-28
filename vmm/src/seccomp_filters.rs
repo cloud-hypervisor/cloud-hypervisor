@@ -683,6 +683,9 @@ fn vmm_thread_rules(
         (libc::SYS_fcntl, vec![]),
         (libc::SYS_fdatasync, vec![]),
         (libc::SYS_fstat, vec![]),
+        // Virtio device threads inherit this filter; the balloon worker needs
+        // fstatfs to tell hugetlbfs-backed guest memory apart.
+        (libc::SYS_fstatfs, vec![]),
         (libc::SYS_fsync, vec![]),
         (libc::SYS_ftruncate, vec![]),
         #[cfg(target_arch = "aarch64")]
