@@ -1,10 +1,29 @@
 // Copyright 2023 Arm Limited (or its affiliates). All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+#![cfg_attr(fuzzing, allow(unexpected_cfgs))]
+
+#[cfg(fuzzing)]
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use libc::{_SC_PAGESIZE, sysconf};
+
+#[cfg(fuzzing)]
+static FUZZ_PAGE_SIZE: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(fuzzing)]
+/// Set the page size used by fuzz-only callers.
+pub fn set_fuzz_page_size(page_size: Option<u64>) {
+    FUZZ_PAGE_SIZE.store(page_size.unwrap_or(0), Ordering::Relaxed);
+}
 
 /// get host page size
 pub fn get_page_size() -> u64 {
+    #[cfg(fuzzing)]
+    if let page_size @ 1.. = FUZZ_PAGE_SIZE.load(Ordering::Relaxed) {
+        return page_size;
+    }
+
     // SAFETY: FFI call. Trivially safe.
     unsafe { sysconf(_SC_PAGESIZE) as u64 }
 }

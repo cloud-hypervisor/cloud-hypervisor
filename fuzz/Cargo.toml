@@ -33,6 +33,7 @@ net_util = { path = "../net_util" }
 seccompiler = "0.5.0"
 virtio-devices = { path = "../virtio-devices" }
 virtio-queue = "0.18.0"
+vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
 vm-memory = "0.18.0"
 vm-migration = { path = "../vm-migration" }

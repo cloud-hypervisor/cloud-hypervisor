@@ -256,6 +256,7 @@ dependencies = [
  "seccompiler",
  "virtio-devices",
  "virtio-queue",
+ "vm-allocator",
  "vm-device",
  "vm-memory",
  "vm-migration",
