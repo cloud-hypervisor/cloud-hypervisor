@@ -378,6 +378,7 @@ pub enum IommuType {
     #[default]
     Off,
     Virtio,
+    Smmuv3,
 }
 
 impl IommuType {
@@ -425,7 +426,8 @@ impl<'de> Deserialize<'de> for IommuType {
                 match value {
                     "Off" => Ok(IommuType::Off),
                     "Virtio" => Ok(IommuType::Virtio),
-                    _ => Err(E::unknown_variant(value, &["Off", "Virtio"])),
+                    "Smmuv3" => Ok(IommuType::Smmuv3),
+                    _ => Err(E::unknown_variant(value, &["Off", "Virtio", "Smmuv3"])),
                 }
             }
         }

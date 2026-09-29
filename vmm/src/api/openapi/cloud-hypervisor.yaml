@@ -986,7 +986,7 @@ components:
     IommuType:
       description: Virtual IOMMU the device is attached to.
       type: string
-      enum: ["Off", "Virtio"]
+      enum: ["Off", "Virtio", "Smmuv3"]
       default: "Off"
 
     PlatformConfig:

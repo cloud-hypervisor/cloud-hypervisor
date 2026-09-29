@@ -25,6 +25,8 @@ type GuestMemoryMmapAtomic = GuestMemoryAtomic<GuestMemoryMmap<AtomicBitmap>>;
 // All constants below are based on the reference specification that
 // can be found at https://developer.arm.com/documentation/ihi0070/latest/
 pub const SMMU_V3_MMIO_SIZE: u64 = 0x2_0000;
+// Registers are exposed through two 64KiB pages.
+pub const SMMU_V3_MMIO_PAGE_SIZE: u64 = 0x1_0000;
 
 const CMDQ_ENTRY_SIZE: u64 = 16;
 
