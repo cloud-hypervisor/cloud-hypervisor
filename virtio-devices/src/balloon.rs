@@ -76,7 +76,8 @@ const VIRTIO_BALLOON_PFN_SHIFT: u64 = 12;
 // bytes. Matches the Linux driver, which submits at most
 // VIRTIO_BALLOON_ARRAY_PFNS_MAX of 256 PFN entries of 4 bytes each per
 // descriptor.
-const VIRTIO_BALLOON_MAX_PFN_BYTES: u32 = 256 * 4;
+const VIRTIO_BALLOON_MAX_PFNS: usize = 256;
+const VIRTIO_BALLOON_MAX_PFN_BYTES: u32 = (VIRTIO_BALLOON_MAX_PFNS * size_of::<u32>()) as u32;
 
 // Enable statistics virtqueue.
 const VIRTIO_BALLOON_F_STATS_VQ: u64 = 1;
@@ -413,6 +414,14 @@ impl BalloonEpollHandler {
         Ok(())
     }
 
+    fn process_inflate_addresses(&mut self, memory: &GuestMemoryMmap, addresses: &[GuestAddress]) {
+        for &address in addresses {
+            if let Err(e) = Self::release_memory_range_4k(&mut self.pbp, memory, address) {
+                warn!("Failed to release memory at address {:#x}: {e}", address.0);
+            }
+        }
+    }
+
     fn process_queue(&mut self, queue_index: u16) -> result::Result<(), Error> {
         let mut used_descs = false;
         while let Some(mut desc_chain) =
@@ -447,6 +456,8 @@ impl BalloonEpollHandler {
                     continue;
                 }
 
+                let mut inflate_addresses: SmallVec<[GuestAddress; VIRTIO_BALLOON_MAX_PFNS]> =
+                    SmallVec::new();
                 let mut offset = 0u64;
                 while offset < desc.len() as u64 {
                     let Some(addr) = desc.addr().checked_add(offset) else {
@@ -464,13 +475,8 @@ impl BalloonEpollHandler {
 
                     match queue_index {
                         INFLATE_QUEUE => {
-                            if let Err(e) = Self::release_memory_range_4k(
-                                &mut self.pbp,
-                                desc_chain.memory(),
-                                GuestAddress(u64::from(pfn) << VIRTIO_BALLOON_PFN_SHIFT),
-                            ) {
-                                warn!("Failed to release memory for PFN {pfn:#x}: {e}");
-                            }
+                            inflate_addresses
+                                .push(GuestAddress(u64::from(pfn) << VIRTIO_BALLOON_PFN_SHIFT));
                         }
                         DEFLATE_QUEUE => {
                             let page_size = get_page_size() as usize;
@@ -488,6 +494,10 @@ impl BalloonEpollHandler {
                         }
                         _ => return Err(Error::InvalidQueueIndex(queue_index)),
                     }
+                }
+
+                if queue_index == INFLATE_QUEUE {
+                    self.process_inflate_addresses(desc_chain.memory(), &inflate_addresses);
                 }
             }
 
