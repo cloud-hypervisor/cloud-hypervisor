@@ -355,9 +355,9 @@ impl BalloonEpollHandler {
             return Ok(());
         }
 
-        // Only punch holes for MAP_SHARED file-backed memory regions. Private
-        // mappings are copy-on-write views where the backing file must remain
-        // unmodified; MADV_DONTNEED below discards their private pages instead.
+        // Only punch holes for MAP_SHARED file-backed memory regions. For
+        // anonymous or MAP_PRIVATE memory, MADV_DONTNEED discards pages without
+        // modifying the backing file.
         if region.flags() & libc::MAP_SHARED == libc::MAP_SHARED
             && let Some(f_off) = region.file_offset()
         {
@@ -372,11 +372,13 @@ impl BalloonEpollHandler {
             };
 
             if res != 0 {
-                return Err(Error::FallocateFail(io::Error::last_os_error()));
+                Err(Error::FallocateFail(io::Error::last_os_error()))
+            } else {
+                Ok(())
             }
+        } else {
+            Self::advise_memory_range(memory, range_base, len as usize, libc::MADV_DONTNEED)
         }
-
-        Self::advise_memory_range(memory, range_base, len as usize, libc::MADV_DONTNEED)
     }
 
     fn release_memory_range_4k(
