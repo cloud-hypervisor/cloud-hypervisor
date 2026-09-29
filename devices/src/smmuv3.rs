@@ -73,7 +73,7 @@ const EVENTQ_CONS: u64 = PAGE1_BASE + 0x00ac;
 // IDR0 fields
 const IDR0_S1P: u32 = 1 << 1;
 const IDR0_TTF_AARCH64: u32 = 0b10 << 2;
-const IDR0_COHACC: u32 = 1 << 4;
+pub const IDR0_COHACC: u32 = 1 << 4;
 const IDR0_ASID16: u32 = 1 << 12;
 const IDR0_VMID16: u32 = 1 << 18;
 const IDR0_CD2L: u32 = 1 << 19;
