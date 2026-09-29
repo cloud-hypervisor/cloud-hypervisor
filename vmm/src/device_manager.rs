@@ -376,6 +376,11 @@ pub enum DeviceManagerError {
     #[error("The VFIO device has no iommufd device id")]
     IommufdDevIdMissing,
 
+    /// Failed to find the physical IOMMU of a passthrough device
+    #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+    #[error("Failed to find the physical IOMMU of a passthrough device")]
+    FindPhysicalIommu(#[source] io::Error),
+
     /// Cannot create a VFIO device
     #[error("Cannot create a VFIO device")]
     VfioCreate(#[source] vfio_ioctls::VfioError),
@@ -1041,7 +1046,8 @@ pub struct DeviceManager {
     // information for filling the ACPI VIOT table.
     iommu_attached_devices: Option<(PciBdf, Vec<PciBdf>)>,
 
-    // Emulated SMMUv3s
+    // Emulated SMMUv3s, keyed by the physical SMMUv3 they sit on top of, as
+    // one is created per physical SMMUv3.
     #[cfg(target_arch = "aarch64")]
     smmuv3s: BTreeMap<String, Smmuv3Iommufd>,
 
@@ -4154,6 +4160,60 @@ impl DeviceManager {
     }
 
     #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+    fn find_physical_iommu(device_cfg: &DeviceConfig) -> DeviceManagerResult<String> {
+        let pci_dir: PathBuf = match (&device_cfg.path, device_cfg.fd) {
+            (Some(path), None) => path.clone(),
+            (None, Some(fd)) => {
+                use std::mem::zeroed;
+
+                // SAFETY: `libc::stat` is plain-old-data, so an all-zero value is valid.
+                let mut st: libc::stat = unsafe { zeroed() };
+                // SAFETY: `fstat` only writes into `st`; `fd` is a valid open cdev fd.
+                let ret = unsafe { libc::fstat(fd, &mut st) };
+                if ret < 0 {
+                    return Err(DeviceManagerError::FindPhysicalIommu(
+                        io::Error::last_os_error(),
+                    ));
+                }
+                if st.st_mode & libc::S_IFMT != libc::S_IFCHR {
+                    return Err(DeviceManagerError::FindPhysicalIommu(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("VFIO device FD {fd} is not a character device"),
+                    )));
+                }
+
+                let major = libc::major(st.st_rdev);
+                let minor = libc::minor(st.st_rdev);
+                let char_link = PathBuf::from(format!("/sys/dev/char/{major}:{minor}"));
+                let vfio_dir =
+                    fs::canonicalize(&char_link).map_err(DeviceManagerError::FindPhysicalIommu)?;
+                // The VFIO device sits two levels below the PCI device.
+                vfio_dir
+                    .parent()
+                    .and_then(|p| p.parent())
+                    .ok_or_else(|| {
+                        DeviceManagerError::FindPhysicalIommu(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("Unexpected VFIO device path {vfio_dir:?}"),
+                        ))
+                    })?
+                    .to_path_buf()
+            }
+            _ => unreachable!("DeviceConfig::validate enforces exactly one of path/fd"),
+        };
+
+        let iommu_link = pci_dir.join("iommu");
+        let target = fs::read_link(&iommu_link).map_err(DeviceManagerError::FindPhysicalIommu)?;
+        let name = target.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
+            DeviceManagerError::FindPhysicalIommu(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("IOMMU symlink {target:?} has no name component"),
+            ))
+        })?;
+        Ok(name.to_string())
+    }
+
+    #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
     fn attach_vfio_to_smmuv3(
         &mut self,
         device_cfg: &DeviceConfig,
@@ -4161,7 +4221,7 @@ impl DeviceManager {
         device: &Arc<VfioDevice>,
         bdf: PciBdf,
     ) -> DeviceManagerResult<()> {
-        let key = String::from(SMMUV3_DEVICE_NAME);
+        let key = Self::find_physical_iommu(device_cfg)?;
         let virt_id = Smmuv3Iommufd::stream_id(bdf);
         let dev_id = device
             .iommufd_dev_id()
