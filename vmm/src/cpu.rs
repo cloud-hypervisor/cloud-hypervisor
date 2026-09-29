@@ -1158,13 +1158,19 @@ impl CpuManager {
         }
 
         if let Some(snapshot) = snapshot {
-            for vcpu in &vcpus {
-                let vcpu = vcpu.lock().unwrap();
-                if let Some(snapshot) = snapshot_from_id(Some(snapshot), &vcpu.id()) {
-                    vcpu.restore(snapshot)
-                        .map_err(|e| Error::VcpuCreate(e.into()))?;
-                }
-            }
+            parallel_map(
+                &vcpus,
+                |vcpu| {
+                    let vcpu = vcpu.lock().unwrap();
+                    match snapshot_from_id(Some(snapshot), &vcpu.id()) {
+                        Some(snapshot) => vcpu.restore(snapshot),
+                        None => Ok(()),
+                    }
+                },
+                VCPU_SERIALIZE_MAX_THREADS,
+                VCPU_SERIALIZE_MIN_CHUNKS_PER_THREAD,
+            )
+            .map_err(|e| Error::VcpuCreate(e.into()))?;
         }
 
         #[cfg(target_arch = "x86_64")]
