@@ -457,7 +457,10 @@ impl ReceiveAdditionalConnections {
         let role = match ConnectionRole::read_from(&mut socket) {
             Ok(role) => role,
             Err(e) => {
-                warn!("Dropping connection: failed to read connection role: {e}");
+                warn!(
+                    "Dropping connection: failed to read connection role: {}",
+                    flatten_error_chain_to_string(&e)
+                );
                 return Ok(None);
             }
         };
@@ -518,17 +521,18 @@ impl ReceiveAdditionalConnections {
         threads: Vec<JoinHandle<Result<(), MigratableError>>>,
         mut first_err: Result<(), MigratableError>,
     ) -> Result<(), MigratableError> {
-        for thread in threads {
+        for (idx, thread) in threads.into_iter().enumerate() {
             let err = match thread.join() {
                 Ok(Ok(())) => None,
                 Ok(Err(e)) => Some(e),
                 Err(panic) => Some(MigratableError::MigrateReceive(anyhow!(
-                    "receive-memory worker panicked: {panic:?}"
+                    "receive-memory worker #{idx} panicked: {panic:?}"
                 ))),
             };
 
             if let Some(e) = err {
-                warn!("Error in receive-memory worker: {e}");
+                let err_msg = flatten_error_chain_to_string(&e);
+                error!("Error in receive-memory worker #{idx}: {err_msg}");
 
                 if first_err.is_ok() {
                     first_err = Err(e);
