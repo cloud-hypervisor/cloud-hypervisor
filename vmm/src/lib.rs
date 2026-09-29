@@ -3349,7 +3349,11 @@ impl RequestHandler for Vmm {
                 // Serving and resume already happened in the protocol loop.
                 event!("vm", "migration-receive-finished");
             })
-            .inspect_err(|_| {
+            .inspect_err(|e| {
+                error!(
+                    "Receiving migration failed: {}",
+                    flatten_error_chain_to_string(e)
+                );
                 event!("vm", "migration-receive-failed");
                 self.vm = VmOwnership::None;
                 self.vm_config = None;
