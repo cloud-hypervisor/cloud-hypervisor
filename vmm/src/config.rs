@@ -348,6 +348,18 @@ pub enum ValidationError {
     /// `iommufd_fd` was provided without also enabling the iommufd backend.
     #[error("Platform `iommufd_fd=<fd>` requires `iommufd=on`")]
     IommufdFdRequiresIommufd,
+    /// The SMMUv3 was requested on a build that cannot provide it.
+    #[error("`iommu=smmuv3` is only supported on aarch64 with KVM")]
+    IommuSmmuv3NotSupported,
+    /// The SMMUv3 was requested without the iommufd backend.
+    #[error("`iommu=smmuv3` requires platform `iommufd=on`")]
+    IommuSmmuv3RequiresIommufd,
+    /// The SMMUv3 was requested for a device that cannot sit behind it.
+    #[error("`iommu=smmuv3` is only supported for passthrough devices")]
+    IommuSmmuv3NotPassthrough,
+    /// Devices asked for different types of virtual IOMMU.
+    #[error("Devices cannot be attached to different types of virtual IOMMU")]
+    MixedIommuTypes,
     /// Provided MTU is lower than what the VIRTIO specification expects
     #[error("Provided MTU {0} is lower than 1280 (expected by VIRTIO specification)")]
     InvalidMtu(u16),
@@ -1437,7 +1449,11 @@ impl PciDeviceCommonConfig {
         })
     }
 
-    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+    pub fn validate(&self, vm_config: &VmConfig, virtio_iommu_only: bool) -> ValidationResult<()> {
+        if virtio_iommu_only && self.iommu == IommuType::Smmuv3 {
+            return Err(ValidationError::IommuSmmuv3NotPassthrough);
+        }
+
         let num_pci_segments = vm_config
             .platform
             .as_ref()
@@ -1664,7 +1680,7 @@ impl DiskConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        self.pci_common.validate(vm_config)?;
+        self.pci_common.validate(vm_config, true)?;
 
         if self.num_queues > vm_config.cpus.boot_vcpus as usize {
             return Err(ValidationError::TooManyQueues(
@@ -1934,7 +1950,7 @@ impl NetConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        self.pci_common.validate(vm_config)?;
+        self.pci_common.validate(vm_config, true)?;
 
         if self.num_queues < 2 {
             return Err(ValidationError::VnetQueueLowerThan2(self.num_queues));
@@ -2023,7 +2039,7 @@ impl RngConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        self.pci_common.validate(vm_config)
+        self.pci_common.validate(vm_config, true)
     }
 }
 
@@ -2045,7 +2061,7 @@ impl RtcConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        self.pci_common.validate(vm_config)
+        self.pci_common.validate(vm_config, true)
     }
 }
 
@@ -2090,7 +2106,7 @@ impl BalloonConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        self.pci_common.validate(vm_config)
+        self.pci_common.validate(vm_config, true)
     }
 }
 
@@ -2218,7 +2234,7 @@ impl GenericVhostUserConfig {
             validate_queue_size(queue_size)?;
         }
 
-        self.pci_common.validate(vm_config)
+        self.pci_common.validate(vm_config, true)
     }
 }
 
@@ -2278,7 +2294,7 @@ impl FsConfig {
             return Err(ValidationError::IommuNotSupported);
         }
 
-        self.pci_common.validate(vm_config)
+        self.pci_common.validate(vm_config, true)
     }
 }
 
@@ -2418,7 +2434,7 @@ impl PmemConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        self.pci_common.validate(vm_config)
+        self.pci_common.validate(vm_config, true)
     }
 }
 
@@ -2490,7 +2506,7 @@ impl ConsoleConfig {
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
         self.common.validate()?;
-        self.pci_common.validate(vm_config)
+        self.pci_common.validate(vm_config, true)
     }
 }
 
@@ -2603,7 +2619,18 @@ impl DeviceConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        self.pci_common.validate(vm_config)?;
+        self.pci_common.validate(vm_config, false)?;
+
+        #[cfg(not(all(target_arch = "aarch64", feature = "kvm")))]
+        if self.pci_common.iommu == IommuType::Smmuv3 {
+            return Err(ValidationError::IommuSmmuv3NotSupported);
+        }
+
+        if self.pci_common.iommu == IommuType::Smmuv3
+            && !vm_config.platform.as_ref().is_some_and(|p| p.iommufd)
+        {
+            return Err(ValidationError::IommuSmmuv3RequiresIommufd);
+        }
 
         match (&self.path, self.fd) {
             (None, None) => return Err(ValidationError::VfioDeviceNeitherPathNorFd),
@@ -2661,7 +2688,7 @@ impl UserDeviceConfig {
             return Err(ValidationError::IommuNotSupported);
         }
 
-        self.pci_common.validate(vm_config)
+        self.pci_common.validate(vm_config, true)
     }
 }
 
@@ -2696,7 +2723,7 @@ impl VdpaConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        self.pci_common.validate(vm_config)
+        self.pci_common.validate(vm_config, true)
     }
 }
 
@@ -2731,7 +2758,7 @@ impl VsockConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        self.pci_common.validate(vm_config)
+        self.pci_common.validate(vm_config, true)
     }
 }
 
@@ -3275,7 +3302,7 @@ impl IvshmemConfig {
         if self.pci_common.iommu.attached() {
             return Err(ValidationError::IommuNotSupported);
         }
-        self.pci_common.validate(vm_config)?;
+        self.pci_common.validate(vm_config, true)?;
 
         let size = self.size as u64;
         let path = &self.path;
@@ -3358,6 +3385,14 @@ impl VmConfig {
         Ok(())
     }
 
+    /// Identify if an emulated SMMUv3 is required based on configuration from every device
+    pub fn smmuv3_attached(&self) -> bool {
+        self.devices
+            .iter()
+            .flatten()
+            .any(|d| d.pci_common.iommu == IommuType::Smmuv3)
+    }
+
     /// Identify if a virtio-iommu IOMMU is required based on configuration from every device
     pub fn virtio_iommu_attached(&self) -> bool {
         let attached = |common: &PciDeviceCommonConfig| common.iommu == IommuType::Virtio;
@@ -3390,6 +3425,10 @@ impl VmConfig {
     // configuration.
     pub fn validate(&mut self) -> ValidationResult<BTreeSet<String>> {
         let mut id_list = BTreeSet::new();
+
+        if self.virtio_iommu_attached() && self.smmuv3_attached() {
+            return Err(ValidationError::MixedIommuTypes);
+        }
 
         // Is the payload configuration bootable?
         self.payload
@@ -5621,6 +5660,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             serde_json::from_str::<IommuType>(r#""Virtio""#).unwrap(),
             IommuType::Virtio
         );
+        assert_eq!(
+            serde_json::from_str::<IommuType>(r#""Smmuv3""#).unwrap(),
+            IommuType::Smmuv3
+        );
         serde_json::from_str::<IommuType>(r#""Nope""#).unwrap_err();
 
         // "on" and "off" predate the type on the command line.
@@ -7293,6 +7336,37 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 Err(ValidationError::SevSnpNoViommu)
             );
         }
+
+        // Devices cannot ask for different types of virtual IOMMU.
+        let mut invalid_config = valid_config.clone();
+        invalid_config.disks = Some(vec![DiskConfig {
+            pci_common: PciDeviceCommonConfig {
+                iommu: IommuType::Virtio,
+                ..Default::default()
+            },
+            ..raw_disk_fixture()
+        }]);
+        assert!(invalid_config.virtio_iommu_attached());
+        assert!(!invalid_config.smmuv3_attached());
+
+        invalid_config.devices = Some(vec![DeviceConfig {
+            pci_common: PciDeviceCommonConfig {
+                iommu: IommuType::Smmuv3,
+                ..Default::default()
+            },
+            ..device_fixture()
+        }]);
+        assert!(invalid_config.smmuv3_attached());
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::MixedIommuTypes)
+        );
+
+        invalid_config.disks = None;
+        assert_ne!(
+            invalid_config.validate(),
+            Err(ValidationError::MixedIommuTypes)
+        );
 
         // x_nv_gpudirect_clique with vfio_p2p_dma=off should fail
         let mut invalid_config = valid_config.clone();
