@@ -55,6 +55,8 @@ const QUEUE_SIZE: u16 = 128;
 const REPORTING_QUEUE_SIZE: u16 = 32;
 const STATS_QUEUE_SIZE: u16 = 32;
 const MIN_NUM_QUEUES: usize = 2;
+const INFLATE_QUEUE: u16 = 0;
+const DEFLATE_QUEUE: u16 = 1;
 
 // Inflate virtio queue event.
 const INFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
@@ -462,7 +464,7 @@ impl BalloonEpollHandler {
                     offset += data_chunk_size as u64;
 
                     match queue_index {
-                        0 => {
+                        INFLATE_QUEUE => {
                             if let Err(e) = Self::release_memory_range_4k(
                                 &mut self.pbp,
                                 desc_chain.memory(),
@@ -471,7 +473,7 @@ impl BalloonEpollHandler {
                                 warn!("Failed to release memory for PFN {pfn:#x}: {e}");
                             }
                         }
-                        1 => {
+                        DEFLATE_QUEUE => {
                             let page_size = get_page_size() as usize;
                             let rbase =
                                 align_page_size_down((pfn as u64) << VIRTIO_BALLOON_PFN_SHIFT);
@@ -679,7 +681,7 @@ impl EpollHelperHandler for BalloonEpollHandler {
                         "Failed to get inflate queue event: {e:?}"
                     ))
                 })?;
-                self.process_queue(0).map_err(|e| {
+                self.process_queue(INFLATE_QUEUE).map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
                         "Failed to signal used inflate queue: {e:?}"
                     ))
@@ -691,7 +693,7 @@ impl EpollHelperHandler for BalloonEpollHandler {
                         "Failed to get deflate queue event: {e:?}"
                     ))
                 })?;
-                self.process_queue(1).map_err(|e| {
+                self.process_queue(DEFLATE_QUEUE).map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
                         "Failed to signal used deflate queue: {e:?}"
                     ))
