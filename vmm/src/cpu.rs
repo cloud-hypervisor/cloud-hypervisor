@@ -1123,12 +1123,7 @@ impl CpuManager {
 
         // Only create vCPUs in excess of all the allocated vCPUs.
         for cpu_id in self.vcpus.len() as u32..desired_vcpus {
-            vcpus.push(self.create_vcpu(
-                cpu_id,
-                // TODO: The special format of the CPU id can be removed once
-                // ready to break live upgrade.
-                snapshot_from_id(snapshot, cpu_id.to_string().as_str()),
-            )?);
+            vcpus.push(self.create_vcpu(cpu_id, snapshot_from_id(snapshot, &cpu_id.to_string()))?);
         }
 
         #[cfg(target_arch = "x86_64")]
