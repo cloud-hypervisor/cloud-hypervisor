@@ -4,7 +4,7 @@
 
 use std::fs::read_to_string;
 use std::mem::zeroed;
-use std::sync::OnceLock;
+use std::sync::{OnceLock, mpsc};
 use std::{cmp, io, thread};
 
 use log::{info, warn};
@@ -135,15 +135,20 @@ pub(crate) fn prefault_regions(regions: &[PrefaultRegion]) -> Result<(), Error> 
 
     let ranges = cpu_affinity_ranges(regions);
 
-    // Released once all workers spawn, so none populates while a sibling's
-    // stack mmap is still queued. false means a spawn failed.
+    // Each thread signals the main thread once startup is complete. The main
+    // thread then releases all threads for parallel prefaulting, avoiding
+    // interference with per thread malloc and signal stack setup. `false`
+    // indicates that spawning a thread failed.
     let start: OnceLock<bool> = OnceLock::new();
+    let (ready_tx, ready_rx) = mpsc::channel();
 
     thread::scope(|s| -> Result<(), Error> {
         let mut handles = Vec::new();
         for range in &ranges {
             let start = &start;
+            let ready_tx = ready_tx.clone();
             let worker = move || -> Result<(), io::Error> {
+                let _ = ready_tx.send(());
                 if !*start.wait() {
                     return Ok(());
                 }
@@ -177,7 +182,13 @@ pub(crate) fn prefault_regions(regions: &[PrefaultRegion]) -> Result<(), Error> 
             }
         }
 
-        let _ = start.set(true);
+        // Wait until all threads are started, then release them.
+        {
+            for _ in &handles {
+                let _ = ready_rx.recv();
+            }
+            let _ = start.set(true);
+        }
 
         for handle in handles {
             handle
