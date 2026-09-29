@@ -124,6 +124,11 @@ macro_rules! extract_bits_64_without_offset {
 
 pub const CPU_MANAGER_ACPI_SIZE: usize = 0xc;
 
+// On large servers, the thread overhead outgrows the benefit, especially on
+// loaded hosts. These values are a sweet spot on developer laptops and servers.
+const VCPU_SERIALIZE_MAX_THREADS: usize = 32;
+const VCPU_SERIALIZE_MIN_CHUNKS_PER_THREAD: usize = 4;
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("Error creating vCPU")]
@@ -721,7 +726,6 @@ impl Vcpu {
 
 /// Performs a parallel mapping into a vec by chunking the input slice and
 /// distributing the chunks over the threads.
-#[allow(unused)] // used in next commit
 fn parallel_map<T: Sync, R: Send, E: Send>(
     items: &[T],
     f: impl Fn(&T) -> result::Result<R, E> + Sync,
@@ -2844,12 +2848,20 @@ impl Snapshottable for CpuManager {
     }
 
     fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
-        let mut cpu_manager_snapshot = Snapshot::default();
+        let snapshots = parallel_map(
+            &self.vcpus,
+            |vcpu| {
+                let mut vcpu = vcpu.lock().unwrap();
+                Ok((vcpu.id(), vcpu.snapshot()?))
+            },
+            VCPU_SERIALIZE_MAX_THREADS,
+            VCPU_SERIALIZE_MIN_CHUNKS_PER_THREAD,
+        )?;
 
         // The CpuManager snapshot is a collection of all vCPUs snapshots.
-        for vcpu in &self.vcpus {
-            let mut vcpu = vcpu.lock().unwrap();
-            cpu_manager_snapshot.add_snapshot(vcpu.id(), vcpu.snapshot()?);
+        let mut cpu_manager_snapshot = Snapshot::default();
+        for (id, snapshot) in snapshots {
+            cpu_manager_snapshot.add_snapshot(id, snapshot);
         }
 
         Ok(cpu_manager_snapshot)
