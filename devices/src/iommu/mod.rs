@@ -2,6 +2,9 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+#[cfg(target_arch = "aarch64")]
+pub mod iommufd;
+
 use std::io;
 
 #[cfg(target_arch = "aarch64")]

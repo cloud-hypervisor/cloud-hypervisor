@@ -659,6 +659,8 @@ dependencies = [
  "byteorder",
  "event_monitor",
  "hypervisor",
+ "iommufd-bindings",
+ "iommufd-ioctls",
  "libc",
  "linux-loader",
  "log",
