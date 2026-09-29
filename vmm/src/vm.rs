@@ -741,13 +741,17 @@ impl Vm {
     /// Determine if VIRTIO_F_ACCESS_PLATFORM should be forced based on
     /// confidential computing features.
     fn should_force_access_platform(_config: &Arc<Mutex<VmConfig>>) -> bool {
-        #[cfg(feature = "tdx")]
-        if _config.lock().unwrap().is_tdx_enabled() {
-            return true;
-        }
-        #[cfg(feature = "sev_snp")]
-        if _config.lock().unwrap().is_sev_snp_enabled() {
-            return true;
+        #[cfg(any(feature = "tdx", feature = "sev_snp"))]
+        {
+            let config = _config.lock().unwrap();
+            #[cfg(feature = "tdx")]
+            if config.is_tdx_enabled() {
+                return true;
+            }
+            #[cfg(feature = "sev_snp")]
+            if config.is_sev_snp_enabled() {
+                return true;
+            }
         }
         false
     }
