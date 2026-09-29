@@ -127,7 +127,7 @@ pub use kvm_bindings::{
 };
 #[cfg(target_arch = "aarch64")]
 use kvm_bindings::{
-    KVM_GUESTDBG_USE_HW, KVM_NR_SPSR, KVM_REG_ARM_COPROC_MASK, KVM_REG_ARM_CORE, KVM_REG_ARM64,
+    KVM_GUESTDBG_USE_HW, KVM_REG_ARM_COPROC_MASK, KVM_REG_ARM_CORE, KVM_REG_ARM64,
     KVM_REG_ARM64_SYSREG, KVM_REG_ARM64_SYSREG_CRM_MASK, KVM_REG_ARM64_SYSREG_CRM_SHIFT,
     KVM_REG_ARM64_SYSREG_CRN_MASK, KVM_REG_ARM64_SYSREG_CRN_SHIFT, KVM_REG_ARM64_SYSREG_OP0_MASK,
     KVM_REG_ARM64_SYSREG_OP0_SHIFT, KVM_REG_ARM64_SYSREG_OP1_MASK, KVM_REG_ARM64_SYSREG_OP1_SHIFT,
@@ -2131,12 +2131,12 @@ impl cpu::Vcpu for KvmVcpu {
         // https://elixir.bootlin.com/linux/v4.14.174/source/arch/arm64/include/uapi/asm/ptrace.h#L72
         // These actually are the general-purpose registers of the Armv8-a
         // architecture (i.e x0-x30 if used as a 64bit register or w0-30 when used as a 32bit register).
-        for i in 0..31 {
+        for reg in &mut state.regs.regs {
             let mut bytes = [0_u8; 8];
             self.fd
                 .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), &mut bytes)
                 .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
-            state.regs.regs[i] = u64::from_le_bytes(bytes);
+            *reg = u64::from_le_bytes(bytes);
             off += size_of::<u64>();
         }
 
@@ -2184,12 +2184,12 @@ impl cpu::Vcpu for KvmVcpu {
 
         // Saved Program Status Registers, there are 5 of them used in the kernel.
         let mut off = offset_of!(kvm_regs, spsr);
-        for i in 0..KVM_NR_SPSR as usize {
+        for spsr in &mut state.spsr {
             let mut bytes = [0_u8; 8];
             self.fd
                 .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), &mut bytes)
                 .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
-            state.spsr[i] = u64::from_le_bytes(bytes);
+            *spsr = u64::from_le_bytes(bytes);
             off += size_of::<u64>();
         }
 
@@ -2285,11 +2285,11 @@ impl cpu::Vcpu for KvmVcpu {
         // for some additional info on registers.
         let kvm_regs_state: kvm_regs = (*state).into();
         let mut off = offset_of!(user_pt_regs, regs);
-        for i in 0..31 {
+        for reg in &kvm_regs_state.regs.regs {
             self.fd
                 .set_one_reg(
                     arm64_core_reg_id!(KVM_REG_SIZE_U64, off),
-                    &kvm_regs_state.regs.regs[i].to_le_bytes(),
+                    &reg.to_le_bytes(),
                 )
                 .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
             off += size_of::<u64>();
@@ -2336,11 +2336,11 @@ impl cpu::Vcpu for KvmVcpu {
             .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
 
         let mut off = offset_of!(kvm_regs, spsr);
-        for i in 0..KVM_NR_SPSR as usize {
+        for spsr in &kvm_regs_state.spsr {
             self.fd
                 .set_one_reg(
                     arm64_core_reg_id!(KVM_REG_SIZE_U64, off),
-                    &kvm_regs_state.spsr[i].to_le_bytes(),
+                    &spsr.to_le_bytes(),
                 )
                 .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
             off += size_of::<u64>();
@@ -3873,12 +3873,12 @@ impl KvmVcpu {
         // Floating point registers are stored in the user_fpsimd_state in the kernel:
         // https://elixir.bootlin.com/linux/v4.9.62/source/arch/arm64/include/uapi/asm/kvm.h#L53
         let mut off = offset_of!(kvm_regs, fp_regs.vregs);
-        for i in 0..32 {
+        for vreg in &mut regs.fp_regs.vregs {
             let mut bytes = [0_u8; 16];
             self.fd
                 .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U128, off), &mut bytes)
                 .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
-            regs.fp_regs.vregs[i] = u128::from_le_bytes(bytes);
+            *vreg = u128::from_le_bytes(bytes);
             off += size_of::<u128>();
         }
 
@@ -3905,11 +3905,11 @@ impl KvmVcpu {
         // Floating point registers are stored in the user_fpsimd_state in the kernel:
         // https://elixir.bootlin.com/linux/v4.9.62/source/arch/arm64/include/uapi/asm/kvm.h#L53
         let mut off = offset_of!(kvm_regs, fp_regs.vregs);
-        for i in 0..32 {
+        for vreg in &regs.fp_regs.vregs {
             self.fd
                 .set_one_reg(
                     arm64_core_reg_id!(KVM_REG_SIZE_U128, off),
-                    &regs.fp_regs.vregs[i].to_le_bytes(),
+                    &vreg.to_le_bytes(),
                 )
                 .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
             off += size_of::<u128>();
