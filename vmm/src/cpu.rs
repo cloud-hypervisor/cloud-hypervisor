@@ -1034,11 +1034,7 @@ impl CpuManager {
         })))
     }
 
-    fn create_vcpu(
-        &mut self,
-        cpu_id: u32,
-        snapshot: Option<&Snapshot>,
-    ) -> Result<Arc<Mutex<Vcpu>>> {
+    fn create_vcpu(&mut self, cpu_id: u32) -> Result<Arc<Mutex<Vcpu>>> {
         debug!("Creating vCPU: cpu_id = {cpu_id}");
 
         #[cfg(target_arch = "x86_64")]
@@ -1061,11 +1057,6 @@ impl CpuManager {
 
         #[cfg(target_arch = "aarch64")]
         vcpu.init(self.vm.as_ref())?;
-
-        if let Some(snapshot) = snapshot {
-            vcpu.restore(snapshot)
-                .map_err(|e| Error::VcpuCreate(e.into()))?;
-        }
 
         let vcpu = Arc::new(Mutex::new(vcpu));
 
@@ -1163,7 +1154,17 @@ impl CpuManager {
 
         // Only create vCPUs in excess of all the allocated vCPUs.
         for cpu_id in self.vcpus.len() as u32..desired_vcpus {
-            vcpus.push(self.create_vcpu(cpu_id, snapshot_from_id(snapshot, &cpu_id.to_string()))?);
+            vcpus.push(self.create_vcpu(cpu_id)?);
+        }
+
+        if let Some(snapshot) = snapshot {
+            for vcpu in &vcpus {
+                let vcpu = vcpu.lock().unwrap();
+                if let Some(snapshot) = snapshot_from_id(Some(snapshot), &vcpu.id()) {
+                    vcpu.restore(snapshot)
+                        .map_err(|e| Error::VcpuCreate(e.into()))?;
+                }
+            }
         }
 
         #[cfg(target_arch = "x86_64")]
