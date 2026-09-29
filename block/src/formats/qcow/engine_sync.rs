@@ -499,6 +499,26 @@ mod tests {
         );
     }
 
+    // The old L1 table freed by a resize must reach the free list.
+    #[test]
+    fn freed_l1_table_clusters_are_tracked() {
+        const CL: u64 = 65536;
+        let (temp, mut disk) = create_disk_with_data(1 << 30, &[], 0, true, false);
+        // 2 GiB needs a larger L1 table than 1 GiB.
+        disk.resize(2 << 30).unwrap();
+
+        let file_clusters = temp.as_file().metadata().unwrap().len() / CL;
+        let free_on_disk = (0..file_clusters)
+            .filter(|c| disk.metadata().cluster_refcount(c * CL).unwrap() == 0)
+            .count();
+        let tracked = disk.metadata().free_list_len();
+        assert!(free_on_disk > 0, "growing the L1 table freed no cluster");
+        assert_eq!(
+            free_on_disk, tracked,
+            "{free_on_disk} free clusters on disk, {tracked} on the free list",
+        );
+    }
+
     // sync_metadata must make completed writes visible to a fresh reader of
     // the file while the writing disk stays open. Device pause relies on
     // this so snapshot copies and migration reopen a self-consistent image

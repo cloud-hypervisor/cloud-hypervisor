@@ -880,7 +880,7 @@ impl QcowState {
             let cluster_addr = old_l1_offset + i * cluster_size;
             // Best effort: the old L1 clusters are no longer reachable,
             // so a refcount update failure just leaks space.
-            let _ = self.set_cluster_refcount(cluster_addr, 0);
+            self.release_unreferenced_cluster(cluster_addr);
         }
 
         // Update L1 table cache
