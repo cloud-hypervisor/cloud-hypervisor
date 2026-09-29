@@ -97,8 +97,9 @@ use libc::{
 use log::{debug, error, info, warn};
 use net_util::MacAddr;
 use pci::{
-    DeviceRelocation, MmioRegion, PciBarConfiguration, PciBarRegionType, PciBdf, PciDevice,
-    VfioDmaMapping, VfioPciDevice, VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError,
+    DeviceRelocation, MmioRegion, PasidCap, PciBarConfiguration, PciBarRegionType, PciBdf,
+    PciDevice, PciExpressCapability, VfioDmaMapping, VfioPciDevice, VfioUserDmaMapping,
+    VfioUserPciDevice, VfioUserPciDeviceError,
 };
 use rate_limiter::group;
 use rate_limiter::group::RateLimiterGroup;
@@ -4158,7 +4159,7 @@ impl DeviceManager {
         vfio_ops: &Arc<dyn VfioOps>,
         device: &Arc<VfioDevice>,
         bdf: PciBdf,
-    ) -> DeviceManagerResult<()> {
+    ) -> DeviceManagerResult<Option<PasidCap>> {
         let key = Self::find_physical_iommu(device_cfg)?;
         let virt_id = Smmuv3Iommufd::stream_id(bdf);
         let dev_id = device
@@ -4177,6 +4178,9 @@ impl DeviceManager {
                 dev_id,
             )
             .map_err(DeviceManagerError::Smmuv3)?;
+        let pasid_cap = viommu
+            .pasid_cap(dev_id)
+            .map_err(DeviceManagerError::Smmuv3)?;
 
         self.msi_interrupt_manager.register_remapping(
             bdf.into(),
@@ -4185,7 +4189,7 @@ impl DeviceManager {
             }),
         );
 
-        Ok(())
+        Ok(pasid_cap)
     }
 
     fn add_vfio_device(
@@ -4293,9 +4297,13 @@ impl DeviceManager {
         let vfio_device = Arc::new(vfio_device);
 
         #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
-        if smmuv3_attached {
-            self.attach_vfio_to_smmuv3(device_cfg, &vfio_ops, &vfio_device, pci_device_bdf)?;
-        }
+        let pasid_cap = if smmuv3_attached {
+            self.attach_vfio_to_smmuv3(device_cfg, &vfio_ops, &vfio_device, pci_device_bdf)?
+        } else {
+            None
+        };
+        #[cfg(not(all(target_arch = "aarch64", feature = "kvm")))]
+        let pasid_cap: Option<PasidCap> = None;
 
         if needs_dma_mapping {
             let vfio_mapping = Arc::new(VfioDmaMapping::new(
@@ -4397,6 +4405,11 @@ impl DeviceManager {
             (mm.memory_slot_allocator(), mm.guest_memory())
         };
 
+        let extended_caps = pasid_cap
+            .into_iter()
+            .map(|cap| Arc::new(cap) as Arc<dyn PciExpressCapability + Send + Sync>)
+            .collect();
+
         let vfio_pci_device = VfioPciDevice::new(
             vfio_name.clone(),
             Arc::clone(&self.address_manager.vm),
@@ -4418,7 +4431,7 @@ impl DeviceManager {
                 .map(|bar| *bar as u8)
                 .collect(),
             device_path,
-            Vec::new(),
+            extended_caps,
         )
         .map_err(DeviceManagerError::VfioPciCreate)?;
 
