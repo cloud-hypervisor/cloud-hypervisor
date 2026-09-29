@@ -59,6 +59,8 @@ use devices::ioapic;
 #[cfg(target_arch = "aarch64")]
 use devices::iommu::Smmuv3AcpiInfo;
 #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+use devices::iommu::Smmuv3MsiRemapping;
+#[cfg(all(target_arch = "aarch64", feature = "kvm"))]
 use devices::iommu::iommufd::Error as IommufdIommuError;
 #[cfg(target_arch = "aarch64")]
 use devices::iommu::iommufd::Smmuv3Iommufd;
@@ -1618,6 +1620,13 @@ impl DeviceManager {
             device_tree: self.device_tree.lock().unwrap().clone(),
             device_id_cnt: self.device_id_cnt,
         }
+    }
+
+    /// Guest address of the vITS GITS_TRANSLATER register.
+    #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+    fn vits_doorbell(&self) -> u64 {
+        let vcpus = self.config.lock().unwrap().cpus.boot_vcpus;
+        gic::Gic::create_default_config(vcpus.into()).msi_addr + 0x1_0040
     }
 
     fn get_msi_iova_space(&mut self) -> (u64, u64) {
@@ -4208,6 +4217,13 @@ impl DeviceManager {
                 dev_id,
             )
             .map_err(DeviceManagerError::Smmuv3)?;
+
+        self.msi_interrupt_manager.register_remapping(
+            bdf.into(),
+            Arc::new(Smmuv3MsiRemapping {
+                doorbell: self.vits_doorbell(),
+            }),
+        );
 
         Ok(())
     }
