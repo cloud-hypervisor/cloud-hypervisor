@@ -34,6 +34,8 @@ pub const VMGENID_SIZE: usize = 16;
 #[cfg(not(target_arch = "riscv64"))]
 pub const VMGENID_REGION_SIZE: u64 = 0x1000;
 
+const VMGENID_GED_BIT: usize = AcpiNotificationFlags::VMGENID_CHANGED.bits() as usize;
+
 /// A device for handling ACPI shutdown and reboot
 pub struct AcpiShutdownDevice {
     guest_exit_evt: EventFd,
@@ -210,6 +212,14 @@ impl Aml for AcpiGedDevice {
                             &aml::Equal::new(&aml::Local(1), &8usize),
                             vec![&aml::Notify::new(
                                 &aml::Path::new("\\_SB_.PWRB"),
+                                &0x80usize,
+                            )],
+                        ),
+                        &aml::And::new(&aml::Local(1), &aml::Local(0), &VMGENID_GED_BIT),
+                        &aml::If::new(
+                            &aml::Equal::new(&aml::Local(1), &VMGENID_GED_BIT),
+                            vec![&aml::Notify::new(
+                                &aml::Path::new("\\_SB_.VGEN"),
                                 &0x80usize,
                             )],
                         ),
