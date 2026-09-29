@@ -71,6 +71,7 @@ const STATS_REQUEST_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 5;
 
 // Size of a PFN in the balloon interface.
 const VIRTIO_BALLOON_PFN_SHIFT: u64 = 12;
+const VIRTIO_BALLOON_PAGE_SIZE: usize = 1 << VIRTIO_BALLOON_PFN_SHIFT;
 
 // Upper bound on a single inflate or deflate descriptor length, in
 // bytes. Matches the Linux driver, which submits at most
@@ -408,11 +409,15 @@ impl BalloonEpollHandler {
         Ok(())
     }
 
-    fn process_inflate_addresses(&mut self, memory: &GuestMemoryMmap, addresses: &[GuestAddress]) {
+    fn process_inflate_addresses(
+        &mut self,
+        memory: &GuestMemoryMmap,
+        addresses: &mut SmallVec<[GuestAddress; VIRTIO_BALLOON_MAX_PFNS]>,
+    ) {
         // The balloon always deals with 4 KiB pages. Use partial page handling
         // if the host page size differs from that.
-        if get_page_size() != 1 << VIRTIO_BALLOON_PFN_SHIFT {
-            for &address in addresses {
+        if get_page_size() as usize != VIRTIO_BALLOON_PAGE_SIZE {
+            for &address in addresses.iter() {
                 if let Err(e) = Self::release_memory_range_4k(&mut self.pbp, memory, address) {
                     warn!("Failed to release memory at address {:#x}: {e}", address.0);
                 }
@@ -420,9 +425,33 @@ impl BalloonEpollHandler {
             return;
         }
 
-        let page_size = 1usize << VIRTIO_BALLOON_PFN_SHIFT;
-        for &address in addresses {
-            if let Err(e) = Self::release_memory_range(memory, address, page_size) {
+        addresses.sort_unstable();
+        addresses.dedup();
+        let same_region = |prev: &GuestAddress, next: &GuestAddress| {
+            let prev_region = memory.find_region(*prev).map(GuestMemoryRegion::start_addr);
+            let next_region = memory.find_region(*next).map(GuestMemoryRegion::start_addr);
+            prev_region == next_region
+        };
+
+        for region_addresses in addresses.chunk_by(same_region) {
+            let mut range_base = region_addresses[0];
+            let mut range_len = VIRTIO_BALLOON_PAGE_SIZE;
+            let mut previous_address = region_addresses[0];
+
+            for &address in &region_addresses[1..] {
+                if previous_address.checked_add(VIRTIO_BALLOON_PAGE_SIZE as u64) == Some(address) {
+                    range_len += VIRTIO_BALLOON_PAGE_SIZE;
+                } else {
+                    if let Err(e) = Self::release_memory_range(memory, range_base, range_len) {
+                        warn!("Failed to release ballooned memory range: {e}");
+                    }
+                    range_base = address;
+                    range_len = VIRTIO_BALLOON_PAGE_SIZE;
+                }
+                previous_address = address;
+            }
+
+            if let Err(e) = Self::release_memory_range(memory, range_base, range_len) {
                 warn!("Failed to release ballooned memory range: {e}");
             }
         }
@@ -503,7 +532,7 @@ impl BalloonEpollHandler {
                 }
 
                 if queue_index == INFLATE_QUEUE {
-                    self.process_inflate_addresses(desc_chain.memory(), &inflate_addresses);
+                    self.process_inflate_addresses(desc_chain.memory(), &mut inflate_addresses);
                 }
             }
 
@@ -1228,6 +1257,49 @@ mod tests {
     fn release_private_page_does_not_modify_writable_backing_file() {
         // A writable descriptor does not make a MAP_PRIVATE mapping punchable.
         test_release_private_page(false);
+    }
+
+    #[test]
+    fn process_inflate_addresses_releases_coalesced_ranges() {
+        let page_size = get_page_size() as usize;
+        if page_size != VIRTIO_BALLOON_PAGE_SIZE {
+            return;
+        }
+
+        let memory_size = page_size * 4;
+        let memory = TestMemory::from_ranges(&[(GuestAddress(0), memory_size)]).unwrap();
+        memory
+            .write_slice(&vec![0xa5; memory_size], GuestAddress(0))
+            .unwrap();
+        let mut handler = create_stats_handler(
+            &memory,
+            Queue::new(16).unwrap(),
+            BalloonStatsState::WaitingForInitialDescriptor,
+        );
+        let mut addresses: SmallVec<[GuestAddress; VIRTIO_BALLOON_MAX_PFNS]> = [3, 1, 0, 1]
+            .into_iter()
+            .map(|pfn| GuestAddress(pfn << VIRTIO_BALLOON_PFN_SHIFT))
+            .collect();
+
+        handler.process_inflate_addresses(&memory, &mut addresses);
+
+        assert_eq!(
+            &addresses[..],
+            &[
+                GuestAddress(0),
+                GuestAddress(page_size as u64),
+                GuestAddress((page_size * 3) as u64),
+            ]
+        );
+        let mut data = vec![0xff; memory_size];
+        memory.read_slice(&mut data, GuestAddress(0)).unwrap();
+        assert!(data[..page_size * 2].iter().all(|byte| *byte == 0));
+        assert!(
+            data[page_size * 2..page_size * 3]
+                .iter()
+                .all(|byte| *byte == 0xa5)
+        );
+        assert!(data[page_size * 3..].iter().all(|byte| *byte == 0));
     }
 
     #[test]
