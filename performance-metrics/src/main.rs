@@ -189,14 +189,11 @@ impl fmt::Display for PerformanceTestOverrides {
             f,
             "{}{}{}vm_type = {}",
             self.test_iterations
-                .map(|v| format!("test_iterations = {v}, "))
-                .unwrap_or_default(),
+                .map_or_else(String::new, |v| format!("test_iterations = {v}, ")),
             self.test_timeout
-                .map(|v| format!("test_timeout = {v}, "))
-                .unwrap_or_default(),
+                .map_or_else(String::new, |v| format!("test_timeout = {v}, ")),
             self.test_image_format
-                .map(|v| format!("test_image_format = {v}, "))
-                .unwrap_or_default(),
+                .map_or_else(String::new, |v| format!("test_image_format = {v}, ")),
             self.vm_type
         )
     }
@@ -1933,8 +1930,7 @@ fn main() {
             .unwrap_or_default(),
         vm_type: cmd_arguments
             .get_one::<String>("vm-type")
-            .map(|s| s.parse().unwrap_or_default())
-            .unwrap_or_default(),
+            .map_or_else(Default::default, |s| s.parse().unwrap_or_default()),
     });
 
     #[cfg(target_arch = "aarch64")]
