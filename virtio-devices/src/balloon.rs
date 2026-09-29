@@ -383,13 +383,7 @@ impl BalloonEpollHandler {
         memory: &GuestMemoryMmap,
         range_base: GuestAddress,
     ) -> result::Result<(), Error> {
-        let range_len = 1 << VIRTIO_BALLOON_PFN_SHIFT;
-
         let page_size: u64 = get_page_size();
-        if page_size == 1 << VIRTIO_BALLOON_PFN_SHIFT {
-            return Self::release_memory_range(memory, range_base, range_len);
-        }
-
         if pbp.is_none() {
             *pbp = Some(PartiallyBalloonedPage::new());
         }
@@ -415,9 +409,21 @@ impl BalloonEpollHandler {
     }
 
     fn process_inflate_addresses(&mut self, memory: &GuestMemoryMmap, addresses: &[GuestAddress]) {
+        // The balloon always deals with 4 KiB pages. Use partial page handling
+        // if the host page size differs from that.
+        if get_page_size() != 1 << VIRTIO_BALLOON_PFN_SHIFT {
+            for &address in addresses {
+                if let Err(e) = Self::release_memory_range_4k(&mut self.pbp, memory, address) {
+                    warn!("Failed to release memory at address {:#x}: {e}", address.0);
+                }
+            }
+            return;
+        }
+
+        let page_size = 1usize << VIRTIO_BALLOON_PFN_SHIFT;
         for &address in addresses {
-            if let Err(e) = Self::release_memory_range_4k(&mut self.pbp, memory, address) {
-                warn!("Failed to release memory at address {:#x}: {e}", address.0);
+            if let Err(e) = Self::release_memory_range(memory, address, page_size) {
+                warn!("Failed to release ballooned memory range: {e}");
             }
         }
     }
