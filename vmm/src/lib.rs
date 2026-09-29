@@ -2175,7 +2175,10 @@ impl Vmm {
                         info!("Resumed VM successfully after failed migration");
                     }
                     Err(e) => {
-                        warn!("Failed resuming VM after failed migration: {e}");
+                        error!(
+                            "Failed resuming VM after failed migration: {}",
+                            flatten_error_chain_to_string(&e)
+                        );
                         self.exit_evt.write(1).unwrap();
                     }
                 }
@@ -2183,7 +2186,10 @@ impl Vmm {
 
             // Ensure full VM performance. The operation is idempotent.
             let _ = vm.stop_dirty_log().inspect_err(|e| {
-                warn!("Failed stopping dirty log after resuming VM: {e} - VM performance might be slower than usual");
+                warn!(
+                    "Failed stopping dirty log after resuming VM: {} - VM performance might be degraded",
+                    flatten_error_chain_to_string(e)
+                );
             });
 
             self.vm = VmOwnership::Owned(vm);
@@ -2201,7 +2207,10 @@ impl Vmm {
                 // Since the VMM explicitly no longer owns the VM, the exit
                 // event won't call the shutdown path automatically.
                 if let Err(e) = vm.shutdown() {
-                    error!("Failed shutting down the VM after migration: {e}");
+                    error!(
+                        "Failed shutting down the VM after migration: {}",
+                        flatten_error_chain_to_string(&e)
+                    );
                 }
 
                 if let Err(e) = self.exit_evt.write(1) {
@@ -2223,7 +2232,10 @@ impl Vmm {
                     self.vm = VmOwnership::None;
                     let mut vm = vm;
                     if let Err(e) = vm.shutdown() {
-                        warn!("Failed tearing down the VM after failed postcopy migration: {e}");
+                        warn!(
+                            "Failed tearing down the VM after failed postcopy migration: {}",
+                            flatten_error_chain_to_string(&e)
+                        );
                     }
                 } else {
                     try_resume_vm_after_failed_migration(vm);
