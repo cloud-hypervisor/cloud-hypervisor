@@ -12,6 +12,8 @@ use iommufd_bindings::iommufd::{
     iommu_hw_info, iommu_hw_info_arm_smmuv3, iommu_hwpt_arm_smmuv3,
     iommu_veventq_flag_IOMMU_VEVENTQ_FLAG_LOST_EVENTS, iommu_viommu_arm_smmuv3_invalidate,
     iommufd_hw_capabilities_IOMMU_HW_CAP_PCI_ATS_NOT_SUPPORTED,
+    iommufd_hw_capabilities_IOMMU_HW_CAP_PCI_PASID_EXEC,
+    iommufd_hw_capabilities_IOMMU_HW_CAP_PCI_PASID_PRIV,
 };
 use iommufd_ioctls::{
     AttachHwpt, IommufdError, IommufdHwInfoData, IommufdHwptData, IommufdInvalidateData,
@@ -19,7 +21,7 @@ use iommufd_ioctls::{
     IommufdViommuData,
 };
 use log::{error, warn};
-use pci::PciBdf;
+use pci::{PasidCap, PciBdf};
 use thiserror::Error;
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
@@ -121,6 +123,21 @@ impl IommufdIommu {
         );
 
         Ok(())
+    }
+
+    pub fn pasid_cap(&self, dev_id: u32) -> Result<Option<PasidCap>, Error> {
+        let (hw_info, _) = Self::query_hw_info(&self.viommu, dev_id)?;
+        Ok((hw_info.out_max_pasid_log2 != 0).then(|| {
+            PasidCap::new(
+                hw_info.out_max_pasid_log2,
+                hw_info.out_capabilities
+                    & u64::from(iommufd_hw_capabilities_IOMMU_HW_CAP_PCI_PASID_EXEC)
+                    != 0,
+                hw_info.out_capabilities
+                    & u64::from(iommufd_hw_capabilities_IOMMU_HW_CAP_PCI_PASID_PRIV)
+                    != 0,
+            )
+        }))
     }
 
     pub fn attached_bdfs(&self) -> Vec<PciBdf> {
