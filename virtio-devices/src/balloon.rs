@@ -513,20 +513,7 @@ impl BalloonEpollHandler {
                             inflate_addresses
                                 .push(GuestAddress(u64::from(pfn) << VIRTIO_BALLOON_PFN_SHIFT));
                         }
-                        DEFLATE_QUEUE => {
-                            let page_size = get_page_size() as usize;
-                            let rbase =
-                                align_page_size_down((pfn as u64) << VIRTIO_BALLOON_PFN_SHIFT);
-
-                            if let Err(e) = Self::advise_memory_range(
-                                desc_chain.memory(),
-                                vm_memory::GuestAddress(rbase),
-                                page_size,
-                                libc::MADV_WILLNEED,
-                            ) {
-                                warn!("Failed to advise memory for PFN {pfn:#x}: {e}");
-                            }
-                        }
+                        DEFLATE_QUEUE => {} // Nothing to do on deflate
                         _ => return Err(Error::InvalidQueueIndex(queue_index)),
                     }
                 }
