@@ -43,6 +43,10 @@ zerocopy = { version = "0.8.50", features = [
 [target.'cfg(any(target_arch = "aarch64", target_arch = "riscv64"))'.dependencies]
 arch = { path = "../arch" }
 
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+iommufd-bindings = { workspace = true }
+iommufd-ioctls = { workspace = true }
+
 [features]
 default = []
 fw_cfg = ["arch/fw_cfg", "bitfield-struct", "linux-loader", "zerocopy"]
