@@ -1288,7 +1288,8 @@ fn create_acpi_tables_internal(
 
     #[cfg(target_arch = "aarch64")]
     {
-        let iort = create_iort_table(device_manager.pci_segments(), &[]);
+        let smmus = device_manager.smmuv3_acpi_infos();
+        let iort = create_iort_table(device_manager.pci_segments(), &smmus);
         let iort_addr = next_table_address(prev_tbl_addr, prev_tbl_len)?;
         tables_bytes.extend_from_slice(iort.as_slice());
         xsdt_table_pointers.push(iort_addr.0);
