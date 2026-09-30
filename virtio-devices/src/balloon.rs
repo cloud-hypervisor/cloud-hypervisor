@@ -381,7 +381,7 @@ impl BalloonEpollHandler {
         }
     }
 
-    fn release_memory_range_4k(
+    fn release_memory_range_partial_page(
         pbp: &mut Option<PartiallyBalloonedPage>,
         memory: &GuestMemoryMmap,
         range_base: GuestAddress,
@@ -420,7 +420,9 @@ impl BalloonEpollHandler {
         // if the host page size differs from that.
         if get_page_size() as usize != VIRTIO_BALLOON_PAGE_SIZE {
             for &address in addresses.iter() {
-                if let Err(e) = Self::release_memory_range_4k(&mut self.pbp, memory, address) {
+                if let Err(e) =
+                    Self::release_memory_range_partial_page(&mut self.pbp, memory, address)
+                {
                     warn!("Failed to release memory at address {:#x}: {e}", address.0);
                 }
             }
