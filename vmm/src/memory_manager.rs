@@ -201,6 +201,17 @@ struct ArchMemRegion {
     r_type: RegionType,
 }
 
+// Reserved ranges as (base, end), ascending.
+fn reserved_spans(regions: &[ArchMemRegion]) -> Vec<(u64, u64)> {
+    let mut spans: Vec<(u64, u64)> = regions
+        .iter()
+        .filter(|r| r.r_type == RegionType::Reserved)
+        .map(|r| (r.base, r.base + r.size as u64))
+        .collect();
+    spans.sort_unstable();
+    spans
+}
+
 pub struct MemoryManager {
     boot_guest_memory: GuestMemoryMmap,
     guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
@@ -2593,6 +2604,10 @@ impl MemoryManager {
 
     pub fn allocator(&self) -> Arc<Mutex<SystemAllocator>> {
         Arc::clone(&self.allocator)
+    }
+
+    pub fn reserved_regions(&self) -> Vec<(u64, u64)> {
+        reserved_spans(&self.arch_mem_regions)
     }
 
     pub fn start_of_device_area(&self) -> GuestAddress {

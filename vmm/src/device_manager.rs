@@ -1093,6 +1093,22 @@ pub struct DeviceManager {
     ivshmem_device: Option<Arc<Mutex<devices::IvshmemDevice>>>,
 }
 
+// Claims the part of [base, end) that falls inside the allocator.
+fn claim_reserved(
+    allocator: &mut AddressAllocator,
+    base: u64,
+    end: u64,
+) -> DeviceManagerResult<()> {
+    let start = base.max(allocator.base().0);
+    let last = (end - 1).min(allocator.end().0);
+    if start <= last {
+        allocator
+            .allocate(Some(GuestAddress(start)), last - start + 1, None)
+            .ok_or(DeviceManagerError::AllocateMmioAddress)?;
+    }
+    Ok(())
+}
+
 /// Create per-PCI-segment MMIO allocators over the range `[start, end]`.
 /// Both `start` and `end` are inclusive addresses.
 fn create_mmio_allocators(
@@ -1217,6 +1233,13 @@ impl DeviceManager {
             &mmio64_aperture_weights,
             4 << 30,
         );
+
+        // Keep BARs off reserved ranges.
+        for (base, end) in memory_manager.lock().unwrap().reserved_regions() {
+            for allocator in pci_mmio64_allocators.iter() {
+                claim_reserved(&mut allocator.lock().unwrap(), base, end)?;
+            }
+        }
 
         let address_manager = Arc::new(AddressManager {
             allocator: memory_manager.lock().unwrap().allocator(),
@@ -6300,6 +6323,44 @@ impl Drop for DeviceManager {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn claim_reserved_keeps_bars_off_the_range() {
+        use vm_allocator::AddressAllocator;
+        use vm_memory::GuestAddress;
+
+        use super::claim_reserved;
+
+        const GIB: u64 = 1 << 30;
+        let (base, end) = (1012 * GIB, 1024 * GIB);
+
+        // Wholly inside the allocator.
+        let mut a = AddressAllocator::new(GuestAddress(8 * GIB), 2040 * GIB).unwrap();
+        claim_reserved(&mut a, base, end).unwrap();
+        assert!(a.allocate(Some(GuestAddress(base)), 4096, None).is_none());
+        assert!(
+            a.allocate(Some(GuestAddress(end - 4096)), 4096, None)
+                .is_none()
+        );
+        assert!(a.allocate(Some(GuestAddress(end)), 4096, None).is_some());
+
+        // Straddling the allocator end, only the overlap is claimed.
+        let mut a = AddressAllocator::new(GuestAddress(8 * GIB), 1008 * GIB).unwrap();
+        claim_reserved(&mut a, base, end).unwrap();
+        assert!(a.allocate(Some(GuestAddress(base)), 4096, None).is_none());
+        assert!(
+            a.allocate(Some(GuestAddress(base - 4096)), 4096, None)
+                .is_some()
+        );
+
+        // Clear of the allocator, nothing is claimed.
+        let mut a = AddressAllocator::new(GuestAddress(8 * GIB), 8 * GIB).unwrap();
+        claim_reserved(&mut a, base, end).unwrap();
+        assert!(
+            a.allocate(Some(GuestAddress(8 * GIB)), 8 * GIB, None)
+                .is_some()
+        );
+    }
+
     use super::*;
 
     #[test]
