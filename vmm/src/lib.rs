@@ -767,7 +767,7 @@ enum ReceiveMigrationState {
     /// The migration is successful.
     Completed,
 
-    /// The migration couldn't complete, either due to an error or because the sender abandoned the migration.
+    #[deprecated = "Will be removed with Command::Abandon once v54 is released"]
     Aborted,
 }
 
@@ -780,10 +780,12 @@ impl ReceiveMigrationState {
             ReceiveMigrationState::Configured(_) => "Configured",
             ReceiveMigrationState::StateReceived { .. } => "StateReceived",
             ReceiveMigrationState::Completed => "Completed",
+            #[expect(deprecated)]
             ReceiveMigrationState::Aborted => "Aborted",
         }
     }
 
+    #[expect(deprecated)]
     fn finished(&self) -> bool {
         matches!(
             self,
@@ -1120,6 +1122,7 @@ impl Vmm {
                 }
                 c => invalid_command(state_name, c),
             },
+            #[expect(deprecated)]
             Completed | Aborted => {
                 unreachable!("Performed a step on the finished state machine")
             }
@@ -1179,6 +1182,7 @@ impl Vmm {
         }
 
         match state {
+            #[expect(deprecated)]
             ReceiveMigrationState::Aborted => Err(MigratableError::MigrateReceive(anyhow!(
                 "Received Abandon command"
             ))),
