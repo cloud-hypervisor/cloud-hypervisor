@@ -135,6 +135,7 @@ mod iommufd {
     pub(super) const IOMMU_IOAS_ALLOC: u64 = 0x3b81;
     pub(super) const IOMMU_IOAS_MAP: u64 = 0x3b85;
     pub(super) const IOMMU_IOAS_UNMAP: u64 = 0x3b86;
+    pub(super) const IOMMU_IOAS_MAP_FILE: u64 = 0x3b8f;
 
     // See include/uapi/linux/vfio.h in the kernel code.
     pub(super) const VFIO_DEVICE_BIND_IOMMUFD: u64 = 0x3b76;
@@ -297,6 +298,7 @@ fn create_vmm_ioctl_seccomp_rule_iommufd() -> Result<Vec<SeccompRule>, BackendEr
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_ALLOC)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_MAP)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_UNMAP)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_MAP_FILE)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_DEVICE_BIND_IOMMUFD)?],
         and![Cond::new(
             1,
@@ -866,6 +868,8 @@ fn create_vcpu_ioctl_seccomp_rule_iommufd() -> Result<Vec<SeccompRule>, BackendE
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_DESTROY)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_MAP)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_UNMAP)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_MAP_FILE)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VFIO_DEVICE_FEATURE)?],
         and![Cond::new(
             1,
             ArgLen::Dword,

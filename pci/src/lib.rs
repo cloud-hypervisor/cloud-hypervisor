@@ -13,6 +13,7 @@ mod mmap;
 mod msi;
 mod msix;
 mod vfio;
+mod vfio_dmabuf;
 mod vfio_user;
 
 use std::fmt::{self, Debug, Display};
@@ -39,6 +40,7 @@ pub use self::msix::{
     MsixTableEntry,
 };
 pub use self::vfio::{MmioRegion, VfioDmaMapping, VfioPciDevice, VfioPciError};
+pub use self::vfio_dmabuf::IommufdIoas;
 pub use self::vfio_user::{VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError};
 
 #[cfg(target_arch = "x86_64")]

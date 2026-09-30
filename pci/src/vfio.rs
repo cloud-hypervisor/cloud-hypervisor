@@ -63,6 +63,7 @@ use crate::configuration::{
 use crate::mmap::MmapRegion;
 use crate::msi::{MSI_CONFIG_ID, MsiConfigState};
 use crate::msix::{MaybeMutInterruptSourceGroup, MsixConfigState};
+use crate::vfio_dmabuf::{IommufdIoas, probe_dma_buf};
 use crate::{
     BarReprogrammingParams, MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE, MsiCap, MsiConfig, MsixCap,
     MsixConfig, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType,
@@ -110,6 +111,8 @@ pub enum VfioPciError {
     ExtendedCapMismatchedWriteMasks(u16),
     #[error("Failed to restore VFIO migration state")]
     RestoreMigration(#[source] anyhow::Error),
+    #[error("Cannot map the BARs as dma-bufs for P2P DMA, which x_nv_gpudirect_clique needs")]
+    DmaBufP2p(#[source] io::Error),
 }
 
 #[derive(Copy, Clone)]
@@ -1157,6 +1160,40 @@ impl VfioCommon {
         status & PCI_CONFIG_STATUS_CAPABILITIES_LIST != 0
     }
 
+    // Writes to these registers can put the device in D3hot or start an FLR.
+    fn dma_buf_revoking_registers(&self) -> Vec<usize> {
+        let mut registers = Vec::new();
+        if !self.has_capabilities() {
+            return registers;
+        }
+
+        let mut cap = self
+            .vfio_wrapper
+            .read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET)
+            & PCI_CONFIG_CAPABILITY_PTR_MASK;
+        while cap != 0 {
+            let register =
+                match PciCapabilityId::from(self.vfio_wrapper.read_config_byte(cap.into())) {
+                    PciCapabilityId::PowerManagement => Some(PCI_PM_CTRL),
+                    PciCapabilityId::PciExpress => Some(PCI_EXP_DEVCTL),
+                    PciCapabilityId::PciAdvancedFeatures => Some(PCI_AF_CTRL),
+                    _ => None,
+                };
+            if let Some(register) = register {
+                registers.push((u32::from(cap) + register) as usize / PCI_CONFIG_REGISTER_SIZE);
+            }
+
+            let next = self.vfio_wrapper.read_config_byte((cap + 1).into())
+                & PCI_CONFIG_CAPABILITY_PTR_MASK;
+            if next == cap {
+                break;
+            }
+            cap = next;
+        }
+
+        registers
+    }
+
     fn get_msix_cap_idx(&self) -> Option<usize> {
         if !self.has_capabilities() {
             return None;
@@ -2054,6 +2091,46 @@ impl Snapshottable for VfioCommon {
     }
 }
 
+struct P2pDmabuf {
+    ioas: IommufdIoas,
+    // IOVA of each mapped user memory region, by slot.
+    mapped: HashMap<u32, u64>,
+    revoking_registers: Vec<usize>,
+}
+
+impl P2pDmabuf {
+    fn map(
+        &mut self,
+        device: &VfioDevice,
+        region_index: u32,
+        region_start: u64,
+        user_memory_region: &UserMemoryRegion,
+    ) -> io::Result<()> {
+        let iova = user_memory_region.start;
+        let len = user_memory_region.mapping.len() as u64;
+        if self
+            .ioas
+            .map_bar(device, region_index, iova - region_start, len, iova)?
+        {
+            self.mapped.insert(user_memory_region.slot, iova);
+        }
+        Ok(())
+    }
+
+    fn unmap(
+        &mut self,
+        vfio_ops: &dyn VfioOps,
+        bdf: PciBdf,
+        user_memory_region: &UserMemoryRegion,
+    ) {
+        if let Some(iova) = self.mapped.remove(&user_memory_region.slot)
+            && let Err(e) = vfio_ops.vfio_dma_unmap(iova, user_memory_region.mapping.len())
+        {
+            error!("{bdf}: could not unmap BAR from P2P DMA at 0x{iova:x}: {e}");
+        }
+    }
+}
+
 /// VfioPciDevice represents a VFIO PCI device.
 /// This structure implements the BusDevice and PciDevice traits.
 ///
@@ -2070,6 +2147,8 @@ pub struct VfioPciDevice {
     // Whether to map VFIO device MMIO BARs into the host IOMMU address space.
     // Required for peer-to-peer DMA between VFIO devices.
     p2p_dma: bool,
+    // iommufd only maps BARs as dma-bufs.
+    p2p_dmabuf: Option<P2pDmabuf>,
     memory_slot_allocator: MemorySlotAllocator,
     // Guest memory layout, used to enumerate the IOVA ranges to track when
     // programming VFIO DMA logging.
@@ -2090,6 +2169,7 @@ impl VfioPciDevice {
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
         iommu_attached: bool,
         p2p_dma: bool,
+        iommufd_ioas: Option<IommufdIoas>,
         bdf: PciBdf,
         memory_slot_allocator: MemorySlotAllocator,
         memory: GuestMemoryAtomic<GuestMemoryMmap>,
@@ -2101,6 +2181,23 @@ impl VfioPciDevice {
     ) -> Result<Self, VfioPciError> {
         let device = Arc::new(device);
         device.reset();
+
+        let (p2p_dma, iommufd_ioas) = match iommufd_ioas {
+            Some(ioas) if p2p_dma && !iommu_attached => match probe_dma_buf(device.as_ref()) {
+                Ok(()) => (true, Some(ioas)),
+                // The clique tells the guest driver that P2P DMA works.
+                Err(e) if x_nv_gpudirect_clique.is_some() => {
+                    return Err(VfioPciError::DmaBufP2p(e));
+                }
+                Err(e) => {
+                    warn!(
+                        "{bdf}: BARs cannot be exported as dma-bufs, no P2P DMA to this device: {e}"
+                    );
+                    (false, None)
+                }
+            },
+            _ => (p2p_dma, None),
+        };
 
         let vfio_wrapper = VfioDeviceWrapper::new(Arc::clone(&device));
 
@@ -2118,6 +2215,12 @@ impl VfioPciDevice {
             },
         )?;
 
+        let p2p_dmabuf = iommufd_ioas.map(|ioas| P2pDmabuf {
+            ioas,
+            mapped: HashMap::new(),
+            revoking_registers: common.dma_buf_revoking_registers(),
+        });
+
         let vfio_pci_device = VfioPciDevice {
             id,
             vm,
@@ -2126,6 +2229,7 @@ impl VfioPciDevice {
             common,
             iommu_attached,
             p2p_dma,
+            p2p_dmabuf,
             memory_slot_allocator,
             memory,
             bdf,
@@ -2137,6 +2241,53 @@ impl VfioPciDevice {
 
     pub fn iommu_attached(&self) -> bool {
         self.iommu_attached
+    }
+
+    // vfio-pci revokes the dma-bufs of a device that stops decoding memory, is
+    // reset or goes to D3hot, and iommufd does not restore a revoked mapping.
+    fn sync_p2p_dmabuf(&mut self, reg_idx: usize, offset: u64, moving: &[BarReprogrammingParams]) {
+        let Some(p2p_dmabuf) = self.p2p_dmabuf.as_mut() else {
+            return;
+        };
+
+        let maybe_revoked = p2p_dmabuf.revoking_registers.contains(&reg_idx);
+        // Only the lower halves of these registers hold the controls.
+        if (!maybe_revoked && reg_idx != COMMAND_REG) || offset >= 2 {
+            return;
+        }
+
+        let decoding =
+            self.common.configuration.read_reg(COMMAND_REG) & COMMAND_REG_MEMORY_SPACE_MASK != 0;
+        for region in self.common.mmio_regions.iter() {
+            // move_bar() maps it at its new address.
+            if decoding
+                && moving
+                    .iter()
+                    .any(|params| params.old_base == region.start.raw_value())
+            {
+                continue;
+            }
+            for user_memory_region in region.user_memory_regions.iter() {
+                let mapped = p2p_dmabuf.mapped.contains_key(&user_memory_region.slot);
+                if mapped && (maybe_revoked || !decoding) {
+                    p2p_dmabuf.unmap(self.vfio_ops.as_ref(), self.bdf, user_memory_region);
+                }
+                if decoding
+                    && (maybe_revoked || !mapped)
+                    && let Err(e) = p2p_dmabuf.map(
+                        &self.device,
+                        region.index,
+                        region.start.raw_value(),
+                        user_memory_region,
+                    )
+                {
+                    warn!(
+                        "{}: could not map BAR {} for P2P DMA at 0x{:x}: {e}",
+                        self.bdf, region.index, user_memory_region.start
+                    );
+                }
+            }
+        }
     }
 
     fn generate_sparse_areas(
@@ -2380,7 +2531,22 @@ impl VfioPciDevice {
 
                     // Map the MMIO BAR into the host IOMMU address space via VfioOps
                     // Only needed if p2p_dma is enabled.
-                    if !self.iommu_attached && self.p2p_dma {
+                    if let Some(p2p_dmabuf) = self.p2p_dmabuf.as_mut() {
+                        if let Err(e) = p2p_dmabuf.map(
+                            &self.device,
+                            region.index,
+                            region.start.raw_value(),
+                            &user_memory_region,
+                        ) {
+                            if self.common.x_nv_gpudirect_clique.is_some() {
+                                return Err(VfioPciError::DmaBufP2p(e));
+                            }
+                            warn!(
+                                "{}: could not map BAR {} for P2P DMA at 0x{:x}: {e}",
+                                self.bdf, region.index, user_memory_region.start
+                            );
+                        }
+                    } else if !self.iommu_attached && self.p2p_dma {
                         // vfio_dma_map should be unsafe but isn't.
                         // SAFETY: MmapRegion invariants guarantee that
                         // user_memory_region.mapping.addr() points to
@@ -2410,7 +2576,9 @@ impl VfioPciDevice {
                 let host_addr = user_memory_region.mapping.addr();
                 // Unmap MMIO region from the host IOMMU address space via VfioOps
                 // Only needed if p2p_dma is enabled.
-                if !self.iommu_attached
+                if let Some(p2p_dmabuf) = self.p2p_dmabuf.as_mut() {
+                    p2p_dmabuf.unmap(self.vfio_ops.as_ref(), self.bdf, &user_memory_region);
+                } else if !self.iommu_attached
                     && self.p2p_dma
                     && let Err(e) = self
                         .vfio_ops
@@ -2525,6 +2693,10 @@ const PCI_HEADER_TYPE_REG_INDEX: usize = 3;
 const PCI_CONFIG_BAR0_INDEX: usize = 4;
 // PCI ROM expansion BAR register index
 const PCI_ROM_EXP_BAR_INDEX: usize = 12;
+// Offsets of PMCSR, Device Control and AF Control in their capabilities
+const PCI_PM_CTRL: u32 = 4;
+const PCI_EXP_DEVCTL: u32 = 8;
+const PCI_AF_CTRL: u32 = 4;
 
 impl PciDevice for VfioPciDevice {
     fn allocate_bars(
@@ -2558,7 +2730,9 @@ impl PciDevice for VfioPciDevice {
         offset: u64,
         data: &[u8],
     ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>) {
-        self.common.write_config_register(reg_idx, offset, data)
+        let ret = self.common.write_config_register(reg_idx, offset, data);
+        self.sync_p2p_dmabuf(reg_idx, offset, &ret.0);
+        ret
     }
 
     fn read_config_register(&mut self, reg_idx: usize) -> u32 {
@@ -2583,7 +2757,9 @@ impl PciDevice for VfioPciDevice {
                     let host_addr = user_memory_region.mapping.addr();
                     // Unmap the old MMIO region from the host IOMMU address space via VfioOps
                     // Only needed if p2p_dma is enabled.
-                    if !self.iommu_attached
+                    if let Some(p2p_dmabuf) = self.p2p_dmabuf.as_mut() {
+                        p2p_dmabuf.unmap(self.vfio_ops.as_ref(), self.bdf, user_memory_region);
+                    } else if !self.iommu_attached
                         && self.p2p_dma
                         && let Err(e) = self
                             .vfio_ops
@@ -2639,7 +2815,16 @@ iova 0x{:x}, size 0x{:x}: {}, ",
 
                     // Map the moved MMIO region into the host IOMMU address space via VfioOps
                     // Only needed if p2p_dma is enabled.
-                    if !self.iommu_attached && self.p2p_dma {
+                    if let Some(p2p_dmabuf) = self.p2p_dmabuf.as_mut() {
+                        if let Err(e) =
+                            p2p_dmabuf.map(&self.device, region.index, new_base, user_memory_region)
+                        {
+                            warn!(
+                                "{}: could not map BAR {} for P2P DMA at 0x{:x}: {e}",
+                                self.bdf, region.index, user_memory_region.start
+                            );
+                        }
+                    } else if !self.iommu_attached && self.p2p_dma {
                         // vfio_dma_map is unsound and ought to be marked as unsafe
                         // SAFETY: MmapRegion invariants guarantee that
                         // host_addr points to len bytes of
@@ -3661,5 +3846,30 @@ mod tests {
         restored.set_state(&state, None, None, None).unwrap();
 
         assert_eq!(restored.read_config_register(0x40 / 4), 0x0000_1234);
+    }
+
+    #[test]
+    fn dma_buf_revoking_registers_follow_the_capability_list() {
+        let mock = MockConfigSpace::new(&[]);
+        {
+            let mut space = mock.space.lock().unwrap();
+            space[PCI_CONFIG_STATUS_OFFSET as usize] = PCI_CONFIG_STATUS_CAPABILITIES_LIST as u8;
+            space[PCI_CONFIG_CAPABILITY_OFFSET as usize] = 0x40;
+            for (cap, id, next) in [
+                (0x40, PciCapabilityId::PowerManagement, 0x50),
+                (0x50, PciCapabilityId::MsiX, 0x60),
+                (0x60, PciCapabilityId::PciExpress, 0x70),
+                (0x70, PciCapabilityId::PciAdvancedFeatures, 0),
+            ] {
+                space[cap] = id as u8;
+                space[cap + 1] = next;
+            }
+        }
+        let common = test_vfio_common(mock, None);
+
+        assert_eq!(
+            common.dma_buf_revoking_registers(),
+            [0x44 / 4, 0x68 / 4, 0x74 / 4]
+        );
     }
 }
