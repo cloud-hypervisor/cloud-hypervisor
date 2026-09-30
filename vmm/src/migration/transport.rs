@@ -388,8 +388,13 @@ impl ReceiveAdditionalConnections {
             seccomp_filter,
         );
 
-        if first_err.is_err() {
-            warn!("Signaling termination due to an error while accepting connections.");
+        // Not every failure path propagates this error, so log it here,
+        // accepting a possible duplicate higher up.
+        if let Err(e) = &first_err {
+            error!(
+                "Error while accepting additional connections, signaling termination to receive-memory workers: {}",
+                flatten_error_chain_to_string(e)
+            );
             let _ = kill_evt.write(1);
         }
 
