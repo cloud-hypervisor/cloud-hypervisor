@@ -3375,7 +3375,15 @@ impl RequestHandler for Vmm {
                     flatten_error_chain_to_string(e)
                 );
                 event!("vm", "migration-receive-failed");
-                self.vm = VmOwnership::None;
+                let vm = self.vm.take_owned_or(VmError::VmNotCreated);
+                if let Ok(mut vm) = vm
+                    && let Err(err) = vm.shutdown()
+                {
+                    error!(
+                        "Failed shutting down the VM after failed receive migration: {}",
+                        flatten_error_chain_to_string(&err)
+                    );
+                }
                 self.vm_config = None;
             })
     }
