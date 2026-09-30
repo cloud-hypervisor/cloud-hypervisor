@@ -2100,7 +2100,6 @@ impl VfioPciDevice {
         extended_caps: Vec<Arc<dyn PciExpressCapability + Send + Sync>>,
     ) -> Result<Self, VfioPciError> {
         let device = Arc::new(device);
-        device.reset();
 
         let vfio_wrapper = VfioDeviceWrapper::new(Arc::clone(&device));
 

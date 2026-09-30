@@ -3921,8 +3921,11 @@ impl DeviceManager {
             .downcast::<VfioIommufd>()
             .map_err(|_| DeviceManagerError::ExpectedIommufdBackend)?;
         let vfio_device = if already_bound {
-            VfioDevice::new_from_bound_fd(file, vfio_iommufd, attach_ioas)
-                .map_err(DeviceManagerError::VfioCreate)?
+            let vfio_device = VfioDevice::new_from_bound_fd(file, vfio_iommufd, attach_ioas)
+                .map_err(DeviceManagerError::VfioCreate)?;
+            // The kernel reset the device when this fd was bound, on a previous boot.
+            vfio_device.reset();
+            vfio_device
         } else {
             VfioDevice::new_from_fd(file, vfio_iommufd, attach_ioas)
                 .map_err(DeviceManagerError::VfioCreate)?
