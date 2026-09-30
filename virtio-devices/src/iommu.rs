@@ -213,7 +213,6 @@ struct VirtioIommuProbeProperty {
 }
 
 /// Virtio IOMMU request PROBE property RESV_MEM subtypes
-#[expect(dead_code)]
 const VIRTIO_IOMMU_RESV_MEM_T_RESERVED: u8 = 0;
 const VIRTIO_IOMMU_RESV_MEM_T_MSI: u8 = 1;
 
@@ -348,6 +347,7 @@ impl Request {
         mapping: &Arc<IommuMapping>,
         ext_mapping: &BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
         msi_iova_space: (u64, u64),
+        reserved_regions: &[(u64, u64)],
         input_range: Option<(u64, u64)>,
     ) -> result::Result<usize, Error> {
         let desc = desc_chain
@@ -765,7 +765,18 @@ impl Request {
                     };
                     reply.extend_from_slice(resv_mem.as_slice());
 
-                    hdr_len = PROBE_PROP_SIZE;
+                    for &(start, end) in reserved_regions {
+                        reply.extend_from_slice(probe_prop.as_slice());
+                        let resv_mem = VirtioIommuProbeResvMem {
+                            subtype: VIRTIO_IOMMU_RESV_MEM_T_RESERVED,
+                            start,
+                            end,
+                            ..Default::default()
+                        };
+                        reply.extend_from_slice(resv_mem.as_slice());
+                    }
+
+                    hdr_len = reply.len() as u32;
                 }
                 _ => {
                     unrecognised_type = true;
@@ -871,6 +882,7 @@ struct IommuEpollHandler {
     mapping: Arc<IommuMapping>,
     ext_mapping: Arc<Mutex<BTreeMap<u32, Arc<dyn ExternalDmaMapping>>>>,
     msi_iova_space: (u64, u64),
+    reserved_regions: Vec<(u64, u64)>,
     input_range: Option<(u64, u64)>,
 }
 
@@ -887,6 +899,7 @@ impl IommuEpollHandler {
                 &self.mapping,
                 &self.ext_mapping.lock().unwrap(),
                 self.msi_iova_space,
+                &self.reserved_regions,
                 self.input_range,
             ) {
                 Ok(len) => len as u32,
@@ -1146,6 +1159,7 @@ pub struct Iommu {
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
     msi_iova_space: (u64, u64),
+    reserved_regions: Vec<(u64, u64)>,
     input_range: Option<(u64, u64)>,
 }
 
@@ -1158,19 +1172,23 @@ pub struct IommuState {
     acked_features: u64,
     endpoints: EndpointsState,
     domains: DomainsState,
+    #[serde(default)]
+    probe_size: u32,
 }
 
 impl Iommu {
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
         msi_iova_space: (u64, u64),
+        reserved_regions: Vec<(u64, u64)>,
         address_width_bits: u8,
         access_platform_enabled: bool,
         state: Option<IommuState>,
     ) -> io::Result<(Self, Arc<IommuMapping>)> {
-        let (mut avail_features, acked_features, endpoints, domains, paused) =
+        let (mut avail_features, acked_features, endpoints, domains, paused, restored_probe_size) =
             if let Some(state) = state {
                 info!("Restoring virtio-iommu {id}");
                 (
@@ -1191,6 +1209,7 @@ impl Iommu {
                         })
                         .collect(),
                     true,
+                    Some(state.probe_size),
                 )
             } else {
                 let avail_features = (1u64 << VIRTIO_F_VERSION_1)
@@ -1198,12 +1217,26 @@ impl Iommu {
                     | (1u64 << VIRTIO_IOMMU_F_PROBE)
                     | (1u64 << VIRTIO_IOMMU_F_BYPASS_CONFIG);
 
-                (avail_features, 0, BTreeMap::new(), BTreeMap::new(), false)
+                (
+                    avail_features,
+                    0,
+                    BTreeMap::new(),
+                    BTreeMap::new(),
+                    false,
+                    None,
+                )
             };
+
+        // A restored guest sized its PROBE buffers from the probe_size it read
+        // before, so report no more reserved regions than that holds.
+        let mut reserved_regions = reserved_regions;
+        if let Some(probe_size) = restored_probe_size {
+            reserved_regions.truncate((probe_size / PROBE_PROP_SIZE).saturating_sub(1) as usize);
+        }
 
         let mut config = VirtioIommuConfig {
             page_size_mask: VIRTIO_IOMMU_PAGE_SIZE_MASK,
-            probe_size: PROBE_PROP_SIZE,
+            probe_size: PROBE_PROP_SIZE * (1 + reserved_regions.len() as u32),
             ..Default::default()
         };
 
@@ -1246,6 +1279,7 @@ impl Iommu {
                 seccomp_action,
                 exit_evt,
                 msi_iova_space,
+                reserved_regions,
                 input_range,
             },
             mapping,
@@ -1273,6 +1307,7 @@ impl Iommu {
                 .into_iter()
                 .map(|(k, v)| (k, (v.mappings.into_iter().collect(), v.bypass)))
                 .collect(),
+            probe_size: self.config.probe_size,
         }
     }
 
@@ -1374,6 +1409,7 @@ impl VirtioDevice for Iommu {
             mapping: Arc::clone(&self.mapping),
             ext_mapping: Arc::clone(&self.ext_mapping),
             msi_iova_space: self.msi_iova_space,
+            reserved_regions: self.reserved_regions.clone(),
             input_range: self.input_range,
         };
 
@@ -1454,6 +1490,7 @@ mod tests {
             SeccompAction::Allow,
             EventFd::new(EFD_NONBLOCK).unwrap(),
             (0, 0),
+            Vec::new(),
             64,
             false,
             None,

@@ -299,6 +299,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
         SeccompAction::Allow,
         EventFd::new(EFD_NONBLOCK).unwrap(),
         ((MEM_SIZE - IOVA_SPACE_SIZE) as u64, (MEM_SIZE - 1) as u64),
+        Vec::new(),
         fuzz_plan.address_width_bits,
         fuzz_plan.access_platform_enabled,
         None,
@@ -376,6 +377,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
                 SeccompAction::Allow,
                 EventFd::new(EFD_NONBLOCK).unwrap(),
                 ((MEM_SIZE - IOVA_SPACE_SIZE) as u64, (MEM_SIZE - 1) as u64),
+                Vec::new(),
                 if fuzz_plan.address_width_bits == 64 {
                     IOMMU_ADDR_WIDTH_BITS
                 } else {
