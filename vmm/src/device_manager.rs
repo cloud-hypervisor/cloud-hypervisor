@@ -1650,6 +1650,13 @@ impl DeviceManager {
                     .try_clone()
                     .map_err(DeviceManagerError::EventFd)?,
                 self.get_msi_iova_space(),
+                self.memory_manager
+                    .lock()
+                    .unwrap()
+                    .reserved_regions()
+                    .into_iter()
+                    .map(|(base, end)| (base, end - 1))
+                    .collect(),
                 iommu_address_width_bits,
                 self.force_access_platform,
                 state_from_id(snapshot, iommu_id.as_str())
