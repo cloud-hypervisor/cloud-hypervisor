@@ -533,3 +533,16 @@ pub(crate) fn wake(fd: BorrowedFd<'_>, addr: u64, len: u64) -> Result<(), Error>
     }
     Ok(())
 }
+
+/// Returns whether the page at `addr` in this process is present. For a
+/// shared file mapping, this is whether the file holds the page, even if
+/// it is not mapped at `addr`.
+pub(crate) fn page_present(addr: u64) -> Result<bool, Error> {
+    let mut vec = 0u8;
+    // SAFETY: mincore() writes one byte for the single page at `addr`.
+    let ret = unsafe { libc::mincore(addr as *mut libc::c_void, 1, &mut vec) };
+    if ret < 0 {
+        return Err(Error::last_os_error());
+    }
+    Ok(vec & 1 != 0)
+}
