@@ -2826,6 +2826,7 @@ impl NumaConfig {
     }
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct RestoredNetConfig {
     pub id: String,
@@ -2900,6 +2901,7 @@ pub struct VmMemoryZoneUpdateData {
     pub host_numa_node: u32,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct RestoredVfioConfig {
     pub id: String,
@@ -2920,6 +2922,7 @@ where
     }
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct RestoreConfig {
     pub source_url: PathBuf,
