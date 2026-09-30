@@ -1143,14 +1143,19 @@ impl Vmm {
         let mut state = ReceiveMigrationState::Established;
 
         while !state.finished() {
-            let req = Request::read_from(&mut socket).inspect_err(|error| {
-                if matches!(
-                    error,
+            let req = Request::read_from(&mut socket).map_err(|e| {
+                let hint = match &e {
                     MigratableError::MigrateSocket(io_error)
-                        if io_error.kind() == io::ErrorKind::UnexpectedEof
-                ) {
-                    error!("Failed to read migration request: sender likely failed, aborting");
-                }
+                        if io_error.kind() == io::ErrorKind::UnexpectedEof =>
+                    {
+                        " (sender likely failed)"
+                    }
+                    _ => "",
+                };
+                MigratableError::MigrateReceive(anyhow::Error::new(e).context(format!(
+                    "Failed to read migration request in state {}{hint}",
+                    state.variant_name()
+                )))
             })?;
             debug!("Command '{:?}' received", req.command());
 
@@ -1173,7 +1178,10 @@ impl Vmm {
                 .with_context(|| format!("Migration command {:?} failed", req.command()))
                 .map_err(MigratableError::MigrateReceive)?;
 
-            Response::ok().write_to(&mut socket)?;
+            Response::ok()
+                .write_to(&mut socket)
+                .with_context(|| format!("Failed to acknowledge command {:?}", req.command()))
+                .map_err(MigratableError::MigrateReceive)?;
 
             // Connection and handshake established
             if matches!(state, ReceiveMigrationState::Started) {
