@@ -125,3 +125,7 @@ pub const APIC_START: GuestAddress = GuestAddress(0xfee0_0000);
 
 // ** 64-bit RAM start (start: 4GiB, length: varies) **
 pub const RAM_64BIT_START: GuestAddress = GuestAddress(0x1_0000_0000);
+
+// ** AMD HyperTransport range (start: 1012GiB, length: 12GiB) **
+pub const AMD_HYPER_TRANSPORT_HOLE_START: GuestAddress = GuestAddress(0xfd_0000_0000);
+pub const AMD_HYPER_TRANSPORT_HOLE_SIZE: u64 = 0x3_0000_0000;
