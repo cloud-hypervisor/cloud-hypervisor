@@ -212,6 +212,29 @@ fn reserved_spans(regions: &[ArchMemRegion]) -> Vec<(u64, u64)> {
     spans
 }
 
+// Moves base above any reserved range that a span of size would cross.
+fn base_clear_of_reserved(regions: &[ArchMemRegion], base: u64, size: u64) -> u64 {
+    let mut base = base;
+    for (r_base, r_end) in reserved_spans(regions) {
+        if base < r_end && r_base < base + size {
+            base = r_end;
+        }
+    }
+    base
+}
+
+// A hotplugged RAM region that would overlap a reserved range is placed after it,
+// so the window must extend size bytes past any reserved range it crosses.
+fn size_clear_of_reserved(regions: &[ArchMemRegion], base: u64, size: u64) -> Result<u64, Error> {
+    let mut end = base.checked_add(size).ok_or(Error::GuestAddressOverFlow)?;
+    for (r_base, r_end) in reserved_spans(regions) {
+        if base < r_end && r_base < end {
+            end = r_end.checked_add(size).ok_or(Error::GuestAddressOverFlow)?;
+        }
+    }
+    Ok(end - base)
+}
+
 pub struct MemoryManager {
     boot_guest_memory: GuestMemoryMmap,
     guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
@@ -1795,10 +1818,19 @@ impl MemoryManager {
                 // based on the GuestMemoryBackend regions.
                 continue;
             }
+            // The allocator stops at the device area, so claim only the part
+            // of an entry that falls inside it.
+            let last = cmp::min(
+                region.base + region.size as u64 - 1,
+                self.ram_allocator.end().raw_value(),
+            );
+            if region.base > last {
+                continue;
+            }
             self.ram_allocator
                 .allocate(
                     Some(GuestAddress(region.base)),
-                    region.size as GuestUsize,
+                    last - region.base + 1,
                     None,
                 )
                 .ok_or(Error::MemoryRangeAllocation)?;
@@ -1944,17 +1976,23 @@ impl MemoryManager {
                             let hotplug_address_space_size = hotplug_size
                                 .checked_add(HOTPLUG_RAM_GAP_SIZE * (HOTPLUG_COUNT as u64 - 1))
                                 .ok_or(Error::GuestAddressOverFlow)?;
+                            let span = size_clear_of_reserved(
+                                &arch_mem_regions,
+                                start_of_device_area.0,
+                                hotplug_address_space_size,
+                            )?;
                             start_of_device_area = start_of_device_area
-                                .checked_add(hotplug_address_space_size)
+                                .checked_add(span)
                                 .ok_or(Error::GuestAddressOverFlow)?;
                         } else {
                             // Alignment must be "natural" i.e. same as size of block
-                            let start_addr = GuestAddress(
-                                start_of_device_area
-                                    .0
-                                    .div_ceil(virtio_devices::VIRTIO_MEM_ALIGN_SIZE)
-                                    * virtio_devices::VIRTIO_MEM_ALIGN_SIZE,
-                            );
+                            let align = virtio_devices::VIRTIO_MEM_ALIGN_SIZE;
+                            let start_addr = start_of_device_area.0.div_ceil(align) * align;
+                            // One contiguous region, so it goes wholly above a
+                            // reserved range it would cross.
+                            let start_addr =
+                                base_clear_of_reserved(&arch_mem_regions, start_addr, hotplug_size);
+                            let start_addr = GuestAddress(start_addr.div_ceil(align) * align);
 
                             let region = MemoryManager::create_ram_region(
                                 &None,
@@ -2557,6 +2595,11 @@ impl MemoryManager {
         }
 
         let start_addr = MemoryManager::start_addr(self.guest_memory.memory().last_addr(), true)?;
+        let start_addr = GuestAddress(base_clear_of_reserved(
+            &self.arch_mem_regions,
+            start_addr.0,
+            size as u64,
+        ));
 
         if start_addr
             .checked_add((size - 1).try_into().unwrap())
@@ -3772,6 +3815,41 @@ fn do_mmap_cow_saved_regions(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn guest_ram_stays_clear_of_reserved() {
+        use arch::RegionType;
+
+        use super::{ArchMemRegion, base_clear_of_reserved, size_clear_of_reserved};
+
+        const GIB: u64 = 1 << 30;
+        let regions = vec![ArchMemRegion {
+            base: 1012 * GIB,
+            size: (12 * GIB) as usize,
+            r_type: RegionType::Reserved,
+        }];
+
+        // An ACPI window crossing the range extends its full size past it.
+        assert_eq!(
+            size_clear_of_reserved(&regions, 1001 * GIB, 15 * GIB).unwrap(),
+            38 * GIB
+        );
+        assert_eq!(
+            size_clear_of_reserved(&regions, 8 * GIB, 8 * GIB).unwrap(),
+            8 * GIB
+        );
+
+        // Overlapping hotplugged RAM or virtio-mem regions are placed after it.
+        assert_eq!(
+            base_clear_of_reserved(&regions, 1008 * GIB, 8 * GIB),
+            1024 * GIB
+        );
+        assert_eq!(
+            base_clear_of_reserved(&regions, 1001 * GIB, 64 * GIB),
+            1024 * GIB
+        );
+        assert_eq!(base_clear_of_reserved(&regions, 8 * GIB, 8 * GIB), 8 * GIB);
+    }
+
     use std::io::{Read, Seek, SeekFrom, Write};
 
     use vm_migration::protocol::{MemoryRange, MemoryRangeTable};
