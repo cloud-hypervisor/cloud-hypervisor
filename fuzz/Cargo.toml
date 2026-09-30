@@ -207,3 +207,6 @@ name = "x86emul"
 path = "fuzz_targets/x86emul.rs"
 required-features = ["mshv_emulator"]
 test = false
+
+[patch.crates-io]
+vhost = { git = "https://github.com/lucido-simon/vhost", branch = "postcopy-backend-mem-bases" }
