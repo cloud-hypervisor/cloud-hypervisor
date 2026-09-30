@@ -911,6 +911,7 @@ fn vcpu_thread_rules(
         (libc::SYS_clock_gettime, vec![]),
         (libc::SYS_clock_nanosleep, vec![]),
         (libc::SYS_close, vec![]),
+        (libc::SYS_connect, vec![]),
         (libc::SYS_dup, vec![]),
         (libc::SYS_exit, vec![]),
         (libc::SYS_epoll_ctl, vec![]),
@@ -961,6 +962,10 @@ fn vcpu_thread_rules(
         (libc::SYS_sendto, vec![]),
         (libc::SYS_shutdown, vec![]),
         (libc::SYS_sigaltstack, vec![]),
+        (
+            libc::SYS_socket,
+            or![and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_UNIX as u64)?]],
+        ),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_stat, vec![]),
         (libc::SYS_statx, vec![]),
