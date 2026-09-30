@@ -1443,6 +1443,17 @@ impl MemoryManager {
                     continue;
                 }
 
+                // A missing fault on a served page is either a discard, or a
+                // fault queued on another userfaultfd while the page was
+                // being resolved. Only the latter leaves the page present.
+                if !minor_fault
+                    && served_bitmap[range_idx].is_bit_set(page_idx as usize)
+                    && uffd::page_present(ranges[range_idx].page_addr(page_idx))?
+                {
+                    uffd::wake(fault_uffd.fd(), range.page_addr(page_idx), range.page_size)?;
+                    continue;
+                }
+
                 let key = (range_idx, page_idx);
 
                 let served_minor = {
