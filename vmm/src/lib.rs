@@ -1151,30 +1151,26 @@ impl Vmm {
             })?;
             debug!("Command '{:?}' received", req.command());
 
-            // If sender-side migration causes any error propagated here, the
-            // next loop iteration logs a helpful error when reading the next
-            // request (which will fail as the sender closed the socket).
-            let (response, new_state) = match self.vm_receive_migration_step(
-                &mut socket,
-                &listener,
-                state,
-                &req,
-                receive_data_migration,
-            ) {
-                Ok(next_state) => (Response::ok(), next_state),
-                Err(err) => {
-                    warn!(
-                        "Migration aborted as migration command {:?} failed: {}",
-                        req.command(),
-                        err
-                    );
-                    (Response::error(), ReceiveMigrationState::Aborted)
-                }
-            };
+            state = self
+                .vm_receive_migration_step(
+                    &mut socket,
+                    &listener,
+                    state,
+                    &req,
+                    receive_data_migration,
+                )
+                .inspect_err(|_| {
+                    if let Err(response_err) = Response::error().write_to(&mut socket) {
+                        warn!(
+                            "Failed to send migration error response: {}",
+                            flatten_error_chain_to_string(&response_err)
+                        );
+                    }
+                })
+                .with_context(|| format!("Migration command {:?} failed", req.command()))
+                .map_err(MigratableError::MigrateReceive)?;
 
-            state = new_state;
-            assert_eq!(response.length(), 0);
-            response.write_to(&mut socket)?;
+            Response::ok().write_to(&mut socket)?;
 
             // Connection and handshake established
             if matches!(state, ReceiveMigrationState::Started) {
@@ -1183,8 +1179,8 @@ impl Vmm {
         }
 
         match state {
-            ReceiveMigrationState::Aborted => Err(MigratableError::CompleteMigration(anyhow!(
-                "Migration was aborted"
+            ReceiveMigrationState::Aborted => Err(MigratableError::MigrateReceive(anyhow!(
+                "Received Abandon command"
             ))),
             ReceiveMigrationState::Completed => Ok(()),
             _ => unreachable!("loop only exits in Completed or Aborted"),
