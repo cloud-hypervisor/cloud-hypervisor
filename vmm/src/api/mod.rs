@@ -237,10 +237,14 @@ pub struct VmmPingResponse {
     pub features: Vec<String>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Deserialize, Serialize, Default, Debug)]
 pub struct VmResizeData {
+    #[serde(default)]
     pub desired_vcpus: Option<u32>,
+    #[serde(default)]
     pub desired_ram: Option<u64>,
+    #[serde(default)]
     pub desired_balloon: Option<u64>,
 }
 
@@ -304,6 +308,7 @@ impl FromStr for MigrationMode {
     }
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Deserialize, Serialize, Default, Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct VmReceiveMigrationData {
@@ -578,6 +583,7 @@ pub enum VmSendMigrationConfigError {
 }
 
 /// Configuration for an outgoing migration.
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Deserialize, Serialize, Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct VmSendMigrationData {
