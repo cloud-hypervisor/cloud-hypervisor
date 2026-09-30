@@ -26,12 +26,13 @@ use std::path::{Path, PathBuf};
 use std::result;
 use std::sync::Arc;
 
-use log::warn;
+use log::{info, warn};
 use rustls::pki_types::pem::{self, PemObject};
 use rustls::pki_types::{CertificateDer, InvalidDnsNameError, PrivateKeyDer, ServerName};
 use rustls::server::{VerifierBuilderError, WebPkiClientVerifier};
 use rustls::{
-    ClientConfig, ClientConnection, RootCertStore, ServerConfig, ServerConnection, StreamOwned,
+    ClientConfig, ClientConnection, CommonState, RootCertStore, ServerConfig, ServerConnection,
+    StreamOwned,
 };
 use thiserror::Error;
 use vm_memory::bitmap::BitmapSlice;
@@ -267,6 +268,8 @@ impl TlsStream {
             }
         }
 
+        Self::log_handshake(&tls.conn, "client-side/sender");
+
         Ok(Self {
             stream: TlsStreamParticipant::Client(tls),
             write_buf: Vec::new(),
@@ -298,10 +301,29 @@ impl TlsStream {
             }
         }
 
+        Self::log_handshake(&tls.conn, "server-side/receiver");
+
         Ok(Self {
             stream: TlsStreamParticipant::Server(tls),
             write_buf: Vec::new(),
         })
+    }
+
+    fn log_handshake(tls_conn: &CommonState, qualifier: &str) {
+        info!(
+            "TLS handshake ({qualifier}) successful ({:?}, {:?}, {:?})",
+            tls_conn
+                .protocol_version()
+                .expect("Handshake succeeded, should have TLS version"),
+            tls_conn
+                .negotiated_key_exchange_group()
+                .expect("Handshake succeeded, should have negotiated cipher")
+                .name(),
+            tls_conn
+                .negotiated_cipher_suite()
+                .expect("Handshake succeeded, should have negotiated cipher")
+                .suite(),
+        );
     }
 }
 
