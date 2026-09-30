@@ -160,6 +160,9 @@ pub enum Error {
     /// Error parsing pci segment options
     #[error("Error parsing --pci-segment")]
     ParsePciSegment(#[source] OptionParserError),
+    /// Failed parsing virtual IOMMU parameters
+    #[error("Error parsing --iommu")]
+    ParseIommu(#[source] OptionParserError),
     /// Failed parsing platform parameters
     #[error("Error parsing --platform")]
     ParsePlatform(#[source] OptionParserError),
@@ -524,6 +527,7 @@ pub struct VmParams<'a> {
     pub gdb: bool,
     pub pci_segments: Option<Vec<&'a str>>,
     pub platform: Option<&'a str>,
+    pub iommu: Option<&'a str>,
     pub tpm: Option<&'a str>,
     #[cfg(feature = "igvm")]
     pub igvm: Option<&'a str>,
@@ -595,6 +599,7 @@ impl<'a> VmParams<'a> {
             .get_many::<String>("pci-segment")
             .map(|x| x.map(|y| y as &str).collect());
         let platform = args.get_one::<String>("platform").map(|x| x as &str);
+        let iommu = args.get_one::<String>("iommu").map(|x| x as &str);
         #[cfg(feature = "guest_debug")]
         let gdb = args.contains_id("gdb");
         let tpm: Option<&str> = args.get_one::<String>("tpm").map(|x| x as &str);
@@ -613,6 +618,7 @@ impl<'a> VmParams<'a> {
         let ivshmem: Option<&str> = args.get_one::<String>("ivshmem").map(|x| x as &str);
         VmParams {
             cpus,
+            iommu,
             memory,
             memory_zones,
             firmware,
@@ -883,12 +889,45 @@ impl PciSegmentConfig {
     }
 }
 
+impl IommuConfig {
+    pub const SYNTAX: &'static str = "Virtual IOMMU parameters \
+    \"segments=<list_of_segments>,address_width=<bits>\"";
+
+    pub fn parse(iommu: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser.add("segments").add("address_width");
+        parser.parse(iommu).map_err(Error::ParseIommu)?;
+
+        let segments = parser
+            .convert::<IntegerList>("segments")
+            .map_err(Error::ParseIommu)?
+            .map(|v| v.0.iter().map(|e| *e as u16).collect());
+        let address_width_bits: u8 = parser
+            .convert("address_width")
+            .map_err(Error::ParseIommu)?
+            .unwrap_or(MAX_IOMMU_ADDRESS_WIDTH_BITS);
+
+        Ok(IommuConfig {
+            segments,
+            address_width_bits,
+        })
+    }
+}
+
 impl PlatformConfig {
+    /// The deprecated virtual IOMMU options
+    fn iommu_config(&self) -> IommuConfig {
+        IommuConfig {
+            segments: self.iommu_segments.clone(),
+            address_width_bits: self.iommu_address_width_bits,
+        }
+    }
+
     pub fn syntax() -> &'static str {
         static SYNTAX: LazyLock<String> = LazyLock::new(|| {
             let mut syntax = "Platform configuration parameters \
-            \"num_pci_segments=<num_pci_segments>,iommu_segments=<list_of_segments>,\
-            iommu_address_width=<bits>,iommufd=on|off,iommufd_fd=<fd>,vfio_p2p_dma=on|off,\
+            \"num_pci_segments=<num_pci_segments>,iommufd=on|off,iommufd_fd=<fd>,\
+            vfio_p2p_dma=on|off,\
             system_manufacturer=<dmi_system_manufacturer>,\
             system_product_name=<dmi_system_product_name>,system_version=<dmi_system_version>,\
             system_serial_number=<dmi_system_serial_number>,system_uuid=<dmi_system_uuid>,\
@@ -1071,20 +1110,6 @@ impl PlatformConfig {
         if self.num_pci_segments == 0 || self.num_pci_segments > MAX_NUM_PCI_SEGMENTS {
             return Err(ValidationError::InvalidNumPciSegments(
                 self.num_pci_segments,
-            ));
-        }
-
-        if let Some(iommu_segments) = &self.iommu_segments {
-            for segment in iommu_segments {
-                if *segment >= self.num_pci_segments {
-                    return Err(ValidationError::InvalidPciSegment(*segment));
-                }
-            }
-        }
-
-        if self.iommu_address_width_bits > MAX_IOMMU_ADDRESS_WIDTH_BITS {
-            return Err(ValidationError::InvalidIommuAddressWidthBits(
-                self.iommu_address_width_bits,
             ));
         }
 
@@ -1445,8 +1470,7 @@ impl PciDeviceCommonConfig {
             return Err(ValidationError::InvalidPciSegment(self.pci_segment));
         }
 
-        if let Some(platform_config) = vm_config.platform.as_ref()
-            && let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
+        if let Some(iommu_segments) = vm_config.iommu_config().segments
             && iommu_segments.contains(&self.pci_segment)
             && !self.iommu
         {
@@ -3292,11 +3316,35 @@ impl VmConfig {
         }
     }
 
+    /// The virtual IOMMU configuration
+    pub fn iommu_config(&self) -> IommuConfig {
+        self.viommu.clone().unwrap_or_else(|| {
+            self.platform
+                .as_ref()
+                .map(PlatformConfig::iommu_config)
+                .unwrap_or_default()
+        })
+    }
+
     // Also enables virtio-iommu if the config needs it
     // Returns the list of unique identifiers provided through the
     // configuration.
     pub fn validate(&mut self) -> ValidationResult<BTreeSet<String>> {
         let mut id_list = BTreeSet::new();
+
+        if self
+            .platform
+            .as_ref()
+            .is_some_and(|p| p.iommu_config() != IommuConfig::default())
+        {
+            if self.viommu.is_some() {
+                warn!(
+                    "The IOMMU options from --platform are deprecated and ignored because --iommu is set"
+                );
+            } else {
+                warn!("The IOMMU options from --platform are deprecated, use --iommu instead");
+            }
+        }
 
         // Is the payload configuration bootable?
         self.payload
@@ -3707,11 +3755,27 @@ impl VmConfig {
         }
 
         self.platform.as_ref().map(|p| p.validate()).transpose()?;
-        self.iommu |= self
+
+        let iommu_config = self.iommu_config();
+        let num_pci_segments = self
             .platform
             .as_ref()
-            .map(|p| p.iommu_segments.is_some())
-            .unwrap_or_default();
+            .map_or(DEFAULT_NUM_PCI_SEGMENTS, |p| p.num_pci_segments);
+        if let Some(iommu_segments) = &iommu_config.segments {
+            for segment in iommu_segments {
+                if *segment >= num_pci_segments {
+                    return Err(ValidationError::InvalidPciSegment(*segment));
+                }
+            }
+        }
+
+        if iommu_config.address_width_bits > MAX_IOMMU_ADDRESS_WIDTH_BITS {
+            return Err(ValidationError::InvalidIommuAddressWidthBits(
+                iommu_config.address_width_bits,
+            ));
+        }
+
+        self.iommu |= iommu_config.segments.is_some();
 
         // Checked after self.iommu changes, so it sees devices and iommu_segments
         #[cfg(feature = "sev_snp")]
@@ -3869,6 +3933,7 @@ impl VmConfig {
         }
 
         let platform = vm_params.platform.map(PlatformConfig::parse).transpose()?;
+        let viommu = vm_params.iommu.map(IommuConfig::parse).transpose()?;
 
         let mut numa: Option<Box<[NumaConfig]>> = None;
         if let Some(numa_list) = &vm_params.numa {
@@ -3958,6 +4023,7 @@ impl VmConfig {
             pvmemcontrol,
             pvpanic: vm_params.pvpanic,
             iommu: false, // updated in VmConfig::validate()
+            viommu,
             numa,
             watchdog: vm_params.watchdog,
             rtc,
@@ -4099,6 +4165,7 @@ impl Clone for VmConfig {
             numa: self.numa.clone(),
             pci_segments: self.pci_segments.clone(),
             platform: self.platform.clone(),
+            viommu: self.viommu.clone(),
             tpm: self.tpm.clone(),
             preserved_fds: self
                 .preserved_fds
@@ -5549,6 +5616,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             pvmemcontrol: None,
             pvpanic: false,
             iommu: false,
+            viommu: None,
             numa: None,
             watchdog: false,
             rtc: None,
@@ -5786,6 +5854,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             pvmemcontrol: None,
             pvpanic: false,
             iommu: false,
+            viommu: None,
             numa: None,
             watchdog: false,
             rtc: None,
@@ -5987,6 +6056,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             pvmemcontrol: None,
             pvpanic: false,
             iommu: false,
+            viommu: None,
             numa: None,
             watchdog: false,
             rtc: None,

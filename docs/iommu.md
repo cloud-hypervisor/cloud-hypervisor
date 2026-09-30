@@ -235,8 +235,13 @@ To facilitate hotplug of devices that require being behind an IOMMU it is
 possible to mark entire PCI segments as behind the IOMMU.
 
 This is accomplished through `--platform
-num_pci_segments=<number_of_segments>,iommu_segments=<range of segments>` or
-via the equivalents in `PlatformConfig` for the API.
+num_pci_segments=<number_of_segments>` and `--iommu segments=<range of
+segments>`, or via the equivalents in `PlatformConfig` and `IommuConfig` for
+the API.
+
+The `iommu_segments` and `iommu_address_width` keys of `--platform` are
+deprecated in favour of `--iommu`. They are still accepted, with a warning, and
+will be removed in a future release.
 
 e.g.
 
@@ -248,7 +253,8 @@ e.g.
     --disk path=focal-server-cloudimg-amd64.raw,image_type=raw \
     --kernel custom-vmlinux \
     --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
-    --platform num_pci_segments=2,iommu_segments=1
+    --platform num_pci_segments=2 \
+    --iommu segments=1
 ```
 
 This adds a second PCI segment to the platform behind the IOMMU. A VFIO device

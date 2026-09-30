@@ -212,6 +212,29 @@ impl PlatformConfig {
     }
 }
 
+pub fn default_iommuconfig_address_width_bits() -> u8 {
+    DEFAULT_IOMMU_ADDRESS_WIDTH_BITS
+}
+
+/// Virtual IOMMU configuration
+#[serde_with::skip_serializing_none]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct IommuConfig {
+    #[serde(default)]
+    pub segments: Option<Box<[u16]>>,
+    #[serde(default = "default_iommuconfig_address_width_bits")]
+    pub address_width_bits: u8,
+}
+
+impl Default for IommuConfig {
+    fn default() -> Self {
+        IommuConfig {
+            segments: None,
+            address_width_bits: DEFAULT_IOMMU_ADDRESS_WIDTH_BITS,
+        }
+    }
+}
+
 fn deserialize_platformconfig_iommufd_fd<'de, D>(d: D) -> Result<Option<i32>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -1201,6 +1224,7 @@ pub struct VmConfig {
     pub pvpanic: bool,
     #[serde(default)]
     pub iommu: bool,
+    pub viommu: Option<IommuConfig>,
     pub numa: Option<Box<[NumaConfig]>>,
     #[serde(default)]
     pub watchdog: bool,

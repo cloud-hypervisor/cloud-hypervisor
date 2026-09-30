@@ -141,9 +141,9 @@ use crate::util::flatten_error_chain_to_string;
 #[cfg(feature = "ivshmem")]
 use crate::vm_config::IvshmemConfig;
 use crate::vm_config::{
-    ConsoleOutputMode, DEFAULT_IOMMU_ADDRESS_WIDTH_BITS, DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT,
-    DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PciDeviceCommonConfig,
-    PmemConfig, UserDeviceConfig, VdpaConfig, VhostMode, VmConfig, VsockConfig,
+    ConsoleOutputMode, DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT, DeviceConfig, DiskConfig, FsConfig,
+    GenericVhostUserConfig, NetConfig, PciDeviceCommonConfig, PmemConfig, UserDeviceConfig,
+    VdpaConfig, VhostMode, VmConfig, VsockConfig,
 };
 use crate::{DEVICE_MANAGER_SNAPSHOT_ID, GuestRegionMmap, PciDeviceInfo, device_node};
 
@@ -1612,12 +1612,12 @@ impl DeviceManager {
     fn add_pci_devices(&mut self, snapshot: Option<&Snapshot>) -> DeviceManagerResult<()> {
         let iommu_id = String::from(IOMMU_DEVICE_NAME);
 
-        let iommu_address_width_bits =
-            if let Some(ref platform) = self.config.lock().unwrap().platform {
-                platform.iommu_address_width_bits
-            } else {
-                DEFAULT_IOMMU_ADDRESS_WIDTH_BITS
-            };
+        let iommu_address_width_bits = self
+            .config
+            .lock()
+            .unwrap()
+            .iommu_config()
+            .address_width_bits;
 
         let iommu_device = if self.config.lock().unwrap().iommu {
             let (device, mapping) = virtio_devices::Iommu::new(
@@ -5421,14 +5421,10 @@ impl DeviceManager {
             .lock()
             .as_ref()
             .unwrap()
-            .platform
+            .iommu_config()
+            .segments
             .as_ref()
-            .map(|pc| {
-                pc.iommu_segments
-                    .as_ref()
-                    .map(|v| v.contains(&pci_segment_id))
-                    .unwrap_or_default()
-            })
+            .map(|v| v.contains(&pci_segment_id))
             .unwrap_or_default()
     }
 

@@ -3666,6 +3666,7 @@ mod tests {
             pvmemcontrol: None,
             pvpanic: false,
             iommu: false,
+            viommu: None,
             numa: None,
             watchdog: false,
             rtc: None,

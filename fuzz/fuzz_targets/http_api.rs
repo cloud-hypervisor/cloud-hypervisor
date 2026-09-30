@@ -203,6 +203,7 @@ impl RequestHandler for StubApiRequestHandler {
                 #[cfg(feature = "pvmemcontrol")]
                 pvmemcontrol: None,
                 iommu: false,
+                viommu: None,
                 numa: None,
                 watchdog: false,
                 rtc: None,

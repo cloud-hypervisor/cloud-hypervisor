@@ -878,6 +878,8 @@ components:
         iommu:
           type: boolean
           default: false
+        viommu:
+          $ref: "#/components/schemas/IommuConfig"
         watchdog:
           type: boolean
           default: false
@@ -986,6 +988,18 @@ components:
           type: integer
           format: int32
 
+    IommuConfig:
+      type: object
+      properties:
+        segments:
+          type: array
+          items:
+            type: integer
+            format: int16
+        address_width_bits:
+          type: integer
+          format: uint8
+
     PlatformConfig:
       type: object
       properties:
@@ -997,9 +1011,11 @@ components:
           items:
             type: integer
             format: int16
+          deprecated: true
         iommu_address_width_bits:
           type: integer
           format: uint8
+          deprecated: true
         system_serial_number:
           type: string
         serial_number:

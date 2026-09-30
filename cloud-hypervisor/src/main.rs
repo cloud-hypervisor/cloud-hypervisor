@@ -39,9 +39,9 @@ use vmm::vm_config::FwCfgConfig;
 use vmm::vm_config::IvshmemConfig;
 use vmm::vm_config::{
     BalloonConfig, ConsoleConfig, DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig,
-    LandlockConfig, NetConfig, NumaConfig, PciSegmentConfig, PlatformConfig, PmemConfig,
-    RateLimiterGroupConfig, RngConfig, RtcConfig, SerialConfig, TpmConfig, UserDeviceConfig,
-    VdpaConfig, VmConfig, VsockConfig,
+    IommuConfig, LandlockConfig, NetConfig, NumaConfig, PciSegmentConfig, PlatformConfig,
+    PmemConfig, RateLimiterGroupConfig, RngConfig, RtcConfig, SerialConfig, TpmConfig,
+    UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::block_signal;
@@ -357,6 +357,11 @@ fn get_cli_options_sorted(
         Arg::new("initramfs")
             .long("initramfs")
             .help("Path to initramfs image")
+            .num_args(1)
+            .group("vm-config"),
+        Arg::new("iommu")
+            .long("iommu")
+            .help(IommuConfig::SYNTAX)
             .num_args(1)
             .group("vm-config"),
         #[cfg(feature = "ivshmem")]
@@ -1175,6 +1180,7 @@ mod tests {
             #[cfg(feature = "pvmemcontrol")]
             pvmemcontrol: None,
             iommu: false,
+            viommu: None,
             numa: None,
             watchdog: false,
             rtc: None,
