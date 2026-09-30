@@ -214,9 +214,12 @@ pub enum ValidationError {
     /// Too many CPUs.
     #[error("Too many CPUs: specified {0} but {MAX_SUPPORTED_CPUS} is the limit")]
     TooManyCpus(u32 /* specified CPUs */),
-    /// Requested CPU affinity matches or exceeds `CPU_SETSIZE`.
-    #[error("Requested CPU affinity {0} must be below {CPU_SETSIZE}")]
-    CpuAffinityExceedsMax(usize /* specified affinity */),
+    /// Requested CPU affinity matches or exceeds the size the libc accepts.
+    #[error("Requested CPU affinity {0} must be below {1}")]
+    CpuAffinityExceedsMax(
+        usize, /* specified affinity */
+        usize, /* maximum affinity */
+    ),
     /// Both socket and path specified
     #[error("Disk path and vhost socket both provided")]
     DiskSocketAndPath,
@@ -3409,7 +3412,10 @@ impl VmConfig {
         if let Some(affinity) = &self.cpus.affinity {
             for affinity in affinity.iter().flat_map(|affinity| &affinity.host_cpus) {
                 if *affinity >= CPU_SETSIZE as usize {
-                    return Err(ValidationError::CpuAffinityExceedsMax(*affinity));
+                    return Err(ValidationError::CpuAffinityExceedsMax(
+                        *affinity,
+                        CPU_SETSIZE as usize,
+                    ));
                 }
             }
         }
@@ -6183,7 +6189,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         }]));
         assert_eq!(
             invalid_config.validate(),
-            Err(ValidationError::CpuAffinityExceedsMax(1024))
+            Err(ValidationError::CpuAffinityExceedsMax(
+                1024,
+                CPU_SETSIZE as usize
+            ))
         );
 
         let mut invalid_config = valid_config.clone();
