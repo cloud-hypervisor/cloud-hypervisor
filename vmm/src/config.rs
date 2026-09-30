@@ -4136,6 +4136,9 @@ mod tests {
     #[test]
     fn test_cpu_parsing() -> Result<()> {
         assert_eq!(CpusConfig::parse("")?, CpusConfig::default());
+        assert!(CpusConfig::parse("boot=1,nested=on")?.nested);
+        assert!(!CpusConfig::parse("boot=1,nested=off")?.nested);
+        assert!(CpusConfig::parse("boot=1")?.nested);
 
         assert_eq!(
             CpusConfig::parse("boot=1")?,

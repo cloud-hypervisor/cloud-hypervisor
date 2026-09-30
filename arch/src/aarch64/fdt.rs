@@ -104,6 +104,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
     numa_nodes: &NumaNodes,
     virtio_iommu_bdf: Option<u32>,
     pmu_supported: bool,
+    psci_smc: bool,
 ) -> FdtWriterResult<Vec<u8>> {
     // Allocate stuff necessary for the holding the blob.
     let mut fdt = FdtWriter::new().unwrap();
@@ -131,7 +132,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
         create_pmu_node(&mut fdt)?;
     }
     create_clock_node(&mut fdt)?;
-    create_psci_node(&mut fdt)?;
+    create_psci_node(&mut fdt, psci_smc)?;
     create_devices_node(&mut fdt, device_info)?;
     create_pci_nodes(&mut fdt, pci_space_info, virtio_iommu_bdf)?;
     if numa_nodes.len() > 1 {
@@ -596,14 +597,16 @@ fn create_timer_node(fdt: &mut FdtWriter) -> FdtWriterResult<()> {
     Ok(())
 }
 
-fn create_psci_node(fdt: &mut FdtWriter) -> FdtWriterResult<()> {
+fn create_psci_node(fdt: &mut FdtWriter, smc: bool) -> FdtWriterResult<()> {
     let compatible = "arm,psci-0.2";
     let psci_node = fdt.begin_node("psci")?;
     fdt.property_string("compatible", compatible)?;
     // Two methods available: hvc and smc.
     // As per documentation, PSCI calls between a guest and hypervisor may use the HVC conduit instead of SMC.
-    // So, since we are using kvm, we need to use hvc.
-    fdt.property_string("method", "hvc")?;
+    // So, since we are using kvm, we need to use hvc. The exception is a guest
+    // booted at EL2 (nested virtualization): HVC is then taken by the guest's
+    // own EL2, so PSCI has to go through SMC, which KVM also handles.
+    fdt.property_string("method", if smc { "smc" } else { "hvc" })?;
     fdt.end_node(psci_node)?;
 
     Ok(())

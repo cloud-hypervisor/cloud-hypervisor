@@ -173,8 +173,22 @@ const PSR_F_BIT: u64 = 0x0000_0040;
 const PSR_I_BIT: u64 = 0x0000_0080;
 const PSR_A_BIT: u64 = 0x0000_0100;
 const PSR_D_BIT: u64 = 0x0000_0200;
+#[expect(non_upper_case_globals)]
+const PSR_MODE_EL2h: u64 = 0x0000_0009;
+const PSR_MODE_MASK: u64 = 0x0000_000f;
 // Taken from arch/arm64/kvm/inject_fault.c.
 pub const PSTATE_FAULT_BITS_64: u64 = PSR_MODE_EL1h | PSR_A_BIT | PSR_F_BIT | PSR_I_BIT | PSR_D_BIT;
+
+/// Returns the PSTATE to boot a vCPU with, given the PSTATE KVM reset it to.
+/// That is EL1h, unless the vCPU was created with `KVM_ARM_VCPU_HAS_EL2`, in
+/// which case KVM reset it to EL2h and it must stay there.
+pub fn boot_pstate(reset_pstate: u64) -> u64 {
+    if reset_pstate & PSR_MODE_MASK == PSR_MODE_EL2h {
+        (PSTATE_FAULT_BITS_64 & !PSR_MODE_MASK) | PSR_MODE_EL2h
+    } else {
+        PSTATE_FAULT_BITS_64
+    }
+}
 
 // AArch64 system register encoding:
 // See https://developer.arm.com/documentation/ddi0487 (chapter D12)
@@ -212,7 +226,10 @@ macro_rules! arm64_sys_reg {
     };
 }
 
+arm64_sys_reg!(MIDR_EL1, 3, 0, 0, 0, 0);
 arm64_sys_reg!(MPIDR_EL1, 3, 0, 0, 0, 5);
+arm64_sys_reg!(VPIDR_EL2, 3, 4, 0, 0, 0);
+arm64_sys_reg!(VMPIDR_EL2, 3, 4, 0, 0, 5);
 arm64_sys_reg!(ID_AA64MMFR0_EL1, 3, 0, 0, 7, 0);
 arm64_sys_reg!(TTBR1_EL1, 3, 0, 2, 0, 1);
 arm64_sys_reg!(TCR_EL1, 3, 0, 2, 0, 2);
@@ -225,3 +242,17 @@ pub const AARCH64_ARCH_TIMER_HYP_IRQ: u32 = 10;
 pub const AARCH64_PMU_PPI_INDEX: u32 = 7;
 pub const AARCH64_MIN_PPI_IRQ: u32 = 16;
 pub const AARCH64_PMU_IRQ: u32 = AARCH64_MIN_PPI_IRQ + AARCH64_PMU_PPI_INDEX;
+
+#[cfg(test)]
+mod boot_pstate_tests {
+    use super::*;
+
+    #[test]
+    fn boots_at_el1_unless_kvm_reset_the_vcpu_to_el2() {
+        assert_eq!(boot_pstate(PSR_MODE_EL1h), PSTATE_FAULT_BITS_64);
+        assert_eq!(boot_pstate(0), PSTATE_FAULT_BITS_64);
+        let el2 = boot_pstate(PSR_MODE_EL2h);
+        assert_eq!(el2 & PSR_MODE_MASK, PSR_MODE_EL2h);
+        assert_eq!(el2 & !PSR_MODE_MASK, PSTATE_FAULT_BITS_64 & !PSR_MODE_MASK);
+    }
+}

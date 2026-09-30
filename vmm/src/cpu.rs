@@ -46,7 +46,9 @@ use hypervisor::arch::aarch64::gic::Vgic;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::arch::aarch64::mpidr_from_vcpu_id;
 #[cfg(target_arch = "aarch64")]
-use hypervisor::arch::aarch64::regs::{AARCH64_PMU_IRQ, MPIDR_EL1};
+use hypervisor::arch::aarch64::regs::{
+    AARCH64_PMU_IRQ, MIDR_EL1, MPIDR_EL1, VMPIDR_EL2, VPIDR_EL2,
+};
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 use hypervisor::arch::aarch64::regs::{ID_AA64MMFR0_EL1, TCR_EL1, TTBR1_EL1};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -159,6 +161,10 @@ pub enum Error {
     #[cfg(target_arch = "aarch64")]
     #[error("Error finalising vCPU")]
     VcpuArmFinalize(#[source] hypervisor::HypervisorCpuError),
+
+    #[cfg(target_arch = "aarch64")]
+    #[error("Error initialising vCPU EL2 ID registers")]
+    VcpuInitEl2IdRegs(#[source] hypervisor::HypervisorCpuError),
 
     #[cfg(target_arch = "aarch64")]
     #[error("Error setting pre-finalize registers")]
@@ -541,12 +547,12 @@ impl Vcpu {
         #[cfg(target_arch = "x86_64")] cpuid: Vec<CpuIdEntry>,
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
         #[cfg(target_arch = "x86_64")] topology: (u16, u16, u16, u16),
-        #[cfg(target_arch = "x86_64")] nested: bool,
+        #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))] nested: bool,
         #[cfg(feature = "igvm")] igvm_enabled: bool,
     ) -> Result<()> {
         #[cfg(target_arch = "aarch64")]
         {
-            self.init(vm)?;
+            self.init(vm, nested && vm.nested_el2_supported())?;
             self.finalize_sve()?;
             self.verify_mpidr();
             arch::configure_vcpu(self.vcpu.as_ref(), self.id, boot_setup)
@@ -587,21 +593,47 @@ impl Vcpu {
         Ok(())
     }
 
-    /// Initializes an aarch64 specific vcpu for booting Linux.
+    /// Initializes an aarch64 specific vcpu for booting Linux. With `el2`, the
+    /// vCPU starts at EL2 so the guest can run its own hypervisor.
     #[cfg(target_arch = "aarch64")]
-    pub fn init(&self, vm: &dyn hypervisor::Vm) -> Result<()> {
+    pub fn init(&self, vm: &dyn hypervisor::Vm, el2: bool) -> Result<()> {
         let mut kvi = self.vcpu.create_vcpu_init();
 
         vm.get_preferred_target(&mut kvi)
             .map_err(Error::VcpuArmPreferredTarget)?;
 
         self.vcpu
-            .vcpu_set_processor_features(vm, &mut kvi, self.id)
+            .vcpu_set_processor_features(vm, &mut kvi, self.id, el2)
             .map_err(Error::VcpuSetProcessorFeatures)?;
 
         self.vcpu.vcpu_init(&kvi).map_err(Error::VcpuArmInit)?;
 
+        if el2 {
+            self.init_virtual_el2_ids()?;
+        }
+
         Ok(())
+    }
+
+    /// VPIDR_EL2 and VMPIDR_EL2 are UNKNOWN at reset. On hardware, firmware
+    /// seeds them with MIDR_EL1 and MPIDR_EL1 before entering EL2; do the same
+    /// so that EL1 reads of the ID registers return the vCPU's own values.
+    #[cfg(target_arch = "aarch64")]
+    fn init_virtual_el2_ids(&self) -> Result<()> {
+        let mpidr = self
+            .vcpu
+            .get_sys_reg(MPIDR_EL1)
+            .map_err(Error::VcpuInitEl2IdRegs)?;
+        let midr = self
+            .vcpu
+            .get_sys_reg(MIDR_EL1)
+            .map_err(Error::VcpuInitEl2IdRegs)?;
+        self.vcpu
+            .set_sys_reg(VMPIDR_EL2, mpidr)
+            .map_err(Error::VcpuInitEl2IdRegs)?;
+        self.vcpu
+            .set_sys_reg(VPIDR_EL2, midr)
+            .map_err(Error::VcpuInitEl2IdRegs)
     }
 
     /// Panics if the MPIDR derived from the vCPU id has drifted away from the
@@ -1008,7 +1040,14 @@ impl CpuManager {
 
             #[cfg(target_arch = "aarch64")]
             {
-                vcpu.init(self.vm.as_ref())?;
+                // Match how the saved vCPU was created, whatever the config
+                // or the host default says now.
+                if state.has_el2() && !self.vm.nested_el2_supported() {
+                    return Err(Error::VcpuCreate(anyhow!(
+                        "vCPU state was saved at EL2 but the host does not support nested virtualization"
+                    )));
+                }
+                vcpu.init(self.vm.as_ref(), state.has_el2())?;
                 let pre_finalize = state.pre_finalize_regs();
                 if !pre_finalize.is_empty() {
                     vcpu.vcpu
@@ -1084,7 +1123,7 @@ impl CpuManager {
         )?;
 
         #[cfg(target_arch = "aarch64")]
-        vcpu.configure(self.vm.as_ref(), boot_setup)?;
+        vcpu.configure(self.vm.as_ref(), boot_setup, self.config.nested)?;
 
         #[cfg(target_arch = "riscv64")]
         vcpu.configure(boot_setup)?;
@@ -1159,6 +1198,13 @@ impl CpuManager {
                 warn!("Could not synchronize vCPU TSC offset: {e}");
             }
         }
+    }
+
+    /// Whether vCPUs were started at EL2 (arm64 nested virtualization). The
+    /// guest's own EL2 consumes HVC, so its PSCI conduit must be SMC.
+    #[cfg(target_arch = "aarch64")]
+    pub fn nested_el2(&self) -> bool {
+        self.config.nested && self.vm.nested_el2_supported()
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -3661,7 +3707,7 @@ mod tests {
             assert_eq!(mpidr_from_vcpu_id(id as u64), expected, "vCPU {id}");
 
             // Must be what the hypervisor itself calculates.
-            vcpu.init(vm.as_ref()).unwrap();
+            vcpu.init(vm.as_ref(), false).unwrap();
             vcpu.finalize_sve().unwrap();
             vcpu.verify_mpidr();
         }

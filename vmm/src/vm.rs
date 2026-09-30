@@ -1954,6 +1954,7 @@ impl Vm {
             &vgic,
             &self.numa_nodes,
             pmu_supported,
+            self.cpu_manager.lock().unwrap().nested_el2(),
             smbios.as_ref(),
         )
         .map_err(Error::ConfigureSystem)?;
@@ -4067,6 +4068,7 @@ mod tests {
             &BTreeMap::new(),
             None,
             true,
+            false,
         )
         .unwrap();
     }

@@ -1321,6 +1321,13 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "aarch64")]
+    fn set_sys_reg(&self, _sys_reg: u32, _value: u64) -> cpu::Result<()> {
+        Err(cpu::HypervisorCpuError::SetSysRegister(anyhow!(
+            "set_sys_reg is not supported on MSHV"
+        )))
+    }
+
+    #[cfg(target_arch = "aarch64")]
     fn get_sys_reg(&self, sys_reg: u32) -> cpu::Result<u64> {
         let mshv_reg = self.sys_reg_to_mshv_reg(sys_reg)?;
 
@@ -1373,6 +1380,7 @@ impl cpu::Vcpu for MshvVcpu {
         _vm: &dyn crate::Vm,
         _kvi: &mut crate::VcpuInit,
         _id: u32,
+        _el2: bool,
     ) -> cpu::Result<()> {
         Ok(())
     }
@@ -2378,6 +2386,11 @@ impl vm::Vm for MshvVm {
     #[cfg(target_arch = "aarch64")]
     fn get_preferred_target(&self, _kvi: &mut crate::VcpuInit) -> vm::Result<()> {
         Ok(())
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn nested_el2_supported(&self) -> bool {
+        false
     }
 
     /// Pause the VM

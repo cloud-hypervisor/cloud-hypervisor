@@ -398,6 +398,10 @@ pub trait Vm: Send + Sync + Any {
     /// Returns the preferred CPU target type which can be emulated by KVM on underlying host.
     #[cfg(target_arch = "aarch64")]
     fn get_preferred_target(&self, kvi: &mut crate::VcpuInit) -> Result<()>;
+    /// Whether the host can start vCPUs at EL2 so the guest can run its own
+    /// KVM (arm64 nested virtualization).
+    #[cfg(target_arch = "aarch64")]
+    fn nested_el2_supported(&self) -> bool;
     /// Enable split Irq capability
     #[cfg(target_arch = "x86_64")]
     fn enable_split_irq(&self) -> Result<()>;

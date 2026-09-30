@@ -11,13 +11,17 @@
 pub mod gic;
 
 use kvm_bindings::{
-    KVM_REG_ARM_COPROC_MASK, KVM_REG_ARM_CORE, KVM_REG_ARM64, KVM_REG_ARM64_SVE, KVM_REG_SIZE_MASK,
-    KVM_REG_SIZE_SHIFT, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64, KVM_REG_SIZE_U128, KVM_REG_SIZE_U256,
-    KVM_REG_SIZE_U512, KVM_REG_SIZE_U1024, KVM_REG_SIZE_U2048, kvm_mp_state, kvm_one_reg, kvm_regs,
+    KVM_REG_ARM_COPROC_MASK, KVM_REG_ARM_CORE, KVM_REG_ARM64, KVM_REG_ARM64_SVE,
+    KVM_REG_ARM64_SYSREG, KVM_REG_ARM64_SYSREG_CRM_MASK, KVM_REG_ARM64_SYSREG_CRN_MASK,
+    KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP1_MASK, KVM_REG_ARM64_SYSREG_OP2_MASK,
+    KVM_REG_SIZE_MASK, KVM_REG_SIZE_SHIFT, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64, KVM_REG_SIZE_U128,
+    KVM_REG_SIZE_U256, KVM_REG_SIZE_U512, KVM_REG_SIZE_U1024, KVM_REG_SIZE_U2048, kvm_mp_state,
+    kvm_one_reg, kvm_regs,
 };
 pub use kvm_ioctls::{Cap, Kvm};
 use serde::{Deserialize, Serialize};
 
+use crate::arch::aarch64::regs::VMPIDR_EL2;
 use crate::kvm::{KvmError, KvmResult};
 
 // Following are macros that help with getting the ID of a aarch64 core register.
@@ -79,6 +83,20 @@ pub fn is_system_register(regid: u64) -> bool {
     }
 }
 
+/// Returns the KVM `ONE_REG` id of a system register, given its Arm encoding
+/// as built by `arm64_sys_reg!`.
+pub fn sys_reg_id(sys_reg: u32) -> u64 {
+    KVM_REG_ARM64
+        | KVM_REG_SIZE_U64
+        | KVM_REG_ARM64_SYSREG as u64
+        | (((sys_reg >> 5)
+            & (KVM_REG_ARM64_SYSREG_OP0_MASK
+                | KVM_REG_ARM64_SYSREG_OP1_MASK
+                | KVM_REG_ARM64_SYSREG_CRN_MASK
+                | KVM_REG_ARM64_SYSREG_CRM_MASK
+                | KVM_REG_ARM64_SYSREG_OP2_MASK)) as u64)
+}
+
 pub fn is_sve_register(regid: u64) -> bool {
     (regid & KVM_REG_ARM_COPROC_MASK as u64) == KVM_REG_ARM64_SVE as u64
 }
@@ -125,4 +143,34 @@ pub struct VcpuKvmState {
     pub pre_finalize_regs: Vec<ExtendedReg>,
     #[serde(default)]
     pub extended_regs: Vec<ExtendedReg>,
+}
+
+impl VcpuKvmState {
+    /// Whether the state was saved from a vCPU created with
+    /// `KVM_ARM_VCPU_HAS_EL2`. Only such vCPUs expose the EL2 system registers.
+    pub fn has_el2(&self) -> bool {
+        let vmpidr_el2 = sys_reg_id(VMPIDR_EL2);
+        self.sys_regs.iter().any(|reg| reg.id == vmpidr_el2)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::arch::aarch64::regs::MPIDR_EL1;
+
+    #[test]
+    fn has_el2_detects_saved_el2_system_registers() {
+        let reg = |sys_reg| kvm_one_reg {
+            id: sys_reg_id(sys_reg),
+            addr: 0,
+        };
+        let mut state = VcpuKvmState {
+            sys_regs: vec![reg(MPIDR_EL1)],
+            ..Default::default()
+        };
+        assert!(!state.has_el2());
+        state.sys_regs.push(reg(VMPIDR_EL2));
+        assert!(state.has_el2());
+    }
 }

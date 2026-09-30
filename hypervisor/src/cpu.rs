@@ -489,6 +489,7 @@ pub trait Vcpu: Send + Sync {
         vm: &dyn crate::Vm,
         kvi: &mut VcpuInit,
         id: u32,
+        el2: bool,
     ) -> Result<()>;
     ///
     /// Returns VcpuInit with default value set
@@ -506,6 +507,11 @@ pub trait Vcpu: Send + Sync {
     ///
     #[cfg(target_arch = "aarch64")]
     fn get_sys_reg(&self, sys_reg: u32) -> Result<u64>;
+    ///
+    /// Sets the value of a system register
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn set_sys_reg(&self, sys_reg: u32, value: u64) -> Result<()>;
     ///
     /// Gets the guest virtual counter (`CNTVCT_EL0`) via `KVM_REG_ARM_TIMER_CNT`.
     ///

@@ -215,7 +215,9 @@ In this example the amx CPU feature will be enabled for the VMM.
 
 ### `nested`
 
-Enable nested virtualization (default on). Nested virtualization is needed to access hardware virtualization by this guest. This option can only be changed on x86-64.
+Enable nested virtualization (default on). Nested virtualization is needed to access hardware virtualization by this guest.
+
+On arm64 this starts the vCPUs at EL2 (`KVM_ARM_VCPU_HAS_EL2`) and describes PSCI over SMC in the device tree, so the guest kernel boots at EL2 and can run KVM itself. It needs hardware with FEAT_NV2 and a host kernel (Linux 6.16 or newer) booted with `kvm-arm.mode=nested`. Hosts that do not report `KVM_CAP_ARM_EL2` ignore the option and boot the guest at EL1 as before. Use `nested=off` to boot at EL1 on a nested-capable host, for instance to avoid the overhead of running the guest kernel at EL2. A restored snapshot or migrated VM keeps the exception level it was saved with, and cannot be restored at EL2 on a host without nested support.
 
 _Example_
 

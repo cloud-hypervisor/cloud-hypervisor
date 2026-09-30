@@ -175,6 +175,17 @@ impl CpuState {
             CpuState::Mshv(_) => &[],
         }
     }
+
+    /// Whether the state was saved from a vCPU started at EL2 (nested
+    /// virtualization). A restored vCPU must be created the same way.
+    pub fn has_el2(&self) -> bool {
+        match self {
+            #[cfg(feature = "kvm")]
+            CpuState::Kvm(state) => state.has_el2(),
+            #[cfg(feature = "mshv")]
+            CpuState::Mshv(_) => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
