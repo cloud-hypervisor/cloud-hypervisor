@@ -52,6 +52,14 @@ For AArch64 machines, an ARM PrimeCell Real Time Clock (PL031) is implemented.
 This device is built-in by default for the AArch64 platform, and it is always
 enabled, and cannot be disabled from the command line.
 
+With ACPI, a separate Time and Alarm Device (TAD), identified as `ACPI000E`,
+provides the wall clock.
+Linux 7.1 or newer with `CONFIG_ACPI_TAD=y`, `CONFIG_RTC_CLASS=y` and
+`CONFIG_RTC_HCTOSYS=y` can use it to initialise the system clock without EFI
+runtime services. It supports reading and setting UTC time from 1900 to 9999;
+wake alarms are not supported. With `acpi=off`, Linux uses the
+PL031 device described in FDT.
+
 ### I/O APIC
 
 `cloud-hypervisor` supports a so-called split IRQ chip implementation by
