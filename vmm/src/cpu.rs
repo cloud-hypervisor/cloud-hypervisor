@@ -27,7 +27,9 @@ use acpi_tables::{Aml, aml};
 use anyhow::anyhow;
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::cache::{CacheTopologyInfo, read_cache_topology};
-use arch::{EntryPoint, NumaNodes, layout};
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+use arch::layout;
+use arch::{EntryPoint, NumaNodes};
 #[cfg(target_arch = "aarch64")]
 use devices::gic::Gic;
 use devices::interrupt_controller::InterruptController;

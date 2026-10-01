@@ -7,7 +7,7 @@ use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 #[cfg(feature = "fw_cfg")]
 use std::str::FromStr;
-use std::{fs, result};
+use std::{fmt, fs, result};
 
 use arch::CpuProfile;
 use block::ImageType;
@@ -166,6 +166,49 @@ pub struct PlatformConfig {
     pub iommufd_fd: Option<i32>,
     #[serde(default = "default_platformconfig_vfio_p2p_dma")]
     pub vfio_p2p_dma: bool,
+    #[serde(default)]
+    pub iommu: Option<IommuType>,
+}
+
+/// The virtual IOMMU the platform provides (`--platform iommu=`).
+///
+/// `On` is the historical spelling of `VirtioIommu`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum IommuType {
+    /// No virtual IOMMU.
+    Off,
+    /// The virtio-iommu (alias of `VirtioIommu`).
+    On,
+    /// The virtio-iommu.
+    VirtioIommu,
+    /// An ARM SMMUv3; VFIO devices with `iommu=on`
+    Smmuv3,
+}
+
+impl IommuType {
+    /// Whether this selects the virtio-iommu.
+    pub fn is_virtio_iommu(self) -> bool {
+        matches!(self, Self::On | Self::VirtioIommu)
+    }
+}
+
+impl fmt::Display for IommuType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Off => "off",
+            Self::On => "on",
+            Self::VirtioIommu => "virtio-iommu",
+            Self::Smmuv3 => "smmuv3",
+        })
+    }
+}
+
+impl PlatformConfig {
+    /// Whether VFIO devices with `iommu=on` go behind an SMMUv3.
+    pub fn iommu_is_smmuv3(&self) -> bool {
+        self.iommu == Some(IommuType::Smmuv3)
+    }
 }
 
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
