@@ -3358,6 +3358,33 @@ impl VmConfig {
         Ok(())
     }
 
+    /// Identify if a virtio-iommu IOMMU is required based on configuration from every device
+    pub fn virtio_iommu_attached(&self) -> bool {
+        let attached = |common: &PciDeviceCommonConfig| common.iommu == IommuType::Virtio;
+
+        self.disks.iter().flatten().any(|d| attached(&d.pci_common))
+            || self.net.iter().flatten().any(|n| attached(&n.pci_common))
+            || self.pmem.iter().flatten().any(|p| attached(&p.pci_common))
+            || self.vdpa.iter().flatten().any(|v| attached(&v.pci_common))
+            || self
+                .devices
+                .iter()
+                .flatten()
+                .any(|d| attached(&d.pci_common))
+            || attached(&self.rng.pci_common)
+            || attached(&self.console.pci_common)
+            || self.rtc.as_ref().is_some_and(|r| attached(&r.pci_common))
+            || self
+                .balloon
+                .as_ref()
+                .is_some_and(|b| attached(&b.pci_common))
+            || self.vsock.as_ref().is_some_and(|v| attached(&v.pci_common))
+            || self
+                .platform
+                .as_ref()
+                .is_some_and(|p| p.iommu_segments.is_some())
+    }
+
     // Also enables virtio-iommu if the config needs it
     // Returns the list of unique identifiers provided through the
     // configuration.
@@ -3520,7 +3547,6 @@ impl VmConfig {
                 }
 
                 disk.validate(self)?;
-                self.iommu |= disk.pci_common.iommu.attached();
 
                 Self::validate_identifier(&mut id_list, &disk.pci_common.id)?;
             }
@@ -3538,7 +3564,6 @@ impl VmConfig {
                     return Err(ValidationError::VhostUserRateLimiterNotSupported);
                 }
                 net.validate(self)?;
-                self.iommu |= net.pci_common.iommu.attached();
 
                 Self::validate_identifier(&mut id_list, &net.pci_common.id)?;
             }
@@ -3569,7 +3594,6 @@ impl VmConfig {
         if let Some(pmems) = &self.pmem {
             for pmem in pmems {
                 pmem.validate(self)?;
-                self.iommu |= pmem.pci_common.iommu.attached();
 
                 Self::validate_identifier(&mut id_list, &pmem.pci_common.id)?;
             }
@@ -3577,17 +3601,14 @@ impl VmConfig {
 
         self.rng.validate(self)?;
         Self::validate_identifier(&mut id_list, &self.rng.pci_common.id)?;
-        self.iommu |= self.rng.pci_common.iommu.attached();
 
         if let Some(rtc) = &self.rtc {
             rtc.validate(self)?;
             Self::validate_identifier(&mut id_list, &rtc.pci_common.id)?;
-            self.iommu |= rtc.pci_common.iommu.attached();
         }
 
         self.console.validate(self)?;
         Self::validate_identifier(&mut id_list, &self.console.pci_common.id)?;
-        self.iommu |= self.console.pci_common.iommu.attached();
 
         self.serial.validate()?;
 
@@ -3667,7 +3688,6 @@ impl VmConfig {
         if let Some(vdpa_devices) = &self.vdpa {
             for vdpa_device in vdpa_devices {
                 vdpa_device.validate(self)?;
-                self.iommu |= vdpa_device.pci_common.iommu.attached();
 
                 Self::validate_identifier(&mut id_list, &vdpa_device.pci_common.id)?;
             }
@@ -3682,7 +3702,6 @@ impl VmConfig {
         if let Some(balloon) = &self.balloon {
             balloon.validate(self)?;
             Self::validate_identifier(&mut id_list, &balloon.pci_common.id)?;
-            self.iommu |= balloon.pci_common.iommu.attached();
 
             let ram_size = self.memory.total_size();
             if balloon.size >= ram_size {
@@ -3705,7 +3724,6 @@ impl VmConfig {
                 }
 
                 device.validate(self)?;
-                self.iommu |= device.pci_common.iommu.attached();
 
                 Self::validate_identifier(&mut id_list, &device.pci_common.id)?;
             }
@@ -3713,7 +3731,6 @@ impl VmConfig {
 
         if let Some(vsock) = &self.vsock {
             vsock.validate(self)?;
-            self.iommu |= vsock.pci_common.iommu.attached();
 
             Self::validate_identifier(&mut id_list, &vsock.pci_common.id)?;
         }
@@ -3778,15 +3795,10 @@ impl VmConfig {
         }
 
         self.platform.as_ref().map(|p| p.validate()).transpose()?;
-        self.iommu |= self
-            .platform
-            .as_ref()
-            .map(|p| p.iommu_segments.is_some())
-            .unwrap_or_default();
+        self.iommu = self.virtio_iommu_attached();
 
-        // Checked after self.iommu changes, so it sees devices and iommu_segments
         #[cfg(feature = "sev_snp")]
-        if self.iommu && self.platform.as_ref().is_some_and(|p| p.sev_snp) {
+        if self.virtio_iommu_attached() && self.platform.as_ref().is_some_and(|p| p.sev_snp) {
             return Err(ValidationError::SevSnpNoViommu);
         }
 
@@ -7276,13 +7288,6 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 iommu_segments: Some(Box::new([1])),
                 ..platform_fixture()
             });
-            assert_eq!(
-                invalid_config.validate(),
-                Err(ValidationError::SevSnpNoViommu)
-            );
-
-            let mut invalid_config = sev_snp_config.clone();
-            invalid_config.iommu = true;
             assert_eq!(
                 invalid_config.validate(),
                 Err(ValidationError::SevSnpNoViommu)
