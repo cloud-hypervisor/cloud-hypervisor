@@ -1262,7 +1262,7 @@ pub struct VmConfig {
     pub pvmemcontrol: Option<PvmemcontrolConfig>,
     #[serde(default)]
     pub pvpanic: bool,
-    #[serde(default)]
+    #[serde(skip)]
     pub iommu: bool,
     pub numa: Option<Box<[NumaConfig]>>,
     #[serde(default)]
