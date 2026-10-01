@@ -719,6 +719,40 @@ impl Vcpu {
     }
 }
 
+/// Performs a parallel mapping into a vec by chunking the input slice and
+/// distributing the chunks over the threads.
+#[allow(unused)] // used in next commit
+fn parallel_map<T: Sync, R: Send, E: Send>(
+    items: &[T],
+    f: impl Fn(&T) -> result::Result<R, E> + Sync,
+    max_threads: usize,
+    min_items_per_thread: usize,
+) -> result::Result<Vec<R>, E> {
+    let max_threads = thread::available_parallelism()
+        .map_or(1, |val| val.get())
+        .min(max_threads);
+    let chunk_size = items.len().div_ceil(max_threads).max(min_items_per_thread);
+
+    let mut chunks = items.chunks(chunk_size);
+    let Some(host_chunk) = chunks.next_back() else {
+        return Ok(Vec::new());
+    };
+
+    thread::scope(|scope| {
+        let handles = chunks
+            .map(|chunk| scope.spawn(|| chunk.iter().map(&f).collect::<Vec<_>>()))
+            .collect::<Vec<_>>();
+
+        let mut results = Vec::with_capacity(items.len());
+        for handle in handles {
+            results.extend(handle.join().unwrap());
+        }
+
+        results.extend(host_chunk.iter().map(&f));
+        results.into_iter().collect()
+    })
+}
+
 pub struct CpuManager {
     config: CpusConfig,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
@@ -3440,6 +3474,9 @@ impl BusDevice for AcpiCpuHotplugController {
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 #[cfg(test)]
 mod tests {
+    use std::convert::Infallible;
+
+    use anyhow::anyhow;
     use arch::layout;
     use arch::layout::{BOOT_STACK_POINTER, ZERO_PAGE_START};
     use arch::x86_64::interrupts::*;
@@ -3447,6 +3484,36 @@ mod tests {
     use hypervisor::arch::x86::{FpuState, LapicState};
     use hypervisor::{HypervisorVmConfig, StandardRegisters};
     use linux_loader::loader::bootparam::setup_header;
+    use vm_migration::MigratableError;
+
+    use crate::cpu::parallel_map;
+
+    #[test]
+    fn test_parallel_map() {
+        let items = (0..100).collect::<Vec<u32>>();
+        let doubled = items.iter().map(|i| i * 2).collect::<Vec<_>>();
+        assert_eq!(
+            parallel_map::<_, _, Infallible>(&items, |i| Ok(i * 2), 10, 7).unwrap(),
+            doubled
+        );
+
+        // The first error in vCPU order wins, as with a sequential map.
+        let result = parallel_map(
+            &items,
+            |&i| match i % 30 {
+                29 => Err(MigratableError::Snapshot(anyhow!("{i}"))),
+                _ => Ok(i),
+            },
+            10,
+            7,
+        );
+        assert!(matches!(result, Err(MigratableError::Snapshot(e)) if e.to_string() == "29"));
+        assert!(
+            parallel_map::<_, _, Infallible>(&[], |&i: &u32| Ok(i), 10, 7)
+                .unwrap()
+                .is_empty()
+        );
+    }
 
     #[test]
     fn test_setlint() {
