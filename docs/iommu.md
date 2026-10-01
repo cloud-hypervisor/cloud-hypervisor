@@ -69,11 +69,14 @@ virtio-iommu device and expose it through the ACPI IORT table. This can be
 simply achieved by attaching at least one device to the virtual IOMMU.
 
 The way to expose to the guest a specific device as sitting behind this IOMMU
-is to explicitly tag it from the command line with the option `iommu=on`.
+is to explicitly tag it from the command line with the option `iommu=virtio`.
 
 Not all devices support this extra option, and the default value will always
 be `off` since we want to avoid the performance impact for most users who don't
 need this.
+
+`iommu=on` is accepted as a synonym of `iommu=virtio`, but it is deprecated and
+will be removed in a future release.
 
 Refer to the command line `--help` to find out which devices can be supported
 to be attached to the virtual IOMMU.
@@ -85,7 +88,7 @@ virtual IOMMU:
 ./cloud-hypervisor \
     --cpus boot=1 \
     --memory size=512M \
-    --disk path=focal-server-cloudimg-amd64.raw,iommu=on,image_type=raw \
+    --disk path=focal-server-cloudimg-amd64.raw,iommu=virtio,image_type=raw \
     --kernel custom-vmlinux \
     --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
 ```
@@ -126,7 +129,7 @@ enabled. But the effect is different with what the aforementioned test showed.
 When ACPI is disabled, virtual IOMMU is supported through Flattened Device Tree
 (FDT). In this case, the guest kernel cannot tell which device should be
 IOMMU-attached and which should not. No matter how many devices you attached to
-the virtual IOMMU by setting `iommu=on` option, all the devices on the PCI bus
+the virtual IOMMU by setting `iommu=virtio` option, all the devices on the PCI bus
 will be attached to the virtual IOMMU (except the IOMMU itself). Each of the
 devices will be added into an IOMMU group.
 
@@ -188,7 +191,7 @@ be consumed.
     --disk path=focal-server-cloudimg-amd64.raw,image_type=raw \
     --kernel custom-vmlinux \
     --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw hugepagesz=2M hugepages=2048" \
-    --net tap=,mac=,iommu=on
+    --net tap=,mac=,iommu=virtio
 ```
 
 ### Nested usage
@@ -205,7 +208,7 @@ passing through is `0000:00:01.0`.
     --disk path=focal-server-cloudimg-amd64.raw,image_type=raw \
     --kernel custom-vmlinux \
     --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw kvm-intel.nested=1 vfio_iommu_type1.allow_unsafe_interrupts rw hugepagesz=2M hugepages=2048" \
-    --device path=/sys/bus/pci/devices/0000:00:01.0,iommu=on
+    --device path=/sys/bus/pci/devices/0000:00:01.0,iommu=virtio
 ```
 
 Once the L1 VM is running, unbind the device from the default driver in the
@@ -257,7 +260,7 @@ requiring the IOMMU then may be hotplugged:
 e.g.
 
 ```bash
-./ch-remote --api-socket=/tmp/api add-device path=/sys/bus/pci/devices/0000:00:04.0,iommu=on,pci_segment=1
+./ch-remote --api-socket=/tmp/api add-device path=/sys/bus/pci/devices/0000:00:04.0,iommu=virtio,pci_segment=1
 ```
 
 Devices that cannot be placed behind an IOMMU (e.g. lacking an `iommu=` option)

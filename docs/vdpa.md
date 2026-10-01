@@ -37,7 +37,7 @@ struct VdpaConfig {
 ```
 
 ```
---vdpa <vdpa>	vDPA device "path=<device_path>,num_queues=<number_of_queues>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>"
+--vdpa <vdpa>	vDPA device "path=<device_path>,num_queues=<number_of_queues>,iommu=off|virtio,id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>"
 ```
 
 ### `path`
