@@ -41,6 +41,9 @@ pub enum Error {
     #[error("Error setting up SMBIOS table")]
     SmbiosSetup(#[source] smbios::Error),
 
+    #[error("Error setting up UEFI tables")]
+    UefiSetup(#[source] uefi::Error),
+
     /// Failed to create a GIC.
     #[error("Failed to create a GIC")]
     SetupGic,
@@ -135,7 +138,11 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
     numa_nodes: &NumaNodes,
     pmu_supported: bool,
     smbios: Option<&smbios::SmbiosConfig>,
+    rsdp_addr: Option<GuestAddress>,
 ) -> super::Result<()> {
+    if let Some(rsdp) = rsdp_addr {
+        uefi::create_uefi_stub_tables(guest_mem, rsdp).map_err(Error::UefiSetup)?;
+    }
     let fdt_final = fdt::create_fdt(
         guest_mem,
         cmdline,
