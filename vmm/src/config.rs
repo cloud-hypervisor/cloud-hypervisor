@@ -1786,6 +1786,7 @@ impl FromStr for IommuType {
                 Ok(IommuType::Virtio)
             }
             "virtio" => Ok(IommuType::Virtio),
+            "smmuv3" => Ok(IommuType::Smmuv3),
             _ => Err(ParseIommuTypeError::InvalidValue(s.to_owned())),
         }
     }
@@ -2583,7 +2584,8 @@ impl DebugConsoleConfig {
 
 impl DeviceConfig {
     pub const SYNTAX: &'static str = "Direct device assignment parameters \
-    \"path=<device_path>,fd=<vfio_cdev_fd>,iommu=off|virtio,id=<device_id>,\
+    \"path=<device_path>,fd=<vfio_cdev_fd>,iommu=off|virtio|smmuv3,\
+    id=<device_id>,\
     pci_segment=<segment_id>,pci_device_id=<pci_slot>,\
     x_nv_gpudirect_clique=<clique_id>,\
     x_exclude_mmap_bars=[<bar>...]\"";
@@ -5670,6 +5672,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!("on".parse::<IommuType>().unwrap(), IommuType::Virtio);
         assert_eq!("off".parse::<IommuType>().unwrap(), IommuType::Off);
         assert_eq!("virtio".parse::<IommuType>().unwrap(), IommuType::Virtio);
+        assert_eq!("smmuv3".parse::<IommuType>().unwrap(), IommuType::Smmuv3);
         "nope".parse::<IommuType>().unwrap_err();
     }
 
