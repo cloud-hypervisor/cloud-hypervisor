@@ -796,6 +796,21 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
         ));
     }
 
+    // Rebuilding only the refblocks that cover the file keeps the work proportional to the image
+    let file_clusters = div_round_up_u64(file_size, cluster_size);
+    let used_refblocks =
+        div_round_up_u64(file_clusters, refcount_block_entries).min(refblock_clusters);
+
+    // The rebuilt table is written in place and has to fit the declared one.
+    let declared_table_entries =
+        u64::from(header.refcount_table_clusters) * cluster_size / size_of::<u64>() as u64;
+    if used_refblocks > declared_table_entries {
+        return Err(BlockError::new(
+            BlockErrorKind::CorruptImage,
+            Error::InvalidRefcountTableSize(used_refblocks),
+        ));
+    }
+
     let mut refcounts = vec![0; max_valid_cluster_index as usize];
 
     // Find all references clusters and rebuild refcounts.
@@ -827,11 +842,6 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
     )
     .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
 
-    // Rebuilding only the refblocks that cover the file keeps the work proportional to the image
-    let file_clusters = div_round_up_u64(file_size, cluster_size);
-    let used_refblocks =
-        div_round_up_u64(file_clusters, refcount_block_entries).min(refblock_clusters);
-
     // Allocate clusters to store the new reference count blocks.
     let ref_table = alloc_refblocks(
         &mut refcounts,
@@ -841,9 +851,6 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
         refcount_bits,
     )
     .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
-
-    let declared_table_entries =
-        u64::from(header.refcount_table_clusters) * cluster_size / size_of::<u64>() as u64;
 
     // Write updated reference counts and point the reftable at them.
     write_refblocks(
@@ -2094,6 +2101,35 @@ mod tests {
         assert!(
             elapsed.as_secs() < 10,
             "opening an image declaring a 1 TiB refcount table took {elapsed:?}"
+        );
+    }
+
+    // A one-cluster refcount table of 512-byte clusters covers 8 MiB and the
+    // file is 16 MiB. L1 entry 0 points past the end of the file, so reading
+    // the L1 table first fails with an I/O error.
+    #[test]
+    fn rebuild_refcounts_rejects_a_file_the_declared_table_cannot_cover() {
+        use std::os::unix::fs::FileExt;
+
+        let mut header = valid_header_v3();
+        header[23] = 9; // cluster_bits
+        header[24..32].copy_from_slice(&(64u64 << 20).to_be_bytes()); // size
+        header[36..40].copy_from_slice(&2048u32.to_be_bytes()); // L1 size
+        header[40..48].copy_from_slice(&0x400u64.to_be_bytes()); // L1 table offset
+        header[48..56].copy_from_slice(&0x200u64.to_be_bytes()); // refcount table offset
+        header[56..60].copy_from_slice(&1u32.to_be_bytes()); // refcount table clusters
+        let temp = TempFile::new().unwrap();
+        let file = temp.as_file();
+        file.write_all_at(&header, 0).unwrap();
+        file.write_all_at(&(1u64 << 40).to_be_bytes(), 0x400)
+            .unwrap();
+        file.set_len(16 << 20).unwrap();
+
+        let err = QcowDisk::new(file.try_clone().unwrap(), false, false, true, false)
+            .expect_err("a file larger than the refcount table covers must be rejected");
+        assert!(
+            matches!(err.kind(), BlockErrorKind::CorruptImage),
+            "{err:?}"
         );
     }
 
