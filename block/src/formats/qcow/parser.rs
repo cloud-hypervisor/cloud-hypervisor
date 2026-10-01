@@ -441,11 +441,17 @@ pub(crate) fn parse_qcow(
             Error::TooManyRefcounts(refcount_clusters),
         ));
     }
+    let declared_table_entries =
+        u64::from(header.refcount_table_clusters) * cluster_size / size_of::<u64>() as u64;
+    let refcount_table_entries = min(
+        declared_table_entries,
+        MAX_RAM_POINTER_TABLE_SIZE - l1_clusters,
+    );
     let refcount_block_entries = cluster_size * 8 / refcount_bits;
     let mut refcounts = RefCount::new(
         &mut raw_file,
         header.refcount_table_offset,
-        refcount_clusters,
+        refcount_table_entries,
         refcount_block_entries,
         cluster_size,
         refcount_bits,
@@ -769,7 +775,8 @@ fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockRes
     let l1_clusters = div_round_up_u64(l2_clusters, pointers_per_cluster);
     let header_clusters = div_round_up_u64(size_of::<QcowHeader>() as u64, cluster_size);
     let max_clusters = data_clusters + l2_clusters + l1_clusters + header_clusters;
-    let mut max_valid_cluster_index = max_clusters;
+    // The file can end past what the virtual size needs.
+    let mut max_valid_cluster_index = max(max_clusters, div_round_up_u64(file_size, cluster_size));
     let refblock_clusters = div_round_up_u64(max_valid_cluster_index, refcount_block_entries);
     let reftable_clusters = div_round_up_u64(refblock_clusters, pointers_per_cluster);
     // Account for refblocks and the ref table size needed to address them.

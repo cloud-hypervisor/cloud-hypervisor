@@ -1654,4 +1654,128 @@ mod tests {
         };
         assert_eq!(refcount, 1);
     }
+
+    // Allocate past the refcount limit of the virtual size, then reopen after
+    // a clean and an unclean close.
+    #[test]
+    fn allocates_past_the_virtual_size_refcount_limit() {
+        use std::os::unix::fs::FileExt;
+
+        let cluster_size: u64 = 1 << 16;
+        let temp = super::super::QcowTempDisk::new(64 * cluster_size, None, false, true, false)
+            .unwrap()
+            .into_tempfile();
+        let open = || {
+            let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+            super::super::parser::parse_qcow(raw, 0, true).unwrap().0
+        };
+        let read_back = |inner: &mut super::QcowState| match inner
+            .map_read_with_populate(0, 16, false)
+            .unwrap()
+        {
+            super::ClusterReadMapping::Allocated { offset, .. } => {
+                let mut buf = [0u8; 16];
+                temp.as_file().read_exact_at(&mut buf, offset).unwrap();
+                buf
+            }
+            _ => panic!("guest cluster 0 is not allocated after reopen"),
+        };
+
+        let mut inner = open();
+        // Limit for a 4 MiB image: two refcount blocks of 2 GiB each.
+        let blocks_end = 2 * (cluster_size * 8 / 16) * cluster_size;
+        inner.raw_file.file_mut().set_len(blocks_end).unwrap();
+        inner.avail_clusters.clear();
+        inner.unref_clusters.clear();
+
+        let super::ClusterWriteMapping::Allocated { offset } = inner
+            .map_write(0, None)
+            .expect("allocation past the refcount blocks for the virtual size");
+        assert!(
+            offset >= blocks_end,
+            "cluster {offset:#x} is not from the file end"
+        );
+        temp.as_file().write_all_at(&[0xa5; 16], offset).unwrap();
+        super::QcowMetadata::new(inner).shutdown();
+
+        assert_eq!(read_back(&mut open()), [0xa5; 16]);
+
+        // Drop without shutdown() so the next open rebuilds the refcounts.
+        drop(open());
+        let mut inner = open();
+        assert_eq!(read_back(&mut inner), [0xa5; 16]);
+        let data_cluster = offset & !(cluster_size - 1);
+        let super::QcowState {
+            ref mut refcounts,
+            ref mut raw_file,
+            ..
+        } = inner;
+        assert_eq!(
+            refcounts
+                .get_cluster_refcount(raw_file, data_cluster)
+                .unwrap(),
+            1
+        );
+    }
+
+    // A one-cluster refcount table of 512-byte clusters covers 8 MiB of the
+    // 64 MiB disk, and the L1 table follows it.
+    #[test]
+    fn allocations_stay_within_the_declared_refcount_table() {
+        use std::os::unix::fs::FileExt;
+
+        use vmm_sys_util::tempfile::TempFile;
+
+        let cluster_size: u64 = 512;
+        let size: u64 = 64 << 20;
+        let mut header = super::QcowHeader::create_for_size_and_path(3, size, None).unwrap();
+        header.cluster_bits = 9;
+        header.l1_size = size.div_ceil(cluster_size * cluster_size / 8) as u32;
+        header.refcount_table_offset = cluster_size;
+        header.refcount_table_clusters = 1;
+        header.l1_table_offset = 2 * cluster_size;
+        let l1_clusters = (u64::from(header.l1_size) * 8).div_ceil(cluster_size);
+
+        let temp = TempFile::new().unwrap();
+        let file = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+        header.write_to(&file).unwrap();
+        file.set_len((2 + l1_clusters) * cluster_size).unwrap();
+        let open = || {
+            let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+            super::super::parser::parse_qcow(raw, 0, true).unwrap().0
+        };
+
+        let capacity = 64 * (cluster_size * 8 / 16) * cluster_size;
+        let mut inner = open();
+        let mut guest = 0;
+        let err = loop {
+            match inner.map_write(guest, None) {
+                Ok(super::ClusterWriteMapping::Allocated { offset }) => {
+                    assert!(
+                        offset < capacity,
+                        "cluster {offset:#x} is past the declared refcount table"
+                    );
+                    temp.as_file()
+                        .write_all_at(&guest.to_be_bytes(), offset)
+                        .unwrap();
+                }
+                Err(e) => break e,
+            }
+            guest += cluster_size;
+            assert!(guest < size, "allocated the whole disk without ENOSPC");
+        };
+        assert_eq!(err.raw_os_error(), Some(libc::ENOSPC));
+        super::QcowMetadata::new(inner).shutdown();
+
+        let mut inner = open();
+        let super::ClusterReadMapping::Allocated { offset, .. } = inner
+            .map_read_with_populate(cluster_size, 8, false)
+            .unwrap()
+        else {
+            panic!("guest cluster 1 is not allocated after reopen");
+        };
+        let mut buf = [0u8; 8];
+        temp.as_file().read_exact_at(&mut buf, offset).unwrap();
+        assert_eq!(buf, cluster_size.to_be_bytes());
+    }
 }
