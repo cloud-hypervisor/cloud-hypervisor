@@ -212,6 +212,12 @@ impl AddressAllocator {
     pub fn end(&self) -> GuestAddress {
         self.end
     }
+
+    /// Whether `address` lies in the range the allocator manages, from its
+    /// base through its end
+    pub fn contains(&self, address: GuestAddress) -> bool {
+        address >= self.base && address <= self.end
+    }
 }
 
 #[cfg(test)]
@@ -221,6 +227,24 @@ mod tests {
     #[test]
     fn new_fails_overflow() {
         assert_eq!(AddressAllocator::new(GuestAddress(u64::MAX), 0x100), None);
+    }
+
+    #[test]
+    fn contains_base_through_end() {
+        const BASE: u64 = 0x1000;
+        const SIZE: u64 = 0x1000;
+        const END: u64 = BASE + SIZE - 1;
+        let pool = AddressAllocator::new(GuestAddress(BASE), SIZE).unwrap();
+
+        let cases = [
+            (BASE - 1, false),
+            (BASE, true),
+            (END, true),
+            (END + 1, false),
+        ];
+        for (addr, expected) in cases {
+            assert_eq!(pool.contains(GuestAddress(addr)), expected, "{addr:#x}");
+        }
     }
 
     #[test]
