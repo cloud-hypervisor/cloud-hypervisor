@@ -140,9 +140,10 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
     smbios: Option<&smbios::SmbiosConfig>,
     rsdp_addr: Option<GuestAddress>,
 ) -> super::Result<()> {
-    if let Some(rsdp) = rsdp_addr {
-        uefi::create_uefi_stub_tables(guest_mem, rsdp).map_err(Error::UefiSetup)?;
-    }
+    let uefi_mmap_size = rsdp_addr
+        .map(|rsdp| uefi::create_uefi_stub_tables(guest_mem, rsdp))
+        .transpose()
+        .map_err(Error::UefiSetup)?;
     let fdt_final = fdt::create_fdt(
         guest_mem,
         cmdline,
@@ -155,6 +156,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
         numa_nodes,
         virtio_iommu_bdf,
         pmu_supported,
+        uefi_mmap_size,
     )
     .map_err(|_| Error::SetupFdt)?;
 
