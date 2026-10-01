@@ -44,11 +44,11 @@ use hypervisor::StandardRegisters;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::arch::aarch64::gic::Vgic;
 #[cfg(target_arch = "aarch64")]
-use hypervisor::arch::aarch64::mpidr_from_vcpu_id;
-#[cfg(target_arch = "aarch64")]
 use hypervisor::arch::aarch64::regs::{AARCH64_PMU_IRQ, MPIDR_EL1};
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 use hypervisor::arch::aarch64::regs::{ID_AA64MMFR0_EL1, TCR_EL1, TTBR1_EL1};
+#[cfg(target_arch = "aarch64")]
+use hypervisor::arch::aarch64::{ExtendedReg, mpidr_from_vcpu_id};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use hypervisor::arch::x86::MsrEntry;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -547,8 +547,7 @@ impl Vcpu {
         #[cfg(target_arch = "aarch64")]
         {
             self.init(vm)?;
-            self.finalize_sve()?;
-            self.verify_mpidr();
+            self.finalize(&[])?;
             arch::configure_vcpu(self.vcpu.as_ref(), self.id, boot_setup)
                 .map_err(Error::VcpuConfiguration)?;
         }
@@ -636,6 +635,16 @@ impl Vcpu {
         Ok(())
     }
 
+    #[cfg(target_arch = "aarch64")]
+    fn finalize(&self, pre_finalize_regs: &[ExtendedReg]) -> Result<()> {
+        self.vcpu
+            .set_pre_finalize_regs(pre_finalize_regs)
+            .map_err(Error::VcpuSetPreFinalizeRegs)?;
+        self.finalize_sve()?;
+        self.verify_mpidr();
+        Ok(())
+    }
+
     /// Runs the VCPU until it exits, returning the reason.
     ///
     /// Note that the state of the VCPU and associated VM must be setup first for this to do
@@ -706,17 +715,9 @@ impl Vcpu {
         })?;
 
         #[cfg(target_arch = "aarch64")]
-        {
-            let restore_err =
-                |e: Error| MigratableError::Restore(anyhow!("Could not prepare the vCPU {e:?}"));
-
-            let pre_finalize = state.pre_finalize_regs();
-            self.vcpu
-                .set_pre_finalize_regs(pre_finalize)
-                .map_err(|e| restore_err(Error::VcpuSetPreFinalizeRegs(e)))?;
-            self.finalize_sve().map_err(restore_err)?;
-            self.verify_mpidr();
-        }
+        self.finalize(state.pre_finalize_regs()).map_err(|e| {
+            MigratableError::Restore(anyhow!("Could not finalize vCPU state: {e:?}"))
+        })?;
 
         self.vcpu
             .set_state(&state)
