@@ -536,7 +536,6 @@ impl Vcpu {
     /// * `cpuid` - (x86_64) CpuId, wrapper over the `kvm_cpuid2` structure.
     pub fn configure(
         &mut self,
-        #[cfg(target_arch = "aarch64")] vm: &dyn hypervisor::Vm,
         boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
         #[cfg(target_arch = "x86_64")] cpuid: Vec<CpuIdEntry>,
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
@@ -545,13 +544,8 @@ impl Vcpu {
         #[cfg(feature = "igvm")] igvm_enabled: bool,
     ) -> Result<()> {
         #[cfg(target_arch = "aarch64")]
-        {
-            self.init(vm)?;
-            self.finalize(&[])?;
-            arch::configure_vcpu(self.vcpu.as_ref(), self.id, boot_setup)
-                .map_err(Error::VcpuConfiguration)?;
-        }
-        #[cfg(target_arch = "riscv64")]
+        self.finalize(&[])?;
+        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
         arch::configure_vcpu(self.vcpu.as_ref(), self.id, boot_setup)
             .map_err(Error::VcpuConfiguration)?;
         info!("Configuring vCPU: cpu_id = {}", self.id);
@@ -1027,10 +1021,10 @@ impl CpuManager {
             self.msr_config_update.clone(),
         )?;
 
-        if let Some(snapshot) = snapshot {
-            #[cfg(target_arch = "aarch64")]
-            vcpu.init(self.vm.as_ref())?;
+        #[cfg(target_arch = "aarch64")]
+        vcpu.init(self.vm.as_ref())?;
 
+        if let Some(snapshot) = snapshot {
             vcpu.restore(snapshot)
                 .map_err(|e| Error::VcpuCreate(e.into()))?;
         }
@@ -1094,10 +1088,7 @@ impl CpuManager {
             self.igvm_enabled,
         )?;
 
-        #[cfg(target_arch = "aarch64")]
-        vcpu.configure(self.vm.as_ref(), boot_setup)?;
-
-        #[cfg(target_arch = "riscv64")]
+        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
         vcpu.configure(boot_setup)?;
 
         Ok(())
