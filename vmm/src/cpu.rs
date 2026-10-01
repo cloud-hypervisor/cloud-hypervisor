@@ -955,6 +955,7 @@ impl CpuManager {
         #[cfg(target_arch = "x86_64")]
         let msr_config_update = arch::x86_64::generate_required_msr_updates(
             hypervisor.as_ref(),
+            &cpuid,
             config.profile,
             config.kvm_hyperv,
             config.nested,
