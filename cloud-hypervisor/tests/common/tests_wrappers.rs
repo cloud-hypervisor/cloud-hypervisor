@@ -2978,7 +2978,7 @@ pub(crate) fn _test_landlock(guest: &Guest) {
     handle_child_output(r, &output);
 }
 
-pub(crate) fn _test_disk_hotplug(guest: &Guest, landlock_enabled: bool) {
+pub(crate) fn _test_disk_hotplug(guest: &Guest, landlock_enabled: bool, use_fw: bool) {
     let api_socket = temp_api_path(&guest.tmp_dir);
 
     let mut blk_file_path = dirs::home_dir().unwrap();
@@ -2996,10 +2996,11 @@ pub(crate) fn _test_disk_hotplug(guest: &Guest, landlock_enabled: bool) {
     cmd.args(["--api-socket", &api_socket])
         .default_cpus()
         .default_memory();
-    #[cfg(target_arch = "x86_64")]
-    cmd.default_kernel_cmdline();
-    #[cfg(target_arch = "aarch64")]
-    cmd.args(["--firmware", edk2_path().to_str().unwrap()]);
+    if use_fw {
+        cmd.args(["--firmware", edk2_path().to_str().unwrap()]);
+    } else {
+        cmd.default_kernel_cmdline();
+    }
     cmd.default_disks().default_net().capture_output();
 
     let mut child = cmd.spawn().unwrap();

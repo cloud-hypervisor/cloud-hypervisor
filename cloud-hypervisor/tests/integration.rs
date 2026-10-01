@@ -3747,14 +3747,14 @@ mod common_parallel {
     #[test]
     fn test_disk_hotplug() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
-        _test_disk_hotplug(&guest, false);
+        _test_disk_hotplug(&guest, false, cfg!(target_arch = "aarch64"));
     }
 
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_disk_hotplug_with_landlock() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
-        _test_disk_hotplug(&guest, true);
+        _test_disk_hotplug(&guest, true, false);
     }
 
     #[test]
@@ -13863,6 +13863,13 @@ mod aarch64_acpi {
     #[test]
     fn test_direct_kernel_boot_acpi_off() {
         test_direct_kernel_boot(false);
+    }
+
+    #[test]
+    fn test_direct_kernel_boot_acpi_disk_hotplug() {
+        let mut guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        guest.kernel_cmdline = Some(format!("{DIRECT_KERNEL_BOOT_CMDLINE} acpi=on"));
+        _test_disk_hotplug(&guest, false, false);
     }
 
     fn kvm_exposes_split_l1_cache() -> bool {

@@ -282,7 +282,7 @@ mod common_cvm {
     #[test]
     fn test_disk_hotplug() {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
-        _test_disk_hotplug(&guest, false);
+        _test_disk_hotplug(&guest, false, false);
     }
 
     #[test]
