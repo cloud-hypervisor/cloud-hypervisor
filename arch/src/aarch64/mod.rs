@@ -8,7 +8,7 @@ pub mod cache;
 pub mod fdt;
 /// Layout for this aarch64 system.
 pub mod layout;
-/// Module for loading UEFI binary.
+/// UEFI loading and boot tables.
 pub mod uefi;
 
 use std::collections::HashMap;

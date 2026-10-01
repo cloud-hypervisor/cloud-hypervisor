@@ -118,12 +118,14 @@ pub const FDT_MAX_SIZE: u64 = 0x20_0000;
 
 /// Put ACPI table above dtb
 pub const ACPI_START: GuestAddress = GuestAddress(RAM_START.0 + FDT_MAX_SIZE);
-const ACPI_SMBIOS_MAX_SIZE: u64 = 0x20_0000;
-pub const ACPI_MAX_SIZE: u64 = ACPI_SMBIOS_MAX_SIZE - SMBIOS_MAX_SIZE;
+pub const ACPI_MAX_SIZE: u64 = 0x20_0000 - EFI_TABLES_MAX_SIZE - SMBIOS_MAX_SIZE;
 pub const RSDP_POINTER: GuestAddress = ACPI_START;
 
-/// Put SMBIOS table above ACPI table and below the kernel
-pub const SMBIOS_START: GuestAddress = GuestAddress(ACPI_START.0 + ACPI_MAX_SIZE);
+pub const EFI_TABLES_START: GuestAddress = GuestAddress(ACPI_START.0 + ACPI_MAX_SIZE);
+pub const EFI_TABLES_MAX_SIZE: u64 = 0x1_0000;
+
+/// Put SMBIOS table above EFI tables and below the kernel
+pub const SMBIOS_START: GuestAddress = GuestAddress(EFI_TABLES_START.0 + EFI_TABLES_MAX_SIZE);
 pub const SMBIOS_MAX_SIZE: u64 = 0x1_0000;
 
 /// Kernel start after the above
