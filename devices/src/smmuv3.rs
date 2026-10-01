@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use std::result;
 use std::sync::{Arc, Barrier};
 
-use log::{debug, error, warn};
+use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error as ThisError;
 use vm_device::BusDevice;
@@ -958,7 +958,7 @@ impl BusDevice for Smmuv3 {
             Ok(val) if data.len() == 8 => write_le_u64(data, val),
             Ok(val) => write_le_u32(data, val as u32),
             Err(e) => {
-                error!("SMMUv3 read at {offset:#x}: {e}");
+                debug!("SMMUv3 read at {offset:#x}: {e}");
                 data.fill(0);
             }
         }
@@ -972,7 +972,7 @@ impl BusDevice for Smmuv3 {
         };
 
         if let Err(e) = self.write_reg(offset, val, data.len()) {
-            error!("SMMUv3 write at {offset:#x}: {e}");
+            debug!("SMMUv3 write at {offset:#x}: {e}");
         }
 
         None

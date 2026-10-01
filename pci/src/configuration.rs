@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::{mem, result};
 
 use byteorder::{ByteOrder, LittleEndian};
-use log::{info, warn};
+use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_device::PciBarType;
@@ -825,7 +825,7 @@ impl PciConfiguration {
         if let Some(r) = self.registers.get_mut(reg_idx) {
             *r = (*r & !self.writable_bits[reg_idx]) | (value & mask);
         } else {
-            warn!("bad PCI register write {reg_idx}");
+            debug!("bad PCI register write {reg_idx}");
         }
     }
 
@@ -835,7 +835,7 @@ impl PciConfiguration {
             0 => 0,
             2 => 16,
             _ => {
-                warn!("bad PCI config write offset {offset}");
+                debug!("bad PCI config write offset {offset}");
                 return;
             }
         };
@@ -847,7 +847,7 @@ impl PciConfiguration {
             let shifted_value = (u32::from(value) << shift) & writable_mask;
             *r = *r & !mask | shifted_value;
         } else {
-            warn!("bad PCI config write offset {offset}");
+            debug!("bad PCI config write offset {offset}");
         }
     }
 
@@ -871,7 +871,7 @@ impl PciConfiguration {
             let shifted_value = (u32::from(value) << shift) & writable_mask;
             *r = *r & !mask | shifted_value;
         } else {
-            warn!("bad PCI config write offset {offset}");
+            debug!("bad PCI config write offset {offset}");
         }
     }
 

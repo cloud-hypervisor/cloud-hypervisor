@@ -590,7 +590,7 @@ impl PvmemcontrolBusDevice {
         let request: PvmemcontrolReq = if let Ok(x) = self.mem.memory().read_obj(guest_addr) {
             x
         } else {
-            warn!("cannot read from guest address {:#x}", guest_addr.0);
+            debug!("cannot read from guest address {:#x}", guest_addr.0);
             return;
         };
 
@@ -603,14 +603,14 @@ impl PvmemcontrolBusDevice {
         };
 
         if self.mem.memory().write_obj(response, guest_addr).is_err() {
-            warn!("cannot write to guest address {:#x}", guest_addr.0);
+            debug!("cannot write to guest address {:#x}", guest_addr.0);
         }
     }
 
     fn handle_guest_write(&self, offset: u64, data: &[u8]) {
         if offset as usize != mem::offset_of!(PvmemcontrolTransport, command) {
             if data.len() != 4 && data.len() != 8 {
-                warn!("guest write is not 4 or 8 bytes long");
+                debug!("guest write is not 4 or 8 bytes long");
                 return;
             }
             self.dev.write().unwrap().write_transport(offset, data);
@@ -623,7 +623,7 @@ impl PvmemcontrolBusDevice {
                 .for_each(|(d, data)| *d = *data);
             d
         } else {
-            warn!("guest write with non u32 at command register");
+            debug!("guest write with non u32 at command register");
             return;
         };
         let data_cmd = u32::from_le_bytes(data);

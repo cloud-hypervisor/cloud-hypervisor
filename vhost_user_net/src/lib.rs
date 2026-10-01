@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::{io, process, result};
 
 use libc::EFD_NONBLOCK;
-use log::{error, warn};
+use log::{debug, error};
 use net_util::{
     MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TxVirtio, VirtioNetConfig,
     open_tap,
@@ -322,7 +322,7 @@ impl VhostUserBackendMut for VhostUserNetBackend {
             if let Some(subset) = subset {
                 subset.to_vec()
             } else {
-                warn!("Invalid config offset {offset} or size {size}");
+                debug!("Invalid config offset {offset} or size {size}");
                 vec![]
             }
         } else {

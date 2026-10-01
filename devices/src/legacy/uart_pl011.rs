@@ -414,7 +414,7 @@ impl BusDevice for Pl011 {
         if read_ok && data.len() <= 4 {
             write_le_u32(data, v);
         } else {
-            warn!(
+            debug!(
                 "Invalid PL011 read: offset {}, data length {}",
                 offset,
                 data.len()
@@ -429,7 +429,7 @@ impl BusDevice for Pl011 {
                 warn!("Failed to write to PL011 device: {e}");
             }
         } else {
-            warn!(
+            debug!(
                 "Invalid PL011 write: offset {offset}, data length {}",
                 data.len()
             );

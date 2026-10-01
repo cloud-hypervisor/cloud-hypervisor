@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use std::{io, thread};
 
 use acpi_tables::{Aml, AmlSink, aml};
-use log::{error, info, warn};
+use log::{debug, error, info};
 use vm_device::BusDevice;
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_memory::GuestAddress;
@@ -46,7 +46,7 @@ impl BusDevice for AcpiShutdownDevice {
     // Spec has all fields as zero
     fn read(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {
         if data.len() != 1 {
-            warn!("Invalid sized read of ACPI shutdown device: {}", data.len());
+            debug!("Invalid sized read of ACPI shutdown device: {}", data.len());
             return;
         }
         data.fill(0);
@@ -54,7 +54,7 @@ impl BusDevice for AcpiShutdownDevice {
 
     fn write(&mut self, _base: u64, _offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         if data.len() != 1 {
-            warn!(
+            debug!(
                 "Invalid sized write of ACPI shutdown device: {}",
                 data.len()
             );
@@ -131,7 +131,7 @@ impl BusDevice for AcpiGedDevice {
     // Spec has all fields as zero
     fn read(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {
         if data.len() != 1 {
-            warn!("Invalid sized read of ACPI GED device: {}", data.len());
+            debug!("Invalid sized read of ACPI GED device: {}", data.len());
             return;
         }
         data[0] = self.notification_type.bits();
@@ -251,7 +251,7 @@ impl Default for AcpiPmTimerDevice {
 impl BusDevice for AcpiPmTimerDevice {
     fn read(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {
         if data.len() != size_of::<u32>() {
-            warn!("Invalid sized read of PM timer: {}", data.len());
+            debug!("Invalid sized read of PM timer: {}", data.len());
             return;
         }
         let now = Instant::now();
