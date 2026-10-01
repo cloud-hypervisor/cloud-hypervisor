@@ -798,7 +798,16 @@ impl BusDevice for FwCfg {
         let size = data.len();
         match (offset, size) {
             (FW_CFG_SELECTOR_REGISTER_OFFSET, _) => {
-                error!("fw_cfg: selector register is write-only.");
+                #[cfg(target_arch = "x86_64")]
+                // The selector register is specified as write-only. QEMU’s combined PIO region
+                // treats a 1-byte read at this offset as a data read. Bypass to mimic QEMU quirk.
+                self.read_data(data, size as u32);
+                #[cfg(not(target_arch = "x86_64"))]
+                {
+                    error!("fw_cfg: selector register is write-only.");
+                    // Return zero, matching QEMU’s rejected MMIO read result.
+                    data.fill(0x0);
+                }
             }
             (FW_CFG_DATA_REGISTER_OFFSET, _) => _ = self.read_data(data, size as u32),
             (FW_CFG_DMA_HI_REGISTER_OFFSET, 4) => {
@@ -1319,5 +1328,24 @@ mod tests {
         fw_cfg.read(0, FW_CFG_DMA_LO_REGISTER_OFFSET, &mut buff);
         assert_eq!(fw_cfg.data_offset, 0);
         assert_eq!(buff, [0x0; 16]);
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn test_register_qemu_selector_read_quirk() {
+        // While defined as write-only, QEMU uses a port-mapping that leaves the selector register
+        // readable. For full compatibility we also allow reading from the selector register as a
+        // quirk.
+        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(GuestMemoryMmap::new()));
+        fw_cfg.write(
+            0,
+            FW_CFG_SELECTOR_REGISTER_OFFSET,
+            &[FW_CFG_SIGNATURE as u8, 0],
+        );
+        // One-byte read returns actual data.
+        let mut buff = [0xEF; 1];
+        fw_cfg.read(0, FW_CFG_SELECTOR_REGISTER_OFFSET, &mut buff);
+        assert_eq!(fw_cfg.data_offset, 1);
+        assert_eq!(buff, [b'Q']);
     }
 }
