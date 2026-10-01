@@ -33,6 +33,7 @@ List of experimental features:
 - TDX
 - vfio-user
 - vDPA
+- Emulated ARM SMMUv3
 
 ### Security
 
@@ -78,4 +79,3 @@ E - EOL
 
 Snapshot/restore support is not compatible across `MAJOR` versions.
 Live migration support is not compatible across `MAJOR` versions.
-
