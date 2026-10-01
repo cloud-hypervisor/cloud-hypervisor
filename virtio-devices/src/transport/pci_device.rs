@@ -15,7 +15,7 @@ use std::{cmp, io, result};
 
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use pci::{
     BarReprogrammingParams, MaybeMutInterruptSourceGroup, MsixCap, MsixConfig, PciBarConfiguration,
     PciBarRegionType, PciCapability, PciCapabilityId, PciClassCode, PciConfiguration, PciDevice,
@@ -1263,7 +1263,7 @@ impl PciDevice for VirtioPciDevice {
                     }
                 }
                 if !signalled {
-                    warn!("Notification BAR write matched no queue: offset = 0x{o:x}");
+                    debug!("Notification BAR write matched no queue: offset = 0x{o:x}");
                 }
             }
             o if (MSIX_TABLE_BAR_OFFSET..MSIX_TABLE_BAR_OFFSET + MSIX_TABLE_SIZE).contains(&o) => {

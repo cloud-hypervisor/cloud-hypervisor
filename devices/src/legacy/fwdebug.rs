@@ -9,7 +9,7 @@
 
 use std::sync::{Arc, Barrier};
 
-use log::error;
+use log::debug;
 use vm_device::BusDevice;
 
 /// Provides firmware debug output via I/O port controls
@@ -29,7 +29,7 @@ impl BusDevice for FwDebugDevice {
         if data.len() == 1 {
             data[0] = 0xe9;
         } else {
-            error!("Invalid read size on debug port: {}", data.len());
+            debug!("Invalid read size on debug port: {}", data.len());
         }
     }
 
@@ -37,7 +37,7 @@ impl BusDevice for FwDebugDevice {
         if data.len() == 1 {
             print!("{}", data[0] as char);
         } else {
-            error!("Invalid write size on debug port: {}", data.len());
+            debug!("Invalid write size on debug port: {}", data.len());
         }
 
         None

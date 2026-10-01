@@ -13,7 +13,7 @@ use std::result;
 use std::sync::{Arc, Barrier};
 
 use byteorder::{ByteOrder, LittleEndian};
-use log::{debug, error, trace, warn};
+use log::{debug, error, trace};
 use serde::{Deserialize, Serialize};
 use vm_device::BusDevice;
 use vm_device::interrupt::{
@@ -148,7 +148,7 @@ pub struct IoapicState {
 impl BusDevice for Ioapic {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
         if data.len() != size_of::<u32>() {
-            warn!("Invalid read size on IOAPIC: {}", data.len());
+            debug!("Invalid read size on IOAPIC: {}", data.len());
             return;
         }
 
@@ -158,7 +158,7 @@ impl BusDevice for Ioapic {
             IOREGSEL_OFF => self.reg_sel,
             IOWIN_OFF => self.ioapic_read(),
             _ => {
-                error!("IOAPIC: failed reading at offset {offset}");
+                debug!("IOAPIC: failed reading at offset {offset}");
                 return;
             }
         };
@@ -168,7 +168,7 @@ impl BusDevice for Ioapic {
 
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         if data.len() != size_of::<u32>() {
-            warn!("Invalid write size on IOAPIC: {}", data.len());
+            debug!("Invalid write size on IOAPIC: {}", data.len());
             return None;
         }
 
@@ -180,7 +180,7 @@ impl BusDevice for Ioapic {
             IOREGSEL_OFF => self.reg_sel = value,
             IOWIN_OFF => self.ioapic_write(value),
             _ => {
-                error!("IOAPIC: failed writing at offset {offset}");
+                debug!("IOAPIC: failed writing at offset {offset}");
             }
         }
         None
@@ -267,7 +267,7 @@ impl Ioapic {
             IOWIN_OFF..=REG_MAX_OFFSET => {
                 let (index, is_high_bits) = decode_irq_from_selector(self.reg_sel as u8);
                 if index > NUM_IOAPIC_PINS {
-                    warn!("IOAPIC index out of range: {index}");
+                    debug!("IOAPIC index out of range: {index}");
                     return;
                 }
                 if is_high_bits {
@@ -288,7 +288,7 @@ impl Ioapic {
                 // Store the information this IRQ is now being used.
                 self.used_entries[index] = true;
             }
-            _ => error!(
+            _ => debug!(
                 "IOAPIC: invalid write to register offset 0x{:x}",
                 self.reg_sel
             ),
@@ -304,7 +304,7 @@ impl Ioapic {
             IOWIN_OFF..=REG_MAX_OFFSET => {
                 let (index, is_high_bits) = decode_irq_from_selector(self.reg_sel as u8);
                 if index > NUM_IOAPIC_PINS {
-                    warn!("IOAPIC index out of range: {index}");
+                    debug!("IOAPIC index out of range: {index}");
                     return 0;
                 }
                 if is_high_bits {
@@ -314,7 +314,7 @@ impl Ioapic {
                 }
             }
             _ => {
-                error!(
+                debug!(
                     "IOAPIC: invalid read from register offset 0x{:x}",
                     self.reg_sel
                 );

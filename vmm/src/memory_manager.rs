@@ -566,7 +566,7 @@ impl BusDevice for MemoryManager {
                     }
                 }
                 _ => {
-                    warn!("Unexpected offset for accessing memory manager device: {offset:#}");
+                    debug!("Unexpected offset for accessing memory manager device: {offset:#}");
                 }
             }
         } else {
@@ -599,7 +599,7 @@ impl BusDevice for MemoryManager {
                 }
             }
             _ => {
-                warn!("Unexpected offset for accessing memory manager device: {offset:#}");
+                debug!("Unexpected offset for accessing memory manager device: {offset:#}");
             }
         }
         None

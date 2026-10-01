@@ -10,7 +10,7 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::{io, result};
 
 use anyhow::anyhow;
-use log::{debug, error, warn};
+use log::{debug, error};
 use pci::{
     BarReprogrammingParams, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable,
     PciBarRegionType, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType,
@@ -340,16 +340,16 @@ impl PciDevice for IvshmemDevice {
                 data.fill(0);
             }
             // bar 2
-            1 => warn!("Unexpected read ivshmem memory idx: {offset}"),
+            1 => debug!("Unexpected read ivshmem memory idx: {offset}"),
             _ => {
-                warn!("Invalid bar_idx: {bar_idx}");
+                debug!("Invalid bar_idx: {bar_idx}");
             }
         }
     }
 
     fn write_bar(&mut self, base: u64, offset: u64, _data: &[u8]) -> Option<Arc<Barrier>> {
         debug!("write base {base:x} offset {offset}");
-        warn!("Unexpected write ivshmem memory idx: {offset}");
+        debug!("Unexpected write ivshmem memory idx: {offset}");
         None
     }
 
