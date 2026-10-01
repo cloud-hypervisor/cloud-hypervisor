@@ -700,11 +700,7 @@ impl Snapshottable for Vcpu {
 }
 
 impl Vcpu {
-    fn restore(
-        &self,
-        #[cfg_attr(not(target_arch = "aarch64"), allow(unused_variables))] vm: &dyn hypervisor::Vm,
-        snapshot: &Snapshot,
-    ) -> result::Result<(), MigratableError> {
+    fn restore(&self, snapshot: &Snapshot) -> result::Result<(), MigratableError> {
         let state: CpuState = snapshot.to_state().map_err(|e| {
             MigratableError::Restore(anyhow!("Could not get vCPU state from snapshot {e:?}"))
         })?;
@@ -713,13 +709,11 @@ impl Vcpu {
         {
             let restore_err =
                 |e: Error| MigratableError::Restore(anyhow!("Could not prepare the vCPU {e:?}"));
-            self.init(vm).map_err(restore_err)?;
+
             let pre_finalize = state.pre_finalize_regs();
-            if !pre_finalize.is_empty() {
-                self.vcpu
-                    .set_pre_finalize_regs(pre_finalize)
-                    .map_err(|e| restore_err(Error::VcpuSetPreFinalizeRegs(e)))?;
-            }
+            self.vcpu
+                .set_pre_finalize_regs(pre_finalize)
+                .map_err(|e| restore_err(Error::VcpuSetPreFinalizeRegs(e)))?;
             self.finalize_sve().map_err(restore_err)?;
             self.verify_mpidr();
         }
@@ -1033,7 +1027,10 @@ impl CpuManager {
         )?;
 
         if let Some(snapshot) = snapshot {
-            vcpu.restore(self.vm.as_ref(), snapshot)
+            #[cfg(target_arch = "aarch64")]
+            vcpu.init(self.vm.as_ref())?;
+
+            vcpu.restore(snapshot)
                 .map_err(|e| Error::VcpuCreate(e.into()))?;
         }
 
