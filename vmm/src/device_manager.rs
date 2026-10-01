@@ -1657,7 +1657,7 @@ impl DeviceManager {
             self.reserve_explicit_device_ids()?;
 
             for handle in self.virtio_devices.clone() {
-                let mapping: Option<Arc<IommuMapping>> = if handle.pci_common.iommu {
+                let mapping: Option<Arc<IommuMapping>> = if handle.pci_common.iommu.attached() {
                     self.iommu_mapping.clone()
                 } else {
                     None
@@ -1678,7 +1678,7 @@ impl DeviceManager {
                 // Track device BDF for Generic Initiator support
                 self.device_id_to_bdf.insert(id, dev_id);
 
-                if handle.pci_common.iommu {
+                if handle.pci_common.iommu.attached() {
                     iommu_attached_devices.push(dev_id);
                 }
             }
@@ -2431,7 +2431,7 @@ impl DeviceManager {
                 .resize_pipe
                 .as_ref()
                 .map(|p| p.try_clone().unwrap()),
-            self.force_access_platform | console_config.pci_common.iommu,
+            self.force_access_platform | console_config.pci_common.iommu.attached(),
             self.seccomp_action.clone(),
             self.exit_evt
                 .try_clone()
@@ -2763,7 +2763,7 @@ impl DeviceManager {
                     .ok_or(DeviceManagerError::NoDiskPath)?
                     .clone(),
                 disk_cfg.readonly,
-                self.force_access_platform | disk_cfg.pci_common.iommu,
+                self.force_access_platform | disk_cfg.pci_common.iommu.attached(),
                 disk_cfg.num_queues,
                 disk_cfg.queue_size,
                 disk_cfg.serial.clone(),
@@ -2902,7 +2902,7 @@ impl DeviceManager {
                         guest_mac,
                         net_cfg.host_mac,
                         net_cfg.mtu,
-                        self.force_access_platform | net_cfg.pci_common.iommu,
+                        self.force_access_platform | net_cfg.pci_common.iommu.attached(),
                         net_cfg.num_queues,
                         net_cfg.queue_size,
                         self.seccomp_action.clone(),
@@ -2923,7 +2923,7 @@ impl DeviceManager {
                     fds,
                     guest_mac,
                     net_cfg.mtu,
-                    self.force_access_platform | net_cfg.pci_common.iommu,
+                    self.force_access_platform | net_cfg.pci_common.iommu.attached(),
                     net_cfg.queue_size,
                     self.seccomp_action.clone(),
                     net_cfg.rate_limiter_config,
@@ -2953,7 +2953,7 @@ impl DeviceManager {
                         guest_mac,
                         net_cfg.host_mac,
                         net_cfg.mtu,
-                        self.force_access_platform | net_cfg.pci_common.iommu,
+                        self.force_access_platform | net_cfg.pci_common.iommu.attached(),
                         net_cfg.num_queues,
                         net_cfg.queue_size,
                         self.seccomp_action.clone(),
@@ -3024,7 +3024,7 @@ impl DeviceManager {
                 virtio_devices::Rng::new(
                     id.clone(),
                     rng_path,
-                    self.force_access_platform | rng_config.pci_common.iommu,
+                    self.force_access_platform | rng_config.pci_common.iommu.attached(),
                     self.seccomp_action.clone(),
                     self.exit_evt
                         .try_clone()
@@ -3072,7 +3072,7 @@ impl DeviceManager {
         let virtio_rtc_device = Arc::new(Mutex::new(
             virtio_devices::Rtc::new(
                 id.clone(),
-                self.force_access_platform | rtc_config.pci_common.iommu,
+                self.force_access_platform | rtc_config.pci_common.iommu.attached(),
                 self.seccomp_action.clone(),
                 self.exit_evt
                     .try_clone()
@@ -3389,7 +3389,7 @@ impl DeviceManager {
                 file,
                 GuestAddress(region_base),
                 mapping,
-                self.force_access_platform | pmem_cfg.pci_common.iommu,
+                self.force_access_platform | pmem_cfg.pci_common.iommu.attached(),
                 self.seccomp_action.clone(),
                 self.exit_evt
                     .try_clone()
@@ -3460,7 +3460,7 @@ impl DeviceManager {
                 vsock_cfg.cid,
                 vsock_cfg.socket.clone(),
                 backend,
-                self.force_access_platform | vsock_cfg.pci_common.iommu,
+                self.force_access_platform | vsock_cfg.pci_common.iommu.attached(),
                 self.seccomp_action.clone(),
                 self.exit_evt
                     .try_clone()
@@ -3629,7 +3629,7 @@ impl DeviceManager {
                     balloon_config.size,
                     balloon_config.deflate_on_oom,
                     balloon_config.free_page_reporting,
-                    self.force_access_platform | balloon_config.pci_common.iommu,
+                    self.force_access_platform | balloon_config.pci_common.iommu.attached(),
                     self.seccomp_action.clone(),
                     self.exit_evt
                         .try_clone()
@@ -3979,7 +3979,7 @@ impl DeviceManager {
         // container/group. The VFIO cdev and iommufd do not have such a
         // limitation, and this will be revised once we have VFIO cdev and
         // iommufd support.
-        let vfio_ops = if device_cfg.pci_common.iommu {
+        let vfio_ops = if device_cfg.pci_common.iommu.attached() {
             let vfio_ops = self.create_vfio_ops()?;
 
             let vfio_mapping = Arc::new(VfioDmaMapping::new(
@@ -4148,7 +4148,7 @@ impl DeviceManager {
             Arc::clone(&self.msi_interrupt_manager)
                 as Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
             legacy_interrupt_group,
-            device_cfg.pci_common.iommu,
+            device_cfg.pci_common.iommu.attached(),
             vfio_p2p_dma,
             pci_device_bdf,
             memory_slot_allocator,
@@ -4208,7 +4208,7 @@ impl DeviceManager {
         )?;
 
         #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
-        if !device_cfg.pci_common.iommu {
+        if !device_cfg.pci_common.iommu.attached() {
             self.shared_vfio_devices += 1;
         }
 
@@ -4311,7 +4311,7 @@ impl DeviceManager {
         if let Some(device_list_cfg) = &mut devices {
             for device_cfg in device_list_cfg.iter_mut() {
                 let (device_id, _) = self.add_passthrough_device(device_cfg, snapshot)?;
-                if device_cfg.pci_common.iommu && self.iommu_device.is_some() {
+                if device_cfg.pci_common.iommu.attached() && self.iommu_device.is_some() {
                     iommu_attached_device_ids.push(device_id);
                 }
             }
@@ -4846,7 +4846,7 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::UpdateMemoryForVirtioDevice)?;
 
             if let Some(dma_handler) = &handle.dma_handler
-                && !handle.pci_common.iommu
+                && !handle.pci_common.iommu.attached()
             {
                 let gpa = new_region.start_addr().0;
                 let size = new_region.len();
@@ -4923,7 +4923,8 @@ impl DeviceManager {
     ) -> DeviceManagerResult<PciDeviceInfo> {
         self.validate_identifier(&device_cfg.pci_common.id)?;
 
-        if device_cfg.pci_common.iommu && !self.is_iommu_segment(device_cfg.pci_common.pci_segment)
+        if device_cfg.pci_common.iommu.attached()
+            && !self.is_iommu_segment(device_cfg.pci_common.pci_segment)
         {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
@@ -5394,7 +5395,7 @@ impl DeviceManager {
         // for instance.
         self.virtio_devices.push(handle.clone());
 
-        let mapping: Option<Arc<IommuMapping>> = if handle.pci_common.iommu {
+        let mapping: Option<Arc<IommuMapping>> = if handle.pci_common.iommu.attached() {
             self.iommu_mapping.clone()
         } else {
             None
@@ -5438,7 +5439,9 @@ impl DeviceManager {
     pub fn add_disk(&mut self, disk_cfg: &mut DiskConfig) -> DeviceManagerResult<PciDeviceInfo> {
         self.validate_identifier(&disk_cfg.pci_common.id)?;
 
-        if disk_cfg.pci_common.iommu && !self.is_iommu_segment(disk_cfg.pci_common.pci_segment) {
+        if disk_cfg.pci_common.iommu.attached()
+            && !self.is_iommu_segment(disk_cfg.pci_common.pci_segment)
+        {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
 
@@ -5466,7 +5469,9 @@ impl DeviceManager {
     pub fn add_pmem(&mut self, pmem_cfg: &mut PmemConfig) -> DeviceManagerResult<PciDeviceInfo> {
         self.validate_identifier(&pmem_cfg.pci_common.id)?;
 
-        if pmem_cfg.pci_common.iommu && !self.is_iommu_segment(pmem_cfg.pci_common.pci_segment) {
+        if pmem_cfg.pci_common.iommu.attached()
+            && !self.is_iommu_segment(pmem_cfg.pci_common.pci_segment)
+        {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
 
@@ -5477,7 +5482,9 @@ impl DeviceManager {
     pub fn add_net(&mut self, net_cfg: &mut NetConfig) -> DeviceManagerResult<PciDeviceInfo> {
         self.validate_identifier(&net_cfg.pci_common.id)?;
 
-        if net_cfg.pci_common.iommu && !self.is_iommu_segment(net_cfg.pci_common.pci_segment) {
+        if net_cfg.pci_common.iommu.attached()
+            && !self.is_iommu_segment(net_cfg.pci_common.pci_segment)
+        {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
 
@@ -5488,7 +5495,9 @@ impl DeviceManager {
     pub fn add_vdpa(&mut self, vdpa_cfg: &mut VdpaConfig) -> DeviceManagerResult<PciDeviceInfo> {
         self.validate_identifier(&vdpa_cfg.pci_common.id)?;
 
-        if vdpa_cfg.pci_common.iommu && !self.is_iommu_segment(vdpa_cfg.pci_common.pci_segment) {
+        if vdpa_cfg.pci_common.iommu.attached()
+            && !self.is_iommu_segment(vdpa_cfg.pci_common.pci_segment)
+        {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
 
@@ -5499,7 +5508,9 @@ impl DeviceManager {
     pub fn add_vsock(&mut self, vsock_cfg: &mut VsockConfig) -> DeviceManagerResult<PciDeviceInfo> {
         self.validate_identifier(&vsock_cfg.pci_common.id)?;
 
-        if vsock_cfg.pci_common.iommu && !self.is_iommu_segment(vsock_cfg.pci_common.pci_segment) {
+        if vsock_cfg.pci_common.iommu.attached()
+            && !self.is_iommu_segment(vsock_cfg.pci_common.pci_segment)
+        {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
 
