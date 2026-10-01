@@ -13792,6 +13792,79 @@ mod vfio {
 mod aarch64_acpi {
     use crate::*;
 
+    fn test_direct_kernel_boot(acpi: bool) {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(2);
+        let cmdline = format!(
+            "{DIRECT_KERNEL_BOOT_CMDLINE} acpi={}",
+            if acpi { "on" } else { "off" }
+        );
+        let mut child = GuestCommand::new(&guest)
+            .default_cpus()
+            .default_memory()
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", &cmdline])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            assert_eq!(guest.get_cpu_count().unwrap(), 2);
+            assert!(guest.get_total_memory().unwrap() > 400_000);
+
+            let systab = guest
+                .ssh_command("sudo cat /sys/firmware/efi/systab")
+                .unwrap();
+            for table in ["ACPI20=", "SMBIOS3="] {
+                assert!(
+                    systab.lines().any(|line| line.starts_with(table)),
+                    "Missing {table} in EFI configuration tables: {systab}"
+                );
+            }
+            assert_eq!(
+                guest
+                    .ssh_command("cat /sys/class/dmi/id/sys_vendor")
+                    .unwrap()
+                    .trim(),
+                "Cloud Hypervisor"
+            );
+
+            if acpi {
+                guest
+                    .ssh_command("test -f /sys/firmware/acpi/tables/DSDT")
+                    .unwrap();
+                guest
+                    .ssh_command("test ! -d /sys/firmware/devicetree/base")
+                    .unwrap();
+            } else {
+                guest.ssh_command("test ! -d /sys/firmware/acpi").unwrap();
+                assert!(
+                    guest
+                        .ssh_command("cat /sys/class/rtc/rtc0/name")
+                        .unwrap()
+                        .starts_with("rtc-pl031 ")
+                );
+            }
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_direct_kernel_boot_acpi() {
+        test_direct_kernel_boot(true);
+    }
+
+    #[test]
+    fn test_direct_kernel_boot_acpi_off() {
+        test_direct_kernel_boot(false);
+    }
+
     fn kvm_exposes_split_l1_cache() -> bool {
         const CTR_EL0_IDC: u64 = 1 << 28;
         const CTR_EL0_DIC: u64 = 1 << 29;
