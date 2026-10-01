@@ -26,6 +26,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd};
 #[cfg(not(target_arch = "riscv64"))]
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 #[cfg(not(target_arch = "riscv64"))]
 use std::time::Instant;
@@ -86,7 +87,8 @@ use log::{debug, error, info, warn};
 use net_util::MacAddr;
 use pci::{
     DeviceRelocation, MmioRegion, PciBarConfiguration, PciBarRegionType, PciBdf, PciDevice,
-    VfioDmaMapping, VfioPciDevice, VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError,
+    VfioDmaMapping, VfioPciDevice, VfioUserClient, VfioUserDmaMapping, VfioUserPciDevice,
+    VfioUserPciDeviceError,
 };
 use rate_limiter::group;
 use rate_limiter::group::RateLimiterGroup;
@@ -1049,6 +1051,8 @@ pub struct DeviceManager {
     // Possible handle to the virtio-mem device
     virtio_mem_devices: Vec<Arc<Mutex<virtio_devices::Mem>>>,
 
+    vfio_user_reconnect_disabled: Vec<Arc<AtomicBool>>,
+
     #[cfg(target_arch = "aarch64")]
     // GPIO device for AArch64
     gpio_device: Option<Arc<Mutex<legacy::Gpio>>>,
@@ -1369,6 +1373,7 @@ impl DeviceManager {
             serial_manager: None,
             original_termios_opt: Arc::new(Mutex::new(None)),
             virtio_mem_devices: Vec::new(),
+            vfio_user_reconnect_disabled: Vec::new(),
             #[cfg(target_arch = "aarch64")]
             gpio_device: None,
             #[cfg(feature = "pvmemcontrol")]
@@ -4358,9 +4363,11 @@ impl DeviceManager {
             };
 
         let client = Arc::new(Mutex::new(
-            vfio_user::Client::new(&device_cfg.socket)
+            VfioUserClient::new(&device_cfg.socket)
                 .map_err(DeviceManagerError::VfioUserCreateClient)?,
         ));
+        self.vfio_user_reconnect_disabled
+            .push(client.lock().unwrap().reconnect_disabled());
 
         let memory_manager = Arc::clone(&self.memory_manager);
 
@@ -4439,6 +4446,14 @@ impl DeviceManager {
         )?;
 
         Ok((pci_device_bdf, vfio_user_name))
+    }
+
+    /// Stops vfio-user accesses from waiting for a backend that went away, so
+    /// that the vCPUs blocked in them can be joined.
+    pub fn disable_vfio_user_reconnect(&self) {
+        for reconnect_disabled in &self.vfio_user_reconnect_disabled {
+            reconnect_disabled.store(true, Ordering::Relaxed);
+        }
     }
 
     fn add_user_devices(
