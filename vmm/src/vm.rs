@@ -1865,8 +1865,8 @@ impl Vm {
     #[cfg(target_arch = "aarch64")]
     fn configure_system(
         &mut self,
-        _rsdp_addr: Option<GuestAddress>,
-        _entry_addr: EntryPoint,
+        rsdp_addr: Option<GuestAddress>,
+        entry_addr: EntryPoint,
     ) -> Result<()> {
         let cmdline = Self::generate_cmdline(
             self.config.lock().unwrap().payload.as_ref().unwrap(),
@@ -1955,6 +1955,7 @@ impl Vm {
             &self.numa_nodes,
             pmu_supported,
             smbios.as_ref(),
+            rsdp_addr.filter(|_| entry_addr.entry_addr != layout::UEFI_START),
         )
         .map_err(Error::ConfigureSystem)?;
 
