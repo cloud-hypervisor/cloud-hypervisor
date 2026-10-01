@@ -32,6 +32,7 @@ use super::layout::{
     MEM_32BIT_DEVICES_START, MEM_PCI_IO_SIZE, MEM_PCI_IO_START, PCI_HIGH_BASE,
     PCI_MMIO_CONFIG_SIZE_PER_SEGMENT,
 };
+use super::uefi;
 use crate::{NumaNodes, PciSpaceInfo};
 
 // This is a value for uniquely identifying the FDT node declaring the interrupt controller.
@@ -104,6 +105,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
     numa_nodes: &NumaNodes,
     virtio_iommu_bdf: Option<u32>,
     pmu_supported: bool,
+    uefi_mmap_size: Option<u32>,
 ) -> FdtWriterResult<Vec<u8>> {
     // Allocate stuff necessary for the holding the blob.
     let mut fdt = FdtWriter::new().unwrap();
@@ -124,7 +126,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
     fdt.property_u32("interrupt-parent", GIC_PHANDLE)?;
     create_cpu_nodes(&mut fdt, vcpu_mpidr, vcpu_topology, numa_nodes)?;
     create_memory_node(&mut fdt, guest_mem, numa_nodes)?;
-    create_chosen_node(&mut fdt, cmdline, initrd)?;
+    create_chosen_node(&mut fdt, cmdline, initrd, uefi_mmap_size)?;
     create_gic_node(&mut fdt, gic_device)?;
     create_timer_node(&mut fdt)?;
     if pmu_supported {
@@ -489,9 +491,19 @@ fn create_chosen_node(
     fdt: &mut FdtWriter,
     cmdline: &str,
     initrd: &Option<InitramfsConfig>,
+    uefi_mmap_size: Option<u32>,
 ) -> FdtWriterResult<()> {
     let chosen_node = fdt.begin_node("chosen")?;
     fdt.property_string("bootargs", cmdline)?;
+
+    if let Some(size) = uefi_mmap_size {
+        fdt.property_u64("linux,uefi-system-table", super::layout::EFI_TABLES_START.0)?;
+        fdt.property_u64("linux,uefi-mmap-start", uefi::MEMORY_MAP_START.0)?;
+        fdt.property_u32("linux,uefi-mmap-size", size)?;
+        fdt.property_u32("linux,uefi-mmap-desc-size", uefi::MEMORY_DESCRIPTOR_SIZE)?;
+        fdt.property_u32("linux,uefi-mmap-desc-ver", 1)?;
+        fdt.property_u32("linux,uefi-secure-boot", 2)?;
+    }
 
     if let Some(initrd_config) = initrd {
         let initrd_start = initrd_config.address.raw_value();

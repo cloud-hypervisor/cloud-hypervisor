@@ -39,6 +39,7 @@ pub enum Error {
 type Result<T> = result::Result<T, Error>;
 
 pub(super) const MEMORY_MAP_START: GuestAddress = GuestAddress(layout::EFI_TABLES_START.0 + 0x1000);
+pub(super) const MEMORY_DESCRIPTOR_SIZE: u32 = size_of::<MemoryDescriptor>() as u32;
 
 const EFI_CONVENTIONAL_MEMORY: u32 = 7;
 const EFI_ACPI_RECLAIM_MEMORY: u32 = 9;

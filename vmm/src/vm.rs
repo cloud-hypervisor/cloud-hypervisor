@@ -4068,6 +4068,7 @@ mod tests {
             &BTreeMap::new(),
             None,
             true,
+            None,
         )
         .unwrap();
     }
