@@ -178,6 +178,9 @@ const KVM_REG_ARM_TIMER_CNT: u64 = KVM_REG_ARM64
 #[cfg(target_arch = "aarch64")]
 const NANOS_PER_SECOND: u128 = 1_000_000_000;
 
+#[cfg(target_arch = "aarch64")]
+const KVM_CAP_ARM_EL2: u32 = 240;
+
 #[cfg(target_arch = "x86_64")]
 ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
 // kvm-ioctls only exposes the vCPU device-attribute ioctls for aarch64.
@@ -773,6 +776,13 @@ impl KvmVm {
 /// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
 /// ```
 impl vm::Vm for KvmVm {
+    #[cfg(target_arch = "aarch64")]
+    fn has_el2_support(&self) -> bool {
+        self.fd
+            .check_extension_raw(KVM_CAP_ARM_EL2 as libc::c_ulong)
+            > 0
+    }
+
     #[cfg(feature = "sev_snp")]
     fn register_memory_conversion_handler(&self, handler: Arc<dyn vm::MemoryConversionHandler>) {
         self.memory_conversion_handler
@@ -2911,6 +2921,7 @@ impl cpu::Vcpu for KvmVcpu {
         vm: &dyn crate::Vm,
         kvi: &mut crate::VcpuInit,
         id: u32,
+        enable_el2: bool,
     ) -> cpu::Result<()> {
         use std::arch::is_aarch64_feature_detected;
         #[allow(clippy::nonminimal_bool)]
@@ -2921,6 +2932,9 @@ impl cpu::Vcpu for KvmVcpu {
 
         // We already checked that the capability is supported.
         kvm_kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PSCI_0_2;
+        if enable_el2 {
+            kvm_kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_HAS_EL2;
+        }
         if vm
             .as_any()
             .downcast_ref::<KvmVm>()
@@ -3069,13 +3083,24 @@ impl cpu::Vcpu for KvmVcpu {
     /// Configure core registers for a given CPU.
     ///
     #[cfg(target_arch = "aarch64")]
-    fn setup_regs(&self, cpu_id: u32, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
+    fn setup_regs(
+        &self,
+        cpu_id: u32,
+        boot_ip: u64,
+        fdt_start: u64,
+        enable_el2: bool,
+    ) -> cpu::Result<()> {
         // Get the register index of the PSTATE (Processor State) register.
         let pstate = offset_of!(kvm_regs, regs.pstate);
+        let pstate_value = if enable_el2 {
+            regs::PSTATE_FAULT_BITS_64_EL2H
+        } else {
+            regs::PSTATE_FAULT_BITS_64_EL1H
+        };
         self.fd
             .set_one_reg(
                 arm64_core_reg_id!(KVM_REG_SIZE_U64, pstate),
-                &regs::PSTATE_FAULT_BITS_64.to_le_bytes(),
+                &pstate_value.to_le_bytes(),
             )
             .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
 

@@ -516,6 +516,12 @@ pub trait Vm: Send + Sync + Any {
     fn enable_x2apic_api(&self) -> Result<()> {
         unimplemented!("x2Apic is only supported on KVM/Linux hosts")
     }
+
+    #[cfg(target_arch = "aarch64")]
+    /// Returns whether this VM supports exposing EL2 to its vCPUs.
+    fn has_el2_support(&self) -> bool {
+        false
+    }
 }
 
 pub trait VmOps: Send + Sync {
