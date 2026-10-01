@@ -168,7 +168,8 @@ mod tests {
     const TEST_CLUSTER_USED_FLAG: u64 = 1 << 63;
     const TEST_COMPRESSED_FLAG: u64 = 1 << 62;
     const TEST_ZERO_FLAG: u64 = 1;
-    const TEST_OUT_OF_BOUNDS_CLUSTER: u64 = 0x0000_0001_4000_0000;
+    // Past the 16 TiB a one-cluster refcount table covers.
+    const TEST_OUT_OF_BOUNDS_CLUSTER: u64 = 0x0000_2000_0000_0000;
 
     fn read_be_u64_at(file: &mut File, offset: u64) -> u64 {
         let mut bytes = [0u8; 8];
