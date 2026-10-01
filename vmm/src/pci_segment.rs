@@ -482,9 +482,12 @@ impl Aml for PciSegment {
                     // Split range up to serial port PIO
                     #[cfg(target_arch = "x86_64")]
                     &aml::AddressSpace::new_io(0u16, 0x03f7u16, None),
+                    // Split range up to fw_cfg PIO
+                    #[cfg(target_arch = "x86_64")]
+                    &aml::AddressSpace::new_io(0x0400u16, 0x050fu16, None),
                     // Split range up to PCI config PIO
                     #[cfg(target_arch = "x86_64")]
-                    &aml::AddressSpace::new_io(0x0400u16, 0x0cf7u16, None),
+                    &aml::AddressSpace::new_io(0x051cu16, 0x0cf7u16, None),
                     // Remainder
                     #[cfg(target_arch = "x86_64")]
                     &aml::AddressSpace::new_io(0x0d00u16, 0xffffu16, None),
