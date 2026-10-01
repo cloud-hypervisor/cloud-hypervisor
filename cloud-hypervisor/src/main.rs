@@ -1578,22 +1578,6 @@ mod tests {
                 }"#,
                 false,
             ),
-            #[cfg(target_arch = "x86_64")]
-            (
-                vec![
-                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
-                    "--net",
-                    "mac=12:34:56:78:90:ab,host_mac=34:56:78:90:ab:cd,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=2,queue_size=256,iommu=on",
-                ],
-                r#"{
-                    "payload": {"kernel": "/path/to/kernel"},
-                    "net": [
-                        {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 2, "queue_size": 256, "iommu": true}
-                    ],
-                    "iommu": true
-                }"#,
-                true,
-            ),
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
@@ -1743,24 +1727,6 @@ mod tests {
                         {"file": "/path/to/img/1", "size": 1073741824},
                         {"file": "/path/to/img/2", "size": 2147483648}
                     ]
-                }"#,
-                true,
-            ),
-            #[cfg(target_arch = "x86_64")]
-            (
-                vec![
-                    "cloud-hypervisor",
-                    "--kernel",
-                    "/path/to/kernel",
-                    "--pmem",
-                    "file=/path/to/img/1,size=1G,iommu=on",
-                ],
-                r#"{
-                    "payload": {"kernel": "/path/to/kernel"},
-                    "pmem": [
-                        {"file": "/path/to/img/1", "size": 1073741824, "iommu": true}
-                    ],
-                    "iommu": true
                 }"#,
                 true,
             ),
@@ -1967,23 +1933,6 @@ mod tests {
                     "payload": {"kernel": "/path/to/kernel"},
                     "devices": [
                         {"path": "/path/to/device", "iommu": true}
-                    ],
-                    "iommu": true
-                }"#,
-                true,
-            ),
-            (
-                vec![
-                    "cloud-hypervisor",
-                    "--kernel",
-                    "/path/to/kernel",
-                    "--device",
-                    "path=/path/to/device,iommu=on",
-                ],
-                r#"{
-                    "payload": {"kernel": "/path/to/kernel"},
-                    "devices": [
-                        {"path": "/path/to/device", "iommu": true}
                     ]
                 }"#,
                 false,
@@ -2086,22 +2035,6 @@ mod tests {
                     "vsock": {"cid": 123, "socket": "/path/to/sock/1"}
                 }"#,
                 false,
-            ),
-            #[cfg(target_arch = "x86_64")]
-            (
-                vec![
-                    "cloud-hypervisor",
-                    "--kernel",
-                    "/path/to/kernel",
-                    "--vsock",
-                    "cid=123,socket=/path/to/sock/1,iommu=on",
-                ],
-                r#"{
-                    "payload": {"kernel": "/path/to/kernel"},
-                    "vsock": {"cid": 123, "socket": "/path/to/sock/1", "iommu": true},
-                    "iommu": true
-                }"#,
-                true,
             ),
             #[cfg(target_arch = "x86_64")]
             (

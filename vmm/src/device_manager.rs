@@ -1619,7 +1619,7 @@ impl DeviceManager {
                 DEFAULT_IOMMU_ADDRESS_WIDTH_BITS
             };
 
-        let iommu_device = if self.config.lock().unwrap().iommu {
+        let iommu_device = if self.config.lock().unwrap().virtio_iommu_attached() {
             let (device, mapping) = virtio_devices::Iommu::new(
                 iommu_id.clone(),
                 self.seccomp_action.clone(),

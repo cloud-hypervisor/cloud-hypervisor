@@ -875,9 +875,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/NumaConfig"
-        iommu:
-          type: boolean
-          default: false
         watchdog:
           type: boolean
           default: false
