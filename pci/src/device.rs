@@ -37,11 +37,41 @@ pub enum Error {
 pub(crate) type Result<T> = result::Result<T, Error>;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub(crate) struct BarReprogrammingParamsState {
+    pub old_base: u64,
+    pub new_base: u64,
+    pub len: u64,
+    pub region_type: PciBarRegionType,
+}
+
+#[derive(Clone, Copy, Debug)]
 pub struct BarReprogrammingParams {
     pub old_base: u64,
     pub new_base: u64,
     pub len: u64,
     pub region_type: PciBarRegionType,
+}
+
+impl From<BarReprogrammingParams> for BarReprogrammingParamsState {
+    fn from(p: BarReprogrammingParams) -> Self {
+        BarReprogrammingParamsState {
+            old_base: p.old_base,
+            new_base: p.new_base,
+            len: p.len,
+            region_type: p.region_type,
+        }
+    }
+}
+
+impl From<BarReprogrammingParamsState> for BarReprogrammingParams {
+    fn from(s: BarReprogrammingParamsState) -> Self {
+        BarReprogrammingParams {
+            old_base: s.old_base,
+            new_base: s.new_base,
+            len: s.len,
+            region_type: s.region_type,
+        }
+    }
 }
 
 pub trait PciDevice: Send {
