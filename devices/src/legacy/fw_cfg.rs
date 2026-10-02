@@ -159,7 +159,12 @@ impl FwCfgContent {
     fn size(&self) -> Result<u32> {
         let ret = match self {
             FwCfgContent::Bytes(v) => v.len(),
-            FwCfgContent::File(offset, f) => (f.metadata()?.len() - offset) as usize,
+            FwCfgContent::File(offset, f) => {
+                f.metadata()?
+                    .len()
+                    .checked_sub(*offset)
+                    .ok_or(ErrorKind::InvalidData)? as usize
+            }
             FwCfgContent::Slice(s) => s.len(),
             FwCfgContent::U32(n) => size_of_val(n),
         };
@@ -205,20 +210,16 @@ struct AccessControl {
     error: bool,
     // FW_CFG_DMA_CTL_READ = 0x02
     read: bool,
-    #[bits(1)]
-    _unused2: u8,
     // FW_CFG_DMA_CTL_SKIP = 0x04
     skip: bool,
-    #[bits(3)]
-    _unused3: u8,
-    // FW_CFG_DMA_CTL_ERROR = 0x08
+    // FW_CFG_DMA_CTL_SELECT = 0x08
     select: bool,
-    #[bits(7)]
-    _unused4: u8,
     // FW_CFG_DMA_CTL_WRITE = 0x10
     write: bool,
+    #[bits(11)]
+    _unused: u16,
     #[bits(16)]
-    _unused: u32,
+    selector: u16,
 }
 
 #[repr(C)]
@@ -581,6 +582,18 @@ impl FwCfg {
         }
     }
 
+    fn item_size(&self, selector: u16) -> Option<u32> {
+        let content = if let Some(content) = self.known_items.get(selector as usize) {
+            content
+        } else {
+            &self
+                .items
+                .get((selector - FW_CFG_FILE_FIRST) as usize)?
+                .content
+        };
+        content.size().ok()
+    }
+
     fn dma_read(&mut self, selector: u16, len: u32, address: u64) -> Result<()> {
         let op_size = if let Some(content) = self.known_items.get(selector as usize) {
             self.dma_read_content(content, self.data_offset, len, address)
@@ -612,7 +625,8 @@ impl FwCfg {
         };
         let control = AccessControl(u32::from_be(dma_access.control_be));
         if control.select() {
-            self.selector = control.select() as u16;
+            self.selector = control.selector();
+            self.data_offset = 0;
         }
         let len = u32::from_be(dma_access.length_be);
         let addr = u64::from_be(dma_access.address_be);
@@ -621,7 +635,10 @@ impl FwCfg {
         } else if control.write() {
             Err(ErrorKind::InvalidInput.into())
         } else if control.skip() {
-            self.data_offset += len;
+            let size = self.item_size(self.selector).unwrap_or(0);
+            self.data_offset += len.min(size.saturating_sub(self.data_offset));
+            Ok(())
+        } else if control.select() {
             Ok(())
         } else {
             Err(ErrorKind::InvalidData.into())
@@ -1058,5 +1075,160 @@ mod tests {
         }
         let _ = mem.read(&mut data, GuestAddress(code_address));
         assert_eq!(data, code);
+    }
+
+    #[test]
+    fn test_dma_control_bits() {
+        assert_eq!(AccessControl::new().with_error(true).0, 0x01);
+        assert_eq!(AccessControl::new().with_read(true).0, 0x02);
+        assert_eq!(AccessControl::new().with_skip(true).0, 0x04);
+        assert_eq!(AccessControl::new().with_select(true).0, 0x08);
+        assert_eq!(AccessControl::new().with_write(true).0, 0x10);
+        assert_eq!(AccessControl::new().with_selector(0xabcd).0, 0xabcd_0000);
+    }
+
+    const DMA_DESCRIPTOR: GuestAddress = GuestAddress(0x1000);
+    const DMA_BUFFER: GuestAddress = GuestAddress(0x1800);
+
+    fn run_dma(
+        fw_cfg: &mut FwCfg,
+        mem: &GuestMemoryMmap<AtomicBitmap>,
+        control: AccessControl,
+        len: u32,
+    ) -> u32 {
+        let mut access = FwCfgDmaAccess {
+            control_be: control.0.to_be(),
+            length_be: len.to_be(),
+            address_be: DMA_BUFFER.0.to_be(),
+        };
+        mem.write(access.as_mut_bytes(), DMA_DESCRIPTOR).unwrap();
+        let address = DMA_DESCRIPTOR.0.to_be_bytes();
+        #[cfg(target_arch = "aarch64")]
+        fw_cfg.write(0, DMA_OFFSET, &address);
+        #[cfg(target_arch = "x86_64")]
+        {
+            fw_cfg.write(0, DMA_OFFSET, &address[0..4]);
+            fw_cfg.write(0, DMA_OFFSET + 4, &address[4..8]);
+        }
+        let mut status = [0u8; 4];
+        mem.read(&mut status, DMA_DESCRIPTOR).unwrap();
+        u32::from_be_bytes(status)
+    }
+
+    fn dma_buffer(mem: &GuestMemoryMmap<AtomicBitmap>, len: usize) -> Vec<u8> {
+        let mut data = vec![0u8; len];
+        mem.read(&mut data, DMA_BUFFER).unwrap();
+        data
+    }
+
+    #[test]
+    fn test_dma_select_and_skip() {
+        let mem: GuestMemoryMmap<AtomicBitmap> =
+            GuestMemoryMmap::from_ranges(&[(DMA_DESCRIPTOR, 0x1000)]).unwrap();
+        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(mem.clone()));
+        let item_a = FW_CFG_FILE_FIRST;
+        let item_b = FW_CFG_FILE_FIRST + 1;
+        for (name, data) in [
+            ("a", [1, 2, 3, 4, 5, 6, 7, 8]),
+            ("b", [11, 12, 13, 14, 15, 16, 17, 18]),
+        ] {
+            let content = FwCfgContent::Bytes(data.to_vec());
+            fw_cfg
+                .add_item(FwCfgItem {
+                    name: name.to_string(),
+                    content,
+                })
+                .unwrap();
+        }
+        let select = |item| AccessControl::new().with_select(true).with_selector(item);
+        let read = AccessControl::new().with_read(true);
+        let skip = AccessControl::new().with_skip(true);
+        let write = AccessControl::new().with_write(true);
+        let error = AccessControl::new().with_error(true).0;
+
+        #[cfg(target_arch = "aarch64")]
+        fw_cfg.write(0, SELECTOR_OFFSET, &item_a.to_be_bytes());
+        #[cfg(target_arch = "x86_64")]
+        fw_cfg.write(0, SELECTOR_OFFSET, &item_a.to_le_bytes());
+
+        assert_eq!(
+            run_dma(&mut fw_cfg, &mem, select(item_b).with_read(true), 4),
+            0
+        );
+        assert_eq!(dma_buffer(&mem, 4), [11, 12, 13, 14]);
+
+        assert_eq!(run_dma(&mut fw_cfg, &mem, skip, 2), 0);
+        assert_eq!(run_dma(&mut fw_cfg, &mem, read, 2), 0);
+        assert_eq!(dma_buffer(&mem, 2), [17, 18]);
+
+        assert_eq!(
+            run_dma(&mut fw_cfg, &mem, select(item_b).with_read(true), 2),
+            0
+        );
+        assert_eq!(dma_buffer(&mem, 2), [11, 12]);
+
+        assert_eq!(run_dma(&mut fw_cfg, &mem, skip, u32::MAX), 0);
+        assert_eq!(fw_cfg.data_offset, 8);
+
+        assert_eq!(run_dma(&mut fw_cfg, &mem, select(item_a), 0), 0);
+        assert_eq!(run_dma(&mut fw_cfg, &mem, read, 3), 0);
+        assert_eq!(dma_buffer(&mem, 3), [1, 2, 3]);
+
+        assert_eq!(run_dma(&mut fw_cfg, &mem, write, 1), error);
+    }
+
+    #[test]
+    fn test_dma_truncated_file() {
+        let mem: GuestMemoryMmap<AtomicBitmap> =
+            GuestMemoryMmap::from_ranges(&[(DMA_DESCRIPTOR, 0x1000)]).unwrap();
+        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(mem.clone()));
+        let temp = TempFile::new().unwrap();
+        let file = temp.as_file();
+        file.set_len(16).unwrap();
+        let content = FwCfgContent::File(8, file.try_clone().unwrap());
+        fw_cfg
+            .add_item(FwCfgItem {
+                name: "file".to_string(),
+                content,
+            })
+            .unwrap();
+        file.set_len(4).unwrap();
+
+        let select = AccessControl::new()
+            .with_select(true)
+            .with_selector(FW_CFG_FILE_FIRST);
+        let skip = select.with_skip(true);
+        let read = select.with_read(true);
+        let error = AccessControl::new().with_error(true).0;
+        assert_eq!(run_dma(&mut fw_cfg, &mem, skip, 4), 0);
+        assert_eq!(fw_cfg.data_offset, 0);
+        assert_eq!(run_dma(&mut fw_cfg, &mem, read, 4), error);
+    }
+
+    #[test]
+    fn test_dma_skip_after_truncation_keeps_offset() {
+        let mem: GuestMemoryMmap<AtomicBitmap> =
+            GuestMemoryMmap::from_ranges(&[(DMA_DESCRIPTOR, 0x1000)]).unwrap();
+        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(mem.clone()));
+        let temp = TempFile::new().unwrap();
+        let file = temp.as_file();
+        file.set_len(8).unwrap();
+        let content = FwCfgContent::File(0, file.try_clone().unwrap());
+        fw_cfg
+            .add_item(FwCfgItem {
+                name: "file".to_string(),
+                content,
+            })
+            .unwrap();
+
+        let select = AccessControl::new()
+            .with_select(true)
+            .with_selector(FW_CFG_FILE_FIRST);
+        assert_eq!(run_dma(&mut fw_cfg, &mem, select.with_read(true), 6), 0);
+        file.set_len(4).unwrap();
+        let skip = AccessControl::new().with_skip(true);
+        assert_eq!(run_dma(&mut fw_cfg, &mem, skip, 0), 0);
+        assert_eq!(run_dma(&mut fw_cfg, &mem, skip, 2), 0);
+        assert_eq!(fw_cfg.data_offset, 6);
     }
 }
