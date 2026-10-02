@@ -43,6 +43,8 @@ use arch::{NumaNodes, layout};
 use block::ImageType;
 use block::error::BlockError;
 use block::factory::{DiskOpenOptions, open_disk};
+#[cfg(target_arch = "aarch64")]
+use devices::acpi_tad;
 #[cfg(target_arch = "riscv64")]
 use devices::aia;
 #[cfg(target_arch = "x86_64")]
@@ -953,6 +955,9 @@ pub struct DeviceManager {
     // ACPI GED notification device
     ged_notification_device: Option<Arc<Mutex<devices::AcpiGedDevice>>>,
 
+    #[cfg(target_arch = "aarch64")]
+    acpi_tad_device: Option<Arc<Mutex<acpi_tad::AcpiTadDevice>>>,
+
     // VM configuration
     config: Arc<Mutex<VmConfig>>,
 
@@ -1334,6 +1339,8 @@ impl DeviceManager {
             #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
             cmdline_additions: Vec::new(),
             ged_notification_device: None,
+            #[cfg(target_arch = "aarch64")]
+            acpi_tad_device: None,
             config,
             memory_manager,
             cpu_manager,
@@ -2078,6 +2085,28 @@ impl DeviceManager {
                 irq: rtc_irq,
             },
         );
+
+        let tad_address = layout::ACPI_TAD_MAPPED_IO_START;
+        let id = acpi_tad::ACPI_TAD_SNAPSHOT_ID.to_string();
+        let tad_device = Arc::new(Mutex::new(acpi_tad::AcpiTadDevice::new(
+            tad_address,
+            state_from_id(snapshot, &id).map_err(DeviceManagerError::RestoreGetState)?,
+        )));
+        self.device_tree
+            .lock()
+            .unwrap()
+            .insert(id.clone(), device_node!(id, tad_device));
+        self.bus_devices
+            .push(Arc::clone(&tad_device) as Arc<dyn BusDeviceSync>);
+        self.address_manager
+            .mmio_bus
+            .insert(
+                Arc::clone(&tad_device) as Arc<dyn BusDeviceSync>,
+                tad_address.0,
+                acpi_tad::ACPI_TAD_MMIO_SIZE,
+            )
+            .map_err(DeviceManagerError::BusError)?;
+        self.acpi_tad_device = Some(tad_device);
 
         // Add a GPIO device
         let id = String::from(GPIO_DEVICE_NAME);
@@ -5993,6 +6022,14 @@ impl Aml for DeviceManager {
             )
             .to_aml_bytes(sink);
         }
+
+        #[cfg(target_arch = "aarch64")]
+        self.acpi_tad_device
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .to_aml_bytes(sink);
 
         create_s5_sleep_state(sink);
 
