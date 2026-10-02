@@ -27,6 +27,9 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
 
+use super::defs::uapi;
+use super::unix::SEQPACKET_PATH_SUFFIX;
+
 /// This is the `VirtioDevice` implementation for our vsock device. It handles the virtio-level
 /// device logic: feature negotiation, device configuration, and device activation.
 /// The run-time device logic (i.e. event-driven data handling) is implemented by
@@ -349,6 +352,8 @@ pub struct Vsock<B: VsockBackend> {
     cid: u64,
     backend: Arc<RwLock<B>>,
     path: PathBuf,
+    /// Path of the seqpacket listener the backend binds alongside `path`.
+    path_seqpacket: PathBuf,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
 }
@@ -385,13 +390,18 @@ where
             backend.queue_rst_for_connections(state.connections.clone());
             (state.avail_features, state.acked_features, true)
         } else {
-            let mut avail_features = (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_F_IN_ORDER);
+            let mut avail_features = (1u64 << VIRTIO_F_VERSION_1)
+                | (1u64 << VIRTIO_F_IN_ORDER)
+                | (1u64 << uapi::VIRTIO_VSOCK_F_SEQPACKET);
 
             if access_platform_enabled {
                 avail_features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
             }
             (avail_features, 0, false)
         };
+
+        let mut path_seqpacket = path.clone().into_os_string();
+        path_seqpacket.push(SEQPACKET_PATH_SUFFIX);
 
         Ok(Vsock {
             common: VirtioCommon {
@@ -408,6 +418,7 @@ where
             cid: cid.into(),
             backend: Arc::new(RwLock::new(backend)),
             path,
+            path_seqpacket: path_seqpacket.into(),
             seccomp_action,
             exit_evt,
         })
@@ -514,6 +525,7 @@ where
 
     fn shutdown(&mut self) {
         fs::remove_file(&self.path).ok();
+        fs::remove_file(&self.path_seqpacket).ok();
     }
 
     fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
@@ -567,7 +579,9 @@ mod tests {
     #[test]
     fn test_virtio_device() {
         let mut ctx = TestContext::new();
-        let avail_features = (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_F_IN_ORDER);
+        let avail_features = (1u64 << VIRTIO_F_VERSION_1)
+            | (1u64 << VIRTIO_F_IN_ORDER)
+            | (1u64 << uapi::VIRTIO_VSOCK_F_SEQPACKET);
         let device_features = avail_features;
         let driver_features: u64 = avail_features | 1 | (1 << 32);
         let device_pages = [
@@ -660,6 +674,18 @@ mod tests {
                 device_status: Arc::new(AtomicU8::new(0)),
             })
             .unwrap();
+    }
+
+    #[test]
+    fn test_seqpacket_feature_advertised() {
+        // Test case: the device offers VIRTIO_VSOCK_F_SEQPACKET, without which the guest
+        // driver refuses to create SOCK_SEQPACKET sockets.
+        let ctx = TestContext::new();
+        assert_ne!(
+            ctx.device.features() & (1u64 << uapi::VIRTIO_VSOCK_F_SEQPACKET),
+            0,
+            "vsock device should advertise VIRTIO_VSOCK_F_SEQPACKET"
+        );
     }
 
     #[test]

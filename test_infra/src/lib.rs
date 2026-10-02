@@ -18,6 +18,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
+use std::ptr;
 use std::str::FromStr;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
@@ -1085,6 +1086,115 @@ pub fn exec_host_command_with_retries(command: &str, retries: u32, interval: Dur
     false
 }
 
+/// An AF_UNIX SOCK_SEQPACKET socket. std has no such type, so we go through libc, the same way
+/// the vsock unix backend does.
+pub struct SeqpacketSocket {
+    fd: i32,
+}
+
+impl SeqpacketSocket {
+    fn from_fd(fd: i32) -> Self {
+        assert!(fd >= 0, "bad seqpacket fd");
+        Self { fd }
+    }
+
+    fn new_fd() -> i32 {
+        let fd =
+            unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_SEQPACKET | libc::SOCK_CLOEXEC, 0) };
+        assert!(fd >= 0, "socket(): {}", io::Error::last_os_error());
+        fd
+    }
+
+    fn sockaddr(path: &str) -> (libc::sockaddr_un, libc::socklen_t) {
+        let mut addr: libc::sockaddr_un = unsafe { mem::zeroed() };
+        addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
+        let bytes = path.as_bytes();
+        assert!(bytes.len() < addr.sun_path.len(), "socket path too long");
+        for (dst, src) in addr.sun_path.iter_mut().zip(bytes.iter()) {
+            *dst = *src as libc::c_char;
+        }
+        let len = (mem::size_of::<libc::sa_family_t>() + bytes.len() + 1) as libc::socklen_t;
+        (addr, len)
+    }
+
+    pub fn connect(path: &str) -> Self {
+        let fd = Self::new_fd();
+        let (addr, len) = Self::sockaddr(path);
+        let ret = unsafe { libc::connect(fd, ptr::addr_of!(addr).cast::<libc::sockaddr>(), len) };
+        assert!(ret >= 0, "connect({path}): {}", io::Error::last_os_error());
+        Self::from_fd(fd)
+    }
+
+    pub fn send(&self, buf: &[u8]) {
+        let ret = unsafe {
+            libc::send(
+                self.fd,
+                buf.as_ptr().cast::<libc::c_void>(),
+                buf.len(),
+                libc::MSG_NOSIGNAL,
+            )
+        };
+        assert_eq!(
+            ret,
+            buf.len() as isize,
+            "send(): {}",
+            io::Error::last_os_error()
+        );
+    }
+
+    /// Receive one datagram as a string.
+    pub fn recv(&self) -> String {
+        let mut buf = vec![0u8; 64 * 1024];
+        let ret = unsafe {
+            libc::recv(
+                self.fd,
+                buf.as_mut_ptr().cast::<libc::c_void>(),
+                buf.len(),
+                0,
+            )
+        };
+        assert!(ret >= 0, "recv(): {}", io::Error::last_os_error());
+        buf.truncate(ret as usize);
+        String::from_utf8_lossy(&buf).to_string()
+    }
+}
+
+impl Drop for SeqpacketSocket {
+    fn drop(&mut self) {
+        unsafe { libc::close(self.fd) };
+    }
+}
+
+/// A listening AF_UNIX SOCK_SEQPACKET socket, for guest-initiated connections.
+pub struct SeqpacketListener {
+    fd: i32,
+}
+
+impl SeqpacketListener {
+    pub fn bind(path: &str) -> Self {
+        let _ = fs::remove_file(path);
+        let fd = SeqpacketSocket::new_fd();
+        let (addr, len) = SeqpacketSocket::sockaddr(path);
+        let ret = unsafe { libc::bind(fd, ptr::addr_of!(addr).cast::<libc::sockaddr>(), len) };
+        assert!(ret >= 0, "bind({path}): {}", io::Error::last_os_error());
+        let ret = unsafe { libc::listen(fd, 128) };
+        assert!(ret >= 0, "listen(): {}", io::Error::last_os_error());
+        Self { fd }
+    }
+
+    pub fn accept(&self) -> SeqpacketSocket {
+        let ret = unsafe { libc::accept(self.fd, ptr::null_mut(), ptr::null_mut()) };
+        assert!(ret >= 0, "accept(): {}", io::Error::last_os_error());
+        SeqpacketSocket::from_fd(ret)
+    }
+}
+
+impl Drop for SeqpacketListener {
+    fn drop(&mut self) {
+        unsafe { libc::close(self.fd) };
+    }
+}
+
 pub fn exec_host_command_status(command: &str) -> ExitStatus {
     exec_host_command_output(command).status
 }
@@ -1633,6 +1743,76 @@ impl Guest {
         }
 
         Ok(false)
+    }
+
+    /// Host-initiated seqpacket. We connect to the "_seqpacket" listener and the guest reads
+    /// the message off a SOCK_SEQPACKET vsock socket.
+    ///
+    /// The "connect <port>" handshake must be its own datagram. The muxer reads a whole
+    /// datagram for it and drops the rest.
+    pub fn check_vsock_seqpacket(&self, socket: &str) {
+        // Listen from guest on vsock PORT=16. socktype=5 is SOCK_SEQPACKET.
+        let guest_ip = self.network.guest_ip0.clone();
+        let listen_socat = thread::spawn(move || {
+            ssh_command_ip(
+                "sudo socat - vsock-listen:16,socktype=5 > vsock_seq_log",
+                &guest_ip,
+                DEFAULT_SSH_RETRIES,
+                DEFAULT_SSH_TIMEOUT,
+            )
+            .unwrap();
+        });
+
+        // Make sure socat is listening, which might take a few second on slow systems
+        thread::sleep(Duration::new(10, 0));
+
+        let sock = SeqpacketSocket::connect(&format!("{socket}_seqpacket"));
+        sock.send(b"connect 16\n");
+        let reply = sock.recv();
+        assert!(
+            reply.starts_with("OK "),
+            "unexpected handshake reply: {reply:?}"
+        );
+
+        // A second datagram, so the guest sees one message with its boundary intact.
+        sock.send(b"HelloWorld!");
+        drop(sock);
+
+        // Wait for the thread to terminate.
+        listen_socat.join().unwrap();
+
+        assert_eq!(
+            self.ssh_command("cat vsock_seq_log").unwrap().trim(),
+            "HelloWorld!"
+        );
+    }
+
+    /// Guest-initiated seqpacket. The muxer connects out to "<socket>_<port>", so we listen
+    /// there. Two guest sends must arrive as two datagrams.
+    pub fn check_vsock_seqpacket_guest_initiated(&self, socket: &str) {
+        let port = 1234;
+        let listener = SeqpacketListener::bind(&format!("{socket}_{port}"));
+
+        let guest_ip = self.network.guest_ip0.clone();
+        let send_socat = thread::spawn(move || {
+            // Connect to CID=2 (host) PORT=1234 and send two separate messages.
+            ssh_command_ip(
+                "printf 'one' | sudo socat - vsock-connect:2:1234,socktype=5 && \
+                 printf 'two' | sudo socat - vsock-connect:2:1234,socktype=5",
+                &guest_ip,
+                DEFAULT_SSH_RETRIES,
+                DEFAULT_SSH_TIMEOUT,
+            )
+            .unwrap();
+        });
+
+        for expected in ["one", "two"] {
+            let conn = listener.accept();
+            let msg = conn.recv();
+            assert_eq!(msg.trim_end_matches('\n'), expected);
+        }
+
+        send_socat.join().unwrap();
     }
 
     pub fn check_vsock(&self, socket: &str) {
