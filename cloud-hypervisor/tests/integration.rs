@@ -13790,6 +13790,8 @@ mod vfio {
 
 #[cfg(target_arch = "aarch64")]
 mod aarch64_acpi {
+    use std::time::Instant;
+
     use crate::*;
 
     fn test_direct_kernel_boot(acpi: bool) {
@@ -14039,6 +14041,195 @@ mod aarch64_acpi {
 
             handle_child_output(r, &output);
         });
+    }
+
+    #[test]
+    fn test_acpi_tad() {
+        let mut guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        guest.kernel_cmdline = Some(format!(
+            "{DIRECT_KERNEL_BOOT_CMDLINE} acpi=on systemd.mask=systemd-timesyncd.service"
+        ));
+
+        let mut child = GuestCommand::new(&guest)
+            .default_cpus()
+            .default_memory()
+            .default_kernel_cmdline()
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+            for (path, expected) in [
+                ("/sys/class/rtc/rtc0/name", "acpi-tad ACPI000E:00"),
+                ("/sys/class/rtc/rtc0/hctosys", "1"),
+                ("/sys/bus/platform/devices/ACPI000E:00/caps", "0x04"),
+            ] {
+                let value = guest.ssh_command(&format!("cat {path}")).unwrap();
+                assert_eq!(value.trim(), expected, "{path}");
+            }
+
+            let before = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64;
+            let rtc = guest
+                .ssh_command("cat /sys/class/rtc/rtc0/since_epoch")
+                .unwrap()
+                .trim()
+                .parse::<i64>()
+                .unwrap();
+            let after = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64;
+            assert!(
+                (before - 2..=after + 2).contains(&rtc),
+                "RTC time {rtc} does not match host time {before}..={after}"
+            );
+            guest
+                .ssh_command("test ! -e /sys/class/rtc/rtc0/wakealarm")
+                .unwrap();
+
+            // Exercise the epoch, a leap day and the 32-bit seconds rollover.
+            for (date, expected) in [
+                ("1970-01-01 00:00:00", 0),
+                ("2000-02-29 12:34:56", 951_827_696),
+                ("2106-02-07 06:28:16", 4_294_967_296),
+            ] {
+                let start = Instant::now();
+                guest
+                    .ssh_command(&format!(
+                        "sudo hwclock --rtc /dev/rtc0 --utc --noadjfile --set --date '{date}'"
+                    ))
+                    .unwrap();
+                let rtc = guest
+                    .ssh_command("cat /sys/class/rtc/rtc0/since_epoch")
+                    .unwrap()
+                    .trim()
+                    .parse::<i64>()
+                    .unwrap();
+                // Account for hwclock's one-second adjustment and the RTC's
+                // one-second resolution in addition to the elapsed time.
+                let latest = expected + start.elapsed().as_secs() as i64 + 2;
+                assert!(
+                    (expected..=latest).contains(&rtc),
+                    "RTC time {rtc} is outside {expected}..={latest} after setting {date}"
+                );
+            }
+
+            let start = Instant::now();
+            let before = guest
+                .ssh_command("cat /sys/class/rtc/rtc0/since_epoch")
+                .unwrap()
+                .trim()
+                .parse::<i64>()
+                .unwrap();
+            // These values pass the ACPI TAD driver's checks and must be
+            // rejected by the device without changing the clock offset.
+            for invalid in [
+                "2001:2:29:12:34:56:2047:0",
+                "2000:2:29:12:34:56:60:0",
+                "2000:2:29:12:34:56:2047:1",
+            ] {
+                guest
+                    .ssh_command(&format!(
+                        "! echo '{invalid}' | sudo tee \
+                         /sys/bus/platform/devices/ACPI000E:00/time > /dev/null"
+                    ))
+                    .unwrap();
+            }
+            let after = guest
+                .ssh_command("cat /sys/class/rtc/rtc0/since_epoch")
+                .unwrap()
+                .trim()
+                .parse::<i64>()
+                .unwrap();
+            assert!((before..=before + start.elapsed().as_secs() as i64 + 1).contains(&after));
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_acpi_tad_snapshot_restore() {
+        let mut guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        guest.kernel_cmdline = Some(format!(
+            "{DIRECT_KERNEL_BOOT_CMDLINE} acpi=on systemd.mask=systemd-timesyncd.service"
+        ));
+
+        let api_socket = temp_api_path(&guest.tmp_dir);
+        let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket])
+            .default_cpus()
+            .default_memory()
+            .default_kernel_cmdline()
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+            guest
+                .ssh_command(
+                    "sudo hwclock --rtc /dev/rtc0 --utc --noadjfile --set --date '+1 hour'",
+                )
+                .unwrap();
+            assert!(remote_command(&api_socket, "pause", None));
+            assert!(remote_command(
+                &api_socket,
+                "snapshot",
+                Some(&format!("file://{snapshot_dir}")),
+            ));
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        // Exceed the clock tolerance so a frozen RTC fails after restore.
+        thread::sleep(Duration::from_secs(5));
+        let mut child = GuestCommand::new(&guest)
+            .args([
+                "--restore",
+                &format!("source_url=file://{snapshot_dir},resume=on"),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_for_ssh(Duration::from_secs(30)).unwrap();
+            let before = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64;
+            let rtc = guest
+                .ssh_command("cat /sys/class/rtc/rtc0/since_epoch")
+                .unwrap()
+                .trim()
+                .parse::<i64>()
+                .unwrap();
+            let after = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64;
+            assert!(
+                (before + 3600 - 2..=after + 3600 + 2).contains(&rtc),
+                "RTC time {rtc} does not match host time {before}..={after} with offset 3600"
+            );
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
     }
 }
 
