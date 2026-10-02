@@ -8,6 +8,8 @@
 //! Emulates virtual and hardware devices.
 
 pub mod acpi;
+#[cfg(target_arch = "aarch64")]
+pub mod acpi_tad;
 #[cfg(target_arch = "riscv64")]
 pub mod aia;
 #[cfg(target_arch = "x86_64")]
