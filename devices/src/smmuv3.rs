@@ -77,22 +77,24 @@ const IDR0_S1P: u32 = 1 << 1;
 const IDR0_TTF_AARCH64: u32 = 0b10 << 2;
 pub const IDR0_COHACC: u32 = 1 << 4;
 const IDR0_ASID16: u32 = 1 << 12;
-const IDR0_VMID16: u32 = 1 << 18;
 const IDR0_CD2L: u32 = 1 << 19;
 const IDR0_ATS: u32 = 1 << 10;
 const IDR0_TTENDIAN_LE: u32 = 0b10 << 21;
 const IDR0_STALL_MODEL_NONE: u32 = 0b01 << 24;
 const IDR0_STLEVEL_2LVL: u32 = 0b01 << 27;
-const IDR0_HOST_GATED: u32 = IDR0_COHACC | IDR0_ASID16 | IDR0_VMID16 | IDR0_CD2L;
-const IDR0_VALUE: u32 = IDR0_S1P
-    | IDR0_TTF_AARCH64
-    | IDR0_COHACC
-    | IDR0_ASID16
-    | IDR0_VMID16
-    | IDR0_CD2L
-    | IDR0_TTENDIAN_LE
-    | IDR0_STALL_MODEL_NONE
-    | IDR0_STLEVEL_2LVL;
+// Emulation model supported features
+//   S1P:         Stage 1 is programmed by the guest, stage 2 is not exposed.
+//   TTENDIAN:    Translation table walks are little endian only.
+//   STALL_MODEL: Faults terminate the transaction and are never stalled.
+//   STLEVEL:     Stream table walks can have two levels.
+const IDR0_MODEL_FEATURES: u32 =
+    IDR0_S1P | IDR0_TTENDIAN_LE | IDR0_STALL_MODEL_NONE | IDR0_STLEVEL_2LVL;
+// Host features mask
+//   COHACC: Access to tables, structures and queues are coherent.
+//   TTF:    Walk stage 1 tables in the AArch64 format.
+//   ASID16: ASIDs read from Context Descriptor are 16 bits.
+//   CD2L:   Walk two level Context Descriptor table.
+const IDR0_HOST_FEATURES_MASK: u32 = IDR0_COHACC | IDR0_TTF_AARCH64 | IDR0_ASID16 | IDR0_CD2L;
 
 // IDR1 fields
 const IDR1_SIDSIZE: u32 = 16;
@@ -101,7 +103,11 @@ const IDR1_SSIDSIZE_SHIFT: u32 = 6;
 const IDR1_SSIDSIZE_MASK: u32 = 0x1f << IDR1_SSIDSIZE_SHIFT;
 const IDR1_CMDQS: u32 = Q_MAX_LOG2SIZE << 21;
 const IDR1_EVENTQS: u32 = Q_MAX_LOG2SIZE << 16;
-const IDR1_VALUE: u32 = IDR1_SIDSIZE | IDR1_CMDQS | IDR1_EVENTQS;
+// Emulation model supported features
+//   SIDSIZE: StreamIDs are 16 bits.
+//   CMDQS:   Command queue holds Q_MAX_LOG2SIZE entries.
+//   EVENTQS: Event queue holds Q_MAX_LOG2SIZE entries.
+const IDR1_MODEL_FEATURES: u32 = IDR1_SIDSIZE | IDR1_CMDQS | IDR1_EVENTQS;
 
 // IDR5 fields
 const IDR5_OAS_MASK: u32 = 0b111;
@@ -110,7 +116,7 @@ const IDR5_GRAN4K: u32 = 1 << 4;
 const IDR5_GRAN16K: u32 = 1 << 5;
 const IDR5_GRAN64K: u32 = 1 << 6;
 const IDR5_GRAN_MASK: u32 = IDR5_GRAN4K | IDR5_GRAN16K | IDR5_GRAN64K;
-const IDR5_VALUE: u32 = IDR5_OAS_48BIT | IDR5_GRAN4K | IDR5_GRAN64K;
+const IDR5_MODEL_FEATURES: u32 = 0;
 
 // CR0 fields
 const CR0_SMMUEN: u32 = 1 << 0;
@@ -263,6 +269,8 @@ pub enum Error {
     BackendHwInfo(#[source] IommuError),
     #[error("The backend reported information for another IOMMU")]
     BackendHwInfoMismatch,
+    #[error("Host IOMMU reported no translation granule")]
+    MissingHostGranules,
     #[error("Unsupported access width {0}")]
     AccessWidth(usize),
     #[error("Unknown register offset {0:#x}")]
@@ -422,9 +430,9 @@ impl Smmuv3 {
     ) -> Self {
         let restored = state.is_some();
         let state = state.unwrap_or(Smmuv3State {
-            idr0: IDR0_VALUE,
-            idr1: IDR1_VALUE,
-            idr5: IDR5_VALUE,
+            idr0: IDR0_MODEL_FEATURES,
+            idr1: IDR1_MODEL_FEATURES,
+            idr5: IDR5_MODEL_FEATURES,
             ..Default::default()
         });
 
@@ -501,27 +509,27 @@ impl Smmuv3 {
             return Err(Error::BackendHwInfoMismatch);
         };
 
-        self.set_host_id_regs(&idr, ats_supported);
-
-        Ok(())
+        self.set_host_id_regs(&idr, ats_supported)
     }
 
-    fn set_host_id_regs(&mut self, idr: &[u32; 6], ats_supported: bool) {
+    fn set_host_id_regs(&mut self, idr: &[u32; 6], ats_supported: bool) -> Result<(), Error> {
         let (h0, h1, h5) = (idr[0], idr[1], idr[5]);
 
-        self.idr0 = IDR0_VALUE & (h0 | !IDR0_HOST_GATED);
+        self.idr0 = IDR0_MODEL_FEATURES | (h0 & IDR0_HOST_FEATURES_MASK);
         if ats_supported {
             self.idr0 |= IDR0_ATS;
         }
 
-        self.idr1 = (IDR1_VALUE & !IDR1_SSIDSIZE_MASK) | (h1 & IDR1_SSIDSIZE_MASK);
+        self.idr1 = IDR1_MODEL_FEATURES | (h1 & IDR1_SSIDSIZE_MASK);
 
-        let oas = (IDR5_VALUE & IDR5_OAS_MASK).min(h5 & IDR5_OAS_MASK);
-        let mut granules = IDR5_VALUE & h5 & IDR5_GRAN_MASK;
+        let oas = IDR5_OAS_48BIT.min(h5 & IDR5_OAS_MASK);
+        let granules = h5 & IDR5_GRAN_MASK;
         if granules == 0 {
-            granules = IDR5_VALUE & IDR5_GRAN_MASK;
+            return Err(Error::MissingHostGranules);
         }
-        self.idr5 = (IDR5_VALUE & !(IDR5_OAS_MASK | IDR5_GRAN_MASK)) | oas | granules;
+        self.idr5 = oas | granules;
+
+        Ok(())
     }
 
     fn read_reg(&self, offset: u64, len: usize) -> Result<u64, Error> {
@@ -1375,7 +1383,7 @@ mod tests {
     #[test]
     fn test_set_host_id_regs_ats_and_ssidsize() {
         let mut idr = [0u32; 6];
-        idr[0] = IDR0_COHACC | IDR0_ASID16 | IDR0_VMID16 | IDR0_CD2L | IDR0_STLEVEL_2LVL;
+        idr[0] = IDR0_COHACC | IDR0_ASID16 | IDR0_CD2L | IDR0_STLEVEL_2LVL;
         idr[1] = 20 << IDR1_SSIDSIZE_SHIFT;
         idr[5] = IDR5_OAS_48BIT | IDR5_GRAN4K | IDR5_GRAN64K;
 
@@ -1403,27 +1411,29 @@ mod tests {
 
     #[test]
     fn test_set_host_id_regs_drops_features_the_host_lacks() {
-        let backend = HostInfoBackend::new([0u32; 6], false);
+        let mut idr = [0u32; 6];
+        idr[5] = IDR5_GRAN4K;
+        let backend = HostInfoBackend::new(idr, false);
         let mut smmuv3 = smmuv3_with_host_info(&backend);
 
         smmuv3.initialize().unwrap();
 
-        assert_eq!(smmuv3.idr0 & IDR0_HOST_GATED, 0);
-        assert_eq!(smmuv3.idr0, IDR0_VALUE & !IDR0_HOST_GATED);
+        assert_eq!(smmuv3.idr0 & IDR0_HOST_FEATURES_MASK, 0);
+        assert_eq!(smmuv3.idr0, IDR0_MODEL_FEATURES);
     }
 
     #[test]
     fn test_new_advertises_conservative_defaults() {
         let smmuv3 = test_smmuv3();
-        assert_eq!(smmuv3.idr0, IDR0_VALUE);
-        assert_eq!(smmuv3.idr1, IDR1_VALUE);
-        assert_eq!(smmuv3.idr5, IDR5_VALUE);
+        assert_eq!(smmuv3.idr0, IDR0_MODEL_FEATURES);
+        assert_eq!(smmuv3.idr1, IDR1_MODEL_FEATURES);
+        assert_eq!(smmuv3.idr5, IDR5_MODEL_FEATURES);
     }
 
     #[test]
     fn test_default_id_regs_omit_ats_and_ssidsize() {
-        assert_eq!(IDR0_VALUE & IDR0_ATS, 0);
-        assert_eq!(IDR1_VALUE & IDR1_SSIDSIZE_MASK, 0);
+        assert_eq!(IDR0_MODEL_FEATURES & IDR0_ATS, 0);
+        assert_eq!(IDR1_MODEL_FEATURES & IDR1_SSIDSIZE_MASK, 0);
     }
 
     #[test]
