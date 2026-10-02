@@ -1033,6 +1033,21 @@ impl Vm {
         vm.sev_snp_init(guest_policy)
             .map_err(Error::InitializeSevSnpVm)?;
 
+        // A private conversion would discard 4 KiB of the shared mapping, which
+        // hugetlb backing (hugepages=on or a file on hugetlbfs) rejects: keep it
+        // instead.
+        // SAFETY: FFI call. Trivially safe.
+        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u64;
+        if memory_manager
+            .lock()
+            .unwrap()
+            .memory_zones()
+            .values()
+            .any(|zone| zone.backing_page_size() > page_size)
+        {
+            vm.disable_shared_mapping_reclaim();
+        }
+
         // Load payload for SEV-SNP (IGVM parser needs cpu_manager for cpuid)
         let load_payload_handle = if snapshot.is_none() {
             Self::load_payload_async(memory_manager, config, cpu_manager, igvm_file)?

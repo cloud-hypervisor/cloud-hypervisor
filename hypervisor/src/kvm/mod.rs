@@ -664,6 +664,12 @@ pub struct KvmVm {
     memory_slots: Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
     #[cfg(feature = "sev_snp")]
     memory_conversion_handler: Arc<OnceLock<Arc<dyn vm::MemoryConversionHandler>>>,
+    /// Set once the shared mapping must no longer be reclaimed (guest RAM
+    /// pinned for device DMA, or backed by hugepages); never cleared. vCPUs
+    /// hold the read side across the check and the reclaim, so setting it
+    /// waits for reclaims in flight.
+    #[cfg(feature = "sev_snp")]
+    shared_mapping_reclaim_disabled: Arc<RwLock<bool>>,
 }
 
 impl KvmVm {
@@ -779,6 +785,11 @@ impl vm::Vm for KvmVm {
             .set(handler)
             .ok()
             .expect("Memory conversion handler already registered");
+    }
+
+    #[cfg(feature = "sev_snp")]
+    fn disable_shared_mapping_reclaim(&self) {
+        *self.shared_mapping_reclaim_disabled.write().unwrap() = true;
     }
 
     #[cfg(feature = "sev_snp")]
@@ -978,6 +989,8 @@ impl vm::Vm for KvmVm {
             memory_slots: self.memory_slots.clone(),
             #[cfg(feature = "sev_snp")]
             memory_conversion_handler: Arc::clone(&self.memory_conversion_handler),
+            #[cfg(feature = "sev_snp")]
+            shared_mapping_reclaim_disabled: Arc::clone(&self.shared_mapping_reclaim_disabled),
         };
         Ok(Box::new(vcpu))
     }
@@ -1823,6 +1836,8 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 memory_slots,
                 #[cfg(feature = "sev_snp")]
                 memory_conversion_handler: Arc::new(OnceLock::new()),
+                #[cfg(feature = "sev_snp")]
+                shared_mapping_reclaim_disabled: Arc::new(RwLock::new(false)),
             }))
         }
 
@@ -1967,6 +1982,8 @@ pub struct KvmVcpu {
     memory_slots: Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
     #[cfg(feature = "sev_snp")]
     memory_conversion_handler: Arc<OnceLock<Arc<dyn vm::MemoryConversionHandler>>>,
+    #[cfg(feature = "sev_snp")]
+    shared_mapping_reclaim_disabled: Arc<RwLock<bool>>,
 }
 
 #[cfg(feature = "sev_snp")]
@@ -2010,11 +2027,21 @@ impl KvmVcpu {
         Ok(())
     }
 
-    /// Whether to discard the stale shared mapping on conversion to private.
-    fn should_discard_shared_mapping(&self) -> bool {
-        self.memory_conversion_handler
+    /// On conversion of `[gpa, gpa + size)` to private, free the stale shared
+    /// mapping when that is safe (see `reclaim_shared_mapping_allowed`).
+    /// Otherwise the guest could make the host hold both copies of its RAM by
+    /// converting it to shared and back.
+    fn discard_stale_shared_mapping(&self, gpa: u64, size: u64) {
+        // Held across the decision and the discard: disabling reclaim waits
+        // for this, so no page is zapped once it is pinned for DMA.
+        let disabled = self.shared_mapping_reclaim_disabled.read().unwrap();
+        let handler = self
+            .memory_conversion_handler
             .get()
-            .is_some_and(|h| h.reclaims_shared_mapping())
+            .map(|h| h.reclaims_shared_mapping());
+        if reclaim_shared_mapping_allowed(handler, *disabled) {
+            Self::discard_shared_mapping(&self.memory_slots, gpa, size);
+        }
     }
 
     fn punch_holes_in_guest_memfd(
@@ -2785,8 +2812,8 @@ impl cpu::Vcpu for KvmVcpu {
                                 set_private_attr == 0,
                             )?;
 
-                            if set_private_attr != 0 && self.should_discard_shared_mapping() {
-                                Self::discard_shared_mapping(&self.memory_slots, address, size);
+                            if set_private_attr != 0 {
+                                self.discard_stale_shared_mapping(address, size);
                             }
 
                             Ok(cpu::VmExit::Ignore)
@@ -2831,8 +2858,8 @@ impl cpu::Vcpu for KvmVcpu {
 
                     self.notify_memory_conversion_handler(gpa, size, attributes == 0)?;
 
-                    if attributes != 0 && self.should_discard_shared_mapping() {
-                        Self::discard_shared_mapping(&self.memory_slots, gpa, size);
+                    if attributes != 0 {
+                        self.discard_stale_shared_mapping(gpa, size);
                     }
 
                     Ok(cpu::VmExit::Ignore)
@@ -4211,6 +4238,7 @@ mod tests {
             vm_fd,
             memory_slots: slots,
             memory_conversion_handler: Arc::new(OnceLock::new()),
+            shared_mapping_reclaim_disabled: Arc::new(RwLock::new(false)),
         };
 
         assert_eq!(vcpu.validate_gpa_range(0x1000, 1).unwrap(), 0x1000);
@@ -4283,5 +4311,46 @@ mod tests {
 
         vcpu0.set_regs(&core_regs).unwrap();
         assert_eq!(vcpu0.get_regs().unwrap(), core_regs);
+    }
+}
+
+/// Whether the shared mapping may be freed when a page turns private.
+/// `disabled`: reclaim was turned off, because all guest RAM is statically
+/// mapped for device DMA (VFIO without the per-page tracker, vfio-user, vDPA
+/// without a virtual IOMMU), where a pinned page must never be freed whatever
+/// else is registered, or because RAM is backed by hugepages, which cannot be
+/// discarded 4 KiB at a time.
+/// `handler`: `Some(reclaims)` when a conversion handler (the per-page VFIO
+/// tracker) is registered; it unmaps the page from the IOMMU first and decides.
+/// Otherwise nothing maps guest RAM for device DMA and reclaiming is safe.
+#[cfg(feature = "sev_snp")]
+fn reclaim_shared_mapping_allowed(handler: Option<bool>, disabled: bool) -> bool {
+    !disabled && handler.unwrap_or(true)
+}
+
+#[cfg(all(test, feature = "sev_snp"))]
+mod reclaim_tests {
+    use super::reclaim_shared_mapping_allowed;
+
+    #[test]
+    fn no_vfio_reclaims() {
+        assert!(reclaim_shared_mapping_allowed(None, false));
+    }
+
+    #[test]
+    fn disabled_reclaim_is_never_reclaimed() {
+        assert!(!reclaim_shared_mapping_allowed(None, true));
+    }
+
+    #[test]
+    fn a_registered_handler_decides() {
+        assert!(reclaim_shared_mapping_allowed(Some(true), false));
+        assert!(!reclaim_shared_mapping_allowed(Some(false), false));
+    }
+
+    #[test]
+    fn disabled_reclaim_overrides_the_handler() {
+        assert!(!reclaim_shared_mapping_allowed(Some(true), true));
+        assert!(!reclaim_shared_mapping_allowed(Some(false), true));
     }
 }

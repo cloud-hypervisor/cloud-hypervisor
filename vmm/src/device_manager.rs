@@ -2649,6 +2649,7 @@ impl DeviceManager {
         info!("Creating virtio-block device: {disk_cfg:?}");
 
         let (virtio_device, migratable_device) = if disk_cfg.vhost_user {
+            self.disable_shared_mapping_reclaim();
             if is_hotplug {
                 debug!("Acquiring image lock for vhost-user block device not supported");
             }
@@ -2850,6 +2851,7 @@ impl DeviceManager {
         info!("Creating virtio-net device: {net_cfg:?}");
 
         let (virtio_device, migratable_device) = if net_cfg.vhost_user {
+            self.disable_shared_mapping_reclaim();
             let socket = net_cfg.vhost_socket.as_ref().unwrap().clone();
             let vu_cfg = VhostUserConfig {
                 socket,
@@ -3121,6 +3123,7 @@ impl DeviceManager {
         let mut node = device_node!(id);
 
         if let Some(generic_vhost_user_socket) = generic_vhost_user_cfg.socket.to_str() {
+            self.disable_shared_mapping_reclaim();
             let generic_vhost_user_device = Arc::new(Mutex::new(
                 vhost_user::GenericVhostUser::new(
                     id.clone(),
@@ -3191,6 +3194,7 @@ impl DeviceManager {
         let mut node = device_node!(id);
 
         if let Some(fs_socket) = fs_cfg.socket.to_str() {
+            self.disable_shared_mapping_reclaim();
             let virtio_fs_device = Arc::new(Mutex::new(
                 vhost_user::Fs::new(
                     id.clone(),
@@ -4078,6 +4082,7 @@ impl DeviceManager {
             let static_map_all_ram = true;
 
             if static_map_all_ram {
+                self.disable_shared_mapping_reclaim();
                 // Statically map all guest RAM into the IOMMU. Do not register
                 // virtio-mem regions, as they are handled directly by the
                 // virtio-mem device itself.
@@ -4392,6 +4397,7 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
         }
 
+        self.disable_shared_mapping_reclaim();
         for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
             for region in zone.regions() {
                 vfio_user_pci_device
@@ -4541,6 +4547,7 @@ impl DeviceManager {
                         .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
                 }
 
+                self.disable_shared_mapping_reclaim();
                 // Do not register virtio-mem regions, as they are handled directly by
                 // virtio-mem devices.
                 for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
@@ -5648,6 +5655,18 @@ impl DeviceManager {
         if let Some(1) = self.vfio_ops.as_ref().map(Arc::strong_count) {
             debug!("Drop VfioOps given no active VFIO devices.");
             self.vfio_ops = None;
+        }
+    }
+
+    /// Guest RAM is about to be mapped for device DMA outside the per-page
+    /// tracker (static VFIO, vfio-user, vDPA without a virtual IOMMU) or handed
+    /// to a vhost-user backend, which may pin it: from here on the hypervisor
+    /// must not reclaim the shared mapping when an SEV-SNP guest turns pages
+    /// private.
+    fn disable_shared_mapping_reclaim(&self) {
+        #[cfg(feature = "sev_snp")]
+        if self.config.lock().unwrap().is_sev_snp_enabled() {
+            self.address_manager.vm.disable_shared_mapping_reclaim();
         }
     }
 

@@ -493,6 +493,11 @@ pub trait Vm: Send + Sync + Any {
         unimplemented!("memory conversion handlers are only supported on the KVM backend")
     }
 
+    /// Stop reclaiming the shared mapping when pages turn private: all guest
+    /// RAM is now pinned for device DMA (static VFIO, vfio-user or vDPA
+    /// mapping) or is backed by hugepages. Waits for in-flight reclaims.
+    fn disable_shared_mapping_reclaim(&self) {}
+
     /// Initialize the VM
     fn init(&self) -> Result<()> {
         Ok(())
