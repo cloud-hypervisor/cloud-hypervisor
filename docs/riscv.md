@@ -58,7 +58,7 @@ popd
 
 ```console
 pushd $CLOUDH
-git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b ch-6.12.8
+git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b ch-7.2.8
 cd linux
 make ch_defconfig
 make -j `nproc`
