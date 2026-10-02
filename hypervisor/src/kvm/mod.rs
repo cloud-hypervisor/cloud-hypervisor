@@ -1992,6 +1992,25 @@ impl KvmVcpu {
             .is_some_and(|h| h.reclaims_shared_mapping())
     }
 
+    /// Whether `[gpa, gpa + size)` lies entirely inside guest RAM (possibly
+    /// spanning adjacent memory slots).
+    #[cfg(feature = "sev_snp")]
+    fn gpa_range_in_guest_memory(
+        memory_slots: &Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
+        gpa: u64,
+        size: u64,
+    ) -> bool {
+        let Some(slots) = memory_slots else {
+            return false;
+        };
+        let slots = slots.read().unwrap();
+        gpa_range_covered(
+            slots.values().map(|s| (s.guest_phys_addr, s.memory_size)),
+            gpa,
+            size,
+        )
+    }
+
     fn punch_holes_in_guest_memfd(
         memory_slots: &Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
         gpa: u64,
@@ -2727,7 +2746,31 @@ impl cpu::Vcpu for KvmVcpu {
                             // bits[5-63] = zero
                             let attributes = hypercall.args[2];
                             // TODO: Add 2mb page support
-                            let size = num_pages * PAGE_SIZE_4K;
+                            // The guest chooses address and num_pages, and KVM
+                            // only checks alignment and wrap-around. Without a
+                            // bound, a range far beyond guest RAM makes
+                            // KVM_SET_MEMORY_ATTRIBUTES reserve per-page state
+                            // for all of it in the host kernel. Refuse anything
+                            // outside guest RAM and tell the guest, as KVM does
+                            // for malformed requests.
+                            let size = match num_pages.checked_mul(PAGE_SIZE_4K) {
+                                Some(size)
+                                    if Self::gpa_range_in_guest_memory(
+                                        &self.memory_slots,
+                                        address,
+                                        size,
+                                    ) =>
+                                {
+                                    size
+                                }
+                                _ => {
+                                    warn!(
+                                        "KVM_HC_MAP_GPA_RANGE outside guest memory: address={address:#x}, pages={num_pages}"
+                                    );
+                                    *hypercall.ret = (-(libc::EINVAL as i64)) as u64;
+                                    return Ok(cpu::VmExit::Ignore);
+                                }
+                            };
                             // bit 4 = private attribute encoding
                             const PRIVATE_ENCODING_BITMASK: u64 = 0b10000;
                             debug!(
@@ -4195,5 +4238,69 @@ mod tests {
 
         vcpu0.set_regs(&core_regs).unwrap();
         assert_eq!(vcpu0.get_regs().unwrap(), core_regs);
+    }
+}
+
+/// Whether `[gpa, gpa + size)` is covered by the `(start, size)` ranges with no
+/// gaps. An empty or wrapping range is not.
+#[cfg(feature = "sev_snp")]
+fn gpa_range_covered(ranges: impl Iterator<Item = (u64, u64)>, gpa: u64, size: u64) -> bool {
+    let Some(end) = gpa.checked_add(size) else {
+        return false;
+    };
+    if size == 0 {
+        return false;
+    }
+    let mut ranges: Vec<(u64, u64)> = ranges
+        .filter_map(|(start, len)| Some((start, start.checked_add(len)?)))
+        .collect();
+    ranges.sort_unstable();
+    let mut covered_to = gpa;
+    for (start, range_end) in ranges {
+        if start > covered_to {
+            break;
+        }
+        covered_to = covered_to.max(range_end);
+        if covered_to >= end {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(all(test, feature = "sev_snp"))]
+mod gpa_range_tests {
+    use std::iter;
+
+    use super::gpa_range_covered;
+
+    const RAM: [(u64, u64); 2] = [(0, 0x8000_0000), (0x1_0000_0000, 0x4000_0000)];
+
+    #[test]
+    fn inside_one_slot() {
+        assert!(gpa_range_covered(RAM.into_iter(), 0x1000, 0x1000));
+        assert!(gpa_range_covered(RAM.into_iter(), 0, 0x8000_0000));
+    }
+
+    #[test]
+    fn across_adjacent_slots() {
+        let adjacent = [(0, 0x1000), (0x1000, 0x1000)];
+        assert!(gpa_range_covered(adjacent.into_iter(), 0x800, 0x1000));
+    }
+
+    #[test]
+    fn gaps_beyond_ram_empty_or_wrapping_are_refused() {
+        // spans the hole between the two slots
+        assert!(!gpa_range_covered(RAM.into_iter(), 0x7fff_f000, 0x2000));
+        // past the end of RAM / far beyond it
+        assert!(!gpa_range_covered(RAM.into_iter(), 0x1_3fff_f000, 0x2000));
+        assert!(!gpa_range_covered(RAM.into_iter(), 0, 1 << 48));
+        assert!(!gpa_range_covered(RAM.into_iter(), 0x1000, 0));
+        assert!(!gpa_range_covered(
+            RAM.into_iter(),
+            u64::MAX - 0xfff,
+            0x2000
+        ));
+        assert!(!gpa_range_covered(iter::empty(), 0, 0x1000));
     }
 }
