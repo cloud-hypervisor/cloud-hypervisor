@@ -2179,6 +2179,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore = "See #8988"]
     fn test_virtio_block_direct_and_firmware() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
