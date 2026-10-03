@@ -10,7 +10,7 @@
 use std::sync::{Arc, Barrier};
 use std::{io, result};
 
-use log::warn;
+use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_device::BusDevice;
@@ -282,7 +282,7 @@ impl BusDevice for Gpio {
         if read_ok && data.len() <= 4 {
             write_le_u32(data, value);
         } else {
-            warn!(
+            debug!(
                 "Invalid GPIO PL061 read: offset {}, data length {}",
                 offset,
                 data.len()
@@ -297,7 +297,7 @@ impl BusDevice for Gpio {
                 warn!("Failed to write to GPIO PL061 device: {e}");
             }
         } else {
-            warn!(
+            debug!(
                 "Invalid GPIO PL061 write: offset {}, data length {}",
                 offset,
                 data.len()

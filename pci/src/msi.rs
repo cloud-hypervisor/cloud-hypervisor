@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::{io, result};
 
 use byteorder::{ByteOrder, LittleEndian};
-use log::error;
+use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_device::interrupt::{
@@ -148,7 +148,7 @@ impl MsiCap {
                             | (value & (MSI_CTL_ENABLE | MSI_CTL_MULTI_MSG_ENABLE));
                     }
                     x if x == msg_data_offset => self.msg_data = value,
-                    _ => error!("invalid offset"),
+                    _ => debug!("invalid offset"),
                 }
             }
             4 => {
@@ -167,10 +167,10 @@ impl MsiCap {
                     x if mask_bits_offset.is_some() && x == mask_bits_offset.unwrap() => {
                         self.mask_bits = value;
                     }
-                    _ => error!("invalid offset"),
+                    _ => debug!("invalid offset"),
                 }
             }
-            _ => error!("invalid data length"),
+            _ => debug!("invalid data length"),
         }
     }
 }

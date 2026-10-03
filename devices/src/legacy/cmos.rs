@@ -14,7 +14,7 @@ use std::{mem, thread};
 #[cfg_attr(target_env = "musl", allow(deprecated))]
 use libc::time_t;
 use libc::{CLOCK_REALTIME, clock_gettime, gmtime_r, timespec, tm};
-use log::{info, warn};
+use log::{debug, info};
 use vm_device::BusDevice;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -69,7 +69,7 @@ impl Cmos {
 impl BusDevice for Cmos {
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         if data.len() != 1 {
-            warn!("Invalid write size on CMOS device: {}", data.len());
+            debug!("Invalid write size on CMOS device: {}", data.len());
             return None;
         }
 
@@ -90,7 +90,7 @@ impl BusDevice for Cmos {
                     self.data[(self.index & INDEX_MASK) as usize] = data[0];
                 }
             }
-            o => warn!("bad write offset on CMOS device: {o}"),
+            o => debug!("bad write offset on CMOS device: {o}"),
         }
         None
     }
@@ -102,7 +102,7 @@ impl BusDevice for Cmos {
         }
 
         if data.len() != 1 {
-            warn!("Invalid read size on CMOS device: {}", data.len());
+            debug!("Invalid read size on CMOS device: {}", data.len());
             return;
         }
 
@@ -164,7 +164,7 @@ impl BusDevice for Cmos {
                 }
             }
             o => {
-                warn!("bad read offset on CMOS device: {o}");
+                debug!("bad read offset on CMOS device: {o}");
                 0
             }
         }

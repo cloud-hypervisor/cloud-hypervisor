@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 
 use byteorder::{ByteOrder, LittleEndian};
-use log::{debug, error, warn};
+use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use virtio_queue::{Queue, QueueT};
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
@@ -210,7 +210,7 @@ impl VirtioPciCommonConfig {
                 let v = self.read_common_config_qword(offset);
                 LittleEndian::write_u64(data, v);
             }
-            _ => error!("invalid data length for virtio read: len {}", data.len()),
+            _ => debug!("invalid data length for virtio read: len {}", data.len()),
         }
     }
 
@@ -224,7 +224,7 @@ impl VirtioPciCommonConfig {
                 self.write_common_config_dword(offset, LittleEndian::read_u32(data), queues);
             }
             8 => self.write_common_config_qword(offset, LittleEndian::read_u64(data), queues),
-            _ => error!("invalid data length for virtio write: len {}", data.len()),
+            _ => debug!("invalid data length for virtio write: len {}", data.len()),
         }
     }
 
@@ -235,7 +235,7 @@ impl VirtioPciCommonConfig {
             0x14 => self.driver_status.load(Ordering::Acquire),
             0x15 => self.config_generation.load(Ordering::Acquire),
             _ => {
-                warn!("invalid virtio config byte read: 0x{offset:x}");
+                debug!("invalid virtio config byte read: 0x{offset:x}");
                 0
             }
         }
@@ -246,7 +246,7 @@ impl VirtioPciCommonConfig {
         match offset {
             0x14 => self.driver_status.store(value, Ordering::Release),
             _ => {
-                warn!("invalid virtio config byte write: 0x{offset:x}");
+                debug!("invalid virtio config byte write: 0x{offset:x}");
             }
         }
     }
@@ -268,7 +268,7 @@ impl VirtioPciCommonConfig {
             0x1c => u16::from(self.with_queue(queues, |q| q.ready()).unwrap_or(false)),
             0x1e => self.queue_select, // notify_off
             _ => {
-                warn!("invalid virtio register word read: 0x{offset:x}");
+                debug!("invalid virtio register word read: 0x{offset:x}");
                 0
             }
         }
@@ -344,7 +344,7 @@ impl VirtioPciCommonConfig {
                 }
             }),
             _ => {
-                warn!("invalid virtio register word write: 0x{offset:x}");
+                debug!("invalid virtio register word write: 0x{offset:x}");
             }
         }
     }
@@ -363,7 +363,7 @@ impl VirtioPciCommonConfig {
             }
             0x08 => self.driver_feature_select,
             _ => {
-                warn!("invalid virtio register dword read: 0x{offset:x}");
+                debug!("invalid virtio register dword read: 0x{offset:x}");
                 0
             }
         }
@@ -389,7 +389,7 @@ impl VirtioPciCommonConfig {
             0x30 => self.with_queue_mut(queues, |q| q.set_used_ring_address(Some(value), None)),
             0x34 => self.with_queue_mut(queues, |q| q.set_used_ring_address(None, Some(value))),
             _ => {
-                warn!("invalid virtio register dword write: 0x{offset:x}");
+                debug!("invalid virtio register dword write: 0x{offset:x}");
             }
         }
     }
@@ -410,7 +410,7 @@ impl VirtioPciCommonConfig {
             0x28 => self.with_queue_mut(queues, |q| q.set_avail_ring_address(low, high)),
             0x30 => self.with_queue_mut(queues, |q| q.set_used_ring_address(low, high)),
             _ => {
-                warn!("invalid virtio register qword write: 0x{offset:x}");
+                debug!("invalid virtio register qword write: 0x{offset:x}");
             }
         }
     }

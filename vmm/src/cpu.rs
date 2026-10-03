@@ -3352,7 +3352,7 @@ impl BusDevice for AcpiCpuHotplugController {
             }
             Self::CPU_STATUS_OFFSET => {
                 if data.len() != 1 {
-                    warn!("Invalid sized read of CPU status register: {}", data.len());
+                    debug!("Invalid sized read of CPU status register: {}", data.len());
                     return;
                 }
                 if self.selected_cpu < self.max_vcpus {
@@ -3367,11 +3367,11 @@ impl BusDevice for AcpiCpuHotplugController {
                         data[0] |= 1 << Self::CPU_REMOVING_FLAG;
                     }
                 } else {
-                    warn!("Out of range vCPU id: {}", self.selected_cpu);
+                    debug!("Out of range vCPU id: {}", self.selected_cpu);
                 }
             }
             _ => {
-                warn!("Unexpected offset for accessing CPU manager device: {offset:#}");
+                debug!("Unexpected offset for accessing CPU manager device: {offset:#}");
             }
         }
     }
@@ -3380,7 +3380,7 @@ impl BusDevice for AcpiCpuHotplugController {
         match offset {
             Self::CPU_SELECTION_OFFSET => {
                 if data.len() != size_of::<u32>() {
-                    warn!(
+                    debug!(
                         "Invalid sized write of CPU selection register: {}",
                         data.len()
                     );
@@ -3390,7 +3390,7 @@ impl BusDevice for AcpiCpuHotplugController {
             }
             Self::CPU_STATUS_OFFSET => {
                 if data.len() != 1 {
-                    warn!("Invalid sized write of CPU status register: {}", data.len());
+                    debug!("Invalid sized write of CPU status register: {}", data.len());
                     return None;
                 }
                 if self.selected_cpu < self.max_vcpus {
@@ -3426,11 +3426,11 @@ impl BusDevice for AcpiCpuHotplugController {
                         }
                     }
                 } else {
-                    warn!("Out of range vCPU id: {}", self.selected_cpu);
+                    debug!("Out of range vCPU id: {}", self.selected_cpu);
                 }
             }
             _ => {
-                warn!("Unexpected offset for accessing CPU manager device: {offset:#}");
+                debug!("Unexpected offset for accessing CPU manager device: {offset:#}");
             }
         }
         None

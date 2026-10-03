@@ -294,7 +294,7 @@ impl MsixConfig {
                     0x8 => self.table_entries[index].msg_data,
                     0xc => self.table_entries[index].vector_ctl,
                     _ => {
-                        error!("invalid offset");
+                        debug!("invalid offset");
                         0
                     }
                 };
@@ -313,7 +313,7 @@ impl MsixConfig {
                             | u64::from(self.table_entries[index].msg_data)
                     }
                     _ => {
-                        error!("invalid offset");
+                        debug!("invalid offset");
                         0
                     }
                 };
@@ -322,7 +322,7 @@ impl MsixConfig {
                 LittleEndian::write_u64(data, value);
             }
             _ => {
-                error!("invalid data length");
+                debug!("invalid data length");
             }
         }
     }
@@ -357,7 +357,7 @@ impl MsixConfig {
                     0xc => {
                         self.table_entries[index].vector_ctl = value;
                     }
-                    _ => error!("invalid offset"),
+                    _ => debug!("invalid offset"),
                 }
 
                 debug!("MSI_W TABLE offset 0x{offset:x} data 0x{value:x}");
@@ -373,12 +373,12 @@ impl MsixConfig {
                         self.table_entries[index].msg_data = (value & 0xffff_ffffu64) as u32;
                         self.table_entries[index].vector_ctl = (value >> 32) as u32;
                     }
-                    _ => error!("invalid offset"),
+                    _ => debug!("invalid offset"),
                 }
 
                 debug!("MSI_W TABLE offset 0x{offset:x} data 0x{value:x}");
             }
-            _ => error!("invalid data length"),
+            _ => debug!("invalid data length"),
         }
 
         let table_entry = &self.table_entries[index];
@@ -454,7 +454,7 @@ impl MsixConfig {
                     0x0 => (self.pba_entries[index] & 0xffff_ffffu64) as u32,
                     0x4 => (self.pba_entries[index] >> 32) as u32,
                     _ => {
-                        error!("invalid offset");
+                        debug!("invalid offset");
                         0
                     }
                 };
@@ -466,7 +466,7 @@ impl MsixConfig {
                 let value: u64 = match modulo_offset {
                     0x0 => self.pba_entries[index],
                     _ => {
-                        error!("invalid offset");
+                        debug!("invalid offset");
                         0
                     }
                 };
@@ -475,7 +475,7 @@ impl MsixConfig {
                 LittleEndian::write_u64(data, value);
             }
             _ => {
-                error!("invalid data length");
+                debug!("invalid data length");
             }
         }
     }

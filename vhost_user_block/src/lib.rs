@@ -411,7 +411,7 @@ impl VhostUserBackendMut for VhostUserBlkBackend {
         if let Some(subset) = subset {
             subset.to_vec()
         } else {
-            warn!("Invalid config offset {offset} or size {size}");
+            debug!("Invalid config offset {offset} or size {size}");
             vec![]
         }
     }
@@ -424,7 +424,7 @@ impl VhostUserBackendMut for VhostUserBlkBackend {
             .checked_add(data_len)
             .ok_or_else(|| io::Error::from_raw_os_error(libc::EINVAL))?;
         if end > config_len {
-            error!("Failed to write config space: offset {offset} + len {data_len} > {config_len}");
+            debug!("Failed to write config space: offset {offset} + len {data_len} > {config_len}");
             return Err(io::Error::from_raw_os_error(libc::EINVAL));
         }
         config_slice[offset as usize..end as usize].copy_from_slice(data);
