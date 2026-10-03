@@ -136,6 +136,11 @@ use kvm_bindings::{
 };
 #[cfg(target_arch = "riscv64")]
 use kvm_bindings::{KVM_REG_RISCV_CORE, KVM_REG_RISCV_TIMER, kvm_riscv_core};
+#[cfg(target_arch = "x86_64")]
+use kvm_bindings::{
+    KVM_STATE_NESTED_FORMAT_SVM, KVM_STATE_NESTED_FORMAT_VMX, KVM_STATE_NESTED_GIF_SET,
+    kvm_nested_state,
+};
 #[cfg(feature = "tdx")]
 use kvm_bindings::{KVM_X86_SW_PROTECTED_VM, KVMIO};
 #[cfg(target_arch = "x86_64")]
@@ -177,6 +182,9 @@ const KVM_REG_ARM_TIMER_CNT: u64 = KVM_REG_ARM64
 
 #[cfg(target_arch = "aarch64")]
 const NANOS_PER_SECOND: u128 = 1_000_000_000;
+
+#[cfg(target_arch = "x86_64")]
+const INVALID_GPA: u64 = u64::MAX;
 
 #[cfg(target_arch = "x86_64")]
 ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
@@ -4121,16 +4129,22 @@ impl KvmVcpu {
     fn nested_state(&self) -> cpu::Result<Option<KvmNestedStateBuffer>> {
         let mut buffer = KvmNestedStateBuffer::empty();
 
-        let maybe_size = self
-            .fd
+        self.fd
             .nested_state(&mut buffer)
             .map_err(|e| cpu::HypervisorCpuError::GetNestedState(e.into()))?;
 
-        if let Some(_size) = maybe_size {
-            Ok(Some(buffer))
-        } else {
-            Ok(None)
-        }
+        let has_payload = buffer.size as usize > size_of::<kvm_nested_state>();
+        let header_has_state = match u32::from(buffer.format) {
+            KVM_STATE_NESTED_FORMAT_VMX => {
+                // SAFETY: every bit pattern is valid for the VMX header.
+                let vmxon_pa = unsafe { buffer.hdr.vmx.vmxon_pa };
+                vmxon_pa != INVALID_GPA
+            }
+            KVM_STATE_NESTED_FORMAT_SVM => u32::from(buffer.flags) & KVM_STATE_NESTED_GIF_SET == 0,
+            _ => false,
+        };
+
+        Ok((has_payload || header_has_state).then_some(buffer))
     }
 
     /// Sets the state of the nested guest for the current vCPU.
