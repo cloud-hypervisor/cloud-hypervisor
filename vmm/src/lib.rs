@@ -1491,6 +1491,7 @@ impl Vmm {
         cancel_migration: &AtomicBool,
     ) -> result::Result<MemoryRangeTable /* remaining */, MigratableError> {
         loop {
+            vm.flush_disks();
             let iteration_begin = Instant::now();
 
             let iteration_table = if ctx.iteration == 0 {
@@ -1813,6 +1814,7 @@ impl Vmm {
             }
             // No need for precopy: just pause VM
             (MigrationMode::MemFDs, SocketStream::Unix(_)) | (MigrationMode::Postcopy, _) => {
+                vm.flush_disks();
                 let downtime_begin = Instant::now();
                 if vm.get_state() != VmState::Paused {
                     vm.pause()?;
