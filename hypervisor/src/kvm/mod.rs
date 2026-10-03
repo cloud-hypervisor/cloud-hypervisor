@@ -1971,6 +1971,31 @@ pub struct KvmVcpu {
 
 #[cfg(feature = "sev_snp")]
 impl KvmVcpu {
+    fn validate_gpa_range(&self, gpa: u64, num_pages: u64) -> cpu::Result<u64> {
+        if let Some(size) = num_pages.checked_mul(PAGE_SIZE_4K)
+            && size != 0
+            && let Some(end) = gpa.checked_add(size)
+            && let Some(slots) = &self.memory_slots
+        {
+            let slots = slots.read().unwrap();
+            // Memory slots do not overlap, so their intersections must cover the range.
+            let covered: u64 = slots
+                .values()
+                .map(|slot| {
+                    let start = gpa.max(slot.guest_phys_addr);
+                    let end = end.min(slot.guest_phys_addr + slot.memory_size);
+                    end.saturating_sub(start)
+                })
+                .sum();
+            if covered == size {
+                return Ok(size);
+            }
+        }
+        Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
+            "Invalid GPA range: address={gpa:#x}, pages={num_pages}"
+        )))
+    }
+
     fn notify_memory_conversion_handler(
         &self,
         gpa: u64,
@@ -2726,8 +2751,8 @@ impl cpu::Vcpu for KvmVcpu {
                             // bits[4]   = 1 if private, 0 if shared
                             // bits[5-63] = zero
                             let attributes = hypercall.args[2];
-                            // TODO: Add 2mb page support
-                            let size = num_pages * PAGE_SIZE_4K;
+                            // The hypercall page count is always in 4 KiB units.
+                            let size = self.validate_gpa_range(address, num_pages)?;
                             // bit 4 = private attribute encoding
                             const PRIVATE_ENCODING_BITMASK: u64 = 0b10000;
                             debug!(
@@ -4143,6 +4168,69 @@ impl KvmVcpu {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[cfg(feature = "sev_snp")]
+    fn test_validate_gpa_range() {
+        use super::*;
+
+        let slots = Some(Arc::new(RwLock::new(
+            [
+                (0, 0x1000, 0x2000),
+                (1, 0x3000, 0x1000),
+                (2, 0x5000, 0x1000),
+            ]
+            .into_iter()
+            .map(|(id, guest_phys_addr, memory_size)| {
+                (
+                    id,
+                    KvmMemorySlot {
+                        guest_memfd: fs::File::open("/dev/null").unwrap().into(),
+                        guest_phys_addr,
+                        memory_size,
+                        userspace_addr: 0,
+                    },
+                )
+            })
+            .collect(),
+        )));
+
+        let vm_fd = Arc::new(Kvm::new().unwrap().create_vm().unwrap());
+        let mut vcpu = KvmVcpu {
+            fd: vm_fd.create_vcpu(0).unwrap(),
+            #[cfg(target_arch = "x86_64")]
+            msrs: Vec::new(),
+            #[cfg(target_arch = "x86_64")]
+            feature_msrs: Vec::new(),
+            vm_ops: None,
+            #[cfg(target_arch = "x86_64")]
+            hyperv_synic: AtomicBool::new(false),
+            #[cfg(target_arch = "x86_64")]
+            xsave_size: 0,
+            #[cfg(target_arch = "x86_64")]
+            has_xcrs: false,
+            vm_fd,
+            memory_slots: slots,
+            memory_conversion_handler: Arc::new(OnceLock::new()),
+        };
+
+        assert_eq!(vcpu.validate_gpa_range(0x1000, 1).unwrap(), 0x1000);
+        assert_eq!(vcpu.validate_gpa_range(0x1000, 3).unwrap(), 0x3000);
+        assert_eq!(vcpu.validate_gpa_range(0x5000, 1).unwrap(), 0x1000);
+        for (gpa, pages) in [
+            (0, 1),
+            (0x6000, 1),
+            (0x3000, 2),
+            (0x3000, 3),
+            (0x1000, 0),
+            (0x1000, u64::MAX / PAGE_SIZE_4K + 1),
+            (u64::MAX - PAGE_SIZE_4K + 1, 1),
+        ] {
+            vcpu.validate_gpa_range(gpa, pages).unwrap_err();
+        }
+        vcpu.memory_slots = None;
+        vcpu.validate_gpa_range(0x1000, 1).unwrap_err();
+    }
+
     #[test]
     #[cfg(target_arch = "riscv64")]
     fn test_get_and_set_regs() {
