@@ -124,6 +124,11 @@ macro_rules! extract_bits_64_without_offset {
 
 pub const CPU_MANAGER_ACPI_SIZE: usize = 0xc;
 
+// On large servers, the thread overhead outgrows the benefit, especially on
+// loaded hosts. These values are a sweet spot on developer laptops and servers.
+const VCPU_SERIALIZE_MAX_THREADS: usize = 32;
+const VCPU_SERIALIZE_MIN_CHUNKS_PER_THREAD: usize = 4;
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("Error creating vCPU")]
@@ -719,6 +724,39 @@ impl Vcpu {
     }
 }
 
+/// Performs a parallel mapping into a vec by chunking the input slice and
+/// distributing the chunks over the threads.
+fn parallel_map<T: Sync, R: Send, E: Send>(
+    items: &[T],
+    f: impl Fn(&T) -> result::Result<R, E> + Sync,
+    max_threads: usize,
+    min_items_per_thread: usize,
+) -> result::Result<Vec<R>, E> {
+    let max_threads = thread::available_parallelism()
+        .map_or(1, |val| val.get())
+        .min(max_threads);
+    let chunk_size = items.len().div_ceil(max_threads).max(min_items_per_thread);
+
+    let mut chunks = items.chunks(chunk_size);
+    let Some(host_chunk) = chunks.next_back() else {
+        return Ok(Vec::new());
+    };
+
+    thread::scope(|scope| {
+        let handles = chunks
+            .map(|chunk| scope.spawn(|| chunk.iter().map(&f).collect::<Vec<_>>()))
+            .collect::<Vec<_>>();
+
+        let mut results = Vec::with_capacity(items.len());
+        for handle in handles {
+            results.extend(handle.join().unwrap());
+        }
+
+        results.extend(host_chunk.iter().map(&f));
+        results.into_iter().collect()
+    })
+}
+
 pub struct CpuManager {
     config: CpusConfig,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
@@ -996,11 +1034,7 @@ impl CpuManager {
         })))
     }
 
-    fn create_vcpu(
-        &mut self,
-        cpu_id: u32,
-        snapshot: Option<&Snapshot>,
-    ) -> Result<Arc<Mutex<Vcpu>>> {
+    fn create_vcpu(&mut self, cpu_id: u32) -> Result<Arc<Mutex<Vcpu>>> {
         debug!("Creating vCPU: cpu_id = {cpu_id}");
 
         #[cfg(target_arch = "x86_64")]
@@ -1023,11 +1057,6 @@ impl CpuManager {
 
         #[cfg(target_arch = "aarch64")]
         vcpu.init(self.vm.as_ref())?;
-
-        if let Some(snapshot) = snapshot {
-            vcpu.restore(snapshot)
-                .map_err(|e| Error::VcpuCreate(e.into()))?;
-        }
 
         let vcpu = Arc::new(Mutex::new(vcpu));
 
@@ -1125,7 +1154,23 @@ impl CpuManager {
 
         // Only create vCPUs in excess of all the allocated vCPUs.
         for cpu_id in self.vcpus.len() as u32..desired_vcpus {
-            vcpus.push(self.create_vcpu(cpu_id, snapshot_from_id(snapshot, &cpu_id.to_string()))?);
+            vcpus.push(self.create_vcpu(cpu_id)?);
+        }
+
+        if let Some(snapshot) = snapshot {
+            parallel_map(
+                &vcpus,
+                |vcpu| {
+                    let vcpu = vcpu.lock().unwrap();
+                    match snapshot_from_id(Some(snapshot), &vcpu.id()) {
+                        Some(snapshot) => vcpu.restore(snapshot),
+                        None => Ok(()),
+                    }
+                },
+                VCPU_SERIALIZE_MAX_THREADS,
+                VCPU_SERIALIZE_MIN_CHUNKS_PER_THREAD,
+            )
+            .map_err(|e| Error::VcpuCreate(e.into()))?;
         }
 
         #[cfg(target_arch = "x86_64")]
@@ -2810,12 +2855,20 @@ impl Snapshottable for CpuManager {
     }
 
     fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
-        let mut cpu_manager_snapshot = Snapshot::default();
+        let snapshots = parallel_map(
+            &self.vcpus,
+            |vcpu| {
+                let mut vcpu = vcpu.lock().unwrap();
+                Ok((vcpu.id(), vcpu.snapshot()?))
+            },
+            VCPU_SERIALIZE_MAX_THREADS,
+            VCPU_SERIALIZE_MIN_CHUNKS_PER_THREAD,
+        )?;
 
         // The CpuManager snapshot is a collection of all vCPUs snapshots.
-        for vcpu in &self.vcpus {
-            let mut vcpu = vcpu.lock().unwrap();
-            cpu_manager_snapshot.add_snapshot(vcpu.id(), vcpu.snapshot()?);
+        let mut cpu_manager_snapshot = Snapshot::default();
+        for (id, snapshot) in snapshots {
+            cpu_manager_snapshot.add_snapshot(id, snapshot);
         }
 
         Ok(cpu_manager_snapshot)
@@ -3440,6 +3493,9 @@ impl BusDevice for AcpiCpuHotplugController {
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 #[cfg(test)]
 mod tests {
+    use std::convert::Infallible;
+
+    use anyhow::anyhow;
     use arch::layout;
     use arch::layout::{BOOT_STACK_POINTER, ZERO_PAGE_START};
     use arch::x86_64::interrupts::*;
@@ -3447,6 +3503,36 @@ mod tests {
     use hypervisor::arch::x86::{FpuState, LapicState};
     use hypervisor::{HypervisorVmConfig, StandardRegisters};
     use linux_loader::loader::bootparam::setup_header;
+    use vm_migration::MigratableError;
+
+    use crate::cpu::parallel_map;
+
+    #[test]
+    fn test_parallel_map() {
+        let items = (0..100).collect::<Vec<u32>>();
+        let doubled = items.iter().map(|i| i * 2).collect::<Vec<_>>();
+        assert_eq!(
+            parallel_map::<_, _, Infallible>(&items, |i| Ok(i * 2), 10, 7).unwrap(),
+            doubled
+        );
+
+        // The first error in vCPU order wins, as with a sequential map.
+        let result = parallel_map(
+            &items,
+            |&i| match i % 30 {
+                29 => Err(MigratableError::Snapshot(anyhow!("{i}"))),
+                _ => Ok(i),
+            },
+            10,
+            7,
+        );
+        assert!(matches!(result, Err(MigratableError::Snapshot(e)) if e.to_string() == "29"));
+        assert!(
+            parallel_map::<_, _, Infallible>(&[], |&i: &u32| Ok(i), 10, 7)
+                .unwrap()
+                .is_empty()
+        );
+    }
 
     #[test]
     fn test_setlint() {
