@@ -2587,6 +2587,15 @@ impl DeviceManager {
         Ok(())
     }
 
+    pub fn flush_disks(&self) {
+        for dev in &self.block_devices {
+            let dev = dev.lock().unwrap();
+            if let Err(e) = dev.sync_metadata() {
+                warn!("Failed to flush metadata of disk {}: {e}", dev.id());
+            }
+        }
+    }
+
     fn make_virtio_devices(&mut self, snapshot: Option<&Snapshot>) -> DeviceManagerResult<()> {
         // Create "standard" virtio devices (net/block/rng)
         self.make_virtio_block_devices(snapshot)?;

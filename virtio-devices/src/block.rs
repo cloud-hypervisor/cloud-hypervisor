@@ -1043,6 +1043,10 @@ impl Block {
         })
     }
 
+    pub fn sync_metadata(&self) -> result::Result<(), BlockError> {
+        self.disk_image.sync_metadata()
+    }
+
     fn state(&self) -> BlockState {
         BlockState {
             disk_path: self.disk_path.to_str().unwrap().to_owned(),
