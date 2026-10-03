@@ -1084,13 +1084,16 @@ impl Block {
 
         let nsectors = new_size / SECTOR_SIZE;
 
+        let was_paused = self.common.paused.load(Ordering::SeqCst);
         self.common.pause().map_err(Error::Pause)?;
 
         self.disk_nsectors.store(nsectors, Ordering::SeqCst);
         self.config.capacity = nsectors;
         self.state().disk_nsectors = nsectors;
 
-        self.common.resume().map_err(Error::Resume)?;
+        if !was_paused {
+            self.common.resume().map_err(Error::Resume)?;
+        }
 
         self.common
             .trigger_interrupt(VirtioInterruptType::Config)
