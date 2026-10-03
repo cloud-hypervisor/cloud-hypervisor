@@ -2017,7 +2017,10 @@ impl Vm {
                 .resize(desired_memory)
                 .map_err(Error::MemoryManager)?;
 
-            let memory_config = &mut self.config.lock().unwrap().memory;
+            // The config lock must not be held while taking the device
+            // manager lock: a vCPU ejecting a device takes them in the
+            // opposite order.
+            let hotplug_method = self.config.lock().unwrap().memory.hotplug_method;
 
             if let Some(new_region) = &new_region {
                 self.device_manager
@@ -2026,7 +2029,7 @@ impl Vm {
                     .update_memory(new_region)
                     .map_err(Error::DeviceManager)?;
 
-                match memory_config.hotplug_method {
+                match hotplug_method {
                     HotplugMethod::Acpi => {
                         self.device_manager
                             .lock()
@@ -2037,6 +2040,8 @@ impl Vm {
                     HotplugMethod::VirtioMem => {}
                 }
             }
+
+            let memory_config = &mut self.config.lock().unwrap().memory;
 
             // We update the VM config regardless of the actual guest resize
             // operation result (happened or not), so that if the VM reboots
