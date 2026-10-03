@@ -15,6 +15,7 @@ anyhow = { workspace = true }
 base64 = { workspace = true }
 byteorder = { workspace = true }
 hypervisor = { path = "../hypervisor" }
+iommufd-bindings = { workspace = true }
 libc = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

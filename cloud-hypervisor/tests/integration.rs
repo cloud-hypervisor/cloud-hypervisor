@@ -13463,7 +13463,7 @@ mod vfio {
 
     fn platform_cfg(iommufd: bool) -> String {
         if iommufd {
-            "iommufd=on,vfio_p2p_dma=off".to_string()
+            "iommufd=on".to_string()
         } else {
             "iommufd=off".to_string()
         }

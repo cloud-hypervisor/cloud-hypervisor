@@ -16,6 +16,7 @@ MSIS = "MSIS" # MSIs (Message Signaled Interrupt)
 SME = "SME" # Secure Memory Encryption
 THR = "THR" # Transmitter Holding Register
 TRANSLATER = "TRANSLATER"
+WRITEABLE = "WRITEABLE" # iommufd UAPI, e.g. IOMMU_IOAS_MAP_WRITEABLE
 ba = "ba"
 conectix = "conectix"
 liness = "liness"
