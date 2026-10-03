@@ -729,7 +729,7 @@ impl PciConfiguration {
             )
         };
 
-        PciConfiguration {
+        let config = PciConfiguration {
             registers,
             writable_bits,
             bars,
@@ -740,7 +740,50 @@ impl PciConfiguration {
             msix_cap_reg_idx,
             msix_config,
             pending_bar_reprogram,
+        };
+        config.fixup_pending_bar_reprogram()
+    }
+
+    fn fixup_pending_bar_reprogram(mut self) -> Self {
+        for i in (0..self.pending_bar_reprogram.len()).rev() {
+            if self.pending_bar_reprogram[i].bar_idx.is_some() {
+                continue;
+            }
+
+            let p = self.pending_bar_reprogram[i];
+            self.pending_bar_reprogram[i].bar_idx = self.pending_bar_reprogram[i + 1..]
+                .iter()
+                .find(|q| {
+                    q.old_base == p.new_base && q.len == p.len && q.region_type == p.region_type
+                })
+                .and_then(|q| q.bar_idx)
+                .or_else(|| self.find_bar_idx_by_addr(p.new_base, p.region_type));
         }
+
+        // If the corresponding bar_idx isn't found, there is inconsistency.
+        // Give up with warning.
+        self.pending_bar_reprogram.retain(|p| {
+            if p.bar_idx.is_none() {
+                warn!("Dropping pending BAR move {p:x?}");
+            }
+            p.bar_idx.is_some()
+        });
+        self
+    }
+
+    fn find_bar_idx_by_addr(&self, base_addr: u64, region_type: PciBarRegionType) -> Option<usize> {
+        (0..NUM_BAR_REGS)
+            .find(|&idx| {
+                self.bars[idx].used
+                    && self.get_bar_addr(idx) == base_addr
+                    && self.bars[idx].r#type == Some(region_type)
+            })
+            .or_else(|| {
+                (self.rom_bar_used
+                    && u64::from(self.rom_bar_addr & self.writable_bits[ROM_BAR_REG]) == base_addr
+                    && region_type == PciBarRegionType::Memory32BitRegion)
+                    .then_some(ROM_BAR_IDX)
+            })
     }
 
     fn state(&self) -> PciConfigurationState {
@@ -1122,6 +1165,7 @@ impl PciConfiguration {
                 self.bars[bar_idx].addr = value;
 
                 return Some(BarReprogrammingParams {
+                    bar_idx: Some(bar_idx),
                     old_base,
                     new_base,
                     len,
@@ -1150,6 +1194,8 @@ impl PciConfiguration {
                 self.bars[bar_idx - 1].addr = self.registers[reg_idx - 1];
 
                 return Some(BarReprogrammingParams {
+                    // 64-bit BAR is tracked by the lower slot.
+                    bar_idx: Some(bar_idx - 1),
                     old_base,
                     new_base,
                     len,
@@ -1178,6 +1224,7 @@ impl PciConfiguration {
             self.rom_bar_addr = value;
 
             return Some(BarReprogrammingParams {
+                bar_idx: Some(ROM_BAR_IDX),
                 old_base,
                 new_base,
                 len,
