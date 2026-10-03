@@ -165,6 +165,11 @@ impl MemoryZone {
     pub fn virtio_mem_zone_mut(&mut self) -> Option<&mut VirtioMemZone> {
         self.virtio_mem_zone.as_mut()
     }
+    /// Page size of the zone's backing memory (larger than the system page
+    /// size for hugepages, including a file on hugetlbfs).
+    pub fn backing_page_size(&self) -> u64 {
+        self.backing_page_size
+    }
 
     fn backing_page_size_for_gpa(&self, gpa: u64) -> Option<u64> {
         if self.regions.iter().any(|region| {
