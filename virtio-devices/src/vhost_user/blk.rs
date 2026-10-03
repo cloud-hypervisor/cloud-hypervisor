@@ -232,7 +232,9 @@ impl Blk {
     }
 
     fn state(&self) -> result::Result<State, MigratableError> {
-        self.vu_common.state(*self.config.lock().unwrap())
+        // Release the config lock before vu_common.state() locks vu.
+        let config = *self.config.lock().unwrap();
+        self.vu_common.state(config)
     }
 }
 
