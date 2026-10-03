@@ -24,7 +24,9 @@ mod mptable;
 use std::arch::x86_64;
 
 use helpers::{deserialize_u32_hex, serialize_u32_hex};
-use hypervisor::arch::x86::{CPUID_FLAG_VALID_INDEX, CpuIdEntry, VcpuMsrConfigUpdate};
+use hypervisor::arch::x86::{
+    CPUID_FLAG_VALID_INDEX, CpuIdEntry, MsrEntry, VcpuMsrConfigUpdate, msr_index,
+};
 use hypervisor::{CpuVendor, HypervisorCpuError, HypervisorError};
 use linux_loader::loader::bootparam::{boot_params, setup_header};
 use linux_loader::loader::elf::start_info::{
@@ -806,12 +808,15 @@ pub fn generate_common_cpuid(
 /// of what the host actually supports.
 pub fn generate_required_msr_updates(
     hypervisor: &dyn hypervisor::Hypervisor,
+    guest_cpuid: &[CpuIdEntry],
     cpu_profile: CpuProfile,
     kvm_hyperv: bool,
     nested: bool,
 ) -> super::Result<Option<VcpuMsrConfigUpdate>> {
-    if matches!(cpu_profile, CpuProfile::Host) {
-        return Ok(None);
+    fn cpu_exposes_vmx(cpuid: &[CpuIdEntry]) -> bool {
+        cpuid
+            .iter()
+            .any(|entry| entry.function == 0x1 && entry.ecx & (1 << VMX_ECX_BIT) != 0)
     }
 
     let host_supported_msrs = hypervisor
@@ -821,6 +826,63 @@ pub fn generate_required_msr_updates(
     let host_feature_msrs = hypervisor
         .get_feature_msrs()
         .map_err(Error::CpuProfileFeatureMsrs)?;
+
+    if matches!(cpu_profile, CpuProfile::Host) {
+        let should_configure_nested_vmx =
+            hypervisor.get_cpu_vendor() == CpuVendor::Intel && cpu_exposes_vmx(guest_cpuid);
+        if nested && should_configure_nested_vmx {
+            let mut feature_msrs = vec![MsrEntry {
+                index: msr_index::MSR_IA32_FEATURE_CONTROL,
+                data: u64::from(
+                    msr_index::FEATURE_CONTROL_LOCKED
+                        | msr_index::FEATURE_CONTROL_VMXON_ENABLED_OUTSIDE_SMX,
+                ),
+            }];
+
+            // Keep the guest VMX CPUID bit and the VMX discovery MSRs
+            // coherent. Linux only reports `vmx` to an L1 guest when
+            // IA32_FEATURE_CONTROL permits VMXON outside SMX and the VMX
+            // capability MSRs describe the supported controls.
+            //
+            // Here we're reproducing the behavior used in QEMU by using the
+            // VMX feature MSRs reported by Hypervisor::get_feature_msrs() and
+            // writing IA32_FEATURE_CONTROL before these VMX feature MSRs.
+            //
+            // Hypervisor::get_feature_msrs calls the KVM_GET_MSR_FEATURE_INDEX_LIST
+            // ioctl underneath (as used in QEMU).
+            //
+            // Source: qemu/target/i386/kvm/kvm.c:kvm_feature_msrs.
+            const NESTED_VMX_FEATURE_MSRS: [u32; 11] = [
+                msr_index::MSR_IA32_VMX_TRUE_PROCBASED_CTLS,
+                msr_index::MSR_IA32_VMX_TRUE_PINBASED_CTLS,
+                msr_index::MSR_IA32_VMX_TRUE_EXIT_CTLS,
+                msr_index::MSR_IA32_VMX_TRUE_ENTRY_CTLS,
+                msr_index::MSR_IA32_VMX_PROCBASED_CTLS2,
+                msr_index::MSR_IA32_VMX_EPT_VPID_CAP,
+                msr_index::MSR_IA32_VMX_BASIC,
+                msr_index::MSR_IA32_VMX_MISC,
+                msr_index::MSR_IA32_VMX_VMFUNC,
+                msr_index::MSR_IA32_VMX_CR0_FIXED0,
+                msr_index::MSR_IA32_VMX_CR4_FIXED0,
+            ];
+
+            for index in NESTED_VMX_FEATURE_MSRS {
+                feature_msrs.extend(host_feature_msrs.iter().filter(|msr| msr.index == index));
+            }
+
+            let mut snapshottable_msr_indices: Vec<u32> =
+                feature_msrs.iter().map(|msr| msr.index).collect();
+            snapshottable_msr_indices.sort_unstable();
+            snapshottable_msr_indices.dedup();
+
+            return Ok(Some(VcpuMsrConfigUpdate {
+                feature_msrs,
+                snapshottable_msr_indices,
+            }));
+        }
+
+        return Ok(None);
+    }
 
     let required_updates = cpu_profile.required_msr_updates(
         &host_feature_msrs,
