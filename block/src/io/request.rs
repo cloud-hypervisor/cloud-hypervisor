@@ -251,7 +251,6 @@ impl Request {
         // Queue operations expected to be submitted.
         match request_type {
             RequestType::In => {
-                self.mark_read_dirty(&mem)?;
                 let op = self.build_data_operation(mem, offset, alignment, user_data)?;
                 if disk_image.batch_requests_enabled() {
                     ret.batch_request = Some(op);
@@ -528,16 +527,26 @@ impl Request {
             .sum()
     }
 
-    // Marks guest-memory read destinations dirty before submitting async IO.
+    // Marks the first `len` bytes of the read destinations dirty.
     fn mark_read_dirty<B: Bitmap + 'static>(
         &self,
         mem: &vm_memory::GuestMemoryMmap<B>,
-    ) -> Result<(), ExecuteError> {
+        len: usize,
+    ) -> Result<(), Error> {
+        let mut remaining = len;
         for (data_addr, data_len) in &self.data_descriptors {
-            mem.get_slice(*data_addr, *data_len as usize)
-                .map_err(ExecuteError::GetHostAddress)?
+            if *data_len == 0 {
+                continue;
+            }
+            if remaining == 0 {
+                break;
+            }
+            let data_len = (*data_len as usize).min(remaining);
+            mem.get_slice(*data_addr, data_len)
+                .map_err(Error::GuestMemory)?
                 .bitmap()
-                .mark_dirty(0, *data_len as usize);
+                .mark_dirty(0, data_len);
+            remaining -= data_len;
         }
         Ok(())
     }
@@ -582,12 +591,17 @@ impl Request {
         mem: &vm_memory::GuestMemoryMmap<B>,
         completion: &mut AsyncIoCompletion,
     ) -> Result<(), Error> {
-        if self.request_type == RequestType::In
-            && completion.result > 0
-            && let Some(buffer) = completion.buffer.take()
-        {
-            let len = (completion.result as usize).min(buffer.as_slice().len());
-            self.copy_buffer_to_guest(mem, &buffer.as_slice()[..len])?;
+        if self.request_type == RequestType::In && completion.result > 0 {
+            if let Some(buffer) = completion.buffer.take() {
+                let len = (completion.result as usize).min(buffer.as_slice().len());
+                self.copy_buffer_to_guest(mem, &buffer.as_slice()[..len])?;
+            } else {
+                // No bounce buffer: the kernel read through raw iovecs (io_uring,
+                // AIO or preadv()) straight into guest memory, which bypasses the
+                // dirty bitmap. Formats that copy the data themselves already
+                // marked it, so marking it again is harmless.
+                self.mark_read_dirty(mem, completion.result as usize)?;
+            }
         }
 
         Ok(())
@@ -660,14 +674,28 @@ mod tests {
     use super::*;
     use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoOperation, AsyncIoResult};
 
-    struct PanicAsyncIo(EventFd);
+    /// Records submitted data operations instead of performing them.
+    struct RecordingAsyncIo {
+        notifier: EventFd,
+        submitted: Vec<AsyncIoOperation>,
+    }
 
-    impl AsyncIo for PanicAsyncIo {
-        fn notifier(&self) -> &EventFd {
-            &self.0
+    impl RecordingAsyncIo {
+        fn new() -> Self {
+            Self {
+                notifier: EventFd::new(0).unwrap(),
+                submitted: Vec::new(),
+            }
         }
-        fn submit_data_operation(&mut self, _: AsyncIoOperation) -> AsyncIoResult<()> {
-            unreachable!()
+    }
+
+    impl AsyncIo for RecordingAsyncIo {
+        fn notifier(&self) -> &EventFd {
+            &self.notifier
+        }
+        fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
+            self.submitted.push(op);
+            Ok(())
         }
         fn fsync(&mut self, _: Option<u64>) -> AsyncIoResult<()> {
             unreachable!()
@@ -699,12 +727,60 @@ mod tests {
             writeback: true,
             start: Instant::now(),
         };
-        let mut disk = PanicAsyncIo(EventFd::new(0).unwrap());
+        let mut disk = RecordingAsyncIo::new();
 
         let Err(ExecuteError::BadRequest(Error::InvalidOffset)) =
             request.execute_async(mem, 1024, &mut disk, &[], 0)
         else {
             panic!("expected BadRequest(InvalidOffset)");
         };
+    }
+
+    /// Drives the real submit path: page-aligned buffers are read straight
+    /// into guest memory, the completion is built from the submitted
+    /// operation as the engines do, and the dirty log is harvested while the
+    /// read is in flight, as the migration thread does. A mark placed before
+    /// the submit does not survive that harvest.
+    #[test]
+    fn read_marks_survive_a_dirty_log_harvest_while_in_flight() {
+        use vm_memory::bitmap::AtomicBitmap;
+        use vm_memory::{GuestMemoryBackend, GuestMemoryRegion};
+
+        let mem = Arc::new(
+            GuestMemoryMmap::<AtomicBitmap>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+        );
+        // One page at 0x1000, two pages at 0x4000
+        let mut request = Request {
+            request_type: RequestType::In,
+            sector: 0,
+            data_descriptors: SmallVec::from_slice(&[
+                (GuestAddress(0x1000), 0x1000),
+                (GuestAddress(0x4000), 0x2000),
+            ]),
+            status_addr: GuestAddress(0),
+            writeback: true,
+            start: Instant::now(),
+        };
+        let mut disk = RecordingAsyncIo::new();
+        request
+            .execute_async(Arc::clone(&mem), 1024, &mut disk, &[], 0)
+            .unwrap();
+        let op = disk.submitted.pop().unwrap();
+        assert!(matches!(op, AsyncIoOperation::ReadToMemory { .. }));
+
+        // The interesting part: the migration thread harvests the dirty log
+        // while the read is still in flight. A page marked dirty at submit
+        // time is consumed here, and nothing would mark it dirty again.
+        let region = mem.find_region(GuestAddress(0)).unwrap();
+        (**region).bitmap().get_and_reset();
+
+        // The backend filled the first buffer and one page of the second
+        let mut completion = AsyncIoCompletion::from_operation(op, 0x2000);
+        request.complete_async(&mem, &mut completion).unwrap();
+
+        let bitmap = region.bitmap();
+        assert!(bitmap.dirty_at(0x1000));
+        assert!(bitmap.dirty_at(0x4000));
+        assert!(!bitmap.dirty_at(0x5000));
     }
 }
