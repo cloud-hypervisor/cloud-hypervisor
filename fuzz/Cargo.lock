@@ -814,6 +814,7 @@ dependencies = [
  "log",
  "rate_limiter",
  "serde",
+ "smallvec",
  "thiserror",
  "virtio-bindings",
  "virtio-queue",
