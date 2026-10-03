@@ -130,7 +130,7 @@ pub trait PciDevice: Send {
         None
     }
     /// Relocates the BAR to a different address in guest address space.
-    fn move_bar(&mut self, _old_base: u64, _new_base: u64) -> result::Result<(), io::Error> {
+    fn move_bar(&mut self, _bar_idx: usize, _new_base: u64) -> result::Result<(), io::Error> {
         Ok(())
     }
     /// Restore BAR address in config space after a failed move_bar.
@@ -152,6 +152,7 @@ pub trait DeviceRelocation: Send + Sync {
     /// space. This follows a decision from the software running in the guest.
     fn move_bar(
         &self,
+        bar_idx: usize,
         old_base: u64,
         new_base: u64,
         len: u64,
