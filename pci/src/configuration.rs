@@ -729,12 +729,7 @@ impl PciConfiguration {
             )
         };
 
-        let pending_bar_reprogram: Vec<BarReprogrammingParams> = pending_bar_reprogram
-            .into_iter()
-            .map(BarReprogrammingParams::from)
-            .collect();
-
-        PciConfiguration {
+        let mut config = PciConfiguration {
             registers,
             writable_bits,
             bars,
@@ -744,8 +739,56 @@ impl PciConfiguration {
             last_capability,
             msix_cap_reg_idx,
             msix_config,
-            pending_bar_reprogram,
+            pending_bar_reprogram: Vec::new(),
+        };
+        config.pending_bar_reprogram = config.restore_pending_bar_reprogram(pending_bar_reprogram);
+        config
+    }
+
+    fn restore_pending_bar_reprogram(
+        &self,
+        mut pending_bar_reprogram: Vec<BarReprogrammingParamsState>,
+    ) -> Vec<BarReprogrammingParams> {
+        for i in (0..pending_bar_reprogram.len()).rev() {
+            if pending_bar_reprogram[i].bar_idx.is_some() {
+                continue;
+            }
+
+            let p = pending_bar_reprogram[i];
+            pending_bar_reprogram[i].bar_idx = pending_bar_reprogram[i + 1..]
+                .iter()
+                .find(|q| {
+                    q.old_base == p.new_base && q.len == p.len && q.region_type == p.region_type
+                })
+                .and_then(|q| q.bar_idx)
+                .or_else(|| self.find_bar_idx_by_addr(p.new_base, p.region_type));
         }
+
+        // If the corresponding bar_idx isn't found, there is something wrong.
+        // Give up to handle it with warning.
+        pending_bar_reprogram
+            .into_iter()
+            .filter_map(|p| {
+                BarReprogrammingParams::try_from(p)
+                    .inspect_err(|e| warn!("Dropping pending BAR move {p:x?}: {e}"))
+                    .ok()
+            })
+            .collect()
+    }
+
+    fn find_bar_idx_by_addr(&self, base_addr: u64, region_type: PciBarRegionType) -> Option<usize> {
+        (0..NUM_BAR_REGS)
+            .find(|&idx| {
+                self.bars[idx].used
+                    && self.get_bar_addr(idx) == base_addr
+                    && self.bars[idx].r#type == Some(region_type)
+            })
+            .or_else(|| {
+                (self.rom_bar_used
+                    && u64::from(self.rom_bar_addr & self.writable_bits[ROM_BAR_REG]) == base_addr
+                    && region_type == PciBarRegionType::Memory32BitRegion)
+                    .then_some(ROM_BAR_IDX)
+            })
     }
 
     fn state(&self) -> PciConfigurationState {
@@ -1132,6 +1175,7 @@ impl PciConfiguration {
                 self.bars[bar_idx].addr = value;
 
                 return Some(BarReprogrammingParams {
+                    bar_idx,
                     old_base,
                     new_base,
                     len,
@@ -1160,6 +1204,9 @@ impl PciConfiguration {
                 self.bars[bar_idx - 1].addr = self.registers[reg_idx - 1];
 
                 return Some(BarReprogrammingParams {
+                    // The high-dword write completes the move for a 64-bit BAR.
+                    // Report the low slot.
+                    bar_idx: bar_idx - 1,
                     old_base,
                     new_base,
                     len,
@@ -1188,6 +1235,7 @@ impl PciConfiguration {
             self.rom_bar_addr = value;
 
             return Some(BarReprogrammingParams {
+                bar_idx: ROM_BAR_IDX,
                 old_base,
                 new_base,
                 len,

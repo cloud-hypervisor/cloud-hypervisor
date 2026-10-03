@@ -33,11 +33,16 @@ pub enum Error {
     /// Invalid resource.
     #[error("Invalid resource: {0:?}")]
     InvalidResource(Resource),
+    /// Index is missing in BarReprogrammingParamsState
+    #[error("Index missing in BarReprogrammingParamsState")]
+    MissingBarIndex,
 }
 pub(crate) type Result<T> = result::Result<T, Error>;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub(crate) struct BarReprogrammingParamsState {
+    #[serde(default)]
+    pub bar_idx: Option<usize>,
     pub old_base: u64,
     pub new_base: u64,
     pub len: u64,
@@ -46,6 +51,7 @@ pub(crate) struct BarReprogrammingParamsState {
 
 #[derive(Clone, Copy, Debug)]
 pub struct BarReprogrammingParams {
+    pub bar_idx: usize,
     pub old_base: u64,
     pub new_base: u64,
     pub len: u64,
@@ -55,6 +61,7 @@ pub struct BarReprogrammingParams {
 impl From<BarReprogrammingParams> for BarReprogrammingParamsState {
     fn from(p: BarReprogrammingParams) -> Self {
         BarReprogrammingParamsState {
+            bar_idx: Some(p.bar_idx),
             old_base: p.old_base,
             new_base: p.new_base,
             len: p.len,
@@ -63,14 +70,17 @@ impl From<BarReprogrammingParams> for BarReprogrammingParamsState {
     }
 }
 
-impl From<BarReprogrammingParamsState> for BarReprogrammingParams {
-    fn from(s: BarReprogrammingParamsState) -> Self {
-        BarReprogrammingParams {
+impl TryFrom<BarReprogrammingParamsState> for BarReprogrammingParams {
+    type Error = Error;
+
+    fn try_from(s: BarReprogrammingParamsState) -> result::Result<Self, Self::Error> {
+        Ok(BarReprogrammingParams {
+            bar_idx: s.bar_idx.ok_or(Error::MissingBarIndex)?,
             old_base: s.old_base,
             new_base: s.new_base,
             len: s.len,
             region_type: s.region_type,
-        }
+        })
     }
 }
 
