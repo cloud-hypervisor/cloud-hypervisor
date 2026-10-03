@@ -527,7 +527,7 @@ impl Tap {
         str::from_utf8(self.if_name.as_bytes()).expect("Tap interface name should be valid UTF-8")
     }
 
-    #[cfg(fuzzing)]
+    #[cfg(any(fuzzing, test))]
     pub fn new_for_fuzzing(tap_file: File, if_name: &str) -> Self {
         if if_name.len() > IFNAMSIZ - 1 {
             panic!("provided name longer than `IFNAMSIZ` without NULL terminator")

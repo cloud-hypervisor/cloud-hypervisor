@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use log::{debug, error, info};
 use rate_limiter::{RateLimiter, TokenType};
+use smallvec::SmallVec;
 use thiserror::Error;
 use virtio_bindings::virtio_net::{
     VIRTIO_NET_HDR_F_NEEDS_CSUM, VIRTIO_NET_HDR_GSO_NONE, virtio_net_hdr_v1,
@@ -21,6 +22,14 @@ use vm_memory::{Bytes, GuestAddress, GuestMemoryBackend};
 use vm_virtio::{AccessPlatform, Translatable};
 
 use super::{Tap, register_listener, unregister_listener, vnet_hdr_len};
+
+/// Linux sets MAX_SKB_FRAGS + 2 descriptors per RX chain when guest offloads
+/// are on and mergeable RX buffers are off, as with this device [0, 1, 2].
+///
+/// [0]: https://elixir.bootlin.com/linux/v7.2/source/include/linux/skbuff.h#L354
+/// [1]: https://elixir.bootlin.com/linux/v7.2/source/drivers/net/virtio_net.c#L6695
+/// [2]: https://elixir.bootlin.com/linux/v7.2/source/drivers/net/virtio_net.c#L2647
+const RX_CHAIN_INLINE_DESCS: usize = 19;
 
 #[derive(Clone)]
 pub struct TxVirtio {
@@ -225,7 +234,6 @@ impl TxVirtio {
 pub struct RxVirtio {
     pub counter_bytes: Wrapping<u64>,
     pub counter_frames: Wrapping<u64>,
-    iovecs: IovecBuffer,
 }
 
 impl Default for RxVirtio {
@@ -239,7 +247,6 @@ impl RxVirtio {
         RxVirtio {
             counter_bytes: Wrapping(0),
             counter_frames: Wrapping(0),
-            iovecs: IovecBuffer::new(),
         }
     }
 
@@ -267,7 +274,11 @@ impl RxVirtio {
                 break;
             }
 
-            let mut iovecs = self.iovecs.borrow();
+            // Ranges for translation into host iovecs and for dirty tracking after readv()
+            let mut guest_ranges: SmallVec<[(GuestAddress, usize); RX_CHAIN_INLINE_DESCS]> =
+                SmallVec::new();
+            let mut iovecs: SmallVec<[libc::iovec; RX_CHAIN_INLINE_DESCS]> = SmallVec::new();
+
             // Parse the descriptor chain into an iovec array. On error, the
             // offending head descriptor is still added to the used ring with
             // len 0 below, so the guest does not see a descriptor leak.
@@ -299,17 +310,7 @@ impl RxVirtio {
                             NetQueuePairError::GuestMemory(vm_memory::GuestMemoryError::IOError(e))
                         })?;
                     if desc.is_write_only() && desc.len() > 0 {
-                        let buf = desc_chain
-                            .memory()
-                            .get_slice(desc_addr, desc.len() as usize)
-                            .map_err(NetQueuePairError::GuestMemory)?;
-                        assert!(buf.len() >= desc.len() as usize);
-                        let buf = buf.ptr_guard_mut();
-                        let iovec = libc::iovec {
-                            iov_base: buf.as_ptr().cast(),
-                            iov_len: desc.len() as libc::size_t,
-                        };
-                        iovecs.push(iovec);
+                        guest_ranges.push((desc_addr, desc.len() as usize));
                     } else {
                         error!(
                             "Invalid descriptor chain: address = 0x{:x} length = {} write_only = {}",
@@ -320,6 +321,20 @@ impl RxVirtio {
                         return Err(NetQueuePairError::DescriptorChainInvalid);
                     }
                     next_desc = desc_chain.next();
+                }
+
+                // Translate guest_ranges into host_iovecs.
+                for (addr, len) in &guest_ranges {
+                    let buf = desc_chain
+                        .memory()
+                        .get_slice(*addr, *len)
+                        .map_err(NetQueuePairError::GuestMemory)?;
+                    assert!(buf.len() >= *len);
+                    let buf = buf.ptr_guard_mut();
+                    iovecs.push(libc::iovec {
+                        iov_base: buf.as_ptr().cast(),
+                        iov_len: *len,
+                    });
                 }
                 Ok(num_buffers_addr)
             })();
@@ -378,6 +393,22 @@ impl RxVirtio {
                         .map_err(NetQueuePairError::GuestMemory)?;
                     0
                 } else {
+                    // readv() bypasses dirty bitmap. Update the touched pages manually
+                    let mut remaining = result as usize;
+                    for (addr, len) in &guest_ranges {
+                        if *len == 0 {
+                            continue;
+                        }
+                        if remaining == 0 {
+                            break;
+                        }
+                        let n = remaining.min(*len);
+                        if let Ok(buf) = desc_chain.memory().get_slice(*addr, n) {
+                            buf.bitmap().mark_dirty(0, n);
+                        }
+                        remaining -= n;
+                    }
+
                     // Write num_buffers to guest memory. Always 1 because the
                     // frame is never spread over more than one descriptor chain.
                     if let Err(e) = desc_chain.memory().write_obj(1u16, num_buffers_addr) {
@@ -624,7 +655,17 @@ impl NetQueuePair {
 
 #[cfg(test)]
 mod tests {
+    use std::fs::File;
+    use std::os::fd::OwnedFd;
+    use std::os::unix::net::UnixDatagram;
+
     use virtio_bindings::virtio_net::{VIRTIO_NET_HDR_F_DATA_VALID, VIRTIO_NET_HDR_GSO_TCPV4};
+    use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
+    use virtio_queue::desc::RawDescriptor;
+    use virtio_queue::desc::split::Descriptor;
+    use virtio_queue::mock::MockSplitQueue;
+    use vm_memory::bitmap::AtomicBitmap;
+    use vm_memory::{GuestMemoryMmap, GuestMemoryRegion};
 
     use super::*;
 
@@ -651,5 +692,53 @@ mod tests {
         header[1] = VIRTIO_NET_HDR_GSO_TCPV4 as u8;
         assert!(!TxVirtio::tx_is_header_valid(&header, len, false));
         assert!(TxVirtio::tx_is_header_valid(&header, len, true));
+    }
+
+    #[test]
+    fn rx_marks_all_written_pages_dirty() {
+        const BUF0: u64 = 0x10000;
+        const BUF1: u64 = 0x20000;
+        const FILL: u8 = 0xab;
+
+        let mem =
+            GuestMemoryMmap::<AtomicBitmap>::from_ranges(&[(GuestAddress(0), 0x10_0000)]).unwrap();
+        // One RX chain: one page at BUF0, two pages at BUF1
+        let vq = MockSplitQueue::new(&mem, 16);
+        vq.add_desc_chains(
+            &[
+                RawDescriptor::from(Descriptor::new(
+                    BUF0,
+                    0x1000,
+                    (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT) as u16,
+                    1,
+                )),
+                RawDescriptor::from(Descriptor::new(BUF1, 0x2000, VRING_DESC_F_WRITE as u16, 0)),
+            ],
+            0,
+        )
+        .unwrap();
+        let mut queue: Queue = vq.create_queue().unwrap();
+        // A frame that spills from the first buffer into the second one
+        let tap = {
+            let (tx, rx) = UnixDatagram::pair().unwrap();
+            rx.set_nonblocking(true).unwrap();
+            tx.send(&[FILL; 6000]).unwrap();
+            Tap::new_for_fuzzing(File::from(OwnedFd::from(rx)), "test")
+        };
+
+        // readv() writes into guest memory through raw pointers, which the
+        // vm-memory dirty bitmap cannot see. The device must mark those bytes
+        // itself, or a live migration never resends them.
+        RxVirtio::new()
+            .process_desc_chain(&mem, &tap, &mut queue, &mut None, None)
+            .unwrap();
+
+        // readv() fills BUF0 (4096 bytes) and spills the remaining 1904 bytes into BUF1
+        assert_eq!(mem.read_obj::<u8>(GuestAddress(BUF1 + 100)).unwrap(), FILL);
+        let bitmap = mem.find_region(GuestAddress(0)).unwrap().bitmap();
+        assert!(bitmap.dirty_at(BUF0 as usize));
+        assert!(bitmap.dirty_at(BUF1 as usize));
+        // Only 6000 - 4096 bytes were written to the second buffer
+        assert!(!bitmap.dirty_at(BUF1 as usize + 0x1000));
     }
 }
