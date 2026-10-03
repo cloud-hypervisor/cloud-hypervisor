@@ -290,8 +290,8 @@ const MSIX_PBA_SIZE: u64 = 0x800;
 const CAPABILITY_BAR_SIZE: u64 = (MSIX_PBA_BAR_OFFSET + MSIX_PBA_SIZE).next_power_of_two();
 // Align larger than natural alignment to work around Windows driver issues
 const VIRTIO_PCI_BAR_ALIGN: u64 = 0x80_0000;
-const VIRTIO_CONFIG_BAR_INDEX: usize = 0;
-const VIRTIO_SHM_BAR_INDEX: usize = 2;
+pub const VIRTIO_CONFIG_BAR_INDEX: usize = 0;
+pub const VIRTIO_SHM_BAR_INDEX: usize = 2;
 
 const NOTIFY_OFF_MULTIPLIER: u32 = 4; // A dword per notification address.
 
@@ -695,10 +695,6 @@ impl VirtioPciDevice {
     /// Determines if the driver has requested the device (re)init / reset itself
     fn is_driver_init(&self) -> bool {
         self.common_config.driver_status.load(Ordering::SeqCst) == DEVICE_INIT as u8
-    }
-
-    pub fn config_bar_addr(&self) -> u64 {
-        self.configuration.get_bar_addr(VIRTIO_CONFIG_BAR_INDEX)
     }
 
     fn add_pci_capabilities(
@@ -1165,11 +1161,11 @@ impl PciDevice for VirtioPciDevice {
         Ok(())
     }
 
-    fn move_bar(&mut self, old_base: u64, new_base: u64) -> io::Result<()> {
+    fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> io::Result<()> {
         // We only update our idea of the bar in order to support free_bars() above.
         // The majority of the reallocation is done inside DeviceManager.
         for bar in self.bar_regions.iter_mut() {
-            if bar.addr() == old_base {
+            if bar.idx() == bar_idx {
                 *bar = bar.set_address(new_base);
             }
         }

@@ -55,7 +55,7 @@ use devices::interrupt_controller::InterruptController;
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
 #[cfg(feature = "ivshmem")]
-use devices::ivshmem::{IvshmemError, IvshmemOps};
+use devices::ivshmem::{IVSHMEM_DATA_BAR_IDX, IvshmemError, IvshmemOps};
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
 #[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))]
@@ -98,7 +98,10 @@ use tracer::trace_scoped;
 use vfio_ioctls::VfioIommufd;
 use vfio_ioctls::{VfioContainer, VfioDevice, VfioDeviceFd, VfioOps};
 use virtio_devices::block::Error as VirtioBlockError;
-use virtio_devices::transport::{VirtioPciDevice, VirtioPciDeviceActivator, VirtioTransport};
+use virtio_devices::transport::{
+    VIRTIO_CONFIG_BAR_INDEX, VIRTIO_SHM_BAR_INDEX, VirtioPciDevice, VirtioPciDeviceActivator,
+    VirtioTransport,
+};
 use virtio_devices::vhost_user::VhostUserConfig;
 use virtio_devices::{
     AccessPlatformMapping, Block, Endpoint, IommuMapping, VdpaDmaMapping, VirtioMemMappingSource,
@@ -656,6 +659,7 @@ pub(crate) struct AddressManager {
 impl DeviceRelocation for AddressManager {
     fn move_bar(
         &self,
+        bar_idx: usize,
         old_base: u64,
         new_base: u64,
         len: u64,
@@ -746,9 +750,8 @@ impl DeviceRelocation for AddressManager {
             if let Some(node) = self.device_tree.lock().unwrap().get_mut(&id) {
                 let mut resource_updated = false;
                 for resource in node.resources.iter_mut() {
-                    if let Resource::PciBar { base, type_, .. } = resource
-                        && PciBarRegionType::from(*type_) == region_type
-                        && *base == old_base
+                    if let Resource::PciBar { index, base, .. } = resource
+                        && *index == bar_idx
                     {
                         *base = new_base;
                         resource_updated = true;
@@ -758,7 +761,7 @@ impl DeviceRelocation for AddressManager {
 
                 if !resource_updated {
                     return Err(io::Error::other(format!(
-                        "Couldn't find a resource with base 0x{old_base:x} for device {id}"
+                        "Couldn't find a resource for BAR {bar_idx} of device {id}"
                     )));
                 }
             } else {
@@ -770,8 +773,7 @@ impl DeviceRelocation for AddressManager {
 
         let any_dev = pci_dev.as_any_mut();
         if let Some(virtio_pci_dev) = any_dev.downcast_ref::<VirtioPciDevice>() {
-            let bar_addr = virtio_pci_dev.config_bar_addr();
-            if bar_addr == new_base {
+            if bar_idx == VIRTIO_CONFIG_BAR_INDEX {
                 for (event, addr) in virtio_pci_dev.ioeventfds(old_base) {
                     let io_addr = IoEventAddress::Mmio(addr);
                     self.vm.unregister_ioevent(event, &io_addr).map_err(|e| {
@@ -786,12 +788,10 @@ impl DeviceRelocation for AddressManager {
                             io::Error::other(format!("failed to register ioevent: {e:?}"))
                         })?;
                 }
-            } else {
+            } else if bar_idx == VIRTIO_SHM_BAR_INDEX {
                 let virtio_dev = virtio_pci_dev.virtio_device();
                 let mut virtio_dev = virtio_dev.lock().unwrap();
-                if let Some(mut shm_regions) = virtio_dev.get_shm_regions()
-                    && shm_regions.addr.raw_value() == old_base
-                {
+                if let Some(mut shm_regions) = virtio_dev.get_shm_regions() {
                     // SAFETY: guaranteed by MmapRegion invariants
                     unsafe {
                         // Remove old mapping
@@ -836,7 +836,7 @@ impl DeviceRelocation for AddressManager {
             }
         }
 
-        pci_dev.move_bar(old_base, new_base)
+        pci_dev.move_bar(bar_idx, new_base)
     }
 }
 
@@ -4584,7 +4584,8 @@ impl DeviceManager {
             resources,
         )?;
 
-        let bar_addr = virtio_pci_device.lock().unwrap().config_bar_addr();
+        let bar = PciBarConfiguration::bar_of_idx(&bars, VIRTIO_CONFIG_BAR_INDEX).unwrap();
+        let bar_addr = bar.addr();
         for (event, addr) in virtio_pci_device.lock().unwrap().ioeventfds(bar_addr) {
             let io_addr = IoEventAddress::Mmio(addr);
             self.address_manager
@@ -4696,7 +4697,8 @@ impl DeviceManager {
             resources,
         )?;
 
-        let start_addr = ivshmem_device.lock().unwrap().data_bar_addr();
+        let bar = PciBarConfiguration::bar_of_idx(&bars, IVSHMEM_DATA_BAR_IDX).unwrap();
+        let start_addr = bar.addr();
         let (region, mapping) = ivshmem_ops
             .lock()
             .unwrap()
@@ -5139,7 +5141,7 @@ impl DeviceManager {
             .free_device_id(device_id)
             .map_err(DeviceManagerError::FreePciDeviceId)?;
 
-        let (pci_device_handle, id) = {
+        let (pci_device_handle, id, pci_bar_resources) = {
             // Remove the device from the device tree along with its children.
             let mut device_tree = self.device_tree.lock().unwrap();
             let pci_device_node = device_tree
@@ -5165,7 +5167,7 @@ impl DeviceManager {
                 device_tree.remove(child);
             }
 
-            (pci_device_handle, id)
+            (pci_device_handle, id, pci_device_node.resources)
         };
 
         let mut iommu_attached = false;
@@ -5209,13 +5211,19 @@ impl DeviceManager {
             }
             PciDeviceHandle::Virtio(virtio_pci_device) => {
                 let dev = virtio_pci_device.lock().unwrap();
-                let bar_addr = dev.config_bar_addr();
-                for (event, addr) in dev.ioeventfds(bar_addr) {
-                    let io_addr = IoEventAddress::Mmio(addr);
-                    self.address_manager
-                        .vm
-                        .unregister_ioevent(event, &io_addr)
-                        .map_err(|e| DeviceManagerError::UnRegisterIoevent(e.into()))?;
+                let config_bar_idx = VIRTIO_CONFIG_BAR_INDEX;
+                let bar_addr = pci_bar_resources.iter().find_map(|r| match r {
+                    Resource::PciBar { index, base, .. } if *index == config_bar_idx => Some(*base),
+                    _ => None,
+                });
+                if let Some(bar_addr) = bar_addr {
+                    for (event, addr) in dev.ioeventfds(bar_addr) {
+                        let io_addr = IoEventAddress::Mmio(addr);
+                        self.address_manager
+                            .vm
+                            .unregister_ioevent(event, &io_addr)
+                            .map_err(|e| DeviceManagerError::UnRegisterIoevent(e.into()))?;
+                    }
                 }
 
                 if let Some(dma_handler) = dev.dma_handler()

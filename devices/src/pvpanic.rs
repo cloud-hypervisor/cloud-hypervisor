@@ -135,10 +135,6 @@ impl PvPanicDevice {
             events: self.events,
         }
     }
-
-    pub fn config_bar_addr(&self) -> u64 {
-        self.configuration.get_bar_addr(0)
-    }
 }
 
 impl BusDevice for PvPanicDevice {
@@ -221,9 +217,9 @@ impl PciDevice for PvPanicDevice {
         Ok(())
     }
 
-    fn move_bar(&mut self, old_base: u64, new_base: u64) -> io::Result<()> {
+    fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> io::Result<()> {
         for bar in self.bar_regions.iter_mut() {
-            if bar.addr() == old_base {
+            if bar.idx() == bar_idx {
                 *bar = bar.set_address(new_base);
             }
         }

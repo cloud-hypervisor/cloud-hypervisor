@@ -33,15 +33,55 @@ pub enum Error {
     /// Invalid resource.
     #[error("Invalid resource: {0:?}")]
     InvalidResource(Resource),
+    /// Index is missing in BarReprogrammingParamsState
+    #[error("Index missing in BarReprogrammingParamsState")]
+    MissingBarIndex,
 }
 pub(crate) type Result<T> = result::Result<T, Error>;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-pub struct BarReprogrammingParams {
+pub(crate) struct BarReprogrammingParamsState {
+    #[serde(default)]
+    pub bar_idx: Option<usize>,
     pub old_base: u64,
     pub new_base: u64,
     pub len: u64,
     pub region_type: PciBarRegionType,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct BarReprogrammingParams {
+    pub bar_idx: usize,
+    pub old_base: u64,
+    pub new_base: u64,
+    pub len: u64,
+    pub region_type: PciBarRegionType,
+}
+
+impl From<BarReprogrammingParams> for BarReprogrammingParamsState {
+    fn from(p: BarReprogrammingParams) -> Self {
+        BarReprogrammingParamsState {
+            bar_idx: Some(p.bar_idx),
+            old_base: p.old_base,
+            new_base: p.new_base,
+            len: p.len,
+            region_type: p.region_type,
+        }
+    }
+}
+
+impl TryFrom<BarReprogrammingParamsState> for BarReprogrammingParams {
+    type Error = Error;
+
+    fn try_from(s: BarReprogrammingParamsState) -> result::Result<Self, Self::Error> {
+        Ok(BarReprogrammingParams {
+            bar_idx: s.bar_idx.ok_or(Error::MissingBarIndex)?,
+            old_base: s.old_base,
+            new_base: s.new_base,
+            len: s.len,
+            region_type: s.region_type,
+        })
+    }
 }
 
 pub trait PciDevice: Send {
@@ -90,7 +130,7 @@ pub trait PciDevice: Send {
         None
     }
     /// Relocates the BAR to a different address in guest address space.
-    fn move_bar(&mut self, _old_base: u64, _new_base: u64) -> result::Result<(), io::Error> {
+    fn move_bar(&mut self, _bar_idx: usize, _new_base: u64) -> result::Result<(), io::Error> {
         Ok(())
     }
     /// Restore BAR address in config space after a failed move_bar.
@@ -112,6 +152,7 @@ pub trait DeviceRelocation: Send + Sync {
     /// space. This follows a decision from the software running in the guest.
     fn move_bar(
         &self,
+        bar_idx: usize,
         old_base: u64,
         new_base: u64,
         len: u64,

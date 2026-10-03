@@ -224,6 +224,7 @@ impl PciBus {
     fn apply_bar_reprogramming(&self, device: &mut dyn PciDevice, bars: &[BarReprogrammingParams]) {
         for bar in bars {
             if let Err(e) = self.device_reloc.move_bar(
+                bar.bar_idx,
                 bar.old_base,
                 bar.new_base,
                 bar.len,
@@ -516,6 +517,7 @@ mod tests {
     impl DeviceRelocation for MockDeviceRelocation {
         fn move_bar(
             &self,
+            _bar_idx: usize,
             _old_base: u64,
             _new_base: u64,
             _len: u64,
