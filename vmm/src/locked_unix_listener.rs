@@ -12,7 +12,7 @@
 
 use std::fs::{File, OpenOptions};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
-use std::os::unix::fs::FileTypeExt;
+use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
@@ -42,19 +42,33 @@ impl SocketLock {
         let mut path = socket_path.to_path_buf().into_os_string();
         path.push(".lock");
         let path = PathBuf::from(path);
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&path)
-            .map_err(LockedUnixListenerError::Io)?;
+        // Retry, as the previous owner may unlink the file between open() and lock.
+        loop {
+            let file = OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .write(true)
+                .open(&path)
+                .map_err(LockedUnixListenerError::Io)?;
 
-        match try_acquire_lock(&file, LockType::Write, LockGranularity::WholeFile) {
-            Ok(()) => Ok(Self { _file: file, path }),
-            Err(LockError::AlreadyLocked) => {
-                Err(LockedUnixListenerError::InUse(socket_path.to_path_buf()))
+            match try_acquire_lock(&file, LockType::Write, LockGranularity::WholeFile) {
+                Ok(()) => {}
+                Err(LockError::AlreadyLocked) => {
+                    return Err(LockedUnixListenerError::InUse(socket_path.to_path_buf()));
+                }
+                Err(LockError::Io(e)) => return Err(LockedUnixListenerError::Io(e)),
             }
-            Err(LockError::Io(e)) => Err(LockedUnixListenerError::Io(e)),
+
+            // A lock on a file that was unlinked meanwhile guards nothing.
+            let locked = file.metadata().map_err(LockedUnixListenerError::Io)?;
+            match fs::metadata(&path) {
+                Ok(current) if current.dev() == locked.dev() && current.ino() == locked.ino() => {
+                    return Ok(Self { _file: file, path });
+                }
+                Ok(_) => {}
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(LockedUnixListenerError::Io(e)),
+            }
         }
     }
 }
@@ -131,6 +145,7 @@ impl Drop for LockedUnixListener {
 #[cfg(test)]
 mod tests {
     use std::os::unix::net::UnixStream;
+    use std::thread;
 
     use vmm_sys_util::tempdir::TempDir;
 
@@ -169,6 +184,27 @@ mod tests {
 
         // The guard has been dropped, so the path can be taken again.
         LockedUnixListener::bind(&path).unwrap();
+    }
+
+    #[test]
+    fn test_lock_is_not_held_on_an_unlinked_lock_file() {
+        let tmp_dir = TempDir::new_with_prefix("/tmp/locked-socket").unwrap();
+        let path = tmp_dir.as_path().join("test.sock");
+
+        // The lock file is unlinked on release, racing with the other open.
+        let contend = || {
+            for _ in 0..20_000 {
+                if let Ok(lock) = SocketLock::acquire(&path) {
+                    let locked = lock._file.metadata().unwrap();
+                    let current = fs::metadata(&lock.path).unwrap();
+                    assert_eq!((locked.dev(), locked.ino()), (current.dev(), current.ino()));
+                }
+            }
+        };
+        thread::scope(|s| {
+            s.spawn(contend);
+            s.spawn(contend);
+        });
     }
 
     #[test]
