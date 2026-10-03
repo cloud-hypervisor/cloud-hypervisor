@@ -3091,6 +3091,10 @@ impl Vm {
         Ok(())
     }
 
+    pub fn flush_disks(&self) {
+        self.device_manager.lock().unwrap().flush_disks();
+    }
+
     pub fn activate_virtio_devices(&self) -> Result<()> {
         self.device_manager
             .lock()
