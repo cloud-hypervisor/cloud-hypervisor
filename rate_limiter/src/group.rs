@@ -247,7 +247,14 @@ impl RateLimiterGroup {
                                     warn!("Unknown rate-limiter loop event: {event}");
                                 }
                                 EpollDispatch::Unblocked => {
-                                    inner.rate_limiter.event_handler().unwrap();
+                                    match inner.rate_limiter.event_handler() {
+                                        // The timer was re-armed after it
+                                        // fired and will fire again.
+                                        Err(crate::Error::SpuriousRateLimiterEvent(_)) => {
+                                            continue;
+                                        }
+                                        res => res.unwrap(),
+                                    }
                                     let handles = inner.handles.lock().unwrap();
                                     for handle in handles.iter() {
                                         handle.write(1).map_err(Error::EventFdWrite)?;
