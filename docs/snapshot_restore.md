@@ -207,6 +207,30 @@ driver).
 
 See [`vfio.md`](vfio.md) for details on requirements and behavior.
 
+## VM Generation ID
+
+A snapshot captures the state of the guest random number generator along with
+the rest of guest memory, so every VM restored from the same snapshot starts
+with an identical generator state and produces the same stream from
+`/dev/urandom` until something reseeds it.
+
+The VM Generation ID device closes that gap. It exposes a 128 bit value that
+changes on every restore, which the guest driver takes as its cue to reseed.
+The device is always present and needs no configuration.
+
+The guest kernel config needs `CONFIG_VMGENID=y`, which builds the `vmgenid`
+platform driver into the kernel. It calls `add_vmfork_randomness()` when the
+value moves, which mixes the new value into the kernel pool and forces an
+immediate reseed that changes `/dev/urandom` and `getrandom()`.
+
+A program that seeded a generator of its own at startup carries that seed into
+every clone, so it keeps producing the same values even though `/dev/urandom`
+has moved on. Such a program has to draw fresh randomness itself after the
+restore.
+
+A live migration draws a new value as well, because the destination completes
+through the same restore path.
+
 ## Offload Snapshot and Restore
 
 Cloud Hypervisor can hand the snapshot payload off to a user-provided

@@ -160,6 +160,8 @@ const DEBUGCON_DEVICE_NAME: &str = "__debug_console";
 const GPIO_DEVICE_NAME: &str = "__gpio";
 const RNG_DEVICE_NAME: &str = "__rng";
 const RTC_DEVICE_NAME: &str = "__rtc";
+#[cfg(not(target_arch = "riscv64"))]
+const VMGENID_DEVICE_NAME: &str = "__vmgenid";
 const IOMMU_DEVICE_NAME: &str = "__iommu";
 #[cfg(feature = "pvmemcontrol")]
 const PVMEMCONTROL_DEVICE_NAME: &str = "__pvmemcontrol";
@@ -514,6 +516,31 @@ pub enum DeviceManagerError {
     /// Failed to do power button notification
     #[error("Failed to do power button notification")]
     PowerButtonNotification(#[source] io::Error),
+
+    /// Failed to create the VM Generation ID device
+    #[cfg(not(target_arch = "riscv64"))]
+    #[error("Failed to create the VM Generation ID device")]
+    CreateVmGenId(#[source] devices::VmGenIdError),
+
+    /// Failed to create the VM Generation ID memory region
+    #[cfg(not(target_arch = "riscv64"))]
+    #[error("Failed to create the VM Generation ID memory region")]
+    CreateVmGenIdRegion(#[source] MemoryManagerError),
+
+    /// Failed to map the VM Generation ID memory region
+    #[cfg(not(target_arch = "riscv64"))]
+    #[error("Failed to map the VM Generation ID memory region")]
+    CreateVmGenIdMapping(#[source] MemoryManagerError),
+
+    /// Failed to change the VM Generation ID
+    #[cfg(not(target_arch = "riscv64"))]
+    #[error("Failed to change the VM Generation ID")]
+    ChangeVmGenId(#[source] devices::VmGenIdError),
+
+    /// Failed to do VM Generation ID notification
+    #[cfg(not(target_arch = "riscv64"))]
+    #[error("Failed to do VM Generation ID notification")]
+    VmGenIdNotification(#[source] io::Error),
 
     /// Failed to do AArch64 GPIO power button notification
     #[cfg(target_arch = "aarch64")]
@@ -953,6 +980,14 @@ pub struct DeviceManager {
     // ACPI GED notification device
     ged_notification_device: Option<Arc<Mutex<devices::AcpiGedDevice>>>,
 
+    // VM Generation ID device
+    #[cfg(not(target_arch = "riscv64"))]
+    vmgenid_device: Option<Arc<Mutex<devices::VmGenIdDevice>>>,
+
+    // Mapping backing the VM Generation ID device, kept for teardown
+    #[cfg(not(target_arch = "riscv64"))]
+    vmgenid_mapping: Option<UserspaceMapping>,
+
     // VM configuration
     config: Arc<Mutex<VmConfig>>,
 
@@ -1334,6 +1369,10 @@ impl DeviceManager {
             #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
             cmdline_additions: Vec::new(),
             ged_notification_device: None,
+            #[cfg(not(target_arch = "riscv64"))]
+            vmgenid_device: None,
+            #[cfg(not(target_arch = "riscv64"))]
+            vmgenid_mapping: None,
             config,
             memory_manager,
             cpu_manager,
@@ -1870,6 +1909,90 @@ impl DeviceManager {
         Ok(interrupt_controller)
     }
 
+    #[cfg(not(target_arch = "riscv64"))]
+    fn add_vmgenid_device(&mut self) -> DeviceManagerResult<()> {
+        let id = String::from(VMGENID_DEVICE_NAME);
+        let mut node = device_node!(id);
+
+        let restored = self
+            .device_tree
+            .lock()
+            .unwrap()
+            .get(&id)
+            .and_then(|node| {
+                node.resources.iter().find_map(|resource| match resource {
+                    Resource::MmioAddressRange { base, .. } => Some(*base),
+                    _ => None,
+                })
+            })
+            .map(GuestAddress);
+
+        let address = self
+            .address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_platform_mmio_addresses(
+                restored,
+                devices::VMGENID_REGION_SIZE,
+                Some(devices::VMGENID_REGION_SIZE),
+            )
+            .ok_or(DeviceManagerError::AllocateMmioAddress)?;
+
+        let region = Arc::new(
+            MemoryManager::create_ram_region_raw(
+                &None,
+                0,
+                devices::VMGENID_REGION_SIZE as usize,
+                false,
+                false,
+                false,
+                None,
+                None,
+                None,
+                false,
+            )
+            .map_err(DeviceManagerError::CreateVmGenIdRegion)?,
+        );
+
+        // SAFETY: the region is owned by the device and outlives the mapping.
+        let mem_slot = unsafe {
+            self.memory_manager
+                .lock()
+                .unwrap()
+                .create_userspace_mapping(
+                    address.0,
+                    region.len(),
+                    region.as_ptr(),
+                    false,
+                    false,
+                    false,
+                    hypervisor::MemoryVisibility::Shared,
+                )
+                .map_err(DeviceManagerError::CreateVmGenIdMapping)?
+        };
+        self.vmgenid_mapping = Some(UserspaceMapping {
+            mem_slot,
+            addr: address,
+            mapping: Arc::clone(&region),
+            mergeable: false,
+        });
+
+        let device = Arc::new(Mutex::new(
+            devices::VmGenIdDevice::new(address, region)
+                .map_err(DeviceManagerError::CreateVmGenId)?,
+        ));
+
+        node.resources.push(Resource::MmioAddressRange {
+            base: address.0,
+            size: devices::VMGENID_REGION_SIZE,
+        });
+        self.device_tree.lock().unwrap().insert(id, node);
+        self.vmgenid_device = Some(device);
+
+        Ok(())
+    }
+
     fn add_acpi_devices(
         &mut self,
         interrupt_manager: &dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>,
@@ -1930,6 +2053,10 @@ impl DeviceManager {
             .unwrap()
             .allocate_platform_mmio_addresses(None, acpi::GED_DEVICE_ACPI_SIZE as u64, None)
             .ok_or(DeviceManagerError::AllocateMmioAddress)?;
+
+        #[cfg(not(target_arch = "riscv64"))]
+        self.add_vmgenid_device()?;
+
         let ged_device = Arc::new(Mutex::new(devices::AcpiGedDevice::new(
             interrupt_group,
             ged_irq,
@@ -5582,6 +5709,27 @@ impl DeviceManager {
             .map_err(DeviceManagerError::PowerButtonNotification)
     }
 
+    #[cfg(not(target_arch = "riscv64"))]
+    pub fn regenerate_vmgenid(&self) -> DeviceManagerResult<()> {
+        let Some(device) = self.vmgenid_device.as_ref() else {
+            return Ok(());
+        };
+
+        device
+            .lock()
+            .unwrap()
+            .regenerate()
+            .map_err(DeviceManagerError::ChangeVmGenId)?;
+
+        self.ged_notification_device
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .notify(AcpiNotificationFlags::VMGENID_CHANGED)
+            .map_err(DeviceManagerError::VmGenIdNotification)
+    }
+
     #[cfg(target_arch = "aarch64")]
     pub fn notify_power_button(&self) -> DeviceManagerResult<()> {
         // There are two use cases:
@@ -6011,6 +6159,11 @@ impl Aml for DeviceManager {
             TpmDevice {}.to_aml_bytes(sink);
         }
 
+        #[cfg(not(target_arch = "riscv64"))]
+        if let Some(vmgenid_device) = self.vmgenid_device.as_ref() {
+            vmgenid_device.lock().unwrap().to_aml_bytes(sink);
+        }
+
         self.ged_notification_device
             .as_ref()
             .unwrap()
@@ -6274,6 +6427,25 @@ impl Drop for DeviceManager {
         // that they are dropped and unmapped before the container is cleared.
         // See eject_device() for the device hot-unplug equivalent.
         self.mmio_regions.lock().unwrap().clear();
+
+        #[cfg(not(target_arch = "riscv64"))]
+        if let Some(mapping) = self.vmgenid_mapping.take() {
+            // SAFETY: the mapping is still installed and its region is alive.
+            if let Err(e) = unsafe {
+                self.memory_manager
+                    .lock()
+                    .unwrap()
+                    .remove_userspace_mapping(
+                        mapping.addr.0,
+                        mapping.mapping.len(),
+                        mapping.mapping.as_ptr(),
+                        mapping.mergeable,
+                        mapping.mem_slot,
+                    )
+            } {
+                error!("Error removing VM Generation ID mapping: {e:?}");
+            }
+        }
 
         // Wake up the DeviceManager threads (mainly virtio device workers),
         // to avoid deadlock on waiting for paused/parked worker threads.

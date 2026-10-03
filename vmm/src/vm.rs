@@ -2987,6 +2987,14 @@ impl Vm {
             .try_lock_disks()
             .map_err(Error::LockingError)?;
 
+        // Any restore may be a fork, so reseed before the guest runs.
+        #[cfg(not(target_arch = "riscv64"))]
+        self.device_manager
+            .lock()
+            .unwrap()
+            .regenerate_vmgenid()
+            .map_err(Error::DeviceManager)?;
+
         // Now we can start all vCPUs from here.
         self.cpu_manager
             .lock()
