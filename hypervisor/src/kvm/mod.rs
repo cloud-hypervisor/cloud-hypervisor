@@ -3486,9 +3486,6 @@ impl cpu::Vcpu for KvmVcpu {
         }
         self.set_lapic(&state.lapic_state)?;
         self.set_fpu(&state.fpu)?;
-        if let Some(nested_state) = state.nested_state {
-            self.set_nested_state(&nested_state)?;
-        }
 
         if let Some(freq) = state.tsc_khz {
             self.set_tsc_khz(freq)?;
@@ -3536,6 +3533,10 @@ impl cpu::Vcpu for KvmVcpu {
             if required_feature_msr_not_set {
                 return Err(cpu::HypervisorCpuError::RestoreFeatureMsr);
             }
+        }
+
+        if let Some(nested_state) = state.nested_state {
+            self.set_nested_state(&nested_state)?;
         }
 
         if let Some(ssp) = state.guest_ssp {
