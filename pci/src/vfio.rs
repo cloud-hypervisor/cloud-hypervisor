@@ -2084,7 +2084,7 @@ impl VfioPciDevice {
     pub fn new(
         id: String,
         vm: Arc<dyn hypervisor::Vm>,
-        device: VfioDevice,
+        device: Arc<VfioDevice>,
         vfio_ops: Arc<dyn VfioOps>,
         msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
@@ -2099,8 +2099,6 @@ impl VfioPciDevice {
         device_path: PathBuf,
         extended_caps: Vec<Arc<dyn PciExpressCapability + Send + Sync>>,
     ) -> Result<Self, VfioPciError> {
-        let device = Arc::new(device);
-
         let vfio_wrapper = VfioDeviceWrapper::new(Arc::clone(&device));
 
         let common = VfioCommon::new(

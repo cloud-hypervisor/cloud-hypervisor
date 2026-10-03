@@ -7,7 +7,7 @@ use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 #[cfg(feature = "fw_cfg")]
 use std::str::FromStr;
-use std::{fs, result};
+use std::{fmt, fs, result};
 
 use arch::CpuProfile;
 use block::ImageType;
@@ -16,6 +16,7 @@ pub use block::fcntl::LockGranularityChoice;
 use devices::debug_console;
 use log::{debug, warn};
 use net_util::MacAddr;
+use serde::de::{Error as DeError, Visitor};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_devices::RateLimiterConfig;
@@ -371,13 +372,77 @@ pub struct VirtQueueAffinity {
     pub host_cpus: Box<[usize]>,
 }
 
+/// Virtual IOMMU type
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub enum IommuType {
+    #[default]
+    Off,
+    Virtio,
+    Smmuv3,
+}
+
+impl IommuType {
+    pub fn attached(&self) -> bool {
+        !self.is_off()
+    }
+
+    fn is_off(&self) -> bool {
+        matches!(self, IommuType::Off)
+    }
+}
+
+/// We need a custom deserializer for handling backward compatibility with the
+/// iommu field being provided as a boolean rather than a IommuType enum
+impl<'de> Deserialize<'de> for IommuType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct IommuTypeVisitor;
+
+        impl<'de> Visitor<'de> for IommuTypeVisitor {
+            type Value = IommuType;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("Virtual IOMMU type, or a boolean")
+            }
+
+            fn visit_bool<E>(self, attached: bool) -> Result<Self::Value, E> {
+                warn!(
+                    "Boolean support is deprecated, use a virtual IOMMU type instead. It will be removed in a future release"
+                );
+
+                Ok(if attached {
+                    IommuType::Virtio
+                } else {
+                    IommuType::Off
+                })
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: DeError,
+            {
+                match value {
+                    "Off" => Ok(IommuType::Off),
+                    "Virtio" => Ok(IommuType::Virtio),
+                    "Smmuv3" => Ok(IommuType::Smmuv3),
+                    _ => Err(E::unknown_variant(value, &["Off", "Virtio", "Smmuv3"])),
+                }
+            }
+        }
+
+        deserializer.deserialize_any(IommuTypeVisitor)
+    }
+}
+
 #[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct PciDeviceCommonConfig {
     #[serde(default)]
     pub id: Option<String>,
-    #[serde(default, skip_serializing_if = "<&bool as std::ops::Not>::not")]
-    pub iommu: bool,
+    #[serde(default, skip_serializing_if = "IommuType::is_off")]
+    pub iommu: IommuType,
     #[serde(default)]
     pub pci_segment: u16,
     #[serde(default)]
@@ -1199,7 +1264,7 @@ pub struct VmConfig {
     pub pvmemcontrol: Option<PvmemcontrolConfig>,
     #[serde(default)]
     pub pvpanic: bool,
-    #[serde(default)]
+    #[serde(skip)]
     pub iommu: bool,
     pub numa: Option<Box<[NumaConfig]>>,
     #[serde(default)]

@@ -2,11 +2,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+#[cfg(target_arch = "aarch64")]
+pub mod iommufd;
+
 use std::io;
 
 #[cfg(target_arch = "aarch64")]
 use pci::PciBdf;
 use thiserror::Error;
+#[cfg(target_arch = "aarch64")]
+use vm_device::interrupt::{InterruptRemapping, MsiIrqSourceConfig};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -63,4 +68,20 @@ pub struct Smmuv3AcpiInfo {
 pub enum IommuAcpiInfo {
     #[cfg(target_arch = "aarch64")]
     Smmuv3(Smmuv3AcpiInfo),
+}
+
+#[cfg(target_arch = "aarch64")]
+pub struct Smmuv3MsiRemapping {
+    pub doorbell: u64,
+}
+
+#[cfg(target_arch = "aarch64")]
+impl InterruptRemapping for Smmuv3MsiRemapping {
+    fn translate_msi(&self, _dev_id: u32, cfg: MsiIrqSourceConfig) -> Option<MsiIrqSourceConfig> {
+        Some(MsiIrqSourceConfig {
+            high_addr: (self.doorbell >> 32) as u32,
+            low_addr: self.doorbell as u32,
+            ..cfg
+        })
+    }
 }
