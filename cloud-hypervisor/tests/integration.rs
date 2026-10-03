@@ -14574,4 +14574,47 @@ mod fw_cfg {
 
         handle_child_output(r, &output);
     }
+
+    #[test]
+    fn test_fw_cfg_firmware_boot() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let mut cmd = GuestCommand::new(&guest);
+
+        let test_file = guest.tmp_dir.as_path().join("test-file");
+        fs::write(&test_file, "test-file-content").unwrap();
+
+        cmd.args(["--cpus", "boot=4"])
+            .default_memory()
+            .args(["--firmware", edk2_path().to_str().unwrap()])
+            .default_disks()
+            .default_net()
+            .args([
+                "--fw-cfg-config",
+                &format!(
+                    "e820=off,kernel=off,cmdline=off,initramfs=off,\
+                     items=[name=opt/org.test/test-file,file={}]",
+                    test_file.to_str().unwrap()
+                ),
+            ])
+            .capture_output();
+
+        let mut child = cmd.spawn().unwrap();
+
+        let r = panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+            thread::sleep(Duration::new(3, 0));
+            let result = guest
+                .ssh_command(
+                    "sudo cat /sys/firmware/qemu_fw_cfg/by_name/opt/org.test/test-file/raw",
+                )
+                .unwrap();
+            assert_eq!(result, "test-file-content");
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
 }
