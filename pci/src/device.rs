@@ -38,6 +38,8 @@ pub(crate) type Result<T> = result::Result<T, Error>;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct BarReprogrammingParams {
+    #[serde(default)]
+    pub bar_idx: Option<usize>,
     pub old_base: u64,
     pub new_base: u64,
     pub len: u64,
