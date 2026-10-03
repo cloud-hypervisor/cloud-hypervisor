@@ -6,7 +6,7 @@ use std::fs::{File, Metadata};
 use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::fs::FileExt;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::{io, slice};
+use std::{io, ptr};
 
 use vmm_sys_util::file_traits::FileSync;
 use vmm_sys_util::seek_hole::SeekHole;
@@ -174,9 +174,9 @@ impl AlignedFile {
                     break;
                 }
                 let n = data.len().min(iov.iov_len);
-                // SAFETY: upheld by this fn contract.
-                let dst = unsafe { slice::from_raw_parts_mut(iov.iov_base as *mut u8, n) };
-                dst.copy_from_slice(&data[..n]);
+                // SAFETY: the iovec is valid per this fn contract and distinct
+                // from the bounce buffer.
+                unsafe { ptr::copy_nonoverlapping(data.as_ptr(), iov.iov_base as *mut u8, n) };
                 data = &data[n..];
             }
             Ok(())
@@ -217,9 +217,9 @@ impl AlignedFile {
                     break;
                 }
                 let n = dst.len().min(iov.iov_len);
-                // SAFETY: upheld by this fn contract.
-                let src = unsafe { slice::from_raw_parts(iov.iov_base as *const u8, n) };
-                dst[..n].copy_from_slice(src);
+                // SAFETY: the iovec is valid per this fn contract and distinct
+                // from the bounce buffer.
+                unsafe { ptr::copy_nonoverlapping(iov.iov_base as *const u8, dst.as_mut_ptr(), n) };
                 dst = &mut dst[n..];
             }
             Ok(())
