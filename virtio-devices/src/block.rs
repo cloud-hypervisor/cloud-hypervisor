@@ -1340,7 +1340,14 @@ impl Snapshottable for Block {
     }
 }
 impl Transportable for Block {}
-impl Migratable for Block {}
+impl Migratable for Block {
+    fn notify_started_migration(&mut self) -> result::Result<(), MigratableError> {
+        if let Err(e) = self.disk_image.sync_metadata() {
+            warn!("Failed to flush disk {} before migration: {e}", self.id);
+        }
+        Ok(())
+    }
+}
 
 #[cfg(test)]
 mod tests {
