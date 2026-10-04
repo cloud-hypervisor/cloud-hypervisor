@@ -522,29 +522,6 @@ pub(crate) fn setup_ovs_dpdk_guests(
     (child1, child2)
 }
 
-pub(crate) enum FwType {
-    Ovmf,
-    RustHypervisorFirmware,
-}
-
-pub(crate) fn fw_path(_fw_type: FwType) -> String {
-    let mut workload_path = dirs::home_dir().unwrap();
-    workload_path.push("workloads");
-
-    let mut fw_path = workload_path;
-    #[cfg(target_arch = "aarch64")]
-    fw_path.push("CLOUDHV_EFI.fd");
-    #[cfg(target_arch = "x86_64")]
-    {
-        match _fw_type {
-            FwType::Ovmf => fw_path.push(OVMF_NAME),
-            FwType::RustHypervisorFirmware => fw_path.push("hypervisor-fw"),
-        }
-    }
-
-    fw_path.to_str().unwrap().to_string()
-}
-
 /// Parse the event_monitor file based on the format that each event
 /// is followed by a double newline
 fn parse_event_file(event_file: &str) -> Vec<serde_json::Value> {

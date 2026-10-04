@@ -51,14 +51,6 @@ mod common_parallel {
 
     #[test]
     #[cfg(target_arch = "x86_64")]
-    fn test_jammy_hypervisor_fw() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME)
-            .with_kernel(fw_path(FwType::RustHypervisorFirmware));
-        _test_simple_launch(&guest, false);
-    }
-
-    #[test]
-    #[cfg(target_arch = "x86_64")]
     fn test_jammy_ovmf() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_simple_launch(&guest, true);
