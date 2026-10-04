@@ -30,7 +30,7 @@ mod common_cvm {
     fn test_jammy_simple_launch() {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
 
-        _test_simple_launch(&guest);
+        _test_simple_launch(&guest, false);
     }
 
     #[test]
@@ -58,7 +58,7 @@ mod common_cvm {
     #[test]
     fn test_power_button() {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
-        _test_power_button(&guest);
+        _test_power_button(&guest, false);
     }
 
     #[test]
