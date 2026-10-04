@@ -162,13 +162,12 @@ combination without affecting the others.
 | Variable             | Description                                |
 |----------------------|--------------------------------------------|
 | `CH_CUSTOM_KERNEL`   | Path to a custom `vmlinux` (x86_64) or `Image` (aarch64) kernel binary. |
-| `CH_CUSTOM_FIRMWARE` | Path to a custom `hypervisor-fw` firmware binary. |
-| `CH_CUSTOM_OVMF`    | Path to a custom OVMF binary (`CLOUDHV.fd` on x86_64, `CLOUDHV_EFI.fd` on aarch64). |
+| `CH_CUSTOM_OVMF`     | Path to a custom OVMF binary (`CLOUDHV.fd` on x86_64, `CLOUDHV_EFI.fd` on aarch64). |
 
 The paths refer to locations on the **host**. Before launching the
 Docker container, `dev_cli.sh` copies the referenced files into
 `$HOME/workloads` at the default names the test scripts expect
-(e.g., `vmlinux-x86_64`, `hypervisor-fw`, `CLOUDHV.fd`). Because
+(e.g., `vmlinux-x86_64` and `CLOUDHV.fd`). Because
 the workloads directory is bind-mounted into the container, the
 existing download-if-missing guards inside the test scripts
 automatically skip the network fetch.
@@ -178,9 +177,8 @@ automatically skip the network fetch.
 CH_CUSTOM_KERNEL=/path/to/vmlinux \
     scripts/dev_cli.sh tests --integration
 
-# Override all three
+# Override both
 CH_CUSTOM_KERNEL=/path/to/vmlinux \
-CH_CUSTOM_FIRMWARE=/path/to/hypervisor-fw \
 CH_CUSTOM_OVMF=/path/to/CLOUDHV.fd \
     scripts/dev_cli.sh tests --integration
 ```
@@ -253,7 +251,6 @@ automatically downloads and prepares all required workloads:
 
 - **Kernel:** `vmlinux-x86_64` (prebuilt or built from source with
   `--build-guest-kernel`).
-- **Firmware:** `hypervisor-fw` (rust-hypervisor-firmware).
 - **OVMF:** `CLOUDHV.fd`.
 - **Guest images:** Ubuntu Focal and Jammy cloud images in multiple
   formats (raw, qcow2, compressed, backing-file variants).

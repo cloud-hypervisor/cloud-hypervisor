@@ -558,10 +558,6 @@ cmd_tests() {
         fi
     fi
 
-    if [ -n "$CH_CUSTOM_FIRMWARE" ]; then
-        say "Copying custom firmware from $CH_CUSTOM_FIRMWARE"
-        cp "$CH_CUSTOM_FIRMWARE" "$CLH_INTEGRATION_WORKLOADS/hypervisor-fw"
-    fi
     if [ -n "$CH_CUSTOM_OVMF" ]; then
         say "Copying custom OVMF from $CH_CUSTOM_OVMF"
         if [ "$(uname -m)" = "aarch64" ]; then
@@ -587,7 +583,6 @@ cmd_tests() {
         --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN"
         --env CH_CUSTOM_KERNEL="$CH_CUSTOM_KERNEL"
         --env CH_CUSTOM_BZIMAGE="$CH_CUSTOM_BZIMAGE"
-        --env CH_CUSTOM_FIRMWARE="$CH_CUSTOM_FIRMWARE"
         --env CH_CUSTOM_OVMF="$CH_CUSTOM_OVMF"
         --env VM_TYPE="$vm_type"
     )
