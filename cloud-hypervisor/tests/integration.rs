@@ -96,8 +96,7 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", &format!("max_phys_bits={max_phys_bits}")])
             .default_memory()
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .default_net()
             .capture_output()
@@ -129,8 +128,7 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
             .default_memory()
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .default_net()
             .capture_output()
@@ -188,8 +186,7 @@ mod common_parallel {
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--cpus", "boot=48"])
             .args(["--memory", "size=5120M"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .args(["--serial", "tty"])
             .args(["--console", "off"])
             .capture_output()
@@ -227,8 +224,7 @@ mod common_parallel {
         let mut cmd = GuestCommand::new(&guest);
         cmd.default_cpus()
             .args(["--memory", "size=128G"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .capture_output()
             .default_disks()
             .default_net();
@@ -259,8 +255,6 @@ mod common_parallel {
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
-        let kernel_path = direct_kernel_boot_path();
-
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
             .args(["--memory", "size=0,hotplug_method=virtio-mem"])
@@ -270,8 +264,7 @@ mod common_parallel {
                 "id=mem1,size=1G,shared=on",
                 "id=mem2,size=1G,host_numa_node=0,hotplug_size=2G",
             ])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .args(["--api-socket", &api_socket])
             .capture_output()
             .default_disks()
@@ -363,8 +356,7 @@ mod common_parallel {
         cmd.default_cpus()
             .args(["--api-socket", &api_socket])
             .default_memory()
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .args([
                 "--platform",
                 &format!("num_pci_segments={MAX_NUM_PCI_SEGMENTS},iommu_segments=[1]"),
@@ -638,13 +630,10 @@ mod common_parallel {
         let focal = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
         let loopdev = LoopDev::new(guest.tmp_dir.as_path(), 64);
-        let kernel_path = direct_kernel_boot_path();
-
         let mut cloud_child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=2"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .args([
                 "--disk",
@@ -891,8 +880,6 @@ mod common_parallel {
     {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
-
         let test_image_path = guest.tmp_dir.as_path().join("test.qcow2");
 
         // Create test image based on configuration and capture backing checksum if applicable
@@ -933,8 +920,7 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=8"])
             .args(["--memory", "size=1024M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .args([
                 "--disk",
                 &format!(
@@ -1581,8 +1567,6 @@ mod common_parallel {
 
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
-
         // The loop backing file needs a real O_DIRECT capable FS, not tmpfs.
         let mut workloads_path = dirs::home_dir().unwrap();
         workloads_path.push("workloads");
@@ -1633,8 +1617,7 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .args([
                 "--disk",
@@ -1836,8 +1819,6 @@ mod common_parallel {
     fn test_virtio_block_qcow2_dirty_bit_unclean_shutdown() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
-
         let test_image_path = guest.tmp_dir.as_path().join("test-dirty.qcow2");
         let original_image = guest.disk_config.disk(DiskType::OperatingSystem).unwrap();
 
@@ -1852,8 +1833,7 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
             .default_memory()
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .args([
                 "--disk",
                 &format!(
@@ -1899,8 +1879,6 @@ mod common_parallel {
     fn test_virtio_block_qcow2_dirty_bit_clean_shutdown() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
-
         let test_image_path = guest.tmp_dir.as_path().join("test-dirty.qcow2");
         let original_image = guest.disk_config.disk(DiskType::OperatingSystem).unwrap();
 
@@ -1915,8 +1893,7 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
             .default_memory()
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .args([
                 "--disk",
                 &format!(
@@ -1958,8 +1935,6 @@ mod common_parallel {
     fn test_virtio_block_qcow2_corrupt_bit_rejected_for_write() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
-
         let test_image_path = guest.tmp_dir.as_path().join("test-corrupt.qcow2");
         let original_image = guest.disk_config.disk(DiskType::OperatingSystem).unwrap();
 
@@ -1982,8 +1957,7 @@ mod common_parallel {
         let child = GuestCommand::new(&guest)
             .default_cpus()
             .default_memory()
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .args([
                 "--disk",
                 &format!(
@@ -2014,8 +1988,6 @@ mod common_parallel {
     fn test_virtio_block_qcow2_corrupt_bit_allowed_readonly() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
-
         let test_image_path = guest.tmp_dir.as_path().join("test-corrupt-ro.qcow2");
         let original_image = guest.disk_config.disk(DiskType::OperatingSystem).unwrap();
 
@@ -2032,8 +2004,7 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
             .default_memory()
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .args([
                 "--disk",
                 &format!(
@@ -2460,14 +2431,11 @@ mod common_parallel {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        let kernel_path = direct_kernel_boot_path();
-
         // virtio-rtc is disabled by default and needs to be explicitly enabled.
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
             .default_memory()
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .args(["--rtc"])
             .default_disks()
             .default_net()
@@ -2591,8 +2559,7 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
             .default_memory()
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .default_net()
             .capture_output()
@@ -3575,16 +3542,13 @@ mod common_parallel {
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
-        let kernel_path = direct_kernel_boot_path();
-
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=2,max=4"])
             .args([
                 "--memory",
                 "size=512M,hotplug_method=virtio-mem,hotplug_size=8192M",
             ])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .default_net()
             .args(["--api-socket", &api_socket])
@@ -3653,13 +3617,10 @@ mod common_parallel {
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
-        let kernel_path = direct_kernel_boot_path();
-
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=2,max=4"])
             .args(["--memory", "size=512M,hotplug_size=8192M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .default_net()
             .args(["--api-socket", &api_socket])
@@ -3726,8 +3687,7 @@ mod common_parallel {
                 "id=mem0,size=128M,prefault=on,host_numa_node=0",
                 "id=mem1,size=128M,prefault=on",
             ])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .default_net()
             .capture_output()
@@ -4204,8 +4164,6 @@ mod common_parallel {
     fn test_virtio_block_direct_io_block_device_alignment_4k() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
-
         // The backing file for the loop device must live on a filesystem that
         // supports O_DIRECT (e.g. ext4).  guest.tmp_dir is on tmpfs inside
         // Docker, and the loop driver forwards I/O to the backing file.
@@ -4231,8 +4189,7 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .args([
                 "--disk",
@@ -4281,8 +4238,6 @@ mod common_parallel {
     fn test_virtio_block_direct_io_file_backed_alignment_4k() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
-
         let mut workloads_path = dirs::home_dir().unwrap();
         workloads_path.push("workloads");
         let img_dir = TempDir::new_in(workloads_path.as_path()).unwrap();
@@ -4334,8 +4289,7 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .args([
                 "--disk",
@@ -4516,8 +4470,6 @@ mod common_parallel {
     ) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
-
         let test_disk_path = guest
             .tmp_dir
             .as_path()
@@ -4539,8 +4491,7 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
             .default_memory()
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .args([
                 "--disk",
@@ -4821,8 +4772,6 @@ mod common_parallel {
     fn test_virtio_block_discard_loop_device() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
-
         let test_disk_path = guest.tmp_dir.as_path().join("loop_discard_test.raw");
         let res = run_qemu_img(&test_disk_path, &["create", "-f", "raw"], Some(&["128M"]));
         assert!(
@@ -4836,8 +4785,7 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .args(["--disk", format!("path={loop_dev},image_type=raw").as_str()])
             .default_net()
@@ -4918,8 +4866,6 @@ mod common_parallel {
         // DM topology follows the same pattern used by WindowsDiskConfig.
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
-
         let origin_path = guest.tmp_dir.as_path().join("dm_origin.raw");
         let cow_path = guest.tmp_dir.as_path().join("dm_cow.raw");
 
@@ -5000,8 +4946,7 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .args(["--disk", format!("path={dm_dev},image_type=raw").as_str()])
             .default_net()
@@ -5106,8 +5051,6 @@ mod common_parallel {
     ) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
-
         let test_disk_path = guest
             .tmp_dir
             .as_path()
@@ -5129,8 +5072,7 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
             .default_memory()
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .args([
                 "--disk",
@@ -5300,8 +5242,6 @@ mod common_parallel {
 
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
-
         let test_disk_path = guest.tmp_dir.as_path().join("sparse_off_test.raw");
         let test_disk_path = test_disk_path.to_str().unwrap();
 
@@ -5324,8 +5264,7 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
             .default_memory()
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .args([
                 "--disk",
@@ -5406,8 +5345,6 @@ mod common_parallel {
 
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
-
         let test_disk_path = guest.tmp_dir.as_path().join("sparse_off_test.qcow2");
         let test_disk_path = test_disk_path.to_str().unwrap();
 
@@ -5422,8 +5359,7 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
             .default_memory()
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .args([
                 "--disk",
@@ -5501,8 +5437,6 @@ mod common_parallel {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        let kernel_path = direct_kernel_boot_path();
-
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         //Let's start a 4G guest with balloon occupied 2G memory
@@ -5510,8 +5444,7 @@ mod common_parallel {
             .args(["--api-socket", &api_socket])
             .default_cpus()
             .args(["--memory", "size=4G"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .args(["--balloon", "size=2G,deflate_on_oom=on"])
             .default_disks()
             .default_net()
@@ -5567,8 +5500,7 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .args(["--api-socket", &api_socket])
             .default_cpus()
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .args(["--balloon", "size=0,free_page_reporting=on"])
             .default_disks()
             .default_net()
@@ -5649,8 +5581,7 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
             .args(memory_args)
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .args(["--balloon", "size=0,free_page_reporting=on"])
             .default_disks()
             .default_net()
@@ -6343,13 +6274,10 @@ mod common_parallel {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        let kernel_path = direct_kernel_boot_path();
-
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=2"])
             .args(["--memory", "size=1G,hugepages=on"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .default_net()
             .args(["--vdpa", "path=/dev/vhost-vdpa-2,num_queues=3"])
@@ -6931,7 +6859,6 @@ mod common_parallel {
     fn _test_live_migration(upgrade_test: bool, memfds: bool, paused: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
         let console_text = String::from("On a branch floating down river a cricket, singing.");
         let net_id = "net123";
         let net_params = format!(
@@ -6970,8 +6897,7 @@ mod common_parallel {
                 format!("boot={boot_vcpus},max={max_vcpus}").as_str(),
             ])
             .args(memory_param)
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .args(["--net", net_params.as_str()])
             .args(["--api-socket", &src_api_socket])
             .args([
@@ -7094,7 +7020,6 @@ mod common_parallel {
     fn _test_live_migration_with_landlock() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
         let net_id = "net123";
         let net_params = format!(
             "id={},tap=,mac={},ip={},mask=255.255.255.128",
@@ -7115,8 +7040,7 @@ mod common_parallel {
                 format!("boot={boot_vcpus},max={max_vcpus}").as_str(),
             ])
             .args(["--memory", "size=1500M,shared=on"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .args(["--api-socket", &src_api_socket])
             .args(["--landlock"])
@@ -7435,7 +7359,6 @@ mod common_parallel {
     fn _test_live_migration_tcp(connections: NonZeroU32) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
         let console_text = String::from("On a branch floating down river a cricket, singing.");
         let net_id = "net123";
         let net_params = format!(
@@ -7463,8 +7386,7 @@ mod common_parallel {
                 format!("boot={boot_vcpus},max={max_vcpus}").as_str(),
             ])
             .args(memory_param)
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .args(["--net", net_params.as_str()])
             .args(["--api-socket", &src_api_socket])
@@ -7565,7 +7487,6 @@ mod common_parallel {
     fn _test_live_migration_tcp_postcopy() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
         let console_text = String::from("On a branch floating down river a cricket, singing.");
         let net_id = "netpc1";
         let net_params = format!(
@@ -7580,8 +7501,7 @@ mod common_parallel {
         let mut src_child = GuestCommand::new_with_binary_path(&guest, &src_vm_path)
             .args(["--cpus", format!("boot={boot_vcpus}").as_str()])
             .args(memory_param)
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .args(["--net", net_params.as_str()])
             .args(["--api-socket", &src_api_socket])
@@ -7663,7 +7583,6 @@ mod common_parallel {
     fn _test_live_migration_tcp_timeout(timeout_strategy: TimeoutStrategy) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
         let net_id = "net1337";
         let net_params = format!(
             "id={},tap=,mac={},ip={},mask=255.255.255.128",
@@ -7682,8 +7601,7 @@ mod common_parallel {
         src_vm_cmd
             .args(["--cpus", format!("boot={boot_vcpus}").as_str()])
             .args(memory_param)
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .args(["--net", net_params.as_str()])
             .args(["--api-socket", &src_api_socket])
@@ -7916,7 +7834,6 @@ mod common_parallel {
     fn _test_live_migration_failure(test: TestLiveMigrationFailure) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
         let net_params = guest.default_net_string();
         // Enable enough stress worker to slow down migration.
         let boot_vcpus = 4;
@@ -7945,8 +7862,7 @@ mod common_parallel {
         let mut src_child = GuestCommand::new(&guest)
             .args(["--cpus", format!("boot={boot_vcpus}").as_str()])
             .args(["--memory", "size=1600M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .args(["--net", net_params.as_str()])
             .args(["--api-socket", &src_api_socket])
@@ -8212,7 +8128,6 @@ mod common_parallel {
 
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
         let net_id = "net123";
         let net_params = format!(
             "id={},tap=,mac={},ip={},mask=255.255.255.128",
@@ -8232,8 +8147,7 @@ mod common_parallel {
         src_vm_cmd
             .args(["--cpus", format!("boot={boot_vcpus}").as_str()])
             .args(memory_param)
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .args(["--net", net_params.as_str()])
             .args(["--api-socket", &src_api_socket])
@@ -8518,8 +8432,6 @@ mod common_parallel {
 
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
-
         let shared_dir = guest.tmp_dir.as_path().join("virtiofs_shared");
         fs::create_dir(&shared_dir).unwrap();
 
@@ -8532,8 +8444,7 @@ mod common_parallel {
             .args(["--api-socket", &src_api_socket])
             .args(["--cpus", "boot=2"])
             .args(["--memory", "size=512M,shared=on"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .default_net()
             .args([
@@ -8959,7 +8870,6 @@ mod ivshmem {
     fn _test_live_migration_ivshmem(memfds: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
         let console_text = String::from("On a branch floating down river a cricket, singing.");
         let net_id = "net123";
         let net_params = format!(
@@ -9015,8 +8925,7 @@ mod ivshmem {
                 format!("boot={boot_vcpus},max={max_vcpus}").as_str(),
             ])
             .args(memory_param)
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .args(["--net", net_params.as_str()])
             .args(["--api-socket", &src_api_socket])
@@ -9136,8 +9045,6 @@ mod ivshmem {
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
-        let kernel_path = direct_kernel_boot_path();
-
         let ivshmem_file_path = String::from(
             guest
                 .tmp_dir
@@ -9162,8 +9069,7 @@ mod ivshmem {
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=2"])
             .default_memory()
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .default_net()
             .args([
@@ -9869,8 +9775,6 @@ mod snapshot_restore_common {
     ) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
-
         let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
 
         let console_text = String::from("On a branch floating down river a cricket, singing.");
@@ -9890,8 +9794,7 @@ mod snapshot_restore_common {
         }
 
         let mut child = source_cmd
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .default_net()
             .args(["--vsock", format!("cid=3,socket={socket}").as_str()])
@@ -10176,8 +10079,6 @@ mod snapshot_restore_common {
     pub(crate) fn _test_snapshot_restore_offload(virtio_mem: bool, ondemand: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
-
         let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
         let console_text = String::from("On a branch floating down river a cricket, singing.");
         let offload_dir = String::from(
@@ -10210,8 +10111,7 @@ mod snapshot_restore_common {
             .args(["--api-socket", &api_socket_source])
             .args(["--cpus", "boot=2"])
             .args(["--memory", mem_params])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .default_net()
             .capture_output()
@@ -10401,7 +10301,6 @@ mod snapshot_restore_common {
     pub(crate) fn _test_snapshot_restore_offload_preserve_source() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         let offload_dir = String::from(
@@ -10453,8 +10352,7 @@ mod snapshot_restore_common {
             .args(["--api-socket", &api_socket])
             .args(["--cpus", "boot=2"])
             .args(["--memory", "size=512M,shared=on"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .args(["--disk", blk_params.as_str()])
             .default_net()
@@ -11214,7 +11112,6 @@ mod common_sequential {
     fn _test_live_migration_balloon(upgrade_test: bool, memfds: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
         let console_text = String::from("On a branch floating down river a cricket, singing.");
         let net_id = "net123";
         let net_params = format!(
@@ -11263,8 +11160,7 @@ mod common_sequential {
                 format!("boot={boot_vcpus},max={max_vcpus}").as_str(),
             ])
             .args(memory_param)
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .args(["--net", net_params.as_str()])
             .args(["--api-socket", &src_api_socket])
             .args([
@@ -11407,7 +11303,6 @@ mod common_sequential {
     fn _test_live_migration_numa(upgrade_test: bool, memfds: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
         let console_text = String::from("On a branch floating down river a cricket, singing.");
         let net_id = "net123";
         let net_params = format!(
@@ -11468,8 +11363,7 @@ mod common_sequential {
                 format!("boot={boot_vcpus},max={max_vcpus}").as_str(),
             ])
             .args(memory_param)
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .args(["--net", net_params.as_str()])
             .args(["--api-socket", &src_api_socket])
             .args([
@@ -11835,7 +11729,6 @@ mod common_sequential {
     fn _test_live_migration_watchdog(upgrade_test: bool, memfds: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
         let console_text = String::from("On a branch floating down river a cricket, singing.");
         let net_id = "net123";
         let net_params = format!(
@@ -11874,8 +11767,7 @@ mod common_sequential {
                 format!("boot={boot_vcpus},max={max_vcpus}").as_str(),
             ])
             .args(memory_param)
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .args(["--net", net_params.as_str()])
             .args(["--api-socket", &src_api_socket])
             .args([
@@ -14168,8 +14060,7 @@ mod rate_limiter {
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", &format!("boot={}", num_queues / 2)])
             .args(["--memory", "size=1G"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .args(["--net", net_params.as_str()])
             .capture_output()
@@ -14244,8 +14135,7 @@ mod rate_limiter {
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", &format!("boot={num_queues}")])
             .args(["--memory", "size=1G"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .default_disks()
             .args(["--disk", test_blk_params.as_str()])
             .default_net()
@@ -14332,8 +14222,7 @@ mod rate_limiter {
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", &format!("boot={}", num_queues * num_disks)])
             .args(["--memory", "size=1G"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_kernel_cmdline()
             .args(["--rate-limit-group", &rate_limit_group_arg])
             .default_disks()
             .args(test_disks)
