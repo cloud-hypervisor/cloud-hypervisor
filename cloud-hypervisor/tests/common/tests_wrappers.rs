@@ -319,23 +319,20 @@ pub(crate) fn test_cpu_topology(
     let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
     let guest = Guest::new(Box::new(disk_config));
     let total_vcpus = threads_per_core * cores_per_package * packages;
-    let direct_kernel_boot_path = direct_kernel_boot_path();
-    let mut kernel_path = direct_kernel_boot_path.to_str().unwrap();
-    let fw_path = fw_path(FwType::RustHypervisorFirmware);
+
+    let mut cmd = GuestCommand::new(&guest);
+    cmd.args([
+        "--cpus",
+        &format!("boot={total_vcpus},topology={threads_per_core}:{cores_per_package}:1:{packages}"),
+    ])
+    .default_memory();
     if use_fw {
-        kernel_path = fw_path.as_str();
+        cmd.args(["--firmware", edk2_path().to_str().unwrap()]);
+    } else {
+        cmd.default_kernel_cmdline();
     }
 
-    let mut child = GuestCommand::new(&guest)
-        .args([
-            "--cpus",
-            &format!(
-                "boot={total_vcpus},topology={threads_per_core}:{cores_per_package}:1:{packages}"
-            ),
-        ])
-        .default_memory()
-        .args(["--kernel", kernel_path])
-        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+    let mut child = cmd
         .default_disks()
         .default_net()
         .capture_output()
