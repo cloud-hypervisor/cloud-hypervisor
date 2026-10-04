@@ -2172,7 +2172,7 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
             .default_memory()
-            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args(["--firmware", edk2_path().to_str().unwrap()])
             .args([
                 "--disk",
                 format!(
