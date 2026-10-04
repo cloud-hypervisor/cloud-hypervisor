@@ -54,14 +54,14 @@ mod common_parallel {
     fn test_jammy_hypervisor_fw() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME)
             .with_kernel(fw_path(FwType::RustHypervisorFirmware));
-        _test_simple_launch(&guest);
+        _test_simple_launch(&guest, false);
     }
 
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_jammy_ovmf() {
-        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_kernel(fw_path(FwType::Ovmf));
-        _test_simple_launch(&guest);
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        _test_simple_launch(&guest, true);
     }
 
     #[test]
@@ -246,7 +246,7 @@ mod common_parallel {
     #[test]
     fn test_power_button() {
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
-        _test_power_button(&guest);
+        _test_power_button(&guest, false);
     }
 
     #[test]
@@ -430,10 +430,6 @@ mod common_parallel {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
-        #[cfg(target_arch = "x86_64")]
-        let kernel_path = direct_kernel_boot_path();
-        #[cfg(target_arch = "aarch64")]
-        let kernel_path = edk2_path();
 
         // Prepare another disk file for the virtio-disk device
         let test_disk_path = String::from(
@@ -450,8 +446,8 @@ mod common_parallel {
         assert!(exec_host_command_status(format!("mkfs.ext4 {test_disk_path}").as_str()).success());
         const TEST_DISK_NODE: u16 = 1;
 
-        let mut child = GuestCommand::new(&guest)
-            .args(["--platform", "num_pci_segments=2"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--platform", "num_pci_segments=2"])
             .args(["--cpus", "boot=2"])
             .args(["--memory", "size=0"])
             .args(["--memory-zone", "id=mem0,size=256M", "id=mem1,size=256M"])
@@ -459,9 +455,13 @@ mod common_parallel {
                 "--numa",
                 "guest_numa_id=0,cpus=[0],distances=[1@20],memory_zones=mem0,pci_segments=[0]",
                 "guest_numa_id=1,cpus=[1],distances=[0@20],memory_zones=mem1,pci_segments=[1]",
-            ])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            ]);
+        #[cfg(target_arch = "x86_64")]
+        cmd.default_kernel_cmdline();
+        #[cfg(target_arch = "aarch64")]
+        cmd.args(["--firmware", edk2_path().to_str().unwrap()]);
+
+        let mut child = cmd
             .args(["--api-socket", &api_socket])
             .capture_output()
             .default_disks()
@@ -1474,7 +1474,7 @@ mod common_parallel {
         // O_DIRECT forces 4096 byte alignment on all I/O buffers.
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
         let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = edk2_path();
+        let firmware_path = edk2_path();
 
         let mut workloads_path = dirs::home_dir().unwrap();
         workloads_path.push("workloads");
@@ -1526,7 +1526,7 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
             .default_memory()
-            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--firmware", firmware_path.to_str().unwrap()])
             .args([
                 "--disk",
                 &format!(
@@ -3278,11 +3278,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_vsock_hotplug() {
-        #[cfg(target_arch = "x86_64")]
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
-        #[cfg(target_arch = "aarch64")]
-        let guest =
-            basic_regular_guest!(JAMMY_IMAGE_NAME).with_kernel_path(edk2_path().to_str().unwrap());
         _test_virtio_vsock(&guest, true);
     }
 
@@ -3320,7 +3316,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_iommu() {
-        _test_virtio_iommu(cfg!(target_arch = "x86_64"));
+        _test_virtio_iommu(false);
     }
 
     #[test]
@@ -3334,10 +3330,6 @@ mod common_parallel {
     // properly probed first, then removing it, and adding it again by doing a
     // rescan.
     fn test_pci_bar_reprogramming() {
-        #[cfg(target_arch = "aarch64")]
-        let guest =
-            basic_regular_guest!(JAMMY_IMAGE_NAME).with_kernel_path(edk2_path().to_str().unwrap());
-        #[cfg(target_arch = "x86_64")]
         let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_pci_bar_reprogramming(&guest);
     }
@@ -3456,16 +3448,15 @@ mod common_parallel {
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
-        #[cfg(target_arch = "aarch64")]
-        let kernel_path = edk2_path();
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=2,max=4"])
+            .args(["--memory", "size=512M,hotplug_size=8192M"]);
         #[cfg(target_arch = "x86_64")]
-        let kernel_path = direct_kernel_boot_path();
+        cmd.default_kernel_cmdline();
+        #[cfg(target_arch = "aarch64")]
+        cmd.args(["--firmware", edk2_path().to_str().unwrap()]);
 
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=2,max=4"])
-            .args(["--memory", "size=512M,hotplug_size=8192M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        let mut child = cmd
             .default_disks()
             .default_net()
             .args(["--balloon", "size=0"])
@@ -3755,12 +3746,7 @@ mod common_parallel {
 
     #[test]
     fn test_disk_hotplug() {
-        #[cfg(target_arch = "x86_64")]
-        let kernel_path = direct_kernel_boot_path();
-        #[cfg(target_arch = "aarch64")]
-        let kernel_path = edk2_path();
-        let guest =
-            basic_regular_guest!(JAMMY_IMAGE_NAME).with_kernel_path(kernel_path.to_str().unwrap());
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_disk_hotplug(&guest, false);
     }
 
@@ -3776,11 +3762,6 @@ mod common_parallel {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        #[cfg(target_arch = "x86_64")]
-        let kernel_path = direct_kernel_boot_path();
-        #[cfg(target_arch = "aarch64")]
-        let kernel_path = edk2_path();
-
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         // Create a disk image that we can write to
@@ -3794,12 +3775,12 @@ mod common_parallel {
 
         cmd.args(["--api-socket", &api_socket])
             .default_cpus()
-            .default_memory()
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .default_disks()
-            .default_net()
-            .capture_output();
+            .default_memory();
+        #[cfg(target_arch = "x86_64")]
+        cmd.default_kernel_cmdline();
+        #[cfg(target_arch = "aarch64")]
+        cmd.args(["--firmware", edk2_path().to_str().unwrap()]);
+        cmd.default_disks().default_net().capture_output();
 
         let mut child = cmd.spawn().unwrap();
 
@@ -3886,11 +3867,6 @@ mod common_parallel {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        #[cfg(target_arch = "x86_64")]
-        let kernel_path = direct_kernel_boot_path();
-        #[cfg(target_arch = "aarch64")]
-        let kernel_path = edk2_path();
-
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         let test_disk_path = guest.tmp_dir.as_path().join("resize-test.qcow2");
@@ -3909,12 +3885,12 @@ mod common_parallel {
 
         cmd.args(["--api-socket", &api_socket])
             .default_cpus()
-            .default_memory()
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .default_disks()
-            .default_net()
-            .capture_output();
+            .default_memory();
+        #[cfg(target_arch = "x86_64")]
+        cmd.default_kernel_cmdline();
+        #[cfg(target_arch = "aarch64")]
+        cmd.args(["--firmware", edk2_path().to_str().unwrap()]);
+        cmd.default_disks().default_net().capture_output();
 
         let mut child = cmd.spawn().unwrap();
 
@@ -5648,23 +5624,18 @@ mod common_parallel {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        #[cfg(target_arch = "x86_64")]
-        let kernel_path = direct_kernel_boot_path();
-        #[cfg(target_arch = "aarch64")]
-        let kernel_path = edk2_path();
-
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         let mut cmd = GuestCommand::new(&guest);
 
         cmd.args(["--api-socket", &api_socket])
             .default_cpus()
-            .default_memory()
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .default_disks()
-            .default_net()
-            .capture_output();
+            .default_memory();
+        #[cfg(target_arch = "x86_64")]
+        cmd.default_kernel_cmdline();
+        #[cfg(target_arch = "aarch64")]
+        cmd.args(["--firmware", edk2_path().to_str().unwrap()]);
+        cmd.default_disks().default_net().capture_output();
 
         if pci_segment.is_some() {
             cmd.args([
@@ -5771,24 +5742,14 @@ mod common_parallel {
 
     #[test]
     fn test_net_hotplug() {
-        #[cfg(target_arch = "x86_64")]
-        let kernel_path = direct_kernel_boot_path();
-        #[cfg(target_arch = "aarch64")]
-        let kernel_path = edk2_path();
-        let guest =
-            basic_regular_guest!(JAMMY_IMAGE_NAME).with_kernel_path(kernel_path.to_str().unwrap());
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
 
         _test_net_hotplug(&guest, MAX_NUM_PCI_SEGMENTS, None);
     }
 
     #[test]
     fn test_net_multi_segment_hotplug() {
-        #[cfg(target_arch = "x86_64")]
-        let kernel_path = direct_kernel_boot_path();
-        #[cfg(target_arch = "aarch64")]
-        let kernel_path = edk2_path();
-        let guest =
-            basic_regular_guest!(JAMMY_IMAGE_NAME).with_kernel_path(kernel_path.to_str().unwrap());
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_net_hotplug(&guest, MAX_NUM_PCI_SEGMENTS, Some(15));
     }
 
@@ -6521,11 +6482,6 @@ mod common_parallel {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        #[cfg(target_arch = "x86_64")]
-        let kernel_path = direct_kernel_boot_path();
-        #[cfg(target_arch = "aarch64")]
-        let kernel_path = edk2_path();
-
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         // Boot without network
@@ -6533,10 +6489,12 @@ mod common_parallel {
 
         cmd.args(["--api-socket", &api_socket])
             .default_cpus()
-            .default_memory()
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(["--console", "tty,pci_device_id=7"])
+            .default_memory();
+        #[cfg(target_arch = "x86_64")]
+        cmd.default_kernel_cmdline();
+        #[cfg(target_arch = "aarch64")]
+        cmd.args(["--firmware", edk2_path().to_str().unwrap()]);
+        cmd.args(["--console", "tty,pci_device_id=7"])
             .args(["--balloon", "size=0,pci_device_id=8"])
             .default_net()
             .default_disks()
@@ -6696,11 +6654,6 @@ mod common_parallel {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        #[cfg(target_arch = "x86_64")]
-        let kernel_path = direct_kernel_boot_path();
-        #[cfg(target_arch = "aarch64")]
-        let kernel_path = edk2_path();
-
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         // Boot without network
@@ -6708,12 +6661,12 @@ mod common_parallel {
 
         cmd.args(["--api-socket", &api_socket])
             .default_cpus()
-            .default_memory()
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .default_net()
-            .default_disks()
-            .capture_output();
+            .default_memory();
+        #[cfg(target_arch = "x86_64")]
+        cmd.default_kernel_cmdline();
+        #[cfg(target_arch = "aarch64")]
+        cmd.args(["--firmware", edk2_path().to_str().unwrap()]);
+        cmd.default_net().default_disks().capture_output();
 
         let mut child = cmd.spawn().unwrap();
 
@@ -6774,11 +6727,6 @@ mod common_parallel {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        #[cfg(target_arch = "x86_64")]
-        let kernel_path = direct_kernel_boot_path();
-        #[cfg(target_arch = "aarch64")]
-        let kernel_path = edk2_path();
-
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         // Boot without network
@@ -6786,12 +6734,12 @@ mod common_parallel {
 
         cmd.args(["--api-socket", &api_socket])
             .default_cpus()
-            .default_memory()
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .default_net()
-            .default_disks()
-            .capture_output();
+            .default_memory();
+        #[cfg(target_arch = "x86_64")]
+        cmd.default_kernel_cmdline();
+        #[cfg(target_arch = "aarch64")]
+        cmd.args(["--firmware", edk2_path().to_str().unwrap()]);
+        cmd.default_net().default_disks().capture_output();
 
         let mut child = cmd.spawn().unwrap();
 
@@ -12269,7 +12217,7 @@ mod windows {
         let mut child = GuestCommand::new(windows_guest.guest())
             .args(["--cpus", "boot=2,kvm_hyperv=on"])
             .args(["--memory", "size=4G"])
-            .args(["--kernel", edk2_path().to_str().unwrap()])
+            .args(["--firmware", edk2_path().to_str().unwrap()])
             .args(["--serial", "tty"])
             .args(["--console", "off"])
             .default_disks()
@@ -12336,7 +12284,7 @@ mod windows {
         let mut child = GuestCommand::new(windows_guest.guest())
             .args(["--cpus", "boot=2,kvm_hyperv=on"])
             .args(["--memory", "size=4G"])
-            .args(["--kernel", ovmf_path.to_str().unwrap()])
+            .args(["--firmware", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
             .args(["--console", "off"])
             .default_disks()
@@ -12437,7 +12385,7 @@ mod windows {
         let mut child = GuestCommand::new(windows_guest.guest())
             .args(["--cpus", "boot=2,kvm_hyperv=on"])
             .args(["--memory", "size=4G"])
-            .args(["--kernel", edk2_path().to_str().unwrap()])
+            .args(["--firmware", edk2_path().to_str().unwrap()])
             .args(["--serial", "tty"])
             .args(["--console", "off"])
             .args(["--tpm", &format!("socket={swtpm_socket_path}")])
@@ -12488,7 +12436,7 @@ mod windows {
         let mut child = GuestCommand::new(windows_guest.guest())
             .args(["--cpus", "boot=4,kvm_hyperv=on"])
             .args(["--memory", "size=4G"])
-            .args(["--kernel", ovmf_path.to_str().unwrap()])
+            .args(["--firmware", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
             .args(["--console", "off"])
             .args([
@@ -12559,7 +12507,7 @@ mod windows {
             .args(["--api-socket", &api_socket_source])
             .args(["--cpus", "boot=2,kvm_hyperv=on"])
             .args(["--memory", "size=4G"])
-            .args(["--kernel", ovmf_path.to_str().unwrap()])
+            .args(["--firmware", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
             .args(["--console", "off"])
             .default_disks()
@@ -12658,7 +12606,7 @@ mod windows {
             .args(["--api-socket", &api_socket])
             .args(["--cpus", "boot=2,max=8,kvm_hyperv=on"])
             .args(["--memory", "size=4G"])
-            .args(["--kernel", ovmf_path.to_str().unwrap()])
+            .args(["--firmware", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
             .args(["--console", "off"])
             .default_disks()
@@ -12739,7 +12687,7 @@ mod windows {
             .args(["--api-socket", &api_socket])
             .args(["--cpus", "boot=2,kvm_hyperv=on"])
             .args(["--memory", "size=2G,hotplug_size=5G"])
-            .args(["--kernel", ovmf_path.to_str().unwrap()])
+            .args(["--firmware", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
             .args(["--console", "off"])
             .default_disks()
@@ -12815,7 +12763,7 @@ mod windows {
             .args(["--api-socket", &api_socket])
             .args(["--cpus", "boot=2,kvm_hyperv=on"])
             .args(["--memory", "size=4G"])
-            .args(["--kernel", ovmf_path.to_str().unwrap()])
+            .args(["--firmware", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
             .args(["--console", "off"])
             .default_disks()
@@ -12897,7 +12845,7 @@ mod windows {
             .args(["--api-socket", &api_socket])
             .args(["--cpus", "boot=2,kvm_hyperv=on"])
             .args(["--memory", "size=4G"])
-            .args(["--kernel", ovmf_path.to_str().unwrap()])
+            .args(["--firmware", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
             .args(["--console", "off"])
             .default_disks()
@@ -13005,7 +12953,7 @@ mod windows {
             .args(["--api-socket", &api_socket])
             .args(["--cpus", "boot=2,kvm_hyperv=on"])
             .args(["--memory", "size=2G"])
-            .args(["--kernel", ovmf_path.to_str().unwrap()])
+            .args(["--firmware", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
             .args(["--console", "off"])
             .default_disks()
@@ -13154,7 +13102,7 @@ mod windows {
             .args(["--api-socket", &api_socket])
             .args(["--cpus", "boot=2,kvm_hyperv=on"])
             .args(["--memory", "size=4G"])
-            .args(["--kernel", ovmf_path.to_str().unwrap()])
+            .args(["--firmware", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
             .args(["--console", "off"])
             .default_disks()
@@ -13204,7 +13152,7 @@ mod windows {
         let mut child = GuestCommand::new(windows_guest.guest())
             .args(["--cpus", "boot=2,kvm_hyperv=on"])
             .args(["--memory", "size=4G"])
-            .args(["--kernel", edk2_path().to_str().unwrap()])
+            .args(["--firmware", edk2_path().to_str().unwrap()])
             .args(["--serial", "tty"])
             .args(["--console", "off"])
             .args([
@@ -13866,7 +13814,7 @@ mod aarch64_acpi {
             let mut child = GuestCommand::new(&guest)
                 .default_cpus()
                 .default_memory()
-                .args(["--kernel", edk2_path().to_str().unwrap()])
+                .args(["--firmware", edk2_path().to_str().unwrap()])
                 .default_disks()
                 .default_net()
                 .args(["--serial", "tty", "--console", "off"])
@@ -13896,7 +13844,7 @@ mod aarch64_acpi {
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
             .default_memory()
-            .args(["--kernel", edk2_path().to_str().unwrap()])
+            .args(["--firmware", edk2_path().to_str().unwrap()])
             .default_disks()
             .default_net()
             .args(["--serial", "tty", "--console", "off"])
@@ -13947,10 +13895,8 @@ mod aarch64_acpi {
     #[test]
     fn test_power_button_acpi() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = GuestFactory::new_regular_guest_factory()
-            .create_guest(Box::new(disk_config))
-            .with_kernel_path(edk2_path().to_str().unwrap());
-        _test_power_button(&guest);
+        let guest = GuestFactory::new_regular_guest_factory().create_guest(Box::new(disk_config));
+        _test_power_button(&guest, true);
     }
 
     #[test]
@@ -13974,7 +13920,7 @@ mod aarch64_acpi {
             let mut child = GuestCommand::new(&guest)
                 .default_cpus()
                 .default_memory()
-                .args(["--kernel", edk2_path().to_str().unwrap()])
+                .args(["--firmware", edk2_path().to_str().unwrap()])
                 .default_disks()
                 .default_net()
                 .args(["--serial", "tty", "--console", "off"])
