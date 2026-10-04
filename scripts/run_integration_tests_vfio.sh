@@ -16,8 +16,8 @@ process_common_args "$@"
 
 WORKLOADS_DIR="$HOME/workloads"
 
-if [ ! -f "$WORKLOADS_DIR/hypervisor-fw" ]; then
-    echo "Missing workload asset: $WORKLOADS_DIR/hypervisor-fw"
+if [ ! -f "$WORKLOADS_DIR/CLOUDHV.fd" ]; then
+    echo "Missing workload asset: $WORKLOADS_DIR/CLOUDHV.fd"
     echo "Run: python3 scripts/fetch_workloads.py --test vfio"
     exit 1
 fi
