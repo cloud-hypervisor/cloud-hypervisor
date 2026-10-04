@@ -69,11 +69,10 @@ reviewable, and compatible with the project's normal engineering constraints.
   trailer.
 - Lines in a commit message that are allowed to exceed the 72-column limit are
   specified in `./scripts/gitlint/rules`.
-- For LLM-assisted changes, follow the disclosure guidance in `CONTRIBUTING.md`:
-  use the project's `Assisted-by:` trailer when disclosure is needed, and do not
-  add `Co-authored-by` or similar trailers unless that policy changes. Prefer
-  explicit version numbers, such as `Assisted-by: Claude:Opus-4.7`, rather than
-  `Assisted-by: Claude:Opus-4`.
+- For LLM-assisted changes, follow the PR disclosure guidance in
+  `CONTRIBUTING.md`; disclosure in commit messages is not required.
+  Do not add `Co-authored-by` or similar authorship trailers for AI tools or
+  models.
 - Temporary allowances such as `#[allow(unused)]` or ignored tests are only
   acceptable if resolved within the same commit series or paired with a clear
   TODO referencing a ticket. Ask the developer if in doubt.
