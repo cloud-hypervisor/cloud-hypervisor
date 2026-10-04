@@ -23,6 +23,8 @@ exclude = [
   '^tcp://192\.168\.1\.10',
   # Slack invite endpoints reject automated GETs and return 403.
   '^https://join\.slack\.com/t/',
+  # The project Slack workspace also returns 403 for automated checks.
+  '^https://cloud-hypervisor\.slack\.com/',
   # Metrics publish endpoint only answers authenticated PUTs; a plain GET
   # returns 404.
   '^https://ch-metrics\.azurewebsites\.net/api/publishmetrics',
