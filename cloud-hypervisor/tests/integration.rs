@@ -6139,11 +6139,16 @@ mod common_parallel {
         let mut spdk_child = setup_spdk_nvme(spdk_nvme_dir.as_path());
 
         let api_socket = temp_api_path(&guest.tmp_dir);
-        let mut child = GuestCommand::new(&guest)
-            .args(["--api-socket", &api_socket])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--api-socket", &api_socket])
             .default_cpus()
-            .args(["--memory", "size=1G,shared=on,hugepages=on"])
-            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args(["--memory", "size=1G,shared=on,hugepages=on"]);
+        #[cfg(target_arch = "x86_64")]
+        cmd.default_kernel_cmdline();
+        #[cfg(target_arch = "aarch64")]
+        cmd.args(["--firmware", edk2_path().to_str().unwrap()]);
+
+        let mut child = cmd
             .args(["--serial", "tty", "--console", "off"])
             .default_disks()
             .default_net()
