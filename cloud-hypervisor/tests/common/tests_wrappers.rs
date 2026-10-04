@@ -433,22 +433,13 @@ pub(crate) fn test_cpu_topology(
     handle_child_output(r, &output);
 }
 
-#[allow(unused_variables)]
-pub(crate) fn _test_guest_numa_nodes(acpi: bool) {
+pub(crate) fn _test_guest_numa_nodes(use_fw: bool) {
     let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
     let guest = Guest::new(Box::new(disk_config));
     let api_socket = temp_api_path(&guest.tmp_dir);
-    #[cfg(target_arch = "x86_64")]
-    let kernel_path = direct_kernel_boot_path();
-    #[cfg(target_arch = "aarch64")]
-    let kernel_path = if acpi {
-        edk2_path()
-    } else {
-        direct_kernel_boot_path()
-    };
 
-    let mut child = GuestCommand::new(&guest)
-        .args(["--cpus", "boot=6,max=12"])
+    let mut cmd = GuestCommand::new(&guest);
+    cmd.args(["--cpus", "boot=6,max=12"])
         .args(["--memory", "size=0,hotplug_method=virtio-mem"])
         .args([
             "--memory-zone",
@@ -461,9 +452,14 @@ pub(crate) fn _test_guest_numa_nodes(acpi: bool) {
             "guest_numa_id=0,cpus=[0-2,9],distances=[1@15,2@20],memory_zones=mem0",
             "guest_numa_id=1,cpus=[3-4,6-8],distances=[0@20,2@25],memory_zones=mem1",
             "guest_numa_id=2,cpus=[5,10-11],distances=[0@25,1@30],memory_zones=mem2",
-        ])
-        .args(["--kernel", kernel_path.to_str().unwrap()])
-        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        ]);
+    if use_fw {
+        cmd.args(["--firmware", edk2_path().to_str().unwrap()]);
+    } else {
+        cmd.default_kernel_cmdline();
+    }
+
+    let mut child = cmd
         .args(["--api-socket", &api_socket])
         .capture_output()
         .default_disks()
@@ -510,18 +506,21 @@ pub(crate) fn _test_guest_numa_nodes(acpi: bool) {
     handle_child_output(r, &output);
 }
 
-#[allow(unused_variables)]
-pub(crate) fn _test_power_button(guest: &Guest) {
+pub(crate) fn _test_power_button(guest: &Guest, use_fw: bool) {
     let mut cmd = GuestCommand::new(guest);
     let api_socket = temp_api_path(&guest.tmp_dir);
 
     cmd.default_cpus()
         .default_memory()
-        .default_kernel_cmdline()
         .capture_output()
         .default_disks()
         .default_net()
         .args(["--api-socket", &api_socket]);
+    if use_fw {
+        cmd.args(["--firmware", edk2_path().to_str().unwrap()]);
+    } else {
+        cmd.default_kernel_cmdline();
+    }
 
     let child = cmd.spawn().unwrap();
 
@@ -944,24 +943,19 @@ pub(crate) fn _test_virtio_fs(
     let mut shared_dir = workload_path;
     shared_dir.push("shared_dir");
 
-    #[cfg(target_arch = "x86_64")]
-    let kernel_path = direct_kernel_boot_path();
-    #[cfg(target_arch = "aarch64")]
-    let kernel_path = if hotplug {
-        edk2_path()
-    } else {
-        direct_kernel_boot_path()
-    };
-
     let (mut daemon_child, virtiofsd_socket_path) =
         prepare_daemon(&guest.tmp_dir, shared_dir.to_str().unwrap());
 
     let mut guest_command = GuestCommand::new(&guest);
     guest_command
         .default_cpus()
-        .args(["--memory", "size=512M,hotplug_size=2048M,shared=on"])
-        .args(["--kernel", kernel_path.to_str().unwrap()])
-        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .args(["--memory", "size=512M,hotplug_size=2048M,shared=on"]);
+    if cfg!(target_arch = "aarch64") && hotplug {
+        guest_command.args(["--firmware", edk2_path().to_str().unwrap()]);
+    } else {
+        guest_command.default_kernel_cmdline();
+    }
+    guest_command
         .default_disks()
         .default_net()
         .args(["--api-socket", &api_socket])
@@ -1250,7 +1244,11 @@ pub(crate) fn _test_virtio_vsock(guest: &Guest, hotplug: bool) {
     cmd.args(["--api-socket", &api_socket]);
     cmd.default_cpus();
     cmd.default_memory();
-    cmd.default_kernel_cmdline();
+    if cfg!(target_arch = "aarch64") && hotplug {
+        cmd.args(["--firmware", edk2_path().to_str().unwrap()]);
+    } else {
+        cmd.default_kernel_cmdline();
+    }
     cmd.default_disks();
     cmd.default_net();
 
@@ -1379,24 +1377,19 @@ pub(crate) fn test_memory_mergeable(mergeable: bool) {
 // The last interesting part of this test is that it exercises the network
 // interface attached to the virtual IOMMU since this is the one used to
 // send all commands through SSH.
-pub(crate) fn _test_virtio_iommu(_acpi: bool /* not needed on x86_64 */) {
+pub(crate) fn _test_virtio_iommu(use_fw: bool) {
     let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
     let guest = Guest::new(Box::new(disk_config));
 
-    #[cfg(target_arch = "x86_64")]
-    let kernel_path = direct_kernel_boot_path();
-    #[cfg(target_arch = "aarch64")]
-    let kernel_path = if _acpi {
-        edk2_path()
+    let mut cmd = GuestCommand::new(&guest);
+    cmd.default_cpus().default_memory();
+    if use_fw {
+        cmd.args(["--firmware", edk2_path().to_str().unwrap()]);
     } else {
-        direct_kernel_boot_path()
-    };
+        cmd.default_kernel_cmdline();
+    }
 
-    let mut child = GuestCommand::new(&guest)
-        .default_cpus()
-        .default_memory()
-        .args(["--kernel", kernel_path.to_str().unwrap()])
-        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+    let mut child = cmd
         .args([
             "--disk",
             format!(
@@ -1604,13 +1597,18 @@ EOF
     assert_eq!(test_message_write, file_message);
 }
 
-pub(crate) fn _test_simple_launch(guest: &Guest) {
+pub(crate) fn _test_simple_launch(guest: &Guest, use_fw: bool) {
     let event_path = temp_event_monitor_path(&guest.tmp_dir);
 
-    let mut child = GuestCommand::new(guest)
-        .default_cpus()
-        .default_memory()
-        .default_kernel_cmdline()
+    let mut cmd = GuestCommand::new(guest);
+    cmd.default_cpus().default_memory();
+    if use_fw {
+        cmd.args(["--firmware", edk2_path().to_str().unwrap()]);
+    } else {
+        cmd.default_kernel_cmdline();
+    }
+
+    let mut child = cmd
         .default_disks()
         .default_net()
         .args(["--serial", "tty", "--console", "off"])
@@ -2814,10 +2812,14 @@ pub(crate) fn _test_direct_kernel_boot_noacpi(guest: &Guest) {
 }
 
 pub(crate) fn _test_pci_bar_reprogramming(guest: &Guest) {
-    let mut child = GuestCommand::new(guest)
-        .default_cpus()
-        .default_memory()
-        .default_kernel_cmdline()
+    let mut cmd = GuestCommand::new(guest);
+    cmd.default_cpus().default_memory();
+    #[cfg(target_arch = "x86_64")]
+    cmd.default_kernel_cmdline();
+    #[cfg(target_arch = "aarch64")]
+    cmd.args(["--firmware", edk2_path().to_str().unwrap()]);
+
+    let mut child = cmd
         .default_disks()
         .args([
             "--net",
@@ -2996,11 +2998,12 @@ pub(crate) fn _test_disk_hotplug(guest: &Guest, landlock_enabled: bool) {
 
     cmd.args(["--api-socket", &api_socket])
         .default_cpus()
-        .default_memory()
-        .default_kernel_cmdline()
-        .default_disks()
-        .default_net()
-        .capture_output();
+        .default_memory();
+    #[cfg(target_arch = "x86_64")]
+    cmd.default_kernel_cmdline();
+    #[cfg(target_arch = "aarch64")]
+    cmd.args(["--firmware", edk2_path().to_str().unwrap()]);
+    cmd.default_disks().default_net().capture_output();
 
     let mut child = cmd.spawn().unwrap();
 
@@ -3194,6 +3197,17 @@ pub(crate) fn _test_net_hotplug(
         .default_disks()
         .capture_output();
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        cmd.args(["--firmware", edk2_path().to_str().unwrap()]);
+        if pci_segment.is_some() {
+            cmd.args([
+                "--platform",
+                &format!("num_pci_segments={max_num_pci_segments}"),
+            ]);
+        }
+    }
+    #[cfg(target_arch = "x86_64")]
     if pci_segment.is_some() {
         cmd.default_kernel_cmdline_with_platform(Some(&format!(
             "num_pci_segments={max_num_pci_segments}"
