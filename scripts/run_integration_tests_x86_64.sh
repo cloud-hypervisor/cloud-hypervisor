@@ -19,15 +19,12 @@ if [ "$hypervisor" = "mshv" ]; then
     test_features="--features mshv"
 fi
 
-# if migratable version is set to override the default
-FW="$WORKLOADS_DIR/hypervisor-fw"
 JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.qcow2"
 JAMMY_OS_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_IMAGE_NAME"
 JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.raw"
 JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
 
 required_files=(
-    "$FW"
     "$WORKLOADS_DIR/CLOUDHV.fd"
     "$JAMMY_OS_IMAGE"
     "$WORKLOADS_DIR/vmlinux-x86_64"
@@ -156,7 +153,6 @@ VFIO_DISK_IMAGE="$WORKLOADS_DIR/vfio.img"
 rm -rf "$VFIO_DIR" "$VFIO_DISK_IMAGE"
 mkdir -p "$VFIO_DIR"
 cp "$JAMMY_OS_RAW_IMAGE" "$VFIO_DIR"
-cp "$FW" "$VFIO_DIR"
 cp "$VMLINUX_IMAGE" "$VFIO_DIR" || exit 1
 
 cargo build --features mshv --all --release --target "$BUILD_TARGET"

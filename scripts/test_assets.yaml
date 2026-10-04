@@ -7,12 +7,6 @@
 
 assets:
   # Firmware
-  - filename: hypervisor-fw
-    url: https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/download/0.5.0/hypervisor-fw
-    sha1: 540ac358429305d7aa94e15363665d1c9d845982
-    arch: [x86_64]
-    test: [integration]
-
   - filename: CLOUDHV.fd
     url: https://github.com/cloud-hypervisor/edk2/releases/download/ch-1e1b96f126/CLOUDHV.fd
     sha1: fb2e6834cc482c80a45766f6dcf12474f4fcb74e
