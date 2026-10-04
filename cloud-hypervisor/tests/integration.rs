@@ -8039,7 +8039,7 @@ mod common_parallel {
         // The migration must fail in the TLS setup, not later in the protocol.
         let (output, expected_error) = match tls_only_on {
             TlsOnlyOn::Sender => (&src_output, "Error creating TLS migration stream"),
-            TlsOnlyOn::Receiver => (&dest_output, "Failed to accept TLS migration connection"),
+            TlsOnlyOn::Receiver => (&dest_output, "Error setting up a TLS-encrypted connection"),
         };
         let r = panic::catch_unwind(|| {
             assert!(String::from_utf8_lossy(&output.stderr).contains(expected_error));
