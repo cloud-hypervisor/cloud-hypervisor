@@ -13372,7 +13372,7 @@ mod vfio {
                 "--memory",
                 format!("size=4G,hotplug_size=4G,hotplug_method={hotplug_method}").as_str(),
             ])
-            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args(["--firmware", edk2_path().to_str().unwrap()])
             .args(["--platform", &platform_cfg(iommufd)])
             .args(["--device", format!("path={NVIDIA_VFIO_DEVICE}").as_str()])
             .args(["--api-socket", &api_socket])
@@ -13439,7 +13439,7 @@ mod vfio {
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
             .args(["--memory", "size=1G"])
-            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args(["--firmware", edk2_path().to_str().unwrap()])
             .args(["--platform", &platform_cfg(iommufd)])
             .args(["--api-socket", &api_socket])
             .default_disks()
@@ -13493,7 +13493,7 @@ mod vfio {
             .args(["--cpus", "boot=4"])
             .args(["--memory", "size=1G"])
             .args(["--platform", &platform_cfg(iommufd)])
-            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args(["--firmware", edk2_path().to_str().unwrap()])
             .args([
                 "--device",
                 format!("path={NVIDIA_VFIO_DEVICE},iommu=on").as_str(),
@@ -13586,7 +13586,7 @@ mod vfio {
             .args(["--cpus", "boot=4"])
             .args(["--memory", "size=1G"])
             .args(["--platform", &platform])
-            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args(["--firmware", edk2_path().to_str().unwrap()])
             .args([
                 "--device",
                 format!("fd={},iommu=on", cdev_file.as_raw_fd()).as_str(),
@@ -13632,7 +13632,7 @@ mod vfio {
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
             .args(["--memory", "size=1G"])
-            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args(["--firmware", edk2_path().to_str().unwrap()])
             .args(["--device", format!("path={NVIDIA_VFIO_DEVICE}").as_str()])
             .args(["--platform", &platform])
             .args(["--api-socket", &api_socket])
@@ -13687,7 +13687,7 @@ mod vfio {
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
             .args(["--memory", "size=1G"])
-            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args(["--firmware", edk2_path().to_str().unwrap()])
             .args(["--platform", &platform_cfg(iommufd)])
             .args([
                 "--device",
@@ -13756,8 +13756,7 @@ mod vfio {
                 "--device",
                 &format!("id=vfio0,path={NVIDIA_VFIO_DEVICE},iommu=on"),
             ])
-            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--firmware", edk2_path().to_str().unwrap()])
             .args(["--api-socket", &api_socket])
             .capture_output()
             .default_disks()
