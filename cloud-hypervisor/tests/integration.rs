@@ -5857,7 +5857,7 @@ mod common_parallel {
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--cpus", "boot=4"])
             .args(["--memory", "size=1G"])
-            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .default_kernel_cmdline()
             .default_disks()
             .args(["--net", guest.default_net_string().as_str()])
             .args(["--api-socket", &api_socket])
@@ -5905,7 +5905,7 @@ mod common_parallel {
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--cpus", "boot=4"])
             .args(["--memory", "size=1G"])
-            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .default_kernel_cmdline()
             .default_disks()
             .args(["--net", guest.default_net_string().as_str()])
             .args(["--api-socket", &api_socket])
