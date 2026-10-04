@@ -552,8 +552,6 @@ pub(crate) fn test_vhost_user_net(
     let guest = Guest::new(Box::new(disk_config));
     let api_socket = temp_api_path(&guest.tmp_dir);
 
-    let kernel_path = direct_kernel_boot_path();
-
     let host_mac = if generate_host_mac {
         Some(MacAddr::local_random())
     } else {
@@ -615,8 +613,7 @@ pub(crate) fn test_vhost_user_net(
     ch_command
         .args(["--cpus", format!("boot={}", num_queues / 2).as_str()])
         .args(["--memory", "size=512M,hotplug_size=2048M,shared=on"])
-        .args(["--kernel", kernel_path.to_str().unwrap()])
-        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .default_kernel_cmdline()
         .default_disks()
         .args(["--net", net_params.as_str()])
         .args(["--api-socket", &api_socket])
@@ -754,8 +751,6 @@ pub(crate) fn test_vhost_user_blk(
     let guest = Guest::new(Box::new(disk_config));
     let api_socket = temp_api_path(&guest.tmp_dir);
 
-    let kernel_path = direct_kernel_boot_path();
-
     let (blk_params, daemon_child) = {
         let prepare_daemon = prepare_vhost_user_blk_daemon.unwrap();
         // Start the daemon
@@ -773,8 +768,7 @@ pub(crate) fn test_vhost_user_blk(
     let mut child = GuestCommand::new(&guest)
         .args(["--cpus", format!("boot={num_queues}").as_str()])
         .args(["--memory", "size=512M,hotplug_size=2048M,shared=on"])
-        .args(["--kernel", kernel_path.to_str().unwrap()])
-        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .default_kernel_cmdline()
         .default_disks()
         .args(["--disk", blk_params.as_str()])
         .default_net()
@@ -883,8 +877,6 @@ pub(crate) fn test_boot_from_vhost_user_blk(
     let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
     let guest = Guest::new(Box::new(disk_config));
 
-    let kernel_path = direct_kernel_boot_path();
-
     let disk_path = guest.disk_config.disk(DiskType::OperatingSystem).unwrap();
 
     let (blk_boot_params, daemon_child) = {
@@ -909,8 +901,7 @@ pub(crate) fn test_boot_from_vhost_user_blk(
     let mut child = GuestCommand::new(&guest)
         .args(["--cpus", format!("boot={num_queues}").as_str()])
         .args(["--memory", "size=512M,shared=on"])
-        .args(["--kernel", kernel_path.to_str().unwrap()])
-        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .default_kernel_cmdline()
         .args(["--disk", blk_boot_params.as_str()])
         .default_cloudinit_disk()
         .default_net()
@@ -1184,8 +1175,6 @@ pub(crate) fn test_virtio_pmem(discard_writes: bool, specify_size: bool) {
     let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
     let guest = Guest::new(Box::new(disk_config));
 
-    let kernel_path = direct_kernel_boot_path();
-
     let pmem_temp_file = TempFile::new().unwrap();
     pmem_temp_file.as_file().set_len(128 << 20).unwrap();
 
@@ -1197,8 +1186,7 @@ pub(crate) fn test_virtio_pmem(discard_writes: bool, specify_size: bool) {
     let mut child = GuestCommand::new(&guest)
         .default_cpus()
         .default_memory()
-        .args(["--kernel", kernel_path.to_str().unwrap()])
-        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .default_kernel_cmdline()
         .default_disks()
         .default_net()
         .args([
@@ -1327,8 +1315,7 @@ pub(crate) fn test_memory_mergeable(mergeable: bool) {
     let mut child1 = GuestCommand::new(&guest1)
         .default_cpus()
         .args(["--memory", format!("size=512M,{memory_param}").as_str()])
-        .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .default_kernel_cmdline()
         .default_disks()
         .args(["--net", guest1.default_net_string().as_str()])
         .args(["--serial", "tty", "--console", "off"])
@@ -1353,8 +1340,7 @@ pub(crate) fn test_memory_mergeable(mergeable: bool) {
     let mut child2 = GuestCommand::new(&guest2)
         .default_cpus()
         .args(["--memory", format!("size=512M,{memory_param}").as_str()])
-        .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .default_kernel_cmdline()
         .default_disks()
         .args(["--net", guest2.default_net_string().as_str()])
         .args(["--serial", "tty", "--console", "off"])
