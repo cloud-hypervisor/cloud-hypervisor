@@ -6367,7 +6367,7 @@ mod common_parallel {
         guest_cmd
             .default_cpus()
             .args(["--memory", "size=1G"])
-            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args(["--firmware", edk2_path().to_str().unwrap()])
             .args(["--tpm", &format!("socket={swtpm_socket_path}")])
             .capture_output()
             .default_disks()
