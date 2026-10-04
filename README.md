@@ -117,16 +117,9 @@ kernel must be built with PVH support or be a bzImage. The second is
 firmware boot, where a firmware image is passed to `--firmware` and
 brings up the guest's normal boot loader.
 
-Two firmware options are supported, and which one works best depends
-on the guest OS. [Rust Hypervisor
-Firmware](https://github.com/cloud-hypervisor/rust-hypervisor-firmware)
-is a lightweight Rust-based PVH firmware. The edk2 UEFI firmware is
-called `CLOUDHV.fd` for x86-64 and `CLOUDHV_EFI.fd` for AArch64.
-Prebuilt binaries for both are available at their respective releases
-pages, [Rust Hypervisor
-Firmware](https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/latest)
-and [our edk2
-fork](https://github.com/cloud-hypervisor/edk2/releases/latest).
+The project's edk2 UEFI firmware is called `CLOUDHV.fd` for x86-64 and
+`CLOUDHV_EFI.fd` for AArch64. Prebuilt binaries are available from the
+[edk2 fork releases](https://github.com/cloud-hypervisor/edk2/releases/latest).
 The edk2 fork carries customizations required to boot AArch64 guests
 on cloud-hypervisor. See [docs/uefi.md](docs/uefi.md) for differences
 with upstream tianocore/edk2.
@@ -143,7 +136,7 @@ with.
 ```shell
 $ wget https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img
 $ qemu-img convert -p -f qcow2 -O raw focal-server-cloudimg-amd64.img focal-server-cloudimg-amd64.raw
-$ wget https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/download/0.4.2/hypervisor-fw
+$ wget https://github.com/cloud-hypervisor/edk2/releases/latest/download/CLOUDHV.fd
 ```
 
 The Ubuntu cloud images do not ship with a default password so it necessary to
@@ -159,7 +152,7 @@ interface will be enabled as per `network-config` details.
 $ sudo setcap cap_net_admin+ep ./cloud-hypervisor
 $ ./create-cloud-init.sh
 $ ./cloud-hypervisor \
-	--firmware ./hypervisor-fw \
+	--firmware ./CLOUDHV.fd \
 	--disk path=focal-server-cloudimg-amd64.raw,image_type=raw \
 		path=/tmp/ubuntu-cloudinit.img,image_type=raw \
 	--cpus boot=4 \
@@ -173,7 +166,7 @@ GRUB) is required then it necessary to switch to the serial console instead of
 
 ```shell
 $ ./cloud-hypervisor \
-	--kernel ./hypervisor-fw \
+	--firmware ./CLOUDHV.fd \
 	--disk path=focal-server-cloudimg-amd64.raw,image_type=raw \
 		path=/tmp/ubuntu-cloudinit.img,image_type=raw \
 	--cpus boot=4 \
@@ -190,10 +183,6 @@ to load a payload/bootitem(s):
 
 - Provide firmware
 - Provide kernel \[+ cmdline\]\ [+ initrd\]
-
-Please note that our Cloud Hypervisor firmware (`hypervisor-fw`) has a Xen PVH
-boot entry, therefore it can also be booted via the `--kernel` parameter, as 
-seen in some examples.
 
 ### Custom Kernel and Disk Image
 

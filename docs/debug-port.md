@@ -52,12 +52,13 @@ to easily grep for the tracing logs (e.g.
 
 ```
 ./target/debug/cloud-hypervisor \
-    --kernel ~/rust-hypervisor-firmware/target/release/hypervisor-fw \
+    --kernel ~/workloads/vmlinux-x86_64 \
+    --cmdline "root=/dev/vda1 console=hvc0 rw" \
     --disk path=~/hypervisor/images/focal-server-cloudimg-amd64.raw,image_type=raw \
     --cpus boot=4 \
     --memory size=1024M \
     --rng \
-    --log-file /tmp/ch-fw.log \
+    --log-file /tmp/ch-debug-port.log \
     -vvv
 ```
 
@@ -65,9 +66,8 @@ After booting the guest, we then have to grep for the debug I/O port traces in
 the log file:
 
 ```Shell
-$ grep "Debug I/O port" /tmp/ch-fw.log
-cloud-hypervisor: 19.762449ms: DEBUG:vmm/src/vm.rs:510 -- [Debug I/O port: Firmware code 0x0] 0.019004 seconds
-cloud-hypervisor: 403.499628ms: DEBUG:vmm/src/vm.rs:510 -- [Debug I/O port: Firmware code 0x1] 0.402744 seconds
+$ grep "Debug I/O port" /tmp/ch-debug-port.log
+cloud-hypervisor: 5.995892s: DEBUG:vmm/src/vm.rs:510 -- [Debug I/O port: Kernel code 0x41] 5.994830 seconds
 ```
 
 ### Debug console port
