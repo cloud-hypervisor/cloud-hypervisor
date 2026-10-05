@@ -95,6 +95,7 @@ pub mod landlock;
 pub mod locked_unix_listener;
 pub mod memory_manager;
 pub mod migration;
+mod pagemap;
 mod pci_segment;
 mod prefault;
 pub mod seccomp_filters;
