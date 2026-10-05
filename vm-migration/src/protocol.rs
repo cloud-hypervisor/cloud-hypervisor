@@ -427,7 +427,7 @@ impl MemoryRange {
 }
 
 /// A set of guest-memory ranges to transfer as one migration payload.
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryRangeTable {
     data: Vec<MemoryRange>,
 }
