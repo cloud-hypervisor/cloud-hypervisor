@@ -74,10 +74,9 @@ const VIRTIO_BALLOON_PFN_SHIFT: u64 = 12;
 const VIRTIO_BALLOON_PAGE_SIZE: usize = 1 << VIRTIO_BALLOON_PFN_SHIFT;
 
 // Upper bound on a single inflate or deflate descriptor length, in
-// bytes. Matches the Linux driver, which submits at most
-// VIRTIO_BALLOON_ARRAY_PFNS_MAX of 256 PFN entries of 4 bytes each per
-// descriptor.
-const VIRTIO_BALLOON_MAX_PFNS: usize = 256;
+// bytes. The Linux driver submits at most VIRTIO_BALLOON_ARRAY_PFNS_MAX
+// of 256 PFN entries per descriptor, the Windows driver up to one page.
+const VIRTIO_BALLOON_MAX_PFNS: usize = VIRTIO_BALLOON_PAGE_SIZE / size_of::<u32>();
 const VIRTIO_BALLOON_MAX_PFN_BYTES: u32 = (VIRTIO_BALLOON_MAX_PFNS * size_of::<u32>()) as u32;
 
 // Enable statistics virtqueue.
@@ -1291,6 +1290,50 @@ mod tests {
                 .all(|byte| *byte == 0xa5)
         );
         assert!(data[page_size * 3..].iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn inflate_queue_accepts_page_sized_descriptor() {
+        const QUEUE_ADDRESS: GuestAddress = GuestAddress(0x1_0000);
+        const PFNS_ADDRESS: GuestAddress = GuestAddress(0x2_0000);
+        const BALLOON_ADDRESS: GuestAddress = GuestAddress(0x40_0000);
+
+        let page_size = get_page_size() as usize;
+        if page_size != VIRTIO_BALLOON_PAGE_SIZE {
+            return;
+        }
+
+        let balloon_size = VIRTIO_BALLOON_MAX_PFNS * page_size;
+        let memory = TestMemory::from_ranges(&[(
+            GuestAddress(0),
+            BALLOON_ADDRESS.raw_value() as usize + balloon_size,
+        )])
+        .unwrap();
+        memory
+            .write_slice(&vec![0xa5; balloon_size], BALLOON_ADDRESS)
+            .unwrap();
+        let first_pfn = (BALLOON_ADDRESS.raw_value() >> VIRTIO_BALLOON_PFN_SHIFT) as u32;
+        let pfns: Vec<u8> = (first_pfn..)
+            .take(VIRTIO_BALLOON_MAX_PFNS)
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        memory.write_slice(&pfns, PFNS_ADDRESS).unwrap();
+
+        let guest_queue = VirtQueue::new(QUEUE_ADDRESS, &memory, 16);
+        guest_queue.dtable[0].set(PFNS_ADDRESS.raw_value(), pfns.len() as u32, 0, 0);
+        guest_queue.avail.ring[0].set(0);
+        guest_queue.avail.idx.set(1);
+
+        let mut handler = create_stats_handler(
+            &memory,
+            guest_queue.create_queue(),
+            BalloonStatsState::WaitingForInitialDescriptor,
+        );
+        handler.process_queue(INFLATE_QUEUE).unwrap();
+
+        let mut data = vec![0xff; balloon_size];
+        memory.read_slice(&mut data, BALLOON_ADDRESS).unwrap();
+        assert!(data.iter().all(|byte| *byte == 0));
     }
 
     #[test]
