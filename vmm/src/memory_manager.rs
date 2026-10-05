@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Barrier, Mutex};
-use std::{cmp, ffi, panic, result, thread, time};
+use std::{cmp, ffi, panic, process, result, thread, time};
 
 use acpi_tables::{Aml, aml};
 use anyhow::{Context, anyhow};
@@ -1186,6 +1186,7 @@ impl MemoryManager {
                     let mut result = Self::uffd_handler_loop(
                         uffd_fd,
                         &thread_stop_event,
+                        &thread_exit_evt,
                         source,
                         &handler_ranges,
                         &ready_tx,
@@ -1276,12 +1277,35 @@ impl MemoryManager {
             .is_some_and(|h| !h.prefault_complete.load(Ordering::Acquire))
     }
 
+    /// Poison a page that can no longer be restored. Exits if that's not
+    /// possible.
+    fn uffd_poison_page(
+        uffd_fd: BorrowedFd<'_>,
+        range: &UffdRange,
+        page_idx: u64,
+    ) -> Result<(), io::Error> {
+        let page_addr = range.page_addr(page_idx);
+        match uffd::poison(uffd_fd, page_addr, range.page_size) {
+            Ok(()) => Ok(()),
+            // Already present or poisoned by an earlier fault on that page.
+            // Wake any blocked threads.
+            Err(e) if e.raw_os_error() == Some(libc::EEXIST) => {
+                uffd::wake(uffd_fd, page_addr, range.page_size)
+            }
+            Err(e) => {
+                error!("UFFD handler cannot poison unrestored guest memory: {e}");
+                process::exit(1);
+            }
+        }
+    }
+
     /// Serve UFFD faults via `source`, prefaulting one page per idle
-    /// iteration.
+    /// iteration. Once `source` fails, poison each faulted page instead.
     #[expect(clippy::needless_pass_by_value)]
     fn uffd_handler_loop(
         uffd_fd: OwnedFd,
         stop_event: &EventFd,
+        exit_evt: &EventFd,
         mut source: Box<dyn UffdMemorySource>,
         ranges: &[UffdRange],
         ready_tx: &SyncSender<()>,
@@ -1309,6 +1333,7 @@ impl MemoryManager {
         let pages_loading: Mutex<HashSet<(usize, u64)>> = Mutex::new(HashSet::new());
 
         let mut prefault_active = !ranges.is_empty();
+        let mut source_failed = false;
         let mut range_idx = 0;
         let mut page_idx = 0;
         let prefault_start = time::Instant::now();
@@ -1426,6 +1451,11 @@ impl MemoryManager {
                         "UFFD handler: fault at {fault_addr:#x} does not belong to any registered range",
                     )))?;
 
+                if source_failed {
+                    Self::uffd_poison_page(uffd_fd.as_fd(), range, page_idx)?;
+                    continue;
+                }
+
                 let key = (range_idx, page_idx);
 
                 let served_minor = {
@@ -1483,7 +1513,17 @@ impl MemoryManager {
                     loading.remove(&key);
                 }
 
-                result?;
+                if let Err(e) = result {
+                    error!(
+                        "UFFD handler: source error at {:#x}, poisoning unrestored guest memory: {e}",
+                        range.page_addr(page_idx)
+                    );
+                    exit_evt.write(1).ok();
+                    prefault_active = false;
+                    source_failed = true;
+                    Self::uffd_poison_page(uffd_fd.as_fd(), range, page_idx)?;
+                    continue;
+                }
                 pages_served += 1;
 
                 continue;
