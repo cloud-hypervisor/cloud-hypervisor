@@ -2023,15 +2023,16 @@ impl DeviceManager {
             .map_err(DeviceManagerError::BusError)?;
         {
             // Add a CMOS emulated device
-            let mem_size = self
-                .memory_manager
-                .lock()
-                .unwrap()
-                .guest_memory()
-                .memory()
-                .last_addr()
-                .0
-                + 1;
+            let memory_manager = self.memory_manager.lock().unwrap();
+            let mem_size = memory_manager.guest_memory().memory().last_addr().0 + 1;
+            // CMOS holds RAM above 4 GiB as a single size, so end it at the
+            // first reserved region there.
+            let mem_size = memory_manager
+                .reserved_regions()
+                .into_iter()
+                .map(|(base, _)| base)
+                .filter(|&base| base >= layout::RAM_64BIT_START.0)
+                .fold(mem_size, cmp::min);
             let mem_below_4g = cmp::min(layout::MEM_32BIT_RESERVED_START.0, mem_size);
             let mem_above_4g = mem_size.saturating_sub(layout::RAM_64BIT_START.0);
 
