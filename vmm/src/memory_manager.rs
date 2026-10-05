@@ -3653,30 +3653,14 @@ impl Transportable for MemoryManager {
 
             if !wrote_sparse {
                 // Dense fallback: anonymous mmap or hugetlbfs (no
-                // SEEK_HOLE). Match the dense layout by seeking to
-                // file_cursor and streaming bytes via the existing
-                // volatile copy.
-                memory_file
-                    .seek(SeekFrom::Start(file_cursor))
-                    .context("Error seeking memory snapshot file")
-                    .map_err(MigratableError::MigrateSend)?;
-                let mut offset: u64 = 0;
-                // Manual partial-write loop preserves the workaround for
-                // https://github.com/rust-vmm/vm-memory/issues/174
-                loop {
-                    let bytes_written = guest_memory
-                        .write_volatile_to(
-                            GuestAddress(range.gpa + offset),
-                            &mut memory_file,
-                            (range.length - offset) as usize,
-                        )
-                        .context("Error writing dense memory snapshot region")
-                        .map_err(MigratableError::MigrateSend)?;
-                    offset += bytes_written as u64;
-                    if offset == range.length {
-                        break;
-                    }
-                }
+                // SEEK_HOLE).
+                write_guest_range(
+                    &guest_memory,
+                    &mut memory_file,
+                    file_cursor,
+                    range.gpa,
+                    range.length,
+                )?;
             }
 
             file_cursor += range.length;
@@ -3757,6 +3741,30 @@ impl Migratable for MemoryManager {
         }
         Ok(table)
     }
+}
+
+// Streams guest memory `[gpa, gpa + length)` into `file` at `file_offset`.
+fn write_guest_range(
+    guest_memory: &GuestMemoryMmap,
+    file: &mut File,
+    file_offset: u64,
+    gpa: u64,
+    length: u64,
+) -> result::Result<(), MigratableError> {
+    file.seek(SeekFrom::Start(file_offset))
+        .context("Error seeking memory snapshot file")
+        .map_err(MigratableError::MigrateSend)?;
+    let mut offset: u64 = 0;
+    // Manual partial-write loop preserves the workaround for
+    // https://github.com/rust-vmm/vm-memory/issues/174
+    while offset < length {
+        let bytes_written = guest_memory
+            .write_volatile_to(GuestAddress(gpa + offset), file, (length - offset) as usize)
+            .context("Error writing dense memory snapshot region")
+            .map_err(MigratableError::MigrateSend)?;
+        offset += bytes_written as u64;
+    }
+    Ok(())
 }
 
 // Reports whether every saved range is page-aligned and lies wholly inside a
