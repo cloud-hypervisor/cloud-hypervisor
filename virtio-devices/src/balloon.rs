@@ -73,12 +73,8 @@ const STATS_REQUEST_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 5;
 const VIRTIO_BALLOON_PFN_SHIFT: u64 = 12;
 const VIRTIO_BALLOON_PAGE_SIZE: usize = 1 << VIRTIO_BALLOON_PFN_SHIFT;
 
-// Upper bound on a single inflate or deflate descriptor length, in
-// bytes. Matches the Linux driver, which submits at most
-// VIRTIO_BALLOON_ARRAY_PFNS_MAX of 256 PFN entries of 4 bytes each per
-// descriptor.
-const VIRTIO_BALLOON_MAX_PFNS: usize = 256;
-const VIRTIO_BALLOON_MAX_PFN_BYTES: u32 = (VIRTIO_BALLOON_MAX_PFNS * size_of::<u32>()) as u32;
+// Batch the number of PFNs handled in one pass
+const VIRTIO_BALLOON_PFNS_PER_BATCH: usize = 256;
 
 // Enable statistics virtqueue.
 const VIRTIO_BALLOON_F_STATS_VQ: u64 = 1;
@@ -414,7 +410,7 @@ impl BalloonEpollHandler {
     fn process_inflate_addresses(
         &mut self,
         memory: &GuestMemoryMmap,
-        addresses: &mut SmallVec<[GuestAddress; VIRTIO_BALLOON_MAX_PFNS]>,
+        addresses: &mut SmallVec<[GuestAddress; VIRTIO_BALLOON_PFNS_PER_BATCH]>,
     ) {
         // The balloon always deals with 4 KiB pages. Use partial page handling
         // if the host page size differs from that.
@@ -487,15 +483,8 @@ impl BalloonEpollHandler {
                     );
                     continue;
                 }
-                if desc.len() > VIRTIO_BALLOON_MAX_PFN_BYTES {
-                    warn!(
-                        "Skipping descriptor with length {} exceeding cap {VIRTIO_BALLOON_MAX_PFN_BYTES}",
-                        desc.len()
-                    );
-                    continue;
-                }
 
-                let mut inflate_addresses: SmallVec<[GuestAddress; VIRTIO_BALLOON_MAX_PFNS]> =
+                let mut inflate_addresses: SmallVec<[GuestAddress; VIRTIO_BALLOON_PFNS_PER_BATCH]> =
                     SmallVec::new();
                 let mut offset = 0u64;
                 while offset < desc.len() as u64 {
@@ -516,6 +505,13 @@ impl BalloonEpollHandler {
                         INFLATE_QUEUE => {
                             inflate_addresses
                                 .push(GuestAddress(u64::from(pfn) << VIRTIO_BALLOON_PFN_SHIFT));
+                            if inflate_addresses.len() == VIRTIO_BALLOON_PFNS_PER_BATCH {
+                                self.process_inflate_addresses(
+                                    desc_chain.memory(),
+                                    &mut inflate_addresses,
+                                );
+                                inflate_addresses.clear();
+                            }
                         }
                         DEFLATE_QUEUE => {} // Nothing to do on deflate
                         _ => return Err(Error::InvalidQueueIndex(queue_index)),
@@ -1267,7 +1263,7 @@ mod tests {
             Queue::new(16).unwrap(),
             BalloonStatsState::WaitingForInitialDescriptor,
         );
-        let mut addresses: SmallVec<[GuestAddress; VIRTIO_BALLOON_MAX_PFNS]> = [3, 1, 0, 1]
+        let mut addresses: SmallVec<[GuestAddress; VIRTIO_BALLOON_PFNS_PER_BATCH]> = [3, 1, 0, 1]
             .into_iter()
             .map(|pfn| GuestAddress(pfn << VIRTIO_BALLOON_PFN_SHIFT))
             .collect();
@@ -1291,6 +1287,55 @@ mod tests {
                 .all(|byte| *byte == 0xa5)
         );
         assert!(data[page_size * 3..].iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn process_inflate_queue_accepts_large_pfn_buffers() {
+        const QUEUE_ADDRESS: GuestAddress = GuestAddress(0x1_0000);
+        const PFNS_ADDRESS: GuestAddress = GuestAddress(0x2_0000);
+        const PAGES_ADDRESS: GuestAddress = GuestAddress(0x10_0000);
+
+        let page_size = get_page_size() as usize;
+        let pfns_per_page = page_size / VIRTIO_BALLOON_PAGE_SIZE;
+        // Exercise full batches and a trailing partial batch, while covering
+        // whole host pages on hosts with pages larger than 4 KiB.
+        for num_pfns in [512, 512 + pfns_per_page, 1024] {
+            let balloon_size = num_pfns * VIRTIO_BALLOON_PAGE_SIZE;
+            let memory = TestMemory::from_ranges(&[
+                (GuestAddress(0), PAGES_ADDRESS.0 as usize),
+                (PAGES_ADDRESS, balloon_size + page_size),
+            ])
+            .unwrap();
+            memory
+                .write_slice(&vec![0xa5; balloon_size + page_size], PAGES_ADDRESS)
+                .unwrap();
+            for index in 0..num_pfns {
+                let pfn = (PAGES_ADDRESS.0 >> VIRTIO_BALLOON_PFN_SHIFT) as u32 + index as u32;
+                memory
+                    .write_obj(
+                        pfn,
+                        PFNS_ADDRESS.unchecked_add((index * size_of::<u32>()) as u64),
+                    )
+                    .unwrap();
+            }
+            let guest_queue = VirtQueue::new(QUEUE_ADDRESS, &memory, 16);
+            guest_queue.dtable[0].set(PFNS_ADDRESS.0, (num_pfns * size_of::<u32>()) as u32, 0, 0);
+            guest_queue.avail.ring[0].set(0);
+            guest_queue.avail.idx.set(1);
+            let mut handler = create_stats_handler(
+                &memory,
+                guest_queue.create_queue(),
+                BalloonStatsState::WaitingForInitialDescriptor,
+            );
+
+            handler.process_queue(INFLATE_QUEUE).unwrap();
+
+            assert_eq!(guest_queue.used.idx.get(), 1);
+            let mut data = vec![0xff; balloon_size + page_size];
+            memory.read_slice(&mut data, PAGES_ADDRESS).unwrap();
+            assert!(data[..balloon_size].iter().all(|byte| *byte == 0));
+            assert!(data[balloon_size..].iter().all(|byte| *byte == 0xa5));
+        }
     }
 
     #[test]
