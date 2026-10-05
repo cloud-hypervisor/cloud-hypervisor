@@ -122,6 +122,10 @@ guest RAM before restore completes. This mode is strict: if Cloud Hypervisor
 cannot enable the `userfaultfd` restore path, restore fails instead of falling
 back to `copy`.
 
+If the page source fails during the restore, the guest memory that was not
+restored yet is poisoned so that the guest cannot use it. This needs Linux
+6.6 or later. On older kernels Cloud Hypervisor exits with an error instead.
+
 Current constraints for `memory_restore_mode=ondemand`:
 
 - `prefault=on` is not supported
