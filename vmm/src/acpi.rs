@@ -43,6 +43,9 @@ pub enum Error {
     #[error("Failed to write ACPI data to guest memory")]
     GuestMemory(#[source] vm_memory::GuestMemoryError),
 
+    #[error("ACPI tables exceed their reserved memory")]
+    TablesTooLarge,
+
     #[error("Failed to add ACPI data to fw_cfg")]
     FwCfg(#[source] io::Error),
 }
@@ -1398,6 +1401,10 @@ pub(crate) fn create_acpi_tables(
         numa_nodes,
         tpm_enabled,
     )?;
+
+    if Rsdp::len() as u64 + tables_bytes.len() as u64 > layout::ACPI_MAX_SIZE {
+        return Err(Error::TablesTooLarge);
+    }
 
     guest_mem
         .write_slice(rsdp.as_bytes(), rsdp_addr)

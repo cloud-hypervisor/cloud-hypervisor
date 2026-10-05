@@ -72,6 +72,8 @@ pub const EBDA_START: GuestAddress = GuestAddress(0xa0000);
 
 // ACPI RSDP table
 pub const RSDP_POINTER: GuestAddress = EBDA_START;
+/// Maximum size of the RSDP and ACPI tables before SMBIOS.
+pub const ACPI_MAX_SIZE: u64 = SMBIOS_START.0 - RSDP_POINTER.0;
 
 // First possible location per the spec.
 pub const SMBIOS_START: GuestAddress = GuestAddress(0xf0000);
