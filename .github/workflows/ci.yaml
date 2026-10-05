@@ -630,7 +630,7 @@ jobs:
         run: scripts/dev_cli.sh tests --unit --libc ${{ matrix.libc }}
   # PR-only: delay integration testing until the build and quality gates pass.
   integration-x86-64-pr:
-    name: integration-x86-64-pr
+    name: integration-x86-64-pr (${{ matrix.runner }}, ${{ matrix.libc }})
     needs: [preflight, dco, quality, build]
     if: >-
       github.event_name == 'pull_request' && needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
@@ -645,6 +645,12 @@ jobs:
       matrix:
         include:
           - {runner: garm-noble, libc: gnu}
+          # musl smoke test
+          - runner: garm-noble
+            libc: musl
+            test-args: >-
+              -- --test-filter test_live_migration_memfds
+              -- test_live_migration_tcp_parallel_connections
     # format() because `${{ matrix.runner }}-16` is not valid in runs-on.
     runs-on: ${{ format('{0}-16', matrix.runner) }}
     steps: &integration-x86-64-steps
@@ -668,7 +674,7 @@ jobs:
         run: sudo modprobe openvswitch
       - name: Run integration tests
         timeout-minutes: 60
-        run: scripts/dev_cli.sh tests --integration --libc ${{ matrix.libc }}
+        run: scripts/dev_cli.sh tests --integration --libc ${{ matrix.libc }} ${{ matrix.test-args }}
   # MQ and dev branch pushes start all four matrix entries after preflight, in
   # parallel with the build and quality jobs. The PR job keeps existing gates.
   integration-x86-64-mq:
