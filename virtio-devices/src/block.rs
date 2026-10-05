@@ -100,10 +100,10 @@ pub enum Error {
     },
     #[error("Disk image size is not a multiple of {}", SECTOR_SIZE)]
     InvalidSize,
-    #[error("Failed to pause vcpus")]
-    PauseVcpus(#[source] MigratableError),
-    #[error("Failed to resume vcpus")]
-    ResumeVcpus(#[source] MigratableError),
+    #[error("Failed to pause worker thread")]
+    Pause(#[source] MigratableError),
+    #[error("Failed to resume worker thread")]
+    Resume(#[source] MigratableError),
     #[error("Failed signal config interrupt")]
     ConfigChange(#[source] io::Error),
     #[error("Disk resize failed")]
@@ -1084,13 +1084,13 @@ impl Block {
 
         let nsectors = new_size / SECTOR_SIZE;
 
-        self.common.pause().map_err(Error::PauseVcpus)?;
+        self.common.pause().map_err(Error::Pause)?;
 
         self.disk_nsectors.store(nsectors, Ordering::SeqCst);
         self.config.capacity = nsectors;
         self.state().disk_nsectors = nsectors;
 
-        self.common.resume().map_err(Error::ResumeVcpus)?;
+        self.common.resume().map_err(Error::Resume)?;
 
         self.common
             .trigger_interrupt(VirtioInterruptType::Config)
