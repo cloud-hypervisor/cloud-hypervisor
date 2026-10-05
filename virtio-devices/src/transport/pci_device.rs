@@ -273,6 +273,7 @@ const COMMON_CONFIG_BAR_OFFSET: u64 = 0x0000;
 const COMMON_CONFIG_SIZE: u64 = 56;
 const ISR_CONFIG_BAR_OFFSET: u64 = next_bar_addr(COMMON_CONFIG_BAR_OFFSET, COMMON_CONFIG_SIZE);
 const ISR_CONFIG_SIZE: u64 = 1;
+const ISR_STATUS_CONFIG_BIT: usize = 0x2;
 const DEVICE_CONFIG_BAR_OFFSET: u64 = next_bar_addr(ISR_CONFIG_BAR_OFFSET, ISR_CONFIG_SIZE);
 const DEVICE_CONFIG_SIZE: u64 = 0x1000;
 const NOTIFICATION_BAR_OFFSET: u64 = next_bar_addr(DEVICE_CONFIG_BAR_OFFSET, DEVICE_CONFIG_SIZE);
@@ -612,10 +613,12 @@ impl VirtioPciDevice {
         // prevents from a subtle deadlock.
         drop(locked_device);
 
+        let interrupt_status = Arc::new(AtomicUsize::new(interrupt_status));
         let virtio_interrupt = Arc::new(VirtioInterruptMsix::new(
             Arc::clone(&msix_config),
             Arc::clone(&common_config.msix_config),
             Arc::clone(&common_config.config_changed),
+            Arc::clone(&interrupt_status),
             Arc::clone(&common_config.msix_queues),
             interrupt_source_group.clone(),
         ));
@@ -628,7 +631,7 @@ impl VirtioPciDevice {
             msix_num,
             device,
             device_activated: Arc::new(AtomicBool::new(device_activated)),
-            interrupt_status: Arc::new(AtomicUsize::new(interrupt_status)),
+            interrupt_status,
             virtio_interrupt,
             queues,
             queue_evts,
@@ -884,6 +887,7 @@ pub(super) struct VirtioInterruptMsix {
     msix_config: Arc<Mutex<MsixConfig>>,
     config_vector: Arc<AtomicU16>,
     config_changed: Arc<AtomicBool>,
+    interrupt_status: Arc<AtomicUsize>,
     queues_vectors: Arc<Mutex<Vec<u16>>>,
     interrupt_source_group: MaybeMutInterruptSourceGroup,
     msix_table_size: usize,
@@ -894,6 +898,7 @@ impl VirtioInterruptMsix {
         msix_config: Arc<Mutex<MsixConfig>>,
         config_vector: Arc<AtomicU16>,
         config_changed: Arc<AtomicBool>,
+        interrupt_status: Arc<AtomicUsize>,
         queues_vectors: Arc<Mutex<Vec<u16>>>,
         interrupt_source_group: MaybeMutInterruptSourceGroup,
     ) -> Self {
@@ -902,6 +907,7 @@ impl VirtioInterruptMsix {
             msix_config,
             config_vector,
             config_changed,
+            interrupt_status,
             queues_vectors,
             interrupt_source_group,
             msix_table_size,
@@ -913,6 +919,9 @@ impl VirtioInterrupt for VirtioInterruptMsix {
     fn trigger(&self, int_type: VirtioInterruptType) -> io::Result<()> {
         if matches!(int_type, VirtioInterruptType::Config) {
             self.config_changed.store(true, Ordering::Release);
+            // The spec requires this bit to be set even with MSI-X.
+            self.interrupt_status
+                .fetch_or(ISR_STATUS_CONFIG_BIT, Ordering::AcqRel);
         }
 
         let vector = match int_type {
@@ -1303,9 +1312,10 @@ impl PciDevice for VirtioPciDevice {
                 device.reset();
             }
 
-            // Reset queue readiness and the common configuration
+            // Reset queue readiness, the common configuration and ISR status
             self.queues.iter_mut().for_each(Queue::reset);
             self.common_config.reset();
+            self.interrupt_status.store(0, Ordering::Release);
         }
 
         None
@@ -1417,12 +1427,14 @@ mod tests {
         ));
         let config_vector = Arc::new(AtomicU16::new(VIRTQ_MSI_NO_VECTOR));
         let config_changed = Arc::new(AtomicBool::new(false));
+        let interrupt_status = Arc::new(AtomicUsize::new(0));
         let queues_vectors = Arc::new(Mutex::new(vec![VIRTQ_MSI_NO_VECTOR; 1]));
 
         VirtioInterruptMsix::new(
             msix_config,
             config_vector,
             config_changed,
+            interrupt_status,
             queues_vectors,
             MaybeMutInterruptSourceGroup::Immutable(isg),
         )
@@ -1476,6 +1488,23 @@ mod tests {
         let intr = make_msix_interrupt(2);
         intr.trigger(VirtioInterruptType::Queue(0)).unwrap();
         assert!(!intr.config_changed.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn trigger_config_sets_isr_config_bit() {
+        let intr = make_msix_interrupt(2);
+        intr.trigger(VirtioInterruptType::Config).unwrap();
+        assert_eq!(
+            intr.interrupt_status.load(Ordering::Acquire),
+            ISR_STATUS_CONFIG_BIT
+        );
+    }
+
+    #[test]
+    fn trigger_queue_does_not_set_isr_config_bit() {
+        let intr = make_msix_interrupt(2);
+        intr.trigger(VirtioInterruptType::Queue(0)).unwrap();
+        assert_eq!(intr.interrupt_status.load(Ordering::Acquire), 0);
     }
 
     #[test]
@@ -1706,6 +1735,22 @@ mod tests {
             ptr = ((dword >> 8) & 0xFF) as usize;
         }
         false
+    }
+
+    #[test]
+    fn device_reset_clears_isr_status() {
+        let mut dev = make_virtio_pci_device();
+        dev.virtio_interrupt
+            .trigger(VirtioInterruptType::Config)
+            .unwrap();
+        assert_eq!(
+            dev.interrupt_status.load(Ordering::Acquire),
+            ISR_STATUS_CONFIG_BIT
+        );
+
+        // Writing 0 to device_status requests a device reset.
+        dev.write_bar(0, COMMON_CONFIG_BAR_OFFSET + 0x14, &[0]);
+        assert_eq!(dev.interrupt_status.load(Ordering::Acquire), 0);
     }
 
     #[test]
