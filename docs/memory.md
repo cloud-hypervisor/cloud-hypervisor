@@ -229,6 +229,13 @@ _Example_
 --memory size=1G,thp=on
 ```
 
+## Reserved Address Ranges
+
+On x86_64, guest physical addresses `0xfd00000000` to `0xffffffffff`
+(1012 GiB to 1 TiB) are reserved, as AMD IOMMUs reserve that range for
+HyperTransport. Guest RAM and hotplugged memory are placed around it, and the
+boot memory maps and ACPI tables mark it reserved.
+
 ## Advanced Parameters
 
 `MemoryZoneConfig` or what is known as `--memory-zone` from the CLI perspective
