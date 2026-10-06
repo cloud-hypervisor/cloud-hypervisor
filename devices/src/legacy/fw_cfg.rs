@@ -77,6 +77,9 @@ pub const PORT_FW_CFG_BASE: u64 = 0x9030000;
 #[cfg(target_arch = "aarch64")]
 pub const PORT_FW_CFG_WIDTH: u64 = 0x18;
 
+// CH return value for unassigned port I/O and MMIO.
+const CH_UNASSIGNED_IO_RETURN_VALUE: u8 = 0xFF;
+
 const FW_CFG_SIGNATURE: u16 = 0x00;
 const FW_CFG_ID: u16 = 0x01;
 const FW_CFG_KERNEL_SIZE: u16 = 0x08;
@@ -809,10 +812,13 @@ impl BusDevice for FwCfg {
                 let addr_lo = (addr & 0xffff_ffff) as u32;
                 data.copy_from_slice(&addr_lo.to_be_bytes());
             }
-            _ => {
+            (port, _) => {
+                // Handle any port that cannot be associated with the fw_cfg protocol as unassigned read.
                 debug!(
-                    "fw_cfg: read from unknown port {port:#x}: {size:#x} bytes and offset {offset:#x}."
+                    "fw_cfg: Unsupported {:#x}-byte read at address {port:#x}.",
+                    data.len()
                 );
+                data.fill(CH_UNASSIGNED_IO_RETURN_VALUE)
             }
         }
     }
@@ -1231,5 +1237,33 @@ mod tests {
         assert_eq!(run_dma(&mut fw_cfg, &mem, skip, 0), 0);
         assert_eq!(run_dma(&mut fw_cfg, &mem, skip, 2), 0);
         assert_eq!(fw_cfg.data_offset, 6);
+    }
+
+    #[test]
+    // Reads from invalid register addresses should result in returning all ones (if port I/O)
+    // or all zeros (if MMIO mapped). The addresses below are chosen to be part of the
+    // mapping holes.
+    fn test_reads_from_invalid_register_address() {
+        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(GuestMemoryMmap::new()));
+        #[cfg(target_arch = "x86_64")]
+        let invalid_addresses = [
+            PORT_FW_CFG_DMA_LO - PORT_FW_CFG_BASE + 4,
+            PORT_FW_CFG_DATA - PORT_FW_CFG_BASE + 1,
+            PORT_FW_CFG_DATA - PORT_FW_CFG_BASE + 2,
+        ];
+
+        #[cfg(target_arch = "aarch64")]
+        let invalid_addresses = [
+            PORT_FW_CFG_DMA_LO - PORT_FW_CFG_BASE + 5,
+            PORT_FW_CFG_BASE + PORT_FW_CFG_SELECTOR + 10,
+            PORT_FW_CFG_BASE + PORT_FW_CFG_DMA_HI - 1,
+        ];
+
+        for address in invalid_addresses {
+            let mut buff = [0xCD; 1];
+            fw_cfg.read(0, address, &mut buff);
+            assert_eq!(fw_cfg.data_offset, 0);
+            assert_eq!(buff, [CH_UNASSIGNED_IO_RETURN_VALUE]);
+        }
     }
 }
