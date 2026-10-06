@@ -40,8 +40,11 @@ macro_rules! basic_regular_guest {
 mod common_parallel {
     use std::cell::Cell;
     use std::io::{self, SeekFrom};
+    use std::net::TcpStream;
     use std::num::NonZeroU32;
     use std::process::Command;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{Duration, Instant};
 
     use test_infra::GuestFactory;
@@ -7326,6 +7329,176 @@ mod common_parallel {
         command_success
     }
 
+    // Odd length, so the pattern shifts against page boundaries
+    const INTEGRITY_PATTERN: &[u8] =
+        b"Cloud Hypervisor keeps every byte intact across a live migration.";
+    // ~16 MiB
+    const INTEGRITY_CHUNK_SIZE: usize = INTEGRITY_PATTERN.len() * 258_111;
+    // sha256 of the chunk, i.e., INTEGRITY_PATTERN repeated to
+    // INTEGRITY_CHUNK_SIZE
+    const INTEGRITY_CHUNK_SHA256: &str =
+        "b6c71b89a172a64c5abbaa29cafbd06e77e60f8f4ccee82ed6d1e78b5e6ee012";
+
+    fn integrity_chunk() -> Vec<u8> {
+        INTEGRITY_PATTERN.repeat(INTEGRITY_CHUNK_SIZE / INTEGRITY_PATTERN.len())
+    }
+
+    /// Moves known data into guest memory across a live migration, where
+    /// the host writes it behind the dirty tracking of KVM.
+    trait IntegrityCheck {
+        fn start(guest: &Guest, api_socket: &str) -> Self;
+        /// Checks every chunk the guest consumed.
+        fn verify(self, guest: &Guest);
+    }
+
+    /// Streams a known chunk into the guest until stopped; the guest hashes
+    /// every chunk. Data received across the migration must stay intact.
+    struct NetIntegrityStream {
+        stop: Arc<AtomicBool>,
+        sender: thread::JoinHandle<usize>,
+        receiver: thread::JoinHandle<Result<String, SshCommandError>>,
+    }
+
+    impl IntegrityCheck for NetIntegrityStream {
+        fn start(guest: &Guest, _api_socket: &str) -> Self {
+            const PORT: u16 = 5001;
+            let chunk = integrity_chunk();
+
+            let guest_ip = guest.network.guest_ip0.clone();
+            let receiver = thread::spawn(move || {
+                ssh_command_ip(
+                    &format!("nc -l {PORT} | split -b {INTEGRITY_CHUNK_SIZE} --filter=sha256sum"),
+                    &guest_ip,
+                    DEFAULT_SSH_RETRIES,
+                    DEFAULT_SSH_TIMEOUT,
+                )
+            });
+
+            let addr = format!("{}:{PORT}", guest.network.guest_ip0);
+            let mut stream = None;
+            assert!(wait_until(Duration::from_secs(30), || {
+                stream = TcpStream::connect(&addr).ok();
+                stream.is_some()
+            }));
+            let mut stream = stream.unwrap();
+
+            let stop = Arc::new(AtomicBool::new(false));
+            let sender = {
+                let stop = Arc::clone(&stop);
+                thread::spawn(move || {
+                    let mut chunks = 0;
+                    while !stop.load(Ordering::SeqCst) {
+                        // Paced so the stream does not stall the pre-copy
+                        for slice in chunk.chunks(1 << 20) {
+                            stream.write_all(slice).unwrap();
+                            thread::sleep(Duration::from_millis(10));
+                        }
+                        chunks += 1;
+                    }
+                    chunks
+                })
+            };
+
+            Self {
+                stop,
+                sender,
+                receiver,
+            }
+        }
+
+        fn verify(self, _guest: &Guest) {
+            self.stop.store(true, Ordering::SeqCst);
+            let chunks = self.sender.join().expect("sender thread failed");
+            let hashes = self.receiver.join().unwrap().unwrap();
+            assert!(chunks > 0);
+            assert_eq!(
+                hashes.lines().count(),
+                chunks,
+                "guest hashed a different number of chunks than sent:\n{hashes}"
+            );
+            for line in hashes.lines() {
+                assert!(
+                    line.starts_with(INTEGRITY_CHUNK_SHA256),
+                    "chunk received across the migration is corrupted: {line} != \
+                     {INTEGRITY_CHUNK_SHA256}"
+                );
+            }
+        }
+    }
+
+    /// Live-migrates a guest over TCP while `C` moves data into its memory.
+    fn _test_live_migration_tcp_integrity<C: IntegrityCheck>() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let net_params = format!(
+            "tap=,mac={},ip={},mask=255.255.255.128",
+            guest.network.guest_mac0, guest.network.host_ip0
+        );
+        let dest_event_path = temp_event_monitor_path(&guest.tmp_dir);
+        let src_api_socket = temp_api_path(&guest.tmp_dir);
+        let mut src_child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=2"])
+            .args(["--memory", "size=1500M"])
+            .default_kernel_cmdline()
+            .default_disks()
+            .args(["--net", &net_params])
+            .args(["--api-socket", &src_api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
+        dest_api_socket.push_str(".dest");
+        let mut dest_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &dest_api_socket])
+            .args(["--event-monitor", &format!("path={dest_event_path}")])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            guest.wait_vm_boot().unwrap();
+            let check = C::start(&guest, &src_api_socket);
+            assert!(
+                start_live_migration_tcp_with_flags(
+                    &src_api_socket,
+                    &dest_api_socket,
+                    &dest_event_path,
+                    // Caught the bugs more often than one connection
+                    NonZeroU32::new(8).unwrap(),
+                    // A 1 ms downtime is rarely met, so the pre-copy harvests
+                    // the dirty log about every 40 ms while data is in
+                    // flight. After 5 s, `Ignore` switches over instead of
+                    // cancelling, which bounds the test duration.
+                    &SendMigrationOptions {
+                        downtime_ms: Some(1),
+                        timeout_s: Some(5),
+                        timeout_strategy: Some(TimeoutStrategy::Ignore),
+                        ..Default::default()
+                    },
+                ),
+                "Unsuccessful command: 'send-migration' or 'receive-migration'."
+            );
+            check
+        }));
+        let check = match r {
+            Ok(check) => check,
+            Err(_) => print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Error occurred during live-migration",
+            ),
+        };
+        let _ = src_child.kill();
+        let _ = src_child.wait();
+
+        let r = panic::catch_unwind(panic::AssertUnwindSafe(|| check.verify(&guest)));
+        let _ = dest_child.kill();
+        let dest_output = dest_child.wait_with_output().unwrap();
+        handle_child_output(r, &dest_output);
+    }
+
     fn _test_live_migration_tcp(connections: NonZeroU32) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -8052,6 +8225,11 @@ mod common_parallel {
     }
 
     #[test]
+    fn test_live_migration_tcp_integrity_net() {
+        _test_live_migration_tcp_integrity::<NetIntegrityStream>();
+    }
+
+    #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_tcp_postcopy() {
         _test_live_migration_tcp_postcopy();
@@ -8400,9 +8578,6 @@ mod common_parallel {
     }
 
     fn _test_live_migration_virtio_fs(memfds: bool) {
-        use std::sync::Arc;
-        use std::sync::atomic::{AtomicBool, Ordering};
-
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let shared_dir = guest.tmp_dir.as_path().join("virtiofs_shared");
