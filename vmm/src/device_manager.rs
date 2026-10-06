@@ -136,7 +136,7 @@ use crate::memory_manager::{Error as MemoryManagerError, MEMORY_MANAGER_ACPI_SIZ
 use crate::pci_segment::PciSegment;
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
 #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
-use crate::sev_snp_tracker::SevSnpSharedPageTracker;
+use crate::sev_snp_tracker::{PerPageUnmap, SevSnpSharedPageTracker};
 use crate::util::flatten_error_chain_to_string;
 #[cfg(feature = "ivshmem")]
 use crate::vm_config::IvshmemConfig;
@@ -551,11 +551,6 @@ pub enum DeviceManagerError {
     /// Failed to update memory mappings for VFIO user device
     #[error("Failed to update memory mappings for VFIO user device")]
     UpdateMemoryForVfioUserPciDevice(#[source] VfioUserPciDeviceError),
-
-    /// vfio-user cannot be hot-added while SEV-SNP shared-page tracking is active
-    #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
-    #[error("Cannot hot-add a vfio-user device while SEV-SNP shared-page tracking is active")]
-    VfioUserHotplugSevSnpTracker,
 
     /// Cannot duplicate file descriptor
     #[error("Cannot duplicate file descriptor")]
@@ -4440,11 +4435,27 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
         }
 
-        for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
-            for region in zone.regions() {
-                vfio_user_pci_device
-                    .dma_map(region)
-                    .map_err(DeviceManagerError::VfioUserDmaMap)?;
+        // A confidential VM maps the shared pages only, through the shared
+        // page tracker, once the device is otherwise set up. A vfio-user
+        // unmap must match a single earlier mapping, so unmap page by page.
+        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        let sev_snp_dma_handler = self.sev_snp_shared_page_tracker.as_ref().map(|_| {
+            Arc::new(PerPageUnmap(
+                Arc::clone(&vfio_user_mapping) as Arc<dyn ExternalDmaMapping>
+            )) as Arc<dyn ExternalDmaMapping>
+        });
+        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        let static_map_all_ram = sev_snp_dma_handler.is_none();
+        #[cfg(not(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg")))]
+        let static_map_all_ram = true;
+
+        if static_map_all_ram {
+            for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
+                for region in zone.regions() {
+                    vfio_user_pci_device
+                        .dma_map(region)
+                        .map_err(DeviceManagerError::VfioUserDmaMap)?;
+                }
             }
         }
 
@@ -4464,6 +4475,13 @@ impl DeviceManager {
             .map_mmio_regions()
             .map_err(DeviceManagerError::VfioUserMapRegion)?;
 
+        // Registered before the device is published, so that a failed
+        // replay leaves nothing referencing it.
+        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        if let Some(handler) = &sev_snp_dma_handler {
+            self.add_sev_snp_dma_handler(pci_device_bdf, handler)?;
+        }
+
         let mut node = device_node!(vfio_user_name, vfio_user_pci_device);
 
         // Update the device tree with correct resource information.
@@ -4480,13 +4498,14 @@ impl DeviceManager {
         self.device_id_to_bdf
             .insert(vfio_user_name.clone(), pci_device_bdf);
 
-        self.commit_pci_device(
+        let result = self.commit_pci_device(
             Arc::clone(&vfio_user_pci_device) as Arc<dyn BusDeviceSync>,
             vfio_user_pci_device,
             pci_segment_id,
             pci_device_bdf,
             bars,
-        )?;
+        );
+        self.remove_dma_handler_on_err(pci_device_bdf, result)?;
 
         Ok((pci_device_bdf, vfio_user_name))
     }
@@ -5033,11 +5052,6 @@ impl DeviceManager {
             ));
         }
 
-        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
-        if self.sev_snp_shared_page_tracker.is_some() {
-            return Err(DeviceManagerError::VfioUserHotplugSevSnpTracker);
-        }
-
         let (bdf, device_name) = self.add_vfio_user_device(device_cfg, None)?;
 
         // Update the PCIU bitmap
@@ -5320,13 +5334,20 @@ impl DeviceManager {
                 )
             }
             PciDeviceHandle::VfioUser(vfio_user_pci_device) => {
-                let mut dev = vfio_user_pci_device.lock().unwrap();
-                for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
-                    for region in zone.regions() {
-                        // On error, log, but continue so the loop below removing the mapping from
-                        // the devices runs.
-                        if let Err(e) = dev.dma_unmap(region) {
-                            warn!("vfio-user dma_unmap failed during eject: {e}");
+                #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+                let static_mapped = !self.remove_sev_snp_dma_handler(pci_device_bdf);
+                #[cfg(not(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg")))]
+                let static_mapped = true;
+
+                if static_mapped {
+                    let mut dev = vfio_user_pci_device.lock().unwrap();
+                    for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
+                        for region in zone.regions() {
+                            // On error, log, but continue so the loop below removing the mapping
+                            // from the devices runs.
+                            if let Err(e) = dev.dma_unmap(region) {
+                                warn!("vfio-user dma_unmap failed during eject: {e}");
+                            }
                         }
                     }
                 }
@@ -5787,17 +5808,12 @@ impl DeviceManager {
         cpu_manager: &Arc<Mutex<CpuManager>>,
         memory_manager: &Arc<Mutex<MemoryManager>>,
     ) -> Option<Arc<SevSnpSharedPageTracker>> {
-        // The SEV-SNP per-page tracker is only supported over an iommufd backend
-        // with no vfio-user devices. Otherwise, confidential VFIO falls back to
-        // static-mapping all pages.
+        // The SEV-SNP per-page tracker is only supported over an iommufd
+        // backend. Otherwise, confidential VFIO falls back to static-mapping
+        // all pages.
         let sev_snp_config_enabled = {
             let config = config.lock().unwrap();
-            config.is_sev_snp_enabled()
-                && config.platform.as_ref().is_some_and(|p| p.iommufd)
-                && config
-                    .user_devices
-                    .as_ref()
-                    .is_none_or(|devices| devices.is_empty())
+            config.is_sev_snp_enabled() && config.platform.as_ref().is_some_and(|p| p.iommufd)
         };
 
         if !sev_snp_config_enabled {

@@ -291,6 +291,24 @@ impl SevSnpSharedPageTracker {
     }
 }
 
+/// Wraps a DMA handler whose unmaps must match a single earlier mapping,
+/// such as a vfio-user client, splitting the tracker's coalesced unmaps
+/// into the 4KiB mappings it made.
+pub(crate) struct PerPageUnmap(pub(crate) Arc<dyn ExternalDmaMapping>);
+
+impl ExternalDmaMapping for PerPageUnmap {
+    fn map(&self, iova: u64, gpa: u64, size: u64) -> io::Result<()> {
+        self.0.map(iova, gpa, size)
+    }
+
+    fn unmap(&self, iova: u64, size: u64) -> io::Result<()> {
+        for offset in (0..size).step_by(PAGE_SIZE_4K as usize) {
+            self.0.unmap(iova + offset, PAGE_SIZE_4K)?;
+        }
+        Ok(())
+    }
+}
+
 impl MemoryConversionHandler for SevSnpSharedPageTracker {
     fn handle_conversion(&self, gpa: u64, size: u64, to_shared: bool) -> anyhow::Result<()> {
         self.set_shared(gpa, size, to_shared)
@@ -564,6 +582,28 @@ mod tests {
         rec.fail_unmap.store(true, Ordering::Relaxed);
         t.remove_dma_mapping_handler(&(Arc::clone(&rec) as Arc<dyn ExternalDmaMapping>));
         assert!(t.set_shared(page(1), PAGE_SIZE_4K, true).is_err());
+    }
+
+    #[test]
+    fn per_page_unmap_splits_coalesced_unmaps() {
+        let t = SevSnpSharedPageTracker::new();
+        t.register_region(page(0), 4 * PAGE_SIZE_4K);
+        let rec = Arc::new(Recorder::default());
+        let handler: Arc<dyn ExternalDmaMapping> =
+            Arc::new(PerPageUnmap(Arc::clone(&rec) as Arc<dyn ExternalDmaMapping>));
+        t.add_dma_mapping_handler(&handler).unwrap();
+
+        t.set_shared(page(0), 3 * PAGE_SIZE_4K, true).unwrap();
+        t.set_shared(page(0), 2 * PAGE_SIZE_4K, false).unwrap();
+        t.remove_dma_mapping_handler(&handler);
+        assert_eq!(
+            *rec.unmaps.lock().unwrap(),
+            vec![
+                (page(0), PAGE_SIZE_4K),
+                (page(1), PAGE_SIZE_4K),
+                (page(2), PAGE_SIZE_4K),
+            ]
+        );
     }
 
     #[test]
