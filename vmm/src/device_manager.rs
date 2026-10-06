@@ -727,30 +727,23 @@ impl DeviceRelocation for AddressManager {
                 } else {
                     &self.pci_mmio64_allocators
                 };
+                let mut pci_mmio_allocator = pci_mmio_allocators
+                    [usize::from(pci_dev.bdf().segment())]
+                .lock()
+                .unwrap();
 
-                // Find the specific allocator that this BAR was allocated from and use it for a new one
-                for pci_mmio_allocator_mutex in pci_mmio_allocators {
-                    let mut pci_mmio_allocator = pci_mmio_allocator_mutex.lock().unwrap();
-
-                    if old_base >= pci_mmio_allocator.base().0
-                        && old_base <= pci_mmio_allocator.end().0
-                    {
-                        if pci_mmio_allocator
-                            .move_range(
-                                GuestAddress(old_base),
-                                GuestAddress(new_base),
-                                len as GuestUsize,
-                                Some(len),
-                            )
-                            .is_none()
-                        {
-                            return Err(io::Error::other(format!(
-                                "Cannot move MMIO BAR address range from {old_base:#x} to {new_base:#x}"
-                            )));
-                        }
-
-                        break;
-                    }
+                if pci_mmio_allocator
+                    .move_range(
+                        GuestAddress(old_base),
+                        GuestAddress(new_base),
+                        len as GuestUsize,
+                        Some(len),
+                    )
+                    .is_none()
+                {
+                    return Err(io::Error::other(format!(
+                        "Cannot move MMIO BAR address range from {old_base:#x} to {new_base:#x}"
+                    )));
                 }
 
                 // Update MMIO bus
