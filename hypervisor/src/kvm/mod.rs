@@ -24,7 +24,7 @@ use std::os::unix::io::AsRawFd;
 use std::os::unix::io::RawFd;
 #[cfg(feature = "tdx")]
 use std::ptr;
-#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64", feature = "sev_snp"))]
 use std::sync::Mutex;
 #[cfg(feature = "sev_snp")]
 use std::sync::OnceLock;
@@ -672,6 +672,8 @@ pub struct KvmVm {
     memory_slots: Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
     #[cfg(feature = "sev_snp")]
     memory_conversion_handler: Arc<OnceLock<Arc<dyn vm::MemoryConversionHandler>>>,
+    #[cfg(feature = "sev_snp")]
+    memory_conversion_lock: Arc<Mutex<()>>,
 }
 
 impl KvmVm {
@@ -986,6 +988,8 @@ impl vm::Vm for KvmVm {
             memory_slots: self.memory_slots.clone(),
             #[cfg(feature = "sev_snp")]
             memory_conversion_handler: Arc::clone(&self.memory_conversion_handler),
+            #[cfg(feature = "sev_snp")]
+            memory_conversion_lock: Arc::clone(&self.memory_conversion_lock),
         };
         Ok(Box::new(vcpu))
     }
@@ -1831,6 +1835,8 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 memory_slots,
                 #[cfg(feature = "sev_snp")]
                 memory_conversion_handler: Arc::new(OnceLock::new()),
+                #[cfg(feature = "sev_snp")]
+                memory_conversion_lock: Arc::new(Mutex::new(())),
             }))
         }
 
@@ -1975,6 +1981,8 @@ pub struct KvmVcpu {
     memory_slots: Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
     #[cfg(feature = "sev_snp")]
     memory_conversion_handler: Arc<OnceLock<Arc<dyn vm::MemoryConversionHandler>>>,
+    #[cfg(feature = "sev_snp")]
+    memory_conversion_lock: Arc<Mutex<()>>,
 }
 
 #[cfg(feature = "sev_snp")]
@@ -2002,6 +2010,42 @@ impl KvmVcpu {
         Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
             "Invalid GPA range: address={gpa:#x}, pages={num_pages}"
         )))
+    }
+
+    /// Convert `[gpa, gpa + size)` to private or shared memory. Conversions
+    /// are serialized across vCPUs, so that no other vCPU can share and map a
+    /// page for DMA again between the handler unmapping it and its shared
+    /// mapping being discarded.
+    fn convert_memory(&self, gpa: u64, size: u64, private: bool) -> cpu::Result<()> {
+        let _conversion = self.memory_conversion_lock.lock().unwrap();
+
+        let attributes = if private {
+            KVM_MEMORY_ATTRIBUTE_PRIVATE as u64
+        } else {
+            // the only attribute available is private, o/w 0
+            // https://docs.kernel.org/virt/kvm/api.html#kvm-set-memory-attributes
+            0u64
+        };
+        self.vm_fd
+            .set_memory_attributes(kvm_memory_attributes {
+                address: gpa,
+                size,
+                attributes,
+                flags: 0,
+            })
+            .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
+
+        if !private {
+            Self::punch_holes_in_guest_memfd(&self.memory_slots, gpa, size);
+        }
+
+        self.notify_memory_conversion_handler(gpa, size, !private)?;
+
+        if private && self.should_discard_shared_mapping() {
+            Self::discard_shared_mapping(&self.memory_slots, gpa, size);
+        }
+
+        Ok(())
     }
 
     fn notify_memory_conversion_handler(
@@ -2766,36 +2810,11 @@ impl cpu::Vcpu for KvmVcpu {
                             debug!(
                                 "KVM_HC_MAP_GPA_RANGE: address={address:#x}, pages={num_pages}, attributes={attributes:#x}"
                             );
-                            let set_private_attr = if attributes & PRIVATE_ENCODING_BITMASK > 0 {
-                                KVM_MEMORY_ATTRIBUTE_PRIVATE as u64
-                            } else {
-                                // the only attribute available is private, o/w 0
-                                // https://docs.kernel.org/virt/kvm/api.html#kvm-set-memory-attributes
-                                0u64
-                            };
-                            let mem_attributes = kvm_memory_attributes {
+                            self.convert_memory(
                                 address,
                                 size,
-                                attributes: set_private_attr,
-                                ..Default::default()
-                            };
-                            self.vm_fd
-                                .set_memory_attributes(mem_attributes)
-                                .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
-
-                            if set_private_attr == 0 {
-                                Self::punch_holes_in_guest_memfd(&self.memory_slots, address, size);
-                            }
-
-                            self.notify_memory_conversion_handler(
-                                address,
-                                size,
-                                set_private_attr == 0,
+                                attributes & PRIVATE_ENCODING_BITMASK > 0,
                             )?;
-
-                            if set_private_attr != 0 && self.should_discard_shared_mapping() {
-                                Self::discard_shared_mapping(&self.memory_slots, address, size);
-                            }
 
                             Ok(cpu::VmExit::Ignore)
                         }
@@ -2816,32 +2835,7 @@ impl cpu::Vcpu for KvmVcpu {
                         )));
                     }
 
-                    let attributes = if flags & KVM_MEMORY_EXIT_FLAG_PRIVATE != 0 {
-                        KVM_MEMORY_ATTRIBUTE_PRIVATE as u64
-                    } else {
-                        // the only attribute available is private, o/w 0
-                        // https://docs.kernel.org/virt/kvm/api.html#kvm-set-memory-attributes
-                        0u64
-                    };
-
-                    self.vm_fd
-                        .set_memory_attributes(kvm_memory_attributes {
-                            address: gpa,
-                            size,
-                            attributes,
-                            flags: 0,
-                        })
-                        .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
-
-                    if attributes == 0 {
-                        Self::punch_holes_in_guest_memfd(&self.memory_slots, gpa, size);
-                    }
-
-                    self.notify_memory_conversion_handler(gpa, size, attributes == 0)?;
-
-                    if attributes != 0 && self.should_discard_shared_mapping() {
-                        Self::discard_shared_mapping(&self.memory_slots, gpa, size);
-                    }
+                    self.convert_memory(gpa, size, flags & KVM_MEMORY_EXIT_FLAG_PRIVATE != 0)?;
 
                     Ok(cpu::VmExit::Ignore)
                 }
@@ -4226,6 +4220,7 @@ mod tests {
             vm_fd,
             memory_slots: slots,
             memory_conversion_handler: Arc::new(OnceLock::new()),
+            memory_conversion_lock: Arc::new(Mutex::new(())),
         };
 
         assert_eq!(vcpu.validate_gpa_range(0x1000, 1).unwrap(), 0x1000);
