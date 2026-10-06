@@ -65,7 +65,7 @@ use devices::legacy::fw_cfg::FW_CFG_ACPI_ID;
 #[cfg(feature = "fw_cfg")]
 use devices::legacy::{
     FwCfg,
-    fw_cfg::{PORT_FW_CFG_BASE, PORT_FW_CFG_WIDTH},
+    fw_cfg::{FW_CFG_REGISTER_BASE, FW_CFG_REGISTER_WIDTH},
 };
 #[cfg(feature = "pvmemcontrol")]
 use devices::pvmemcontrol::{self, PvmemcontrolBusDevice, PvmemcontrolPciDevice};
@@ -1535,7 +1535,7 @@ impl DeviceManager {
         #[cfg(target_arch = "x86_64")]
         self.address_manager
             .io_bus
-            .insert(fw_cfg, PORT_FW_CFG_BASE, PORT_FW_CFG_WIDTH)
+            .insert(fw_cfg, FW_CFG_REGISTER_BASE, FW_CFG_REGISTER_WIDTH)
             .map_err(DeviceManagerError::ErrorAddingFwCfgToBus)?;
 
         // default address for fw_cfg on arm via mmio
@@ -1546,8 +1546,8 @@ impl DeviceManager {
                 .mmio_bus
                 .insert(
                     Arc::clone(&fw_cfg) as Arc<dyn BusDeviceSync>,
-                    PORT_FW_CFG_BASE,
-                    PORT_FW_CFG_WIDTH,
+                    FW_CFG_REGISTER_BASE,
+                    FW_CFG_REGISTER_WIDTH,
                 )
                 .map_err(DeviceManagerError::ErrorAddingFwCfgToBus)?;
 
@@ -1562,8 +1562,8 @@ impl DeviceManager {
             self.id_to_dev_info.insert(
                 (DeviceType::FwCfg, "fw-cfg".to_string()),
                 MmioDeviceInfo {
-                    addr: PORT_FW_CFG_BASE,
-                    len: PORT_FW_CFG_WIDTH,
+                    addr: FW_CFG_REGISTER_BASE,
+                    len: FW_CFG_REGISTER_WIDTH,
                     irq: fw_cfg_irq,
                 },
             );
@@ -5934,10 +5934,10 @@ impl Aml for DeviceManager {
                     &aml::Name::new(
                         "_CRS".into(),
                         &aml::ResourceTemplate::new(vec![&aml::IO::new(
-                            PORT_FW_CFG_BASE as u16,
-                            PORT_FW_CFG_BASE as u16,
+                            FW_CFG_REGISTER_BASE as u16,
+                            FW_CFG_REGISTER_BASE as u16,
                             0x01,
-                            PORT_FW_CFG_WIDTH as u8,
+                            FW_CFG_REGISTER_WIDTH as u8,
                         )]),
                     ),
                 ],
