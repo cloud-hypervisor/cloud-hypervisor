@@ -4202,8 +4202,8 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Option<PasidCap>> {
         let key = Self::find_physical_iommu(device_cfg)?;
         let virt_id = Smmuv3Iommufd::stream_id(bdf);
-        let dev_id = device
-            .iommufd_dev_id()
+        let dev_id = device_cfg
+            .iommufd_dev_id
             .ok_or(DeviceManagerError::IommufdDevIdMissing)?;
         let smmuv3 = match self.smmuv3s.get(&key) {
             Some(smmuv3) => smmuv3,
@@ -4335,6 +4335,10 @@ impl DeviceManager {
             _ => unreachable!("DeviceConfig::validate enforces exactly one of path/fd"),
         };
         let vfio_device = Arc::new(vfio_device);
+
+        if let Some(dev_id) = vfio_device.iommufd_dev_id() {
+            device_cfg.iommufd_dev_id = Some(dev_id);
+        }
 
         #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
         let pasid_cap = if smmuv3_attached {
