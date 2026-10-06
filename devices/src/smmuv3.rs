@@ -109,6 +109,13 @@ const IDR1_EVENTQS: u32 = Q_MAX_LOG2SIZE << 16;
 //   EVENTQS: Event queue holds Q_MAX_LOG2SIZE entries.
 const IDR1_MODEL_FEATURES: u32 = IDR1_SIDSIZE | IDR1_CMDQS | IDR1_EVENTQS;
 
+// IDR3 fields
+//   RIL: range invalidation commands
+//   BBML: break-before-make level
+const IDR3_RIL: u32 = 1 << 10;
+const IDR3_BBML_MASK: u32 = 0b11 << 11;
+const IDR3_HOST_FEATURES_MASK: u32 = IDR3_RIL | IDR3_BBML_MASK;
+
 // IDR5 fields
 const IDR5_OAS_MASK: u32 = 0b111;
 const IDR5_OAS_48BIT: u32 = 0b101;
@@ -362,6 +369,7 @@ pub struct Smmuv3Interrupts {
 pub struct Smmuv3State {
     idr0: u32,
     idr1: u32,
+    idr3: u32,
     idr5: u32,
     cr0: u32,
     cr0ack: u32,
@@ -389,6 +397,7 @@ pub struct Smmuv3 {
 
     idr0: u32,
     idr1: u32,
+    idr3: u32,
     idr5: u32,
 
     cr0: u32,
@@ -432,6 +441,7 @@ impl Smmuv3 {
         let state = state.unwrap_or(Smmuv3State {
             idr0: IDR0_MODEL_FEATURES,
             idr1: IDR1_MODEL_FEATURES,
+            idr3: 0,
             idr5: IDR5_MODEL_FEATURES,
             ..Default::default()
         });
@@ -440,6 +450,7 @@ impl Smmuv3 {
             id,
             idr0: state.idr0,
             idr1: state.idr1,
+            idr3: state.idr3,
             idr5: state.idr5,
             cr0: state.cr0,
             cr0ack: state.cr0ack,
@@ -474,6 +485,7 @@ impl Smmuv3 {
         Smmuv3State {
             idr0: self.idr0,
             idr1: self.idr1,
+            idr3: self.idr3,
             idr5: self.idr5,
             cr0: self.cr0,
             cr0ack: self.cr0ack,
@@ -513,7 +525,7 @@ impl Smmuv3 {
     }
 
     fn set_host_id_regs(&mut self, idr: &[u32; 6], ats_supported: bool) -> Result<(), Error> {
-        let (h0, h1, h5) = (idr[0], idr[1], idr[5]);
+        let (h0, h1, h3, h5) = (idr[0], idr[1], idr[3], idr[5]);
 
         self.idr0 = IDR0_MODEL_FEATURES | (h0 & IDR0_HOST_FEATURES_MASK);
         if ats_supported {
@@ -521,6 +533,8 @@ impl Smmuv3 {
         }
 
         self.idr1 = IDR1_MODEL_FEATURES | (h1 & IDR1_SSIDSIZE_MASK);
+
+        self.idr3 = h3 & IDR3_HOST_FEATURES_MASK;
 
         let oas = IDR5_OAS_48BIT.min(h5 & IDR5_OAS_MASK);
         let granules = h5 & IDR5_GRAN_MASK;
@@ -540,7 +554,8 @@ impl Smmuv3 {
         let value = match offset {
             IDR0 => self.idr0 as u64,
             IDR1 => self.idr1 as u64,
-            IDR2 | IDR3 | IDR4 => 0,
+            IDR3 => self.idr3 as u64,
+            IDR2 | IDR4 => 0,
             IDR5 => self.idr5 as u64,
             IIDR => 0,
             // SMMUv3.0
@@ -1407,6 +1422,34 @@ mod tests {
         backend.idr.lock().unwrap()[1] = 0;
         smmuv3.initialize().unwrap();
         assert_eq!(smmuv3.idr1 & IDR1_SSIDSIZE_MASK, 0);
+    }
+
+    #[test]
+    fn test_set_host_id_regs_mirrors_ril_and_bbm() {
+        // RIL, BBM level 2, FWB, and 52-bit VA (IDR5.VAX) on the host.
+        let mut idr = [0u32; 6];
+        idr[3] = IDR3_RIL | (2 << 11) | (1 << 8);
+        idr[5] = IDR5_OAS_48BIT | IDR5_GRAN4K | (1 << 10);
+        let backend = HostInfoBackend::new(idr, false);
+        let mut smmuv3 = smmuv3_with_host_info(&backend);
+
+        smmuv3.initialize().unwrap();
+
+        assert_eq!(smmuv3.idr3, IDR3_RIL | (2 << 11), "RIL and BBM, never FWB");
+        assert_eq!(smmuv3.idr5 & (0b11 << 10), 0, "VAX stays hidden, as QEMU's");
+        assert_eq!(smmuv3.read_reg(IDR3, 4).unwrap(), u64::from(smmuv3.idr3));
+    }
+
+    #[test]
+    fn test_set_host_id_regs_without_ril_and_bbm() {
+        let mut idr = [0u32; 6];
+        idr[5] = IDR5_GRAN4K;
+        let backend = HostInfoBackend::new(idr, false);
+        let mut smmuv3 = smmuv3_with_host_info(&backend);
+
+        smmuv3.initialize().unwrap();
+
+        assert_eq!(smmuv3.idr3, 0);
     }
 
     #[test]
