@@ -4063,26 +4063,15 @@ impl DeviceManager {
 
             #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
             let static_map_all_ram = match self.sev_snp_shared_page_tracker.as_ref() {
-                // Confidential VM over iommufd supports shared/private tracking.
-                // Registered with the tracker before the device is published.
+                // A confidential VM maps the shared pages only, through the
+                // shared page tracker. The handler is registered with it
+                // before the device is published.
                 Some(_) => {
                     sev_snp_vfio_dma_handler =
                         Some(Arc::clone(&vfio_mapping) as Arc<dyn ExternalDmaMapping>);
                     false
                 }
-                None => {
-                    if self.config.lock().unwrap().is_sev_snp_enabled()
-                        && self.cpu_manager.lock().unwrap().hypervisor_type()
-                            == hypervisor::HypervisorType::Kvm
-                    {
-                        warn!(
-                            "SEV-SNP: static-pinning all guest RAM (no reclaim); per-page \
-                             shared-page tracking needs an iommufd backend, non-hugepage \
-                             RAM, and no vfio-user devices."
-                        );
-                    }
-                    true
-                }
+                None => true,
             };
             #[cfg(not(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg")))]
             let static_map_all_ram = true;
@@ -5275,6 +5264,18 @@ impl DeviceManager {
                 #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
                 {
                     removed_shared_vfio_device = !vfio_pci_device.lock().unwrap().iommu_attached();
+
+                    // Detaching the last group from a legacy container drops
+                    // its IOMMU mappings, after which unmapping fails. So
+                    // unregister the container's handler while the last
+                    // device is still attached.
+                    if removed_shared_vfio_device
+                        && self.shared_vfio_devices == 1
+                        && let Some(tracker) = &self.sev_snp_shared_page_tracker
+                        && let Some(handler) = self.sev_snp_vfio_dma_handler.take()
+                    {
+                        tracker.remove_dma_mapping_handler(&handler);
+                    }
                 }
 
                 // Remove this device's MMIO regions from the DeviceManager's
@@ -5737,8 +5738,9 @@ impl DeviceManager {
         #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
         if let Some(tracker) = &self.sev_snp_shared_page_tracker {
             if self.vfio_ops.is_some() && self.shared_vfio_devices == 0 {
-                // Drop the container's handler. The tracker itself persists so
-                // a later VFIO attach replays the current shared set.
+                // Drop the container's handler, if ejecting its last device
+                // did not already. The tracker itself persists so a later
+                // VFIO attach replays the current shared set.
                 if let Some(handler) = self.sev_snp_vfio_dma_handler.take() {
                     tracker.remove_dma_mapping_handler(&handler);
                 }
@@ -5808,15 +5810,7 @@ impl DeviceManager {
         cpu_manager: &Arc<Mutex<CpuManager>>,
         memory_manager: &Arc<Mutex<MemoryManager>>,
     ) -> Option<Arc<SevSnpSharedPageTracker>> {
-        // The SEV-SNP per-page tracker is only supported over an iommufd
-        // backend. Otherwise, confidential VFIO falls back to static-mapping
-        // all pages.
-        let sev_snp_config_enabled = {
-            let config = config.lock().unwrap();
-            config.is_sev_snp_enabled() && config.platform.as_ref().is_some_and(|p| p.iommufd)
-        };
-
-        if !sev_snp_config_enabled {
+        if !config.lock().unwrap().is_sev_snp_enabled() {
             return None;
         }
 
