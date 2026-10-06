@@ -407,6 +407,9 @@ pub enum ValidationError {
     /// Prefault requires the eager-copy restore mode
     #[error("'prefault' requires 'memory_restore_mode=copy'")]
     InvalidRestorePrefaultWithOnDemand,
+    /// Postcopy and on-demand restore are not supported with some devices
+    #[error("Postcopy and on-demand restore are not supported with {0} devices")]
+    PostcopyIncompatibleDevice(String),
     /// Path provided in landlock-rules doesn't exist
     #[error("Path {0:?} provided in landlock-rules does not exist")]
     LandlockPathDoesNotExist(PathBuf),
@@ -3054,6 +3057,10 @@ impl RestoreConfig {
             return Err(ValidationError::InvalidRestorePrefaultWithOnDemand);
         }
 
+        if self.memory_restore_mode == MemoryRestoreMode::OnDemand {
+            vm_config.check_postcopy_incompatible_device()?;
+        }
+
         let mut restored_net_with_fds = HashMap::new();
         for n in self.net_fds.iter().flatten() {
             assert_eq!(
@@ -3295,6 +3302,15 @@ impl VmConfig {
         } else {
             false
         }
+    }
+
+    pub fn check_postcopy_incompatible_device(&self) -> ValidationResult<()> {
+        if self.devices.as_ref().is_some_and(|d| !d.is_empty()) {
+            return Err(ValidationError::PostcopyIncompatibleDevice(
+                "VFIO".to_owned(),
+            ));
+        }
+        Ok(())
     }
 
     // Also enables virtio-iommu if the config needs it

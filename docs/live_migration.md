@@ -339,7 +339,8 @@ migration process. Via the API or `ch-remote`, you may specify:
   descriptors over a UNIX socket. It requires every guest memory region to use
   shared memory or hugepage backing. `postcopy` resumes the destination first
   and faults guest pages in on demand over a dedicated connection. Defaults to
-  `precopy`.
+  `precopy`. `postcopy` is not supported with:
+  - VFIO devices
 - `preserve_source <on|off>`: \
   Keep the source VM in a paused state after migration completes. This is only
   supported with `memory_mode=memfds` and defaults to `off`.
