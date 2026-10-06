@@ -136,7 +136,7 @@ use crate::memory_manager::{Error as MemoryManagerError, MEMORY_MANAGER_ACPI_SIZ
 use crate::pci_segment::PciSegment;
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
 #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
-use crate::sev::SevSnpSharedPageTracker;
+use crate::sev_snp_tracker::SevSnpSharedPageTracker;
 use crate::util::flatten_error_chain_to_string;
 #[cfg(feature = "ivshmem")]
 use crate::vm_config::IvshmemConfig;
