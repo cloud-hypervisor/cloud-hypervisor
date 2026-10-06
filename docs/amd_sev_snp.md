@@ -48,5 +48,29 @@ For more information related to Microsoft Hypervisor, please see [mshv.md](mshv.
 **Limitations**
 Note that Cloud Hypervisor does not support the following features with SEV-SNP:
 - Memory & CPU hotplug
-- Huge Pages (HugeTLB)
+- Huge Pages (HugeTLB), and on KVM a memory zone file on hugetlbfs
 - Virtual IOMMU
+- pvmemcontrol (on KVM)
+
+**Device DMA**
+On KVM, VFIO, vfio-user and vDPA devices only get the pages the guest
+shares with the host mapped for DMA. When the guest converts a page back
+to private, it is unmapped from every device before the VMM discards
+its shared backing. Each shared page is its own 4 KiB mapping, which counts
+against the backend's mapping limit:
+- Legacy VFIO container (`iommufd=off`): the `vfio_iommu_type1` module's
+  `dma_entry_limit` parameter, 65535 by default (256 MiB of shared memory).
+- vDPA: since Linux 7.2, the `max_iotlb_entries` parameter of the
+  `vhost_vdpa` module and of the parent driver (e.g. `mlx5_vdpa`), 2048
+  by default (8 MiB of shared memory), which most guests exceed. `0` is
+  not accepted as unlimited by `vhost_vdpa`, so raise it to a large value
+  instead, for example `vhost_vdpa.max_iotlb_entries=1048576`.
+- vfio-user: the number of DMA mappings the server accepts.
+
+A guest sharing more memory than the VFIO or vDPA limit allows is
+stopped. The vfio-user client does not check the server's reply to a
+DMA mapping request yet, so a mapping refused by the server goes
+unnoticed.
+
+vhost-user backends must not pin guest memory, for instance by mapping it
+into an IOMMU of their own: the VMM is not told about their mappings.
