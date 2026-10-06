@@ -4017,11 +4017,11 @@ impl DeviceManager {
         } else if let Some(vfio_ops) = &self.vfio_ops {
             Arc::clone(vfio_ops)
         } else {
-            let vfio_ops = self.create_vfio_ops()?;
+            // Only cached once the device is added below, so that a failed
+            // add does not leave an unmapped container for the next one to
+            // reuse.
             needs_dma_mapping = true;
-            self.vfio_ops = Some(Arc::clone(&vfio_ops));
-
-            vfio_ops
+            self.create_vfio_ops()?
         };
 
         let (vfio_device, device_path) = match (&device_cfg.path, device_cfg.fd) {
@@ -4049,6 +4049,9 @@ impl DeviceManager {
             _ => unreachable!("DeviceConfig::validate enforces exactly one of path/fd"),
         };
 
+        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        let mut sev_snp_vfio_dma_handler: Option<Arc<dyn ExternalDmaMapping>> = None;
+
         if needs_dma_mapping {
             let vfio_mapping = Arc::new(VfioDmaMapping::new(
                 Arc::clone(&vfio_ops),
@@ -4059,12 +4062,10 @@ impl DeviceManager {
             #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
             let static_map_all_ram = match self.sev_snp_shared_page_tracker.as_ref() {
                 // Confidential VM over iommufd supports shared/private tracking.
-                Some(tracker) => {
-                    let handler = Arc::clone(&vfio_mapping) as Arc<dyn ExternalDmaMapping>;
-                    tracker
-                        .add_dma_mapping_handler(&handler)
-                        .map_err(DeviceManagerError::AddDmaMappingHandlerSevSnp)?;
-                    self.sev_snp_vfio_dma_handler = Some(handler);
+                // Registered with the tracker before the device is published.
+                Some(_) => {
+                    sev_snp_vfio_dma_handler =
+                        Some(Arc::clone(&vfio_mapping) as Arc<dyn ExternalDmaMapping>);
                     false
                 }
                 None => {
@@ -4118,6 +4119,7 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
             }
         }
+        let new_vfio_ops = needs_dma_mapping.then(|| Arc::clone(&vfio_ops));
 
         let legacy_interrupt_group =
             if let Some(legacy_interrupt_manager) = &self.legacy_interrupt_manager {
@@ -4188,6 +4190,18 @@ impl DeviceManager {
             .map_mmio_regions()
             .map_err(DeviceManagerError::VfioMapRegion)?;
 
+        // Register a new container's handler with the shared page tracker
+        // before the device is published, so that a failed replay drops the
+        // device, and the container with it, before any vCPU uses it.
+        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        if let Some(handler) = &sev_snp_vfio_dma_handler
+            && let Some(tracker) = &self.sev_snp_shared_page_tracker
+        {
+            tracker
+                .add_dma_mapping_handler(handler)
+                .map_err(DeviceManagerError::AddDmaMappingHandlerSevSnp)?;
+        }
+
         for mmio_region in vfio_pci_device.lock().unwrap().mmio_regions() {
             self.mmio_regions.lock().unwrap().push(mmio_region);
         }
@@ -4208,13 +4222,33 @@ impl DeviceManager {
         self.device_id_to_bdf
             .insert(vfio_name.clone(), pci_device_bdf);
 
-        self.commit_pci_device(
+        let result = self.commit_pci_device(
             Arc::clone(&vfio_pci_device) as Arc<dyn BusDeviceSync>,
             vfio_pci_device,
             pci_segment_id,
             pci_device_bdf,
             bars,
-        )?;
+        );
+        // The partly committed device keeps the container alive, so unmap
+        // the shared pages from it rather than just dropping the handler.
+        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        if result.is_err()
+            && let Some(handler) = &sev_snp_vfio_dma_handler
+            && let Some(tracker) = &self.sev_snp_shared_page_tracker
+        {
+            tracker.remove_dma_mapping_handler(handler);
+        }
+        result?;
+
+        // Only cache a new container, and own its tracker handler, once its
+        // first device is added.
+        if let Some(vfio_ops) = new_vfio_ops {
+            self.vfio_ops = Some(vfio_ops);
+            #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+            {
+                self.sev_snp_vfio_dma_handler = sev_snp_vfio_dma_handler;
+            }
+        }
 
         #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
         if !device_cfg.pci_common.iommu {
