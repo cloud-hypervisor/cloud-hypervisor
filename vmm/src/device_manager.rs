@@ -1003,6 +1003,11 @@ pub struct DeviceManager {
     #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
     shared_vfio_devices: usize,
 
+    // DMA handler of `vfio_ops` registered with the SEV-SNP shared page
+    // tracker, which only holds it weakly.
+    #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+    sev_snp_vfio_dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
+
     // Paravirtualized IOMMU
     iommu_device: Option<Arc<Mutex<virtio_devices::Iommu>>>,
     iommu_mapping: Option<Arc<IommuMapping>>,
@@ -1347,6 +1352,8 @@ impl DeviceManager {
             vfio_ops: None,
             #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
             shared_vfio_devices: 0,
+            #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+            sev_snp_vfio_dma_handler: None,
             iommu_device: None,
             iommu_mapping: None,
             iommu_attached_devices: None,
@@ -4053,11 +4060,11 @@ impl DeviceManager {
             let static_map_all_ram = match self.sev_snp_shared_page_tracker.as_ref() {
                 // Confidential VM over iommufd supports shared/private tracking.
                 Some(tracker) => {
+                    let handler = Arc::clone(&vfio_mapping) as Arc<dyn ExternalDmaMapping>;
                     tracker
-                        .add_dma_mapping_handler(
-                            Arc::clone(&vfio_mapping) as Arc<dyn ExternalDmaMapping>
-                        )
+                        .add_dma_mapping_handler(&handler)
                         .map_err(DeviceManagerError::AddDmaMappingHandlerSevSnp)?;
+                    self.sev_snp_vfio_dma_handler = Some(handler);
                     false
                 }
                 None => {
@@ -5636,9 +5643,11 @@ impl DeviceManager {
         #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
         if let Some(tracker) = &self.sev_snp_shared_page_tracker {
             if self.vfio_ops.is_some() && self.shared_vfio_devices == 0 {
-                // Drop the tracker's handler. The tracker itself persists so a
-                // later VFIO attach replays the current shared set.
-                tracker.clear_dma_mapping_handler();
+                // Drop the container's handler. The tracker itself persists so
+                // a later VFIO attach replays the current shared set.
+                if let Some(handler) = self.sev_snp_vfio_dma_handler.take() {
+                    tracker.remove_dma_mapping_handler(&handler);
+                }
                 self.vfio_ops = None;
             }
             return;
