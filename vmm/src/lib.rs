@@ -101,7 +101,7 @@ pub mod seccomp_filters;
 mod serial_manager;
 #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
 pub(crate) mod sev;
-#[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+#[cfg(all(feature = "kvm", feature = "sev_snp"))]
 mod sev_snp_tracker;
 mod sigwinch_listener;
 pub mod sparse;

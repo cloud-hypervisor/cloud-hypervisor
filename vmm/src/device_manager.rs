@@ -135,7 +135,7 @@ use crate::locked_unix_listener::LockedUnixListener;
 use crate::memory_manager::{Error as MemoryManagerError, MEMORY_MANAGER_ACPI_SIZE, MemoryManager};
 use crate::pci_segment::PciSegment;
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
-#[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+#[cfg(all(feature = "kvm", feature = "sev_snp"))]
 use crate::sev_snp_tracker::{PerPageUnmap, SevSnpSharedPageTracker};
 use crate::util::flatten_error_chain_to_string;
 #[cfg(feature = "ivshmem")]
@@ -528,7 +528,7 @@ pub enum DeviceManagerError {
     RemoveDmaMappingHandlerVirtioMem(#[source] mem::Error),
 
     /// Failed to add a DMA mapping handler to the SEV-SNP shared-page tracker.
-    #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+    #[cfg(all(feature = "kvm", feature = "sev_snp"))]
     #[error("Failed to add DMA mapping handler to SEV-SNP shared-page tracker")]
     AddDmaMappingHandlerSevSnp(#[source] anyhow::Error),
 
@@ -995,17 +995,17 @@ pub struct DeviceManager {
     vfio_ops: Option<Arc<dyn VfioOps>>,
 
     // Number of active VFIO devices sharing `vfio_ops`.
-    #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+    #[cfg(all(feature = "kvm", feature = "sev_snp"))]
     shared_vfio_devices: usize,
 
     // DMA handler of `vfio_ops` registered with the SEV-SNP shared page
     // tracker, which only holds it weakly.
-    #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+    #[cfg(all(feature = "kvm", feature = "sev_snp"))]
     sev_snp_vfio_dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
 
     // Per-device DMA handlers registered with the SEV-SNP shared page
     // tracker, keyed by PCI BDF.
-    #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+    #[cfg(all(feature = "kvm", feature = "sev_snp"))]
     sev_snp_dma_handlers: HashMap<u32, Arc<dyn ExternalDmaMapping>>,
 
     // Paravirtualized IOMMU
@@ -1087,7 +1087,7 @@ pub struct DeviceManager {
     mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
 
     // Track shared pages for SEV-SNP VFIO
-    #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+    #[cfg(all(feature = "kvm", feature = "sev_snp"))]
     sev_snp_shared_page_tracker: Option<Arc<SevSnpSharedPageTracker>>,
 
     #[cfg(feature = "fw_cfg")]
@@ -1324,7 +1324,7 @@ impl DeviceManager {
             }
         }
 
-        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
         let sev_snp_shared_page_tracker = Self::create_sev_snp_shared_page_tracker(
             &address_manager,
             &config,
@@ -1350,11 +1350,11 @@ impl DeviceManager {
             legacy_interrupt_manager: None,
             passthrough_device: None,
             vfio_ops: None,
-            #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+            #[cfg(all(feature = "kvm", feature = "sev_snp"))]
             shared_vfio_devices: 0,
-            #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+            #[cfg(all(feature = "kvm", feature = "sev_snp"))]
             sev_snp_vfio_dma_handler: None,
-            #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+            #[cfg(all(feature = "kvm", feature = "sev_snp"))]
             sev_snp_dma_handlers: HashMap::new(),
             iommu_device: None,
             iommu_mapping: None,
@@ -1391,7 +1391,7 @@ impl DeviceManager {
             acpi_platform_addresses: AcpiPlatformAddresses::default(),
             rate_limit_groups,
             mmio_regions: Arc::new(Mutex::new(Vec::new())),
-            #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+            #[cfg(all(feature = "kvm", feature = "sev_snp"))]
             sev_snp_shared_page_tracker,
             #[cfg(feature = "fw_cfg")]
             fw_cfg: None,
@@ -4051,7 +4051,7 @@ impl DeviceManager {
             _ => unreachable!("DeviceConfig::validate enforces exactly one of path/fd"),
         };
 
-        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
         let mut sev_snp_vfio_dma_handler: Option<Arc<dyn ExternalDmaMapping>> = None;
 
         if needs_dma_mapping {
@@ -4061,7 +4061,7 @@ impl DeviceManager {
                 Arc::clone(&self.mmio_regions),
             ));
 
-            #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+            #[cfg(all(feature = "kvm", feature = "sev_snp"))]
             let static_map_all_ram = match self.sev_snp_shared_page_tracker.as_ref() {
                 // A confidential VM maps the shared pages only, through the
                 // shared page tracker. The handler is registered with it
@@ -4073,7 +4073,7 @@ impl DeviceManager {
                 }
                 None => true,
             };
-            #[cfg(not(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg")))]
+            #[cfg(not(all(feature = "kvm", feature = "sev_snp")))]
             let static_map_all_ram = true;
 
             if static_map_all_ram {
@@ -4184,7 +4184,7 @@ impl DeviceManager {
         // Register a new container's handler with the shared page tracker
         // before the device is published, so that a failed replay drops the
         // device, and the container with it, before any vCPU uses it.
-        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
         if let Some(handler) = &sev_snp_vfio_dma_handler
             && let Some(tracker) = &self.sev_snp_shared_page_tracker
         {
@@ -4222,7 +4222,7 @@ impl DeviceManager {
         );
         // The partly committed device keeps the container alive, so unmap
         // the shared pages from it rather than just dropping the handler.
-        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
         if result.is_err()
             && let Some(handler) = &sev_snp_vfio_dma_handler
             && let Some(tracker) = &self.sev_snp_shared_page_tracker
@@ -4235,13 +4235,13 @@ impl DeviceManager {
         // first device is added.
         if let Some(vfio_ops) = new_vfio_ops {
             self.vfio_ops = Some(vfio_ops);
-            #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+            #[cfg(all(feature = "kvm", feature = "sev_snp"))]
             {
                 self.sev_snp_vfio_dma_handler = sev_snp_vfio_dma_handler;
             }
         }
 
-        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
         if !device_cfg.pci_common.iommu {
             self.shared_vfio_devices += 1;
         }
@@ -4427,15 +4427,15 @@ impl DeviceManager {
         // A confidential VM maps the shared pages only, through the shared
         // page tracker, once the device is otherwise set up. A vfio-user
         // unmap must match a single earlier mapping, so unmap page by page.
-        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
         let sev_snp_dma_handler = self.sev_snp_shared_page_tracker.as_ref().map(|_| {
             Arc::new(PerPageUnmap(
                 Arc::clone(&vfio_user_mapping) as Arc<dyn ExternalDmaMapping>
             )) as Arc<dyn ExternalDmaMapping>
         });
-        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
         let static_map_all_ram = sev_snp_dma_handler.is_none();
-        #[cfg(not(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg")))]
+        #[cfg(not(all(feature = "kvm", feature = "sev_snp")))]
         let static_map_all_ram = true;
 
         if static_map_all_ram {
@@ -4466,7 +4466,7 @@ impl DeviceManager {
 
         // Registered before the device is published, so that a failed
         // replay leaves nothing referencing it.
-        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
         if let Some(handler) = &sev_snp_dma_handler {
             self.add_sev_snp_dma_handler(pci_device_bdf, handler)?;
         }
@@ -4573,13 +4573,13 @@ impl DeviceManager {
 
         // A confidential VM maps the shared pages only, through the shared
         // page tracker, once the device is otherwise set up.
-        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
         let sev_snp_dma_handler = dma_handler
             .clone()
             .filter(|_| iommu_mapping.is_none() && self.sev_snp_shared_page_tracker.is_some());
-        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
         let static_map_all_ram = sev_snp_dma_handler.is_none();
-        #[cfg(not(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg")))]
+        #[cfg(not(all(feature = "kvm", feature = "sev_snp")))]
         let static_map_all_ram = true;
 
         // Map DMA ranges if a DMA handler is available and if the device is
@@ -4655,7 +4655,7 @@ impl DeviceManager {
 
         // Registered before the PCI device is published, and unregistered if
         // adding it fails afterwards.
-        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
         if let Some(handler) = &sev_snp_dma_handler {
             self.add_sev_snp_dma_handler(pci_device_bdf, handler)?;
         }
@@ -5252,7 +5252,7 @@ impl DeviceManager {
             iommu_attached = true;
         }
 
-        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
         let mut removed_shared_vfio_device = false;
 
         let (pci_device, bus_device, virtio_device, remove_dma_handler) = match pci_device_handle {
@@ -5261,7 +5261,7 @@ impl DeviceManager {
             // It goes away when cleanup_vfio_ops drops the container after the
             // last shared VFIO device is removed.
             PciDeviceHandle::Vfio(vfio_pci_device) => {
-                #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+                #[cfg(all(feature = "kvm", feature = "sev_snp"))]
                 {
                     removed_shared_vfio_device = !vfio_pci_device.lock().unwrap().iommu_attached();
 
@@ -5307,9 +5307,9 @@ impl DeviceManager {
                         .map_err(|e| DeviceManagerError::UnRegisterIoevent(e.into()))?;
                 }
 
-                #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+                #[cfg(all(feature = "kvm", feature = "sev_snp"))]
                 let static_mapped = !self.remove_sev_snp_dma_handler(pci_device_bdf);
-                #[cfg(not(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg")))]
+                #[cfg(not(all(feature = "kvm", feature = "sev_snp")))]
                 let static_mapped = true;
 
                 if let Some(dma_handler) = dev.dma_handler()
@@ -5335,9 +5335,9 @@ impl DeviceManager {
                 )
             }
             PciDeviceHandle::VfioUser(vfio_user_pci_device) => {
-                #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+                #[cfg(all(feature = "kvm", feature = "sev_snp"))]
                 let static_mapped = !self.remove_sev_snp_dma_handler(pci_device_bdf);
-                #[cfg(not(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg")))]
+                #[cfg(not(all(feature = "kvm", feature = "sev_snp")))]
                 let static_mapped = true;
 
                 if static_mapped {
@@ -5478,7 +5478,7 @@ impl DeviceManager {
         // any_device, bus_device and pci_device are released, the actual
         // device will be dropped.
 
-        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
         if removed_shared_vfio_device {
             if self.shared_vfio_devices == 0 {
                 error!("shared VFIO device count underflow on eject, falling to 0");
@@ -5735,7 +5735,7 @@ impl DeviceManager {
         // We need to release every other container reference before dropping
         // `self.vfio_ops`, so its drop closes the container fd and unpins
         // the shared pages.
-        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
         if let Some(tracker) = &self.sev_snp_shared_page_tracker {
             if self.vfio_ops.is_some() && self.shared_vfio_devices == 0 {
                 // Drop the container's handler, if ejecting its last device
@@ -5764,17 +5764,17 @@ impl DeviceManager {
         bdf: PciBdf,
         result: DeviceManagerResult<T>,
     ) -> DeviceManagerResult<T> {
-        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
         if result.is_err() {
             self.remove_sev_snp_dma_handler(bdf);
         }
-        #[cfg(not(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg")))]
+        #[cfg(not(all(feature = "kvm", feature = "sev_snp")))]
         let _ = bdf;
         result
     }
 
     /// Register a device's DMA handler with the SEV-SNP shared page tracker.
-    #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+    #[cfg(all(feature = "kvm", feature = "sev_snp"))]
     fn add_sev_snp_dma_handler(
         &mut self,
         bdf: PciBdf,
@@ -5792,7 +5792,7 @@ impl DeviceManager {
 
     /// Unregister a device's DMA handler from the SEV-SNP shared page
     /// tracker. Returns false when it was not registered.
-    #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+    #[cfg(all(feature = "kvm", feature = "sev_snp"))]
     fn remove_sev_snp_dma_handler(&mut self, bdf: PciBdf) -> bool {
         let Some(handler) = self.sev_snp_dma_handlers.remove(&bdf.into()) else {
             return false;
@@ -5803,7 +5803,7 @@ impl DeviceManager {
         true
     }
 
-    #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+    #[cfg(all(feature = "kvm", feature = "sev_snp"))]
     fn create_sev_snp_shared_page_tracker(
         address_manager: &Arc<AddressManager>,
         config: &Arc<Mutex<VmConfig>>,
