@@ -1291,7 +1291,11 @@ impl Vmm {
         // pages never fault and are never served. Reject postcopy+prefault
         // rather than serve stale data.
         if matches!(mode, MigrationMode::Postcopy) {
-            let memory = &vm_migration_config.vm_config.lock().unwrap().memory;
+            let vm_config = vm_migration_config.vm_config.lock().unwrap();
+            vm_config
+                .check_postcopy_incompatible_device()
+                .map_err(|e| MigratableError::MigrateReceive(e.into()))?;
+            let memory = &vm_config.memory;
             let prefault_enabled = memory.prefault
                 || memory
                     .zones
@@ -3430,18 +3434,20 @@ impl RequestHandler for Vmm {
             send_data_migration.timeout_strategy
         );
 
-        if !self
-            .vm_config
-            .as_ref()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .backed_by_shared_memory()
-            && send_data_migration.effective_memory_mode() == MigrationMode::MemFDs
         {
-            return Err(MigratableError::MigrateSend(anyhow!(
-                "Memory FD migration requires shared memory or hugepages enabled"
-            )));
+            let vm_config = self.vm_config.as_ref().unwrap().lock().unwrap();
+            if !vm_config.backed_by_shared_memory()
+                && send_data_migration.effective_memory_mode() == MigrationMode::MemFDs
+            {
+                return Err(MigratableError::MigrateSend(anyhow!(
+                    "Memory FD migration requires shared memory or hugepages enabled"
+                )));
+            }
+            if send_data_migration.effective_memory_mode() == MigrationMode::Postcopy {
+                vm_config
+                    .check_postcopy_incompatible_device()
+                    .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+            }
         }
 
         let vm = self
