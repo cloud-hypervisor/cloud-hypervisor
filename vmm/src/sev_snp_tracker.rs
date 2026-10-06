@@ -182,11 +182,6 @@ impl SevSnpSharedPageTracker {
         ptr::addr_eq(registered.as_ptr(), Arc::as_ptr(handler))
     }
 
-    fn has_dma_handler(&self) -> bool {
-        let inner = self.inner.lock().unwrap();
-        !inner.poisoned && inner.handlers.iter().any(|h| h.strong_count() > 0)
-    }
-
     /// Flip `[gpa, gpa + size)` shared/private in the tracker, driving the
     /// handlers so the devices map the shared pages only.
     fn set_shared(&self, gpa: u64, size: u64, shared: bool) -> io::Result<()> {
@@ -313,12 +308,6 @@ impl MemoryConversionHandler for SevSnpSharedPageTracker {
     fn handle_conversion(&self, gpa: u64, size: u64, to_shared: bool) -> anyhow::Result<()> {
         self.set_shared(gpa, size, to_shared)
             .map_err(|e| anyhow::anyhow!("confidential DMA conversion failed: {e}"))
-    }
-
-    /// Only reclaim once a DMA handler is registered as `handle_conversion`
-    /// would have unmapped the page, so freeing its stale mapping is safe.
-    fn reclaims_shared_mapping(&self) -> bool {
-        self.has_dma_handler()
     }
 }
 
@@ -543,7 +532,6 @@ mod tests {
         // private, so nothing converts anymore.
         assert_eq!(first.live(), vec![page(0)]);
         assert!(t.set_shared(page(0), PAGE_SIZE_4K, false).is_err());
-        assert!(!t.has_dma_handler());
     }
 
     #[test]

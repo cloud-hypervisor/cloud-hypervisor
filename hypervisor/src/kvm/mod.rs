@@ -2041,7 +2041,7 @@ impl KvmVcpu {
 
         self.notify_memory_conversion_handler(gpa, size, !private)?;
 
-        if private && self.should_discard_shared_mapping() {
+        if private {
             Self::discard_shared_mapping(&self.memory_slots, gpa, size);
         }
 
@@ -2060,13 +2060,6 @@ impl KvmVcpu {
                 .map_err(cpu::HypervisorCpuError::RunVcpu)?;
         }
         Ok(())
-    }
-
-    /// Whether to discard the stale shared mapping on conversion to private.
-    fn should_discard_shared_mapping(&self) -> bool {
-        self.memory_conversion_handler
-            .get()
-            .is_some_and(|h| h.reclaims_shared_mapping())
     }
 
     fn punch_holes_in_guest_memfd(
@@ -2109,7 +2102,9 @@ impl KvmVcpu {
         }
     }
 
-    /// Discard the stale *shared* mapping for `[gpa, gpa + size)`.
+    /// Discard the stale *shared* mapping for `[gpa, gpa + size)`. Device DMA
+    /// mappings of the range, made through the memory conversion handler,
+    /// are already gone.
     fn discard_shared_mapping(
         memory_slots: &Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
         gpa: u64,
