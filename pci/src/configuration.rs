@@ -1641,4 +1641,237 @@ mod tests {
         let expected: &[u32] = &[1, 0, 0, 0, 0, 7, 0, 9];
         assert_eq!(&actual_vec[..8], expected);
     }
+
+    const RELOC_BAR_SIZE: u64 = 0x8_0000;
+
+    fn reloc_config(state: Option<PciConfigurationState>) -> PciConfiguration {
+        PciConfiguration::new(
+            0x1234,
+            0x5678,
+            0x1,
+            PciClassCode::MultimediaController,
+            &PciMultimediaSubclass::AudioController,
+            None,
+            PciHeaderType::Device,
+            0xABCD,
+            0x2468,
+            None,
+            state,
+        )
+    }
+
+    fn add_reloc_bar(cfg: &mut PciConfiguration, idx: usize, addr: u64) {
+        let bar = PciBarConfiguration::new(
+            idx,
+            RELOC_BAR_SIZE,
+            PciBarRegionType::Memory32BitRegion,
+            PciBarPrefetchable::NotPrefetchable,
+        )
+        .set_address(addr);
+        cfg.add_pci_bar(&bar).unwrap();
+        cfg.write_reg(COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK);
+    }
+
+    #[test]
+    fn bar_reprogramming_reports_the_moved_bar_index() {
+        let mut cfg = reloc_config(None);
+        add_reloc_bar(&mut cfg, 0, 0xc000_0000);
+        add_reloc_bar(&mut cfg, 1, 0xd000_0000);
+
+        let reprogram = cfg.write_config_register(BAR0_REG + 1, 0, &0xe000_0000u32.to_le_bytes());
+
+        assert_eq!(reprogram.len(), 1);
+        assert_eq!(reprogram[0].bar_idx, Some(1));
+        assert_eq!(reprogram[0].old_base, 0xd000_0000);
+        assert_eq!(reprogram[0].new_base, 0xe000_0000);
+        assert_eq!(reprogram[0].len, RELOC_BAR_SIZE);
+    }
+
+    #[test]
+    fn bar_reprogramming_distinguishes_bars_sharing_a_base() {
+        let mut cfg = reloc_config(None);
+        add_reloc_bar(&mut cfg, 0, 0xc000_0000);
+        add_reloc_bar(&mut cfg, 1, 0xd000_0000);
+
+        let aliased = cfg.write_config_register(BAR0_REG, 0, &0xd000_0000u32.to_le_bytes());
+        assert_eq!(aliased.len(), 1);
+        assert_eq!(aliased[0].bar_idx, Some(0));
+        assert_eq!(cfg.get_bar_addr(0), cfg.get_bar_addr(1));
+
+        let reprogram = cfg.write_config_register(BAR0_REG + 1, 0, &0xe000_0000u32.to_le_bytes());
+
+        assert_eq!(reprogram.len(), 1);
+        assert_eq!(reprogram[0].bar_idx, Some(1));
+        assert_eq!(reprogram[0].old_base, 0xd000_0000);
+        assert_eq!(reprogram[0].new_base, 0xe000_0000);
+        assert_eq!(cfg.get_bar_addr(0), 0xd000_0000);
+    }
+
+    #[test]
+    fn bar_reprogramming_of_64bit_bar_reports_the_low_slot() {
+        let mut cfg = reloc_config(None);
+        let bar = PciBarConfiguration::new(
+            0,
+            RELOC_BAR_SIZE,
+            PciBarRegionType::Memory64BitRegion,
+            PciBarPrefetchable::NotPrefetchable,
+        )
+        .set_address(0x4_0000_0000);
+        cfg.add_pci_bar(&bar).unwrap();
+        cfg.write_reg(COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK);
+
+        // The low bar address doesn't trigger 64-bit bar move yet.
+        assert!(
+            cfg.write_config_register(BAR0_REG, 0, &0u32.to_le_bytes())
+                .is_empty()
+        );
+
+        // The high bar address triggers 64-bit bar move.
+        let reprogram = cfg.write_config_register(BAR0_REG + 1, 0, &8u32.to_le_bytes());
+
+        assert_eq!(reprogram.len(), 1);
+        assert_eq!(reprogram[0].bar_idx, Some(0));
+        assert_eq!(reprogram[0].old_base, 0x4_0000_0000);
+        assert_eq!(reprogram[0].new_base, 0x8_0000_0000);
+    }
+
+    #[test]
+    fn rom_bar_reprogramming_reports_the_rom_slot() {
+        let mut cfg = reloc_config(None);
+        let bar = PciBarConfiguration::new(
+            ROM_BAR_IDX,
+            RELOC_BAR_SIZE,
+            PciBarRegionType::Memory32BitRegion,
+            PciBarPrefetchable::NotPrefetchable,
+        )
+        .set_address(0xf000_0000);
+        cfg.add_pci_rom_bar(&bar, 0).unwrap();
+        cfg.write_reg(COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK);
+
+        let reprogram = cfg.write_config_register(ROM_BAR_REG, 0, &0xf100_0000u32.to_le_bytes());
+
+        assert_eq!(reprogram.len(), 1);
+        assert_eq!(reprogram[0].bar_idx, Some(ROM_BAR_IDX));
+        assert_eq!(reprogram[0].old_base, 0xf000_0000);
+        assert_eq!(reprogram[0].new_base, 0xf100_0000);
+    }
+
+    fn restore_legacy(cfg: &PciConfiguration) -> Vec<BarReprogrammingParams> {
+        let mut state = cfg.state();
+        for p in state.pending_bar_reprogram.iter_mut() {
+            p.bar_idx = None;
+        }
+        reloc_config(Some(state)).pending_bar_reprogram
+    }
+
+    fn legacy_pending_move(
+        idx: usize,
+        region_type: PciBarRegionType,
+        prefetchable: PciBarPrefetchable,
+        old: u64,
+        new: u64,
+    ) -> Vec<BarReprogrammingParams> {
+        let mut cfg = reloc_config(None);
+        let size = if region_type == PciBarRegionType::IoRegion {
+            0x100
+        } else {
+            RELOC_BAR_SIZE
+        };
+        let bar = PciBarConfiguration::new(idx, size, region_type, prefetchable).set_address(old);
+        if idx == ROM_BAR_IDX {
+            cfg.add_pci_rom_bar(&bar, 0).unwrap();
+            cfg.write_config_register(ROM_BAR_REG, 0, &(new as u32).to_le_bytes());
+        } else {
+            cfg.add_pci_bar(&bar).unwrap();
+            let low = cfg.read_reg(BAR0_REG + idx) & !cfg.writable_bits[BAR0_REG + idx];
+            cfg.write_config_register(BAR0_REG + idx, 0, &(new as u32 | low).to_le_bytes());
+            if region_type == PciBarRegionType::Memory64BitRegion {
+                let high = (new >> 32) as u32;
+                cfg.write_config_register(BAR0_REG + idx + 1, 0, &high.to_le_bytes());
+            }
+        }
+        assert_eq!(cfg.pending_bar_reprogram.len(), 1);
+        restore_legacy(&cfg)
+    }
+
+    #[test]
+    fn legacy_pending_move_recovers_the_bar_index() {
+        use PciBarPrefetchable::{NotPrefetchable, Prefetchable};
+        use PciBarRegionType::{IoRegion, Memory32BitRegion, Memory64BitRegion};
+
+        let cases = [
+            (
+                1,
+                Memory32BitRegion,
+                NotPrefetchable,
+                0xd000_0000,
+                0xe000_0000,
+            ),
+            (1, Memory32BitRegion, Prefetchable, 0xd000_0000, 0xe000_0000),
+            (1, IoRegion, NotPrefetchable, 0xc000, 0xd000),
+            (
+                0,
+                Memory64BitRegion,
+                Prefetchable,
+                0x4_0000_0000,
+                0x8_0000_0000,
+            ),
+            (
+                1,
+                Memory64BitRegion,
+                NotPrefetchable,
+                0x4_0000_0000,
+                0x8_0000_0000,
+            ),
+            (
+                ROM_BAR_IDX,
+                Memory32BitRegion,
+                NotPrefetchable,
+                0xf000_0000,
+                0xf100_0000,
+            ),
+        ];
+        for (idx, region_type, prefetchable, old, new) in cases {
+            let pending = legacy_pending_move(idx, region_type, prefetchable, old, new);
+            assert_eq!(pending.len(), 1, "BAR {idx} {region_type:?}");
+            assert_eq!(pending[0].bar_idx, Some(idx), "BAR {idx} {region_type:?}");
+            assert_eq!(pending[0].old_base, old);
+            assert_eq!(pending[0].new_base, new);
+        }
+    }
+
+    #[test]
+    fn legacy_chained_moves_resolve_to_the_same_bar() {
+        let mut cfg = reloc_config(None);
+        add_reloc_bar(&mut cfg, 0, 0xc000_0000);
+        add_reloc_bar(&mut cfg, 1, 0xd000_0000);
+        cfg.write_reg(COMMAND_REG, 0);
+
+        cfg.write_config_register(BAR0_REG + 1, 0, &0xe000_0000u32.to_le_bytes());
+        cfg.write_config_register(BAR0_REG + 1, 0, &0xf000_0000u32.to_le_bytes());
+
+        let pending = restore_legacy(&cfg);
+
+        assert_eq!(pending.len(), 2);
+        assert_eq!(pending[0].bar_idx, Some(1));
+        assert_eq!(pending[0].new_base, 0xe000_0000);
+        assert_eq!(pending[1].bar_idx, Some(1));
+        assert_eq!(pending[1].new_base, 0xf000_0000);
+    }
+
+    #[test]
+    fn legacy_pending_move_without_a_match_is_dropped() {
+        let mut cfg = reloc_config(None);
+        add_reloc_bar(&mut cfg, 0, 0xc000_0000);
+        let mut state = cfg.state();
+        state.pending_bar_reprogram.push(BarReprogrammingParams {
+            bar_idx: None,
+            old_base: 0xa000_0000,
+            new_base: 0xb000_0000,
+            len: RELOC_BAR_SIZE,
+            region_type: PciBarRegionType::Memory32BitRegion,
+        });
+
+        assert!(reloc_config(Some(state)).pending_bar_reprogram.is_empty());
+    }
 }
