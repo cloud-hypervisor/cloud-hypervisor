@@ -3320,6 +3320,18 @@ impl VmConfig {
                 "vfio-user".to_owned(),
             ));
         }
+        if self.disks.iter().flatten().any(|disk| disk.vhost_user)
+            || self.net.iter().flatten().any(|net| net.vhost_user)
+            || self.fs.as_ref().is_some_and(|fs| !fs.is_empty())
+            || self
+                .generic_vhost_user
+                .as_ref()
+                .is_some_and(|d| !d.is_empty())
+        {
+            return Err(ValidationError::PostcopyIncompatibleDevice(
+                "vhost-user".to_owned(),
+            ));
+        }
         Ok(())
     }
 
