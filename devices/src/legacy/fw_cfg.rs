@@ -812,6 +812,18 @@ impl BusDevice for FwCfg {
                 let addr_lo = (addr & 0xffff_ffff) as u32;
                 data.copy_from_slice(&addr_lo.to_be_bytes());
             }
+            #[cfg(target_arch = "x86_64")]
+            (port, _)
+                if (port >= PORT_FW_CFG_SELECTOR && port <= PORT_FW_CFG_DATA)
+                    || (port >= PORT_FW_CFG_DMA_HI && port <= PORT_FW_CFG_DMA_LO + 3) =>
+            {
+                // For port access with unsupported width QEMU returns all zeros.
+                debug!(
+                    "fw_cfg: Unsupported {:#x}-byte read from port {port:#x}.",
+                    data.len()
+                );
+                data.fill(0x0);
+            }
             (port, _) => {
                 // Handle any port that cannot be associated with the fw_cfg protocol as unassigned read.
                 debug!(
@@ -1265,5 +1277,18 @@ mod tests {
             assert_eq!(fw_cfg.data_offset, 0);
             assert_eq!(buff, [CH_UNASSIGNED_IO_RETURN_VALUE]);
         }
+    }
+
+    #[test]
+    fn test_register_invalid_sized_reads_zero_buffer() {
+        // Reads with unsupported size zero the whole buffer in QEMU. We mimic this behavior.
+        // On all architectures QEMU rejects the unsupported-width access and returns zero.
+        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(GuestMemoryMmap::new()));
+        fw_cfg.write(0, SELECTOR_OFFSET, &[FW_CFG_SIGNATURE as u8, 0]);
+        // 16-byte reads are forbidden on all architectures.
+        let mut buff = [0xEF; 16];
+        fw_cfg.read(0, PORT_FW_CFG_DMA_LO - PORT_FW_CFG_BASE, &mut buff);
+        assert_eq!(fw_cfg.data_offset, 0);
+        assert_eq!(buff, [0x0; 16]);
     }
 }
