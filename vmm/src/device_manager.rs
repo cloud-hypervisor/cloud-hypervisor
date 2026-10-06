@@ -1008,6 +1008,11 @@ pub struct DeviceManager {
     #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
     sev_snp_vfio_dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
 
+    // Per-device DMA handlers registered with the SEV-SNP shared page
+    // tracker, keyed by PCI BDF.
+    #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+    sev_snp_dma_handlers: HashMap<u32, Arc<dyn ExternalDmaMapping>>,
+
     // Paravirtualized IOMMU
     iommu_device: Option<Arc<Mutex<virtio_devices::Iommu>>>,
     iommu_mapping: Option<Arc<IommuMapping>>,
@@ -1354,6 +1359,8 @@ impl DeviceManager {
             shared_vfio_devices: 0,
             #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
             sev_snp_vfio_dma_handler: None,
+            #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+            sev_snp_dma_handlers: HashMap::new(),
             iommu_device: None,
             iommu_mapping: None,
             iommu_attached_devices: None,
@@ -4556,6 +4563,17 @@ impl DeviceManager {
 
         let memory = self.memory_manager.lock().unwrap().guest_memory();
 
+        // A confidential VM maps the shared pages only, through the shared
+        // page tracker, once the device is otherwise set up.
+        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        let sev_snp_dma_handler = dma_handler
+            .clone()
+            .filter(|_| iommu_mapping.is_none() && self.sev_snp_shared_page_tracker.is_some());
+        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        let static_map_all_ram = sev_snp_dma_handler.is_none();
+        #[cfg(not(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg")))]
+        let static_map_all_ram = true;
+
         // Map DMA ranges if a DMA handler is available and if the device is
         // not attached to a virtual IOMMU.
         if let Some(dma_handler) = &dma_handler {
@@ -4584,13 +4602,15 @@ impl DeviceManager {
 
                 // Do not register virtio-mem regions, as they are handled directly by
                 // virtio-mem devices.
-                for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
-                    for region in zone.regions() {
-                        let gpa = region.start_addr().0;
-                        let size = region.len();
-                        dma_handler
-                            .map(gpa, gpa, size)
-                            .map_err(DeviceManagerError::VirtioDmaMap)?;
+                if static_map_all_ram {
+                    for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
+                        for region in zone.regions() {
+                            let gpa = region.start_addr().0;
+                            let size = region.len();
+                            dma_handler
+                                .map(gpa, gpa, size)
+                                .map_err(DeviceManagerError::VirtioDmaMap)?;
+                        }
                     }
                 }
             }
@@ -4625,14 +4645,26 @@ impl DeviceManager {
             resources,
         )?;
 
-        let bar_addr = virtio_pci_device.lock().unwrap().config_bar_addr();
-        for (event, addr) in virtio_pci_device.lock().unwrap().ioeventfds(bar_addr) {
-            let io_addr = IoEventAddress::Mmio(addr);
-            self.address_manager
-                .vm
-                .register_ioevent(event, &io_addr, None)
-                .map_err(|e| DeviceManagerError::RegisterIoevent(e.into()))?;
+        // Registered before the PCI device is published, and unregistered if
+        // adding it fails afterwards.
+        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        if let Some(handler) = &sev_snp_dma_handler {
+            self.add_sev_snp_dma_handler(pci_device_bdf, handler)?;
         }
+
+        let bar_addr = virtio_pci_device.lock().unwrap().config_bar_addr();
+        let result = virtio_pci_device
+            .lock()
+            .unwrap()
+            .ioeventfds(bar_addr)
+            .try_for_each(|(event, addr)| {
+                let io_addr = IoEventAddress::Mmio(addr);
+                self.address_manager
+                    .vm
+                    .register_ioevent(event, &io_addr, None)
+                    .map_err(|e| DeviceManagerError::RegisterIoevent(e.into()))
+            });
+        self.remove_dma_handler_on_err(pci_device_bdf, result)?;
 
         // Update the device tree with correct resource information.
         node.resources = new_resources;
@@ -4641,13 +4673,14 @@ impl DeviceManager {
         node.pci_device_handle = Some(PciDeviceHandle::Virtio(Arc::clone(&virtio_pci_device)));
         self.device_tree.lock().unwrap().insert(id, node);
 
-        self.commit_pci_device(
+        let result = self.commit_pci_device(
             Arc::clone(&virtio_pci_device) as Arc<dyn BusDeviceSync>,
             virtio_pci_device,
             pci_segment_id,
             pci_device_bdf,
             bars,
-        )?;
+        );
+        self.remove_dma_handler_on_err(pci_device_bdf, result)?;
 
         Ok(pci_device_bdf)
     }
@@ -5259,8 +5292,14 @@ impl DeviceManager {
                         .map_err(|e| DeviceManagerError::UnRegisterIoevent(e.into()))?;
                 }
 
+                #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+                let static_mapped = !self.remove_sev_snp_dma_handler(pci_device_bdf);
+                #[cfg(not(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg")))]
+                let static_mapped = true;
+
                 if let Some(dma_handler) = dev.dma_handler()
                     && !iommu_attached
+                    && static_mapped
                 {
                     for zone in self.memory_manager.lock().unwrap().memory_zones().values() {
                         for region in zone.regions() {
@@ -5692,6 +5731,53 @@ impl DeviceManager {
             debug!("Drop VfioOps given no active VFIO devices.");
             self.vfio_ops = None;
         }
+    }
+
+    /// Pass `result` through, unregistering the DMA handler of the device
+    /// being added at `bdf` from the SEV-SNP shared page tracker if it is an
+    /// error.
+    fn remove_dma_handler_on_err<T>(
+        &mut self,
+        bdf: PciBdf,
+        result: DeviceManagerResult<T>,
+    ) -> DeviceManagerResult<T> {
+        #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+        if result.is_err() {
+            self.remove_sev_snp_dma_handler(bdf);
+        }
+        #[cfg(not(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg")))]
+        let _ = bdf;
+        result
+    }
+
+    /// Register a device's DMA handler with the SEV-SNP shared page tracker.
+    #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+    fn add_sev_snp_dma_handler(
+        &mut self,
+        bdf: PciBdf,
+        handler: &Arc<dyn ExternalDmaMapping>,
+    ) -> DeviceManagerResult<()> {
+        if let Some(tracker) = &self.sev_snp_shared_page_tracker {
+            tracker
+                .add_dma_mapping_handler(handler)
+                .map_err(DeviceManagerError::AddDmaMappingHandlerSevSnp)?;
+            self.sev_snp_dma_handlers
+                .insert(bdf.into(), Arc::clone(handler));
+        }
+        Ok(())
+    }
+
+    /// Unregister a device's DMA handler from the SEV-SNP shared page
+    /// tracker. Returns false when it was not registered.
+    #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
+    fn remove_sev_snp_dma_handler(&mut self, bdf: PciBdf) -> bool {
+        let Some(handler) = self.sev_snp_dma_handlers.remove(&bdf.into()) else {
+            return false;
+        };
+        if let Some(tracker) = &self.sev_snp_shared_page_tracker {
+            tracker.remove_dma_mapping_handler(&handler);
+        }
+        true
     }
 
     #[cfg(all(feature = "kvm", feature = "sev_snp", feature = "fw_cfg"))]
