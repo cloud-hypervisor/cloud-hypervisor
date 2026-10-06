@@ -35,6 +35,25 @@ use crate::smmuv3::{Error as Smmuv3Error, EventRecord, IDR0_COHACC, Smmuv3, Smmu
 
 const VEVENTQ_DEPTH: u32 = 64;
 
+// The STE fields the kernel lets userspace set for a nested stage 1
+// (STRTAB_STE_{0,1}_NESTING_ALLOWED, arm-smmu-v3.h).
+//   word 0: V [0], Config [3:1], S1Fmt [5:4], S1ContextPtr [51:6],
+//           S1CDMax [63:59]
+//   word 1: S1DSS [1:0], S1CIR [3:2], S1COR [5:4], S1CSH [7:6],
+//           S1STALLD [27], EATS [29:28]
+#[cfg(target_arch = "aarch64")]
+const STE0_NESTING_ALLOWED: u64 = 0xf80f_ffff_ffff_ffff;
+#[cfg(target_arch = "aarch64")]
+const STE1_NESTING_ALLOWED: u64 = 0x0000_0000_3800_00ff;
+
+#[cfg(target_arch = "aarch64")]
+fn nested_ste(words: &[u64; 8]) -> [u64; 2] {
+    [
+        words[0] & STE0_NESTING_ALLOWED,
+        words[1] & STE1_NESTING_ALLOWED,
+    ]
+}
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("Failed to query host IOMMU information")]
@@ -196,7 +215,7 @@ impl PhysicalIommu for IommufdIommu {
         let hwpt_data = match entry {
             #[cfg(target_arch = "aarch64")]
             TableEntry::Smmuv3Ste(words) => IommufdHwptData::Smmuv3(iommu_hwpt_arm_smmuv3 {
-                ste: [words[0], words[1]],
+                ste: nested_ste(&words),
             }),
         };
 
@@ -424,5 +443,48 @@ impl Drop for FaultForwarder {
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }
+    }
+}
+
+#[cfg(all(test, target_arch = "aarch64"))]
+mod tests {
+    use super::*;
+
+    // GENMASK_ULL(high, low)
+    fn genmask(high: u32, low: u32) -> u64 {
+        (u64::MAX >> (63 - high)) & (u64::MAX << low)
+    }
+
+    #[test]
+    fn test_nested_ste_keeps_only_the_fields_the_kernel_allows() {
+        // V, Config, S1Fmt, S1ContextPtr, S1CDMax
+        let ste0 = genmask(0, 0) | genmask(3, 1) | genmask(5, 4) | genmask(51, 6) | genmask(63, 59);
+        // S1DSS, S1CIR, S1COR, S1CSH, S1STALLD, EATS
+        let ste1 = genmask(1, 0)
+            | genmask(3, 2)
+            | genmask(5, 4)
+            | genmask(7, 6)
+            | genmask(27, 27)
+            | genmask(29, 28);
+
+        assert_eq!(nested_ste(&[u64::MAX; 8]), [ste0, ste1]);
+    }
+
+    #[test]
+    fn test_nested_ste_clears_host_owned_fields() {
+        // V, Config = stage 1 only, S1ContextPtr, S1CDMax = 4
+        let ste0: u64 = 1 | (0b101 << 1) | 0x8000_1000 | (4 << 59);
+        // S1CIR = S1COR = WBRA, S1CSH = inner shareable
+        let ste1: u64 = (1 << 2) | (1 << 4) | (3 << 6);
+        let mev = 1 << 19;
+        let s2fwb = 1 << 25;
+        let strw_el2 = 2 << 30;
+        let shcfg_incoming = 1 << 44;
+
+        let mut words = [u64::MAX; 8];
+        words[0] = ste0;
+        words[1] = ste1 | mev | s2fwb | strw_el2 | shcfg_incoming;
+
+        assert_eq!(nested_ste(&words), [ste0, ste1]);
     }
 }
