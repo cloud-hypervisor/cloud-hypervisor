@@ -102,6 +102,8 @@ use crate::igvm::{igvm_loader, parse_igvm};
 use crate::landlock::LandlockError;
 #[cfg(feature = "tdx")]
 use crate::memory_manager;
+#[cfg(all(feature = "kvm", feature = "sev_snp"))]
+use crate::memory_manager::is_on_hugetlbfs;
 use crate::memory_manager::{
     Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData, MemoryRangePolicy,
 };
@@ -267,6 +269,11 @@ pub enum Error {
     #[cfg(feature = "sev_snp")]
     #[error("Error enabling SEV-SNP VM")]
     InitializeSevSnpVm(#[source] hypervisor::HypervisorVmError),
+
+    /// SEV-SNP guest RAM on KVM must not be backed by hugepages.
+    #[cfg(feature = "sev_snp")]
+    #[error("SEV-SNP guest RAM backed by hugepages is not supported on KVM")]
+    SevSnpHugePageBacking,
 
     /// pvmemcontrol is not supported with SEV-SNP on KVM.
     #[cfg(all(feature = "sev_snp", feature = "pvmemcontrol"))]
@@ -1030,6 +1037,22 @@ impl Vm {
             && cpu_manager.lock().unwrap().hypervisor_type() == hypervisor::HypervisorType::Kvm
         {
             return Err(Error::SevSnpPvmemcontrol);
+        }
+
+        // KVM discards the shared backing of a page the guest converts to
+        // private 4KiB at a time, which hugetlb backing cannot do. The
+        // hugepages option is refused by config validation; this catches a
+        // memory zone file on hugetlbfs, checking the files actually mapped.
+        #[cfg(feature = "kvm")]
+        if cpu_manager.lock().unwrap().hypervisor_type() == hypervisor::HypervisorType::Kvm {
+            let memory_manager = memory_manager.lock().unwrap();
+            for zone in memory_manager.memory_zones().values() {
+                for file_offset in zone.regions().iter().filter_map(|r| r.file_offset()) {
+                    if is_on_hugetlbfs(file_offset.file()).map_err(Error::MemoryManager)? {
+                        return Err(Error::SevSnpHugePageBacking);
+                    }
+                }
+            }
         }
 
         // Create boot vCPUs before SEV-SNP initialization

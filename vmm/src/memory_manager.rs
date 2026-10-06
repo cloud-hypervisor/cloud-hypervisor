@@ -476,6 +476,24 @@ fn statfs_get_bsize(path: &str) -> Result<u64, Error> {
     Ok(bsize)
 }
 
+/// Whether `file` is on hugetlbfs, so its pages are hugepages whatever the
+/// `hugepages` option says.
+pub fn is_on_hugetlbfs(file: &File) -> Result<bool, Error> {
+    let mut buf = MaybeUninit::<libc::statfs>::uninit();
+
+    // SAFETY: FFI call with a valid fd and buffer
+    let ret = unsafe { libc::fstatfs(file.as_raw_fd(), buf.as_mut_ptr()) };
+    if ret != 0 {
+        return Err(Error::GetFileSystemBlockSize(io::Error::last_os_error()));
+    }
+
+    // SAFETY: `buf` is valid at this point
+    // `f_type` and the constant differ in type between libcs, so compare as i64.
+    #[allow(clippy::unnecessary_cast)]
+    let is_hugetlbfs = unsafe { (*buf.as_ptr()).f_type } as i64 == libc::HUGETLBFS_MAGIC as i64;
+    Ok(is_hugetlbfs)
+}
+
 fn memory_zone_get_align_size(zone: &MemoryZoneConfig) -> Result<u64, Error> {
     // SAFETY: FFI call. Trivially safe.
     let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) as u64 };
@@ -3726,6 +3744,26 @@ mod tests {
     use vm_migration::protocol::{MemoryRange, MemoryRangeTable};
 
     use super::*;
+
+    #[test]
+    fn test_is_on_hugetlbfs() {
+        use std::fs;
+
+        assert!(!is_on_hugetlbfs(&File::open("/").unwrap()).unwrap());
+        assert!(!is_on_hugetlbfs(&File::open("/proc").unwrap()).unwrap());
+        // A mounted hugetlbfs, when the host has an accessible one.
+        if let Ok(mounts) = fs::read_to_string("/proc/mounts") {
+            for dir in mounts
+                .lines()
+                .filter(|l| l.split_whitespace().nth(2) == Some("hugetlbfs"))
+                .filter_map(|l| l.split_whitespace().nth(1))
+            {
+                if let Ok(dir) = File::open(dir) {
+                    assert!(is_on_hugetlbfs(&dir).unwrap());
+                }
+            }
+        }
+    }
 
     struct RecordingUffdMemorySource {
         attempts: Arc<Mutex<Vec<(u64, u64)>>>,
