@@ -342,6 +342,7 @@ migration process. Via the API or `ch-remote`, you may specify:
   `precopy`. `postcopy` is not supported with:
   - VFIO devices
   - vDPA devices
+  - vfio-user devices
 - `preserve_source <on|off>`: \
   Keep the source VM in a paused state after migration completes. This is only
   supported with `memory_mode=memfds` and defaults to `off`.
