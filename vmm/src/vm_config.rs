@@ -857,6 +857,8 @@ pub struct DeviceConfig {
     pub x_nv_gpudirect_clique: Option<u8>,
     #[serde(default)]
     pub x_exclude_mmap_bars: Vec<u64>,
+    #[serde(skip)]
+    pub iommufd_dev_id: Option<u32>,
 }
 
 fn deserialize_deviceconfig_fd<'de, D>(d: D) -> Result<Option<i32>, D::Error>
