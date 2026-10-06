@@ -3310,6 +3310,11 @@ impl VmConfig {
                 "VFIO".to_owned(),
             ));
         }
+        if self.vdpa.as_ref().is_some_and(|d| !d.is_empty()) {
+            return Err(ValidationError::PostcopyIncompatibleDevice(
+                "vDPA".to_owned(),
+            ));
+        }
         Ok(())
     }
 

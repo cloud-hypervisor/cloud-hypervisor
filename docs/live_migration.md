@@ -341,6 +341,7 @@ migration process. Via the API or `ch-remote`, you may specify:
   and faults guest pages in on demand over a dedicated connection. Defaults to
   `precopy`. `postcopy` is not supported with:
   - VFIO devices
+  - vDPA devices
 - `preserve_source <on|off>`: \
   Keep the source VM in a paused state after migration completes. This is only
   supported with `memory_mode=memfds` and defaults to `off`.
