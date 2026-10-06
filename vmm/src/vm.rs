@@ -268,6 +268,11 @@ pub enum Error {
     #[error("Error enabling SEV-SNP VM")]
     InitializeSevSnpVm(#[source] hypervisor::HypervisorVmError),
 
+    /// pvmemcontrol is not supported with SEV-SNP on KVM.
+    #[cfg(all(feature = "sev_snp", feature = "pvmemcontrol"))]
+    #[error("SEV-SNP on KVM does not support pvmemcontrol")]
+    SevSnpPvmemcontrol,
+
     #[cfg(feature = "tdx")]
     #[error("Error performing I/O on TDX firmware file")]
     LoadTdvf(#[source] io::Error),
@@ -1017,6 +1022,16 @@ impl Vm {
         snapshot: Option<&Snapshot>,
         igvm_file: Option<IgvmFile>,
     ) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {
+        // KVM discards the shared backing of a page the guest converts to
+        // private, once no device maps it anymore. pvmemcontrol discards and
+        // locks guest RAM behind its back.
+        #[cfg(all(feature = "kvm", feature = "pvmemcontrol"))]
+        if config.lock().unwrap().pvmemcontrol.is_some()
+            && cpu_manager.lock().unwrap().hypervisor_type() == hypervisor::HypervisorType::Kvm
+        {
+            return Err(Error::SevSnpPvmemcontrol);
+        }
+
         // Create boot vCPUs before SEV-SNP initialization
         cpu_manager
             .lock()
