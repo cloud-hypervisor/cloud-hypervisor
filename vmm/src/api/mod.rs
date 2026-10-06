@@ -1430,7 +1430,7 @@ impl ApiAction for VmCounters {
 
     fn request(&self, _: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: VmCounters");
+            debug!("API request event: VmCounters");
 
             let response = vmm
                 .vm_counters()
@@ -1463,7 +1463,7 @@ impl ApiAction for VmBalloonStats {
 
     fn request(&self, _: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: VmBalloonStats");
+            debug!("API request event: VmBalloonStats");
 
             let response = vmm
                 .vm_balloon_stats()
@@ -1572,7 +1572,7 @@ impl ApiAction for VmInfo {
 
     fn request(&self, _: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: VmInfo");
+            debug!("API request event: VmInfo");
 
             let response = vmm
                 .vm_info()
