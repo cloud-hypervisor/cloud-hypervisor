@@ -326,3 +326,11 @@ Limitations:
     --platform iommufd=on \
     --device path=/sys/bus/pci/devices/0009:01:00.0/,iommu=smmuv3
 ```
+
+### Advertised capabilities
+
+The emulated SMMUv3 advertises range invalidation (RIL) and the
+break-before-make level (BBML) only as the host SMMUv3 supports them.  If the
+CPUs support BBML2 without aborts, Linux uses shared virtual addressing (SVA)
+only when the SMMU advertises BBML2, and CUDA on a Grace-Blackwell GPU requires
+SVA.
