@@ -447,6 +447,9 @@ impl FwCfg {
         #[cfg(target_arch = "x86_64")] kvm_sev_snp_enabled: bool,
     ) -> Result<()> {
         if let Some(mem_size) = mem_size {
+            #[cfg(target_arch = "x86_64")]
+            self.add_e820(mem_size, kvm_sev_snp_enabled)?;
+            #[cfg(target_arch = "aarch64")]
             self.add_e820(mem_size)?;
         }
         if let Some(kernel) = kernel {
@@ -470,7 +473,11 @@ impl FwCfg {
         Ok(())
     }
 
-    pub fn add_e820(&mut self, mem_size: usize) -> Result<()> {
+    pub fn add_e820(
+        &mut self,
+        mem_size: usize,
+        #[cfg(target_arch = "x86_64")] kvm_sev_snp_enabled: bool,
+    ) -> Result<()> {
         #[cfg(target_arch = "x86_64")]
         let mut mem_regions = vec![
             (GuestAddress(0), EBDA_START.0 as usize, RegionType::Ram),
@@ -484,10 +491,13 @@ impl FwCfg {
                 PCI_MMCONFIG_SIZE as usize,
                 RegionType::Reserved,
             ),
-            (STAGE0_START_ADDRESS, STAGE0_SIZE, RegionType::Reserved),
         ];
         #[cfg(target_arch = "aarch64")]
         let mut mem_regions = arch::aarch64::arch_memory_regions();
+        #[cfg(target_arch = "x86_64")]
+        if kvm_sev_snp_enabled {
+            mem_regions.push((STAGE0_START_ADDRESS, STAGE0_SIZE, RegionType::Reserved));
+        }
         if mem_size < MEM_32BIT_DEVICES_START.0 as usize {
             mem_regions.push((
                 HIGH_RAM_START,
@@ -881,6 +891,30 @@ mod tests {
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_stage0_reserved_only_for_sev_snp() {
+        for sev_snp in [false, true] {
+            let gm = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap();
+            let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(gm));
+            fw_cfg.add_e820(2 << 20, sev_snp).unwrap();
+
+            let FwCfgContent::Bytes(bytes) = &fw_cfg.items[0].content else {
+                panic!("Expected an E820 file");
+            };
+            let has_stage0 = bytes
+                .as_chunks::<{ size_of::<BootE820Entry>() }>()
+                .0
+                .iter()
+                .any(|entry| {
+                    u64::from_le_bytes(entry[0..8].try_into().unwrap()) == STAGE0_START_ADDRESS.0
+                        && u64::from_le_bytes(entry[8..16].try_into().unwrap())
+                            == STAGE0_SIZE as u64
+                });
+            assert_eq!(has_stage0, sev_snp);
+        }
+    }
 
     #[cfg(target_arch = "x86_64")]
     const SELECTOR_OFFSET: u64 = 0;
