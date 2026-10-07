@@ -87,8 +87,9 @@ use libc::{
 use log::{debug, error, info, warn};
 use net_util::MacAddr;
 use pci::{
-    DeviceRelocation, MmioRegion, PciBarConfiguration, PciBarRegionType, PciBdf, PciDevice,
-    VfioDmaMapping, VfioPciDevice, VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError,
+    DeviceRelocation, IommufdIoas, MmioRegion, PciBarConfiguration, PciBarRegionType, PciBdf,
+    PciDevice, VfioDmaMapping, VfioPciDevice, VfioUserDmaMapping, VfioUserPciDevice,
+    VfioUserPciDeviceError,
 };
 use rate_limiter::group;
 use rate_limiter::group::RateLimiterGroup;
@@ -4166,6 +4167,19 @@ impl DeviceManager {
             .as_ref()
             .is_none_or(|p| p.vfio_p2p_dma);
 
+        #[cfg(feature = "kvm")]
+        let iommufd_ioas = (Arc::clone(&vfio_ops) as Arc<dyn Any + Send + Sync>)
+            .downcast::<VfioIommufd>()
+            .ok()
+            .map(|vfio_iommufd| {
+                IommufdIoas::new(
+                    Arc::clone(vfio_iommufd.iommufd()) as Arc<dyn AsRawFd + Send + Sync>,
+                    vfio_iommufd.ioas_id(),
+                )
+            });
+        #[cfg(not(feature = "kvm"))]
+        let iommufd_ioas: Option<IommufdIoas> = None;
+
         let (memory_slot_allocator, guest_memory) = {
             let mut mm = memory_manager.lock().unwrap();
             (mm.memory_slot_allocator(), mm.guest_memory())
@@ -4181,6 +4195,7 @@ impl DeviceManager {
             legacy_interrupt_group,
             device_cfg.pci_common.iommu,
             vfio_p2p_dma,
+            iommufd_ioas,
             pci_device_bdf,
             memory_slot_allocator,
             guest_memory,

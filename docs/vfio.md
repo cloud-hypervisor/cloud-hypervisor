@@ -144,6 +144,11 @@ that are part of the same clique.
 --device path=/sys/bus/pci/devices/0000:01:00.0/,x_nv_gpudirect_clique=0
 ```
 
+With `--platform iommufd=on`, P2P DMA needs Linux 6.19 or later and a driver
+that exports BARs as dma-bufs, such as `vfio-pci`. Without them, Cloud
+Hypervisor logs a warning and the VM runs without P2P DMA to that device, and
+a device with `x_nv_gpudirect_clique` fails to be added.
+
 The following command can be run on the guest to verify that GPUDirect P2P is
 correctly enabled.
 ```
@@ -258,8 +263,6 @@ All the snapshot and restore requirements apply, plus the following.
 - **iommufd.** The destination receives the device as file descriptors, which
   requires the config to carry `iommufd=on`. The iommufd itself arrives as a
   file descriptor with the receive request, see below.
-- **BAR mapping.** `vfio_p2p_dma=off` is needed on older Linux kernels
-  (pre 6.19) that cannot map VFIO BAR MMIO into iommufd.
 - **No virtual IOMMU.** Live migration of a VFIO device behind a virtual
   IOMMU is not supported and is refused at migration start. Assign the
   device without a virtual IOMMU.

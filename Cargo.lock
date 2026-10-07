@@ -1693,6 +1693,7 @@ dependencies = [
  "base64",
  "byteorder",
  "hypervisor",
+ "iommufd-bindings",
  "libc",
  "log",
  "serde",
