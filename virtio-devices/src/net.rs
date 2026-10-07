@@ -951,7 +951,7 @@ impl VirtioDevice for Net {
         let mut taps = self.taps.clone();
         for i in 0..queues.len() / 2 {
             let rx = RxVirtio::new();
-            let tx = TxVirtio::new();
+            let tx = TxVirtio::new(self.common.feature_acked(VIRTIO_NET_F_CSUM.into()));
             let rx_tap_listening = false;
 
             let (_, queue_0, queue_evt_0) = queues.remove(0);

@@ -92,7 +92,7 @@ impl VhostUserNetThread {
                 tap_for_write_epoll: tap.clone(),
                 tap,
                 rx: RxVirtio::new(),
-                tx: TxVirtio::new(),
+                tx: TxVirtio::new(false),
                 rx_tap_listening: false,
                 tx_tap_listening: false,
                 epoll_fd: None,
@@ -209,6 +209,22 @@ impl VhostUserBackendMut for VhostUserNetBackend {
 
     fn features(&self) -> u64 {
         self.avail_features | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
+    }
+
+    fn acked_features(&mut self, features: u64) {
+        let host_checksum_offload = features & (1 << VIRTIO_NET_F_CSUM) != 0;
+        for thread in &mut self.threads {
+            thread
+                .get_mut()
+                .unwrap()
+                .net
+                .tx
+                .set_host_checksum_offload(host_checksum_offload);
+        }
+    }
+
+    fn reset_device(&mut self) {
+        self.acked_features(0);
     }
 
     fn protocol_features(&self) -> VhostUserProtocolFeatures {
