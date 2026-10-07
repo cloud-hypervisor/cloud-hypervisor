@@ -2018,13 +2018,6 @@ impl KvmVcpu {
         Ok(())
     }
 
-    /// Whether to discard the stale shared mapping on conversion to private.
-    fn should_discard_shared_mapping(&self) -> bool {
-        self.memory_conversion_handler
-            .get()
-            .is_some_and(|h| h.reclaims_shared_mapping())
-    }
-
     fn punch_holes_in_guest_memfd(
         memory_slots: &Option<Arc<RwLock<HashMap<u32, KvmMemorySlot>>>>,
         gpa: u64,
@@ -2793,7 +2786,7 @@ impl cpu::Vcpu for KvmVcpu {
                                 set_private_attr == 0,
                             )?;
 
-                            if set_private_attr != 0 && self.should_discard_shared_mapping() {
+                            if set_private_attr != 0 {
                                 Self::discard_shared_mapping(&self.memory_slots, address, size);
                             }
 
@@ -2839,7 +2832,7 @@ impl cpu::Vcpu for KvmVcpu {
 
                     self.notify_memory_conversion_handler(gpa, size, attributes == 0)?;
 
-                    if attributes != 0 && self.should_discard_shared_mapping() {
+                    if attributes != 0 {
                         Self::discard_shared_mapping(&self.memory_slots, gpa, size);
                     }
 

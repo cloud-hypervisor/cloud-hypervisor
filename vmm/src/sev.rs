@@ -290,10 +290,6 @@ impl SevSnpSharedPageTracker {
         self.inner.lock().unwrap().handler = None;
     }
 
-    fn has_dma_handler(&self) -> bool {
-        self.inner.lock().unwrap().handler.is_some()
-    }
-
     /// Flip `[gpa, gpa + size)` shared/private in the tracker, driving the
     /// handler so the device IOMMU maps the shared pages only.
     fn set_shared(&self, gpa: u64, size: u64, shared: bool) -> io::Result<()> {
@@ -383,12 +379,6 @@ impl MemoryConversionHandler for SevSnpSharedPageTracker {
     fn handle_conversion(&self, gpa: u64, size: u64, to_shared: bool) -> anyhow::Result<()> {
         self.set_shared(gpa, size, to_shared)
             .map_err(|e| anyhow::anyhow!("confidential VFIO conversion failed: {e}"))
-    }
-
-    /// Only reclaim once a VFIO device is attached as `handle_conversion` would
-    /// have unmapped the page, so freeing its stale mapping is safe.
-    fn reclaims_shared_mapping(&self) -> bool {
-        self.has_dma_handler()
     }
 }
 
