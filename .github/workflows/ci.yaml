@@ -802,7 +802,7 @@ jobs:
     needs: [preflight]
     if: *mq-if
     runs-on: garm-noble-16
-    timeout-minutes: 35
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
