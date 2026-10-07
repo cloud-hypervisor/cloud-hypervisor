@@ -2325,7 +2325,7 @@ impl FwCfgConfig {
         let e820 = parser
             .convert::<Toggle>("e820")
             .map_err(Error::ParseFwCfgItem)?
-            .unwrap_or(Toggle(true))
+            .unwrap_or(Toggle(cfg!(target_arch = "x86_64")))
             .0;
         let kernel = parser
             .convert::<Toggle>("kernel")
@@ -6242,7 +6242,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             let mut invalid_config = valid_config.clone();
             if let Some(payload) = invalid_config.payload.as_mut() {
                 payload.fw_cfg_config = Some(FwCfgConfig {
-                    e820: true,
+                    e820: cfg!(target_arch = "x86_64"),
                     kernel: false,
                     cmdline: false,
                     initramfs: false,
@@ -6262,6 +6262,12 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                     PayloadConfigError::FwCfgInvalidItem("opt/org.test/invalid".to_string())
                 ))
             );
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                assert!(!FwCfgConfig::default().e820);
+                assert!(!FwCfgConfig::parse("kernel=off").unwrap().e820);
+            }
         }
 
         let mut invalid_config = valid_config.clone();

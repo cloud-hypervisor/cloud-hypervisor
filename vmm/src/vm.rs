@@ -1171,10 +1171,6 @@ impl Vm {
         config: &Arc<Mutex<VmConfig>>,
         #[cfg(target_arch = "x86_64")] kvm_sev_snp_enabled: bool,
     ) -> Result<()> {
-        let mut e820_option: Option<usize> = None;
-        if fw_cfg_config.e820 {
-            e820_option = Some(config.lock().unwrap().memory.size as usize);
-        }
         let mut kernel_option: Option<File> = None;
         if fw_cfg_config.kernel {
             let kernel = config
@@ -1239,16 +1235,26 @@ impl Vm {
             fw_cfg_item_list_option = Some(fw_cfg_item_list);
         }
 
-        let device_manager_binding = device_manager.lock().unwrap();
-        let Some(fw_cfg) = device_manager_binding.fw_cfg() else {
-            return Err(Error::FwCfgDisabled);
-        };
+        let fw_cfg = device_manager
+            .lock()
+            .unwrap()
+            .fw_cfg()
+            .cloned()
+            .ok_or(Error::FwCfgDisabled)?;
 
+        #[cfg(target_arch = "x86_64")]
+        if fw_cfg_config.e820 {
+            let mem_size = config.lock().unwrap().memory.size as usize;
+            fw_cfg
+                .lock()
+                .unwrap()
+                .add_e820(mem_size, kvm_sev_snp_enabled)
+                .map_err(Error::ErrorPopulatingFwCfg)?;
+        }
         fw_cfg
             .lock()
             .unwrap()
             .populate_fw_cfg(
-                e820_option,
                 kernel_option,
                 initramfs_option,
                 cmdline_option,

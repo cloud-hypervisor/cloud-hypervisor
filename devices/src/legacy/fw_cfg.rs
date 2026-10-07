@@ -22,11 +22,8 @@ use std::{
 };
 
 use acpi_tables::rsdp::Rsdp;
+#[cfg(target_arch = "x86_64")]
 use arch::RegionType;
-#[cfg(target_arch = "aarch64")]
-use arch::aarch64::layout::{
-    MEM_32BIT_DEVICES_START, MEM_32BIT_RESERVED_START, RAM_64BIT_START, RAM_START as HIGH_RAM_START,
-};
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{
     EBDA_START, HIGH_RAM_START, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START,
@@ -49,7 +46,9 @@ use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes};
 const STAGE0_START_ADDRESS: GuestAddress = GuestAddress(0xfffe_0000);
 #[cfg(target_arch = "x86_64")]
 const STAGE0_SIZE: usize = 0x2_0000;
+#[cfg(target_arch = "x86_64")]
 const E820_RAM: u32 = 1;
+#[cfg(target_arch = "x86_64")]
 const E820_RESERVED: u32 = 2;
 
 #[cfg(target_arch = "x86_64")]
@@ -238,6 +237,7 @@ pub fn create_file_name(name: &str) -> [u8; FILE_NAME_SIZE] {
     c_name
 }
 
+#[cfg(target_arch = "x86_64")]
 #[repr(C, packed)]
 #[derive(Debug, IntoBytes, FromBytes, Clone, Copy)]
 struct BootE820Entry {
@@ -439,19 +439,12 @@ impl FwCfg {
 
     pub fn populate_fw_cfg(
         &mut self,
-        mem_size: Option<usize>,
         kernel: Option<File>,
         initramfs: Option<File>,
         cmdline: Option<CString>,
         fw_cfg_item_list: Option<Vec<FwCfgItem>>,
         #[cfg(target_arch = "x86_64")] kvm_sev_snp_enabled: bool,
     ) -> Result<()> {
-        if let Some(mem_size) = mem_size {
-            #[cfg(target_arch = "x86_64")]
-            self.add_e820(mem_size, kvm_sev_snp_enabled)?;
-            #[cfg(target_arch = "aarch64")]
-            self.add_e820(mem_size)?;
-        }
         if let Some(kernel) = kernel {
             self.add_kernel_data(
                 &kernel,
@@ -473,12 +466,8 @@ impl FwCfg {
         Ok(())
     }
 
-    pub fn add_e820(
-        &mut self,
-        mem_size: usize,
-        #[cfg(target_arch = "x86_64")] kvm_sev_snp_enabled: bool,
-    ) -> Result<()> {
-        #[cfg(target_arch = "x86_64")]
+    #[cfg(target_arch = "x86_64")]
+    pub fn add_e820(&mut self, mem_size: usize, kvm_sev_snp_enabled: bool) -> Result<()> {
         let mut mem_regions = vec![
             (GuestAddress(0), EBDA_START.0 as usize, RegionType::Ram),
             (
@@ -492,9 +481,6 @@ impl FwCfg {
                 RegionType::Reserved,
             ),
         ];
-        #[cfg(target_arch = "aarch64")]
-        let mut mem_regions = arch::aarch64::arch_memory_regions();
-        #[cfg(target_arch = "x86_64")]
         if kvm_sev_snp_enabled {
             mem_regions.push((STAGE0_START_ADDRESS, STAGE0_SIZE, RegionType::Reserved));
         }
@@ -919,7 +905,7 @@ mod tests {
     #[test]
     fn test_signature() {
         let gm = GuestMemoryAtomic::new(
-            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), RAM_64BIT_START.0 as usize)]).unwrap(),
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap(),
         );
 
         let mut fw_cfg = FwCfg::new(gm);
@@ -941,7 +927,7 @@ mod tests {
     #[test]
     fn test_kernel_cmdline() {
         let gm = GuestMemoryAtomic::new(
-            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), RAM_64BIT_START.0 as usize)]).unwrap(),
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap(),
         );
 
         let mut fw_cfg = FwCfg::new(gm);
@@ -968,7 +954,7 @@ mod tests {
     #[cfg(target_arch = "aarch64")]
     fn test_kernel_data() {
         let gm = GuestMemoryAtomic::new(
-            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), RAM_64BIT_START.0 as usize)]).unwrap(),
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap(),
         );
         let mut fw_cfg = FwCfg::new(gm);
         let kernel = b"test kernel image";
@@ -991,7 +977,7 @@ mod tests {
     #[test]
     fn test_initram_fs() {
         let gm = GuestMemoryAtomic::new(
-            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), RAM_64BIT_START.0 as usize)]).unwrap(),
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap(),
         );
 
         let mut fw_cfg = FwCfg::new(gm);
@@ -1021,7 +1007,7 @@ mod tests {
     #[test]
     fn test_string_item() {
         let gm = GuestMemoryAtomic::new(
-            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), RAM_64BIT_START.0 as usize)]).unwrap(),
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap(),
         );
 
         let mut fw_cfg = FwCfg::new(gm);
