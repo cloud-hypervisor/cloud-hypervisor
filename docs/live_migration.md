@@ -308,7 +308,6 @@ following parameters. Unless marked otherwise, they apply to
   - VFIO devices
   - vDPA devices
   - vfio-user devices
-  - vhost-user devices
   - memory prefault (`prefault=on`)
   - multiple connections (`connections` greater than `1`)
 - `preserve_source <on|off>`: \
