@@ -304,7 +304,6 @@ following parameters. Unless marked otherwise, they apply to
   - VFIO devices
   - vDPA devices
   - vfio-user devices
-  - vhost-user devices
 - `preserve_source <on|off>`: \
   Keep the source VM in a paused state after migration completes. This is only
   supported with `memory_mode=memfds` and defaults to `off`.
