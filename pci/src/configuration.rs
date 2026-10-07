@@ -1312,6 +1312,13 @@ impl PciConfiguration {
                     }
                 }
             }
+        } else if i == ROM_BAR_IDX && self.rom_bar_used {
+            let mask = self.writable_bits[ROM_BAR_REG];
+            if u64::from(self.rom_bar_addr & mask) == params.new_base {
+                let old = params.old_base as u32;
+                self.registers[ROM_BAR_REG] = (self.registers[ROM_BAR_REG] & !mask) | (old & mask);
+                self.rom_bar_addr = self.registers[ROM_BAR_REG];
+            }
         }
     }
 }
@@ -1768,7 +1775,7 @@ mod tests {
             PciBarPrefetchable::NotPrefetchable,
         )
         .set_address(0xf000_0000);
-        cfg.add_pci_rom_bar(&bar, 0).unwrap();
+        cfg.add_pci_rom_bar(&bar, 1).unwrap();
         cfg.write_reg(COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK);
 
         let reprogram = cfg.write_config_register(ROM_BAR_REG, 0, &0xf100_0000u32.to_le_bytes());
@@ -1777,6 +1784,9 @@ mod tests {
         assert_eq!(reprogram[0].bar_idx, Some(ROM_BAR_IDX));
         assert_eq!(reprogram[0].old_base, 0xf000_0000);
         assert_eq!(reprogram[0].new_base, 0xf100_0000);
+        cfg.restore_bar_addr(&reprogram[0]);
+        assert_eq!(cfg.rom_bar_addr, 0xf000_0001);
+        assert_eq!(cfg.read_reg(ROM_BAR_REG), 0xf000_0001);
     }
 
     fn restore_legacy(cfg: &PciConfiguration) -> Vec<BarReprogrammingParams> {
