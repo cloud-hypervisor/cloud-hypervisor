@@ -9,9 +9,12 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use log::{error, info};
+use log::{debug, error, info};
 use rate_limiter::{RateLimiter, TokenType};
 use thiserror::Error;
+use virtio_bindings::virtio_net::{
+    VIRTIO_NET_HDR_F_NEEDS_CSUM, VIRTIO_NET_HDR_GSO_NONE, virtio_net_hdr_v1,
+};
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
 use vm_memory::bitmap::Bitmap;
 use vm_memory::{Bytes, GuestAddress, GuestMemoryBackend};
@@ -24,21 +27,34 @@ pub struct TxVirtio {
     pub counter_bytes: Wrapping<u64>,
     pub counter_frames: Wrapping<u64>,
     iovecs: IovecBuffer,
-}
-
-impl Default for TxVirtio {
-    fn default() -> Self {
-        Self::new()
-    }
+    host_checksum_offload: bool,
 }
 
 impl TxVirtio {
-    pub fn new() -> Self {
+    /// Create a TX queue with the negotiated VIRTIO_NET_F_CSUM policy.
+    pub fn new(host_checksum_offload: bool) -> Self {
         TxVirtio {
             counter_bytes: Wrapping(0),
             counter_frames: Wrapping(0),
             iovecs: IovecBuffer::new(),
+            host_checksum_offload,
         }
+    }
+
+    pub fn set_host_checksum_offload(&mut self, host_checksum_offload: bool) {
+        self.host_checksum_offload = host_checksum_offload;
+    }
+
+    fn tx_is_header_valid(
+        header: &[u8; size_of::<virtio_net_hdr_v1>()],
+        header_len: usize,
+        host_checksum_offload: bool,
+    ) -> bool {
+        // Segmentation offloads also require checksum offload support.
+        header_len == header.len()
+            && (host_checksum_offload
+                || (u32::from(header[0]) & VIRTIO_NET_HDR_F_NEEDS_CSUM == 0
+                    && u32::from(header[1]) == VIRTIO_NET_HDR_GSO_NONE))
     }
 
     pub fn process_desc_chain<B: Bitmap + 'static>(
@@ -66,6 +82,8 @@ impl TxVirtio {
 
             let mut next_desc = desc_chain.next();
 
+            let mut header = [0u8; size_of::<virtio_net_hdr_v1>()];
+            let mut header_len = 0;
             let mut iovecs = self.iovecs.borrow();
             // Parse the descriptor chain into an iovec array. On error, the
             // offending head descriptor is still added to the used ring with
@@ -84,12 +102,17 @@ impl TxVirtio {
                             .get_slice(desc_addr, desc.len() as usize)
                             .map_err(NetQueuePairError::GuestMemory)?;
                         assert!(buf.len() >= desc.len() as usize);
+                        // Copy the header because the guest can modify its buffers
+                        // between validation and the TAP write.
+                        let copied = buf.copy_to(&mut header[header_len..]);
+                        header_len += copied;
                         let buf = buf.ptr_guard_mut();
-                        let iovec = libc::iovec {
-                            iov_base: buf.as_ptr().cast(),
-                            iov_len: desc.len() as libc::size_t,
-                        };
-                        iovecs.push(iovec);
+                        if copied < desc.len() as usize {
+                            iovecs.push(libc::iovec {
+                                iov_base: buf.as_ptr().wrapping_add(copied).cast(),
+                                iov_len: desc.len() as libc::size_t - copied,
+                            });
+                        }
                     } else {
                         error!(
                             "Invalid descriptor chain: address = 0x{:x} length = {} write_only = {}",
@@ -113,10 +136,25 @@ impl TxVirtio {
                 return Err(e);
             }
 
+            if Self::tx_is_header_valid(&header, header_len, self.host_checksum_offload) {
+                iovecs.insert(
+                    0,
+                    libc::iovec {
+                        iov_base: header.as_mut_ptr().cast(),
+                        iov_len: header.len(),
+                    },
+                );
+            } else {
+                // Do not send invalid guest packets to TAP.
+                debug!("Dropping TX packets due to invalid header");
+                iovecs.clear();
+            }
+
             let bytes_sent = if iovecs.is_empty() {
                 0
             } else {
-                // SAFETY: FFI call with correct arguments
+                // SAFETY: The iovecs refer to checked guest memory ranges and
+                // the private header. All remain valid for the duration of the write.
                 let result = unsafe {
                     libc::writev(
                         tap.as_raw_fd() as libc::c_int,
@@ -581,5 +619,37 @@ impl NetQueuePair {
         queue
             .needs_notification(mem)
             .map_err(NetQueuePairError::QueueNeedsNotification)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use virtio_bindings::virtio_net::{VIRTIO_NET_HDR_F_DATA_VALID, VIRTIO_NET_HDR_GSO_TCPV4};
+
+    use super::*;
+
+    #[test]
+    fn tx_header_must_be_complete() {
+        let header = [0; size_of::<virtio_net_hdr_v1>()];
+        let len = header.len();
+        assert!(!TxVirtio::tx_is_header_valid(&header, len - 1, true));
+        assert!(!TxVirtio::tx_is_header_valid(&header, len - 1, false));
+        assert!(TxVirtio::tx_is_header_valid(&header, len, false));
+    }
+
+    #[test]
+    fn tx_header_respects_checksum_offload() {
+        let mut header = [0; size_of::<virtio_net_hdr_v1>()];
+        let len = header.len();
+        header[0] = VIRTIO_NET_HDR_F_NEEDS_CSUM as u8;
+        assert!(!TxVirtio::tx_is_header_valid(&header, len, false));
+        assert!(TxVirtio::tx_is_header_valid(&header, len, true));
+
+        header[0] = VIRTIO_NET_HDR_F_DATA_VALID as u8;
+        assert!(TxVirtio::tx_is_header_valid(&header, len, false));
+
+        header[1] = VIRTIO_NET_HDR_GSO_TCPV4 as u8;
+        assert!(!TxVirtio::tx_is_header_valid(&header, len, false));
+        assert!(TxVirtio::tx_is_header_valid(&header, len, true));
     }
 }
