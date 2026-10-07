@@ -2195,6 +2195,17 @@ impl Vm {
     }
 
     pub fn add_device(&mut self, mut device_cfg: DeviceConfig) -> Result<PciDeviceInfo> {
+        // Legacy VFIO devices aren't supported with SEV-SNP
+        #[cfg(feature = "sev_snp")]
+        {
+            let config = self.config.lock().unwrap();
+            if config.is_sev_snp_enabled() && !config.platform.as_ref().is_some_and(|p| p.iommufd) {
+                return Err(Error::ConfigValidation(
+                    ValidationError::SevSnpRequiresIommufd,
+                ));
+            }
+        }
+
         let pci_device_info = self
             .device_manager
             .lock()
@@ -2381,6 +2392,12 @@ impl Vm {
     }
 
     pub fn add_vdpa(&mut self, mut vdpa_cfg: VdpaConfig) -> Result<PciDeviceInfo> {
+        // vDPA devices aren't supported with SEV-SNP
+        #[cfg(feature = "sev_snp")]
+        if self.config.lock().unwrap().is_sev_snp_enabled() {
+            return Err(Error::ConfigValidation(ValidationError::SevSnpNoVdpa));
+        }
+
         let pci_device_info = self
             .device_manager
             .lock()
