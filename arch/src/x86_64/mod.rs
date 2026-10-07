@@ -1353,13 +1353,27 @@ pub fn generate_ram_ranges(guest_mem: &GuestMemoryMmap) -> super::Result<Vec<Ram
     Ok(ram_ranges)
 }
 
-/// The reserved ranges of the guest memory map, as (base, size).
-fn reserved_regions() -> Vec<(u64, u64)> {
-    arch_memory_regions()
-        .into_iter()
-        .filter(|(_, _, r_type)| *r_type == RegionType::Reserved)
-        .map(|(base, size, _)| (base.raw_value(), size as u64))
-        .collect()
+/// Generate the E820 entries shared by direct boot and fw_cfg.
+/// Each entry is (base, size, type).
+pub fn generate_e820_memory_map(
+    guest_mem: &GuestMemoryMmap,
+) -> super::Result<Vec<(u64, u64, u32)>> {
+    let mut entries = vec![(0, layout::EBDA_START.0, E820_RAM)];
+    entries.extend(
+        generate_ram_ranges(guest_mem)?
+            .into_iter()
+            .map(|(start, end)| (start, end - start, E820_RAM)),
+    );
+    entries.extend(
+        arch_memory_regions()
+            .into_iter()
+            // Leave the PCI BAR window out of E820 so Linux can allocate
+            // resources for hotplugged devices within it.
+            .filter(|(_, _, r_type)| *r_type == RegionType::Reserved)
+            .map(|(base, size, _)| (base.0, size as u64, E820_RESERVED)),
+    );
+    entries.sort_unstable_by_key(|entry| entry.0);
+    Ok(entries)
 }
 
 fn configure_pvh(
@@ -1405,28 +1419,8 @@ fn configure_pvh(
     // at MEMMAP_START after all of the mappings are recorded.
     let mut memmap: Vec<hvm_memmap_table_entry> = Vec::new();
 
-    // Create the memory map entries.
-    add_memmap_entry(&mut memmap, 0, layout::EBDA_START.raw_value(), E820_RAM);
-
-    // Get usable physical memory ranges
-    let ram_ranges = generate_ram_ranges(guest_mem)?;
-
-    // Create e820 memory map entries
-    for ram_range in ram_ranges {
-        info!(
-            "create_memmap_entry, start: 0x{:08x}, end: 0x{:08x}",
-            ram_range.0, ram_range.1
-        );
-        add_memmap_entry(
-            &mut memmap,
-            ram_range.0,
-            ram_range.1 - ram_range.0,
-            E820_RAM,
-        );
-    }
-
-    for (base, size) in reserved_regions() {
-        add_memmap_entry(&mut memmap, base, size, E820_RESERVED);
+    for (base, size, type_) in generate_e820_memory_map(guest_mem)? {
+        add_memmap_entry(&mut memmap, base, size, type_);
     }
 
     start_info.memmap_entries = memmap.len() as u32;
@@ -1496,16 +1490,9 @@ fn configure_32bit_entry(
         params.hdr.ramdisk_size = initramfs_config.size as u32;
     }
 
-    add_e820_entry(&mut params, 0, layout::EBDA_START.raw_value(), E820_RAM)?;
-
-    for (start, end) in generate_ram_ranges(guest_mem)? {
-        add_e820_entry(&mut params, start, end - start, E820_RAM)?;
+    for (base, size, type_) in generate_e820_memory_map(guest_mem)? {
+        add_e820_entry(&mut params, base, size, type_)?;
     }
-
-    for (base, size) in reserved_regions() {
-        add_e820_entry(&mut params, base, size, E820_RESERVED)?;
-    }
-
     if let Some(rsdp_addr) = rsdp_addr {
         params.acpi_rsdp_addr = rsdp_addr.0;
     }
@@ -1870,6 +1857,47 @@ mod tests {
             None,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn test_generate_e820_memory_map() {
+        let gm = GuestMemoryMmap::from_ranges(&[
+            (GuestAddress(0), 2 << 20),
+            (layout::RAM_64BIT_START, 2 << 20),
+            (layout::RAM_64BIT_START.unchecked_add(4 << 20), 2 << 20),
+            (
+                layout::AMD_HYPER_TRANSPORT_HOLE_START
+                    .unchecked_add(layout::AMD_HYPER_TRANSPORT_HOLE_SIZE),
+                2 << 20,
+            ),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            generate_e820_memory_map(&gm).unwrap(),
+            vec![
+                (0, layout::EBDA_START.0, E820_RAM),
+                (layout::HIGH_RAM_START.0, 1 << 20, E820_RAM),
+                (
+                    layout::PCI_MMCONFIG_START.0,
+                    layout::PCI_MMCONFIG_SIZE,
+                    E820_RESERVED,
+                ),
+                (layout::RAM_64BIT_START.0, 2 << 20, E820_RAM),
+                (layout::RAM_64BIT_START.0 + (4 << 20), 2 << 20, E820_RAM),
+                (
+                    layout::AMD_HYPER_TRANSPORT_HOLE_START.0,
+                    layout::AMD_HYPER_TRANSPORT_HOLE_SIZE,
+                    E820_RESERVED,
+                ),
+                (
+                    layout::AMD_HYPER_TRANSPORT_HOLE_START.0
+                        + layout::AMD_HYPER_TRANSPORT_HOLE_SIZE,
+                    2 << 20,
+                    E820_RAM,
+                ),
+            ]
+        );
     }
 
     #[test]
