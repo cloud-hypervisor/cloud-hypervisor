@@ -1070,7 +1070,19 @@ impl MemoryManager {
         else {
             return Ok(());
         };
-        self.spawn_uffd_handler(uffd_fd, None, ranges, source, exit_evt)?;
+        // Per-range bitmap tracking which pages have been populated by the
+        // on-demand fault handler. Lets the prefault cursor skip them without
+        // doing a wasted file read + UFFDIO_COPY.
+        let served_bitmap: Vec<AtomicBitmap> = ranges
+            .iter()
+            .map(|r| {
+                AtomicBitmap::new(
+                    r.length as usize,
+                    NonZeroUsize::new(r.page_size as usize).unwrap(),
+                )
+            })
+            .collect();
+        self.spawn_uffd_handler(uffd_fd, None, ranges, served_bitmap, source, exit_evt)?;
         info!("UFFD restore: demand-paged restore enabled");
         Ok(())
     }
@@ -1100,7 +1112,23 @@ impl MemoryManager {
             return Ok(());
         };
 
-        self.spawn_uffd_handler(uffd_fd, Some(socket_fd), ranges, source, exit_evt)
+        let served_bitmap: Vec<AtomicBitmap> = ranges
+            .iter()
+            .map(|r| {
+                AtomicBitmap::new(
+                    r.length as usize,
+                    NonZeroUsize::new(r.page_size as usize).unwrap(),
+                )
+            })
+            .collect();
+        self.spawn_uffd_handler(
+            uffd_fd,
+            Some(socket_fd),
+            ranges,
+            served_bitmap,
+            source,
+            exit_evt,
+        )
     }
 
     /// Create a UFFD fd and register every range.
@@ -1197,6 +1225,7 @@ impl MemoryManager {
         uffd_fd: OwnedFd,
         fault_socket_fd: Option<OwnedFd>,
         handler_ranges: Vec<UffdRange>,
+        served_bitmap: Vec<AtomicBitmap>,
         source: Box<dyn UffdMemorySource>,
         exit_evt: &EventFd,
     ) -> Result<(), Error> {
@@ -1223,6 +1252,7 @@ impl MemoryManager {
                         &thread_exit_evt,
                         source,
                         &handler_ranges,
+                        served_bitmap,
                         &ready_tx,
                         &thread_prefault_complete,
                     );
@@ -1336,12 +1366,14 @@ impl MemoryManager {
     /// Serve UFFD faults via `source`, prefaulting one page per idle
     /// iteration. Once `source` fails, poison each faulted page instead.
     #[expect(clippy::needless_pass_by_value)]
+    #[expect(clippy::too_many_arguments)]
     fn uffd_handler_loop(
         uffd_fd: OwnedFd,
         stop_event: &EventFd,
         exit_evt: &EventFd,
         mut source: Box<dyn UffdMemorySource>,
         ranges: &[UffdRange],
+        served_bitmap: Vec<AtomicBitmap>,
         ready_tx: &SyncSender<()>,
         prefault_complete: &AtomicBool,
     ) -> Result<(), io::Error> {
@@ -1350,19 +1382,6 @@ impl MemoryManager {
         let total_pages: u64 = ranges.iter().map(UffdRange::num_pages).sum();
         let mut pages_served: u64 = 0;
         let mut pages_prefaulted: u64 = 0;
-
-        // Per-range bitmap tracking which pages have been populated by the
-        // on-demand fault handler. Lets the prefault cursor skip them without
-        // doing a wasted file read + UFFDIO_COPY.
-        let served_bitmap: Vec<AtomicBitmap> = ranges
-            .iter()
-            .map(|r| {
-                AtomicBitmap::new(
-                    r.length as usize,
-                    NonZeroUsize::new(r.page_size as usize).unwrap(),
-                )
-            })
-            .collect();
 
         let pages_loading: Mutex<HashSet<(usize, u64)>> = Mutex::new(HashSet::new());
 
