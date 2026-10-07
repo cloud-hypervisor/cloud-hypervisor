@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#[cfg(target_arch = "x86_64")]
+use std::io::Error;
 /// Cloud Hypervisor implementation of QEMU's fw_cfg spec
 /// https://www.qemu.org/docs/master/specs/fw_cfg.html
 /// Linux kernel fw_cfg driver header
@@ -23,12 +25,7 @@ use std::{
 
 use acpi_tables::rsdp::Rsdp;
 #[cfg(target_arch = "x86_64")]
-use arch::RegionType;
-#[cfg(target_arch = "x86_64")]
-use arch::layout::{
-    EBDA_START, HIGH_RAM_START, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START,
-    MEM_32BIT_RESERVED_START, PCI_MMCONFIG_SIZE, PCI_MMCONFIG_START, RAM_64BIT_START,
-};
+use arch::x86_64::generate_e820_memory_map;
 use bitfield_struct::bitfield;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::bootparam::boot_params;
@@ -46,8 +43,6 @@ use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes};
 const STAGE0_START_ADDRESS: GuestAddress = GuestAddress(0xfffe_0000);
 #[cfg(target_arch = "x86_64")]
 const STAGE0_SIZE: usize = 0x2_0000;
-#[cfg(target_arch = "x86_64")]
-const E820_RAM: u32 = 1;
 #[cfg(target_arch = "x86_64")]
 const E820_RESERVED: u32 = 2;
 
@@ -467,70 +462,19 @@ impl FwCfg {
     }
 
     #[cfg(target_arch = "x86_64")]
-    pub fn add_e820(&mut self, mem_size: usize, kvm_sev_snp_enabled: bool) -> Result<()> {
-        let mut mem_regions = vec![
-            (GuestAddress(0), EBDA_START.0 as usize, RegionType::Ram),
-            (
-                MEM_32BIT_DEVICES_START,
-                MEM_32BIT_DEVICES_SIZE as usize,
-                RegionType::Reserved,
-            ),
-            (
-                PCI_MMCONFIG_START,
-                PCI_MMCONFIG_SIZE as usize,
-                RegionType::Reserved,
-            ),
-        ];
+    pub fn add_e820(
+        &mut self,
+        boot_memory: &GuestMemoryMmap<AtomicBitmap>,
+        kvm_sev_snp_enabled: bool,
+    ) -> Result<()> {
+        let mut entries = generate_e820_memory_map(boot_memory).map_err(Error::other)?;
         if kvm_sev_snp_enabled {
-            mem_regions.push((STAGE0_START_ADDRESS, STAGE0_SIZE, RegionType::Reserved));
-        }
-        if mem_size < MEM_32BIT_DEVICES_START.0 as usize {
-            mem_regions.push((
-                HIGH_RAM_START,
-                mem_size - HIGH_RAM_START.0 as usize,
-                RegionType::Ram,
-            ));
-        } else {
-            mem_regions.push((
-                HIGH_RAM_START,
-                MEM_32BIT_RESERVED_START.0 as usize - HIGH_RAM_START.0 as usize,
-                RegionType::Ram,
-            ));
-            let mut base = RAM_64BIT_START.0;
-            let mut left = mem_size as u64 - MEM_32BIT_DEVICES_START.0;
-            for (r_base, r_size) in arch::arch_memory_regions()
-                .into_iter()
-                .filter(|(base, _, r_type)| {
-                    *r_type == RegionType::Reserved && base.0 >= RAM_64BIT_START.0
-                })
-                .map(|(base, size, _)| (base.0, size as u64))
-            {
-                if base + left <= r_base {
-                    break;
-                }
-                mem_regions.push((
-                    GuestAddress(base),
-                    (r_base - base) as usize,
-                    RegionType::Ram,
-                ));
-                mem_regions.push((GuestAddress(r_base), r_size as usize, RegionType::Reserved));
-                left -= r_base - base;
-                base = r_base + r_size;
-            }
-            mem_regions.push((GuestAddress(base), left as usize, RegionType::Ram));
+            entries.push((STAGE0_START_ADDRESS.0, STAGE0_SIZE as u64, E820_RESERVED));
+            entries.sort_unstable_by_key(|entry| entry.0);
         }
         let mut bytes = vec![];
-        for (addr, size, region) in mem_regions.iter() {
-            let type_ = match region {
-                RegionType::Ram => E820_RAM,
-                RegionType::Reserved => E820_RESERVED,
-                RegionType::SubRegion => continue,
-            };
-            let mut entry = BootE820Entry {
-                addr: addr.0,
-                size: *size as u64,
-                type_,
-            };
+        for (addr, size, type_) in entries {
+            let mut entry = BootE820Entry { addr, size, type_ };
             bytes.extend_from_slice(entry.as_mut_bytes());
         }
         let item = FwCfgItem {
@@ -883,8 +827,8 @@ mod tests {
     fn test_stage0_reserved_only_for_sev_snp() {
         for sev_snp in [false, true] {
             let gm = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap();
-            let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(gm));
-            fw_cfg.add_e820(2 << 20, sev_snp).unwrap();
+            let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(gm.clone()));
+            fw_cfg.add_e820(&gm, sev_snp).unwrap();
 
             let FwCfgContent::Bytes(bytes) = &fw_cfg.items[0].content else {
                 panic!("Expected an E820 file");
