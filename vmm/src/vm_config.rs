@@ -1067,7 +1067,7 @@ pub struct FwCfgConfig {
 impl Default for FwCfgConfig {
     fn default() -> Self {
         FwCfgConfig {
-            e820: true,
+            e820: cfg!(target_arch = "x86_64"),
             kernel: true,
             cmdline: true,
             initramfs: true,
@@ -1170,6 +1170,14 @@ impl PayloadConfig {
         #[cfg(feature = "fw_cfg")]
         if let Some(fw_cfg_config) = &self.fw_cfg_config {
             fw_cfg_config.validate(self)?;
+        }
+
+        #[cfg(all(feature = "fw_cfg", target_arch = "aarch64"))]
+        if let Some(fw_cfg_config) = &mut self.fw_cfg_config
+            && fw_cfg_config.e820
+        {
+            warn!("Ignoring fw_cfg e820 on ARM64");
+            fw_cfg_config.e820 = false;
         }
 
         Ok(())
