@@ -404,6 +404,14 @@ pub enum ValidationError {
     #[cfg(feature = "sev_snp")]
     #[error("Virtual IOMMU is not supported with SEV-SNP")]
     SevSnpNoViommu,
+    /// vDPA devices are not supported with SEV-SNP
+    #[cfg(feature = "sev_snp")]
+    #[error("vDPA devices are not supported with SEV-SNP")]
+    SevSnpNoVdpa,
+    /// Passthrough devices require iommufd with SEV-SNP
+    #[cfg(feature = "sev_snp")]
+    #[error("Passthrough devices require --platform iommufd=on with SEV-SNP")]
+    SevSnpRequiresIommufd,
     /// Restore expects all net ids that have fds
     #[error("Net id {0} is associated with FDs and is required")]
     RestoreMissingRequiredNetId(String),
@@ -3485,6 +3493,16 @@ impl VmConfig {
 
                 if self.memory.hugepages_enabled() {
                     return Err(ValidationError::SevSnpNoHugePages);
+                }
+
+                if self.vdpa.as_ref().is_some_and(|d| !d.is_empty()) {
+                    return Err(ValidationError::SevSnpNoVdpa);
+                }
+
+                if self.devices.as_ref().is_some_and(|d| !d.is_empty())
+                    && !self.platform.as_ref().is_some_and(|p| p.iommufd)
+                {
+                    return Err(ValidationError::SevSnpRequiresIommufd);
                 }
             }
         }
@@ -7326,6 +7344,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 pci_common: iommu_pci_common.clone(),
                 ..device_fixture()
             }]);
+            invalid_config.platform = Some(PlatformConfig {
+                sev_snp: true,
+                iommufd: true,
+                ..platform_fixture()
+            });
             assert_eq!(
                 invalid_config.validate(),
                 Err(ValidationError::SevSnpNoViommu)
@@ -7341,6 +7364,32 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 invalid_config.validate(),
                 Err(ValidationError::SevSnpNoViommu)
             );
+
+            let mut invalid_config = sev_snp_config.clone();
+            invalid_config.vdpa = Some(vec![VdpaConfig {
+                path: PathBuf::from("/path/to/vdpa"),
+                ..vdpa_fixture()
+            }]);
+            assert_eq!(
+                invalid_config.validate(),
+                Err(ValidationError::SevSnpNoVdpa)
+            );
+
+            let mut invalid_config = sev_snp_config.clone();
+            invalid_config.devices = Some(vec![device_fixture()]);
+            assert_eq!(
+                invalid_config.validate(),
+                Err(ValidationError::SevSnpRequiresIommufd)
+            );
+
+            let mut valid = sev_snp_config.clone();
+            valid.devices = Some(vec![device_fixture()]);
+            valid.platform = Some(PlatformConfig {
+                sev_snp: true,
+                iommufd: true,
+                ..platform_fixture()
+            });
+            valid.validate().unwrap();
         }
 
         // Devices cannot ask for different types of virtual IOMMU.
