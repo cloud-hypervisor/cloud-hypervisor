@@ -847,6 +847,53 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_e820_matches_boot_map_and_reserves_stage0_only_for_sev_snp() {
+        let gm = GuestMemoryMmap::from_ranges(&[
+            (GuestAddress(0), 2 << 20),
+            (GuestAddress(1 << 32), 2 << 20),
+        ])
+        .unwrap();
+        let boot_entries = arch::x86_64::generate_e820_memory_map(&gm).unwrap();
+
+        for sev_snp in [false, true] {
+            let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(gm.clone()));
+            // Noncontiguous boot RAM must be represented without inferring
+            // its layout from the configured total memory size.
+            fw_cfg.add_e820(&gm, sev_snp).unwrap();
+
+            let FwCfgContent::Bytes(bytes) = &fw_cfg
+                .items
+                .iter()
+                .find(|item| item.name == "etc/e820")
+                .unwrap()
+                .content
+            else {
+                panic!("Expected an e820 file");
+            };
+            let entries: Vec<_> = bytes
+                .as_chunks::<{ size_of::<BootE820Entry>() }>()
+                .0
+                .iter()
+                .map(|entry| {
+                    (
+                        u64::from_le_bytes(entry[0..8].try_into().unwrap()),
+                        u64::from_le_bytes(entry[8..16].try_into().unwrap()),
+                        u32::from_le_bytes(entry[16..20].try_into().unwrap()),
+                    )
+                })
+                .collect();
+
+            let mut expected = boot_entries.clone();
+            if sev_snp {
+                expected.push((STAGE0_START_ADDRESS.0, STAGE0_SIZE as u64, E820_RESERVED));
+                expected.sort_unstable_by_key(|entry| entry.0);
+            }
+            assert_eq!(entries, expected);
+        }
+    }
+
+    #[test]
     fn test_signature() {
         let gm = GuestMemoryAtomic::new(
             GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 2 << 20)]).unwrap(),
