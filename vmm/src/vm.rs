@@ -2048,6 +2048,13 @@ impl Vm {
 
         self.state.valid_transition(new_state)?;
 
+        // Before anything takes a device lock that a vCPU waiting for a
+        // vfio-user backend holds.
+        self.device_manager
+            .lock()
+            .unwrap()
+            .disable_vfio_user_reconnect();
+
         // Wake up the DeviceManager threads so they will get terminated cleanly
         self.device_manager
             .lock()

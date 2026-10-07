@@ -39,7 +39,9 @@ pub use self::msix::{
     MsixTableEntry,
 };
 pub use self::vfio::{MmioRegion, VfioDmaMapping, VfioPciDevice, VfioPciError};
-pub use self::vfio_user::{VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError};
+pub use self::vfio_user::{
+    VfioUserClient, VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError,
+};
 
 #[cfg(target_arch = "x86_64")]
 pub const PCI_CONFIG_IO_PORT: u64 = 0xcf8;
