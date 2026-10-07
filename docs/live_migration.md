@@ -304,7 +304,8 @@ following parameters. Unless marked otherwise, they apply to
   descriptors over a UNIX socket. It requires every guest memory region to use
   shared memory or hugepage backing. `postcopy` (experimental) resumes the
   destination first and faults guest pages in on demand over a dedicated
-  connection. Defaults to `precopy`. `postcopy` is not supported with:
+  connection. It requires every vhost-user backend to support the `PAGEFAULT`
+  protocol feature. Defaults to `precopy`. `postcopy` is not supported with:
   - VFIO devices
   - vDPA devices
   - vfio-user devices
