@@ -56,9 +56,8 @@ use vmm_sys_util::eventfd::EventFd;
 
 use crate::configuration::{
     COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK, PCI_EXP_FLAGS_TYPE_MASK, PCI_EXP_FLAGS_VERS_MASK,
-    PCI_EXP_FLAGS_VERS_SHIFT, PCI_EXP_LNKCAP, PCI_EXP_LNKCAP2, PCI_EXP_LNKCTL, PCI_EXP_LNKCTL2,
-    PCI_EXP_TYPE_RC_END, PCI_EXT_CAP_ALIGN, PCI_EXT_CAP_NEXT_MASK, PCI_EXT_CAP_NEXT_SHIFT,
-    PCIE_CONFIG_SPACE_SIZE,
+    PCI_EXP_FLAGS_VERS_SHIFT, PCI_EXP_LNKCTL, PCI_EXP_LNKCTL2, PCI_EXP_TYPE_RC_END,
+    PCI_EXT_CAP_ALIGN, PCI_EXT_CAP_NEXT_MASK, PCI_EXT_CAP_NEXT_SHIFT, PCIE_CONFIG_SPACE_SIZE,
 };
 use crate::mmap::MmapRegion;
 use crate::msi::{MSI_CONFIG_ID, MsiConfigState};
@@ -1302,14 +1301,12 @@ impl VfioCommon {
             this.patch_reg(reg_idx + (reg / 4) as usize, 0xffff_ffff, 0, 0);
         };
 
-        clear(self, PCI_EXP_LNKCAP);
         clear(self, PCI_EXP_LNKCTL);
 
         let flags = self.vfio_wrapper.read_config_dword(u32::from(cap_offset));
         let version = (flags & PCI_EXP_FLAGS_VERS_MASK) >> PCI_EXP_FLAGS_VERS_SHIFT;
 
         if version > 1 {
-            clear(self, PCI_EXP_LNKCAP2);
             clear(self, PCI_EXP_LNKCTL2);
         }
     }
