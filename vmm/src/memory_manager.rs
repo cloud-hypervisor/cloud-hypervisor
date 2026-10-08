@@ -60,7 +60,7 @@ use crate::migration::transport::SocketStream;
 use crate::migration::url_to_path;
 use crate::sparse::{next_data_extent, write_region_sparse};
 use crate::uffd::{
-    self, FileUffdMemorySource, SocketUffdMemorySource, UffdMemorySource, UffdRange,
+    self, FileUffdMemorySource, SocketUffdMemorySource, Uffd, UffdMemorySource, UffdRange,
 };
 use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
 use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID, prefault, userfaultfd};
@@ -1061,7 +1061,7 @@ impl MemoryManager {
             snapshot_file.try_clone().map_err(Error::SnapshotOpen)?,
         ));
 
-        let Some((uffd_fd, ranges)) = self.prepare_uffd(
+        let Some(uffd) = self.prepare_uffd(
             saved_regions,
             |r| {
                 let o = file_offset;
@@ -1076,7 +1076,8 @@ impl MemoryManager {
         // Per-range bitmap tracking which pages have been populated by the
         // on-demand fault handler. Lets the prefault cursor skip them without
         // doing a wasted file read + UFFDIO_COPY.
-        let served_bitmap: Vec<AtomicBitmap> = ranges
+        let served_bitmap: Vec<AtomicBitmap> = uffd
+            .ranges()
             .iter()
             .map(|r| {
                 AtomicBitmap::new(
@@ -1087,7 +1088,7 @@ impl MemoryManager {
             .collect();
 
         // For sparse files, we mark holes as served pages so we don't prefault them.
-        for (range, served) in ranges.iter().zip(&served_bitmap) {
+        for (range, served) in uffd.ranges().iter().zip(&served_bitmap) {
             let end = range.source_offset + range.length;
             let mut file_cursor = range.source_offset;
             while let Ok(next) = next_data_extent(snapshot_file.as_fd(), file_cursor, end) {
@@ -1105,7 +1106,7 @@ impl MemoryManager {
             }
         }
 
-        self.spawn_uffd_handler(uffd_fd, None, ranges, served_bitmap, source, exit_evt)?;
+        self.spawn_uffd_handler(uffd, None, served_bitmap, source, exit_evt)?;
         info!("UFFD restore: demand-paged restore enabled");
         Ok(())
     }
@@ -1129,13 +1130,14 @@ impl MemoryManager {
             Box::new(SocketUffdMemorySource::new(socket, shared_backing));
 
         // PageFault uses the GPA as the page identifier on the wire.
-        let Some((uffd_fd, ranges)) =
+        let Some(uffd) =
             self.prepare_uffd(saved_regions, |r| r.gpa, source.requires_uffd_minor_mode())?
         else {
             return Ok(());
         };
 
-        let served_bitmap: Vec<AtomicBitmap> = ranges
+        let served_bitmap: Vec<AtomicBitmap> = uffd
+            .ranges()
             .iter()
             .map(|r| {
                 AtomicBitmap::new(
@@ -1144,14 +1146,7 @@ impl MemoryManager {
                 )
             })
             .collect();
-        self.spawn_uffd_handler(
-            uffd_fd,
-            Some(socket_fd),
-            ranges,
-            served_bitmap,
-            source,
-            exit_evt,
-        )
+        self.spawn_uffd_handler(uffd, Some(socket_fd), served_bitmap, source, exit_evt)
     }
 
     /// Create a UFFD fd and register every range.
@@ -1160,7 +1155,7 @@ impl MemoryManager {
         saved_regions: &MemoryRangeTable,
         mut source_offset_for: F,
         uffd_requires_minor_mode: bool,
-    ) -> Result<Option<(OwnedFd, Vec<UffdRange>)>, Error>
+    ) -> Result<Option<Uffd>, Error>
     where
         F: FnMut(&MemoryRange) -> u64,
     {
@@ -1239,22 +1234,21 @@ impl MemoryManager {
             });
         }
 
-        Ok(Some((uffd_fd, handler_ranges)))
+        Ok(Some(Uffd::new(uffd_fd, handler_ranges.into())))
     }
 
     /// Spawn the UFFD handler thread that resolves faults through `source`.
     fn spawn_uffd_handler(
         &mut self,
-        uffd_fd: OwnedFd,
+        uffd: Uffd,
         fault_socket_fd: Option<OwnedFd>,
-        handler_ranges: Vec<UffdRange>,
         served_bitmap: Vec<AtomicBitmap>,
         source: Box<dyn UffdMemorySource>,
         exit_evt: &EventFd,
     ) -> Result<(), Error> {
         info!(
             "UFFD: spawning handler for {} region(s)",
-            handler_ranges.len()
+            uffd.ranges().len()
         );
 
         let stop_event = EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?;
@@ -1270,11 +1264,10 @@ impl MemoryManager {
             .spawn(move || {
                 panic::catch_unwind(panic::AssertUnwindSafe(move || {
                     let mut result = Self::uffd_handler_loop(
-                        uffd_fd,
+                        uffd,
                         &thread_stop_event,
                         &thread_exit_evt,
                         source,
-                        &handler_ranges,
                         served_bitmap,
                         &ready_tx,
                         &thread_prefault_complete,
@@ -1389,18 +1382,18 @@ impl MemoryManager {
     /// Serve UFFD faults via `source`, prefaulting one page per idle
     /// iteration. Once `source` fails, poison each faulted page instead.
     #[expect(clippy::needless_pass_by_value)]
-    #[expect(clippy::too_many_arguments)]
     fn uffd_handler_loop(
-        uffd_fd: OwnedFd,
+        uffd: Uffd,
         stop_event: &EventFd,
         exit_evt: &EventFd,
         mut source: Box<dyn UffdMemorySource>,
-        ranges: &[UffdRange],
         served_bitmap: Vec<AtomicBitmap>,
         ready_tx: &SyncSender<()>,
         prefault_complete: &AtomicBool,
     ) -> Result<(), io::Error> {
+        let uffd_fd = uffd.fd();
         let uffd_raw_fd = uffd_fd.as_raw_fd();
+        let ranges = uffd.ranges();
 
         let total_pages: u64 = ranges.iter().map(UffdRange::num_pages).sum();
         let mut pages_served: u64 = 0;
