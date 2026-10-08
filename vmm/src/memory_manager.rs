@@ -1154,7 +1154,9 @@ impl MemoryManager {
             });
         }
 
-        Ok(Some(Uffd::new(uffd_fd, handler_ranges.into())))
+        Ok(Some(
+            Uffd::new(uffd_fd, handler_ranges.into()).map_err(UffdError::Create)?,
+        ))
     }
 
     /// Spawn the UFFD handler thread that resolves faults through `source`.
