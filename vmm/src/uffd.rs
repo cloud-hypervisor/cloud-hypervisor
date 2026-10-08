@@ -239,6 +239,13 @@ struct UffdioRange {
 }
 
 #[repr(C)]
+struct UffdioZeropage {
+    range: UffdioRange,
+    mode: u64,
+    zeropage: i64,
+}
+
+#[repr(C)]
 struct UffdioPoison {
     range: UffdioRange,
     mode: u64,
@@ -482,6 +489,34 @@ impl Drop for SocketUffdMemorySource {
 
 fn io_other<E: fmt::Display>(e: E) -> io::Error {
     io::Error::other(e.to_string())
+}
+
+/// Resolve a missing page fault by mapping a zero-filled page.
+pub(crate) fn zeropage(fd: BorrowedFd<'_>, addr: u64, len: u64) -> Result<(), Error> {
+    let mut zp = UffdioZeropage {
+        range: UffdioRange { start: addr, len },
+        mode: 0,
+        zeropage: 0,
+    };
+    loop {
+        // SAFETY: `zp` is a valid, correctly-sized struct for this ioctl.
+        let ret = unsafe {
+            libc::ioctl(
+                fd.as_raw_fd(),
+                userfaultfd::UFFDIO_ZEROPAGE as libc::Ioctl,
+                &mut zp,
+            )
+        };
+        if ret >= 0 {
+            return Ok(());
+        }
+
+        let error = Error::last_os_error();
+        if error.raw_os_error() != Some(libc::EAGAIN) {
+            return Err(error);
+        }
+        thread::yield_now();
+    }
 }
 
 /// Mark a missing page so that an access to it fails instead of resolving a
