@@ -826,9 +826,7 @@ impl BusDevice for FwCfg {
                 data.copy_from_slice(&addr_lo.to_be_bytes());
             }
             _ => {
-                debug!(
-                    "fw_cfg: read from unknown port {port:#x}: {size:#x} bytes and offset {offset:#x}."
-                );
+                debug!("fw_cfg: read from unknown offset {offset:#x}: {size:#x} bytes.");
             }
         }
     }
@@ -870,9 +868,7 @@ impl BusDevice for FwCfg {
                 self.dma_address |= val as u64;
                 self.do_dma();
             }
-            _ => debug!(
-                "fw_cfg: write to unknown port {port:#x}: {size:#x} bytes and offset {offset:#x} ."
-            ),
+            _ => debug!("fw_cfg: write to unknown offset {offset:#x}: {size:#x} bytes."),
         }
         None
     }
