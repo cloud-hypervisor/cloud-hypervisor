@@ -3,23 +3,22 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-/// Cloud Hypervisor implementation of Qemu's fw_cfg spec
-/// https://www.qemu.org/docs/master/specs/fw_cfg.html
-/// Linux kernel fw_cfg driver header
-/// https://github.com/torvalds/linux/blob/master/include/uapi/linux/qemu_fw_cfg.h
-/// Uploading files to the guest via fw_cfg is supported for all kernels 4.6+ w/ CONFIG_FW_CFG_SYSFS enabled
-/// https://cateee.net/lkddb/web-lkddb/FW_CFG_SYSFS.html
-/// No kernel requirement if above functionality is not required,
-/// only firmware must implement mechanism to interact with this fw_cfg device
-use std::{
-    cmp,
-    ffi::CString,
-    fs::File,
-    io::{ErrorKind, Read, Result, Seek, SeekFrom},
-    mem::offset_of,
-    os::unix::fs::FileExt,
-    sync::{Arc, Barrier},
-};
+//! Cloud Hypervisor implementation of QEMU's fw_cfg spec
+//! https://www.qemu.org/docs/master/specs/fw_cfg.html
+//! Linux kernel fw_cfg driver header
+//! https://github.com/torvalds/linux/blob/master/include/uapi/linux/qemu_fw_cfg.h
+//! Uploading files to the guest via fw_cfg is supported for all kernels 4.6+ w/ CONFIG_FW_CFG_SYSFS enabled
+//! https://cateee.net/lkddb/web-lkddb/FW_CFG_SYSFS.html
+//! No kernel requirement if above functionality is not required,
+//! only firmware must implement mechanism to interact with this fw_cfg device
+use std::cmp;
+use std::ffi::CString;
+use std::fs::File;
+use std::io::{Error as IoError, ErrorKind, Read, Result};
+use std::mem::offset_of;
+use std::os::unix::fs::FileExt;
+use std::result::Result as StdResult;
+use std::sync::{Arc, Barrier};
 
 use acpi_tables::rsdp::Rsdp;
 use arch::RegionType;
@@ -36,6 +35,7 @@ use bitfield_struct::bitfield;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::bootparam::boot_params;
 use log::{debug, error};
+use thiserror::Error;
 use vm_device::BusDevice;
 #[cfg(target_arch = "x86_64")]
 use vm_memory::ByteValued;
@@ -53,29 +53,32 @@ const E820_RAM: u32 = 1;
 const E820_RESERVED: u32 = 2;
 
 #[cfg(target_arch = "x86_64")]
-const PORT_FW_CFG_SELECTOR: u64 = 0x510;
+const FW_CFG_SELECTOR_REGISTER_OFFSET: u64 = 0x0;
 #[cfg(target_arch = "x86_64")]
-const PORT_FW_CFG_DATA: u64 = 0x511;
+const FW_CFG_DATA_REGISTER_OFFSET: u64 = 0x1;
 #[cfg(target_arch = "x86_64")]
-const PORT_FW_CFG_DMA_HI: u64 = 0x514;
+const FW_CFG_DMA_HI_REGISTER_OFFSET: u64 = 0x4;
 #[cfg(target_arch = "x86_64")]
-const PORT_FW_CFG_DMA_LO: u64 = 0x518;
+const FW_CFG_DMA_LO_REGISTER_OFFSET: u64 = 0x8;
 #[cfg(target_arch = "x86_64")]
-pub const PORT_FW_CFG_BASE: u64 = 0x510;
+pub const FW_CFG_REGISTER_BASE: u64 = 0x510;
 #[cfg(target_arch = "x86_64")]
-pub const PORT_FW_CFG_WIDTH: u64 = 0xc;
+pub const FW_CFG_REGISTER_WIDTH: u64 = 0xc;
 #[cfg(target_arch = "aarch64")]
-const PORT_FW_CFG_SELECTOR: u64 = 0x9030008;
+const FW_CFG_SELECTOR_REGISTER_OFFSET: u64 = 0x8;
 #[cfg(target_arch = "aarch64")]
-const PORT_FW_CFG_DATA: u64 = 0x9030000;
+const FW_CFG_DATA_REGISTER_OFFSET: u64 = 0x0;
 #[cfg(target_arch = "aarch64")]
-const PORT_FW_CFG_DMA_HI: u64 = 0x9030010;
+const FW_CFG_DMA_HI_REGISTER_OFFSET: u64 = 0x10;
 #[cfg(target_arch = "aarch64")]
-const PORT_FW_CFG_DMA_LO: u64 = 0x9030014;
+const FW_CFG_DMA_LO_REGISTER_OFFSET: u64 = 0x14;
 #[cfg(target_arch = "aarch64")]
-pub const PORT_FW_CFG_BASE: u64 = 0x9030000;
+pub const FW_CFG_REGISTER_BASE: u64 = 0x9030000;
 #[cfg(target_arch = "aarch64")]
-pub const PORT_FW_CFG_WIDTH: u64 = 0x18;
+pub const FW_CFG_REGISTER_WIDTH: u64 = 0x18;
+
+// CH return value for unassigned port I/O and MMIO.
+const CH_UNASSIGNED_IO_RETURN_VALUE: u8 = 0xFF;
 
 const FW_CFG_SIGNATURE: u16 = 0x00;
 const FW_CFG_ID: u16 = 0x01;
@@ -93,7 +96,8 @@ const FW_CFG_FILE_DIR: u16 = 0x19;
 const FW_CFG_KNOWN_ITEMS: usize = 0x20;
 
 pub const FW_CFG_FILE_FIRST: u16 = 0x20;
-pub const FW_CFG_DMA_SIGNATURE: [u8; 8] = *b"QEMU CFG";
+pub const FW_CFG_DMA_SIGNATURE_CONTENT: [u8; 8] = *b"QEMU CFG";
+pub const FW_CFG_SIGNATURE_CONTENT: [u8; 4] = *b"QEMU";
 // https://github.com/torvalds/linux/blob/master/include/uapi/linux/qemu_fw_cfg.h
 pub const FW_CFG_ACPI_ID: &str = "QEMU0002";
 // Reserved (must be enabled)
@@ -130,8 +134,8 @@ impl Read for FwCfgContentAccess<'_> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         match self.content {
             FwCfgContent::File(offset, f) => {
-                Seek::seek(&mut (&*f), SeekFrom::Start(offset + self.offset as u64))?;
-                Read::read(&mut (&*f), buf)
+                f.read_exact_at(buf, offset + self.offset as u64)?;
+                Ok(buf.len())
             }
             FwCfgContent::Bytes(b) => match b.get(self.offset as usize..) {
                 Some(mut s) => s.read(buf),
@@ -159,12 +163,9 @@ impl FwCfgContent {
     fn size(&self) -> Result<u32> {
         let ret = match self {
             FwCfgContent::Bytes(v) => v.len(),
-            FwCfgContent::File(offset, f) => {
-                f.metadata()?
-                    .len()
-                    .checked_sub(*offset)
-                    .ok_or(ErrorKind::InvalidData)? as usize
-            }
+            FwCfgContent::File(offset, f) => (f.metadata()?.len().checked_sub(*offset))
+                .ok_or::<IoError>(ErrorKind::UnexpectedEof.into())?
+                as usize,
             FwCfgContent::Slice(s) => s.len(),
             FwCfgContent::U32(n) => size_of_val(n),
         };
@@ -417,11 +418,34 @@ fn create_acpi_loader(acpi_table: AcpiTable) -> [FwCfgItem; 3] {
     [table_loader, acpi_rsdp, apci_tables]
 }
 
+#[derive(Error, Debug)]
+pub enum FwCfgContentAccessError {
+    /// Failed to access the data source that is backing the FwCfg item.
+    #[error("Reading the source failed")]
+    ReadError,
+    /// FwCfg doesn't hold an item that can be referenced by the given selector.
+    #[error("There is no item accessible through the selector {0}")]
+    IllegalSelector(u16),
+    /// The item accessed is too large and it's size cannot be represented by a 32-bit unsigned
+    /// integer.
+    #[error("The accessed item is too large")]
+    TooLarge,
+    /// The cursor for this item pointed behind its EOF, which means the
+    /// file was shrunk after the last access.
+    #[error("The cursor was behind the EOF of an item")]
+    UnexpectedEof,
+    /// Accessing a file backed item failed.
+    #[error("The file backed item could not be accessed")]
+    FileAccessFailed(#[source] IoError),
+}
+
+type FwCfgContentAccessResult<T> = StdResult<T, FwCfgContentAccessError>;
+
 impl FwCfg {
     pub fn new(memory: GuestMemoryAtomic<GuestMemoryMmap<AtomicBitmap>>) -> FwCfg {
         const DEFAULT_ITEM: FwCfgContent = FwCfgContent::Slice(&[]);
         let mut known_items = [DEFAULT_ITEM; FW_CFG_KNOWN_ITEMS];
-        known_items[FW_CFG_SIGNATURE as usize] = FwCfgContent::Slice(&FW_CFG_DMA_SIGNATURE);
+        known_items[FW_CFG_SIGNATURE as usize] = FwCfgContent::Slice(&FW_CFG_SIGNATURE_CONTENT);
         known_items[FW_CFG_ID as usize] = FwCfgContent::Slice(&FW_CFG_FEATURE);
         let file_buf = Vec::from(FwCfgFilesHeader { count_be: 0 }.as_mut_bytes());
         known_items[FW_CFG_FILE_DIR as usize] = FwCfgContent::Bytes(file_buf);
@@ -572,6 +596,21 @@ impl FwCfg {
         self.items.push(item);
         self.update_count();
         Ok(())
+    }
+
+    /// Retrieves the [`FwCfgContent`] corresponding to the selector currently set in the internal
+    /// selector buffer.
+    fn get_selected_content(&self) -> FwCfgContentAccessResult<&FwCfgContent> {
+        if let Some(known_item) = self.known_items.get(usize::from(self.selector)) {
+            Ok(known_item)
+        } else if let Some(item) = self
+            .items
+            .get(usize::from(self.selector - FW_CFG_FILE_FIRST))
+        {
+            Ok(&item.content)
+        } else {
+            Err(FwCfgContentAccessError::IllegalSelector(self.selector))
+        }
     }
 
     fn dma_read_content(
@@ -759,85 +798,112 @@ impl FwCfg {
         Ok(())
     }
 
-    fn read_content(content: &FwCfgContent, offset: u32, data: &mut [u8], size: u32) -> Option<u8> {
-        // Zero fill rather than the usual 0xff fill for QEMU compatibility
-        data.fill(0);
-        let start = offset as usize;
-        let end = start + size as usize;
-        match content {
-            FwCfgContent::Bytes(b) => {
-                if end <= b.len() {
-                    data.copy_from_slice(&b[start..end]);
-                }
-            }
-            FwCfgContent::Slice(s) => {
-                if end <= s.len() {
-                    data.copy_from_slice(&s[start..end]);
-                }
-            }
-            FwCfgContent::File(o, f) => {
-                f.read_exact_at(data, o + offset as u64).ok()?;
-            }
-            FwCfgContent::U32(n) => {
-                let bytes = n.to_le_bytes();
-                if end <= bytes.len() {
-                    data.copy_from_slice(&bytes[start..end]);
-                }
-            }
+    /// Reads the data [`FwCfgContent`] of the item currently selected through the internal selector
+    /// buffer to an externally provided buffer.
+    ///
+    /// On success, returns the number of bytes written to the buffer. This can be fewer bytes than
+    /// the buffer's length, if the item's content is shorter than the buffer. If the buffer is
+    /// shorter than the item's content, then more than one read is necessary to retrieve all data.
+    ///
+    /// Either accumulate the number of bytes returned through all calls to this function or use the
+    /// internal buffer for offset and the item's size to determine whether all bytes were read.
+    fn read_content(&mut self, data: &mut [u8]) -> FwCfgContentAccessResult<u32> {
+        let content_size = self.get_selected_content()?.size().map_err(|e| match e {
+            e if e.kind() == ErrorKind::UnexpectedEof => FwCfgContentAccessError::UnexpectedEof,
+            e if e.kind() == ErrorKind::InvalidInput => FwCfgContentAccessError::TooLarge,
+            e => FwCfgContentAccessError::FileAccessFailed(e),
+        })?;
+
+        let remaining_content_bytes = content_size.saturating_sub(self.data_offset);
+        let content_bytes_to_copy = u32::min(remaining_content_bytes, data.len() as u32);
+        let planned_end = self.data_offset + content_bytes_to_copy;
+        let read_size = self
+            .get_selected_content()?
+            .access(self.data_offset)
+            .read(data[..content_bytes_to_copy as usize].as_mut_bytes())
+            .map_err(|_| FwCfgContentAccessError::ReadError)?;
+
+        // Only relevant for file backed items. The file can shrink after obtaining its size and
+        // before reading it.
+        if read_size != content_bytes_to_copy as usize {
+            return Err(FwCfgContentAccessError::ReadError);
         }
-        Some(size as u8)
+
+        self.data_offset = planned_end;
+
+        Ok(content_bytes_to_copy)
     }
 
-    fn read_data(&mut self, data: &mut [u8], size: u32) -> u8 {
-        let ret = if let Some(content) = self.known_items.get(self.selector as usize) {
-            Self::read_content(content, self.data_offset, data, size)
-        } else if let Some(item) = self.items.get((self.selector - FW_CFG_FILE_FIRST) as usize) {
-            Self::read_content(&item.content, self.data_offset, data, size)
+    /// Reads data from this [`FwCfg`]'s item selected through the internal selector buffer and
+    /// writes its data to the provided buffer.
+    ///
+    /// Potentially remaining bytes of the buffer will be filled with zeros (0x0).
+    fn read_data(&mut self, data: &mut [u8]) {
+        if let Ok(read_len) = self.read_content(data) {
+            data[read_len as usize..].fill(0x0);
         } else {
-            error!("fw_cfg: selector {:#x} does not exist.", self.selector);
-            None
-        };
-        if let Some(val) = ret {
-            self.data_offset += size;
-            val
-        } else {
-            0
+            data.fill(0x0);
         }
     }
 }
 
 impl BusDevice for FwCfg {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
-        let port = offset + PORT_FW_CFG_BASE;
-        let size = data.len();
-        match (port, size) {
-            (PORT_FW_CFG_SELECTOR, _) => {
-                error!("fw_cfg: selector register is write-only.");
+        match (offset, data.len()) {
+            (FW_CFG_SELECTOR_REGISTER_OFFSET, _) => {
+                #[cfg(target_arch = "x86_64")]
+                // The selector register is specified as write-only. QEMU’s combined PIO region
+                // treats a 1-byte read at this offset as a data read. Bypass to mimic QEMU quirk.
+                self.read_data(data);
+                #[cfg(not(target_arch = "x86_64"))]
+                {
+                    error!("fw_cfg: selector register is write-only.");
+                    // Return zero, matching QEMU’s rejected MMIO read result.
+                    data.fill(0x0);
+                }
             }
-            (PORT_FW_CFG_DATA, _) => _ = self.read_data(data, size as u32),
-            (PORT_FW_CFG_DMA_HI, 4) => {
+            (FW_CFG_DATA_REGISTER_OFFSET, _) => self.read_data(data),
+            (FW_CFG_DMA_HI_REGISTER_OFFSET, 4) => {
                 let addr = self.dma_address;
                 let addr_hi = (addr >> 32) as u32;
                 data.copy_from_slice(&addr_hi.to_be_bytes());
             }
-            (PORT_FW_CFG_DMA_LO, 4) => {
+            (FW_CFG_DMA_LO_REGISTER_OFFSET, 4) => {
                 let addr = self.dma_address;
                 let addr_lo = (addr & 0xffff_ffff) as u32;
                 data.copy_from_slice(&addr_lo.to_be_bytes());
             }
-            _ => {
+            #[cfg(target_arch = "x86_64")]
+            (offset, _)
+                if (offset >= FW_CFG_SELECTOR_REGISTER_OFFSET
+                    && offset <= FW_CFG_DATA_REGISTER_OFFSET)
+                    || (offset >= FW_CFG_DMA_HI_REGISTER_OFFSET
+                        && offset <= FW_CFG_DMA_LO_REGISTER_OFFSET + 3) =>
+            {
+                // For port access with unsupported width QEMU returns all zeros.
                 debug!(
-                    "fw_cfg: read from unknown port {port:#x}: {size:#x} bytes and offset {offset:#x}."
+                    "fw_cfg: Unsupported {:#x}-byte read from address: base={:#x} + offset={:#x}.",
+                    data.len(),
+                    FW_CFG_REGISTER_BASE,
+                    offset
                 );
+                data.fill(0x0);
+            }
+            (port, _) => {
+                // Handle any port that cannot be associated with the fw_cfg protocol as unassigned read.
+                debug!(
+                    "fw_cfg: Unsupported {:#x}-byte read at address offset {offset:#x}.",
+                    data.len()
+                );
+                data.fill(CH_UNASSIGNED_IO_RETURN_VALUE)
             }
         }
     }
 
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
-        let port = offset + PORT_FW_CFG_BASE;
         let size = data.size();
-        match (port, size) {
-            (PORT_FW_CFG_SELECTOR, 2) => {
+        match (offset, size) {
+            (FW_CFG_SELECTOR_REGISTER_OFFSET, 2) => {
                 let mut buf = [0u8; 2];
                 buf[..size].copy_from_slice(&data[..size]);
                 #[cfg(target_arch = "x86_64")]
@@ -847,22 +913,22 @@ impl BusDevice for FwCfg {
                 self.selector = val;
                 self.data_offset = 0;
             }
-            (PORT_FW_CFG_DATA, 1) => error!("fw_cfg: data register is read-only."),
+            (FW_CFG_DATA_REGISTER_OFFSET, 1) => error!("fw_cfg: data register is read-only."),
             #[cfg(target_arch = "aarch64")]
-            (PORT_FW_CFG_DMA_HI, 8) => {
+            (FW_CFG_DMA_HI_REGISTER_OFFSET, 8) => {
                 let mut buf = [0u8; 8];
                 buf.copy_from_slice(data);
                 self.dma_address = u64::from_be_bytes(buf);
                 self.do_dma();
             }
-            (PORT_FW_CFG_DMA_HI, 4) => {
+            (FW_CFG_DMA_HI_REGISTER_OFFSET, 4) => {
                 let mut buf = [0u8; 4];
                 buf[..size].copy_from_slice(&data[..size]);
                 let val = u32::from_be_bytes(buf);
                 self.dma_address &= 0xffff_ffff;
                 self.dma_address |= (val as u64) << 32;
             }
-            (PORT_FW_CFG_DMA_LO, 4) => {
+            (FW_CFG_DMA_LO_REGISTER_OFFSET, 4) => {
                 let mut buf = [0u8; 4];
                 buf[..size].copy_from_slice(&data[..size]);
                 let val = u32::from_be_bytes(buf);
@@ -870,9 +936,11 @@ impl BusDevice for FwCfg {
                 self.dma_address |= val as u64;
                 self.do_dma();
             }
-            _ => debug!(
-                "fw_cfg: write to unknown port {port:#x}: {size:#x} bytes and offset {offset:#x} ."
-            ),
+            _ => {
+                debug!(
+                    "fw_cfg: unsupported write to address: base={FW_CFG_REGISTER_BASE:#x} + offset={offset:#x}. Write length: {size}."
+                );
+            }
         }
         None
     }
@@ -887,19 +955,6 @@ mod tests {
 
     use super::*;
 
-    #[cfg(target_arch = "x86_64")]
-    const SELECTOR_OFFSET: u64 = 0;
-    #[cfg(target_arch = "aarch64")]
-    const SELECTOR_OFFSET: u64 = 8;
-    #[cfg(target_arch = "x86_64")]
-    const DATA_OFFSET: u64 = 1;
-    #[cfg(target_arch = "aarch64")]
-    const DATA_OFFSET: u64 = 0;
-    #[cfg(target_arch = "x86_64")]
-    const DMA_OFFSET: u64 = 4;
-    #[cfg(target_arch = "aarch64")]
-    const DMA_OFFSET: u64 = 16;
-
     #[test]
     fn test_signature() {
         let gm = GuestMemoryAtomic::new(
@@ -910,11 +965,15 @@ mod tests {
 
         let mut data = vec![0u8];
 
-        let mut sig_iter = FW_CFG_DMA_SIGNATURE.into_iter();
-        fw_cfg.write(0, SELECTOR_OFFSET, &[FW_CFG_SIGNATURE as u8, 0]);
+        let mut sig_iter = FW_CFG_SIGNATURE_CONTENT.into_iter();
+        fw_cfg.write(
+            0,
+            FW_CFG_SELECTOR_REGISTER_OFFSET,
+            &[FW_CFG_SIGNATURE as u8, 0],
+        );
         loop {
             if let Some(char) = sig_iter.next() {
-                fw_cfg.read(0, DATA_OFFSET, &mut data);
+                fw_cfg.read(0, FW_CFG_DATA_REGISTER_OFFSET, &mut data);
                 assert_eq!(data[0], char);
             } else {
                 return;
@@ -937,10 +996,14 @@ mod tests {
         let mut data = vec![0u8];
 
         let mut cmdline_iter = cmdline.into_iter();
-        fw_cfg.write(0, SELECTOR_OFFSET, &[FW_CFG_CMDLINE_DATA as u8, 0]);
+        fw_cfg.write(
+            0,
+            FW_CFG_SELECTOR_REGISTER_OFFSET,
+            &[FW_CFG_CMDLINE_DATA as u8, 0],
+        );
         loop {
             if let Some(char) = cmdline_iter.next() {
-                fw_cfg.read(0, DATA_OFFSET, &mut data);
+                fw_cfg.read(0, FW_CFG_DATA_REGISTER_OFFSET, &mut data);
                 assert_eq!(data[0], char);
             } else {
                 return;
@@ -962,13 +1025,21 @@ mod tests {
         fw_cfg.add_kernel_data(temp.as_file()).unwrap();
 
         let mut size = [0u8; size_of::<u32>()];
-        fw_cfg.write(0, SELECTOR_OFFSET, &FW_CFG_KERNEL_SIZE.to_be_bytes());
-        fw_cfg.read(0, DATA_OFFSET, &mut size);
+        fw_cfg.write(
+            0,
+            FW_CFG_SELECTOR_REGISTER_OFFSET,
+            &FW_CFG_KERNEL_SIZE.to_be_bytes(),
+        );
+        fw_cfg.read(0, FW_CFG_DATA_REGISTER_OFFSET, &mut size);
         assert_eq!(u32::from_le_bytes(size), kernel.len() as u32);
 
         let mut data = vec![0u8; kernel.len()];
-        fw_cfg.write(0, SELECTOR_OFFSET, &FW_CFG_KERNEL_DATA.to_be_bytes());
-        fw_cfg.read(0, DATA_OFFSET, &mut data);
+        fw_cfg.write(
+            0,
+            FW_CFG_SELECTOR_REGISTER_OFFSET,
+            &FW_CFG_KERNEL_DATA.to_be_bytes(),
+        );
+        fw_cfg.read(0, FW_CFG_DATA_REGISTER_OFFSET, &mut data);
         assert_eq!(data, kernel);
     }
 
@@ -991,10 +1062,14 @@ mod tests {
         let mut data = vec![0u8];
 
         let mut initram_iter = (*initram_content).into_iter();
-        fw_cfg.write(0, SELECTOR_OFFSET, &[FW_CFG_INITRD_DATA as u8, 0]);
+        fw_cfg.write(
+            0,
+            FW_CFG_SELECTOR_REGISTER_OFFSET,
+            &[FW_CFG_INITRD_DATA as u8, 0],
+        );
         loop {
             if let Some(char) = initram_iter.next() {
-                fw_cfg.read(0, DATA_OFFSET, &mut data);
+                fw_cfg.read(0, FW_CFG_DATA_REGISTER_OFFSET, &mut data);
                 assert_eq!(data[0], char);
             } else {
                 return;
@@ -1021,9 +1096,13 @@ mod tests {
         let mut data = vec![0u8];
 
         // Select the first file item (FW_CFG_FILE_FIRST = 0x20)
-        fw_cfg.write(0, SELECTOR_OFFSET, &[FW_CFG_FILE_FIRST as u8, 0]);
+        fw_cfg.write(
+            0,
+            FW_CFG_SELECTOR_REGISTER_OFFSET,
+            &[FW_CFG_FILE_FIRST as u8, 0],
+        );
         for &byte in expected.iter() {
-            fw_cfg.read(0, DATA_OFFSET, &mut data);
+            fw_cfg.read(0, FW_CFG_DATA_REGISTER_OFFSET, &mut data);
             assert_eq!(data[0], byte);
         }
     }
@@ -1060,9 +1139,10 @@ mod tests {
         let access_address = GuestAddress(load_addr.0);
         let address_bytes = access_address.0.to_be_bytes();
         #[cfg(target_arch = "x86_64")]
-        let dma_lo: [u8; 4] = address_bytes[0..4].try_into().unwrap();
+        // Note: address is big endian.
+        let dma_hi: [u8; 4] = address_bytes[0..4].try_into().unwrap();
         #[cfg(target_arch = "x86_64")]
-        let dma_hi: [u8; 4] = address_bytes[4..8].try_into().unwrap();
+        let dma_lo: [u8; 4] = address_bytes[4..8].try_into().unwrap();
 
         // writing the FwCfgDmaAccess to mem (this would just be self.dma_access.as_ref() in guest)
         let _ = mem.write(access.as_mut_bytes(), access_address);
@@ -1080,16 +1160,25 @@ mod tests {
         assert_ne!(data, code);
 
         #[cfg(target_arch = "aarch64")]
-        fw_cfg.write(0, SELECTOR_OFFSET, &FW_CFG_FILE_FIRST.to_be_bytes());
+        fw_cfg.write(
+            0,
+            FW_CFG_SELECTOR_REGISTER_OFFSET,
+            &FW_CFG_FILE_FIRST.to_be_bytes(),
+        );
         #[cfg(target_arch = "x86_64")]
-        fw_cfg.write(0, SELECTOR_OFFSET, &[FW_CFG_FILE_FIRST as u8, 0]);
+        fw_cfg.write(
+            0,
+            FW_CFG_SELECTOR_REGISTER_OFFSET,
+            &[FW_CFG_FILE_FIRST as u8, 0],
+        );
         #[cfg(target_arch = "aarch64")]
-        fw_cfg.write(0, DMA_OFFSET, &address_bytes);
+        fw_cfg.write(0, FW_CFG_DMA_HI_REGISTER_OFFSET, &address_bytes);
         #[cfg(target_arch = "x86_64")]
         {
-            fw_cfg.write(0, DMA_OFFSET, &dma_lo);
-            fw_cfg.write(0, DMA_OFFSET + 4, &dma_hi);
+            fw_cfg.write(0, FW_CFG_DMA_HI_REGISTER_OFFSET, &dma_hi);
+            fw_cfg.write(0, FW_CFG_DMA_LO_REGISTER_OFFSET, &dma_lo);
         }
+
         let _ = mem.read(&mut data, GuestAddress(code_address));
         assert_eq!(data, code);
     }
@@ -1121,11 +1210,11 @@ mod tests {
         mem.write(access.as_mut_bytes(), DMA_DESCRIPTOR).unwrap();
         let address = DMA_DESCRIPTOR.0.to_be_bytes();
         #[cfg(target_arch = "aarch64")]
-        fw_cfg.write(0, DMA_OFFSET, &address);
+        fw_cfg.write(0, FW_CFG_DMA_HI_REGISTER_OFFSET, &address);
         #[cfg(target_arch = "x86_64")]
         {
-            fw_cfg.write(0, DMA_OFFSET, &address[0..4]);
-            fw_cfg.write(0, DMA_OFFSET + 4, &address[4..8]);
+            fw_cfg.write(0, FW_CFG_DMA_HI_REGISTER_OFFSET, &address[0..4]);
+            fw_cfg.write(0, FW_CFG_DMA_LO_REGISTER_OFFSET, &address[4..8]);
         }
         let mut status = [0u8; 4];
         mem.read(&mut status, DMA_DESCRIPTOR).unwrap();
@@ -1164,9 +1253,9 @@ mod tests {
         let error = AccessControl::new().with_error(true).0;
 
         #[cfg(target_arch = "aarch64")]
-        fw_cfg.write(0, SELECTOR_OFFSET, &item_a.to_be_bytes());
+        fw_cfg.write(0, FW_CFG_SELECTOR_REGISTER_OFFSET, &item_a.to_be_bytes());
         #[cfg(target_arch = "x86_64")]
-        fw_cfg.write(0, SELECTOR_OFFSET, &item_a.to_le_bytes());
+        fw_cfg.write(0, FW_CFG_SELECTOR_REGISTER_OFFSET, &item_a.to_le_bytes());
 
         assert_eq!(
             run_dma(&mut fw_cfg, &mem, select(item_b).with_read(true), 4),
@@ -1247,5 +1336,147 @@ mod tests {
         assert_eq!(run_dma(&mut fw_cfg, &mem, skip, 0), 0);
         assert_eq!(run_dma(&mut fw_cfg, &mem, skip, 2), 0);
         assert_eq!(fw_cfg.data_offset, 6);
+    }
+
+    #[test]
+    // Reads from invalid register addresses should result in returning all ones (if port I/O)
+    // or all zeros (if MMIO mapped). The addresses below are chosen to be part of the
+    // mapping holes.
+    fn test_reads_from_invalid_register_address() {
+        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(GuestMemoryMmap::new()));
+        #[cfg(target_arch = "x86_64")]
+        let invalid_addresses = [
+            FW_CFG_DMA_LO_REGISTER_OFFSET + 4,
+            FW_CFG_DATA_REGISTER_OFFSET + 1,
+            FW_CFG_DATA_REGISTER_OFFSET + 2,
+        ];
+
+        #[cfg(target_arch = "aarch64")]
+        let invalid_addresses = [
+            FW_CFG_DMA_HI_REGISTER_OFFSET - 1,
+            FW_CFG_DMA_LO_REGISTER_OFFSET + 5,
+            FW_CFG_SELECTOR_REGISTER_OFFSET + 10,
+        ];
+
+        for address in invalid_addresses {
+            let mut buff = [0xCD; 1];
+            fw_cfg.read(0, address, &mut buff);
+            assert_eq!(fw_cfg.data_offset, 0);
+            assert_eq!(buff, [CH_UNASSIGNED_IO_RETURN_VALUE]);
+        }
+    }
+
+    #[test]
+    fn test_register_invalid_sized_reads_zero_buffer() {
+        // Reads with unsupported size zero the whole buffer in QEMU. We mimic this behavior.
+        // On all architectures QEMU rejects the unsupported-width access and returns zero.
+        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(GuestMemoryMmap::new()));
+        fw_cfg.write(
+            0,
+            FW_CFG_SELECTOR_REGISTER_OFFSET,
+            &[FW_CFG_SIGNATURE as u8, 0],
+        );
+        // 16-byte reads are forbidden on all architectures.
+        let mut buff = [0xEF; 16];
+        fw_cfg.read(0, FW_CFG_DMA_LO_REGISTER_OFFSET, &mut buff);
+        assert_eq!(fw_cfg.data_offset, 0);
+        assert_eq!(buff, [0x0; 16]);
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn test_register_qemu_selector_read_quirk() {
+        // While defined as write-only, QEMU uses a port-mapping that leaves the selector register
+        // readable. For full compatibility we also allow reading from the selector register as a
+        // quirk.
+        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(GuestMemoryMmap::new()));
+        fw_cfg.write(
+            0,
+            FW_CFG_SELECTOR_REGISTER_OFFSET,
+            &[FW_CFG_SIGNATURE as u8, 0],
+        );
+        // One-byte read returns actual data.
+        let mut buff = [0xEF; 1];
+        fw_cfg.read(0, FW_CFG_SELECTOR_REGISTER_OFFSET, &mut buff);
+        assert_eq!(fw_cfg.data_offset, 1);
+        assert_eq!(buff, [b'Q']);
+    }
+
+    #[test]
+    fn test_register_reads_past_eof_return_zero() {
+        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(GuestMemoryMmap::new()));
+        fw_cfg.write(
+            0,
+            FW_CFG_SELECTOR_REGISTER_OFFSET,
+            &[FW_CFG_SIGNATURE as u8, 0],
+        );
+        let mut buff = [0xEF; 8];
+        let max_offset = FW_CFG_SIGNATURE_CONTENT.len() as u32;
+        for (offset, byte) in buff.iter_mut().enumerate() {
+            fw_cfg.read(0, FW_CFG_DATA_REGISTER_OFFSET, byte.as_mut_bytes());
+            let expected_offset = if (offset as u32 + 1) < max_offset {
+                offset as u32 + 1
+            } else {
+                max_offset
+            };
+            assert_eq!(fw_cfg.data_offset, expected_offset);
+        }
+        assert_eq!(buff[..4], FW_CFG_SIGNATURE_CONTENT);
+        assert_eq!(buff[4..], [0; 4]);
+    }
+
+    #[test]
+    fn test_register_reads_with_invalid_selector() {
+        // RW selector outside the known items without a configured file entry.
+        const ILLEGAL_SELECTOR: u16 = 0x4080;
+        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(GuestMemoryMmap::new()));
+        fw_cfg.write(
+            0,
+            FW_CFG_SELECTOR_REGISTER_OFFSET,
+            #[cfg(target_arch = "x86_64")]
+            &ILLEGAL_SELECTOR.to_le_bytes(),
+            #[cfg(not(target_arch = "x86_64"))]
+            &ILLEGAL_SELECTOR.to_be_bytes(),
+        );
+        let mut buff = [0xEF_u8; 8];
+        for byte in buff.iter_mut() {
+            fw_cfg.read(0, FW_CFG_DATA_REGISTER_OFFSET, byte.as_mut_bytes());
+            assert_eq!(fw_cfg.data_offset, 0);
+        }
+        assert_eq!(buff, [0; 8]);
+    }
+
+    #[test]
+    fn test_register_writing_select_resets_internal_cursor() {
+        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(GuestMemoryMmap::new()));
+        let payload_bytes = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];
+        let content = FwCfgContent::Bytes(payload_bytes.to_vec());
+        let cfg_item = FwCfgItem {
+            name: "payload".to_string(),
+            content,
+        };
+        fw_cfg.add_item(cfg_item).unwrap();
+
+        // Read the same bytes twice, reselecting the item resets the cursor.
+        for _ in 0..2 {
+            fw_cfg.write(
+                0,
+                FW_CFG_SELECTOR_REGISTER_OFFSET,
+                #[cfg(target_arch = "x86_64")]
+                &FW_CFG_FILE_FIRST.to_le_bytes(),
+                #[cfg(not(target_arch = "x86_64"))]
+                &FW_CFG_FILE_FIRST.to_be_bytes(),
+            );
+            assert_eq!(fw_cfg.data_offset, 0);
+            let mut buffer = [0xEF_u8; 6];
+            const MAX_INDEX: usize = 4;
+            for (index, byte) in buffer.iter_mut().enumerate().take(MAX_INDEX) {
+                fw_cfg.read(0, FW_CFG_DATA_REGISTER_OFFSET, byte.as_mut_bytes());
+                assert_eq!(fw_cfg.data_offset as usize, index + 1);
+            }
+            assert_eq!(buffer[..MAX_INDEX], payload_bytes[..MAX_INDEX]);
+            assert_eq!(buffer[MAX_INDEX..], [0xEF; 2]);
+            assert_eq!(fw_cfg.data_offset, MAX_INDEX as u32);
+        }
     }
 }
