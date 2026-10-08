@@ -252,11 +252,13 @@ impl Serial {
                         self.recv_data()?;
                     }
                 } else {
-                    if let Some(out) = self.out.as_mut() {
-                        out.write_all(&[v])?;
-                        out.flush()?;
-                    }
-                    self.thr_empty()?;
+                    let output_result = self
+                        .out
+                        .as_mut()
+                        .map_or(Ok(()), |out| out.write_all(&[v]).and_then(|()| out.flush()));
+                    let interrupt_result = self.thr_empty();
+                    output_result?;
+                    interrupt_result?;
                 }
             }
             IER => self.interrupt_enable = v & IER_FIFO_BITS,
@@ -403,6 +405,17 @@ mod tests {
         }
     }
 
+    struct FailingBuffer;
+
+    impl io::Write for FailingBuffer {
+        fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+            Err(io::Error::from(io::ErrorKind::BrokenPipe))
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::from(io::ErrorKind::BrokenPipe))
+        }
+    }
+
     #[test]
     fn serial_output() {
         let intr_evt = EventFd::new(0).unwrap();
@@ -479,6 +492,27 @@ mod tests {
         let mut data = [0u8];
         serial.read(0, IER as u64, &mut data[..]);
         assert_eq!(data[0] & IER_FIFO_BITS, IER_THR_BIT);
+        serial.read(0, IIR as u64, &mut data[..]);
+        assert_ne!(data[0] & IIR_THR_BIT, 0);
+    }
+
+    #[test]
+    fn serial_thr_raised_despite_sink_error() {
+        let intr_evt = EventFd::new(0).unwrap();
+        let mut serial = Serial::new_out(
+            String::from(SERIAL_NAME),
+            Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
+            Box::new(FailingBuffer),
+            None,
+        );
+
+        intr_evt.write(1).unwrap();
+        serial.write(0, IER as u64, &[IER_THR_BIT]);
+
+        assert!(serial.handle_write(DATA, b'a').is_err());
+
+        assert_eq!(intr_evt.read().unwrap(), 2);
+        let mut data = [0u8];
         serial.read(0, IIR as u64, &mut data[..]);
         assert_ne!(data[0] & IIR_THR_BIT, 0);
     }
