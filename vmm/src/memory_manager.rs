@@ -1358,7 +1358,7 @@ impl MemoryManager {
             epoll_fd,
             epoll::ControlOptions::EPOLL_CTL_ADD,
             uffd_raw_fd,
-            epoll::Event::new(epoll::Events::EPOLLIN | epoll::Events::EPOLLHUP, EVENT_UFFD),
+            epoll::Event::new(epoll::Events::EPOLLIN, EVENT_UFFD),
         )
         .map_err(io::Error::other)?;
 
@@ -1392,14 +1392,6 @@ impl MemoryManager {
                 let token = event.data;
                 let evt_flags = event.events;
 
-                if token == EVENT_UFFD
-                    && (evt_flags & epoll::Events::EPOLLHUP.bits()) != 0
-                    && (evt_flags & epoll::Events::EPOLLIN.bits()) == 0
-                {
-                    debug!("UFFD handler: fd closed (EPOLLHUP), exiting");
-                    return Ok(());
-                }
-
                 if token == EVENT_UFFD && (evt_flags & epoll::Events::EPOLLIN.bits()) != 0 {
                     got_uffd_data = true;
                 }
@@ -1422,10 +1414,6 @@ impl MemoryManager {
                         continue;
                     }
                     return Err(err);
-                }
-                if n == 0 {
-                    debug!("UFFD handler: EOF on fd, exiting");
-                    return Ok(());
                 }
                 if n as usize != size_of::<uffd::UffdMsg>() {
                     return Err(io::Error::new(
