@@ -12,7 +12,7 @@ use std::{fmt, io, mem, ptr, result};
 use log::{debug, warn};
 use num_enum::TryFromPrimitive;
 use pci::{
-    BarReprogrammingParams, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType,
+    BarReprogrammingParams, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciBdf,
     PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciSubclass,
 };
 use thiserror::Error;
@@ -417,6 +417,7 @@ pub struct PvmemcontrolBusDevice {
 
 pub struct PvmemcontrolPciDevice {
     id: String,
+    bdf: PciBdf,
     configuration: PciConfiguration,
     bar_regions: Vec<PciBarConfiguration>,
 }
@@ -655,6 +656,7 @@ impl PvmemcontrolBusDevice {
 impl PvmemcontrolDevice {
     pub fn make_device(
         id: String,
+        bdf: PciBdf,
         mem: GuestMemoryAtomic<GuestMemoryMmap<AtomicBitmap>>,
     ) -> (PvmemcontrolPciDevice, PvmemcontrolBusDevice) {
         let dev = RwLock::new(PvmemcontrolDevice::error());
@@ -677,6 +679,7 @@ impl PvmemcontrolDevice {
         (
             PvmemcontrolPciDevice {
                 id,
+                bdf,
                 configuration,
                 bar_regions: Vec::new(),
             },
@@ -713,6 +716,10 @@ impl PciDevice for PvmemcontrolPciDevice {
 
     fn id(&self) -> Option<String> {
         Some(self.id.clone())
+    }
+
+    fn bdf(&self) -> PciBdf {
+        self.bdf
     }
 
     fn allocate_bars(

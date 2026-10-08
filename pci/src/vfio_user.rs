@@ -42,6 +42,7 @@ pub struct VfioUserPciDevice {
     client: Arc<Mutex<Client>>,
     common: VfioCommon,
     memory_slot_allocator: MemorySlotAllocator,
+    bdf: PciBdf,
 }
 
 #[derive(Error, Debug)]
@@ -121,6 +122,7 @@ impl VfioUserPciDevice {
             client,
             common,
             memory_slot_allocator,
+            bdf,
         })
     }
 
@@ -502,6 +504,10 @@ impl PciDevice for VfioUserPciDevice {
 
     fn id(&self) -> Option<String> {
         Some(self.id.clone())
+    }
+
+    fn bdf(&self) -> PciBdf {
+        self.bdf
     }
 }
 

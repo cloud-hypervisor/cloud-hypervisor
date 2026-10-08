@@ -13,8 +13,8 @@ use anyhow::anyhow;
 use log::{debug, error, warn};
 use pci::{
     BarReprogrammingParams, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable,
-    PciBarRegionType, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType,
-    PciSubclass,
+    PciBarRegionType, PciBdf, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
+    PciHeaderType, PciSubclass,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -86,6 +86,7 @@ pub trait IvshmemOps: Send + Sync {
 /// But only ivshmem-plain support now, ivshmem-doorbell doesn't support yet.
 pub struct IvshmemDevice {
     id: String,
+    bdf: PciBdf,
 
     // ivshmem device registers
     // (only used for ivshmem-doorbell, ivshmem-doorbell don't support yet)
@@ -115,6 +116,7 @@ pub struct IvshmemDeviceState {
 impl IvshmemDevice {
     pub fn new(
         id: String,
+        bdf: PciBdf,
         region_size: u64,
         ivshmem_ops: Arc<Mutex<dyn IvshmemOps>>,
         snapshot: Option<&Snapshot>,
@@ -153,6 +155,7 @@ impl IvshmemDevice {
         let device = if let Some(s) = state {
             IvshmemDevice {
                 id,
+                bdf,
                 configuration,
                 bar_regions: vec![],
                 _interrupt_mask: s.interrupt_mask,
@@ -167,6 +170,7 @@ impl IvshmemDevice {
         } else {
             IvshmemDevice {
                 id,
+                bdf,
                 configuration,
                 bar_regions: vec![],
                 _interrupt_mask: 0,
@@ -385,6 +389,10 @@ impl PciDevice for IvshmemDevice {
 
     fn id(&self) -> Option<String> {
         Some(self.id.clone())
+    }
+
+    fn bdf(&self) -> PciBdf {
+        self.bdf
     }
 }
 

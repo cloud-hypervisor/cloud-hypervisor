@@ -13,8 +13,8 @@ use thiserror::Error;
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::Resource;
 
-use crate::PciBarConfiguration;
 use crate::configuration::{self, PciBarRegionType};
+use crate::{PciBarConfiguration, PciBdf};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -105,6 +105,9 @@ pub trait PciDevice: Send {
 
     /// Optionally returns a unique identifier.
     fn id(&self) -> Option<String>;
+
+    /// BDF of this device
+    fn bdf(&self) -> PciBdf;
 }
 
 /// This trait defines a set of functions which can be triggered whenever a

@@ -15,6 +15,7 @@ use log::warn;
 use thiserror::Error;
 use vm_device::BusDevice;
 
+use crate::PciBdf;
 use crate::configuration::{PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType};
 use crate::device::{BarReprogrammingParams, DeviceRelocation, PciDevice};
 
@@ -97,6 +98,10 @@ impl PciDevice for PciRoot {
 
     fn id(&self) -> Option<String> {
         None
+    }
+
+    fn bdf(&self) -> PciBdf {
+        PciBdf::new(0, 0, PCI_ROOT_DEVICE_ID, 0)
     }
 }
 
