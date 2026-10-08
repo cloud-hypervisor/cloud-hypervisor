@@ -282,8 +282,17 @@ pub(crate) struct Uffd {
 }
 
 impl Uffd {
-    pub(crate) fn new(fd: OwnedFd, ranges: Box<[UffdRange]>) -> Self {
-        Self { fd, ranges }
+    pub(crate) fn new(fd: OwnedFd, ranges: Box<[UffdRange]>) -> Result<Self, Error> {
+        // SAFETY: `F_GETFL` takes no argument.
+        let flags = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFL) };
+        if flags < 0 {
+            return Err(Error::last_os_error());
+        }
+        // SAFETY: `F_SETFL` takes an integer argument, no pointer.
+        if unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+            return Err(Error::last_os_error());
+        }
+        Ok(Self { fd, ranges })
     }
 
     pub(crate) fn fd(&self) -> BorrowedFd<'_> {
