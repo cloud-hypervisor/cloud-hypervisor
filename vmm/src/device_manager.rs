@@ -702,27 +702,18 @@ impl DeviceRelocation for AddressManager {
         match region_type {
             PciBarRegionType::IoRegion => {
                 let mut sys_allocator = self.allocator.lock().unwrap();
-                // Free old_base first so allocate(new_base) sees it as
-                // available; restore old_base on failure to keep the
-                // allocator in sync with the PIO bus.
-                sys_allocator.free_io_addresses(GuestAddress(old_base), len as GuestUsize);
                 if sys_allocator
-                    .allocate_io_addresses(Some(GuestAddress(new_base)), len as GuestUsize, None)
+                    .move_io_addresses(
+                        GuestAddress(old_base),
+                        GuestAddress(new_base),
+                        len as GuestUsize,
+                        None,
+                    )
                     .is_none()
                 {
-                    if sys_allocator
-                        .allocate_io_addresses(
-                            Some(GuestAddress(old_base)),
-                            len as GuestUsize,
-                            None,
-                        )
-                        .is_none()
-                    {
-                        error!(
-                            "Failed to restore old IO range 0x{old_base:x} after rejected move_bar"
-                        );
-                    }
-                    return Err(io::Error::other("failed allocating new IO range"));
+                    return Err(io::Error::other(format!(
+                        "Cannot move IO BAR address range from {old_base:#x} to {new_base:#x}"
+                    )));
                 }
 
                 // Update PIO bus

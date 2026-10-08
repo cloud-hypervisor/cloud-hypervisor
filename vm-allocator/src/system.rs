@@ -107,6 +107,22 @@ impl SystemAllocator {
             .allocate(address, size, Some(align_size.unwrap_or(0x1)))
     }
 
+    /// Moves an allocated IO address range to `new_address`.
+    pub fn move_io_addresses(
+        &mut self,
+        old_address: GuestAddress,
+        new_address: GuestAddress,
+        size: GuestUsize,
+        align_size: Option<GuestUsize>,
+    ) -> Option<GuestAddress> {
+        self.io_address_space.move_range(
+            old_address,
+            new_address,
+            size,
+            Some(align_size.unwrap_or(0x1)),
+        )
+    }
+
     /// Reserves a section of `size` bytes of platform MMIO address space.
     pub fn allocate_platform_mmio_addresses(
         &mut self,
@@ -125,5 +141,31 @@ impl SystemAllocator {
     /// We can only free a range if it matches exactly an already allocated range.
     pub fn free_io_addresses(&mut self, address: GuestAddress, size: GuestUsize) {
         self.io_address_space.free(address, size);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn move_io_addresses_overlapping_old_range() {
+        let mut allocator = SystemAllocator::new(
+            GuestAddress(0x1000),
+            0x1000,
+            GuestAddress(0x1_0000),
+            0x1000,
+            #[cfg(target_arch = "x86_64")]
+            &[GsiApic::new(5, 19)],
+        )
+        .unwrap();
+
+        assert_eq!(
+            allocator.allocate_io_addresses(Some(GuestAddress(0x1201)), 0x100, None),
+            Some(GuestAddress(0x1201))
+        );
+        let new_address =
+            allocator.move_io_addresses(GuestAddress(0x1201), GuestAddress(0x1281), 0x100, None);
+        assert_eq!(new_address, Some(GuestAddress(0x1281)));
     }
 }
