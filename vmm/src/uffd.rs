@@ -302,6 +302,18 @@ impl Uffd {
     pub(crate) fn ranges(&self) -> &[UffdRange] {
         &self.ranges
     }
+
+    /// Returns the `(range_idx, page_idx)` containing `addr`.
+    pub(crate) fn locate(&self, addr: u64) -> Option<(usize, u64)> {
+        self.ranges
+            .iter()
+            .enumerate()
+            .find_map(|(range_idx, range)| {
+                range
+                    .page_index_of(addr)
+                    .map(|page_idx| (range_idx, page_idx))
+            })
+    }
 }
 
 /// Provider of guest-memory page contents for a UFFD handler.

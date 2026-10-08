@@ -1185,7 +1185,7 @@ impl MemoryManager {
             .spawn(move || {
                 panic::catch_unwind(panic::AssertUnwindSafe(move || {
                     let mut result = Self::uffd_handler_loop(
-                        uffd,
+                        &[uffd],
                         &thread_stop_event,
                         &thread_exit_evt,
                         source,
@@ -1299,20 +1299,19 @@ impl MemoryManager {
         }
     }
 
-    /// Serve UFFD faults via `source`, prefaulting one page per idle
-    /// iteration. Once `source` fails, poison each faulted page instead.
-    #[expect(clippy::needless_pass_by_value)]
+    /// Serve UFFD faults from every userfaultfd in `uffds` via `source`,
+    /// prefaulting one page per idle iteration through the first one. Once
+    /// `source` fails, poison each faulted page instead.
     fn uffd_handler_loop(
-        uffd: Uffd,
+        uffds: &[Uffd],
         stop_event: &EventFd,
         exit_evt: &EventFd,
         mut source: Box<dyn UffdMemorySource>,
         ready_tx: &SyncSender<()>,
         prefault_complete: &AtomicBool,
     ) -> Result<(), io::Error> {
-        let uffd_fd = uffd.fd();
-        let uffd_raw_fd = uffd_fd.as_raw_fd();
-        let ranges = uffd.ranges();
+        let vmm_uffd = &uffds[0];
+        let ranges = vmm_uffd.ranges();
 
         let total_pages: u64 = ranges.iter().map(UffdRange::num_pages).sum();
         let mut pages_served: u64 = 0;
@@ -1339,8 +1338,7 @@ impl MemoryManager {
         let mut page_idx = 0;
         let prefault_start = time::Instant::now();
 
-        const EVENT_STOP: u64 = 0;
-        const EVENT_UFFD: u64 = 1;
+        const EVENT_STOP: u64 = u64::MAX;
 
         let epoll_fd = epoll::create(true).map_err(io::Error::other)?;
         // SAFETY: epoll_fd is valid and owned by this scope.
@@ -1354,17 +1352,19 @@ impl MemoryManager {
         )
         .map_err(io::Error::other)?;
 
-        epoll::ctl(
-            epoll_fd,
-            epoll::ControlOptions::EPOLL_CTL_ADD,
-            uffd_raw_fd,
-            epoll::Event::new(epoll::Events::EPOLLIN, EVENT_UFFD),
-        )
-        .map_err(io::Error::other)?;
+        for (idx, uffd) in uffds.iter().enumerate() {
+            epoll::ctl(
+                epoll_fd,
+                epoll::ControlOptions::EPOLL_CTL_ADD,
+                uffd.fd().as_raw_fd(),
+                epoll::Event::new(epoll::Events::EPOLLIN, idx as u64),
+            )
+            .map_err(io::Error::other)?;
+        }
 
         ready_tx.send(()).ok();
 
-        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); 2];
+        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); uffds.len() + 1];
         loop {
             // Block only when prefault is done; otherwise poll non-blocking
             // so we can advance prefault between faults.
@@ -1387,23 +1387,25 @@ impl MemoryManager {
                 return Ok(());
             }
 
-            let mut got_uffd_data = false;
+            let mut ready_uffd = None;
             for event in events.iter().take(num_events) {
-                let token = event.data;
+                let idx = event.data as usize;
                 let evt_flags = event.events;
 
-                if token == EVENT_UFFD && (evt_flags & epoll::Events::EPOLLIN.bits()) != 0 {
-                    got_uffd_data = true;
+                if (evt_flags & epoll::Events::EPOLLIN.bits()) != 0 {
+                    ready_uffd = Some(idx);
+                    break;
                 }
             }
 
-            if got_uffd_data {
+            if let Some(idx) = ready_uffd {
+                let fault_uffd = &uffds[idx];
                 // SAFETY: UffdMsg is a plain repr(C) struct, safe to zero-init.
                 let mut msg: uffd::UffdMsg = unsafe { zeroed() };
                 // SAFETY: reading a uffd_msg-sized struct from the valid uffd fd.
                 let n = unsafe {
                     libc::read(
-                        uffd_raw_fd,
+                        fault_uffd.fd().as_raw_fd(),
                         (&raw mut msg).cast(),
                         size_of::<uffd::UffdMsg>(),
                     )
@@ -1429,19 +1431,15 @@ impl MemoryManager {
                 let fault_addr = msg.pf_address;
                 let minor_fault = msg.pf_flags & userfaultfd::UFFD_PAGEFAULT_FLAG_MINOR != 0;
 
-                // Find the corresponding page info from the fault address
-                let (range, range_idx, page_idx) = ranges
-                    .iter()
-                    .enumerate()
-                    .find_map(|(range_idx, uffd_range)| {
-                        uffd_range.page_index_of(fault_addr).map(|page_idx| (uffd_range, range_idx, page_idx))
-                    })
-                    .ok_or_else(|| io::Error::other(format!(
+                let (range_idx, page_idx) = fault_uffd.locate(fault_addr).ok_or_else(|| {
+                    io::Error::other(format!(
                         "UFFD handler: fault at {fault_addr:#x} does not belong to any registered range",
-                    )))?;
+                    ))
+                })?;
+                let range = &fault_uffd.ranges()[range_idx];
 
                 if source_failed {
-                    Self::uffd_poison_page(uffd_fd.as_fd(), range, page_idx)?;
+                    Self::uffd_poison_page(fault_uffd.fd(), range, page_idx)?;
                     continue;
                 }
 
@@ -1458,8 +1456,11 @@ impl MemoryManager {
                         // handling this page will call UFFDIO_COPY or
                         // UFFDIO_CONTINUE on the page range. The kernel
                         // guarantees us that it will wake all the threads
-                        // waiting on this range, so we don't need to do
-                        // anything here.
+                        // waiting on this range in the userfaultfd it
+                        // resolves through. This fault may come from another
+                        // one, so wake it right away: it faults again until
+                        // the page is resolved.
+                        uffd::wake(fault_uffd.fd(), range.page_addr(page_idx), range.page_size)?;
                         continue;
                     } else {
                         if served {
@@ -1474,7 +1475,7 @@ impl MemoryManager {
                     // The backing page is already in the page cache. A
                     // minor fault only needs the page mapped into this VMA.
                     uffd::uffd_continue(
-                        uffd_fd.as_fd(),
+                        fault_uffd.fd(),
                         range.page_addr(page_idx),
                         range.page_size,
                     )
@@ -1490,7 +1491,7 @@ impl MemoryManager {
                     continue;
                 }
 
-                let result = source.resolve(uffd_fd.as_fd(), range, page_idx);
+                let result = source.resolve(fault_uffd.fd(), range, page_idx);
 
                 {
                     let mut loading = pages_loading.lock().unwrap();
@@ -1510,7 +1511,7 @@ impl MemoryManager {
                     exit_evt.write(1).ok();
                     prefault_active = false;
                     source_failed = true;
-                    Self::uffd_poison_page(uffd_fd.as_fd(), range, page_idx)?;
+                    Self::uffd_poison_page(fault_uffd.fd(), range, page_idx)?;
                     continue;
                 }
                 pages_served += 1;
@@ -1523,7 +1524,7 @@ impl MemoryManager {
             }
 
             match Self::uffd_prefault(
-                uffd_fd.as_fd(),
+                vmm_uffd.fd(),
                 &mut range_idx,
                 &mut page_idx,
                 ranges,
