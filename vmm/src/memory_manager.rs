@@ -34,6 +34,7 @@ use virtio_devices::BlocksState;
 use virtio_devices::mem::Error as VirtioMemError;
 #[cfg(target_arch = "x86_64")]
 use vm_allocator::GsiApic;
+use vm_allocator::page_size::get_page_size;
 use vm_allocator::{AddressAllocator, MemorySlotAllocator, SystemAllocator};
 use vm_device::BusDevice;
 use vm_memory::bitmap::AtomicBitmap;
@@ -3717,6 +3718,7 @@ impl Migratable for MemoryManager {
     // Generate a table for the pages that are dirty. The dirty pages are collapsed
     // together in the table if they are contiguous.
     fn dirty_log(&mut self) -> result::Result<MemoryRangeTable, MigratableError> {
+        let page_size = get_page_size();
         let mut table = MemoryRangeTable::default();
         for r in &self.guest_ram_mappings {
             let vm_dirty_bitmap = self
@@ -3745,7 +3747,7 @@ impl Migratable for MemoryManager {
                 .map(|(x, y)| x | y);
 
             let ranges_before = table.ranges().len();
-            table.extend_from_dirty_bitmap(dirty_bitmap, r.gpa, 4096);
+            table.extend_from_dirty_bitmap(dirty_bitmap, r.gpa, page_size);
             let slot_ranges = &table.ranges()[ranges_before..];
 
             trace!(
