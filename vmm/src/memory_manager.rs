@@ -1516,6 +1516,25 @@ impl MemoryManager {
                 }
                 pages_served += 1;
 
+                // preemptively fault that page in the guest, as it's very
+                // likely it's going to access it soon, causing minor fault
+                // if it's enabled.
+                let is_backend_fault = idx != 0;
+                if is_backend_fault && source.requires_uffd_minor_mode() {
+                    uffd::uffd_continue(
+                        vmm_uffd.fd(),
+                        ranges[range_idx].page_addr(page_idx),
+                        range.page_size,
+                    )
+                    .or_else(|e| {
+                        if e.raw_os_error() == Some(libc::EEXIST) {
+                            Ok(())
+                        } else {
+                            Err(e)
+                        }
+                    })?;
+                }
+
                 continue;
             }
 
