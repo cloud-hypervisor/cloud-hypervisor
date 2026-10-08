@@ -735,27 +735,18 @@ impl DeviceRelocation for AddressManager {
                     if old_base >= pci_mmio_allocator.base().0
                         && old_base <= pci_mmio_allocator.end().0
                     {
-                        // Free old_base first so allocate(new_base) sees it
-                        // as available; restore old_base on failure to keep
-                        // the allocator in sync with the MMIO bus.
-                        pci_mmio_allocator.free(GuestAddress(old_base), len as GuestUsize);
                         if pci_mmio_allocator
-                            .allocate(Some(GuestAddress(new_base)), len as GuestUsize, Some(len))
+                            .move_range(
+                                GuestAddress(old_base),
+                                GuestAddress(new_base),
+                                len as GuestUsize,
+                                Some(len),
+                            )
                             .is_none()
                         {
-                            if pci_mmio_allocator
-                                .allocate(
-                                    Some(GuestAddress(old_base)),
-                                    len as GuestUsize,
-                                    Some(len),
-                                )
-                                .is_none()
-                            {
-                                error!(
-                                    "Failed to restore old MMIO range 0x{old_base:x} after rejected move_bar"
-                                );
-                            }
-                            return Err(io::Error::other("failed allocating new MMIO range"));
+                            return Err(io::Error::other(format!(
+                                "Cannot move MMIO BAR address range from {old_base:#x} to {new_base:#x}"
+                            )));
                         }
 
                         break;
