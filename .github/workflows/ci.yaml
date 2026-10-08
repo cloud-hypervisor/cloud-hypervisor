@@ -836,7 +836,7 @@ jobs:
           mkdir $HOME/workloads
           az storage blob download --container-name private-images --file "$HOME/workloads/windows-server-2025-amd64-1.raw" --name windows-server-2025-amd64-1.raw --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
       - name: Run Windows guest integration tests
-        timeout-minutes: 15
+        timeout-minutes: 30
         run: scripts/dev_cli.sh tests --integration-windows --libc ${{ matrix.libc }}
   integration-mshv-x86-64:
     name: integration-mshv-x86-64
