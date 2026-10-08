@@ -6,6 +6,7 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::ffi::CString;
+use std::os::unix::io::AsRawFd;
 use std::sync::{Arc, Barrier, RwLock};
 use std::{fmt, io, mem, ptr, result};
 
@@ -22,7 +23,8 @@ use vm_device::{BusDeviceSync, Resource};
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-    GuestMemoryBackend, GuestMemoryError, GuestMemoryMmap, Le32, Le64,
+    GuestMemoryBackend, GuestMemoryError, GuestMemoryMmap, GuestMemoryRegion, Le32, Le64,
+    VolatileMemory,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 
@@ -162,7 +164,21 @@ enum FunctionCode {
     MprotectRW = 12,
     Mergeable = 13,
     Unmergeable = 14,
+    Hugepage = 15,
+    NoHugepage = 16,
+    DontneedLockedBatch = 17,
+    DontneedLocked = 18,
 }
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default)]
+struct PvmemcontrolIovec {
+    iov_base: Le64,
+    iov_len: Le64,
+}
+
+// SAFETY: it only has data and has no implicit padding.
+unsafe impl ByteValued for PvmemcontrolIovec {}
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Default)]
@@ -448,16 +464,74 @@ impl PvmemcontrolBusDevice {
     }
 
     fn madvise(&self, addr: u64, length: u64, advice: libc::c_int) -> result::Result<(), Error> {
+        if length == 0 {
+            return Ok(());
+        }
+
+        // If discarding and backed by a file (shared=on / memfd), punch hole via fallocate
+        if advice == libc::MADV_DONTNEED || advice == libc::MADV_DONTNEED_LOCKED {
+            let memory = self.mem.memory();
+            let range_base = GuestAddress(addr);
+            let range_len = usize::try_from(length).map_err(|_| Error::InvalidRequest)?;
+
+            let region = memory.find_region(range_base).ok_or(Error::GuestMemory(
+                GuestMemoryError::InvalidGuestAddress(range_base),
+            ))?;
+            if let Some(f_off) = region.file_offset() {
+                let offset = range_base.0 - region.start_addr().0;
+                // SAFETY: FFI call with valid arguments
+                let res = unsafe {
+                    libc::fallocate64(
+                        f_off.file().as_raw_fd(),
+                        libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE,
+                        (offset + f_off.start()) as libc::off64_t,
+                        range_len as libc::off64_t,
+                    )
+                };
+                if res != 0 {
+                    return Err(Error::LibcFail(io::Error::last_os_error()));
+                }
+            }
+        }
+
         // SAFETY: [`base`, `base` + `len`) is guest memory
         self.operate_on_memory_range(addr, length, |base, len| unsafe {
             libc::madvise(base, len, advice)
         })
     }
 
-    fn mlock(&self, addr: u64, length: u64, on_default: bool) -> result::Result<(), Error> {
+    // Issues `MADV_DONTNEED_LOCKED` on each memory range in the
+    // `PvmemcontrolIovec` array at GPA `addr` with `length` entries.
+    fn madvise_dontneed_locked_batch(&self, addr: u64, length: u64) -> result::Result<(), Error> {
+        if length == 0 {
+            return Ok(());
+        }
+
+        let memory = self.mem.memory();
+        let range_base = GuestAddress(addr);
+        let region = memory.find_region(range_base).ok_or(Error::GuestMemory(
+            GuestMemoryError::InvalidGuestAddress(range_base),
+        ))?;
+        let offset = (range_base.0 - region.start_addr().0) as usize;
+        let array_ref = region
+            .get_array_ref::<PvmemcontrolIovec>(offset, length as usize)
+            .map_err(|e| Error::GuestMemory(e.into()))?;
+
+        for i in 0..array_ref.len() {
+            let entry = array_ref.load(i);
+            self.madvise(
+                entry.iov_base.to_native(),
+                entry.iov_len.to_native(),
+                libc::MADV_DONTNEED_LOCKED,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn mlock(&self, addr: u64, length: u64, on_fault: bool) -> result::Result<(), Error> {
         // SAFETY: [`base`, `base` + `len`) is guest memory
         self.operate_on_memory_range(addr, length, |base, len| unsafe {
-            libc::mlock2(base, len, if on_default { libc::MLOCK_ONFAULT } else { 0 })
+            libc::mlock2(base, len, if on_fault { libc::MLOCK_ONFAULT } else { 0 })
         })
     }
 
@@ -524,7 +598,10 @@ impl PvmemcontrolBusDevice {
             FunctionCode::Pageout => self.madvise(addr, length, libc::MADV_PAGEOUT),
             FunctionCode::Dontdump => self.madvise(addr, length, libc::MADV_DONTDUMP),
             FunctionCode::SetVMAAnonName => self.set_vma_anon_name(addr, length, arg),
-            FunctionCode::Mlock => self.mlock(addr, length, false),
+            FunctionCode::Mlock => {
+                let onfault = (arg as libc::c_uint) & libc::MLOCK_ONFAULT != 0;
+                self.mlock(addr, length, onfault)
+            }
             FunctionCode::Munlock => self.munlock(addr, length),
             FunctionCode::MprotectNone => self.mprotect(addr, length, libc::PROT_NONE),
             FunctionCode::MprotectR => self.mprotect(addr, length, libc::PROT_READ),
@@ -534,6 +611,10 @@ impl PvmemcontrolBusDevice {
             }
             FunctionCode::Mergeable => self.madvise(addr, length, libc::MADV_MERGEABLE),
             FunctionCode::Unmergeable => self.madvise(addr, length, libc::MADV_UNMERGEABLE),
+            FunctionCode::Hugepage => self.madvise(addr, length, libc::MADV_HUGEPAGE),
+            FunctionCode::NoHugepage => self.madvise(addr, length, libc::MADV_NOHUGEPAGE),
+            FunctionCode::DontneedLockedBatch => self.madvise_dontneed_locked_batch(addr, length),
+            FunctionCode::DontneedLocked => self.madvise(addr, length, libc::MADV_DONTNEED_LOCKED),
         };
         result.map(|_| PvmemcontrolResp::default())
     }
