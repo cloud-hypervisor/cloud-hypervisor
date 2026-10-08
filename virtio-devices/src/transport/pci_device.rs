@@ -18,8 +18,8 @@ use libc::EFD_NONBLOCK;
 use log::{error, info, warn};
 use pci::{
     BarReprogrammingParams, MaybeMutInterruptSourceGroup, MsixCap, MsixConfig, PciBarConfiguration,
-    PciBarRegionType, PciCapability, PciCapabilityId, PciClassCode, PciConfiguration, PciDevice,
-    PciDeviceError, PciHeaderType, PciMassStorageSubclass, PciNetworkControllerSubclass,
+    PciBarRegionType, PciBdf, PciCapability, PciCapabilityId, PciClassCode, PciConfiguration,
+    PciDevice, PciDeviceError, PciHeaderType, PciMassStorageSubclass, PciNetworkControllerSubclass,
     PciSubclass,
 };
 use serde::{Deserialize, Serialize};
@@ -419,6 +419,8 @@ pub struct VirtioPciDevice {
 
     // Pending activations
     pending_activations: Arc<Mutex<Vec<VirtioPciDeviceActivator>>>,
+
+    bdf: PciBdf,
 }
 
 impl VirtioPciDevice {
@@ -430,7 +432,7 @@ impl VirtioPciDevice {
         device: Arc<Mutex<dyn VirtioDevice>>,
         access_platform: Option<&Arc<dyn AccessPlatform>>,
         interrupt_manager: &dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>,
-        pci_device_bdf: u32,
+        bdf: PciBdf,
         activate_evt: EventFd,
         use_64bit_bar: bool,
         dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
@@ -494,8 +496,7 @@ impl VirtioPciDevice {
             let interrupt_source_group: MaybeMutInterruptSourceGroup =
                 interrupt_source_group.clone();
             let msix_config = Arc::new(Mutex::new(
-                MsixConfig::new(msix_num, interrupt_source_group, pci_device_bdf, msix_state)
-                    .unwrap(),
+                MsixConfig::new(msix_num, interrupt_source_group, bdf.into(), msix_state).unwrap(),
             ));
             let msix_config_clone = Arc::clone(&msix_config);
             (msix_config, msix_config_clone)
@@ -642,6 +643,7 @@ impl VirtioPciDevice {
             activate_evt,
             dma_handler,
             pending_activations,
+            bdf,
         };
 
         // In case of a restore, we can activate the device, as we know at
@@ -1324,6 +1326,10 @@ impl PciDevice for VirtioPciDevice {
     fn id(&self) -> Option<String> {
         Some(self.id.clone())
     }
+
+    fn bdf(&self) -> PciBdf {
+        self.bdf
+    }
 }
 
 impl BusDevice for VirtioPciDevice {
@@ -1711,7 +1717,7 @@ mod tests {
             device,
             None,
             &TestInterruptManager,
-            0,
+            0.into(),
             EventFd::new(EFD_NONBLOCK).unwrap(),
             false,
             None,
@@ -1792,7 +1798,7 @@ mod tests {
             device,
             None,
             &TestInterruptManager,
-            0,
+            0.into(),
             EventFd::new(EFD_NONBLOCK).unwrap(),
             false,
             None,

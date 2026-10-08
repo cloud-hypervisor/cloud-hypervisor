@@ -12,8 +12,8 @@ use event_monitor::event;
 use log::{debug, info};
 use pci::{
     BarReprogrammingParams, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable,
-    PciBarRegionType, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType,
-    PciSubclass,
+    PciBarRegionType, PciBdf, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
+    PciHeaderType, PciSubclass,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -53,6 +53,7 @@ impl PciSubclass for PvPanicSubclass {
 /// A device for handling guest panic event
 pub struct PvPanicDevice {
     id: String,
+    bdf: PciBdf,
     events: u8,
 
     // PCI configuration registers.
@@ -66,7 +67,7 @@ pub struct PvPanicDeviceState {
 }
 
 impl PvPanicDevice {
-    pub fn new(id: String, snapshot: Option<&Snapshot>) -> Result<Self, PvPanicError> {
+    pub fn new(id: String, bdf: PciBdf, snapshot: Option<&Snapshot>) -> Result<Self, PvPanicError> {
         let pci_configuration_state = vm_migration::state_from_id(snapshot, PCI_CONFIGURATION_ID)
             .map_err(|e| {
             PvPanicError::RetrievePciConfigurationState(anyhow!(
@@ -112,6 +113,7 @@ impl PvPanicDevice {
 
         let pvpanic_device = PvPanicDevice {
             id,
+            bdf,
             events,
             configuration,
             bar_regions: vec![],
@@ -241,6 +243,10 @@ impl PciDevice for PvPanicDevice {
 
     fn id(&self) -> Option<String> {
         Some(self.id.clone())
+    }
+
+    fn bdf(&self) -> PciBdf {
+        self.bdf
     }
 }
 

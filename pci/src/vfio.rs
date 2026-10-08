@@ -2673,6 +2673,10 @@ iova 0x{:x}, size 0x{:x}: {}, ",
     fn id(&self) -> Option<String> {
         Some(self.id.clone())
     }
+
+    fn bdf(&self) -> PciBdf {
+        self.bdf
+    }
 }
 
 impl Pausable for VfioPciDevice {

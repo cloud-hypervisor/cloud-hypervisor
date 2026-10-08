@@ -3683,6 +3683,7 @@ impl DeviceManager {
         let (pvmemcontrol_pci_device, pvmemcontrol_bus_device) =
             pvmemcontrol::PvmemcontrolDevice::make_device(
                 id.clone(),
+                pci_device_bdf,
                 self.memory_manager.lock().unwrap().guest_memory(),
             );
 
@@ -4912,7 +4913,7 @@ impl DeviceManager {
                 virtio_device,
                 access_platform.as_ref(),
                 self.msi_interrupt_manager.as_ref(),
-                pci_device_bdf.into(),
+                pci_device_bdf,
                 self.activate_evt
                     .try_clone()
                     .map_err(DeviceManagerError::EventFd)?,
@@ -4978,7 +4979,7 @@ impl DeviceManager {
 
         let snapshot = snapshot_from_id(snapshot, id.as_str());
 
-        let pvpanic_device = devices::PvPanicDevice::new(id.clone(), snapshot)
+        let pvpanic_device = devices::PvPanicDevice::new(id.clone(), pci_device_bdf, snapshot)
             .map_err(DeviceManagerError::PvPanicCreate)?;
 
         let pvpanic_device = Arc::new(Mutex::new(pvpanic_device));
@@ -5037,6 +5038,7 @@ impl DeviceManager {
         let ivshmem_device = Arc::new(Mutex::new(
             devices::IvshmemDevice::new(
                 id.clone(),
+                pci_device_bdf,
                 ivshmem_cfg.size as u64,
                 Arc::clone(&ivshmem_ops) as Arc<Mutex<dyn IvshmemOps>>,
                 snapshot,
