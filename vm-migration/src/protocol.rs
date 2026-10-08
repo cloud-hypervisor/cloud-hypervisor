@@ -726,27 +726,27 @@ mod tests {
     fn test_memory_range_table_from_dirty_ranges_iter() {
         let input = [0b1111_1110_1110, 0b1_0000];
 
-        let start_gpa = 0x1000;
-        let page_size = 0x1000;
-
-        let range = MemoryRangeTable::from_dirty_bitmap(input, start_gpa, page_size);
-        assert_eq!(
-            range.ranges(),
-            &[
-                MemoryRange {
-                    gpa: start_gpa + page_size,
-                    length: page_size * 3,
-                },
-                MemoryRange {
-                    gpa: start_gpa + 5 * page_size,
-                    length: page_size * 7,
-                },
-                MemoryRange {
-                    gpa: start_gpa + (64 + 4) * page_size,
-                    length: page_size,
-                }
-            ]
-        );
+        let start_gpa = 0x10000;
+        for page_size in [4096, 16384, 65536] {
+            let range = MemoryRangeTable::from_dirty_bitmap(input, start_gpa, page_size);
+            assert_eq!(
+                range.ranges(),
+                &[
+                    MemoryRange {
+                        gpa: start_gpa + page_size,
+                        length: page_size * 3,
+                    },
+                    MemoryRange {
+                        gpa: start_gpa + 5 * page_size,
+                        length: page_size * 7,
+                    },
+                    MemoryRange {
+                        gpa: start_gpa + (64 + 4) * page_size,
+                        length: page_size,
+                    }
+                ]
+            );
+        }
     }
 
     /// Appending multiple bitmaps must yield the same table as merging the
