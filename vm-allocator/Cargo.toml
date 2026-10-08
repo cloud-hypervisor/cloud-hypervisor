@@ -11,6 +11,7 @@ kvm = ["arch/kvm"]
 
 [dependencies]
 libc = { workspace = true }
+log = { workspace = true }
 thiserror = { workspace = true }
 vm-memory = { workspace = true }
 
