@@ -111,7 +111,7 @@ impl Read for SocketConsole {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Read, Write};
+    use std::io::{ErrorKind, Read, Write};
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::thread;
     use std::time::Duration;
@@ -203,5 +203,49 @@ mod tests {
         let _client = UnixStream::connect(&path).unwrap();
         console.accept(&listener).unwrap();
         assert!(console.client_fd().is_some());
+    }
+
+    #[test]
+    fn client_reset_with_unread_output_does_not_wedge_console() {
+        let tmp_dir = TempDir::new().unwrap();
+        let path = tmp_dir.as_path().join("socket");
+        let listener = UnixListener::bind(&path).unwrap();
+        let mut console = SocketConsole::new();
+
+        {
+            let _client = UnixStream::connect(&path).unwrap();
+            console.accept(&listener).unwrap();
+            assert!(console.client_fd().is_some());
+
+            let mut sink = console.out_sink();
+            sink.write_all(&vec![b'x'; 64 * 1024]).unwrap();
+        }
+
+        let mut buf = [0u8; 64];
+        let mut reset = None;
+        for _ in 0..1000 {
+            match console.read(&mut buf) {
+                Ok(0) if console.client_fd().is_some() => {
+                    thread::sleep(Duration::from_millis(1));
+                }
+                Ok(n) => panic!("expected a connection reset, got {n} readable byte(s)"),
+                Err(e) => {
+                    reset = Some(e);
+                    break;
+                }
+            }
+        }
+        let reset = reset.expect("connection reset was never observed");
+        assert_eq!(reset.kind(), ErrorKind::ConnectionReset);
+
+        assert!(console.client_fd().is_none());
+
+        let mut next = UnixStream::connect(&path).unwrap();
+        console.accept(&listener).unwrap();
+        let mut sink = console.out_sink();
+        sink.write_all(b"back\n").unwrap();
+        let mut got = [0u8; 5];
+        next.read_exact(&mut got).unwrap();
+        assert_eq!(&got, b"back\n");
     }
 }
