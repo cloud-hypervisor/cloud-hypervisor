@@ -274,6 +274,27 @@ impl UffdRange {
     }
 }
 
+/// A userfaultfd and the ranges registered in it, at the addresses they are
+/// mapped at in the process owning it.
+pub(crate) struct Uffd {
+    fd: OwnedFd,
+    ranges: Box<[UffdRange]>,
+}
+
+impl Uffd {
+    pub(crate) fn new(fd: OwnedFd, ranges: Box<[UffdRange]>) -> Self {
+        Self { fd, ranges }
+    }
+
+    pub(crate) fn fd(&self) -> BorrowedFd<'_> {
+        self.fd.as_fd()
+    }
+
+    pub(crate) fn ranges(&self) -> &[UffdRange] {
+        &self.ranges
+    }
+}
+
 /// Provider of guest-memory page contents for a UFFD handler.
 pub(crate) trait UffdMemorySource: Send {
     fn resolve(
