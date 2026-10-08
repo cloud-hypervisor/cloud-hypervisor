@@ -53,29 +53,29 @@ const E820_RAM: u32 = 1;
 const E820_RESERVED: u32 = 2;
 
 #[cfg(target_arch = "x86_64")]
-const FW_CFG_PORT_SELECTOR: u64 = 0x510;
+const FW_CFG_ADDRESS_SELECTOR: u64 = 0x510;
 #[cfg(target_arch = "x86_64")]
-const FW_CFG_PORT_DATA: u64 = 0x511;
+const FW_CFG_ADDRESS_DATA: u64 = 0x511;
 #[cfg(target_arch = "x86_64")]
-const FW_CFG_PORT_DMA_HI: u64 = 0x514;
+const FW_CFG_ADDRESS_DMA_HI: u64 = 0x514;
 #[cfg(target_arch = "x86_64")]
-const FW_CFG_PORT_DMA_LO: u64 = 0x518;
+const FW_CFG_ADDRESS_DMA_LO: u64 = 0x518;
 #[cfg(target_arch = "x86_64")]
-pub const FW_CFG_PORT_BASE: u64 = 0x510;
+pub const FW_CFG_ADDRESS_BASE: u64 = 0x510;
 #[cfg(target_arch = "x86_64")]
-pub const FW_CFG_PORT_WIDTH: u64 = 0xc;
+pub const FW_CFG_ADDRESS_WIDTH: u64 = 0xc;
 #[cfg(target_arch = "aarch64")]
-const FW_CFG_PORT_SELECTOR: u64 = 0x9030008;
+const FW_CFG_ADDRESS_SELECTOR: u64 = 0x9030008;
 #[cfg(target_arch = "aarch64")]
-const FW_CFG_PORT_DATA: u64 = 0x9030000;
+const FW_CFG_ADDRESS_DATA: u64 = 0x9030000;
 #[cfg(target_arch = "aarch64")]
-const FW_CFG_PORT_DMA_HI: u64 = 0x9030010;
+const FW_CFG_ADDRESS_DMA_HI: u64 = 0x9030010;
 #[cfg(target_arch = "aarch64")]
-const FW_CFG_PORT_DMA_LO: u64 = 0x9030014;
+const FW_CFG_ADDRESS_DMA_LO: u64 = 0x9030014;
 #[cfg(target_arch = "aarch64")]
-pub const FW_CFG_PORT_BASE: u64 = 0x9030000;
+pub const FW_CFG_ADDRESS_BASE: u64 = 0x9030000;
 #[cfg(target_arch = "aarch64")]
-pub const FW_CFG_PORT_WIDTH: u64 = 0x18;
+pub const FW_CFG_ADDRESS_WIDTH: u64 = 0x18;
 
 const FW_CFG_SIGNATURE: u16 = 0x00;
 const FW_CFG_ID: u16 = 0x01;
@@ -808,19 +808,19 @@ impl FwCfg {
 
 impl BusDevice for FwCfg {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
-        let port = offset + FW_CFG_PORT_BASE;
+        let port = offset + FW_CFG_ADDRESS_BASE;
         let size = data.len();
         match (port, size) {
-            (FW_CFG_PORT_SELECTOR, _) => {
+            (FW_CFG_ADDRESS_SELECTOR, _) => {
                 error!("fw_cfg: selector register is write-only.");
             }
-            (FW_CFG_PORT_DATA, _) => _ = self.read_data(data, size as u32),
-            (FW_CFG_PORT_DMA_HI, 4) => {
+            (FW_CFG_ADDRESS_DATA, _) => _ = self.read_data(data, size as u32),
+            (FW_CFG_ADDRESS_DMA_HI, 4) => {
                 let addr = self.dma_address;
                 let addr_hi = (addr >> 32) as u32;
                 data.copy_from_slice(&addr_hi.to_be_bytes());
             }
-            (FW_CFG_PORT_DMA_LO, 4) => {
+            (FW_CFG_ADDRESS_DMA_LO, 4) => {
                 let addr = self.dma_address;
                 let addr_lo = (addr & 0xffff_ffff) as u32;
                 data.copy_from_slice(&addr_lo.to_be_bytes());
@@ -832,10 +832,10 @@ impl BusDevice for FwCfg {
     }
 
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
-        let port = offset + FW_CFG_PORT_BASE;
+        let port = offset + FW_CFG_ADDRESS_BASE;
         let size = data.size();
         match (port, size) {
-            (FW_CFG_PORT_SELECTOR, 2) => {
+            (FW_CFG_ADDRESS_SELECTOR, 2) => {
                 let mut buf = [0u8; 2];
                 buf[..size].copy_from_slice(&data[..size]);
                 #[cfg(target_arch = "x86_64")]
@@ -845,22 +845,22 @@ impl BusDevice for FwCfg {
                 self.selector = val;
                 self.data_offset = 0;
             }
-            (FW_CFG_PORT_DATA, 1) => error!("fw_cfg: data register is read-only."),
+            (FW_CFG_ADDRESS_DATA, 1) => error!("fw_cfg: data register is read-only."),
             #[cfg(target_arch = "aarch64")]
-            (FW_CFG_PORT_DMA_HI, 8) => {
+            (FW_CFG_ADDRESS_DMA_HI, 8) => {
                 let mut buf = [0u8; 8];
                 buf.copy_from_slice(data);
                 self.dma_address = u64::from_be_bytes(buf);
                 self.do_dma();
             }
-            (FW_CFG_PORT_DMA_HI, 4) => {
+            (FW_CFG_ADDRESS_DMA_HI, 4) => {
                 let mut buf = [0u8; 4];
                 buf[..size].copy_from_slice(&data[..size]);
                 let val = u32::from_be_bytes(buf);
                 self.dma_address &= 0xffff_ffff;
                 self.dma_address |= (val as u64) << 32;
             }
-            (FW_CFG_PORT_DMA_LO, 4) => {
+            (FW_CFG_ADDRESS_DMA_LO, 4) => {
                 let mut buf = [0u8; 4];
                 buf[..size].copy_from_slice(&data[..size]);
                 let val = u32::from_be_bytes(buf);
