@@ -203,7 +203,7 @@ passing through is `0000:00:01.0`.
 
 ```bash
 ./cloud-hypervisor \
-    --cpus boot=1 \
+    --cpus boot=1,nested=on \
     --memory size=8G,hugepages=on \
     --disk path=focal-server-cloudimg-amd64.raw,image_type=raw \
     --kernel custom-vmlinux \

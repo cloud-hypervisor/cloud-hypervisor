@@ -1099,7 +1099,7 @@ mod tests {
                 max_phys_bits: 46,
                 affinity: None,
                 features: CpuFeatures::default(),
-                nested: true,
+                nested: false,
                 core_scheduling: CoreScheduling::Vm,
                 profile: Default::default(),
             },
