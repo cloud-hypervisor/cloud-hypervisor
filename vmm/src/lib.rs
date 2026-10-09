@@ -737,6 +737,8 @@ struct ReceiveMigrationConfiguredData {
     /// The memory transfer mode announced by the sender in the received
     /// [`VmMigrationConfig`].
     memory_mode: MigrationMode,
+    /// Enable the background thread for faulting all remaining pages.
+    background_fetch_pages: bool,
 }
 
 /// The receiver's state machine behind the migration protocol.
@@ -1029,6 +1031,7 @@ impl Vmm {
                     shared_backing,
                     fault_rx,
                     memory_mode,
+                    background_fetch_pages: receive_data_migration.background_fetch_pages,
                 })
             };
 
@@ -1229,6 +1232,7 @@ impl Vmm {
                 .start_postcopy_serving(
                     &saved_regions,
                     shared_backing,
+                    config_data.background_fetch_pages,
                     fault_stream,
                     &self.exit_evt,
                 )
@@ -4180,6 +4184,7 @@ mod tests {
             vfio_fds,
             iommufd_fd,
             zone_updates: vec![],
+            background_fetch_pages: true,
         }
     }
 
