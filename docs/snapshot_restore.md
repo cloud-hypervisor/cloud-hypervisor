@@ -168,7 +168,8 @@ Current constraints for `memory_restore_mode=copyonwrite`:
   (`mergeable=on`), `--pvmemcontrol`, device passthrough
   (`--device`/`--user-device`/`--vdpa`), and snapshot ranges that are not
   page-aligned single-region extents. Each region's `reserve` policy and the
-  THP policy are re-applied to the mapped region.
+  THP policy are re-applied to the mapped region. Each page the guest writes
+  is copied on its own, so written memory is not backed by huge pages.
 - A snapshot memory file shorter than the saved ranges is rejected up front (it
   would otherwise fault `SIGBUS` at run time).
 - `prefault` is rejected.
