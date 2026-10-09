@@ -1106,7 +1106,7 @@ impl MemoryManager {
             }
         }
 
-        self.spawn_uffd_handler(uffd, None, served_bitmap, source, exit_evt)?;
+        self.spawn_uffd_handler(uffd, None, served_bitmap, source, exit_evt, true)?;
         info!("UFFD restore: demand-paged restore enabled");
         Ok(())
     }
@@ -1117,6 +1117,7 @@ impl MemoryManager {
         &mut self,
         saved_regions: &MemoryRangeTable,
         shared_backing: bool,
+        background_fetch_pages: bool,
         socket: SocketStream,
         exit_evt: &EventFd,
     ) -> Result<(), Error> {
@@ -1146,7 +1147,15 @@ impl MemoryManager {
                 )
             })
             .collect();
-        self.spawn_uffd_handler(uffd, Some(socket_fd), served_bitmap, source, exit_evt)
+        info!("UFFD: postcopy background prefault {background_fetch_pages}");
+        self.spawn_uffd_handler(
+            uffd,
+            Some(socket_fd),
+            served_bitmap,
+            source,
+            exit_evt,
+            background_fetch_pages,
+        )
     }
 
     /// Create a UFFD fd and register every range.
@@ -1247,6 +1256,7 @@ impl MemoryManager {
         served_bitmap: Vec<AtomicBitmap>,
         source: Box<dyn UffdMemorySource>,
         exit_evt: &EventFd,
+        background_fetch_pages: bool,
     ) -> Result<(), Error> {
         info!(
             "UFFD: spawning handler for {} region(s)",
@@ -1273,6 +1283,7 @@ impl MemoryManager {
                         served_bitmap,
                         &ready_tx,
                         &thread_prefault_complete,
+                        background_fetch_pages,
                     );
 
                     if result.is_err() && thread_stop_event.read().is_ok() {
@@ -1384,7 +1395,7 @@ impl MemoryManager {
     /// Serve UFFD faults from every userfaultfd in `uffds` via `source`,
     /// prefaulting one page per idle iteration through the first one. Once
     /// `source` fails, poison each faulted page instead.
-    #[expect(clippy::needless_pass_by_value)]
+    #[expect(clippy::needless_pass_by_value, clippy::too_many_arguments)]
     fn uffd_handler_loop(
         uffds: &[Uffd],
         stop_event: &EventFd,
@@ -1393,6 +1404,7 @@ impl MemoryManager {
         served_bitmap: Vec<AtomicBitmap>,
         ready_tx: &SyncSender<()>,
         prefault_complete: &AtomicBool,
+        background_fetch_pages: bool,
     ) -> Result<(), io::Error> {
         let vmm_uffd = &uffds[0];
         let ranges = vmm_uffd.ranges();
@@ -1403,7 +1415,7 @@ impl MemoryManager {
 
         let pages_loading: Mutex<HashSet<(usize, u64)>> = Mutex::new(HashSet::new());
 
-        let mut prefault_active = !ranges.is_empty();
+        let mut prefault_active = background_fetch_pages && !ranges.is_empty();
         let mut source_failed = false;
         let mut range_idx = 0;
         let mut page_idx = 0;
