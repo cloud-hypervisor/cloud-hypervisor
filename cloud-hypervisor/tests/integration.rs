@@ -7118,19 +7118,29 @@ mod common_parallel {
             .port()
     }
 
+    /// Properties of `send-migration` that the TCP helpers pass on; `None`
+    /// keeps the default of the VMM.
+    #[derive(Default)]
+    struct SendMigrationOptions {
+        postcopy: bool,
+        downtime_ms: Option<u64>,
+        timeout_s: Option<u64>,
+        timeout_strategy: Option<TimeoutStrategy>,
+    }
+
     fn start_live_migration_tcp_with_flags(
         src_api_socket: &str,
         dest_api_socket: &str,
         dest_event_path: &str,
         connections: NonZeroU32,
-        postcopy: bool,
+        options: &SendMigrationOptions,
     ) -> bool {
         dispatch_live_migration_tcp_with_flags(
             src_api_socket,
             dest_api_socket,
             dest_event_path,
             connections,
-            postcopy,
+            options,
         )
         .is_some_and(|receive_migration| {
             let receive_success =
@@ -7158,7 +7168,7 @@ mod common_parallel {
         dest_api_socket: &str,
         dest_event_path: &str,
         connections: NonZeroU32,
-        postcopy: bool,
+        options: &SendMigrationOptions,
     ) -> Option<Child> {
         // Wait for CH to start and to accept API requests
         if !wait_for_sequential_events_str(
@@ -7200,18 +7210,25 @@ mod common_parallel {
 
         // Start the 'send-migration' command on the source
         let connections = connections.get();
-        let extra = if postcopy {
-            ",memory_mode=postcopy"
-        } else {
-            ""
-        };
+        let mut params =
+            format!("destination_url=tcp:{host_ip}:{migration_port},connections={connections}");
+        if options.postcopy {
+            params.push_str(",memory_mode=postcopy");
+        }
+        if let Some(downtime_ms) = options.downtime_ms {
+            params.push_str(&format!(",downtime_ms={downtime_ms}"));
+        }
+        if let Some(timeout_s) = options.timeout_s {
+            params.push_str(&format!(",timeout_s={timeout_s}"));
+        }
+        if let Some(timeout_strategy) = options.timeout_strategy {
+            params.push_str(&format!(",timeout_strategy={timeout_strategy:?}"));
+        }
         let send_migration = Command::new(clh_command("ch-remote"))
             .args([
                 &format!("--api-socket={src_api_socket}"),
                 "send-migration",
-                &format!(
-                    "destination_url=tcp:{host_ip}:{migration_port},connections={connections}{extra}"
-                ),
+                &params,
             ])
             .stdin(Stdio::null())
             .stderr(Stdio::piped())
@@ -7383,7 +7400,7 @@ mod common_parallel {
                     &dest_api_socket,
                     &dest_event_path,
                     connections,
-                    false
+                    &SendMigrationOptions::default(),
                 ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
@@ -7490,7 +7507,10 @@ mod common_parallel {
                     &dest_api_socket,
                     &dest_event_path,
                     NonZeroU32::new(1).unwrap(),
-                    /* postcopy */ true,
+                    &SendMigrationOptions {
+                        postcopy: true,
+                        ..Default::default()
+                    },
                 ),
                 "Postcopy live migration command failed."
             );
@@ -7765,7 +7785,7 @@ mod common_parallel {
                 dest_api_socket,
                 dest_event_path,
                 NonZeroU32::new(1).unwrap(),
-                false,
+                &SendMigrationOptions::default(),
             ),
             TestLiveMigrationFailure::TcpPrecopyParallelConnections => {
                 dispatch_live_migration_tcp_with_flags(
@@ -7773,7 +7793,7 @@ mod common_parallel {
                     dest_api_socket,
                     dest_event_path,
                     NonZeroU32::new(8).unwrap(),
-                    false,
+                    &SendMigrationOptions::default(),
                 )
             }
         }
@@ -8140,7 +8160,7 @@ mod common_parallel {
                     &dest_api_socket,
                     &dest_event_path,
                     connections,
-                    false,
+                    &SendMigrationOptions::default(),
                 )
                 .expect("Unsuccessful command: 'send-migration'."),
             );
@@ -8241,7 +8261,7 @@ mod common_parallel {
                     &dest_api_socket,
                     &dest_event_path,
                     connections,
-                    false,
+                    &SendMigrationOptions::default(),
                 ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
