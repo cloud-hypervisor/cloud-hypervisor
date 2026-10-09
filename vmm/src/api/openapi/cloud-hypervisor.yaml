@@ -1304,13 +1304,13 @@ components:
           $ref: "#/components/schemas/RateLimiterConfig"
         offload_tso:
           type: boolean
-          default: true
+          default: false
         offload_ufo:
           type: boolean
-          default: true
+          default: false
         offload_csum:
           type: boolean
-          default: true
+          default: false
 
     RngConfig:
       required:
