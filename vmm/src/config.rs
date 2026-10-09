@@ -828,7 +828,7 @@ impl CpusConfig {
         let nested = parser
             .convert::<Toggle>("nested")
             .map_err(Error::ParseCpus)?
-            .is_none_or(|toggle| toggle.0);
+            .is_some_and(|toggle| toggle.0);
 
         let core_scheduling = parser
             .convert("core_scheduling")
@@ -4279,6 +4279,8 @@ mod tests {
     #[test]
     fn test_cpu_parsing() -> Result<()> {
         assert_eq!(CpusConfig::parse("")?, CpusConfig::default());
+        assert!(CpusConfig::parse("nested=on")?.nested);
+        assert!(!CpusConfig::parse("nested=off")?.nested);
 
         assert_eq!(
             CpusConfig::parse("boot=1")?,

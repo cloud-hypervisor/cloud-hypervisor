@@ -957,7 +957,7 @@ components:
           type: integer
         nested:
           type: boolean
-          default: true
+          default: false
         affinity:
           type: array
           items:

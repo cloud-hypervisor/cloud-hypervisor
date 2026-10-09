@@ -3057,7 +3057,7 @@ mod common_parallel {
         let vfio_tap3 = "vfio-tap3";
 
         let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=4"])
+            .args(["--cpus", "boot=4,nested=on"])
             .args(["--memory", "size=2G,hugepages=on,shared=on"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .default_disks()

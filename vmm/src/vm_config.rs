@@ -85,7 +85,7 @@ pub struct CpusConfig {
     pub affinity: Option<Box<[CpuAffinity]>>,
     #[serde(default)]
     pub features: CpuFeatures,
-    #[serde(default = "default_cpusconfig_nested")]
+    #[serde(default)]
     pub nested: bool,
     #[serde(default)]
     pub core_scheduling: CoreScheduling,
@@ -106,7 +106,7 @@ impl Default for CpusConfig {
             max_phys_bits: DEFAULT_MAX_PHYS_BITS,
             affinity: None,
             features: CpuFeatures::default(),
-            nested: true,
+            nested: false,
             core_scheduling: CoreScheduling::default(),
             profile: CpuProfile::default(),
         }
@@ -295,10 +295,6 @@ pub enum HotplugMethod {
 }
 
 fn default_memoryconfig_thp() -> bool {
-    true
-}
-
-fn default_cpusconfig_nested() -> bool {
     true
 }
 

@@ -1274,7 +1274,7 @@ impl Guest {
             kernel_cmdline: Some(DIRECT_KERNEL_BOOT_CMDLINE.to_string()),
             console_type: None,
             num_cpu: 1u32,
-            nested: true,
+            nested: false,
             mem_size_str: "512M".to_string(),
             test_name: thread::current().name().map(String::from),
         }
@@ -1426,6 +1426,7 @@ impl Guest {
             "cpus": {
             "boot_vcpus": self.num_cpu,
             "max_vcpus": self.num_cpu,
+            "nested": self.nested,
             },
             "net": [
             {
@@ -1445,10 +1446,6 @@ impl Guest {
             }
             ]
         });
-
-        if !self.nested {
-            body["cpus"]["nested"] = serde_json::json!(false);
-        }
 
         if self.vm_type == GuestVmType::Confidential {
             body["platform"] = serde_json::json!({"sev_snp": true});
@@ -1809,17 +1806,17 @@ impl Guest {
 
     pub fn default_cpus_string(&self) -> String {
         format!(
-            "boot={}{}",
+            "boot={},nested={}",
             self.num_cpu,
-            if self.nested { "" } else { ",nested=off" }
+            if self.nested { "on" } else { "off" }
         )
     }
 
     pub fn default_cpus_with_affinity_string(&self) -> String {
         format!(
-            "boot={},affinity=[0@[0,2],1@[1,3]]{}",
+            "boot={},affinity=[0@[0,2],1@[1,3]],nested={}",
             self.num_cpu,
-            if self.nested { "" } else { ",nested=off" }
+            if self.nested { "on" } else { "off" }
         )
     }
 
@@ -1935,7 +1932,7 @@ impl GuestFactory {
         Self {
             vm_type: GuestVmType::Regular,
             boot_timeout: DEFAULT_TCP_LISTENER_TIMEOUT,
-            nested: true,
+            nested: false,
         }
     }
 
