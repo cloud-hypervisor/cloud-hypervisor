@@ -331,6 +331,13 @@ pub struct VmReceiveMigrationData {
     /// Optional memory zone update data
     #[serde(default)]
     pub zone_updates: Vec<VmMemoryZoneUpdateData>,
+    /// Enable the background thread for faulting all remaining pages.
+    #[serde(default = "default_receive_migration_postcopy_prefault")]
+    pub postcopy_prefault: bool,
+}
+
+fn default_receive_migration_postcopy_prefault() -> bool {
+    true
 }
 
 #[derive(Debug, Error)]
@@ -382,7 +389,7 @@ impl VmReceiveMigrationData {
     pub const SYNTAX: &'static str = "VM receive migration parameters \
         \"<receiver_url>\" or \"receiver_url=<url>[,tls_dir=<path>]\
         [,vfio_fds=<list_of_vfio_ids_with_their_associated_fd>][,iommufd_fd=<fd>]\
-        [,zone_updates=[<id@host_numa_node>]]\"";
+        [,zone_updates=[<id@host_numa_node>]][,postcopy_prefault=on|off]\"";
 
     pub fn parse(migration: &str) -> Result<Self, VmReceiveMigrationConfigError> {
         let mut parser = OptionParser::new();
@@ -391,7 +398,8 @@ impl VmReceiveMigrationData {
             .add("tls_dir")
             .add("vfio_fds")
             .add("iommufd_fd")
-            .add("zone_updates");
+            .add("zone_updates")
+            .add("postcopy_prefault");
         parser
             .parse(migration)
             .map_err(VmReceiveMigrationConfigError::ParseError)?;
@@ -432,12 +440,19 @@ impl VmReceiveMigrationData {
                     .collect()
             });
 
+        let postcopy_prefault = parser
+            .convert::<Toggle>("postcopy_prefault")
+            .map_err(VmReceiveMigrationConfigError::ParseError)?
+            .unwrap_or(Toggle(true))
+            .0;
+
         let data = Self {
             receiver_url,
             tls_dir,
             vfio_fds,
             iommufd_fd,
             zone_updates,
+            postcopy_prefault,
         };
 
         data.validate()?;
@@ -2262,6 +2277,29 @@ mod tests {
     }
 
     #[test]
+    fn test_vm_receive_migration_data_postcopy_prefault() {
+        let data = VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock").unwrap();
+        assert!(data.postcopy_prefault);
+
+        let data =
+            VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,postcopy_prefault=off")
+                .unwrap();
+        assert!(!data.postcopy_prefault);
+
+        let data =
+            VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,postcopy_prefault=on")
+                .unwrap();
+        assert!(data.postcopy_prefault);
+
+        VmReceiveMigrationData::parse("receiver_url=unix:/tmp/sock,postcopy_prefault=maybe")
+            .unwrap_err();
+
+        let data: VmReceiveMigrationData =
+            serde_json::from_str(r#"{"receiver_url":"unix:/tmp/sock"}"#).unwrap();
+        assert!(data.postcopy_prefault);
+    }
+
+    #[test]
     fn test_vm_receive_migration_data_parse() {
         let data = VmReceiveMigrationData::parse("receiver_url=tcp:192.168.1.1:8080").unwrap();
         assert_eq!(
@@ -2272,6 +2310,7 @@ mod tests {
                 vfio_fds: None,
                 iommufd_fd: None,
                 zone_updates: vec![],
+                postcopy_prefault: true,
             }
         );
 
@@ -2301,6 +2340,7 @@ mod tests {
                 vfio_fds: None,
                 iommufd_fd: None,
                 zone_updates: vec![],
+                postcopy_prefault: true,
             }
         );
 
