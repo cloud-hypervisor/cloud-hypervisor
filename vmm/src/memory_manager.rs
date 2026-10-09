@@ -1057,7 +1057,9 @@ impl MemoryManager {
         let mut file_offset: u64 = 0;
 
         let snapshot_file = File::open(file_path).map_err(Error::SnapshotOpen)?;
-        let source: Box<dyn UffdMemorySource> = Box::new(FileUffdMemorySource::new(snapshot_file));
+        let source: Box<dyn UffdMemorySource> = Box::new(FileUffdMemorySource::new(
+            snapshot_file.try_clone().map_err(Error::SnapshotOpen)?,
+        ));
 
         let Some((uffd_fd, ranges)) = self.prepare_uffd(
             saved_regions,
@@ -1083,6 +1085,26 @@ impl MemoryManager {
                 )
             })
             .collect();
+
+        // For sparse files, we mark holes as served pages so we don't prefault them.
+        for (range, served) in ranges.iter().zip(&served_bitmap) {
+            let end = range.source_offset + range.length;
+            let mut file_cursor = range.source_offset;
+            while let Ok(next) = next_data_extent(snapshot_file.as_fd(), file_cursor, end) {
+                let (data_off, ext_len) = next.unwrap_or((end, 0));
+                let hole_start =
+                    (file_cursor - range.source_offset).next_multiple_of(range.page_size);
+                let hole_end = align_down(data_off - range.source_offset, range.page_size);
+                if hole_end > hole_start {
+                    served.set_addr_range(hole_start as usize, (hole_end - hole_start) as usize);
+                }
+                if next.is_none() {
+                    break;
+                }
+                file_cursor = data_off + ext_len;
+            }
+        }
+
         self.spawn_uffd_handler(uffd_fd, None, ranges, served_bitmap, source, exit_evt)?;
         info!("UFFD restore: demand-paged restore enabled");
         Ok(())
