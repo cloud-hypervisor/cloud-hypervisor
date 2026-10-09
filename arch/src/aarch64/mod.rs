@@ -74,12 +74,14 @@ pub fn configure_vcpu(
     vcpu: &dyn hypervisor::Vcpu,
     id: u32,
     boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
+    nested: bool,
 ) -> super::Result<()> {
     if let Some((kernel_entry_point, _guest_memory)) = boot_setup {
         vcpu.setup_regs(
             id,
             kernel_entry_point.entry_addr.raw_value(),
             super::layout::FDT_START.raw_value(),
+            nested,
         )
         .map_err(Error::RegsConfiguration)?;
     }
@@ -137,6 +139,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
     gic_device: &Arc<Mutex<dyn Vgic>>,
     numa_nodes: &NumaNodes,
     pmu_supported: bool,
+    nested: bool,
     smbios: Option<&smbios::SmbiosConfig>,
     rsdp_addr: Option<GuestAddress>,
 ) -> super::Result<()> {
@@ -156,6 +159,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: BuildHasher>(
         numa_nodes,
         virtio_iommu_bdf,
         pmu_supported,
+        nested,
         uefi_mmap_size,
     )
     .map_err(|_| Error::SetupFdt)?;

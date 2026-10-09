@@ -317,10 +317,25 @@ pub(crate) fn create_dsdt_table(
 
 const FACP_DSDT_OFFSET: usize = 140;
 
+#[cfg(target_arch = "aarch64")]
+fn arm_boot_flags(nested: bool) -> u16 {
+    // ACPI specification section 5.2.9.4. ARM Architecture Boot Flags
+    const PSCI_COMPLIANT: u16 = 0b01;
+    const PSCI_USE_HVC: u16 = 0b10;
+
+    // PSCI compliant, using SMC for an EL2 guest and HVC otherwise.
+    if nested {
+        PSCI_COMPLIANT
+    } else {
+        PSCI_COMPLIANT | PSCI_USE_HVC
+    }
+}
+
 fn create_facp_table(
     dsdt_offset: GuestAddress,
     device_manager: &DeviceManager,
     legacy_acpi_pm1a: bool,
+    #[cfg(target_arch = "aarch64")] nested: bool,
 ) -> Sdt {
     trace_scoped!("create_facp_table");
 
@@ -359,8 +374,7 @@ fn create_facp_table(
 
     // aarch64 specific fields
     #[cfg(target_arch = "aarch64")]
-    // ARM_BOOT_ARCH: enable PSCI with HVC enable-method
-    facp.write(129, 3u16);
+    facp.write(129, arm_boot_flags(nested));
 
     // Architecture common fields
     // HW_REDUCED_ACPI, RESET_REG_SUP, TMR_VAL_EXT
@@ -1156,7 +1170,15 @@ fn create_acpi_tables_internal(
     let legacy_acpi_pm1a = cpu_manager.nested() && cpu_manager.kvm_hyperv();
     #[cfg(not(target_arch = "x86_64"))]
     let legacy_acpi_pm1a = false;
-    let facp = create_facp_table(dsdt_addr, device_manager, legacy_acpi_pm1a);
+    #[cfg(target_arch = "aarch64")]
+    let nested = cpu_manager.nested();
+    let facp = create_facp_table(
+        dsdt_addr,
+        device_manager,
+        legacy_acpi_pm1a,
+        #[cfg(target_arch = "aarch64")]
+        nested,
+    );
     let facp_addr = next_table_address(dsdt_addr, dsdt.len() as u64)?;
     tables_bytes.extend_from_slice(facp.as_slice());
     xsdt_table_pointers.push(facp_addr.0);

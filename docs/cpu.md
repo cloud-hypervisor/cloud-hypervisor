@@ -215,13 +215,24 @@ In this example the amx CPU feature will be enabled for the VMM.
 
 ### `nested`
 
-Enable nested virtualization (default on). Nested virtualization is needed to access hardware virtualization by this guest. This option can only be changed on x86-64.
+Enable nested virtualization (default on).
+Nested virtualization is needed to access hardware virtualization from a guest.
+This option is available on x86_64 (KVM & MSHV) and aarch64 (KVM only).
 
 _Example_
 
 ```
 --cpus nested=on
 ```
+
+If `nested=on`, but the kernel does not support nested virtualization, Cloud Hypervisor will
+launch a VM in normal mode.
+
+#### KVM aarch64 host requirements
+
+On `aarch64`, nested virtualization is enabled if the kernel has `KVM_CAP_ARM_EL2`.
+This can be enabled on the kernel command line by specifying `kvm-arm.mode=nested`.
+Nested virtualization is supported only on hardware with `FEAT_NV2` and a host kernel in VHE mode.
 
 ### `core_scheduling`
 

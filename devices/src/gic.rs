@@ -42,6 +42,7 @@ impl Gic {
         vcpu_count: u32,
         interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         vm: Arc<dyn hypervisor::Vm>,
+        maintenance_irq: Option<u32>,
     ) -> Result<Gic> {
         let interrupt_source_group = interrupt_manager
             .create_group(MsiIrqGroupConfig {
@@ -50,7 +51,8 @@ impl Gic {
             })
             .map_err(Error::CreateInterruptSourceGroup)?;
 
-        let config = Gic::create_default_config(vcpu_count as u64);
+        let mut config = Gic::create_default_config(vcpu_count as u64);
+        config.maintenance_irq = maintenance_irq;
         let vgic = vm.create_vgic(&config).map_err(Error::CreateGic)?;
 
         let gic = Gic {
@@ -110,6 +112,7 @@ impl Gic {
             msi_addr: redists_addr - layout::GIC_V3_ITS_SIZE,
             msi_size: layout::GIC_V3_ITS_SIZE,
             nr_irqs: layout::IRQ_NUM,
+            maintenance_irq: None,
         }
     }
 
