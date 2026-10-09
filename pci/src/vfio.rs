@@ -2374,7 +2374,7 @@ impl VfioPciDevice {
 
                     // Map the MMIO BAR into the host IOMMU address space via VfioOps
                     // Only needed if p2p_dma is enabled.
-                    if !self.iommu_attached && self.p2p_dma {
+                    if self.p2p_dma {
                         // vfio_dma_map should be unsafe but isn't.
                         // SAFETY: MmapRegion invariants guarantee that
                         // user_memory_region.mapping.addr() points to
@@ -2404,8 +2404,7 @@ impl VfioPciDevice {
                 let host_addr = user_memory_region.mapping.addr();
                 // Unmap MMIO region from the host IOMMU address space via VfioOps
                 // Only needed if p2p_dma is enabled.
-                if !self.iommu_attached
-                    && self.p2p_dma
+                if self.p2p_dma
                     && let Err(e) = self
                         .vfio_ops
                         .vfio_dma_unmap(user_memory_region.start, len)
@@ -2578,8 +2577,7 @@ impl PciDevice for VfioPciDevice {
                     let host_addr = user_memory_region.mapping.addr();
                     // Unmap the old MMIO region from the host IOMMU address space via VfioOps
                     // Only needed if p2p_dma is enabled.
-                    if !self.iommu_attached
-                        && self.p2p_dma
+                    if self.p2p_dma
                         && let Err(e) = self
                             .vfio_ops
                             .vfio_dma_unmap(user_memory_region.start, len)
@@ -2634,7 +2632,7 @@ iova 0x{:x}, size 0x{:x}: {}, ",
 
                     // Map the moved MMIO region into the host IOMMU address space via VfioOps
                     // Only needed if p2p_dma is enabled.
-                    if !self.iommu_attached && self.p2p_dma {
+                    if self.p2p_dma {
                         // vfio_dma_map is unsound and ought to be marked as unsafe
                         // SAFETY: MmapRegion invariants guarantee that
                         // host_addr points to len bytes of

@@ -298,6 +298,9 @@ Requirements:
   ARM SMMUv3.
 - `--platform iommufd=on`, since the offload goes through iommufd. Requesting
   `iommu=smmuv3` without it is rejected.
+- A host kernel able to map VFIO BAR MMIO into iommufd, or
+  `--platform vfio_p2p_dma=off`. See the `vfio_p2p_dma` notes in the
+  [VFIO documentation](vfio.md).
 - Only passthrough devices can be placed behind it. Every other device keeps
   using `iommu=virtio`.
 

@@ -4456,13 +4456,18 @@ impl DeviceManager {
 
         let memory_manager = Arc::clone(&self.memory_manager);
 
-        let vfio_p2p_dma = self
+        // Map the device BARs into the host IOMMU address space shared with
+        // the other VFIO devices so they can reach each other through
+        // peer-to-peer DMA. Devices behind a virtio-iommu are left out since
+        // the guest maps device BARs through the virtio-iommu on demand.
+        let p2p_dma = self
             .config
             .lock()
             .unwrap()
             .platform
             .as_ref()
-            .is_none_or(|p| p.vfio_p2p_dma);
+            .is_none_or(|p| p.vfio_p2p_dma)
+            && device_cfg.pci_common.iommu != IommuType::Virtio;
 
         let (memory_slot_allocator, guest_memory) = {
             let mut mm = memory_manager.lock().unwrap();
@@ -4483,7 +4488,7 @@ impl DeviceManager {
                 as Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
             legacy_interrupt_group,
             device_cfg.pci_common.iommu.attached(),
-            vfio_p2p_dma,
+            p2p_dma,
             pci_device_bdf,
             memory_slot_allocator,
             guest_memory,
