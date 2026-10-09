@@ -186,7 +186,7 @@ download_hypervisor_fw() {
 }
 
 download_linux() {
-    KERNEL_TAG="ch-release-v7.2.8-20261002"
+    KERNEL_TAG="ch-release-v7.2.8-20261009"
     if [ -n "$AUTH_DOWNLOAD_TOKEN" ]; then
         echo "Using authenticated download from GitHub"
         KERNEL_URLS=$(curl --silent https://api.github.com/repos/cloud-hypervisor/linux/releases/tags/${KERNEL_TAG} \

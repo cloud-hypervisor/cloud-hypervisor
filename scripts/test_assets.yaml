@@ -59,20 +59,20 @@ assets:
 
   # Kernels
   - filename: vmlinux-x86_64
-    url: https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v7.2.8-20261002/vmlinux-x86_64
-    sha256: e9225294c5e0e258b3c4cdb485169fafa2143eb56d9f50ce274cf401d8b45534
+    url: https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v7.2.8-20261009/vmlinux-x86_64
+    sha256: edfeb8a8a6c04ff2979e9f1c700feaa29b8f564f952261834ef0b7d2e673a853
     arch: [x86_64]
     test: [integration, rate-limiter, metrics]
 
   - filename: bzImage-x86_64
-    url: https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v7.2.8-20261002/bzImage-x86_64
-    sha256: e6c762bd778356e0f04cbee46f505a36c67a1695db484e223653bc3f83f065b1
+    url: https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v7.2.8-20261009/bzImage-x86_64
+    sha256: 40f5ac32a703528a850dd2cedb3de5cb5bfc383c5abbff1424a135d7a85bec35
     arch: [x86_64]
     test: [integration]
 
   - filename: Image-arm64
-    url: https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v7.2.8-20261002/Image-arm64
-    sha256: 00343744a98c83267b2b8d159327d441e3f3351076be8355f6f13e08f277fdae
+    url: https://github.com/cloud-hypervisor/linux/releases/download/ch-release-v7.2.8-20261009/Image-arm64
+    sha256: 8f8f3d5a983809f87a4e1e9a13053a3361fda47ef04e09c771a41c5e037cb6c2
     arch: [aarch64]
     test: [integration, metrics]
 
