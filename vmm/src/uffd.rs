@@ -203,6 +203,33 @@ pub(crate) fn copy(fd: BorrowedFd<'_>, dst: u64, src: *const u8, len: u64) -> Re
     }
 }
 
+/// Allocate a zero-filled buffer to resolve UFFD faults with.
+pub(crate) fn allocate_zero_buffer(len: usize) -> Vec<u8> {
+    let buf = vec![0u8; len];
+
+    // Ensure the page tables of the buffer exist, so UFFDIO_COPY works
+    // with it on 1 GiB pages.
+    // SAFETY: FFI call. Trivially safe.
+    let base_page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
+    let start = buf.as_ptr() as usize & !(base_page_size - 1);
+    // SAFETY: the range only covers pages backing `buf`.
+    let ret = unsafe {
+        libc::madvise(
+            start as *mut libc::c_void,
+            buf.as_ptr() as usize + buf.len() - start,
+            libc::MADV_POPULATE_READ,
+        )
+    };
+    if ret != 0 {
+        log::warn!(
+            "UFFD handler: failed to populate zero buffer: {}",
+            io::Error::last_os_error()
+        );
+    }
+
+    buf
+}
+
 /// Resolves a minor page fault by installing PTEs for a range.
 pub(crate) fn uffd_continue(fd: BorrowedFd<'_>, dst: u64, len: u64) -> Result<(), Error> {
     let mut cont = UffdioContinue {
