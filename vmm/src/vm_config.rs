@@ -551,16 +551,12 @@ pub struct NetConfig {
     pub fds: Option<Vec<i32>>,
     #[serde(default)]
     pub rate_limiter_config: Option<RateLimiterConfig>,
-    #[serde(default = "default_netconfig_true")]
+    #[serde(default)]
     pub offload_tso: bool,
-    #[serde(default = "default_netconfig_true")]
+    #[serde(default)]
     pub offload_ufo: bool,
-    #[serde(default = "default_netconfig_true")]
+    #[serde(default)]
     pub offload_csum: bool,
-}
-
-pub fn default_netconfig_true() -> bool {
-    true
 }
 
 pub fn default_netconfig_tap() -> Option<String> {

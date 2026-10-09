@@ -1848,17 +1848,17 @@ impl NetConfig {
         let offload_tso = parser
             .convert::<Toggle>("offload_tso")
             .map_err(Error::ParseNetwork)?
-            .unwrap_or(Toggle(true))
+            .unwrap_or(Toggle(false))
             .0;
         let offload_ufo = parser
             .convert::<Toggle>("offload_ufo")
             .map_err(Error::ParseNetwork)?
-            .unwrap_or(Toggle(true))
+            .unwrap_or(Toggle(false))
             .0;
         let offload_csum = parser
             .convert::<Toggle>("offload_csum")
             .map_err(Error::ParseNetwork)?
-            .unwrap_or(Toggle(true))
+            .unwrap_or(Toggle(false))
             .0;
         let mtu = parser.convert("mtu").map_err(Error::ParseNetwork)?;
         let queue_size = parser
@@ -4798,9 +4798,9 @@ mod tests {
             vhost_mode: VhostMode::Client,
             fds: None,
             rate_limiter_config: None,
-            offload_tso: true,
-            offload_ufo: true,
-            offload_csum: true,
+            offload_tso: false,
+            offload_ufo: false,
+            offload_csum: false,
         }
     }
 
@@ -6613,6 +6613,8 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
         let mut invalid_config = valid_config.clone();
         invalid_config.net = Some(vec![NetConfig {
+            offload_tso: true,
+            offload_ufo: true,
             offload_csum: false,
             ..net_fixture()
         }]);
