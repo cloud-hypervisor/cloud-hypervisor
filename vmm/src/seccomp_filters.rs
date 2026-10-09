@@ -736,6 +736,7 @@ fn vmm_thread_rules(
         (libc::SYS_madvise, vec![]),
         (libc::SYS_mbind, vec![]),
         (libc::SYS_memfd_create, vec![]),
+        (libc::SYS_mincore, vec![]),
         (libc::SYS_mmap, vec![]),
         (libc::SYS_mprotect, vec![]),
         (libc::SYS_mremap, vec![]),

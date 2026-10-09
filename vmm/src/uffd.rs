@@ -274,6 +274,48 @@ impl UffdRange {
     }
 }
 
+/// A userfaultfd and the ranges registered in it, at the addresses they are
+/// mapped at in the process owning it.
+pub(crate) struct Uffd {
+    fd: OwnedFd,
+    ranges: Box<[UffdRange]>,
+}
+
+impl Uffd {
+    pub(crate) fn new(fd: OwnedFd, ranges: Box<[UffdRange]>) -> Result<Self, Error> {
+        // SAFETY: `F_GETFL` takes no argument.
+        let flags = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFL) };
+        if flags < 0 {
+            return Err(Error::last_os_error());
+        }
+        // SAFETY: `F_SETFL` takes an integer argument, no pointer.
+        if unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+            return Err(Error::last_os_error());
+        }
+        Ok(Self { fd, ranges })
+    }
+
+    pub(crate) fn fd(&self) -> BorrowedFd<'_> {
+        self.fd.as_fd()
+    }
+
+    pub(crate) fn ranges(&self) -> &[UffdRange] {
+        &self.ranges
+    }
+
+    /// Returns the `(range_idx, page_idx)` containing `addr`.
+    pub(crate) fn locate(&self, addr: u64) -> Option<(usize, u64)> {
+        self.ranges
+            .iter()
+            .enumerate()
+            .find_map(|(range_idx, range)| {
+                range
+                    .page_index_of(addr)
+                    .map(|page_idx| (range_idx, page_idx))
+            })
+    }
+}
+
 /// Provider of guest-memory page contents for a UFFD handler.
 pub(crate) trait UffdMemorySource: Send {
     fn resolve(
@@ -490,4 +532,17 @@ pub(crate) fn wake(fd: BorrowedFd<'_>, addr: u64, len: u64) -> Result<(), Error>
         return Err(Error::last_os_error());
     }
     Ok(())
+}
+
+/// Returns whether the page at `addr` in this process is present. For a
+/// shared file mapping, this is whether the file holds the page, even if
+/// it is not mapped at `addr`.
+pub(crate) fn page_present(addr: u64) -> Result<bool, Error> {
+    let mut vec = 0u8;
+    // SAFETY: mincore() writes one byte for the single page at `addr`.
+    let ret = unsafe { libc::mincore(addr as *mut libc::c_void, 1, &mut vec) };
+    if ret < 0 {
+        return Err(Error::last_os_error());
+    }
+    Ok(vec & 1 != 0)
 }
