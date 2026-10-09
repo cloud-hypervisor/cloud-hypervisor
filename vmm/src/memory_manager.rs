@@ -1366,6 +1366,8 @@ impl MemoryManager {
 
         let pages_loading: Mutex<HashSet<(usize, u64)>> = Mutex::new(HashSet::new());
 
+        let zero_buf = vec![0u8; ranges.iter().map(|r| r.page_size).max().unwrap_or(0) as usize];
+
         let mut prefault_active = !ranges.is_empty();
         let mut source_failed = false;
         let mut range_idx = 0;
@@ -1492,12 +1494,15 @@ impl MemoryManager {
 
                 let key = (range_idx, page_idx);
 
-                let served_minor = {
+                let (served_minor, discarded) = {
                     let mut loading = pages_loading.lock().unwrap();
                     let served = served_bitmap[range_idx].is_bit_set(page_idx as usize);
 
                     if served && minor_fault {
-                        true
+                        (true, false)
+                    } else if served {
+                        // The page has been discarded (ie. virtio-balloon)
+                        (false, true)
                     } else if !loading.insert(key) {
                         // Another worker owns this page. The thread that's
                         // handling this page will call UFFDIO_COPY or
@@ -1507,11 +1512,7 @@ impl MemoryManager {
                         // anything here.
                         continue;
                     } else {
-                        if served {
-                            // The page has been discarded (ie. virtio-balloon)
-                            served_bitmap[range_idx].reset_bit(page_idx as usize);
-                        }
-                        false
+                        (false, false)
                     }
                 };
 
@@ -1532,6 +1533,25 @@ impl MemoryManager {
                     })?;
 
                     // Do not fall through and resolve an already present page.
+                    continue;
+                }
+
+                if discarded {
+                    let page_addr = range.page_addr(page_idx);
+                    uffd::copy(
+                        uffd_fd.as_fd(),
+                        page_addr,
+                        zero_buf.as_ptr(),
+                        range.page_size,
+                    )
+                    .or_else(|e| {
+                        if e.raw_os_error() == Some(libc::EEXIST) {
+                            uffd::wake(uffd_fd.as_fd(), page_addr, range.page_size)
+                        } else {
+                            Err(e)
+                        }
+                    })?;
+
                     continue;
                 }
 
