@@ -7332,12 +7332,12 @@ mod common_parallel {
     // Odd length, so the pattern shifts against page boundaries
     const INTEGRITY_PATTERN: &[u8] =
         b"Cloud Hypervisor keeps every byte intact across a live migration.";
-    // ~16 MiB
-    const INTEGRITY_CHUNK_SIZE: usize = INTEGRITY_PATTERN.len() * 258_111;
+    // ~16 MiB, page aligned so that a disk image of chunks has whole sectors
+    const INTEGRITY_CHUNK_SIZE: usize = INTEGRITY_PATTERN.len() * 258_048;
     // sha256 of the chunk, i.e., INTEGRITY_PATTERN repeated to
     // INTEGRITY_CHUNK_SIZE
     const INTEGRITY_CHUNK_SHA256: &str =
-        "b6c71b89a172a64c5abbaa29cafbd06e77e60f8f4ccee82ed6d1e78b5e6ee012";
+        "14da4c9bb7caa8e014ebf6e201372b71b4538624a3f8bca916d1a900151db00e";
 
     fn integrity_chunk() -> Vec<u8> {
         INTEGRITY_PATTERN.repeat(INTEGRITY_CHUNK_SIZE / INTEGRITY_PATTERN.len())
@@ -7426,10 +7426,95 @@ mod common_parallel {
         }
     }
 
+    /// Catches stale disk reads (VIRTIO_BLK_T_IN) across a live migration:
+    /// the host kernel writes them into guest memory behind the dirty
+    /// tracking. The guest hashes every chunk of a hot-plugged direct I/O
+    /// disk in a loop.
+    struct BlkIntegrityReader {
+        reader: thread::JoinHandle<Result<String, SshCommandError>>,
+    }
+
+    impl BlkIntegrityReader {
+        const DEVICE: &str = "/dev/disk/by-id/virtio-integrity";
+        const STOP_FILE: &str = "/tmp/stop-integrity";
+        const CHUNKS: usize = 32;
+    }
+
+    impl IntegrityCheck for BlkIntegrityReader {
+        fn start(guest: &Guest, api_socket: &str) -> Self {
+            let path = guest.tmp_dir.as_path().join("integrity.img");
+            let chunk = integrity_chunk();
+            let mut image = File::create(&path).unwrap();
+            for _ in 0..Self::CHUNKS {
+                image.write_all(&chunk).unwrap();
+            }
+            let path = path.to_str().unwrap();
+            assert!(remote_command(
+                api_socket,
+                "add-disk",
+                Some(&format!(
+                    "path={path},image_type=raw,readonly=on,direct=on,id=integrity,\
+                     serial=integrity"
+                )),
+            ));
+
+            // Wait for disk to appear
+            assert!(wait_until(Duration::from_secs(30), || guest
+                .ssh_command(&format!("ls {} 2>/dev/null || true", Self::DEVICE))
+                .is_ok_and(|out| !out.trim().is_empty())));
+
+            // A large readahead consumed slowly (1 MiB per 10 ms) keeps the
+            // reads of the last pre-copy iterations unconsumed at switchover.
+            guest
+                .ssh_command(&format!("sudo blockdev --setra 524288 {}", Self::DEVICE))
+                .unwrap();
+
+            let script = format!(
+                "sudo sh -c '
+                    while [ ! -e {stop} ]; do
+                        echo 3 > /proc/sys/vm/drop_caches
+                        cat {dev} | for i in $(seq {mib}); do
+                            dd bs=1M count=1 iflag=fullblock status=none
+                            sleep 0.01
+                        done | split -b {INTEGRITY_CHUNK_SIZE} --filter=sha256sum
+                    done
+                '",
+                dev = Self::DEVICE,
+                stop = Self::STOP_FILE,
+                mib = (Self::CHUNKS * INTEGRITY_CHUNK_SIZE).div_ceil(1 << 20),
+            );
+            let guest_ip = guest.network.guest_ip0.clone();
+            let reader = thread::spawn(move || {
+                ssh_command_ip(&script, &guest_ip, DEFAULT_SSH_RETRIES, DEFAULT_SSH_TIMEOUT)
+            });
+
+            Self { reader }
+        }
+
+        fn verify(self, guest: &Guest) {
+            guest
+                .ssh_command(&format!("touch {}", Self::STOP_FILE))
+                .unwrap();
+            let hashes = self.reader.join().unwrap().unwrap();
+            assert!(hashes.lines().count() > 0, "integrity disk was never read");
+            for line in hashes.lines() {
+                assert!(
+                    line.starts_with(INTEGRITY_CHUNK_SHA256),
+                    "disk read across the migration is corrupted: {line} != \
+                     {INTEGRITY_CHUNK_SHA256}"
+                );
+            }
+        }
+    }
+
     /// Live-migrates a guest over TCP while `C` moves data into its memory.
     fn _test_live_migration_tcp_integrity<C: IntegrityCheck>() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
+        let mut guest = Guest::new(Box::new(disk_config));
+        // Disk hotplug needs ACPI on aarch64
+        if cfg!(target_arch = "aarch64") {
+            guest.kernel_cmdline = Some(format!("{DIRECT_KERNEL_BOOT_CMDLINE} acpi=on"));
+        }
         let net_params = format!(
             "tap=,mac={},ip={},mask=255.255.255.128",
             guest.network.guest_mac0, guest.network.host_ip0
@@ -8227,6 +8312,11 @@ mod common_parallel {
     #[test]
     fn test_live_migration_tcp_integrity_net() {
         _test_live_migration_tcp_integrity::<NetIntegrityStream>();
+    }
+
+    #[test]
+    fn test_live_migration_tcp_integrity_block() {
+        _test_live_migration_tcp_integrity::<BlkIntegrityReader>();
     }
 
     #[test]
