@@ -1415,7 +1415,9 @@ impl MemoryManager {
 
         let pages_loading: Mutex<HashSet<(usize, u64)>> = Mutex::new(HashSet::new());
 
-        let zero_buf = vec![0u8; ranges.iter().map(|r| r.page_size).max().unwrap_or(0) as usize];
+        let zero_buf = uffd::allocate_zero_buffer(
+            ranges.iter().map(|r| r.page_size).max().unwrap_or(0) as usize,
+        );
 
         let mut prefault_active = background_fetch_pages && !ranges.is_empty();
         let mut source_failed = false;
