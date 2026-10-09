@@ -677,6 +677,8 @@ pub(crate) struct ConfigPatch {
     mask: u32,
     patch: u32,
     write_mask: u32,
+    #[serde(default)]
+    write_ignore: bool,
 }
 
 impl ConfigPatch {
@@ -1268,6 +1270,7 @@ impl VfioCommon {
             mask: 0,
             patch: 0,
             write_mask: 0,
+            write_ignore: false,
         });
 
         entry.mask |= mask;
@@ -1301,7 +1304,11 @@ impl VfioCommon {
             this.patch_reg(reg_idx + (reg / 4) as usize, 0xffff_ffff, 0, 0);
         };
 
-        clear(self, PCI_EXP_LNKCTL);
+        let lnkctl = reg_idx + (PCI_EXP_LNKCTL / 4) as usize;
+        self.patch_reg(lnkctl, 0x0000_ffff, 0, 0);
+        if let Some(patch) = self.patches.get_mut(&lnkctl) {
+            patch.write_ignore = true;
+        }
 
         let flags = self.vfio_wrapper.read_config_dword(u32::from(cap_offset));
         let version = (flags & PCI_EXP_FLAGS_VERS_MASK) >> PCI_EXP_FLAGS_VERS_SHIFT;
@@ -1652,7 +1659,7 @@ impl VfioCommon {
         if let Some(patch) = self.patches.get_mut(&reg_idx) {
             patch.write(offset, data);
 
-            if patch.mask == 0xffff_ffff {
+            if patch.mask == 0xffff_ffff || patch.write_ignore {
                 return (Vec::new(), None);
             }
         }
@@ -3645,6 +3652,37 @@ mod tests {
         common.write_config_register(0x50 / 4, 0, &0x1111_2222u32.to_le_bytes());
         assert_eq!(mock.dword(0x50), 0);
         assert_eq!(common.read_config_register(0x50 / 4), 0x0000_0022);
+    }
+
+    #[test]
+    fn integrated_endpoint_keeps_link_capabilities_and_status() {
+        let mock = MockConfigSpace::new(&[]);
+        let seed = |offset: u64, value: u32| mock.region_write(0, offset, &value.to_le_bytes());
+        // A PCI Express v2 capability of an endpoint at 0x40.
+        seed(0x40, 0x0002_0010);
+        seed(0x4c, 0x0047_ac46); // Link Capabilities
+        seed(0x50, 0x1011_0040); // Link Status : Link Control
+        seed(0x6c, 0x0000_007e); // Link Capabilities 2
+        seed(0x70, 0x0000_0006); // Link Status 2 : Link Control 2
+        let mut common = test_vfio_common_with_pasid(Arc::clone(&mock));
+
+        common.present_as_integrated_endpoint(0x40);
+
+        assert_eq!(
+            common.read_config_register(0x40 / 4) & PCI_EXP_FLAGS_TYPE_MASK,
+            PCI_EXP_TYPE_RC_END
+        );
+        assert_eq!(common.read_config_register(0x4c / 4), 0x0047_ac46);
+        assert_eq!(common.read_config_register(0x50 / 4), 0x1011_0000);
+        assert_eq!(common.read_config_register(0x6c / 4), 0x0000_007e);
+        assert_eq!(common.read_config_register(0x70 / 4), 0);
+
+        // Neither a Link Control write (Link Disable, Retrain Link) nor a
+        // write of the whole register reaches the device.
+        common.write_config_register(0x50 / 4, 0, &0x0030u16.to_le_bytes());
+        common.write_config_register(0x50 / 4, 0, &0xc000_0030u32.to_le_bytes());
+        assert_eq!(mock.dword(0x50), 0x1011_0040);
+        assert_eq!(common.read_config_register(0x50 / 4), 0x1011_0000);
     }
 
     #[test]
