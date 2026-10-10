@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#[cfg(not(target_arch = "riscv64"))]
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
@@ -10,14 +12,29 @@ use std::{io, thread};
 
 use acpi_tables::{Aml, AmlSink, aml};
 use log::{debug, error, info};
+#[cfg(not(target_arch = "riscv64"))]
+use thiserror::Error;
 use vm_device::BusDevice;
+#[cfg(not(target_arch = "riscv64"))]
+use vm_device::UserspaceMapping;
 use vm_device::interrupt::InterruptSourceGroup;
-use vm_memory::GuestAddress;
+#[cfg(not(target_arch = "riscv64"))]
+use vm_memory::VolatileMemory;
+#[cfg(not(target_arch = "riscv64"))]
+use vm_memory::bitmap::AtomicBitmap;
+#[cfg(not(target_arch = "riscv64"))]
+use vm_memory::volatile_memory::Error as VolatileMemoryError;
+use vm_memory::{GuestAddress, MmapRegion};
 use vmm_sys_util::eventfd::EventFd;
 
 use super::AcpiNotificationFlags;
 
 pub const GED_DEVICE_ACPI_SIZE: usize = 0x1;
+
+#[cfg(not(target_arch = "riscv64"))]
+pub const VMGENID_SIZE: usize = 16;
+
+const VMGENID_GED_BIT: usize = AcpiNotificationFlags::VMGENID_CHANGED.bits() as usize;
 
 /// A device for handling ACPI shutdown and reboot
 pub struct AcpiShutdownDevice {
@@ -198,6 +215,14 @@ impl Aml for AcpiGedDevice {
                                 &0x80usize,
                             )],
                         ),
+                        &aml::And::new(&aml::Local(1), &aml::Local(0), &VMGENID_GED_BIT),
+                        &aml::If::new(
+                            &aml::Equal::new(&aml::Local(1), &VMGENID_GED_BIT),
+                            vec![&aml::Notify::new(
+                                &aml::Path::new("\\_SB_.VGEN"),
+                                &0x80usize,
+                            )],
+                        ),
                     ],
                 ),
             ],
@@ -223,6 +248,112 @@ impl Aml for AcpiGedDevice {
                     1,
                     true,
                     vec![&aml::MethodCall::new("\\_SB_.GEC_.ESCN".into(), vec![])],
+                ),
+            ],
+        )
+        .to_aml_bytes(sink);
+    }
+}
+
+/// Map and unmap the VM Generation ID region, implemented by the VMM.
+#[cfg(not(target_arch = "riscv64"))]
+pub trait VmGenIdOps: Send {
+    fn map_ram_region(
+        &mut self,
+        start_addr: u64,
+        size: u64,
+    ) -> Result<(Arc<MmapRegion<AtomicBitmap>>, UserspaceMapping), VmGenIdError>;
+
+    fn unmap(&mut self, mapping: UserspaceMapping) -> Result<(), VmGenIdError>;
+}
+
+/// A device exposing a VM Generation ID from its own memory region
+#[cfg(not(target_arch = "riscv64"))]
+pub struct VmGenIdDevice {
+    address: GuestAddress,
+    region: Arc<MmapRegion<AtomicBitmap>>,
+    ops: Arc<Mutex<dyn VmGenIdOps>>,
+    mapping: Option<UserspaceMapping>,
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+#[derive(Debug, Error)]
+pub enum VmGenIdError {
+    #[error("Failed to read random bytes for the VM Generation ID")]
+    Random(#[source] getrandom::Error),
+
+    #[error("Failed to publish the VM Generation ID")]
+    Publish(#[source] VolatileMemoryError),
+
+    #[error("Failed to create the VM Generation ID region")]
+    CreateRegion(#[source] anyhow::Error),
+
+    #[error("Failed to map the VM Generation ID region")]
+    CreateMapping(#[source] anyhow::Error),
+
+    #[error("Failed to remove the VM Generation ID mapping")]
+    RemoveMapping(#[source] anyhow::Error),
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+impl VmGenIdDevice {
+    pub fn new(
+        address: GuestAddress,
+        size: u64,
+        ops: Arc<Mutex<dyn VmGenIdOps>>,
+    ) -> Result<VmGenIdDevice, VmGenIdError> {
+        let (region, mapping) = ops.lock().unwrap().map_ram_region(address.0, size)?;
+
+        let device = VmGenIdDevice {
+            address,
+            region,
+            ops,
+            mapping: Some(mapping),
+        };
+        device.regenerate()?;
+
+        Ok(device)
+    }
+
+    pub fn regenerate(&self) -> Result<(), VmGenIdError> {
+        let mut gen_id = [0u8; VMGENID_SIZE];
+        getrandom::fill(&mut gen_id).map_err(VmGenIdError::Random)?;
+
+        self.region
+            .get_slice(0, VMGENID_SIZE)
+            .map_err(VmGenIdError::Publish)?
+            .copy_from(&gen_id);
+
+        Ok(())
+    }
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+impl Drop for VmGenIdDevice {
+    fn drop(&mut self) {
+        if let Some(mapping) = self.mapping.take()
+            && let Err(e) = self.ops.lock().unwrap().unmap(mapping)
+        {
+            error!("Failed to remove VM Generation ID mapping: {e}");
+        }
+    }
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+impl Aml for VmGenIdDevice {
+    fn to_aml_bytes(&self, sink: &mut dyn AmlSink) {
+        let addr_low = self.address.0 as u32;
+        let addr_high = (self.address.0 >> 32) as u32;
+
+        aml::Device::new(
+            "_SB_.VGEN".into(),
+            vec![
+                &aml::Name::new("_HID".into(), &"VMGENCTR"),
+                &aml::Name::new("_CID".into(), &"VM_Gen_Counter"),
+                &aml::Name::new("_DDN".into(), &"VM_Gen_Counter"),
+                &aml::Name::new(
+                    "ADDR".into(),
+                    &aml::Package::new(vec![&addr_low, &addr_high]),
                 ),
             ],
         )
@@ -265,5 +396,66 @@ impl BusDevice for AcpiPmTimerDevice {
         let counter: u32 = (counter & 0xffff_ffff) as u32;
 
         data.copy_from_slice(&counter.to_le_bytes());
+    }
+}
+
+#[cfg(all(test, not(target_arch = "riscv64")))]
+mod tests {
+    use super::*;
+
+    struct TestOps {
+        region: Option<Arc<MmapRegion<AtomicBitmap>>>,
+    }
+
+    impl VmGenIdOps for TestOps {
+        fn map_ram_region(
+            &mut self,
+            start_addr: u64,
+            size: u64,
+        ) -> Result<(Arc<MmapRegion<AtomicBitmap>>, UserspaceMapping), VmGenIdError> {
+            let region = Arc::new(MmapRegion::new(size as usize).unwrap());
+            self.region = Some(Arc::clone(&region));
+            let mapping = UserspaceMapping {
+                mem_slot: 0,
+                addr: GuestAddress(start_addr),
+                mapping: Arc::clone(&region),
+                mergeable: false,
+            };
+            Ok((region, mapping))
+        }
+
+        fn unmap(&mut self, _mapping: UserspaceMapping) -> Result<(), VmGenIdError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_vmgenid_regenerate() {
+        // SAFETY: sysconf(_SC_PAGESIZE) has no failure mode relevant here.
+        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u64;
+        let ops = Arc::new(Mutex::new(TestOps { region: None }));
+        let device = VmGenIdDevice::new(
+            GuestAddress(0xa_0028),
+            page_size,
+            Arc::clone(&ops) as Arc<Mutex<dyn VmGenIdOps>>,
+        )
+        .unwrap();
+        let region = ops.lock().unwrap().region.clone().unwrap();
+
+        let mut first = [0u8; VMGENID_SIZE];
+        region
+            .get_slice(0, VMGENID_SIZE)
+            .unwrap()
+            .copy_to(&mut first);
+
+        device.regenerate().unwrap();
+
+        let mut second = [0u8; VMGENID_SIZE];
+        region
+            .get_slice(0, VMGENID_SIZE)
+            .unwrap()
+            .copy_to(&mut second);
+
+        assert_ne!(first, second);
     }
 }

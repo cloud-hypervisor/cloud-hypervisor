@@ -122,13 +122,14 @@ use virtio_devices::{
     AccessPlatformMapping, Block, Endpoint, IommuMapping, VdpaDmaMapping, VirtioMemMappingSource,
     balloon, mem, net, transport, vdpa, vhost_user, vsock,
 };
+use vm_allocator::page_size::get_page_size;
 use vm_allocator::{AddressAllocator, InterruptAllocError, SystemAllocator};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptRemapping, LegacyIrqGroupConfig, MsiIrqGroupConfig,
 };
 use vm_device::{Bus, BusDevice, BusDeviceSync, Resource, UserspaceMapping};
-#[cfg(feature = "ivshmem")]
+#[cfg(any(feature = "ivshmem", not(target_arch = "riscv64")))]
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
@@ -181,6 +182,8 @@ const GPIO_DEVICE_NAME: &str = "__gpio";
 const SMMUV3_DEVICE_NAME: &str = "__smmuv3";
 const RNG_DEVICE_NAME: &str = "__rng";
 const RTC_DEVICE_NAME: &str = "__rtc";
+#[cfg(not(target_arch = "riscv64"))]
+const VMGENID_DEVICE_NAME: &str = "__vmgenid";
 const IOMMU_DEVICE_NAME: &str = "__iommu";
 #[cfg(feature = "pvmemcontrol")]
 const PVMEMCONTROL_DEVICE_NAME: &str = "__pvmemcontrol";
@@ -550,6 +553,16 @@ pub enum DeviceManagerError {
     /// Failed to do power button notification
     #[error("Failed to do power button notification")]
     PowerButtonNotification(#[source] io::Error),
+
+    /// VM Generation ID device error
+    #[cfg(not(target_arch = "riscv64"))]
+    #[error("VM Generation ID device error")]
+    VmGenId(#[source] devices::VmGenIdError),
+
+    /// Failed to notify the VM Generation ID change
+    #[cfg(not(target_arch = "riscv64"))]
+    #[error("Failed to notify the VM Generation ID change")]
+    VmGenIdNotification(#[source] io::Error),
 
     /// Failed to do AArch64 GPIO power button notification
     #[cfg(target_arch = "aarch64")]
@@ -964,6 +977,10 @@ pub struct DeviceManager {
     #[cfg(target_arch = "aarch64")]
     acpi_tad_device: Option<Arc<Mutex<acpi_tad::AcpiTadDevice>>>,
 
+    // VM Generation ID device
+    #[cfg(not(target_arch = "riscv64"))]
+    vmgenid_device: Option<Arc<Mutex<devices::VmGenIdDevice>>>,
+
     // VM configuration
     config: Arc<Mutex<VmConfig>>,
 
@@ -1375,6 +1392,8 @@ impl DeviceManager {
             ged_notification_device: None,
             #[cfg(target_arch = "aarch64")]
             acpi_tad_device: None,
+            #[cfg(not(target_arch = "riscv64"))]
+            vmgenid_device: None,
             config,
             memory_manager,
             cpu_manager,
@@ -1927,6 +1946,55 @@ impl DeviceManager {
         Ok(interrupt_controller)
     }
 
+    #[cfg(not(target_arch = "riscv64"))]
+    fn add_vmgenid_device(&mut self) -> DeviceManagerResult<()> {
+        let id = String::from(VMGENID_DEVICE_NAME);
+        let mut node = device_node!(id);
+
+        // KVM requires the memory slot to be page sized, so size it to the host
+        // page, which is 4 KiB or 64 KiB depending on the architecture.
+        let region_size = get_page_size();
+
+        let restored = self
+            .device_tree
+            .lock()
+            .unwrap()
+            .get(&id)
+            .and_then(|node| {
+                node.resources.iter().find_map(|resource| match resource {
+                    Resource::MmioAddressRange { base, .. } => Some(*base),
+                    _ => None,
+                })
+            })
+            .map(GuestAddress);
+
+        let address = self
+            .address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_platform_mmio_addresses(restored, region_size, Some(region_size))
+            .ok_or(DeviceManagerError::AllocateMmioAddress)?;
+
+        let ops = Arc::new(Mutex::new(VmGenIdHandler {
+            memory_manager: Arc::clone(&self.memory_manager),
+        })) as Arc<Mutex<dyn devices::VmGenIdOps>>;
+
+        let device = Arc::new(Mutex::new(
+            devices::VmGenIdDevice::new(address, region_size, ops)
+                .map_err(DeviceManagerError::VmGenId)?,
+        ));
+
+        node.resources.push(Resource::MmioAddressRange {
+            base: address.0,
+            size: region_size,
+        });
+        self.device_tree.lock().unwrap().insert(id, node);
+        self.vmgenid_device = Some(device);
+
+        Ok(())
+    }
+
     fn add_acpi_devices(
         &mut self,
         interrupt_manager: &dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>,
@@ -1987,6 +2055,10 @@ impl DeviceManager {
             .unwrap()
             .allocate_platform_mmio_addresses(None, acpi::GED_DEVICE_ACPI_SIZE as u64, None)
             .ok_or(DeviceManagerError::AllocateMmioAddress)?;
+
+        #[cfg(not(target_arch = "riscv64"))]
+        self.add_vmgenid_device()?;
+
         let ged_device = Arc::new(Mutex::new(devices::AcpiGedDevice::new(
             interrupt_group,
             ged_irq,
@@ -5938,6 +6010,27 @@ impl DeviceManager {
             .map_err(DeviceManagerError::PowerButtonNotification)
     }
 
+    #[cfg(not(target_arch = "riscv64"))]
+    pub fn regenerate_vmgenid(&self) -> DeviceManagerResult<()> {
+        if let Some(device) = self.vmgenid_device.as_ref() {
+            device
+                .lock()
+                .unwrap()
+                .regenerate()
+                .map_err(DeviceManagerError::VmGenId)?;
+
+            self.ged_notification_device
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .notify(AcpiNotificationFlags::VMGENID_CHANGED)
+                .map_err(DeviceManagerError::VmGenIdNotification)?;
+        }
+
+        Ok(())
+    }
+
     #[cfg(target_arch = "aarch64")]
     pub fn notify_power_button(&self) -> DeviceManagerResult<()> {
         // There are two use cases:
@@ -6055,6 +6148,82 @@ impl DeviceManager {
         );
 
         Some(tracker)
+    }
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+struct VmGenIdHandler {
+    memory_manager: Arc<Mutex<MemoryManager>>,
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+impl devices::VmGenIdOps for VmGenIdHandler {
+    fn map_ram_region(
+        &mut self,
+        start_addr: u64,
+        size: u64,
+    ) -> Result<(Arc<MmapRegion<AtomicBitmap>>, UserspaceMapping), devices::VmGenIdError> {
+        let region = Arc::new(
+            MemoryManager::create_ram_region_raw(
+                &None,
+                0,
+                size as usize,
+                false,
+                false,
+                false,
+                None,
+                None,
+                None,
+                false,
+            )
+            .map_err(|e| devices::VmGenIdError::CreateRegion(e.into()))?,
+        );
+
+        // SAFETY: the region is owned by the device and outlives the mapping.
+        let mem_slot = unsafe {
+            self.memory_manager
+                .lock()
+                .unwrap()
+                .create_userspace_mapping(
+                    start_addr,
+                    region.len(),
+                    region.as_ptr(),
+                    false,
+                    false,
+                    false,
+                    hypervisor::MemoryVisibility::Shared,
+                )
+                .map_err(|e| devices::VmGenIdError::CreateMapping(e.into()))?
+        };
+
+        let mapping = UserspaceMapping {
+            mem_slot,
+            addr: GuestAddress(start_addr),
+            mapping: Arc::clone(&region),
+            mergeable: false,
+        };
+
+        Ok((region, mapping))
+    }
+
+    fn unmap(&mut self, mapping: UserspaceMapping) -> Result<(), devices::VmGenIdError> {
+        // SAFETY: the mapping was installed by map_ram_region and its region is
+        // still alive.
+        unsafe {
+            self.memory_manager
+                .lock()
+                .unwrap()
+                .remove_userspace_mapping(
+                    mapping.addr.0,
+                    mapping.mapping.len(),
+                    mapping.mapping.as_ptr(),
+                    mapping.mergeable,
+                    mapping.mem_slot,
+                )
+                .map_err(|e| devices::VmGenIdError::RemoveMapping(e.into()))?;
+        }
+
+        Ok(())
     }
 }
 
@@ -6382,6 +6551,11 @@ impl Aml for DeviceManager {
         if self.config.lock().unwrap().tpm.is_some() {
             // Add tpm device
             TpmDevice {}.to_aml_bytes(sink);
+        }
+
+        #[cfg(not(target_arch = "riscv64"))]
+        if let Some(vmgenid_device) = self.vmgenid_device.as_ref() {
+            vmgenid_device.lock().unwrap().to_aml_bytes(sink);
         }
 
         self.ged_notification_device

@@ -9495,6 +9495,16 @@ mod ivshmem {
     }
 
     #[test]
+    fn test_snapshot_restore_vmgenid() {
+        snapshot_restore_common::_test_snapshot_restore(
+            snapshot_restore_common::SnapshotRestoreTest {
+                check_vmgenid: true,
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
     fn test_snapshot_restore_with_resume() {
         snapshot_restore_common::_test_snapshot_restore(
             snapshot_restore_common::SnapshotRestoreTest {
@@ -9636,8 +9646,21 @@ mod ivshmem {
 mod snapshot_restore_common {
     use std::fs::{read_to_string, remove_dir_all};
     use std::process::Command;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     use crate::*;
+
+    // Sum the guest ACPI GED interrupt count across all CPUs.
+    fn ged_interrupt_count(guest: &Guest) -> u64 {
+        guest
+            .ssh_command(
+                "grep 'ACPI:Ged' /proc/interrupts | \
+                 awk '{s=0; for(i=2;i<=NF;i++) if($i~/^[0-9]+$/) s+=$i; print s}'",
+            )
+            .ok()
+            .and_then(|c| c.trim().parse::<u64>().ok())
+            .unwrap_or(0)
+    }
 
     // Off-host interval simulated between snapshot and restore, and the maximum
     // guest-vs-host clock skew tolerated afterwards. The interval must exceed the
@@ -9680,6 +9703,7 @@ mod snapshot_restore_common {
         pub check_clock: bool,
         pub memory_restore_mode: Option<&'static str>,
         pub use_prefault: bool,
+        pub check_vmgenid: bool,
     }
 
     pub(crate) fn _test_snapshot_restore(cfg: SnapshotRestoreTest) {
@@ -9689,6 +9713,7 @@ mod snapshot_restore_common {
             check_clock,
             memory_restore_mode,
             use_prefault,
+            check_vmgenid,
         } = cfg;
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -9718,11 +9743,15 @@ mod snapshot_restore_common {
         // x86_64: force kvm-clock — the restore catch-up moves kvmclock (KVM_SET_CLOCK),
         // not the tsc clocksource, so a tsc guest wouldn't catch up. aarch64 ignores this
         // (CNTVCT is advanced directly).
-        let boot_cmdline = if check_clock && cfg!(target_arch = "x86_64") {
-            format!("{DIRECT_KERNEL_BOOT_CMDLINE} clocksource=kvm-clock")
-        } else {
-            DIRECT_KERNEL_BOOT_CMDLINE.to_string()
-        };
+        let mut boot_cmdline = DIRECT_KERNEL_BOOT_CMDLINE.to_string();
+        if check_clock && cfg!(target_arch = "x86_64") {
+            boot_cmdline.push_str(" clocksource=kvm-clock");
+        }
+        // aarch64 needs acpi=on to reach ACPI over the FDT on a direct boot.
+        #[cfg(target_arch = "aarch64")]
+        if check_vmgenid {
+            boot_cmdline.push_str(" acpi=on");
+        }
 
         let mut child = GuestCommand::new(&guest)
             .args(["--api-socket", &api_socket_source])
@@ -9751,8 +9780,15 @@ mod snapshot_restore_common {
         // Create the snapshot directory
         let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
 
+        // AtomicU64 so the baseline crosses the catch_unwind closures below.
+        let ged_baseline = AtomicU64::new(0);
+
         let r = panic::catch_unwind(|| {
             guest.wait_vm_boot().unwrap();
+
+            if check_vmgenid {
+                ged_baseline.store(ged_interrupt_count(&guest), Ordering::Relaxed);
+            }
 
             // Check the number of vCPUs
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
@@ -9951,6 +9987,28 @@ mod snapshot_restore_common {
 
             #[cfg(target_arch = "x86_64")]
             guest.remove_test_disk(&api_socket_restored);
+
+            if check_vmgenid {
+                // Restore must raise the GED count above the earlier baseline.
+                let before = ged_baseline.load(Ordering::Relaxed);
+                let after = ged_interrupt_count(&guest);
+                assert!(
+                    after > before,
+                    "GED interrupt did not fire on restore (before: {before}, after: {after})"
+                );
+
+                // The vmgenid driver reseeds the kernel RNG on that notification.
+                assert!(
+                    wait_until(Duration::from_secs(20), || {
+                        guest
+                            .ssh_command(
+                                "sudo dmesg | grep -c 'crng reseeded due to virtual machine fork'",
+                            )
+                            .is_ok_and(|c| c.trim() != "0")
+                    }),
+                    "guest did not reseed its RNG after the VM Generation ID changed"
+                );
+            }
 
             if check_clock {
                 // Across the off-host interval the restored guest's wall clock
