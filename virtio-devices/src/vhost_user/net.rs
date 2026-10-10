@@ -50,7 +50,6 @@ pub struct Net {
     config: VirtioNetConfig,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
-    access_platform_enabled: bool,
     announce: AnnouncementState,
 }
 
@@ -242,10 +241,13 @@ impl Net {
 
             // Build the feature set that gets exposed to the guest. Some frontend available
             // features are dependent on the features the backend supports.
-            let guest_avail_features = Self::guest_avail_features(
+            let mut guest_avail_features = Self::guest_avail_features(
                 backend_acked_features,
                 backend_provides_mtu || mtu.is_some(),
             );
+            if access_platform_enabled {
+                guest_avail_features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
+            }
 
             (
                 guest_avail_features,
@@ -287,7 +289,6 @@ impl Net {
             config,
             seccomp_action,
             exit_evt,
-            access_platform_enabled,
             announce: AnnouncementState::new(announce_pending).map_err(Error::CreateEventFd)?,
         })
     }
@@ -337,11 +338,7 @@ impl VirtioDevice for Net {
     }
 
     fn features(&self) -> u64 {
-        let mut features = self.vu_common.virtio_common.avail_features;
-        if self.access_platform_enabled {
-            features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
-        }
-        features
+        self.vu_common.virtio_common.avail_features
     }
 
     fn ack_features(&mut self, value: u64) {
@@ -578,7 +575,6 @@ mod tests {
             config: VirtioNetConfig::default(),
             seccomp_action: SeccompAction::Allow,
             exit_evt: EventFd::new(libc::EFD_NONBLOCK).unwrap(),
-            access_platform_enabled: false,
             announce: AnnouncementState::new(false).map_err(Error::CreateEventFd)?,
         })
     }

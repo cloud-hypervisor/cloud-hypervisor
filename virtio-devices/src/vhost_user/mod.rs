@@ -880,18 +880,25 @@ mod tests {
     use std::thread;
 
     use vhost::vhost_user::message::{FrontendReq, VhostUserHeaderFlag};
+    use vm_memory::{FileOffset, GuestAddress};
+    use vm_migration::Snapshottable;
     use vmm_sys_util::tempdir::TempDir;
 
     use super::*;
+    use crate::vsock::tests::NoopVirtioInterrupt;
+    use crate::{VIRTIO_F_ACCESS_PLATFORM, VirtioDevice};
 
-    fn read_request(stream: &mut UnixStream, expected_request: FrontendReq) {
+    fn read_request(stream: &mut UnixStream, expected_request: FrontendReq) -> Vec<u8> {
         let mut header = [0u8; 12];
         stream.read_exact(&mut header).unwrap();
         assert_eq!(
             u32::from_ne_bytes(header[0..4].try_into().unwrap()),
             u32::from(expected_request)
         );
-        assert_eq!(u32::from_ne_bytes(header[8..12].try_into().unwrap()), 0);
+        let size = u32::from_ne_bytes(header[8..12].try_into().unwrap()) as usize;
+        let mut payload = vec![0; size];
+        stream.read_exact(&mut payload).unwrap();
+        payload
     }
 
     #[test]
@@ -901,13 +908,13 @@ mod tests {
         let listener = UnixListener::bind(&socket_path).unwrap();
         let backend = thread::spawn(move || {
             let (mut first, _) = listener.accept().unwrap();
-            read_request(&mut first, FrontendReq::SET_OWNER);
-            read_request(&mut first, FrontendReq::GET_FEATURES);
+            assert!(read_request(&mut first, FrontendReq::SET_OWNER).is_empty());
+            assert!(read_request(&mut first, FrontendReq::GET_FEATURES).is_empty());
             drop(first);
 
             let (mut second, _) = listener.accept().unwrap();
-            read_request(&mut second, FrontendReq::SET_OWNER);
-            read_request(&mut second, FrontendReq::GET_FEATURES);
+            assert!(read_request(&mut second, FrontendReq::SET_OWNER).is_empty());
+            assert!(read_request(&mut second, FrontendReq::GET_FEATURES).is_empty());
 
             let mut reply = Vec::with_capacity(20);
             reply.extend_from_slice(&u32::from(FrontendReq::GET_FEATURES).to_ne_bytes());
@@ -928,6 +935,116 @@ mod tests {
         )
         .unwrap();
 
+        backend.join().unwrap();
+    }
+
+    #[test]
+    fn access_platform_is_preserved_in_guest_features() {
+        let access_platform = 1u64 << VIRTIO_F_ACCESS_PLATFORM;
+        for enabled in [false, true] {
+            for backend_features in [0, access_platform] {
+                let temp_dir = TempDir::new_with_prefix("/tmp/vhost-user-features-").unwrap();
+                let socket_path = temp_dir.as_path().join("backend.sock");
+                let listener = UnixListener::bind(&socket_path).unwrap();
+                let backend = thread::spawn(move || {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    assert!(read_request(&mut stream, FrontendReq::SET_OWNER).is_empty());
+                    assert!(read_request(&mut stream, FrontendReq::GET_FEATURES).is_empty());
+                    for value in [
+                        u32::from(FrontendReq::GET_FEATURES),
+                        VhostUserHeaderFlag::REPLY.bits() | 1,
+                        8,
+                    ] {
+                        stream.write_all(&value.to_ne_bytes()).unwrap();
+                    }
+                    stream.write_all(&backend_features.to_ne_bytes()).unwrap();
+                });
+
+                let mut device = GenericVhostUser::new(
+                    "test".to_string(),
+                    socket_path.to_str().unwrap(),
+                    vec![256],
+                    vm_virtio::VirtioDeviceType::Fs as u32,
+                    None,
+                    SeccompAction::Allow,
+                    EventFd::new(libc::EFD_NONBLOCK).unwrap(),
+                    enabled,
+                    None,
+                )
+                .unwrap();
+                assert_eq!(device.features() & access_platform != 0, enabled);
+                device.ack_features(access_platform);
+                let state: VhostUserState<()> = device.snapshot().unwrap().to_state().unwrap();
+                assert_eq!(state.avail_features, device.features());
+                assert_eq!(state.acked_features & access_platform != 0, enabled);
+                backend.join().unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn access_platform_is_not_sent_to_backend() {
+        let temp_dir = TempDir::new_with_prefix("/tmp/vhost-user-features-").unwrap();
+        let socket_path = temp_dir.as_path().join("backend.sock");
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        let backend = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            assert!(read_request(&mut stream, FrontendReq::SET_OWNER).is_empty());
+            assert!(read_request(&mut stream, FrontendReq::GET_FEATURES).is_empty());
+            for value in [
+                u32::from(FrontendReq::GET_FEATURES),
+                VhostUserHeaderFlag::REPLY.bits() | 1,
+                8,
+            ] {
+                stream.write_all(&value.to_ne_bytes()).unwrap();
+            }
+            let features = (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_F_ACCESS_PLATFORM);
+            stream.write_all(&features.to_ne_bytes()).unwrap();
+            assert_eq!(
+                read_request(&mut stream, FrontendReq::SET_FEATURES),
+                (1u64 << VIRTIO_F_VERSION_1).to_ne_bytes()
+            );
+            assert_eq!(
+                read_request(&mut stream, FrontendReq::SET_MEM_TABLE).len(),
+                40
+            );
+        });
+
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(temp_dir.as_path().join("memory"))
+            .unwrap();
+        file.set_len(0x1000).unwrap();
+        let mem = GuestMemoryMmap::from_ranges_with_files(&[(
+            GuestAddress(0),
+            0x1000,
+            Some(FileOffset::new(file, 0)),
+        )])
+        .unwrap();
+        let kill_evt = EventFd::new(libc::EFD_NONBLOCK).unwrap();
+        let mut vu = VhostUserHandle::connect_vhost_user(
+            false,
+            socket_path.to_str().unwrap(),
+            1,
+            false,
+            &kill_evt,
+            |_| Ok(()),
+        )
+        .unwrap();
+        struct BackendReqHandler;
+        impl VhostUserFrontendReqHandler for BackendReqHandler {}
+        vu.setup_vhost_user::<BackendReqHandler>(
+            &mem,
+            &[],
+            &NoopVirtioInterrupt {},
+            (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_F_ACCESS_PLATFORM),
+            &None,
+            None,
+            None,
+        )
+        .unwrap();
         backend.join().unwrap();
     }
 }
