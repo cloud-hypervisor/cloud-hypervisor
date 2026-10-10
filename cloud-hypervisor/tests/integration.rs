@@ -1711,18 +1711,8 @@ mod common_parallel {
         let guest = Guest::new(Box::new(disk_config));
 
         // The advertised 4096 geometry comes entirely from the override and
-        // not from the backend. Direct I/O needs an O_DIRECT capable
-        // backing, so place it on the workloads filesystem rather than the
-        // default tmpfs.
-        let workloads_dir = direct.then(|| {
-            let mut workloads_path = dirs::home_dir().unwrap();
-            workloads_path.push("workloads");
-            TempDir::new_in(workloads_path.as_path()).unwrap()
-        });
-        let test_disk = match &workloads_dir {
-            Some(dir) => dir.as_path().join(format!("lbs-test.{ext}")),
-            None => guest.tmp_dir.as_path().join(format!("lbs-test.{ext}")),
-        };
+        // not from the backend.
+        let test_disk = guest.tmp_dir.as_path().join(format!("lbs-test.{ext}"));
         let test_disk_path = test_disk.to_str().unwrap().to_owned();
         let res = run_qemu_img(&test_disk, &["create", "-f", qemu_fmt], Some(&["64M"]));
         assert!(res.status.success(), "qemu-img create failed: {res:?}");
