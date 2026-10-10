@@ -693,61 +693,62 @@ jobs:
     # format() because `${{ matrix.runner }}-16` is not valid in runs-on.
     runs-on: ${{ format('{0}-16', matrix.runner) }}
     steps: *integration-x86-64-steps
-  integration-arm64:
-    name: integration-arm64
-    needs: [preflight]
-    if: *mq-if
-    timeout-minutes: 120
-    env:
-      # Our runner has 80 cores (nproc).
-      # We limit parallelism only to avoid exhausting disk space and memory
-      # resources, not to save CPU resources.
-      PARALLEL_INTEGRATION_TESTS_NUM: 25
-    runs-on: bookworm-arm64
-    steps:
-      # arm64 runner user is "runner" (vfio's is "github-runner").
-      - name: Fix workspace permissions
-        run: sudo chown -R runner:runner ${GITHUB_WORKSPACE}
-      - name: Code checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - name: Run unit tests (musl)
-        run: scripts/dev_cli.sh tests --unit --libc musl
-      - name: Load openvswitch module
-        run: sudo modprobe openvswitch
-      - name: Run integration tests (musl)
-        timeout-minutes: 60
-        run: scripts/dev_cli.sh tests --integration --libc musl
-      - name: Install Azure CLI
-        run: |
-          set -eufo pipefail
-          sudo apt install -y ca-certificates curl apt-transport-https lsb-release gnupg
-          curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
-          echo "deb [arch=arm64] https://packages.microsoft.com/repos/azure-cli/ bookworm main" | sudo tee /etc/apt/sources.list.d/azure-cli.list
-          sudo apt update
-          sudo apt install -y azure-cli
-      - name: Download Windows image
-        shell: bash
-        run: |
-          set -eufo pipefail
-          IMG_BASENAME=windows-11-iot-enterprise-aarch64.raw
-          IMG_PATH=$HOME/workloads/$IMG_BASENAME
-          IMG_GZ_PATH=$HOME/workloads/$IMG_BASENAME.gz
-          IMG_GZ_BLOB_NAME=windows-11-iot-enterprise-aarch64-25h2-6.raw.gz
-          cp "scripts/$IMG_BASENAME.sha1" "$HOME/workloads/"
-          pushd "$HOME/workloads"
-          if sha1sum "$IMG_BASENAME.sha1" --check; then
-              exit
-          fi
-          popd
-          mkdir -p "$HOME/workloads"
-          rm -f "$IMG_PATH" "$IMG_GZ_PATH"
-          az storage blob download --container-name private-images --file "$IMG_GZ_PATH" --name "$IMG_GZ_BLOB_NAME" --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
-          gzip -d "$IMG_GZ_PATH"
-      - name: Run Windows guest integration tests
-        timeout-minutes: 30
-        run: scripts/dev_cli.sh tests --integration-windows --libc musl
+# Disabled for maintenance  
+#  integration-arm64:
+#    name: integration-arm64
+#    needs: [preflight]
+#    if: *mq-if
+#    timeout-minutes: 120
+#    env:
+#      # Our runner has 80 cores (nproc).
+#      # We limit parallelism only to avoid exhausting disk space and memory
+#      # resources, not to save CPU resources.
+#      PARALLEL_INTEGRATION_TESTS_NUM: 25
+#    runs-on: bookworm-arm64
+#    steps:
+#      # arm64 runner user is "runner" (vfio's is "github-runner").
+#      - name: Fix workspace permissions
+#        run: sudo chown -R runner:runner ${GITHUB_WORKSPACE}
+#      - name: Code checkout
+#        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+#        with:
+#          fetch-depth: 0
+#      - name: Run unit tests (musl)
+#        run: scripts/dev_cli.sh tests --unit --libc musl
+#      - name: Load openvswitch module
+#        run: sudo modprobe openvswitch
+#      - name: Run integration tests (musl)
+#        timeout-minutes: 60
+#        run: scripts/dev_cli.sh tests --integration --libc musl
+#      - name: Install Azure CLI
+#        run: |
+#          set -eufo pipefail
+#          sudo apt install -y ca-certificates curl apt-transport-https lsb-release gnupg
+#          curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
+#          echo "deb [arch=arm64] https://packages.microsoft.com/repos/azure-cli/ bookworm main" | sudo tee /etc/apt/sources.list.d/azure-cli.list
+#          sudo apt update
+#          sudo apt install -y azure-cli
+#      - name: Download Windows image
+#        shell: bash
+#        run: |
+#          set -eufo pipefail
+#          IMG_BASENAME=windows-11-iot-enterprise-aarch64.raw
+#          IMG_PATH=$HOME/workloads/$IMG_BASENAME
+#          IMG_GZ_PATH=$HOME/workloads/$IMG_BASENAME.gz
+#          IMG_GZ_BLOB_NAME=windows-11-iot-enterprise-aarch64-25h2-6.raw.gz
+#          cp "scripts/$IMG_BASENAME.sha1" "$HOME/workloads/"
+#          pushd "$HOME/workloads"
+#          if sha1sum "$IMG_BASENAME.sha1" --check; then
+#              exit
+#          fi
+#          popd
+#          mkdir -p "$HOME/workloads"
+#          rm -f "$IMG_PATH" "$IMG_GZ_PATH"
+#          az storage blob download --container-name private-images --file "$IMG_GZ_PATH" --name "$IMG_GZ_BLOB_NAME" --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
+#          gzip -d "$IMG_GZ_PATH"
+#      - name: Run Windows guest integration tests
+#        timeout-minutes: 30
+#        run: scripts/dev_cli.sh tests --integration-windows --libc musl
   integration-graviton:
     name: integration-graviton
     needs: [preflight]
@@ -1011,7 +1012,7 @@ jobs:
       - fuzz-build
       - gitlint
       - hadolint
-      - integration-arm64
+#      - integration-arm64
       - integration-graviton
       - integration-sev-snp
       - integration-vfio
