@@ -1734,6 +1734,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/VmMemoryZoneUpdateData"
+        postcopy_prefault:
+          type: boolean
+          default: true
+          description: Enable the background thread for faulting all remaining pages.
 
     MigrationMode:
       type: string

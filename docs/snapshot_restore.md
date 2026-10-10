@@ -332,6 +332,16 @@ call is the same as for a regular restore:
     --resume --ondemand
 ```
 
+By default CH also pulls every remaining page in the background until guest
+memory is fully populated. A daemon that keeps memory in remote storage may
+prefer to serve only the pages the guest touches. Disable the background
+prefault on the receiving side:
+
+```bash
+./ch-remote --api-socket /tmp/cloud-hypervisor.sock \
+    receive-migration receiver_url=unix:/tmp/restore.sock,postcopy_prefault=off &
+```
+
 ### The daemon protocol
 
 The daemon implements the local live-migration wire protocol defined in

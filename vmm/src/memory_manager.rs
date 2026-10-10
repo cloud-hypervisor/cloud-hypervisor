@@ -1105,7 +1105,7 @@ impl MemoryManager {
             }
         }
 
-        self.spawn_uffd_handler(uffd_fd, None, ranges, served_bitmap, source, exit_evt)?;
+        self.spawn_uffd_handler(uffd_fd, None, ranges, served_bitmap, source, exit_evt, true)?;
         info!("UFFD restore: demand-paged restore enabled");
         Ok(())
     }
@@ -1116,6 +1116,7 @@ impl MemoryManager {
         &mut self,
         saved_regions: &MemoryRangeTable,
         shared_backing: bool,
+        background_prefault: bool,
         socket: SocketStream,
         exit_evt: &EventFd,
     ) -> Result<(), Error> {
@@ -1144,6 +1145,7 @@ impl MemoryManager {
                 )
             })
             .collect();
+        info!("UFFD: postcopy background prefault {background_prefault}");
         self.spawn_uffd_handler(
             uffd_fd,
             Some(socket_fd),
@@ -1151,6 +1153,7 @@ impl MemoryManager {
             served_bitmap,
             source,
             exit_evt,
+            background_prefault,
         )
     }
 
@@ -1243,6 +1246,7 @@ impl MemoryManager {
     }
 
     /// Spawn the UFFD handler thread that resolves faults through `source`.
+    #[expect(clippy::too_many_arguments)]
     fn spawn_uffd_handler(
         &mut self,
         uffd_fd: OwnedFd,
@@ -1251,6 +1255,7 @@ impl MemoryManager {
         served_bitmap: Vec<AtomicBitmap>,
         source: Box<dyn UffdMemorySource>,
         exit_evt: &EventFd,
+        background_prefault: bool,
     ) -> Result<(), Error> {
         info!(
             "UFFD: spawning handler for {} region(s)",
@@ -1278,6 +1283,7 @@ impl MemoryManager {
                         served_bitmap,
                         &ready_tx,
                         &thread_prefault_complete,
+                        background_prefault,
                     );
 
                     if result.is_err() && thread_stop_event.read().is_ok() {
@@ -1399,6 +1405,7 @@ impl MemoryManager {
         served_bitmap: Vec<AtomicBitmap>,
         ready_tx: &SyncSender<()>,
         prefault_complete: &AtomicBool,
+        background_prefault: bool,
     ) -> Result<(), io::Error> {
         let uffd_raw_fd = uffd_fd.as_raw_fd();
 
@@ -1408,7 +1415,7 @@ impl MemoryManager {
 
         let pages_loading: Mutex<HashSet<(usize, u64)>> = Mutex::new(HashSet::new());
 
-        let mut prefault_active = !ranges.is_empty();
+        let mut prefault_active = background_prefault && !ranges.is_empty();
         let mut source_failed = false;
         let mut range_idx = 0;
         let mut page_idx = 0;
