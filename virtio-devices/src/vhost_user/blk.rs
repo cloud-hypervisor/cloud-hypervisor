@@ -163,6 +163,7 @@ impl Blk {
                 | VhostUserProtocolFeatures::INFLIGHT_SHMFD
                 | VhostUserProtocolFeatures::LOG_SHMFD
                 | VhostUserProtocolFeatures::DEVICE_STATE
+                | VhostUserProtocolFeatures::GPA_ADDRESSES
                 | VhostUserProtocolFeatures::BACKEND_REQ;
 
             let (acked_features, acked_protocol_features) =

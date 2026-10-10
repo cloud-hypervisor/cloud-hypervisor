@@ -231,6 +231,7 @@ impl VhostUserBackendMut for VhostUserNetBackend {
         VhostUserProtocolFeatures::MQ
             | VhostUserProtocolFeatures::REPLY_ACK
             | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
+            | VhostUserProtocolFeatures::GPA_ADDRESSES
             | if self.config.is_some() {
                 VhostUserProtocolFeatures::CONFIG
             } else {

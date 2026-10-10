@@ -29,6 +29,7 @@ use virtio_queue::{Queue, QueueT};
 use vm_memory::guest_memory::Error as MmapError;
 use vm_memory::{Address, FileOffset, GuestAddress, GuestMemoryBackend, GuestMemoryRegion};
 use vm_migration::protocol::MemoryRangeTable;
+use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::epoll::{ControlOperation, Epoll, EpollEvent, EventSet};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::timerfd::TimerFd;
@@ -36,12 +37,68 @@ use vmm_sys_util::timerfd::TimerFd;
 use super::{Error, Result, VhostUserState};
 use crate::vhost_user::Inflight;
 use crate::{
-    GuestMemoryMmap, GuestRegionMmap, MmapRegion, VIRTIO_F_IN_ORDER, VirtioInterrupt,
-    VirtioInterruptType, get_host_address_range,
+    GuestMemoryMmap, GuestRegionMmap, MmapRegion, VIRTIO_F_IN_ORDER, VIRTIO_F_RING_EVENT_IDX,
+    VirtioInterrupt, VirtioInterruptType,
 };
 
 // Size of a dirty page for vhost-user.
 const VHOST_LOG_PAGE: u64 = 0x1000;
+// Keep legacy vhost-user addresses non-zero without exposing the frontend HVA.
+const VHOST_USER_LEGACY_ADDRESS_BIAS: u64 = 0x1000;
+const VRING_HEADER_SIZE: usize = 2 * size_of::<u16>();
+const VRING_EVENT_SIZE: usize = size_of::<u16>();
+
+fn avail_ring_size(queue_size: usize, event_idx: bool) -> usize {
+    VRING_HEADER_SIZE + queue_size * size_of::<u16>() + if event_idx { VRING_EVENT_SIZE } else { 0 }
+}
+
+fn used_ring_size(queue_size: usize, event_idx: bool) -> usize {
+    VRING_HEADER_SIZE
+        + queue_size * 2 * size_of::<u32>()
+        + if event_idx { VRING_EVENT_SIZE } else { 0 }
+}
+
+/// Addresses handed to a backend that did not negotiate `GPA_ADDRESSES`.
+///
+/// Such a backend expects the `userspace_addr` of a memory region and the vring
+/// addresses to live in the same address space, but it only ever uses them to
+/// compute offsets into its own mappings. Biasing the guest address keeps those
+/// values consistent and non-zero without exposing the frontend's host virtual
+/// addresses.
+#[derive(Debug)]
+struct VhostUserLegacyAddresses;
+
+impl AccessPlatform for VhostUserLegacyAddresses {
+    fn translate_gva(&self, base: u64, size: u64) -> io::Result<u64> {
+        self.translate_gpa(base, size)
+    }
+
+    fn translate_gpa(&self, base: u64, size: u64) -> io::Result<u64> {
+        let translated = base
+            .checked_add(VHOST_USER_LEGACY_ADDRESS_BIAS)
+            .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+        translated
+            .checked_add(size)
+            .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+
+        Ok(translated)
+    }
+}
+
+/// Check that a vring defines a valid range within a single guest memory region
+/// before handing its address to the backend.
+fn translate_vring(
+    mem: &GuestMemoryMmap,
+    access_platform: Option<&dyn AccessPlatform>,
+    guest_addr: u64,
+    size: usize,
+) -> Option<u64> {
+    if size == 0 {
+        return None;
+    }
+    mem.get_slice(GuestAddress(guest_addr), size).ok()?;
+    guest_addr.translate_gpa(access_platform, size).ok()
+}
 
 #[derive(Debug, Clone)]
 pub struct VhostUserConfig {
@@ -68,6 +125,7 @@ pub struct VhostUserHandle {
     vrings_info: Option<Vec<VringInfo>>,
     queue_indexes: Vec<u16>,
     vring_bases: Option<Vec<u64>>,
+    access_platform: Option<Arc<dyn AccessPlatform>>,
 }
 
 impl VhostUserHandle {
@@ -86,7 +144,11 @@ impl VhostUserHandle {
             let vhost_user_net_reg = VhostUserMemoryRegionInfo {
                 guest_phys_addr: region.start_addr().raw_value(),
                 memory_size: region.len(),
-                userspace_addr: region.as_ptr() as u64,
+                userspace_addr: region
+                    .start_addr()
+                    .raw_value()
+                    .translate_gpa(self.access_platform.as_deref(), region.len() as usize)
+                    .map_err(Error::TranslateAddress)?,
                 mmap_offset,
                 mmap_handle,
             };
@@ -110,7 +172,11 @@ impl VhostUserHandle {
         let region = VhostUserMemoryRegionInfo {
             guest_phys_addr: region.start_addr().raw_value(),
             memory_size: region.len(),
-            userspace_addr: region.as_ptr() as u64,
+            userspace_addr: region
+                .start_addr()
+                .raw_value()
+                .translate_gpa(self.access_platform.as_deref(), region.len() as usize)
+                .map_err(Error::TranslateAddress)?,
             mmap_offset,
             mmap_handle,
         };
@@ -185,6 +251,7 @@ impl VhostUserHandle {
 
         // Update internal value after it's been sent to the backend.
         self.acked_features = acked_features;
+        let event_idx = acked_features & (1u64 << VIRTIO_F_RING_EVENT_IDX) != 0;
 
         // Let's first provide the memory table to the backend.
         self.update_mem_table(mem)?;
@@ -222,34 +289,33 @@ impl VhostUserHandle {
 
         let mut vrings_info = Vec::new();
         for (i, (queue_index, queue, queue_evt)) in queues.iter().enumerate() {
-            let actual_size: usize = queue.size().into();
-
+            let queue_size: usize = queue.size().into();
+            let access_platform = self.access_platform.as_deref();
             let config_data = VringConfigData {
                 queue_max_size: queue.max_size(),
                 queue_size: queue.size(),
                 flags: 0u32,
-                desc_table_addr: get_host_address_range(
+                desc_table_addr: translate_vring(
                     mem,
-                    GuestAddress(queue.desc_table()),
-                    actual_size * size_of::<RawDescriptor>(),
+                    access_platform,
+                    queue.desc_table(),
+                    queue_size * size_of::<RawDescriptor>(),
                 )
-                .ok_or(Error::DescriptorTableAddress)? as u64,
-                // The used ring is {flags: u16; idx: u16; virtq_used_elem [{id: u16, len: u16}; actual_size]},
-                // i.e. 4 + (4 + 4) * actual_size.
-                used_ring_addr: get_host_address_range(
+                .ok_or(Error::DescriptorTableAddress)?,
+                used_ring_addr: translate_vring(
                     mem,
-                    GuestAddress(queue.used_ring()),
-                    4 + actual_size * 8,
+                    access_platform,
+                    queue.used_ring(),
+                    used_ring_size(queue_size, event_idx),
                 )
-                .ok_or(Error::UsedAddress)? as u64,
-                // The used ring is {flags: u16; idx: u16; elem [u16; actual_size]},
-                // i.e. 4 + (2) * actual_size.
-                avail_ring_addr: get_host_address_range(
+                .ok_or(Error::UsedAddress)?,
+                avail_ring_addr: translate_vring(
                     mem,
-                    GuestAddress(queue.avail_ring()),
-                    4 + actual_size * 2,
+                    access_platform,
+                    queue.avail_ring(),
+                    avail_ring_size(queue_size, event_idx),
                 )
-                .ok_or(Error::AvailAddress)? as u64,
+                .ok_or(Error::AvailAddress)?,
                 log_addr: None,
             };
 
@@ -427,6 +493,7 @@ impl VhostUserHandle {
                 vrings_info: None,
                 queue_indexes: Vec::new(),
                 vring_bases: None,
+                access_platform: Some(Arc::new(VhostUserLegacyAddresses)),
             };
             vhost_user
                 .vu
@@ -486,6 +553,7 @@ impl VhostUserHandle {
                         vrings_info: None,
                         queue_indexes: Vec::new(),
                         vring_bases: None,
+                        access_platform: Some(Arc::new(VhostUserLegacyAddresses)),
                     })
                     .map_err(Error::VhostUserConnect);
 
@@ -590,6 +658,14 @@ impl VhostUserHandle {
     }
 
     fn update_supported_protocol_features(&mut self, acked_protocol_features: u64) {
+        // A backend that negotiated GPA_ADDRESSES takes guest physical addresses
+        // as they are, so no translation is needed.
+        self.access_platform =
+            if acked_protocol_features & VhostUserProtocolFeatures::GPA_ADDRESSES.bits() == 0 {
+                Some(Arc::new(VhostUserLegacyAddresses))
+            } else {
+                None
+            };
         self.supports_migration = self.backend_features & VhostUserVirtioFeatures::LOG_ALL.bits()
             != 0
             && acked_protocol_features & VhostUserProtocolFeatures::LOG_SHMFD.bits() != 0;
@@ -874,5 +950,18 @@ fn memfd_create(name: &ffi::CStr, flags: u32) -> io::Result<RawFd> {
         Err(io::Error::last_os_error())
     } else {
         Ok(res as RawFd)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vring_sizes_follow_event_idx_negotiation() {
+        assert_eq!(avail_ring_size(8, false), 20);
+        assert_eq!(avail_ring_size(8, true), 22);
+        assert_eq!(used_ring_size(8, false), 68);
+        assert_eq!(used_ring_size(8, true), 70);
     }
 }

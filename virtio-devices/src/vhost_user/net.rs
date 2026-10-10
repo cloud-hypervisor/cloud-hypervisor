@@ -176,6 +176,7 @@ impl Net {
                 | VhostUserProtocolFeatures::INFLIGHT_SHMFD
                 | VhostUserProtocolFeatures::LOG_SHMFD
                 | VhostUserProtocolFeatures::DEVICE_STATE
+                | VhostUserProtocolFeatures::GPA_ADDRESSES
                 | VhostUserProtocolFeatures::CONFIG;
 
             let (backend_acked_features, acked_protocol_features) =

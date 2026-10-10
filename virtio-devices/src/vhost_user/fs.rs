@@ -134,7 +134,8 @@ impl Fs {
                 | VhostUserProtocolFeatures::REPLY_ACK
                 | VhostUserProtocolFeatures::INFLIGHT_SHMFD
                 | VhostUserProtocolFeatures::LOG_SHMFD
-                | VhostUserProtocolFeatures::DEVICE_STATE;
+                | VhostUserProtocolFeatures::DEVICE_STATE
+                | VhostUserProtocolFeatures::GPA_ADDRESSES;
 
             let (acked_features, acked_protocol_features) =
                 vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
