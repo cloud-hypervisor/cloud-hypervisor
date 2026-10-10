@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::HashMap;
 use std::fs::read_to_string;
 use std::mem::zeroed;
 use std::sync::{OnceLock, mpsc};
@@ -47,7 +48,7 @@ struct RegionPlan {
     threads: usize,
 }
 
-fn cpu_affinity_ranges(regions: &[PrefaultRegion]) -> Vec<CpuAffinityRange> {
+fn cpu_affinity_ranges(regions: &[PrefaultRegion], isolated: &[usize]) -> Vec<CpuAffinityRange> {
     let machine_cores = thread::available_parallelism().map_or(1, |val| val.get());
 
     // Pass 1: resolve each region and the pool it draws threads from.
@@ -84,25 +85,54 @@ fn cpu_affinity_ranges(regions: &[PrefaultRegion]) -> Vec<CpuAffinityRange> {
     // Pass 2: hand each region a share of its pool's cores.
     assign_threads(&mut plans, machine_cores);
 
-    // Pass 3: split each region into one slice per assigned thread.
+    // Pass 3: split each region into one slice per assigned thread. The
+    // scheduler never balances threads onto cpus isolated with
+    // isolcpus=domain, so in a pinned pool that has some, each thread gets a
+    // cpu of its own.
+    let mut next_cpu = HashMap::new();
     let mut ranges = Vec::new();
     for plan in &plans {
         if plan.threads == 0 {
             continue;
         }
+        let pinned_cpus = plan
+            .cpu_set
+            .as_ref()
+            .map(cpus_in_set)
+            .filter(|cpus| cpus.iter().any(|cpu| isolated.contains(cpu)));
         let pages_per_thread = plan.num_pages / plan.threads;
         let remainder = plan.num_pages % plan.threads;
         for i in 0..plan.threads {
             let pages = pages_per_thread + if i < remainder { 1 } else { 0 };
             let offset = plan.page_size * ((i * pages_per_thread) + cmp::min(i, remainder));
+            let cpu_set = match &pinned_cpus {
+                Some(cpus) => {
+                    let next = next_cpu.entry(plan.node).or_insert(0);
+                    let cpu = cpus[*next % cpus.len()];
+                    *next += 1;
+                    // SAFETY: an all zero cpu_set_t is a valid empty set
+                    let mut set = unsafe { zeroed::<libc::cpu_set_t>() };
+                    // SAFETY: cpu is below CPU_SETSIZE
+                    unsafe { libc::CPU_SET(cpu, &mut set) };
+                    Some(set)
+                }
+                None => plan.cpu_set,
+            };
             ranges.push(CpuAffinityRange {
                 addr: plan.addr + offset,
                 len: pages * plan.page_size,
-                cpu_set: plan.cpu_set,
+                cpu_set,
             });
         }
     }
     ranges
+}
+
+fn cpus_in_set(set: &libc::cpu_set_t) -> Vec<usize> {
+    (0..libc::CPU_SETSIZE as usize)
+        // SAFETY: cpu is below CPU_SETSIZE and set is initialized
+        .filter(|&cpu| unsafe { libc::CPU_ISSET(cpu, set) })
+        .collect()
 }
 
 fn assign_threads(plans: &mut [RegionPlan], machine_cores: usize) {
@@ -133,7 +163,14 @@ pub(crate) fn prefault_regions(regions: &[PrefaultRegion]) -> Result<(), Error> 
         return Ok(());
     }
 
-    let ranges = cpu_affinity_ranges(regions);
+    let isolated = if regions.iter().any(|r| r.host_numa_node.is_some()) {
+        read_cpulist("/sys/devices/system/cpu/isolated")
+            .map(|(cpu_set, _)| cpus_in_set(&cpu_set))
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let ranges = cpu_affinity_ranges(regions, &isolated);
 
     // Each thread signals the main thread once startup is complete. The main
     // thread then releases all threads for parallel prefaulting, avoiding
@@ -236,7 +273,11 @@ fn node_cpu_set_within_current(node: u32) -> Option<(libc::cpu_set_t, usize)> {
 }
 
 fn numa_node_cpu_set(node: u32) -> Option<(libc::cpu_set_t, usize)> {
-    let cpulist = read_to_string(format!("/sys/devices/system/node/node{node}/cpulist")).ok()?;
+    read_cpulist(&format!("/sys/devices/system/node/node{node}/cpulist"))
+}
+
+fn read_cpulist(path: &str) -> Option<(libc::cpu_set_t, usize)> {
+    let cpulist = read_to_string(path).ok()?;
 
     // SAFETY: an all zero cpu_set_t is a valid empty set
     let mut cpu_set = unsafe { zeroed::<libc::cpu_set_t>() };
@@ -279,5 +320,28 @@ mod tests {
     #[test]
     fn test_numa_node_cpu_set_missing_node() {
         assert!(numa_node_cpu_set(u32::MAX).is_none());
+    }
+
+    #[test]
+    fn test_cpu_affinity_ranges_cpu_per_thread() {
+        let regions: Vec<_> = (0..2)
+            .map(|i| PrefaultRegion {
+                addr: i << 40,
+                size: 64 << 30,
+                page_size: 2 << 20,
+                host_numa_node: Some(0),
+            })
+            .collect();
+        let Some((pool, _)) = node_cpu_set_within_current(0) else {
+            return;
+        };
+        let cpus = cpus_in_set(&pool);
+
+        for range in cpu_affinity_ranges(&regions, &[]) {
+            assert_eq!(cpus_in_set(&range.cpu_set.unwrap()), cpus);
+        }
+        for (i, range) in cpu_affinity_ranges(&regions, &cpus).iter().enumerate() {
+            assert_eq!(cpus_in_set(&range.cpu_set.unwrap()), [cpus[i % cpus.len()]]);
+        }
     }
 }
