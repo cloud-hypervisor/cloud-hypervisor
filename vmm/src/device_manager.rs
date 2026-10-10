@@ -70,7 +70,7 @@ use devices::ivshmem::{IVSHMEM_DATA_BAR_IDX, IvshmemError, IvshmemOps};
 use devices::legacy::Pl011;
 #[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))]
 use devices::legacy::Serial;
-#[cfg(all(feature = "fw_cfg", target_arch = "x86_64"))]
+#[cfg(feature = "fw_cfg")]
 use devices::legacy::fw_cfg::FW_CFG_ACPI_ID;
 #[cfg(feature = "fw_cfg")]
 use devices::legacy::{
@@ -6303,6 +6303,27 @@ impl Aml for DeviceManager {
                             FW_CFG_ADDRESS_BASE as u16,
                             0x01,
                             FW_CFG_ADDRESS_WIDTH as u8,
+                        )]),
+                    ),
+                ],
+            )
+            .to_aml_bytes(sink);
+        }
+
+        #[cfg(all(feature = "fw_cfg", target_arch = "aarch64"))]
+        if self.fw_cfg.is_some() {
+            aml::Device::new(
+                "_SB_.FWCF".into(),
+                vec![
+                    &aml::Name::new("_HID".into(), &FW_CFG_ACPI_ID.to_string()),
+                    &aml::Name::new("_STA".into(), &0xB_usize),
+                    &aml::Name::new("_CCA".into(), &aml::ONE),
+                    &aml::Name::new(
+                        "_CRS".into(),
+                        &aml::ResourceTemplate::new(vec![&aml::Memory32Fixed::new(
+                            true,
+                            PORT_FW_CFG_BASE as u32,
+                            PORT_FW_CFG_WIDTH as u32,
                         )]),
                     ),
                 ],
