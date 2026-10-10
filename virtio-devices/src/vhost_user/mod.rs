@@ -99,6 +99,8 @@ pub enum Error {
     VhostUserSetVringEnable(#[source] VhostError),
     #[error("Failed to read vhost eventfd")]
     VhostUserMemoryRegion(#[source] MmapError),
+    #[error("Failed to translate address")]
+    TranslateAddress(#[source] io::Error),
     #[error("Failed to create the frontend request handler from backend")]
     FrontendReqHandlerCreation(#[source] VhostUserError),
     #[error("Set backend request fd failed")]

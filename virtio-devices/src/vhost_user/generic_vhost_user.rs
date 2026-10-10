@@ -117,6 +117,7 @@ impl GenericVhostUser {
                 | VhostUserProtocolFeatures::INFLIGHT_SHMFD
                 | VhostUserProtocolFeatures::LOG_SHMFD
                 | VhostUserProtocolFeatures::DEVICE_STATE
+                | VhostUserProtocolFeatures::GPA_ADDRESSES
                 | VhostUserProtocolFeatures::BACKEND_REQ;
 
             let avail_features = super::DEFAULT_VIRTIO_FEATURES;
