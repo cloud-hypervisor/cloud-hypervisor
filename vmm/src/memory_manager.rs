@@ -1408,6 +1408,44 @@ impl MemoryManager {
 
         let pages_loading: Mutex<HashSet<(usize, u64)>> = Mutex::new(HashSet::new());
 
+        let zero_buf = vec![0u8; ranges.iter().map(|r| r.page_size).max().unwrap_or(0) as usize];
+        // During UFFDIO_COPY, the kernel reads this buffer with page faults
+        // disabled. The buffer is new anonymous memory and has no page table
+        // entries yet. Because of this, the first copy can't read the buffer:
+        // the kernel then uses a slower method where it copies the data into a
+        // temporary page, and then into the guest page.
+        //
+        // On hugetlbfs, the temporary page must be a free huge page that no
+        // mapping reserves. The guest memory reserves all of its huge pages,
+        // and the host pool could have no spare page. For 2 MiB pages, the
+        // kernel can get a new page from normal memory, but for 1 GiB pages,
+        // the kernel refuses to do this. Then UFFDIO_COPY fails with ENOMEM,
+        // and the handler stops the VM.
+        //
+        // MADV_POPULATE_READ prevents this. It maps the shared zero page behind
+        // each page of the buffer, so the copy does not fault. This adds no
+        // RSS, only page tables: approximately 2 MiB for a 1 GiB buffer.
+        // madvise() needs a page-aligned start, and it rounds the length up.
+        //
+        // SAFETY: FFI call. Trivially safe.
+        let base_page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
+        let populate_start = zero_buf.as_ptr() as usize & !(base_page_size - 1);
+        // SAFETY: the range only covers pages backing `zero_buf`, which
+        // outlives this call.
+        let ret = unsafe {
+            libc::madvise(
+                populate_start as *mut libc::c_void,
+                zero_buf.as_ptr() as usize + zero_buf.len() - populate_start,
+                libc::MADV_POPULATE_READ,
+            )
+        };
+        if ret != 0 {
+            warn!(
+                "UFFD handler: failed to populate zero buffer: {}",
+                io::Error::last_os_error()
+            );
+        }
+
         let mut prefault_active = !ranges.is_empty();
         let mut source_failed = false;
         let mut range_idx = 0;
@@ -1534,12 +1572,15 @@ impl MemoryManager {
 
                 let key = (range_idx, page_idx);
 
-                let served_minor = {
+                let (served_minor, discarded) = {
                     let mut loading = pages_loading.lock().unwrap();
                     let served = served_bitmap[range_idx].is_bit_set(page_idx as usize);
 
                     if served && minor_fault {
-                        true
+                        (true, false)
+                    } else if served {
+                        // The page has been discarded (ie. virtio-balloon)
+                        (false, true)
                     } else if !loading.insert(key) {
                         // Another worker owns this page. The thread that's
                         // handling this page will call UFFDIO_COPY or
@@ -1549,11 +1590,7 @@ impl MemoryManager {
                         // anything here.
                         continue;
                     } else {
-                        if served {
-                            // The page has been discarded (ie. virtio-balloon)
-                            served_bitmap[range_idx].reset_bit(page_idx as usize);
-                        }
-                        false
+                        (false, false)
                     }
                 };
 
@@ -1574,6 +1611,25 @@ impl MemoryManager {
                     })?;
 
                     // Do not fall through and resolve an already present page.
+                    continue;
+                }
+
+                if discarded {
+                    let page_addr = range.page_addr(page_idx);
+                    uffd::copy(
+                        uffd_fd.as_fd(),
+                        page_addr,
+                        zero_buf.as_ptr(),
+                        range.page_size,
+                    )
+                    .or_else(|e| {
+                        if e.raw_os_error() == Some(libc::EEXIST) {
+                            uffd::wake(uffd_fd.as_fd(), page_addr, range.page_size)
+                        } else {
+                            Err(e)
+                        }
+                    })?;
+
                     continue;
                 }
 
