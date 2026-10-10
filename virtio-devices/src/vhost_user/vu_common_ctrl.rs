@@ -36,8 +36,8 @@ use vmm_sys_util::timerfd::TimerFd;
 use super::{Error, Result, VhostUserState};
 use crate::vhost_user::Inflight;
 use crate::{
-    GuestMemoryMmap, GuestRegionMmap, MmapRegion, VIRTIO_F_IN_ORDER, VirtioInterrupt,
-    VirtioInterruptType, get_host_address_range,
+    GuestMemoryMmap, GuestRegionMmap, MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_IN_ORDER,
+    VirtioInterrupt, VirtioInterruptType, get_host_address_range,
 };
 
 // Size of a dirty page for vhost-user.
@@ -176,8 +176,10 @@ impl VhostUserHandle {
         // May run more than once on the same handle (resume after snapshot)
         self.queue_indexes.clear();
 
-        // Mask out any frontend only negotiated features
-        let acked_features = acked_features & self.backend_features;
+        // ACCESS_PLATFORM can be offered to confidential guests, but vhost-user
+        // gives it IOTLB semantics, which this frontend does not implement.
+        let acked_features =
+            acked_features & self.backend_features & !(1u64 << VIRTIO_F_ACCESS_PLATFORM);
 
         self.vu
             .set_features(acked_features)

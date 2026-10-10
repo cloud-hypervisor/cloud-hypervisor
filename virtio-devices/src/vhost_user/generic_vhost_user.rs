@@ -54,7 +54,6 @@ pub struct GenericVhostUser {
     cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
-    access_platform_enabled: bool,
     cfg_warning: AtomicBool,
 }
 
@@ -141,8 +140,13 @@ since the backend only supports {backend_num_queues}\n",
                 return Err(Error::BadQueueNum);
             }
 
+            let mut avail_features = acked_features;
+            if access_platform_enabled {
+                avail_features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
+            }
+
             (
-                acked_features,
+                avail_features,
                 // If part of the available features that have been acked, the
                 // PROTOCOL_FEATURES bit must be already set through the VIRTIO
                 // acked features as we know the guest would never ack it, thus
@@ -178,7 +182,6 @@ since the backend only supports {backend_num_queues}\n",
             cache,
             seccomp_action,
             exit_evt,
-            access_platform_enabled,
             cfg_warning: AtomicBool::new(false),
         })
     }
@@ -219,11 +222,7 @@ impl VirtioDevice for GenericVhostUser {
     }
 
     fn features(&self) -> u64 {
-        let mut features = self.vu_common.virtio_common.avail_features;
-        if self.access_platform_enabled {
-            features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
-        }
-        features
+        self.vu_common.virtio_common.avail_features
     }
 
     fn ack_features(&mut self, value: u64) {
