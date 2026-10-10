@@ -54,7 +54,7 @@ jobs:
           cp target/${{ matrix.platform.target }}/release/ch-remote ./${{ matrix.platform.name_ch_remote }}
       - name: Upload Release Artifacts
         if: github.event_name == 'create' && github.event.ref_type == 'tag'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Artifacts for ${{ matrix.platform.target }}
           path: |
@@ -80,7 +80,7 @@ jobs:
           github.event_name == 'create' && github.event.ref_type == 'tag' &&
           matrix.platform.target == 'x86_64-unknown-linux-gnu'
         id: upload-release-cloud-hypervisor-vendored-sources
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           path: cloud-hypervisor-${{ github.event.ref }}.tar.xz
           name: cloud-hypervisor-${{ github.event.ref }}.tar.xz
