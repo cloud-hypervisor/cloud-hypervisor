@@ -334,10 +334,18 @@ impl VhostUserHandle {
         acked_features: u64,
         acked_protocol_features: u64,
     ) -> Result<()> {
-        if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0
-            && let Some(acked_protocol_features) =
-                VhostUserProtocolFeatures::from_bits(acked_protocol_features)
-        {
+        if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
+            let backend_protocol_features = self
+                .vu
+                .get_protocol_features()
+                .map_err(Error::VhostUserGetProtocolFeatures)?;
+            let unsupported = acked_protocol_features & !backend_protocol_features.bits();
+            if unsupported != 0 {
+                return Err(Error::UnsupportedProtocolFeatures(unsupported));
+            }
+
+            let acked_protocol_features =
+                VhostUserProtocolFeatures::from_bits_truncate(acked_protocol_features);
             self.vu
                 .set_protocol_features(acked_protocol_features)
                 .map_err(Error::VhostUserSetProtocolFeatures)?;
@@ -345,6 +353,8 @@ impl VhostUserHandle {
             if acked_protocol_features.contains(VhostUserProtocolFeatures::REPLY_ACK) {
                 self.vu.set_hdr_flags(VhostUserHeaderFlag::NEED_REPLY);
             }
+        } else if acked_protocol_features != 0 {
+            return Err(Error::InconsistentProtocolFeatures(acked_protocol_features));
         }
 
         self.update_supported_protocol_features(acked_protocol_features);

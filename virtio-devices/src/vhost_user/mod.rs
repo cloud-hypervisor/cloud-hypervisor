@@ -75,6 +75,10 @@ pub enum Error {
     VhostUserGetQueueMaxNum(#[source] VhostError),
     #[error("Get protocol features failed")]
     VhostUserGetProtocolFeatures(#[source] VhostError),
+    #[error("Backend does not support protocol features {0:#x}")]
+    UnsupportedProtocolFeatures(u64),
+    #[error("Protocol features {0:#x} saved without PROTOCOL_FEATURES acknowledged")]
+    InconsistentProtocolFeatures(u64),
     #[error("Get vring base failed")]
     VhostUserGetVringBase(#[source] VhostError),
     #[error("Set owner failed")]
@@ -1046,5 +1050,109 @@ mod tests {
         )
         .unwrap();
         backend.join().unwrap();
+    }
+
+    #[test]
+    fn restored_protocol_features_must_be_supported() {
+        let protocol_features = VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
+        let mq = VhostUserProtocolFeatures::MQ.bits();
+        let config = VhostUserProtocolFeatures::CONFIG.bits();
+        for (saved, available) in [(mq, mq | config), (mq, config), (1u64 << 63, mq)] {
+            let missing = saved & !available;
+            let temp_dir = TempDir::new_with_prefix("/tmp/vhost-user-protocol-").unwrap();
+            let socket_path = temp_dir.as_path().join("backend.sock");
+            let listener = UnixListener::bind(&socket_path).unwrap();
+            let backend = thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                assert!(read_request(&mut stream, FrontendReq::SET_OWNER).is_empty());
+                for (request, value) in [
+                    (FrontendReq::GET_FEATURES, protocol_features),
+                    (FrontendReq::GET_PROTOCOL_FEATURES, available),
+                ] {
+                    assert!(read_request(&mut stream, request).is_empty());
+                    for field in [u32::from(request), VhostUserHeaderFlag::REPLY.bits() | 1, 8] {
+                        stream.write_all(&field.to_ne_bytes()).unwrap();
+                    }
+                    stream.write_all(&value.to_ne_bytes()).unwrap();
+                }
+                if missing == 0 {
+                    assert_eq!(
+                        read_request(&mut stream, FrontendReq::SET_PROTOCOL_FEATURES),
+                        saved.to_ne_bytes()
+                    );
+                }
+                // An incompatible connection must close before sending any
+                // protocol settings, device state, or memory addresses.
+                assert_eq!(stream.read(&mut [0u8; 1]).unwrap(), 0);
+            });
+
+            let kill_evt = EventFd::new(libc::EFD_NONBLOCK).unwrap();
+            let result = VhostUserHandle::connect_vhost_user(
+                false,
+                socket_path.to_str().unwrap(),
+                1,
+                false,
+                &kill_evt,
+                |vu| vu.set_protocol_features_vhost_user(protocol_features, saved),
+            );
+            match result {
+                Ok(vu) => {
+                    assert_eq!(missing, 0);
+                    drop(vu);
+                }
+                Err(Error::UnsupportedProtocolFeatures(bits)) => {
+                    assert_ne!(missing, 0);
+                    assert_eq!(bits, missing);
+                }
+                Err(err) => panic!("Unexpected negotiation error: {err}"),
+            }
+            backend.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn restored_protocol_features_require_protocol_features_bit() {
+        for saved in [0, VhostUserProtocolFeatures::MQ.bits()] {
+            let temp_dir = TempDir::new_with_prefix("/tmp/vhost-user-protocol-").unwrap();
+            let socket_path = temp_dir.as_path().join("backend.sock");
+            let listener = UnixListener::bind(&socket_path).unwrap();
+            let backend = thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                assert!(read_request(&mut stream, FrontendReq::SET_OWNER).is_empty());
+                assert!(read_request(&mut stream, FrontendReq::GET_FEATURES).is_empty());
+                for field in [
+                    u32::from(FrontendReq::GET_FEATURES),
+                    VhostUserHeaderFlag::REPLY.bits() | 1,
+                    8,
+                ] {
+                    stream.write_all(&field.to_ne_bytes()).unwrap();
+                }
+                stream.write_all(&0u64.to_ne_bytes()).unwrap();
+                // Protocol negotiation must not occur without PROTOCOL_FEATURES.
+                assert_eq!(stream.read(&mut [0u8; 1]).unwrap(), 0);
+            });
+
+            let kill_evt = EventFd::new(libc::EFD_NONBLOCK).unwrap();
+            let result = VhostUserHandle::connect_vhost_user(
+                false,
+                socket_path.to_str().unwrap(),
+                1,
+                false,
+                &kill_evt,
+                |vu| vu.set_protocol_features_vhost_user(0, saved),
+            );
+            match result {
+                Ok(vu) => {
+                    assert_eq!(saved, 0);
+                    drop(vu);
+                }
+                Err(Error::InconsistentProtocolFeatures(bits)) => {
+                    assert_ne!(saved, 0);
+                    assert_eq!(bits, saved);
+                }
+                Err(err) => panic!("Unexpected negotiation error: {err}"),
+            }
+            backend.join().unwrap();
+        }
     }
 }
