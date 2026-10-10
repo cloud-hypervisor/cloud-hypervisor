@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-//! Sparse file-copy helpers shared between snapshot/restore paths (the
-//! `MemoryManager` snapshot writer and the offload daemon). Holes are
-//! detected via `lseek(SEEK_DATA)`/`lseek(SEEK_HOLE)` and left as holes in
+//! Sparse and reflink file-copy helpers shared between snapshot/restore
+//! paths (the `MemoryManager` snapshot writer and the offload daemon). Holes
+//! are detected via `lseek(SEEK_DATA)`/`lseek(SEEK_HOLE)` and left as holes in
 //! the destination, with a dense fallback when the source filesystem does
 //! not support sparse-seek.
 
@@ -149,6 +149,17 @@ pub fn copy_region(
     Ok(())
 }
 
+/// Make `dst` share every extent of `src` (`FICLONE`). Fails unless both
+/// files are on one filesystem that supports reflink.
+pub fn clone_file(src: &File, dst: &File) -> io::Result<()> {
+    // SAFETY: both fds are valid for the borrows; FICLONE only reads them.
+    let ret = unsafe { libc::ioctl(dst.as_raw_fd(), libc::FICLONE as _, src.as_raw_fd()) };
+    if ret < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Write;
@@ -158,7 +169,7 @@ mod tests {
 
     use vm_allocator::page_size::get_page_size;
 
-    use super::{next_data_extent, write_region_sparse};
+    use super::{clone_file, next_data_extent, write_region_sparse};
 
     fn make_memfd(size: u64) -> fs::File {
         // SAFETY: memfd_create is a self-contained syscall; we own the
@@ -413,5 +424,26 @@ mod tests {
         assert!(restored[4096 * 5..4096 * 26].iter().all(|&b| b == 0));
         assert!(restored[4096 * 26..4096 * 30].iter().all(|&b| b == 0xBB));
         assert!(restored[4096 * 30..].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn clone_file_copies_content_where_reflink_exists() {
+        let mut src = tempfile::tempfile().unwrap();
+        src.write_all(&[0xab; 4096]).unwrap();
+        let dst = tempfile::tempfile().unwrap();
+        match clone_file(&src, &dst) {
+            Ok(()) => {
+                let mut got = [0u8; 4096];
+                dst.read_exact_at(&mut got, 0).unwrap();
+                assert_eq!(got, [0xab; 4096]);
+            }
+            Err(e) => assert!(
+                matches!(
+                    e.raw_os_error(),
+                    Some(libc::EOPNOTSUPP | libc::EXDEV | libc::EINVAL)
+                ),
+                "unexpected clone error: {e}"
+            ),
+        }
     }
 }
