@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
@@ -20,7 +20,8 @@ use crate::{
 };
 
 const TPM_REQ_HDR_SIZE: usize = 10;
-const TPM_DATA_SOCKET_READ_TIMEOUT: Duration = Duration::from_millis(100);
+const TPM_RSP_HDR_SIZE: usize = 10;
+const TPM_DATA_SOCKET_READ_TIMEOUT: Duration = Duration::from_secs(120);
 const TPM_RC_INITIALIZE: u32 = 0x100;
 const TPM2_STARTUP_CLEAR: [u8; 12] = [
     0x80, 0x01, // TPM_ST_NO_SESSIONS
@@ -55,6 +56,29 @@ pub fn is_selftest(input: &[u8]) -> bool {
         return u32::from_ne_bytes(*ordinal).to_be() == 0x143;
     }
     false
+}
+
+fn receive_response(mut socket: &UnixStream, buffer: &mut [u8]) -> Result<usize> {
+    let receive_error = |e: io::Error| {
+        Error::SendReceive(anyhow!(
+            "Failed to receive response for tpm command over Data FD. Error Code {e:?}"
+        ))
+    };
+
+    socket
+        .read_exact(&mut buffer[..TPM_RSP_HDR_SIZE])
+        .map_err(receive_error)?;
+    let size = u32::from_be_bytes(buffer[2..6].try_into().unwrap()) as usize;
+    if !(TPM_RSP_HDR_SIZE..=buffer.len()).contains(&size) {
+        return Err(Error::SendReceive(anyhow!(
+            "TPM response size {size} is outside {TPM_RSP_HDR_SIZE}..={}",
+            buffer.len()
+        )));
+    }
+    socket
+        .read_exact(&mut buffer[TPM_RSP_HDR_SIZE..size])
+        .map_err(receive_error)?;
+    Ok(size)
 }
 
 #[derive(Error, Debug)]
@@ -365,11 +389,7 @@ impl Emulator {
                 ))
             })?;
 
-        let output_len = data_socket.read(cmd.buffer).map_err(|e| {
-            Error::SendReceive(anyhow!(
-                "Failed to receive response for tpm command over Data FD. Error Code {e:?}"
-            ))
-        })?;
+        let output_len = receive_response(data_socket, cmd.buffer)?;
         debug!(
             "response = {:02X?} len = {:?} selftest = {:?}",
             cmd.buffer, output_len, isselftest
@@ -467,6 +487,9 @@ impl Emulator {
 
 #[cfg(test)]
 mod tests {
+    use std::thread;
+    use std::time::Instant;
+
     use super::*;
 
     #[test]
@@ -478,5 +501,77 @@ mod tests {
     #[test]
     fn test_startup_response_rejects_other_errors() {
         assert!(!startup_response_is_ok(0x101));
+    }
+
+    fn data_pair(timeout: Duration) -> (UnixStream, UnixStream) {
+        let (ours, swtpm) = UnixStream::pair().unwrap();
+        ours.set_read_timeout(Some(timeout)).unwrap();
+        (ours, swtpm)
+    }
+
+    const RESPONSE: [u8; 14] = [
+        0x80, 0x01, 0x00, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x00, 0x00, 0xde, 0xad, 0xbe, 0xef,
+    ];
+
+    #[test]
+    fn test_receive_response_waits_for_a_slow_split_response() {
+        let (ours, mut swtpm) = data_pair(Duration::from_secs(5));
+        let writer = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(300));
+            swtpm.write_all(&RESPONSE[..6]).unwrap();
+            thread::sleep(Duration::from_millis(300));
+            swtpm.write_all(&RESPONSE[6..]).unwrap();
+            swtpm
+        });
+        let mut buf = [0u8; 64];
+        let n = receive_response(&ours, &mut buf).unwrap();
+        assert_eq!(&buf[..n], &RESPONSE);
+        writer.join().unwrap();
+    }
+
+    #[test]
+    fn test_receive_response_reads_only_the_declared_size() {
+        let (ours, mut swtpm) = data_pair(Duration::from_secs(1));
+        swtpm.write_all(&RESPONSE).unwrap();
+        swtpm.write_all(&RESPONSE).unwrap();
+        let mut buf = [0u8; 64];
+        for _ in 0..2 {
+            let n = receive_response(&ours, &mut buf).unwrap();
+            assert_eq!(&buf[..n], &RESPONSE);
+        }
+    }
+
+    #[test]
+    fn test_receive_response_times_out() {
+        let (ours, _swtpm) = data_pair(Duration::from_millis(200));
+        let mut buf = [0u8; 64];
+        let start = Instant::now();
+        receive_response(&ours, &mut buf).unwrap_err();
+        let elapsed = start.elapsed();
+        assert!(elapsed >= Duration::from_millis(200));
+        assert!(elapsed < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn test_receive_response_rejects_an_invalid_size() {
+        for size in [9u8, 65] {
+            let (ours, mut swtpm) = data_pair(Duration::from_secs(5));
+            swtpm
+                .write_all(&[0x80, 0x01, 0x00, 0x00, 0x00, size, 0x00, 0x00, 0x00, 0x00])
+                .unwrap();
+            let mut buf = [0u8; 64];
+            let start = Instant::now();
+            receive_response(&ours, &mut buf).unwrap_err();
+            assert!(start.elapsed() < Duration::from_secs(1));
+        }
+    }
+
+    #[test]
+    fn test_receive_response_fails_when_swtpm_closes_mid_response() {
+        let (ours, mut swtpm) = data_pair(Duration::from_secs(5));
+        swtpm.write_all(&RESPONSE[..8]).unwrap();
+        drop(swtpm);
+        let mut buf = [0u8; 64];
+        receive_response(&ours, &mut buf).unwrap_err();
     }
 }
