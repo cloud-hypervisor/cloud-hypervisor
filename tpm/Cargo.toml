@@ -8,7 +8,6 @@ version = "0.1.0"
 
 [dependencies]
 anyhow = { workspace = true }
-libc = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }
 vmm-sys-util = { workspace = true }
