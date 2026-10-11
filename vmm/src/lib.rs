@@ -2602,7 +2602,13 @@ impl RequestHandler for Vmm {
         match self.vm {
             VmOwnership::Owned(ref mut vm) => vm.pause().map_err(VmError::Pause),
             VmOwnership::Migration { .. } => Err(VmError::VmMigrating),
-            VmOwnership::None => Err(VmError::VmNotRunning),
+            VmOwnership::None => {
+                if self.vm_config.is_none() {
+                    Err(VmError::VmNotCreated)
+                } else {
+                    Err(VmError::VmNotRunning)
+                }
+            }
         }
     }
 
@@ -2610,7 +2616,13 @@ impl RequestHandler for Vmm {
         match self.vm {
             VmOwnership::Owned(ref mut vm) => vm.resume().map_err(VmError::Resume),
             VmOwnership::Migration { .. } => Err(VmError::VmMigrating),
-            VmOwnership::None => Err(VmError::VmNotRunning),
+            VmOwnership::None => {
+                if self.vm_config.is_none() {
+                    Err(VmError::VmNotCreated)
+                } else {
+                    Err(VmError::VmNotRunning)
+                }
+            }
         }
     }
 
@@ -2742,6 +2754,9 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_shutdown(&mut self) -> result::Result<(), VmError> {
+        if self.vm_config.is_none() {
+            return Err(VmError::VmNotCreated);
+        }
         let mut vm = self.vm.take_owned_or(VmError::VmNotRunning)?;
         // Drain console_info so that the FDs are not reused
         let _ = self.console_info.take();
@@ -3317,7 +3332,13 @@ impl RequestHandler for Vmm {
         match self.vm {
             VmOwnership::Owned(ref mut vm) => vm.power_button(),
             VmOwnership::Migration { .. } => Err(VmError::VmMigrating),
-            VmOwnership::None => Err(VmError::VmNotRunning),
+            VmOwnership::None => {
+                if self.vm_config.is_none() {
+                    Err(VmError::VmNotCreated)
+                } else {
+                    Err(VmError::VmNotRunning)
+                }
+            }
         }
     }
 
@@ -3730,6 +3751,23 @@ mod tests {
             vmm.vm_create(config),
             Err(VmError::VmAlreadyCreated)
         ));
+    }
+
+    #[test]
+    fn test_vmm_lifecycle_errors_when_vm_is_not_created() {
+        let mut vmm = create_dummy_vmm();
+
+        assert!(matches!(vmm.vm_pause(), Err(VmError::VmNotCreated)));
+        assert!(matches!(vmm.vm_resume(), Err(VmError::VmNotCreated)));
+        assert!(matches!(vmm.vm_power_button(), Err(VmError::VmNotCreated)));
+        assert!(matches!(vmm.vm_shutdown(), Err(VmError::VmNotCreated)));
+
+        vmm.vm_create(create_dummy_vm_config()).unwrap();
+
+        assert!(matches!(vmm.vm_pause(), Err(VmError::VmNotRunning)));
+        assert!(matches!(vmm.vm_resume(), Err(VmError::VmNotRunning)));
+        assert!(matches!(vmm.vm_power_button(), Err(VmError::VmNotRunning)));
+        assert!(matches!(vmm.vm_shutdown(), Err(VmError::VmNotRunning)));
     }
 
     #[test]
