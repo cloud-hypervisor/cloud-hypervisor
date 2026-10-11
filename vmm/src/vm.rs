@@ -76,10 +76,11 @@ use thiserror::Error;
 use tracer::trace_scoped;
 use vm_device::Bus;
 #[cfg(feature = "tdx")]
-use vm_memory::GuestMemoryBackend;
-#[cfg(feature = "tdx")]
-use vm_memory::{Address, ByteValued, GuestMemoryRegion, ReadVolatile};
-use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
+use vm_memory::{Address, ByteValued};
+use vm_memory::{
+    Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend,
+    GuestMemoryRegion, ReadVolatile,
+};
 use vm_migration::protocol::{MemoryRangeTable, Request, Response};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, snapshot_from_id,
@@ -120,6 +121,55 @@ use crate::{
     CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, GuestMemoryMmap,
     MEMORY_MANAGER_SNAPSHOT_ID, MemoryZoneUpdateError, PciDeviceInfo, acpi, cpu,
 };
+
+/// Read all bytes from `src` into guest memory, retrying after short reads.
+fn read_guest_memory_exact<F>(
+    memory: &GuestMemoryMmap,
+    addr: GuestAddress,
+    src: &mut F,
+    count: usize,
+) -> result::Result<(), vm_memory::GuestMemoryError>
+where
+    F: ReadVolatile,
+{
+    let mut offset = 0;
+    while offset < count {
+        let current_addr = GuestAddress(
+            addr.0
+                .checked_add(offset as u64)
+                .ok_or(vm_memory::GuestMemoryError::GuestAddressOverflow)?,
+        );
+        let region = match memory.find_region(current_addr) {
+            Some(region) => region,
+            None if offset == 0 => {
+                return Err(vm_memory::GuestMemoryError::InvalidGuestAddress(
+                    current_addr,
+                ));
+            }
+            None => {
+                return Err(vm_memory::GuestMemoryError::PartialBuffer {
+                    expected: count,
+                    completed: offset,
+                });
+            }
+        };
+        let region_offset = current_addr.0 - region.start_addr().0;
+        let count_in_region = (region.len() - region_offset).min((count - offset) as u64) as usize;
+        // Keep each call within one region so a short source read cannot skip unwritten bytes
+        // when GuestMemory::read_volatile_from traverses multiple regions.
+        let bytes_read = memory.read_volatile_from(current_addr, src, count_in_region)?;
+
+        if bytes_read == 0 {
+            return Err(vm_memory::GuestMemoryError::PartialBuffer {
+                expected: count,
+                completed: offset,
+            });
+        }
+        offset += bytes_read;
+    }
+
+    Ok(())
+}
 
 /// Errors associated with VM management
 #[derive(Debug, Error)]
@@ -1490,10 +1540,7 @@ impl Vm {
             arch::initramfs_load_addr(guest_mem, size).map_err(Error::InitramfsAddress)?;
         let address = GuestAddress(address);
 
-        // TODO although the name indicates, there is no retry internally: https://github.com/rust-vmm/rust-vmm/issues/43
-        // For now, we prefer to fail loudly at least.
-        guest_mem
-            .read_exact_volatile_from(address, initramfs, size)
+        read_guest_memory_exact(guest_mem, address, initramfs, size)
             .map_err(Error::InitramfsRead)?;
 
         info!("Initramfs loaded: address = 0x{:x}", address.0);
@@ -2588,9 +2635,8 @@ impl Vm {
                     firmware_file
                         .seek(SeekFrom::Start(section.data_offset as u64))
                         .map_err(Error::LoadTdvf)?;
-                    // TODO although the name indicates, there is no retry internally: https://github.com/rust-vmm/rust-vmm/issues/43
-                    // For now, we prefer to fail loudly at least.
-                    mem.read_exact_volatile_from(
+                    read_guest_memory_exact(
+                        &mem,
                         GuestAddress(section.address),
                         &mut firmware_file,
                         section.data_size as usize,
@@ -2627,9 +2673,8 @@ impl Vm {
                         }
 
                         payload_file.rewind().map_err(Error::LoadPayload)?;
-                        // TODO although the name indicates, there is no retry internally: https://github.com/rust-vmm/rust-vmm/issues/43
-                        // For now, we prefer to fail loudly at least.
-                        mem.read_exact_volatile_from(
+                        read_guest_memory_exact(
+                            &mem,
                             GuestAddress(section.address),
                             payload_file,
                             payload_size as usize,
@@ -3678,7 +3723,74 @@ impl GuestDebuggable for Vm {
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 #[cfg(test)]
 mod tests {
+    use vm_memory::bitmap::BitmapSlice;
+    use vm_memory::{VolatileMemoryError, VolatileSlice};
+
     use super::*;
+
+    struct ShortReader {
+        data: Vec<u8>,
+        offset: usize,
+    }
+
+    impl ReadVolatile for ShortReader {
+        fn read_volatile<B: BitmapSlice>(
+            &mut self,
+            buf: &mut VolatileSlice<B>,
+        ) -> result::Result<usize, VolatileMemoryError> {
+            if self.offset == self.data.len() {
+                return Ok(0);
+            }
+
+            let count = buf.len().min(1);
+            buf.subslice(0, count)
+                .unwrap()
+                .copy_from(&self.data[self.offset..self.offset + count]);
+            self.offset += count;
+            Ok(count)
+        }
+    }
+
+    #[test]
+    fn test_read_guest_memory_exact_retries_short_reads() {
+        let data = b"short reads are retried".to_vec();
+        let memory = GuestMemoryMmap::from_ranges(&[(GuestAddress(0x1000), data.len())]).unwrap();
+        let mut reader = ShortReader {
+            data: data.clone(),
+            offset: 0,
+        };
+
+        read_guest_memory_exact(&memory, GuestAddress(0x1000), &mut reader, data.len()).unwrap();
+
+        let mut actual = vec![0; data.len()];
+        memory
+            .read_slice(&mut actual, GuestAddress(0x1000))
+            .unwrap();
+        assert_eq!(actual, data);
+    }
+
+    #[test]
+    fn test_read_guest_memory_exact_retries_short_reads_across_regions() {
+        let data = b"short reads are retried";
+        let split = data.len() / 2;
+        let memory = GuestMemoryMmap::from_ranges(&[
+            (GuestAddress(0x1000), split),
+            (GuestAddress(0x1000 + split as u64), data.len() - split),
+        ])
+        .unwrap();
+        let mut reader = ShortReader {
+            data: data.to_vec(),
+            offset: 0,
+        };
+
+        read_guest_memory_exact(&memory, GuestAddress(0x1000), &mut reader, data.len()).unwrap();
+
+        let mut actual = vec![0; data.len()];
+        memory
+            .read_slice(&mut actual, GuestAddress(0x1000))
+            .unwrap();
+        assert_eq!(actual, data);
+    }
 
     fn test_vm_state_transitions(state: VmState) {
         match state {
