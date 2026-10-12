@@ -99,6 +99,7 @@ impl Fs {
         )?;
         if postcopy {
             vu.check_postcopy_feature()?;
+            vu.postcopy_advise()?;
         }
 
         let (

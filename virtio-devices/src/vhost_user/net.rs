@@ -102,6 +102,7 @@ impl Net {
         )?;
         if postcopy {
             vu.check_postcopy_feature()?;
+            vu.postcopy_advise()?;
         }
 
         let (

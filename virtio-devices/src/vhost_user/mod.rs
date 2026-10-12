@@ -91,6 +91,8 @@ pub enum Error {
     VhostUserSetFeatures(#[source] VhostError),
     #[error("Set protocol features failed")]
     VhostUserSetProtocolFeatures(#[source] VhostError),
+    #[error("Postcopy advise failed")]
+    VhostUserPostcopyAdvise(#[source] VhostError),
     #[error("Set mem table failed")]
     VhostUserSetMemTable(#[source] VhostError),
     #[error("Set vring num failed")]
@@ -215,6 +217,7 @@ impl Error {
             | Error::VhostUserSetOwner(e)
             | Error::VhostUserSetFeatures(e)
             | Error::VhostUserSetProtocolFeatures(e)
+            | Error::VhostUserPostcopyAdvise(e)
             | Error::VhostUserSetMemTable(e)
             | Error::VhostUserSetVringNum(e)
             | Error::VhostUserSetVringAddr(e)

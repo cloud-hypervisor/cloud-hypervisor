@@ -68,6 +68,7 @@ pub struct VhostUserHandle {
     vrings_info: Option<Vec<VringInfo>>,
     queue_indexes: Vec<u16>,
     vring_bases: Option<Vec<u64>>,
+    postcopy_uffd: Option<Arc<File>>,
 }
 
 impl VhostUserHandle {
@@ -122,6 +123,14 @@ impl VhostUserHandle {
         Ok(())
     }
 
+    fn postcopy_protocol_features(&self) -> VhostUserProtocolFeatures {
+        if self.postcopy_uffd.is_some() {
+            VhostUserProtocolFeatures::PAGEFAULT
+        } else {
+            VhostUserProtocolFeatures::empty()
+        }
+    }
+
     pub fn check_postcopy_feature(&mut self) -> Result<()> {
         if self.backend_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
             let backend_protocol_features = self
@@ -133,6 +142,24 @@ impl VhostUserHandle {
             }
         }
         Err(Error::VhostUserPageFaultUnsupported)
+    }
+
+    /// Enable PAGEFAULT and get the userfaultfd the backend registers its
+    /// guest memory mappings on once postcopy is listening. PAGEFAULT stays
+    /// enabled across later protocol feature updates.
+    ///
+    /// This replaces the enabled protocol features, so it must be called
+    /// before they are negotiated or restored.
+    pub fn postcopy_advise(&mut self) -> Result<()> {
+        self.vu
+            .set_protocol_features(VhostUserProtocolFeatures::PAGEFAULT)
+            .map_err(Error::VhostUserSetProtocolFeatures)?;
+        let uffd = self
+            .vu
+            .postcopy_advise()
+            .map_err(Error::VhostUserPostcopyAdvise)?;
+        self.postcopy_uffd = Some(Arc::new(uffd));
+        Ok(())
     }
 
     pub fn negotiate_features_vhost_user(
@@ -150,9 +177,11 @@ impl VhostUserHandle {
                     .map_err(Error::VhostUserGetProtocolFeatures)?;
 
                 let acked_protocol_features = avail_protocol_features & backend_protocol_features;
+                let enabled_protocol_features =
+                    acked_protocol_features | self.postcopy_protocol_features();
 
                 self.vu
-                    .set_protocol_features(acked_protocol_features)
+                    .set_protocol_features(enabled_protocol_features)
                     .map_err(Error::VhostUserSetProtocolFeatures)?;
 
                 acked_protocol_features
@@ -362,7 +391,7 @@ impl VhostUserHandle {
             let acked_protocol_features =
                 VhostUserProtocolFeatures::from_bits_truncate(acked_protocol_features);
             self.vu
-                .set_protocol_features(acked_protocol_features)
+                .set_protocol_features(acked_protocol_features | self.postcopy_protocol_features())
                 .map_err(Error::VhostUserSetProtocolFeatures)?;
 
             if acked_protocol_features.contains(VhostUserProtocolFeatures::REPLY_ACK) {
@@ -454,6 +483,7 @@ impl VhostUserHandle {
                 vrings_info: None,
                 queue_indexes: Vec::new(),
                 vring_bases: None,
+                postcopy_uffd: None,
             };
             vhost_user
                 .vu
@@ -513,6 +543,7 @@ impl VhostUserHandle {
                         vrings_info: None,
                         queue_indexes: Vec::new(),
                         vring_bases: None,
+                        postcopy_uffd: None,
                     })
                     .map_err(Error::VhostUserConnect);
 
