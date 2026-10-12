@@ -599,7 +599,7 @@ fn create_spcr_table(base_address: u64, gsi: u32) -> Sdt {
     // Base Address in format ACPI Generic Address Structure
     spcr.write(40, GenericAddress::mmio_address::<u8>(base_address));
     // Interrupt Type: Bit[3] ARMH GIC interrupt
-    spcr.write(52, (1 << 3) as u8);
+    spcr.write(52, 1u8 << 3);
     // Global System Interrupt used by the UART
     spcr.write(54, gsi.to_le());
     // Baud Rate: 3 = 9600
@@ -607,7 +607,7 @@ fn create_spcr_table(base_address: u64, gsi: u32) -> Sdt {
     // Stop Bits: 1 Stop bit
     spcr.write(60, 1u8);
     // Flow Control: Bit[1] = RTS/CTS hardware flow control
-    spcr.write(61, (1 << 1) as u8);
+    spcr.write(61, 1u8 << 1);
     // PCI Device ID: Not a PCI device
     spcr.write(64, 0xffff_u16);
     // PCI Vendor ID: Not a PCI device
