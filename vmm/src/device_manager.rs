@@ -2881,6 +2881,7 @@ impl DeviceManager {
                     self.force_access_platform,
                     state_from_id(snapshot, id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
+                    None,
                 ) {
                     Ok(vub_device) => vub_device,
                     Err(e) => {
@@ -3087,6 +3088,7 @@ impl DeviceManager {
                     self.force_access_platform,
                     state_from_id(snapshot, id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
+                    None,
                     net_cfg.offload_tso,
                     net_cfg.offload_ufo,
                     net_cfg.offload_csum,
@@ -3348,6 +3350,7 @@ impl DeviceManager {
                     self.force_access_platform,
                     state_from_id(snapshot, id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
+                    None,
                 )
                 .map_err(DeviceManagerError::CreateGenericVhostUser)?,
             ));
@@ -3419,6 +3422,7 @@ impl DeviceManager {
                     self.force_access_platform,
                     state_from_id(snapshot, id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
+                    None,
                 )
                 .map_err(DeviceManagerError::CreateVirtioFs)?,
             ));
