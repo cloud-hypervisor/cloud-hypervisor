@@ -2,6 +2,12 @@ verbose = "info"
 
 exclude_path = [".lychee.toml"]
 
+# Check GitHub source files through the raw endpoint to avoid 503 responses
+# from the HTML pages.
+remap = [
+  '^https://github\.com/([^/]+)/([^/]+)/blob/(.+)$ https://raw.githubusercontent.com/$1/$2/$3',
+]
+
 exclude = [
   # Availability of links below should be manually verified.
   # Page for intel TDX support, returns 403 while querying.
