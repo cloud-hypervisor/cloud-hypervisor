@@ -17,8 +17,9 @@ use crate::sparse::{punch_hole, write_zeroes};
 use crate::{AlignedFile, is_block_device};
 
 pub(crate) struct RawAsync {
-    raw_file: AlignedFile,
+    // Drop before raw_file so pending SQEs can be submitted while its fd is valid.
     data_io: UringDataIo,
+    raw_file: AlignedFile,
     alignment: Option<u64>,
     is_block_device: bool,
 }
@@ -31,8 +32,8 @@ impl RawAsync {
         let alignment = raw_file.alignment().map(|alignment| alignment as u64);
 
         Ok(RawAsync {
-            raw_file,
             data_io,
+            raw_file,
             alignment,
             is_block_device,
         })
