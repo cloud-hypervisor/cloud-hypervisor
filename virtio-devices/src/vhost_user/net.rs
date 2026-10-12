@@ -85,6 +85,7 @@ impl Net {
         exit_evt: EventFd,
         access_platform_enabled: bool,
         state: Option<State>,
+        postcopy: bool,
         offload_tso: bool,
         offload_ufo: bool,
         offload_csum: bool,
@@ -99,6 +100,9 @@ impl Net {
             &exit_evt,
             |_| Ok(()),
         )?;
+        if postcopy {
+            vu.check_postcopy_feature()?;
+        }
 
         let (
             avail_features,

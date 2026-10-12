@@ -98,6 +98,7 @@ impl Blk {
         exit_evt: EventFd,
         access_platform_enabled: bool,
         state: Option<State>,
+        postcopy: bool,
     ) -> Result<Blk> {
         let num_queues = vu_cfg.num_queues;
 
@@ -109,6 +110,9 @@ impl Blk {
             &exit_evt,
             |_| Ok(()),
         )?;
+        if postcopy {
+            vu.check_postcopy_feature()?;
+        }
 
         let (
             avail_features,

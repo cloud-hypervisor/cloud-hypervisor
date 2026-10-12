@@ -83,6 +83,7 @@ impl Fs {
         exit_evt: EventFd,
         access_platform_enabled: bool,
         state: Option<State>,
+        postcopy: bool,
     ) -> Result<Fs> {
         // Calculate the actual number of queues needed.
         let num_queues = NUM_QUEUE_OFFSET + req_num_queues;
@@ -96,6 +97,9 @@ impl Fs {
             &exit_evt,
             |_| Ok(()),
         )?;
+        if postcopy {
+            vu.check_postcopy_feature()?;
+        }
 
         let (
             avail_features,

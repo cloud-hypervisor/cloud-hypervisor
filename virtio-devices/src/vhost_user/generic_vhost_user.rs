@@ -70,6 +70,7 @@ impl GenericVhostUser {
         exit_evt: EventFd,
         access_platform_enabled: bool,
         state: Option<State>,
+        postcopy: bool,
     ) -> Result<GenericVhostUser> {
         // Calculate the actual number of queues needed.
         let num_queues = request_queue_sizes.len();
@@ -83,6 +84,9 @@ impl GenericVhostUser {
             &exit_evt,
             |_| Ok(()),
         )?;
+        if postcopy {
+            vu.check_postcopy_feature()?;
+        }
 
         let (
             avail_features,

@@ -122,6 +122,19 @@ impl VhostUserHandle {
         Ok(())
     }
 
+    pub fn check_postcopy_feature(&mut self) -> Result<()> {
+        if self.backend_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
+            let backend_protocol_features = self
+                .vu
+                .get_protocol_features()
+                .map_err(Error::VhostUserGetProtocolFeatures)?;
+            if backend_protocol_features.contains(VhostUserProtocolFeatures::PAGEFAULT) {
+                return Ok(());
+            }
+        }
+        Err(Error::VhostUserPageFaultUnsupported)
+    }
+
     pub fn negotiate_features_vhost_user(
         &mut self,
         avail_features: u64,

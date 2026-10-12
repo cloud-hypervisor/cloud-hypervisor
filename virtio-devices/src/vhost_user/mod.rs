@@ -79,6 +79,10 @@ pub enum Error {
     UnsupportedProtocolFeatures(u64),
     #[error("Protocol features {0:#x} saved without PROTOCOL_FEATURES acknowledged")]
     InconsistentProtocolFeatures(u64),
+    #[error(
+        "The backend does not support PAGEFAULT, which postcopy migration and on-demand restore require"
+    )]
+    VhostUserPageFaultUnsupported,
     #[error("Get vring base failed")]
     VhostUserGetVringBase(#[source] VhostError),
     #[error("Set owner failed")]
@@ -974,6 +978,7 @@ mod tests {
                     EventFd::new(libc::EFD_NONBLOCK).unwrap(),
                     enabled,
                     None,
+                    false,
                 )
                 .unwrap();
                 assert_eq!(device.features() & access_platform != 0, enabled);
