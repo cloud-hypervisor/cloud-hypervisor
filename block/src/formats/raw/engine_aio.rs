@@ -7,6 +7,7 @@
 // Copyright © 2023 Crusoe Energy Systems LLC
 //
 
+use std::fs::File;
 use std::os::unix::io::AsRawFd;
 
 use vmm_sys_util::eventfd::EventFd;
@@ -16,21 +17,25 @@ use crate::async_io::{
 };
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::sparse::{punch_hole, write_zeroes};
-use crate::{AlignedFile, is_block_device};
+use crate::{SECTOR_SIZE, is_block_device, probe_direct_alignment};
 
 pub(super) struct RawAio {
-    raw_file: AlignedFile,
+    raw_file: File,
     data_io: AioDataIo,
     alignment: Option<u64>,
     is_block_device: bool,
 }
 
 impl RawAio {
-    pub(super) fn new(raw_file: AlignedFile, queue_depth: u32) -> BlockResult<Self> {
+    pub(super) fn new(raw_file: File, direct: bool, queue_depth: u32) -> BlockResult<Self> {
         let data_io =
             AioDataIo::new(queue_depth).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
         let is_block_device = is_block_device(raw_file.as_raw_fd());
-        let alignment = raw_file.alignment().map(|alignment| alignment as u64);
+        let alignment = if direct {
+            Some(probe_direct_alignment(raw_file.as_raw_fd()).unwrap_or(SECTOR_SIZE))
+        } else {
+            None
+        };
 
         Ok(RawAio {
             raw_file,
@@ -85,13 +90,8 @@ impl AsyncIo for RawAio {
         // Linux AIO has no IOCB command for fallocate, so perform the
         // operation synchronously and signal completion via the completion
         // list, matching the pattern used by the sync backend (RawSync).
-        punch_hole(
-            self.raw_file.file_mut(),
-            self.is_block_device,
-            offset,
-            length,
-        )
-        .map_err(AsyncIoError::PunchHole)?;
+        punch_hole(&mut self.raw_file, self.is_block_device, offset, length)
+            .map_err(AsyncIoError::PunchHole)?;
         self.data_io
             .inject_completion(AsyncIoCompletion::new(user_data, 0, None));
 
@@ -100,13 +100,8 @@ impl AsyncIo for RawAio {
 
     fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
         // Same as punch_hole().
-        write_zeroes(
-            self.raw_file.file_mut(),
-            self.is_block_device,
-            offset,
-            length,
-        )
-        .map_err(AsyncIoError::WriteZeroes)?;
+        write_zeroes(&mut self.raw_file, self.is_block_device, offset, length)
+            .map_err(AsyncIoError::WriteZeroes)?;
         self.data_io
             .inject_completion(AsyncIoCompletion::new(user_data, 0, None));
 
@@ -125,8 +120,7 @@ mod tests {
     fn test_punch_hole() {
         let temp_file = TempFile::new().unwrap();
         let mut file = temp_file.into_file();
-        let mut async_io =
-            RawAio::new(AlignedFile::new(file.try_clone().unwrap(), false), 128).unwrap();
+        let mut async_io = RawAio::new(file.try_clone().unwrap(), false, 128).unwrap();
         test_helpers::test_punch_hole(&mut async_io, &mut file);
     }
 
@@ -134,8 +128,7 @@ mod tests {
     fn test_write_zeroes() {
         let temp_file = TempFile::new().unwrap();
         let mut file = temp_file.into_file();
-        let mut async_io =
-            RawAio::new(AlignedFile::new(file.try_clone().unwrap(), false), 128).unwrap();
+        let mut async_io = RawAio::new(file.try_clone().unwrap(), false, 128).unwrap();
         test_helpers::test_write_zeroes(&mut async_io, &mut file);
     }
 
@@ -143,8 +136,7 @@ mod tests {
     fn test_punch_hole_multiple_operations() {
         let temp_file = TempFile::new().unwrap();
         let mut file = temp_file.into_file();
-        let mut async_io =
-            RawAio::new(AlignedFile::new(file.try_clone().unwrap(), false), 128).unwrap();
+        let mut async_io = RawAio::new(file.try_clone().unwrap(), false, 128).unwrap();
         test_helpers::test_punch_hole_multiple_operations(&mut async_io, &mut file);
     }
 }

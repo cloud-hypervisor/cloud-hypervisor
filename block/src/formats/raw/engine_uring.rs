@@ -4,6 +4,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use std::fs::File;
 use std::os::unix::io::AsRawFd;
 
 use vmm_sys_util::eventfd::EventFd;
@@ -13,22 +14,26 @@ use crate::async_io::{
 };
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::sparse::{punch_hole, write_zeroes};
-use crate::{AlignedFile, is_block_device};
+use crate::{SECTOR_SIZE, is_block_device, probe_direct_alignment};
 
 pub(crate) struct RawAsync {
     // Drop before raw_file so pending SQEs can be submitted while its fd is valid.
     data_io: UringDataIo,
-    raw_file: AlignedFile,
+    raw_file: File,
     alignment: Option<u64>,
     is_block_device: bool,
 }
 
 impl RawAsync {
-    pub(crate) fn new(raw_file: AlignedFile, ring_depth: u32) -> BlockResult<Self> {
+    pub(crate) fn new(raw_file: File, direct: bool, ring_depth: u32) -> BlockResult<Self> {
         let data_io =
             UringDataIo::new(ring_depth).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
         let is_block_device = is_block_device(raw_file.as_raw_fd());
-        let alignment = raw_file.alignment().map(|alignment| alignment as u64);
+        let alignment = if direct {
+            Some(probe_direct_alignment(raw_file.as_raw_fd()).unwrap_or(SECTOR_SIZE))
+        } else {
+            None
+        };
 
         Ok(RawAsync {
             data_io,
@@ -95,13 +100,8 @@ impl AsyncIo for RawAsync {
         // reissuing the request, and lets the sparse helper handle the ioctl
         // path for block devices and the write fallback for unsupported
         // filesystems.
-        punch_hole(
-            self.raw_file.file_mut(),
-            self.is_block_device,
-            offset,
-            length,
-        )
-        .map_err(AsyncIoError::PunchHole)?;
+        punch_hole(&mut self.raw_file, self.is_block_device, offset, length)
+            .map_err(AsyncIoError::PunchHole)?;
         // Deliver the completion through the normal io_uring path by
         // queuing a NOP carrying `user_data`. The registered eventfd will
         // fire when it completes, just like any other request.
@@ -112,13 +112,8 @@ impl AsyncIo for RawAsync {
 
     fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
         // Same rationale as punch_hole().
-        write_zeroes(
-            self.raw_file.file_mut(),
-            self.is_block_device,
-            offset,
-            length,
-        )
-        .map_err(AsyncIoError::WriteZeroes)?;
+        write_zeroes(&mut self.raw_file, self.is_block_device, offset, length)
+            .map_err(AsyncIoError::WriteZeroes)?;
         self.data_io
             .submit_nop(user_data)
             .map_err(AsyncIoError::WriteZeroes)

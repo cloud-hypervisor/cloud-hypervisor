@@ -152,12 +152,11 @@ impl disk_file::AsyncDiskFile for RawDisk {
             .file
             .try_clone()
             .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::Clone(e)))?;
-        let raw_file = AlignedFile::new(file, self.direct);
         match self.backend {
-            RawBackend::Sync => Ok(Box::new(RawSync::new(raw_file))),
+            RawBackend::Sync => Ok(Box::new(RawSync::new(AlignedFile::new(file, self.direct)))),
             #[cfg(feature = "io_uring")]
-            RawBackend::IoUring => Ok(Box::new(RawAsync::new(raw_file, ring_depth)?)),
-            RawBackend::Aio => Ok(Box::new(RawAio::new(raw_file, ring_depth)?)),
+            RawBackend::IoUring => Ok(Box::new(RawAsync::new(file, self.direct, ring_depth)?)),
+            RawBackend::Aio => Ok(Box::new(RawAio::new(file, self.direct, ring_depth)?)),
         }
     }
 }
