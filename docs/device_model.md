@@ -119,6 +119,11 @@ With buffered I/O the host page cache absorbs any alignment difference. Under
 `direct=on`, overrides below the backing block size are rejected for writable
 disks and for read-only raw and fixed VHD disks.
 
+Raw and fixed VHD data requests under `direct=on` must have offsets and total
+lengths aligned to the backing file's direct I/O requirement. Unaligned requests
+return a virtio-block I/O error, including reads from read-only disks. Unaligned
+guest memory buffers are handled with an aligned memory buffer.
+
 ### virtio-console
 
 `cloud-hypervisor` exposes a `virtio-console` device to the guest. Although

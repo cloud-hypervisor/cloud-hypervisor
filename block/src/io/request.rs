@@ -460,6 +460,19 @@ impl Request {
         alignment: Option<u64>,
         user_data: u64,
     ) -> Result<AsyncIoOperation, ExecuteError> {
+        if offset < 0 {
+            return Err(ExecuteError::BadRequest(Error::InvalidOffset));
+        }
+
+        if let Some(alignment) = alignment
+            && (!(offset as u64).is_multiple_of(alignment)
+                || !(self.data_len() as u64).is_multiple_of(alignment))
+        {
+            return Err(ExecuteError::BadRequest(Error::InvalidDataAlignment(
+                alignment,
+            )));
+        }
+
         if let Some(alignment) = alignment
             && !self.guest_memory_is_aligned(&mem, alignment)?
         {
@@ -710,6 +723,73 @@ mod tests {
         }
         fn next_completed_request(&mut self) -> Option<AsyncIoCompletion> {
             None
+        }
+    }
+
+    #[test]
+    fn invalid_data_operations_are_rejected() {
+        let mem = Arc::new(GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 8192)]).unwrap());
+        for request_type in [RequestType::In, RequestType::Out] {
+            for (alignment, offset, len) in [
+                (Some(4096), 512, 4096),
+                (Some(4096), 0, 512),
+                (None, -512, 0),
+                (Some(4096), -512, 0),
+            ] {
+                let request = Request {
+                    request_type,
+                    sector: 0,
+                    data_descriptors: SmallVec::from_slice(&[(GuestAddress(0), len)]),
+                    status_addr: GuestAddress(8191),
+                    writeback: true,
+                    start: Instant::now(),
+                };
+                let result = request.build_data_operation(Arc::clone(&mem), offset, alignment, 1);
+                if offset < 0 {
+                    assert!(matches!(
+                        result,
+                        Err(ExecuteError::BadRequest(Error::InvalidOffset))
+                    ));
+                } else {
+                    assert!(matches!(
+                        result,
+                        Err(ExecuteError::BadRequest(Error::InvalidDataAlignment(4096)))
+                    ));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn unaligned_guest_buffers_are_bounced() {
+        let mem = Arc::new(GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 8192)]).unwrap());
+        mem.write_slice(&vec![0x5a; 4096], GuestAddress(1)).unwrap();
+        for request_type in [RequestType::In, RequestType::Out] {
+            let request = Request {
+                request_type,
+                sector: 8,
+                data_descriptors: SmallVec::from_slice(&[
+                    (GuestAddress(1), 512),
+                    (GuestAddress(513), 3584),
+                ]),
+                status_addr: GuestAddress(8191),
+                writeback: true,
+                start: Instant::now(),
+            };
+            let op = request
+                .build_data_operation(Arc::clone(&mem), 4096, Some(4096), 1)
+                .unwrap();
+            assert_eq!(op.offset(), 4096);
+            assert_eq!(op.total_len(), 4096);
+            assert_eq!(op.iovecs().len(), 1);
+            assert!((op.iovecs()[0].iov_base as usize).is_multiple_of(4096));
+            match op {
+                AsyncIoOperation::WriteFromVec { buffer, .. } => {
+                    assert!(buffer.as_slice().iter().all(|byte| *byte == 0x5a));
+                }
+                AsyncIoOperation::ReadToVec { .. } => {}
+                _ => panic!("Expected an owned bounce buffer"),
+            }
         }
     }
 

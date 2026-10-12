@@ -34,6 +34,10 @@ impl AsyncIo for FixedVhdAsync {
         self.raw_file_async.notifier()
     }
 
+    fn alignment(&self) -> Option<u64> {
+        self.raw_file_async.alignment()
+    }
+
     fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
         op.validate_bounds(self.size)?;
         self.raw_file_async.submit_data_operation(op)
