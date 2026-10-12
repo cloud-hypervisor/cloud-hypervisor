@@ -916,19 +916,6 @@ mod tests {
         }
     }
 
-    #[cfg(target_arch = "x86_64")]
-    const SELECTOR_OFFSET: u64 = 0;
-    #[cfg(target_arch = "aarch64")]
-    const SELECTOR_OFFSET: u64 = 8;
-    #[cfg(target_arch = "x86_64")]
-    const DATA_OFFSET: u64 = 1;
-    #[cfg(target_arch = "aarch64")]
-    const DATA_OFFSET: u64 = 0;
-    #[cfg(target_arch = "x86_64")]
-    const DMA_OFFSET: u64 = 4;
-    #[cfg(target_arch = "aarch64")]
-    const DMA_OFFSET: u64 = 16;
-
     #[test]
     fn test_signature() {
         let gm = GuestMemoryAtomic::new(
@@ -940,10 +927,10 @@ mod tests {
         let mut data = vec![0u8];
 
         let mut sig_iter = FW_CFG_SIGNATURE_CONTENT.into_iter();
-        fw_cfg.write(0, SELECTOR_OFFSET, &[FW_CFG_SIGNATURE as u8, 0]);
+        fw_cfg.write(0, FW_CFG_SELECTOR_OFFSET, &[FW_CFG_SIGNATURE as u8, 0]);
         loop {
             if let Some(char) = sig_iter.next() {
-                fw_cfg.read(0, DATA_OFFSET, &mut data);
+                fw_cfg.read(0, FW_CFG_DATA_OFFSET, &mut data);
                 assert_eq!(data[0], char);
             } else {
                 return;
@@ -966,10 +953,10 @@ mod tests {
         let mut data = vec![0u8];
 
         let mut cmdline_iter = cmdline.into_iter();
-        fw_cfg.write(0, SELECTOR_OFFSET, &[FW_CFG_CMDLINE_DATA as u8, 0]);
+        fw_cfg.write(0, FW_CFG_SELECTOR_OFFSET, &[FW_CFG_CMDLINE_DATA as u8, 0]);
         loop {
             if let Some(char) = cmdline_iter.next() {
-                fw_cfg.read(0, DATA_OFFSET, &mut data);
+                fw_cfg.read(0, FW_CFG_DATA_OFFSET, &mut data);
                 assert_eq!(data[0], char);
             } else {
                 return;
@@ -991,13 +978,13 @@ mod tests {
         fw_cfg.add_kernel_data(temp.as_file()).unwrap();
 
         let mut size = [0u8; size_of::<u32>()];
-        fw_cfg.write(0, SELECTOR_OFFSET, &FW_CFG_KERNEL_SIZE.to_be_bytes());
-        fw_cfg.read(0, DATA_OFFSET, &mut size);
+        fw_cfg.write(0, FW_CFG_SELECTOR_OFFSET, &FW_CFG_KERNEL_SIZE.to_be_bytes());
+        fw_cfg.read(0, FW_CFG_DATA_OFFSET, &mut size);
         assert_eq!(u32::from_le_bytes(size), kernel.len() as u32);
 
         let mut data = vec![0u8; kernel.len()];
-        fw_cfg.write(0, SELECTOR_OFFSET, &FW_CFG_KERNEL_DATA.to_be_bytes());
-        fw_cfg.read(0, DATA_OFFSET, &mut data);
+        fw_cfg.write(0, FW_CFG_SELECTOR_OFFSET, &FW_CFG_KERNEL_DATA.to_be_bytes());
+        fw_cfg.read(0, FW_CFG_DATA_OFFSET, &mut data);
         assert_eq!(data, kernel);
     }
 
@@ -1020,10 +1007,10 @@ mod tests {
         let mut data = vec![0u8];
 
         let mut initram_iter = (*initram_content).into_iter();
-        fw_cfg.write(0, SELECTOR_OFFSET, &[FW_CFG_INITRD_DATA as u8, 0]);
+        fw_cfg.write(0, FW_CFG_SELECTOR_OFFSET, &[FW_CFG_INITRD_DATA as u8, 0]);
         loop {
             if let Some(char) = initram_iter.next() {
-                fw_cfg.read(0, DATA_OFFSET, &mut data);
+                fw_cfg.read(0, FW_CFG_DATA_OFFSET, &mut data);
                 assert_eq!(data[0], char);
             } else {
                 return;
@@ -1050,9 +1037,9 @@ mod tests {
         let mut data = vec![0u8];
 
         // Select the first file item (FW_CFG_FILE_FIRST = 0x20)
-        fw_cfg.write(0, SELECTOR_OFFSET, &[FW_CFG_FILE_FIRST as u8, 0]);
+        fw_cfg.write(0, FW_CFG_SELECTOR_OFFSET, &[FW_CFG_FILE_FIRST as u8, 0]);
         for &byte in expected.iter() {
-            fw_cfg.read(0, DATA_OFFSET, &mut data);
+            fw_cfg.read(0, FW_CFG_DATA_OFFSET, &mut data);
             assert_eq!(data[0], byte);
         }
     }
@@ -1110,11 +1097,11 @@ mod tests {
         assert_ne!(data, code);
 
         #[cfg(target_arch = "aarch64")]
-        fw_cfg.write(0, SELECTOR_OFFSET, &FW_CFG_FILE_FIRST.to_be_bytes());
+        fw_cfg.write(0, FW_CFG_SELECTOR_OFFSET, &FW_CFG_FILE_FIRST.to_be_bytes());
         #[cfg(target_arch = "x86_64")]
-        fw_cfg.write(0, SELECTOR_OFFSET, &[FW_CFG_FILE_FIRST as u8, 0]);
+        fw_cfg.write(0, FW_CFG_SELECTOR_OFFSET, &[FW_CFG_FILE_FIRST as u8, 0]);
         #[cfg(target_arch = "aarch64")]
-        fw_cfg.write(0, DMA_OFFSET, &address_bytes);
+        fw_cfg.write(0, FW_CFG_DMA_HI_OFFSET, &address_bytes);
         #[cfg(target_arch = "x86_64")]
         {
             fw_cfg.write(0, FW_CFG_DMA_HI_OFFSET, &dma_hi);
@@ -1151,11 +1138,11 @@ mod tests {
         mem.write(access.as_mut_bytes(), DMA_DESCRIPTOR).unwrap();
         let address = DMA_DESCRIPTOR.0.to_be_bytes();
         #[cfg(target_arch = "aarch64")]
-        fw_cfg.write(0, DMA_OFFSET, &address);
+        fw_cfg.write(0, FW_CFG_DMA_HI_OFFSET, &address);
         #[cfg(target_arch = "x86_64")]
         {
-            fw_cfg.write(0, DMA_OFFSET, &address[0..4]);
-            fw_cfg.write(0, DMA_OFFSET + 4, &address[4..8]);
+            fw_cfg.write(0, FW_CFG_DMA_HI_OFFSET, &address[0..4]);
+            fw_cfg.write(0, FW_CFG_DMA_LO_OFFSET, &address[4..8]);
         }
         let mut status = [0u8; 4];
         mem.read(&mut status, DMA_DESCRIPTOR).unwrap();
@@ -1194,9 +1181,9 @@ mod tests {
         let error = AccessControl::new().with_error(true).0;
 
         #[cfg(target_arch = "aarch64")]
-        fw_cfg.write(0, SELECTOR_OFFSET, &item_a.to_be_bytes());
+        fw_cfg.write(0, FW_CFG_SELECTOR_OFFSET, &item_a.to_be_bytes());
         #[cfg(target_arch = "x86_64")]
-        fw_cfg.write(0, SELECTOR_OFFSET, &item_a.to_le_bytes());
+        fw_cfg.write(0, FW_CFG_SELECTOR_OFFSET, &item_a.to_le_bytes());
 
         assert_eq!(
             run_dma(&mut fw_cfg, &mem, select(item_b).with_read(true), 4),
