@@ -8,7 +8,6 @@ use std::os::unix::io::AsRawFd;
 
 use vmm_sys_util::eventfd::EventFd;
 
-use super::{operation_is_aligned, run_unaligned_operation};
 use crate::async_io::{
     AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, UringDataIo,
 };
@@ -52,22 +51,14 @@ impl AsyncIo for RawAsync {
     fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
         let is_read = op.is_read();
 
-        if operation_is_aligned(&op, self.alignment) {
-            let fd = self.raw_file.as_raw_fd();
-            return self.data_io.submit_operation(fd, op).map_err(|e| {
-                if is_read {
-                    AsyncIoError::ReadVectored(e)
-                } else {
-                    AsyncIoError::WriteVectored(e)
-                }
-            });
-        }
-
-        let result = run_unaligned_operation(&self.raw_file, &op)?;
-        self.data_io
-            .inject_completion(AsyncIoCompletion::from_operation(op, result));
-
-        Ok(())
+        let fd = self.raw_file.as_raw_fd();
+        self.data_io.submit_operation(fd, op).map_err(|e| {
+            if is_read {
+                AsyncIoError::ReadVectored(e)
+            } else {
+                AsyncIoError::WriteVectored(e)
+            }
+        })
     }
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
@@ -93,26 +84,6 @@ impl AsyncIo for RawAsync {
     }
 
     fn submit_batch_requests(&mut self, batch_request: Vec<AsyncIoOperation>) -> AsyncIoResult<()> {
-        if self.alignment.is_some() {
-            let mut aligned_batch = Vec::with_capacity(batch_request.len());
-            for op in batch_request {
-                if operation_is_aligned(&op, self.alignment) {
-                    aligned_batch.push(op);
-                } else {
-                    let result = run_unaligned_operation(&self.raw_file, &op)?;
-                    self.data_io
-                        .inject_completion(AsyncIoCompletion::from_operation(op, result));
-                }
-            }
-            if aligned_batch.is_empty() {
-                return Ok(());
-            }
-            return self
-                .data_io
-                .submit_batch(self.raw_file.as_raw_fd(), aligned_batch)
-                .map_err(AsyncIoError::SubmitBatchRequests);
-        }
-
         self.data_io
             .submit_batch(self.raw_file.as_raw_fd(), batch_request)
             .map_err(AsyncIoError::SubmitBatchRequests)
