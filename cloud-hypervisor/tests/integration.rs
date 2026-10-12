@@ -6840,7 +6840,15 @@ mod common_parallel {
         src_vm_cmd
             .args([
                 "--cpus",
-                format!("boot={boot_vcpus},max={max_vcpus}").as_str(),
+                format!(
+                    "boot={boot_vcpus},max={max_vcpus}{}",
+                    if cfg!(target_arch = "aarch64") {
+                        ",nested=off"
+                    } else {
+                        ""
+                    }
+                )
+                .as_str(),
             ])
             .args(memory_param)
             .default_kernel_cmdline()
@@ -11440,7 +11448,15 @@ mod common_sequential {
         src_vm_cmd
             .args([
                 "--cpus",
-                format!("boot={boot_vcpus},max={max_vcpus}").as_str(),
+                format!(
+                    "boot={boot_vcpus},max={max_vcpus}{}",
+                    if cfg!(target_arch = "aarch64") {
+                        ",nested=off"
+                    } else {
+                        ""
+                    }
+                )
+                .as_str(),
             ])
             .args(memory_param)
             .default_kernel_cmdline()
@@ -11640,7 +11656,15 @@ mod common_sequential {
         src_vm_cmd
             .args([
                 "--cpus",
-                format!("boot={boot_vcpus},max={max_vcpus}").as_str(),
+                format!(
+                    "boot={boot_vcpus},max={max_vcpus}{}",
+                    if cfg!(target_arch = "aarch64") {
+                        ",nested=off"
+                    } else {
+                        ""
+                    }
+                )
+                .as_str(),
             ])
             .args(memory_param)
             .default_kernel_cmdline()
