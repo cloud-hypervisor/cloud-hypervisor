@@ -274,6 +274,10 @@ impl Net {
             )
         };
 
+        if postcopy.is_some() {
+            vu.start_postcopy()?;
+        }
+
         Ok(Net {
             id,
             vu_common: VhostUserCommon {

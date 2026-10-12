@@ -165,6 +165,10 @@ since the backend only supports {backend_num_queues}\n",
             )
         };
 
+        if postcopy.is_some() {
+            vu.start_postcopy()?;
+        }
+
         Ok(GenericVhostUser {
             vu_common: VhostUserCommon {
                 virtio_common: VirtioCommon {

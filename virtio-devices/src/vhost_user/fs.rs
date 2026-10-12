@@ -191,6 +191,10 @@ impl Fs {
             )
         };
 
+        if postcopy.is_some() {
+            vu.start_postcopy()?;
+        }
+
         Ok(Fs {
             vu_common: VhostUserCommon {
                 virtio_common: VirtioCommon {
