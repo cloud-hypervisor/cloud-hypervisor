@@ -559,6 +559,11 @@ pub enum DeviceManagerError {
     #[error("VM Generation ID device error")]
     VmGenId(#[source] devices::VmGenIdError),
 
+    /// Failed to notify the VM Generation ID change
+    #[cfg(not(target_arch = "riscv64"))]
+    #[error("Failed to notify the VM Generation ID change")]
+    VmGenIdNotification(#[source] io::Error),
+
     /// Failed to do AArch64 GPIO power button notification
     #[cfg(target_arch = "aarch64")]
     #[error("Failed to do AArch64 GPIO power button notification")]
@@ -6043,6 +6048,27 @@ impl DeviceManager {
             .unwrap()
             .notify(AcpiNotificationFlags::POWER_BUTTON_CHANGED)
             .map_err(DeviceManagerError::PowerButtonNotification)
+    }
+
+    #[cfg(not(target_arch = "riscv64"))]
+    pub fn regenerate_vmgenid(&self) -> DeviceManagerResult<()> {
+        if let Some(device) = self.vmgenid_device.as_ref() {
+            device
+                .lock()
+                .unwrap()
+                .regenerate()
+                .map_err(DeviceManagerError::VmGenId)?;
+
+            self.ged_notification_device
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .notify(AcpiNotificationFlags::VMGENID_CHANGED)
+                .map_err(DeviceManagerError::VmGenIdNotification)?;
+        }
+
+        Ok(())
     }
 
     #[cfg(target_arch = "aarch64")]
