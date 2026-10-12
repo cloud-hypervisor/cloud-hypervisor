@@ -25,8 +25,8 @@ const MSIX_PBA_ENTRIES_MODULO: u64 = 8;
 const BITS_PER_PBA_ENTRY: usize = 64;
 const FUNCTION_MASK_BIT: u8 = 14;
 const MSIX_ENABLE_BIT: u8 = 15;
-const FUNCTION_MASK_MASK: u16 = (1 << FUNCTION_MASK_BIT) as u16;
-const MSIX_ENABLE_MASK: u16 = (1 << MSIX_ENABLE_BIT) as u16;
+const FUNCTION_MASK_MASK: u16 = 1u16 << FUNCTION_MASK_BIT;
+const MSIX_ENABLE_MASK: u16 = 1u16 << MSIX_ENABLE_BIT;
 pub const MSIX_TABLE_ENTRY_SIZE: usize = 16;
 pub const MSIX_CONFIG_ID: &str = "msix_config";
 
