@@ -250,52 +250,18 @@ impl Request {
         };
         // Queue operations expected to be submitted.
         match request_type {
-            RequestType::In => {
+            RequestType::In | RequestType::Out => {
                 let op = self.build_data_operation(mem, offset, alignment, user_data)?;
                 if disk_image.batch_requests_enabled() {
                     ret.batch_request = Some(op);
                 } else {
-                    match op {
-                        AsyncIoOperation::ReadToMemory {
-                            offset,
-                            target,
-                            user_data,
-                        } => disk_image
-                            .read_to_memory(offset, target, user_data)
-                            .map_err(ExecuteError::AsyncRead)?,
-                        AsyncIoOperation::ReadToVec {
-                            offset,
-                            buffer,
-                            user_data,
-                        } => disk_image
-                            .read_to_vec(offset, buffer, user_data)
-                            .map_err(ExecuteError::AsyncRead)?,
-                        _ => unreachable!("unexpected read operation"),
-                    }
-                }
-            }
-            RequestType::Out => {
-                let op = self.build_data_operation(mem, offset, alignment, user_data)?;
-                if disk_image.batch_requests_enabled() {
-                    ret.batch_request = Some(op);
-                } else {
-                    match op {
-                        AsyncIoOperation::WriteFromMemory {
-                            offset,
-                            target,
-                            user_data,
-                        } => disk_image
-                            .write_from_memory(offset, target, user_data)
-                            .map_err(ExecuteError::AsyncWrite)?,
-                        AsyncIoOperation::WriteFromVec {
-                            offset,
-                            buffer,
-                            user_data,
-                        } => disk_image
-                            .write_from_vec(offset, buffer, user_data)
-                            .map_err(ExecuteError::AsyncWrite)?,
-                        _ => unreachable!("unexpected write operation"),
-                    }
+                    disk_image.submit_data_operation(op).map_err(|e| {
+                        if request_type == RequestType::In {
+                            ExecuteError::AsyncRead(e)
+                        } else {
+                            ExecuteError::AsyncWrite(e)
+                        }
+                    })?;
                 }
             }
             RequestType::Flush => {
