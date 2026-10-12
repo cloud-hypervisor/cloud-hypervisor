@@ -4,11 +4,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use std::fs::File;
 use std::io;
 
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::AlignedFile;
 use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
 use crate::error::BlockResult;
 use crate::formats::raw::engine_uring::RawAsync;
@@ -19,8 +19,13 @@ pub(super) struct FixedVhdAsync {
 }
 
 impl FixedVhdAsync {
-    pub(super) fn new(raw_file: AlignedFile, ring_depth: u32, size: u64) -> BlockResult<Self> {
-        let raw_file_async = RawAsync::new(raw_file, ring_depth)?;
+    pub(super) fn new(
+        raw_file: File,
+        direct: bool,
+        ring_depth: u32,
+        size: u64,
+    ) -> BlockResult<Self> {
+        let raw_file_async = RawAsync::new(raw_file, direct, ring_depth)?;
 
         Ok(FixedVhdAsync {
             raw_file_async,

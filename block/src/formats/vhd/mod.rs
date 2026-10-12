@@ -127,12 +127,16 @@ impl disk_file::AsyncDiskFile for VhdDisk {
         let file = self.inner.file().try_clone().map_err(|e| {
             BlockError::new(BlockErrorKind::Io, DiskFileError::NewAsyncIo(e)).with_op(ErrorOp::Open)
         })?;
-        let raw_file = AlignedFile::new(file, self.direct);
 
         if self.use_io_uring {
             #[cfg(feature = "io_uring")]
             {
-                return Ok(Box::new(FixedVhdAsync::new(raw_file, ring_depth, size)?));
+                return Ok(Box::new(FixedVhdAsync::new(
+                    file,
+                    self.direct,
+                    ring_depth,
+                    size,
+                )?));
             }
 
             #[cfg(not(feature = "io_uring"))]
@@ -140,7 +144,10 @@ impl disk_file::AsyncDiskFile for VhdDisk {
         }
 
         let _ = ring_depth;
-        Ok(Box::new(FixedVhdSync::new(raw_file, size)))
+        Ok(Box::new(FixedVhdSync::new(
+            AlignedFile::new(file, self.direct),
+            size,
+        )))
     }
 }
 
@@ -274,12 +281,7 @@ mod tests {
     fn io_uring_batch_rejects_request_straddling_logical_size() {
         let file = TempFile::new().unwrap().into_file();
         file.set_len(0x2000).unwrap();
-        let mut async_io = FixedVhdAsync::new(
-            AlignedFile::new(file.try_clone().unwrap(), false),
-            8,
-            0x1000,
-        )
-        .unwrap();
+        let mut async_io = FixedVhdAsync::new(file.try_clone().unwrap(), false, 8, 0x1000).unwrap();
         let op = AsyncIoOperation::read_to_vec(0x800, OwnedIoBuffer::from_vec(vec![0; 0x900]), 1);
 
         assert!(matches!(
@@ -293,12 +295,7 @@ mod tests {
     fn io_uring_rejects_single_op_straddling_logical_size() {
         let file = TempFile::new().unwrap().into_file();
         file.set_len(0x2000).unwrap();
-        let mut async_io = FixedVhdAsync::new(
-            AlignedFile::new(file.try_clone().unwrap(), false),
-            8,
-            0x1000,
-        )
-        .unwrap();
+        let mut async_io = FixedVhdAsync::new(file.try_clone().unwrap(), false, 8, 0x1000).unwrap();
         let op = AsyncIoOperation::read_to_vec(0x800, OwnedIoBuffer::from_vec(vec![0; 0x900]), 1);
 
         assert!(matches!(
