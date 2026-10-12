@@ -19,6 +19,10 @@ representing the VMM.
 Each of these threads has a limited scope of what it is expected to perform,
 which is why different filters are applied to each of them.
 
+The main thread applies its own filter after starting the worker threads,
+before sending initial VM lifecycle requests. Its filter is more restrictive
+than the VMM thread's filter.
+
 By default, Cloud Hypervisor enables seccomp filtering as the project believes
 that security should not be an option.
 

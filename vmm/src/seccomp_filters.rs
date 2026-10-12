@@ -35,6 +35,7 @@ use crate::userfaultfd::{
 
 #[derive(Copy, Clone)]
 pub enum Thread {
+    Main,
     HttpApi,
     #[cfg(feature = "dbus_api")]
     DBusApi,
@@ -666,6 +667,68 @@ fn pty_foreground_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
     ])
 }
 
+fn main_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
+    Ok(vec![
+        (libc::SYS_brk, vec![]),
+        (libc::SYS_clock_gettime, vec![]),
+        (libc::SYS_close, vec![]),
+        (libc::SYS_exit, vec![]),
+        (libc::SYS_exit_group, vec![]),
+        (libc::SYS_fcntl, vec![]),
+        (libc::SYS_fstat, vec![]),
+        (libc::SYS_futex, vec![]),
+        (libc::SYS_getrandom, vec![]),
+        (libc::SYS_landlock_create_ruleset, vec![]),
+        (libc::SYS_landlock_restrict_self, vec![]),
+        (libc::SYS_lseek, vec![]),
+        (libc::SYS_madvise, vec![]),
+        (libc::SYS_mmap, vec![]),
+        (libc::SYS_mprotect, vec![]),
+        (libc::SYS_mremap, vec![]),
+        (libc::SYS_munmap, vec![]),
+        (libc::SYS_newfstatat, vec![]),
+        // Heap profiling writes its report from main during shutdown.
+        #[cfg(feature = "dhat-heap")]
+        (libc::SYS_openat, vec![]),
+        (
+            libc::SYS_prctl,
+            or![
+                and![Cond::new(0, ArgLen::Dword, Eq, libc::PR_GET_NAME as u64)?],
+                and![Cond::new(
+                    0,
+                    ArgLen::Dword,
+                    Eq,
+                    libc::PR_GET_NO_NEW_PRIVS as u64
+                )?],
+                and![
+                    Cond::new(0, ArgLen::Dword, Eq, libc::PR_SET_NO_NEW_PRIVS as u64)?,
+                    Cond::new(1, ArgLen::Dword, Eq, 1)?
+                ],
+            ],
+        ),
+        #[cfg(all(feature = "dhat-heap", target_arch = "x86_64"))]
+        (libc::SYS_readlink, vec![]),
+        #[cfg(all(
+            feature = "dhat-heap",
+            any(target_arch = "aarch64", target_arch = "riscv64")
+        ))]
+        (libc::SYS_readlinkat, vec![]),
+        (libc::SYS_restart_syscall, vec![]),
+        (libc::SYS_rt_sigreturn, vec![]),
+        (libc::SYS_sched_yield, vec![]),
+        (libc::SYS_sigaltstack, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_stat, vec![]),
+        (libc::SYS_statx, vec![]),
+        // HTTP shutdown drops the socket and its lock file on this thread.
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_unlink, vec![]),
+        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+        (libc::SYS_unlinkat, vec![]),
+        (libc::SYS_writev, vec![]),
+    ])
+}
+
 // The filter containing the white listed syscall rules required by the VMM to
 // function.
 fn vmm_thread_rules(
@@ -1242,6 +1305,7 @@ fn get_seccomp_rules(
 ) -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
     let mut rules = common_thread_rules()?;
     let specific_rules = match thread_type {
+        Thread::Main => main_thread_rules()?,
         Thread::HttpApi => http_api_thread_rules()?,
         #[cfg(feature = "dbus_api")]
         Thread::DBusApi => dbus_api_thread_rules()?,

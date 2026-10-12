@@ -31,6 +31,7 @@ use vmm::api::http::http_api_graceful_shutdown;
 use vmm::api::{self, ApiAction};
 use vmm::config::{self, RestoreConfig, VmParams};
 use vmm::landlock::{Landlock, LandlockError};
+use vmm::seccomp_filters::{Thread, get_seccomp_filter};
 use vmm::vm::Vm;
 use vmm::vm_config;
 #[cfg(feature = "fw_cfg")]
@@ -147,6 +148,10 @@ enum Error {
     CreateExitEventFd(#[source] io::Error),
     #[error("Failed to open hypervisor interface (is hypervisor interface available?)")]
     CreateHypervisor(#[source] hypervisor::HypervisorError),
+    #[error("Failed to create main thread seccomp filter")]
+    CreateSeccompFilter(#[source] seccompiler::Error),
+    #[error("Failed to apply main thread seccomp filter")]
+    ApplySeccompFilter(#[source] seccompiler::Error),
     #[error("Failed to start the VMM thread")]
     StartVmmThread(#[source] vmm::Error),
     #[error("Error parsing config")]
@@ -679,6 +684,8 @@ fn start_vmm(
     info!("{} starting", env!("BUILD_VERSION"));
 
     let hypervisor = hypervisor::new().map_err(Error::CreateHypervisor)?;
+    let main_seccomp_filter = get_seccomp_filter(&seccomp_action, Thread::Main, None)
+        .map_err(Error::CreateSeccompFilter)?;
 
     #[cfg(feature = "guest_debug")]
     let gdb_socket_path = if let Some(gdb_config) = cmd_arguments.get_one::<String>("gdb") {
@@ -801,6 +808,11 @@ fn start_vmm(
         landlock_enable,
     )
     .map_err(Error::StartVmmThread)?;
+
+    // Spawn workers first so they do not inherit main's narrower filter.
+    if !main_seccomp_filter.is_empty() {
+        seccompiler::apply_filter(&main_seccomp_filter).map_err(Error::ApplySeccompFilter)?;
+    }
 
     // API endpoints (HTTP, D-Bus) are set up at this point (if API socket is
     // configured)
