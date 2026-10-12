@@ -71,6 +71,8 @@ pub enum Error {
     InvalidOffset,
     #[error("Request data length is not a multiple of the 512-byte sector size")]
     InvalidDataLength,
+    #[error("Request offset or length is not aligned to {0} bytes")]
+    InvalidDataAlignment(u64),
     #[error("Failure in qcow")]
     QcowError(#[source] qcow::Error),
     #[error("The requested operation does not support multiple descriptors")]
