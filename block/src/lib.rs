@@ -677,6 +677,7 @@ impl DiskTopology {
             // must reflect the filesystem DIO alignment so the guest issues
             // correctly sized I/O.
             if let Some(alignment) = probe_direct_alignment(f.as_raw_fd()) {
+                let alignment = alignment.max(SECTOR_SIZE);
                 return Ok(DiskTopology {
                     logical_block_size: alignment,
                     physical_block_size: alignment,
@@ -687,12 +688,19 @@ impl DiskTopology {
             return Ok(DiskTopology::default());
         }
 
-        Ok(DiskTopology {
+        let topology = DiskTopology {
             logical_block_size: Self::query_block_size(f, BlockSize::LogicalBlock)?,
             physical_block_size: Self::query_block_size(f, BlockSize::PhysicalBlock)?,
             minimum_io_size: Self::query_block_size(f, BlockSize::MinimumIo)?,
             optimal_io_size: Self::query_block_size(f, BlockSize::OptimalIo)?,
-        })
+        };
+
+        // Direct I/O can require larger transfers than logical blocks.
+        if let Some(alignment) = probe_direct_alignment(f.as_raw_fd()) {
+            let block_size = topology.logical_block_size.max(alignment);
+            return Ok(topology.with_block_size(block_size));
+        }
+        Ok(topology)
     }
 }
 
