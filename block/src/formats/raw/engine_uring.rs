@@ -95,8 +95,13 @@ impl AsyncIo for RawAsync {
         // reissuing the request, and lets the sparse helper handle the ioctl
         // path for block devices and the write fallback for unsupported
         // filesystems.
-        punch_hole(&mut self.raw_file, self.is_block_device, offset, length)
-            .map_err(AsyncIoError::PunchHole)?;
+        punch_hole(
+            self.raw_file.file_mut(),
+            self.is_block_device,
+            offset,
+            length,
+        )
+        .map_err(AsyncIoError::PunchHole)?;
         // Deliver the completion through the normal io_uring path by
         // queuing a NOP carrying `user_data`. The registered eventfd will
         // fire when it completes, just like any other request.
@@ -107,8 +112,13 @@ impl AsyncIo for RawAsync {
 
     fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
         // Same rationale as punch_hole().
-        write_zeroes(&mut self.raw_file, self.is_block_device, offset, length)
-            .map_err(AsyncIoError::WriteZeroes)?;
+        write_zeroes(
+            self.raw_file.file_mut(),
+            self.is_block_device,
+            offset,
+            length,
+        )
+        .map_err(AsyncIoError::WriteZeroes)?;
         self.data_io
             .submit_nop(user_data)
             .map_err(AsyncIoError::WriteZeroes)

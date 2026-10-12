@@ -286,7 +286,12 @@ impl QcowRawFile {
         let tail_end = declared_end.min(self.file.metadata()?.len());
         if tail_end > tail_start {
             let is_blkdev = is_block_device(self.file.as_raw_fd());
-            punch_hole(&mut self.file, is_blkdev, tail_start, tail_end - tail_start)?;
+            punch_hole(
+                self.file.file_mut(),
+                is_blkdev,
+                tail_start,
+                tail_end - tail_start,
+            )?;
         }
 
         Ok(())
