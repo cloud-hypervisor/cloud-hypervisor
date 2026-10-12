@@ -158,13 +158,27 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(
+        target_arch = "x86_64",
+        all(target_arch = "aarch64", not(feature = "mshv"))
+    ))]
     fn test_nested_virtualization_on() {
+        #[cfg(target_arch = "aarch64")]
+        if fs::read_to_string("/proc/cmdline")
+            .expect("Failed to read /proc/cmdline")
+            .split_ascii_whitespace()
+            .rev()
+            .find_map(|arg| arg.strip_prefix("kvm-arm.mode="))
+            != Some("nested")
+        {
+            eprintln!("SKIPPED: host kernel was not booted with kvm-arm.mode=nested");
+            return;
+        }
         _test_nested_virtualization(true);
     }
 
     #[test]
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
     fn test_nested_virtualization_off() {
         _test_nested_virtualization(false);
     }
