@@ -11,7 +11,6 @@ use std::os::unix::io::AsRawFd;
 
 use vmm_sys_util::eventfd::EventFd;
 
-use super::{operation_is_aligned, run_unaligned_operation};
 use crate::async_io::{
     AioDataIo, AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult,
 };
@@ -54,22 +53,14 @@ impl AsyncIo for RawAio {
     fn submit_data_operation(&mut self, op: AsyncIoOperation) -> AsyncIoResult<()> {
         let is_read = op.is_read();
 
-        if operation_is_aligned(&op, self.alignment) {
-            let fd = self.raw_file.as_raw_fd();
-            return self.data_io.submit_operation(fd, op).map_err(|e| {
-                if is_read {
-                    AsyncIoError::ReadVectored(e)
-                } else {
-                    AsyncIoError::WriteVectored(e)
-                }
-            });
-        }
-
-        let result = run_unaligned_operation(&self.raw_file, &op)?;
-        self.data_io
-            .inject_completion(AsyncIoCompletion::from_operation(op, result));
-
-        Ok(())
+        let fd = self.raw_file.as_raw_fd();
+        self.data_io.submit_operation(fd, op).map_err(|e| {
+            if is_read {
+                AsyncIoError::ReadVectored(e)
+            } else {
+                AsyncIoError::WriteVectored(e)
+            }
+        })
     }
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {

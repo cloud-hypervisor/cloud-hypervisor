@@ -18,9 +18,7 @@ use self::engine_aio::RawAio;
 use self::engine_sync::RawSync;
 #[cfg(feature = "io_uring")]
 use self::engine_uring::RawAsync;
-use crate::async_io::{
-    AsyncIo, AsyncIoError, AsyncIoOperation, AsyncIoResult, BorrowedDiskFd, DiskFileError,
-};
+use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError};
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::{AlignedFile, DiskTopology, disk_file, probe_sparse_support, query_device_size};
 
@@ -162,43 +160,6 @@ impl disk_file::AsyncDiskFile for RawDisk {
             RawBackend::Aio => Ok(Box::new(RawAio::new(raw_file, ring_depth)?)),
         }
     }
-}
-
-/// True when `op` satisfies `alignment` and can go straight to the kernel.
-fn operation_is_aligned(op: &AsyncIoOperation, alignment: Option<u64>) -> bool {
-    let Some(alignment) = alignment else {
-        return true;
-    };
-    if !(op.offset() as u64).is_multiple_of(alignment) {
-        return false;
-    }
-    op.iovecs().iter().all(|iov| {
-        (iov.iov_base as u64).is_multiple_of(alignment)
-            && (iov.iov_len as u64).is_multiple_of(alignment)
-    })
-}
-
-/// Runs an unaligned O_DIRECT operation synchronously through `aligned_file`.
-fn run_unaligned_operation(
-    aligned_file: &AlignedFile,
-    op: &AsyncIoOperation,
-) -> AsyncIoResult<i32> {
-    let offset = op.offset() as u64;
-    let iovecs = op.iovecs();
-
-    let n = if op.is_read() {
-        // SAFETY: op.iovecs() describes valid memory for iov_len bytes by
-        // construction of AsyncIoOperation.
-        unsafe { aligned_file.read_vectored_at(iovecs, offset) }
-            .map_err(AsyncIoError::ReadVectored)?
-    } else {
-        // SAFETY: op.iovecs() describes valid memory for iov_len bytes by
-        // construction of AsyncIoOperation.
-        unsafe { aligned_file.write_vectored_at(iovecs, offset) }
-            .map_err(AsyncIoError::WriteVectored)?
-    };
-
-    Ok(n as i32)
 }
 
 #[cfg(test)]
