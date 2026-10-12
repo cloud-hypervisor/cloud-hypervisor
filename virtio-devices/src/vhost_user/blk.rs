@@ -28,7 +28,7 @@ use super::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
 use super::{DEFAULT_VIRTIO_FEATURES, Error, Result};
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
-use crate::vhost_user::{VhostUserCommon, VhostUserState};
+use crate::vhost_user::{PostcopyHandler, VhostUserCommon, VhostUserState};
 use crate::{GuestRegionMmap, VIRTIO_F_ACCESS_PLATFORM, VirtioInterrupt, VirtioInterruptType};
 
 const DEFAULT_QUEUE_NUMBER: usize = 1;
@@ -91,6 +91,7 @@ pub struct Blk {
 
 impl Blk {
     /// Create a new vhost-user-blk device
+    #[expect(clippy::needless_pass_by_value)]
     pub fn new(
         id: String,
         vu_cfg: VhostUserConfig,
@@ -98,6 +99,7 @@ impl Blk {
         exit_evt: EventFd,
         access_platform_enabled: bool,
         state: Option<State>,
+        postcopy_handler: Option<Arc<dyn PostcopyHandler>>,
     ) -> Result<Blk> {
         let num_queues = vu_cfg.num_queues;
 
@@ -124,6 +126,7 @@ impl Blk {
             vu.set_protocol_features_vhost_user(
                 state.acked_features,
                 state.acked_protocol_features,
+                postcopy_handler.is_some(),
             )?;
 
             vu.restore_state(&state)?;
@@ -164,8 +167,11 @@ impl Blk {
                 | VhostUserProtocolFeatures::DEVICE_STATE
                 | VhostUserProtocolFeatures::BACKEND_REQ;
 
-            let (acked_features, acked_protocol_features) =
-                vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
+            let (acked_features, acked_protocol_features) = vu.negotiate_features_vhost_user(
+                avail_features,
+                avail_protocol_features,
+                postcopy_handler.is_some(),
+            )?;
 
             let backend_num_queues =
                 if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {

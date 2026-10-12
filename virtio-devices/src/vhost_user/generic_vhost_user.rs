@@ -22,7 +22,7 @@ use super::vu_common_ctrl::VhostUserHandle;
 use super::{Error, Result};
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
-use crate::vhost_user::{VhostUserCommon, VhostUserState};
+use crate::vhost_user::{PostcopyHandler, VhostUserCommon, VhostUserState};
 use crate::{
     ActivateResult, GuestRegionMmap, MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon,
     VirtioDevice, VirtioInterrupt, VirtioInterruptType, VirtioSharedMemoryList,
@@ -59,6 +59,7 @@ pub struct GenericVhostUser {
 
 impl GenericVhostUser {
     /// Create a new generic vhost-user device.
+    #[expect(clippy::needless_pass_by_value)]
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
@@ -70,6 +71,7 @@ impl GenericVhostUser {
         exit_evt: EventFd,
         access_platform_enabled: bool,
         state: Option<State>,
+        postcopy_handler: Option<Arc<dyn PostcopyHandler>>,
     ) -> Result<GenericVhostUser> {
         // Calculate the actual number of queues needed.
         let num_queues = request_queue_sizes.len();
@@ -96,6 +98,7 @@ impl GenericVhostUser {
             vu.set_protocol_features_vhost_user(
                 state.acked_features,
                 state.acked_protocol_features,
+                postcopy_handler.is_some(),
             )?;
 
             vu.restore_state(&state)?;
@@ -120,8 +123,11 @@ impl GenericVhostUser {
 
             let avail_features = super::DEFAULT_VIRTIO_FEATURES;
 
-            let (acked_features, acked_protocol_features) =
-                vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
+            let (acked_features, acked_protocol_features) = vu.negotiate_features_vhost_user(
+                avail_features,
+                avail_protocol_features,
+                postcopy_handler.is_some(),
+            )?;
 
             let backend_num_queues =
                 if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
