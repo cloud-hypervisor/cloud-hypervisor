@@ -489,7 +489,7 @@ impl MsixConfig {
 
         let index: usize = (vector as usize) / BITS_PER_PBA_ENTRY;
         let shift: usize = (vector as usize) % BITS_PER_PBA_ENTRY;
-        let mut mask: u64 = (1 << shift) as u64;
+        let mut mask = 1u64 << shift;
 
         if reset {
             mask = !mask;
@@ -640,5 +640,64 @@ impl MsixCap {
         // The table takes 1 bit per entry modulo 8 bytes.
         let size = ((self.table_size() as u64 / 64) + 1) * 8;
         (self.pba_offset() as u64, size)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestInterruptSourceGroup;
+
+    impl InterruptSourceGroup for TestInterruptSourceGroup {
+        fn trigger(&self, _index: InterruptIndex) -> io::Result<()> {
+            unreachable!()
+        }
+
+        fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
+            unreachable!()
+        }
+
+        fn update(
+            &self,
+            _index: InterruptIndex,
+            _config: InterruptSourceConfig,
+            _masked: bool,
+            _set_gsi: bool,
+        ) -> io::Result<()> {
+            unreachable!()
+        }
+
+        fn set_gsi(&self) -> io::Result<()> {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn test_set_pba_bit() {
+        let mut config = MsixConfig::new(
+            MAX_MSIX_VECTORS_PER_DEVICE,
+            MaybeMutInterruptSourceGroup::Immutable(Arc::new(TestInterruptSourceGroup)),
+            0,
+            None,
+        )
+        .unwrap();
+
+        for vector in 0..MAX_MSIX_VECTORS_PER_DEVICE {
+            let index = usize::from(vector) / BITS_PER_PBA_ENTRY;
+            let mask = 1u64 << (usize::from(vector) % BITS_PER_PBA_ENTRY);
+
+            config.pba_entries.fill(0);
+            let mut expected = config.pba_entries.clone();
+            expected[index] = mask;
+            config.set_pba_bit(vector, false);
+            assert_eq!(config.pba_entries, expected, "Setting vector {vector}");
+
+            config.pba_entries.fill(u64::MAX);
+            let mut expected = config.pba_entries.clone();
+            expected[index] = !mask;
+            config.set_pba_bit(vector, true);
+            assert_eq!(config.pba_entries, expected, "Clearing vector {vector}");
+        }
     }
 }
