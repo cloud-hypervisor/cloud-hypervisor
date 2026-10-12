@@ -153,7 +153,7 @@ impl Gpio {
         if changed > 0 {
             self.old_in_data = self.data;
             for i in 0..N_GPIOS {
-                let mask = (1 << i) as u32;
+                let mask = 1u32 << i;
                 if (changed & mask) > 0 {
                     // Bits set high in GPIOIS(Interrupt sense register) configure the corresponding
                     // pins to detect levels, otherwise, detect edges.
@@ -222,7 +222,7 @@ impl Gpio {
     }
 
     pub fn trigger_key(&mut self, key: u32) -> Result<()> {
-        let mask = (1 << key) as u32;
+        let mask = 1u32 << key;
         if (!self.dir & mask) > 0 {
             // emulate key event
             // By default, Input Pin is configured to detect both rising and falling edges.
