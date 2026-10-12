@@ -126,6 +126,7 @@ impl VhostUserHandle {
         &mut self,
         avail_features: u64,
         avail_protocol_features: VhostUserProtocolFeatures,
+        postcopy: bool,
     ) -> Result<(u64, u64)> {
         let acked_features = avail_features & self.backend_features;
 
@@ -135,6 +136,11 @@ impl VhostUserHandle {
                     .vu
                     .get_protocol_features()
                     .map_err(Error::VhostUserGetProtocolFeatures)?;
+                if postcopy
+                    && !backend_protocol_features.contains(VhostUserProtocolFeatures::PAGEFAULT)
+                {
+                    return Err(Error::VhostUserPageFaultUnsupported);
+                }
 
                 let acked_protocol_features = avail_protocol_features & backend_protocol_features;
 
@@ -143,6 +149,8 @@ impl VhostUserHandle {
                     .map_err(Error::VhostUserSetProtocolFeatures)?;
 
                 acked_protocol_features
+            } else if postcopy {
+                return Err(Error::VhostUserPageFaultUnsupported);
             } else {
                 VhostUserProtocolFeatures::empty()
             };
@@ -335,6 +343,7 @@ impl VhostUserHandle {
         &mut self,
         acked_features: u64,
         acked_protocol_features: u64,
+        postcopy: bool,
     ) -> Result<()> {
         if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
             let backend_protocol_features = self
@@ -344,6 +353,10 @@ impl VhostUserHandle {
             let unsupported = acked_protocol_features & !backend_protocol_features.bits();
             if unsupported != 0 {
                 return Err(Error::UnsupportedProtocolFeatures(unsupported));
+            }
+            if postcopy && !backend_protocol_features.contains(VhostUserProtocolFeatures::PAGEFAULT)
+            {
+                return Err(Error::VhostUserPageFaultUnsupported);
             }
 
             let acked_protocol_features =
@@ -357,6 +370,8 @@ impl VhostUserHandle {
             }
         } else if acked_protocol_features != 0 {
             return Err(Error::InconsistentProtocolFeatures(acked_protocol_features));
+        } else if postcopy {
+            return Err(Error::VhostUserPageFaultUnsupported);
         }
 
         self.update_supported_protocol_features(acked_protocol_features);
@@ -375,7 +390,7 @@ impl VhostUserHandle {
         backend_req_handler: &Option<FrontendReqHandler<S>>,
         inflight: Option<&mut Inflight>,
     ) -> Result<()> {
-        self.set_protocol_features_vhost_user(acked_features, acked_protocol_features)?;
+        self.set_protocol_features_vhost_user(acked_features, acked_protocol_features, false)?;
 
         // With in-order processing, used_idx is a contiguous completion boundary.
         // Replay descriptors after it when inflight tracking is not available to

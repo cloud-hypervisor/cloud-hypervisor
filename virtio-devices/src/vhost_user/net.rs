@@ -31,7 +31,9 @@ use crate::device::ActivationContext;
 use crate::net::{AnnounceOps, AnnouncementState, Announcer, VirtioNetGuestAnnounceOps};
 use crate::seccomp_filters::Thread;
 use crate::vhost_user::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
-use crate::vhost_user::{DEFAULT_VIRTIO_FEATURES, Error, Result, VhostUserCommon, VhostUserState};
+use crate::vhost_user::{
+    DEFAULT_VIRTIO_FEATURES, Error, Result, VhostUserCommon, VhostUserPostcopy, VhostUserState,
+};
 use crate::{
     ActivateError, ActivateResult, GuestRegionMmap, NetCtrlEpollHandler, VIRTIO_F_ACCESS_PLATFORM,
     VirtioCommon, VirtioDevice, VirtioDeviceType,
@@ -74,6 +76,7 @@ impl Net {
     }
 
     /// Create a new vhost-user-net device
+    #[expect(clippy::needless_pass_by_value)]
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
@@ -85,6 +88,7 @@ impl Net {
         exit_evt: EventFd,
         access_platform_enabled: bool,
         state: Option<State>,
+        postcopy: Option<Arc<dyn VhostUserPostcopy>>,
         offload_tso: bool,
         offload_ufo: bool,
         offload_csum: bool,
@@ -115,6 +119,7 @@ impl Net {
             vu.set_protocol_features_vhost_user(
                 state.acked_features,
                 state.acked_protocol_features,
+                postcopy.is_some(),
             )?;
 
             vu.restore_state(&state)?;
@@ -177,8 +182,12 @@ impl Net {
                 | VhostUserProtocolFeatures::DEVICE_STATE
                 | VhostUserProtocolFeatures::CONFIG;
 
-            let (backend_acked_features, acked_protocol_features) =
-                vu.negotiate_features_vhost_user(backend_avail_features, avail_protocol_features)?;
+            let (backend_acked_features, acked_protocol_features) = vu
+                .negotiate_features_vhost_user(
+                    backend_avail_features,
+                    avail_protocol_features,
+                    postcopy.is_some(),
+                )?;
 
             let backend_num_queues =
                 if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
