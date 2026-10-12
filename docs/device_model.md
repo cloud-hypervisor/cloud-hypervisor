@@ -116,9 +116,8 @@ regardless of the backing storage. It applies to every image format backend and
 must be a power of 2 between 512 and 64KiB.
 
 With buffered I/O the host page cache absorbs any alignment difference. Under
-`direct=on` a value below the backing block size is not supported, because the
-sub block writes it produces need a read modify write serialized against
-concurrent requests, which the block layer does not do.
+`direct=on`, overrides below the backing block size are rejected for writable
+disks and for read-only raw and fixed VHD disks.
 
 ### virtio-console
 
