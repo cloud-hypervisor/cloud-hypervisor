@@ -1089,9 +1089,10 @@ mod tests {
         let access_address = GuestAddress(load_addr.0);
         let address_bytes = access_address.0.to_be_bytes();
         #[cfg(target_arch = "x86_64")]
-        let dma_lo: [u8; 4] = address_bytes[0..4].try_into().unwrap();
+        // Note: address is big endian.
+        let dma_hi: [u8; 4] = address_bytes[0..4].try_into().unwrap();
         #[cfg(target_arch = "x86_64")]
-        let dma_hi: [u8; 4] = address_bytes[4..8].try_into().unwrap();
+        let dma_lo: [u8; 4] = address_bytes[4..8].try_into().unwrap();
 
         // writing the FwCfgDmaAccess to mem (this would just be self.dma_access.as_ref() in guest)
         let _ = mem.write(access.as_mut_bytes(), access_address);
@@ -1116,8 +1117,8 @@ mod tests {
         fw_cfg.write(0, DMA_OFFSET, &address_bytes);
         #[cfg(target_arch = "x86_64")]
         {
-            fw_cfg.write(0, DMA_OFFSET, &dma_lo);
-            fw_cfg.write(0, DMA_OFFSET + 4, &dma_hi);
+            fw_cfg.write(0, FW_CFG_DMA_HI_OFFSET, &dma_hi);
+            fw_cfg.write(0, FW_CFG_DMA_LO_OFFSET, &dma_lo);
         }
         let _ = mem.read(&mut data, GuestAddress(code_address));
         assert_eq!(data, code);
