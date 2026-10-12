@@ -56,7 +56,11 @@ struct VringInfo {
     used_guest_addr: u64,
 }
 
-#[derive(Clone)]
+struct PostcopyContext {
+    #[expect(dead_code)]
+    uffd: OwnedFd,
+}
+
 pub struct VhostUserHandle {
     vu: Frontend,
     backend_features: u64,
@@ -68,6 +72,7 @@ pub struct VhostUserHandle {
     vrings_info: Option<Vec<VringInfo>>,
     queue_indexes: Vec<u16>,
     vring_bases: Option<Vec<u64>>,
+    postcopy_ctx: Option<PostcopyContext>,
 }
 
 impl VhostUserHandle {
@@ -122,6 +127,15 @@ impl VhostUserHandle {
         Ok(())
     }
 
+    pub fn start_postcopy(&mut self) -> Result<()> {
+        let uffd = self
+            .vu
+            .postcopy_advise()
+            .map_err(Error::VhostUserPostcopyAdvise)?;
+        self.postcopy_ctx = Some(PostcopyContext { uffd: uffd.into() });
+        Ok(())
+    }
+
     pub fn negotiate_features_vhost_user(
         &mut self,
         avail_features: u64,
@@ -143,9 +157,17 @@ impl VhostUserHandle {
                 }
 
                 let acked_protocol_features = avail_protocol_features & backend_protocol_features;
+                let mut enabled_protocol_features = acked_protocol_features;
+
+                // Postcopy is not a feature we want to persist to state, since
+                // it's enabled only if we're in postcopy, which we can't know
+                // beforehand, so don't add it to the acked bitflag.
+                if postcopy {
+                    enabled_protocol_features |= VhostUserProtocolFeatures::PAGEFAULT;
+                }
 
                 self.vu
-                    .set_protocol_features(acked_protocol_features)
+                    .set_protocol_features(enabled_protocol_features)
                     .map_err(Error::VhostUserSetProtocolFeatures)?;
 
                 acked_protocol_features
@@ -361,8 +383,14 @@ impl VhostUserHandle {
                 return Err(Error::VhostUserPageFaultUnsupported);
             }
 
-            let acked_protocol_features =
+            let mut acked_protocol_features =
                 VhostUserProtocolFeatures::from_bits_truncate(acked_protocol_features);
+            // Postcopy is not a feature we want to persist to state, since
+            // it's enabled only if we're in postcopy, which we can't know
+            // beforehand, so don't add it to the acked bitflag.
+            if postcopy {
+                acked_protocol_features |= VhostUserProtocolFeatures::PAGEFAULT;
+            }
             self.vu
                 .set_protocol_features(acked_protocol_features)
                 .map_err(Error::VhostUserSetProtocolFeatures)?;
@@ -458,6 +486,7 @@ impl VhostUserHandle {
                 vrings_info: None,
                 queue_indexes: Vec::new(),
                 vring_bases: None,
+                postcopy_ctx: None,
             };
             vhost_user
                 .vu
@@ -517,6 +546,7 @@ impl VhostUserHandle {
                         vrings_info: None,
                         queue_indexes: Vec::new(),
                         vring_bases: None,
+                        postcopy_ctx: None,
                     })
                     .map_err(Error::VhostUserConnect);
 
