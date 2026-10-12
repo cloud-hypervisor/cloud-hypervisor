@@ -2783,7 +2783,8 @@ impl DeviceManager {
 
             if let Some(guest_block_size) = disk_cfg.guest_block_size
                 && disk_cfg.direct
-                && !disk_cfg.readonly
+                && (!disk_cfg.readonly
+                    || matches!(disk_cfg.image_type, ImageType::Raw | ImageType::FixedVhd))
                 && u64::from(guest_block_size) < disk.topology().logical_block_size
             {
                 return Err(DeviceManagerError::GuestBlockSizeBelowBackend);
