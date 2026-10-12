@@ -3384,6 +3384,14 @@ impl RequestHandler for Vmm {
             receive_data_migration.zone_updates,
         );
 
+        if receive_data_migration.receiver_url.starts_with("tcp:")
+            && receive_data_migration.tls_dir.is_none()
+        {
+            warn!(
+                "Receiving migration over unencrypted, unauthenticated TCP. Consider TLS (tls_dir=<path>)."
+            );
+        }
+
         let listener = transport::receive_migration_listener(
             &receive_data_migration.receiver_url,
             receive_data_migration.tls_dir.as_deref(),
@@ -3458,6 +3466,14 @@ impl RequestHandler for Vmm {
             send_data_migration.timeout().as_secs(),
             send_data_migration.timeout_strategy
         );
+
+        if send_data_migration.destination_url.starts_with("tcp:")
+            && send_data_migration.tls_dir.is_none()
+        {
+            warn!(
+                "Sending migration over unencrypted, unauthenticated TCP. Consider TLS (tls_dir=<path>)."
+            );
+        }
 
         {
             let vm_config = self.vm_config.as_ref().unwrap().lock().unwrap();
