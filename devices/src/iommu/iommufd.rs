@@ -20,7 +20,7 @@ use iommufd_ioctls::{
     IommufdVDevice, IommufdVEvent, IommufdVEventData, IommufdVEventQ, IommufdVIommu,
     IommufdViommuData,
 };
-use log::{error, warn};
+use log::{debug, error, warn};
 use pci::{PasidCap, PciBdf};
 use thiserror::Error;
 use vm_memory::bitmap::AtomicBitmap;
@@ -45,6 +45,8 @@ pub enum Error {
     AttachBypass(#[source] IommufdError),
     #[error("Failed to install stage 1 HWPT")]
     InstallStage1(#[source] IommufdError),
+    #[error("Failed to attach device to the stage 1 HWPT")]
+    AttachStage1(#[source] io::Error),
     #[error("Failed to uninstall stage 1 HWPT")]
     UninstallStage1(#[source] IommufdError),
     #[error("Failed to invalidate vIOMMU caches")]
@@ -69,7 +71,11 @@ impl From<Error> for IommuError {
 struct Endpoint {
     bdf: PciBdf,
     device: Arc<dyn AttachHwpt>,
-    vdevice: IommufdVDevice,
+    _vdevice: IommufdVDevice,
+    // The iommufd crate does not expose the device id or the stage-1 HWPT.
+    // TODO: have it replace the HWPT instead of uninstall/install.
+    dev_id: u32,
+    s1_hwpt: Option<u32>,
 }
 
 /// Iommufd backend of an emulated IOMMU.
@@ -118,7 +124,9 @@ impl IommufdIommu {
             Endpoint {
                 bdf,
                 device,
-                vdevice,
+                _vdevice: vdevice,
+                dev_id,
+                s1_hwpt: None,
             },
         );
 
@@ -172,21 +180,55 @@ impl IommufdIommu {
         let Some(endpoint) = endpoints.get_mut(&device_id) else {
             return Ok(());
         };
-        endpoint
-            .vdevice
-            .uninstall_s1_hwpt(&*endpoint.device, abort)
-            .map_err(Error::UninstallStage1)?;
+        if abort {
+            self.viommu.attach_abort(&*endpoint.device)
+        } else {
+            self.viommu.attach_bypass(&*endpoint.device)
+        }
+        .map_err(Error::UninstallStage1)?;
+
+        if let Some(id) = endpoint.s1_hwpt.take() {
+            match self.viommu.iommufd().destroy_iommu_object(id) {
+                Ok(()) => debug!(
+                    "SMMUv3 accel: uninstall done: nested S1 HWPT {id} for SID {device_id:#x} \
+                     (now on the {} HWPT)",
+                    if abort { "abort" } else { "bypass" }
+                ),
+                Err(e) => warn!(
+                    "SMMUv3 accel: S1 HWPT {id} of SID {device_id:#x} could not be destroyed \
+                     ({e}); leaked until the iommufd context closes"
+                ),
+            }
+        }
 
         Ok(())
+    }
+
+    fn install_failed(&self, endpoint: &Endpoint, sid: u32, e: Error) -> IommuError {
+        warn!("SMMUv3 accel: install nested S1 for SID {sid:#x} failed: {e}");
+        if endpoint.s1_hwpt.is_none()
+            && let Err(e) = self.viommu.attach_abort(&*endpoint.device)
+        {
+            warn!("SMMUv3 accel: SID {sid:#x} attaching the abort HWPT failed: {e}");
+        }
+        e.into()
     }
 }
 
 impl Drop for IommufdIommu {
     fn drop(&mut self) {
-        for endpoint in self.endpoints.lock().unwrap().values() {
+        for endpoint in self.endpoints.get_mut().unwrap().values_mut() {
             if let Err(e) = endpoint.device.detach_hwpt() {
                 error!(
                     "Failed to detach device {} from the vIOMMU: {e}",
+                    endpoint.bdf
+                );
+            }
+            if let Some(id) = endpoint.s1_hwpt.take()
+                && let Err(e) = self.viommu.iommufd().destroy_iommu_object(id)
+            {
+                error!(
+                    "Failed to destroy S1 HWPT {id} of device {}: {e}",
                     endpoint.bdf
                 );
             }
@@ -217,14 +259,32 @@ impl PhysicalIommu for IommufdIommu {
         let Some(endpoint) = endpoints.get_mut(&device_id) else {
             return Ok(());
         };
-        endpoint
-            .vdevice
-            .uninstall_s1_hwpt(&*endpoint.device, true)
-            .map_err(Error::UninstallStage1)?;
-        endpoint
-            .vdevice
-            .install_s1_hwpt(&*endpoint.device, &hwpt_data)
-            .map_err(Error::InstallStage1)?;
+        let staged = match self.viommu.alloc_s1_hwpt(endpoint.dev_id, &hwpt_data) {
+            Ok(id) => id,
+            Err(e) => {
+                return Err(self.install_failed(endpoint, device_id, Error::InstallStage1(e)));
+            }
+        };
+        if let Err(e) = endpoint.device.attach_hwpt(staged) {
+            if let Err(e) = self.viommu.iommufd().destroy_iommu_object(staged) {
+                warn!(
+                    "SMMUv3 accel: SID {device_id:#x} destroy staged S1 HWPT {staged} failed: {e}"
+                );
+            }
+            return Err(self.install_failed(endpoint, device_id, Error::AttachStage1(e)));
+        }
+
+        let destroyed = endpoint
+            .s1_hwpt
+            .replace(staged)
+            .map(|old| (old, self.viommu.iommufd().destroy_iommu_object(old)));
+        if let Some((old, Err(e))) = destroyed {
+            warn!(
+                "SMMUv3 accel: installed nested S1 HWPT {staged} for SID {device_id:#x} but the \
+                 previous S1 HWPT {old} could not be destroyed ({e}); leaked until the iommufd \
+                 closes"
+            );
+        }
 
         Ok(())
     }
