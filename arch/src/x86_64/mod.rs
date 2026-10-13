@@ -35,8 +35,9 @@ use vm_memory::{
 };
 
 use crate::smbios::SmbiosConfig;
+use crate::x86_64::cpu_profile::CpuProfile;
 use crate::x86_64::cpu_profile::cpuid_adjustments::MissingCpuidEntriesError;
-use crate::{CpuProfile, GuestMemoryMmap, InitramfsConfig, RegionType, smbios};
+use crate::{GuestMemoryMmap, InitramfsConfig, RegionType, smbios};
 
 // While modern architectures support more than 255 CPUs via x2APIC,
 // legacy devices such as mptable support at most 254 CPUs.
@@ -91,7 +92,6 @@ pub struct CpuidConfig {
     pub phys_bits: u8,
     pub kvm_hyperv: bool,
     pub amx: bool,
-    pub profile: CpuProfile,
 }
 
 #[derive(Debug, Error)]
@@ -664,14 +664,15 @@ impl CpuidFeatureEntry {
 ///
 /// ## CPU profiles
 ///
-/// This function takes the CPU profile given in `config` into account and returns compatible CPUID entries
-/// if possible.
+/// This function applies `cpu_profile` and returns compatible CPUID entries if possible.
+/// Passing `None` uses the host profile.
 ///
 /// An error is returned when the CPUID entries obtained from the hypervisor do not satisfy the requirements
 /// to apply the selected CPU profile.
 pub fn generate_common_cpuid(
     hypervisor: &dyn hypervisor::Hypervisor,
     config: &CpuidConfig,
+    cpu_profile: Option<&CpuProfile>,
 ) -> super::Result<Vec<CpuIdEntry>> {
     #[allow(unused_unsafe)]
     // SAFETY: cpuid called with valid leaves
@@ -695,7 +696,7 @@ pub fn generate_common_cpuid(
         config.phys_bits
     );
 
-    let is_non_host_profile = !matches!(config.profile, CpuProfile::Host);
+    let is_non_host_profile = cpu_profile.is_some();
     if is_non_host_profile {
         cpu_profile::check_cpu_profile_support(hypervisor.hypervisor_type())?;
     }
@@ -721,9 +722,8 @@ pub fn generate_common_cpuid(
         });
     }
 
-    let cpuid_profile = if is_non_host_profile {
-        let cpuid_profile = config
-            .profile
+    let cpuid_profile = if let Some(cpu_profile) = cpu_profile {
+        let cpuid_profile = cpu_profile
             .adjust_cpuid(cpuid.clone(), config.amx, hypervisor.get_cpu_vendor())
             .map_err(Error::MissingExpectedCpuidEntry)?;
 
@@ -777,13 +777,13 @@ pub fn generate_common_cpuid(
 /// of what the host actually supports.
 pub fn generate_required_msr_updates(
     hypervisor: &dyn hypervisor::Hypervisor,
-    cpu_profile: CpuProfile,
+    cpu_profile: Option<&CpuProfile>,
     kvm_hyperv: bool,
     nested: bool,
 ) -> super::Result<Option<VcpuMsrConfigUpdate>> {
-    if matches!(cpu_profile, CpuProfile::Host) {
+    let Some(cpu_profile) = cpu_profile else {
         return Ok(None);
-    }
+    };
 
     cpu_profile::check_cpu_profile_support(hypervisor.hypervisor_type())?;
 
@@ -802,18 +802,16 @@ pub fn generate_required_msr_updates(
         nested,
     )?;
 
-    if let Some(required_updates) = &required_updates {
-        // If IA32_ARCH_CAPABILITIES is present then we need to check for compatibility.
-        // This MSR is only available on Intel CPUs as of now, but we do not check for vendor equality here.
-        //
-        // TODO: Consider adding a CPU vendor equality requirement to `check_cpuid_compatibility` even though
-        // it is extremely unlikely that CPUs from different vendors will pass the existing checks.
-        arch_capabilities_checks::valid_required_arch_capabilities_update(
-            required_updates,
-            &host_feature_msrs,
-        )?;
-    }
-    Ok(required_updates)
+    // If IA32_ARCH_CAPABILITIES is present then we need to check for compatibility.
+    // This MSR is only available on Intel CPUs as of now, but we do not check for vendor equality here.
+    //
+    // TODO: Consider adding a CPU vendor equality requirement to `check_cpuid_compatibility` even though
+    // it is extremely unlikely that CPUs from different vendors will pass the existing checks.
+    arch_capabilities_checks::valid_required_arch_capabilities_update(
+        &required_updates,
+        &host_feature_msrs,
+    )?;
+    Ok(Some(required_updates))
 }
 
 /// Apply updates to common CPUID (not vCPU specific) that are necessary regardless of

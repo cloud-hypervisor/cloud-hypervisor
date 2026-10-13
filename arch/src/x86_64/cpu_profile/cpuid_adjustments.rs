@@ -183,7 +183,7 @@ impl CpuidOutputRegisterAdjustments {
 }
 
 /// Data describing CPUID adjustments related to a CPU Profile.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CpuidProfileData {
     /// Adjustments necessary to become compatible with the desired target.
     pub adjustments: Vec<(CpuidParameters, CpuidOutputRegisterAdjustments)>,

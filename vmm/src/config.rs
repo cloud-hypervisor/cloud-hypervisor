@@ -11,7 +11,7 @@ use std::result;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use arch::CpuProfile;
+use arch::CpuProfileConfig;
 use block::ImageType;
 use clap::ArgMatches;
 use log::{debug, warn};
@@ -791,7 +791,7 @@ impl CpusConfig {
             });
 
         let profile = parser
-            .convert::<CpuProfile>("profile")
+            .convert::<CpuProfileConfig>("profile")
             .map_err(Error::ParseCpus)?
             .unwrap_or_default();
 

@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{fmt, fs, result};
 
-use arch::CpuProfile;
+use arch::CpuProfileConfig;
 use block::ImageType;
 pub use block::fcntl::LockGranularityChoice;
 #[cfg(target_arch = "x86_64")]
@@ -91,7 +91,7 @@ pub struct CpusConfig {
     pub core_scheduling: CoreScheduling,
     // Defaults to "Host" if no profile is given.
     #[serde(default)]
-    pub profile: CpuProfile,
+    pub profile: CpuProfileConfig,
 }
 
 pub const DEFAULT_VCPUS: u32 = 1;
@@ -108,7 +108,7 @@ impl Default for CpusConfig {
             features: CpuFeatures::default(),
             nested: false,
             core_scheduling: CoreScheduling::default(),
-            profile: CpuProfile::default(),
+            profile: CpuProfileConfig::default(),
         }
     }
 }
