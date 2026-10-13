@@ -86,8 +86,6 @@ pub(crate) struct MigrationWorker {
     vm_receiver: Receiver<Vm>,
     check_migration_evt: EventFd,
     config: VmSendMigrationData,
-    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-    hypervisor: Arc<dyn hypervisor::Hypervisor>,
     initial_vm_state: VmState,
     seccomp_filters: MigrationSeccompFilters,
     vm_moved_to_destination: bool,
@@ -117,8 +115,6 @@ impl MigrationWorker {
                 event!("vm", "migration-starting");
                 Vmm::send_migration(
                     &mut vm,
-                    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-                    self.hypervisor.as_ref(),
                     &self.config,
                     self.initial_vm_state,
                     &self.seccomp_filters,
@@ -158,9 +154,6 @@ impl MigrationWorker {
         vm: Vm,
         check_migration_evt: EventFd,
         config: VmSendMigrationData,
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))] hypervisor: Arc<
-            dyn hypervisor::Hypervisor,
-        >,
         initial_vm_state: VmState,
         seccomp_filters: MigrationSeccompFilters,
     ) -> Result<MigrationWorkerHandle, MigrationWorkerSpawnError> {
@@ -171,8 +164,6 @@ impl MigrationWorker {
             vm_receiver,
             check_migration_evt,
             config,
-            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-            hypervisor,
             initial_vm_state,
             seccomp_filters,
             vm_moved_to_destination: false,

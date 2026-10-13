@@ -1664,8 +1664,6 @@ impl Vmm {
     /// migrations.
     fn send_migration(
         vm: &mut Vm,
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-        hypervisor: &dyn hypervisor::Hypervisor,
         send_data_migration: &VmSendMigrationData,
         initial_vm_state: VmState,
         seccomp_filters: &MigrationSeccompFilters,
@@ -1698,31 +1696,7 @@ impl Vmm {
         // Send config
         let vm_config = vm.get_config();
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-        let common_cpuid = {
-            let (amx, max_phys_bits, profile, kvm_hyperv) = {
-                let guard = vm_config.lock().unwrap();
-                (
-                    guard.cpus.features.amx,
-                    guard.cpus.max_phys_bits,
-                    guard.cpus.profile,
-                    guard.cpus.kvm_hyperv,
-                )
-            };
-
-            let phys_bits = vm::physical_bits(hypervisor, max_phys_bits);
-
-            arch::generate_common_cpuid(
-                hypervisor,
-                &arch::CpuidConfig {
-                    phys_bits,
-                    kvm_hyperv,
-                    amx,
-                    profile,
-                },
-            )
-            .context("Error generating common cpuid")
-            .map_err(MigratableError::MigrateSend)?
-        };
+        let common_cpuid = { vm.cpu_manager().lock().unwrap().common_cpuid() };
 
         // Send memory FDs
         match (&mut socket, memory_mode) {
@@ -3518,8 +3492,6 @@ impl RequestHandler for Vmm {
             vm,
             check_migration_evt,
             send_data_migration,
-            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-            Arc::clone(&self.hypervisor),
             initial_vm_state,
             seccomp_filters,
         ) {
