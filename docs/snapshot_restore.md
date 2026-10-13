@@ -372,6 +372,37 @@ prefault on the receiving side:
     receive-migration receiver_url=unix:/tmp/restore.sock,background_fetch_pages=off &
 ```
 
+Until the restore has fetched all guest memory, CH rejects `snapshot` and
+`send-migration`. Without the background prefault, the restore may never
+fetch all of it. `send-migration` with `memory_mode=memfds` is therefore
+accepted during the restore: it does not copy guest memory, so a daemon
+that keeps the restore's source can take an offload snapshot without
+fetching the rest of the memory first:
+
+```bash
+# Restore on demand, fetching only the pages the guest touches. my_daemon
+# and its options are placeholders for a daemon of your own. It keeps
+# running: it serves page faults, records which pages it fetched, and
+# listens on /tmp/offload.sock for offload snapshots.
+./ch-remote --api-socket /tmp/cloud-hypervisor.sock \
+    receive-migration receiver_url=unix:/tmp/restore.sock,background_fetch_pages=off &
+my_daemon --restore-socket /tmp/restore.sock --source /var/snapshots/vm1 \
+    --snapshot-socket /tmp/offload.sock --output-dir /var/snapshots/vm1-new &
+
+# Later, snapshot the running VM to that daemon and keep running it.
+./ch-remote --api-socket /tmp/cloud-hypervisor.sock \
+    send-migration destination_url=unix:/tmp/offload.sock,memory_mode=memfds,preserve_source=on
+./ch-remote --api-socket /tmp/cloud-hypervisor.sock resume
+```
+
+The memory FDs then hold only the pages the restore has fetched. Any access
+to guest memory, by the guest or by CH, fetches the page first, so every
+other page has never been accessed and still holds the source's content.
+The daemon must take those pages from the source. CH does not tell the
+daemon which pages they are; the daemon knows from the pages it fetched.
+Holes in the memory FDs do not reliably mark them. The in-tree
+`offload_daemon` does not support this.
+
 ### The daemon protocol
 
 The daemon implements the local live-migration wire protocol defined in
