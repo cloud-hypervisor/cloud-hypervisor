@@ -19,6 +19,7 @@ libc = { workspace = true }
 linux-loader = { workspace = true, features = ["bzimage", "elf", "pe"] }
 log = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
 vm-memory = { workspace = true, features = ["backend-bitmap", "backend-mmap"] }
@@ -26,7 +27,6 @@ vmm-sys-util = { workspace = true, features = ["with-serde"] }
 
 [dev-dependencies]
 proptest = "1.0.0"
-serde_json = { workspace = true }
 
 [target.'cfg(target_arch = "aarch64")'.dependencies]
 crc-any = "3.0.0"

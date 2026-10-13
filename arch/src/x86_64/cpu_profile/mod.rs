@@ -5,6 +5,8 @@
 
 use std::collections::HashSet;
 use std::ops::RangeInclusive;
+use std::path::{Path, PathBuf};
+use std::{fs, io};
 
 use hypervisor::CpuVendor;
 use hypervisor::arch::x86::msr_index::{MSR_IA32_VMX_BASIC, MSR_IA32_VMX_VMFUNC};
@@ -36,14 +38,44 @@ pub struct CpuProfile {
     pub msr: MsrProfileData,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum CpuProfileLoadError {
+    #[error("Error reading CPU profile {path:?}")]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    #[error("Error parsing CPU profile {path:?}")]
+    Parse {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
+}
+
 /// CPU profile selected in the VM configuration.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum CpuProfileConfig {
     #[default]
     Host,
+    /// Path to a JSON CPU profile.
+    File(PathBuf),
 }
 
 impl CpuProfile {
+    /// Load a CPU profile from a JSON file.
+    pub fn from_file(path: &Path) -> Result<Self, CpuProfileLoadError> {
+        let json = fs::read_to_string(path).map_err(|source| CpuProfileLoadError::Read {
+            path: path.to_owned(),
+            source,
+        })?;
+        serde_json::from_str(&json).map_err(|source| CpuProfileLoadError::Parse {
+            path: path.to_owned(),
+            source,
+        })
+    }
+
     /// Adjust `cpuid` to the chosen CPU profile.
     ///
     /// The CPUID data obtained from the hypervisor is thus downgraded to the selected profile.
@@ -231,11 +263,18 @@ fn required_msr_updates(
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::io::ErrorKind;
+
     use hypervisor::arch::x86::MsrEntry;
     use hypervisor::arch::x86::msr_index::{MSR_IA32_UCODE_REV, MSR_IA32_VMX_MISC};
     use proptest::prelude::*;
+    use vmm_sys_util::tempfile::TempFile;
 
-    use super::{CpuIdEntry, CpuProfile, CpuVendor, CpuidProfileData, CpuidReg, adjust_cpuid};
+    use super::{
+        CpuIdEntry, CpuProfile, CpuProfileLoadError, CpuVendor, CpuidProfileData, CpuidReg,
+        adjust_cpuid,
+    };
     use crate::x86_64::cpu_profile::cpuid_adjustments::{
         CpuidOutputRegisterAdjustments, CpuidParameters,
     };
@@ -296,6 +335,31 @@ mod tests {
                 required_msrs: vec![RegisterAddress(0x10a), RegisterAddress(0x174)],
             }
         );
+    }
+
+    #[test]
+    fn test_file_profile_errors() {
+        let file_path = {
+            let file = TempFile::new().unwrap();
+            for json in ["invalid", "{}", r#"{"cpuid":{"adjustments":[]}}"#] {
+                fs::write(file.as_path(), json).unwrap();
+                let error = CpuProfile::from_file(file.as_path()).unwrap_err();
+                let CpuProfileLoadError::Parse { path, source } = error else {
+                    panic!("Expected a JSON error");
+                };
+                assert_eq!(path, file.as_path());
+                assert!(source.is_syntax() || source.is_data());
+            }
+            file.as_path().to_owned()
+        };
+
+        let CpuProfileLoadError::Read { path, source } =
+            CpuProfile::from_file(&file_path).unwrap_err()
+        else {
+            panic!("Expected a file error");
+        };
+        assert_eq!(path, file_path);
+        assert_eq!(source.kind(), ErrorKind::NotFound);
     }
 
     // Note that the tests for adjust_cpuid within this module tend to use much simpler inputs
