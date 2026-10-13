@@ -14638,7 +14638,16 @@ mod rate_limiter {
         _test_rate_limiter_net(false);
     }
 
-    fn _test_rate_limiter_block(bandwidth: bool, num_queues: u32) {
+    fn block_rate_limiter_fio_command(fio_ops: &FioOps, num_queues: u32) -> String {
+        format!(
+            "sudo fio --filename=/dev/vdc --name=test --output-format=json \
+            --direct=1 --bs=4k --ioengine=io_uring --iodepth=64 \
+            --rw={fio_ops} --runtime={BLOCK_RATE_LIMITER_RUNTIME} \
+            --ramp_time={BLOCK_RATE_LIMITER_RAMP_TIME} --numjobs={num_queues}",
+        )
+    }
+
+    fn _test_rate_limiter_block(bandwidth: bool, num_queues: u32, burst: Option<(u64, u64, u64)>) {
         let fio_ops = FioOps::RandRW;
 
         let bw_size = if bandwidth {
@@ -14647,7 +14656,10 @@ mod rate_limiter {
             1000_u64 // I/O
         };
         let bw_refill_time = 1000; // ms
-        let limit_rate = (bw_size * 1000) as f64 / bw_refill_time as f64;
+        let limit_rate = burst.map_or(
+            (bw_size * 1000) as f64 / bw_refill_time as f64,
+            |(_, _, expected_rate)| expected_rate as f64,
+        );
 
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -14665,7 +14677,7 @@ mod rate_limiter {
             .success()
         );
 
-        let test_blk_params = if bandwidth {
+        let mut test_blk_params = if bandwidth {
             format!(
                 "path={blk_rate_limiter_test_img},num_queues={num_queues},bw_size={bw_size},bw_one_time_burst=0,bw_refill_time={bw_refill_time},image_type=raw"
             )
@@ -14674,6 +14686,10 @@ mod rate_limiter {
                 "path={blk_rate_limiter_test_img},num_queues={num_queues},ops_size={bw_size},ops_one_time_burst=0,ops_refill_time={bw_refill_time},image_type=raw"
             )
         };
+        if let Some((burst_rate, burst_seconds, _)) = burst {
+            test_blk_params +=
+                &format!(",ops_burst_rate={burst_rate},ops_burst_seconds={burst_seconds}");
+        }
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", &format!("boot={num_queues}")])
@@ -14690,12 +14706,7 @@ mod rate_limiter {
         let r = panic::catch_unwind(|| {
             guest.wait_vm_boot().unwrap();
 
-            let fio_command = format!(
-                "sudo fio --filename=/dev/vdc --name=test --output-format=json \
-                --direct=1 --bs=4k --ioengine=io_uring --iodepth=64 \
-                --rw={fio_ops} --runtime={BLOCK_RATE_LIMITER_RUNTIME} \
-                --ramp_time={BLOCK_RATE_LIMITER_RAMP_TIME} --numjobs={num_queues}",
-            );
+            let fio_command = block_rate_limiter_fio_command(&fio_ops, num_queues);
             let output = guest.ssh_command(&fio_command).unwrap();
 
             // Parse fio output
@@ -14816,8 +14827,8 @@ mod rate_limiter {
 
     #[test]
     fn test_rate_limiter_block_bandwidth() {
-        _test_rate_limiter_block(true, 1);
-        _test_rate_limiter_block(true, 2);
+        _test_rate_limiter_block(true, 1, None);
+        _test_rate_limiter_block(true, 2, None);
     }
 
     #[test]
@@ -14830,8 +14841,20 @@ mod rate_limiter {
 
     #[test]
     fn test_rate_limiter_block_iops() {
-        _test_rate_limiter_block(false, 1);
-        _test_rate_limiter_block(false, 2);
+        _test_rate_limiter_block(false, 1, None);
+        _test_rate_limiter_block(false, 2, None);
+    }
+
+    #[test]
+    fn test_rate_limiter_block_iops_burst() {
+        // At 2000 IOPS, the 120000-token depth lasts 120 s, covering ramp and runtime.
+        _test_rate_limiter_block(false, 1, Some((2000, 60, 2000)));
+    }
+
+    #[test]
+    fn test_rate_limiter_block_iops_burst_exhausted() {
+        // At 2000 IOPS, the 2000-token depth is exhausted within the 5 s fio ramp.
+        _test_rate_limiter_block(false, 1, Some((2000, 1, 1000)));
     }
 
     #[test]
