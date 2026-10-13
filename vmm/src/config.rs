@@ -87,6 +87,8 @@ pub enum Error {
     /// Error parsing CPU options
     #[error("Error parsing --cpus")]
     ParseCpus(#[source] OptionParserError),
+    #[error("Error parsing --cpus profile")]
+    ParseCpuProfile(#[source] arch::ParseCpuProfileError),
     /// Invalid CPU features
     #[error("Invalid feature in --cpus features list: {0}")]
     InvalidCpuFeatures(String),
@@ -791,8 +793,10 @@ impl CpusConfig {
             });
 
         let profile = parser
-            .convert::<CpuProfileConfig>("profile")
-            .map_err(Error::ParseCpus)?
+            .get("profile")
+            .map(|profile| profile.parse::<CpuProfileConfig>())
+            .transpose()
+            .map_err(Error::ParseCpuProfile)?
             .unwrap_or_default();
 
         let features_list = parser
@@ -4203,6 +4207,8 @@ impl Drop for VmConfig {
 mod tests {
     use std::fs::File;
     use std::os::unix::io::AsRawFd;
+    #[cfg(target_arch = "x86_64")]
+    use std::{env, fs};
 
     use net_util::MacAddr;
 
@@ -4211,6 +4217,13 @@ mod tests {
     #[test]
     fn test_cpu_parsing() -> Result<()> {
         assert_eq!(CpusConfig::parse("")?, CpusConfig::default());
+        for host in ["host", "Host", "HOST"] {
+            assert_eq!(
+                CpusConfig::parse(&format!("profile={host}"))?,
+                CpusConfig::default()
+            );
+        }
+        assert_eq!(CpusConfig::parse("profile=")?, CpusConfig::default());
         assert!(CpusConfig::parse("nested=on")?.nested);
         assert!(!CpusConfig::parse("nested=off")?.nested);
 
@@ -4311,6 +4324,34 @@ mod tests {
         // Invalid value should error
         CpusConfig::parse("boot=1,core_scheduling=invalid").unwrap_err();
 
+        Ok(())
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn test_cpu_profile_file_parsing() -> Result<()> {
+        use vmm_sys_util::tempfile::TempFile;
+
+        let (input, config) = {
+            let file = TempFile::new_with_prefix(
+                env::temp_dir().join("cpu profile:with,commas[and]=signs-"),
+            )
+            .unwrap();
+            // Parsing the selector must not read or validate the file contents.
+            fs::write(file.as_path(), "invalid json").unwrap();
+            let input = format!(
+                r#"boot=2,profile="path:{}",max=4"#,
+                file.as_path().display()
+            );
+            let config = CpusConfig::parse(&input)?;
+            assert_eq!(
+                config.profile,
+                CpuProfileConfig::File(file.as_path().to_owned())
+            );
+            (input, config)
+        };
+
+        assert_eq!(CpusConfig::parse(&input)?, config);
         Ok(())
     }
 

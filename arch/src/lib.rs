@@ -13,7 +13,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::{fmt, result};
 
-use serde::de::{IntoDeserializer, value};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_memory::bitmap::AtomicBitmap;
@@ -69,11 +68,36 @@ pub enum CpuProfileConfig {
     Host,
 }
 
-// Note that this trait impl is architecture agnostic and may thus reside here.
+#[derive(Debug, Error)]
+pub enum ParseCpuProfileError {
+    #[error("Invalid CPU profile: {0}")]
+    InvalidValue(String),
+    #[cfg(not(target_arch = "x86_64"))]
+    #[error("File CPU profiles are only supported on x86_64")]
+    UnsupportedArchitecture,
+}
+
 impl FromStr for CpuProfileConfig {
-    type Err = value::Error;
+    type Err = ParseCpuProfileError;
+
     fn from_str(s: &str) -> result::Result<Self, Self::Err> {
-        Self::deserialize(s.into_deserializer())
+        if s.to_lowercase() == "host" {
+            return Ok(Self::Host);
+        }
+
+        match s.split_once(':') {
+            Some((selector, path)) if selector.to_lowercase() == "path" && !path.is_empty() => {
+                #[cfg(target_arch = "x86_64")]
+                {
+                    Ok(Self::File(path.into()))
+                }
+                #[cfg(not(target_arch = "x86_64"))]
+                {
+                    Err(ParseCpuProfileError::UnsupportedArchitecture)
+                }
+            }
+            _ => Err(ParseCpuProfileError::InvalidValue(s.to_owned())),
+        }
     }
 }
 
@@ -221,5 +245,52 @@ impl DeviceInfoForFdt for MmioDeviceInfo {
     }
     fn length(&self) -> u64 {
         self.len
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CpuProfileConfig, ParseCpuProfileError};
+
+    #[test]
+    fn test_cpu_profile_parsing() {
+        for host in ["host", "Host", "HOST"] {
+            assert_eq!(
+                host.parse::<CpuProfileConfig>().unwrap(),
+                CpuProfileConfig::default()
+            );
+        }
+        #[cfg(target_arch = "x86_64")]
+        for path in ["cpu_profile.json", "/profiles/CPU:Profile.json"] {
+            for selector in ["path", "Path", "PATH"] {
+                assert_eq!(
+                    format!("{selector}:{path}")
+                        .parse::<CpuProfileConfig>()
+                        .unwrap(),
+                    CpuProfileConfig::File(path.into())
+                );
+            }
+        }
+        for invalid in [
+            "",
+            "File",
+            "path:",
+            "cpu_profile.json",
+            "Host:profile",
+            "internal:amd-milan",
+            "internal:intel-skylake",
+            "unknown:profile",
+        ] {
+            assert!(matches!(
+                invalid.parse::<CpuProfileConfig>(),
+                Err(ParseCpuProfileError::InvalidValue(value)) if value == invalid
+            ));
+        }
+
+        #[cfg(not(target_arch = "x86_64"))]
+        assert!(matches!(
+            "path:cpu_profile.json".parse::<CpuProfileConfig>(),
+            Err(ParseCpuProfileError::UnsupportedArchitecture)
+        ));
     }
 }

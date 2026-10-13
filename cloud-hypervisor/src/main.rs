@@ -272,7 +272,8 @@ fn get_cli_options_sorted(
                     kvm_hyperv=on|off,max_phys_bits=<maximum_number_of_physical_bits>,\
                     affinity=<list_of_vcpus_with_their_associated_cpuset>,\
                     features=<list_of_features_to_enable>,\
-                    nested=on|off,core_scheduling=vm|vcpu|off",
+                    nested=on|off,core_scheduling=vm|vcpu|off,\
+                    profile=host|path:<file>",
             )
             .default_value(default_vcpus)
             .group("vm-config"),

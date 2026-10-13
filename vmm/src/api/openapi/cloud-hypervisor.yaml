@@ -936,6 +936,25 @@ components:
       enum: ["Vm", "Vcpu", "Off"]
       default: "Vm"
 
+    CpuProfileConfig:
+      description: >-
+        CPU profile. File selects a JSON profile by path and is supported
+        on x86-64 with KVM. Other platforms support Host only.
+      default: "Host"
+      oneOf:
+        - type: string
+          enum: ["Host"]
+        - type: object
+          required: ["File"]
+          additionalProperties: false
+          properties:
+            File:
+              type: string
+              description: >-
+                Path to a JSON CPU profile on the VMM host. The file must
+                remain available with unchanged contents for reboot and
+                restore, including at a migration destination.
+
     CpusConfig:
       required:
         - boot_vcpus
@@ -966,7 +985,8 @@ components:
           $ref: "#/components/schemas/CpuFeatures"
         core_scheduling:
           $ref: "#/components/schemas/CoreSchedulingMode"
-
+        profile:
+          $ref: "#/components/schemas/CpuProfileConfig"
 
     PciSegmentConfig:
       required:

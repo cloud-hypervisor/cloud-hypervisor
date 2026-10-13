@@ -33,6 +33,7 @@ List of experimental features:
 - vfio-user
 - vDPA
 - Emulated ARM SMMUv3
+- [CPU profiles](cpu.md#profile)
 
 ### Security
 
