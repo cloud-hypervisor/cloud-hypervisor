@@ -3,23 +3,21 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-/// Cloud Hypervisor implementation of QEMU's fw_cfg spec
-/// https://www.qemu.org/docs/master/specs/fw_cfg.html
-/// Linux kernel fw_cfg driver header
-/// https://github.com/torvalds/linux/blob/master/include/uapi/linux/qemu_fw_cfg.h
-/// Uploading files to the guest via fw_cfg is supported for all kernels 4.6+ w/ CONFIG_FW_CFG_SYSFS enabled
-/// https://cateee.net/lkddb/web-lkddb/FW_CFG_SYSFS.html
-/// No kernel requirement if above functionality is not required,
-/// only firmware must implement mechanism to interact with this fw_cfg device
-use std::{
-    cmp,
-    ffi::CString,
-    fs::File,
-    io::{ErrorKind, Read, Result, Seek, SeekFrom},
-    mem::offset_of,
-    os::unix::fs::FileExt,
-    sync::{Arc, Barrier},
-};
+//! Cloud Hypervisor implementation of QEMU's fw_cfg spec
+//! https://www.qemu.org/docs/master/specs/fw_cfg.html
+//! Linux kernel fw_cfg driver header
+//! https://github.com/torvalds/linux/blob/master/include/uapi/linux/qemu_fw_cfg.h
+//! Uploading files to the guest via fw_cfg is supported for all kernels 4.6+ w/ CONFIG_FW_CFG_SYSFS enabled
+//! https://cateee.net/lkddb/web-lkddb/FW_CFG_SYSFS.html
+//! No kernel requirement if above functionality is not required,
+//! only firmware must implement mechanism to interact with this fw_cfg device
+use std::cmp;
+use std::ffi::CString;
+use std::fs::File;
+use std::io::{ErrorKind, Read, Result, Seek, SeekFrom};
+use std::mem::offset_of;
+use std::os::unix::fs::FileExt;
+use std::sync::{Arc, Barrier};
 
 use acpi_tables::rsdp::Rsdp;
 use arch::RegionType;
