@@ -82,9 +82,10 @@ Both machines need TLS certificates and keys as described in
 You will need a kernel and initramfs for a minimal Linux system. For
 this example, we will use the Debian netboot image.
 
-Place the kernel and initramfs into the _same directory_ on both
-machines. This is important for the migration to succeed. We will use
-`/var/images`:
+Resources that the VM configuration references, such as the kernel, the
+initramfs, and disk images, must be available at the same paths on both
+machines. The destination needs them to restore the VM and to reboot it
+later. We will use `/var/images` for the kernel and initramfs:
 
 ```console
 src $ export DEBIAN=https://ftp.debian.org/debian/dists/stable/main/installer-amd64/current/images/netboot/debian-installer/amd64
