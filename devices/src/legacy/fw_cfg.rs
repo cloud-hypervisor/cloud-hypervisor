@@ -698,11 +698,11 @@ impl FwCfg {
         Ok(())
     }
 
-    fn read_content(content: &FwCfgContent, offset: u32, data: &mut [u8], size: u32) -> Option<u8> {
+    fn read_content(content: &FwCfgContent, offset: u32, data: &mut [u8]) -> Option<u8> {
         // Zero fill rather than the usual 0xff fill for QEMU compatibility
         data.fill(0);
         let start = offset as usize;
-        let end = start + size as usize;
+        let end = start + data.len();
         match content {
             FwCfgContent::Bytes(b) => {
                 if end <= b.len() {
@@ -724,20 +724,20 @@ impl FwCfg {
                 }
             }
         }
-        Some(size as u8)
+        Some(data.len() as u8)
     }
 
-    fn read_data(&mut self, data: &mut [u8], size: u32) -> u8 {
+    fn read_data(&mut self, data: &mut [u8]) -> u8 {
         let ret = if let Some(content) = self.known_items.get(self.selector as usize) {
-            Self::read_content(content, self.data_offset, data, size)
+            Self::read_content(content, self.data_offset, data)
         } else if let Some(item) = self.items.get((self.selector - FW_CFG_FILE_FIRST) as usize) {
-            Self::read_content(&item.content, self.data_offset, data, size)
+            Self::read_content(&item.content, self.data_offset, data)
         } else {
             error!("fw_cfg: selector {:#x} does not exist.", self.selector);
             None
         };
         if let Some(val) = ret {
-            self.data_offset += size;
+            self.data_offset += data.len() as u32;
             val
         } else {
             0
@@ -747,12 +747,11 @@ impl FwCfg {
 
 impl BusDevice for FwCfg {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
-        let size = data.len();
-        match (offset, size) {
+        match (offset, data.len()) {
             (FW_CFG_SELECTOR_OFFSET, _) => {
                 error!("fw_cfg: selector register is write-only.");
             }
-            (FW_CFG_DATA_OFFSET, _) => _ = self.read_data(data, size as u32),
+            (FW_CFG_DATA_OFFSET, _) => _ = self.read_data(data),
             (FW_CFG_DMA_HI_OFFSET, 4) => {
                 let addr = self.dma_address;
                 let addr_hi = (addr >> 32) as u32;
@@ -764,7 +763,10 @@ impl BusDevice for FwCfg {
                 data.copy_from_slice(&addr_lo.to_be_bytes());
             }
             _ => {
-                debug!("fw_cfg: read from unknown offset {offset:#x}: {size:#x} bytes.");
+                debug!(
+                    "fw_cfg: read from unknown offset {offset:#x}: {:#x} bytes.",
+                    data.len()
+                );
             }
         }
     }
