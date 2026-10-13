@@ -153,7 +153,8 @@ With migration parameters:
 src $ ch-remote --api-socket=/tmp/api send-migration destination_url=tcp:{dst}:{port},tls_dir=/path/to/src-tls,downtime_ms=200,timeout_s=3600,timeout_strategy=cancel
 ```
 
-> Replace {dst}:{port} with the actual IP address and port of your destination host.
+> Replace {dst}:{port} with the actual host name or IP address and port of
+> your destination host. For a same-host migration, use `localhost`.
 
 After completing the above commands, the source VM will be migrated to
 the destination host and continue running there. The source VM instance
@@ -192,18 +193,6 @@ verifies the destination certificate against `ca-cert.pem` and presents
 `client-cert.pem` and `client-key.pem`. The destination presents
 `server-cert.pem` and `server-key.pem`, and only accepts client
 certificates that chain to `ca-cert.pem`.
-
-Example receiver command:
-
-```console
-dst $ ch-remote --api-socket=/tmp/api receive-migration receiver_url=tcp:0.0.0.0:{port},tls_dir=/path/to/dst-tls
-```
-
-Example sender command:
-
-```console
-src $ ch-remote --api-socket=/tmp/api send-migration destination_url=tcp:{dst}:{port},tls_dir=/path/to/src-tls
-```
 
 TLS encryption is only supported with `tcp:<host>:<port>` migration
 URLs, not with UNIX domain socket migration.
@@ -282,38 +271,6 @@ $ certtool --generate-certificate \
 ```
 
 For a same-host test, place these files in a single directory and use that directory as `tls_dir` for both commands.
-
-##### Performing the Migration
-
-On the receiver side, we prepare an empty VM:
-
-```console
-dst $ cloud-hypervisor --api-socket /tmp/api-rcv
-```
-
-In a different terminal, prepare to receive the migration:
-
-```console
-dst $ ch-remote --api-socket=/tmp/api-rcv receive-migration receiver_url=tcp:0.0.0.0:9000,tls_dir=/path/to/certificates
-```
-
-On the sender side, we start a VM:
-
-```console
-src $ cloud-hypervisor \
-        --serial tty --console off \
-        --cpus boot=2 --memory size=4G \
-        --kernel /var/images/linux \
-        --initramfs /var/images/initrd \
-        --cmdline "console=ttyS0" \
-        --api-socket /tmp/api-src
-```
-
-After a few seconds the VM should be up and you can interact with it. Then trigger the migration:
-
-```console
-src $ ch-remote --api-socket=/tmp/api-src send-migration destination_url=tcp:localhost:9000,tls_dir=/path/to/certificates
-```
 
 #### Migration Parameters
 
