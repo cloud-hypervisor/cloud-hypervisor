@@ -479,17 +479,11 @@ impl FwCfg {
         Ok(())
     }
 
-    fn dma_read_content(
-        &self,
-        content: &FwCfgContent,
-        offset: u32,
-        len: u32,
-        address: u64,
-    ) -> Result<u32> {
-        let content_size = content.size()?.saturating_sub(offset);
+    fn dma_read_content(&self, content: &FwCfgContent, len: u32, address: u64) -> Result<u32> {
+        let content_size = content.size()?.saturating_sub(self.data_offset);
         let op_size = cmp::min(content_size, len);
         let mut buf = vec![0u8; op_size as usize];
-        Self::read_content(content, offset, buf.as_mut_bytes())?;
+        Self::read_content(content, self.data_offset, buf.as_mut_bytes())?;
         let r = self
             .memory
             .memory()
@@ -533,7 +527,7 @@ impl FwCfg {
 
     fn dma_read(&mut self, len: u32, address: u64) -> Result<()> {
         let content = self.get_selected_content()?;
-        let op_size = self.dma_read_content(content, self.data_offset, len, address)?;
+        let op_size = self.dma_read_content(content, len, address)?;
         self.data_offset += op_size;
         Ok(())
     }
