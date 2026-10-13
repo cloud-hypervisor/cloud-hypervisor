@@ -2852,6 +2852,10 @@ impl Vm {
             .map_err(MigratableError::Resume)
     }
 
+    pub fn cpu_manager(&self) -> &Arc<Mutex<cpu::CpuManager>> {
+        &self.cpu_manager
+    }
+
     pub fn device_manager(&self) -> &Arc<Mutex<DeviceManager>> {
         &self.device_manager
     }
