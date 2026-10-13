@@ -1730,6 +1730,9 @@ components:
             Directory containing the TLS server certificate (server-cert.pem), the TLS
             server key (server-key.pem), and the client TLS root CA certificate (ca-cert.pem).
             TLS is only supported with tcp:<host>:<port> receiver URLs.
+            Recommended for all TCP migrations. Omitting it is only intended for
+            development and testing, as TCP migration is then unencrypted and
+            unauthenticated.
         zone_updates:
           type: array
           items:
@@ -1826,6 +1829,9 @@ components:
             Directory containing the TLS root CA certificate (ca-cert.pem), the TLS client
             certificate (client-cert.pem), and TLS client key (client-key.pem).
             TLS is only supported with tcp:<host>:<port> destination URLs.
+            Recommended for all TCP migrations. Omitting it is only intended for
+            development and testing, as TCP migration is then unencrypted and
+            unauthenticated.
         memory_mode:
           $ref: "#/components/schemas/MigrationMode"
 
