@@ -21,12 +21,12 @@ live upgrades with minimal VM downtime. We call this mode "local migration".
 
 If `memory_mode=memfds` is omitted, the migration defaults to copying guest
 memory instead. UNIX domain socket transport may be proxied via a socket proxy
-(e.g. `socat` fur advanced custom use cases).
+(e.g. `socat`) for advanced custom use cases.
 
 Launch the source VM (on the host machine):
 
 ```console
-$ target/release/cloud-hypervisor
+$ target/release/cloud-hypervisor \
     --kernel ~/workloads/vmlinux \
     --disk path=~/workloads/focal.raw,image_type=raw \
     --cpus boot=1 --memory size=1G,shared=on \
