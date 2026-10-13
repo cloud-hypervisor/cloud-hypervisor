@@ -550,13 +550,13 @@ impl FwCfg {
         content.size().ok()
     }
 
-    fn dma_read(&mut self, selector: u16, len: u32, address: u64) -> Result<()> {
-        let op_size = if let Some(content) = self.known_items.get(selector as usize) {
+    fn dma_read(&mut self, len: u32, address: u64) -> Result<()> {
+        let op_size = if let Some(content) = self.known_items.get(self.selector as usize) {
             self.dma_read_content(content, self.data_offset, len, address)
-        } else if let Some(item) = self.items.get((selector - FW_CFG_FILE_FIRST) as usize) {
+        } else if let Some(item) = self.items.get((self.selector - FW_CFG_FILE_FIRST) as usize) {
             self.dma_read_content(&item.content, self.data_offset, len, address)
         } else {
-            error!("fw_cfg: selector {selector:#x} does not exist.");
+            error!("fw_cfg: selector {:#x} does not exist.", self.selector);
             Err(ErrorKind::NotFound.into())
         }?;
         self.data_offset += op_size;
@@ -587,7 +587,7 @@ impl FwCfg {
         let len = u32::from_be(dma_access.length_be);
         let addr = u64::from_be(dma_access.address_be);
         let ret = if control.read() {
-            self.dma_read(self.selector, len, addr)
+            self.dma_read(len, addr)
         } else if control.write() {
             Err(ErrorKind::InvalidInput.into())
         } else if control.skip() {
