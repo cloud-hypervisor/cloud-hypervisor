@@ -727,7 +727,7 @@ impl FwCfg {
         Some(data.len() as u8)
     }
 
-    fn read_data(&mut self, data: &mut [u8]) -> u8 {
+    fn read_data(&mut self, data: &mut [u8]) {
         let ret = if let Some(content) = self.known_items.get(self.selector as usize) {
             Self::read_content(content, self.data_offset, data)
         } else if let Some(item) = self.items.get((self.selector - FW_CFG_FILE_FIRST) as usize) {
@@ -736,11 +736,8 @@ impl FwCfg {
             error!("fw_cfg: selector {:#x} does not exist.", self.selector);
             None
         };
-        if let Some(val) = ret {
+        if ret.is_some() {
             self.data_offset += data.len() as u32;
-            val
-        } else {
-            0
         }
     }
 }
@@ -751,7 +748,7 @@ impl BusDevice for FwCfg {
             (FW_CFG_SELECTOR_OFFSET, _) => {
                 error!("fw_cfg: selector register is write-only.");
             }
-            (FW_CFG_DATA_OFFSET, _) => _ = self.read_data(data),
+            (FW_CFG_DATA_OFFSET, _) => self.read_data(data),
             (FW_CFG_DMA_HI_OFFSET, 4) => {
                 let addr = self.dma_address;
                 let addr_hi = (addr >> 32) as u32;
