@@ -16,6 +16,7 @@ use std::ffi::CString;
 use std::fs::File;
 use std::io::{ErrorKind, Read, Result, Seek, SeekFrom};
 use std::mem::offset_of;
+use std::ops::RangeInclusive;
 use std::os::unix::fs::FileExt;
 use std::sync::{Arc, Barrier};
 
@@ -75,8 +76,18 @@ pub const FW_CFG_ADDRESS_BASE: u64 = 0x9030000;
 #[cfg(target_arch = "aarch64")]
 pub const FW_CFG_ADDRESS_WIDTH: u64 = 0x18;
 
+// QEMU uses two separately mapped regions instead of a single contiguous one as CH does.
+#[cfg(target_arch = "x86_64")]
+const QEMU_IO_REGISTER_REGION: RangeInclusive<u64> = FW_CFG_SELECTOR_OFFSET..=FW_CFG_DATA_OFFSET;
+#[cfg(target_arch = "aarch64")]
+const QEMU_IO_REGISTER_REGION: RangeInclusive<u64> =
+    FW_CFG_DATA_OFFSET..=FW_CFG_SELECTOR_OFFSET + 1;
+const QEMU_DMA_REGISTER_REGION: RangeInclusive<u64> =
+    FW_CFG_DMA_HI_OFFSET..=FW_CFG_DMA_LO_OFFSET + 3;
 // CH return value for accesses to unassigned port I/O and MMIO.
 const CH_UNASSIGNED_IO_RETURN_VALUE: u8 = 0xFF;
+// QEMU returns 0x00 for read to unassigned memory.
+const QEMU_UNASSIGNED_MEM_RETURN_VALUE: u8 = 0x0;
 
 const FW_CFG_SIGNATURE: u16 = 0x00;
 const FW_CFG_ID: u16 = 0x01;
@@ -836,6 +847,20 @@ impl BusDevice for FwCfg {
                 let addr_lo = (addr & 0xffff_ffff) as u32;
                 data.copy_from_slice(&addr_lo.to_be_bytes());
             }
+            (offset, _)
+                if QEMU_IO_REGISTER_REGION.contains(&offset)
+                    || QEMU_DMA_REGISTER_REGION.contains(&offset) =>
+            {
+                // The IO address is correct, but the read has an invalid length. Return QEMU
+                // compatibility value for fw_cfg exclusively.
+                debug!(
+                    "fw_cfg: Unsupported {:#x}-byte read from mapped address: base={:#x} + offset={:#x}.",
+                    data.len(),
+                    FW_CFG_ADDRESS_BASE,
+                    offset
+                );
+                data.fill(QEMU_UNASSIGNED_MEM_RETURN_VALUE);
+            }
             (offset, _) => {
                 // Handle any address that cannot be associated with the fw_cfg protocol or reads of
                 // invalid size as unassigned read.
@@ -894,7 +919,6 @@ impl BusDevice for FwCfg {
 
 #[cfg(test)]
 mod tests {
-    use core::ops::RangeInclusive;
     use std::ffi::CString;
     use std::io::Write;
 
@@ -1279,15 +1303,6 @@ mod tests {
     #[test]
     // Reads from invalid register addresses should behave as unassigned reads.
     fn test_reads_from_invalid_register_address() {
-        // QEMU uses two separately mapped regions instead of a single contiguous one as CH does.
-        #[cfg(target_arch = "x86_64")]
-        const QEMU_IO_REGISTER_REGION: RangeInclusive<u64> =
-            FW_CFG_SELECTOR_OFFSET..=FW_CFG_DATA_OFFSET;
-        #[cfg(target_arch = "aarch64")]
-        const QEMU_IO_REGISTER_REGION: RangeInclusive<u64> =
-            FW_CFG_DATA_OFFSET..=FW_CFG_SELECTOR_OFFSET + 1;
-        const QEMU_DMA_REGISTER_REGION: RangeInclusive<u64> =
-            FW_CFG_DMA_HI_OFFSET..=FW_CFG_DMA_LO_OFFSET + 3;
         let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(GuestMemoryMmap::new()));
         // QEMU maps two regions of addresses to fw_cfg: One for the SELECTOR and DATA register and
         // one for the DMA registers, so there is a mapping hole between these two in QEMU. CH can
@@ -1310,5 +1325,18 @@ mod tests {
                 "Address={address:#x}"
             );
         }
+    }
+
+    #[test]
+    fn test_register_invalid_sized_reads_zero_buffer() {
+        // Reads with unsupported size zero the whole buffer in QEMU. We mimic this behavior.
+        // On all architectures QEMU rejects the unsupported-width access and returns zero.
+        let mut fw_cfg = FwCfg::new(GuestMemoryAtomic::new(GuestMemoryMmap::new()));
+        fw_cfg.write(0, FW_CFG_SELECTOR_OFFSET, &[FW_CFG_SIGNATURE as u8, 0]);
+        // 16-byte reads are forbidden on all architectures.
+        let mut buff = [0xEF; 16];
+        fw_cfg.read(0, FW_CFG_DMA_LO_OFFSET, &mut buff);
+        assert_eq!(fw_cfg.data_offset, 0);
+        assert_eq!(buff, [QEMU_UNASSIGNED_MEM_RETURN_VALUE; 16]);
     }
 }
