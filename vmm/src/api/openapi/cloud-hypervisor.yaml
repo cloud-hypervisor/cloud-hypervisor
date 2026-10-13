@@ -1195,15 +1195,29 @@ components:
           format: int64
           minimum: 0
           description: The amount of milliseconds it takes for the bucket to refill.
+        burst_rate:
+          type: integer
+          format: int64
+          minimum: 1
+          description:
+            The peak rate in tokens per second (bytes/s for bandwidth, operations/s
+            for ops). Enables bounded bursts.
+        burst_seconds:
+          type: integer
+          format: int64
+          minimum: 1
+          description:
+            The burst length in seconds, with depth equal to burst_rate times
+            burst_seconds. Requires burst_rate and defaults to 1 when burst_rate is set.
       description:
-        Defines a token bucket with a maximum capacity (_size_), an initial burst size
-        (_one_time_burst_) and an interval for refilling purposes (_refill_time_).
-        The refill-rate is derived from _size_ and _refill_time_, and it is the constant
-        rate at which the tokens replenish. The refill process only starts happening after
-        the initial burst budget is consumed.
-        Consumption from the token bucket is unbounded in speed which allows for bursts
-        bound in size by the amount of tokens available.
-        Once the token bucket is empty, consumption speed is bound by the refill-rate.
+        A plain bucket holds _size_ tokens, refills over _refill_time_ milliseconds,
+        and allows initial _one_time_burst_ credit that does not replenish.
+        Available tokens can be consumed at device speed.
+        With bounded bursts, _size_ and _refill_time_ define the sustained rate,
+        and the full initial depth is _burst_rate_ times _burst_seconds_.
+        A peak bucket holds _burst_rate_ tokens and refills at _burst_rate_ tokens/s;
+        requests need both meters. This is a token-bucket envelope, not a
+        strict per-second ceiling, and oversized requests carry debt.
 
     RateLimiterConfig:
       type: object
