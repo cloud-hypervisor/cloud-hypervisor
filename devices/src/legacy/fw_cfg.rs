@@ -16,7 +16,7 @@ use std::ffi::CString;
 use std::fs::File;
 #[cfg(target_arch = "x86_64")]
 use std::io::Error;
-use std::io::{ErrorKind, Read, Result, Seek, SeekFrom};
+use std::io::{ErrorKind, Result};
 use std::mem::offset_of;
 use std::os::unix::fs::FileExt;
 use std::sync::{Arc, Barrier};
@@ -114,34 +114,6 @@ pub enum FwCfgContent {
     U32(u32),
 }
 
-struct FwCfgContentAccess<'a> {
-    content: &'a FwCfgContent,
-    offset: u32,
-}
-
-impl Read for FwCfgContentAccess<'_> {
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-        match self.content {
-            FwCfgContent::File(offset, f) => {
-                Seek::seek(&mut (&*f), SeekFrom::Start(offset + self.offset as u64))?;
-                Read::read(&mut (&*f), buf)
-            }
-            FwCfgContent::Bytes(b) => match b.get(self.offset as usize..) {
-                Some(mut s) => s.read(buf),
-                None => Err(ErrorKind::UnexpectedEof)?,
-            },
-            FwCfgContent::Slice(b) => match b.get(self.offset as usize..) {
-                Some(mut s) => s.read(buf),
-                None => Err(ErrorKind::UnexpectedEof)?,
-            },
-            FwCfgContent::U32(n) => match n.to_le_bytes().get(self.offset as usize..) {
-                Some(mut s) => s.read(buf),
-                None => Err(ErrorKind::UnexpectedEof)?,
-            },
-        }
-    }
-}
-
 impl Default for FwCfgContent {
     fn default() -> Self {
         FwCfgContent::Slice(&[])
@@ -162,12 +134,6 @@ impl FwCfgContent {
             FwCfgContent::U32(n) => size_of_val(n),
         };
         u32::try_from(ret).map_err(|_| ErrorKind::InvalidInput.into())
-    }
-    fn access(&self, offset: u32) -> FwCfgContentAccess<'_> {
-        FwCfgContentAccess {
-            content: self,
-            offset,
-        }
     }
 }
 
@@ -522,9 +488,8 @@ impl FwCfg {
     ) -> Result<u32> {
         let content_size = content.size()?.saturating_sub(offset);
         let op_size = cmp::min(content_size, len);
-        let mut access = content.access(offset);
         let mut buf = vec![0u8; op_size as usize];
-        access.read_exact(buf.as_mut_bytes())?;
+        Self::read_content(content, offset, buf.as_mut_bytes())?;
         let r = self
             .memory
             .memory()
@@ -708,7 +673,7 @@ impl FwCfg {
         Ok(())
     }
 
-    fn read_content(content: &FwCfgContent, offset: u32, data: &mut [u8]) -> Option<u8> {
+    fn read_content(content: &FwCfgContent, offset: u32, data: &mut [u8]) -> Result<()> {
         // Zero fill rather than the usual 0xff fill for QEMU compatibility
         data.fill(0);
         let start = offset as usize;
@@ -725,7 +690,7 @@ impl FwCfg {
                 }
             }
             FwCfgContent::File(o, f) => {
-                f.read_exact_at(data, o + offset as u64).ok()?;
+                f.read_exact_at(data, o + offset as u64)?;
             }
             FwCfgContent::U32(n) => {
                 let bytes = n.to_le_bytes();
@@ -734,12 +699,12 @@ impl FwCfg {
                 }
             }
         }
-        Some(data.len() as u8)
+        Ok(())
     }
 
     fn read_data(&mut self, data: &mut [u8]) {
         if let Ok(content) = self.get_selected_content()
-            && Self::read_content(content, self.data_offset, data).is_some()
+            && Self::read_content(content, self.data_offset, data).is_ok()
         {
             self.data_offset += data.len() as u32;
         }
