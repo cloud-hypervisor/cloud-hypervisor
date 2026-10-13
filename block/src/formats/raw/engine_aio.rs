@@ -22,7 +22,7 @@ use crate::{AlignedFile, is_block_device};
 pub(super) struct RawAio {
     raw_file: AlignedFile,
     data_io: AioDataIo,
-    alignment: u64,
+    alignment: Option<u64>,
     is_block_device: bool,
 }
 
@@ -31,7 +31,7 @@ impl RawAio {
         let data_io =
             AioDataIo::new(queue_depth).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
         let is_block_device = is_block_device(raw_file.as_raw_fd());
-        let alignment = raw_file.alignment() as u64;
+        let alignment = raw_file.alignment().map(|alignment| alignment as u64);
 
         Ok(RawAio {
             raw_file,
@@ -47,7 +47,7 @@ impl AsyncIo for RawAio {
         self.data_io.notifier()
     }
 
-    fn alignment(&self) -> u64 {
+    fn alignment(&self) -> Option<u64> {
         self.alignment
     }
 

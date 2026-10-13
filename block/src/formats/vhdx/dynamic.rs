@@ -415,7 +415,8 @@ mod tests {
 
         // Force a non-zero alignment so all of vhdx's positioned I/O exercises
         // the bounce/RMW path even though the tempfile is not really O_DIRECT.
-        vhdx.aligned = AlignedFile::with_alignment(vhdx.aligned.file().try_clone().unwrap(), 512);
+        vhdx.aligned =
+            AlignedFile::with_alignment(vhdx.aligned.file().try_clone().unwrap(), Some(512));
 
         let sector = vhdx.disk_spec.logical_sector_size as usize;
         let data: Vec<u8> = (0..sector).map(|i| ((i + 1) % 251) as u8).collect();

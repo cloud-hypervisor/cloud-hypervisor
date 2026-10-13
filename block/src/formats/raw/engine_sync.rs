@@ -18,14 +18,14 @@ use crate::{AlignedFile, is_block_device};
 pub(crate) struct RawSync {
     raw_file: AlignedFile,
     completions: CompletionCommon,
-    alignment: u64,
+    alignment: Option<u64>,
     is_block_device: bool,
 }
 
 impl RawSync {
     pub(crate) fn new(raw_file: AlignedFile) -> Self {
         let is_block_device = is_block_device(raw_file.as_raw_fd());
-        let alignment = raw_file.alignment() as u64;
+        let alignment = raw_file.alignment().map(|alignment| alignment as u64);
         RawSync {
             raw_file,
             completions: CompletionCommon::new(),
@@ -40,7 +40,7 @@ impl AsyncIo for RawSync {
         self.completions.notifier()
     }
 
-    fn alignment(&self) -> u64 {
+    fn alignment(&self) -> Option<u64> {
         self.alignment
     }
 

@@ -538,7 +538,7 @@ pub fn validate_image_type(f: &mut File, image_type: ImageType) -> BlockResult<b
     // A VMDK descriptor file is small few hundred bytes of text. Read
     // best-effort so a short file yields a zero-padded partial block instead
     // of an UnexpectedEof, and let the per-format probes below decide.
-    let mut block = vec![0u8; aligned.alignment()];
+    let mut block = vec![0u8; aligned.alignment().unwrap()];
     let mut filled = 0;
     while filled < block.len() {
         match aligned.read_at(&mut block[filled..], filled as u64) {

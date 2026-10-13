@@ -16,48 +16,50 @@ use crate::aligned_buffer::AlignedBuffer;
 use crate::{SECTOR_SIZE, probe_direct_alignment};
 
 /// True when `buf_ptr`/`len`/`offset` already satisfy `alignment`
-/// (`alignment == 0` means no O_DIRECT, so everything is "aligned").
-fn is_aligned(alignment: usize, buf_ptr: usize, len: usize, offset: u64) -> bool {
-    alignment == 0
-        || (buf_ptr.is_multiple_of(alignment)
+/// (`None` means no O_DIRECT, so everything is "aligned").
+fn is_aligned(alignment: Option<usize>, buf_ptr: usize, len: usize, offset: u64) -> bool {
+    alignment.is_none_or(|alignment| {
+        buf_ptr.is_multiple_of(alignment)
             && len.is_multiple_of(alignment)
-            && offset.is_multiple_of(alignment as u64))
+            && offset.is_multiple_of(alignment as u64)
+    })
 }
 
 /// True when `offset` and every iovec base/length satisfy `alignment`
-/// (`alignment == 0` means no O_DIRECT, so everything is "aligned").
-fn iovecs_are_aligned(alignment: usize, iovecs: &[libc::iovec], offset: u64) -> bool {
-    alignment == 0
-        || (offset.is_multiple_of(alignment as u64)
+/// (`None` means no O_DIRECT, so everything is "aligned").
+fn iovecs_are_aligned(alignment: Option<usize>, iovecs: &[libc::iovec], offset: u64) -> bool {
+    alignment.is_none_or(|alignment| {
+        offset.is_multiple_of(alignment as u64)
             && iovecs.iter().all(|iov| {
                 (iov.iov_base as usize).is_multiple_of(alignment)
                     && iov.iov_len.is_multiple_of(alignment)
-            }))
+            })
+    })
 }
 
 /// A `File` that transparently satisfies O_DIRECT alignment requirements.
 ///
-/// `alignment == 0` means no O_DIRECT (all I/O passes straight through).
+/// `None` means no O_DIRECT (all I/O passes straight through).
 /// For unaligned requests under O_DIRECT, I/O is bounced through an
 /// `AlignedBuffer` (read-modify-write for writes).
 #[derive(Debug)]
 pub struct AlignedFile {
     file: File,
-    alignment: usize,
+    alignment: Option<usize>,
 }
 
 impl AlignedFile {
     /// Wrap `file`, querying the O_DIRECT block alignment when `direct_io`.
     pub fn new(file: File, direct_io: bool) -> Self {
         let alignment = if direct_io {
-            probe_direct_alignment(file.as_raw_fd()).unwrap_or(SECTOR_SIZE) as usize
+            Some(probe_direct_alignment(file.as_raw_fd()).unwrap_or(SECTOR_SIZE) as usize)
         } else {
-            0
+            None
         };
         AlignedFile { file, alignment }
     }
 
-    pub fn alignment(&self) -> usize {
+    pub fn alignment(&self) -> Option<usize> {
         self.alignment
     }
 
@@ -93,7 +95,7 @@ impl AlignedFile {
     }
 
     pub fn is_direct(&self) -> bool {
-        self.alignment != 0
+        self.alignment.is_some()
     }
 
     pub fn is_writable(&self) -> bool {
@@ -109,7 +111,7 @@ impl AlignedFile {
     /// Wrap `file` with an explicit alignment, bypassing the probe. Used by
     /// tests to force the bounce/RMW path without a real O_DIRECT fd.
     #[cfg(test)]
-    pub fn with_alignment(file: File, alignment: usize) -> Self {
+    pub fn with_alignment(file: File, alignment: Option<usize>) -> Self {
         AlignedFile { file, alignment }
     }
 
@@ -120,7 +122,10 @@ impl AlignedFile {
         len: usize,
         scatter: impl FnOnce(&[u8]) -> io::Result<()>,
     ) -> io::Result<usize> {
-        let mut abuf = AlignedBuffer::new(offset, len, self.alignment)?;
+        let alignment = self
+            .alignment
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Missing I/O alignment"))?;
+        let mut abuf = AlignedBuffer::new(offset, len, alignment)?;
         let n = abuf.read_from(&self.file)?;
         scatter(&abuf.as_slice()[..n])?;
         Ok(n)
@@ -133,7 +138,10 @@ impl AlignedFile {
         len: usize,
         gather: impl FnOnce(&mut [u8]) -> io::Result<()>,
     ) -> io::Result<usize> {
-        let mut abuf = AlignedBuffer::new(offset, len, self.alignment)?;
+        let alignment = self
+            .alignment
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Missing I/O alignment"))?;
+        let mut abuf = AlignedBuffer::new(offset, len, alignment)?;
         abuf.read_from(&self.file)?; // RMW: preserve head/tail padding
         gather(abuf.as_mut_slice())?;
         abuf.write_to(&self.file)?;
@@ -318,7 +326,7 @@ mod tests {
         tf
     }
 
-    fn forced(file: File, alignment: usize) -> AlignedFile {
+    fn forced(file: File, alignment: Option<usize>) -> AlignedFile {
         AlignedFile { file, alignment }
     }
 
@@ -327,19 +335,19 @@ mod tests {
         let tf = pattern_file(8192);
         // Not O_DIRECT, so new() falls back to SECTOR_SIZE (512).
         let mut af = AlignedFile::new(tf.as_file().try_clone().unwrap(), true);
-        assert_eq!(af.alignment(), 512);
+        assert_eq!(af.alignment(), Some(512));
         let _ = af.file();
         let _ = af.file_mut();
         let _ = af.try_clone().unwrap();
 
         let plain = AlignedFile::new(tf.as_file().try_clone().unwrap(), false);
-        assert_eq!(plain.alignment(), 0);
+        assert_eq!(plain.alignment(), None);
     }
 
     #[test]
     fn read_unaligned_offset_matches_contents() {
         let tf = pattern_file(8192);
-        let af = forced(tf.as_file().try_clone().unwrap(), 512);
+        let af = forced(tf.as_file().try_clone().unwrap(), Some(512));
         let mut buf = vec![0u8; 200];
         assert_eq!(af.read_at(&mut buf, 100).unwrap(), 200);
         let want: Vec<u8> = (100..300).map(|i| (i % 251) as u8).collect();
@@ -349,7 +357,7 @@ mod tests {
     #[test]
     fn read_unaligned_short_at_eof() {
         let tf = pattern_file(100);
-        let af = forced(tf.as_file().try_clone().unwrap(), 512);
+        let af = forced(tf.as_file().try_clone().unwrap(), Some(512));
         let mut buf = vec![0u8; 200];
         assert_eq!(af.read_at(&mut buf, 10).unwrap(), 90);
     }
@@ -357,7 +365,7 @@ mod tests {
     #[test]
     fn write_unaligned_offset_is_rmw() {
         let tf = pattern_file(8192);
-        let af = forced(tf.as_file().try_clone().unwrap(), 512);
+        let af = forced(tf.as_file().try_clone().unwrap(), Some(512));
         let data: Vec<u8> = (0..200).map(|i| ((i + 1) % 239) as u8).collect();
         assert_eq!(af.write_at(&data, 100).unwrap(), 200);
 
@@ -373,7 +381,7 @@ mod tests {
     #[test]
     fn aligned_passthrough_roundtrip() {
         let tf = pattern_file(4096);
-        let af = forced(tf.as_file().try_clone().unwrap(), 512);
+        let af = forced(tf.as_file().try_clone().unwrap(), Some(512));
         let mut buf = vec![0u8; 512];
         assert_eq!(af.read_at(&mut buf, 512).unwrap(), 512);
         let want: Vec<u8> = (512..1024).map(|i| (i % 251) as u8).collect();
@@ -383,7 +391,7 @@ mod tests {
     #[test]
     fn no_alignment_is_plain_passthrough() {
         let tf = pattern_file(100);
-        let af = forced(tf.as_file().try_clone().unwrap(), 0);
+        let af = forced(tf.as_file().try_clone().unwrap(), None);
         let mut buf = vec![0u8; 50];
         assert_eq!(af.read_at(&mut buf, 10).unwrap(), 50);
     }
@@ -391,7 +399,7 @@ mod tests {
     #[test]
     fn test_unaligned_read_beyond_eof_returns_zero() {
         let tf = pattern_file(100);
-        let af = forced(tf.as_file().try_clone().unwrap(), 512);
+        let af = forced(tf.as_file().try_clone().unwrap(), Some(512));
         let mut buf = vec![0u8; 16];
         assert_eq!(af.read_at(&mut buf, 200).unwrap(), 0);
     }
@@ -400,7 +408,7 @@ mod tests {
     fn test_unaligned_write_extends_at_eof() {
         let file_size = 100usize;
         let tf = pattern_file(file_size);
-        let af = forced(tf.as_file().try_clone().unwrap(), 512);
+        let af = forced(tf.as_file().try_clone().unwrap(), Some(512));
         let data = b"xyz";
         assert_eq!(af.write_at(data, file_size as u64).unwrap(), data.len());
 
@@ -414,7 +422,7 @@ mod tests {
     #[test]
     fn test_empty_unaligned_io_is_noop() {
         let tf = pattern_file(100);
-        let af = forced(tf.as_file().try_clone().unwrap(), 512);
+        let af = forced(tf.as_file().try_clone().unwrap(), Some(512));
         let mut read_buf = [];
         assert_eq!(af.read_at(&mut read_buf, 1).unwrap(), 0);
         assert_eq!(af.write_at(&[], 1).unwrap(), 0);
@@ -423,7 +431,7 @@ mod tests {
     #[test]
     fn read_unaligned_scatters_in_a_single_copy() {
         let file = pattern_file(8192);
-        let aligned_file = forced(file.as_file().try_clone().unwrap(), 512);
+        let aligned_file = forced(file.as_file().try_clone().unwrap(), Some(512));
         let mut out = vec![0u8; 200];
         let n = aligned_file
             .read_unaligned(100, 200, |data| {
@@ -439,7 +447,7 @@ mod tests {
     #[test]
     fn read_unaligned_closure_short_at_eof() {
         let file = pattern_file(100);
-        let aligned_file = forced(file.as_file().try_clone().unwrap(), 512);
+        let aligned_file = forced(file.as_file().try_clone().unwrap(), Some(512));
         let mut seen = 0usize;
         let n = aligned_file
             .read_unaligned(10, 200, |data| {
@@ -454,7 +462,7 @@ mod tests {
     #[test]
     fn write_unaligned_gather_is_rmw() {
         let file = pattern_file(8192);
-        let aligned_file = forced(file.as_file().try_clone().unwrap(), 512);
+        let aligned_file = forced(file.as_file().try_clone().unwrap(), Some(512));
         let data: Vec<u8> = (0..200).map(|i| ((i + 1) % 239) as u8).collect();
         let n = aligned_file
             .write_unaligned(100, 200, |buf| {
@@ -476,7 +484,7 @@ mod tests {
     #[test]
     fn read_unaligned_propagates_closure_error() {
         let file = pattern_file(8192);
-        let aligned_file = forced(file.as_file().try_clone().unwrap(), 512);
+        let aligned_file = forced(file.as_file().try_clone().unwrap(), Some(512));
         let err = aligned_file
             .read_unaligned(100, 200, |_| {
                 Err(io::Error::new(io::ErrorKind::InvalidInput, "boom"))
@@ -488,7 +496,7 @@ mod tests {
     #[test]
     fn write_unaligned_propagates_closure_error() {
         let file = pattern_file(8192);
-        let aligned_file = forced(file.as_file().try_clone().unwrap(), 512);
+        let aligned_file = forced(file.as_file().try_clone().unwrap(), Some(512));
         let err = aligned_file
             .write_unaligned(100, 200, |_| {
                 Err(io::Error::new(io::ErrorKind::InvalidInput, "boom"))
@@ -508,7 +516,7 @@ mod tests {
     #[test]
     fn vectored_empty_is_noop() {
         let tf = pattern_file(100);
-        let af = forced(tf.as_file().try_clone().unwrap(), 512);
+        let af = forced(tf.as_file().try_clone().unwrap(), Some(512));
         // SAFETY: empty iovec slices point to no memory.
         assert_eq!(unsafe { af.read_vectored_at(&[], 0) }.unwrap(), 0);
         // SAFETY: empty iovec slices point to no memory.
@@ -518,8 +526,8 @@ mod tests {
     #[test]
     fn vectored_fast_path_roundtrip() {
         let tf = pattern_file(4096);
-        // alignment 0 sends any iovecs through the single preadv/pwritev path.
-        let af = forced(tf.as_file().try_clone().unwrap(), 0);
+        // No alignment requirement: use the single preadv/pwritev path.
+        let af = forced(tf.as_file().try_clone().unwrap(), None);
 
         let mut w0: Vec<u8> = (0..30).map(|i| ((i + 7) % 239) as u8).collect();
         let mut w1: Vec<u8> = (0..70).map(|i| ((i + 37) % 239) as u8).collect();
@@ -543,7 +551,7 @@ mod tests {
     #[test]
     fn vectored_unaligned_scatter_gather_roundtrip() {
         let tf = pattern_file(8192);
-        let af = forced(tf.as_file().try_clone().unwrap(), 512);
+        let af = forced(tf.as_file().try_clone().unwrap(), Some(512));
 
         // Gather three iovecs into an unaligned read-modify-write.
         let mut w0: Vec<u8> = (0..50).map(|i| ((i + 1) % 239) as u8).collect();

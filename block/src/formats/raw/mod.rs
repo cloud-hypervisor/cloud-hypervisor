@@ -165,10 +165,10 @@ impl disk_file::AsyncDiskFile for RawDisk {
 }
 
 /// True when `op` satisfies `alignment` and can go straight to the kernel.
-fn operation_is_aligned(op: &AsyncIoOperation, alignment: u64) -> bool {
-    if alignment == 0 {
+fn operation_is_aligned(op: &AsyncIoOperation, alignment: Option<u64>) -> bool {
+    let Some(alignment) = alignment else {
         return true;
-    }
+    };
     if !(op.offset() as u64).is_multiple_of(alignment) {
         return false;
     }
