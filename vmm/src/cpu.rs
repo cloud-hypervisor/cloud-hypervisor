@@ -27,6 +27,8 @@ use acpi_tables::{Aml, aml};
 use anyhow::anyhow;
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::cache::{CacheTopologyInfo, read_cache_topology};
+#[cfg(target_arch = "x86_64")]
+use arch::x86_64::cpu_profile::{CpuProfile, CpuProfileLoadError};
 use arch::{EntryPoint, NumaNodes, layout};
 #[cfg(target_arch = "aarch64")]
 use devices::gic::Gic;
@@ -140,6 +142,10 @@ pub enum Error {
 
     #[error("Error generating common CPUID")]
     CommonCpuId(#[source] arch::Error),
+
+    #[cfg(target_arch = "x86_64")]
+    #[error("Error loading CPU profile")]
+    LoadCpuProfile(#[source] CpuProfileLoadError),
 
     #[error("Error configuring vCPU")]
     VcpuConfiguration(#[source] arch::Error),
@@ -964,6 +970,14 @@ impl CpuManager {
         let dynamic = true;
 
         #[cfg(target_arch = "x86_64")]
+        let cpu_profile_data = match &config.profile {
+            arch::CpuProfileConfig::Host => None,
+            arch::CpuProfileConfig::File(path) => {
+                Some(CpuProfile::from_file(path).map_err(Error::LoadCpuProfile)?)
+            }
+        };
+
+        #[cfg(target_arch = "x86_64")]
         let cpuid = {
             let phys_bits = physical_bits(hypervisor.as_ref(), config.max_phys_bits);
             arch::generate_common_cpuid(
@@ -973,7 +987,7 @@ impl CpuManager {
                     kvm_hyperv: config.kvm_hyperv,
                     amx: config.features.amx,
                 },
-                None,
+                cpu_profile_data.as_ref(),
             )
             .map_err(Error::CommonCpuId)?
         };
@@ -981,7 +995,7 @@ impl CpuManager {
         #[cfg(target_arch = "x86_64")]
         let msr_config_update = arch::x86_64::generate_required_msr_updates(
             hypervisor.as_ref(),
-            None,
+            cpu_profile_data.as_ref(),
             config.kvm_hyperv,
             config.nested,
         )
