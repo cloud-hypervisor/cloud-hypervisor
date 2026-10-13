@@ -193,7 +193,10 @@ Current TCP migration uses mutual TLS (mTLS) authentication. The source
 verifies the destination certificate against `ca-cert.pem` and presents
 `client-cert.pem` and `client-key.pem`. The destination presents
 `server-cert.pem` and `server-key.pem`, and only accepts client
-certificates that chain to `ca-cert.pem`.
+certificates that chain to `ca-cert.pem`. The destination certificate
+must be valid for the host name or IP address in `destination_url`. The
+destination accepts every client certificate issued by this CA, so use a
+CA dedicated to migration.
 
 TLS encryption is only supported with `tcp:<host>:<port>` migration
 URLs, not with UNIX domain socket migration.
@@ -231,7 +234,7 @@ $ certtool --generate-self-signed \
 
 Generate a private key and a certificate for each side. Cloud Hypervisor enforces mTLS, thus you also need a key for the migration sender.
 
-The certificates also require template data. You can use separate templates for sender and receiver, but this example uses a single template, `hosts.info`:
+The certificates also require template data. You can use separate templates for sender and receiver, but this example uses a single template, `hosts.info`, for a same-host migration. For migration between hosts, set `cn`, `dns_name`, and `ip_address` to the destination host. The source can use the same template, as the destination does not check the name of the client certificate:
 
 ```text
 organization = Name of your organization
@@ -271,7 +274,7 @@ $ certtool --generate-certificate \
            --outfile server-cert.pem
 ```
 
-For a same-host test, place these files in a single directory and use that directory as `tls_dir` for both commands.
+For a same-host test, place these files, except `ca-key.pem`, in a single directory and use that directory as `tls_dir` for both commands. The CA key is only needed to issue certificates and does not belong in a `tls_dir`.
 
 #### Migration Parameters
 
