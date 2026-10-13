@@ -7,8 +7,8 @@ Cloud Hypervisor supports live migration over two transport channels:
 | TCP/TLS stream     | Migration between hosts. It also works on one host.                             |
 | UNIX domain socket | Migration between VMMs on the same host.                                        |
 
-See [Migration Parameters](#migration-parameters) for the full definitions of
-these parameters.
+See [Migration Parameters](#migration-parameters) for all options of
+`send-migration` and `receive-migration`.
 
 > :warning: The following examples place sockets in /tmp. This is done for
 > simplicity and should not be done in production.
@@ -276,11 +276,22 @@ $ certtool --generate-certificate \
 
 For a same-host test, place these files, except `ca-key.pem`, in a single directory and use that directory as `tls_dir` for both commands. The CA key is only needed to issue certificates and does not belong in a `tls_dir`.
 
-#### Migration Parameters
+## Migration Parameters
 
 Cloud Hypervisor supports additional parameters to control the
-migration process. Via the API or `ch-remote`, you may specify:
+migration process. Via the API or `ch-remote`, you may specify the
+following parameters. Unless marked otherwise, they apply to
+`send-migration`.
 
+- `destination_url <url>`: \
+  Where to send the VM to: `tcp:<host>:<port>` or `unix:<path>`.
+- `receiver_url <url>` (`receive-migration`): \
+  Where to listen for the migration: `tcp:<host>:<port>` or `unix:<path>`.
+- `tls_dir <path>` (both sides): \
+  Directory with the TLS certificates and keys, see
+  [Encryption](#encryption). Only supported with `tcp:` URLs. If omitted on
+  both sides, the migration uses plain TCP, which is only intended for
+  development and testing.
 - `downtime_ms <milliseconds>`: \
   The maximum downtime the migration aims for, in milliseconds.
   Defaults to `300ms`.
@@ -309,10 +320,17 @@ migration process. Via the API or `ch-remote`, you may specify:
 - `preserve_source <on|off>`: \
   Keep the source VM in a paused state after migration completes. This is only
   supported with `memory_mode=memfds` and defaults to `off`.
-- `zone_updates <list of zone updates>`: \
+- `zone_updates <list of zone updates>` (`receive-migration`): \
   A list of updates to apply to memory zones on the receiver side. For example,
   this can be used to remap memory zones to another NUMA node. Each zone update
   has the form `zone_id@host_numa_node`.
+- `vfio_fds <list of id@fd>` and `iommufd_fd <fd>` (`receive-migration`): \
+  File descriptors opened on the destination for migratable VFIO devices, see
+  [Destination File Descriptors](vfio.md#destination-file-descriptors).
+- `background_fetch_pages <on|off>` (`receive-migration`): \
+  For postcopy migration and on-demand restore, keep fetching the remaining
+  guest pages in the background after the VM resumed. With `off`, only the
+  pages that the guest or the VMM access are fetched. Defaults to `on`.
 
 ## Migrating VMs with VFIO Devices
 
