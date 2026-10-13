@@ -29,12 +29,16 @@ const VMX_FEATURE_MSR_RANGE: RangeInclusive<u32> = MSR_IA32_VMX_BASIC..=MSR_IA32
 pub mod cpuid_adjustments;
 pub mod msr_adjustments;
 
-// TODO: Auto generate the CpuProfile enum with a build script once we introduce user facing CPU profiles.
+/// CPUID and MSR adjustments describing a CPU profile.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CpuProfile {
+    pub cpuid: CpuidProfileData,
+    pub msr: MsrProfileData,
+}
 
-/// A [`CpuProfile`] is a mechanism for ensuring live migration compatibility
-/// between hosts with potentially different CPU models.
+/// CPU profile selected in the VM configuration.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum CpuProfile {
+pub enum CpuProfileConfig {
     #[default]
     Host,
 }
@@ -52,34 +56,13 @@ impl CpuProfile {
     ///
     /// If Intel AMX is not desired, then passing `amx = false` will permit missing (sub)-leaves
     /// that are **purely AMX related**.
-    ///
-    /// The Host profile guarantees that `cpuid` is returned without any modifications.
     pub(in crate::x86_64) fn adjust_cpuid(
         &self,
         cpuid: Vec<CpuIdEntry>,
         amx: bool,
         cpu_vendor: CpuVendor,
     ) -> Result<Vec<CpuIdEntry>, MissingCpuidEntriesError> {
-        let Some(cpuid_profile_data) = self.cpuid_data() else {
-            return Ok(cpuid);
-        };
-        adjust_cpuid(cpuid_profile_data, cpuid, amx, cpu_vendor)
-    }
-
-    /// Obtain CPUID adjustment data related to the CPU profile.
-    fn cpuid_data(&self) -> Option<CpuidProfileData> {
-        // TODO: Auto generate this through a build script once
-        // we introduce actual CPU profiles.
-        match self {
-            CpuProfile::Host => None,
-        }
-    }
-
-    /// Obtain MSR adjustment data related to the given CPU profile.
-    fn msr_data(&self) -> Option<MsrProfileData> {
-        match self {
-            CpuProfile::Host => None,
-        }
+        adjust_cpuid(self.cpuid.clone(), cpuid, amx, cpu_vendor)
     }
 
     /// Compute the MSR-related updates required by the chosen CPU profile.
@@ -95,28 +78,20 @@ impl CpuProfile {
     ///
     /// If nested virtualization is disabled then the output will not include any
     /// feature MSRs used for nested virtualization.
-    ///
-    /// The Host profile guarantees that `Ok(None)` is returned.
     pub(in crate::x86_64) fn required_msr_updates(
         &self,
         feature_msrs: &[MsrEntry],
         msr_index_list: &[u32],
         kvm_hyperv: bool,
         nested: bool,
-    ) -> Result<Option<VcpuMsrConfigUpdate>, Error> {
-        if matches!(self, Self::Host) {
-            return Ok(None);
-        }
-
+    ) -> Result<VcpuMsrConfigUpdate, Error> {
         required_msr_updates(
-            self.msr_data()
-                .expect("There should always be data for a CPU profile different from Host"),
+            self.msr.clone(),
             feature_msrs,
             msr_index_list,
             kvm_hyperv,
             nested,
         )
-        .map(Some)
     }
 }
 
@@ -131,7 +106,7 @@ pub(super) fn check_cpu_profile_support(
     Err(Error::CpuProfileUnsupportedHypervisor(hypervisor_type))
 }
 
-/// See [`CpuProfile::adjust_cpuid`](CpuProfile::adjust_cpuid)
+/// See [`CpuProfile::adjust_cpuid`]
 fn adjust_cpuid(
     CpuidProfileData { mut adjustments }: CpuidProfileData,
     cpuid: Vec<CpuIdEntry>,
@@ -260,7 +235,7 @@ mod tests {
     use hypervisor::arch::x86::msr_index::{MSR_IA32_UCODE_REV, MSR_IA32_VMX_MISC};
     use proptest::prelude::*;
 
-    use super::{CpuIdEntry, CpuVendor, CpuidProfileData, CpuidReg, adjust_cpuid};
+    use super::{CpuIdEntry, CpuProfile, CpuVendor, CpuidProfileData, CpuidReg, adjust_cpuid};
     use crate::x86_64::cpu_profile::cpuid_adjustments::{
         CpuidOutputRegisterAdjustments, CpuidParameters,
     };
@@ -271,6 +246,57 @@ mod tests {
         TILECFG_MASK, TILEDATA_MASK, VMX_FEATURE_MSR_RANGE, required_msr_updates,
     };
     use crate::x86_64::hyperv_msrs::HYPERV_MSRS;
+
+    #[test]
+    fn test_cpu_profile_deserialization() {
+        let json = r#"{
+            "cpuid": {
+                "adjustments": [[
+                    {
+                        "leaf": "0x7",
+                        "sub_leaf": {"start": "0x0", "end": "0x1"},
+                        "register": "EBX"
+                    },
+                    {"replacements": "0x8", "mask": "0xfffffff7"}
+                ]]
+            },
+            "msr": {
+                "adjustments": [[
+                    "0x10a",
+                    {"replacements": "0x100000000", "mask": "0xfffffffeffffffff"}
+                ]],
+                "required_msrs": ["0x10a", "0x174"]
+            }
+        }"#;
+        let data: CpuProfile = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            data.cpuid.adjustments,
+            vec![(
+                CpuidParameters {
+                    leaf: 7,
+                    sub_leaf: 0..=1,
+                    register: CpuidReg::EBX,
+                },
+                CpuidOutputRegisterAdjustments {
+                    replacements: 8,
+                    mask: 0xffff_fff7,
+                },
+            )]
+        );
+        assert_eq!(
+            data.msr,
+            MsrProfileData {
+                adjustments: vec![(
+                    RegisterAddress(0x10a),
+                    FeatureMsrAdjustment {
+                        replacements: 0x1_0000_0000,
+                        mask: 0xffff_fffe_ffff_ffff,
+                    },
+                )],
+                required_msrs: vec![RegisterAddress(0x10a), RegisterAddress(0x174)],
+            }
+        );
+    }
 
     // Note that the tests for adjust_cpuid within this module tend to use much simpler inputs
     // than what it will be called with at runtime within Cloud hypervisor. We do this here in order

@@ -1997,8 +1997,8 @@ impl Vmm {
                     phys_bits,
                     kvm_hyperv: vm_config.cpus.kvm_hyperv,
                     amx: vm_config.cpus.features.amx,
-                    profile: vm_config.cpus.profile,
                 },
+                None,
             )
             .context("Error generating common cpuid")
             .map_err(MigratableError::MigrateReceive)?
@@ -3568,7 +3568,7 @@ mod util {
 mod tests {
     use std::path::PathBuf;
 
-    use arch::CpuProfile;
+    use arch::CpuProfileConfig;
 
     use super::*;
     use crate::config::RestoredVfioConfig;
@@ -3608,7 +3608,7 @@ mod tests {
                 features: CpuFeatures::default(),
                 nested: true,
                 core_scheduling: CoreScheduling::default(),
-                profile: CpuProfile::default(),
+                profile: CpuProfileConfig::default(),
             },
             memory: MemoryConfig {
                 size: 536_870_912,

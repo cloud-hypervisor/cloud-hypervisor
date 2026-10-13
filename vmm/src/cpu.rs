@@ -972,8 +972,8 @@ impl CpuManager {
                     phys_bits,
                     kvm_hyperv: config.kvm_hyperv,
                     amx: config.features.amx,
-                    profile: config.profile,
                 },
+                None,
             )
             .map_err(Error::CommonCpuId)?
         };
@@ -981,7 +981,7 @@ impl CpuManager {
         #[cfg(target_arch = "x86_64")]
         let msr_config_update = arch::x86_64::generate_required_msr_updates(
             hypervisor.as_ref(),
-            config.profile,
+            None,
             config.kvm_hyperv,
             config.nested,
         )
