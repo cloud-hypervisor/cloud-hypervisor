@@ -545,9 +545,12 @@ pub(crate) mod tests {
 
     #[test]
     fn test_rate_limiter_group_burst() {
-        let group =
-            RateLimiterGroup::new("burst", None, TokenBucket::new_with_burst(10, 1000, 100, 2))
-                .unwrap();
+        let group = RateLimiterGroup::new(
+            "burst",
+            None,
+            TokenBucket::new_with_burst(10, 1000, 100, 2, 0),
+        )
+        .unwrap();
         let first = group.new_handle().unwrap();
         let second = group.new_handle().unwrap();
 
