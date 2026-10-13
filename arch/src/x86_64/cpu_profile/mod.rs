@@ -120,6 +120,17 @@ impl CpuProfile {
     }
 }
 
+pub(super) fn check_cpu_profile_support(
+    hypervisor_type: hypervisor::HypervisorType,
+) -> Result<(), Error> {
+    #[cfg(feature = "kvm")]
+    if matches!(hypervisor_type, hypervisor::HypervisorType::Kvm) {
+        return Ok(());
+    }
+
+    Err(Error::CpuProfileUnsupportedHypervisor(hypervisor_type))
+}
+
 /// See [`CpuProfile::adjust_cpuid`](CpuProfile::adjust_cpuid)
 fn adjust_cpuid(
     CpuidProfileData { mut adjustments }: CpuidProfileData,
