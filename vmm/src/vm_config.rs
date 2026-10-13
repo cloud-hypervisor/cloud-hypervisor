@@ -1302,6 +1302,11 @@ impl VmConfig {
             landlock.add_rule_with_access(Path::new("/sys/devices/system/cpu/cpu0/cache"), "r")?;
         }
 
+        #[cfg(target_arch = "x86_64")]
+        if let CpuProfileConfig::File(path) = &self.cpus.profile {
+            landlock.add_rule_with_access(path, "r")?;
+        }
+
         if let Some(mem_zones) = &self.memory.zones {
             for zone in mem_zones.iter() {
                 zone.apply_landlock(&mut landlock)?;
