@@ -290,7 +290,7 @@ vfio12
 dst $ exec 5<>/dev/vfio/devices/vfio12
 dst $ exec 6<>/dev/iommu
 dst $ ch-remote --api-socket=/tmp/api receive-migration \
-          receiver_url=tcp:0.0.0.0:{port},vfio_fds=[vfio0@5],iommufd_fd=6
+          receiver_url=tcp:0.0.0.0:{port},tls_dir=/path/to/dst-tls,vfio_fds=[vfio0@5],iommufd_fd=6
 ```
 
 The id in each `vfio_fds` entry must match the `id` of the corresponding

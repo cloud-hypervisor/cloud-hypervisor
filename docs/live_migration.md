@@ -4,7 +4,7 @@ Cloud Hypervisor supports live migration over two transport channels:
 
 | Transport          | When to use it                                                                  |
 |--------------------|---------------------------------------------------------------------------------|
-| TCP stream         | Migration between hosts. It also works on one host for development and testing. |
+| TCP/TLS stream     | Migration between hosts. It also works on one host.                             |
 | UNIX domain socket | Migration between VMMs on the same host.                                        |
 
 See [Migration Parameters](#migration-parameters) for the full definitions of
@@ -57,18 +57,27 @@ When the above commands completed, the source VM should be successfully
 migrated to the destination VM. Now the destination VM is running while
 the source VM is terminated gracefully.
 
-## TCP Migration
+## TCP/TLS Migration
 
-TCP is intended for migration from one machine (`src`) to
-another (`dst`) across the network. To keep it simple, we will use a
-minimal VM setup without storage. Same host TCP migration is also supported
-for development and testing.
+TCP/TLS migration is intended for migration from one machine (`src`) to
+another (`dst`) across the network. The connection uses mutual TLS
+(mTLS): both sides authenticate each other with certificates, and all
+migration data is encrypted. To keep it simple, we will use a minimal VM
+setup without storage. Same host TCP/TLS migration is also supported.
+
+> [!WARNING]
+> For development and testing, you can omit `tls_dir` on both sides to
+> use plain TCP. The migration is then unencrypted, with the receiver
+> accepting arbitrary connections.
 
 ### Preparation
 
 Make sure that `src` and `dst` can reach each other via the
 network. You should be able to ping each machine. Also each machine
 should have an open TCP port.
+
+Both machines need TLS certificates and keys as described in
+[Encryption](#encryption).
 
 You will need a kernel and initramfs for a minimal Linux system. For
 this example, we will use the Debian netboot image.
@@ -98,15 +107,7 @@ re-announcement therefore only happens when the guest negotiated
 `VIRTIO_NET_F_GUEST_ANNOUNCE`. For `vhost-user-net`, the current implementation
 only uses the guest announcement path.
 
-### Performing a TCP Migration
-
-Use TCP migration only in a trusted network or configure TLS as described
-below.
-
-**Warning**: without TLS, the listener accepts data from anyone who can
-connect to it. Use plaintext `tcp:` only on networks where every host is
-trusted. On any other network, use the TLS support described below, or a
-UNIX socket combined with filesystem permissions.
+### Performing a TCP/TLS Migration
 
 #### Starting the Receiver VM
 
@@ -119,7 +120,7 @@ dst $ cloud-hypervisor --api-socket /tmp/api
 In a different terminal, prepare to receive the migration:
 
 ```console
-dst $ ch-remote --api-socket=/tmp/api receive-migration receiver_url=tcp:0.0.0.0:{port}
+dst $ ch-remote --api-socket=/tmp/api receive-migration receiver_url=tcp:0.0.0.0:{port},tls_dir=/path/to/dst-tls
 ```
 
 #### Starting the Sender VM
@@ -140,16 +141,16 @@ After a few seconds the VM should be up and you can interact with it.
 
 #### Performing the Migration
 
-Initiate the Migration over TCP:
+Initiate the migration over TCP/TLS:
 
 ```console
-src $ ch-remote --api-socket=/tmp/api send-migration destination_url=tcp:{dst}:{port}
+src $ ch-remote --api-socket=/tmp/api send-migration destination_url=tcp:{dst}:{port},tls_dir=/path/to/src-tls
 ```
 
 With migration parameters:
 
 ```console
-src $ ch-remote --api-socket=/tmp/api send-migration destination_url=tcp:{dst}:{port},downtime_ms=200,timeout_s=3600,timeout_strategy=cancel
+src $ ch-remote --api-socket=/tmp/api send-migration destination_url=tcp:{dst}:{port},tls_dir=/path/to/src-tls,downtime_ms=200,timeout_s=3600,timeout_strategy=cancel
 ```
 
 > Replace {dst}:{port} with the actual IP address and port of your destination host.

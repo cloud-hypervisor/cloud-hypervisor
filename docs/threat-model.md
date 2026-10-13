@@ -60,11 +60,13 @@ paths and console files. Whoever can connect to a migration listener
 therefore has the same power as management software.
 
 The listener used by `receive-migration` must only be reachable by
-trusted peers. Plaintext TCP provides no authentication and must only
-be used on networks where every host is trusted. On any other network,
-TLS support must be used, or the UNIX socket transport combined with
-filesystem permissions. This also covers the additional migration
-connections that a TCP migration accepts on the same listener.
+trusted peers. TCP migration should use TLS. Plain TCP (without
+`tls_dir`) provides neither authentication nor encryption and is only
+intended for development and testing. It must only be used on networks
+where every host is trusted. Otherwise, TLS must be used, or the UNIX
+socket transport combined with filesystem permissions. This also covers
+the additional migration connections that a TCP migration accepts on the
+same listener.
 
 Snapshot files are trusted input for restore operations.
 
