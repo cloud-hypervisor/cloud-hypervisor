@@ -20,11 +20,12 @@ struct CpusConfig {
     features: CpuFeatures,
     nested: bool,
     core_scheduling: CoreScheduling,
+    profile: CpuProfileConfig,
 }
 ```
 
 ```
---cpus boot=<boot_vcpus>,max=<max_vcpus>,topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,kvm_hyperv=on|off,max_phys_bits=<maximum_number_of_physical_bits>,affinity=<list_of_vcpus_with_their_associated_cpuset>,features=<list_of_features_to_enable>,nested=on|off,core_scheduling=vm|vcpu|off
+--cpus boot=<boot_vcpus>,max=<max_vcpus>,topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,kvm_hyperv=on|off,max_phys_bits=<maximum_number_of_physical_bits>,affinity=<list_of_vcpus_with_their_associated_cpuset>,features=<list_of_features_to_enable>,nested=on|off,core_scheduling=vm|vcpu|off,profile=host|path:<file>
 ```
 
 ### `boot`
@@ -253,3 +254,56 @@ _Example_
 In this example, both vCPUs will share the same core scheduling cookie,
 allowing them to be co-scheduled on SMT siblings while preventing host
 threads from sharing those siblings.
+
+### `profile`
+
+CPU profiles are experimental. They are under active development and no
+guarantees are made about their stability.
+
+Select the CPU profile used to configure guest CPUID and MSRs. `host` is the
+default. A file profile describes the CPU capabilities required by the guest,
+which are checked against the host when creating or restoring the VM.
+
+File profiles are supported on x86-64 with KVM. Other architectures and MSHV
+support `host` only.
+
+CLI selectors are case-insensitive; the file path retains its original case.
+
+Load a profile with:
+
+```shell
+--cpus boot=2,profile=path:/path/to/cpu_profile.json
+```
+
+Paths may be absolute or relative to the current working directory. Quote the
+value when a path contains commas or brackets:
+
+```shell
+--cpus 'boot=2,profile="path:/path/to/cpu,profile.json"'
+```
+
+The configuration contains only the profile path. The file is read whenever
+the VM's CPUs are created, including reboot, snapshot restore, and migration
+at the destination. Keep the file available and unchanged across these
+operations. For restore or migration on another host, provide the same
+contents at the configured path there.
+
+The JSON file has two required sections:
+
+- `cpuid.adjustments` contains `[parameters, adjustment]` pairs. Parameters
+  specify `leaf`, an inclusive `sub_leaf` range with `start` and `end`, and a
+  `register` (`EAX`, `EBX`, `ECX`, or `EDX`). Each adjustment has `mask` and
+  `replacements` fields. Registers without an adjustment are cleared.
+- `msr.adjustments` contains `[address, adjustment]` pairs for feature MSRs.
+  `msr.required_msrs` lists the MSR addresses required by the profile.
+
+Both adjustment types compute `(host_value & mask) | replacements`. Leaves,
+sub-leaves, MSR addresses, masks and replacement values are hexadecimal strings
+with a `0x` prefix. CPUID values and MSR addresses are 32-bit; MSR values are
+64-bit. Normal VM settings, including topology, AMX, Hyper-V and nested
+virtualization, still apply.
+
+The JSON API accepts `"Host"` or an object with a `"File"` key whose value is
+the profile path, such as `{"File": "/path/to/cpu_profile.json"}`. See the
+`CpuProfileConfig` schema in
+[the OpenAPI definition](../vmm/src/api/openapi/cloud-hypervisor.yaml).
