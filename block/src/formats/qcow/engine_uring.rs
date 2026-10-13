@@ -810,7 +810,7 @@ mod tests {
         )
         .unwrap();
         let async_io = disk.create_async_io(1).unwrap();
-        assert_eq!(async_io.alignment(), SECTOR_SIZE);
+        assert_eq!(async_io.alignment(), Some(SECTOR_SIZE));
     }
 
     #[test]
@@ -818,7 +818,7 @@ mod tests {
         require_direct_io!();
         let tmp_disk = QcowTempDisk::new(100 * 1024 * 1024, None, true, true, true).unwrap();
         let async_io = tmp_disk.disk().create_async_io(1).unwrap();
-        assert!(async_io.alignment() >= SECTOR_SIZE);
+        assert!(async_io.alignment().unwrap() >= SECTOR_SIZE);
     }
 
     #[test]

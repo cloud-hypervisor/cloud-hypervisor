@@ -80,7 +80,7 @@ impl FlatVmdkSync {
         is_read: bool,
     ) -> io::Result<usize> {
         // O_DIRECT unaligned
-        if file.alignment() != 0 {
+        if file.alignment().is_some() {
             return if is_read {
                 file.read_unaligned(file_offset, seg_len, |data| {
                     op.write_bytes_at(buf_start, data)

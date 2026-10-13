@@ -19,7 +19,7 @@ use crate::{AlignedFile, is_block_device};
 pub(crate) struct RawAsync {
     raw_file: AlignedFile,
     data_io: UringDataIo,
-    alignment: u64,
+    alignment: Option<u64>,
     is_block_device: bool,
 }
 
@@ -28,7 +28,7 @@ impl RawAsync {
         let data_io =
             UringDataIo::new(ring_depth).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
         let is_block_device = is_block_device(raw_file.as_raw_fd());
-        let alignment = raw_file.alignment() as u64;
+        let alignment = raw_file.alignment().map(|alignment| alignment as u64);
 
         Ok(RawAsync {
             raw_file,
@@ -44,7 +44,7 @@ impl AsyncIo for RawAsync {
         self.data_io.notifier()
     }
 
-    fn alignment(&self) -> u64 {
+    fn alignment(&self) -> Option<u64> {
         self.alignment
     }
 
@@ -92,7 +92,7 @@ impl AsyncIo for RawAsync {
     }
 
     fn submit_batch_requests(&mut self, batch_request: Vec<AsyncIoOperation>) -> AsyncIoResult<()> {
-        if self.alignment != 0 {
+        if self.alignment.is_some() {
             let mut aligned_batch = Vec::with_capacity(batch_request.len());
             for op in batch_request {
                 if operation_is_aligned(&op, self.alignment) {

@@ -457,30 +457,32 @@ impl Request {
         &self,
         mem: Arc<vm_memory::GuestMemoryMmap<B>>,
         offset: libc::off_t,
-        alignment: u64,
+        alignment: Option<u64>,
         user_data: u64,
     ) -> Result<AsyncIoOperation, ExecuteError> {
-        if self.guest_memory_is_aligned(&mem, alignment)? {
-            let target = GuestMemoryTarget::new(mem, &self.data_descriptors)
-                .map_err(ExecuteError::GetHostAddress)?;
+        if let Some(alignment) = alignment
+            && !self.guest_memory_is_aligned(&mem, alignment)?
+        {
+            // The guest-memory buffers are unaligned, so use an aligned bounce buffer.
+            let mut buffer = OwnedIoBuffer::new(self.data_len(), alignment as usize)
+                .map_err(ExecuteError::TemporaryBufferAllocation)?;
+
+            if self.request_type == RequestType::Out {
+                self.copy_guest_to_buffer(&mem, buffer.as_mut_slice())?;
+            }
+
             return Ok(match self.request_type {
-                RequestType::In => AsyncIoOperation::read_to_memory(offset, target, user_data),
-                RequestType::Out => AsyncIoOperation::write_from_memory(offset, target, user_data),
+                RequestType::In => AsyncIoOperation::read_to_vec(offset, buffer, user_data),
+                RequestType::Out => AsyncIoOperation::write_from_vec(offset, buffer, user_data),
                 _ => unreachable!("unexpected data operation type"),
             });
         }
 
-        // The guest-memory buffers are unaligned, so use an aligned bounce buffer.
-        let mut buffer = OwnedIoBuffer::new(self.data_len(), alignment as usize)
-            .map_err(ExecuteError::TemporaryBufferAllocation)?;
-
-        if self.request_type == RequestType::Out {
-            self.copy_guest_to_buffer(&mem, buffer.as_mut_slice())?;
-        }
-
+        let target = GuestMemoryTarget::new(mem, &self.data_descriptors)
+            .map_err(ExecuteError::GetHostAddress)?;
         Ok(match self.request_type {
-            RequestType::In => AsyncIoOperation::read_to_vec(offset, buffer, user_data),
-            RequestType::Out => AsyncIoOperation::write_from_vec(offset, buffer, user_data),
+            RequestType::In => AsyncIoOperation::read_to_memory(offset, target, user_data),
+            RequestType::Out => AsyncIoOperation::write_from_memory(offset, target, user_data),
             _ => unreachable!("unexpected data operation type"),
         })
     }

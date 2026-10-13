@@ -177,7 +177,7 @@ pub trait AsyncIo: Send {
         }
     }
 
-    fn alignment(&self) -> u64 {
-        SECTOR_SIZE
+    fn alignment(&self) -> Option<u64> {
+        Some(SECTOR_SIZE)
     }
 }
