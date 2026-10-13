@@ -550,15 +550,25 @@ impl FwCfg {
         content.size().ok()
     }
 
-    fn dma_read(&mut self, len: u32, address: u64) -> Result<()> {
-        let op_size = if let Some(content) = self.known_items.get(self.selector as usize) {
-            self.dma_read_content(content, self.data_offset, len, address)
-        } else if let Some(item) = self.items.get((self.selector - FW_CFG_FILE_FIRST) as usize) {
-            self.dma_read_content(&item.content, self.data_offset, len, address)
+    /// Retrieves the [`FwCfgContent`] corresponding to the selector currently set in the internal
+    /// selector buffer.
+    fn get_selected_content(&self) -> Result<&FwCfgContent> {
+        if let Some(known_item) = self.known_items.get(usize::from(self.selector)) {
+            Ok(known_item)
+        } else if let Some(item) = self
+            .items
+            .get(usize::from(self.selector - FW_CFG_FILE_FIRST))
+        {
+            Ok(&item.content)
         } else {
             error!("fw_cfg: selector {:#x} does not exist.", self.selector);
             Err(ErrorKind::NotFound.into())
-        }?;
+        }
+    }
+
+    fn dma_read(&mut self, len: u32, address: u64) -> Result<()> {
+        let content = self.get_selected_content()?;
+        let op_size = self.dma_read_content(content, self.data_offset, len, address)?;
         self.data_offset += op_size;
         Ok(())
     }
@@ -728,15 +738,9 @@ impl FwCfg {
     }
 
     fn read_data(&mut self, data: &mut [u8]) {
-        let ret = if let Some(content) = self.known_items.get(self.selector as usize) {
-            Self::read_content(content, self.data_offset, data)
-        } else if let Some(item) = self.items.get((self.selector - FW_CFG_FILE_FIRST) as usize) {
-            Self::read_content(&item.content, self.data_offset, data)
-        } else {
-            error!("fw_cfg: selector {:#x} does not exist.", self.selector);
-            None
-        };
-        if ret.is_some() {
+        if let Ok(content) = self.get_selected_content()
+            && Self::read_content(content, self.data_offset, data).is_some()
+        {
             self.data_offset += data.len() as u32;
         }
     }
