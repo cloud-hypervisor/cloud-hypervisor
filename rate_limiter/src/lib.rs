@@ -24,12 +24,15 @@
 //! The token buckets are replenished every time a `consume()` is called, before
 //! actually trying to consume the requested amount of tokens. The amount of tokens
 //! replenished is automatically calculated to respect the `complete_refill_time`
-//! configuration parameter provided by the user. The token buckets will never
+//! configuration parameter provided by the user. Plain token buckets never
 //! replenish above their respective `size`.
 //!
 //! Each token bucket can start off with a `one_time_burst` initial extra capacity
 //! on top of their `size`. This initial extra credit does not replenish and
 //! can be used for an initial burst of data.
+//!
+//! Bounded bursts combine sustained credit with a peak-rate meter; see
+//! [`TokenBucket::new_with_burst`].
 //!
 //! The granularity for 'wake up' events when the rate limiter is blocked is
 //! currently hardcoded to `100 milliseconds`.
@@ -98,7 +101,7 @@ pub enum BucketReduction {
 }
 
 /// TokenBucket provides a lower level interface to rate limiting with a
-/// configurable capacity, refill-rate and initial burst.
+/// configurable refill-rate and either initial extra credit or bounded bursts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TokenBucket {
     // Bucket defining traits.
@@ -114,7 +117,114 @@ pub struct TokenBucket {
 
     // Fields used for pre-processing optimizations.
     processed_capacity: u64,
-    processed_refill_time: u64,
+    processed_refill_time: u128,
+    burst: Option<Box<Burst>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Meter {
+    capacity: u64,
+    // Exact level = level + remainder / processed_refill_time, with a nonnegative
+    // remainder smaller than the denominator. Splitting it avoids capacity * time overflow.
+    level: i128,
+    remainder: u128,
+    processed_capacity: u64,
+    processed_refill_time: u128,
+}
+
+impl Meter {
+    fn new(capacity: u64, size: u64, refill_time_ns: u128) -> Self {
+        // gcd(a, b) == gcd(a, b % a) keeps the GCD argument within u64.
+        let common_factor = gcd(size, (refill_time_ns % u128::from(size)) as u64);
+        Self {
+            capacity,
+            level: i128::from(capacity),
+            remainder: 0,
+            processed_capacity: size / common_factor,
+            processed_refill_time: refill_time_ns / u128::from(common_factor),
+        }
+    }
+
+    fn refill(&mut self, elapsed_ns: u64) {
+        let refill = u128::from(elapsed_ns) * u128::from(self.processed_capacity);
+        let whole = refill / self.processed_refill_time;
+        let fraction = refill % self.processed_refill_time + self.remainder;
+        let whole = whole + fraction / self.processed_refill_time;
+        let needed = (i128::from(self.capacity) - self.level) as u128;
+        if whole >= needed {
+            self.level = i128::from(self.capacity);
+            self.remainder = 0;
+        } else {
+            self.level += whole as i128;
+            self.remainder = fraction % self.processed_refill_time;
+        }
+    }
+
+    fn admits(&self, tokens: u64) -> bool {
+        i128::from(tokens) <= self.level || (tokens > self.capacity && self.level >= 0)
+    }
+
+    fn delay_ns(&self) -> f64 {
+        if self.level >= 0 {
+            return 0.0;
+        }
+        let debt = (-self.level) as u128;
+        let rate = u128::from(self.processed_capacity);
+        if let Some(scaled_debt) = debt.checked_mul(self.processed_refill_time) {
+            return (scaled_debt - self.remainder).div_ceil(rate) as f64;
+        }
+        // Only enormous configurations exceed u128; the public delay ratio is
+        // already floating point, and converting before multiplication avoids overflow.
+        ((debt as f64 * self.processed_refill_time as f64 - self.remainder as f64) / rate as f64)
+            .ceil()
+    }
+
+    fn replenish(&mut self, tokens: u64) {
+        self.level += i128::from(tokens);
+        if self.level >= i128::from(self.capacity) {
+            self.level = i128::from(self.capacity);
+            self.remainder = 0;
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Burst {
+    sustained: Meter,
+    peak: Meter,
+}
+
+impl Burst {
+    fn refill(&mut self, elapsed_ns: u64) {
+        self.sustained.refill(elapsed_ns);
+        self.peak.refill(elapsed_ns);
+    }
+
+    fn budget(&self) -> u64 {
+        self.sustained.level.max(0) as u64
+    }
+
+    fn replenish(&mut self, tokens: u64) {
+        self.sustained.replenish(tokens);
+        self.peak.replenish(tokens);
+    }
+
+    fn reduce(&mut self, tokens: u64, elapsed_ns: u64, refill_time_ms: u64) -> BucketReduction {
+        self.refill(elapsed_ns);
+        if !self.sustained.admits(tokens) || !self.peak.admits(tokens) {
+            return BucketReduction::Failure;
+        }
+        self.sustained.level -= i128::from(tokens);
+        self.peak.level -= i128::from(tokens);
+        let delay_ns = self.sustained.delay_ns().max(self.peak.delay_ns());
+        if delay_ns > 0.0 {
+            BucketReduction::OverConsumption(
+                delay_ns / (refill_time_ms as f64 * NANOSEC_IN_ONE_MILLISEC as f64),
+            )
+        } else {
+            BucketReduction::Success
+        }
+    }
 }
 
 impl TokenBucket {
@@ -135,13 +245,14 @@ impl TokenBucket {
         // refill_token_count = (delta_time * size) / (complete_refill_time_ms * 1_000_000)
         // In order to avoid overflows, simplify the fractions by computing greatest common divisor.
 
-        let complete_refill_time_ns = complete_refill_time_ms * NANOSEC_IN_ONE_MILLISEC;
+        let complete_refill_time_ns =
+            u128::from(complete_refill_time_ms) * u128::from(NANOSEC_IN_ONE_MILLISEC);
         // Get the greatest common factor between `size` and `complete_refill_time_ns`.
-        let common_factor = gcd(size, complete_refill_time_ns);
+        let common_factor = gcd(size, (complete_refill_time_ns % u128::from(size)) as u64);
         // The division will be exact since `common_factor` is a factor of `size`.
         let processed_capacity: u64 = size / common_factor;
         // The division will be exact since `common_factor` is a factor of `complete_refill_time_ns`.
-        let processed_refill_time: u64 = complete_refill_time_ns / common_factor;
+        let processed_refill_time = complete_refill_time_ns / u128::from(common_factor);
 
         Some(TokenBucket {
             size,
@@ -153,6 +264,48 @@ impl TokenBucket {
             last_update: Instant::now(),
             processed_capacity,
             processed_refill_time,
+            burst: None,
+        })
+    }
+
+    /// Creates a bounded burst bucket.
+    ///
+    /// The sustained rate is `size` tokens per `complete_refill_time_ms`, with
+    /// credit capacity `burst_rate * burst_seconds` (saturating on overflow).
+    /// A second meter caps the peak rate at `burst_rate` tokens per second with
+    /// one second of peak credit. Both start full, both must admit a request,
+    /// and oversized requests retain debt until repaid.
+    /// One-time burst credit does not apply to this mode.
+    ///
+    /// Returns `None` if `size` or the refill time is zero. A zero burst rate or
+    /// duration instead creates a plain bucket without one-time burst credit.
+    pub fn new_with_burst(
+        size: u64,
+        complete_refill_time_ms: u64,
+        burst_rate: u64,
+        burst_seconds: u64,
+    ) -> Option<Self> {
+        if size == 0 || complete_refill_time_ms == 0 {
+            return None;
+        }
+        if burst_rate == 0 || burst_seconds == 0 {
+            return Self::new(size, 0, complete_refill_time_ms);
+        }
+        let capacity = burst_rate.saturating_mul(burst_seconds);
+        let refill_ns = u128::from(complete_refill_time_ms) * u128::from(NANOSEC_IN_ONE_MILLISEC);
+        let sustained = Meter::new(capacity, size, refill_ns);
+        Some(Self {
+            size,
+            one_time_burst: 0,
+            refill_time: complete_refill_time_ms,
+            budget: 0,
+            last_update: Instant::now(),
+            processed_capacity: 0,
+            processed_refill_time: 0,
+            burst: Some(Box::new(Burst {
+                sustained,
+                peak: Meter::new(burst_rate, burst_rate, 1_000_000_000),
+            })),
         })
     }
 
@@ -160,6 +313,16 @@ impl TokenBucket {
     // TODO (Issue #259): handle cases where a single request is larger than the full capacity
     // for such cases we need to support partial fulfilment of requests
     pub fn reduce(&mut self, mut tokens: u64) -> BucketReduction {
+        if let Some(burst) = self.burst.as_mut() {
+            let now = Instant::now();
+            // Cap elapsed time so the refill product fits u128.
+            let elapsed_ns = now
+                .duration_since(self.last_update)
+                .as_nanos()
+                .min(u128::from(u64::MAX)) as u64;
+            self.last_update = now;
+            return burst.reduce(tokens, elapsed_ns, self.refill_time);
+        }
         // First things first: consume the one-time-burst budget.
         if self.one_time_burst > 0 {
             // We still have burst budget for *all* tokens requests.
@@ -183,11 +346,9 @@ impl TokenBucket {
         // refill_amount = (time_delta * size) / (complete_refill_time_ms * 1_000_000)
         // `processed_capacity` and `processed_refill_time` are the result of simplifying above
         // fraction formula with their greatest-common-factor.
-        self.budget += (time_delta * self.processed_capacity) / self.processed_refill_time;
-
-        if self.budget >= self.size {
-            self.budget = self.size;
-        }
+        let refill = u128::from(time_delta) * u128::from(self.processed_capacity)
+            / self.processed_refill_time;
+        self.budget = (u128::from(self.budget) + refill).min(u128::from(self.size)) as u64;
 
         if tokens > self.budget {
             // This operation requests a bandwidth higher than the bucket size
@@ -212,6 +373,17 @@ impl TokenBucket {
 
     /// "Manually" adds tokens to bucket.
     pub fn replenish(&mut self, tokens: u64) {
+        if let Some(burst) = self.burst.as_mut() {
+            let now = Instant::now();
+            let elapsed_ns = now
+                .duration_since(self.last_update)
+                .as_nanos()
+                .min(u128::from(u64::MAX)) as u64;
+            self.last_update = now;
+            burst.refill(elapsed_ns);
+            burst.replenish(tokens);
+            return;
+        }
         // This means we are still during the burst interval.
         // Of course there is a very small chance  that the last reduce() also used up burst
         // budget which should now be replenished, but for performance and code-complexity
@@ -223,24 +395,28 @@ impl TokenBucket {
         self.budget = cmp::min(self.budget + tokens, self.size);
     }
 
-    /// Returns the capacity of the token bucket.
+    /// Returns the sustained credit depth (`burst_rate * burst_seconds` in burst
+    /// mode), or the configured size of a plain bucket.
     pub fn capacity(&self) -> u64 {
-        self.size
+        self.burst
+            .as_ref()
+            .map_or(self.size, |b| b.sustained.capacity)
     }
 
-    /// Returns the remaining one time burst budget.
+    /// Returns the remaining one-time burst budget (zero in bounded burst mode).
     pub fn one_time_burst(&self) -> u64 {
         self.one_time_burst
     }
 
-    /// Returns the time in milliseconds required to to completely fill the bucket.
+    /// Returns the configured sustained-rate refill interval in milliseconds.
     pub fn refill_time_ms(&self) -> u64 {
         self.refill_time
     }
 
-    /// Returns the current budget (one time burst allowance notwithstanding).
+    /// Returns whole sustained tokens available, excluding one-time burst credit.
+    /// Debt is reported as zero.
     pub fn budget(&self) -> u64 {
-        self.budget
+        self.burst.as_ref().map_or(self.budget, |b| b.budget())
     }
 }
 
@@ -345,6 +521,20 @@ impl RateLimiter {
             ops_complete_refill_time_ms,
         );
 
+        Self::from_buckets(bytes_token_bucket, ops_token_bucket)
+    }
+
+    /// Creates a limiter from optional plain or bounded burst buckets.
+    ///
+    /// `None` disables limiting for that token type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if creating or configuring the timerfd fails.
+    pub fn from_buckets(
+        bandwidth: Option<TokenBucket>,
+        ops: Option<TokenBucket>,
+    ) -> io::Result<Self> {
         // We'll need a timer_fd, even if our current config effectively disables rate limiting,
         // because `Self::update_buckets()` might re-enable it later, and we might be
         // seccomp-blocked from creating the timer_fd at that time.
@@ -364,8 +554,8 @@ impl RateLimiter {
 
         Ok(RateLimiter {
             inner: Mutex::new(RateLimiterInner {
-                bandwidth: bytes_token_bucket,
-                ops: ops_token_bucket,
+                bandwidth,
+                ops,
                 timer_fd,
             }),
             timer_active: AtomicBool::new(false),
@@ -410,6 +600,8 @@ impl RateLimiter {
                     // order to enforce the bandwidth limit we need to prevent
                     // further calls to the rate limiter for
                     // `ratio * refill_time` milliseconds.
+                    // Round up: a zero timerfd duration disarms it and would
+                    // leave the limiter blocked forever on a sub-ms debt.
                     guard.activate_timer(
                         Duration::from_millis((ratio * refill_time as f64).ceil() as u64),
                         &self.timer_active,
@@ -541,7 +733,7 @@ pub(crate) mod tests {
             self.processed_capacity
         }
 
-        fn get_processed_refill_time(&self) -> u64 {
+        fn get_processed_refill_time(&self) -> u128 {
             self.processed_refill_time
         }
 
@@ -608,14 +800,17 @@ pub(crate) mod tests {
     fn test_token_bucket_preprocess() {
         let tb = TokenBucket::new(1000, 0, 1000).unwrap();
         assert_eq!(tb.get_processed_capacity(), 1);
-        assert_eq!(tb.get_processed_refill_time(), NANOSEC_IN_ONE_MILLISEC);
+        assert_eq!(
+            tb.get_processed_refill_time(),
+            u128::from(NANOSEC_IN_ONE_MILLISEC)
+        );
 
         let thousand = 1000;
         let tb = TokenBucket::new(3 * 7 * 11 * 19 * thousand, 0, 7 * 11 * 13 * 17).unwrap();
         assert_eq!(tb.get_processed_capacity(), 3 * 19);
         assert_eq!(
             tb.get_processed_refill_time(),
-            13 * 17 * (NANOSEC_IN_ONE_MILLISEC / thousand)
+            u128::from(13 * 17 * (NANOSEC_IN_ONE_MILLISEC / thousand))
         );
     }
 
@@ -932,5 +1127,244 @@ pub(crate) mod tests {
                 l.ops()
             ),
         );
+    }
+
+    fn burst_reduce(bucket: &mut TokenBucket, tokens: u64, elapsed_ms: u64) -> BucketReduction {
+        bucket.burst.as_mut().unwrap().reduce(
+            tokens,
+            elapsed_ms * NANOSEC_IN_ONE_MILLISEC,
+            bucket.refill_time,
+        )
+    }
+
+    #[test]
+    fn test_burst_peak_cap() {
+        let mut bucket = TokenBucket::new_with_burst(10, 1000, 101, 2).unwrap();
+        assert_eq!(bucket.capacity(), 202);
+        assert_eq!(bucket.one_time_burst(), 0);
+        assert_eq!(bucket.burst.as_ref().unwrap().peak.capacity, 101);
+        for _ in 0..101 {
+            assert_eq!(burst_reduce(&mut bucket, 1, 0), BucketReduction::Success);
+        }
+        let before = bucket.burst.clone();
+        assert_eq!(burst_reduce(&mut bucket, 1, 0), BucketReduction::Failure);
+        assert_eq!(bucket.burst, before);
+        assert_eq!(bucket.budget(), 101);
+    }
+
+    #[test]
+    fn test_burst_exhaustion_and_idle_refill() {
+        let mut bucket = TokenBucket::new_with_burst(10, 1000, 100, 1).unwrap();
+        assert_eq!(burst_reduce(&mut bucket, 100, 0), BucketReduction::Success);
+        assert_eq!(bucket.budget(), 0);
+        for _ in 0..20 {
+            assert_eq!(burst_reduce(&mut bucket, 10, 100), BucketReduction::Failure);
+            assert_eq!(burst_reduce(&mut bucket, 1, 0), BucketReduction::Success);
+            assert_eq!(bucket.budget(), 0);
+        }
+        assert_eq!(burst_reduce(&mut bucket, 0, 1000), BucketReduction::Success);
+        assert_eq!(bucket.budget(), 10);
+        assert_eq!(bucket.burst.as_ref().unwrap().peak.level, 100);
+        assert_eq!(
+            burst_reduce(&mut bucket, 0, 20_000),
+            BucketReduction::Success
+        );
+        assert_eq!(bucket.budget(), 100);
+        assert_eq!(bucket.burst.as_ref().unwrap().peak.level, 100);
+    }
+
+    #[test]
+    fn test_burst_atomic_admission() {
+        let mut bucket = TokenBucket::new_with_burst(10, 1000, 100, 1).unwrap();
+        // Peak FAIL / sustained OK, sustained FAIL / peak OK, and peak OVER /
+        // sustained FAIL must never partially debit either meter.
+        for (sustained, peak, tokens) in [(100, 0, 1), (0, 100, 1), (-1, 100, 101), (100, -1, 101)]
+        {
+            let burst = bucket.burst.as_mut().unwrap();
+            burst.sustained.level = sustained;
+            burst.peak.level = peak;
+            let before = bucket.burst.clone();
+            assert_eq!(
+                burst_reduce(&mut bucket, tokens, 0),
+                BucketReduction::Failure
+            );
+            assert_eq!(bucket.burst, before);
+        }
+        {
+            let burst = bucket.burst.as_mut().unwrap();
+            burst.sustained.level = 100;
+            burst.peak.level = 0;
+        }
+        assert_eq!(
+            burst_reduce(&mut bucket, 101, 0),
+            BucketReduction::OverConsumption(1.01),
+        );
+        let burst = bucket.burst.as_ref().unwrap();
+        assert_eq!(burst.sustained.level, -1);
+        assert_eq!(burst.peak.level, -101);
+        assert_eq!(bucket.budget(), 0);
+        // The slower sustained meter, rather than the peak meter, can set the delay.
+        bucket.burst.as_mut().unwrap().sustained.level = 0;
+        bucket.burst.as_mut().unwrap().peak.level = 100;
+        assert_eq!(
+            burst_reduce(&mut bucket, 101, 0),
+            BucketReduction::OverConsumption(10.1),
+        );
+    }
+
+    #[test]
+    fn test_burst_debt_retention() {
+        let mut bucket = TokenBucket::new_with_burst(100, 1000, 100, 10).unwrap();
+        assert_eq!(
+            burst_reduce(&mut bucket, 200, 0),
+            BucketReduction::OverConsumption(1.0),
+        );
+        let before = bucket.burst.clone();
+        assert_eq!(burst_reduce(&mut bucket, 200, 0), BucketReduction::Failure);
+        assert_eq!(bucket.burst, before);
+        assert_eq!(
+            burst_reduce(&mut bucket, 200, 999),
+            BucketReduction::Failure
+        );
+        assert_eq!(
+            burst_reduce(&mut bucket, 200, 1),
+            BucketReduction::OverConsumption(2.0),
+        );
+        // Every subsequent 200-token request requires 2000 ms at B = 100.
+        for _ in 0..20 {
+            assert_eq!(
+                burst_reduce(&mut bucket, 200, 1999),
+                BucketReduction::Failure
+            );
+            assert_eq!(
+                burst_reduce(&mut bucket, 200, 1),
+                BucketReduction::OverConsumption(2.0),
+            );
+        }
+    }
+
+    #[test]
+    fn test_burst_fractional_refill() {
+        for rate in (1..10).chain([19]) {
+            let mut bucket = TokenBucket::new_with_burst(rate, 1000, rate, 2).unwrap();
+            let peak_capacity = bucket.burst.as_ref().unwrap().peak.capacity;
+            assert_eq!(
+                burst_reduce(&mut bucket, peak_capacity, 0),
+                BucketReduction::Success,
+            );
+            let mut admitted = 0;
+            for _ in 0..1000 {
+                match burst_reduce(&mut bucket, 1, 1) {
+                    BucketReduction::Success => admitted += 1,
+                    BucketReduction::Failure => {}
+                    outcome => panic!("Unexpected fractional refill outcome: {outcome:?}"),
+                }
+            }
+            assert_eq!(admitted, rate);
+            assert_eq!(bucket.burst.as_ref().unwrap().peak.level, 0);
+            let mut bucket = TokenBucket::new_with_burst(rate, 1000, rate, 2).unwrap();
+            assert_eq!(burst_reduce(&mut bucket, rate, 0), BucketReduction::Success);
+            let mut admitted = 0;
+            for _ in 0..100 {
+                let mut outcome = burst_reduce(&mut bucket, 1, REFILL_TIMER_INTERVAL_MS);
+                while outcome == BucketReduction::Success {
+                    admitted += 1;
+                    outcome = burst_reduce(&mut bucket, 1, 0);
+                }
+                assert_eq!(outcome, BucketReduction::Failure);
+            }
+            assert_eq!(admitted, rate * 10);
+        }
+    }
+
+    #[test]
+    fn test_burst_byte_rate_with_fixed_probes() {
+        let rate = 10_000_000;
+        let request = 384 * 1024;
+        let mut bucket = TokenBucket::new_with_burst(rate, 1000, rate, 2).unwrap();
+        while burst_reduce(&mut bucket, request, 0) == BucketReduction::Success {}
+        let mut admitted = 0;
+        for _ in 0..100 {
+            let mut outcome = burst_reduce(&mut bucket, request, REFILL_TIMER_INTERVAL_MS);
+            while outcome == BucketReduction::Success {
+                admitted += request;
+                outcome = burst_reduce(&mut bucket, request, 0);
+            }
+            assert_eq!(outcome, BucketReduction::Failure);
+        }
+        assert!(admitted.abs_diff(rate * 10) < request);
+    }
+
+    #[test]
+    fn test_burst_last_update_and_refund() {
+        let mut bucket = TokenBucket::new_with_burst(10, 1000, 100, 2).unwrap();
+        assert_eq!(burst_reduce(&mut bucket, 10, 0), BucketReduction::Success);
+        bucket.last_update = Instant::now() - Duration::from_millis(100);
+        assert_eq!(bucket.reduce(1), BucketReduction::Success);
+        assert_eq!(bucket.budget(), 190);
+        assert_eq!(bucket.burst.as_ref().unwrap().peak.level, 99);
+
+        let limiter = RateLimiter::from_buckets(None, Some(bucket)).unwrap();
+        limiter.manual_replenish(1, TokenType::Ops);
+        let bucket = limiter.ops().unwrap();
+        assert_eq!(bucket.budget(), 191);
+        assert_eq!(bucket.burst.as_ref().unwrap().peak.level, 100);
+        limiter.manual_replenish(u64::MAX, TokenType::Ops);
+        let bucket = limiter.ops().unwrap();
+        assert_eq!(bucket.budget(), 200);
+        assert_eq!(bucket.burst.as_ref().unwrap().peak.level, 100);
+
+        let mut bucket = TokenBucket::new_with_burst(10, 1000, 100, 2).unwrap();
+        assert_eq!(
+            burst_reduce(&mut bucket, 201, 0),
+            BucketReduction::OverConsumption(1.01),
+        );
+        bucket.replenish(100);
+        assert_eq!(bucket.budget(), 99);
+        assert_eq!(bucket.burst.as_ref().unwrap().peak.level, -1);
+    }
+
+    #[test]
+    fn test_burst_sub_ms_overconsumption_timer() {
+        let limiter =
+            RateLimiter::from_buckets(None, TokenBucket::new_with_burst(10_000, 1000, 10_000, 1))
+                .unwrap();
+        assert!(limiter.consume(10_001, TokenType::Ops));
+        assert!(limiter.is_blocked());
+        thread::sleep(Duration::from_millis(5));
+        limiter.event_handler().unwrap();
+        assert!(!limiter.is_blocked());
+    }
+
+    #[test]
+    fn test_burst_constructor_edges() {
+        assert!(TokenBucket::new_with_burst(0, 1000, 100, 1).is_none());
+        assert!(TokenBucket::new_with_burst(10, 0, 100, 1).is_none());
+        for (rate, seconds) in [(0, 1), (100, 0), (0, 0)] {
+            let mut bucket = TokenBucket::new_with_burst(10, 1000, rate, seconds).unwrap();
+            let plain = TokenBucket::new(10, 0, 1000).unwrap();
+            bucket.last_update = plain.last_update;
+            assert_eq!(bucket, plain);
+        }
+        for (rate, seconds) in [(0, 1), (1, 0)] {
+            let mut bucket = TokenBucket::new_with_burst(1, 1 << 58, rate, seconds).unwrap();
+            assert_eq!(bucket.reduce(1), BucketReduction::Success);
+            assert_eq!(bucket.reduce(1), BucketReduction::Failure);
+        }
+        for (size, refill, rate, seconds) in [
+            (1, u64::MAX, u64::MAX, u64::MAX),
+            (u64::MAX, u64::MAX, u64::MAX, 1),
+            (u64::MAX, 1, u64::MAX, 1),
+            (1, u64::MAX, 1, 1),
+        ] {
+            let mut bucket = TokenBucket::new_with_burst(size, refill, rate, seconds).unwrap();
+            assert_eq!(bucket.capacity(), rate.saturating_mul(seconds));
+            assert!(matches!(
+                burst_reduce(&mut bucket, u64::MAX, 0),
+                BucketReduction::Success | BucketReduction::OverConsumption(_)
+            ));
+            bucket.burst.as_mut().unwrap().refill(u64::MAX);
+            bucket.replenish(u64::MAX);
+        }
     }
 }
