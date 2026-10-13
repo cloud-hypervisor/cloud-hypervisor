@@ -1209,6 +1209,14 @@ components:
           description:
             The burst length in seconds, with depth equal to burst_rate times
             burst_seconds. Requires burst_rate and defaults to 1 when burst_rate is set.
+        burst_recharge_seconds:
+          type: integer
+          format: int64
+          minimum: 1
+          description:
+            The seconds to regain full burst credit from empty while idle.
+            Requires burst_rate and defaults to burst_rate times burst_seconds
+            divided by the sustained rate.
       description:
         A plain bucket holds _size_ tokens, refills over _refill_time_ milliseconds,
         and allows initial _one_time_burst_ credit that does not replenish.
@@ -1218,6 +1226,8 @@ components:
         A peak bucket holds _burst_rate_ tokens and refills at _burst_rate_ tokens/s;
         requests need both meters. This is a token-bucket envelope, not a
         strict per-second ceiling, and oversized requests carry debt.
+        Optional _burst_recharge_seconds_ changes idle recharge time without
+        increasing the rate under continuous demand.
 
     RateLimiterConfig:
       type: object

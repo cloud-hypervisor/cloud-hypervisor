@@ -1567,6 +1567,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
             refill_time: 2,
             burst_rate: None,
             burst_seconds: None,
+            burst_recharge_seconds: None,
         }),
         ops: Some(TokenBucketConfig {
             size: 256,
@@ -1574,6 +1575,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
             refill_time: 1,
             burst_rate: None,
             burst_seconds: None,
+            burst_recharge_seconds: None,
         }),
     });
     run_stateful_activation(
