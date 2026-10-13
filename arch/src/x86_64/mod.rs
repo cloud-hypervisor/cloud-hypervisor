@@ -170,6 +170,9 @@ pub enum Error {
     #[error("The selected CPU profile could not be utilized: failed to obtain feature MSRs")]
     CpuProfileFeatureMsrs(#[source] HypervisorError),
 
+    #[error("Custom CPU profiles are not supported by {0:?}")]
+    CpuProfileUnsupportedHypervisor(hypervisor::HypervisorType),
+
     // Error writing EBDA address
     #[error("Error writing EBDA address")]
     EbdaSetup(#[source] vm_memory::GuestMemoryError),
@@ -692,12 +695,15 @@ pub fn generate_common_cpuid(
         config.phys_bits
     );
 
+    let is_non_host_profile = !matches!(config.profile, CpuProfile::Host);
+    if is_non_host_profile {
+        cpu_profile::check_cpu_profile_support(hypervisor.hypervisor_type())?;
+    }
+
     // Supported CPUID
     let mut cpuid = hypervisor
         .get_supported_cpuid()
         .map_err(Error::CpuidGetSupported)?;
-
-    let is_non_host_profile = !matches!(config.profile, CpuProfile::Host);
 
     // Copy CPU identification string
     for i in 0x8000_0002..=0x8000_0004 {
@@ -778,6 +784,8 @@ pub fn generate_required_msr_updates(
     if matches!(cpu_profile, CpuProfile::Host) {
         return Ok(None);
     }
+
+    cpu_profile::check_cpu_profile_support(hypervisor.hypervisor_type())?;
 
     let host_supported_msrs = hypervisor
         .get_msr_index_list()
