@@ -92,6 +92,7 @@ pub struct CpuidConfig {
     pub phys_bits: u8,
     pub kvm_hyperv: bool,
     pub amx: bool,
+    pub cpuid_overrides: Vec<CpuidOverride>,
 }
 
 #[derive(Debug, Error)]
@@ -358,6 +359,68 @@ impl CpuidPatch {
         }
 
         false
+    }
+}
+
+/// Replaces all four registers of a CPUID leaf and subleaf.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CpuidOverride {
+    #[serde(
+        serialize_with = "serialize_u32_hex",
+        deserialize_with = "deserialize_u32_hex"
+    )]
+    pub leaf: u32,
+    #[serde(
+        serialize_with = "serialize_u32_hex",
+        deserialize_with = "deserialize_u32_hex"
+    )]
+    pub subleaf: u32,
+    #[serde(
+        serialize_with = "serialize_u32_hex",
+        deserialize_with = "deserialize_u32_hex"
+    )]
+    pub eax: u32,
+    #[serde(
+        serialize_with = "serialize_u32_hex",
+        deserialize_with = "deserialize_u32_hex"
+    )]
+    pub ebx: u32,
+    #[serde(
+        serialize_with = "serialize_u32_hex",
+        deserialize_with = "deserialize_u32_hex"
+    )]
+    pub ecx: u32,
+    #[serde(
+        serialize_with = "serialize_u32_hex",
+        deserialize_with = "deserialize_u32_hex"
+    )]
+    pub edx: u32,
+}
+
+fn apply_cpuid_overrides(cpuid: &mut Vec<CpuIdEntry>, overrides: &[CpuidOverride]) {
+    for over in overrides {
+        let mut found = false;
+        for entry in cpuid.iter_mut() {
+            if entry.function == over.leaf && entry.index == over.subleaf {
+                entry.eax = over.eax;
+                entry.ebx = over.ebx;
+                entry.ecx = over.ecx;
+                entry.edx = over.edx;
+                found = true;
+            }
+        }
+
+        if !found {
+            cpuid.push(CpuIdEntry {
+                function: over.leaf,
+                index: over.subleaf,
+                flags: CPUID_FLAG_VALID_INDEX,
+                eax: over.eax,
+                ebx: over.ebx,
+                ecx: over.ecx,
+                edx: over.edx,
+            });
+        }
     }
 }
 
@@ -669,6 +732,8 @@ impl CpuidFeatureEntry {
 ///
 /// An error is returned when the CPUID entries obtained from the hypervisor do not satisfy the requirements
 /// to apply the selected CPU profile.
+///
+/// Overrides are applied after the selected CPU profile and common updates.
 pub fn generate_common_cpuid(
     hypervisor: &dyn hypervisor::Hypervisor,
     config: &CpuidConfig,
@@ -745,7 +810,7 @@ pub fn generate_common_cpuid(
     );
 
     // If we want to apply a CPU profile we need to check that it remains compatible with `cpuid_host`
-    if is_non_host_profile {
+    let mut cpuid = if is_non_host_profile {
         CpuidFeatureEntry::check_cpuid_compatibility_with_descriptions(
             &cpuid_profile,
             "CPU Profile",
@@ -753,10 +818,13 @@ pub fn generate_common_cpuid(
             "Host VM",
         )
         .map_err(|_| Error::CpuProfileCpuidIncompatibility)?;
-        Ok(cpuid_profile)
+        cpuid_profile
     } else {
-        Ok(cpuid_host)
-    }
+        cpuid_host
+    };
+
+    apply_cpuid_overrides(&mut cpuid, &config.cpuid_overrides);
+    Ok(cpuid)
 }
 
 /// Generates the MSR related updates that are required in order to be compatible with the given CPU profile (if any).
@@ -1689,6 +1757,89 @@ mod tests {
     use linux_loader::loader::bootparam::boot_e820_entry;
 
     use super::*;
+
+    #[test]
+    fn test_cpuid_override_existing_entries() {
+        let entry = CpuIdEntry {
+            function: 7,
+            index: 0,
+            flags: CPUID_FLAG_VALID_INDEX,
+            eax: 1,
+            ebx: 2,
+            ecx: 3,
+            edx: 4,
+        };
+        let other_subleaf = CpuIdEntry { index: 1, ..entry };
+        let other_leaf = CpuIdEntry {
+            function: 1,
+            ..entry
+        };
+        let mut cpuid = vec![entry, other_subleaf, other_leaf, entry];
+        let over = CpuidOverride {
+            leaf: 7,
+            subleaf: 0,
+            eax: 5,
+            ebx: 6,
+            ecx: 7,
+            edx: 8,
+        };
+
+        apply_cpuid_overrides(&mut cpuid, &[over]);
+        let expected = CpuIdEntry {
+            eax: 5,
+            ebx: 6,
+            ecx: 7,
+            edx: 8,
+            ..entry
+        };
+        assert_eq!(cpuid, vec![expected, other_subleaf, other_leaf, expected]);
+        apply_cpuid_overrides(&mut cpuid, &[]);
+        assert_eq!(cpuid, vec![expected, other_subleaf, other_leaf, expected]);
+    }
+
+    #[test]
+    fn test_cpuid_override_new_entries_and_duplicates() {
+        let over = CpuidOverride {
+            leaf: 7,
+            subleaf: 0,
+            eax: 1,
+            ebx: 2,
+            ecx: 3,
+            edx: 4,
+        };
+        let mut cpuid = Vec::new();
+        apply_cpuid_overrides(
+            &mut cpuid,
+            &[
+                over,
+                CpuidOverride { subleaf: 1, ..over },
+                CpuidOverride { eax: 5, ..over },
+            ],
+        );
+        assert_eq!(
+            cpuid,
+            vec![
+                CpuIdEntry {
+                    function: 7,
+                    index: 0,
+                    flags: CPUID_FLAG_VALID_INDEX,
+                    eax: 5,
+                    ebx: 2,
+                    ecx: 3,
+                    edx: 4,
+                },
+                CpuIdEntry {
+                    function: 7,
+                    index: 1,
+                    flags: CPUID_FLAG_VALID_INDEX,
+                    eax: 1,
+                    ebx: 2,
+                    ecx: 3,
+                    edx: 4,
+                },
+            ]
+        );
+    }
 
     #[test]
     fn regions_base_addr() {

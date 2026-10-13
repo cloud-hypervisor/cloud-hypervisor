@@ -153,10 +153,10 @@ pub mod x86_64;
 
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
-    _NSIG, CpuidConfig, CpuidFeatureEntry, EntryPoint, arch_memory_regions, configure_system,
-    configure_vcpu, cpu_profile::CpuProfileConfig, generate_common_cpuid, generate_ram_ranges,
-    get_host_cpu_phys_bits, initramfs_load_addr, layout, layout::CMDLINE_MAX_SIZE,
-    layout::CMDLINE_START, regs,
+    _NSIG, CpuidConfig, CpuidFeatureEntry, CpuidOverride, EntryPoint, arch_memory_regions,
+    configure_system, configure_vcpu, cpu_profile::CpuProfileConfig, generate_common_cpuid,
+    generate_ram_ranges, get_host_cpu_phys_bits, initramfs_load_addr, layout,
+    layout::CMDLINE_MAX_SIZE, layout::CMDLINE_START, regs,
 };
 
 /// Safe wrapper for `sysconf(_SC_PAGESIZE)`.

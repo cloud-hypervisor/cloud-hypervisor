@@ -10,6 +10,8 @@ use std::str::FromStr;
 use std::{fmt, fs, result};
 
 use arch::CpuProfileConfig;
+#[cfg(target_arch = "x86_64")]
+use arch::CpuidOverride;
 use block::ImageType;
 pub use block::fcntl::LockGranularityChoice;
 #[cfg(target_arch = "x86_64")]
@@ -92,6 +94,13 @@ pub struct CpusConfig {
     // Defaults to "Host" if no profile is given.
     #[serde(default)]
     pub profile: CpuProfileConfig,
+    #[cfg(target_arch = "x86_64")]
+    #[serde(
+        default,
+        rename = "x-cpuid-overrides",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub cpuid_overrides: Vec<CpuidOverride>,
 }
 
 pub const DEFAULT_VCPUS: u32 = 1;
@@ -109,6 +118,8 @@ impl Default for CpusConfig {
             nested: false,
             core_scheduling: CoreScheduling::default(),
             profile: CpuProfileConfig::default(),
+            #[cfg(target_arch = "x86_64")]
+            cpuid_overrides: Vec::new(),
         }
     }
 }

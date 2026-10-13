@@ -1997,6 +1997,7 @@ impl Vmm {
                     phys_bits,
                     kvm_hyperv: vm_config.cpus.kvm_hyperv,
                     amx: vm_config.cpus.features.amx,
+                    cpuid_overrides: vm_config.cpus.cpuid_overrides.clone(),
                 },
                 None,
             )
@@ -3609,6 +3610,8 @@ mod tests {
                 nested: true,
                 core_scheduling: CoreScheduling::default(),
                 profile: CpuProfileConfig::default(),
+                #[cfg(target_arch = "x86_64")]
+                cpuid_overrides: Vec::new(),
             },
             memory: MemoryConfig {
                 size: 536_870_912,
