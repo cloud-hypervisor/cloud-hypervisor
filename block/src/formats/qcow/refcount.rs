@@ -75,8 +75,18 @@ impl RefCount {
             refcount_table_entries,
             None,
         )?);
-        let max_valid_cluster_index = (ref_table.len() as u64) * refcount_block_entries - 1;
-        let max_valid_cluster_offset = max_valid_cluster_index * cluster_size;
+        // All three factors come from the untrusted image, so reject
+        // geometries whose product overflows a u64.
+        let max_valid_cluster_offset = (ref_table.len() as u64)
+            .checked_mul(refcount_block_entries)
+            .and_then(|clusters| clusters.checked_sub(1))
+            .and_then(|max_index| max_index.checked_mul(cluster_size))
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "QCOW2 refcount table addresses more clusters than fit a 64-bit offset",
+                )
+            })?;
         let max_refcount = if refcount_bits >= 64 {
             u64::MAX
         } else {
@@ -229,5 +239,49 @@ impl RefCount {
         let block_index = (address / self.cluster_size) % self.refcount_block_entries;
         let refcount_table_index = (address / self.cluster_size) / self.refcount_block_entries;
         (refcount_table_index as usize, block_index as usize)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::super::qcow_raw_file::QcowRawFile;
+    use super::RefCount;
+    use crate::aligned_file::AlignedFile;
+
+    // A refcount table whose entry count, refcounts-per-block and cluster size
+    // all come from the image can describe more clusters than a 64-bit byte
+    // offset can address. With `cluster_bits = 21` (`cluster_size = 2^21`),
+    // `refcount_order = 0` (`refcount_bits = 1`, so `refcount_block_entries =
+    // 2^24`) and a 2^20-entry table, the offset bound computed in
+    // `RefCount::new` overflows a u64. It must be rejected rather than wrap.
+    #[test]
+    fn new_rejects_refcount_geometry_that_overflows_a_64_bit_offset() {
+        let cluster_size: u64 = 1 << 21;
+        let refcount_bits: u64 = 1;
+        let refcount_block_entries = cluster_size * 8 / refcount_bits;
+        let refcount_table_entries: u64 = 1 << 20;
+
+        let temp = TempFile::new().unwrap();
+        temp.as_file()
+            .set_len(refcount_table_entries * size_of::<u64>() as u64 + cluster_size)
+            .unwrap();
+        let file = AlignedFile::new(temp.into_file(), false);
+        let mut raw_file = QcowRawFile::from(file, cluster_size, refcount_bits)
+            .expect("cluster size and refcount width are valid");
+
+        let err = RefCount::new(
+            &mut raw_file,
+            0,
+            refcount_table_entries,
+            refcount_block_entries,
+            cluster_size,
+            refcount_bits,
+        )
+        .expect_err("an overflowing refcount geometry must be rejected");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
     }
 }
