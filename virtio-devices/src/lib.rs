@@ -134,6 +134,10 @@ pub struct TokenBucketConfig {
     /// Burst duration in seconds, defaulting to one when a burst rate is set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub burst_seconds: Option<u64>,
+    /// Seconds to regain full burst credit from empty while idle.
+    /// When absent, recharge takes burst_rate * burst_seconds / sustained rate seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub burst_recharge_seconds: Option<u64>,
 }
 
 impl TokenBucketConfig {
@@ -145,6 +149,7 @@ impl TokenBucketConfig {
                 self.refill_time,
                 rate,
                 self.burst_seconds.unwrap_or(1),
+                self.burst_recharge_seconds.unwrap_or(0),
             )
         } else {
             rate_limiter::TokenBucket::new(

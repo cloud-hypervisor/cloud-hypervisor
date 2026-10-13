@@ -391,6 +391,14 @@ pub enum ValidationError {
     /// Burst capacity must fit in a u64
     #[error("Rate limiter burst rate {0} times duration {1} seconds overflows token capacity")]
     RateLimiterBurstCapacityOverflow(u64, u64),
+    /// A recharge duration requires a bounded burst
+    #[error("Rate limiter burst recharge time {0} seconds requires a burst rate")]
+    RateLimiterBurstRechargeWithoutRate(u64),
+    /// Recharge must take longer than refilling the base meter
+    #[error(
+        "Rate limiter burst recharge time {0} seconds must be at least {1} seconds to exceed the base refill time"
+    )]
+    RateLimiterBurstRechargeTooShort(u64, u128),
     /// Rate limiting is not supported with vhost-user
     #[error("Rate limiting is not supported with vhost-user")]
     VhostUserRateLimiterNotSupported,
@@ -1422,11 +1430,13 @@ const RATE_LIMITER_OPTIONS: &[&str] = &[
     "bw_refill_time",
     "bw_burst_rate",
     "bw_burst_seconds",
+    "bw_burst_recharge_seconds",
     "ops_size",
     "ops_one_time_burst",
     "ops_refill_time",
     "ops_burst_rate",
     "ops_burst_seconds",
+    "ops_burst_recharge_seconds",
 ];
 
 fn parse_rate_limiter_config(
@@ -1438,6 +1448,7 @@ fn parse_rate_limiter_config(
         refill_time: parser.convert("bw_refill_time")?.unwrap_or_default(),
         burst_rate: parser.convert("bw_burst_rate")?,
         burst_seconds: parser.convert("bw_burst_seconds")?,
+        burst_recharge_seconds: parser.convert("bw_burst_recharge_seconds")?,
     };
     let ops = TokenBucketConfig {
         size: parser.convert("ops_size")?.unwrap_or_default(),
@@ -1445,11 +1456,13 @@ fn parse_rate_limiter_config(
         refill_time: parser.convert("ops_refill_time")?.unwrap_or_default(),
         burst_rate: parser.convert("ops_burst_rate")?,
         burst_seconds: parser.convert("ops_burst_seconds")?,
+        burst_recharge_seconds: parser.convert("ops_burst_recharge_seconds")?,
     };
     let [bandwidth, ops] = [bandwidth, ops].map(|bucket| {
         ((bucket.size != 0 && bucket.refill_time != 0)
             || bucket.burst_rate.is_some()
-            || bucket.burst_seconds.is_some())
+            || bucket.burst_seconds.is_some()
+            || bucket.burst_recharge_seconds.is_some())
         .then_some(bucket)
     });
     Ok(RateLimiterConfig { bandwidth, ops })
@@ -1460,6 +1473,11 @@ fn validate_rate_limiter_config(cfg: &RateLimiterConfig) -> ValidationResult<()>
         let Some(rate) = bucket.burst_rate else {
             if let Some(seconds) = bucket.burst_seconds {
                 return Err(ValidationError::RateLimiterBurstSecondsWithoutRate(seconds));
+            }
+            if let Some(recharge) = bucket.burst_recharge_seconds {
+                return Err(ValidationError::RateLimiterBurstRechargeWithoutRate(
+                    recharge,
+                ));
             }
             continue;
         };
@@ -1493,6 +1511,18 @@ fn validate_rate_limiter_config(cfg: &RateLimiterConfig) -> ValidationResult<()>
                 rate, seconds,
             ));
         }
+        if let Some(recharge) = bucket.burst_recharge_seconds {
+            let sustained = u128::from(bucket.size) * 1000;
+            let refill_time = u128::from(bucket.refill_time);
+            let base_depth = sustained.div_ceil(refill_time);
+            let base_refill_seconds = base_depth * refill_time / sustained;
+            if u128::from(recharge) <= base_refill_seconds {
+                return Err(ValidationError::RateLimiterBurstRechargeTooShort(
+                    recharge,
+                    base_refill_seconds + 1,
+                ));
+            }
+        }
     }
     Ok(())
 }
@@ -1501,8 +1531,10 @@ impl RateLimiterGroupConfig {
     pub const SYNTAX: &'static str = "Rate Limit Group parameters \
         \"bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
         bw_burst_rate=<bytes_per_second>,bw_burst_seconds=<seconds>,\
+        bw_burst_recharge_seconds=<seconds>,\
         ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,\
         ops_burst_rate=<io_ops_per_second>,ops_burst_seconds=<seconds>,\
+        ops_burst_recharge_seconds=<seconds>,\
         id=<device_id>\"";
 
     pub fn parse(rate_limit_group: &str) -> Result<Self> {
@@ -1608,8 +1640,10 @@ impl DiskConfig {
          vhost_user=on|off,socket=<vhost_user_socket_path>,\
          bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
          bw_burst_rate=<bytes_per_second>,bw_burst_seconds=<seconds>,\
+         bw_burst_recharge_seconds=<seconds>,\
          ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,\
          ops_burst_rate=<io_ops_per_second>,ops_burst_seconds=<seconds>,\
+         ops_burst_recharge_seconds=<seconds>,\
          id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>,\
          rate_limit_group=<group_id>,\
          queue_affinity=<list_of_queue_indices_with_their_associated_cpuset>,\
@@ -1875,8 +1909,10 @@ impl NetConfig {
     vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>,vhost_mode=client|server,\
     bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
     bw_burst_rate=<bytes_per_second>,bw_burst_seconds=<seconds>,\
+    bw_burst_recharge_seconds=<seconds>,\
     ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,\
     ops_burst_rate=<io_ops_per_second>,ops_burst_seconds=<seconds>,\
+    ops_burst_recharge_seconds=<seconds>,\
     pci_segment=<segment_id>,pci_device_id=<pci_slot>,\
     offload_tso=on|off,offload_ufo=on|off,offload_csum=on|off\"";
 
@@ -4681,6 +4717,7 @@ mod tests {
                         refill_time: 100,
                         burst_rate: None,
                         burst_seconds: None,
+                        burst_recharge_seconds: None,
                     }),
                     ops: None,
                 }
@@ -4698,6 +4735,7 @@ mod tests {
                         refill_time: 100,
                         burst_rate: None,
                         burst_seconds: None,
+                        burst_recharge_seconds: None,
                     }),
                 }
             }
@@ -4732,6 +4770,7 @@ mod tests {
                 refill_time: 1000,
                 burst_rate: Some(2000),
                 burst_seconds: Some(3),
+                burst_recharge_seconds: None,
             }),
             ops: Some(TokenBucketConfig {
                 size: 100,
@@ -4739,6 +4778,7 @@ mod tests {
                 refill_time: 1000,
                 burst_rate: Some(400),
                 burst_seconds: Some(2),
+                burst_recharge_seconds: None,
             }),
         };
         for config in parse_rate_limiter_configs(options) {
@@ -4763,6 +4803,37 @@ mod tests {
     }
 
     #[test]
+    fn test_rate_limiter_burst_recharge_parsing() {
+        let options = "bw_size=1000,bw_refill_time=1000,bw_burst_rate=2000,bw_burst_seconds=3,\
+            bw_burst_recharge_seconds=4,ops_size=100,ops_refill_time=1000,ops_burst_rate=400,\
+            ops_burst_seconds=2,ops_burst_recharge_seconds=5";
+        let expected = RateLimiterConfig {
+            bandwidth: Some(TokenBucketConfig {
+                size: 1000,
+                one_time_burst: Some(0),
+                refill_time: 1000,
+                burst_rate: Some(2000),
+                burst_seconds: Some(3),
+                burst_recharge_seconds: Some(4),
+            }),
+            ops: Some(TokenBucketConfig {
+                size: 100,
+                one_time_burst: Some(0),
+                refill_time: 1000,
+                burst_rate: Some(400),
+                burst_seconds: Some(2),
+                burst_recharge_seconds: Some(5),
+            }),
+        };
+        for config in parse_rate_limiter_configs(options) {
+            assert_eq!(config, expected);
+            for result in rate_limiter_validation_results(config) {
+                result.unwrap();
+            }
+        }
+    }
+
+    #[test]
     fn test_rate_limiter_plain_parsing() {
         let options = "bw_size=1000,bw_refill_time=100,bw_one_time_burst=2000,\
             ops_size=100,ops_refill_time=100,ops_one_time_burst=200";
@@ -4773,6 +4844,7 @@ mod tests {
                 refill_time: 100,
                 burst_rate: None,
                 burst_seconds: None,
+                burst_recharge_seconds: None,
             }),
             ops: Some(TokenBucketConfig {
                 size: 100,
@@ -4780,6 +4852,7 @@ mod tests {
                 refill_time: 100,
                 burst_rate: None,
                 burst_seconds: None,
+                burst_recharge_seconds: None,
             }),
         };
         for config in parse_rate_limiter_configs(options) {
@@ -4855,6 +4928,22 @@ mod tests {
                 "ops_burst_seconds=2",
                 ValidationError::RateLimiterBurstSecondsWithoutRate(2),
             ),
+            (
+                "bw_burst_recharge_seconds=4",
+                ValidationError::RateLimiterBurstRechargeWithoutRate(4),
+            ),
+            (
+                "ops_burst_recharge_seconds=4",
+                ValidationError::RateLimiterBurstRechargeWithoutRate(4),
+            ),
+            (
+                "bw_burst_recharge_seconds=0",
+                ValidationError::RateLimiterBurstRechargeWithoutRate(0),
+            ),
+            (
+                "ops_burst_recharge_seconds=0",
+                ValidationError::RateLimiterBurstRechargeWithoutRate(0),
+            ),
         ] {
             for cfg in parse_rate_limiter_configs(options) {
                 for result in rate_limiter_validation_results(cfg) {
@@ -4872,6 +4961,7 @@ mod tests {
             refill_time: 1000,
             burst_rate: Some(2000),
             burst_seconds: Some(2),
+            burst_recharge_seconds: None,
         };
         let invalid = [
             (
@@ -4986,11 +5076,127 @@ mod tests {
     }
 
     #[test]
+    fn test_rate_limiter_burst_recharge_validation() {
+        let bucket = TokenBucketConfig {
+            size: 1,
+            one_time_burst: Some(0),
+            refill_time: 2000,
+            burst_rate: Some(2),
+            burst_seconds: Some(2),
+            burst_recharge_seconds: Some(3),
+        };
+        let invalid = [
+            (
+                TokenBucketConfig {
+                    burst_rate: None,
+                    burst_seconds: None,
+                    ..bucket
+                },
+                ValidationError::RateLimiterBurstRechargeWithoutRate(3),
+            ),
+            (
+                TokenBucketConfig {
+                    burst_recharge_seconds: Some(0),
+                    ..bucket
+                },
+                ValidationError::RateLimiterBurstRechargeTooShort(0, 3),
+            ),
+            (
+                TokenBucketConfig {
+                    burst_recharge_seconds: Some(1),
+                    ..bucket
+                },
+                ValidationError::RateLimiterBurstRechargeTooShort(1, 3),
+            ),
+            (
+                TokenBucketConfig {
+                    burst_recharge_seconds: Some(2),
+                    ..bucket
+                },
+                ValidationError::RateLimiterBurstRechargeTooShort(2, 3),
+            ),
+            (
+                TokenBucketConfig {
+                    size: 3,
+                    burst_recharge_seconds: Some(1),
+                    ..bucket
+                },
+                ValidationError::RateLimiterBurstRechargeTooShort(1, 2),
+            ),
+            (
+                TokenBucketConfig {
+                    refill_time: u64::MAX,
+                    burst_recharge_seconds: Some(u64::MAX / 1000),
+                    ..bucket
+                },
+                ValidationError::RateLimiterBurstRechargeTooShort(
+                    u64::MAX / 1000,
+                    u128::from(u64::MAX / 1000) + 1,
+                ),
+            ),
+        ];
+        for (bucket, expected) in invalid {
+            for cfg in [
+                RateLimiterConfig {
+                    bandwidth: Some(bucket),
+                    ops: None,
+                },
+                RateLimiterConfig {
+                    bandwidth: None,
+                    ops: Some(bucket),
+                },
+            ] {
+                for result in rate_limiter_validation_results(cfg) {
+                    assert_eq!(result.unwrap_err(), expected);
+                }
+            }
+        }
+
+        for bucket in [
+            bucket,
+            TokenBucketConfig {
+                size: 3,
+                burst_recharge_seconds: Some(2),
+                ..bucket
+            },
+            TokenBucketConfig {
+                size: u64::MAX,
+                refill_time: u64::MAX,
+                burst_rate: Some(u64::MAX),
+                burst_seconds: Some(1),
+                burst_recharge_seconds: Some(u64::MAX),
+                ..bucket
+            },
+            TokenBucketConfig {
+                size: 2_000_000_001,
+                refill_time: 4_000_000_000_000,
+                burst_rate: Some(1),
+                burst_seconds: Some(10),
+                burst_recharge_seconds: Some(2),
+                ..bucket
+            },
+            TokenBucketConfig {
+                refill_time: u64::MAX,
+                burst_recharge_seconds: Some(u64::MAX / 1000 + 1),
+                ..bucket
+            },
+        ] {
+            for result in rate_limiter_validation_results(RateLimiterConfig {
+                bandwidth: Some(bucket),
+                ops: Some(bucket),
+            }) {
+                result.unwrap();
+            }
+        }
+    }
+
+    #[test]
     fn test_rate_limiter_burst_serde() {
         let old_json = r#"{"size":1000,"one_time_burst":0,"refill_time":1000}"#;
         let plain: TokenBucketConfig = serde_json::from_str(old_json).unwrap();
         assert_eq!(plain.burst_rate, None);
         assert_eq!(plain.burst_seconds, None);
+        assert_eq!(plain.burst_recharge_seconds, None);
         assert_eq!(serde_json::to_string(&plain).unwrap(), old_json);
         let old_config_json = format!(r#"{{"bandwidth":{old_json},"ops":null}}"#);
         let plain_config: RateLimiterConfig = serde_json::from_str(&old_config_json).unwrap();
@@ -5019,6 +5225,27 @@ mod tests {
             serde_json::from_str::<RateLimiterConfig>(&json).unwrap(),
             config
         );
+
+        let recharge = TokenBucketConfig {
+            burst_recharge_seconds: Some(4),
+            ..burst
+        };
+        let json = serde_json::to_string(&recharge).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["burst_recharge_seconds"], 4);
+        assert_eq!(
+            serde_json::from_str::<TokenBucketConfig>(&json).unwrap(),
+            recharge
+        );
+        let config = RateLimiterConfig {
+            bandwidth: Some(recharge),
+            ops: Some(recharge),
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        assert_eq!(
+            serde_json::from_str::<RateLimiterConfig>(&json).unwrap(),
+            config
+        );
     }
 
     #[test]
@@ -5029,6 +5256,7 @@ mod tests {
             refill_time: 100,
             burst_rate: None,
             burst_seconds: None,
+            burst_recharge_seconds: None,
         };
         let bucket = plain.token_bucket().unwrap();
         assert_eq!(bucket.capacity(), 1000);
@@ -5052,6 +5280,15 @@ mod tests {
         .token_bucket()
         .unwrap();
         assert_eq!(bucket.capacity(), 60_000);
+        let bucket = TokenBucketConfig {
+            burst_seconds: Some(3),
+            burst_recharge_seconds: Some(4),
+            ..burst
+        }
+        .token_bucket()
+        .unwrap();
+        assert_eq!(bucket.capacity(), 60_000);
+        assert_eq!(bucket.budget(), 60_000);
     }
 
     #[test]

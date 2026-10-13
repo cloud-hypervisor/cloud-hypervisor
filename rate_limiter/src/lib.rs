@@ -160,6 +160,27 @@ impl Meter {
         }
     }
 
+    fn refill_to(&mut self, elapsed_ns: u64, ceiling: u64) {
+        self.refill(elapsed_ns);
+        if self.level >= i128::from(ceiling) {
+            self.level = i128::from(ceiling);
+            self.remainder = 0;
+        }
+    }
+
+    fn refill_with_spill(&mut self, elapsed_ns: u64, ceiling: u64) -> u64 {
+        // Round up the fill time so a fractional nanosecond never refills both meters.
+        let needed = (i128::from(ceiling) - self.level).max(0) as u128;
+        let fill_ns = needed
+            .checked_mul(self.processed_refill_time)
+            .and_then(|scaled| scaled.checked_sub(self.remainder))
+            .map(|scaled| scaled.div_ceil(u128::from(self.processed_capacity)));
+        self.refill_to(elapsed_ns, ceiling);
+        fill_ns.map_or(0, |fill_ns| {
+            u128::from(elapsed_ns).saturating_sub(fill_ns) as u64
+        })
+    }
+
     fn admits(&self, tokens: u64) -> bool {
         i128::from(tokens) <= self.level || (tokens > self.capacity && self.level >= 0)
     }
@@ -190,38 +211,116 @@ impl Meter {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Burst {
+    // Keep the total depth for oversized admission; refill applies the base ceiling.
     sustained: Meter,
     peak: Meter,
+    credit: Option<Meter>,
+    // MAX waits for the timer; finite values cover the retry grace after it fires.
+    starved_ns: Option<u64>,
 }
 
 impl Burst {
-    fn refill(&mut self, elapsed_ns: u64) {
-        self.sustained.refill(elapsed_ns);
+    fn refill(&mut self, mut elapsed_ns: u64) {
         self.peak.refill(elapsed_ns);
+        if self.credit.is_none() {
+            self.sustained.refill(elapsed_ns);
+            return;
+        }
+        if let Some(grace_ns) = self.starved_ns {
+            let pending_ns = elapsed_ns.min(grace_ns);
+            let credit = self.credit.as_ref().unwrap();
+            let ceiling = self.sustained.capacity - credit.level as u64;
+            self.sustained.refill_to(pending_ns, ceiling);
+            elapsed_ns -= pending_ns;
+            if grace_ns == u64::MAX {
+                return;
+            }
+            let remaining_ns = grace_ns - pending_ns;
+            self.starved_ns = Some(remaining_ns);
+            if remaining_ns > 0 {
+                return;
+            }
+            self.leave_starvation();
+        }
+        let credit = self.credit.as_mut().unwrap();
+        let base_capacity = self.sustained.capacity - credit.capacity;
+        let spill_ns = self.sustained.refill_with_spill(elapsed_ns, base_capacity);
+        credit.refill(spill_ns);
+    }
+
+    fn leave_starvation(&mut self) {
+        if let Some(credit) = self.credit.as_mut() {
+            let base_capacity = i128::from(self.sustained.capacity - credit.capacity);
+            let whole_excess = self.sustained.level - base_capacity;
+            let fractional_token = i128::from(self.sustained.remainder > 0);
+            let transfer = (whole_excess + fractional_token).max(0) as u64;
+            self.sustained.level -= i128::from(transfer);
+            // A fractional base level is below D-credit, so rounding the transfer
+            // up still fits Dc. Filling credit discards its old fraction as usual.
+            credit.replenish(transfer);
+        }
+        self.starved_ns = None;
     }
 
     fn budget(&self) -> u64 {
-        self.sustained.level.max(0) as u64
+        (self.sustained.level + self.credit.as_ref().map_or(0, |credit| credit.level)).max(0) as u64
     }
 
-    fn replenish(&mut self, tokens: u64) {
-        self.sustained.replenish(tokens);
+    fn replenish(&mut self, mut tokens: u64) {
         self.peak.replenish(tokens);
+        if let Some(credit) = self.credit.as_mut() {
+            let refund = tokens.min(credit.capacity - credit.level as u64);
+            credit.replenish(refund);
+            tokens -= refund;
+            self.sustained.replenish(tokens);
+            let ceiling = if self.starved_ns.is_some() {
+                self.sustained.capacity - credit.level as u64
+            } else {
+                self.sustained.capacity - credit.capacity
+            };
+            if self.sustained.level >= i128::from(ceiling) {
+                self.sustained.level = i128::from(ceiling);
+                self.sustained.remainder = 0;
+            }
+        } else {
+            self.sustained.replenish(tokens);
+        }
     }
 
     fn reduce(&mut self, tokens: u64, elapsed_ns: u64, refill_time_ms: u64) -> BucketReduction {
         self.refill(elapsed_ns);
-        if !self.sustained.admits(tokens) || !self.peak.admits(tokens) {
+        let admits = if self.credit.is_some() {
+            tokens <= self.budget()
+                || (tokens > self.sustained.capacity && self.sustained.level >= 0)
+        } else {
+            self.sustained.admits(tokens)
+        };
+        if !admits || !self.peak.admits(tokens) {
+            // Waiting demand must accrue only sustained-rate tokens, regardless of request size.
+            self.starved_ns = self.credit.as_ref().map(|_| u64::MAX);
             return BucketReduction::Failure;
         }
-        self.sustained.level -= i128::from(tokens);
+        if let Some(credit) = self.credit.as_mut() {
+            let base_tokens = tokens.min(self.sustained.level.max(0) as u64);
+            self.sustained.level -= i128::from(base_tokens);
+            let credit_tokens = (tokens - base_tokens).min(credit.level as u64);
+            credit.level -= i128::from(credit_tokens);
+            self.sustained.level -= i128::from(tokens - base_tokens - credit_tokens);
+            if self.sustained.level < 0 {
+                credit.remainder = 0;
+            }
+        } else {
+            self.sustained.level -= i128::from(tokens);
+        }
         self.peak.level -= i128::from(tokens);
         let delay_ns = self.sustained.delay_ns().max(self.peak.delay_ns());
         if delay_ns > 0.0 {
+            self.starved_ns = self.credit.as_ref().map(|_| u64::MAX);
             BucketReduction::OverConsumption(
                 delay_ns / (refill_time_ms as f64 * NANOSEC_IN_ONE_MILLISEC as f64),
             )
         } else {
+            self.leave_starvation();
             BucketReduction::Success
         }
     }
@@ -277,6 +376,12 @@ impl TokenBucket {
     /// and oversized requests retain debt until repaid.
     /// One-time burst credit does not apply to this mode.
     ///
+    /// Nonzero `burst_recharge_seconds` selects idle recharge time, within one
+    /// nanosecond per base-full transition. Blocked demand and the 100 ms retry
+    /// grace after its timer fires refill only at the sustained rate.
+    /// Zero recharge, a period no longer than the base refill time, or no credit
+    /// beyond one second of sustained rate retains implicit recharge.
+    ///
     /// Returns `None` if `size` or the refill time is zero. A zero burst rate or
     /// duration instead creates a plain bucket without one-time burst credit.
     pub fn new_with_burst(
@@ -284,6 +389,7 @@ impl TokenBucket {
         complete_refill_time_ms: u64,
         burst_rate: u64,
         burst_seconds: u64,
+        burst_recharge_seconds: u64,
     ) -> Option<Self> {
         if size == 0 || complete_refill_time_ms == 0 {
             return None;
@@ -293,7 +399,24 @@ impl TokenBucket {
         }
         let capacity = burst_rate.saturating_mul(burst_seconds);
         let refill_ns = u128::from(complete_refill_time_ms) * u128::from(NANOSEC_IN_ONE_MILLISEC);
-        let sustained = Meter::new(capacity, size, refill_ns);
+        let mut sustained = Meter::new(capacity, size, refill_ns);
+        let credit = if burst_recharge_seconds == 0 {
+            None
+        } else {
+            let base_capacity = (u128::from(size) * 1000)
+                .div_ceil(u128::from(complete_refill_time_ms))
+                .min(u128::from(capacity)) as u64;
+            let base_refill_ns = u128::from(base_capacity) * sustained.processed_refill_time
+                / u128::from(sustained.processed_capacity);
+            (u128::from(burst_recharge_seconds) * 1_000_000_000)
+                .checked_sub(base_refill_ns)
+                .filter(|credit_ns| *credit_ns > 0 && base_capacity < capacity)
+                .map(|credit_ns| {
+                    sustained.level = i128::from(base_capacity);
+                    let credit_capacity = capacity - base_capacity;
+                    Meter::new(credit_capacity, credit_capacity, credit_ns)
+                })
+        };
         Some(Self {
             size,
             one_time_burst: 0,
@@ -305,6 +428,8 @@ impl TokenBucket {
             burst: Some(Box::new(Burst {
                 sustained,
                 peak: Meter::new(burst_rate, burst_rate, 1_000_000_000),
+                credit,
+                starved_ns: None,
             })),
         })
     }
@@ -393,6 +518,21 @@ impl TokenBucket {
             return;
         }
         self.budget = cmp::min(self.budget + tokens, self.size);
+    }
+
+    fn block_timer_expired(&mut self) {
+        if let Some(burst) = self.burst.as_mut()
+            && burst.starved_ns.is_some()
+        {
+            let now = Instant::now();
+            let elapsed_ns = now
+                .duration_since(self.last_update)
+                .as_nanos()
+                .min(u128::from(u64::MAX)) as u64;
+            self.last_update = now;
+            burst.refill(elapsed_ns);
+            burst.starved_ns = Some(REFILL_TIMER_INTERVAL_MS * NANOSEC_IN_ONE_MILLISEC);
+        }
     }
 
     /// Returns the sustained credit depth (`burst_rate * burst_seconds` in burst
@@ -667,6 +807,12 @@ impl RateLimiter {
                     }
                 }
                 _ => {
+                    if let Some(bucket) = guard.bandwidth.as_mut() {
+                        bucket.block_timer_expired();
+                    }
+                    if let Some(bucket) = guard.ops.as_mut() {
+                        bucket.block_timer_expired();
+                    }
                     self.timer_active.store(false, Ordering::Relaxed);
                     return Ok(());
                 }
@@ -1139,7 +1285,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_burst_peak_cap() {
-        let mut bucket = TokenBucket::new_with_burst(10, 1000, 101, 2).unwrap();
+        let mut bucket = TokenBucket::new_with_burst(10, 1000, 101, 2, 0).unwrap();
         assert_eq!(bucket.capacity(), 202);
         assert_eq!(bucket.one_time_burst(), 0);
         assert_eq!(bucket.burst.as_ref().unwrap().peak.capacity, 101);
@@ -1154,7 +1300,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_burst_exhaustion_and_idle_refill() {
-        let mut bucket = TokenBucket::new_with_burst(10, 1000, 100, 1).unwrap();
+        let mut bucket = TokenBucket::new_with_burst(10, 1000, 100, 1, 0).unwrap();
         assert_eq!(burst_reduce(&mut bucket, 100, 0), BucketReduction::Success);
         assert_eq!(bucket.budget(), 0);
         for _ in 0..20 {
@@ -1175,7 +1321,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_burst_atomic_admission() {
-        let mut bucket = TokenBucket::new_with_burst(10, 1000, 100, 1).unwrap();
+        let mut bucket = TokenBucket::new_with_burst(10, 1000, 100, 1, 0).unwrap();
         // Peak FAIL / sustained OK, sustained FAIL / peak OK, and peak OVER /
         // sustained FAIL must never partially debit either meter.
         for (sustained, peak, tokens) in [(100, 0, 1), (0, 100, 1), (-1, 100, 101), (100, -1, 101)]
@@ -1214,7 +1360,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_burst_debt_retention() {
-        let mut bucket = TokenBucket::new_with_burst(100, 1000, 100, 10).unwrap();
+        let mut bucket = TokenBucket::new_with_burst(100, 1000, 100, 10, 0).unwrap();
         assert_eq!(
             burst_reduce(&mut bucket, 200, 0),
             BucketReduction::OverConsumption(1.0),
@@ -1246,7 +1392,7 @@ pub(crate) mod tests {
     #[test]
     fn test_burst_fractional_refill() {
         for rate in (1..10).chain([19]) {
-            let mut bucket = TokenBucket::new_with_burst(rate, 1000, rate, 2).unwrap();
+            let mut bucket = TokenBucket::new_with_burst(rate, 1000, rate, 2, 0).unwrap();
             let peak_capacity = bucket.burst.as_ref().unwrap().peak.capacity;
             assert_eq!(
                 burst_reduce(&mut bucket, peak_capacity, 0),
@@ -1262,7 +1408,7 @@ pub(crate) mod tests {
             }
             assert_eq!(admitted, rate);
             assert_eq!(bucket.burst.as_ref().unwrap().peak.level, 0);
-            let mut bucket = TokenBucket::new_with_burst(rate, 1000, rate, 2).unwrap();
+            let mut bucket = TokenBucket::new_with_burst(rate, 1000, rate, 2, 0).unwrap();
             assert_eq!(burst_reduce(&mut bucket, rate, 0), BucketReduction::Success);
             let mut admitted = 0;
             for _ in 0..100 {
@@ -1281,7 +1427,7 @@ pub(crate) mod tests {
     fn test_burst_byte_rate_with_fixed_probes() {
         let rate = 10_000_000;
         let request = 384 * 1024;
-        let mut bucket = TokenBucket::new_with_burst(rate, 1000, rate, 2).unwrap();
+        let mut bucket = TokenBucket::new_with_burst(rate, 1000, rate, 2, 0).unwrap();
         while burst_reduce(&mut bucket, request, 0) == BucketReduction::Success {}
         let mut admitted = 0;
         for _ in 0..100 {
@@ -1297,7 +1443,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_burst_last_update_and_refund() {
-        let mut bucket = TokenBucket::new_with_burst(10, 1000, 100, 2).unwrap();
+        let mut bucket = TokenBucket::new_with_burst(10, 1000, 100, 2, 0).unwrap();
         assert_eq!(burst_reduce(&mut bucket, 10, 0), BucketReduction::Success);
         bucket.last_update = Instant::now() - Duration::from_millis(100);
         assert_eq!(bucket.reduce(1), BucketReduction::Success);
@@ -1314,7 +1460,7 @@ pub(crate) mod tests {
         assert_eq!(bucket.budget(), 200);
         assert_eq!(bucket.burst.as_ref().unwrap().peak.level, 100);
 
-        let mut bucket = TokenBucket::new_with_burst(10, 1000, 100, 2).unwrap();
+        let mut bucket = TokenBucket::new_with_burst(10, 1000, 100, 2, 0).unwrap();
         assert_eq!(
             burst_reduce(&mut bucket, 201, 0),
             BucketReduction::OverConsumption(1.01),
@@ -1326,9 +1472,11 @@ pub(crate) mod tests {
 
     #[test]
     fn test_burst_sub_ms_overconsumption_timer() {
-        let limiter =
-            RateLimiter::from_buckets(None, TokenBucket::new_with_burst(10_000, 1000, 10_000, 1))
-                .unwrap();
+        let limiter = RateLimiter::from_buckets(
+            None,
+            TokenBucket::new_with_burst(10_000, 1000, 10_000, 1, 0),
+        )
+        .unwrap();
         assert!(limiter.consume(10_001, TokenType::Ops));
         assert!(limiter.is_blocked());
         thread::sleep(Duration::from_millis(5));
@@ -1338,16 +1486,16 @@ pub(crate) mod tests {
 
     #[test]
     fn test_burst_constructor_edges() {
-        assert!(TokenBucket::new_with_burst(0, 1000, 100, 1).is_none());
-        assert!(TokenBucket::new_with_burst(10, 0, 100, 1).is_none());
+        assert!(TokenBucket::new_with_burst(0, 1000, 100, 1, 0).is_none());
+        assert!(TokenBucket::new_with_burst(10, 0, 100, 1, 0).is_none());
         for (rate, seconds) in [(0, 1), (100, 0), (0, 0)] {
-            let mut bucket = TokenBucket::new_with_burst(10, 1000, rate, seconds).unwrap();
+            let mut bucket = TokenBucket::new_with_burst(10, 1000, rate, seconds, 0).unwrap();
             let plain = TokenBucket::new(10, 0, 1000).unwrap();
             bucket.last_update = plain.last_update;
             assert_eq!(bucket, plain);
         }
         for (rate, seconds) in [(0, 1), (1, 0)] {
-            let mut bucket = TokenBucket::new_with_burst(1, 1 << 58, rate, seconds).unwrap();
+            let mut bucket = TokenBucket::new_with_burst(1, 1 << 58, rate, seconds, 0).unwrap();
             assert_eq!(bucket.reduce(1), BucketReduction::Success);
             assert_eq!(bucket.reduce(1), BucketReduction::Failure);
         }
@@ -1357,14 +1505,432 @@ pub(crate) mod tests {
             (u64::MAX, 1, u64::MAX, 1),
             (1, u64::MAX, 1, 1),
         ] {
-            let mut bucket = TokenBucket::new_with_burst(size, refill, rate, seconds).unwrap();
-            assert_eq!(bucket.capacity(), rate.saturating_mul(seconds));
-            assert!(matches!(
-                burst_reduce(&mut bucket, u64::MAX, 0),
-                BucketReduction::Success | BucketReduction::OverConsumption(_)
-            ));
-            bucket.burst.as_mut().unwrap().refill(u64::MAX);
-            bucket.replenish(u64::MAX);
+            for recharge in [0, u64::MAX] {
+                let mut bucket =
+                    TokenBucket::new_with_burst(size, refill, rate, seconds, recharge).unwrap();
+                assert_eq!(bucket.capacity(), rate.saturating_mul(seconds));
+                assert!(matches!(
+                    burst_reduce(&mut bucket, u64::MAX, 0),
+                    BucketReduction::Success | BucketReduction::OverConsumption(_)
+                ));
+                bucket.burst.as_mut().unwrap().refill(u64::MAX);
+                bucket.replenish(u64::MAX);
+            }
+        }
+    }
+
+    #[test]
+    fn test_burst_recharge_timing_and_partial_credit() {
+        for recharge in [20, 80] {
+            for elapsed_ms in [500, 1000, 1500, 10_000, recharge * 1000 - 1] {
+                let mut bucket =
+                    TokenBucket::new_with_burst(5000, 1000, 20_000, 10, recharge).unwrap();
+                let burst = bucket.burst.as_mut().unwrap();
+                burst.sustained.level = 0;
+                burst.credit.as_mut().unwrap().level = 0;
+                assert_eq!(
+                    burst_reduce(&mut bucket, 0, elapsed_ms),
+                    BucketReduction::Success
+                );
+                let elapsed = elapsed_ms as f64 / 1000.0;
+                let expected = (5000.0 * elapsed).min(5000.0)
+                    + 195_000.0 * ((elapsed - 1.0) / (recharge as f64 - 1.0)).clamp(0.0, 1.0);
+                assert!((bucket.budget() as f64 - expected).abs() <= 1.0);
+                assert!(bucket.budget() < bucket.capacity());
+                assert_eq!(
+                    burst_reduce(&mut bucket, 0, recharge * 1000 - elapsed_ms + 1),
+                    BucketReduction::Success
+                );
+                assert_eq!(bucket.budget(), 200_000);
+                let burst = bucket.burst.as_ref().unwrap();
+                assert_eq!(burst.sustained.remainder, 0);
+                assert_eq!(burst.credit.as_ref().unwrap().remainder, 0);
+            }
+            let mut bucket = TokenBucket::new_with_burst(5000, 1000, 20_000, 10, recharge).unwrap();
+            let burst = bucket.burst.as_mut().unwrap();
+            burst.sustained.level = 0;
+            burst.credit.as_mut().unwrap().level = 0;
+            assert_eq!(
+                burst_reduce(&mut bucket, 0, recharge * 1000),
+                BucketReduction::Success
+            );
+            assert_eq!(bucket.budget(), bucket.capacity());
+        }
+    }
+
+    #[test]
+    fn test_burst_recharge_fractional_spill() {
+        let mut meter = Meter::new(2, 3, 1_000_000_000);
+        meter.level = 0;
+        assert_eq!(meter.refill_with_spill(333_333_333, 1), 0);
+        assert_eq!(meter.level, 0);
+        assert_eq!(meter.refill_with_spill(2, 1), 1);
+        assert_eq!(meter.level, 1);
+        assert_eq!(meter.remainder, 0);
+        assert_eq!(meter.refill_with_spill(100, 1), 100);
+
+        let mut meter = Meter::new(u64::MAX, 1, u128::MAX);
+        meter.level = -1;
+        assert_eq!(meter.refill_with_spill(1, u64::MAX), 0);
+        assert_eq!(meter.level, -1);
+        assert_eq!(meter.remainder, 1);
+    }
+
+    #[test]
+    fn test_burst_recharge_saturated_requests() {
+        for (rate, peak, request) in [(50, 200, 1), (5000, 20_000, 20_000)] {
+            let mut bucket = TokenBucket::new_with_burst(rate, 1000, peak, 10, 20).unwrap();
+            while burst_reduce(&mut bucket, request, 0) == BucketReduction::Success {}
+            let mut admitted = 0_u64;
+            // Discard the initial burst before measuring steady-state throughput.
+            for probe in 0..5000 {
+                let mut outcome = burst_reduce(&mut bucket, request, REFILL_TIMER_INTERVAL_MS);
+                while outcome == BucketReduction::Success {
+                    if probe >= 1000 {
+                        admitted += request;
+                    }
+                    outcome = burst_reduce(&mut bucket, request, 0);
+                }
+                assert_eq!(outcome, BucketReduction::Failure);
+            }
+            assert!(admitted.abs_diff(rate * 400) < request);
+            let credit = bucket.burst.as_ref().unwrap().credit.as_ref().unwrap();
+            assert_eq!(credit.level, 0);
+        }
+    }
+
+    #[test]
+    fn test_burst_recharge_full_depth_cycles() {
+        let mut bucket = TokenBucket::new_with_burst(5000, 1000, 20_000, 10, 20).unwrap();
+        assert_eq!(
+            burst_reduce(&mut bucket, 200_000, 0),
+            BucketReduction::OverConsumption(9.0)
+        );
+        let burst = bucket.burst.as_mut().unwrap();
+        burst.refill(9_000_000_000);
+        assert_eq!(burst.sustained.level, 45_000);
+        assert_eq!(burst.credit.as_ref().unwrap().level, 0);
+        burst.starved_ns = Some(100_000_000);
+        burst.refill(100_000_000);
+        assert_eq!(burst.starved_ns, None);
+        assert_eq!(burst.sustained.level, 5000);
+        assert_eq!(burst.credit.as_ref().unwrap().level, 40_500);
+        let credit_ns = (154_500_u64 * 19_000_000_000).div_ceil(195_000);
+        burst.refill(credit_ns - 1);
+        assert_eq!(burst.budget(), 199_999);
+        burst.refill(1);
+        assert_eq!(burst.budget(), 200_000);
+
+        // A debt wait is not idle: D-sized attempts every P need not attain D/P.
+        let mut bucket = TokenBucket::new_with_burst(5000, 1000, 20_000, 10, 20).unwrap();
+        let mut outcome = burst_reduce(&mut bucket, 200_000, 0);
+        let mut admitted = 0_u64;
+        for _ in 0..100 {
+            let wait_ms = match outcome {
+                BucketReduction::Failure => REFILL_TIMER_INTERVAL_MS,
+                BucketReduction::OverConsumption(ratio) => (ratio * 1000.0).ceil() as u64,
+                BucketReduction::Success => panic!("Full-depth charge must owe peak debt"),
+            };
+            let burst = bucket.burst.as_mut().unwrap();
+            burst.refill(wait_ms * NANOSEC_IN_ONE_MILLISEC);
+            burst.starved_ns = Some(100_000_000);
+            outcome = burst_reduce(&mut bucket, 200_000, 20_000 - wait_ms);
+            if matches!(outcome, BucketReduction::OverConsumption(_)) {
+                admitted += 200_000;
+            }
+        }
+        assert!(admitted / (100 * 20) <= 10_000);
+    }
+
+    #[test]
+    fn test_burst_recharge_one_token_cycles() {
+        let rate = 50;
+        let peak = 200;
+        let depth = 2000;
+        let recharge = 20;
+        let mut bucket = TokenBucket::new_with_burst(rate, 1000, peak, 10, recharge).unwrap();
+        let mut admitted = 0_u64;
+        let mut elapsed_ms = 0_u64;
+        for _ in 0..20 {
+            for _ in 0..peak {
+                assert_eq!(burst_reduce(&mut bucket, 1, 0), BucketReduction::Success);
+                admitted += 1;
+            }
+            while bucket.budget() > 0 {
+                assert_eq!(burst_reduce(&mut bucket, 1, 5), BucketReduction::Success);
+                admitted += 1;
+                elapsed_ms += 5;
+            }
+            assert_eq!(
+                burst_reduce(&mut bucket, 0, recharge * 1000),
+                BucketReduction::Success
+            );
+            elapsed_ms += recharge * 1000;
+            assert_eq!(bucket.budget(), depth);
+        }
+        let average = admitted as f64 * 1000.0 / elapsed_ms as f64;
+        let bound =
+            (peak * (depth - rate)) as f64 / (depth - peak + recharge * (peak - rate)) as f64;
+        assert!(average <= bound);
+        assert!(average > bound * 0.995);
+    }
+
+    #[test]
+    fn test_burst_recharge_atomic_admission() {
+        let mut bucket = TokenBucket::new_with_burst(10, 1000, 100, 2, 5).unwrap();
+        for (base, credit, peak, tokens) in [
+            (10, 190, 0, 1),
+            (0, 0, 100, 1),
+            (5, 6, 100, 12),
+            (-1, 0, 100, 201),
+            (10, 190, -1, 201),
+        ] {
+            let burst = bucket.burst.as_mut().unwrap();
+            burst.sustained.level = base;
+            burst.credit.as_mut().unwrap().level = credit;
+            burst.peak.level = peak;
+            let before = (
+                burst.sustained.clone(),
+                burst.credit.clone(),
+                burst.peak.clone(),
+            );
+            assert_eq!(
+                burst_reduce(&mut bucket, tokens, 0),
+                BucketReduction::Failure
+            );
+            let burst = bucket.burst.as_ref().unwrap();
+            assert_eq!(burst.starved_ns, Some(u64::MAX));
+            assert_eq!(
+                (
+                    burst.sustained.clone(),
+                    burst.credit.clone(),
+                    burst.peak.clone()
+                ),
+                before
+            );
+        }
+        let burst = bucket.burst.as_mut().unwrap();
+        burst.sustained.level = 5;
+        burst.credit.as_mut().unwrap().level = 6;
+        burst.peak.level = 100;
+        assert_eq!(burst_reduce(&mut bucket, 9, 0), BucketReduction::Success);
+        let burst = bucket.burst.as_ref().unwrap();
+        assert_eq!(burst.sustained.level, 0);
+        assert_eq!(burst.credit.as_ref().unwrap().level, 2);
+        assert_eq!(burst.peak.level, 91);
+        assert_eq!(burst.starved_ns, None);
+    }
+
+    #[test]
+    fn test_burst_recharge_debt_and_credit_first_refund() {
+        let mut bucket = TokenBucket::new_with_burst(10, 1000, 100, 2, 5).unwrap();
+        assert_eq!(
+            burst_reduce(&mut bucket, 400, 0),
+            BucketReduction::OverConsumption(20.0)
+        );
+        let burst = bucket.burst.as_mut().unwrap();
+        assert_eq!(burst.sustained.level, -200);
+        assert_eq!(burst.credit.as_ref().unwrap().level, 0);
+        assert_eq!(burst.peak.level, -300);
+        burst.refill(10_000_000_000);
+        assert_eq!(burst.sustained.level, -100);
+        assert_eq!(burst.credit.as_ref().unwrap().level, 0);
+        burst.refill(10_000_000_000);
+        assert_eq!(burst.sustained.level, 0);
+        assert_eq!(burst.credit.as_ref().unwrap().level, 0);
+        burst.replenish(5);
+        assert_eq!(burst.credit.as_ref().unwrap().level, 5);
+        assert_eq!(burst.sustained.level, 0);
+        burst.replenish(190);
+        assert_eq!(burst.credit.as_ref().unwrap().level, 190);
+        assert_eq!(burst.sustained.level, 5);
+        burst.replenish(u64::MAX);
+        assert_eq!(burst.budget(), 200);
+        assert_eq!(burst.sustained.level, 10);
+        assert_eq!(burst.sustained.remainder, 0);
+        assert_eq!(burst.credit.as_ref().unwrap().remainder, 0);
+        assert_eq!(burst.peak.level, 100);
+
+        // The public refund refills elapsed idle time before restoring credit.
+        burst.sustained.level = 0;
+        burst.credit.as_mut().unwrap().level = 0;
+        bucket.last_update = Instant::now() - Duration::from_secs(1);
+        bucket.replenish(1);
+        let burst = bucket.burst.as_ref().unwrap();
+        assert_eq!(burst.sustained.level, 10);
+        assert_eq!(burst.credit.as_ref().unwrap().level, 1);
+    }
+
+    #[test]
+    fn test_burst_recharge_starved_transition() {
+        let mut bucket = TokenBucket::new_with_burst(10, 1000, 100, 2, 5).unwrap();
+        let burst = bucket.burst.as_mut().unwrap();
+        burst.sustained.level = 0;
+        burst.credit.as_mut().unwrap().level = 0;
+        assert_eq!(burst_reduce(&mut bucket, 100, 0), BucketReduction::Failure);
+        bucket.burst.as_mut().unwrap().refill(5_000_000_000);
+        let burst = bucket.burst.as_ref().unwrap();
+        assert_eq!(burst.starved_ns, Some(u64::MAX));
+        assert_eq!(burst.sustained.level, 50);
+        assert_eq!(burst.credit.as_ref().unwrap().level, 0);
+        assert_eq!(burst_reduce(&mut bucket, 1, 0), BucketReduction::Success);
+        let burst = bucket.burst.as_ref().unwrap();
+        assert_eq!(burst.starved_ns, None);
+        assert_eq!(burst.sustained.level, 10);
+        assert_eq!(burst.credit.as_ref().unwrap().level, 39);
+        assert_eq!(bucket.budget(), 49);
+        assert_eq!(burst.sustained.remainder, 0);
+
+        assert_eq!(burst_reduce(&mut bucket, 200, 0), BucketReduction::Failure);
+        bucket.burst.as_mut().unwrap().refill(u64::MAX);
+        assert_eq!(bucket.budget(), 200);
+        assert_eq!(bucket.burst.as_ref().unwrap().sustained.remainder, 0);
+        assert_eq!(burst_reduce(&mut bucket, 0, 0), BucketReduction::Success);
+        let burst = bucket.burst.as_ref().unwrap();
+        assert_eq!(burst.sustained.level, 10);
+        assert_eq!(burst.credit.as_ref().unwrap().level, 190);
+        assert_eq!(burst.credit.as_ref().unwrap().remainder, 0);
+    }
+
+    #[test]
+    fn test_burst_recharge_constructor_edges() {
+        for recharge in [0, 1] {
+            let bucket = TokenBucket::new_with_burst(10, 1000, 100, 2, recharge).unwrap();
+            assert!(bucket.burst.as_ref().unwrap().credit.is_none());
+            assert_eq!(bucket.budget(), 200);
+        }
+        let bucket = TokenBucket::new_with_burst(1, 3000, 1, 2, 3).unwrap();
+        assert!(bucket.burst.as_ref().unwrap().credit.is_none());
+        let bucket = TokenBucket::new_with_burst(10, 1000, 10, 1, 100).unwrap();
+        assert!(bucket.burst.as_ref().unwrap().credit.is_none());
+        assert_eq!(bucket.budget(), 10);
+
+        let mut bucket =
+            TokenBucket::new_with_burst(2_000_000_001, 4_000_000_000_000, 1, 10, 2).unwrap();
+        let burst = bucket.burst.as_mut().unwrap();
+        burst.sustained.level = 0;
+        burst.credit.as_mut().unwrap().level = 0;
+        burst.refill(2_000_000_000);
+        assert_eq!(burst.budget(), 1);
+        burst.refill(1);
+        assert_eq!(burst.budget(), 10);
+    }
+
+    #[test]
+    fn test_burst_recharge_queued_peak_debt() {
+        let mut bucket = TokenBucket::new_with_burst(512, 1000, 1024, 4, 2).unwrap();
+        let mut outcome = burst_reduce(&mut bucket, 4096, 0);
+        let mut elapsed_ms = 0_u64;
+        let mut admitted = 0_u64;
+        while admitted < 4096 * 100 {
+            let wait_ms = match outcome {
+                BucketReduction::Failure => REFILL_TIMER_INTERVAL_MS,
+                BucketReduction::OverConsumption(ratio) => (ratio * 1000.0).ceil() as u64,
+                BucketReduction::Success => panic!("Full-depth charge must owe peak debt"),
+            };
+            let burst = bucket.burst.as_mut().unwrap();
+            assert_eq!(burst.starved_ns, Some(u64::MAX));
+            burst.refill(wait_ms * NANOSEC_IN_ONE_MILLISEC);
+            burst.starved_ns = Some(100_000_000);
+            elapsed_ms += wait_ms;
+            outcome = burst_reduce(&mut bucket, 4096, 0);
+            if matches!(outcome, BucketReduction::OverConsumption(_)) {
+                admitted += 4096;
+            }
+        }
+        let average = admitted as f64 * 1000.0 / elapsed_ms as f64;
+        assert!((average - 512.0).abs() < 512.0 * 0.02);
+    }
+
+    #[test]
+    fn test_burst_recharge_idle_after_debt_timer() {
+        let mut bucket = TokenBucket::new_with_burst(10, 1000, 100, 2, 5).unwrap();
+        assert_eq!(
+            burst_reduce(&mut bucket, 200, 0),
+            BucketReduction::OverConsumption(1.0)
+        );
+        let burst = bucket.burst.as_mut().unwrap();
+        burst.refill(1_000_000_000);
+        burst.starved_ns = Some(100_000_000);
+        burst.refill(4_050_000_000);
+        assert_eq!(burst.starved_ns, None);
+        assert!(burst.budget() < 200);
+        burst.refill(50_000_000);
+        assert_eq!(burst.budget(), 200);
+    }
+
+    #[test]
+    fn test_burst_recharge_failing_retry_within_grace() {
+        let mut bucket = TokenBucket::new_with_burst(10, 1000, 100, 2, 5).unwrap();
+        let burst = bucket.burst.as_mut().unwrap();
+        burst.sustained.level = 0;
+        burst.credit.as_mut().unwrap().level = 0;
+        assert_eq!(burst_reduce(&mut bucket, 100, 0), BucketReduction::Failure);
+        let burst = bucket.burst.as_mut().unwrap();
+        burst.refill(100_000_000);
+        burst.starved_ns = Some(100_000_000);
+        assert_eq!(burst_reduce(&mut bucket, 100, 50), BucketReduction::Failure);
+        let burst = bucket.burst.as_mut().unwrap();
+        assert_eq!(burst.starved_ns, Some(u64::MAX));
+        burst.refill(10_000_000_000);
+        assert_eq!(burst.sustained.level, 101);
+        assert_eq!(
+            burst.sustained.remainder,
+            burst.sustained.processed_refill_time / 2
+        );
+        assert_eq!(burst.credit.as_ref().unwrap().level, 0);
+        assert_eq!(burst.starved_ns, Some(u64::MAX));
+    }
+
+    #[test]
+    fn test_burst_recharge_fractional_starved_transition() {
+        let mut bucket = TokenBucket::new_with_burst(3, 1000, 10, 1, 2).unwrap();
+        assert_eq!(burst_reduce(&mut bucket, 10, 0), BucketReduction::Success);
+        assert_eq!(burst_reduce(&mut bucket, 10, 0), BucketReduction::Failure);
+        assert_eq!(burst_reduce(&mut bucket, 1, 1500), BucketReduction::Success);
+        let burst = bucket.burst.as_ref().unwrap();
+        assert_eq!(burst.starved_ns, None);
+        assert_eq!(burst.budget(), 3);
+        assert_eq!(burst.sustained.level, 2);
+        assert_eq!(
+            burst.sustained.remainder,
+            burst.sustained.processed_refill_time / 2
+        );
+        assert_eq!(burst.credit.as_ref().unwrap().level, 1);
+        assert_eq!(burst.credit.as_ref().unwrap().remainder, 0);
+    }
+
+    #[test]
+    fn test_rate_limiter_recharge_timer_ends_starvation() {
+        let bucket = TokenBucket::new_with_burst(10, 1000, 100, 2, 5).unwrap();
+        let mut limiter = RateLimiter::from_buckets(Some(bucket.clone()), Some(bucket)).unwrap();
+        {
+            let guard = limiter.inner.get_mut().unwrap();
+            for bucket in [&mut guard.bandwidth, &mut guard.ops].into_iter().flatten() {
+                let burst = bucket.burst.as_mut().unwrap();
+                burst.sustained.level = 0;
+                burst.credit.as_mut().unwrap().level = 0;
+                burst.starved_ns = Some(u64::MAX);
+                bucket.last_update = Instant::now() - Duration::from_secs(1);
+            }
+            guard
+                .timer_fd
+                .reset(Duration::from_millis(1), None)
+                .unwrap();
+        }
+        limiter.timer_active.store(true, Ordering::Relaxed);
+        thread::sleep(Duration::from_millis(5));
+        limiter.event_handler().unwrap();
+        assert!(!limiter.is_blocked());
+        let guard = limiter.inner.get_mut().unwrap();
+        for bucket in [&mut guard.bandwidth, &mut guard.ops].into_iter().flatten() {
+            let burst = bucket.burst.as_mut().unwrap();
+            assert_eq!(burst.starved_ns, Some(100_000_000));
+            assert_eq!(burst.credit.as_ref().unwrap().level, 0);
+            assert!(burst.sustained.level >= 10);
+            burst.refill(5_100_000_000);
+            assert_eq!(burst.starved_ns, None);
+            assert_eq!(burst.budget(), 200);
         }
     }
 }

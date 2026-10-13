@@ -14638,12 +14638,12 @@ mod rate_limiter {
         _test_rate_limiter_net(false);
     }
 
-    fn block_rate_limiter_fio_command(fio_ops: &FioOps, num_queues: u32) -> String {
+    fn block_rate_limiter_fio_command(fio_ops: &FioOps, num_queues: u32, ramp_time: u32) -> String {
         format!(
             "sudo fio --filename=/dev/vdc --name=test --output-format=json \
             --direct=1 --bs=4k --ioengine=io_uring --iodepth=64 \
             --rw={fio_ops} --runtime={BLOCK_RATE_LIMITER_RUNTIME} \
-            --ramp_time={BLOCK_RATE_LIMITER_RAMP_TIME} --numjobs={num_queues}",
+            --ramp_time={ramp_time} --numjobs={num_queues}",
         )
     }
 
@@ -14706,7 +14706,8 @@ mod rate_limiter {
         let r = panic::catch_unwind(|| {
             guest.wait_vm_boot().unwrap();
 
-            let fio_command = block_rate_limiter_fio_command(&fio_ops, num_queues);
+            let fio_command =
+                block_rate_limiter_fio_command(&fio_ops, num_queues, BLOCK_RATE_LIMITER_RAMP_TIME);
             let output = guest.ssh_command(&fio_command).unwrap();
 
             // Parse fio output
@@ -14855,6 +14856,85 @@ mod rate_limiter {
     fn test_rate_limiter_block_iops_burst_exhausted() {
         // At 2000 IOPS, the 2000-token depth is exhausted within the 5 s fio ramp.
         _test_rate_limiter_block(false, 1, Some((2000, 1, 1000)));
+    }
+
+    #[test]
+    fn test_rate_limiter_block_iops_burst_recharge() {
+        let fio_ops = FioOps::RandRW;
+        let num_queues = 1;
+
+        for burst_recharge_seconds in [Some(4), None] {
+            let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+            let guest = Guest::new(Box::new(disk_config));
+            let api_socket = temp_api_path(&guest.tmp_dir);
+            let test_img_dir = TempDir::new_with_prefix("/var/tmp/ch").unwrap();
+            let test_img_path = test_img_dir.as_path().join("blk.img");
+            let test_img_path = test_img_path.to_str().unwrap();
+
+            assert!(
+                exec_host_command_output(&format!(
+                    "dd if=/dev/zero of={test_img_path} bs=1M count=1024"
+                ))
+                .status
+                .success()
+            );
+
+            let mut test_blk_params = format!(
+                "path={test_img_path},num_queues={num_queues},ops_size=500,ops_refill_time=1000,\
+                ops_burst_rate=5000,ops_burst_seconds=2,image_type=raw"
+            );
+            if let Some(recharge_seconds) = burst_recharge_seconds {
+                test_blk_params += &format!(",ops_burst_recharge_seconds={recharge_seconds}");
+            }
+
+            let mut child = GuestCommand::new(&guest)
+                .args(["--cpus", &format!("boot={num_queues}")])
+                .args(["--memory", "size=1G"])
+                .default_kernel_cmdline()
+                .default_disks()
+                .args(["--disk", test_blk_params.as_str()])
+                .default_net()
+                .args(["--api-socket", &api_socket])
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            let r = panic::catch_unwind(|| {
+                guest.wait_vm_boot().unwrap();
+
+                let fio_command = block_rate_limiter_fio_command(
+                    &fio_ops,
+                    num_queues,
+                    BLOCK_RATE_LIMITER_RAMP_TIME,
+                );
+                let output = guest.ssh_command(&fio_command).unwrap();
+                let measured_iops = parse_fio_output_iops(&output, &fio_ops, num_queues).unwrap();
+                // D = 10000 ops drains within the 5 s ramp; sustained R = 500 IOPS.
+                assert!(check_rate_limit(measured_iops, 500.0, 0.1));
+
+                // Keep the recharge gap in the guest command.
+                let fio_command = format!(
+                    "sleep 5 && {} --time_based",
+                    block_rate_limiter_fio_command(&fio_ops, num_queues, 0)
+                );
+                let output = guest.ssh_command(&fio_command).unwrap();
+                let measured_iops = parse_fio_output_iops(&output, &fio_ops, num_queues).unwrap();
+                if burst_recharge_seconds.is_some() {
+                    // P = 4 restores D: (10000 + 500 * 20) / 20 = 1000 IOPS.
+                    assert!(check_rate_limit(measured_iops, 1000.0, 0.1));
+                } else {
+                    // Implicit D/R = 20 s: a 5-6 s gap restores only ~625-650 IOPS.
+                    assert!(
+                        measured_iops < 900.0,
+                        "Implicit recharge unexpectedly reached {measured_iops} IOPS"
+                    );
+                }
+            });
+
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+            handle_child_output(r, &output);
+        }
     }
 
     #[test]
