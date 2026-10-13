@@ -142,6 +142,8 @@ impl RequestHandler for StubApiRequestHandler {
                     affinity: None,
                     features: CpuFeatures::default(),
                     profile: Default::default(),
+                    #[cfg(target_arch = "x86_64")]
+                    cpuid_overrides: Vec::new(),
                     nested: true,
                     core_scheduling: CoreScheduling::default(),
                 },

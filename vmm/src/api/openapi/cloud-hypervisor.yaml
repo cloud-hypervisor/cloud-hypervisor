@@ -987,6 +987,43 @@ components:
           $ref: "#/components/schemas/CoreSchedulingMode"
         profile:
           $ref: "#/components/schemas/CpuProfileConfig"
+        x-cpuid-overrides:
+          description: >
+            Experimental x86-64 common CPUID register overrides, applied in
+            order after the selected CPU profile and before per-vCPU
+            adjustments. The caller must ensure host compatibility.
+          type: array
+          default: []
+          items:
+            $ref: "#/components/schemas/CpuidOverride"
+
+    CpuidValue:
+      description: Unsigned 32-bit value encoded as a 0x-prefixed hex string.
+      type: string
+      pattern: '^0x[0-9a-fA-F]{1,8}$'
+
+    CpuidOverride:
+      type: object
+      required:
+        - leaf
+        - subleaf
+        - eax
+        - ebx
+        - ecx
+        - edx
+      properties:
+        leaf:
+          $ref: "#/components/schemas/CpuidValue"
+        subleaf:
+          $ref: "#/components/schemas/CpuidValue"
+        eax:
+          $ref: "#/components/schemas/CpuidValue"
+        ebx:
+          $ref: "#/components/schemas/CpuidValue"
+        ecx:
+          $ref: "#/components/schemas/CpuidValue"
+        edx:
+          $ref: "#/components/schemas/CpuidValue"
 
     PciSegmentConfig:
       required:

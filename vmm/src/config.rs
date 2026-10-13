@@ -12,9 +12,13 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 
 use arch::CpuProfileConfig;
+#[cfg(target_arch = "x86_64")]
+use arch::CpuidOverride;
 use block::ImageType;
 use clap::ArgMatches;
 use log::{debug, warn};
+#[cfg(target_arch = "x86_64")]
+use option_parser::split_commas;
 use option_parser::{
     ByteSized, IntegerList, OptionParser, OptionParserError, StringList, Toggle, Tuple, TupleList,
 };
@@ -196,6 +200,9 @@ pub enum Error {
     ParseFwCfgItem(#[source] OptionParserError),
     #[error("Error parsing common PCI device config")]
     ParsePciDeviceCommonConfig(#[source] OptionParserError),
+    #[cfg(target_arch = "x86_64")]
+    #[error("Error parsing CPUID overrides")]
+    InvalidCpuidOverride(#[source] CpuidOverrideParseError),
 }
 
 #[derive(Debug, PartialEq, Eq, Error)]
@@ -746,6 +753,86 @@ impl FromStr for CpuTopology {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct CpuidOverrides(Vec<CpuidOverride>);
+
+#[cfg(target_arch = "x86_64")]
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum CpuidOverrideParseError {
+    #[error("Expected a bracketed list '[...]', got {0:?}")]
+    MissingBrackets(String),
+    #[error("Expected a bracketed entry '[leaf,subleaf,eax,ebx,ecx,edx]', got {0:?}")]
+    MalformedEntry(String),
+    #[error(
+        "Expected 6 comma-separated fields (leaf,subleaf,eax,ebx,ecx,edx), got {count} in {entry:?}"
+    )]
+    FieldCount { count: usize, entry: String },
+    #[error("Invalid 32-bit value {0:?} (use 0x-prefixed hex)")]
+    InvalidValue(String),
+}
+
+#[cfg(target_arch = "x86_64")]
+impl FromStr for CpuidOverrides {
+    type Err = CpuidOverrideParseError;
+
+    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
+        let body = s
+            .trim()
+            .strip_prefix('[')
+            .and_then(|inner| inner.strip_suffix(']'))
+            .ok_or_else(|| CpuidOverrideParseError::MissingBrackets(s.to_owned()))?
+            .trim();
+
+        if body.is_empty() {
+            return Ok(CpuidOverrides(Vec::new()));
+        }
+
+        let overrides = split_commas(body)
+            .map_err(|_| CpuidOverrideParseError::MalformedEntry(body.to_owned()))?
+            .iter()
+            .map(|entry| parse_cpuid_override_entry(entry.trim()))
+            .collect::<result::Result<Vec<_>, _>>()?;
+
+        Ok(CpuidOverrides(overrides))
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+fn parse_cpuid_override_entry(
+    entry: &str,
+) -> result::Result<CpuidOverride, CpuidOverrideParseError> {
+    let values = entry
+        .strip_prefix('[')
+        .and_then(|inner| inner.strip_suffix(']'))
+        .ok_or_else(|| CpuidOverrideParseError::MalformedEntry(entry.to_owned()))?
+        .split(',')
+        .map(|field| {
+            let field = field.trim();
+            field
+                .strip_prefix("0x")
+                .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+                .ok_or_else(|| CpuidOverrideParseError::InvalidValue(field.to_owned()))
+        })
+        .collect::<result::Result<Vec<_>, _>>()?;
+
+    let [leaf, subleaf, eax, ebx, ecx, edx] = values[..] else {
+        return Err(CpuidOverrideParseError::FieldCount {
+            count: values.len(),
+            entry: entry.to_owned(),
+        });
+    };
+
+    Ok(CpuidOverride {
+        leaf,
+        subleaf,
+        eax,
+        ebx,
+        ecx,
+        edx,
+    })
+}
+
 impl CpusConfig {
     pub fn parse(cpus: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -760,6 +847,8 @@ impl CpusConfig {
             .add("nested")
             .add("core_scheduling")
             .add("profile");
+        #[cfg(target_arch = "x86_64")]
+        parser.add("x-cpuid-overrides");
         parser.parse(cpus).map_err(Error::ParseCpus)?;
 
         let boot_vcpus: u32 = parser
@@ -797,6 +886,15 @@ impl CpusConfig {
             .map(|profile| profile.parse::<CpuProfileConfig>())
             .transpose()
             .map_err(Error::ParseCpuProfile)?
+            .unwrap_or_default();
+
+        #[cfg(target_arch = "x86_64")]
+        let cpuid_overrides = parser
+            .get("x-cpuid-overrides")
+            .map(|value| value.parse::<CpuidOverrides>())
+            .transpose()
+            .map_err(Error::InvalidCpuidOverride)?
+            .map(|overrides| overrides.0)
             .unwrap_or_default();
 
         let features_list = parser
@@ -842,6 +940,8 @@ impl CpusConfig {
             nested,
             core_scheduling,
             profile,
+            #[cfg(target_arch = "x86_64")]
+            cpuid_overrides,
         })
     }
 }
@@ -4213,6 +4313,89 @@ mod tests {
     use net_util::MacAddr;
 
     use super::*;
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn test_cpuid_override_parsing_and_serialization() {
+        let config = CpusConfig::parse(
+            "boot=2,x-cpuid-overrides=[[0x7,0x0,0x1,0x2,0x3,0x4], [0x80000001, 0x0, 0x0, 0x0, 0xFFFFFFFF, 0x0]],max=4",
+        )
+        .unwrap();
+        assert_eq!(config.boot_vcpus, 2);
+        assert_eq!(config.max_vcpus, 4);
+        assert_eq!(
+            config.cpuid_overrides,
+            vec![
+                CpuidOverride {
+                    leaf: 7,
+                    subleaf: 0,
+                    eax: 1,
+                    ebx: 2,
+                    ecx: 3,
+                    edx: 4,
+                },
+                CpuidOverride {
+                    leaf: 0x80000001,
+                    subleaf: 0,
+                    eax: 0,
+                    ebx: 0,
+                    ecx: u32::MAX,
+                    edx: 0,
+                },
+            ]
+        );
+        let json = serde_json::to_string(&config).unwrap();
+        assert_eq!(serde_json::from_str::<CpusConfig>(&json).unwrap(), config);
+        assert_eq!(
+            serde_json::to_value(&config).unwrap()["x-cpuid-overrides"][1]["ecx"],
+            "0xffffffff"
+        );
+        assert_eq!(
+            CpusConfig::parse("x-cpuid-overrides=[]").unwrap(),
+            CpusConfig::default()
+        );
+        assert!(
+            serde_json::to_value(CpusConfig::default())
+                .unwrap()
+                .get("x-cpuid-overrides")
+                .is_none()
+        );
+        assert_eq!(
+            serde_json::from_str::<CpusConfig>(r#"{"boot_vcpus":1,"max_vcpus":1}"#).unwrap(),
+            CpusConfig::default()
+        );
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn test_cpuid_override_invalid_input() {
+        for value in [
+            "0x7",
+            "[0x7,0x0,0x0,0x0,0x0,0x0]",
+            "[[0x7,0x0,0x0,0x0,0x0]]",
+            "[[0x7,0x0,0x0,0x0,0x0,0x0,0x0]]",
+            "[[7,0x0,0x0,0x0,0x0,0x0]]",
+            "[[0x100000000,0x0,0x0,0x0,0x0,0x0]]",
+            "[[0x7,0x0,0x0,0x0,0x0,0xZZ]]",
+            "[[0x7,0x0,0x0,0x0,0x0,0x0],]",
+            "[[0x7,0x0,0x0,0x0,0x0,0x0]",
+        ] {
+            assert!(
+                CpusConfig::parse(&format!("x-cpuid-overrides={value}")).is_err(),
+                "{value}"
+            );
+        }
+        for value in [
+            r#"{"leaf":"0x100000000","subleaf":"0x0","eax":"0x0","ebx":"0x0","ecx":"0x0","edx":"0x0"}"#,
+            r#"{"leaf":7,"subleaf":"0x0","eax":"0x0","ebx":"0x0","ecx":"0x0","edx":"0x0"}"#,
+            r#"{"leaf":"7","subleaf":"0x0","eax":"0x0","ebx":"0x0","ecx":"0x0","edx":"0x0"}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<CpuidOverride>(value).is_err(),
+                "{value}"
+            );
+        }
+    }
 
     #[test]
     fn test_cpu_parsing() -> Result<()> {

@@ -273,7 +273,8 @@ fn get_cli_options_sorted(
                     affinity=<list_of_vcpus_with_their_associated_cpuset>,\
                     features=<list_of_features_to_enable>,\
                     nested=on|off,core_scheduling=vm|vcpu|off,\
-                    profile=host|path:<file>",
+                    profile=host|path:<file>,\
+                    x-cpuid-overrides=[[<leaf>,<subleaf>,<eax>,<ebx>,<ecx>,<edx>],...]",
             )
             .default_value(default_vcpus)
             .group("vm-config"),
@@ -1090,6 +1091,30 @@ mod tests {
         (cli_vm_config, openapi_vm_config)
     }
 
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn test_valid_vm_config_cpuid_overrides() {
+        let cli = vec![
+            "cloud-hypervisor",
+            "--kernel",
+            "/path/to/kernel",
+            "--cpus",
+            "boot=2,x-cpuid-overrides=[[0x80000002,0x0,0x0,0x0,0x0,0x0]]",
+        ];
+        let openapi = r#"{
+            "payload": {"kernel": "/path/to/kernel"},
+            "cpus": {
+                "boot_vcpus": 2,
+                "max_vcpus": 2,
+                "x-cpuid-overrides": [{
+                    "leaf": "0x80000002", "subleaf": "0x0",
+                    "eax": "0x0", "ebx": "0x0", "ecx": "0x0", "edx": "0x0"
+                }]
+            }
+        }"#;
+        compare_vm_config_cli_vs_json(&cli, openapi, true);
+    }
+
     #[test]
     fn test_valid_vm_config_default() {
         let cli = vec!["cloud-hypervisor", "--kernel", "/path/to/kernel"];
@@ -1111,6 +1136,8 @@ mod tests {
                 nested: false,
                 core_scheduling: CoreScheduling::Vm,
                 profile: Default::default(),
+                #[cfg(target_arch = "x86_64")]
+                cpuid_overrides: Vec::new(),
             },
             memory: MemoryConfig {
                 size: 536_870_912,

@@ -21,11 +21,13 @@ struct CpusConfig {
     nested: bool,
     core_scheduling: CoreScheduling,
     profile: CpuProfileConfig,
+    // x86-64 only.
+    cpuid_overrides: Vec<CpuidOverride>,
 }
 ```
 
 ```
---cpus boot=<boot_vcpus>,max=<max_vcpus>,topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,kvm_hyperv=on|off,max_phys_bits=<maximum_number_of_physical_bits>,affinity=<list_of_vcpus_with_their_associated_cpuset>,features=<list_of_features_to_enable>,nested=on|off,core_scheduling=vm|vcpu|off,profile=host|path:<file>
+--cpus boot=<boot_vcpus>,max=<max_vcpus>,topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,kvm_hyperv=on|off,max_phys_bits=<maximum_number_of_physical_bits>,affinity=<list_of_vcpus_with_their_associated_cpuset>,features=<list_of_features_to_enable>,nested=on|off,core_scheduling=vm|vcpu|off,profile=host|path:<file>,x-cpuid-overrides=[[<leaf>,<subleaf>,<eax>,<ebx>,<ecx>,<edx>],...]
 ```
 
 ### `boot`
@@ -307,3 +309,56 @@ The JSON API accepts `"Host"` or an object with a `"File"` key whose value is
 the profile path, such as `{"File": "/path/to/cpu_profile.json"}`. See the
 `CpuProfileConfig` schema in
 [the OpenAPI definition](../vmm/src/api/openapi/cloud-hypervisor.yaml).
+
+### `x-cpuid-overrides` (experimental, x86-64 only)
+
+This option is experimental and may change between releases.
+
+Replace the register values returned by selected CPUID leaves and subleaves.
+This can be used to adjust the CPU information exposed to a guest when
+preparing for snapshot/restore or migration between different hosts.
+
+Each entry contains six unsigned 32-bit values in this order:
+`leaf,subleaf,eax,ebx,ecx,edx`. All values must use `0x`-prefixed hexadecimal
+notation. An entry replaces all four registers of every matching leaf and
+subleaf, or adds a new entry if none exists. Entries are applied in order, so
+the last override for a given leaf and subleaf wins. By default the list is
+empty.
+
+_Example_
+
+```
+--cpus 'boot=2,x-cpuid-overrides=[[0x80000002,0x0,0x0,0x0,0x0,0x0]]'
+```
+
+The corresponding JSON CPU configuration is:
+
+```json
+{
+  "boot_vcpus": 2,
+  "max_vcpus": 2,
+  "x-cpuid-overrides": [
+    {
+      "leaf": "0x80000002",
+      "subleaf": "0x0",
+      "eax": "0x0",
+      "ebx": "0x0",
+      "ecx": "0x0",
+      "edx": "0x0"
+    }
+  ]
+}
+```
+
+Overrides are applied to the common CPUID after the selected CPU profile
+and Cloud Hypervisor's normal adjustments. Per-vCPU adjustments, including
+APIC IDs and CPU topology, are applied afterwards and may change overridden
+values. Snapshot and migration compatibility checks use the overridden
+common CPUID.
+
+Overrides can be used with any CPU profile.
+Cloud Hypervisor does not validate overridden values against host CPU
+capabilities or update related CPUID leaves or MSRs. The caller must ensure
+that the resulting CPU description is consistent and supported by every
+host on which the VM will run. Overrides alone do not guarantee snapshot
+or migration compatibility.

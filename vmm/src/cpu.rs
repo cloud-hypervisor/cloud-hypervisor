@@ -986,6 +986,7 @@ impl CpuManager {
                     phys_bits,
                     kvm_hyperv: config.kvm_hyperv,
                     amx: config.features.amx,
+                    cpuid_overrides: config.cpuid_overrides.clone(),
                 },
                 cpu_profile_data.as_ref(),
             )
