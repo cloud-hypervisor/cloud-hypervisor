@@ -1771,6 +1771,14 @@ impl MemoryManager {
                 &pages_loading,
             ) {
                 Ok(0) => {
+                    // Every page is present, so the faults still queued on
+                    // the other userfaultfds only need waking up.
+                    for uffd in &uffds[1..] {
+                        for range in uffd.ranges() {
+                            uffd::wake(uffd.fd(), range.host_addr, range.length)?;
+                        }
+                    }
+
                     let elapsed = prefault_start.elapsed();
                     info!(
                         "UFFD handler: prefault done in {elapsed:.3?} — \
