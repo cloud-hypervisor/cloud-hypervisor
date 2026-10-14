@@ -114,6 +114,8 @@ pub enum Error {
     VhostUserPostcopyAdvise(#[source] VhostError),
     #[error("Postcopy listen failed")]
     VhostUserPostcopyListen(#[source] VhostError),
+    #[error("Postcopy end failed")]
+    VhostUserPostcopyEnd(#[source] VhostError),
     #[error("The memory table was not sent in postcopy mode")]
     PostcopyMemTableBasesMissing,
     #[error("Failed to register the backend's userfaultfd")]
@@ -244,6 +246,7 @@ impl Error {
             | Error::VhostUserSetProtocolFeatures(e)
             | Error::VhostUserPostcopyAdvise(e)
             | Error::VhostUserPostcopyListen(e)
+            | Error::VhostUserPostcopyEnd(e)
             | Error::VhostUserSetMemTable(e)
             | Error::VhostUserSetVringNum(e)
             | Error::VhostUserSetVringAddr(e)
@@ -278,6 +281,7 @@ pub const DEFAULT_VIRTIO_FEATURES: u64 = (1 << VIRTIO_F_RING_INDIRECT_DESC)
 const HUP_CONNECTION_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 const BACKEND_REQ_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 const RESUME_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
+const POSTCOPY_DONE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
 
 #[derive(Default)]
 pub struct Inflight {
@@ -321,6 +325,16 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
         }
 
         helper.add_event(self.resume_evt.as_raw_fd(), RESUME_EVENT)?;
+
+        if let Some(postcopy) = self.vu.lock().unwrap().postcopy_handle() {
+            // Shared with the other backends, so it's never read and only
+            // fires once.
+            helper.add_event_custom(
+                postcopy.postcopy_done_event().as_raw_fd(),
+                POSTCOPY_DONE_EVENT,
+                epoll::Events::EPOLLIN | epoll::Events::EPOLLONESHOT,
+            )?;
+        }
 
         helper.run(paused, paused_sync, self)?;
 
@@ -451,6 +465,12 @@ impl<S: VhostUserFrontendReqHandler> EpollHelperHandler for VhostUserEpollHandle
                         ))
                     })
             }
+            POSTCOPY_DONE_EVENT => self.vu.lock().unwrap().stop_postcopy().map_err(|e| {
+                EpollHelperError::HandleEvent(anyhow!(
+                    "failed to end postcopy on vhost-user backend for socket {}: {e:?}",
+                    self.socket_path
+                ))
+            }),
             _ => Err(EpollHelperError::HandleEvent(anyhow!(
                 "Unknown event for vhost-user thread"
             ))),

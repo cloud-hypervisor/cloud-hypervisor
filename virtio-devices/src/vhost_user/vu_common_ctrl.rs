@@ -137,6 +137,10 @@ impl VhostUserHandle {
         Ok(())
     }
 
+    pub fn postcopy_handle(&self) -> Option<&Arc<dyn VhostUserPostcopy>> {
+        self.postcopy.as_ref().map(|p| &p.handler)
+    }
+
     pub fn add_memory_region(&mut self, region: &Arc<GuestRegionMmap>) -> Result<()> {
         let (mmap_handle, mmap_offset) = match region.file_offset() {
             Some(file_offset) => (file_offset.file().as_raw_fd(), file_offset.start()),
@@ -175,6 +179,15 @@ impl VhostUserHandle {
             id,
             handler: postcopy,
         });
+        Ok(())
+    }
+
+    pub fn stop_postcopy(&mut self) -> Result<()> {
+        if self.postcopy.take().is_some() {
+            self.vu
+                .postcopy_end()
+                .map_err(Error::VhostUserPostcopyEnd)?;
+        }
         Ok(())
     }
 
