@@ -32,6 +32,7 @@ use thiserror::Error;
 use tracer::trace_scoped;
 use virtio_devices::BlocksState;
 use virtio_devices::mem::Error as VirtioMemError;
+use virtio_devices::vhost_user::{PostcopyRegion, VhostUserPostcopy};
 #[cfg(target_arch = "x86_64")]
 use vm_allocator::GsiApic;
 use vm_allocator::page_size::get_page_size;
@@ -72,6 +73,7 @@ struct UffdHandler {
     handle: thread::JoinHandle<()>,
     fault_socket_fd: Option<OwnedFd>,
     prefault_complete: Arc<AtomicBool>,
+    external_uffd: Arc<ExternalUffd>,
 }
 
 /// Userfaultfds sent to a UFFD handler.
@@ -79,11 +81,50 @@ struct ExternalUffd {
     new_uffds: Mutex<Vec<(String, Uffd)>>,
     new_uffd_evt: EventFd,
     done: EventFd,
+    // The handler ranges, at the VMM's addresses
+    ranges: Box<[UffdRange]>,
 }
 
 impl ExternalUffd {
     fn drain_new_uffds(&self) -> Vec<(String, Uffd)> {
         mem::take(&mut *self.new_uffds.lock().unwrap())
+    }
+}
+
+impl VhostUserPostcopy for ExternalUffd {
+    fn register_uffd_regions(
+        &self,
+        id: &str,
+        fd: OwnedFd,
+        regions: &[PostcopyRegion],
+    ) -> Result<(), io::Error> {
+        // Faults on `fd` are at the addresses where its process maps guest
+        // memory, so translate the handler ranges to those
+        let mut ranges = Vec::new();
+        for range in self.ranges.iter() {
+            let Some(region) = regions.iter().find(|region| {
+                range.gpa >= region.guest_phys_addr
+                    && range.gpa + range.length <= region.guest_phys_addr + region.memory_size
+            }) else {
+                return Err(io::Error::other(format!(
+                    "no region maps guest range {:#x}-{:#x}",
+                    range.gpa,
+                    range.gpa + range.length
+                )));
+            };
+            ranges.push(UffdRange {
+                host_addr: region.backend_addr + (range.gpa - region.guest_phys_addr),
+                ..range.clone()
+            });
+        }
+
+        let entry = (id.to_string(), Uffd::new(fd, ranges.into())?);
+        self.new_uffds.lock().unwrap().push(entry);
+        self.new_uffd_evt.write(1)
+    }
+
+    fn postcopy_done_event(&self) -> &EventFd {
+        &self.done
     }
 }
 
@@ -1271,6 +1312,7 @@ impl MemoryManager {
                 .unwrap_or(base_page_size);
 
             handler_ranges.push(UffdRange {
+                gpa: range.gpa,
                 host_addr,
                 length: range.length,
                 source_offset: source_offset_for(range),
@@ -1306,17 +1348,20 @@ impl MemoryManager {
         let (result_tx, result_rx) = mpsc::sync_channel(1);
         let prefault_complete = Arc::new(AtomicBool::new(false));
         let thread_prefault_complete = Arc::clone(&prefault_complete);
-        let inbox = ExternalUffd {
+        let ranges = Box::from(uffd.ranges());
+        let external_uffd = Arc::new(ExternalUffd {
             new_uffds: Mutex::new(vec![("__vmm".to_string(), uffd)]),
             new_uffd_evt: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
             done: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
-        };
+            ranges,
+        });
+        let thread_external_uffd = Arc::clone(&external_uffd);
         let handle = thread::Builder::new()
             .name("uffd-handler".to_string())
             .spawn(move || {
                 panic::catch_unwind(panic::AssertUnwindSafe(move || {
                     let mut result = Self::uffd_handler_loop(
-                        &inbox,
+                        &thread_external_uffd,
                         &thread_stop_event,
                         &thread_exit_evt,
                         source,
@@ -1362,6 +1407,7 @@ impl MemoryManager {
             handle,
             fault_socket_fd,
             prefault_complete,
+            external_uffd,
         });
 
         Ok(())
@@ -1401,6 +1447,11 @@ impl MemoryManager {
                 _ => {}
             }
         }
+    }
+
+    pub(crate) fn external_uffd(&self) -> Option<Arc<dyn VhostUserPostcopy>> {
+        let uffd_handler = self.uffd_handler.as_ref()?;
+        Some(Arc::clone(&uffd_handler.external_uffd) as Arc<dyn VhostUserPostcopy>)
     }
 
     /// True while an on-demand (UFFD) restore is still faulting in guest RAM.
@@ -4212,12 +4263,14 @@ mod tests {
         let page = page_size();
         let ranges = [
             UffdRange {
+                gpa: 0,
                 host_addr: 0x10_0000,
                 length: 2 * page,
                 source_offset: 0,
                 page_size: page,
             },
             UffdRange {
+                gpa: 2 * page,
                 host_addr: 0x20_0000,
                 length: page,
                 source_offset: 2 * page,
@@ -4291,6 +4344,7 @@ mod tests {
     fn uffd_prefault_retries_page_after_source_failure() {
         let page = page_size();
         let ranges = [UffdRange {
+            gpa: 0,
             host_addr: 0x10_0000,
             length: page,
             source_offset: 0,
