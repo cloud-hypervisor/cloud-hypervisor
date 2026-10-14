@@ -3,6 +3,8 @@
 // Copyright © 2024, Microsoft Corporation
 //
 
+use std::cmp;
+
 use anyhow::anyhow;
 use iced_x86::Register;
 use log::debug;
@@ -12,6 +14,17 @@ use crate::arch::emulator::{PlatformEmulator, PlatformError};
 use crate::arch::x86::emulator::{CpuStateManager, EmulatorCpuState};
 use crate::cpu::Vcpu;
 use crate::mshv::MshvVcpu;
+
+/// Returns how many bytes of an access at `gva` are in the first page.
+fn first_page_len(gva: u64, len: usize) -> usize {
+    let page_size = HV_HYP_PAGE_SIZE as usize;
+    let page_offset = gva as usize % page_size;
+    let bytes_left_in_page = page_size - page_offset;
+    let first_len = cmp::min(len, bytes_left_in_page);
+    // We only handle one page cross-page access
+    assert!(len - first_len <= page_size);
+    first_len
+}
 
 pub struct MshvEmulatorContext<'a> {
     pub vcpu: &'a MshvVcpu,
@@ -76,25 +89,12 @@ impl MshvEmulatorContext<'_> {
         data: &mut [u8],
         flags: u32,
     ) -> Result<(), PlatformError> {
-        let mut len = data.len() as u64;
+        let len = first_page_len(gva, data.len());
 
-        // Compare the page number of the first and last byte. If they are different, this is a
-        // cross-page access.
-        let pg1 = gva >> HV_HYP_PAGE_SHIFT;
-        let pg2 = (gva + len - 1) >> HV_HYP_PAGE_SHIFT;
-        let cross_page = pg1 != pg2;
+        self.r(gva, &mut data[..len], flags)?;
 
-        if cross_page {
-            // We only handle one page cross-page access
-            assert!(pg1 + 1 == pg2);
-            let n = (gva + len) & HV_HYP_PAGE_MASK as u64;
-            len -= n;
-        }
-
-        self.r(gva, &mut data[..len as usize], flags)?;
-
-        if cross_page {
-            self.r(gva + len, &mut data[len as usize..], flags)?;
+        if len < data.len() {
+            self.r(gva + len as u64, &mut data[len..], flags)?;
         }
 
         Ok(())
@@ -181,25 +181,12 @@ impl PlatformEmulator for MshvEmulatorContext<'_> {
     }
 
     fn write_memory(&mut self, gva: u64, data: &[u8]) -> Result<(), PlatformError> {
-        let mut len = data.len() as u64;
+        let len = first_page_len(gva, data.len());
 
-        // Compare the page number of the first and last byte. If they are different, this is a
-        // cross-page access.
-        let pg1 = gva >> HV_HYP_PAGE_SHIFT;
-        let pg2 = (gva + len - 1) >> HV_HYP_PAGE_SHIFT;
-        let cross_page = pg1 != pg2;
+        self.w(gva, &data[..len])?;
 
-        if cross_page {
-            // We only handle one page cross-page access
-            assert!(pg1 + 1 == pg2);
-            let n = (gva + len) & HV_HYP_PAGE_MASK as u64;
-            len -= n;
-        }
-
-        self.w(gva, &data[..len as usize])?;
-
-        if cross_page {
-            self.w(gva + len, &data[len as usize..])?;
+        if len < data.len() {
+            self.w(gva + len as u64, &data[len..])?;
         }
 
         Ok(())
@@ -279,5 +266,18 @@ impl PlatformEmulator for MshvEmulatorContext<'_> {
             instruction_bytes,
             HV_TRANSLATE_GVA_VALIDATE_READ | HV_TRANSLATE_GVA_VALIDATE_EXECUTE,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_first_page_len() {
+        assert_eq!(first_page_len(0x1000, 8), 8);
+        assert_eq!(first_page_len(0x1ff8, 8), 8);
+        assert_eq!(first_page_len(0x1ff8, 16), 8);
+        assert_eq!(first_page_len(0x1fff, 2), 1);
     }
 }
