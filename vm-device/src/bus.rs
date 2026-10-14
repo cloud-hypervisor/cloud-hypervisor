@@ -87,7 +87,11 @@ struct BusRange {
 impl BusRange {
     /// Returns true if there is overlap with the given range.
     pub(crate) fn overlaps(&self, base: u64, len: u64) -> bool {
-        self.base < (base + len) && base < self.base + self.len
+        let (Some(end), Some(self_end)) = (base.checked_add(len), self.base.checked_add(self.len))
+        else {
+            return true;
+        };
+        self.base < end && base < self_end
     }
 }
 
@@ -154,6 +158,9 @@ impl Bus {
         if len == 0 {
             return Err(Error::ZeroSizedRange);
         }
+        if base.checked_add(len).is_none() {
+            return Err(Error::Overlap);
+        }
 
         // Reject all cases where the new device's range overlaps with an existing device.
         if self
@@ -183,6 +190,9 @@ impl Bus {
     pub fn remove(&self, base: u64, len: u64) -> Result<()> {
         if len == 0 {
             return Err(Error::ZeroSizedRange);
+        }
+        if base.checked_add(len).is_none() {
+            return Err(Error::Overlap);
         }
 
         let bus_range = BusRange { base, len };
@@ -371,5 +381,15 @@ mod tests {
         assert!(a.overlaps(0x13ff, 0x100));
         assert!(!a.overlaps(0x1400, 0x100));
         assert!(!a.overlaps(0xf00, 0x100));
+    }
+
+    #[test]
+    fn bus_overflow_range_rejected() {
+        let bus = Bus::new();
+        let dev: Arc<dyn BusDeviceSync> = Arc::new(DummyDevice);
+
+        // Range where base + len overflows u64 (equals 2^64).
+        let res = bus.insert(dev, 0xffff_0000_0000_0000, 0x0001_0000_0000_0000);
+        assert!(res.is_err(), "Overflowing address range must be rejected");
     }
 }
