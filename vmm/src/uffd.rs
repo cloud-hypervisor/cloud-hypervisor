@@ -577,9 +577,9 @@ pub(crate) fn poison(fd: BorrowedFd<'_>, addr: u64, len: u64) -> Result<(), Erro
 
 /// Wake threads waiting on a fault in the given range without copying data.
 ///
-/// Needed after UFFDIO_COPY or UFFDIO_CONTINUE returns EEXIST: the page was
-/// already resolved by a concurrent fault, but any additional threads blocked
-/// on that page may not have been woken.
+/// Needed after UFFDIO_COPY, UFFDIO_ZEROPAGE or UFFDIO_CONTINUE returns EEXIST:
+/// the page was already resolved by a concurrent fault, but any additional
+/// threads blocked on that page may not have been woken.
 pub(crate) fn wake(fd: BorrowedFd<'_>, addr: u64, len: u64) -> Result<(), Error> {
     let mut range = UffdioRange { start: addr, len };
     // SAFETY: `range` is a valid, correctly-sized struct for this ioctl.
