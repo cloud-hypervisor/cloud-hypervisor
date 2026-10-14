@@ -74,12 +74,12 @@ struct UffdHandler {
 
 /// Userfaultfds sent to a UFFD handler.
 struct UffdRegistry {
-    added_uffds: Mutex<Vec<Uffd>>,
+    added_uffds: Mutex<Vec<(String /* device identifier */, Uffd)>>,
     added_uffd_evt: EventFd,
 }
 
 impl UffdRegistry {
-    fn drain_added_uffds(&self) -> Vec<Uffd> {
+    fn drain_added_uffds(&self) -> Vec<(String, Uffd)> {
         mem::take(&mut *self.added_uffds.lock().unwrap())
     }
 }
@@ -87,6 +87,9 @@ impl UffdRegistry {
 pub const MEMORY_MANAGER_ACPI_SIZE: usize = 0x18;
 
 const DEFAULT_MEMORY_ZONE: &str = "mem0";
+
+/// No vhost-user device can have it: users can't pick ids starting with "__".
+const VMM_UFFD_ID: &str = "__vmm";
 
 /// Filename used to store guest RAM in snapshot directories.
 pub const SNAPSHOT_FILENAME: &str = "memory-ranges";
@@ -1316,7 +1319,7 @@ impl MemoryManager {
         let prefault_complete = Arc::new(AtomicBool::new(false));
         let thread_prefault_complete = Arc::clone(&prefault_complete);
         let inbox = UffdRegistry {
-            added_uffds: Mutex::new(vec![uffd]),
+            added_uffds: Mutex::new(vec![(VMM_UFFD_ID.to_string(), uffd)]),
             added_uffd_evt: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
         };
         let handle = thread::Builder::new()
@@ -1444,6 +1447,8 @@ impl MemoryManager {
     /// `uffd_registry` via `source`, prefaulting one page per idle iteration
     /// through the first one, which `uffd_registry` must hold already. Once
     /// `source` fails, poison each faulted page instead.
+    ///
+    /// A userfaultfd received with the key of an earlier one replaces it.
     #[expect(clippy::needless_pass_by_value, clippy::too_many_arguments)]
     fn uffd_handler_loop(
         uffd_registry: &UffdRegistry,
@@ -1457,7 +1462,7 @@ impl MemoryManager {
     ) -> Result<(), io::Error> {
         let mut uffds = uffd_registry.drain_added_uffds();
         assert!(!uffds.is_empty());
-        let vmm_uffd = &uffds[0];
+        let (_, vmm_uffd) = &uffds[0];
         let ranges = vmm_uffd.ranges();
 
         let total_pages: u64 = ranges.iter().map(UffdRange::num_pages).sum();
@@ -1499,7 +1504,7 @@ impl MemoryManager {
         )
         .map_err(io::Error::other)?;
 
-        for (idx, uffd) in uffds.iter().enumerate() {
+        for (idx, (_, uffd)) in uffds.iter().enumerate() {
             epoll::ctl(
                 epoll_fd,
                 epoll::ControlOptions::EPOLL_CTL_ADD,
@@ -1540,15 +1545,30 @@ impl MemoryManager {
                 .any(|event| event.data == EVENT_ADDED_UFFD)
             {
                 uffd_registry.added_uffd_evt.read().ok();
-                for uffd in uffd_registry.drain_added_uffds() {
+                for (id, uffd) in uffd_registry.drain_added_uffds() {
+                    let idx =
+                        if let Some(idx) = uffds.iter().position(|(uffd_id, _)| *uffd_id == id) {
+                            // Its process remapped guest memory, as on a device reset
+                            epoll::ctl(
+                                epoll_fd,
+                                epoll::ControlOptions::EPOLL_CTL_DEL,
+                                uffds[idx].1.fd().as_raw_fd(),
+                                epoll::Event::new(epoll::Events::empty(), 0),
+                            )
+                            .map_err(io::Error::other)?;
+                            uffds[idx].1 = uffd;
+                            idx
+                        } else {
+                            uffds.push((id, uffd));
+                            uffds.len() - 1
+                        };
                     epoll::ctl(
                         epoll_fd,
                         epoll::ControlOptions::EPOLL_CTL_ADD,
-                        uffd.fd().as_raw_fd(),
-                        epoll::Event::new(epoll::Events::EPOLLIN, uffds.len() as u64),
+                        uffds[idx].1.fd().as_raw_fd(),
+                        epoll::Event::new(epoll::Events::EPOLLIN, idx as u64),
                     )
                     .map_err(io::Error::other)?;
-                    uffds.push(uffd);
                 }
                 events.resize(
                     uffds.len() + 2,
@@ -1557,7 +1577,7 @@ impl MemoryManager {
                 continue;
             }
 
-            let vmm_uffd = &uffds[0];
+            let (_, vmm_uffd) = &uffds[0];
             let ranges = vmm_uffd.ranges();
 
             let mut ready_uffd = None;
@@ -1572,7 +1592,7 @@ impl MemoryManager {
             }
 
             if let Some(idx) = ready_uffd {
-                let fault_uffd = &uffds[idx];
+                let (_, fault_uffd) = &uffds[idx];
                 // SAFETY: UffdMsg is a plain repr(C) struct, safe to zero-init.
                 let mut msg: uffd::UffdMsg = unsafe { zeroed() };
                 // SAFETY: reading a uffd_msg-sized struct from the valid uffd fd.
