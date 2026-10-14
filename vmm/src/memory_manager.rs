@@ -77,6 +77,9 @@ struct UffdHandler {
 struct UffdInbox {
     pending: Mutex<Vec<(String, Uffd)>>,
     evt: EventFd,
+    // Written once all pages are present, and never read so that it stays
+    // readable for every registrant
+    done: EventFd,
 }
 
 impl UffdInbox {
@@ -1286,6 +1289,7 @@ impl MemoryManager {
         let inbox = UffdInbox {
             pending: Mutex::new(vec![("__vmm".to_string(), uffd)]),
             evt: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
+            done: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
         };
         let handle = thread::Builder::new()
             .name("uffd-handler".to_string())
@@ -1413,7 +1417,8 @@ impl MemoryManager {
     /// one, which `inbox` must hold already. Once `source` fails, poison each
     /// faulted page instead.
     ///
-    /// A userfaultfd received with the key of an earlier one replaces it.
+    /// A userfaultfd received with the key of an earlier one replaces it. Once
+    /// all pages are present, `inbox.done` is written.
     #[expect(clippy::needless_pass_by_value, clippy::too_many_arguments)]
     fn uffd_handler_loop(
         inbox: &UffdInbox,
@@ -1756,6 +1761,7 @@ impl MemoryManager {
                             uffd::wake(uffd.fd(), range.host_addr, range.length)?;
                         }
                     }
+                    inbox.done.write(1)?;
 
                     let elapsed = prefault_start.elapsed();
                     info!(
