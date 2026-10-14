@@ -203,6 +203,7 @@ fn import_parameter(
         .expect("parameter area should be present")
     {
         ParameterAreaState::Allocated { data, max_size } => (data, max_size),
+        #[expect(clippy::panic, reason = "invalid IGVM file")]
         ParameterAreaState::Inserted => panic!("igvmfile is not valid"),
     };
     let offset = info.byte_offset as usize;
@@ -530,6 +531,7 @@ pub(crate) fn load_igvm(
                         .map_err(Error::Loader)?;
                 }
             }
+            #[expect(clippy::panic, reason = "invalid IGVM file")]
             IgvmDirectiveHeader::ParameterArea {
                 number_of_bytes,
                 parameter_area_index,
@@ -696,6 +698,7 @@ pub(crate) fn load_igvm(
                 #[cfg(feature = "kvm")]
                 let page_count = match area {
                     ParameterAreaState::Allocated { max_size, .. } => *max_size / HV_PAGE_SIZE,
+                    #[expect(clippy::panic, reason = "invalid IGVM file")]
                     ParameterAreaState::Inserted => panic!("igvmfile is invalid, multiple insert"),
                 };
                 match area {
@@ -725,6 +728,7 @@ pub(crate) fn load_igvm(
                             )
                             .map_err(Error::Loader)?;
                     }
+                    #[expect(clippy::panic, reason = "invalid IGVM file")]
                     ParameterAreaState::Inserted => panic!("igvmfile is invalid, multiple insert"),
                 }
                 *area = ParameterAreaState::Inserted;

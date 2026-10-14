@@ -127,6 +127,7 @@ impl From<GicState> for Gicv3ItsState {
             GicState::Kvm(state) => state,
             /* Needed in case other hypervisors are enabled */
             #[allow(unreachable_patterns)]
+            #[expect(clippy::panic, reason = "mixed hypervisor backends")]
             _ => panic!("GicState is not valid"),
         }
     }

@@ -120,6 +120,7 @@ impl MaybeMutInterruptSourceGroup {
         vm: &dyn hypervisor::Vm,
     ) -> io::Result<()> {
         match self {
+            #[expect(clippy::panic, reason = "device programming error")]
             Self::Immutable(_) => panic!(
                 "Attempted to set a notifier of an immutable source.  You must mark your device as needing a mutable source by having sets_irqfd() return true."
             ),

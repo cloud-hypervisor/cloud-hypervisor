@@ -1,1 +1,2 @@
 absolute-paths-allowed-crates = ["arch"]
+allow-panic-in-tests = true

@@ -94,6 +94,7 @@ unsafe fn close_fds_fallback(keep_fds: &BTreeSet<RawFd>) {
 /// in `keep_fds` are not accessed after this point, and that no other
 /// thread is opening file descriptors while this function is
 /// running.
+#[expect(clippy::panic, reason = "forked child has no error path")]
 unsafe fn close_unused_fds(keep_fds: &mut [RawFd]) {
     keep_fds.sort();
 

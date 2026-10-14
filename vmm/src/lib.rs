@@ -2119,6 +2119,7 @@ impl Vmm {
 
     /// Handles the outcome of the migration worker thread.
     fn check_migration(&mut self) {
+        #[expect(clippy::panic, reason = "only called during a migration")]
         let VmOwnership::Migration {
             migration_worker_handle,
             ..

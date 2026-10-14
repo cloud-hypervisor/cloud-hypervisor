@@ -4,6 +4,7 @@
 //
 
 #![expect(clippy::undocumented_unsafe_blocks)]
+#![expect(clippy::panic, reason = "test code")]
 
 use std::any::Any;
 use std::collections::HashMap;

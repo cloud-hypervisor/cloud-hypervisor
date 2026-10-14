@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#![expect(clippy::panic, reason = "test code")]
+
 // Custom harness to run performance tests
 mod micro_bench_block;
 mod performance_tests;
