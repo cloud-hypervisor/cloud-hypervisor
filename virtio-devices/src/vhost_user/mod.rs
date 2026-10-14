@@ -121,6 +121,8 @@ pub enum Error {
     PostcopyRegister(#[source] io::Error),
     #[error("Adding memory regions during postcopy is not supported")]
     PostcopyAddMemReg,
+    #[error("Reconnecting during postcopy is not supported")]
+    PostcopyReconnect,
     #[error("Set mem table failed")]
     VhostUserSetMemTable(#[source] VhostError),
     #[error("Set vring num failed")]
@@ -355,6 +357,12 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
         &mut self,
         helper: &mut EpollHelper,
     ) -> result::Result<(), EpollHelperError> {
+        if self.vu.lock().unwrap().postcopy_handle().is_some() {
+            return Err(EpollHelperError::IoError(io::Error::other(
+                Error::PostcopyReconnect,
+            )));
+        }
+
         helper.del_event_custom(
             self.vu.lock().unwrap().socket_handle().as_raw_fd(),
             HUP_CONNECTION_EVENT,
