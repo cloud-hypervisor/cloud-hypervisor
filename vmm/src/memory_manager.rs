@@ -1590,12 +1590,16 @@ impl MemoryManager {
 
                 if discarded {
                     let page_addr = range.page_addr(page_idx);
-                    uffd::copy(
-                        fault_uffd.fd(),
-                        page_addr,
-                        zero_buf.as_ptr(),
-                        range.page_size,
-                    )
+                    match uffd::zeropage(fault_uffd.fd(), page_addr, range.page_size) {
+                        // hugetlbfs does not support UFFDIO_ZEROPAGE.
+                        Err(e) if e.raw_os_error() == Some(libc::EINVAL) => uffd::copy(
+                            fault_uffd.fd(),
+                            page_addr,
+                            zero_buf.as_ptr(),
+                            range.page_size,
+                        ),
+                        result => result,
+                    }
                     .or_else(|e| {
                         if e.raw_os_error() == Some(libc::EEXIST) {
                             uffd::wake(fault_uffd.fd(), page_addr, range.page_size)
