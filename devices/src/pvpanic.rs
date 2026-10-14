@@ -24,6 +24,8 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 
 const PVPANIC_VENDOR_ID: u16 = 0x1b36;
 const PVPANIC_DEVICE_ID: u16 = 0x0011;
+const PVPANIC_SUBSYSTEM_VENDOR_ID: u16 = 0x1af4;
+const PVPANIC_SUBSYSTEM_ID: u16 = 0x1100;
 
 pub const PVPANIC_DEVICE_MMIO_SIZE: u64 = 0x2;
 pub const PVPANIC_DEVICE_MMIO_ALIGNMENT: u64 = 0x10;
@@ -83,8 +85,8 @@ impl PvPanicDevice {
             &PvPanicSubclass::Other,
             None,
             PciHeaderType::Device,
-            0,
-            0,
+            PVPANIC_SUBSYSTEM_VENDOR_ID,
+            PVPANIC_SUBSYSTEM_ID,
             None,
             pci_configuration_state,
         );
