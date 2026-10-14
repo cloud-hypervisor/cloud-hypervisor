@@ -107,6 +107,11 @@ impl VhostUserPostcopy for ExternalUffd {
         fd: OwnedFd,
         regions: &[PostcopyRegion],
     ) -> Result<(), io::Error> {
+        let mut new_uffds = self.new_uffds.lock().unwrap();
+        if self.is_done() {
+            return Ok(());
+        }
+
         // Faults on `fd` are at the addresses where its process maps guest
         // memory, so translate the handler ranges to those
         let mut ranges = Vec::new();
@@ -128,7 +133,7 @@ impl VhostUserPostcopy for ExternalUffd {
         }
 
         let entry = (id.to_string(), Uffd::new(fd, ranges.into())?);
-        self.new_uffds.lock().unwrap().push(entry);
+        new_uffds.push(entry);
         self.new_uffd_evt.write(1)
     }
 
@@ -1829,6 +1834,10 @@ impl MemoryManager {
                 &pages_loading,
             ) {
                 Ok(0) => {
+                    let mut new_uffds = ext_uffd.new_uffds.lock().unwrap();
+                    for (_, uffd) in new_uffds.drain(..) {
+                        uffds.push(uffd);
+                    }
                     // Every page is present, so the faults still queued on
                     // the other userfaultfds only need waking up.
                     for uffd in &uffds[1..] {
