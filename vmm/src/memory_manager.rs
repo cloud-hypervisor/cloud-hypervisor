@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom};
-use std::mem::{MaybeUninit, zeroed};
+use std::mem::{self, MaybeUninit, zeroed};
 use std::num::NonZeroUsize;
 use std::ops::{BitAnd, Not, Sub};
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
@@ -70,6 +70,18 @@ struct UffdHandler {
     handle: thread::JoinHandle<()>,
     fault_socket_fd: Option<OwnedFd>,
     prefault_complete: Arc<AtomicBool>,
+}
+
+/// Userfaultfds sent to a UFFD handler.
+struct UffdRegistry {
+    added_uffds: Mutex<Vec<Uffd>>,
+    added_uffd_evt: EventFd,
+}
+
+impl UffdRegistry {
+    fn drain_added_uffds(&self) -> Vec<Uffd> {
+        mem::take(&mut *self.added_uffds.lock().unwrap())
+    }
 }
 
 pub const MEMORY_MANAGER_ACPI_SIZE: usize = 0x18;
@@ -1303,12 +1315,16 @@ impl MemoryManager {
         let (result_tx, result_rx) = mpsc::sync_channel(1);
         let prefault_complete = Arc::new(AtomicBool::new(false));
         let thread_prefault_complete = Arc::clone(&prefault_complete);
+        let inbox = UffdRegistry {
+            added_uffds: Mutex::new(vec![uffd]),
+            added_uffd_evt: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
+        };
         let handle = thread::Builder::new()
             .name("uffd-handler".to_string())
             .spawn(move || {
                 panic::catch_unwind(panic::AssertUnwindSafe(move || {
                     let mut result = Self::uffd_handler_loop(
-                        &[uffd],
+                        &inbox,
                         &thread_stop_event,
                         &thread_exit_evt,
                         source,
@@ -1424,12 +1440,13 @@ impl MemoryManager {
         }
     }
 
-    /// Serve UFFD faults from every userfaultfd in `uffds` via `source`,
-    /// prefaulting one page per idle iteration through the first one. Once
+    /// Serve UFFD faults from every userfaultfd received through
+    /// `uffd_registry` via `source`, prefaulting one page per idle iteration
+    /// through the first one, which `uffd_registry` must hold already. Once
     /// `source` fails, poison each faulted page instead.
     #[expect(clippy::needless_pass_by_value, clippy::too_many_arguments)]
     fn uffd_handler_loop(
-        uffds: &[Uffd],
+        uffd_registry: &UffdRegistry,
         stop_event: &EventFd,
         exit_evt: &EventFd,
         mut source: Box<dyn UffdMemorySource>,
@@ -1438,6 +1455,8 @@ impl MemoryManager {
         prefault_complete: &AtomicBool,
         background_fetch_pages: bool,
     ) -> Result<(), io::Error> {
+        let mut uffds = uffd_registry.drain_added_uffds();
+        assert!(!uffds.is_empty());
         let vmm_uffd = &uffds[0];
         let ranges = vmm_uffd.ranges();
 
@@ -1458,6 +1477,7 @@ impl MemoryManager {
         let prefault_start = time::Instant::now();
 
         const EVENT_STOP: u64 = u64::MAX;
+        const EVENT_ADDED_UFFD: u64 = u64::MAX - 1;
 
         let epoll_fd = epoll::create(true).map_err(io::Error::other)?;
         // SAFETY: epoll_fd is valid and owned by this scope.
@@ -1468,6 +1488,14 @@ impl MemoryManager {
             epoll::ControlOptions::EPOLL_CTL_ADD,
             stop_event.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, EVENT_STOP),
+        )
+        .map_err(io::Error::other)?;
+
+        epoll::ctl(
+            epoll_fd,
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            uffd_registry.added_uffd_evt.as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLIN, EVENT_ADDED_UFFD),
         )
         .map_err(io::Error::other)?;
 
@@ -1483,7 +1511,7 @@ impl MemoryManager {
 
         ready_tx.send(()).ok();
 
-        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); uffds.len() + 1];
+        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); uffds.len() + 2];
         loop {
             // Block only when prefault is done; otherwise poll non-blocking
             // so we can advance prefault between faults.
@@ -1505,6 +1533,32 @@ impl MemoryManager {
                 info!("UFFD handler: received stop event, exiting");
                 return Ok(());
             }
+
+            if events
+                .iter()
+                .take(num_events)
+                .any(|event| event.data == EVENT_ADDED_UFFD)
+            {
+                uffd_registry.added_uffd_evt.read().ok();
+                for uffd in uffd_registry.drain_added_uffds() {
+                    epoll::ctl(
+                        epoll_fd,
+                        epoll::ControlOptions::EPOLL_CTL_ADD,
+                        uffd.fd().as_raw_fd(),
+                        epoll::Event::new(epoll::Events::EPOLLIN, uffds.len() as u64),
+                    )
+                    .map_err(io::Error::other)?;
+                    uffds.push(uffd);
+                }
+                events.resize(
+                    uffds.len() + 2,
+                    epoll::Event::new(epoll::Events::empty(), 0),
+                );
+                continue;
+            }
+
+            let vmm_uffd = &uffds[0];
+            let ranges = vmm_uffd.ranges();
 
             let mut ready_uffd = None;
             for event in events.iter().take(num_events) {
