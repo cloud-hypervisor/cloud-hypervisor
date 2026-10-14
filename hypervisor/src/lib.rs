@@ -215,6 +215,7 @@ impl ClockData {
     /// Returns the clock with `CLOCK_REALTIME` filled from the host wall clock
     /// when absent, so a later restore can advance the guest to current wall
     /// time. No-op for backends without a realtime field (e.g. MSHV).
+    #[must_use]
     pub fn with_realtime_filled(mut self) -> Self {
         if !self.has_realtime() {
             self.set_realtime(SystemTime::now());
