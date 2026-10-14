@@ -71,7 +71,6 @@ pub struct Fs {
 
 impl Fs {
     /// Create a new virtio-fs device.
-    #[expect(clippy::needless_pass_by_value)]
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
@@ -191,8 +190,8 @@ impl Fs {
             )
         };
 
-        if postcopy.is_some() {
-            vu.start_postcopy()?;
+        if let Some(postcopy) = postcopy {
+            vu.start_postcopy(id.clone(), postcopy)?;
         }
 
         Ok(Fs {
