@@ -95,6 +95,7 @@ impl UffdInbox {
 #[derive(Clone)]
 pub(crate) struct UffdRegistrar {
     inbox: Arc<UffdInbox>,
+    prefault_complete: Arc<AtomicBool>,
     // The handler ranges, at the VMM's addresses
     ranges: Arc<Vec<UffdRange>>,
 }
@@ -113,6 +114,10 @@ impl UffdRegistrar {
         fd: OwnedFd,
         regions: &[PostcopyRegion],
     ) -> Result<EventFd, io::Error> {
+        if self.prefault_complete.load(Ordering::Acquire) {
+            return self.inbox.done.try_clone();
+        }
+
         // Faults on `fd` are at the addresses where its process maps guest
         // memory, so translate the handler ranges to those
         let mut ranges = Vec::new();
@@ -1347,6 +1352,7 @@ impl MemoryManager {
         });
         let registrar = UffdRegistrar {
             inbox: Arc::clone(&inbox),
+            prefault_complete: Arc::clone(&prefault_complete),
             ranges,
         };
         let handle = thread::Builder::new()
