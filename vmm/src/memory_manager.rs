@@ -32,6 +32,7 @@ use thiserror::Error;
 use tracer::trace_scoped;
 use virtio_devices::BlocksState;
 use virtio_devices::mem::Error as VirtioMemError;
+use virtio_devices::vhost_user::{PostcopyHandler, PostcopyRegion};
 #[cfg(target_arch = "x86_64")]
 use vm_allocator::GsiApic;
 use vm_allocator::page_size::get_page_size;
@@ -72,18 +73,67 @@ struct UffdHandler {
     handle: thread::JoinHandle<()>,
     fault_socket_fd: Option<OwnedFd>,
     prefault_complete: Arc<AtomicBool>,
+    uffd_registry: Arc<UffdRegistry>,
 }
 
 /// Userfaultfds sent to a UFFD handler.
-struct UffdRegistry {
+pub(crate) struct UffdRegistry {
     added_uffds: Mutex<Vec<(String /* device identifier */, Uffd)>>,
     added_uffd_evt: EventFd,
     done: EventFd,
+    ranges: Box<[UffdRange]>,
 }
 
 impl UffdRegistry {
     fn drain_added_uffds(&self) -> Vec<(String, Uffd)> {
         mem::take(&mut *self.added_uffds.lock().unwrap())
+    }
+}
+
+impl PostcopyHandler for UffdRegistry {
+    // vhost-user backends get their memory regions through SET_MEM_TABLE and/or
+    // ADD_MEM_REG requests. These requests send to the backends memory regions,
+    // not the memory ranges. These two differs: we can have multiple memory
+    // ranges in a single memory region. In practice, this doesn't really happen
+    // and one region = one range (with the exception of virio-mem). However,
+    // there is nothing that enforces this and we need this assumption to hold,
+    // as we keep track of the served pages per uffd ranges. So, we take a
+    // defensive approach and design against this by creating a copy of the
+    // memory ranges for each backends (with an updated host_addr that reflects
+    // the backend VMA).
+    fn register_uffd_regions(
+        &self,
+        id: &str,
+        fd: OwnedFd,
+        regions: &[PostcopyRegion],
+    ) -> Result<(), io::Error> {
+        let mut ranges = Vec::new();
+        for range in self.ranges.iter() {
+            let Some(region) = regions.iter().find(|region| {
+                range.host_addr >= region.host_addr
+                    && range.host_addr + range.length <= region.host_addr + region.memory_size
+            }) else {
+                return Err(io::Error::other(format!(
+                    "no region maps host range {:#x}-{:#x}",
+                    range.host_addr,
+                    range.host_addr + range.length
+                )));
+            };
+            ranges.push(UffdRange {
+                // Faults on `fd` are at the addresses where its process maps
+                // guest memory, so translate the handler ranges to those
+                host_addr: region.backend_addr + (range.host_addr - region.host_addr),
+                ..range.clone()
+            });
+        }
+
+        let entry = (id.to_string(), Uffd::new(fd, ranges.into())?);
+        self.added_uffds.lock().unwrap().push(entry);
+        self.added_uffd_evt.write(1)
+    }
+
+    fn postcopy_done_event(&self) -> &EventFd {
+        &self.done
     }
 }
 
@@ -1312,17 +1362,20 @@ impl MemoryManager {
         let (result_tx, result_rx) = mpsc::sync_channel(1);
         let prefault_complete = Arc::new(AtomicBool::new(false));
         let thread_prefault_complete = Arc::clone(&prefault_complete);
-        let inbox = UffdRegistry {
+        let ranges = Box::from(uffd.ranges());
+        let uffd_registry = Arc::new(UffdRegistry {
             added_uffds: Mutex::new(vec![(VMM_UFFD_ID.to_string(), uffd)]),
             added_uffd_evt: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
             done: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
-        };
+            ranges,
+        });
+        let thread_uffd_registry = Arc::clone(&uffd_registry);
         let handle = thread::Builder::new()
             .name("uffd-handler".to_string())
             .spawn(move || {
                 panic::catch_unwind(panic::AssertUnwindSafe(move || {
                     let mut result = Self::uffd_handler_loop(
-                        &inbox,
+                        &thread_uffd_registry,
                         &thread_stop_event,
                         &thread_exit_evt,
                         source,
@@ -1368,6 +1421,7 @@ impl MemoryManager {
             handle,
             fault_socket_fd,
             prefault_complete,
+            uffd_registry,
         });
 
         Ok(())
@@ -1407,6 +1461,11 @@ impl MemoryManager {
                 _ => {}
             }
         }
+    }
+
+    pub(crate) fn uffd_registry(&self) -> Option<Arc<UffdRegistry>> {
+        let uffd_handler = self.uffd_handler.as_ref()?;
+        Some(Arc::clone(&uffd_handler.uffd_registry))
     }
 
     /// True while an on-demand (UFFD) restore is still faulting in guest RAM.
