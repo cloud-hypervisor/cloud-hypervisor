@@ -18,7 +18,7 @@ use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
-use super::vu_common_ctrl::VhostUserHandle;
+use super::vu_common_ctrl::{PostcopyRegistrar, VhostUserHandle};
 use super::{DEFAULT_VIRTIO_FEATURES, Error, Result};
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
@@ -83,7 +83,7 @@ impl Fs {
         exit_evt: EventFd,
         access_platform_enabled: bool,
         state: Option<State>,
-        postcopy: bool,
+        postcopy_registrar: Option<PostcopyRegistrar>,
     ) -> Result<Fs> {
         // Calculate the actual number of queues needed.
         let num_queues = NUM_QUEUE_OFFSET + req_num_queues;
@@ -97,9 +97,10 @@ impl Fs {
             &exit_evt,
             |_| Ok(()),
         )?;
-        if postcopy {
+        if let Some(registrar) = postcopy_registrar {
             vu.check_postcopy_feature()?;
             vu.start_postcopy()?;
+            vu.set_postcopy_registrar(registrar);
         }
 
         let (

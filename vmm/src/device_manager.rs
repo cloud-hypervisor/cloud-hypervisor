@@ -117,7 +117,7 @@ use virtio_devices::transport::{
     VIRTIO_CONFIG_BAR_INDEX, VIRTIO_SHM_BAR_INDEX, VirtioPciDevice, VirtioPciDeviceActivator,
     VirtioTransport,
 };
-use virtio_devices::vhost_user::VhostUserConfig;
+use virtio_devices::vhost_user::{PostcopyRegistrar, VhostUserConfig};
 use virtio_devices::{
     AccessPlatformMapping, Block, Endpoint, IommuMapping, VdpaDmaMapping, VirtioMemMappingSource,
     balloon, mem, net, transport, vdpa, vhost_user, vsock,
@@ -1471,6 +1471,18 @@ impl DeviceManager {
             .map_err(DeviceManagerError::BusError)?;
 
         Ok(device_manager)
+    }
+
+    fn postcopy_registrar(&self, id: &str) -> Option<PostcopyRegistrar> {
+        let memory_manager = self.memory_manager.lock().unwrap();
+        if !memory_manager.restoring() {
+            return None;
+        }
+        let registrar = memory_manager.uffd_registrar()?;
+        let id = id.to_string();
+        Some(Arc::new(move |uffd, ranges| {
+            registrar.register(&id, uffd, ranges)
+        }))
     }
 
     pub fn console_resize_pipe(&self) -> Option<Arc<File>> {
@@ -2861,7 +2873,7 @@ impl DeviceManager {
                     self.force_access_platform,
                     state_from_id(snapshot, id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
-                    self.memory_manager.lock().unwrap().restoring(),
+                    self.postcopy_registrar(&id),
                 ) {
                     Ok(vub_device) => vub_device,
                     Err(e) => {
@@ -3068,7 +3080,7 @@ impl DeviceManager {
                     self.force_access_platform,
                     state_from_id(snapshot, id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
-                    self.memory_manager.lock().unwrap().restoring(),
+                    self.postcopy_registrar(&id),
                     net_cfg.offload_tso,
                     net_cfg.offload_ufo,
                     net_cfg.offload_csum,
@@ -3330,7 +3342,7 @@ impl DeviceManager {
                     self.force_access_platform,
                     state_from_id(snapshot, id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
-                    self.memory_manager.lock().unwrap().restoring(),
+                    self.postcopy_registrar(&id),
                 )
                 .map_err(DeviceManagerError::CreateGenericVhostUser)?,
             ));
@@ -3402,7 +3414,7 @@ impl DeviceManager {
                     self.force_access_platform,
                     state_from_id(snapshot, id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
-                    self.memory_manager.lock().unwrap().restoring(),
+                    self.postcopy_registrar(&id),
                 )
                 .map_err(DeviceManagerError::CreateVirtioFs)?,
             ));

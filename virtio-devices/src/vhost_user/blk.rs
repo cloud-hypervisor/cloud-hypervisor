@@ -24,7 +24,7 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 use vmm_sys_util::eventfd::EventFd;
 
 use super::super::{ActivateResult, VirtioCommon, VirtioDevice, VirtioDeviceType};
-use super::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
+use super::vu_common_ctrl::{PostcopyRegistrar, VhostUserConfig, VhostUserHandle};
 use super::{DEFAULT_VIRTIO_FEATURES, Error, Result};
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
@@ -98,7 +98,7 @@ impl Blk {
         exit_evt: EventFd,
         access_platform_enabled: bool,
         state: Option<State>,
-        postcopy: bool,
+        postcopy_registrar: Option<PostcopyRegistrar>,
     ) -> Result<Blk> {
         let num_queues = vu_cfg.num_queues;
 
@@ -110,9 +110,10 @@ impl Blk {
             &exit_evt,
             |_| Ok(()),
         )?;
-        if postcopy {
+        if let Some(registrar) = postcopy_registrar {
             vu.check_postcopy_feature()?;
             vu.start_postcopy()?;
+            vu.set_postcopy_registrar(registrar);
         }
 
         let (

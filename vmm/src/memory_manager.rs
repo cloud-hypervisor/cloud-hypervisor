@@ -32,6 +32,7 @@ use thiserror::Error;
 use tracer::trace_scoped;
 use virtio_devices::BlocksState;
 use virtio_devices::mem::Error as VirtioMemError;
+use virtio_devices::vhost_user::PostcopyRegion;
 #[cfg(target_arch = "x86_64")]
 use vm_allocator::GsiApic;
 use vm_allocator::page_size::get_page_size;
@@ -71,6 +72,7 @@ struct UffdHandler {
     handle: thread::JoinHandle<()>,
     fault_socket_fd: Option<OwnedFd>,
     prefault_complete: Arc<AtomicBool>,
+    registrar: UffdRegistrar,
 }
 
 /// Userfaultfds sent to a UFFD handler.
@@ -85,6 +87,56 @@ struct UffdInbox {
 impl UffdInbox {
     fn take(&self) -> Vec<(String, Uffd)> {
         mem::take(&mut *self.pending.lock().unwrap())
+    }
+}
+
+/// Adds the userfaultfd of another process mapping guest memory, such as a
+/// vhost-user backend, to a running UFFD handler.
+#[derive(Clone)]
+pub(crate) struct UffdRegistrar {
+    inbox: Arc<UffdInbox>,
+    // The handler ranges, at the VMM's addresses
+    ranges: Arc<Vec<UffdRange>>,
+}
+
+impl UffdRegistrar {
+    /// Serve the faults raised on `fd` by the process identified by `key` on
+    /// the `regions` it maps, replacing the userfaultfd it registered before,
+    /// if any.
+    ///
+    /// Returns an eventfd that becomes readable once all pages are present,
+    /// when `fd` stops being served. It's shared with the other registrants,
+    /// so it must not be read.
+    pub(crate) fn register(
+        &self,
+        key: &str,
+        fd: OwnedFd,
+        regions: &[PostcopyRegion],
+    ) -> Result<EventFd, io::Error> {
+        // Faults on `fd` are at the addresses where its process maps guest
+        // memory, so translate the handler ranges to those
+        let mut ranges = Vec::new();
+        for range in self.ranges.iter() {
+            let Some(region) = regions.iter().find(|region| {
+                range.gpa >= region.guest_phys_addr
+                    && range.gpa + range.length <= region.guest_phys_addr + region.memory_size
+            }) else {
+                return Err(io::Error::other(format!(
+                    "no region maps guest range {:#x}-{:#x}",
+                    range.gpa,
+                    range.gpa + range.length
+                )));
+            };
+            ranges.push(UffdRange {
+                host_addr: region.backend_addr + (range.gpa - region.guest_phys_addr),
+                ..range.clone()
+            });
+        }
+
+        let entry = (key.to_string(), Uffd::new(fd, ranges.into())?);
+        self.inbox.pending.lock().unwrap().push(entry);
+        self.inbox.evt.write(1)?;
+        self.inbox.done.try_clone()
     }
 }
 
@@ -1251,6 +1303,7 @@ impl MemoryManager {
                 .unwrap_or(base_page_size);
 
             handler_ranges.push(UffdRange {
+                gpa: range.gpa,
                 host_addr,
                 length: range.length,
                 source_offset: source_offset_for(range),
@@ -1286,10 +1339,15 @@ impl MemoryManager {
         let (result_tx, result_rx) = mpsc::sync_channel(1);
         let prefault_complete = Arc::new(AtomicBool::new(false));
         let thread_prefault_complete = Arc::clone(&prefault_complete);
-        let inbox = UffdInbox {
+        let ranges = Arc::new(uffd.ranges().to_vec());
+        let inbox = Arc::new(UffdInbox {
             pending: Mutex::new(vec![("__vmm".to_string(), uffd)]),
             evt: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
             done: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
+        });
+        let registrar = UffdRegistrar {
+            inbox: Arc::clone(&inbox),
+            ranges,
         };
         let handle = thread::Builder::new()
             .name("uffd-handler".to_string())
@@ -1342,6 +1400,7 @@ impl MemoryManager {
             handle,
             fault_socket_fd,
             prefault_complete,
+            registrar,
         });
 
         Ok(())
@@ -1381,6 +1440,10 @@ impl MemoryManager {
                 _ => {}
             }
         }
+    }
+
+    pub(crate) fn uffd_registrar(&self) -> Option<UffdRegistrar> {
+        self.uffd_handler.as_ref().map(|h| h.registrar.clone())
     }
 
     /// True while an on-demand (UFFD) restore is still faulting in guest RAM.
@@ -4135,12 +4198,14 @@ mod tests {
         let page = page_size();
         let ranges = [
             UffdRange {
+                gpa: 0,
                 host_addr: 0x10_0000,
                 length: 2 * page,
                 source_offset: 0,
                 page_size: page,
             },
             UffdRange {
+                gpa: 2 * page,
                 host_addr: 0x20_0000,
                 length: page,
                 source_offset: 2 * page,
@@ -4214,6 +4279,7 @@ mod tests {
     fn uffd_prefault_retries_page_after_source_failure() {
         let page = page_size();
         let ranges = [UffdRange {
+            gpa: 0,
             host_addr: 0x10_0000,
             length: page,
             source_offset: 0,

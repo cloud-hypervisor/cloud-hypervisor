@@ -47,7 +47,7 @@ pub use self::blk::Blk;
 pub use self::fs::*;
 pub use self::generic_vhost_user::GenericVhostUser;
 pub use self::net::Net;
-pub use self::vu_common_ctrl::VhostUserConfig;
+pub use self::vu_common_ctrl::{PostcopyRegion, PostcopyRegistrar, VhostUserConfig};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -1019,7 +1019,7 @@ mod tests {
                     EventFd::new(libc::EFD_NONBLOCK).unwrap(),
                     enabled,
                     None,
-                    false,
+                    None,
                 )
                 .unwrap();
                 assert_eq!(device.features() & access_platform != 0, enabled);

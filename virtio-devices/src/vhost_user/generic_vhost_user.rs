@@ -18,7 +18,7 @@ use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
-use super::vu_common_ctrl::VhostUserHandle;
+use super::vu_common_ctrl::{PostcopyRegistrar, VhostUserHandle};
 use super::{Error, Result};
 use crate::device::ActivationContext;
 use crate::seccomp_filters::Thread;
@@ -70,7 +70,7 @@ impl GenericVhostUser {
         exit_evt: EventFd,
         access_platform_enabled: bool,
         state: Option<State>,
-        postcopy: bool,
+        postcopy_registrar: Option<PostcopyRegistrar>,
     ) -> Result<GenericVhostUser> {
         // Calculate the actual number of queues needed.
         let num_queues = request_queue_sizes.len();
@@ -84,9 +84,10 @@ impl GenericVhostUser {
             &exit_evt,
             |_| Ok(()),
         )?;
-        if postcopy {
+        if let Some(registrar) = postcopy_registrar {
             vu.check_postcopy_feature()?;
             vu.start_postcopy()?;
+            vu.set_postcopy_registrar(registrar);
         }
 
         let (

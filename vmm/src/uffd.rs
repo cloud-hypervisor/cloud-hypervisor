@@ -281,7 +281,9 @@ struct UffdioPoison {
 
 /// A guest memory range registered with userfaultfd, plus where its bytes
 /// live for the data source.
+#[derive(Clone)]
 pub(crate) struct UffdRange {
+    pub gpa: u64,
     pub host_addr: u64,
     pub length: u64,
     pub source_offset: u64,
