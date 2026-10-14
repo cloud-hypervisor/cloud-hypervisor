@@ -78,6 +78,7 @@ struct UffdHandler {
 struct ExternalUffd {
     new_uffds: Mutex<Vec<(String, Uffd)>>,
     new_uffd_evt: EventFd,
+    done: EventFd,
 }
 
 impl ExternalUffd {
@@ -1308,6 +1309,7 @@ impl MemoryManager {
         let inbox = ExternalUffd {
             new_uffds: Mutex::new(vec![("__vmm".to_string(), uffd)]),
             new_uffd_evt: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
+            done: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
         };
         let handle = thread::Builder::new()
             .name("uffd-handler".to_string())
@@ -1435,7 +1437,8 @@ impl MemoryManager {
     /// one, which `ext_uffd` must hold already. Once `source` fails, poison
     /// each faulted page instead.
     ///
-    /// A userfaultfd received with the key of an earlier one replaces it.
+    /// A userfaultfd received with the id of an earlier one replaces it. Once
+    /// all pages are present, `ext_uffd.done` is written.
     #[expect(clippy::needless_pass_by_value, clippy::too_many_arguments)]
     fn uffd_handler_loop(
         ext_uffd: &ExternalUffd,
@@ -1778,6 +1781,7 @@ impl MemoryManager {
                             uffd::wake(uffd.fd(), range.host_addr, range.length)?;
                         }
                     }
+                    ext_uffd.done.write(1)?;
 
                     let elapsed = prefault_start.elapsed();
                     info!(
