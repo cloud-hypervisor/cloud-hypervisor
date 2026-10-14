@@ -13,8 +13,8 @@ use std::{ffi, fs, io, slice};
 use log::{error, info};
 use vhost::vhost_kern::vhost_binding::VHOST_VRING_F_LOG;
 use vhost::vhost_user::message::{
-    VhostTransferStateDirection, VhostTransferStatePhase, VhostUserHeaderFlag, VhostUserInflight,
-    VhostUserProtocolFeatures, VhostUserVirtioFeatures,
+    FrontendReq, VhostTransferStateDirection, VhostTransferStatePhase, VhostUserHeaderFlag,
+    VhostUserInflight, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
 };
 use vhost::vhost_user::{
     Error as VhostUserError, Frontend, FrontendReqHandler, VhostUserFrontend,
@@ -56,6 +56,18 @@ struct VringInfo {
     used_guest_addr: u64,
 }
 
+/// A guest memory region mapped by a vhost-user backend.
+pub struct PostcopyRegion {
+    pub guest_phys_addr: u64,
+    pub memory_size: u64,
+    pub backend_addr: u64,
+}
+
+/// Registers a vhost-user backend's userfaultfd so that the faults the
+/// backend raises on it during postcopy are served.
+pub type PostcopyRegistrar =
+    Arc<dyn Fn(OwnedFd, &[PostcopyRegion]) -> io::Result<()> + Send + Sync>;
+
 #[derive(Clone)]
 pub struct VhostUserHandle {
     vu: Frontend,
@@ -69,6 +81,7 @@ pub struct VhostUserHandle {
     queue_indexes: Vec<u16>,
     vring_bases: Option<Vec<u64>>,
     postcopy_uffd: Option<Arc<File>>,
+    postcopy_registrar: Option<PostcopyRegistrar>,
 }
 
 impl VhostUserHandle {
@@ -93,6 +106,37 @@ impl VhostUserHandle {
             };
 
             regions.push(vhost_user_net_reg);
+        }
+
+        if let Some(uffd) = &self.postcopy_uffd {
+            let registrar = self
+                .postcopy_registrar
+                .clone()
+                .ok_or(Error::PostcopyRegistrarMissing)?;
+            let uffd = uffd.try_clone().map_err(Error::PostcopyRegister)?;
+
+            // The backend doesn't access the regions before the ack, by
+            // which time its faults are served.
+            let bases = self
+                .vu
+                .set_mem_table(&regions)
+                .map_err(Error::VhostUserSetMemTable)?
+                .ok_or(Error::PostcopyMemTableBasesMissing)?;
+            let postcopy_regions = regions
+                .iter()
+                .zip(bases)
+                .map(|(region, backend_addr)| PostcopyRegion {
+                    guest_phys_addr: region.guest_phys_addr,
+                    memory_size: region.memory_size,
+                    backend_addr,
+                })
+                .collect::<Vec<_>>();
+            registrar(uffd.into(), &postcopy_regions).map_err(Error::PostcopyRegister)?;
+            self.vu
+                .postcopy_ack_mem_regions(FrontendReq::SET_MEM_TABLE)
+                .map_err(Error::VhostUserSetMemTable)?;
+
+            return Ok(());
         }
 
         self.vu
@@ -144,13 +188,13 @@ impl VhostUserHandle {
         Err(Error::VhostUserPageFaultUnsupported)
     }
 
-    /// Enable PAGEFAULT and get the userfaultfd the backend registers its
-    /// guest memory mappings on once postcopy is listening. PAGEFAULT stays
-    /// enabled across later protocol feature updates.
+    /// Enable PAGEFAULT, get the userfaultfd the backend registers its guest
+    /// memory mappings on, and send POSTCOPY_LISTEN so that it does.
+    /// PAGEFAULT stays enabled across later protocol feature updates.
     ///
     /// This replaces the enabled protocol features, so it must be called
     /// before they are negotiated or restored.
-    pub fn postcopy_advise(&mut self) -> Result<()> {
+    pub fn start_postcopy(&mut self) -> Result<()> {
         self.vu
             .set_protocol_features(VhostUserProtocolFeatures::PAGEFAULT)
             .map_err(Error::VhostUserSetProtocolFeatures)?;
@@ -158,8 +202,15 @@ impl VhostUserHandle {
             .vu
             .postcopy_advise()
             .map_err(Error::VhostUserPostcopyAdvise)?;
+        self.vu
+            .postcopy_listen()
+            .map_err(Error::VhostUserPostcopyListen)?;
         self.postcopy_uffd = Some(Arc::new(uffd));
         Ok(())
+    }
+
+    pub fn set_postcopy_registrar(&mut self, registrar: PostcopyRegistrar) {
+        self.postcopy_registrar = Some(registrar);
     }
 
     pub fn negotiate_features_vhost_user(
@@ -484,6 +535,7 @@ impl VhostUserHandle {
                 queue_indexes: Vec::new(),
                 vring_bases: None,
                 postcopy_uffd: None,
+                postcopy_registrar: None,
             };
             vhost_user
                 .vu
@@ -544,6 +596,7 @@ impl VhostUserHandle {
                         queue_indexes: Vec::new(),
                         vring_bases: None,
                         postcopy_uffd: None,
+                        postcopy_registrar: None,
                     })
                     .map_err(Error::VhostUserConnect);
 

@@ -86,7 +86,7 @@ impl GenericVhostUser {
         )?;
         if postcopy {
             vu.check_postcopy_feature()?;
-            vu.postcopy_advise()?;
+            vu.start_postcopy()?;
         }
 
         let (
