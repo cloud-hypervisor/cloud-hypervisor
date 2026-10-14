@@ -540,6 +540,7 @@ impl MemoryRangeTable {
 
     /// Merges `self` and `other` and combines adjacent and overlapping ranges
     /// into a continuous and sorted table.
+    #[must_use]
     pub fn merge(mut self, other: Self) -> Self {
         self.data.extend(other.data);
         // Faster than sort_unstable() as both ranges are mostly sorted already.

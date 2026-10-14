@@ -641,6 +641,7 @@ impl DiskTopology {
     /// Overrides the logical block size advertised to the guest with `block_size`.
     /// The physical block size and minimum I/O size are raised to `block_size`
     /// when smaller, since neither can be below one logical block.
+    #[must_use]
     pub fn with_block_size(self, block_size: u64) -> Self {
         Self {
             logical_block_size: block_size,
