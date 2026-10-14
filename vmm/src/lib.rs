@@ -768,9 +768,6 @@ enum ReceiveMigrationState {
 
     /// The migration is successful.
     Completed,
-
-    #[deprecated = "Will be removed with Command::Abandon once v54 is released"]
-    Aborted,
 }
 
 impl ReceiveMigrationState {
@@ -782,17 +779,7 @@ impl ReceiveMigrationState {
             ReceiveMigrationState::Configured(_) => "Configured",
             ReceiveMigrationState::StateReceived { .. } => "StateReceived",
             ReceiveMigrationState::Completed => "Completed",
-            #[expect(deprecated)]
-            ReceiveMigrationState::Aborted => "Aborted",
         }
-    }
-
-    #[expect(deprecated)]
-    fn finished(&self) -> bool {
-        matches!(
-            self,
-            ReceiveMigrationState::Completed | ReceiveMigrationState::Aborted
-        )
     }
 }
 
@@ -1044,12 +1031,6 @@ impl Vmm {
             Ok(memory_files)
         };
 
-        #[expect(deprecated)] // last sent in v52
-        if req.command() == Command::Abandon {
-            info!("Abandon Command Received");
-            return Ok(Aborted);
-        }
-
         let state_name = state.variant_name();
         match state {
             Established => match req.command() {
@@ -1125,8 +1106,7 @@ impl Vmm {
                 }
                 c => invalid_command(state_name, c),
             },
-            #[expect(deprecated)]
-            Completed | Aborted => {
+            Completed => {
                 unreachable!("Performed a step on the finished state machine")
             }
         }
@@ -1145,7 +1125,7 @@ impl Vmm {
         event!("vm", "migration-receive-starting");
         let mut state = ReceiveMigrationState::Established;
 
-        while !state.finished() {
+        while !matches!(state, ReceiveMigrationState::Completed) {
             let req = Request::read_from(&mut socket).map_err(|e| {
                 let hint = match &e {
                     MigratableError::MigrateSocket(io_error)
@@ -1193,10 +1173,6 @@ impl Vmm {
         }
 
         match state {
-            #[expect(deprecated)]
-            ReceiveMigrationState::Aborted => Err(MigratableError::MigrateReceive(anyhow!(
-                "Received Abandon command"
-            ))),
             ReceiveMigrationState::Completed => Ok(()),
             _ => unreachable!("loop only exits in Completed or Aborted"),
         }
