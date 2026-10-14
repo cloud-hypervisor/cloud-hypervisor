@@ -75,12 +75,12 @@ struct UffdHandler {
 
 /// Userfaultfds sent to a UFFD handler.
 struct UffdInbox {
-    pending: Mutex<Vec<Uffd>>,
+    pending: Mutex<Vec<(String, Uffd)>>,
     evt: EventFd,
 }
 
 impl UffdInbox {
-    fn take(&self) -> Vec<Uffd> {
+    fn take(&self) -> Vec<(String, Uffd)> {
         mem::take(&mut *self.pending.lock().unwrap())
     }
 }
@@ -1284,7 +1284,7 @@ impl MemoryManager {
         let prefault_complete = Arc::new(AtomicBool::new(false));
         let thread_prefault_complete = Arc::clone(&prefault_complete);
         let inbox = UffdInbox {
-            pending: Mutex::new(vec![uffd]),
+            pending: Mutex::new(vec![("__vmm".to_string(), uffd)]),
             evt: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
         };
         let handle = thread::Builder::new()
@@ -1412,6 +1412,8 @@ impl MemoryManager {
     /// `source`, prefaulting one page per idle iteration through the first
     /// one, which `inbox` must hold already. Once `source` fails, poison each
     /// faulted page instead.
+    ///
+    /// A userfaultfd received with the key of an earlier one replaces it.
     #[expect(clippy::needless_pass_by_value, clippy::too_many_arguments)]
     fn uffd_handler_loop(
         inbox: &UffdInbox,
@@ -1423,7 +1425,12 @@ impl MemoryManager {
         prefault_complete: &AtomicBool,
         background_fetch_pages: bool,
     ) -> Result<(), io::Error> {
-        let mut uffds = inbox.take();
+        let mut uffds = Vec::new();
+        let mut keys: HashMap<String, usize> = HashMap::new();
+        for (key, uffd) in inbox.take() {
+            keys.insert(key, uffds.len());
+            uffds.push(uffd);
+        }
         assert!(!uffds.is_empty());
         let vmm_uffd = &uffds[0];
         let ranges = vmm_uffd.ranges();
@@ -1508,15 +1515,31 @@ impl MemoryManager {
                 .any(|event| event.data == EVENT_NEW_UFFD)
             {
                 inbox.evt.read().ok();
-                for uffd in inbox.take() {
+                for (key, uffd) in inbox.take() {
+                    let idx = if let Some(&idx) = keys.get(&key) {
+                        // Its process remapped guest memory, as on a device reset
+                        epoll::ctl(
+                            epoll_fd,
+                            epoll::ControlOptions::EPOLL_CTL_DEL,
+                            uffds[idx].fd().as_raw_fd(),
+                            epoll::Event::new(epoll::Events::empty(), 0),
+                        )
+                        .map_err(io::Error::other)?;
+                        uffds[idx] = uffd;
+                        idx
+                    } else {
+                        uffds.push(uffd);
+                        let idx = uffds.len() - 1;
+                        keys.insert(key, idx);
+                        idx
+                    };
                     epoll::ctl(
                         epoll_fd,
                         epoll::ControlOptions::EPOLL_CTL_ADD,
-                        uffd.fd().as_raw_fd(),
-                        epoll::Event::new(epoll::Events::EPOLLIN, uffds.len() as u64),
+                        uffds[idx].fd().as_raw_fd(),
+                        epoll::Event::new(epoll::Events::EPOLLIN, idx as u64),
                     )
                     .map_err(io::Error::other)?;
-                    uffds.push(uffd);
                 }
                 events.resize(
                     uffds.len() + 2,
