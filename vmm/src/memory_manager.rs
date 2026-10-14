@@ -76,12 +76,12 @@ struct UffdHandler {
 
 /// Userfaultfds sent to a UFFD handler.
 struct ExternalUffd {
-    new_uffds: Mutex<Vec<Uffd>>,
+    new_uffds: Mutex<Vec<(String, Uffd)>>,
     new_uffd_evt: EventFd,
 }
 
 impl ExternalUffd {
-    fn drain_new_uffds(&self) -> Vec<Uffd> {
+    fn drain_new_uffds(&self) -> Vec<(String, Uffd)> {
         mem::take(&mut *self.new_uffds.lock().unwrap())
     }
 }
@@ -1306,7 +1306,7 @@ impl MemoryManager {
         let prefault_complete = Arc::new(AtomicBool::new(false));
         let thread_prefault_complete = Arc::clone(&prefault_complete);
         let inbox = ExternalUffd {
-            new_uffds: Mutex::new(vec![uffd]),
+            new_uffds: Mutex::new(vec![("__vmm".to_string(), uffd)]),
             new_uffd_evt: EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?,
         };
         let handle = thread::Builder::new()
@@ -1434,6 +1434,8 @@ impl MemoryManager {
     /// `source`, prefaulting one page per idle iteration through the first
     /// one, which `ext_uffd` must hold already. Once `source` fails, poison
     /// each faulted page instead.
+    ///
+    /// A userfaultfd received with the key of an earlier one replaces it.
     #[expect(clippy::needless_pass_by_value, clippy::too_many_arguments)]
     fn uffd_handler_loop(
         ext_uffd: &ExternalUffd,
@@ -1445,7 +1447,12 @@ impl MemoryManager {
         prefault_complete: &AtomicBool,
         background_fetch_pages: bool,
     ) -> Result<(), io::Error> {
-        let mut uffds = ext_uffd.drain_new_uffds();
+        let mut uffds = Vec::new();
+        let mut ids: HashMap<String, usize> = HashMap::new();
+        for (id, uffd) in ext_uffd.drain_new_uffds() {
+            ids.insert(id, uffds.len());
+            uffds.push(uffd);
+        }
         assert!(!uffds.is_empty());
         let vmm_uffd = &uffds[0];
         let ranges = vmm_uffd.ranges();
@@ -1530,15 +1537,31 @@ impl MemoryManager {
                 .any(|event| event.data == EVENT_NEW_UFFD)
             {
                 ext_uffd.new_uffd_evt.read().ok();
-                for uffd in ext_uffd.drain_new_uffds() {
+                for (id, uffd) in ext_uffd.drain_new_uffds() {
+                    let idx = if let Some(&idx) = ids.get(&id) {
+                        // Its process remapped guest memory, as on a device reset
+                        epoll::ctl(
+                            epoll_fd,
+                            epoll::ControlOptions::EPOLL_CTL_DEL,
+                            uffds[idx].fd().as_raw_fd(),
+                            epoll::Event::new(epoll::Events::empty(), 0),
+                        )
+                        .map_err(io::Error::other)?;
+                        uffds[idx] = uffd;
+                        idx
+                    } else {
+                        uffds.push(uffd);
+                        let idx = uffds.len() - 1;
+                        ids.insert(id, idx);
+                        idx
+                    };
                     epoll::ctl(
                         epoll_fd,
                         epoll::ControlOptions::EPOLL_CTL_ADD,
-                        uffd.fd().as_raw_fd(),
-                        epoll::Event::new(epoll::Events::EPOLLIN, uffds.len() as u64),
+                        uffds[idx].fd().as_raw_fd(),
+                        epoll::Event::new(epoll::Events::EPOLLIN, idx as u64),
                     )
                     .map_err(io::Error::other)?;
-                    uffds.push(uffd);
                 }
                 events.resize(
                     uffds.len() + 2,
