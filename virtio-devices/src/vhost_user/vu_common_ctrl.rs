@@ -186,6 +186,10 @@ impl VhostUserHandle {
         Ok(())
     }
 
+    pub fn postcopy_listening(&self) -> bool {
+        self.postcopy_uffd.is_some()
+    }
+
     fn postcopy_protocol_features(&self) -> VhostUserProtocolFeatures {
         if self.postcopy_uffd.is_some() {
             VhostUserProtocolFeatures::PAGEFAULT
