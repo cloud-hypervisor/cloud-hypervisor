@@ -30,6 +30,8 @@ pub const IVSHMEM_DATA_BAR_IDX: usize = 2;
 
 const IVSHMEM_VENDOR_ID: u16 = 0x1af4;
 const IVSHMEM_DEVICE_ID: u16 = 0x1110;
+const IVSHMEM_SUBSYSTEM_VENDOR_ID: u16 = 0x1af4;
+const IVSHMEM_SUBSYSTEM_ID: u16 = 0x1100;
 
 const IVSHMEM_REG_BAR_SIZE: u64 = 0x100;
 
@@ -146,8 +148,8 @@ impl IvshmemDevice {
             &IvshmemSubclass::Other,
             None,
             PciHeaderType::Device,
-            0,
-            0,
+            IVSHMEM_SUBSYSTEM_VENDOR_ID,
+            IVSHMEM_SUBSYSTEM_ID,
             None,
             pci_configuration_state,
         );
