@@ -59,7 +59,6 @@ pub struct GenericVhostUser {
 
 impl GenericVhostUser {
     /// Create a new generic vhost-user device.
-    #[expect(clippy::needless_pass_by_value)]
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
@@ -165,8 +164,8 @@ since the backend only supports {backend_num_queues}\n",
             )
         };
 
-        if postcopy_handler.is_some() {
-            vu.start_postcopy()?;
+        if let Some(postcopy_handler) = postcopy_handler {
+            vu.start_postcopy(id.clone(), postcopy_handler)?;
         }
 
         Ok(GenericVhostUser {

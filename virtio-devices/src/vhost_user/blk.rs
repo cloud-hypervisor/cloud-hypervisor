@@ -91,7 +91,6 @@ pub struct Blk {
 
 impl Blk {
     /// Create a new vhost-user-blk device
-    #[expect(clippy::needless_pass_by_value)]
     pub fn new(
         id: String,
         vu_cfg: VhostUserConfig,
@@ -211,8 +210,8 @@ impl Blk {
             )
         };
 
-        if postcopy_handler.is_some() {
-            vu.start_postcopy()?;
+        if let Some(postcopy_handler) = postcopy_handler {
+            vu.start_postcopy(id.clone(), postcopy_handler)?;
         }
 
         Ok(Blk {

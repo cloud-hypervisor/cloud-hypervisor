@@ -111,6 +111,12 @@ pub enum Error {
     VhostUserSetProtocolFeatures(#[source] VhostError),
     #[error("Postcopy advise failed")]
     VhostUserPostcopyAdvise(#[source] VhostError),
+    #[error("Postcopy listen failed")]
+    VhostUserPostcopyListen(#[source] VhostError),
+    #[error("The memory table was not sent in postcopy mode")]
+    PostcopyMemTableBasesMissing,
+    #[error("Failed to register the backend's userfaultfd")]
+    PostcopyRegister(#[source] io::Error),
     #[error("Set mem table failed")]
     VhostUserSetMemTable(#[source] VhostError),
     #[error("Set vring num failed")]
@@ -236,6 +242,7 @@ impl Error {
             | Error::VhostUserSetFeatures(e)
             | Error::VhostUserSetProtocolFeatures(e)
             | Error::VhostUserPostcopyAdvise(e)
+            | Error::VhostUserPostcopyListen(e)
             | Error::VhostUserSetMemTable(e)
             | Error::VhostUserSetVringNum(e)
             | Error::VhostUserSetVringAddr(e)

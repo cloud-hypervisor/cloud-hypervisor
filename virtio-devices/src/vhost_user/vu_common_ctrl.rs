@@ -13,8 +13,8 @@ use std::{ffi, fs, io, slice};
 use log::{error, info};
 use vhost::vhost_kern::vhost_binding::VHOST_VRING_F_LOG;
 use vhost::vhost_user::message::{
-    VhostTransferStateDirection, VhostTransferStatePhase, VhostUserHeaderFlag, VhostUserInflight,
-    VhostUserProtocolFeatures, VhostUserVirtioFeatures,
+    FrontendReq, VhostTransferStateDirection, VhostTransferStatePhase, VhostUserHeaderFlag,
+    VhostUserInflight, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
 };
 use vhost::vhost_user::{
     Error as VhostUserError, Frontend, FrontendReqHandler, VhostUserFrontend,
@@ -33,7 +33,7 @@ use vmm_sys_util::epoll::{ControlOperation, Epoll, EpollEvent, EventSet};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::timerfd::TimerFd;
 
-use super::{Error, Result, VhostUserState};
+use super::{Error, PostcopyHandler, PostcopyRegion, Result, VhostUserState};
 use crate::vhost_user::Inflight;
 use crate::{
     GuestMemoryMmap, GuestRegionMmap, MmapRegion, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_IN_ORDER,
@@ -57,8 +57,9 @@ struct VringInfo {
 }
 
 struct PostcopyInfo {
-    #[expect(dead_code)]
     uffd: OwnedFd,
+    id: String,
+    handler: Arc<dyn PostcopyHandler>,
 }
 
 pub struct VhostUserHandle {
@@ -99,6 +100,36 @@ impl VhostUserHandle {
             regions.push(vhost_user_net_reg);
         }
 
+        if let Some(postcopy) = &self.postcopy {
+            let uffd = postcopy.uffd.try_clone().map_err(Error::PostcopyRegister)?;
+
+            // The backend doesn't access the regions before the ack, by
+            // which time its faults are served.
+            let bases = self
+                .vu
+                .set_mem_table(&regions)
+                .map_err(Error::VhostUserSetMemTable)?
+                .ok_or(Error::PostcopyMemTableBasesMissing)?;
+            let postcopy_regions = regions
+                .iter()
+                .zip(bases)
+                .map(|(region, backend_addr)| PostcopyRegion {
+                    host_addr: region.userspace_addr,
+                    memory_size: region.memory_size,
+                    backend_addr,
+                })
+                .collect::<Vec<_>>();
+            postcopy
+                .handler
+                .register_uffd_regions(&postcopy.id, uffd, &postcopy_regions)
+                .map_err(Error::PostcopyRegister)?;
+            self.vu
+                .postcopy_ack_mem_regions(FrontendReq::SET_MEM_TABLE)
+                .map_err(Error::VhostUserSetMemTable)?;
+
+            return Ok(());
+        }
+
         self.vu
             .set_mem_table(regions.as_slice())
             .map_err(Error::VhostUserSetMemTable)?;
@@ -127,12 +158,23 @@ impl VhostUserHandle {
         Ok(())
     }
 
-    pub fn start_postcopy(&mut self) -> Result<()> {
+    pub fn start_postcopy(
+        &mut self,
+        id: String,
+        postcopy_handler: Arc<dyn PostcopyHandler>,
+    ) -> Result<()> {
         let uffd = self
             .vu
             .postcopy_advise()
             .map_err(Error::VhostUserPostcopyAdvise)?;
-        self.postcopy = Some(PostcopyInfo { uffd: uffd.into() });
+        self.vu
+            .postcopy_listen()
+            .map_err(Error::VhostUserPostcopyListen)?;
+        self.postcopy = Some(PostcopyInfo {
+            uffd: uffd.into(),
+            id,
+            handler: postcopy_handler,
+        });
         Ok(())
     }
 
