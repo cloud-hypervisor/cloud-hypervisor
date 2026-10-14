@@ -121,6 +121,11 @@ impl PostcopyHandler for UffdRegistry {
         fd: OwnedFd,
         regions: &[PostcopyRegion],
     ) -> Result<(), io::Error> {
+        let mut added_uffds = self.added_uffds.lock().unwrap();
+        if self.is_done() {
+            return Ok(());
+        }
+
         let mut ranges = Vec::new();
         for range in self.ranges.iter() {
             let Some(region) = regions.iter().find(|region| {
@@ -167,7 +172,7 @@ impl PostcopyHandler for UffdRegistry {
         }
 
         let entry = (id.to_string(), Uffd::new(fd, ranges.into(), holes.into())?);
-        self.added_uffds.lock().unwrap().push(entry);
+        added_uffds.push(entry);
         self.added_uffd_evt.write(1)
     }
 
@@ -1883,6 +1888,8 @@ impl MemoryManager {
                 &pages_loading,
             ) {
                 Ok(0) => {
+                    let mut added_uffds = uffd_registry.added_uffds.lock().unwrap();
+                    uffds.append(&mut added_uffds);
                     // Every page is present, so the faults still queued on
                     // the userfaultfds only need waking up.
                     for (_, uffd) in &uffds {
