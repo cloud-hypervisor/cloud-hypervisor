@@ -120,6 +120,8 @@ pub enum Error {
     PostcopyMemTableBasesMissing,
     #[error("Failed to register the backend's userfaultfd")]
     PostcopyRegister(#[source] io::Error),
+    #[error("Adding memory regions during postcopy is not supported")]
+    PostcopyAddMemReg,
     #[error("Set mem table failed")]
     VhostUserSetMemTable(#[source] VhostError),
     #[error("Set vring num failed")]
@@ -698,6 +700,10 @@ impl VhostUserCommon {
 
     fn add_memory_region_internal(&self, region: &Arc<GuestRegionMmap>) -> Result<()> {
         if let Some(vu) = &self.vu {
+            // Only the regions registered when postcopy started are served.
+            if vu.lock().unwrap().postcopy_handle().is_some() {
+                return Err(Error::PostcopyAddMemReg);
+            }
             if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits()
                 != 0
             {
