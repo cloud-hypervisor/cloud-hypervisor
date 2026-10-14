@@ -598,6 +598,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::literal_string_with_formatting_args,
+        reason = "logger template, not a format string"
+    )]
     fn logger_utc_year_matches_jiff() {
         let buf = SharedBuffer::default();
         let logger = Logger::new(Box::new(buf.clone()), "{year}").unwrap();
@@ -653,6 +657,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::literal_string_with_formatting_args,
+        reason = "logger template, not a format string"
+    )]
     fn logger_tid_token() {
         let buf = SharedBuffer::default();
         let logger = Logger::new(Box::new(buf.clone()), "{tid}").unwrap();

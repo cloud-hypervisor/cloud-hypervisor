@@ -2121,8 +2121,9 @@ impl<'a> GuestCommand<'a> {
             } else {
                 "hvc0"
             };
-            let igvm = direct_igvm_boot_path(Some(console_str))
-                .expect("IGVM boot file not found for console type: {console_str}");
+            let igvm = direct_igvm_boot_path(Some(console_str)).unwrap_or_else(|| {
+                panic!("IGVM boot file not found for console type: {console_str}")
+            });
             self.command.args([
                 "--igvm",
                 igvm.to_str().expect("IGVM path is not valid UTF-8"),
