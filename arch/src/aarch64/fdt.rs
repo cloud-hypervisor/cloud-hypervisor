@@ -440,6 +440,7 @@ fn create_memory_node(
             ram_regions
         };
 
+        #[expect(clippy::panic, reason = "memory layout invariant")]
         if ram_regions.len() > 2 {
             panic!(
                 "There should be up to two non-continuous regions, divided by the
@@ -455,6 +456,7 @@ fn create_memory_node(
             let ram_start = super::layout::RAM_START.raw_value();
             let mem_32bit_reserved_start = super::layout::MEM_32BIT_RESERVED_START.raw_value();
 
+            #[expect(clippy::panic, reason = "memory layout invariant")]
             if !((first_region_start <= &ram_start)
                 && (first_region_end > &ram_start)
                 && (first_region_end <= &mem_32bit_reserved_start))
@@ -478,6 +480,7 @@ fn create_memory_node(
         if let Some((second_region_start, second_region_end)) = ram_regions.get(1) {
             let ram_64bit_start = super::layout::RAM_64BIT_START.raw_value();
 
+            #[expect(clippy::panic, reason = "memory layout invariant")]
             if second_region_start != &ram_64bit_start {
                 panic!(
                     "Unexpected second memory region layout: start: 0x{second_region_start:08x}, ram_64bit_start: 0x{ram_64bit_start:08x}"

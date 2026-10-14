@@ -97,6 +97,7 @@ impl LockState {
             // This is so unlikely that we want to avoid the complexity of
             // coping with this error case. Can only fail if either Linux
             // is broken or memory is messed up.
+            #[expect(clippy::panic, reason = "Linux returns known lock types")]
             other => panic!("Unexpected lock state: {other}"),
         }
     }
@@ -216,6 +217,7 @@ pub fn try_acquire_lock<Fd: AsRawFd>(
                     _ => return Err(LockError::Io(io_error)),
                 }
             }
+            #[expect(clippy::panic, reason = "fcntl() returns 0 or -1")]
             val => panic!("Unexpected return value from fcntl(): {val}"),
         }
     }
@@ -252,6 +254,7 @@ pub fn get_lock_state<Fd: AsRawFd>(
             let io_error = io::Error::last_os_error();
             Err(LockError::Io(io_error))
         }
+        #[expect(clippy::panic, reason = "fcntl() returns 0 or -1")]
         val => panic!("Unexpected return value from fcntl(): {val}"),
     }
 }

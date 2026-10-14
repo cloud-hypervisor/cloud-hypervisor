@@ -145,6 +145,7 @@ impl From<CpuState> for VcpuMshvState {
             CpuState::Mshv(s) => s,
             /* Needed in case other hypervisors are enabled */
             #[allow(unreachable_patterns)]
+            #[expect(clippy::panic, reason = "mixed hypervisor backends")]
             _ => panic!("CpuState is not valid"),
         }
     }
@@ -162,6 +163,7 @@ impl From<crate::StandardRegisters> for mshv_bindings::StandardRegisters {
             crate::StandardRegisters::Mshv(e) => e,
             /* Needed in case other hypervisors are enabled */
             #[allow(unreachable_patterns)]
+            #[expect(clippy::panic, reason = "mixed hypervisor backends")]
             _ => panic!("StandardRegisters are not valid"),
         }
     }
@@ -179,6 +181,7 @@ impl From<IrqRoutingEntry> for mshv_user_irq_entry {
             IrqRoutingEntry::Mshv(e) => e,
             /* Needed in case other hypervisors are enabled */
             #[allow(unreachable_patterns)]
+            #[expect(clippy::panic, reason = "mixed hypervisor backends")]
             _ => panic!("IrqRoutingEntry is not valid"),
         }
     }
@@ -198,6 +201,7 @@ impl From<crate::RegList> for mshv_bindings::MshvRegList {
             crate::RegList::Mshv(e) => e,
             /* Needed in case other hypervisors are enabled */
             #[allow(unreachable_patterns)]
+            #[expect(clippy::panic, reason = "mixed hypervisor backends")]
             _ => panic!("RegList is not valid"),
         }
     }
@@ -217,6 +221,7 @@ impl From<crate::VcpuInit> for mshv_bindings::MshvVcpuInit {
             crate::VcpuInit::Mshv(e) => e,
             /* Needed in case other hypervisors are enabled */
             #[allow(unreachable_patterns)]
+            #[expect(clippy::panic, reason = "mixed hypervisor backends")]
             _ => panic!("VcpuInit is not valid"),
         }
     }
@@ -427,6 +432,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
 
         match host_ipa {
             Ok(ipa) => ipa.try_into().unwrap(),
+            #[expect(clippy::panic, reason = "the host must report its IPA limit")]
             Err(e) => {
                 panic!("Failed to get host IPA limit: {e:?}");
             }
@@ -989,6 +995,10 @@ impl cpu::Vcpu for MshvVcpu {
                                         SVM_NAE_HV_DOORBELL_PAGE_CLEAR => {
                                             set_svm_field_u64_ptr!(ghcb, exit_info2, 0);
                                         }
+                                        #[expect(
+                                            clippy::panic,
+                                            reason = "unsupported GHCB request"
+                                        )]
                                         _ => {
                                             panic!(
                                                 "SVM_EXITCODE_HV_DOORBELL_PAGE: Unhandled exit code: {exit_info1:0x}"
@@ -1228,6 +1238,7 @@ impl cpu::Vcpu for MshvVcpu {
 
                                     self.clear_swexit_info1()?;
                                 }
+                                #[expect(clippy::panic, reason = "unsupported GHCB request")]
                                 _ => {
                                     panic!("GHCB_INFO_NORMAL: Unhandled exit code: {exit_code:0x}")
                                 }
@@ -1247,6 +1258,7 @@ impl cpu::Vcpu for MshvVcpu {
                                  (reason_set={reason_set}, reason_val={reason_val})"
                             )));
                         }
+                        #[expect(clippy::panic, reason = "unsupported GHCB request")]
                         _ => panic!("Unsupported VMGEXIT operation: {ghcb_op:0x}"),
                     }
 
@@ -2066,6 +2078,7 @@ impl vm::Vm for MshvVm {
             .map(|entry| match entry {
                 IrqRoutingEntry::Mshv(e) => *e,
                 #[allow(unreachable_patterns)]
+                #[expect(clippy::panic, reason = "mixed hypervisor backends")]
                 _ => panic!("IrqRoutingEntry type is wrong"),
             })
             .collect();

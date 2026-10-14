@@ -42,6 +42,7 @@ impl From<GicState> for MshvGicV2MState {
             GicState::MshvGicV2M(state) => state,
             /* Needed in case other hypervisors are enabled */
             #[allow(unreachable_patterns)]
+            #[expect(clippy::panic, reason = "mixed hypervisor backends")]
             _ => panic!("GicState is not valid"),
         }
     }

@@ -2789,6 +2789,7 @@ impl Vm {
         let coredump_file_path = url_to_file(destination_url)?;
         let mapping_num = self.memory_manager.lock().unwrap().num_guest_ram_mappings();
 
+        #[expect(clippy::panic, reason = "coredump mapping count limit")]
         if mapping_num < UINT16_MAX - 2 {
             elf_phdr_num += mapping_num as u16;
         } else {

@@ -529,6 +529,7 @@ impl Tap {
 
     #[cfg(any(fuzzing, test))]
     pub fn new_for_fuzzing(tap_file: File, if_name: &str) -> Self {
+        #[expect(clippy::panic, reason = "fuzzing and test helper")]
         if if_name.len() > IFNAMSIZ - 1 {
             panic!("provided name longer than `IFNAMSIZ` without NULL terminator")
         }

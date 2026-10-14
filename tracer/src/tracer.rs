@@ -79,6 +79,7 @@ impl Tracer {
         }
     }
 
+    #[expect(clippy::panic, reason = "unbalanced tracing calls")]
     fn decrease_thread_depth(&mut self) {
         let current = thread::current();
         let thread_name = current.name().unwrap_or("");
