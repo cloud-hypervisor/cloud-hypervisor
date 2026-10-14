@@ -64,9 +64,11 @@ pub struct PostcopyRegion {
 }
 
 /// Registers a vhost-user backend's userfaultfd so that the faults the
-/// backend raises on it during postcopy are served.
+/// backend raises on it during postcopy are served. Returns an eventfd that
+/// becomes readable once all of guest memory is present, when postcopy can
+/// end. It's shared with the other backends, so it must not be read.
 pub type PostcopyRegistrar =
-    Arc<dyn Fn(OwnedFd, &[PostcopyRegion]) -> io::Result<()> + Send + Sync>;
+    Arc<dyn Fn(OwnedFd, &[PostcopyRegion]) -> io::Result<EventFd> + Send + Sync>;
 
 #[derive(Clone)]
 pub struct VhostUserHandle {
@@ -81,6 +83,7 @@ pub struct VhostUserHandle {
     queue_indexes: Vec<u16>,
     vring_bases: Option<Vec<u64>>,
     postcopy_uffd: Option<Arc<File>>,
+    postcopy_done: Option<Arc<EventFd>>,
     postcopy_registrar: Option<PostcopyRegistrar>,
 }
 
@@ -131,7 +134,9 @@ impl VhostUserHandle {
                     backend_addr,
                 })
                 .collect::<Vec<_>>();
-            registrar(uffd.into(), &postcopy_regions).map_err(Error::PostcopyRegister)?;
+            let done =
+                registrar(uffd.into(), &postcopy_regions).map_err(Error::PostcopyRegister)?;
+            self.postcopy_done = Some(Arc::new(done));
             self.vu
                 .postcopy_ack_mem_regions(FrontendReq::SET_MEM_TABLE)
                 .map_err(Error::VhostUserSetMemTable)?;
@@ -144,6 +149,20 @@ impl VhostUserHandle {
             .map_err(Error::VhostUserSetMemTable)?;
 
         Ok(())
+    }
+
+    pub fn postcopy_end(&mut self) -> Result<()> {
+        self.postcopy_done = None;
+        if self.postcopy_uffd.take().is_some() {
+            self.vu
+                .postcopy_end()
+                .map_err(Error::VhostUserPostcopyEnd)?;
+        }
+        Ok(())
+    }
+
+    pub fn postcopy_done(&self) -> Option<Arc<EventFd>> {
+        self.postcopy_done.clone()
     }
 
     pub fn add_memory_region(&mut self, region: &Arc<GuestRegionMmap>) -> Result<()> {
@@ -190,7 +209,8 @@ impl VhostUserHandle {
 
     /// Enable PAGEFAULT, get the userfaultfd the backend registers its guest
     /// memory mappings on, and send POSTCOPY_LISTEN so that it does.
-    /// PAGEFAULT stays enabled across later protocol feature updates.
+    /// PAGEFAULT stays enabled across later protocol feature updates until
+    /// postcopy ends.
     ///
     /// This replaces the enabled protocol features, so it must be called
     /// before they are negotiated or restored.
@@ -535,6 +555,7 @@ impl VhostUserHandle {
                 queue_indexes: Vec::new(),
                 vring_bases: None,
                 postcopy_uffd: None,
+                postcopy_done: None,
                 postcopy_registrar: None,
             };
             vhost_user
@@ -596,6 +617,7 @@ impl VhostUserHandle {
                         queue_indexes: Vec::new(),
                         vring_bases: None,
                         postcopy_uffd: None,
+                        postcopy_done: None,
                         postcopy_registrar: None,
                     })
                     .map_err(Error::VhostUserConnect);
