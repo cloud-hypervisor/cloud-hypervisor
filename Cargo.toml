@@ -127,7 +127,7 @@ itertools = "0.15.0"
 jiff = { version = "0.2", default-features = false, features = ["std"] }
 libc = "0.2.186"
 log = "0.4.30"
-rustls = { version = "0.23.40", default-features = false, features = [
+rustls = { version = "0.23.46", default-features = false, features = [
   "logging",
   "ring",
   "std",
