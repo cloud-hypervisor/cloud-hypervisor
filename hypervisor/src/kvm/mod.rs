@@ -1140,6 +1140,11 @@ impl vm::Vm for KvmVm {
             .as_ref()
             .filter(|_| visibility == vm::MemoryVisibility::Private)
         {
+            if log_dirty_pages {
+                return Err(vm::HypervisorVmError::CreateUserMemory(anyhow!(
+                    "Error creating regions with both 'dirty-pages-log' and 'private' visibility."
+                )));
+            }
             flags |= KVM_MEM_GUEST_MEMFD;
             // SAFETY: Safe because guest regions are guaranteed not to overlap.
             let fd = unsafe {
