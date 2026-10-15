@@ -431,11 +431,7 @@ pub(crate) fn setup_ovs_dpdk_guests(
         .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .args(["--net", guest1.default_net_string().as_str(), OVS_DPDK_NET1])
         .capture_output();
-    if release_binary {
-        cmd1.legacy_default_disks();
-    } else {
-        cmd1.default_disks();
-    }
+    cmd1.default_disks();
     let mut child1 = cmd1.spawn().unwrap();
 
     #[cfg(target_arch = "x86_64")]
@@ -488,10 +484,9 @@ pub(crate) fn setup_ovs_dpdk_guests(
         .args(["--net", guest2.default_net_string().as_str(), OVS_DPDK_NET2])
         .capture_output();
     if release_binary {
-        cmd2.args(["--seccomp", "false"]).legacy_default_disks();
-    } else {
-        cmd2.default_disks();
+        cmd2.args(["--seccomp", "false"]);
     }
+    cmd2.default_disks();
     let mut child2 = cmd2.spawn().unwrap();
 
     let r = panic::catch_unwind(|| {
