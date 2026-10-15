@@ -22,6 +22,7 @@ use std::os::unix::fs::FileExt;
 use std::sync::{Arc, Barrier};
 
 use acpi_tables::rsdp::Rsdp;
+use acpi_tables::{Aml, AmlSink, aml};
 #[cfg(target_arch = "x86_64")]
 use arch::x86_64::generate_e820_memory_map;
 use bitfield_struct::bitfield;
@@ -702,6 +703,39 @@ impl FwCfg {
         {
             self.data_offset += data.len() as u32;
         }
+    }
+}
+
+impl Aml for FwCfg {
+    fn to_aml_bytes(&self, sink: &mut dyn AmlSink) {
+        aml::Device::new(
+            "_SB_.FWCF".into(),
+            vec![
+                &aml::Name::new("_HID".into(), &FW_CFG_ACPI_ID.to_string()),
+                &aml::Name::new("_STA".into(), &0xB_usize),
+                #[cfg(target_arch = "aarch64")]
+                &aml::Name::new("_CCA".into(), &aml::ONE),
+                &aml::Name::new(
+                    "_CRS".into(),
+                    &aml::ResourceTemplate::new(vec![
+                        #[cfg(target_arch = "x86_64")]
+                        &aml::IO::new(
+                            FW_CFG_ADDRESS_BASE as u16,
+                            FW_CFG_ADDRESS_BASE as u16,
+                            0x01,
+                            FW_CFG_ADDRESS_WIDTH as u8,
+                        ),
+                        #[cfg(target_arch = "aarch64")]
+                        &aml::Memory32Fixed::new(
+                            true,
+                            FW_CFG_ADDRESS_BASE as u32,
+                            FW_CFG_ADDRESS_WIDTH as u32,
+                        ),
+                    ]),
+                ),
+            ],
+        )
+        .to_aml_bytes(sink);
     }
 }
 
