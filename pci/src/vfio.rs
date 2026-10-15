@@ -4,7 +4,7 @@
 //
 
 use std::any::Any;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::os::fd::BorrowedFd;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
@@ -703,6 +703,7 @@ pub(crate) struct VfioCommon {
     pub(crate) legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
     pub(crate) vfio_wrapper: Arc<dyn Vfio>,
     pub(crate) patches: HashMap<usize, ConfigPatch>,
+    write_ignore: HashSet<usize>,
     x_nv_gpudirect_clique: Option<u8>,
     x_exclude_mmap_bars: Vec<u8>,
     pub(crate) migration_flags: Option<u64>,
@@ -782,6 +783,7 @@ impl VfioCommon {
             legacy_interrupt_group,
             vfio_wrapper,
             patches: HashMap::new(),
+            write_ignore: HashSet::new(),
             x_nv_gpudirect_clique: config.x_nv_gpudirect_clique,
             x_exclude_mmap_bars: config.x_exclude_mmap_bars,
             migration_flags,
@@ -1654,7 +1656,7 @@ impl VfioCommon {
         if let Some(patch) = self.patches.get_mut(&reg_idx) {
             patch.write(offset, data);
 
-            if patch.mask == 0xffff_ffff {
+            if patch.mask == 0xffff_ffff || self.write_ignore.contains(&reg_idx) {
                 return (Vec::new(), None);
             }
         }
@@ -3166,6 +3168,7 @@ mod tests {
             legacy_interrupt_group: None,
             vfio_wrapper,
             patches: HashMap::new(),
+            write_ignore: HashSet::new(),
             x_nv_gpudirect_clique: None,
             x_exclude_mmap_bars: Vec::new(),
             migration_flags,
