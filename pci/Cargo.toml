@@ -7,7 +7,12 @@ version = "0.1.0"
 
 [features]
 default = []
-kvm = ["hypervisor/kvm", "vfio-ioctls/kvm"]
+kvm = [
+  "dep:iommufd-ioctls",
+  "hypervisor/kvm",
+  "vfio-ioctls/kvm",
+  "vfio-ioctls/vfio_cdev",
+]
 mshv = ["hypervisor/mshv", "vfio-ioctls/mshv"]
 
 [dependencies]
@@ -15,6 +20,7 @@ anyhow = { workspace = true }
 base64 = { workspace = true }
 byteorder = { workspace = true }
 hypervisor = { path = "../hypervisor" }
+iommufd-ioctls = { workspace = true, optional = true }
 libc = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
