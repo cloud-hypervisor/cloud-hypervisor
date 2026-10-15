@@ -983,8 +983,6 @@ impl PlatformConfig {
             .add("num_pci_segments")
             .add("iommu_segments")
             .add("iommu_address_width")
-            .add("serial_number")
-            .add("uuid")
             .add("oem_strings")
             .add("iommufd")
             .add("iommufd_fd")
@@ -1070,24 +1068,6 @@ impl PlatformConfig {
                 (field.apply)(&mut platform_config, value);
             }
         }
-
-        let legacy_serial_number = parser
-            .convert::<String>("serial_number")
-            .map_err(Error::ParsePlatform)?;
-        if legacy_serial_number.is_some() {
-            warn!("'serial_number' in --platform is deprecated; use 'system_serial_number'.");
-        }
-        platform_config.system_serial_number = platform_config
-            .system_serial_number
-            .or(legacy_serial_number);
-
-        let legacy_uuid = parser
-            .convert::<String>("uuid")
-            .map_err(Error::ParsePlatform)?;
-        if legacy_uuid.is_some() {
-            warn!("'uuid' in --platform is deprecated; use 'system_uuid'.");
-        }
-        platform_config.system_uuid = platform_config.system_uuid.or(legacy_uuid);
 
         Ok(platform_config)
     }
@@ -5340,6 +5320,39 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 socket: PathBuf::from("/var/run/tpm.sock"),
             }
         );
+        Ok(())
+    }
+
+    #[test]
+    fn test_platform_smbios_parsing() -> Result<()> {
+        let config = PlatformConfig::parse("system_serial_number=serial,system_uuid=uuid")?;
+        assert_eq!(config.system_serial_number.as_deref(), Some("serial"));
+        assert_eq!(config.system_uuid.as_deref(), Some("uuid"));
+
+        let json = serde_json::to_value(&config).unwrap();
+        assert_eq!(json["system_serial_number"], "serial");
+        assert_eq!(json["system_uuid"], "uuid");
+        assert_eq!(
+            serde_json::from_value::<PlatformConfig>(json).unwrap(),
+            config
+        );
+
+        for key in ["serial_number", "uuid"] {
+            for prefix in ["", "system_serial_number=serial,system_uuid=uuid,"] {
+                assert!(matches!(
+                    PlatformConfig::parse(&format!("{prefix}{key}=legacy")),
+                    Err(Error::ParsePlatform(OptionParserError::UnknownOption(option)))
+                        if option == key
+                ));
+            }
+        }
+
+        // Unrecognized JSON fields are ignored, as for other configuration options.
+        let legacy: PlatformConfig =
+            serde_json::from_str(r#"{"serial_number":"legacy","uuid":"legacy"}"#).unwrap();
+        assert_eq!(legacy.system_serial_number, None);
+        assert_eq!(legacy.system_uuid, None);
+
         Ok(())
     }
 
