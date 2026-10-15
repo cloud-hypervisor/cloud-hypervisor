@@ -68,7 +68,6 @@ impl From<Error> for IommuError {
 /// Device attached to the vIOMMU.
 struct Endpoint {
     bdf: PciBdf,
-    device: Arc<dyn AttachHwpt>,
     vdevice: IommufdVDevice,
 }
 
@@ -104,23 +103,24 @@ impl IommufdIommu {
         &self,
         virt_id: u32,
         bdf: PciBdf,
-        device: Arc<dyn AttachHwpt>,
+        device: &Arc<dyn AttachHwpt>,
         dev_id: u32,
     ) -> Result<(), Error> {
-        let vdevice = IommufdVDevice::new(Arc::clone(&self.viommu), dev_id, u64::from(virt_id))
-            .map_err(Error::CreateVdevice)?;
+        let vdevice = IommufdVDevice::new(
+            Arc::clone(&self.viommu),
+            Arc::clone(device),
+            dev_id,
+            u64::from(virt_id),
+        )
+        .map_err(Error::CreateVdevice)?;
         self.viommu
-            .attach_bypass(&*device)
+            .attach_bypass(device.as_ref())
             .map_err(Error::AttachBypass)?;
 
-        self.endpoints.lock().unwrap().insert(
-            virt_id,
-            Endpoint {
-                bdf,
-                device,
-                vdevice,
-            },
-        );
+        self.endpoints
+            .lock()
+            .unwrap()
+            .insert(virt_id, Endpoint { bdf, vdevice });
 
         Ok(())
     }
@@ -174,23 +174,10 @@ impl IommufdIommu {
         };
         endpoint
             .vdevice
-            .uninstall_s1_hwpt(&*endpoint.device, abort)
+            .uninstall_s1_hwpt(abort)
             .map_err(Error::UninstallStage1)?;
 
         Ok(())
-    }
-}
-
-impl Drop for IommufdIommu {
-    fn drop(&mut self) {
-        for endpoint in self.endpoints.lock().unwrap().values() {
-            if let Err(e) = endpoint.device.detach_hwpt() {
-                error!(
-                    "Failed to detach device {} from the vIOMMU: {e}",
-                    endpoint.bdf
-                );
-            }
-        }
     }
 }
 
@@ -219,11 +206,11 @@ impl PhysicalIommu for IommufdIommu {
         };
         endpoint
             .vdevice
-            .uninstall_s1_hwpt(&*endpoint.device, true)
+            .uninstall_s1_hwpt(true)
             .map_err(Error::UninstallStage1)?;
         endpoint
             .vdevice
-            .install_s1_hwpt(&*endpoint.device, &hwpt_data)
+            .install_s1_hwpt(&hwpt_data)
             .map_err(Error::InstallStage1)?;
 
         Ok(())
