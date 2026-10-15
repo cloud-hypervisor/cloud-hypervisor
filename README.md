@@ -315,7 +315,7 @@ Currently the following items are **not** guaranteed across updates:
 * Snapshot/restore is not supported across different versions
 * Live migration is not supported across different versions
 * The following features are considered experimental and may change
-  substantially between releases: TDX, vfio-user, vDPA.
+  substantially between releases: vfio-user, vDPA.
 
 Further details can be found in the [release documentation](docs/releases.md).
 

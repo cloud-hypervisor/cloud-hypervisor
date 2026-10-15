@@ -204,8 +204,7 @@ net_admin` so that tests requiring a hypervisor device or TAP
 interfaces can run.
 
 When the hypervisor is `mshv`, the feature flag `--features mshv` is
-passed to cargo. On x86_64 with KVM, the `tdx` feature is additionally
-enabled if needed (MSHV does not support TDX).
+passed to cargo.
 
 The hypervisor backend is auto-detected from the host device node:
 `/dev/mshv` selects MSHV and `/dev/kvm` selects KVM. Pass
