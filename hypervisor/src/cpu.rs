@@ -10,8 +10,6 @@
 //
 //
 
-#[cfg(feature = "tdx")]
-use std::io;
 use std::result;
 
 #[cfg(feature = "sev_snp")]
@@ -28,8 +26,6 @@ use crate::VcpuInit;
 use crate::arch::aarch64::ExtendedReg;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters};
-#[cfg(feature = "tdx")]
-use crate::kvm::{TdxExitDetails, TdxExitStatus};
 use crate::{CpuState, HypervisorType, MpState, StandardRegisters};
 
 #[cfg(target_arch = "x86_64")]
@@ -273,18 +269,6 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to translate GVA")]
     TranslateVirtualAddress(#[source] anyhow::Error),
-    ///
-    /// Failed to initialize TDX on CPU
-    ///
-    #[cfg(feature = "tdx")]
-    #[error("Failed to initialize TDX")]
-    InitializeTdx(#[source] io::Error),
-    ///
-    /// Unknown TDX VM call
-    ///
-    #[cfg(feature = "tdx")]
-    #[error("Unknown TDX VM call")]
-    UnknownTdxVmCall,
     #[cfg(target_arch = "aarch64")]
     ///
     /// Failed to initialize PMU
@@ -353,8 +337,6 @@ pub enum VmExit {
     Reset,
     Shutdown,
     Hyperv,
-    #[cfg(feature = "tdx")]
-    Tdx,
     #[cfg(feature = "kvm")]
     Debug,
 }
@@ -559,30 +541,9 @@ pub trait Vcpu: Send + Sync {
     ///
     fn translate_gva(&self, gva: u64, flags: u64) -> Result<(u64, u32)>;
     ///
-    /// Initialize TDX support on the vCPU
-    ///
-    #[cfg(feature = "tdx")]
-    fn tdx_init(&self, _hob_address: u64) -> Result<()> {
-        unimplemented!()
-    }
-    ///
     /// Set the "immediate_exit" state
     ///
     fn set_immediate_exit(&mut self, _exit: bool) {}
-    #[cfg(feature = "tdx")]
-    ///
-    /// Returns the details about TDX exit reason
-    ///
-    fn get_tdx_exit_details(&mut self) -> Result<TdxExitDetails> {
-        unimplemented!()
-    }
-    #[cfg(feature = "tdx")]
-    ///
-    /// Set the status code for TDX exit
-    ///
-    fn set_tdx_status(&mut self, _status: TdxExitStatus) {
-        unimplemented!()
-    }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Return the list of initial MSR entries for a VCPU

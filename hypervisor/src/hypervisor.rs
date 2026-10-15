@@ -20,8 +20,6 @@ use crate::arch::x86::{
 };
 #[cfg(target_arch = "x86_64")]
 use crate::cpu::CpuVendor;
-#[cfg(feature = "tdx")]
-use crate::kvm::TdxCapabilities;
 use crate::vm::Vm;
 use crate::{HypervisorType, HypervisorVmConfig};
 
@@ -62,11 +60,6 @@ pub enum HypervisorError {
     ///
     #[error("Checking extensions")]
     CheckExtensions(#[source] anyhow::Error),
-    ///
-    /// Failed to retrieve TDX capabilities
-    ///
-    #[error("Failed to retrieve TDX capabilities")]
-    TdxCapabilities(#[source] anyhow::Error),
     ///
     /// Failed to set partition property
     ///
@@ -142,13 +135,6 @@ pub trait Hypervisor: Send + Sync {
     /// Retrieve AArch64 host maximum IPA size supported by KVM
     ///
     fn get_host_ipa_limit(&self) -> i32;
-    ///
-    /// Retrieve TDX capabilities
-    ///
-    #[cfg(feature = "tdx")]
-    fn tdx_capabilities(&self) -> Result<TdxCapabilities> {
-        unimplemented!()
-    }
     ///
     /// Get the number of supported hardware breakpoints
     ///

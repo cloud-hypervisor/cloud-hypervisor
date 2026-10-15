@@ -17,13 +17,7 @@ use std::mem::offset_of;
 #[cfg(feature = "sev_snp")]
 use std::num;
 use std::os::fd::{FromRawFd, OwnedFd};
-#[cfg(feature = "tdx")]
-use std::os::raw;
 use std::os::unix::io::AsRawFd;
-#[cfg(feature = "tdx")]
-use std::os::unix::io::RawFd;
-#[cfg(feature = "tdx")]
-use std::ptr;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use std::sync::Mutex;
 #[cfg(feature = "sev_snp")]
@@ -141,8 +135,6 @@ use kvm_bindings::{
     KVM_STATE_NESTED_FORMAT_SVM, KVM_STATE_NESTED_FORMAT_VMX, KVM_STATE_NESTED_GIF_SET,
     kvm_nested_state,
 };
-#[cfg(feature = "tdx")]
-use kvm_bindings::{KVM_X86_SW_PROTECTED_VM, KVMIO};
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{Xsave as xsave2, kvm_xsave2};
 pub use kvm_ioctls::{self, Cap, Kvm, VcpuExit};
@@ -153,8 +145,6 @@ use vfio_ioctls::VfioDeviceFd;
 use vmm_sys_util::ioctl::ioctl_with_ref;
 #[cfg(target_arch = "x86_64")]
 use vmm_sys_util::{fam::FamStruct, ioctl_io_nr, ioctl_iow_nr};
-#[cfg(feature = "tdx")]
-use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_iowr_nr};
 
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use crate::RegList;
@@ -260,116 +250,6 @@ fn make_segment(sev_selector: SevSelector) -> Segment {
         unusable: 0,
         ..Default::default()
     }
-}
-
-#[cfg(feature = "tdx")]
-const KVM_EXIT_TDX: u32 = 50;
-#[cfg(feature = "tdx")]
-const TDG_VP_VMCALL_GET_QUOTE: u64 = 0x10002;
-#[cfg(feature = "tdx")]
-const TDG_VP_VMCALL_SETUP_EVENT_NOTIFY_INTERRUPT: u64 = 0x10004;
-#[cfg(feature = "tdx")]
-const TDG_VP_VMCALL_SUCCESS: u64 = 0;
-#[cfg(feature = "tdx")]
-const TDG_VP_VMCALL_INVALID_OPERAND: u64 = 0x8000000000000000;
-
-#[cfg(feature = "tdx")]
-ioctl_iowr_nr!(KVM_MEMORY_ENCRYPT_OP, KVMIO, 0xba, raw::c_ulong);
-
-#[cfg(feature = "tdx")]
-#[repr(u32)]
-enum TdxCommand {
-    Capabilities = 0,
-    InitVm,
-    InitVcpu,
-    InitMemRegion,
-    Finalize,
-}
-
-#[cfg(feature = "tdx")]
-pub enum TdxExitDetails {
-    GetQuote,
-    SetupEventNotifyInterrupt,
-}
-
-#[cfg(feature = "tdx")]
-pub enum TdxExitStatus {
-    Success,
-    InvalidOperand,
-}
-
-#[cfg(feature = "tdx")]
-const TDX_MAX_NR_CPUID_CONFIGS: usize = 6;
-
-#[cfg(feature = "tdx")]
-#[repr(C)]
-#[derive(Debug, Default)]
-pub struct TdxCpuidConfig {
-    pub leaf: u32,
-    pub sub_leaf: u32,
-    pub eax: u32,
-    pub ebx: u32,
-    pub ecx: u32,
-    pub edx: u32,
-}
-
-#[cfg(feature = "tdx")]
-#[repr(C)]
-#[derive(Debug, Default)]
-pub struct TdxCapabilities {
-    pub attrs_fixed0: u64,
-    pub attrs_fixed1: u64,
-    pub xfam_fixed0: u64,
-    pub xfam_fixed1: u64,
-    pub nr_cpuid_configs: u32,
-    pub padding: u32,
-    pub cpuid_configs: [TdxCpuidConfig; TDX_MAX_NR_CPUID_CONFIGS],
-}
-
-#[cfg(feature = "tdx")]
-#[derive(Copy, Clone)]
-pub struct KvmTdxExit {
-    pub type_: u32,
-    pub pad: u32,
-    pub u: KvmTdxExitU,
-}
-
-#[cfg(feature = "tdx")]
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub union KvmTdxExitU {
-    pub vmcall: KvmTdxExitVmcall,
-}
-
-#[cfg(feature = "tdx")]
-#[repr(C)]
-#[derive(Debug, Default, Copy, Clone, PartialEq)]
-pub struct KvmTdxExitVmcall {
-    pub type_: u64,
-    pub subfunction: u64,
-    pub reg_mask: u64,
-    pub in_r12: u64,
-    pub in_r13: u64,
-    pub in_r14: u64,
-    pub in_r15: u64,
-    pub in_rbx: u64,
-    pub in_rdi: u64,
-    pub in_rsi: u64,
-    pub in_r8: u64,
-    pub in_r9: u64,
-    pub in_rdx: u64,
-    pub status_code: u64,
-    pub out_r11: u64,
-    pub out_r12: u64,
-    pub out_r13: u64,
-    pub out_r14: u64,
-    pub out_r15: u64,
-    pub out_rbx: u64,
-    pub out_rdi: u64,
-    pub out_rsi: u64,
-    pub out_r8: u64,
-    pub out_r9: u64,
-    pub out_rdx: u64,
 }
 
 impl From<kvm_userspace_memory_region2> for UserMemoryRegion {
@@ -1477,129 +1357,10 @@ impl vm::Vm for KvmVm {
             .map_err(|e| vm::HypervisorVmError::GetDirtyLog(e.into()))
     }
 
-    ///
-    /// Initialize TDX for this VM
-    ///
-    #[cfg(feature = "tdx")]
-    fn tdx_init(&self, cpuid: &[CpuIdEntry], max_vcpus: u32) -> vm::Result<()> {
-        const TDX_ATTR_SEPT_VE_DISABLE: usize = 28;
-
-        let mut cpuid: Vec<kvm_bindings::kvm_cpuid_entry2> =
-            cpuid.iter().map(|e| (*e).into()).collect();
-        cpuid.resize(256, kvm_bindings::kvm_cpuid_entry2::default());
-
-        #[repr(C)]
-        struct TdxInitVm {
-            attributes: u64,
-            max_vcpus: u32,
-            padding: u32,
-            mrconfigid: [u64; 6],
-            mrowner: [u64; 6],
-            mrownerconfig: [u64; 6],
-            cpuid_nent: u32,
-            cpuid_padding: u32,
-            cpuid_entries: [kvm_bindings::kvm_cpuid_entry2; 256],
-        }
-        let data = TdxInitVm {
-            attributes: 1 << TDX_ATTR_SEPT_VE_DISABLE,
-            max_vcpus,
-            padding: 0,
-            mrconfigid: [0; 6],
-            mrowner: [0; 6],
-            mrownerconfig: [0; 6],
-            cpuid_nent: cpuid.len() as u32,
-            cpuid_padding: 0,
-            cpuid_entries: cpuid.as_slice().try_into().unwrap(),
-        };
-
-        tdx_command(
-            &self.fd.as_raw_fd(),
-            TdxCommand::InitVm,
-            0,
-            (&raw const data).cast(),
-        )
-        .map_err(vm::HypervisorVmError::InitializeTdx)
-    }
-
-    ///
-    /// Finalize the TDX setup for this VM
-    ///
-    #[cfg(feature = "tdx")]
-    fn tdx_finalize(&self) -> vm::Result<()> {
-        tdx_command(&self.fd.as_raw_fd(), TdxCommand::Finalize, 0, ptr::null())
-            .map_err(vm::HypervisorVmError::FinalizeTdx)
-    }
-
-    /// Initialize memory regions for the TDX VM
-    ///
-    /// # Safety
-    ///
-    /// `host_address` must be valid for `size` bytes
-    #[cfg(feature = "tdx")]
-    unsafe fn tdx_init_memory_region(
-        &self,
-        host_address: *mut u8,
-        guest_address: u64,
-        size: usize,
-        measure: bool,
-    ) -> vm::Result<()> {
-        #[repr(C)]
-        struct TdxInitMemRegion {
-            host_address: u64,
-            guest_address: u64,
-            pages: u64,
-        }
-        let data = TdxInitMemRegion {
-            host_address: host_address as _,
-            guest_address,
-            pages: (size / 4096).try_into().unwrap(),
-        };
-
-        tdx_command(
-            &self.fd.as_raw_fd(),
-            TdxCommand::InitMemRegion,
-            u32::from(measure),
-            (&raw const data).cast(),
-        )
-        .map_err(vm::HypervisorVmError::InitMemRegionTdx)
-    }
-
     /// Downcast to the underlying KvmVm type
     fn as_any(&self) -> &dyn Any {
         self
     }
-}
-
-#[cfg(feature = "tdx")]
-fn tdx_command(
-    fd: &RawFd,
-    command: TdxCommand,
-    flags: u32,
-    data: *const libc::c_void,
-) -> io::Result<()> {
-    #[repr(C)]
-    struct TdxIoctlCmd {
-        command: TdxCommand,
-        flags: u32,
-        data: u64,
-        error: u64,
-        unused: u64,
-    }
-    let cmd = TdxIoctlCmd {
-        command,
-        flags,
-        data: data as _,
-        error: 0,
-        unused: 0,
-    };
-    // SAFETY: FFI call. All input parameters are valid.
-    let ret =
-        unsafe { ioctl_with_val(fd, KVM_MEMORY_ENCRYPT_OP(), &raw const cmd as raw::c_ulong) };
-
-    if ret < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
 }
 
 /// Wrapper over KVM system ioctls.
@@ -1719,11 +1480,6 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             #[cfg(feature = "sev_snp")]
             if _config.sev_snp_enabled {
                 vm_type = KVM_X86_SNP_VM.into();
-            }
-
-            #[cfg(feature = "tdx")]
-            if _config.tdx_enabled {
-                vm_type = KVM_X86_SW_PROTECTED_VM.into();
             }
         }
 
@@ -1879,27 +1635,6 @@ impl hypervisor::Hypervisor for KvmHypervisor {
     ///
     fn get_host_ipa_limit(&self) -> i32 {
         self.kvm.get_host_ipa_limit()
-    }
-
-    ///
-    /// Retrieve TDX capabilities
-    ///
-    #[cfg(feature = "tdx")]
-    fn tdx_capabilities(&self) -> hypervisor::Result<TdxCapabilities> {
-        let data = TdxCapabilities {
-            nr_cpuid_configs: TDX_MAX_NR_CPUID_CONFIGS as u32,
-            ..Default::default()
-        };
-
-        tdx_command(
-            &self.kvm.as_raw_fd(),
-            TdxCommand::Capabilities,
-            0,
-            (&raw const data).cast(),
-        )
-        .map_err(|e| hypervisor::HypervisorError::TdxCapabilities(e.into()))?;
-
-        Ok(data)
     }
 
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
@@ -2693,8 +2428,6 @@ impl cpu::Vcpu for KvmVcpu {
                     Ok(cpu::VmExit::Ignore)
                 }
                 VcpuExit::Hyperv => Ok(cpu::VmExit::Hyperv),
-                #[cfg(feature = "tdx")]
-                VcpuExit::Unsupported(KVM_EXIT_TDX) => Ok(cpu::VmExit::Tdx),
                 VcpuExit::Debug(_) => Ok(cpu::VmExit::Debug),
                 #[cfg(feature = "sev_snp")]
                 VcpuExit::Hypercall(hypercall) => {
@@ -3576,71 +3309,10 @@ impl cpu::Vcpu for KvmVcpu {
     }
 
     ///
-    /// Initialize TDX for this CPU
-    ///
-    #[cfg(feature = "tdx")]
-    fn tdx_init(&self, hob_address: u64) -> cpu::Result<()> {
-        // On 32-bit, the next cast would clobber the high 32 bits.
-        #[cfg(not(target_pointer_width = "64"))]
-        compile_error!("32-bit TDX not supported");
-        let hob_address = hob_address as *const _;
-
-        tdx_command(&self.fd.as_raw_fd(), TdxCommand::InitVcpu, 0, hob_address)
-            .map_err(cpu::HypervisorCpuError::InitializeTdx)
-    }
-
-    ///
     /// Set the "immediate_exit" state
     ///
     fn set_immediate_exit(&mut self, exit: bool) {
         self.fd.set_kvm_immediate_exit(exit.into());
-    }
-
-    ///
-    /// Returns the details about TDX exit reason
-    ///
-    #[cfg(feature = "tdx")]
-    fn get_tdx_exit_details(&mut self) -> cpu::Result<TdxExitDetails> {
-        let kvm_run = self.fd.get_kvm_run();
-        // SAFETY: accessing a union field in a valid structure
-        let tdx_vmcall = unsafe {
-            &mut (*((&raw mut kvm_run.__bindgen_anon_1).cast::<KvmTdxExit>()))
-                .u
-                .vmcall
-        };
-
-        tdx_vmcall.status_code = TDG_VP_VMCALL_INVALID_OPERAND;
-
-        if tdx_vmcall.type_ != 0 {
-            return Err(cpu::HypervisorCpuError::UnknownTdxVmCall);
-        }
-
-        match tdx_vmcall.subfunction {
-            TDG_VP_VMCALL_GET_QUOTE => Ok(TdxExitDetails::GetQuote),
-            TDG_VP_VMCALL_SETUP_EVENT_NOTIFY_INTERRUPT => {
-                Ok(TdxExitDetails::SetupEventNotifyInterrupt)
-            }
-            _ => Err(cpu::HypervisorCpuError::UnknownTdxVmCall),
-        }
-    }
-
-    ///
-    /// Set the status code for TDX exit
-    ///
-    #[cfg(feature = "tdx")]
-    fn set_tdx_status(&mut self, status: TdxExitStatus) {
-        let kvm_run = self.fd.get_kvm_run();
-        // SAFETY: accessing a union field in a valid structure
-        let tdx_vmcall = unsafe {
-            &mut (*((&raw mut kvm_run.__bindgen_anon_1).cast::<KvmTdxExit>()))
-                .u
-                .vmcall
-        };
-
-        tdx_vmcall.status_code = match status {
-            TdxExitStatus::Success => TDG_VP_VMCALL_SUCCESS,
-            TdxExitStatus::InvalidOperand => TDG_VP_VMCALL_INVALID_OPERAND,
-        };
     }
 
     #[cfg(target_arch = "x86_64")]

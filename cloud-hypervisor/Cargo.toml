@@ -55,7 +55,6 @@ kvm = ["vmm/kvm"]
 mshv = ["vmm/mshv"]
 pvmemcontrol = ["vmm/pvmemcontrol"]
 sev_snp = ["igvm", "vmm/sev_snp"]
-tdx = ["vmm/tdx"]
 tracing = ["tracer/tracing", "vmm/tracing"]
 
 [lints]

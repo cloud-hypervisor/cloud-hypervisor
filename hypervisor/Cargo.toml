@@ -11,7 +11,6 @@ kvm = ["kvm-bindings", "kvm-ioctls", "vfio-ioctls/kvm"]
 mshv = ["mshv-bindings", "mshv-ioctls", "mshv_emulator", "vfio-ioctls/mshv"]
 mshv_emulator = ["iced-x86", "mshv-bindings"]
 sev_snp = ["dep:bitfield-struct", "igvm", "igvm_defs"]
-tdx = []
 
 [dependencies]
 anyhow = { workspace = true }

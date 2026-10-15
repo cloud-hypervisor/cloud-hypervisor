@@ -154,9 +154,6 @@ pub struct PlatformConfig {
     pub system_sku_number: Option<String>,
     #[serde(default)]
     pub chassis_asset_tag: Option<String>,
-    #[cfg(feature = "tdx")]
-    #[serde(default)]
-    pub tdx: bool,
     #[cfg(feature = "sev_snp")]
     #[serde(default)]
     pub sev_snp: bool,

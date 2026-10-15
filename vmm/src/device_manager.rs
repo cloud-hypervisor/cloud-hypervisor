@@ -1097,7 +1097,7 @@ pub struct DeviceManager {
     // pvpanic device
     pvpanic_device: Option<Arc<Mutex<devices::PvPanicDevice>>>,
 
-    // Force VIRTIO_F_ACCESS_PLATFORM on all virtio devices (e.g. for TDX/SEV-SNP)
+    // Force VIRTIO_F_ACCESS_PLATFORM on all virtio devices (e.g. for SEV-SNP)
     force_access_platform: bool,
     // List of unique identifiers provided at boot through the configuration.
     boot_id_list: BTreeSet<String>,
