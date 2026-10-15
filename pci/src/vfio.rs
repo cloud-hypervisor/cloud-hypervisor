@@ -1226,11 +1226,7 @@ impl VfioCommon {
 
                     // Advertise the device as a PCIe integrated endpoint if the
                     // PASID capability is enabled.
-                    if self
-                        .extended_caps
-                        .iter()
-                        .any(|cap| cap.id() == PciExpressCapabilityId::ProcessAddressSpaceId)
-                    {
+                    if self.presents_as_integrated_endpoint() {
                         self.present_as_integrated_endpoint(cap_iter);
                     }
                 }
@@ -1290,6 +1286,12 @@ impl VfioCommon {
             (u32::from(clique_id) << 19) | 0x5032,
             0,
         );
+    }
+
+    fn presents_as_integrated_endpoint(&self) -> bool {
+        self.extended_caps
+            .iter()
+            .any(|cap| cap.id() == PciExpressCapabilityId::ProcessAddressSpaceId)
     }
 
     fn present_as_integrated_endpoint(&mut self, cap_offset: u8) {
