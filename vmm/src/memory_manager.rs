@@ -3121,6 +3121,8 @@ impl MemoryManager {
             }
         }
 
+        // Memory zones iterate in hash order.
+        table.sort();
         Ok(table)
     }
 
