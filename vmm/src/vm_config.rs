@@ -136,9 +136,9 @@ pub struct PlatformConfig {
     pub iommu_segments: Option<Box<[u16]>>,
     #[serde(default = "default_platformconfig_iommu_address_width_bits")]
     pub iommu_address_width_bits: u8,
-    #[serde(default, alias = "serial_number")]
+    #[serde(default)]
     pub system_serial_number: Option<String>,
-    #[serde(default, alias = "uuid")]
+    #[serde(default)]
     pub system_uuid: Option<String>,
     #[serde(default)]
     pub oem_strings: Option<Box<[String]>>,
