@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-//! Sparse file-copy helpers shared between snapshot/restore paths (the
-//! `MemoryManager` snapshot writer and the offload daemon). Holes are
-//! detected via `lseek(SEEK_DATA)`/`lseek(SEEK_HOLE)` and left as holes in
+//! Sparse and reflink file-copy helpers shared between snapshot/restore
+//! paths (the `MemoryManager` snapshot writer and the offload daemon). Holes
+//! are detected via `lseek(SEEK_DATA)`/`lseek(SEEK_HOLE)` and left as holes in
 //! the destination, with a dense fallback when the source filesystem does
 //! not support sparse-seek.
 
@@ -149,6 +149,25 @@ pub fn copy_region(
     Ok(())
 }
 
+/// Make the first `len` bytes of `dst` share the extents of the first `len`
+/// bytes of `src` (`FICLONERANGE`). Fails unless both files are on one
+/// filesystem that supports reflink.
+pub fn clone_file_range(src: &File, dst: &File, len: u64) -> io::Result<()> {
+    let range = libc::file_clone_range {
+        src_fd: src.as_raw_fd().into(),
+        src_offset: 0,
+        src_length: len,
+        dest_offset: 0,
+    };
+    // SAFETY: both fds are valid for the borrows and `range` outlives the
+    // call; FICLONERANGE only reads them.
+    let ret = unsafe { libc::ioctl(dst.as_raw_fd(), libc::FICLONERANGE as _, &range) };
+    if ret < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Write;
@@ -158,7 +177,7 @@ mod tests {
 
     use vm_allocator::page_size::get_page_size;
 
-    use super::{next_data_extent, write_region_sparse};
+    use super::{clone_file_range, next_data_extent, write_region_sparse};
 
     fn make_memfd(size: u64) -> fs::File {
         // SAFETY: memfd_create is a self-contained syscall; we own the
@@ -413,5 +432,27 @@ mod tests {
         assert!(restored[4096 * 5..4096 * 26].iter().all(|&b| b == 0));
         assert!(restored[4096 * 26..4096 * 30].iter().all(|&b| b == 0xBB));
         assert!(restored[4096 * 30..].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn clone_file_range_copies_content_where_reflink_exists() {
+        let mut src = tempfile::tempfile().unwrap();
+        src.write_all(&[0xab; 8192]).unwrap();
+        let dst = tempfile::tempfile().unwrap();
+        match clone_file_range(&src, &dst, 4096) {
+            Ok(()) => {
+                assert_eq!(dst.metadata().unwrap().len(), 4096);
+                let mut got = [0u8; 4096];
+                dst.read_exact_at(&mut got, 0).unwrap();
+                assert_eq!(got, [0xab; 4096]);
+            }
+            Err(e) => assert!(
+                matches!(
+                    e.raw_os_error(),
+                    Some(libc::EOPNOTSUPP | libc::EXDEV | libc::EINVAL)
+                ),
+                "unexpected clone error: {e}"
+            ),
+        }
     }
 }

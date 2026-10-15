@@ -95,7 +95,6 @@ pub mod landlock;
 pub mod locked_unix_listener;
 pub mod memory_manager;
 pub mod migration;
-#[cfg_attr(not(test), expect(dead_code))]
 mod pagemap;
 mod pci_segment;
 mod prefault;
