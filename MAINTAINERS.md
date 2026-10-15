@@ -55,8 +55,6 @@ ownership for every component.
   - **SEV-SNP**
     - @rhakobyan
     - @russell-islam
-  - **TDX**
-    <!-- - TODO Cyberus Technology will take over soon: Oliver, Leander -->
 - **CPU Profiles**
   - @olivereanderson
 - **Live Migration**

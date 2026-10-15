@@ -3257,7 +3257,7 @@ memory density.
 
 Through the use of `TD-Shim` lightweight firmware it is now possible to
 directly boot into the kernel with TDX. The [TDX
-documentation](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/main/docs/intel_tdx.md#tdshim)
+documentation](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/v22.0/docs/intel_tdx.md#tdshim)
 has been updated for this usage.
 
 ### PMU Support for AArch64
