@@ -824,6 +824,8 @@ impl VfioCommon {
             vfio_common.initialize_legacy_interrupt()?;
         }
 
+        vfio_common.rebuild_write_ignore();
+
         Ok(vfio_common)
     }
 
@@ -1301,17 +1303,28 @@ impl VfioCommon {
 
         self.patch_reg(reg_idx, PCI_EXP_FLAGS_TYPE_MASK, PCI_EXP_TYPE_RC_END, 0);
 
-        let clear = |this: &mut Self, reg: u32| {
-            this.patch_reg(reg_idx + (reg / 4) as usize, 0xffff_ffff, 0, 0);
-        };
-
-        clear(self, PCI_EXP_LNKCTL);
+        // Link Control is owned by the host, so the guest reads it as zero.
+        // Link Status stays readable, since tools query the link from it.
+        self.patch_reg(reg_idx + (PCI_EXP_LNKCTL / 4) as usize, 0x0000_ffff, 0, 0);
 
         let flags = self.vfio_wrapper.read_config_dword(u32::from(cap_offset));
         let version = (flags & PCI_EXP_FLAGS_VERS_MASK) >> PCI_EXP_FLAGS_VERS_SHIFT;
 
         if version > 1 {
-            clear(self, PCI_EXP_LNKCTL2);
+            self.patch_reg(reg_idx + (PCI_EXP_LNKCTL2 / 4) as usize, 0xffff_ffff, 0, 0);
+        }
+    }
+
+    fn rebuild_write_ignore(&mut self) {
+        self.write_ignore.clear();
+
+        if !self.presents_as_integrated_endpoint() {
+            return;
+        }
+
+        if let Some(cap_offset) = self.find_capability(PciCapabilityId::PciExpress) {
+            self.write_ignore
+                .insert(cap_offset / 4 + (PCI_EXP_LNKCTL / 4) as usize);
         }
     }
 
@@ -3650,6 +3663,75 @@ mod tests {
         common.write_config_register(0x50 / 4, 0, &0x1111_2222u32.to_le_bytes());
         assert_eq!(mock.dword(0x50), 0);
         assert_eq!(common.read_config_register(0x50 / 4), 0x0000_0022);
+    }
+
+    fn seed_pci_express_cap(mock: &MockConfigSpace) {
+        let seed = |offset: u64, value: u32| mock.region_write(0, offset, &value.to_le_bytes());
+        seed(0x04, u32::from(PCI_CONFIG_STATUS_CAPABILITIES_LIST) << 16);
+        seed(0x34, 0x40);
+        seed(0x40, 0x0002_0010);
+        seed(0x4c, 0x0047_ac46); // Link Capabilities
+        seed(0x50, 0x1011_0040); // Link Status : Link Control
+        seed(0x6c, 0x0000_007e); // Link Capabilities 2
+        seed(0x70, 0x0001_0006); // Link Status 2 : Link Control 2
+    }
+
+    fn assert_link_control_writes_are_ignored(common: &mut VfioCommon, mock: &MockConfigSpace) {
+        common.write_config_register(0x50 / 4, 0, &0x0030u16.to_le_bytes());
+        common.write_config_register(0x50 / 4, 0, &0xc000_0030u32.to_le_bytes());
+        assert_eq!(mock.dword(0x50), 0x1011_0040);
+        assert_eq!(common.read_config_register(0x50 / 4), 0x1011_0000);
+    }
+
+    #[test]
+    fn integrated_endpoint_keeps_link_capabilities_and_status() {
+        let mock = MockConfigSpace::new(&[]);
+        seed_pci_express_cap(&mock);
+        let mut common = test_vfio_common_with_pasid(Arc::clone(&mock));
+
+        common.present_as_integrated_endpoint(0x40);
+        common.rebuild_write_ignore();
+
+        assert_eq!(
+            common.read_config_register(0x40 / 4) & PCI_EXP_FLAGS_TYPE_MASK,
+            PCI_EXP_TYPE_RC_END
+        );
+        assert_eq!(common.read_config_register(0x4c / 4), 0x0047_ac46);
+        assert_eq!(common.read_config_register(0x50 / 4), 0x1011_0000);
+        assert_eq!(common.read_config_register(0x6c / 4), 0x0000_007e);
+        assert_eq!(common.read_config_register(0x70 / 4), 0);
+
+        assert_link_control_writes_are_ignored(&mut common, &mock);
+    }
+
+    #[test]
+    fn link_control_writes_are_ignored_after_restore() {
+        let mock = MockConfigSpace::new(&[]);
+        seed_pci_express_cap(&mock);
+        let mut common = test_vfio_common_with_pasid(Arc::clone(&mock));
+        common.present_as_integrated_endpoint(0x40);
+
+        let snapshot = Snapshot::new_from_state(&common.state()).unwrap();
+        let state: VfioCommonState = snapshot.to_state().unwrap();
+
+        // The snapshot carries the patches but not the write-ignore list,
+        // which a restore derives again from the device and the config.
+        let mut restored = test_vfio_common_with_pasid(Arc::clone(&mock));
+        restored.set_state(&state, None, None, None).unwrap();
+        restored.rebuild_write_ignore();
+
+        assert_eq!(restored.read_config_register(0x50 / 4), 0x1011_0000);
+        assert_link_control_writes_are_ignored(&mut restored, &mock);
+
+        // Without the PASID capability the device is not presented as an
+        // integrated endpoint, so a partially patched register forwards the
+        // guest write to the device like any other.
+        let mut plain = test_vfio_common(Arc::clone(&mock), None);
+        plain.set_state(&state, None, None, None).unwrap();
+        plain.rebuild_write_ignore();
+
+        plain.write_config_register(0x50 / 4, 0, &0x0030u16.to_le_bytes());
+        assert_eq!(mock.dword(0x50), 0x1011_0030);
     }
 
     #[test]
