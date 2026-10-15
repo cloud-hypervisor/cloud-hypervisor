@@ -1156,7 +1156,7 @@ impl VfioCommon {
         status & PCI_CONFIG_STATUS_CAPABILITIES_LIST != 0
     }
 
-    fn get_msix_cap_idx(&self) -> Option<usize> {
+    fn find_capability(&self, id: PciCapabilityId) -> Option<usize> {
         if !self.has_capabilities() {
             return None;
         }
@@ -1168,7 +1168,7 @@ impl VfioCommon {
 
         while cap_next != 0 {
             let cap_id = self.vfio_wrapper.read_config_byte(cap_next.into());
-            if PciCapabilityId::from(cap_id) == PciCapabilityId::MsiX {
+            if PciCapabilityId::from(cap_id) == id {
                 return Some(cap_next as usize);
             }
             let cap_ptr = self.vfio_wrapper.read_config_byte((cap_next + 1).into())
@@ -1742,7 +1742,7 @@ impl VfioCommon {
             return self.configuration.read_reg(reg_idx);
         }
 
-        if let Some(id) = self.get_msix_cap_idx() {
+        if let Some(id) = self.find_capability(PciCapabilityId::MsiX) {
             let msix = self.interrupt.msix.as_mut().unwrap();
             if reg_idx * 4 == id + 4 {
                 return msix.cap.table;
