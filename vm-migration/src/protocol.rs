@@ -496,6 +496,11 @@ impl MemoryRangeTable {
         &self.data
     }
 
+    /// Sorts the ranges by guest address.
+    pub fn sort(&mut self) {
+        self.data.sort_unstable_by_key(|range| range.gpa);
+    }
+
     pub fn push(&mut self, range: MemoryRange) {
         self.data.push(range);
     }
