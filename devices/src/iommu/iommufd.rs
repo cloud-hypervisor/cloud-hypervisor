@@ -206,10 +206,6 @@ impl PhysicalIommu for IommufdIommu {
         };
         endpoint
             .vdevice
-            .uninstall_s1_hwpt(true)
-            .map_err(Error::UninstallStage1)?;
-        endpoint
-            .vdevice
             .install_s1_hwpt(&hwpt_data)
             .map_err(Error::InstallStage1)?;
 
