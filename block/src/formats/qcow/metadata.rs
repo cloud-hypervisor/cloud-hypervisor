@@ -617,7 +617,8 @@ impl QcowState {
     }
 
     fn is_refcount_addressable_cluster_offset(&self, cluster_addr: u64) -> bool {
-        cluster_addr & (self.raw_file.cluster_size() - 1) == 0
+        cluster_addr != 0
+            && cluster_addr & (self.raw_file.cluster_size() - 1) == 0
             && cluster_addr <= self.refcounts.max_valid_cluster_offset()
     }
 
@@ -1472,6 +1473,41 @@ mod tests {
             !inner.unref_clusters.contains(&live_l2) && !inner.avail_clusters.contains(&live_l2),
             "a still-referenced L2 table must never enter the free lists"
         );
+    }
+
+    // An L2 entry with only the copied flag set maps a guest cluster onto host
+    // cluster 0. Writes through it would overwrite the image header.
+    #[test]
+    fn l2_entry_pointing_at_header_is_rejected() {
+        use std::os::unix::fs::FileExt;
+
+        const CLUSTER_USED_FLAG: u64 = 1 << 63;
+        let cluster_size: u64 = 1 << 16;
+        let temp = super::super::QcowTempDisk::new(64 * cluster_size, None, false, true, false)
+            .unwrap()
+            .into_tempfile();
+        let open = || {
+            let raw = crate::AlignedFile::new(temp.as_file().try_clone().unwrap(), false);
+            super::super::parser::parse_qcow(raw, 0, true).unwrap().0
+        };
+
+        let mut inner = open();
+        inner.map_write(0, None).expect("seed write");
+        let l2_table = inner.l1_table[0];
+        super::QcowMetadata::new(inner).shutdown();
+        temp.as_file()
+            .write_all_at(&CLUSTER_USED_FLAG.to_be_bytes(), l2_table)
+            .unwrap();
+
+        let mut inner = open();
+        let err = inner
+            .map_read_with_populate(0, 512, false)
+            .expect_err("read mapped onto the header");
+        assert_eq!(err.raw_os_error(), Some(libc::EIO));
+        let err = inner
+            .map_write(0, None)
+            .expect_err("write mapped onto the header");
+        assert_eq!(err.raw_os_error(), Some(libc::EIO));
     }
 
     #[test]
