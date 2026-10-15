@@ -7,7 +7,7 @@ use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
 use std::os::fd::BorrowedFd;
 use std::os::unix::io::AsRawFd;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result};
 
@@ -304,6 +304,21 @@ pub(crate) struct UserMemoryRegion {
     pub slot: u32,
     pub start: u64,
     pub mapping: Arc<MmapRegion>,
+}
+
+impl UserMemoryRegion {
+    fn map_for_p2p(
+        &self,
+        vfio_ops: &Arc<dyn VfioOps>,
+        device_path: &Path,
+        bdf: PciBdf,
+    ) -> Result<(), VfioPciError> {
+        // SAFETY: MmapRegion invariants guarantee that self.mapping.addr()
+        // points to self.mapping.len() bytes of valid memory that will only
+        // be unmapped with munmap().
+        unsafe { vfio_ops.vfio_dma_map(self.start, self.mapping.len(), self.mapping.addr()) }
+            .map_err(|e| VfioPciError::DmaMap(e, device_path.to_path_buf(), bdf))
+    }
 }
 
 #[derive(Clone)]
@@ -2431,19 +2446,11 @@ impl VfioPciDevice {
                     // Map the MMIO BAR into the host IOMMU address space via VfioOps
                     // Only needed if p2p_dma is enabled.
                     if self.p2p_dma {
-                        // vfio_dma_map should be unsafe but isn't.
-                        // SAFETY: MmapRegion invariants guarantee that
-                        // user_memory_region.mapping.addr() points to
-                        // user_memory_region.mapping.len() bytes of
-                        // valid memory that will only be unmapped with munmap().
-                        unsafe {
-                            self.vfio_ops.vfio_dma_map(
-                                user_memory_region.start,
-                                user_memory_region.mapping.len(),
-                                user_memory_region.mapping.addr(),
-                            )
-                        }
-                        .map_err(|e| VfioPciError::DmaMap(e, self.device_path.clone(), self.bdf))?;
+                        user_memory_region.map_for_p2p(
+                            &self.vfio_ops,
+                            &self.device_path,
+                            self.bdf,
+                        )?;
                     }
                     region.user_memory_regions.push(user_memory_region);
                 }
@@ -2689,22 +2696,15 @@ iova 0x{:x}, size 0x{:x}: {}, ",
                     // Map the moved MMIO region into the host IOMMU address space via VfioOps
                     // Only needed if p2p_dma is enabled.
                     if self.p2p_dma {
-                        // vfio_dma_map is unsound and ought to be marked as unsafe
-                        // SAFETY: MmapRegion invariants guarantee that
-                        // host_addr points to len bytes of
-                        // valid memory that will only be unmapped with munmap().
-                        unsafe {
-                            self.vfio_ops
-                                .vfio_dma_map(user_memory_region.start, len, host_addr)
-                        }
-                        .map_err(|e| VfioPciError::DmaMap(e, self.device_path.clone(), self.bdf))
-                        .map_err(|e| {
-                            io::Error::other(format!(
-                                "Could not map MMIO region into the host IOMMU address space: \
+                        user_memory_region
+                            .map_for_p2p(&self.vfio_ops, &self.device_path, self.bdf)
+                            .map_err(|e| {
+                                io::Error::other(format!(
+                                    "Could not map MMIO region into the host IOMMU address space: \
 iova 0x{:x}, size 0x{:x}: {}, ",
-                                user_memory_region.start, len, e
-                            ))
-                        })?;
+                                    user_memory_region.start, len, e
+                                ))
+                            })?;
                     }
                 }
             }
