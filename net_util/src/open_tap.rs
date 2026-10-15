@@ -78,7 +78,7 @@ fn open_tap_rx_q_0(
         None => Tap::new(num_rx_q).map_err(Error::TapOpen)?,
     };
     // Don't overwrite ip configuration of existing interfaces:
-    if tap_exists {
+    if tap_exists && ip_addr.is_some() {
         warn!(
             "Tap {} already exists. IP configuration will not be overwritten.",
             if_name.unwrap_or_default()
