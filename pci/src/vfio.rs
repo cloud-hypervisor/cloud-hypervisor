@@ -33,6 +33,8 @@ use vfio_bindings::bindings::vfio::{
 use vfio_ioctls::{
     DmaLoggingRange, VfioDevice, VfioIrq, VfioOps, VfioRegionInfoCap, VfioRegionSparseMmapArea,
 };
+#[cfg(feature = "kvm")]
+use vfio_ioctls::{VfioIommufd, VfioRegionDmaRange};
 use vm_allocator::page_size::{
     align_page_size_down, align_page_size_up, get_page_size, is_4k_aligned, is_4k_multiple,
     is_page_size_aligned,
@@ -79,6 +81,9 @@ pub enum VfioPciError {
     CreateUserMemoryRegion(#[source] HypervisorVmError),
     #[error("Failed to DMA map: {0} for device {1} (guest BDF: {2})")]
     DmaMap(#[source] vfio_ioctls::VfioError, PathBuf, PciBdf),
+    #[cfg(feature = "kvm")]
+    #[error("Failed to map the dma-buf of device {1:?} at {2}")]
+    DmaMapFile(#[source] iommufd_ioctls::IommufdError, PathBuf, PciBdf),
     #[error("Failed to DMA unmap: {0} for device {1} (guest BDF: {2})")]
     DmaUnmap(#[source] vfio_ioctls::VfioError, PathBuf, PciBdf),
     #[error("Failed to enable INTx")]
@@ -307,12 +312,49 @@ pub(crate) struct UserMemoryRegion {
 }
 
 impl UserMemoryRegion {
+    #[cfg_attr(not(feature = "kvm"), expect(unused_variables))]
     fn map_for_p2p(
         &self,
+        device: &VfioDevice,
         vfio_ops: &Arc<dyn VfioOps>,
         device_path: &Path,
         bdf: PciBdf,
+        region_index: u32,
+        offset: u64,
     ) -> Result<(), VfioPciError> {
+        let iova = self.start;
+        let length = self.mapping.len();
+
+        #[cfg(feature = "kvm")]
+        if let Some(vfio_iommufd) = vfio_ops.as_any().downcast_ref::<VfioIommufd>()
+            && let Some(dma_buf) = device
+                .export_dma_buf(
+                    region_index,
+                    &[VfioRegionDmaRange {
+                        offset,
+                        length: length as u64,
+                    }],
+                    libc::O_RDWR as u32,
+                )
+                .map_err(|e| VfioPciError::DmaMap(e, device_path.to_path_buf(), bdf))?
+        {
+            debug!(
+                "Mapped region {region_index} of device {bdf} at 0x{iova:x} \
+                 (0x{length:x} bytes) through dma-buf"
+            );
+
+            return vfio_iommufd
+                .ioas()
+                .map_file(dma_buf.as_raw_fd(), 0, length as u64, iova, true)
+                .map_err(|e| VfioPciError::DmaMapFile(e, device_path.to_path_buf(), bdf));
+        }
+
+        debug!(
+            "Mapped region {region_index} of device {bdf} at 0x{iova:x} \
+             (0x{length:x} bytes) through VFIO dma map since dma-buf isn't \
+             available"
+        );
+
         // SAFETY: MmapRegion invariants guarantee that self.mapping.addr()
         // points to self.mapping.len() bytes of valid memory that will only
         // be unmapped with munmap().
@@ -331,6 +373,11 @@ pub struct MmioRegion {
 }
 
 impl MmioRegion {
+    /// Whether the BAR can be mapped for peer to peer DMA.
+    fn is_p2p_mappable(&self) -> bool {
+        self.length >= get_page_size()
+    }
+
     /// Returns true if this region has the exact same memory slots as the other region.
     pub fn has_matching_slots(&self, other: &MmioRegion) -> bool {
         self.user_memory_regions.len() == other.user_memory_regions.len()
@@ -2371,6 +2418,15 @@ impl VfioPciDevice {
                 )?;
 
                 let page_size = get_page_size();
+                let map_p2p = self.p2p_dma && region.is_p2p_mappable();
+                if self.p2p_dma && !map_p2p {
+                    warn!(
+                        "Skipping P2P DMA mapping of BAR {} of device {}: its size \
+                         0x{:x} is smaller than the host page size 0x{page_size:x}",
+                        region.index, self.bdf, region.length
+                    );
+                }
+
                 for area in sparse_areas.iter() {
                     // KVM_SET_USER_MEMORY_REGION requires memory_size to be a
                     // multiple of the host page size. On aarch64 with 64K pages
@@ -2445,11 +2501,14 @@ impl VfioPciDevice {
 
                     // Map the MMIO BAR into the host IOMMU address space via VfioOps
                     // Only needed if p2p_dma is enabled.
-                    if self.p2p_dma {
+                    if map_p2p {
                         user_memory_region.map_for_p2p(
+                            &self.device,
                             &self.vfio_ops,
                             &self.device_path,
                             self.bdf,
+                            region.index,
+                            area.offset,
                         )?;
                     }
                     region.user_memory_regions.push(user_memory_region);
@@ -2632,15 +2691,18 @@ impl PciDevice for VfioPciDevice {
     fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> Result<(), io::Error> {
         for region in self.common.mmio_regions.iter_mut() {
             if region.index as usize == bar_idx {
+                let region_index = region.index;
                 let old_base = region.start.raw_value();
+                let map_p2p = self.p2p_dma && region.is_p2p_mappable();
                 region.start = GuestAddress(new_base);
 
                 for user_memory_region in region.user_memory_regions.iter_mut() {
                     let len = user_memory_region.mapping.len();
                     let host_addr = user_memory_region.mapping.addr();
+                    let offset = user_memory_region.start - old_base;
                     // Unmap the old MMIO region from the host IOMMU address space via VfioOps
                     // Only needed if p2p_dma is enabled.
-                    if self.p2p_dma
+                    if map_p2p
                         && let Err(e) = self
                             .vfio_ops
                             .vfio_dma_unmap(user_memory_region.start, len)
@@ -2695,9 +2757,16 @@ iova 0x{:x}, size 0x{:x}: {}, ",
 
                     // Map the moved MMIO region into the host IOMMU address space via VfioOps
                     // Only needed if p2p_dma is enabled.
-                    if self.p2p_dma {
+                    if map_p2p {
                         user_memory_region
-                            .map_for_p2p(&self.vfio_ops, &self.device_path, self.bdf)
+                            .map_for_p2p(
+                                &self.device,
+                                &self.vfio_ops,
+                                &self.device_path,
+                                self.bdf,
+                                region_index,
+                                offset,
+                            )
                             .map_err(|e| {
                                 io::Error::other(format!(
                                     "Could not map MMIO region into the host IOMMU address space: \

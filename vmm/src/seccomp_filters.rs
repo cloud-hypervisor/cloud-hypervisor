@@ -141,6 +141,7 @@ mod iommufd {
     pub(super) const IOMMU_HWPT_ALLOC: u64 = 0x3b89;
     pub(super) const IOMMU_GET_HW_INFO: u64 = 0x3b8a;
     pub(super) const IOMMU_HWPT_INVALIDATE: u64 = 0x3b8d;
+    pub(super) const IOMMU_IOAS_MAP_FILE: u64 = 0x3b8f;
     pub(super) const IOMMU_VIOMMU_ALLOC: u64 = 0x3b90;
     pub(super) const IOMMU_VDEVICE_ALLOC: u64 = 0x3b91;
     pub(super) const IOMMU_VEVENTQ_ALLOC: u64 = 0x3b93;
@@ -310,6 +311,7 @@ fn create_vmm_ioctl_seccomp_rule_iommufd() -> Result<Vec<SeccompRule>, BackendEr
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_HWPT_ALLOC)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_GET_HW_INFO)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_HWPT_INVALIDATE)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_MAP_FILE)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_VIOMMU_ALLOC)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_VDEVICE_ALLOC)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_VEVENTQ_ALLOC)?],
@@ -950,6 +952,8 @@ fn create_vcpu_ioctl_seccomp_rule_iommufd() -> Result<Vec<SeccompRule>, BackendE
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_UNMAP)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_HWPT_ALLOC)?],
         and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_HWPT_INVALIDATE)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_MAP_FILE)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VFIO_DEVICE_FEATURE)?],
         and![Cond::new(
             1,
             ArgLen::Dword,
