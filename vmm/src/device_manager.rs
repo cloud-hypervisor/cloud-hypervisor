@@ -4150,13 +4150,8 @@ impl DeviceManager {
             .downcast::<VfioIommufd>()
             .map_err(|_| DeviceManagerError::ExpectedIommufdBackend)?;
         let viommu = Arc::new(
-            IommufdVIommu::new(
-                Arc::clone(vfio_iommufd.iommufd()),
-                vfio_iommufd.ioas_id(),
-                dev_id,
-                false,
-            )
-            .map_err(DeviceManagerError::IommufdCreate)?,
+            IommufdVIommu::new(Arc::clone(vfio_iommufd.ioas()), dev_id, false)
+                .map_err(DeviceManagerError::IommufdCreate)?,
         );
 
         let interrupt_manager = self
@@ -4328,13 +4323,9 @@ impl DeviceManager {
             None => self.add_smmuv3(&key, vfio_ops, dev_id)?,
         };
         let viommu = Arc::clone(smmuv3.backend());
+        let endpoint = Arc::clone(device) as Arc<dyn AttachHwpt>;
         viommu
-            .register_endpoint(
-                virt_id,
-                bdf,
-                Arc::clone(device) as Arc<dyn AttachHwpt>,
-                dev_id,
-            )
+            .register_endpoint(virt_id, bdf, &endpoint, dev_id)
             .map_err(DeviceManagerError::Smmuv3)?;
         let pasid_cap = viommu
             .pasid_cap(dev_id)
