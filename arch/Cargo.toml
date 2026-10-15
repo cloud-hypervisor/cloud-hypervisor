@@ -10,7 +10,6 @@ default = []
 fw_cfg = []
 kvm = ["hypervisor/kvm"]
 sev_snp = []
-tdx = []
 
 [dependencies]
 anyhow = { workspace = true }

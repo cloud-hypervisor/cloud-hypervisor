@@ -11,7 +11,7 @@
 //
 
 use std::any::Any;
-#[cfg(any(feature = "sev_snp", feature = "tdx"))]
+#[cfg(feature = "sev_snp")]
 use std::io;
 use std::result;
 use std::sync::Arc;
@@ -31,8 +31,6 @@ use crate::ClockData;
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
 #[cfg(target_arch = "riscv64")]
 use crate::arch::riscv64::aia::{Vaia, VaiaConfig};
-#[cfg(feature = "tdx")]
-use crate::arch::x86::CpuIdEntry;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::VcpuMsrConfigUpdate;
 use crate::cpu::Vcpu;
@@ -196,24 +194,6 @@ pub enum HypervisorVmError {
     #[error("Failed to initialize SEV-SNP")]
     InitializeSevSnp(#[source] io::Error),
 
-    #[cfg(feature = "tdx")]
-    ///
-    /// Error initializing TDX on the VM
-    ///
-    #[error("Failed to initialize TDX")]
-    InitializeTdx(#[source] io::Error),
-    #[cfg(feature = "tdx")]
-    ///
-    /// Error finalizing the TDX configuration on the VM
-    ///
-    #[error("Failed to finalize TDX")]
-    FinalizeTdx(#[source] io::Error),
-    #[cfg(feature = "tdx")]
-    ///
-    /// Error initializing the TDX memory region
-    ///
-    #[error("Failed to initialize memory region TDX")]
-    InitMemRegionTdx(#[source] io::Error),
     ///
     /// Create Vgic error
     ///
@@ -432,31 +412,6 @@ pub trait Vm: Send + Sync + Any {
     #[cfg(feature = "sev_snp")]
     /// Initialize SEV-SNP on this VM
     fn sev_snp_init(&self, guest_policy: SnpPolicy) -> Result<()>;
-    #[cfg(feature = "tdx")]
-    /// Initialize TDX on this VM
-    fn tdx_init(&self, _cpuid: &[CpuIdEntry], _max_vcpus: u32) -> Result<()> {
-        unimplemented!()
-    }
-    #[cfg(feature = "tdx")]
-    /// Finalize the configuration of TDX on this VM
-    fn tdx_finalize(&self) -> Result<()> {
-        unimplemented!()
-    }
-    #[cfg(feature = "tdx")]
-    /// Initialize a TDX memory region for this VM
-    ///
-    /// # Safety
-    ///
-    /// `_host_address` must be valid for `_size` bytes
-    unsafe fn tdx_init_memory_region(
-        &self,
-        _host_address: *mut u8,
-        _guest_address: u64,
-        _size: usize,
-        _measure: bool,
-    ) -> Result<()> {
-        unimplemented!()
-    }
     /// Downcast to the underlying hypervisor VM type
     fn as_any(&self) -> &dyn Any;
     /// Import the isolated pages

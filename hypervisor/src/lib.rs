@@ -261,8 +261,6 @@ pub enum ClockRestoreMode {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct HypervisorVmConfig {
-    #[cfg(feature = "tdx")]
-    pub tdx_enabled: bool,
     #[cfg(feature = "sev_snp")]
     pub sev_snp_enabled: bool,
     #[cfg(feature = "sev_snp")]

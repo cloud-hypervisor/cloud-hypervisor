@@ -253,8 +253,6 @@ pub enum MemoryZoneUpdateError {
 impl From<&VmConfig> for hypervisor::HypervisorVmConfig {
     fn from(_value: &VmConfig) -> Self {
         hypervisor::HypervisorVmConfig {
-            #[cfg(feature = "tdx")]
-            tdx_enabled: _value.platform.as_ref().is_some_and(|p| p.tdx),
             #[cfg(feature = "sev_snp")]
             sev_snp_enabled: _value.is_sev_snp_enabled(),
             #[cfg(feature = "sev_snp")]
@@ -398,8 +396,6 @@ pub fn feature_list() -> Vec<String> {
         "mshv".to_string(),
         #[cfg(feature = "sev_snp")]
         "sev_snp".to_string(),
-        #[cfg(feature = "tdx")]
-        "tdx".to_string(),
         #[cfg(feature = "tracing")]
         "tracing".to_string(),
         #[cfg(feature = "ivshmem")]
@@ -1348,8 +1344,6 @@ impl Vmm {
             &vm_config.memory.clone(),
             None,
             phys_bits,
-            #[cfg(feature = "tdx")]
-            false,
             #[cfg(feature = "sev_snp")]
             vm_config.is_sev_snp_enabled(),
             Some(&vm_migration_config.memory_manager_data),
@@ -1705,13 +1699,6 @@ impl Vmm {
         let vm_config = vm.get_config();
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         let common_cpuid = {
-            #[cfg(feature = "tdx")]
-            if vm_config.lock().unwrap().is_tdx_enabled() {
-                return Err(MigratableError::MigrateSend(anyhow!(
-                    "Live Migration is not supported when TDX is enabled"
-                )));
-            }
-
             let (amx, max_phys_bits, profile, kvm_hyperv) = {
                 let guard = vm_config.lock().unwrap();
                 (
@@ -1729,8 +1716,6 @@ impl Vmm {
                 &arch::CpuidConfig {
                     phys_bits,
                     kvm_hyperv,
-                    #[cfg(feature = "tdx")]
-                    tdx: false,
                     amx,
                     profile,
                 },
@@ -2016,13 +2001,6 @@ impl Vmm {
         src_vm_config: &Arc<Mutex<VmConfig>>,
         src_vm_cpuid: &[x86::CpuIdEntry],
     ) -> result::Result<(), MigratableError> {
-        #[cfg(feature = "tdx")]
-        if src_vm_config.lock().unwrap().is_tdx_enabled() {
-            return Err(MigratableError::MigrateReceive(anyhow!(
-                "Live Migration is not supported when TDX is enabled"
-            )));
-        }
-
         // We check the `CPUID` compatibility of between the source vm and destination, which is
         // mostly about feature compatibility.
         let dest_cpuid = &{
@@ -2044,8 +2022,6 @@ impl Vmm {
                 &arch::CpuidConfig {
                     phys_bits,
                     kvm_hyperv: vm_config.cpus.kvm_hyperv,
-                    #[cfg(feature = "tdx")]
-                    tdx: false,
                     amx: vm_config.cpus.features.amx,
                     profile: vm_config.cpus.profile,
                 },

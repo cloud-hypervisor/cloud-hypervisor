@@ -1023,9 +1023,6 @@ components:
           type: string
         chassis_asset_tag:
           type: string
-        tdx:
-          type: boolean
-          default: false
         sev_snp:
           type: boolean
           default: false

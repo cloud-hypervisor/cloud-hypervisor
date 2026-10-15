@@ -265,14 +265,6 @@ pub enum ValidationError {
     /// Huge page size is not power of 2
     #[error("Huge page size is not power of 2: {0}")]
     InvalidHugePageSize(u64),
-    /// CPU Hotplug is not permitted with TDX
-    #[cfg(feature = "tdx")]
-    #[error("CPU hotplug is not permitted with TDX")]
-    TdxNoCpuHotplug,
-    /// Missing firmware for TDX
-    #[cfg(feature = "tdx")]
-    #[error("No TDX firmware specified")]
-    TdxFirmwareMissing,
     /// Insufficient vCPUs for queues
     #[error("Queue count ({0}) must not exceed boot vCPUs ({1})")]
     TooManyQueues(usize /* queues */, usize /* vCPUs */),
@@ -921,10 +913,6 @@ impl PlatformConfig {
             oem_strings=<list_of_strings>,chassis_asset_tag=<dmi_chassis_asset_tag>"
                 .to_string();
 
-            if cfg!(feature = "tdx") {
-                syntax.push_str(",tdx=on|off");
-            }
-
             if cfg!(feature = "sev_snp") {
                 syntax.push_str(",sev_snp=on|off");
             }
@@ -990,8 +978,6 @@ impl PlatformConfig {
         for field in SMBIOS_STRING_FIELDS {
             parser.add(field.key);
         }
-        #[cfg(feature = "tdx")]
-        parser.add("tdx");
         #[cfg(feature = "sev_snp")]
         parser.add("sev_snp");
         parser.parse(platform).map_err(Error::ParsePlatform)?;
@@ -1025,12 +1011,6 @@ impl PlatformConfig {
             .map_err(Error::ParsePlatform)?
             .unwrap_or(Toggle(true))
             .0;
-        #[cfg(feature = "tdx")]
-        let tdx = parser
-            .convert::<Toggle>("tdx")
-            .map_err(Error::ParsePlatform)?
-            .unwrap_or(Toggle(false))
-            .0;
         #[cfg(feature = "sev_snp")]
         let sev_snp = parser
             .convert::<Toggle>("sev_snp")
@@ -1053,8 +1033,6 @@ impl PlatformConfig {
             chassis_asset_tag: None,
             iommufd,
             iommufd_fd,
-            #[cfg(feature = "tdx")]
-            tdx,
             #[cfg(feature = "sev_snp")]
             sev_snp,
             vfio_p2p_dma,
@@ -3420,18 +3398,6 @@ impl VmConfig {
             ))?
             .validate()?;
 
-        #[cfg(feature = "tdx")]
-        {
-            let tdx_enabled = self.platform.as_ref().is_some_and(|p| p.tdx);
-            // At this point we know payload isn't None.
-            if tdx_enabled && self.payload.as_ref().unwrap().firmware.is_none() {
-                return Err(ValidationError::TdxFirmwareMissing);
-            }
-            if tdx_enabled && (self.cpus.max_vcpus != self.cpus.boot_vcpus) {
-                return Err(ValidationError::TdxNoCpuHotplug);
-            }
-        }
-
         #[cfg(feature = "sev_snp")]
         {
             let sev_snp_enabled = self.platform.as_ref().is_some_and(|p| p.sev_snp);
@@ -4172,11 +4138,6 @@ impl VmConfig {
         self.preserved_fds
             .get_or_insert_with(HashSet::new)
             .extend(fds);
-    }
-
-    #[cfg(feature = "tdx")]
-    pub fn is_tdx_enabled(&self) -> bool {
-        self.platform.as_ref().is_some_and(|p| p.tdx)
     }
 
     #[cfg(feature = "sev_snp")]
@@ -6079,8 +6040,6 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             system_family: None,
             system_sku_number: None,
             chassis_asset_tag: None,
-            #[cfg(feature = "tdx")]
-            tdx: false,
             #[cfg(feature = "sev_snp")]
             sev_snp: false,
         }

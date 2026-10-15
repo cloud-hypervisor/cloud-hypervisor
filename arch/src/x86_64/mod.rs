@@ -12,9 +12,6 @@ pub mod interrupts;
 pub mod layout;
 pub mod regs;
 
-#[cfg(feature = "tdx")]
-pub mod tdx;
-
 mod arch_capabilities_checks;
 mod helpers;
 mod hyperv_msrs;
@@ -72,19 +69,6 @@ const CACHE_CORE_IDS_SHIFT: u32 = 26;
 const CACHE_CORE_IDS_MASK: u32 = 0x3f;
 
 // KVM feature bits
-#[cfg(feature = "tdx")]
-const KVM_FEATURE_CLOCKSOURCE_BIT: u8 = 0;
-#[cfg(feature = "tdx")]
-const KVM_FEATURE_CLOCKSOURCE2_BIT: u8 = 3;
-#[cfg(feature = "tdx")]
-const KVM_FEATURE_CLOCKSOURCE_STABLE_BIT: u8 = 24;
-#[cfg(feature = "tdx")]
-const KVM_FEATURE_ASYNC_PF_BIT: u8 = 4;
-#[cfg(feature = "tdx")]
-const KVM_FEATURE_ASYNC_PF_VMEXIT_BIT: u8 = 10;
-#[cfg(feature = "tdx")]
-const KVM_FEATURE_STEAL_TIME_BIT: u8 = 5;
-
 const KVM_FEATURE_MSI_EXT_DEST_ID: u8 = 15;
 
 pub const _NSIG: i32 = 65;
@@ -106,8 +90,6 @@ const E820_RESERVED: u32 = 2;
 pub struct CpuidConfig {
     pub phys_bits: u8,
     pub kvm_hyperv: bool,
-    #[cfg(feature = "tdx")]
-    pub tdx: bool,
     pub amx: bool,
     pub profile: CpuProfile,
 }
@@ -160,10 +142,6 @@ pub enum Error {
     )]
     CpuProfileCpuidIncompatibility,
 
-    /// Error because TDX cannot be enabled when a custom (non host) CPU profile has been selected
-    #[error("TDX cannot be enabled when a custom CPU profile has been selected")]
-    CpuProfileTdxIncompatibility,
-
     /// Error when trying to apply a CPU profile because a necessary CPUID entry was not found
     #[error(
         "The selected CPU profile cannot be utilized because a necessary CPUID entry was not found"
@@ -199,11 +177,6 @@ pub enum Error {
     // Error getting CPU TSC frequency
     #[error("Error getting CPU TSC frequency")]
     GetTscFrequency(#[source] HypervisorCpuError),
-
-    /// Error retrieving TDX capabilities through the hypervisor (kvm/mshv) API
-    #[cfg(feature = "tdx")]
-    #[error("Error retrieving TDX capabilities through the hypervisor API")]
-    TdxCapabilities(#[source] HypervisorError),
 
     /// Failed to configure E820 map for bzImage
     #[error("Failed to configure E820 map for bzImage")]
@@ -725,14 +698,6 @@ pub fn generate_common_cpuid(
         .map_err(Error::CpuidGetSupported)?;
 
     let is_non_host_profile = !matches!(config.profile, CpuProfile::Host);
-    #[cfg(feature = "tdx")]
-    if config.tdx {
-        if is_non_host_profile {
-            // TDX is not supported by CPU profiles other than host for the time being.
-            return Err(Error::CpuProfileTdxIncompatibility.into());
-        }
-        common_cpuid_tdx_configuration(&mut cpuid, hypervisor)?;
-    }
 
     // Copy CPU identification string
     for i in 0x8000_0002..=0x8000_0004 {
@@ -961,17 +926,6 @@ fn required_common_cpuid_updates(
                 // Enable KVM_FEATURE_MSI_EXT_DEST_ID. This allows the guest to target
                 // device interrupts to cpus with APIC IDs > 254 without interrupt remapping.
                 entry.eax |= 1 << KVM_FEATURE_MSI_EXT_DEST_ID;
-
-                // These features are not supported by TDX
-                #[cfg(feature = "tdx")]
-                if config.tdx {
-                    entry.eax &= !((1 << KVM_FEATURE_CLOCKSOURCE_BIT)
-                        | (1 << KVM_FEATURE_CLOCKSOURCE2_BIT)
-                        | (1 << KVM_FEATURE_CLOCKSOURCE_STABLE_BIT)
-                        | (1 << KVM_FEATURE_ASYNC_PF_BIT)
-                        | (1 << KVM_FEATURE_ASYNC_PF_VMEXIT_BIT)
-                        | (1 << KVM_FEATURE_STEAL_TIME_BIT));
-                }
             }
             _ => {}
         }
@@ -1040,35 +994,6 @@ fn required_common_cpuid_updates(
     }
 
     cpuid
-}
-
-#[cfg(feature = "tdx")]
-fn common_cpuid_tdx_configuration(
-    cpuid: &mut [CpuIdEntry],
-    hypervisor: &dyn hypervisor::Hypervisor,
-) -> super::Result<()> {
-    let caps = hypervisor
-        .tdx_capabilities()
-        .map_err(Error::TdxCapabilities)?;
-    info!("TDX capabilities {caps:#?}");
-
-    for entry in cpuid.iter_mut().filter(|entry| entry.function == 0xd) {
-        let xcr0_mask: u64 = 0x82ff;
-        let xss_mask: u64 = !xcr0_mask;
-        if entry.index == 0 {
-            entry.eax &= (caps.xfam_fixed0 as u32) & (xcr0_mask as u32);
-            entry.eax |= (caps.xfam_fixed1 as u32) & (xcr0_mask as u32);
-            entry.edx &= ((caps.xfam_fixed0 & xcr0_mask) >> 32) as u32;
-            entry.edx |= ((caps.xfam_fixed1 & xcr0_mask) >> 32) as u32;
-        } else if entry.index == 1 {
-            entry.ecx &= (caps.xfam_fixed0 as u32) & (xss_mask as u32);
-            entry.ecx |= (caps.xfam_fixed1 as u32) & (xss_mask as u32);
-            entry.edx &= ((caps.xfam_fixed0 & xss_mask) >> 32) as u32;
-            entry.edx |= ((caps.xfam_fixed1 & xss_mask) >> 32) as u32;
-        }
-    }
-
-    Ok(())
 }
 
 #[expect(clippy::too_many_arguments)]

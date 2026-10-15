@@ -2035,7 +2035,6 @@ impl MemoryManager {
         config: &MemoryConfig,
         prefault: Option<bool>,
         phys_bits: u8,
-        #[cfg(feature = "tdx")] tdx_enabled: bool,
         #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
         restore_data: Option<&MemoryManagerSnapshotData>,
         existing_memory_files: HashMap<u32, File>,
@@ -2231,10 +2230,8 @@ impl MemoryManager {
             .ok_or(Error::CreateSystemAllocator)?,
         ));
 
-        #[cfg(not(any(feature = "tdx", feature = "sev_snp")))]
+        #[cfg(not(feature = "sev_snp"))]
         let dynamic = true;
-        #[cfg(feature = "tdx")]
-        let dynamic = !tdx_enabled;
         #[cfg(feature = "sev_snp")]
         let dynamic = !sev_snp_enabled;
 
@@ -2324,8 +2321,6 @@ impl MemoryManager {
                 config,
                 Some(prefault),
                 phys_bits,
-                #[cfg(feature = "tdx")]
-                false,
                 #[cfg(feature = "sev_snp")]
                 sev_snp_enabled,
                 Some(&mem_snapshot),

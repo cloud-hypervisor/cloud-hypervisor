@@ -57,8 +57,6 @@ use hypervisor::arch::x86::SpecialRegisters;
 use hypervisor::arch::x86::msr_index;
 #[cfg(target_arch = "x86_64")]
 use hypervisor::arch::x86::{CpuIdEntry, VcpuMsrConfigUpdate};
-#[cfg(feature = "tdx")]
-use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
 #[cfg(feature = "mshv")]
 use hypervisor::mshv;
 use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
@@ -196,10 +194,6 @@ pub enum Error {
 
     #[error("Error starting vCPU after restore")]
     StartRestoreVcpu(#[source] anyhow::Error),
-
-    #[cfg(feature = "tdx")]
-    #[error("Error initializing TDX")]
-    InitializeTdx(#[source] hypervisor::HypervisorCpuError),
 
     #[cfg(target_arch = "aarch64")]
     #[error("Error initializing PMU")]
@@ -920,7 +914,6 @@ impl CpuManager {
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         seccomp_action: SeccompAction,
         vm_ops: Arc<dyn VmOps>,
-        #[cfg(feature = "tdx")] tdx_enabled: bool,
         numa_nodes: &NumaNodes,
         #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
         #[cfg(feature = "igvm")] igvm_enabled: bool,
@@ -968,9 +961,6 @@ impl CpuManager {
             BTreeMap::new()
         };
 
-        #[cfg(feature = "tdx")]
-        let dynamic = !tdx_enabled;
-        #[cfg(not(feature = "tdx"))]
         let dynamic = true;
 
         #[cfg(target_arch = "x86_64")]
@@ -981,8 +971,6 @@ impl CpuManager {
                 &arch::CpuidConfig {
                     phys_bits,
                     kvm_hyperv: config.kvm_hyperv,
-                    #[cfg(feature = "tdx")]
-                    tdx: tdx_enabled,
                     amx: config.features.amx,
                     profile: config.profile,
                 },
@@ -1288,11 +1276,7 @@ impl CpuManager {
                         let cpuset: *const libc::cpu_set_t = cpuset;
                         // SAFETY: FFI call with correct arguments
                         let ret = unsafe {
-                            libc::sched_setaffinity(
-                                0,
-                                size_of::<libc::cpu_set_t>(),
-                                cpuset,
-                            )
+                            libc::sched_setaffinity(0, size_of::<libc::cpu_set_t>(), cpuset)
                         };
 
                         if ret != 0 {
@@ -1321,29 +1305,36 @@ impl CpuManager {
                             // SAFETY: gettid() is always safe to call.
                             let my_tid = unsafe { libc::gettid() };
                             if core_scheduling_group_leader
-                                .compare_exchange(CoreSchedulingLeader::Initial as i32, CoreSchedulingLeader::Elected as i32, Ordering::AcqRel, Ordering::Acquire)
+                                .compare_exchange(
+                                    CoreSchedulingLeader::Initial as i32,
+                                    CoreSchedulingLeader::Elected as i32,
+                                    Ordering::AcqRel,
+                                    Ordering::Acquire,
+                                )
                                 .is_ok()
                             {
                                 // We are the group leader — create the cookie
                                 if let Err(e) = core_scheduling_create() {
-                                    error!(
-                                        "Failed to create core scheduling cookie: {e:?}"
-                                    );
+                                    error!("Failed to create core scheduling cookie: {e:?}");
                                     // This will force the loop in the other threads to break out
-                                    core_scheduling_group_leader.store(CoreSchedulingLeader::Error as i32, Ordering::Release);
+                                    core_scheduling_group_leader.store(
+                                        CoreSchedulingLeader::Error as i32,
+                                        Ordering::Release,
+                                    );
                                     return;
                                 }
                                 // Signal that the cookie is ready by storing real TID
-                                core_scheduling_group_leader
-                                    .store(my_tid, Ordering::Release);
+                                core_scheduling_group_leader.store(my_tid, Ordering::Release);
                             } else {
                                 // Wait for the leader to finish creating the cookie
                                 let leader_tid = loop {
                                     let v = core_scheduling_group_leader.load(Ordering::Acquire);
                                     match CoreSchedulingLeader::try_from(v) {
                                         Ok(CoreSchedulingLeader::Error) => return,
-                                        Ok(CoreSchedulingLeader::Initial |
-                                             CoreSchedulingLeader::Elected) => hint::spin_loop(),
+                                        Ok(
+                                            CoreSchedulingLeader::Initial
+                                            | CoreSchedulingLeader::Elected,
+                                        ) => hint::spin_loop(),
                                         Err(()) => break v,
                                     }
                                 };
@@ -1367,12 +1358,13 @@ impl CpuManager {
                     }
 
                     // Apply seccomp filter for vcpu thread.
-                    if !vcpu_seccomp_filter.is_empty() &&  let Err(e) =
+                    if !vcpu_seccomp_filter.is_empty()
+                        && let Err(e) =
                             apply_filter(&vcpu_seccomp_filter).map_err(Error::ApplySeccompFilter)
-                        {
-                            error!("Error applying seccomp filter: {e:?}");
-                            return;
-                        }
+                    {
+                        error!("Error applying seccomp filter: {e:?}");
+                        return;
+                    }
 
                     extern "C" fn handle_signal(_: i32, _: *mut siginfo_t, _: *mut c_void) {}
                     // This uses an async signal safe handler to kill the vcpu handles.
@@ -1435,7 +1427,7 @@ impl CpuManager {
                                 vcpu_run_interrupted.store(true, Ordering::SeqCst);
                                 #[cfg(target_arch = "x86_64")]
                                 match vcpu.lock().as_ref().unwrap().vcpu.nmi() {
-                                    Ok(()) => {},
+                                    Ok(()) => {}
                                     Err(e) => {
                                         error!("Error when inject nmi {e}");
                                         break;
@@ -1489,19 +1481,6 @@ impl CpuManager {
                                         vcpu_run_interrupted.store(true, Ordering::SeqCst);
                                         guest_exit_evt.write(1).unwrap();
                                         break;
-                                    }
-                                    #[cfg(feature = "tdx")]
-                                    VmExit::Tdx => {
-                                            match vcpu.vcpu.get_tdx_exit_details() {
-                                                Ok(details) => match details {
-                                                    TdxExitDetails::GetQuote => warn!("TDG_VP_VMCALL_GET_QUOTE not supported"),
-                                                    TdxExitDetails::SetupEventNotifyInterrupt => {
-                                                        warn!("TDG_VP_VMCALL_SETUP_EVENT_NOTIFY_INTERRUPT not supported");
-                                                    }
-                                                },
-                                                Err(e) => error!("Unexpected TDX VMCALL: {e}"),
-                                            }
-                                            vcpu.vcpu.set_tdx_status(TdxExitStatus::InvalidOperand);
                                     }
                                 },
 
@@ -1739,18 +1718,6 @@ impl CpuManager {
             state.join_thread()?;
         }
 
-        Ok(())
-    }
-
-    #[cfg(feature = "tdx")]
-    pub fn initialize_tdx(&self, hob_address: u64) -> Result<()> {
-        for vcpu in &self.vcpus {
-            vcpu.lock()
-                .unwrap()
-                .vcpu
-                .tdx_init(hob_address)
-                .map_err(Error::InitializeTdx)?;
-        }
         Ok(())
     }
 
