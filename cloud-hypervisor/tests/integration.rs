@@ -6851,12 +6851,9 @@ mod common_parallel {
                 format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
             ]);
         if upgrade_test {
-            src_vm_cmd
-                .args(["--seccomp", "false"])
-                .legacy_default_disks();
-        } else {
-            src_vm_cmd.default_disks();
+            src_vm_cmd.args(["--seccomp", "false"]);
         }
+        src_vm_cmd.default_disks();
         let mut src_child = src_vm_cmd.capture_output().spawn().unwrap();
 
         // Start the destination VM
@@ -11454,12 +11451,9 @@ mod common_sequential {
                 format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
             ]);
         if upgrade_test {
-            src_vm_cmd
-                .args(["--seccomp", "false"])
-                .legacy_default_disks();
-        } else {
-            src_vm_cmd.default_disks();
+            src_vm_cmd.args(["--seccomp", "false"]);
         }
+        src_vm_cmd.default_disks();
         let mut src_child = src_vm_cmd.capture_output().spawn().unwrap();
 
         // Start the destination VM
@@ -11657,12 +11651,9 @@ mod common_sequential {
                 format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
             ]);
         if upgrade_test {
-            src_vm_cmd
-                .args(["--seccomp", "false"])
-                .legacy_default_disks();
-        } else {
-            src_vm_cmd.default_disks();
+            src_vm_cmd.args(["--seccomp", "false"]);
         }
+        src_vm_cmd.default_disks();
         let mut src_child = src_vm_cmd.capture_output().spawn().unwrap();
 
         // Start the destination VM
@@ -12062,12 +12053,9 @@ mod common_sequential {
             ])
             .args(["--watchdog"]);
         if upgrade_test {
-            src_vm_cmd
-                .args(["--seccomp", "false"])
-                .legacy_default_disks();
-        } else {
-            src_vm_cmd.default_disks();
+            src_vm_cmd.args(["--seccomp", "false"]);
         }
+        src_vm_cmd.default_disks();
         let mut src_child = src_vm_cmd.capture_output().spawn().unwrap();
 
         // Start the destination VM
