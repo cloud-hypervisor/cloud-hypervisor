@@ -186,6 +186,13 @@ Current constraints for `memory_restore_mode=copyonwrite`:
   content in a page that returns from the balloon, so this is correct.
   (`pvmemcontrol` differs: it issues operations that are only valid on
   anonymous memory, which is why it is on the fallback list above.)
+- A snapshot of a VM restored this way copies the restore source with a
+  reflink and then writes only the pages that changed since the restore.
+  For this, the snapshot and the restore source must be on the same
+  filesystem, and the filesystem must support reflinks (for example XFS or
+  btrfs). Before Linux 5.18, they must also be on the same mount. The new
+  memory file is complete, so it restores like any other snapshot. If a
+  reflink is not possible, all guest memory is written.
 - A device that is hot-plugged after the restore and that pins guest memory
   (VFIO, vfio-user, vDPA) write-faults every guest page when its IOMMU mapping
   is created. Every page becomes a private copy: the VM stays correct, but the
