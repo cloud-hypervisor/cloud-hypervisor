@@ -6,6 +6,8 @@
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
 use std::os::fd::BorrowedFd;
+#[cfg(feature = "kvm")]
+use std::os::fd::OwnedFd;
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Barrier, Mutex};
@@ -309,12 +311,14 @@ pub(crate) struct UserMemoryRegion {
     pub slot: u32,
     pub start: u64,
     pub mapping: Arc<MmapRegion>,
+    #[cfg(feature = "kvm")]
+    pub dma_buf: Option<Arc<OwnedFd>>,
 }
 
 impl UserMemoryRegion {
     #[cfg_attr(not(feature = "kvm"), expect(unused_variables))]
     fn map_for_p2p(
-        &self,
+        &mut self,
         device: &VfioDevice,
         vfio_ops: &Arc<dyn VfioOps>,
         device_path: &Path,
@@ -343,10 +347,14 @@ impl UserMemoryRegion {
                  (0x{length:x} bytes) through dma-buf"
             );
 
-            return vfio_iommufd
+            vfio_iommufd
                 .ioas()
                 .map_file(dma_buf.as_raw_fd(), 0, length as u64, iova, true)
-                .map_err(|e| VfioPciError::DmaMapFile(e, device_path.to_path_buf(), bdf));
+                .map_err(|e| VfioPciError::DmaMapFile(e, device_path.to_path_buf(), bdf))?;
+
+            self.dma_buf = Some(Arc::new(OwnedFd::from(dma_buf)));
+
+            return Ok(());
         }
 
         debug!(
@@ -2477,10 +2485,12 @@ impl VfioPciDevice {
                         }
                     };
 
-                    let user_memory_region = UserMemoryRegion {
+                    let mut user_memory_region = UserMemoryRegion {
                         slot: self.memory_slot_allocator.next_memory_slot(),
                         start: region.start.0 + area.offset,
                         mapping: Arc::new(mapping),
+                        #[cfg(feature = "kvm")]
+                        dma_buf: None,
                     };
                     // SAFETY: MmapRegion invariants guarantee that
                     // user_memory_region.mapping.addr() points to
@@ -3009,11 +3019,15 @@ mod tests {
                     slot: 0,
                     start: page_size,
                     mapping: mapping_a,
+                    #[cfg(feature = "kvm")]
+                    dma_buf: None,
                 },
                 UserMemoryRegion {
                     slot: 1,
                     start: 3 * page_size,
                     mapping: mapping_b,
+                    #[cfg(feature = "kvm")]
+                    dma_buf: None,
                 },
             ],
         }]
