@@ -73,28 +73,6 @@ const DEVICE_FEATURES_OK: u32 = 0x08;
 const DEVICE_NEEDS_RESET: u32 = 0x40;
 const DEVICE_FAILED: u32 = 0x80;
 
-/// Marks a virtio device as `NEEDS_RESET` and notifies the guest via a config
-/// change interrupt. Used when a guest induced error (corrupted virtqueue,
-/// malformed descriptor chain or similar) is detected and the worker thread
-/// has stopped processing the device's queues.
-///
-/// `context` is included verbatim in the warning log to identify the cause.
-pub(crate) fn mark_device_needs_reset(
-    device_status: &AtomicU8,
-    interrupt_cb: &dyn self::VirtioInterrupt,
-    context: fmt::Arguments<'_>,
-) {
-    log::warn!(
-        "Corrupted request detected ({context}). Setting device status to 'NEEDS_RESET' and stopping processing queues until reset."
-    );
-
-    device_status.fetch_or(DEVICE_NEEDS_RESET as u8, Ordering::SeqCst);
-
-    if let Err(e) = interrupt_cb.trigger(self::VirtioInterruptType::Config) {
-        log::error!("Failed to signal config interrupt: {e:?}");
-    }
-}
-
 const VIRTIO_F_RING_INDIRECT_DESC: u32 = 28;
 const VIRTIO_F_RING_EVENT_IDX: u32 = 29;
 const VIRTIO_F_VERSION_1: u32 = 32;
@@ -194,4 +172,26 @@ pub fn get_host_address_range<M: GuestMemoryBackend + ?Sized>(
     }
     let slice = mem.get_slice(addr, size).ok()?;
     Some(slice.ptr_guard_mut().as_ptr())
+}
+
+/// Marks a virtio device as `NEEDS_RESET` and notifies the guest via a config
+/// change interrupt. Used when a guest induced error (corrupted virtqueue,
+/// malformed descriptor chain or similar) is detected and the worker thread
+/// has stopped processing the device's queues.
+///
+/// `context` is included verbatim in the warning log to identify the cause.
+pub(crate) fn mark_device_needs_reset(
+    device_status: &AtomicU8,
+    interrupt_cb: &dyn self::VirtioInterrupt,
+    context: fmt::Arguments<'_>,
+) {
+    log::warn!(
+        "Corrupted request detected ({context}). Setting device status to 'NEEDS_RESET' and stopping processing queues until reset."
+    );
+
+    device_status.fetch_or(DEVICE_NEEDS_RESET as u8, Ordering::SeqCst);
+
+    if let Err(e) = interrupt_cb.trigger(self::VirtioInterruptType::Config) {
+        log::error!("Failed to signal config interrupt: {e:?}");
+    }
 }
