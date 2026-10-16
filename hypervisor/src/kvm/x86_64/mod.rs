@@ -9,9 +9,7 @@
 //
 
 use kvm_bindings::nested::KvmNestedStateBuffer;
-use log::error;
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 use vmm_sys_util::fam;
 ///
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
@@ -23,7 +21,7 @@ pub use {
     kvm_bindings::kvm_lapic_state, kvm_bindings::kvm_mp_state as MpState,
     kvm_bindings::kvm_msr_entry, kvm_bindings::kvm_regs, kvm_bindings::kvm_segment,
     kvm_bindings::kvm_sregs, kvm_bindings::kvm_vcpu_events as VcpuEvents,
-    kvm_bindings::kvm_xcrs as ExtendedControlRegisters, kvm_bindings::kvm_xsave,
+    kvm_bindings::kvm_xcrs as ExtendedControlRegisters,
 };
 
 use crate::arch::x86::{
@@ -65,7 +63,7 @@ pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
     check_extension!(Cap::UserMemory);
     check_extension!(Cap::UserNmi);
     check_extension!(Cap::VcpuEvents);
-    check_extension!(Cap::Xsave);
+    check_extension!(Cap::Xsave2);
     Ok(())
 }
 
@@ -299,41 +297,6 @@ impl From<MsrEntry> for kvm_msr_entry {
             data: e.data,
             ..Default::default()
         }
-    }
-}
-
-#[derive(Error, Debug)]
-pub enum XsaveStateError {
-    #[error("kvm_xsave extra field is not empty")]
-    XsaveExtraFieldNotEmpty,
-}
-
-impl From<kvm_xsave> for XsaveState {
-    fn from(value: kvm_xsave) -> Self {
-        // Check if kvm_xsave struct size is larger than region size, indicating extra data exists
-        assert_eq!(
-            size_of_val(&value),
-            size_of_val(&value.region),
-            "kvm_xsave extra field is not empty"
-        );
-        Self {
-            region: value.region,
-            extra: Vec::new(),
-        }
-    }
-}
-
-impl TryFrom<XsaveState> for kvm_xsave {
-    type Error = XsaveStateError;
-    fn try_from(value: XsaveState) -> Result<Self, Self::Error> {
-        if !value.extra.is_empty() {
-            error!("XsaveState extra field is not empty");
-            return Err(XsaveStateError::XsaveExtraFieldNotEmpty);
-        }
-        Ok(Self {
-            region: value.region,
-            extra: Default::default(),
-        })
     }
 }
 
