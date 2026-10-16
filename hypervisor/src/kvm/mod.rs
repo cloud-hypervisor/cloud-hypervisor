@@ -1393,19 +1393,10 @@ impl vm::Vm for KvmVm {
         let elapsed_ns = now_ns.saturating_sub(saved.host_realtime_ns);
         let elapsed_ticks = (elapsed_ns as u128 * saved.cntfrq as u128 / NANOS_PER_SECOND) as u64;
         let target = saved.cntvct.wrapping_add(elapsed_ticks);
-        // Linux >= 6.4 (KVM_CAP_COUNTER_OFFSET) tracks the vtimer offset VM-wide, so one
-        // write advances every vCPU; older kernels track it per-vCPU, so program each.
-        // Restore is the snapshot-boot hot path, so skip the redundant writes when we can.
-        let targets = if self.check_extension(Cap::CounterOffset) {
-            &vcpus[..1]
-        } else {
-            vcpus
-        };
-        for vcpu in targets {
-            vcpu.set_cntvct(target)
-                .map_err(|e| vm::HypervisorVmError::RestoreTimerState(e.into()))?;
-        }
-        Ok(())
+        // KVM shares the vtimer offset across the VM, so one write advances every vCPU.
+        vcpus[0]
+            .set_cntvct(target)
+            .map_err(|e| vm::HypervisorVmError::RestoreTimerState(e.into()))
     }
 
     /// Create a device that is used for passthrough
