@@ -171,6 +171,9 @@ pub enum Error {
     #[error("Error initializing VM")]
     InitializeVm(#[source] hypervisor::HypervisorVmError),
 
+    #[error("Error creating VM")]
+    CreateVm(#[source] hypervisor::HypervisorError),
+
     #[error("No device with id {0:?} to remove")]
     NoDeviceToRemove(String),
 
@@ -1473,7 +1476,7 @@ impl Vm {
     ) -> Result<Arc<dyn hypervisor::Vm>> {
         hypervisor.check_required_extensions().unwrap();
 
-        let vm = hypervisor.create_vm(config).unwrap();
+        let vm = hypervisor.create_vm(config).map_err(Error::CreateVm)?;
 
         #[cfg(target_arch = "x86_64")]
         {
@@ -1951,6 +1954,8 @@ impl Vm {
             .as_ref()
             .and_then(|p| p.smbios_config());
 
+        let nested = self.cpu_manager.lock().unwrap().nested();
+
         arch::configure_system(
             &mem,
             cmdline.as_cstring().unwrap().to_str().unwrap(),
@@ -1963,6 +1968,7 @@ impl Vm {
             &vgic,
             &self.numa_nodes,
             pmu_supported,
+            nested,
             smbios.as_ref(),
             rsdp_addr.filter(|_| entry_addr.entry_addr != layout::UEFI_START),
         )
@@ -3397,6 +3403,13 @@ impl Snapshottable for Vm {
             }
         }
 
+        #[cfg(target_arch = "aarch64")]
+        if self.cpu_manager.lock().unwrap().nested() {
+            return Err(MigratableError::Snapshot(anyhow!(
+                "Snapshot not supported with aarch64 nested virtualization"
+            )));
+        }
+
         if self.get_state() != VmState::Paused {
             return Err(MigratableError::Snapshot(anyhow!(
                 "Trying to snapshot while VM is running"
@@ -4106,6 +4119,7 @@ mod tests {
             &BTreeMap::new(),
             None,
             true,
+            false,
             None,
         )
         .unwrap();
