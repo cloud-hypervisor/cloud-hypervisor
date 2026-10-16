@@ -1,0 +1,142 @@
+sequenceDiagram
+  autonumber
+
+  %% Participants
+  participant Operator as Operator / ch-remote
+  participant HTTP as HTTP API thread
+  participant VMM as VMM control loop (Vmm)
+  participant HYP as Hypervisor (KVM / MSHV)
+  participant MM as MemoryManager
+  participant UFFD as UFFD handler thread
+  participant KERNEL as Linux kernel (/dev/userfaultfd, memfd, ioctls)
+  participant DM as DeviceManager
+  participant VCPU as vCPU threads
+  participant MIGWORK as MigrationWorker (sender)
+  participant MIGDST as Migration Destination / Restore Source
+  participant POST as Postcopy server / page-source worker
+
+  Note over VMM,HTTP: Cloud-Hypervisor process start
+  Operator->>VMM: Start CH process (binary)
+  VMM->>VMM: Initialize runtime, apply seccomp and landlock, start threads
+  VMM->>HTTP: Spawn HTTP API thread
+  VMM->>DM: Initialize DeviceManager (deferred device creation until boot)
+  Note right of HTTP: /vmm.ping becomes answerable once API thread is up
+
+  %% vmm.ping
+  Operator->>HTTP: GET /vmm.ping
+  HTTP->>VMM: ApiRequest(VmmPing)
+  VMM-->>HTTP: VmmPingResponse(build_version, version, pid, features)
+  HTTP-->>Operator: 200 OK (VMM info)
+
+  %% vm.create
+  Operator->>HTTP: PUT /vm.create (VmConfig JSON)
+  HTTP->>VMM: ApiRequest(VmCreate, VmConfig)
+  VMM->>VMM: Store VmConfig (cold)
+  HTTP-->>Operator: 204 No Content
+
+  %% vm.boot (main boot flow)
+  Operator->>HTTP: PUT /vm.boot
+  HTTP->>VMM: ApiRequest(VmBoot)
+  VMM->>VMM: Pre-boot validation, create consoles
+  VMM->>HYP: KVM_CREATE_VM (hypervisor VM)
+  Note over VMM,HYP: Apply hypervisor ioctls (KVM_SET_* etc.)
+
+  alt Memory: eager / normal
+    VMM->>MM: Create guest memory (mmap / file-backed)
+    MM->>HYP: KVM_SET_USER_MEMORY_REGION (register regions with KVM)
+  else Memory: memfd (shared memory / migration)
+    VMM->>KERNEL: Create memfd objects (memfd_create)
+    KERNEL-->>VMM: Return memfd FDs
+    VMM->>HYP: Attach memfd-backed memory (KVM / memfd path)
+  else Memory: restore / on-demand (userfaultfd)
+    VMM->>MIGDST: Receive snapshot metadata and memory ranges (transport)
+    MIGDST-->>VMM: Memory metadata, snapshot file / memfds / fault socket info
+    VMM->>KERNEL: Open /dev/userfaultfd or userfaultfd(2) using USERFAULTFD_IOC_NEW
+    KERNEL-->>VMM: Return uffd FD
+    VMM->>KERNEL: ioctl(UFFDIO_API) - announce features and ioctls
+    VMM->>KERNEL: ioctl(UFFDIO_REGISTER, ranges, UFFDIO_REGISTER_MODE_MISSING)
+    VMM->>UFFD: Spawn UFFD handler thread with a copy of the uffd FD
+    VMM->>MM: Create MemoryManager with snapshot metadata (defer page population)
+  end
+
+  %% Device creation and registration
+  VMM->>DM: Instantiate devices (virtio-net/block, VFIO, vhost-user backends)
+  DM->>HYP: Register irqfds / ioeventfds, map BARs, set KVM device attributes
+
+  alt vhost-user devices
+    DM->>POST: Spawn vhost-user backend process (optional)
+  end
+
+  %% vCPU creation and booting
+  VMM->>HYP: KVM_CREATE_VCPU (per vCPU)
+  HYP-->>VMM: Return vCPU file descriptors
+  VMM->>VCPU: Spawn vCPU threads (one per vCPU)
+  VCPU->>HYP: KVM_RUN (enter guest execution)
+  VMM->>DM: Activate virtio devices
+  VMM->>VMM: Set VM state = Running
+  HTTP-->>Operator: 204 No Content (vm.boot accepted)
+  Note over VCPU,MM: With UFFD on-demand restore, the guest may block on first access while a page is fetched
+
+  %% UFFD fault handling (on-demand restore)
+  Note over UFFD,KERNEL: UFFD handler runs in the background
+  KERNEL->>UFFD: On guest page fault, write uffd_msg to the uffd FD
+  UFFD->>UFFD: Read struct uffd_msg (UFFD_EVENT_PAGEFAULT)
+  UFFD->>MIGDST: Request page data through fault socket / transport (page request with GPA)
+  MIGDST-->>UFFD: Return page payload (page bytes)
+  UFFD->>KERNEL: ioctl(UFFDIO_COPY, dst=guest_addr, src=buf, len)
+  UFFD->>KERNEL: ioctl(UFFDIO_WAKE or UFFDIO_CONTINUE) to wake blocked threads
+
+  alt Page cannot be provided / error
+    UFFD->>KERNEL: ioctl(UFFDIO_POISON) or UFFDIO_ZEROPAGE, depending on policy
+    Note right of UFFD: On older kernels, some operations may fail and restore may abort
+  end
+
+  %% Query: restoring state and API reflection
+  Note over VMM: VMM exposes MemoryManager::restoring() while UFFD handling or prefaulting is incomplete
+  Operator->>HTTP: GET /vm.info
+  HTTP->>VMM: ApiRequest(VmInfo)
+  VMM-->>HTTP: VmInfoResponse(state=Running/Created, memory_actual_size, device_tree)
+  HTTP-->>Operator: 200 OK
+
+  %% Migration: high-level send side
+  Operator->>HTTP: PUT /vm.send-migration (destination_url, memory_mode)
+  HTTP->>VMM: ApiRequest(VmSendMigration)
+  VMM->>MIGWORK: Spawn MigrationWorker thread (take VM ownership)
+  MIGWORK->>MIGDST: transport::send_migration_socket(connect)
+  MIGWORK->>MIGDST: Send Request::start()
+
+  alt Memory mode: precopy
+    MIGWORK->>VMM: Iterate memory rounds (send dirty pages while VM runs)
+    loop Memory iteration
+      MIGWORK->>MIGDST: Send memory ranges for iteration
+      MIGDST-->>MIGWORK: Acknowledge iteration
+    end
+    MIGWORK->>VMM: Pause VM for final iteration
+    MIGWORK->>MIGDST: Send final snapshot and state
+  else Memory mode: memfds
+    MIGWORK->>MIGDST: Send memfd FDs through SCM_RIGHTS over Unix socket
+  else Memory mode: postcopy
+    MIGWORK->>MIGDST: Open postcopy fault connection (fault_stream)
+    MIGDST->>MIGWORK: Destination registers UFFD and sends page faults over fault_stream
+    MIGWORK->>POST: Spawn postcopy serving thread
+    loop Page-fault requests from destination
+      POST->>MIGWORK: Request guest memory pages and send them
+    end
+  end
+
+  %% FD passing (SCM_RIGHTS) for memfds, VFIO cdev, iommufd
+  Note over MIGWORK,MIGDST: Send or receive memfd, VFIO cdev, and iommufd FDs using SCM_RIGHTS over Unix domain sockets
+  MIGWORK->>MIGDST: Send memfd / vfio_fds / iommufd_fd using SCM_RIGHTS
+
+  %% Post-migration completion
+  MIGDST->>MIGWORK: Send Request::complete acknowledgment
+  MIGWORK->>VMM: Release VM ownership if preserve_source=false, or preserve according to flags
+  VMM->>VMM: If moved, stop local VM or continue according to preserve_source
+
+  %% Thread and failure notes
+  Note over VMM: Concurrent threads:<br/>HTTP API thread(s)<br/>VMM control-loop thread<br/>vCPU threads (one per vCPU)<br/>UFFD handler thread(s) for on-demand restore<br/>MigrationWorker and its TCP, worker, and postcopy threads<br/>Event-monitor, signal-handler, and GDB threads (optional)
+
+  Note over KERNEL: Kernel version and permission constraints:<br/>/dev/userfaultfd requires Linux 6.1+ for the device node<br/>Some UFFD features and poison operations require newer kernels, such as Linux 6.6+<br/>The userfaultfd(2) syscall may be restricted by vm.unprivileged_userfaultfd<br/>Misconfigured seccomp or landlock rules may block necessary operations
+
+  %% End
+  Note over Operator,VMM: VM is running guest boot progress is observed from inside the guest through cloud-init, serial console, or an agent
