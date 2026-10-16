@@ -1,6 +1,6 @@
 # VSOCK support
 
-VSOCK provides a way for guest and host to communicate through a socket. `cloud-hypervisor` only supports stream VSOCK sockets.
+VSOCK provides a way for guest and host to communicate through a socket. `cloud-hypervisor` supports stream (`SOCK_STREAM`) and seqpacket (`SOCK_SEQPACKET`) VSOCK sockets.
 
 The `virtio-vsock` is based on the [Firecracker](https://github.com/firecracker-microvm/firecracker/blob/main/docs/vsock.md) implementation, where additional details can be found.
 
@@ -73,6 +73,22 @@ Listening on the host side:
 From the guest:
 
 `$ echo -e "Hello from guest!" | socat - VSOCK-CONNECT:2:1234`
+
+## Seqpacket sockets
+
+Seqpacket (`SOCK_SEQPACKET`) connections preserve message boundaries: each message arrives at the other end as exactly one datagram. The guest driver allows `SOCK_SEQPACKET` sockets only once the device offers `VIRTIO_VSOCK_F_SEQPACKET`, which Cloud Hypervisor does by default. Both host ends are `AF_UNIX`/`SOCK_SEQPACKET` sockets.
+
+### Connecting from host to guest
+
+Host-initiated connections use a separate listener, bound alongside the stream socket with a `_seqpacket` suffix -- `/tmp/ch.vsock_seqpacket` for the example above. The handshake matches the stream one, but each part is its own datagram: send `CONNECT <port>\n`, then read `OK <assigned port>\n`.
+
+### Connecting from guest to host
+
+The host listens at the same per-port path as the stream case, e.g. `/tmp/ch.vsock_1234`. Since the path is shared, a port serves one socket type and not both; connecting with the wrong type fails and the guest gets `ECONNRESET`.
+
+### Message size limit
+
+A message must fit both in Cloud Hypervisor's 64 KiB per-connection buffer and in the peer socket's `SO_VM_SOCKETS_BUFFER_SIZE` (256 KiB by default on Linux, down to 128 bytes). The guest enforces this on its own send path, failing `sendmsg()` with `EMSGSIZE`. A host application is outside vsock flow control and cannot be failed that way, so an oversized host message resets the connection instead: the host sees an abrupt close, and the reason is logged.
 
 ## Links
 
