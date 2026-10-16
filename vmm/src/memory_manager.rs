@@ -2036,6 +2036,7 @@ impl MemoryManager {
         prefault: Option<bool>,
         phys_bits: u8,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
+        #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
         restore_data: Option<&MemoryManagerSnapshotData>,
         existing_memory_files: HashMap<u32, File>,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
@@ -2230,10 +2231,12 @@ impl MemoryManager {
             .ok_or(Error::CreateSystemAllocator)?,
         ));
 
-        #[cfg(not(feature = "tdx"))]
+        #[cfg(not(any(feature = "tdx", feature = "sev_snp")))]
         let dynamic = true;
         #[cfg(feature = "tdx")]
         let dynamic = !tdx_enabled;
+        #[cfg(feature = "sev_snp")]
+        let dynamic = !sev_snp_enabled;
 
         let acpi_address = if dynamic
             && config.hotplug_method == HotplugMethod::Acpi
@@ -2285,7 +2288,7 @@ impl MemoryManager {
             guest_ram_mappings: Vec::new(),
             uffd_handler: None,
             acpi_address,
-            log_dirty: dynamic, // Cannot log dirty pages on a TD
+            log_dirty: dynamic, // Cannot log dirty pages on a CVM
             arch_mem_regions,
             ram_allocator,
             dynamic,
@@ -2307,6 +2310,7 @@ impl MemoryManager {
         memory_restore_mode: MemoryRestoreMode,
         phys_bits: u8,
         exit_evt: &EventFd,
+        #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         if let Some(source_url) = source_url {
             let mut memory_file_path = url_to_path(source_url).map_err(Error::Restore)?;
@@ -2322,6 +2326,8 @@ impl MemoryManager {
                 phys_bits,
                 #[cfg(feature = "tdx")]
                 false,
+                #[cfg(feature = "sev_snp")]
+                sev_snp_enabled,
                 Some(&mem_snapshot),
                 Default::default(),
             )?;

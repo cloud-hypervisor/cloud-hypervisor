@@ -1413,25 +1413,31 @@ impl Vm {
 
         let memory_manager =
             if let Some(snapshot) = snapshot_from_id(snapshot, MEMORY_MANAGER_SNAPSHOT_ID) {
+                let vm_config = vm_config.lock().unwrap();
                 MemoryManager::new_from_snapshot(
                     snapshot,
                     Arc::clone(&vm),
-                    &vm_config.lock().unwrap().memory.clone(),
+                    &vm_config.memory.clone(),
                     source_url,
                     prefault.unwrap_or(false),
                     memory_restore_mode,
                     phys_bits,
                     &exit_evt,
+                    #[cfg(feature = "sev_snp")]
+                    vm_config.is_sev_snp_enabled(),
                 )
                 .map_err(Error::MemoryManager)?
             } else {
+                let vm_config = vm_config.lock().unwrap();
                 MemoryManager::new(
                     Arc::clone(&vm),
-                    &vm_config.lock().unwrap().memory.clone(),
+                    &vm_config.memory.clone(),
                     None,
                     phys_bits,
                     #[cfg(feature = "tdx")]
                     tdx_enabled,
+                    #[cfg(feature = "sev_snp")]
+                    vm_config.is_sev_snp_enabled(),
                     None,
                     Default::default(),
                 )
