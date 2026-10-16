@@ -82,9 +82,8 @@ The following sections describe how to build and run Cloud Hypervisor.
 
 ## Host OS
 
-For required KVM functionality and adequate performance the recommended host
-kernel version is 5.13. The majority of the CI currently tests with kernel
-version 5.15.
+For required KVM functionality and adequate performance the minimum supported
+host kernel version is 6.8.
 
 ## Use Pre-built Binaries
 
