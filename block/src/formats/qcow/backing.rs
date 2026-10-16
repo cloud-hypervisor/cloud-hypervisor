@@ -23,10 +23,6 @@ struct RawBacking {
     pub(crate) virtual_size: u64,
 }
 
-// SAFETY: The only I/O operation is read_at which is position independent
-// and safe for concurrent use from multiple threads.
-unsafe impl Sync for RawBacking {}
-
 impl BackingRead for RawBacking {
     fn read_at(&self, address: u64, buf: &mut [u8]) -> io::Result<()> {
         if address >= self.virtual_size {
@@ -57,10 +53,6 @@ pub(crate) struct Qcow2Backing {
     pub(crate) cluster_size: u64,
     pub(crate) decoder: Arc<dyn Decoder>,
 }
-
-// SAFETY: All reads go through QcowMetadata which uses RwLock
-// and read_exact_at which is position independent and thread safe.
-unsafe impl Sync for Qcow2Backing {}
 
 impl BackingRead for Qcow2Backing {
     fn read_at(&self, address: u64, buf: &mut [u8]) -> io::Result<()> {
