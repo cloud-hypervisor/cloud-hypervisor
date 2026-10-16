@@ -1342,13 +1342,16 @@ impl Vmm {
             config.lock().unwrap().cpus.max_phys_bits,
         );
 
+        let vm_config = config.lock().unwrap();
         let memory_manager = MemoryManager::new(
             vm,
-            &config.lock().unwrap().memory.clone(),
+            &vm_config.memory.clone(),
             None,
             phys_bits,
             #[cfg(feature = "tdx")]
             false,
+            #[cfg(feature = "sev_snp")]
+            vm_config.is_sev_snp_enabled(),
             Some(&vm_migration_config.memory_manager_data),
             existing_memory_files,
         )
