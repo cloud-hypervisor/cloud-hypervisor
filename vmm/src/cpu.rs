@@ -1617,7 +1617,17 @@ impl CpuManager {
     ) -> Result<Vec<Arc<Mutex<Vcpu>>>> {
         trace_scoped!("create_boot_vcpus");
 
-        self.create_vcpus(self.boot_vcpus(), snapshot)
+        let num_vcpus = self.boot_vcpus();
+        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
+        let num_vcpus =
+            if self.sev_snp_enabled && self.hypervisor.hypervisor_type() == HypervisorType::Kvm {
+                // Create all SEV-SNP vCPUs before SNP_LAUNCH_FINISH.
+                self.max_vcpus()
+            } else {
+                num_vcpus
+            };
+
+        self.create_vcpus(num_vcpus, snapshot)
     }
 
     // Starts all the vCPUs that the VM is booting with. Blocks until all vCPUs are running.
