@@ -202,13 +202,6 @@ ioctl_iow_nr!(
     kvm_bindings::kvm_device_attr
 );
 #[cfg(target_arch = "x86_64")]
-ioctl_iow_nr!(
-    KVM_HAS_DEVICE_ATTR,
-    kvm_bindings::KVMIO,
-    0xe3,
-    kvm_bindings::kvm_device_attr
-);
-#[cfg(target_arch = "x86_64")]
 const SHSTK_ECX_BIT: u8 = 7; // CET shadow stack, CPUID leaf 7 subleaf 0 ECX
 
 #[cfg(feature = "sev_snp")]
@@ -2099,15 +2092,6 @@ impl KvmVcpu {
             flags: 0,
         }
     }
-
-    /// Whether the host kernel supports the vCPU TSC offset attribute (Linux
-    /// 5.16+).
-    fn has_tsc_offset_attr(&self) -> bool {
-        let attr = Self::tsc_offset_attr(0);
-        // SAFETY: FFI call with a valid kvm_device_attr; `addr` is unused here.
-        let ret = unsafe { ioctl_with_ref(&self.fd, KVM_HAS_DEVICE_ATTR(), &attr) };
-        ret == 0
-    }
 }
 
 /// Implementation of Vcpu trait for KVM
@@ -3764,13 +3748,9 @@ impl cpu::Vcpu for KvmVcpu {
 
     #[cfg(target_arch = "x86_64")]
     ///
-    /// Read the vCPU's L1 TSC offset, or `None` if the host kernel lacks the
-    /// attribute (Linux < 5.16).
+    /// Read the vCPU's L1 TSC offset.
     ///
     fn tsc_offset(&self) -> cpu::Result<Option<u64>> {
-        if !self.has_tsc_offset_attr() {
-            return Ok(None);
-        }
         let mut offset = 0u64;
         let attr = Self::tsc_offset_attr(&raw mut offset as u64);
         // SAFETY: FFI call; `attr.addr` points to `offset`, filled in by the kernel.
@@ -4106,6 +4086,23 @@ impl KvmVcpu {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_tsc_offset_round_trip() {
+        use super::*;
+
+        let hypervisor = KvmHypervisor::new().unwrap();
+        let vm = hypervisor.create_vm(HypervisorVmConfig::default()).unwrap();
+        let vcpu = vm.create_vcpu(0, None, Default::default()).unwrap();
+
+        let offset = vcpu.tsc_offset().unwrap().unwrap();
+        let target = offset.wrapping_add(1_000_000);
+        vcpu.set_tsc_offset(target).unwrap();
+        assert_eq!(vcpu.tsc_offset().unwrap(), Some(target));
+        vcpu.set_tsc_offset(offset).unwrap();
+        assert_eq!(vcpu.tsc_offset().unwrap(), Some(offset));
+    }
+
     #[test]
     #[cfg(feature = "sev_snp")]
     fn test_validate_gpa_range() {
