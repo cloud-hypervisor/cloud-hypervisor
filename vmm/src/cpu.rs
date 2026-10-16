@@ -972,6 +972,8 @@ impl CpuManager {
         let dynamic = !tdx_enabled;
         #[cfg(not(feature = "tdx"))]
         let dynamic = true;
+        #[cfg(feature = "sev_snp")]
+        let dynamic = dynamic && !sev_snp_enabled;
 
         #[cfg(target_arch = "x86_64")]
         let cpuid = {
