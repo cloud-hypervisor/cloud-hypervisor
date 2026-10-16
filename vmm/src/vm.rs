@@ -601,6 +601,14 @@ impl Vm {
             .validate()
             .map_err(Error::ConfigValidation)?;
 
+        #[cfg(all(feature = "kvm", feature = "mshv", feature = "sev_snp"))]
+        if hypervisor.hypervisor_type() == hypervisor::HypervisorType::Mshv {
+            let config = config.lock().unwrap();
+            if config.is_sev_snp_enabled() && config.cpus.max_vcpus != config.cpus.boot_vcpus {
+                return Err(Error::ConfigValidation(ValidationError::SevSnpNoCpuHotplug));
+            }
+        }
+
         info!("Booting VM from config: {config:?}");
 
         // Create NUMA nodes based on NumaConfig.
@@ -1017,7 +1025,8 @@ impl Vm {
         snapshot: Option<&Snapshot>,
         igvm_file: Option<IgvmFile>,
     ) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {
-        // Create boot vCPUs before SEV-SNP initialization
+        // Create vCPUs before SEV-SNP initialization, including reserved
+        // hotplug vCPUs on KVM. Only boot_vcpus are started at boot.
         cpu_manager
             .lock()
             .unwrap()

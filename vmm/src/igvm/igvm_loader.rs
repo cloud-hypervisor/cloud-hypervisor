@@ -296,7 +296,7 @@ pub(crate) fn load_igvm(
     let command_line = CString::new(cmdline).map_err(Error::InvalidCommandLine)?;
     let memory = memory_manager.lock().as_ref().unwrap().guest_memory();
     let mut gpas: Vec<GpaPages> = Vec::new();
-    let proc_count = cpu_manager.lock().unwrap().vcpus().len() as u32;
+    let proc_count = cpu_manager.lock().unwrap().boot_vcpus();
 
     #[cfg(feature = "sev_snp")]
     let mut host_data_contents = [0; 32];

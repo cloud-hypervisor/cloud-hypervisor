@@ -395,9 +395,9 @@ pub enum ValidationError {
     #[cfg(feature = "sev_snp")]
     #[error("Memory hotplug is not supported with SEV-SNP")]
     SevSnpNoMemoryHotplug,
-    /// CPU hotplug is not supported with SEV-SNP
+    /// CPU hotplug is not supported with SEV-SNP on MSHV
     #[cfg(feature = "sev_snp")]
-    #[error("CPU hotplug is not supported with SEV-SNP")]
+    #[error("CPU hotplug is not supported with SEV-SNP on MSHV")]
     SevSnpNoCpuHotplug,
     /// Huge pages are not supported with SEV-SNP
     #[cfg(feature = "sev_snp")]
@@ -3479,6 +3479,7 @@ impl VmConfig {
                     return Err(ValidationError::SevSnpNoMemoryHotplug);
                 }
 
+                #[cfg(not(feature = "kvm"))]
                 if self.cpus.max_vcpus != self.cpus.boot_vcpus {
                     return Err(ValidationError::SevSnpNoCpuHotplug);
                 }
@@ -7389,10 +7390,13 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 Err(ValidationError::SevSnpNoMemoryHotplug)
             );
 
-            let mut invalid_config = sev_snp_config.clone();
-            invalid_config.cpus.max_vcpus = 2;
+            let mut cpu_config = sev_snp_config.clone();
+            cpu_config.cpus.max_vcpus = 2;
+            #[cfg(feature = "kvm")]
+            cpu_config.validate().unwrap();
+            #[cfg(not(feature = "kvm"))]
             assert_eq!(
-                invalid_config.validate(),
+                cpu_config.validate(),
                 Err(ValidationError::SevSnpNoCpuHotplug)
             );
 
