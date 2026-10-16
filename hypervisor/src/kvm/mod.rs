@@ -162,8 +162,6 @@ use crate::RegList;
 use crate::TimerState;
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::{get_cntfrq, regs};
-#[cfg(target_arch = "x86_64")]
-use crate::kvm::x86_64::XsaveStateError;
 
 // `KVM_REG_ARM_TIMER_CNT`, the timer-counter firmware register the kernel defines
 // as `ARM64_SYS_REG(3, 3, 14, 3, 2)`. kvm-bindings exposes no constant for it, so
@@ -3199,11 +3197,7 @@ impl cpu::Vcpu for KvmVcpu {
         let mp_state = self.get_mp_state()?.into();
         let regs = self.get_regs()?;
         let sregs = self.get_sregs()?;
-        let xsave = if self.xsave_size > 0 {
-            self.get_xsave2()?
-        } else {
-            self.get_xsave()?
-        };
+        let xsave = self.get_xsave2()?;
         let xcrs: ExtendedControlRegisters = if self.has_xcrs {
             self.get_xcrs()?
         } else {
@@ -3480,11 +3474,7 @@ impl cpu::Vcpu for KvmVcpu {
         self.set_mp_state(state.mp_state.into())?;
         self.set_regs(&state.regs.into())?;
         self.set_sregs(&state.sregs.into())?;
-        if self.xsave_size > 0 {
-            self.set_xsave2(&state.xsave)?;
-        } else {
-            self.set_xsave(&state.xsave)?;
-        }
+        self.set_xsave2(&state.xsave)?;
         if self.has_xcrs {
             self.set_xcrs(&state.xcrs)?;
         }
@@ -3992,36 +3982,6 @@ impl KvmVcpu {
 }
 
 impl KvmVcpu {
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// X86 specific call that returns the vcpu's current "xsave struct".
-    ///
-    fn get_xsave(&self) -> cpu::Result<XsaveState> {
-        Ok(self
-            .fd
-            .get_xsave()
-            .map_err(|e| cpu::HypervisorCpuError::GetXsaveState(e.into()))?
-            .into())
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// X86 specific call that sets the vcpu's current "xsave struct".
-    ///
-    fn set_xsave(&self, xsave: &XsaveState) -> cpu::Result<()> {
-        let xsave: kvm_bindings::kvm_xsave = (*xsave)
-            .clone()
-            .try_into()
-            .map_err(|e: XsaveStateError| cpu::HypervisorCpuError::GetXsaveState(e.into()))?;
-        // SAFETY: Here we trust the kernel not to read past the end of the kvm_xsave struct
-        // when calling the kvm-ioctl library function.
-        unsafe {
-            self.fd
-                .set_xsave(&xsave)
-                .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))
-        }
-    }
-
     #[cfg(target_arch = "x86_64")]
     /// X86 specific call that returns the vcpu's current "xsave struct" using the extended
     /// xsave2 interface which supports larger state buffers (>4KB) for features like Intel AMX.
