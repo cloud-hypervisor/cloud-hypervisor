@@ -3367,7 +3367,12 @@ impl RequestHandler for Vmm {
     ) -> result::Result<(), MigratableError> {
         match self.vm {
             VmOwnership::Owned(ref vm) => {
-                if vm.restoring() {
+                // Memory FDs may be sent before the restore completes. They
+                // lack what the restore has not fetched, which the receiver
+                // must take from the restore source.
+                if vm.restoring()
+                    && send_data_migration.effective_memory_mode() != MigrationMode::MemFDs
+                {
                     return Err(MigratableError::Conflict(anyhow!(
                         "An on-demand memory restore is still in progress"
                     )));
