@@ -704,7 +704,27 @@ pub enum ConsoleOutputMode {
     Tty,
     File,
     Socket,
+    Tcp,
     Null,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TcpConsoleConfig {
+    /// Loopback endpoint in `host:port` format.
+    pub address: String,
+    /// Listen for incoming connections. Client mode is not supported.
+    #[serde(default = "TcpConsoleConfig::default_server")]
+    pub server: bool,
+    /// Wait for a client to connect before booting.
+    #[serde(default)]
+    pub wait: bool,
+}
+
+impl TcpConsoleConfig {
+    fn default_server() -> bool {
+        true
+    }
 }
 
 /// Common configuration for plain console configs.
@@ -718,6 +738,8 @@ pub struct CommonConsoleConfig {
     pub mode: ConsoleOutputMode,
     #[serde(default)]
     pub socket: Option<PathBuf>,
+    #[serde(default)]
+    pub tcp: Option<TcpConsoleConfig>,
 }
 
 impl ApplyLandlock for CommonConsoleConfig {
@@ -744,7 +766,7 @@ pub struct SerialConfig {
 }
 
 impl SerialConfig {
-    pub const SYNTAX: &str = "Control serial port: \"off|null|pty|tty|file=<path>|socket=<path>\"";
+    pub const SYNTAX: &str = "Control serial port: \"off|null|pty|tty|file=<path>|socket=<path>|tcp=<loopback_host>:<port>,server=on,wait=on|off\"";
 }
 
 impl Default for SerialConfig {
@@ -754,6 +776,7 @@ impl Default for SerialConfig {
                 file: None,
                 mode: ConsoleOutputMode::Null,
                 socket: None,
+                tcp: None,
             },
         }
     }
@@ -775,7 +798,7 @@ pub struct ConsoleConfig {
 }
 
 impl ConsoleConfig {
-    pub const SYNTAX: &str = "Control (virtio) console: \"off|null|pty|tty|file=<path>|socket=<path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
+    pub const SYNTAX: &str = "Control (virtio) console: \"off|null|pty|tty|file=<path>|socket=<path>|tcp=<loopback_host>:<port>,server=on,wait=on|off,iommu=on|off,id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 }
 
 impl Default for ConsoleConfig {
@@ -785,6 +808,7 @@ impl Default for ConsoleConfig {
                 file: None,
                 mode: ConsoleOutputMode::Tty,
                 socket: None,
+                tcp: None,
             },
             pci_common: PciDeviceCommonConfig::default(),
         }

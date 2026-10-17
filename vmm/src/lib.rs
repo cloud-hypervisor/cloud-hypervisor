@@ -6,6 +6,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Write, stdout};
+use std::net::TcpListener;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::panic::AssertUnwindSafe;
 #[cfg(feature = "guest_debug")]
@@ -716,6 +717,8 @@ pub struct Vmm {
     console_info: Option<ConsoleInfo>,
     serial_socket_listener: Option<Arc<LockedUnixListener>>,
     console_socket_listener: Option<Arc<LockedUnixListener>>,
+    serial_tcp_listener: Option<Arc<TcpListener>>,
+    console_tcp_listener: Option<Arc<TcpListener>>,
     no_shutdown: bool,
     check_migration_evt: EventFd,
 }
@@ -941,6 +944,8 @@ impl Vmm {
             console_info: None,
             serial_socket_listener: None,
             console_socket_listener: None,
+            serial_tcp_listener: None,
+            console_tcp_listener: None,
             no_shutdown,
             check_migration_evt,
         })
@@ -2861,6 +2866,8 @@ impl RequestHandler for Vmm {
         self.console_info = None;
         self.serial_socket_listener = None;
         self.console_socket_listener = None;
+        self.serial_tcp_listener = None;
+        self.console_tcp_listener = None;
         self.vm_config = None;
         event!("vm", "deleted");
 
@@ -3652,6 +3659,7 @@ mod tests {
                     file: None,
                     mode: ConsoleOutputMode::Null,
                     socket: None,
+                    tcp: None,
                 },
             },
             console: ConsoleConfig {
@@ -3660,6 +3668,7 @@ mod tests {
                     // Caution: Don't use `Tty` to not mess with users terminal
                     mode: ConsoleOutputMode::Off,
                     socket: None,
+                    tcp: None,
                 },
                 pci_common: PciDeviceCommonConfig::default(),
             },

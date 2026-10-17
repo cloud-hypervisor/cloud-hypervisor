@@ -39,6 +39,22 @@ PL011 UART device. The related command line for AArch64 is `console=ttyAMA0`.
 This device is always built-in, and it is disabled by default. It can be
 enabled with the `--serial` option, as long as its parameter is not `off`.
 
+The `--serial` parameter selects where the port is connected. Besides `off`,
+`null`, `tty`, `pty`, and `file=<path>`, the port can be exposed on a UNIX
+socket with `socket=<path>` or on a TCP listener with `tcp=<loopback_host>:<port>`.
+The TCP backend only listens for incoming connections on loopback addresses,
+such as `127.0.0.1:4444`, `[::1]:4444`, or `localhost:4444`. It does not connect
+out. Listening is the default and can be selected explicitly with `server=on`.
+Setting `server=off` is rejected because TCP client mode is not supported.
+It serves one client at a time and buffers output until a client connects.
+Adding `wait=on` holds the boot back until a client connects. The default is
+`wait=off`. The same backends and options apply to the `virtio-console` device
+through the `--console` parameter.
+
+TCP console live migration requires the listener address to be available on the
+destination. Migration on the same host cannot reuse the source's bound address.
+Overriding the destination console address is not currently supported.
+
 ### RTC/CMOS
 
 For environments such as Windows or EFI which cannot rely on KVM clock, the
