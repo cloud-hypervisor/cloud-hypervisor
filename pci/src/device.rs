@@ -91,8 +91,16 @@ pub trait PciDevice: Send {
     fn write_bar(&mut self, _base: u64, _offset: u64, _data: &[u8]) -> Option<Arc<Barrier>> {
         None
     }
-    /// Relocates the BAR to a different address in guest address space.
-    fn move_bar(&mut self, _bar_idx: usize, _new_base: u64) -> result::Result<(), io::Error> {
+    /// Tear down the device's host-side resource for the BAR at its old base.
+    fn move_bar_prepare(&mut self, _bar_idx: usize) -> result::Result<(), io::Error> {
+        Ok(())
+    }
+    /// Set up the device's host-side resource at `new_base` and record it.
+    fn move_bar_commit(
+        &mut self,
+        _bar_idx: usize,
+        _new_base: u64,
+    ) -> result::Result<(), io::Error> {
         Ok(())
     }
     /// Restore BAR address in config space after a failed move_bar.
