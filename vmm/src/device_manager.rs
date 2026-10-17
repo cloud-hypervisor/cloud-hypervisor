@@ -838,7 +838,8 @@ impl DeviceRelocation for AddressManager {
             }
         }
 
-        self.move_bar_device(pci_dev, bar_idx, old_base, new_base)?;
+        self.move_bar_prepare_device(pci_dev, bar_idx, old_base)?;
+        self.move_bar_commit_device(pci_dev, bar_idx, new_base)?;
 
         // Record the new base only once the move has succeeded.
         self.update_bar_base(pci_dev, bar_idx, new_base)
@@ -846,24 +847,60 @@ impl DeviceRelocation for AddressManager {
 }
 
 impl AddressManager {
-    /// Device-side work of a BAR move: the virtio follow-on mappings and the
-    /// device's own prepare and commit.
-    fn move_bar_device(
+    /// Device-side release of a BAR at `base`: the virtio follow-on mappings,
+    /// then the device's own prepare.
+    fn move_bar_prepare_device(
         &self,
         pci_dev: &mut dyn PciDevice,
         bar_idx: usize,
-        old_base: u64,
-        new_base: u64,
+        base: u64,
     ) -> result::Result<(), io::Error> {
         let any_dev = pci_dev.as_any_mut();
         if let Some(virtio_pci_dev) = any_dev.downcast_ref::<VirtioPciDevice>() {
             if bar_idx == VIRTIO_CONFIG_BAR_INDEX {
-                for (event, addr) in virtio_pci_dev.ioeventfds(old_base) {
+                for (event, addr) in virtio_pci_dev.ioeventfds(base) {
                     let io_addr = IoEventAddress::Mmio(addr);
                     self.vm.unregister_ioevent(event, &io_addr).map_err(|e| {
                         io::Error::other(format!("failed to unregister ioevent: {e:?}"))
                     })?;
                 }
+            } else if bar_idx == VIRTIO_SHM_BAR_INDEX {
+                let virtio_dev = virtio_pci_dev.virtio_device();
+                let virtio_dev = virtio_dev.lock().unwrap();
+                if let Some(shm_regions) = virtio_dev.get_shm_regions() {
+                    // SAFETY: guaranteed by MmapRegion invariants
+                    unsafe {
+                        self.vm.remove_user_memory_region(
+                            shm_regions.mem_slot,
+                            base,
+                            shm_regions.mapping.len(),
+                            shm_regions.mapping.as_ptr(),
+                            false,
+                        )
+                    }
+                    .map_err(|e| {
+                        io::Error::other(format!("failed to remove user memory region: {e:?}"))
+                    })?;
+                }
+            }
+        }
+
+        pci_dev.move_bar_prepare(bar_idx)
+    }
+
+    /// Device-side install of a BAR at `new_base`: the device's own commit,
+    /// then the virtio follow-on mappings.
+    fn move_bar_commit_device(
+        &self,
+        pci_dev: &mut dyn PciDevice,
+        bar_idx: usize,
+        new_base: u64,
+    ) -> result::Result<(), io::Error> {
+        pci_dev.move_bar_commit(bar_idx, new_base)?;
+
+        let any_dev = pci_dev.as_any_mut();
+        if let Some(virtio_pci_dev) = any_dev.downcast_ref::<VirtioPciDevice>() {
+            if bar_idx == VIRTIO_CONFIG_BAR_INDEX {
                 for (event, addr) in virtio_pci_dev.ioeventfds(new_base) {
                     let io_addr = IoEventAddress::Mmio(addr);
                     self.vm
@@ -878,38 +915,19 @@ impl AddressManager {
                 if let Some(mut shm_regions) = virtio_dev.get_shm_regions() {
                     // SAFETY: guaranteed by MmapRegion invariants
                     unsafe {
-                        // Remove old mapping
-                        self.vm
-                            .remove_user_memory_region(
-                                shm_regions.mem_slot,
-                                old_base,
-                                shm_regions.mapping.len(),
-                                shm_regions.mapping.as_ptr(),
-                                false,
-                            )
-                            .map_err(|e| {
-                                io::Error::other(format!(
-                                    "failed to remove user memory region: {e:?}"
-                                ))
-                            })?;
-
-                        // Create new mapping by inserting new region to KVM.
-                        self.vm
-                            .create_user_memory_region(
-                                shm_regions.mem_slot,
-                                new_base,
-                                shm_regions.mapping.len(),
-                                shm_regions.mapping.as_ptr(),
-                                false,
-                                false,
-                                hypervisor::MemoryVisibility::Shared,
-                            )
-                            .map_err(|e| {
-                                io::Error::other(format!(
-                                    "failed to create user memory regions: {e:?}"
-                                ))
-                            })?;
+                        self.vm.create_user_memory_region(
+                            shm_regions.mem_slot,
+                            new_base,
+                            shm_regions.mapping.len(),
+                            shm_regions.mapping.as_ptr(),
+                            false,
+                            false,
+                            hypervisor::MemoryVisibility::Shared,
+                        )
                     }
+                    .map_err(|e| {
+                        io::Error::other(format!("failed to create user memory regions: {e:?}"))
+                    })?;
 
                     // Update shared memory regions to reflect the new mapping.
                     shm_regions.addr = GuestAddress(new_base);
@@ -920,8 +938,7 @@ impl AddressManager {
             }
         }
 
-        pci_dev.move_bar_prepare(bar_idx)?;
-        pci_dev.move_bar_commit(bar_idx, new_base)
+        Ok(())
     }
 }
 
