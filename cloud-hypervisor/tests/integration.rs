@@ -3315,6 +3315,66 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg(target_arch = "x86_64")]
+    // A VMM started with only --api-socket and --landlock gets its VM config
+    // later through vm.create, as Kata runtime-rs does. The VM it creates
+    // with Landlock enabled must boot, and a disk outside the Landlock rules
+    // must still be refused.
+    fn test_api_create_boot_landlock() {
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket])
+            .args(["--landlock"])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = panic::catch_unwind(|| {
+            assert!(wait_until(Duration::from_secs(5), || remote_command(
+                &api_socket,
+                "ping",
+                None
+            )));
+
+            let mut body: serde_json::Value =
+                serde_json::from_str(&guest.api_create_body()).unwrap();
+            body["landlock_enable"] = serde_json::Value::Bool(true);
+            let config_path = guest.tmp_dir.as_path().join("config");
+            fs::write(&config_path, body.to_string()).unwrap();
+
+            assert!(remote_command(
+                &api_socket,
+                "create",
+                Some(config_path.to_str().unwrap())
+            ));
+            assert!(remote_command(&api_socket, "boot", None));
+            guest.wait_vm_boot().unwrap();
+
+            let mut blk_file_path = dirs::home_dir().unwrap();
+            blk_file_path.push("workloads");
+            blk_file_path.push("blk.img");
+            assert!(!remote_command(
+                &api_socket,
+                "add-disk",
+                Some(
+                    format!(
+                        "path={},id=test0,readonly=true,image_type=raw",
+                        blk_file_path.to_str().unwrap()
+                    )
+                    .as_str()
+                ),
+            ));
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
     fn test_virtio_iommu() {
         _test_virtio_iommu(false);
     }
