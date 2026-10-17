@@ -838,6 +838,23 @@ impl DeviceRelocation for AddressManager {
             }
         }
 
+        self.move_bar_device(pci_dev, bar_idx, old_base, new_base)?;
+
+        // Record the new base only once the move has succeeded.
+        self.update_bar_base(pci_dev, bar_idx, new_base)
+    }
+}
+
+impl AddressManager {
+    /// Device-side work of a BAR move: the virtio follow-on mappings and the
+    /// device's own prepare and commit.
+    fn move_bar_device(
+        &self,
+        pci_dev: &mut dyn PciDevice,
+        bar_idx: usize,
+        old_base: u64,
+        new_base: u64,
+    ) -> result::Result<(), io::Error> {
         let any_dev = pci_dev.as_any_mut();
         if let Some(virtio_pci_dev) = any_dev.downcast_ref::<VirtioPciDevice>() {
             if bar_idx == VIRTIO_CONFIG_BAR_INDEX {
@@ -904,10 +921,7 @@ impl DeviceRelocation for AddressManager {
         }
 
         pci_dev.move_bar_prepare(bar_idx)?;
-        pci_dev.move_bar_commit(bar_idx, new_base)?;
-
-        // Update the device_tree resources associated with the device
-        self.update_bar_base(pci_dev, bar_idx, new_base)
+        pci_dev.move_bar_commit(bar_idx, new_base)
     }
 }
 
