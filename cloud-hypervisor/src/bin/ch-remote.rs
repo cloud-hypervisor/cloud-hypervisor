@@ -753,6 +753,7 @@ fn add_vsock_config(config: &str) -> Result<String, Error> {
 fn snapshot_config(url: &str) -> String {
     let snapshot_config = api::VmSnapshotConfig {
         destination_url: String::from(url),
+        ..Default::default()
     };
 
     serde_json::to_string(&snapshot_config).unwrap()
@@ -1206,7 +1207,9 @@ mod tests {
             (
                 vec!["snapshot", "file:///tmp/snapshot"],
                 "PUT /api/v1/vm.snapshot HTTP/1.1",
-                Some(serde_json::json!({"destination_url": "file:///tmp/snapshot"})),
+                Some(
+                    serde_json::json!({"destination_url": "file:///tmp/snapshot", "memory_base": "Copy"}),
+                ),
             ),
         ] {
             let cli = Cli::try_parse_from(iter::once("ch-remote").chain(args))
