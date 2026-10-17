@@ -3,12 +3,13 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::os::unix::io::RawFd;
+use std::io::{self, Read, Write};
+use std::os::unix::io::AsRawFd;
+use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::{io, mem, ptr};
+use std::time::Duration;
 
 use anyhow::anyhow;
-use libc::{sockaddr_storage, socklen_t};
 use log::{debug, error};
 use thiserror::Error;
 
@@ -19,6 +20,8 @@ use crate::{
 };
 
 const TPM_REQ_HDR_SIZE: usize = 10;
+const TPM_RSP_HDR_SIZE: usize = 10;
+const TPM_DATA_SOCKET_READ_TIMEOUT: Duration = Duration::from_secs(120);
 const TPM_RC_INITIALIZE: u32 = 0x100;
 const TPM2_STARTUP_CLEAR: [u8; 12] = [
     0x80, 0x01, // TPM_ST_NO_SESSIONS
@@ -55,6 +58,29 @@ pub fn is_selftest(input: &[u8]) -> bool {
     false
 }
 
+fn receive_response(mut socket: &UnixStream, buffer: &mut [u8]) -> Result<usize> {
+    let receive_error = |e: io::Error| {
+        Error::SendReceive(anyhow!(
+            "Failed to receive response for tpm command over Data FD. Error Code {e:?}"
+        ))
+    };
+
+    socket
+        .read_exact(&mut buffer[..TPM_RSP_HDR_SIZE])
+        .map_err(receive_error)?;
+    let size = u32::from_be_bytes(buffer[2..6].try_into().unwrap()) as usize;
+    if !(TPM_RSP_HDR_SIZE..=buffer.len()).contains(&size) {
+        return Err(Error::SendReceive(anyhow!(
+            "TPM response size {size} is outside {TPM_RSP_HDR_SIZE}..={}",
+            buffer.len()
+        )));
+    }
+    socket
+        .read_exact(&mut buffer[TPM_RSP_HDR_SIZE..size])
+        .map_err(receive_error)?;
+    Ok(size)
+}
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Could not initialize emulator's backend")]
@@ -85,7 +111,7 @@ pub struct BackendCmd<'a> {
 pub struct Emulator {
     caps: PtmCap, /* capabilities of the TPM */
     control_socket: SocketDev,
-    data_fd: RawFd,
+    data_socket: Option<UnixStream>,
     established_bit_cached: bool,
     established_bit: bool,
 }
@@ -113,7 +139,7 @@ impl Emulator {
         let mut emulator = Self {
             caps: 0,
             control_socket: socket,
-            data_fd: -1,
+            data_socket: None,
             established_bit_cached: false,
             established_bit: false,
         };
@@ -143,71 +169,32 @@ impl Emulator {
     fn prepare_data_fd(&mut self) -> Result<()> {
         let mut res: PtmResult = 0;
 
-        let mut fds = [-1, -1];
-        // SAFETY: FFI calls and return value of the unsafe call is checked
-        unsafe {
-            let ret = libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, fds.as_mut_ptr());
-            if ret == -1 {
-                return Err(Error::PrepareDataFd(anyhow!(
-                    "Failed to prepare data fd for tpm emulator. Error Code {:?}",
-                    io::Error::last_os_error()
-                )));
-            }
-        }
-        self.control_socket.set_msgfd(fds[1]);
-        debug!("data fd to be configured in swtpm = {:?}", fds[1]);
-        if let Err(e) = self.run_control_cmd(Commands::CmdSetDatafd, &mut res, 0, size_of::<u32>())
-        {
-            // SAFETY: FFI calls and return values of the unsafe calls are checked
-            unsafe {
-                if libc::close(fds[0]) == -1 {
-                    error!(
-                        "Failed to close TPM data fd after CmdSetDatafd failure: {:?}",
-                        io::Error::last_os_error()
-                    );
-                }
-                if libc::close(fds[1]) == -1 {
-                    error!(
-                        "Failed to close TPM swtpm fd after CmdSetDatafd failure: {:?}",
-                        io::Error::last_os_error()
-                    );
-                }
-            }
-            return Err(e);
-        }
-        // SAFETY: FFI call and return value of the unsafe call is checked
-        unsafe {
-            if libc::close(fds[1]) == -1 {
-                error!(
-                    "Failed to close local TPM swtpm fd: {:?}",
-                    io::Error::last_os_error()
-                );
-            }
-        }
-        debug!("data fd in cloud-hypervisor = {:?}", fds[0]);
-        self.data_fd = fds[0];
+        let (data_socket, swtpm_socket) = UnixStream::pair().map_err(|e| {
+            Error::PrepareDataFd(anyhow!(
+                "Failed to prepare data fd for tpm emulator. Error Code {e:?}"
+            ))
+        })?;
+        self.control_socket.set_msgfd(swtpm_socket.as_raw_fd());
+        debug!(
+            "data fd to be configured in swtpm = {:?}",
+            swtpm_socket.as_raw_fd()
+        );
+        self.run_control_cmd(Commands::CmdSetDatafd, &mut res, 0, size_of::<u32>())?;
+        drop(swtpm_socket);
+        debug!(
+            "data fd in cloud-hypervisor = {:?}",
+            data_socket.as_raw_fd()
+        );
 
-        // SAFETY: FFI calls and return value of the unsafe call is checked
-        unsafe {
-            let tv = libc::timeval {
-                tv_sec: 0,
-                tv_usec: 100000, // Set recv timeout to 100ms
-            };
-            let ret = libc::setsockopt(
-                fds[0],
-                libc::SOL_SOCKET,
-                libc::SO_RCVTIMEO,
-                (&raw const tv).cast(),
-                size_of::<libc::timeval>() as u32,
-            );
-            if ret == -1 {
-                return Err(Error::PrepareDataFd(anyhow!(
-                    "Failed to set receive timeout on data fd socket. Error Code {:?}",
-                    io::Error::last_os_error()
-                )));
-            }
-        }
-        self.control_socket.set_datafd(fds[0]);
+        data_socket
+            .set_read_timeout(Some(TPM_DATA_SOCKET_READ_TIMEOUT))
+            .map_err(|e| {
+                Error::PrepareDataFd(anyhow!(
+                    "Failed to set receive timeout on data fd socket. Error Code {e:?}"
+                ))
+            })?;
+        self.control_socket.set_datafd(data_socket.as_raw_fd());
+        self.data_socket = Some(data_socket);
         Ok(())
     }
 
@@ -383,9 +370,6 @@ impl Emulator {
 
     /// Function to write to data socket and read the response from it
     pub fn deliver_request(&mut self, cmd: &mut BackendCmd) -> Result<()> {
-        // SAFETY: type "sockaddr_storage" is valid with an all-zero byte-pattern value
-        let mut addr: sockaddr_storage = unsafe { mem::zeroed() };
-        let mut len = size_of::<sockaddr_storage>() as socklen_t;
         let isselftest = is_selftest(&cmd.buffer[0..cmd.input_len]);
 
         debug!(
@@ -393,50 +377,19 @@ impl Emulator {
             cmd.buffer, cmd.input_len
         );
 
-        let mut data_vecs = [libc::iovec {
-            iov_base: cmd.buffer.as_mut_ptr().cast(),
-            iov_len: cmd.input_len,
-        }; 1];
+        let mut data_socket = self
+            .data_socket
+            .as_ref()
+            .ok_or_else(|| Error::SendReceive(anyhow!("TPM data socket has not been prepared")))?;
+        data_socket
+            .write_all(&cmd.buffer[..cmd.input_len])
+            .map_err(|e| {
+                Error::SendReceive(anyhow!(
+                    "Failed to send tpm command over Data FD. Error Code {e:?}"
+                ))
+            })?;
 
-        // SAFETY: all zero values from the unsafe method are updated before usage
-        let mut msghdr: libc::msghdr = unsafe { mem::zeroed() };
-        msghdr.msg_name = ptr::null_mut();
-        msghdr.msg_namelen = 0;
-        msghdr.msg_iov = data_vecs.as_mut_ptr().cast();
-        msghdr.msg_iovlen = data_vecs.len() as _;
-        msghdr.msg_control = ptr::null_mut();
-        msghdr.msg_controllen = 0;
-        msghdr.msg_flags = 0;
-        // SAFETY: FFI call and the return value of the unsafe method is checked
-        unsafe {
-            let ret = libc::sendmsg(self.data_fd, &msghdr, 0);
-            if ret == -1 {
-                return Err(Error::SendReceive(anyhow!(
-                    "Failed to send tpm command over Data FD. Error Code {:?}",
-                    io::Error::last_os_error()
-                )));
-            }
-        }
-
-        let output_len;
-        // SAFETY: FFI calls and return value from unsafe method is checked
-        unsafe {
-            let ret = libc::recvfrom(
-                self.data_fd,
-                cmd.buffer.as_mut_ptr().cast(),
-                cmd.buffer.len(),
-                0,
-                (&raw mut addr).cast(),
-                &raw mut len,
-            );
-            if ret == -1 {
-                return Err(Error::SendReceive(anyhow!(
-                    "Failed to receive response for tpm command over Data FD. Error Code {:?}",
-                    io::Error::last_os_error()
-                )));
-            }
-            output_len = ret as usize;
-        }
+        let output_len = receive_response(data_socket, cmd.buffer)?;
         debug!(
             "response = {:02X?} len = {:?} selftest = {:?}",
             cmd.buffer, output_len, isselftest
@@ -532,25 +485,11 @@ impl Emulator {
     }
 }
 
-impl Drop for Emulator {
-    fn drop(&mut self) {
-        if self.data_fd >= 0 {
-            // SAFETY: FFI call and return value of the unsafe call is checked
-            unsafe {
-                if libc::close(self.data_fd) == -1 {
-                    error!(
-                        "Failed to close TPM data fd: {:?}",
-                        io::Error::last_os_error()
-                    );
-                }
-            }
-            self.data_fd = -1;
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use std::thread;
+    use std::time::Instant;
+
     use super::*;
 
     #[test]
@@ -562,5 +501,77 @@ mod tests {
     #[test]
     fn test_startup_response_rejects_other_errors() {
         assert!(!startup_response_is_ok(0x101));
+    }
+
+    fn data_pair(timeout: Duration) -> (UnixStream, UnixStream) {
+        let (ours, swtpm) = UnixStream::pair().unwrap();
+        ours.set_read_timeout(Some(timeout)).unwrap();
+        (ours, swtpm)
+    }
+
+    const RESPONSE: [u8; 14] = [
+        0x80, 0x01, 0x00, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x00, 0x00, 0xde, 0xad, 0xbe, 0xef,
+    ];
+
+    #[test]
+    fn test_receive_response_waits_for_a_slow_split_response() {
+        let (ours, mut swtpm) = data_pair(Duration::from_secs(5));
+        let writer = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(300));
+            swtpm.write_all(&RESPONSE[..6]).unwrap();
+            thread::sleep(Duration::from_millis(300));
+            swtpm.write_all(&RESPONSE[6..]).unwrap();
+            swtpm
+        });
+        let mut buf = [0u8; 64];
+        let n = receive_response(&ours, &mut buf).unwrap();
+        assert_eq!(&buf[..n], &RESPONSE);
+        writer.join().unwrap();
+    }
+
+    #[test]
+    fn test_receive_response_reads_only_the_declared_size() {
+        let (ours, mut swtpm) = data_pair(Duration::from_secs(1));
+        swtpm.write_all(&RESPONSE).unwrap();
+        swtpm.write_all(&RESPONSE).unwrap();
+        let mut buf = [0u8; 64];
+        for _ in 0..2 {
+            let n = receive_response(&ours, &mut buf).unwrap();
+            assert_eq!(&buf[..n], &RESPONSE);
+        }
+    }
+
+    #[test]
+    fn test_receive_response_times_out() {
+        let (ours, _swtpm) = data_pair(Duration::from_millis(200));
+        let mut buf = [0u8; 64];
+        let start = Instant::now();
+        receive_response(&ours, &mut buf).unwrap_err();
+        let elapsed = start.elapsed();
+        assert!(elapsed >= Duration::from_millis(200));
+        assert!(elapsed < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn test_receive_response_rejects_an_invalid_size() {
+        for size in [9u8, 65] {
+            let (ours, mut swtpm) = data_pair(Duration::from_secs(5));
+            swtpm
+                .write_all(&[0x80, 0x01, 0x00, 0x00, 0x00, size, 0x00, 0x00, 0x00, 0x00])
+                .unwrap();
+            let mut buf = [0u8; 64];
+            let start = Instant::now();
+            receive_response(&ours, &mut buf).unwrap_err();
+            assert!(start.elapsed() < Duration::from_secs(1));
+        }
+    }
+
+    #[test]
+    fn test_receive_response_fails_when_swtpm_closes_mid_response() {
+        let (ours, mut swtpm) = data_pair(Duration::from_secs(5));
+        swtpm.write_all(&RESPONSE[..8]).unwrap();
+        drop(swtpm);
+        let mut buf = [0u8; 64];
+        receive_response(&ours, &mut buf).unwrap_err();
     }
 }
