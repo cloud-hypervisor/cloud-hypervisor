@@ -491,7 +491,7 @@ pub struct DiskConfig {
 impl ApplyLandlock for DiskConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         if let Some(path) = &self.path {
-            landlock.add_rule_with_access(path, "rw")?;
+            landlock.add_rule_with_access(path, if self.readonly { "r" } else { "rw" })?;
         }
         Ok(())
     }
