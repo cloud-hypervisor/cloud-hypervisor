@@ -2758,18 +2758,14 @@ impl PciDevice for VfioPciDevice {
         self.common.write_bar(base, offset, data)
     }
 
-    fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> Result<(), io::Error> {
+    fn move_bar_prepare(&mut self, bar_idx: usize) -> Result<(), io::Error> {
         for region in self.common.mmio_regions.iter_mut() {
             if region.index as usize == bar_idx {
-                let region_index = region.index;
-                let old_base = region.start.raw_value();
                 let map_p2p = self.p2p_dma_mapped && region.is_p2p_mappable();
-                region.start = GuestAddress(new_base);
 
                 for user_memory_region in region.user_memory_regions.iter_mut() {
                     let len = user_memory_region.mapping.len();
                     let host_addr = user_memory_region.mapping.addr();
-                    let offset = user_memory_region.start - old_base;
                     // Unmap the old MMIO region from the host IOMMU address space via VfioOps
                     // Only needed if p2p_dma is enabled.
                     if map_p2p
@@ -2800,6 +2796,25 @@ iova 0x{:x}, size 0x{:x}: {}, ",
                         )
                     }
                     .map_err(io::Error::other)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn move_bar_commit(&mut self, bar_idx: usize, new_base: u64) -> Result<(), io::Error> {
+        for region in self.common.mmio_regions.iter_mut() {
+            if region.index as usize == bar_idx {
+                let region_index = region.index;
+                let old_base = region.start.raw_value();
+                let map_p2p = self.p2p_dma_mapped && region.is_p2p_mappable();
+                region.start = GuestAddress(new_base);
+
+                for user_memory_region in region.user_memory_regions.iter_mut() {
+                    let len = user_memory_region.mapping.len();
+                    let host_addr = user_memory_region.mapping.addr();
+                    let offset = user_memory_region.start - old_base;
 
                     // Update the user memory region with the correct start address.
                     if new_base > old_base {

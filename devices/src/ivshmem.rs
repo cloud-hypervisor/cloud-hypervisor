@@ -307,13 +307,28 @@ impl PciDevice for IvshmemDevice {
         None
     }
 
-    fn move_bar(&mut self, bar_idx: usize, new_base: u64) -> io::Result<()> {
+    fn move_bar_prepare(&mut self, bar_idx: usize) -> io::Result<()> {
         if bar_idx == IVSHMEM_DATA_BAR_IDX {
             self.region
                 .as_mut()
                 .ok_or_else(|| io::Error::other(IvshmemError::MissingMemoryRegion))?
+                .unregister()
+                .map_err(io::Error::other)?;
+        }
+
+        Ok(())
+    }
+
+    fn move_bar_commit(&mut self, bar_idx: usize, new_base: u64) -> io::Result<()> {
+        if bar_idx == IVSHMEM_DATA_BAR_IDX {
+            let region = self
+                .region
+                .as_mut()
+                .ok_or_else(|| io::Error::other(IvshmemError::MissingMemoryRegion))?;
+            region
                 .move_guest_address(GuestAddress(new_base))
                 .map_err(io::Error::other)?;
+            region.register().map_err(io::Error::other)?;
         }
         for bar in self.bar_regions.iter_mut() {
             if bar.idx() == bar_idx {
